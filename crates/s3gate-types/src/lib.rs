@@ -18,9 +18,33 @@
 //! generated per-operation DTOs plus their XML/header codec impls.
 //! NOT responsible for: wire framing, signing, routing.
 //! Upstream: `s3gate-xml`, `s3gate-stream`. Downstream: `s3gate-http` and everything above.
+//!
+//! # Two facades over one set of types
+//!
+//! [`ops`] is the module-per-operation layout: `ops::put_object::{Input, Output}`. [`dto`] is the
+//! flat alias surface: `dto::PutObjectInput`. They are the same types under two names — the first
+//! keeps rustdoc navigable once the operation whitelist is complete, the second keeps `grep` and
+//! an in-flight migration from `s3s::dto` working. Neither declares anything: both are generated
+//! by `cargo xtask codegen` into `generated/dto/`, which is why they are mounted with `#[path]`
+//! instead of living under `src/`.
+//!
+//! Constructing a dto: public fields plus `..Default::default()`, or the per-operation builder.
+//! Never destructure one exhaustively — see ADR-0004 P1 and P3 for why that is the only usage a
+//! new model member breaks.
 #![forbid(unsafe_code)]
 
 mod scalar;
+
+#[cfg(test)]
+mod tests;
+
+/// The generated operation dto, one module per operation.
+#[path = "../../../generated/dto/ops/mod.rs"]
+pub mod ops;
+
+/// Flat aliases for every generated type: `dto::PutObjectInput` is `ops::put_object::Input`.
+#[path = "../../../generated/dto/flat.rs"]
+pub mod dto;
 
 pub use crate::scalar::{
     BucketName, ByteRange, ChecksumAlgorithm, ChecksumDigest, ChecksumError, ChecksumSpec, ChecksumType, Checksummer, ContentMd5,

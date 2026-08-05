@@ -1,7 +1,13 @@
 [package]
 name = "s3gate-types"
 description = "S3 scalar types, operation inputs/outputs and their generated codecs"
-version.workspace = true
+# Not `version.workspace = true`: ADR-0004 P8 requires the crate that carries the generated dto to
+# name the AWS model snapshot it was generated from, so a consumer can tell which model their build
+# corresponds to. The suffix is SemVer build metadata and takes no part in version precedence, so
+# the workspace's `version = "0.1.0"` requirement still matches it. Keep the numeric part equal to
+# `[workspace.package].version`, and move the date whenever `model/s3.json` is re-pinned — the value
+# is `model/PROVENANCE.md`'s "Pinned commit date".
+version = "0.1.0+aws.2026-08-04"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true

@@ -12,12 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Tests for the generator.
+//! Crate-level tests for the generated surface.
 //!
-//! Responsible for: end-to-end generation against the pinned model, determinism, the zero-diff
-//! gate, the golden comparison, and `why`.
-//! NOT responsible for: the parsers, which are tested in `s3gate-model`.
+//! Responsible for: the properties ADR-0004 promises to a downstream consumer, asserted against
+//! the generated types as they are actually compiled rather than against the emitter's output text.
+//! NOT responsible for: the scalar vocabulary, which is tested in `src/scalar/tests/`, or the
+//! generator's shape rules, which are tested in `s3gate-codegen`.
+//! Upstream: `crate::ops` and `crate::dto`. Downstream: nothing.
 
-mod codegen_tests;
 mod dto_tests;
-mod golden_tests;

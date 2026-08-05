@@ -19,6 +19,7 @@
 //! NOT responsible for: writing files (that is [`crate::run`]) or deciding content.
 //! Upstream: [`s3gate_model::ir`]. Downstream: the checked-in artefacts.
 
+pub mod dto;
 pub mod operations_md;
 pub mod rust_files;
 pub mod spec_toml;

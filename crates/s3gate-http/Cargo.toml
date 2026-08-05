@@ -18,3 +18,10 @@ workspace = true
 [dependencies]
 s3gate-types = { workspace = true }
 s3gate-stream = { workspace = true }
+
+# `http` supplies the request head this crate consumes and the `HeaderMap` its views borrow.
+http = { workspace = true }
+# `smallvec` keeps the query index and the normalised host off the heap for the sizes that
+# actually occur; the acceptance path performs no allocation for a typical request, and a `Vec`
+# here would put one malloc per request back.
+smallvec = { workspace = true }

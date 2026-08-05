@@ -63,6 +63,13 @@ pub enum Error {
     /// A checked-in artefact does not match what codegen produces.
     #[error("{0}")]
     Drift(String),
+    /// The IR cannot be turned into a type surface the SemVer policy allows.
+    ///
+    /// ADR-0004 makes this a hard failure rather than a generator guess: a required field with no
+    /// representable default, two operations disagreeing about one shape, or two enumeration
+    /// values colliding on one constant name all need a human decision recorded in the overlays.
+    #[error("{0}")]
+    Policy(String),
     /// `xtask why` found nothing.
     #[error("{0}")]
     NotFound(String),
@@ -126,6 +133,10 @@ impl CodegenOutput {
         vec![
             self.spec_dir.clone(),
             self.generated_dir.join("ir"),
+            self.generated_dir.join("dto").join("ops").join("enums"),
+            self.generated_dir.join("dto").join("ops").join("shapes"),
+            self.generated_dir.join("dto").join("ops"),
+            self.generated_dir.join("dto"),
             self.generated_dir.clone(),
         ]
     }
@@ -170,6 +181,8 @@ pub struct Artifacts {
     pub deferred: BTreeMap<String, String>,
     /// Traits deleted while loading the model.
     pub stripped_traits: usize,
+    /// What the dto emitter produced.
+    pub dto: emit::dto::DtoReport,
 }
 
 /// Loads the model and the overlays, lowers, and renders every artefact in memory.
@@ -195,6 +208,8 @@ pub fn generate(input: &CodegenInput, out: &CodegenOutput) -> Result<Artifacts> 
         out.generated_dir.join("error_codes.rs"),
         emit::rust_files::error_codes(&lowered.operations),
     ));
+    let (dto_files, dto) = emit::dto::emit(&lowered.operations, &out.generated_dir).map_err(Error::Policy)?;
+    files.extend(dto_files);
     files.sort_by(|a, b| a.0.cmp(&b.0));
 
     Ok(Artifacts {
@@ -202,6 +217,7 @@ pub fn generate(input: &CodegenInput, out: &CodegenOutput) -> Result<Artifacts> 
         operations: lowered.operations,
         deferred: lowered.deferred,
         stripped_traits: model.stripped_trait_count(),
+        dto,
     })
 }
 

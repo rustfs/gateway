@@ -72,24 +72,45 @@
 //!    [`timing::SIDE_CHANNELS`].
 #![forbid(unsafe_code)]
 
+mod canonical;
 pub mod codec;
+mod derive;
 mod error;
+mod host;
 mod mode;
+mod parse;
+mod query;
 mod scheme;
 mod secret;
 mod signature;
+mod signed_headers;
 pub mod timing;
 mod verdict;
 
+#[cfg(test)]
+mod full_chain_tests;
+
+pub use canonical::{
+    CanonicalCandidates, CanonicalRequest, CanonicalRequestSpec, PathCandidate, SignatureMismatchDetail, StringToSign,
+    UriPathCandidates,
+};
+pub use derive::{VerifiedScope, calculate_signature, signing_key};
 pub use error::{SigParseError, Unimplemented};
+pub use host::{HostError, HostSource, RawHost, effective_host};
 pub use mode::{
     CanonicalPayloadToken, DeclaredTrailers, EMPTY_PAYLOAD_SHA256_HEX, MAX_DECLARED_TRAILERS, PayloadMode, STREAMING_ECDSA,
     STREAMING_ECDSA_TRAILER, STREAMING_SIGNED, STREAMING_SIGNED_TRAILER, STREAMING_UNSIGNED_TRAILER, TrailerName, TrailerSet,
     UNSIGNED_PAYLOAD,
 };
+pub use parse::{
+    AmzDate, CredentialScope, PresignedParams, SCOPE_TERMINATOR, ScopeDate, SigV4Authorization, X_AMZ_ALGORITHM,
+    X_AMZ_CREDENTIAL, X_AMZ_DATE, X_AMZ_SIGNED_HEADERS,
+};
+pub use query::{QueryExclusion, RawQuery, X_AMZ_SIGNATURE, percent_decode, percent_encode};
 pub use scheme::{
     ALGORITHM_SIGV2_PREFIX, ALGORITHM_SIGV4, ALGORITHM_SIGV4A, AuthScheme, SigFamily, SigIdentity, SigLocation, SigService,
 };
 pub use secret::{SafeToLog, SecretBytes, SessionToken, SigningKey, assert_safe_to_log};
 pub use signature::{CtBytes, Signature, SignatureMatch, VerifyRejection};
+pub use signed_headers::{AMZ_HEADER_PREFIX, SignedHeaderSet, UNSIGNED_HEADER_EXEMPTIONS};
 pub use verdict::{AnonymousAck, AuthError, CredentialPresence, CredentialsWerePresented, Identity, Verdict};
