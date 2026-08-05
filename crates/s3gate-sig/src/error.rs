@@ -75,6 +75,12 @@ pub enum SigParseError {
     UnknownService,
     /// A session token was present but empty.
     EmptySessionToken,
+    /// An access key id was empty, over 128 bytes, or contained a non-graphic ASCII byte.
+    ///
+    /// The character-set rule is not cosmetic: the access key id is the one authentication value
+    /// that legitimately reaches a log line and an audit record, so a `\r\n` inside it is log
+    /// injection and a control byte can corrupt the record it is written into.
+    InvalidAccessKeyId,
 }
 
 /// The recognised-but-unimplemented features, kept apart from "unknown" on purpose.
@@ -119,6 +125,7 @@ impl fmt::Display for SigParseError {
             Self::UnknownAlgorithm => "unknown signing algorithm",
             Self::UnknownService => "unknown credential-scope service",
             Self::EmptySessionToken => "session token is present but empty",
+            Self::InvalidAccessKeyId => "access key id is empty, too long, or not an ASCII graphic string",
         };
         f.write_str(text)
     }

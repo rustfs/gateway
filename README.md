@@ -42,6 +42,20 @@ RustFS Gateway is deliberately small at the edges. It **does not** and will not:
 
 Anything listed above being absent is a design decision, not a missing feature.
 
+## Two guarantees the type system makes
+
+**Signature verification cannot be skipped by accident.** `Signature` has no `PartialEq`; the only
+comparison is `ct_verify`, and its only product is a `SignatureMatch` that nothing else can
+construct. `Verdict::Authenticated` requires that value, so "the access key exists, therefore the
+request is authenticated" — MinIO's CVE-2025-31489 — does not compile here.
+
+**Secret-bearing values cannot be printed.** `SecretBytes` and `SigningKey` have no `Debug` at all,
+not a redacting one, so the absence propagates to every type that contains them. Both zeroize on
+drop.
+
+Details, including the ten-entry timing side-channel register, are in
+[docs/security-model.md](docs/security-model.md).
+
 ## Relationship to s3s
 
 [s3s](https://github.com/Nugine/s3s) is the S3 protocol crate that RustFS used before this

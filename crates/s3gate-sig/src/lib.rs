@@ -42,11 +42,34 @@
 //!
 //! # The comparison invariant
 //!
-//! [`Signature`], [`CtBytes`], [`SecretBytes`] and [`SessionToken`] have no `PartialEq` and no
-//! `Debug`. `a == b` on signature material does not compile; [`Signature::ct_verify`] is the only
-//! comparison, it is constant-time and length-exact, and it is the only producer of
-//! [`SignatureMatch`]. Downstream verdicts are expected to carry that proof, which makes
-//! "authenticated without ever comparing" a compile error.
+//! [`Signature`], [`CtBytes`], [`SecretBytes`], [`SigningKey`] and [`SessionToken`] have no
+//! `PartialEq` and no `Debug`. `a == b` on signature material does not compile;
+//! [`Signature::ct_verify`] is the only comparison, it is constant-time and length-exact, and it is
+//! the only producer of [`SignatureMatch`].
+//!
+//! # The proof invariant
+//!
+//! [`Verdict::Authenticated`] requires that [`SignatureMatch`], and [`Verdict::Anonymous`] requires
+//! an [`AnonymousAck`] that only [`CredentialPresence::into_evidence`] hands out, and only for a
+//! request that presented nothing. So "the access key exists, therefore authenticated" — the shape
+//! of MinIO CVE-2025-31489 — does not compile, and neither does "verification failed, fall back to
+//! anonymous". Anonymous is an outcome that has to be established, never a fallback that can be
+//! reached.
+//!
+//! # Two deployment facts that belong in the release notes
+//!
+//! 1. **Never run a debug build in production.** `subtle`'s invariant checks are `debug_assert!`s
+//!    over secret-derived values: they exist only in debug builds, and they branch on
+//!    secret-dependent conditions. No amount of care in this crate removes that. `subtle`'s
+//!    barriers are `read_volatile`-based and documented as best-effort, so a release build is a
+//!    strong mitigation and not a proof.
+//! 2. **`InvalidAccessKeyId` and `SignatureDoesNotMatch` stay distinct**, because S3 clients branch
+//!    on the code and collapsing them is a compatibility break. The leak that follows is mitigated,
+//!    not removed: identical [`AuthError::message`], no detail fields, a uniform
+//!    [`timing::FailureFloor`] on the failure path, the full derivation run against
+//!    [`timing::placeholder_secret`] for unknown keys — and rate limiting, which belongs to the
+//!    `Governor` extension point (P6-08). The full reasoning is the `T1` row of
+//!    [`timing::SIDE_CHANNELS`].
 #![forbid(unsafe_code)]
 
 pub mod codec;
@@ -55,6 +78,8 @@ mod mode;
 mod scheme;
 mod secret;
 mod signature;
+pub mod timing;
+mod verdict;
 
 pub use error::{SigParseError, Unimplemented};
 pub use mode::{
@@ -65,5 +90,6 @@ pub use mode::{
 pub use scheme::{
     ALGORITHM_SIGV2_PREFIX, ALGORITHM_SIGV4, ALGORITHM_SIGV4A, AuthScheme, SigFamily, SigIdentity, SigLocation, SigService,
 };
-pub use secret::{SecretBytes, SessionToken};
+pub use secret::{SafeToLog, SecretBytes, SessionToken, SigningKey, assert_safe_to_log};
 pub use signature::{CtBytes, Signature, SignatureMatch, VerifyRejection};
+pub use verdict::{AnonymousAck, AuthError, CredentialPresence, CredentialsWerePresented, Identity, Verdict};

@@ -40,12 +40,15 @@ fail_msg() {
 make_sandbox() {
     local dir
     dir="$(mktemp -d "${TMPDIR:-/tmp}/gateway-guard-test.XXXXXX")"
-    (
-        cd "$REPO_ROOT"
-        git ls-files -z | tar -cf - --null -T - 2>/dev/null || {
-            git ls-files | tar -cf - -T -
-        }
-    ) | (cd "$dir" && tar -xf -)
+    # `tar --null -T -` is GNU-only; BSD tar (macOS) rejects it, and letting the
+    # failing call write to the pipe before the fallback produces a spurious
+    # "tar: Write error" that would mask a real one. A list file is understood by
+    # both, so there is one code path and no stderr noise.
+    local list
+    list="$(mktemp "${TMPDIR:-/tmp}/gateway-guard-files.XXXXXX")"
+    (cd "$REPO_ROOT" && git ls-files) >"$list"
+    (cd "$REPO_ROOT" && tar -cf - -T "$list") | (cd "$dir" && tar -xf -)
+    rm -f "$list"
     (
         cd "$dir"
         git init -q .
@@ -193,6 +196,58 @@ mut_strip_header() {
 }
 expect_fail check_license_headers.sh \
     'a Rust file with the licence header removed' mut_strip_header
+
+
+# -----------------------------------------------------------------------------
+# check_ct_eq.sh grew from one rule to seven when P2-02 landed. Each new rule
+# needs its own negative control here: a rule with no failing case is a rule
+# nobody has ever seen work.
+# -----------------------------------------------------------------------------
+
+mut_secret_display() {
+    printf '\nimpl core::fmt::Display for SecretBytes {\n    fn fmt(&self, _: &mut core::fmt::Formatter<\x27_>) -> core::fmt::Result { Ok(()) }\n}\n' \
+        >>crates/s3gate-sig/src/secret.rs
+}
+expect_fail check_ct_eq.sh \
+    'a Display impl on a secret-bearing type' mut_secret_display
+
+mut_second_bool_from() {
+    printf '\nfn leak(c: subtle::Choice) -> bool { bool::from(c) }\n' \
+        >>crates/s3gate-sig/src/verdict.rs
+}
+expect_fail check_ct_eq.sh \
+    'a second bool::from(Choice), which turns constant time back into a branch' mut_second_bool_from
+
+mut_unwrap_u8() {
+    printf '\nfn peek(c: subtle::Choice) -> u8 { c.unwrap_u8() }\n' \
+        >>crates/s3gate-sig/src/verdict.rs
+}
+expect_fail check_ct_eq.sh \
+    'Choice::unwrap_u8, which discards the constant-time wrapper' mut_unwrap_u8
+
+mut_secret_in_log() {
+    printf '\nfn oops(s: &SecretBytes) -> String { format!("secret={s:?}") }\n' \
+        >>crates/s3gate-sig/src/secret.rs
+}
+expect_fail check_ct_eq.sh \
+    'a secret interpolated into a formatting macro' mut_secret_in_log
+
+mut_unboxed_key_material() {
+    printf '\npub(crate) struct Leaky { signing_key: Vec<u8> }\n' \
+        >>crates/s3gate-sig/src/timing.rs
+}
+expect_fail check_ct_eq.sh \
+    'key material held in Vec<u8> instead of a zeroizing box' mut_unboxed_key_material
+
+mut_strip_negative_floor() {
+    # The floor counts across the whole crate, so stripping one file is not enough
+    # to trip it — the mutation has to remove the annotations everywhere.
+    find crates/s3gate-sig -name '*.rs' -print0 | while IFS= read -r -d '' f; do
+        grep -v '^/// Negative' "$f" >"${f}.nf" && mv "${f}.nf" "$f"
+    done
+}
+expect_fail check_ct_eq.sh \
+    'negative-case coverage dropping below its floor' mut_strip_negative_floor
 
 printf '\n%s case(s), %s failure(s)\n' "$cases" "$failures"
 [[ "$failures" -eq 0 ]]
