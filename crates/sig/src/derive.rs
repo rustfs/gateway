@@ -28,8 +28,8 @@
 //
 // What was changed, and why the crate is not simply depended on: the key material moves through
 // this crate's zeroizing containers rather than through `[u8; 32]` locals; the scope is a type
-// this crate refuses to let a client supply; and `aws-sigv4` 1.5.1 raises the MSRV to 1.94.1,
-// against this workspace's 1.89 promise (docs/msrv.md).
+// this crate refuses to let a client supply; and depending on all of `aws-sigv4` would bring
+// server-side verification behavior this workspace deliberately rejects (docs/msrv.md).
 // ---------------------------------------------------------------------------
 
 //! The SigV4 key derivation chain, and the scope that is allowed to seed it.

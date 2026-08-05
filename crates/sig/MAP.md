@@ -106,8 +106,8 @@ Six invariants live here. Everything else in the crate exists to serve them.
 
 - **No `aws-sigv4`** (ADR-0001, `docs/msrv.md`): its two useful pure functions are ported into
   `src/derive.rs` with attribution, and the rest has three measured defects (the `+` collision, a
-  deny-list for signed headers, a `panic!` when a request has no host) plus an MSRV of 1.94.1
-  against this workspace's 1.89. **No `percent-encoding`**: its decoder passes `%zz` through, and a
+  deny-list for signed headers, a `panic!` when a request has no host). **No `percent-encoding`**:
+  its decoder passes `%zz` through, and a
   signature input may not have two spellings. **No `rustfs-gateway-http`**: the framing decision is made
   here and consumed there. **No serializer**: with `serde` absent, no `#[derive(Serialize)]` on key
   material can reappear without a visible dependency change — which is why `full_chain_tests.rs`
