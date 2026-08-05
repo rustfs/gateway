@@ -70,3 +70,27 @@ impl std::fmt::Display for ChecksumType {
         f.write_str(&self.0)
     }
 }
+
+impl Default for ChecksumType {
+    /// The empty value: a placeholder that is **invalid on the wire**, and exists for one
+    /// reason.
+    ///
+    /// ADR-0004 P10. A required member of a generated dto is a bare type, and every generated
+    /// dto derives `Default` so that `..Default::default()` keeps compiling when AWS adds a
+    /// member; an enumeration in a required position therefore needs a `Default`. No model
+    /// value is the empty string and no S3 response carries one, so this cannot be mistaken
+    /// for a value a client sent — a value this build has no constant for is
+    /// [`ChecksumType::custom`], not this.
+    ///
+    /// **The decoding path never produces it.** An absent member is `Option::None`, and
+    /// `check_required` on the enclosing type rejects any placeholder that slips through.
+    fn default() -> Self {
+        Self(Cow::Borrowed(""))
+    }
+}
+
+impl crate::WirePlaceholder for ChecksumType {
+    fn is_wire_placeholder(&self) -> bool {
+        self.0.is_empty()
+    }
+}

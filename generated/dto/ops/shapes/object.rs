@@ -24,25 +24,52 @@
 /// The `Object` body shape. Reached from: ListObjectsV2.
 ///
 /// Public fields plus `Default`, and never `#[non_exhaustive]` — ADR-0004 P1. Do not
-/// destructure it exhaustively (P3).
+/// destructure it exhaustively (P3). A required member is a bare type and an optional one is
+/// `Option<T>`; `Default` fills a required member with a wire-invalid placeholder (P10) that
+/// [`Object::check_required`] refuses to let off the decode path.
 #[derive(Debug, Clone, Default)]
 pub struct Object {
     /// Wire `Key`, bound as BodyXml. Required.
-    pub key: Option<crate::ObjectKey>,
+    pub key: crate::ObjectKey,
     /// Wire `LastModified`, bound as BodyXml. Required.
-    pub last_modified: Option<crate::Timestamp>,
+    pub last_modified: crate::Timestamp,
     /// Wire `ETag`, bound as BodyXml. Required.
-    pub e_tag: Option<crate::ETag>,
+    pub e_tag: crate::ETag,
     /// Wire `ChecksumAlgorithm`, bound as BodyXml. Optional.
     pub checksum_algorithm: Vec<crate::ops::enums::ChecksumAlgorithm>,
     /// Wire `ChecksumType`, bound as BodyXml. Optional.
     pub checksum_type: Option<crate::ops::enums::ChecksumType>,
     /// Wire `Size`, bound as BodyXml. Required.
-    pub size: Option<i64>,
+    pub size: i64,
     /// Wire `StorageClass`, bound as BodyXml. Required.
-    pub storage_class: Option<crate::ops::enums::StorageClass>,
+    pub storage_class: crate::ops::enums::StorageClass,
     /// Wire `Owner`, bound as BodyXml. Optional.
     pub owner: Option<crate::ops::shapes::Owner>,
     /// Wire `RestoreStatus`, bound as BodyXml. Optional.
     pub restore_status: Option<crate::ops::shapes::RestoreStatus>,
+}
+
+impl Object {
+    /// Rejects a required member still holding its placeholder default (ADR-0004 P10).
+    ///
+    /// Call this at the end of decoding. A placeholder here is never a client mistake — a
+    /// request that omits a required member is rejected by the binding that looked for it —
+    /// so an error from this method means the decoder failed to fill the member in. It fails
+    /// closed in release builds, which is the one configuration that matters.
+    ///
+    /// Covers every required, non-container member, recursing into required nested shapes. A
+    /// shape inside a list or a map is checked by the decoder that builds it, through that
+    /// shape's own `check_required`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::PlaceholderDefault`] naming the first offending member.
+    pub fn check_required(&self) -> Result<(), crate::PlaceholderDefault> {
+        crate::reject_placeholder("Object", "Key", &self.key)?;
+        crate::reject_placeholder("Object", "LastModified", &self.last_modified)?;
+        crate::reject_placeholder("Object", "ETag", &self.e_tag)?;
+        crate::reject_placeholder("Object", "Size", &self.size)?;
+        crate::reject_placeholder("Object", "StorageClass", &self.storage_class)?;
+        Ok(())
+    }
 }

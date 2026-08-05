@@ -22,24 +22,28 @@ ring = 0
 workspace = true
 
 [dependencies]
-# No internal dependency, on purpose.
+# Exactly one internal edge, added when the two `effective_host` drafts were merged into one.
 #
-# `rustfs-gateway-http` is absent by acceptance criterion (P2-01): the framing mode is decided here and
-# consumed there, and depending on the wire layer would put both ends of that decision in one crate
-# graph and invite re-deriving framing from `Content-Encoding`.
+# `rustfs-gateway-http` owns the effective-host determination; this crate consumes it and no longer
+# has its own. The edge points the way the layer matrix allows (sig -> http), and it is what makes
+# "which host did this request address" have one answer: the canonical request builder here and the
+# router there read the same `RawHost`, produced by the same function, once per request.
 #
+# P2-01 recorded the opposite — no edge — on the grounds that the framing mode is decided here and
+# consumed there. That reasoning is unaffected: it constrains the http -> sig direction, which stays
+# absent, and nothing in this crate reads `Framing`, `Content-Encoding` or any other wire framing
+# input. `PayloadMode` is still frozen here and is still the only source of the framing decision.
+rustfs-gateway-http = { workspace = true }
+
 # `rustfs-gateway-types` is absent because the frozen dimensions do not use a single S3 type. The layer
-# matrix permits the edge, so a later P2 task may add it back the moment it needs one; until then,
-# zero internal edges keep `cargo test -p rustfs-gateway-sig` under the 30-second feedback contract.
+# matrix permits the edge, so a later P2 task may add it the moment it needs one.
 #
 # `aws-sigv4` is absent permanently (ADR-0001, docs/msrv.md).
 #
-# P2-03 adds three third-party edges and no internal one.
-#
-# `http` carries `Request`, `HeaderMap` and `HeaderName`. `effective_host` has to read both
-# `uri().authority()` and every `host` header off one request value; handing the signature layer a
-# pre-digested view built by the wire layer is the exact split that lets the router and the
-# signature disagree about which host was effective.
+# `http` carries `Request`, `HeaderMap` and `HeaderName`. It stays a direct dependency even though
+# `rustfs-gateway-http` re-exports nothing of it: the canonical request reads a `HeaderMap` and a
+# `Method` of its own, and borrowing them through another crate's re-export would make a
+# third-party version bump invisible here.
 #
 # `hmac` + `sha2` are the SigV4 primitives: four HMAC-SHA256 steps, and one SHA-256 over the
 # canonical request. They are what makes porting the two `aws-sigv4` pure functions into

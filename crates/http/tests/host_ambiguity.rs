@@ -27,7 +27,7 @@
 mod support;
 
 use http::{Request, StatusCode, Version, header::HOST};
-use rustfs_gateway_http::{HostError, HostSource, Limits, WireReject, WireRequest};
+use rustfs_gateway_http::{HostError, HostSource, Limits, MAX_HOST_BYTES, RawHost, WireReject, WireRequest};
 use support::{absolute_form, accept, h2, origin_form, raw_value};
 
 fn host_error(request: Request<&'static str>) -> HostError {
@@ -63,10 +63,33 @@ fn c_wire_0003_http2_host_header_without_authority_is_accepted() {
 }
 
 #[test]
-fn c_wire_0004_authority_and_host_agreeing_case_insensitively_is_accepted() {
-    let accepted = accept(h2(Some("B.Example.COM"), Some("b.example.com"))).expect("case-insensitive agreement");
+fn c_wire_0004_authority_and_host_agreeing_byte_for_byte_is_accepted() {
+    let accepted = accept(h2(Some("B.Example.COM"), Some("B.Example.COM"))).expect("byte-identical agreement");
     assert_eq!(accepted.host().as_str(), "b.example.com");
     assert_eq!(accepted.host().raw_for_signing().as_str(), "B.Example.COM");
+    // When both sources are present the header's bytes are the ones kept, so that is the source
+    // recorded: the signature covered the `Host` header, and an audit record that named the
+    // authority instead would be naming bytes nobody signed.
+    assert_eq!(accepted.host().raw_for_signing().source(), HostSource::HostHeader);
+}
+
+#[test]
+fn c_wire_0004b_a_raw_host_can_be_built_from_either_source_and_is_never_normalised() {
+    // `RawHost` is what `rustfs-gateway-sig` builds a canonical request from, and it is public so
+    // that a layer already holding one host can spell the signer's argument. It applies the same
+    // grammar `accept` does, and it changes nothing about the bytes.
+    for spelling in ["EXAMPLE.COM", "example.com.", "example.com:443", "example.com"] {
+        let from_header = RawHost::from_host_header(spelling.as_bytes()).expect("a valid authority");
+        assert_eq!(from_header.as_str(), spelling, "nothing may be normalised");
+        assert_eq!(from_header.source(), HostSource::HostHeader);
+        assert_eq!(from_header.to_string(), spelling);
+
+        let from_authority = RawHost::from_authority(spelling).expect("a valid authority");
+        assert_eq!(from_authority.as_bytes(), from_header.as_bytes());
+        // The source is part of the value: the two sources are signed and trusted differently.
+        assert_ne!(from_authority, from_header);
+        assert_eq!(from_authority.source(), HostSource::Authority);
+    }
 }
 
 #[test]
@@ -151,6 +174,37 @@ fn c_wire_0038_http2_authority_disagreeing_with_host_header_is_rejected() {
 }
 
 #[test]
+fn c_wire_0038b_authority_and_host_differing_only_in_case_agree() {
+    // Host names are case-insensitive, so these are one host, not two: the difference cannot
+    // point at a different bucket or a different origin. Refusing it would only break a
+    // deployment behind a case-normalising proxy. Non-ASCII never reaches the comparison, so
+    // there is no IDN folding hiding behind the case fold.
+    let accepted = accept(h2(Some("B.Example.COM"), Some("b.example.com"))).expect("one host");
+    // The header's bytes are the ones kept, because that is what the signature covered.
+    assert_eq!(accepted.host().raw_for_signing().as_bytes(), b"b.example.com");
+
+    let accepted = accept(h2(Some("b.example.com"), Some("B.Example.COM"))).expect("one host");
+    assert_eq!(accepted.host().raw_for_signing().as_bytes(), b"B.Example.COM");
+}
+
+#[test]
+fn c_wire_0038c_a_trailing_dot_or_an_explicit_port_is_still_a_conflict() {
+    // Unlike case, these change the bytes the signature was computed over, and `b.example.com`
+    // versus `b.example.com:443` is a genuine disagreement about the authority.
+    assert_eq!(host_error(h2(Some("b.example.com"), Some("b.example.com."))), HostError::Conflict);
+    assert_eq!(host_error(h2(Some("b.example.com"), Some("b.example.com:443"))), HostError::Conflict);
+}
+
+#[test]
+fn c_wire_0038c_a_malformed_host_beside_a_valid_authority_is_invalid_not_conflict() {
+    // Both are a 400, so nothing is admitted either way; the point is that the header is validated
+    // before the comparison, so no value reaches the comparison unvalidated and the log names the
+    // fault that is actually present.
+    assert_eq!(host_error(h2(Some("b.example.com"), Some("user@b.example.com"))), HostError::Invalid);
+    assert_eq!(host_error(h2(Some("b.example.com"), Some(""))), HostError::Invalid);
+}
+
+#[test]
 fn c_wire_0039_non_ascii_host_is_rejected_as_invalid_not_forbidden() {
     let mut request = Request::builder().uri("/object.txt").body("").expect("valid fixture request");
     request.headers_mut().insert(HOST, raw_value("bücket.example.com".as_bytes()));
@@ -220,6 +274,43 @@ fn c_wire_0039f_asterisk_form_target_is_rejected_before_the_host_is_read() {
         .body("")
         .expect("valid fixture request");
     assert_eq!(accept(request).err(), Some(WireReject::MalformedRequestTarget));
+}
+
+#[test]
+fn c_wire_0039g_the_host_ceiling_is_the_stricter_of_the_two_merged_ones() {
+    // 263: the DNS name ceiling of 255, plus room for `:65535` and a trailing dot. The wire draft
+    // carried 273; nothing legitimate lives between the two numbers, and a host is an input to the
+    // canonical request, so the tighter bound is the one that limits what a peer can inflate.
+    assert_eq!(MAX_HOST_BYTES, 263);
+    assert!(RawHost::from_host_header(&[b'a'; MAX_HOST_BYTES]).is_ok());
+    assert_eq!(RawHost::from_host_header(&[b'a'; MAX_HOST_BYTES + 1]), Err(HostError::Invalid));
+    let at_ceiling = "a".repeat(MAX_HOST_BYTES);
+    let request = Request::builder()
+        .uri("/object.txt")
+        .header(HOST, &at_ceiling)
+        .body("")
+        .expect("valid fixture request");
+    assert_eq!(accept(request).expect("a host at the ceiling is accepted").host().as_str(), at_ceiling);
+}
+
+#[test]
+fn every_host_rejection_names_itself_and_quotes_no_byte_of_the_request() {
+    // The reason strings are what an operator reads. They are constants, so a host carrying a
+    // control character or somebody else's bucket name cannot reach a log line through this path.
+    assert_eq!(HostError::HTTP_STATUS, 400);
+    for error in [
+        HostError::Missing,
+        HostError::Duplicate,
+        HostError::Conflict,
+        HostError::Invalid,
+    ] {
+        assert!(!error.as_str().is_empty());
+        assert!(!error.reason().is_empty());
+        assert_eq!(format!("{error}"), error.reason());
+    }
+    assert_eq!(HostError::Duplicate.as_str(), "duplicate");
+    assert_eq!(HostSource::HostHeader.to_string(), "host-header");
+    assert_eq!(HostSource::Authority.to_string(), "authority");
 }
 
 #[test]

@@ -8,6 +8,7 @@ Agent entry point. File → responsibility → when you need to open it.
 |---|---|---|
 | `src/lib.rs` | Crate docs, the public re-export list, and the two `#[path]` mounts that turn `generated/dto/` into the `ops` and `dto` modules. | You need to know what this crate exports, or where the generated types come from. |
 | `src/scalar/mod.rs` | Module wiring for the scalar vocabulary, and the axiom that shapes it (no default rendering). | Adding a scalar, or working out where one lives. |
+| `src/placeholder.rs` | The ADR-0004 P10 placeholder contract: `WirePlaceholder`, `reject_placeholder`, `PlaceholderDefault`. Explains why a required member's `Default` is wire-invalid and why the guard returns an error instead of asserting. | You are adding a scalar that can sit in a required member, or wondering what `BucketName::default()` is for. |
 
 ## The generated dto
 
@@ -18,7 +19,7 @@ What you do need to know is the surface it produces:
 
 | Path | What it is | Read it when |
 |---|---|---|
-| `crate::ops::<snake_op>` | One module per operation: `Input`, `Output`, `InputBuilder`, and a unit marker carrying `NAME`, `REQUIRED_INPUT`/`REQUIRED_OUTPUT` and `HOT_INPUT`/`HOT_OUTPUT`. | You are implementing or calling one operation. |
+| `crate::ops::<snake_op>` | One module per operation: `Input`, `Output`, `InputBuilder`, each struct's `check_required()`, and a unit marker carrying `NAME`, `REQUIRED_INPUT`/`REQUIRED_OUTPUT` and `HOT_INPUT`/`HOT_OUTPUT`. | You are implementing or calling one operation. |
 | `crate::ops::enums` | One newtype over `Cow<'static, str>` per S3 string enumeration, one associated constant per model value, plus `custom` / `as_str` / `is_known` / `VALUES`. | A field's type is an enumeration and you need its values. |
 | `crate::ops::shapes` | One type per nested body shape (`Object`, `Owner`, …), declared once however many operations reach it. | You are building or reading a nested XML body. |
 | `crate::dto` | Flat aliases: `dto::PutObjectInput` is `ops::put_object::Input`. | You are migrating a `use s3s::dto::…` line, or grepping for a type by its AWS name. |
@@ -27,6 +28,20 @@ What you do need to know is the surface it produces:
 To change any of it, edit `model/overlays/` and run `cargo xtask codegen`; editing a generated file
 is a `cargo xtask spec verify` failure, not a style question. The emitter is
 `crates/codegen/src/emit/dto/`.
+
+**A required member is a bare type; an optional one is `Option<T>`.** `input.bucket` is a
+`BucketName`, not an `Option<BucketName>` — requiredness is read off the type and never unwrapped.
+The price is that every scalar reachable from a required member has a `Default` whose value is
+deliberately invalid on the wire (ADR-0004 P10), and that each generated struct carries a
+`check_required()` the decode path calls at its exit. Read `src/placeholder.rs` before writing a
+`Default` for a new scalar; a plausible-looking one is the mistake that policy exists to prevent.
+
+`crates/types/generated` is a **symlink to the top-level `generated/dto`**, and the `#[path]` mounts
+in `src/lib.rs` go through it. That is load-bearing, not tidiness: Cargo's file walk never leaves the
+package directory, so a `#[path]` reaching `../../../generated/dto/…` produces a vendored crate with
+no dto in it and a build that fails in the consumer's tree. Do not delete the link, and do not
+"simplify" it into a real directory — that would be a second copy of generated output, which nothing
+gates against drift. See ADR-0005; `scripts/check_generated_dto_packaged.sh` enforces it.
 
 ## The scalars
 
@@ -66,10 +81,13 @@ string enumeration, the field-count ratchet — are asserted in
 - **An unknown `ErrorCode` maps to 400, never 500.** If you are tempted to change the fallback,
   read the reasoning in `error_code.rs` first.
 - **`crc-fast` must keep `default-features = false`** in `Cargo.toml`; the comment there says why.
-- **Every generated dto member is `Option<T>`, required ones included** — except lists and maps,
-  which are bare containers. `#[derive(Default)]` is non-negotiable (ADR-0004 P1) and none of the
-  scalars has a default that would be valid on the wire, so an empty `BucketName` is not
-  constructible. Requiredness survives as data: `PutObject::REQUIRED_INPUT`.
+- **A required dto member is a bare type; an optional one is `Option<T>`.** Lists and maps are bare
+  containers either way. `#[derive(Default)]` is non-negotiable (ADR-0004 P1), so every scalar in a
+  required position has one — and it is a **wire-invalid placeholder** (P10), not a plausible value.
+  `BucketName::default()` is the empty name, which `validate_bucket_name` rejects;
+  `Timestamp::default()` renders in no wire format. Never treat one as data: call
+  `check_required()` at the end of decoding and let it fail closed. Requiredness is also available
+  as data: `PutObject::REQUIRED_INPUT`.
 - **`crate::ChecksumAlgorithm` and `crate::dto::ChecksumAlgorithm` are different types on purpose.**
   The first is the closed set this implementation can compute; the second is the open set the wire
   may carry. Same for `ChecksumType`. Do not "unify" them — that turns an unknown request algorithm

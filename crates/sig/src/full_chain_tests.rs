@@ -35,12 +35,12 @@ use std::path::{Path, PathBuf};
 
 use http::Method;
 use http::header::{HeaderMap, HeaderName, HeaderValue};
+use rustfs_gateway_http::RawHost;
 use sha2::{Digest, Sha256};
 
 use crate::canonical::{CanonicalRequestSpec, PathCandidate, StringToSign, UriPathCandidates};
 use crate::codec::{decode_hex_lower, encode_hex_lower};
 use crate::derive::{VerifiedScope, calculate_signature, signing_key};
-use crate::host::RawHost;
 use crate::mode::{EMPTY_PAYLOAD_SHA256_HEX, PayloadMode, TrailerSet};
 use crate::parse::{AmzDate, CredentialScope, ScopeDate};
 use crate::query::RawQuery;

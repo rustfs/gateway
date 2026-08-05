@@ -39,6 +39,7 @@
 use percent_encoding::percent_decode_str;
 
 use super::parse_error::{ParseError, rules};
+use crate::placeholder::WirePlaceholder;
 
 /// Maximum object key length, in UTF-8 bytes.
 const MAX_KEY_BYTES: usize = 1024;
@@ -126,6 +127,31 @@ impl ObjectKey {
     }
 }
 
+impl Default for ObjectKey {
+    /// The empty key — a placeholder that is **invalid on the wire**, and exists for one reason.
+    ///
+    /// ADR-0004 P10: a required member of a generated dto uses a bare type, and every generated
+    /// dto derives `Default` so that `..Default::default()` keeps compiling when AWS adds a
+    /// member. That combination needs a `Default` here. The value it produces is rejected by
+    /// [`validate_object_key`], so it can never be a key any client sent or any backend stored.
+    ///
+    /// **The decoding path never produces it.** A request that omits the key is rejected by the
+    /// binding that looked for it, and the generated `check_required` fails closed on any that
+    /// slips through. Treat a value that compares equal to this one as a bug, never as a key.
+    fn default() -> Self {
+        Self {
+            key: Box::from(""),
+            encoded: None,
+        }
+    }
+}
+
+impl WirePlaceholder for ObjectKey {
+    fn is_wire_placeholder(&self) -> bool {
+        self.key.is_empty()
+    }
+}
+
 /// The default AWS object key rules.
 ///
 /// # Errors
@@ -179,6 +205,30 @@ impl BucketName {
     #[must_use]
     pub fn is_vhost_safe(&self) -> bool {
         !self.0.contains('.')
+    }
+}
+
+impl Default for BucketName {
+    /// The empty name — a placeholder that is **invalid on the wire**, and exists for one reason.
+    ///
+    /// ADR-0004 P10: a required member of a generated dto uses a bare type, and every generated
+    /// dto derives `Default` so that `..Default::default()` keeps compiling when AWS adds a
+    /// member. That combination needs a `Default` here. The value it produces is three characters
+    /// short of the shortest legal name and is rejected by [`validate_bucket_name`], so it can
+    /// never name a bucket that exists.
+    ///
+    /// **The decoding path never produces it.** A request that omits the bucket is rejected by
+    /// routing before a dto is built, and the generated `check_required` fails closed on any that
+    /// slips through. Treat a value that compares equal to this one as a bug, never as a bucket —
+    /// in particular, never let one reach an authorization check.
+    fn default() -> Self {
+        Self(Box::from(""))
+    }
+}
+
+impl WirePlaceholder for BucketName {
+    fn is_wire_placeholder(&self) -> bool {
+        self.0.is_empty()
     }
 }
 

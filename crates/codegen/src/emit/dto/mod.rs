@@ -27,10 +27,20 @@
 //! ADR-0004 P1: an Input or Output is a plain struct with public fields and `Default`, and never
 //! `#[non_exhaustive]`. The attribute is measured to reject `..Default::default()` as well as
 //! whole-struct literals (E0639), so applying it here would break every downstream construction
-//! site at once with no mechanical fix. Everything else follows from that: scalar fields are
-//! `Option` so that `Default` is always derivable without inventing a wire value that would be
-//! invalid, string enumerations are `Cow` newtypes so that a new AWS value stays a minor bump
-//! (P4), and only structural unions carry `#[non_exhaustive]` (P5).
+//! site at once with no mechanical fix.
+//!
+//! P1 also decides the wrapper: a **required** member is bare (`pub bucket: BucketName`) and an
+//! **optional** one is `Option<T>`, so requiredness is expressed by the type rather than lied
+//! about by an `Option` that can never be `None`. Making every member `Option` was the earlier
+//! reading, and it forced every consumer to unwrap a value the wire contract guarantees. The cost
+//! of the bare form is that each scalar reachable from a required member needs a `Default`, which
+//! is a wire-invalid placeholder (P10) rather than a plausible value, plus a `check_required` on
+//! each generated struct that keeps one off the decode path.
+//! [`registry::Registry::required_gap`] is the P2 gate: a required member whose type genuinely has
+//! no `Default` fails the run instead of being quietly wrapped back up in an `Option`.
+//!
+//! The rest follows: string enumerations are `Cow` newtypes so that a new AWS value stays a minor
+//! bump (P4), and only structural unions carry `#[non_exhaustive]` (P5).
 
 pub mod naming;
 pub mod registry;
@@ -90,6 +100,7 @@ pub fn emit(operations: &[OperationIr], generated_dir: &Path) -> Result<(Vec<(Pa
     ordered.sort_by(|a, b| a.operation.cmp(&b.operation));
 
     let registry = Registry::collect(&ordered)?;
+    check_required_members_have_defaults(&ordered, &registry)?;
     let mut report = DtoReport::default();
     let mut files: Vec<(PathBuf, String)> = Vec::new();
     let ops_dir = generated_dir.join("dto").join("ops");
@@ -110,6 +121,52 @@ pub fn emit(operations: &[OperationIr], generated_dir: &Path) -> Result<(Vec<(Pa
     files.push((generated_dir.join("dto").join("flat.rs"), render::flat(&ordered, &registry)));
     files.push((generated_dir.join("dto").join("field_counts.txt"), field_counts(&report)));
     Ok((files, report))
+}
+
+/// The ADR-0004 P2 gate, run before a single line is rendered.
+///
+/// A required member is generated bare, which is only sound while its type has a `Default`. When
+/// the model introduces one that has none, the generator must not paper over it — wrapping it in
+/// an `Option` would put the type back to lying about the wire contract, and inventing a `Default`
+/// for a union or a body stream would put a fabricated wire value into safe code. So the run
+/// fails, names the member and the reason, and a human writes the ADR.
+fn check_required_members_have_defaults(operations: &[&OperationIr], registry: &Registry) -> Result<(), String> {
+    let mut offences: Vec<String> = Vec::new();
+    for ir in operations {
+        let sides = [("input", ir.input.as_slice()), ("output", ir.output.as_slice())];
+        for (side, fields) in sides {
+            for field in fields {
+                if let Some(reason) = required_gap(registry, field) {
+                    offences.push(format!("{}.{side}.{}: {reason}", ir.operation, field.name));
+                }
+            }
+        }
+    }
+    for shape in registry.shapes.values() {
+        for field in &shape.fields {
+            if let Some(reason) = required_gap(registry, field) {
+                offences.push(format!("shape {}.{}: {reason}", shape.name, field.name));
+            }
+        }
+    }
+    if offences.is_empty() {
+        return Ok(());
+    }
+    Err(format!(
+        "dto: {} required member(s) have no representable `Default`, so they can be neither bare nor \
+         `#[derive(Default)]`-able (ADR-0004 P2):\n  {}\n\n\
+         This is the hard failure P2 asks for. Either the overlays mark the member optional, or a human \
+         records the decision in an ADR — the generator must not choose.",
+        offences.len(),
+        offences.join("\n  ")
+    ))
+}
+
+fn required_gap(registry: &Registry, field: &Field) -> Option<&'static str> {
+    if !field.required || Registry::is_container(&field.ty) {
+        return None;
+    }
+    registry.required_gap(&field.ty)
 }
 
 /// The ADR-0004 P9 baseline: `<TypeName> <public field count>`, one per line, sorted by name.
@@ -183,21 +240,79 @@ pub fn derives(clonable: bool, has_secret: bool) -> String {
 /// tell those apart is the reason somebody would delete the redaction again.
 #[must_use]
 pub fn debug_impl(type_name: &str, fields: &[Field]) -> String {
+    let optional_secret = fields
+        .iter()
+        .any(|f| registry::is_redacted(f) && !f.required && !Registry::is_container(&f.ty));
     let mut out = format!("impl std::fmt::Debug for {type_name} {{\n");
     out.push_str("    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {\n");
-    out.push_str("        fn redact<T>(value: &Option<T>) -> Option<&'static str> {\n");
-    out.push_str("            value.as_ref().map(|_| \"<redacted>\")\n        }\n\n");
+    if optional_secret {
+        out.push_str("        fn redact<T>(value: &Option<T>) -> Option<&'static str> {\n");
+        out.push_str("            value.as_ref().map(|_| \"<redacted>\")\n        }\n\n");
+    }
     out.push_str(&format!("        f.debug_struct(\"{type_name}\")\n"));
     for field in fields {
         let name = naming::field_name(&field.name);
-        if registry::is_redacted(field) {
-            out.push_str(&format!("            .field(\"{name}\", &redact(&self.{name}))\n"));
-        } else {
-            out.push_str(&format!("            .field(\"{name}\", &self.{name})\n"));
+        let bare = field.required || Registry::is_container(&field.ty);
+        match (registry::is_redacted(field), bare) {
+            // A bare secret is always present, so there is nothing to keep distinguishable and the
+            // placeholder can be written straight in.
+            (true, true) => out.push_str(&format!("            .field(\"{name}\", &\"<redacted>\")\n")),
+            (true, false) => out.push_str(&format!("            .field(\"{name}\", &redact(&self.{name}))\n")),
+            (false, _) => out.push_str(&format!("            .field(\"{name}\", &self.{name})\n")),
         }
     }
     out.push_str("            .finish()\n    }\n}\n");
     out
+}
+
+/// The decode-path exit check ADR-0004 P10 asks for, as a method on one generated struct.
+///
+/// One call per required, non-container member; a required nested structure delegates to its own
+/// `check_required`. Members inside a **container** are not walked from here — a decoder builds
+/// those one at a time and calls the element's own `check_required` as it does, which is why every
+/// nested shape gets the method rather than only the operation structs.
+///
+/// Returning an error rather than `debug_assert!`-ing is deliberate: a `debug_assert!` is compiled
+/// out of the release binary, which is the only build that faces a hostile request, and an empty
+/// `BucketName` or `ObjectKey` reaching a handler is a value authorization and storage would both
+/// accept and neither would recognise. The check costs one comparison per required member.
+#[must_use]
+pub fn check_required_impl(type_name: &str, baseline_name: &str, fields: &[Field]) -> String {
+    let mut body = String::new();
+    for field in fields {
+        if !field.required || Registry::is_container(&field.ty) {
+            continue;
+        }
+        let name = naming::field_name(&field.name);
+        if matches!(field.ty, rustfs_gateway_model::ir::Type::Structure(_)) {
+            body.push_str(&format!("        self.{name}.check_required()?;\n"));
+        } else {
+            body.push_str(&format!(
+                "        crate::reject_placeholder(\"{baseline_name}\", \"{}\", &self.{name})?;\n",
+                field.name
+            ));
+        }
+    }
+    format!(
+        "impl {type_name} {{\n    \
+             /// Rejects a required member still holding its placeholder default (ADR-0004 P10).\n    \
+             ///\n    \
+             /// Call this at the end of decoding. A placeholder here is never a client mistake — a\n    \
+             /// request that omits a required member is rejected by the binding that looked for it —\n    \
+             /// so an error from this method means the decoder failed to fill the member in. It fails\n    \
+             /// closed in release builds, which is the one configuration that matters.\n    \
+             ///\n    \
+             /// Covers every required, non-container member, recursing into required nested shapes. A\n    \
+             /// shape inside a list or a map is checked by the decoder that builds it, through that\n    \
+             /// shape's own `check_required`.\n    \
+             ///\n    \
+             /// # Errors\n    \
+             ///\n    \
+             /// Returns [`crate::PlaceholderDefault`] naming the first offending member.\n    \
+             pub fn check_required(&self) -> Result<(), crate::PlaceholderDefault> {{\n\
+             {body}        Ok(())\n    }}\n\
+         }}\n"
+    )
 }
 
 /// A `&'static [&'static str]` literal of model member names.

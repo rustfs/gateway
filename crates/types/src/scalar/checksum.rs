@@ -44,6 +44,7 @@ use sha2::Sha256;
 use super::base64;
 use super::error_code::ErrorCode;
 use super::parse_error::{ParseError, rules};
+use crate::placeholder::WirePlaceholder;
 
 /// The header prefix every algorithm-specific checksum header shares.
 const CHECKSUM_PREFIX: &str = "x-amz-checksum-";
@@ -225,6 +226,31 @@ impl ChecksumDigest {
     #[must_use]
     pub fn as_bytes(&self) -> &[u8] {
         &self.bytes[..usize::from(self.len)]
+    }
+}
+
+impl Default for ChecksumDigest {
+    /// A zero-width digest — a placeholder that is **invalid on the wire**, and exists for one
+    /// reason.
+    ///
+    /// ADR-0004 P10: a required member of a generated dto uses a bare type, and every generated
+    /// dto derives `Default` so that `..Default::default()` keeps compiling when AWS adds a
+    /// member. No algorithm produces a zero-byte digest, so this value cannot be a checksum any
+    /// client sent or this implementation computed.
+    ///
+    /// **The decoding path never produces it.** Treat a value that compares equal to this one as
+    /// a bug, never as a digest — in particular, never let one satisfy an integrity check.
+    fn default() -> Self {
+        Self {
+            bytes: [0u8; 32],
+            len: 0,
+        }
+    }
+}
+
+impl WirePlaceholder for ChecksumDigest {
+    fn is_wire_placeholder(&self) -> bool {
+        self.len == 0
     }
 }
 
@@ -419,6 +445,34 @@ impl ChecksumSpec {
         let digest = hasher.finalize();
         let value = format!("{}-{count}", base64::encode(&digest));
         Self::from_wire(algo, ChecksumType::Composite, &value)
+    }
+}
+
+impl Default for ChecksumSpec {
+    /// An empty wire value — a placeholder that is **invalid on the wire**, and exists for one
+    /// reason.
+    ///
+    /// ADR-0004 P10: a required member of a generated dto uses a bare type, and every generated
+    /// dto derives `Default` so that `..Default::default()` keeps compiling when AWS adds a
+    /// member. [`ChecksumSpec::parse_header`] rejects an empty value, so this cannot be a spec any
+    /// header carried. The algorithm it names is arbitrary and carries no meaning; only the empty
+    /// value does.
+    ///
+    /// **The decoding path never produces it.** Treat a value that compares equal to this one as
+    /// a bug, never as a checksum — in particular, never let one satisfy an integrity check.
+    fn default() -> Self {
+        Self {
+            algo: ChecksumAlgorithm::Crc32,
+            kind: ChecksumType::FullObject,
+            raw: [0u8; RAW_CAPACITY],
+            len: 0,
+        }
+    }
+}
+
+impl WirePlaceholder for ChecksumSpec {
+    fn is_wire_placeholder(&self) -> bool {
+        self.len == 0
     }
 }
 

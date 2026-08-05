@@ -24,12 +24,12 @@ the policy before the first line of codegen is written.
 
 ## Decision
 
-Nine rules govern the generated shape and the versioning of this workspace.
+Ten rules govern the generated shape and the versioning of this workspace.
 
 | # | Rule |
 |---|---|
-| P1 | All Input and Output structs: **public fields plus `#[derive(Default)]`, and never `#[non_exhaustive]`**. Codegen must guarantee that every Output type can be constructed by `Default` |
-| P2 | A new field in the AWS model must be generated as `Option<T>` (or a container with a `Default`), which makes it a **minor** bump. If codegen ever encounters a new **required, non-`Option`, non-`Default`** field, CI fails hard and a human must write an ADR |
+| P1 | All Input and Output structs: **public fields plus `#[derive(Default)]`, and never `#[non_exhaustive]`**. A **required** member uses a **bare type** (`pub bucket: BucketName`), an **optional** member uses `Option<T>`, and a list or map is a bare container. Requiredness is expressed by the type, never by an `Option` that can never be `None`. Codegen must guarantee that every Input and Output can be constructed by `Default` |
+| P2 | A new field in the AWS model is a **minor** bump when it is either `Option<T>` or a type that has a `Default`. If codegen encounters a **required** member whose type has **no `Default`** — a structural union, a streaming body — CI **fails hard** and a human must write an ADR. The generator must not resolve it by wrapping the member in an `Option`: that would put the type back to lying about the wire contract |
 | P3 | **Exhaustive destructuring of a dto is forbidden** (`let GetObjectInput { bucket, key } = x;`). It is the one usage that adding a field genuinely breaks. Non-exhaustive destructuring with `..` is the required spelling. RustFS has 56 existing sites to convert during migration; a guard script enforces the rule |
 | P4 | **String enumerations** (`ChecksumAlgorithm`, `StorageClass`, `ReplicationStatus`, …) are generated as a **newtype over `Cow<'static, str>` with associated constants**, never as a real `enum`. AWS adds values every quarter; adding a constant is a pure minor bump |
 | P5 | **Structural unions** (`AnalyticsFilter`, `SelectObjectContentEvent`, …) stay real `enum`s and **are** `#[non_exhaustive]`. Downstream matches on them but never constructs them, so the attribute is semantically right there |
@@ -37,6 +37,7 @@ Nine rules govern the generated shape and the versioning of this workspace.
 | P7 | Builders are the **recommended** construction path, not the only one. Codegen emits a builder for every Input, and that must never become a reason to remove the public fields |
 | P8 | **The version carries the model snapshot**: `rustfs-gateway-types = "0.4.2+aws.2026-05-13"`. A model-date change gets its own CHANGELOG section. Field **removals and renames** from the model are batched and released only in a planned major version |
 | P9 | `OperationSpec` is the **inverse case** and **should** be `#[non_exhaustive]` with a builder — it has very few construction sites, all of them inside this workspace |
+| P10 | Every scalar newtype that can occupy a required member has a `Default`, and that value is **invalid on the wire**, never a plausible one. Its rustdoc must say so: it exists only for additive struct evolution, and the decoding path never produces it. Each generated struct carries a `check_required()` that **returns an error** — never `debug_assert!`, which is compiled out of the release build that faces hostile input — when a required member still holds its placeholder |
 
 Three additional rules cover the extension-point traits from ADR-0002:
 
@@ -114,6 +115,7 @@ builder form.
 | Builder-only dto with private fields | Same order of breakage, plus constructing the 46-field `PutObjectInput` through a builder is painful enough that users would wrap it again themselves |
 | Generate string enumerations as real `enum` plus `non_exhaustive` | Forces `_ =>` arms all over downstream code, and AWS adds values every quarter, so every quarter would manufacture downstream noise. A newtype over `Cow` turns the same event into a pure minor bump |
 | Newtype-wrap every dto field for future freedom | Every read becomes `.0`, polluting all 4,619 construction sites for a benefit nobody has asked for |
+| Keep required members bare but drop `#[derive(Default)]` from Input | Rejected when P1-06 landed: adding one optional member then breaks **every** struct literal in the tree, which is precisely the property P1 exists to protect (measured: 4,619 FRU sites in rustfs). The all-`Option` alternative was rejected in the same pass for making the type lie about the wire contract |
 | Omit the model date from the version | A consumer could not tell which AWS model snapshot their build corresponds to. SemVer build metadata is designed for exactly this and does not participate in precedence comparison |
 | Ship the ADR without guard scripts | Documentation blocks nothing. Both rules reduce to deterministic text checks, so they must be scripts |
 | Adopt `cargo-semver-checks` now | There is no previous release to compare against; it would burn CI time to compare a version with nothing |
@@ -146,7 +148,7 @@ builder form.
   |---|---|---|
   | `cargo-semver-checks` | before the first release | No previous version exists to diff against; during `0.x` it stays a warning, never a blocker |
   | `cargo public-api` snapshot | before the first release | Same reason |
-  | "dto public field count never decreases" ratchet | when dto codegen lands (`P1`) | It needs a baseline snapshot, which would be empty today. **The format is fixed now**: `docs/dto-field-counts.txt`, one `<TypeName> <count>` per line, sorted by name |
+  | "dto public field count never decreases" ratchet | when dto codegen lands (`P1`) | It needs a baseline snapshot, which would be empty today. **The format is fixed now**: `generated/dto/field_counts.txt`, one `<TypeName> <count>` per line, sorted by name |
   | P2's hard CI failure on a new required non-`Option` field | when dto codegen lands (`P1`) | It needs codegen's semantic diff capability |
 
 - **The version string grows a build-metadata suffix.** The CHANGELOG must preserve

@@ -173,13 +173,13 @@ mod tests {
     use super::*;
     use crate::canonical::{CanonicalRequestSpec, UriPathCandidates};
     use crate::codec::encode_hex_lower;
-    use crate::host::RawHost;
     use crate::mode::PayloadMode;
     use crate::parse::{AmzDate, CredentialScope};
     use crate::query::RawQuery;
     use crate::signed_headers::SignedHeaderSet;
     use http::Method;
     use http::header::{HeaderMap, HeaderName};
+    use rustfs_gateway_http::RawHost;
 
     /// The published AWS example credential. It authenticates nothing anywhere.
     const EXAMPLE_KEY: &[u8] = b"wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY";

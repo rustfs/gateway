@@ -28,7 +28,7 @@ use std::fmt::Write as _;
 use rustfs_gateway_model::ir::{Field, OperationIr};
 
 use super::registry::Registry;
-use super::{DtoReport, LICENSE, debug_impl, derives, field_decl, name_list, naming, registry, use_group};
+use super::{DtoReport, LICENSE, check_required_impl, debug_impl, derives, field_decl, name_list, naming, registry, use_group};
 
 /// Renders one operation's module.
 pub fn operation(ir: &OperationIr, registry: &Registry, report: &mut DtoReport) -> String {
@@ -119,7 +119,12 @@ fn data_struct(
          /// Public fields plus `Default`, and never `#[non_exhaustive]` — ADR-0004 P1. Construct it\n\
          /// with functional update syntax (`{name} {{ .. }}` with `..Default::default()`) or with the\n\
          /// builder; a member added upstream stays a minor version bump either way. Do not\n\
-         /// destructure it exhaustively (P3): that is the one usage a new member breaks.\n"
+         /// destructure it exhaustively (P3): that is the one usage a new member breaks.\n\
+         ///\n\
+         /// A required member is a bare type and an optional one is `Option<T>`, so requiredness is\n\
+         /// read off the type instead of unwrapped. `Default` fills a required member with a\n\
+         /// wire-invalid placeholder (P10), and [`{name}::check_required`] is what keeps one from\n\
+         /// leaving the decode path.\n"
     );
     if !clonable {
         out.push_str("///\n/// Not `Clone`: it owns a streaming body.\n");
@@ -130,6 +135,8 @@ fn data_struct(
         out.push_str(&field_decl(field));
     }
     out.push_str("}\n\n");
+    out.push_str(&check_required_impl(name, baseline_name, fields));
+    out.push('\n');
     if has_secret {
         out.push_str(&debug_impl(name, fields));
         out.push('\n');
@@ -158,7 +165,10 @@ fn builder(fields: &[Field], registry: &Registry) -> String {
     for field in fields {
         let name = naming::field_name(&field.name);
         let inner = Registry::type_with_enums(&field.ty, &field.name);
-        let (argument, assignment) = if Registry::is_container(&field.ty) {
+        // A container and a required member are both stored bare, so only an optional one is
+        // wrapped. The setter's argument is the unwrapped type in every case.
+        let bare = Registry::is_container(&field.ty) || field.required;
+        let (argument, assignment) = if bare {
             (inner.clone(), format!("self.input.{name} = value;"))
         } else {
             (inner.clone(), format!("self.input.{name} = Some(value);"))

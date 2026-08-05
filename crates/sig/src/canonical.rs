@@ -50,11 +50,11 @@ use core::fmt;
 
 use http::Method;
 use http::header::{HOST, HeaderMap, HeaderName};
+use rustfs_gateway_http::RawHost;
 use sha2::{Digest, Sha256};
 use smallvec::SmallVec;
 
 use crate::codec::encode_hex_lower;
-use crate::host::RawHost;
 use crate::mode::CanonicalPayloadToken;
 use crate::parse::{AmzDate, CredentialScope};
 use crate::query::{QueryExclusion, RawQuery, percent_decode, percent_encode};
@@ -179,8 +179,31 @@ impl UriPathCandidates {
 /// Everything a canonical request is built from, gathered so it can be built more than once.
 ///
 /// The host parameter is a [`RawHost`] and nothing else will do. A resolver's normalised value —
-/// lowercased, default port stripped, trailing dot removed — cannot be passed here, which is what
-/// stops one signature from being valid for four spellings of one host.
+/// lowercased, default port stripped, trailing dot removed — is a different type living in a
+/// different crate, so the many-to-one mistake cannot be made by passing the wrong variable; and
+/// the value comes from [`crate::effective_host`], the one function that decides which host a
+/// request addressed.
+///
+/// A plain string is not accepted either, which is what makes the constraint hold against the
+/// obvious workaround:
+///
+/// ```compile_fail,E0308
+/// use rustfs_gateway_sig::{CanonicalRequestSpec, PayloadMode, RawQuery, SignedHeaderSet, UriPathCandidates};
+/// # use http::{HeaderMap, Method};
+/// # let headers = HeaderMap::new();
+/// # let signed = SignedHeaderSet::parse_and_enforce("host", &headers, None).expect("valid");
+/// # let path = UriPathCandidates::new("/").expect("valid");
+/// # let query = RawQuery::new("");
+/// let _ = CanonicalRequestSpec::new(
+///     &Method::GET,
+///     &path,
+///     &query,
+///     &headers,
+///     &signed,
+///     "example.com", // a normalised host string: does not compile, only `&RawHost` is accepted
+///     PayloadMode::Empty.canonical_payload_token(),
+/// );
+/// ```
 pub struct CanonicalRequestSpec<'r> {
     method: &'r Method,
     paths: &'r UriPathCandidates,

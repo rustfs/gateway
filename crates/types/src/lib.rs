@@ -36,8 +36,17 @@
 //! Constructing a dto: public fields plus `..Default::default()`, or the per-operation builder.
 //! Never destructure one exhaustively — see ADR-0004 P1 and P3 for why that is the only usage a
 //! new model member breaks.
+//!
+//! # Required members are bare, optional members are `Option`
+//!
+//! `PutObjectInput::bucket` is a [`BucketName`], not an `Option<BucketName>`: requiredness is
+//! expressed by the type, and a handler never unwraps a value the wire contract says is always
+//! there. The price is that every scalar reachable from a required member has a `Default`, whose
+//! value is deliberately **invalid on the wire** — see [`placeholder`] for what that means, why it
+//! is safe, and the guard that keeps one off the decode path.
 #![forbid(unsafe_code)]
 
+pub mod placeholder;
 mod scalar;
 
 #[cfg(test)]
@@ -51,6 +60,7 @@ pub mod ops;
 #[path = "../generated/flat.rs"]
 pub mod dto;
 
+pub use crate::placeholder::{PlaceholderDefault, WirePlaceholder, reject_placeholder};
 pub use crate::scalar::{
     BucketName, ByteRange, ChecksumAlgorithm, ChecksumDigest, ChecksumError, ChecksumSpec, ChecksumType, Checksummer, ContentMd5,
     ETag, ErrorCode, ErrorContext, EtagRender, ObjectKey, OpaqueString, ParseError, RangeOutcome, RangeParse, Timestamp,

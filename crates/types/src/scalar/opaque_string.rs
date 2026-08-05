@@ -38,9 +38,23 @@
 use std::borrow::Cow;
 use std::fmt;
 
+use crate::placeholder::WirePlaceholder;
+
 /// A string echoed back unchanged.
+///
+/// `Default` is the empty string, and unlike the other scalars' defaults that is **not** an
+/// ADR-0004 P10 placeholder: this type validates nothing, so an empty value is exactly as
+/// legitimate as any other and a client may genuinely send one. [`WirePlaceholder`] therefore
+/// answers `false` for every value, which keeps the decode-path guard from rejecting a request
+/// that is merely empty.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct OpaqueString(Cow<'static, str>);
+
+impl WirePlaceholder for OpaqueString {
+    fn is_wire_placeholder(&self) -> bool {
+        false
+    }
+}
 
 impl OpaqueString {
     /// Wraps a value. Nothing is validated, because there is nothing to validate against.

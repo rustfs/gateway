@@ -53,12 +53,38 @@ impl GetBucketLocation {
 /// with functional update syntax (`Input { .. }` with `..Default::default()`) or with the
 /// builder; a member added upstream stays a minor version bump either way. Do not
 /// destructure it exhaustively (P3): that is the one usage a new member breaks.
+///
+/// A required member is a bare type and an optional one is `Option<T>`, so requiredness is
+/// read off the type instead of unwrapped. `Default` fills a required member with a
+/// wire-invalid placeholder (P10), and [`Input::check_required`] is what keeps one from
+/// leaving the decode path.
 #[derive(Debug, Clone, Default)]
 pub struct Input {
     /// Wire `Bucket`, bound as UriLabel. Required.
-    pub bucket: Option<crate::BucketName>,
+    pub bucket: crate::BucketName,
     /// Wire `x-amz-expected-bucket-owner`, bound as Header. Optional.
     pub expected_bucket_owner: Option<String>,
+}
+
+impl Input {
+    /// Rejects a required member still holding its placeholder default (ADR-0004 P10).
+    ///
+    /// Call this at the end of decoding. A placeholder here is never a client mistake — a
+    /// request that omits a required member is rejected by the binding that looked for it —
+    /// so an error from this method means the decoder failed to fill the member in. It fails
+    /// closed in release builds, which is the one configuration that matters.
+    ///
+    /// Covers every required, non-container member, recursing into required nested shapes. A
+    /// shape inside a list or a map is checked by the decoder that builds it, through that
+    /// shape's own `check_required`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::PlaceholderDefault`] naming the first offending member.
+    pub fn check_required(&self) -> Result<(), crate::PlaceholderDefault> {
+        crate::reject_placeholder("GetBucketLocationInput", "Bucket", &self.bucket)?;
+        Ok(())
+    }
 }
 
 /// The `GetBucketLocation` response.
@@ -67,10 +93,35 @@ pub struct Input {
 /// with functional update syntax (`Output { .. }` with `..Default::default()`) or with the
 /// builder; a member added upstream stays a minor version bump either way. Do not
 /// destructure it exhaustively (P3): that is the one usage a new member breaks.
+///
+/// A required member is a bare type and an optional one is `Option<T>`, so requiredness is
+/// read off the type instead of unwrapped. `Default` fills a required member with a
+/// wire-invalid placeholder (P10), and [`Output::check_required`] is what keeps one from
+/// leaving the decode path.
 #[derive(Debug, Clone, Default)]
 pub struct Output {
     /// Wire `LocationConstraint`, bound as BodyXml. Optional.
     pub location_constraint: Option<crate::ops::enums::LocationConstraint>,
+}
+
+impl Output {
+    /// Rejects a required member still holding its placeholder default (ADR-0004 P10).
+    ///
+    /// Call this at the end of decoding. A placeholder here is never a client mistake — a
+    /// request that omits a required member is rejected by the binding that looked for it —
+    /// so an error from this method means the decoder failed to fill the member in. It fails
+    /// closed in release builds, which is the one configuration that matters.
+    ///
+    /// Covers every required, non-container member, recursing into required nested shapes. A
+    /// shape inside a list or a map is checked by the decoder that builds it, through that
+    /// shape's own `check_required`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::PlaceholderDefault`] naming the first offending member.
+    pub fn check_required(&self) -> Result<(), crate::PlaceholderDefault> {
+        Ok(())
+    }
 }
 
 /// A builder for [`Input`].
@@ -94,7 +145,7 @@ impl InputBuilder {
     /// Sets `Bucket`.
     #[must_use]
     pub fn bucket(mut self, value: crate::BucketName) -> Self {
-        self.input.bucket = Some(value);
+        self.input.bucket = value;
         self
     }
 

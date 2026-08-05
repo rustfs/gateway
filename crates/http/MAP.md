@@ -17,7 +17,9 @@ Three properties live here. Everything else in the crate exists to serve them.
 3. **Signing reads raw bytes, routing reads derived values.** `EffectiveHost::as_str` is
    normalised; the original bytes are reachable only through `raw_for_signing() -> &RawHost`.
    Normalisation is many-to-one, so a signature over the normalised form would be valid for every
-   spelling that normalises to it.
+   spelling that normalises to it. `RawHost` is the type `rustfs-gateway-sig`'s
+   `CanonicalRequestSpec::new` accepts, and the only one — a `compile_fail` doctest on that
+   constructor proves a `&str` is rejected.
 
 ## Files
 
@@ -25,7 +27,7 @@ Three properties live here. Everything else in the crate exists to serve them.
 |---|---|---|
 | `src/lib.rs` | Module wiring, re-exports, the three properties in full | First stop; you can often stop here |
 | `src/wire.rs` | `WireRequest`, `accept`, `RawPath`, and the fixed order of checks | You are adding a rule, or wondering which rule fires first |
-| `src/host.rs` | `effective_host`, `EffectiveHost`, `RawHost`, `HostSource`, `HostError` | You touch anything host-, vhost- or signature-related |
+| `src/host.rs` | `effective_host`/`effective_host_of`, `EffectiveHost`, `RawHost`, `HostSource`, `HostError`, `MAX_HOST_BYTES` — the **only** host determination in the workspace; `rustfs-gateway-sig` consumes it | You touch anything host-, vhost- or signature-related |
 | `src/framing.rs` | `Framing`, `BodyLength`, rules W-1..W-5, `validate_chunk_size_line` (W-6) | You are deciding where a body ends |
 | `src/header_view.rs` | `HeaderView`, `SignedHeaderList`, canonical-header writing, the repeat and non-UTF-8 policies | You read a header, or build a canonical request |
 | `src/query_view.rs` | `QueryIndex` / `QueryView`: offsets, arrival order, repeat policy | You read a query parameter, or route on one |
@@ -33,7 +35,7 @@ Three properties live here. Everything else in the crate exists to serve them.
 | `src/limits.rs` | `Limits`, `LimitKind` | You are adding a ceiling; P3-05 owns the numbers and the timeouts |
 | `src/reject.rs` | `WireReject`, status and error-code mapping, `may_read_body`, `must_close_connection` | You are adding a rejection, or writing the response |
 | `src/text.rs` | `AsciiBuf` and the byte predicates; no protocol meaning | Rarely |
-| `tests/host_ambiguity.rs` | 6 positive / 14 negative — every row of the host decision table | You changed `host.rs` |
+| `tests/host_ambiguity.rs` | 7 positive / 18 negative — every row of the host decision table | You changed `host.rs`; `crates/sig/tests/effective_host.rs` covers the same function from the signature side and must be run too |
 | `tests/framing_smuggling.rs` | 4 positive / 19 negative — W-1..W-6 and the body ceiling | You changed `framing.rs` |
 | `tests/header_and_query.rs` | 10 positive / 18 negative — tolerance, repeats, metadata, canonicalisation | You changed a view or `metadata.rs` |
 | `tests/allocation_budget.rs` | The no-allocation promise, asserted structurally | You changed a view's storage |
@@ -66,17 +68,24 @@ Three properties live here. Everything else in the crate exists to serve them.
 - **Every rejection is decidable from the head.** No rule needs a body byte, so no limit check can
   become a reason to buffer or drain — `WireReject::may_read_body` is unconditionally `false`.
 
+- **The authority and the `Host` header are compared byte for byte.** `B.Example.COM` beside
+  `b.example.com` is `HostError::Conflict`, not agreement. Case-folding the conflict check is the
+  one normalisation that cannot be undone by reading the raw bytes afterwards: once the two
+  sources are declared equal, only one of them is ever seen again.
+
 ## Deliberate non-dependencies
 
 Three dependencies: `http`, `smallvec`, and `rustfs-gateway-types` for `ErrorCode`. No `hyper`, no
 `aws-chunked` decoder, no percent-decoding, no clock. `rustfs-gateway-stream` is present for the
-`OwnedWireRequest` alias only.
+`OwnedWireRequest` alias only. Nothing here depends on `rustfs-gateway-sig`; the edge runs the other
+way, which is why the host determination lives here and not there.
 
 ## Verify
 
 ```bash
-cargo test -p rustfs-gateway-http                                  # 82 tests, 51 negative / 31 positive
-cargo clippy -p rustfs-gateway-http --all-targets -- -D warnings
+cargo test -p rustfs-gateway-http                                  # 87 tests, 55 negative / 32 positive
+cargo test -p rustfs-gateway-sig                                   # the signature side of the same host function
+cargo clippy -p rustfs-gateway-http -p rustfs-gateway-sig --all-targets -- -D warnings
 cargo fmt --all --check
 bash scripts/check_license_headers.sh
 bash scripts/check_layer_dependencies.sh
@@ -91,10 +100,18 @@ bash scripts/check_ring_boundaries.sh
   refused; no S3 client is known to send it.
 - `SignedHeaderList::parse` requires `host` to be signed. SigV4 requires it, but a presigned flow
   that omits it would be refused before the signature is examined.
-- **Overlap with `rustfs-gateway-sig` (P2-03), landing in parallel.** The boundary intended here: this
-  crate owns the *wire* verdict — accept or refuse a host, and hand over `RawHost` (raw bytes plus
-  source) for signing; `rustfs-gateway-sig` owns the canonical request built from those bytes.
-  `SignedHeaderList` and `HeaderView::write_canonical_headers` exist so the signer never needs the
-  `HeaderMap`. If P2-03's own signed-header and canonical-host types cover the same ground, one of
-  the two should be deleted rather than kept in sync — one rule in two places is the s3s
-  #499-versus-#632 defect shape.
+- **The duplicated host determination is resolved: there is now one, and it is here.** P2-03 and
+  P3-01 each shipped an `effective_host`; `crates/sig/src/host.rs` has been deleted and
+  `rustfs-gateway-sig` re-exports this crate's types. Every point on which the two drafts differed
+  was resolved towards the stricter reading, and the table is in the `src/host.rs` module docs. One
+  of them changes behaviour and wants a maintainer's eye: **the authority/`Host` comparison is now
+  byte-exact**, so an h2 request whose `:authority` and `host` differ only in case is a `400` where
+  it used to be accepted. No S3 SDK is known to emit that shape, but a case-normalising proxy in
+  front of the gateway would.
+- **`MAX_HOST_BYTES` dropped from 273 to 263** in the same merge, taking the stricter of the two
+  drafts' ceilings. Nothing legitimate is between the two numbers, but it is a configured default
+  (`Limits::max_host_bytes`) and therefore observable.
+- **`SignedHeaderList` / `HeaderView::write_canonical_headers` still overlap `rustfs-gateway-sig`'s
+  `SignedHeaderSet`.** Same defect shape as the host duplication — one rule in two places, s3s
+  #499-versus-#632 — and not addressed by this merge. One of the two should be deleted rather than
+  kept in sync.

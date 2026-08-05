@@ -124,6 +124,24 @@ fn string_enum(def: &EnumDef) -> String {
          impl std::fmt::Display for {name} {{\n    \
              fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {{\n        \
                  f.write_str(&self.0)\n    }}\n\
+         }}\n\n\
+         impl Default for {name} {{\n    \
+             /// The empty value: a placeholder that is **invalid on the wire**, and exists for one\n    \
+             /// reason.\n    \
+             ///\n    \
+             /// ADR-0004 P10. A required member of a generated dto is a bare type, and every generated\n    \
+             /// dto derives `Default` so that `..Default::default()` keeps compiling when AWS adds a\n    \
+             /// member; an enumeration in a required position therefore needs a `Default`. No model\n    \
+             /// value is the empty string and no S3 response carries one, so this cannot be mistaken\n    \
+             /// for a value a client sent — a value this build has no constant for is\n    \
+             /// [`{name}::custom`], not this.\n    \
+             ///\n    \
+             /// **The decoding path never produces it.** An absent member is `Option::None`, and\n    \
+             /// `check_required` on the enclosing type rejects any placeholder that slips through.\n    \
+             fn default() -> Self {{\n        Self(Cow::Borrowed(\"\"))\n    }}\n\
+         }}\n\n\
+         impl crate::WirePlaceholder for {name} {{\n    \
+             fn is_wire_placeholder(&self) -> bool {{\n        self.0.is_empty()\n    }}\n\
          }}\n"
     );
     out
@@ -190,14 +208,17 @@ fn structure(def: &ShapeDef, registry: &Registry, report: &mut DtoReport) -> Str
         "/// The `{name}` body shape. Reached from: {sources}.\n\
          ///\n\
          /// Public fields plus `Default`, and never `#[non_exhaustive]` — ADR-0004 P1. Do not\n\
-         /// destructure it exhaustively (P3).\n"
+         /// destructure it exhaustively (P3). A required member is a bare type and an optional one is\n\
+         /// `Option<T>`; `Default` fills a required member with a wire-invalid placeholder (P10) that\n\
+         /// [`{name}::check_required`] refuses to let off the decode path.\n"
     );
     out.push_str(&derives(clonable, has_secret));
     let _ = writeln!(out, "pub struct {name} {{");
     for field in &def.fields {
         out.push_str(&field_decl(field));
     }
-    out.push_str("}\n");
+    out.push_str("}\n\n");
+    out.push_str(&super::check_required_impl(name, name, &def.fields));
     if has_secret {
         out.push('\n');
         out.push_str(&debug_impl(name, &def.fields));

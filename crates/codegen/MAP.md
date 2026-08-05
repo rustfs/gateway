@@ -22,6 +22,11 @@ and the zero-diff gate needs no temporary directory.
 | `src/emit/spec_toml.rs` | `spec/operations/<Op>.toml` — the field-binding view, plus the one-line spellings of a type and a predicate that the other emitters reuse. | A field's rendering in a spec file is wrong. |
 | `src/emit/operations_md.rs` | `OPERATIONS.md` — three reverse indexes (query key, header, error code), the forward table, the route order, and one section per operation. | You are changing what an agent can look up without reading the model. |
 | `src/emit/rust_files.rs` | `generated/routes.rs` and `generated/error_codes.rs`, data only. | P4 wires the route table up, or a row shape changes. |
+| `src/emit/dto/mod.rs` | `generated/dto/**` — one module per operation, plus flat aliases and the `field_counts.txt` ratchet. Owns the **ADR-0004 P2 gate**: a required member whose type has no `Default` fails the build rather than being quietly wrapped in an `Option`. | A dto's shape is wrong, or the P2 gate fires. |
+| `src/emit/dto/naming.rs` | Operation and member names to Rust identifiers, keyword escaping included. | A generated name collides or reads badly. |
+| `src/emit/dto/registry.rs` | Which shapes and enums each operation drags in, so a shape emitted once is shared rather than duplicated. | A type is emitted twice, or is missing. |
+| `src/emit/dto/render.rs` | The struct, enum and builder text itself, formatted to rustfmt's normal form so `cargo fmt` is a no-op over generated code. | Output no longer survives `cargo fmt --check`. |
+| `src/emit/dto/shared.rs` | Helpers common to the dto emitters. | — |
 | `src/golden.rs` | The structural diff behind the sample comparison: objects as maps, arrays as sequences, records matched by `name` or `id`, string lists as sets plus an order note. | A golden difference report is noisy or misleading. |
 | `src/semantic.rs` | The wire-dimension diff for a PR body: operations, route selectors, optionality, bindings, types, XML, error codes. | `generated/` moved by more than 200 lines and the PR needs a summary. |
 | `src/why.rs` | Reverse tracing from a quirk id, operation, error code, header or query key to the evidence behind it — with nearest-candidate suggestions when nothing matches. | Someone asks "why is this behaviour like this?", or you are adding a lookup namespace. |

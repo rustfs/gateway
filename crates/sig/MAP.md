@@ -20,10 +20,14 @@ Six invariants live here. Everything else in the crate exists to serve them.
    `CredentialPresence::into_evidence` produces, and only when nothing was presented. So "the
    access key exists, therefore authenticated" (MinIO CVE-2025-31489) and "verification failed,
    fall back to anonymous" both fail to compile. Rejecting needs no receipt.
-4. **`effective_host()` decides the host once, from raw bytes.** hyper forwards a missing, empty or
-   duplicated `Host`, and an h2 `:authority` contradicting `host`, all with a `200`; each is a `400`
-   here. The canonical request accepts a `RawHost` and nothing else, so a resolver's normalised
-   value cannot seed a signature — otherwise one signature is valid for four spellings of one host.
+4. **`effective_host()` decides the host once, from raw bytes — and it lives in
+   `rustfs-gateway-http`.** hyper forwards a missing, empty or duplicated `Host`, and an h2
+   `:authority` contradicting `host`, all with a `200`; each is a `400` there. This crate
+   re-exports the function and its types rather than implementing them: P2-03 and P3-01 each
+   shipped one, and two implementations of "which host did this request address" are two answers to
+   it. `CanonicalRequestSpec::new` accepts a `RawHost` and nothing else — a `compile_fail` doctest
+   on it proves a `&str` is rejected — so a resolver's normalised value cannot seed a signature,
+   which would make one signature valid for four spellings of one host.
 5. **Headers come from the client's `SignedHeaders`, never from a deny-list**, and the list is
    refused unless it covers `host` and every `x-amz-*` header that arrived. An unsigned `x-amz-*` is
    an unsigned instruction: SSE-C key, copy source, ACL, object lock, session token.
@@ -44,7 +48,6 @@ Six invariants live here. Everything else in the crate exists to serve them.
 | `src/timing.rs` | `SIDE_CHANNELS` (the T1..T10 register), `FailureFloor`, `placeholder_secret`, `LookupBudget`, `CredentialLookup` | You are on a rejection path, or about to call a credential provider |
 | `src/codec.rs` | Length-exact lowercase-hex and canonical-base64 codecs | You are decoding a digest or a signature off the wire |
 | `src/error.rs` | `SigParseError`, `Unimplemented` | You need the rejection reason set, or the 400-vs-501 split |
-| `src/host.rs` | `effective_host`, `RawHost`, `HostSource`, `HostError` | You need the request's host — for the signature, for routing, or for an audit record |
 | `src/query.rs` | `RawQuery`, the canonical query rebuild, `QueryExclusion`, and the strict percent codec | You are canonicalising a query, or encoding a URI component |
 | `src/signed_headers.rs` | `SignedHeaderSet` and its six completeness rules, `UNSIGNED_HEADER_EXEMPTIONS` | You are deciding which headers a signature covers |
 | `src/canonical.rs` | `UriPathCandidates`, `CanonicalRequestSpec`/`CanonicalCandidates`, `CanonicalRequest`, `StringToSign`, `SignatureMismatchDetail` | You are building or debugging a canonical request |
@@ -54,7 +57,7 @@ Six invariants live here. Everything else in the crate exists to serve them.
 | `tests/frozen_dimensions.rs` | The `c-sig-0001`..`c-sig-0025` case suite plus two source-level guards | You changed any type here |
 | `tests/verification_proof.rs` | The `c-sig-0101`..`c-sig-0128` case suite, a miniature authn stage, and the in-crate copies of the source guards | You changed the verdict, the secrets or the register |
 | `tests/canonical_request.rs` | The `c-sig-0201`..`c-sig-0246`, `0255`..`0257` plaintext-level suite | You changed canonicalisation, the query codec or the signed-header rules |
-| `tests/effective_host.rs` | The `c-sig-0206`..`0208`, `0247`..`0252` host suite | You changed `effective_host` or `RawHost` |
+| `tests/effective_host.rs` | The `c-sig-0206`..`0208`, `0247`..`0252` host suite — the *signature layer's* requirements on `rustfs-gateway-http`'s `effective_host`, asserted from outside that crate | You changed `effective_host` or `RawHost`, wherever they live |
 | `tests/timing.rs` | Latency-parity cases `c-sig-0107`/`0108`/`0111`. Run it with `--release` | You touched a comparison or a rejection path |
 
 ## Shape decisions worth not re-litigating
@@ -102,21 +105,32 @@ Six invariants live here. Everything else in the crate exists to serve them.
   value, one of which may be an SSE-C key. `SignatureMismatchDetail` is the only rendering route
   and stays silent unless `verbose-signature-errors` is on; no expected signature is in either.
 
-## Deliberate non-dependencies
+## Dependencies, deliberate and deliberately absent
 
+- **`rustfs-gateway-http` is the one internal edge.** It owns the effective-host determination and
+  this crate consumes it; `src/host.rs` used to hold a second implementation and has been deleted.
+  The edge runs sig -> http, which the layer matrix allows. The http -> sig direction stays absent,
+  so the framing decision is still made here and only *read* there — nothing in this crate touches
+  `Framing`, `Content-Encoding` or any other wire framing input.
 - **No `aws-sigv4`** (ADR-0001, `docs/msrv.md`): its two useful pure functions are ported into
   `src/derive.rs` with attribution, and the rest has three measured defects (the `+` collision, a
   deny-list for signed headers, a `panic!` when a request has no host). **No `percent-encoding`**:
-  its decoder passes `%zz` through, and a
-  signature input may not have two spellings. **No `rustfs-gateway-http`**: the framing decision is made
-  here and consumed there. **No serializer**: with `serde` absent, no `#[derive(Serialize)]` on key
-  material can reappear without a visible dependency change — which is why `full_chain_tests.rs`
-  reads the AWS suite's context files with a six-line scanner.
+  its decoder passes `%zz` through, and a signature input may not have two spellings. **No
+  serializer**: with `serde` absent, no `#[derive(Serialize)]` on key material can reappear without
+  a visible dependency change — which is why `full_chain_tests.rs` reads the AWS suite's context
+  files with a six-line scanner.
+
+  `rustfs-gateway-http` **is** a dependency, and deliberately became one: the effective-host
+  determination lives there and is consumed here. Two implementations of "which host is this" is
+  how a request gets signed for one host and routed to another, so there is exactly one. The
+  invariant that used to justify keeping http out — framing is decided in this crate — is about
+  the http -> sig direction, which stays absent; nothing here reads `Framing` or `Content-Encoding`.
 
 ## Verifying a change
 
 ```bash
 cargo test -p rustfs-gateway-sig                          # unit + case suites + compile_fail doctests
+cargo test -p rustfs-gateway-http                         # the wire side of the same host function
 cargo test -p rustfs-gateway-sig --release --test timing  # latency parity; --release is required
 bash scripts/check_ct_eq.sh                       # seven source guards, incl. negative-case floors
 bash scripts/test_guard_scripts.sh                # proves check_ct_eq.sh can still fail
@@ -129,7 +143,8 @@ plaintext layers. The fetch commands are the `SUITE_HOWTO` constant in `src/full
 which also records the pinned revision; export `S3GATE_AWS_SIGV4_SUITE_DIR` and re-run.
 
 The nineteen compile-time cases are `compile_fail` rustdoc examples on `CtBytes`, `Signature`,
-`SecretBytes`, `SigningKey`, `SessionToken`, `SigFamily`, `PayloadMode`, `RawHost`, `derive` and
+`SecretBytes`, `SigningKey`, `SessionToken`, `SigFamily`, `PayloadMode`, `CanonicalRequestSpec`
+(the host-is-not-a-string case, moved there when `src/host.rs` was merged away), `derive` and
 the `verdict` module, so `cargo test` runs them as doctests — next to the rule they enforce, so a
 maintainer deleting a rule sees the test that forbids it in the same screen. Their `EXXXX`
 annotations were each confirmed by hand: rustdoc checks only that the snippet fails, so treat the

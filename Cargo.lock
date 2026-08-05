@@ -432,6 +432,7 @@ version = "0.1.0"
 dependencies = [
  "hmac",
  "http",
+ "rustfs-gateway-http",
  "sha2",
  "smallvec",
  "subtle",

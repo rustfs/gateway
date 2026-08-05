@@ -40,6 +40,7 @@
 use std::fmt::Write as _;
 
 use super::parse_error::{ParseError, rules};
+use crate::placeholder::WirePlaceholder;
 
 /// The wire spelling of an instant. There is no default: the IR binds one of these per field.
 ///
@@ -205,6 +206,38 @@ impl Timestamp {
             TimestampFormat::EpochSeconds => unreachable!("handled above"),
         }
         Ok(out)
+    }
+}
+
+impl Default for Timestamp {
+    /// An instant no wire format can express — a placeholder that is **invalid on the wire**, and
+    /// exists for one reason.
+    ///
+    /// ADR-0004 P10: a required member of a generated dto uses a bare type, and every generated
+    /// dto derives `Default` so that `..Default::default()` keeps compiling when AWS adds a
+    /// member. `LastModified` is required in every `Object` listing entry, so `Timestamp` needs a
+    /// `Default`. It is deliberately **not** [`Timestamp::UNIX_EPOCH`]: 1970-01-01 is a perfectly
+    /// sendable instant, so a caller could not tell it apart from a value a client meant. This one
+    /// falls roughly nine billion years before the four-digit year range, so
+    /// [`Timestamp::render`] fails for every format but `EpochSeconds`.
+    ///
+    /// **The decoding path never produces it.** No parser in this module can reach it: they all go
+    /// through the four-digit calendar. Treat a value that compares equal to this one as a bug,
+    /// never as a date.
+    fn default() -> Self {
+        Self {
+            secs: PLACEHOLDER_SECS,
+            subsec_nanos: 0,
+        }
+    }
+}
+
+/// The seconds field of the ADR-0004 P10 placeholder instant. Outside every wire format's range.
+const PLACEHOLDER_SECS: i64 = i64::MIN;
+
+impl WirePlaceholder for Timestamp {
+    fn is_wire_placeholder(&self) -> bool {
+        self.secs == PLACEHOLDER_SECS
     }
 }
 

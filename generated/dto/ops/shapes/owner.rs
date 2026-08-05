@@ -24,11 +24,33 @@
 /// The `Owner` body shape. Reached from: ListObjectsV2.
 ///
 /// Public fields plus `Default`, and never `#[non_exhaustive]` — ADR-0004 P1. Do not
-/// destructure it exhaustively (P3).
+/// destructure it exhaustively (P3). A required member is a bare type and an optional one is
+/// `Option<T>`; `Default` fills a required member with a wire-invalid placeholder (P10) that
+/// [`Owner::check_required`] refuses to let off the decode path.
 #[derive(Debug, Clone, Default)]
 pub struct Owner {
     /// Wire `DisplayName`, bound as BodyXml. Optional.
     pub display_name: Option<String>,
     /// Wire `ID`, bound as BodyXml. Optional.
     pub id: Option<String>,
+}
+
+impl Owner {
+    /// Rejects a required member still holding its placeholder default (ADR-0004 P10).
+    ///
+    /// Call this at the end of decoding. A placeholder here is never a client mistake — a
+    /// request that omits a required member is rejected by the binding that looked for it —
+    /// so an error from this method means the decoder failed to fill the member in. It fails
+    /// closed in release builds, which is the one configuration that matters.
+    ///
+    /// Covers every required, non-container member, recursing into required nested shapes. A
+    /// shape inside a list or a map is checked by the decoder that builds it, through that
+    /// shape's own `check_required`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::PlaceholderDefault`] naming the first offending member.
+    pub fn check_required(&self) -> Result<(), crate::PlaceholderDefault> {
+        Ok(())
+    }
 }

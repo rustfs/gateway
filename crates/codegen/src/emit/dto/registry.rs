@@ -163,12 +163,52 @@ impl Registry {
 
     /// Whether a value of this type needs no wrapper because it has a `Default` of its own.
     ///
-    /// Only the two containers qualify. Every scalar in the vocabulary is a validated newtype
-    /// whose empty value would be invalid on the wire, which is the whole reason the generated
-    /// fields are `Option` rather than bare — see ADR-0004 P1 and P2.
+    /// Containers are never wrapped: an empty `Vec` and an absent list are the same fact on the
+    /// wire, so `Option<Vec<_>>` would spell "nothing" twice.
     #[must_use]
     pub fn is_container(ty: &Type) -> bool {
         matches!(ty, Type::List { .. } | Type::Map { .. })
+    }
+
+    /// Why this type cannot carry a **required** member, or `None` when it can.
+    ///
+    /// This is the ADR-0004 P2 gate. A required member is generated bare, so its type must have a
+    /// `Default` — otherwise the enclosing Input or Output loses `#[derive(Default)]` and P1 goes
+    /// with it. Two kinds of type have none and must not acquire one by reflex:
+    ///
+    /// * a **structural union**, a `#[non_exhaustive]` `enum` with no neutral variant — picking
+    ///   one would make the generator invent what the wire said;
+    /// * a **streaming body**, which owns a live producer.
+    ///
+    /// A nested structure inherits the gap from its own required members, because that is exactly
+    /// what `#[derive(Default)]` on it needs. Reaching any of them in a required position is a
+    /// model change that needs a human decision, so codegen fails hard and names the member.
+    #[must_use]
+    pub fn required_gap(&self, ty: &Type) -> Option<&'static str> {
+        self.required_gap_at(ty, 0)
+    }
+
+    /// Nested shapes are not recursive in the S3 model, but a depth bound is cheaper than trusting
+    /// that and much cheaper than a stack overflow inside the generator.
+    fn required_gap_at(&self, ty: &Type, depth: usize) -> Option<&'static str> {
+        if depth > 16 {
+            return Some("the shape nests deeper than the generator will follow, so its `Default` cannot be established");
+        }
+        match ty {
+            Type::Union(_) => Some(
+                "a structural union is a `#[non_exhaustive]` enum with no neutral variant, so it has no `Default`, \
+                 and choosing one would invent a wire fact",
+            ),
+            Type::Blob { streaming: true } => Some("a streaming body owns a live producer and has no `Default`"),
+            Type::Structure(name) => self.shapes.get(&naming::type_name(name)).and_then(|shape| {
+                shape
+                    .fields
+                    .iter()
+                    .filter(|f| f.required && !Self::is_container(&f.ty))
+                    .find_map(|f| self.required_gap_at(&f.ty, depth + 1))
+            }),
+            _ => None,
+        }
     }
 
     /// The Rust spelling of an IR type.
@@ -203,13 +243,21 @@ impl Registry {
 
     /// The Rust spelling of one field's type, wrapper included.
     ///
-    /// Containers stay bare — an empty `Vec` and an absent list are the same fact on the wire —
-    /// and everything else is `Option`, required or not. ADR-0004 P1 needs every Input and Output
-    /// to be `Default`, and none of the scalars has a `Default` that would be valid on the wire.
+    /// Three cases, and the IR decides which (ADR-0004 P1):
+    ///
+    /// * a **container** stays bare — an empty `Vec` and an absent list are the same fact on the
+    ///   wire, so `Option<Vec<_>>` would spell "nothing" twice;
+    /// * a **required** member stays bare, so that requiredness is expressed by the type and no
+    ///   consumer unwraps a value the wire contract says is always present;
+    /// * an **optional** member is `Option<T>`, which is what absence means.
+    ///
+    /// The bare required case is what obliges every scalar reachable from one to have a `Default`.
+    /// That default is a wire-invalid placeholder (P10) and [`Self::required_gap`] is the gate that
+    /// refuses to generate a required member whose type has none.
     #[must_use]
     pub fn field_type(field: &Field) -> String {
         let inner = Self::type_with_enums(&field.ty, &field.name);
-        if Self::is_container(&field.ty) {
+        if Self::is_container(&field.ty) || field.required {
             inner
         } else {
             format!("Option<{inner}>")

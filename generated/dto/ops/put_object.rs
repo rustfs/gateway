@@ -54,6 +54,11 @@ impl PutObject {
 /// builder; a member added upstream stays a minor version bump either way. Do not
 /// destructure it exhaustively (P3): that is the one usage a new member breaks.
 ///
+/// A required member is a bare type and an optional one is `Option<T>`, so requiredness is
+/// read off the type instead of unwrapped. `Default` fills a required member with a
+/// wire-invalid placeholder (P10), and [`Input::check_required`] is what keeps one from
+/// leaving the decode path.
+///
 /// Not `Clone`: it owns a streaming body.
 #[derive(Default)]
 pub struct Input {
@@ -62,7 +67,7 @@ pub struct Input {
     /// The message body. Optional.
     pub body: Option<rustfs_gateway_stream::ByteStream>,
     /// Wire `Bucket`, bound as UriLabel. Required.
-    pub bucket: Option<crate::BucketName>,
+    pub bucket: crate::BucketName,
     /// Wire `cache-control`, bound as Header. Optional.
     pub cache_control: Option<String>,
     /// Wire `content-disposition`, bound as Header. Optional.
@@ -72,7 +77,7 @@ pub struct Input {
     /// Wire `content-language`, bound as Header. Optional.
     pub content_language: Option<String>,
     /// Wire `content-length`, bound as Header. Required.
-    pub content_length: Option<i64>,
+    pub content_length: i64,
     /// Wire `content-md5`, bound as Header. Optional.
     pub content_md5: Option<String>,
     /// Every header under `x-amz-checksum-`. Optional.
@@ -96,7 +101,7 @@ pub struct Input {
     /// Wire `x-amz-grant-write-acp`, bound as Header. Optional.
     pub grant_write_acp: Option<String>,
     /// Wire `Key`, bound as UriLabel. Required.
-    pub key: Option<crate::ObjectKey>,
+    pub key: crate::ObjectKey,
     /// Wire `x-amz-write-offset-bytes`, bound as Header. Optional.
     pub write_offset_bytes: Option<i64>,
     /// Every header under `x-amz-meta-`. Optional.
@@ -131,6 +136,29 @@ pub struct Input {
     pub object_lock_legal_hold_status: Option<crate::ops::enums::ObjectLockLegalHoldStatus>,
     /// Wire `x-amz-expected-bucket-owner`, bound as Header. Optional.
     pub expected_bucket_owner: Option<String>,
+}
+
+impl Input {
+    /// Rejects a required member still holding its placeholder default (ADR-0004 P10).
+    ///
+    /// Call this at the end of decoding. A placeholder here is never a client mistake — a
+    /// request that omits a required member is rejected by the binding that looked for it —
+    /// so an error from this method means the decoder failed to fill the member in. It fails
+    /// closed in release builds, which is the one configuration that matters.
+    ///
+    /// Covers every required, non-container member, recursing into required nested shapes. A
+    /// shape inside a list or a map is checked by the decoder that builds it, through that
+    /// shape's own `check_required`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::PlaceholderDefault`] naming the first offending member.
+    pub fn check_required(&self) -> Result<(), crate::PlaceholderDefault> {
+        crate::reject_placeholder("PutObjectInput", "Bucket", &self.bucket)?;
+        crate::reject_placeholder("PutObjectInput", "ContentLength", &self.content_length)?;
+        crate::reject_placeholder("PutObjectInput", "Key", &self.key)?;
+        Ok(())
+    }
 }
 
 impl std::fmt::Debug for Input {
@@ -187,12 +215,17 @@ impl std::fmt::Debug for Input {
 /// with functional update syntax (`Output { .. }` with `..Default::default()`) or with the
 /// builder; a member added upstream stays a minor version bump either way. Do not
 /// destructure it exhaustively (P3): that is the one usage a new member breaks.
+///
+/// A required member is a bare type and an optional one is `Option<T>`, so requiredness is
+/// read off the type instead of unwrapped. `Default` fills a required member with a
+/// wire-invalid placeholder (P10), and [`Output::check_required`] is what keeps one from
+/// leaving the decode path.
 #[derive(Clone, Default)]
 pub struct Output {
     /// Wire `x-amz-expiration`, bound as Header. Optional.
     pub expiration: Option<crate::OpaqueString>,
     /// Wire `etag`, bound as Header. Required.
-    pub e_tag: Option<crate::ETag>,
+    pub e_tag: crate::ETag,
     /// Every header under `x-amz-checksum-`. Optional.
     pub checksum_spec: Option<crate::ChecksumSpec>,
     /// Wire `x-amz-checksum-type`, bound as Header. Optional.
@@ -215,6 +248,27 @@ pub struct Output {
     pub size: Option<i64>,
     /// Wire `x-amz-request-charged`, bound as Header. Optional.
     pub request_charged: Option<crate::ops::enums::RequestCharged>,
+}
+
+impl Output {
+    /// Rejects a required member still holding its placeholder default (ADR-0004 P10).
+    ///
+    /// Call this at the end of decoding. A placeholder here is never a client mistake — a
+    /// request that omits a required member is rejected by the binding that looked for it —
+    /// so an error from this method means the decoder failed to fill the member in. It fails
+    /// closed in release builds, which is the one configuration that matters.
+    ///
+    /// Covers every required, non-container member, recursing into required nested shapes. A
+    /// shape inside a list or a map is checked by the decoder that builds it, through that
+    /// shape's own `check_required`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::PlaceholderDefault`] naming the first offending member.
+    pub fn check_required(&self) -> Result<(), crate::PlaceholderDefault> {
+        crate::reject_placeholder("PutObjectOutput", "ETag", &self.e_tag)?;
+        Ok(())
+    }
 }
 
 impl std::fmt::Debug for Output {
@@ -276,7 +330,7 @@ impl InputBuilder {
     /// Sets `Bucket`.
     #[must_use]
     pub fn bucket(mut self, value: crate::BucketName) -> Self {
-        self.input.bucket = Some(value);
+        self.input.bucket = value;
         self
     }
 
@@ -311,7 +365,7 @@ impl InputBuilder {
     /// Sets `ContentLength`.
     #[must_use]
     pub fn content_length(mut self, value: i64) -> Self {
-        self.input.content_length = Some(value);
+        self.input.content_length = value;
         self
     }
 
@@ -395,7 +449,7 @@ impl InputBuilder {
     /// Sets `Key`.
     #[must_use]
     pub fn key(mut self, value: crate::ObjectKey) -> Self {
-        self.input.key = Some(value);
+        self.input.key = value;
         self
     }
 

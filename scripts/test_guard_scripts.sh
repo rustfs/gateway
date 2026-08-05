@@ -264,5 +264,70 @@ mut_strip_negative_floor() {
 expect_fail check_ct_eq.sh \
     'negative-case coverage dropping below its floor' mut_strip_negative_floor
 
+# -----------------------------------------------------------------------------
+# ADR-0005. Each of the three mutations below is a way the generated dto silently
+# stops being part of the `rustfs-gateway-types` package: the escaping `#[path]`
+# is the original defect, the real directory is the well-meaning "fix" that
+# duplicates generated output, and the text file is what a Windows checkout
+# without `core.symlinks` produces.
+# -----------------------------------------------------------------------------
+mut_escaping_dto_path() {
+    # The spelling the crate had before ADR-0005: reaches the generated tree, but
+    # from outside the package, so `cargo package` cannot see it.
+    sed -e 's|"../generated/ops/mod.rs"|"../../../generated/dto/ops/mod.rs"|' \
+        -e 's|"../generated/flat.rs"|"../../../generated/dto/flat.rs"|' \
+        crates/types/src/lib.rs >crates/types/src/lib.rs.mut
+    mv crates/types/src/lib.rs.mut crates/types/src/lib.rs
+}
+expect_fail check_generated_dto_packaged.sh \
+    'a #[path] reaching outside the package directory' mut_escaping_dto_path
+
+mut_dto_copy_instead_of_symlink() {
+    rm -f crates/types/generated
+    cp -R generated/dto crates/types/generated
+}
+expect_fail check_generated_dto_packaged.sh \
+    'the dto mount replaced by a real directory (a second copy of generated output)' \
+    mut_dto_copy_instead_of_symlink
+
+mut_dto_symlink_as_text() {
+    rm -f crates/types/generated
+    printf '../../generated/dto' >crates/types/generated
+}
+expect_fail check_generated_dto_packaged.sh \
+    'the dto symlink materialised as a text file, as on Windows without core.symlinks' \
+    mut_dto_symlink_as_text
+
+
+# -----------------------------------------------------------------------------
+# ADR-0004's SemVer policy was prose until now. These two guards are what make
+# "a new optional field is a minor change" enforceable rather than aspirational.
+# -----------------------------------------------------------------------------
+
+mut_dto_non_exhaustive() {
+    f=generated/dto/ops/get_bucket_location.rs
+    awk '/^#\[derive\(Debug, Clone, Default\)\]$/ && !done { print "#[non_exhaustive]"; done = 1 } { print }' \
+        "$f" >"${f}.mut" && mv "${f}.mut" "$f"
+}
+expect_fail check_no_dto_non_exhaustive.sh \
+    'a dto struct marked #[non_exhaustive], which forbids FRU' mut_dto_non_exhaustive
+
+mut_exhaustive_destructuring() {
+    cat >>crates/types/src/lib.rs <<'RS'
+
+#[cfg(test)]
+mod destructure_fixture {
+    #[test]
+    fn fixture() {
+        let out = crate::ops::get_bucket_location::Output::default();
+        let crate::ops::get_bucket_location::Output { location_constraint } = out;
+        let _ = location_constraint;
+    }
+}
+RS
+}
+expect_fail check_no_exhaustive_destructuring.sh \
+    'a dto destructured without a trailing ..' mut_exhaustive_destructuring
+
 printf '\n%s case(s), %s failure(s)\n' "$cases" "$failures"
 [[ "$failures" -eq 0 ]]

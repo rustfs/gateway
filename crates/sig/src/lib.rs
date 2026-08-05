@@ -16,9 +16,11 @@
 //!
 //! Responsible for: `PayloadMode`/`AuthScheme`, canonical request construction, the
 //! constant-time verification proof that makes "never compared" unrepresentable.
-//! NOT responsible for: authorization (that is `rustfs-gateway-core`), credential storage.
-//! Upstream: none today — the frozen dimensions are self-contained. Downstream: `rustfs-gateway-http`
-//! (framing), `rustfs-gateway-core` (authn stage).
+//! NOT responsible for: authorization (that is `rustfs-gateway-core`), credential storage, or
+//! deciding the effective host — that is `rustfs-gateway-http`, and this crate consumes its answer.
+//! Upstream: `rustfs-gateway-http`, for the one effective-host determination and the [`RawHost`] the
+//! canonical request is built from. Downstream: `rustfs-gateway-core` (authn stage), and
+//! `rustfs-gateway-http` reads [`PayloadMode`] to decide framing — a value, not a dependency.
 //!
 //! # What is frozen here, and what is not
 //!
@@ -39,6 +41,15 @@
 //! Corollary, enforced by [`PayloadMode::requires_decoded_length`]:
 //! `x-amz-decoded-content-length` is mandatory under the two streaming modes and **forbidden**
 //! under the other four.
+//!
+//! # The one-host invariant
+//!
+//! There is exactly one function that decides which host a request addressed, and it lives in
+//! `rustfs-gateway-http`: [`effective_host`]. This crate re-exports it and its types rather than
+//! implementing them, because two implementations of that question are two answers to it, and the
+//! whole class of attack the function exists to close is "the signature covered one host, the
+//! routing used another". [`CanonicalRequestSpec::new`] takes a [`RawHost`] and nothing else — not
+//! a `&str`, not a resolver's normalised value — so a many-to-one host cannot seed a signature.
 //!
 //! # The comparison invariant
 //!
@@ -76,7 +87,6 @@ mod canonical;
 pub mod codec;
 mod derive;
 mod error;
-mod host;
 mod mode;
 mod parse;
 mod query;
@@ -96,7 +106,6 @@ pub use canonical::{
 };
 pub use derive::{VerifiedScope, calculate_signature, signing_key};
 pub use error::{SigParseError, Unimplemented};
-pub use host::{HostError, HostSource, RawHost, effective_host};
 pub use mode::{
     CanonicalPayloadToken, DeclaredTrailers, EMPTY_PAYLOAD_SHA256_HEX, MAX_DECLARED_TRAILERS, PayloadMode, STREAMING_ECDSA,
     STREAMING_ECDSA_TRAILER, STREAMING_SIGNED, STREAMING_SIGNED_TRAILER, STREAMING_UNSIGNED_TRAILER, TrailerName, TrailerSet,
@@ -107,6 +116,14 @@ pub use parse::{
     X_AMZ_CREDENTIAL, X_AMZ_DATE, X_AMZ_SIGNED_HEADERS,
 };
 pub use query::{QueryExclusion, RawQuery, X_AMZ_SIGNATURE, percent_decode, percent_encode};
+// The effective host is determined in `rustfs-gateway-http` and nowhere else. These are
+// re-exports, not a second implementation: `rustfs_gateway_sig::RawHost` and
+// `rustfs_gateway_http::RawHost` are the same type, so a value produced by the wire layer is
+// accepted by the canonical request builder without a conversion — which is the point, since a
+// conversion is where a normalisation gets applied. They are re-exported at all because
+// `CanonicalRequestSpec::new` names `RawHost` in its signature, and a caller should not have to
+// add a dependency to spell the argument of a function it can already see.
+pub use rustfs_gateway_http::{EffectiveHost, HostError, HostSource, MAX_HOST_BYTES, RawHost, effective_host};
 pub use scheme::{
     ALGORITHM_SIGV2_PREFIX, ALGORITHM_SIGV4, ALGORITHM_SIGV4A, AuthScheme, SigFamily, SigIdentity, SigLocation, SigService,
 };

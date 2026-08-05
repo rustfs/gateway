@@ -34,7 +34,7 @@ const INLINE_BYTES: usize = 64;
 /// Every constructor validates that the bytes are ASCII, which is what makes [`AsciiBuf::as_str`]
 /// infallible without a panicking conversion. The type is private to the crate: it exists to
 /// avoid an allocation, not to be a general string type.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct AsciiBuf(SmallVec<[u8; INLINE_BYTES]>);
 
 impl AsciiBuf {

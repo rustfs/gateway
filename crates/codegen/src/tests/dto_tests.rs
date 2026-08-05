@@ -251,28 +251,151 @@ fn c_dto_n018_secret_fields_are_redacted_in_debug() {
     );
 }
 
-#[test]
-fn c_dto_n019_no_scalar_field_is_generated_bare() {
-    // Every scalar in the vocabulary is a validated newtype with no valid empty value, so a bare
-    // field would make `#[derive(Default)]` impossible and take P1 with it.
+/// Every generated `pub` field, as `(file, doc line, declaration line)`.
+///
+/// The doc line above a field states `Required.` or `Optional.`, which is the same IR bit the
+/// emitter branches on — so a wrapper that disagrees with the documentation is caught here without
+/// the test having to re-derive requiredness from the model.
+fn declared_fields() -> Vec<(String, String, String)> {
+    let mut found = Vec::new();
     for (name, body) in rust_bodies() {
         if !name.starts_with("ops/") || name.contains("/enums/") {
             continue;
         }
-        for line in body
-            .lines()
-            .map(str::trim)
-            .filter(|l| l.starts_with("pub ") && l.ends_with(','))
-        {
-            let Some((_, ty)) = line.split_once(": ") else {
+        let lines: Vec<&str> = body.lines().collect();
+        for (index, line) in lines.iter().enumerate() {
+            let trimmed = line.trim();
+            if !trimmed.starts_with("pub ") || !trimmed.ends_with(',') || !trimmed.contains(": ") {
                 continue;
-            };
-            let ty = ty.trim().trim_end_matches(',');
+            }
+            let doc = index.checked_sub(1).map(|i| lines[i].trim()).unwrap_or_default();
+            found.push((name.clone(), doc.to_owned(), trimmed.to_owned()));
+        }
+    }
+    assert!(found.len() > 50, "the corpus is suspiciously small: {} fields", found.len());
+    found
+}
+
+fn field_type_of(line: &str) -> &str {
+    line.split_once(": ").expect("a field declaration").1.trim_end_matches(',')
+}
+
+fn is_container_type(ty: &str) -> bool {
+    ty.starts_with("Vec<") || ty.starts_with("std::collections::BTreeMap<")
+}
+
+#[test]
+fn c_dto_0009_a_required_member_is_generated_bare() {
+    // The arbitration on issue 1722: requiredness is expressed by the type. Wrapping a required
+    // member in an `Option` makes the type lie about the wire contract and forces an unwrap at
+    // every consumer, which is what the earlier all-`Option` reading of P1 produced.
+    for (name, doc, line) in declared_fields() {
+        if !doc.contains(" Required.") {
+            continue;
+        }
+        assert!(
+            !field_type_of(&line).starts_with("Option<"),
+            "{name} declares `{line}` for a required member; ADR-0004 P1 wants it bare so that no \
+             consumer unwraps a value the wire contract guarantees"
+        );
+    }
+}
+
+#[test]
+fn c_dto_n019_an_optional_scalar_member_is_never_generated_bare() {
+    // The other half of P1. An optional scalar has to be `Option`: a bare one would have no way to
+    // say "the client sent nothing", because the placeholder default means "never filled in",
+    // which is a decoder bug rather than an absent member.
+    for (name, doc, line) in declared_fields() {
+        if doc.contains(" Required.") {
+            continue;
+        }
+        let ty = field_type_of(&line);
+        assert!(
+            ty.starts_with("Option<") || is_container_type(ty),
+            "{name} declares `{line}` for an optional member; only a required member or a container \
+             may be bare (ADR-0004 P1/P2)"
+        );
+    }
+}
+
+#[test]
+fn c_dto_n032_every_generated_struct_carries_the_decode_path_guard() {
+    // ADR-0004 P10: the placeholder default is only safe because something refuses to let it off
+    // the decode path. An emitter that stops writing `check_required` removes that silently.
+    for (name, body) in rust_bodies() {
+        if !name.starts_with("ops/") || name.contains("/enums/") || name.ends_with("mod.rs") {
+            continue;
+        }
+        for (index, line) in body.lines().enumerate() {
+            if !line.starts_with("pub struct ") || !line.ends_with('{') {
+                continue;
+            }
+            let type_name = line.trim_start_matches("pub struct ").trim_end_matches('{').trim();
+            if type_name == "InputBuilder" {
+                continue;
+            }
             assert!(
-                ty.starts_with("Option<") || ty.starts_with("Vec<") || ty.starts_with("std::collections::BTreeMap<"),
-                "{name} declares `{line}`; every non-container field must be `Option` (ADR-0004 P1/P2)"
+                body.contains(&format!("impl {type_name} {{\n    /// Rejects a required member")),
+                "{name}:{} declares `{type_name}` without a `check_required`; the P10 placeholder \
+                 would then have nothing stopping it at the decode exit",
+                index + 1
             );
         }
+    }
+}
+
+#[test]
+fn c_dto_n034_a_required_member_with_no_representable_default_fails_the_run() {
+    // ADR-0004 P2's hard CI failure. The two ways a type can have no `Default` are a structural
+    // union (a `#[non_exhaustive]` enum with no neutral variant) and a streaming body. Neither may
+    // be quietly wrapped back into an `Option`, and neither may acquire an invented `Default`:
+    // the run stops and a human writes the ADR.
+    use rustfs_gateway_model::ir::Type;
+
+    let registry = crate::emit::dto::registry::Registry::default();
+    assert!(
+        registry.required_gap(&Type::Union("AnalyticsFilter".to_owned())).is_some(),
+        "a required structural union must stop the run"
+    );
+    assert!(
+        registry.required_gap(&Type::Blob { streaming: true }).is_some(),
+        "a required streaming body must stop the run"
+    );
+    for ok in [
+        Type::BucketName,
+        Type::ObjectKey,
+        Type::Long,
+        Type::String,
+        Type::Timestamp(rustfs_gateway_model::ir::TimestampFormat::Iso8601),
+    ] {
+        assert!(
+            registry.required_gap(&ok).is_none(),
+            "{ok:?} has a placeholder `Default` and may be required"
+        );
+    }
+}
+
+#[test]
+fn c_dto_n033_every_generated_placeholder_default_documents_what_it_is() {
+    // P10 is a documentation obligation as much as a code one: a `Default` that reads like a
+    // plausible wire value is exactly what somebody reaches for by mistake.
+    for (name, body) in rust_bodies() {
+        if !name.starts_with("ops/enums/") || name.ends_with("mod.rs") {
+            continue;
+        }
+        assert!(
+            body.contains("impl Default for"),
+            "{name} has no `Default`, so it could not sit in a required member"
+        );
+        assert!(
+            body.contains("**invalid on the wire**") && body.contains("**The decoding path never produces it.**"),
+            "{name}'s `Default` does not say it is a placeholder the decode path never produces (ADR-0004 P10)"
+        );
+        assert!(
+            body.contains("impl crate::WirePlaceholder for"),
+            "{name} cannot answer whether it holds a placeholder, so `check_required` would skip it"
+        );
     }
 }
 

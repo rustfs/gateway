@@ -39,6 +39,7 @@ use std::borrow::Cow;
 use md5::{Digest as _, Md5};
 
 use super::parse_error::{ParseError, rules};
+use crate::placeholder::WirePlaceholder;
 
 /// The maximum number of parts a multipart upload may have, which bounds the `-N` suffix.
 const MAX_MULTIPART_PARTS: u32 = 10_000;
@@ -315,6 +316,33 @@ impl ETag {
             return true;
         }
         self.tag == other.tag
+    }
+}
+
+impl Default for ETag {
+    /// The empty strong tag — a placeholder that is **invalid on the wire**, and exists for one
+    /// reason.
+    ///
+    /// ADR-0004 P10: a required member of a generated dto uses a bare type, and every generated
+    /// dto derives `Default` so that `..Default::default()` keeps compiling when AWS adds a
+    /// member. `ETag` is required in a `PutObject` response and in every `Object` listing entry,
+    /// so it needs a `Default`. The value it produces is rejected by [`ETag::new`] and by every
+    /// parser in this module, and it is not the `*` wildcard either.
+    ///
+    /// **The decoding path never produces it.** Treat a value that compares equal to this one as
+    /// a bug, never as an entity tag — in particular, never let one answer a conditional request.
+    fn default() -> Self {
+        Self {
+            weak: false,
+            any: false,
+            tag: Cow::Borrowed(""),
+        }
+    }
+}
+
+impl WirePlaceholder for ETag {
+    fn is_wire_placeholder(&self) -> bool {
+        !self.any && self.tag.is_empty()
     }
 }
 

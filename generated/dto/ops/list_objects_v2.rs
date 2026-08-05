@@ -62,10 +62,15 @@ impl ListObjectsV2 {
 /// with functional update syntax (`Input { .. }` with `..Default::default()`) or with the
 /// builder; a member added upstream stays a minor version bump either way. Do not
 /// destructure it exhaustively (P3): that is the one usage a new member breaks.
+///
+/// A required member is a bare type and an optional one is `Option<T>`, so requiredness is
+/// read off the type instead of unwrapped. `Default` fills a required member with a
+/// wire-invalid placeholder (P10), and [`Input::check_required`] is what keeps one from
+/// leaving the decode path.
 #[derive(Debug, Clone, Default)]
 pub struct Input {
     /// Wire `Bucket`, bound as UriLabel. Required.
-    pub bucket: Option<crate::BucketName>,
+    pub bucket: crate::BucketName,
     /// Wire `delimiter`, bound as Query. Optional.
     pub delimiter: Option<String>,
     /// Wire `encoding-type`, bound as Query. Optional.
@@ -86,32 +91,58 @@ pub struct Input {
     pub expected_bucket_owner: Option<String>,
 }
 
+impl Input {
+    /// Rejects a required member still holding its placeholder default (ADR-0004 P10).
+    ///
+    /// Call this at the end of decoding. A placeholder here is never a client mistake — a
+    /// request that omits a required member is rejected by the binding that looked for it —
+    /// so an error from this method means the decoder failed to fill the member in. It fails
+    /// closed in release builds, which is the one configuration that matters.
+    ///
+    /// Covers every required, non-container member, recursing into required nested shapes. A
+    /// shape inside a list or a map is checked by the decoder that builds it, through that
+    /// shape's own `check_required`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::PlaceholderDefault`] naming the first offending member.
+    pub fn check_required(&self) -> Result<(), crate::PlaceholderDefault> {
+        crate::reject_placeholder("ListObjectsV2Input", "Bucket", &self.bucket)?;
+        Ok(())
+    }
+}
+
 /// The `ListObjectsV2` response.
 ///
 /// Public fields plus `Default`, and never `#[non_exhaustive]` — ADR-0004 P1. Construct it
 /// with functional update syntax (`Output { .. }` with `..Default::default()`) or with the
 /// builder; a member added upstream stays a minor version bump either way. Do not
 /// destructure it exhaustively (P3): that is the one usage a new member breaks.
+///
+/// A required member is a bare type and an optional one is `Option<T>`, so requiredness is
+/// read off the type instead of unwrapped. `Default` fills a required member with a
+/// wire-invalid placeholder (P10), and [`Output::check_required`] is what keeps one from
+/// leaving the decode path.
 #[derive(Debug, Clone, Default)]
 pub struct Output {
     /// Wire `IsTruncated`, bound as BodyXml. Required.
-    pub is_truncated: Option<bool>,
+    pub is_truncated: bool,
     /// Wire `Contents`, bound as BodyXml. Optional.
     pub contents: Vec<crate::ops::shapes::Object>,
     /// Wire `Name`, bound as BodyXml. Required.
-    pub name: Option<crate::BucketName>,
+    pub name: crate::BucketName,
     /// Wire `Prefix`, bound as BodyXml. Required.
-    pub prefix: Option<String>,
+    pub prefix: String,
     /// Wire `Delimiter`, bound as BodyXml. Optional.
     pub delimiter: Option<String>,
     /// Wire `MaxKeys`, bound as BodyXml. Required.
-    pub max_keys: Option<i32>,
+    pub max_keys: i32,
     /// Wire `CommonPrefixes`, bound as BodyXml. Optional.
     pub common_prefixes: Vec<crate::ops::shapes::CommonPrefix>,
     /// Wire `EncodingType`, bound as BodyXml. Optional.
     pub encoding_type: Option<crate::ops::enums::EncodingType>,
     /// Wire `KeyCount`, bound as BodyXml. Required.
-    pub key_count: Option<i32>,
+    pub key_count: i32,
     /// Wire `ContinuationToken`, bound as BodyXml. Optional.
     pub continuation_token: Option<crate::OpaqueString>,
     /// Wire `NextContinuationToken`, bound as BodyXml. Optional.
@@ -120,6 +151,31 @@ pub struct Output {
     pub start_after: Option<String>,
     /// Wire `x-amz-request-charged`, bound as Header. Optional.
     pub request_charged: Option<crate::ops::enums::RequestCharged>,
+}
+
+impl Output {
+    /// Rejects a required member still holding its placeholder default (ADR-0004 P10).
+    ///
+    /// Call this at the end of decoding. A placeholder here is never a client mistake — a
+    /// request that omits a required member is rejected by the binding that looked for it —
+    /// so an error from this method means the decoder failed to fill the member in. It fails
+    /// closed in release builds, which is the one configuration that matters.
+    ///
+    /// Covers every required, non-container member, recursing into required nested shapes. A
+    /// shape inside a list or a map is checked by the decoder that builds it, through that
+    /// shape's own `check_required`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::PlaceholderDefault`] naming the first offending member.
+    pub fn check_required(&self) -> Result<(), crate::PlaceholderDefault> {
+        crate::reject_placeholder("ListObjectsV2Output", "IsTruncated", &self.is_truncated)?;
+        crate::reject_placeholder("ListObjectsV2Output", "Name", &self.name)?;
+        crate::reject_placeholder("ListObjectsV2Output", "Prefix", &self.prefix)?;
+        crate::reject_placeholder("ListObjectsV2Output", "MaxKeys", &self.max_keys)?;
+        crate::reject_placeholder("ListObjectsV2Output", "KeyCount", &self.key_count)?;
+        Ok(())
+    }
 }
 
 /// A builder for [`Input`].
@@ -143,7 +199,7 @@ impl InputBuilder {
     /// Sets `Bucket`.
     #[must_use]
     pub fn bucket(mut self, value: crate::BucketName) -> Self {
-        self.input.bucket = Some(value);
+        self.input.bucket = value;
         self
     }
 
