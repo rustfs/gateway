@@ -1,0 +1,40 @@
+// Copyright 2026 RustFS Team
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+//! One AWS operation per file: its spec, its security floor, its `Operation` implementation.
+//!
+//! Responsible for: mounting the operation modules, and nothing else. Each module declares exactly
+//! one [`crate::op::Operation`] implementation, and no other module declares it.
+//! NOT responsible for: handlers — a backend implements [`crate::handler::Handler`] in its own
+//! crate — or the dto, which is generated into `rustfs-gateway-types`.
+//! Upstream: `rustfs-gateway-types`' generated operation types, `rustfs-gateway-sig`'s
+//! `OperationFloor`. Downstream: `crate::registry`, and every backend that registers one.
+//!
+//! # Why one operation per file
+//!
+//! Not for `grep` — nobody ever failed to find `GetObject`. It is the unit of parallel edit
+//! conflict: two agents changing two operations produce no git conflict at all. The three modules
+//! here are the whole set the model whitelist has admitted so far; the rest arrive with codegen,
+//! in this shape.
+//!
+//! # What a P5 operation module has to contain
+//!
+//! A spec `static`, a floor `static`, one `impl Operation`, and one `impl HasOperation` for the
+//! input type. Registration refuses the module if the spec or the floor is named differently from
+//! the operation, or if the spec declares no authorisation action — so the four pieces cannot
+//! drift apart quietly.
+
+pub mod get_bucket_location;
+pub mod list_objects_v2;
+pub mod put_object;

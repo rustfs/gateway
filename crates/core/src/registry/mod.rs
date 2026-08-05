@@ -21,6 +21,21 @@
 //! per-operation error codes beyond the two the spec carries.
 //! Upstream: `crate::error`, `crate::route`, `rustfs-gateway-types`. Downstream: `crate::dispatch`.
 //!
+//! ```text
+//!   mod.rs      the spec, the required-parameter check, and the registry itself
+//!   reject.rs   what registration refuses, and why each refusal is a security decision
+//!   handlers.rs where the backend type disappears; the only file here that awaits
+//!   opset.rs    which operations a deployment insists on, and the sentence when some are missing
+//!   builder.rs  assembly: routes, handlers, completeness, and one router or one error
+//! ```
+//!
+//! # Registration is explicit, and that is the feature
+//!
+//! There is no `inventory`, no `linkme`, no `ctor` — banned by ADR-0003 after `error[E0117]` was
+//! measured and after the only workaround turned the registry into a process-global singleton,
+//! which breaks the two-backends-in-one-process arrangement RustFS already relies on. So every
+//! operation this backend answers is a call somebody wrote, and `grep` finds it.
+//!
 //! # Routing and validation are different questions
 //!
 //! `PutBucketAnalyticsConfiguration` requires an `id` query parameter. There are two wrong ways to
@@ -45,12 +60,25 @@
 //! parameter on the second — two facts about the same key, recorded separately, and the spec
 //! consistency check in codegen is what stops a table from carrying only one of them.
 
+mod builder;
+mod handlers;
+mod opset;
+mod reject;
+
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use rustfs_gateway_types::ErrorCode;
 
-use crate::error::{DisallowedPreAuthCode, PreAuthError};
+use crate::error::PreAuthError;
+use crate::handler::{Handler, Req};
+use crate::op::{AuthRequirement, Operation};
 use crate::route::RouteRequestParts;
+
+pub use self::builder::{BuildError, RouterBuilder};
+pub use self::handlers::{ErasedHandler, ErasedRequest, ErasedResponse, HandlerTable, Invocation};
+pub use self::opset::{MissingHandlers, OperationSet};
+pub use self::reject::RegistryError;
 
 /// Where a required parameter is carried.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -92,50 +120,28 @@ pub struct OperationSpec {
     /// unconfigured bucket is `NoSuchLifecycleConfiguration`, not a generic not-found, and a client
     /// that branches on the specific code sees a different outcome.
     pub not_configured_error: Option<ErrorCode>,
-}
-
-/// Why an operation could not be registered.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum RegistryError {
-    /// Two registrations for one operation name.
-    Duplicate {
-        /// The name registered twice.
-        name: &'static str,
-    },
-    /// A required parameter declares a code that cannot be raised before authentication.
+    /// The action this operation is authorised against.
     ///
-    /// Checked once, here, so that the per-request path has no failure mode of its own.
-    UnusableMissingError {
-        /// The operation.
-        name: &'static str,
-        /// The parameter.
-        param: &'static str,
-        /// What is wrong with the code.
-        source: DisallowedPreAuthCode,
-    },
+    /// `Option` so that registration can refuse the `None`: an operation nobody can authorise is
+    /// an operation whose authorisation check can be forgotten, which is what happened in
+    /// rustfs/rustfs#4845. Every registration path goes through
+    /// [`RegistryError::MissingAuthRequirement`], so there is no way to install a handler for one.
+    pub auth: Option<AuthRequirement>,
 }
 
-impl std::fmt::Display for RegistryError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Duplicate { name } => write!(f, "{name} is registered twice"),
-            Self::UnusableMissingError { name, param, source } => {
-                write!(f, "{name}: required parameter {param:?} declares an unusable code: {source}")
-            }
-        }
-    }
-}
-
-impl std::error::Error for RegistryError {}
-
-/// The operations this backend handles.
+/// The operations this backend handles, and the erased handler for each one that has one.
 ///
 /// Explicit and greppable: registration is a call somebody wrote, never a link-time side effect.
 /// `inventory` and `linkme` are forbidden by ADR-0003 precisely so that "who registered this?" has
 /// an answer `grep` can find.
+///
+/// A registry belongs to one [`RouterBuilder`]; it is never a process-global. That is what lets a
+/// test backend and a production backend live in the same process with separate registrations,
+/// which RustFS's end-to-end suite already does.
 #[derive(Clone, Debug, Default)]
 pub struct Registry {
     specs: BTreeMap<&'static str, &'static OperationSpec>,
+    handlers: HandlerTable,
 }
 
 impl Registry {
@@ -145,26 +151,50 @@ impl Registry {
         Self::default()
     }
 
-    /// Registers one operation.
+    /// Registers one operation's spec, without a handler.
+    ///
+    /// Routing and parameter validation then work for it, and an invocation still finds nothing —
+    /// which is the state a dispatch-only test wants and a deployment does not. Prefer
+    /// [`Registry::register_handler`], which cannot leave that gap.
     ///
     /// # Errors
     ///
-    /// [`RegistryError`] for a duplicate name, or for a required parameter whose code could not be
-    /// raised before authentication. Doing this check here rather than per request is what lets
-    /// [`check_required`] be infallible in the only way that matters.
+    /// [`RegistryError`] for a duplicate name, an operation with no authorisation action, or a
+    /// required parameter whose code could not be raised before authentication. Doing these checks
+    /// here rather than per request is what lets [`check_required`] be infallible in the only way
+    /// that matters.
     pub fn register(&mut self, spec: &'static OperationSpec) -> Result<(), RegistryError> {
-        for param in spec.required_params {
-            PreAuthError::with_code(param.missing_error.clone(), param.message).map_err(|source| {
-                RegistryError::UnusableMissingError {
-                    name: spec.name,
-                    param: param.name,
-                    source,
-                }
-            })?;
-        }
-        if self.specs.insert(spec.name, spec).is_some() {
+        reject::check_spec(spec)?;
+        if self.specs.contains_key(spec.name) {
+            // Checked before the insert, not after: `insert` replaces, so reporting the duplicate
+            // afterwards would leave the second registration installed and the error ignorable.
             return Err(RegistryError::Duplicate { name: spec.name });
         }
+        self.specs.insert(spec.name, spec);
+        Ok(())
+    }
+
+    /// Registers one operation and the backend that answers it.
+    ///
+    /// This is where the backend type is erased: `implementation` is consumed into a closure, so
+    /// nothing downstream of here is generic over it.
+    ///
+    /// # Errors
+    ///
+    /// [`RegistryError`] for any rule in [`reject`]: a name that is not namespaced, a third-party
+    /// name colliding with an AWS one, a missing authorisation action, a spec or floor registered
+    /// under another name, or a duplicate.
+    pub fn register_handler<O, B>(&mut self, implementation: Arc<B>) -> Result<(), RegistryError>
+    where
+        O: Operation,
+        B: Handler<O>,
+    {
+        reject::check_operation::<O>()?;
+        if self.specs.contains_key(O::NAME) || self.handlers.contains(O::NAME) {
+            return Err(RegistryError::Duplicate { name: O::NAME });
+        }
+        self.specs.insert(O::NAME, O::spec());
+        self.handlers.insert(O::NAME, handlers::erase::<O, B>(implementation));
         Ok(())
     }
 
@@ -172,6 +202,21 @@ impl Registry {
     #[must_use]
     pub fn get(&self, name: &str) -> Option<&'static OperationSpec> {
         self.specs.get(name).copied()
+    }
+
+    /// The erased handlers.
+    #[must_use]
+    pub const fn handlers(&self) -> &HandlerTable {
+        &self.handlers
+    }
+
+    /// Calls the handler registered for `O`, if there is one.
+    ///
+    /// `None` is the 501: an operation with no handler is not an error condition, it is a backend
+    /// that does not implement it. No default method anywhere had to be written for that.
+    #[must_use]
+    pub fn invoke<O: Operation>(&self, request: Req<O>) -> Option<Invocation<O>> {
+        self.handlers.invoke(request)
     }
 
     /// How many operations are registered.
@@ -189,6 +234,11 @@ impl Registry {
     /// Every registered operation name, sorted.
     pub fn names(&self) -> impl Iterator<Item = &'static str> {
         self.specs.keys().copied().collect::<Vec<_>>().into_iter()
+    }
+
+    /// Every operation with a handler, sorted.
+    pub fn handler_names(&self) -> impl Iterator<Item = &'static str> {
+        self.handlers.names()
     }
 }
 

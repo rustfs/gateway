@@ -1,10 +1,13 @@
 # rustfs-gateway-core — crate map
 
-Which S3 operation a request names, what that operation requires of it, and whether this backend
-handles it. P4-01 landed the ordered route table and its build-time overlap decision, P4-02 split
-parameter validation from routing, P4-03 added the compiled lookup form. Nothing here is `async`,
-nothing here holds a store, and nothing here can say a word about a request that is not a
-compile-time constant — routing runs before the signature is verified.
+Which S3 operation a request names, what that operation requires of it, whether this backend
+handles it, and how it is called. P4-01 landed the ordered route table and its build-time overlap
+decision, P4-02 split parameter validation from routing, P4-03 added the compiled lookup form, and
+P4-06 added the operation trait, the per-operation handler, and the registry that erases the backend
+type. Nothing on the routing path is `async`, nothing there holds a store, and nothing there can say
+a word about a request that is not a compile-time constant — routing runs before the signature is
+verified. `src/registry/handlers.rs` is the one file that awaits, and it runs after the floor has
+admitted the request.
 
 ## Files
 
@@ -21,14 +24,22 @@ compile-time constant — routing runs before the signature is verified.
 | `src/route/compiled.rs` | `CompiledRouter`: `method × target` buckets, mask rules, the empty-mask shortcut | You are changing lookup performance |
 | `src/route/explain.rs` | `Explanation`: what won, what it hid, and why | You are building `route explain` |
 | `src/route/generated.rs` | `RouteRow`/`RoutePredicate` and the parse of `generated/routes.rs` | Codegen changed the emitter |
-| `src/registry.rs` | `OperationSpec`, `RequiredParam`, `check_required`, `Registry` | You are adding a required parameter |
+| `src/op.rs` | `Operation`, `OperationOrigin` and its sealed token, `AuthRequirement`, `HasOperation`, the standard-name set | You are adding an operation, or asking what makes one standard |
+| `src/ops/*.rs` | One AWS operation per file: spec, floor, `impl Operation`, `impl HasOperation` | You are adding an operation — copy the nearest one |
+| `src/handler.rs` | `Handler<O>`, `Req`, `Resp`, `HandlerError`, `BoxFuture` | You are implementing a backend |
+| `src/registry/mod.rs` | `OperationSpec`, `RequiredParam`, `check_required`, `Registry` | You are adding a required parameter |
+| `src/registry/reject.rs` | `RegistryError` and the seven rules an operation passes before it registers | A registration was refused |
+| `src/registry/handlers.rs` | The erasure closure, `HandlerTable`, `Invocation` — the only file here that awaits | You are wiring the pipeline to the handlers |
+| `src/registry/opset.rs` | `OperationSet`, `MissingHandlers` and its one-line message | You are asserting completeness |
+| `src/registry/builder.rs` | `RouterBuilder`: `handle`, `route`, `require`, `build`, and `BuildError` | You are assembling a service |
 | `src/error.rs` | `PreAuthError` and the closed pre-authentication status set | You are raising an error before authn |
 | `src/dispatch.rs` | `Router`: route, then registration, then parameters — three failures, not one | You are wiring the pipeline |
 | `tests/route_table.rs` | 9 positive / 25 negative — every routing and build-refusal case | You changed `table.rs` or `lattice.rs` |
 | `tests/params_and_dispatch.rs` | 4 positive / 14 negative — the 400-not-501 rule and the error properties | You changed `registry.rs` or `error.rs` |
 | `tests/hot_path.rs` | 7 positive / 10 negative — cost, the key ceiling, and the differential generator | You changed `compiled.rs` or `mask.rs` |
 | `tests/golden.rs` + `tests/golden/route-table.txt` | The whole table as text, so a routing change shows up in a diff | Codegen changed |
-| `tests/purity_guard.rs` | 8 source guards: no `async`, no store, no leaked message, file shape | You added a file or a public method |
+| `tests/registration.rs` | 7 positive / 17 negative — the registration rules, erasure, `require`, the 501 | You changed anything under `registry/` |
+| `tests/purity_guard.rs` | 12 source guards: no `async` off the allowance list, no store, no leaked message, one `Box::pin`, file shape | You added a file or a public method |
 
 ## Shape decisions worth not re-litigating
 
@@ -55,12 +66,44 @@ compile-time constant — routing runs before the signature is verified.
   ARN or a different endpoint are skipped at compile time (so one access-point entry does not cost
   every object read its fast path); a rule with any residual predicate disables the shortcut for
   that bucket entirely (so `POST /bucket` is never answered without looking at `content-type`).
+- **The backend type is erased at registration, and the operation type is not.** A registry entry
+  has to call `B::call`, so it has to know `B` — which is why link-time collection cannot work
+  (measured `error[E0117]`, ADR-0003). Erasing `B` in a closure keeps `Router` non-generic, which is
+  what lets one process hold two routers over two backends.
+- **Completeness is a run-time assertion, not a bundle trait.** A bundle supertrait produced 73
+  `E0277` errors for one missing implementation and was not dyn compatible.
+  `require(&OperationSet)` produces one sentence: `backend is missing handlers for: A, B (2 of 73)`.
+- **An operation with no authorisation action cannot be registered.** That is the structural form of
+  rustfs/rustfs#4845 — there is no registration path on which the question can be skipped.
+- **A third party cannot claim to be an AWS operation.** `OperationOrigin::Standard` carries a token
+  whose field is private to this crate, so the namespaced-name rule cannot be opted out of.
 - **The readable table is not deleted.** A fast implementation of a pre-auth security decision is
   only allowed to exist while something proves it agrees with the one a person can read.
 - **Binary search, not `phf`.** `phf` is not a workspace dependency and this task may not add one.
   Sixty-four short sorted keys is six comparisons and no build script.
 
 ## Open for maintainer review
+
+- **P4-05 will add `Operation::DerivedResources`, and that breaks every `impl Operation`.**
+  Associated types cannot have defaults, so adding one is a breaking change for every operation
+  module. If P5 is to run in parallel, P4-05 should land its associated type first, or accept a
+  mechanical edit across every operation file.
+- **The erased payload is `Box<dyn Any + Send>` until the codecs exist.** The design calls for the
+  closure to take a wire request and return a wire response, which needs `Operation::decode` and
+  `Operation::encode` — those arrive with generated codecs, and the three operations that exist
+  today have none. When they land, the erased signature changes and `Handler`, the macro and every
+  P5 operation stay as they are.
+- **`OperationSet` is a name set, not a bit set, and there is no `AWS_CORE`.** An index-based set
+  needs a generator to assign the indices, and a curated `AWS_CORE` would be a second source of
+  truth about which operations exist. Both belong in codegen; `OperationSet::aws_full()` reads the
+  route table.
+- **`AuthRequirement` lives in `op.rs` and is deliberately minimal.** P4-05 owns the full
+  authorisation shape; this is the least that lets registration refuse an operation nobody can
+  authorise, and the two should be merged when P4-05 lands.
+- **`tests/purity_guard.rs` gained a file-level allowance list.** `registry/handlers.rs` awaits,
+  because calling a handler is what it does. The store-word detector now matches whole identifier
+  segments instead of substrings, so `Handler` is no longer read as `Handle`; every catch the
+  substring version had is still asserted, including `ObjectStore` and `ConnectionPool`.
 
 - **`ShadowingPolicy` defaults to `EveryOverlap`, as the design asks, and it is quadratic.** Once
   thirty bucket subresources are in the table, every `?acl`/`?tagging` pair overlaps and the strict

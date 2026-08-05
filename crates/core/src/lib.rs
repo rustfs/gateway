@@ -19,14 +19,39 @@
 //! NOT responsible for: HTTP transport assembly (that is the `rustfs-gateway` facade).
 //! Upstream: `rustfs-gateway-sig`. Downstream: `rustfs-gateway`.
 //!
-//! # What P4-01, P4-02 and P4-03 landed
+//! # What P4-01 to P4-03 and P4-06 landed
 //!
 //! ```text
 //!   route      which operation a request names — decided before anything is authenticated
 //!   registry   what that operation requires of the request, and whether this backend handles it
 //!   error      what may be said about a request from a caller nobody has identified yet
 //!   dispatch   the three questions in order, each with its own failure
+//!   op         what an operation is as a type: name, origin, input, output, authorisation
+//!   ops        one AWS operation per file
+//!   handler    what a backend implements for one operation
 //! ```
+//!
+//! # Registering a backend
+//!
+//! The hand-written form, which always works and which the macro produces verbatim:
+//!
+//! ```ignore
+//! impl Handler<GetBucketLocation> for Fs {
+//!     fn call(&self, req: Req<GetBucketLocation>) -> impl Future<Output = HandlerResult<GetBucketLocation>> + Send {
+//!         self.get_bucket_location(req)
+//!     }
+//! }
+//!
+//! let router = RouterBuilder::new()
+//!     .handle::<GetBucketLocation, _>(Arc::clone(&fs))
+//!     .handle::<PutObject, _>(Arc::clone(&fs))
+//!     .require(&OperationSet::of(["GetBucketLocation", "PutObject"]))?
+//!     .build()?;
+//! ```
+//!
+//! An operation with no handler is answered with `501`, so a backend implementing two of the
+//! seventy-three compiles and runs. Nothing has 73 default methods, and nothing needs a bundle
+//! trait: completeness is asserted where a deployment wants it, by `require`.
 //!
 //! Three properties hold this together. Everything else here exists to serve them.
 //!
@@ -55,12 +80,23 @@
 
 pub mod dispatch;
 pub mod error;
+pub mod handler;
+pub mod op;
+pub mod ops;
 pub mod registry;
 pub mod route;
 
 pub use crate::dispatch::{Dispatch, Router, RouterBuildError};
 pub use crate::error::{DisallowedPreAuthCode, PRE_AUTH_STATUSES, PreAuthError};
-pub use crate::registry::{OperationSpec, ParamKind, Registry, RegistryError, RequiredParam, check_required};
+pub use crate::handler::{BoxFuture, Handler, HandlerError, HandlerResult, Req, Resp};
+pub use crate::op::{
+    AuthRequirement, HasOperation, Operation, OperationOrigin, ResourceShape, StandardOperation, is_standard_operation_name,
+    standard_operation_names,
+};
+pub use crate::registry::{
+    BuildError, ErasedHandler, ErasedRequest, ErasedResponse, HandlerTable, Invocation, MissingHandlers, OperationSet,
+    OperationSpec, ParamKind, Registry, RegistryError, RequiredParam, RouterBuilder, check_required,
+};
 pub use crate::route::{
     ArnForm, CompileError, CompiledRouter, Explanation, HostClass, OpId, Predicate, RequestShape, RouteBuildError, RouteEntry,
     RouteRequestParts, RouteSelector, RouteTable, ShadowingDecl, ShadowingDecls, ShadowingPolicy, TargetKind,

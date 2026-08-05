@@ -36,26 +36,55 @@ fail_msg() {
     failures=$((failures + 1))
 }
 
-# Materialise a git-tracked copy of the repository in a fresh temp directory.
+# One sandbox, reused. Each negative case mutates it, the guard runs, and the tree is
+# reset with `git checkout` plus a clean of untracked files — a few milliseconds instead
+# of a fresh copy. Twenty-nine full copies plus twenty-nine `git add -A` runs pushed this
+# suite past the ten-minute budget of the CI job it lives in, which is a gate that fails
+# for a reason having nothing to do with what it checks.
+SANDBOX=""
+
 make_sandbox() {
-    local dir
+    if [[ -n "$SANDBOX" ]]; then
+        (
+            cd "$SANDBOX"
+            git checkout -- . >/dev/null 2>&1 || true
+            git clean -fdq >/dev/null 2>&1 || true
+        )
+        printf '%s' "$SANDBOX"
+        return
+    fi
+
+    local dir list
     dir="$(mktemp -d "${TMPDIR:-/tmp}/gateway-guard-test.XXXXXX")"
-    # `tar --null -T -` is GNU-only; BSD tar (macOS) rejects it, and letting the
-    # failing call write to the pipe before the fallback produces a spurious
-    # "tar: Write error" that would mask a real one. A list file is understood by
-    # both, so there is one code path and no stderr noise.
-    local list
+    # `tar --null -T -` is GNU-only; BSD tar (macOS) rejects it, and letting the failing
+    # call write to the pipe before the fallback produces a spurious "tar: Write error"
+    # that would mask a real one. A list file is understood by both.
+    #
+    # The pinned model JSON is excluded: it is 3.2 MB, and no guard reads it.
     list="$(mktemp "${TMPDIR:-/tmp}/gateway-guard-files.XXXXXX")"
-    (cd "$REPO_ROOT" && git ls-files) >"$list"
+    (cd "$REPO_ROOT" && git ls-files | grep -v '^model/.*\.json$') >"$list"
     (cd "$REPO_ROOT" && tar -cf - -T "$list") | (cd "$dir" && tar -xf -)
     rm -f "$list"
     (
         cd "$dir"
         git init -q .
         git add -A >/dev/null 2>&1
+        git -c user.name=t -c user.email=t@t commit -qm base >/dev/null 2>&1
     )
+    SANDBOX="$dir"
     printf '%s' "$dir"
 }
+
+cleanup_sandbox() {
+    # Must return 0: an EXIT trap's status becomes the script's status, so a bare
+    # `[[ -n "$SANDBOX" ]] && rm -rf` reports failure whenever no sandbox was made,
+    # and the suite would exit 1 while printing "0 failures".
+    if [[ -n "$SANDBOX" ]]; then
+        rm -rf "$SANDBOX"
+    fi
+    return 0
+}
+trap cleanup_sandbox EXIT
 
 # expect_fail <guard> <description> <mutation-fn>
 # Runs the mutation inside a sandbox, then asserts the guard exits non-zero.
@@ -67,7 +96,6 @@ expect_fail() {
     (cd "$sandbox" && "$mutate" >/dev/null)
     (cd "$sandbox" && git add -A >/dev/null 2>&1)
     GATEWAY_CHECK_ROOT="$sandbox" "${SCRIPT_DIR}/${guard}" >/dev/null 2>&1 || rc=$?
-    rm -rf "$sandbox"
     if [[ "$rc" -ne 0 ]]; then
         pass_msg "${guard} catches: ${desc}"
     else

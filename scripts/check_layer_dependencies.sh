@@ -75,6 +75,7 @@ cd "$ROOT_DIR"
 # graph in AGENTS.md — AGENTS.md is the source of truth, this list follows it.
 # -----------------------------------------------------------------------------
 LAYERS=(
+    "rustfs-gateway-macros|"
     "rustfs-gateway-model|"
     "rustfs-gateway-stream|"
     "rustfs-gateway-xml|"
@@ -198,6 +199,16 @@ for manifest in "${manifests[@]}"; do
     while IFS=$'\t' read -r kind dep; do
         [[ -z "${dep:-}" ]] && continue
         is_internal "$dep" || continue
+
+        # A dev-dependency on a higher layer is not a cycle. Cargo builds dev-deps only for
+        # tests and explicitly permits them to point back at a dependent crate, which is how a
+        # proc-macro crate tests that its expansion produces the same registry as hand-written
+        # code: it needs the real types to compare against. Treating dev-deps like build deps
+        # would either forbid that test or push it into the crate it is meant to check.
+        # Every other kind is still held to the matrix.
+        if [[ "$kind" == "dev-dependencies" ]]; then
+            continue
+        fi
 
         allowed_here=0
         for candidate in $allowed; do

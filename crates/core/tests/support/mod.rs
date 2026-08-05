@@ -15,8 +15,8 @@
 //! Fixtures shared by the route, parameter and hot-path tests.
 //!
 //! Responsible for: [`Req`], which owns the buffers a borrowed [`RouteRequestParts`] points into,
-//! the entry constructor, and [`fixture_table`] — a route table shaped like the real one but small
-//! enough to reason about.
+//! the entry constructor, [`fixture_table`] — a route table shaped like the real one but small
+//! enough to reason about — and [`block_on`], the small executor the handler tests run on.
 //! NOT responsible for: any assertion. Helpers here never assert; a helper that decides what
 //! passes moves the test out of the test file.
 //! Upstream: `rustfs-gateway-core`, `rustfs-gateway-http`. Downstream: every integration test in
@@ -25,6 +25,12 @@
 // Each test binary compiles this module separately and uses a subset of it, so the unused-item and
 // unreachable-pub lints fire on helpers another binary does use.
 #![allow(dead_code, unreachable_pub)]
+
+use std::future::Future;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::task::{Context, Poll, Wake, Waker};
+use std::thread::{self, Thread};
 
 use http::{HeaderMap, HeaderName, HeaderValue, Method};
 use rustfs_gateway_core::route::{
@@ -308,4 +314,48 @@ pub fn fixture_entries() -> Vec<RouteEntry> {
 pub fn fixture_table() -> RouteTable {
     RouteTable::build(fixture_entries(), &ShadowingDecls::NONE.with_policy(ShadowingPolicy::TotalOnly))
         .expect("the fixture table is well formed")
+}
+
+/// Wakes the thread that parked on a future.
+struct ParkSignal {
+    thread: Thread,
+    woken: AtomicBool,
+}
+
+impl Wake for ParkSignal {
+    fn wake(self: Arc<Self>) {
+        self.wake_by_ref();
+    }
+
+    fn wake_by_ref(self: &Arc<Self>) {
+        self.woken.store(true, Ordering::Release);
+        self.thread.unpark();
+    }
+}
+
+/// Runs a future to completion on this thread.
+///
+/// The handler tests need an executor and this workspace has no runtime dependency — deliberately,
+/// since the gateway is meant to be mounted on whichever one the host already runs. Park and
+/// unpark is the whole executor: the futures under test are ready on the first poll, and a test
+/// that hangs here is a test whose handler never completed, which is the failure it should show.
+#[must_use]
+pub fn block_on<F: Future>(future: F) -> F::Output {
+    let mut future = std::pin::pin!(future);
+    let signal = Arc::new(ParkSignal {
+        thread: thread::current(),
+        woken: AtomicBool::new(false),
+    });
+    let waker = Waker::from(Arc::clone(&signal));
+    let mut context = Context::from_waker(&waker);
+    loop {
+        match future.as_mut().poll(&mut context) {
+            Poll::Ready(value) => return value,
+            Poll::Pending => {
+                while !signal.woken.swap(false, Ordering::Acquire) {
+                    thread::park();
+                }
+            }
+        }
+    }
 }

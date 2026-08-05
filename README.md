@@ -8,8 +8,7 @@
 and back, and leaves storage semantics to RustFS itself.
 
 This is where request routing, header and query typing, `aws-chunked` framing, XML codecs, SigV2/SigV4 and presigned-URL
-verification, POST-policy handling, and the error shapes AWS actually returns all live. It exists to
-replace [s3s](https://github.com/Nugine/s3s) in RustFS with a layer we can reason about and change on our own schedule.
+verification, POST-policy handling, and the error shapes AWS actually returns all live.
 
 **Scope, stated plainly:** this is built for RustFS. It is not a general-purpose library, we do not encourage outside
 adoption, and nothing here is published to crates.io — RustFS consumes the repository as a git dependency. The API will
@@ -57,22 +56,6 @@ so the absence propagates to every type that contains them. Both zeroize on drop
 
 Details, including the ten-entry timing side-channel register, are in
 [docs/security-model.md](docs/security-model.md).
-
-## Relationship to s3s
-
-[s3s](https://github.com/Nugine/s3s) is the S3 protocol crate that RustFS used before this project existed. Three things
-about the relationship, stated up front:
-
-1. **Acknowledgement.** The issue and pull-request history of s3s is a valuable public record of how real S3 clients and
-   the real AWS service behave. Those *facts about the protocol*
-   are an important source for RustFS Gateway's conformance corpus, and we are grateful for the work that produced them.
-   Each conformance case cites its evidence as a URL plus an original one-line summary; discussion text itself is never
-   pasted into this repository.
-2. **RustFS Gateway is not a fork of s3s.** It is an independent implementation, written from scratch. It contains no
-   source code copied from s3s, and contributors are explicitly forbidden from introducing any —
-   see [CONTRIBUTING.md](CONTRIBUTING.md).
-3. **Both projects are licensed under Apache-2.0.** s3s is Apache-2.0; so is RustFS Gateway. There is no license
-   incompatibility between them, and no license-derived obligation is being evaded by the choice above.
 
 ## Building
 

@@ -1,0 +1,29 @@
+// Copyright 2026 RustFS Team
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+// A helper beside a handler. The helper must say so: an unrecognised method name is an error, never
+// a silent skip, because a handler that is never registered is invisible until a request arrives.
+
+#[handlers]
+impl Fs {
+    async fn put_object(&self, request: Req<PutObject>) -> HandlerResult<PutObject> {
+        self.write(request.into_input()).await
+    }
+
+    #[handlers(skip)]
+    async fn write(&self, input: PutObjectInput) -> HandlerResult<PutObject> {
+        let _ = input;
+        todo!()
+    }
+}

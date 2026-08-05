@@ -17,6 +17,7 @@ rustfs-gateway = { path = "crates/gateway", version = "0.1.0" }
 rustfs-gateway-codegen = { path = "crates/codegen", version = "0.1.0" }
 rustfs-gateway-core = { path = "crates/core", version = "0.1.0" }
 rustfs-gateway-http = { path = "crates/http", version = "0.1.0" }
+rustfs-gateway-macros = { path = "crates/macros", version = "0.1.0" }
 rustfs-gateway-model = { path = "crates/model", version = "0.1.0" }
 rustfs-gateway-sig = { path = "crates/sig", version = "0.1.0" }
 rustfs-gateway-stream = { path = "crates/stream", version = "0.1.0" }
@@ -40,16 +41,20 @@ md-5 = "0.11"                                       # entity tags, single-part a
 memchr = "2.8"
 percent-encoding = "2.3"
 pin-project-lite = "0.2"
+proc-macro2 = "1.0"
 quick-xml = "0.41"                                  # never expands entities; DOCTYPE must be rejected by us
+quote = "1.0"
 sha1 = "0.11"                                       # one of the five S3 checksum algorithms
 sha2 = "0.11"
 smallvec = "1.15"
 subtle = "2.6"                                      # constant-time comparison
+syn = { version = "3.0", features = ["full", "extra-traits"] }
 thiserror = "2.0"
 zeroize = { version = "1.9", features = ["zeroize_derive"] }
 
 # Dev-only.
 insta = "1.48"
+prettyplease = "0.3"                                # renders the macro expansion goldens; no `cargo expand` needed
 proptest = "1.11"
 
 [workspace.lints.rust]

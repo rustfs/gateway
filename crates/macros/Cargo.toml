@@ -1,0 +1,39 @@
+[package]
+name = "rustfs-gateway-macros"
+description = "Declarative handler registration: #[handlers] on an inherent impl block"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+# Not published, for the reason every crate here is not published: rustfs consumes this
+# repository as a git dependency, and publishing would buy a version lockstep on every change.
+publish = false
+
+[package.metadata.gateway]
+ring = 0
+# Ring 0 and 1 must not depend on any rustfs-* business crate or on a ring-2 crate.
+# This crate is sugar over `rustfs-gateway-core`'s public API and generates code against it;
+# it does not depend on it at build time, only its tests do.
+
+[lib]
+proc-macro = true
+
+[lints]
+workspace = true
+
+[dependencies]
+proc-macro2 = { workspace = true }
+quote = { workspace = true }
+syn = { workspace = true }
+
+[dev-dependencies]
+# The expansion goldens are rendered with prettyplease rather than `cargo expand`, so the golden
+# test needs no tool installed and no nightly.
+prettyplease = { workspace = true }
+# Span line and column assertions need the fallback spans, which this feature turns on.
+proc-macro2 = { workspace = true, features = ["span-locations"] }
+# The equivalence test builds two registries and compares them, so it needs the real thing.
+rustfs-gateway-core = { workspace = true }
+rustfs-gateway-types = { workspace = true }

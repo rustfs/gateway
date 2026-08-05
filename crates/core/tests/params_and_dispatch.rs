@@ -33,6 +33,7 @@ mod support;
 use http::{Method, StatusCode};
 use rustfs_gateway_core::dispatch::{NO_ROUTE_MESSAGE, NOT_REGISTERED_MESSAGE, Router};
 use rustfs_gateway_core::error::{PRE_AUTH_STATUSES, PreAuthError};
+use rustfs_gateway_core::op::{AuthRequirement, ResourceShape};
 use rustfs_gateway_core::registry::{OperationSpec, ParamKind, Registry, RegistryError, RequiredParam};
 use rustfs_gateway_core::route::{Predicate, RouteTable, ShadowingDecls, ShadowingPolicy, TargetKind};
 use rustfs_gateway_types::ErrorCode;
@@ -48,6 +49,7 @@ static PUT_ANALYTICS: OperationSpec = OperationSpec {
         message: "The required parameter 'id' is missing",
     }],
     not_configured_error: None,
+    auth: Some(AuthRequirement::new("s3:PutAnalyticsConfiguration", ResourceShape::Bucket)),
 };
 
 static GET_OBJECT: OperationSpec = OperationSpec {
@@ -55,6 +57,7 @@ static GET_OBJECT: OperationSpec = OperationSpec {
     success_status: 200,
     required_params: &[],
     not_configured_error: None,
+    auth: Some(AuthRequirement::new("s3:GetObject", ResourceShape::Object)),
 };
 
 static DELETE_OBJECT: OperationSpec = OperationSpec {
@@ -62,6 +65,7 @@ static DELETE_OBJECT: OperationSpec = OperationSpec {
     success_status: 204,
     required_params: &[],
     not_configured_error: None,
+    auth: Some(AuthRequirement::new("s3:DeleteObject", ResourceShape::Object)),
 };
 
 static GET_LIFECYCLE: OperationSpec = OperationSpec {
@@ -69,6 +73,7 @@ static GET_LIFECYCLE: OperationSpec = OperationSpec {
     success_status: 200,
     required_params: &[],
     not_configured_error: Some(ErrorCode::NO_SUCH_LIFECYCLE_CONFIGURATION),
+    auth: Some(AuthRequirement::new("s3:GetLifecycleConfiguration", ResourceShape::Bucket)),
 };
 
 static COPY_OBJECT: OperationSpec = OperationSpec {
@@ -81,6 +86,7 @@ static COPY_OBJECT: OperationSpec = OperationSpec {
         message: "The required header 'x-amz-copy-source' is missing",
     }],
     not_configured_error: None,
+    auth: Some(AuthRequirement::new("s3:PutObject", ResourceShape::Object)),
 };
 
 /// Deliberately unregistrable, and kept for the test that says so.
@@ -99,6 +105,7 @@ static UPLOAD_PART: OperationSpec = OperationSpec {
         message: "The request is missing a Content-Length header",
     }],
     not_configured_error: None,
+    auth: Some(AuthRequirement::new("s3:PutObject", ResourceShape::Object)),
 };
 
 /// A table with the four operations these cases route to.

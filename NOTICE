@@ -44,11 +44,6 @@ rustfs-gateway's conformance corpus draws on publicly reported S3 protocol behav
 including those documented in the issue history of the s3s project
 (https://github.com/Nugine/s3s, Apache License 2.0).
 
-rustfs-gateway is an independent implementation and is NOT a fork of s3s; it contains
-no source code copied from s3s. Protocol behaviours learned from public
-discussions are re-expressed as conformance cases written from scratch, and the
-evidence recorded for each case is a URL plus an original one-line summary.
-
 -------------------------------------------------------------------------------
 Copied code registry
 -------------------------------------------------------------------------------
