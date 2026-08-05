@@ -2,10 +2,10 @@
 
 The wire acceptance layer: the first stage of the pipeline, and the last place a raw
 `http::Request` exists. P3-01 landed acceptance, the effective-host determination, framing rules
-W-1 to W-6, and the borrowed header and query views; P3-02/03/05/06 build on these types without
-reshaping them.
+W-1 to W-6, and the borrowed header and query views; P3-03 added the single-pass `aws-chunked`
+ingest pipeline on top of them, without reshaping them.
 
-Three properties live here. Everything else in the crate exists to serve them.
+Four properties live here. Everything else in the crate exists to serve them.
 
 1. **The raw request stops here.** `WireRequest::accept` consumes an `http::Request` and publishes
    no accessor returning `HeaderMap`, `Uri`, `Parts` or the request; `into_body` yields the body
@@ -20,6 +20,10 @@ Three properties live here. Everything else in the crate exists to serve them.
    spelling that normalises to it. `RawHost` is the type `rustfs-gateway-sig`'s
    `CanonicalRequestSpec::new` accepts, and the only one — a `compile_fail` doctest on that
    constructor proves a `&str` is rejected.
+4. **The chunk parser runs only when the signature says so.** `ChunkFraming::derive` is the only
+   constructor of a framing decision, it reads a `PayloadFramingSource`, and that trait has no
+   method that could carry `Content-Encoding`. `IngestPipeline::new` refuses a body the decision
+   did not mark framed, so "the parser ran because a header said `aws-chunked`" is not reachable.
 
 ## Files
 
@@ -32,13 +36,23 @@ Three properties live here. Everything else in the crate exists to serve them.
 | `src/header_view.rs` | `HeaderView`, `SignedHeaderList`, canonical-header writing, the repeat and non-UTF-8 policies | You read a header, or build a canonical request |
 | `src/query_view.rs` | `QueryIndex` / `QueryView`: offsets, arrival order, repeat policy | You read a query parameter, or route on one |
 | `src/metadata.rs` | `x-amz-meta-*` key and value rules, including validation *after* RFC 2047 decoding | You touch user metadata |
-| `src/limits.rs` | `Limits`, `LimitKind` | You are adding a ceiling; P3-05 owns the numbers and the timeouts |
+| `src/limits.rs` | `Limits`, `LimitKind`, `ChunkLimits` (per-chunk data ceiling, metadata ceiling, chunk count, overhead ratio) | You are adding a ceiling; P3-05 owns the timeouts |
+| `src/ingest/mod.rs` | `PayloadFramingSource`, `ChunkFraming`, `DecodedLength`, `validate_decoded_length` — whether the parser runs, and whether the two declared lengths agree | You touch the framing decision or the head cross-checks |
+| `src/ingest/decoder.rs` | `ChunkDecoder`: chunk-size lines, the one permitted extension, CRLF rules, every header-decidable ceiling. Emits `(start, len)` events; moves no payload | You are adding a framing rule |
+| `src/ingest/signer.rs` | `SigningKeyCache` (one derivation per scope), `ChunkSigner` (one HMAC per chunk, stack string-to-sign, constant-time compare), `ChunkSigningKey`, `ChunkSeed`, `ChunkScope`, `ScopeId` | You touch the chunk signature chain |
+| `src/ingest/pipeline.rs` | `IngestPipeline`, `IngestPolicy`: the window, the single pass, verify-before-deliver, `decoded_bytes`, `commit_allowed`, `reject` | You are changing how an upload is read |
+| `src/ingest/reject.rs` | `ChunkReject`, `ModeConfusion`, and the 400/403 split | You are adding a refusal |
 | `src/reject.rs` | `WireReject`, status and error-code mapping, `may_read_body`, `must_close_connection` | You are adding a rejection, or writing the response |
 | `src/text.rs` | `AsciiBuf` and the byte predicates; no protocol meaning | Rarely |
 | `tests/host_ambiguity.rs` | 7 positive / 18 negative — every row of the host decision table | You changed `host.rs`; `crates/sig/tests/effective_host.rs` covers the same function from the signature side and must be run too |
 | `tests/framing_smuggling.rs` | 4 positive / 19 negative — W-1..W-6 and the body ceiling | You changed `framing.rs` |
 | `tests/header_and_query.rs` | 10 positive / 18 negative — tolerance, repeats, metadata, canonicalisation | You changed a view or `metadata.rs` |
 | `tests/allocation_budget.rs` | The no-allocation promise, asserted structurally | You changed a view's storage |
+| `tests/ingest_framing.rs` | 5 positive / 13 negative — the framing derivation, the mode/length cross-checks, the CL/TE interaction | You changed `ingest/mod.rs` |
+| `tests/ingest_chunk_rules.rs` | 5 positive / 26 negative — chunk syntax and every ceiling, including the 4 GiB-chunk regression | You changed `ingest/decoder.rs` |
+| `tests/ingest_verify.rs` | 3 positive / 17 negative — the signature chain, "zero bytes delivered from a failing chunk", trailer hand-off | You changed `ingest/signer.rs` or the delivery policy |
+| `tests/ingest_perf_gates.rs` | 7 positive / 10 negative — the HMAC budget, the single-pass equality, compaction bounds, the zero-adapting-copy assertion | You changed the pipeline's buffering or the key cache |
+| `tests/support/ingest.rs` | Wire-shaped fixtures: a scripted socket, an independently written chunk signer | You need a new malformed body shape |
 | `tests/boundary_guards.rs` | Source guards: no raw-request accessor, no lossy UTF-8, lint denials, file shape | You added a public method or a file |
 
 ## Shape decisions worth not re-litigating
@@ -67,6 +81,19 @@ Three properties live here. Everything else in the crate exists to serve them.
   treat `b.example.com.` and `b.example.com` as one bucket; signing must not.
 - **Every rejection is decidable from the head.** No rule needs a body byte, so no limit check can
   become a reason to buffer or drain — `WireReject::may_read_body` is unconditionally `false`.
+  `ChunkReject` is the deliberate counterpart: it is decidable only from the body, it can be a
+  `403`, and it is therefore a separate type rather than a `WireReject` variant.
+- **The decoder never derives a signing key, and never will.** The four-step chain lives once, in
+  `rustfs-gateway-sig`. `SigningKeyCache` takes a closure and caches the result, so this crate
+  holds derived key material but implements no derivation — a security primitive written twice is
+  a security primitive that drifts.
+- **The consumer's read is the only per-byte copy on the ingest path.** It cannot be removed while
+  `VerifyBeforeDeliver` holds, because writing unverified bytes into the consumer's buffer *is*
+  delivering them. What has been removed is the per-layer poll, the per-chunk allocation, the
+  re-slicing, and the extra pass per digest.
+- **Framing overhead is a ratio in parts per thousand, not a float.** The comparison is on the
+  data path and integer arithmetic cannot round two configurations onto one behaviour. The
+  default of 50 refuses signed chunks below about 1,740 bytes; AWS SDKs do not go below 8 KiB.
 
 - **The authority and the `Host` header are compared byte for byte.** `B.Example.COM` beside
   `b.example.com` is `HostError::Conflict`, not agreement. Case-folding the conflict check is the
@@ -83,7 +110,7 @@ way, which is why the host determination lives here and not there.
 ## Verify
 
 ```bash
-cargo test -p rustfs-gateway-http                                  # 87 tests, 55 negative / 32 positive
+cargo test -p rustfs-gateway-http                                  # 174 tests, 122 negative / 52 positive
 cargo test -p rustfs-gateway-sig                                   # the signature side of the same host function
 cargo clippy -p rustfs-gateway-http -p rustfs-gateway-sig --all-targets -- -D warnings
 cargo fmt --all --check
@@ -111,6 +138,17 @@ bash scripts/check_ring_boundaries.sh
 - **`MAX_HOST_BYTES` dropped from 273 to 263** in the same merge, taking the stricter of the two
   drafts' ceilings. Nothing legitimate is between the two numbers, but it is a configured default
   (`Limits::max_host_bytes`) and therefore observable.
+- **The chunk string-to-sign is not checked against a published known-answer vector.** The suite
+  builds the expected signature from an independently written implementation of the AWS streaming
+  rules rather than calling the code under test, which catches a self-consistent mistake but not a
+  shared misreading of the specification. P3-04 should add one published vector.
+- **A zero-sized chunk in a non-terminal position is detected as bytes arriving after the terminal
+  chunk**, which is the only position from which "the stream continues" is observable. Under a
+  declared trailer section the check cannot run at all, because what follows *is* the trailer.
+- **`ChunkLimits::max_overhead_permille` replaces the `f32` ratio the task described.** Integer
+  parts per thousand, for the reason above; if the float is the contract, it moves.
+- **A trailered upload is never `commit_allowed` at this stage.** That fails closed and is correct
+  until P3-04 verifies the trailer, but it means the trailer modes are not yet end-to-end usable.
 - **`SignedHeaderList` / `HeaderView::write_canonical_headers` still overlap `rustfs-gateway-sig`'s
   `SignedHeaderSet`.** Same defect shape as the host duplication — one rule in two places, s3s
   #499-versus-#632 — and not addressed by this merge. One of the two should be deleted rather than

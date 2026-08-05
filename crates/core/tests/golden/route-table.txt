@@ -1,0 +1,3 @@
+  300  GetBucketLocation                        /{Bucket}            Method(GET) ∧ Target(Bucket) ∧ QueryPresent("location")
+  600  ListObjectsV2                            /{Bucket}            Method(GET) ∧ Target(Bucket) ∧ QueryEquals("list-type", "2")
+  800  PutObject                                /{Bucket}/{Key+}     Method(PUT) ∧ Target(Object)

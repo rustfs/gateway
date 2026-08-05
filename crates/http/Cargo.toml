@@ -31,3 +31,12 @@ http = { workspace = true }
 # actually occur; the acceptance path performs no allocation for a typical request, and a `Vec`
 # here would put one malloc per request back.
 smallvec = { workspace = true }
+
+# The chunk signature chain. `hmac`/`sha2` verify one chunk with one HMAC over a stack-resident
+# string-to-sign; `subtle` compares the raw 32 bytes in constant time — never hex, and never `==`;
+# `zeroize` wipes a derived key when it is dropped or evicted. The four-step key DERIVATION is
+# deliberately absent: it lives once, in `rustfs-gateway-sig`, and this crate adopts its result.
+hmac = { workspace = true }
+sha2 = { workspace = true }
+subtle = { workspace = true }
+zeroize = { workspace = true }

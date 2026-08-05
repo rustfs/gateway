@@ -120,3 +120,149 @@ impl Default for Limits {
         }
     }
 }
+
+/// The ceilings the `aws-chunked` decoder enforces, all of them decidable from a chunk header.
+///
+/// # The ceiling that is a security fix, not a tuning knob
+///
+/// A chunk *size* is parsed from a hexadecimal field whose natural ceiling is whatever the parser
+/// happens to hold it in. Bounding only the metadata line — which is the shape a chunk decoder
+/// usually arrives in — bounds the header and leaves the announced payload unbounded: a peer can
+/// announce a four-gigabyte chunk, then feed it one byte per second, and a decoder that must hold
+/// the chunk until its trailing signature arrives grows to four gigabytes while holding nothing it
+/// is yet able to verify. [`ChunkLimits::max_chunk_size`] defaults to one mebibyte, is checked at
+/// the chunk header before a single data byte is read, and has a hard ceiling that no
+/// configuration can raise. There is deliberately no `unlimited()` constructor.
+///
+/// # Every field is private
+///
+/// The invariants — one mebibyte by default, never above [`ChunkLimits::HARD_MAX_CHUNK_SIZE`], a
+/// metadata ceiling that leaves room for exactly one chunk signature — are enforced by the
+/// setters. Public fields would let a caller construct precisely the states the setters clamp.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ChunkLimits {
+    max_chunk_size: u32,
+    max_chunk_meta_size: u16,
+    min_chunk_size_for_count: u32,
+    max_chunk_count_slack: u32,
+    max_overhead_permille: u16,
+    overhead_ratio_floor_bytes: u64,
+}
+
+impl ChunkLimits {
+    /// The largest chunk size any configuration may permit.
+    ///
+    /// A ceiling on the ceiling. The default is sixteen times lower; this exists so that raising
+    /// the limit for an unusual client cannot re-open the unbounded-buffer hole by accident.
+    pub const HARD_MAX_CHUNK_SIZE: u32 = 16 * 1024 * 1024;
+
+    /// The default per-chunk data ceiling: one mebibyte.
+    pub const DEFAULT_MAX_CHUNK_SIZE: u32 = 1024 * 1024;
+
+    /// The smallest metadata ceiling that can still hold a chunk signature.
+    ///
+    /// `<16 hex digits>;chunk-signature=<64 hex>` is 96 bytes; the remainder is slack for the
+    /// CRLF and for the parser to see a violation rather than run out of buffer.
+    pub const MIN_CHUNK_META_SIZE: u16 = 128;
+
+    /// The per-chunk data ceiling, in bytes.
+    #[must_use]
+    pub fn max_chunk_size(&self) -> u32 {
+        self.max_chunk_size
+    }
+
+    /// The chunk-size line ceiling, in bytes, including the chunk extension and the CRLF.
+    #[must_use]
+    pub fn max_chunk_meta_size(&self) -> u16 {
+        self.max_chunk_meta_size
+    }
+
+    /// The chunk size the chunk-count ceiling is derived from.
+    #[must_use]
+    pub fn min_chunk_size_for_count(&self) -> u32 {
+        self.min_chunk_size_for_count
+    }
+
+    /// The largest framing overhead, in parts per thousand of the decoded body.
+    ///
+    /// Parts per thousand rather than a float: the comparison runs on the data path, and integer
+    /// arithmetic here cannot round two different configurations onto the same behaviour.
+    #[must_use]
+    pub fn max_overhead_permille(&self) -> u16 {
+        self.max_overhead_permille
+    }
+
+    /// The overhead below which the ratio is not enforced.
+    ///
+    /// A short upload is nearly all framing by definition — a one-byte body carries a whole chunk
+    /// header — so the ratio only starts to mean anything once enough overhead has accumulated to
+    /// distinguish a small request from a flood.
+    #[must_use]
+    pub fn overhead_ratio_floor_bytes(&self) -> u64 {
+        self.overhead_ratio_floor_bytes
+    }
+
+    /// Sets the per-chunk data ceiling, clamped to [`ChunkLimits::HARD_MAX_CHUNK_SIZE`] and to at
+    /// least one byte.
+    #[must_use]
+    pub fn with_max_chunk_size(mut self, bytes: u32) -> Self {
+        self.max_chunk_size = bytes.clamp(1, Self::HARD_MAX_CHUNK_SIZE);
+        self
+    }
+
+    /// Sets the chunk-size line ceiling, clamped to at least [`ChunkLimits::MIN_CHUNK_META_SIZE`]
+    /// and to at most [`crate::MAX_CHUNK_SIZE_LINE_BYTES`].
+    #[must_use]
+    pub fn with_max_chunk_meta_size(mut self, bytes: u16) -> Self {
+        let ceiling = u16::try_from(crate::MAX_CHUNK_SIZE_LINE_BYTES).unwrap_or(u16::MAX);
+        self.max_chunk_meta_size = bytes.clamp(Self::MIN_CHUNK_META_SIZE, ceiling);
+        self
+    }
+
+    /// Sets the chunk size the chunk-count ceiling is derived from; at least one byte.
+    #[must_use]
+    pub fn with_min_chunk_size_for_count(mut self, bytes: u32) -> Self {
+        self.min_chunk_size_for_count = bytes.max(1);
+        self
+    }
+
+    /// Sets the framing-overhead ceiling, in parts per thousand.
+    #[must_use]
+    pub fn with_max_overhead_permille(mut self, permille: u16) -> Self {
+        self.max_overhead_permille = permille.min(1000);
+        self
+    }
+
+    /// Sets the overhead floor below which the ratio is not enforced.
+    #[must_use]
+    pub fn with_overhead_ratio_floor_bytes(mut self, bytes: u64) -> Self {
+        self.overhead_ratio_floor_bytes = bytes;
+        self
+    }
+
+    /// The largest number of chunks a body of `decoded_length` bytes may be split into.
+    ///
+    /// Derived rather than configured: the ceiling that matters is a function of how much body
+    /// there is, and a fixed number would be far too tight for a large upload and useless for a
+    /// small one. The slack covers the terminal chunk and a client whose last chunk is short.
+    #[must_use]
+    pub fn max_chunk_count(&self, decoded_length: u64) -> u64 {
+        let min_chunk = u64::from(self.min_chunk_size_for_count.max(1));
+        decoded_length
+            .div_ceil(min_chunk)
+            .saturating_add(u64::from(self.max_chunk_count_slack))
+    }
+}
+
+impl Default for ChunkLimits {
+    fn default() -> Self {
+        Self {
+            max_chunk_size: Self::DEFAULT_MAX_CHUNK_SIZE,
+            max_chunk_meta_size: 256,
+            min_chunk_size_for_count: 1024,
+            max_chunk_count_slack: 16,
+            max_overhead_permille: 50,
+            overhead_ratio_floor_bytes: 4096,
+        }
+    }
+}

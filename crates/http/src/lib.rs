@@ -63,6 +63,7 @@
 mod framing;
 mod header_view;
 mod host;
+mod ingest;
 mod limits;
 mod metadata;
 mod query_view;
@@ -75,7 +76,12 @@ pub use crate::header_view::{
     CanonicalHeadersError, HeaderView, SINGLE_VALUED_HEADERS, SignedHeaderList, SignedHeadersError, is_significant_header,
 };
 pub use crate::host::{EffectiveHost, HostError, HostSource, MAX_HOST_BYTES, RawHost, effective_host, effective_host_of};
-pub use crate::limits::{LimitKind, Limits};
+pub use crate::ingest::{
+    ChunkFraming, ChunkReject, ChunkScope, ChunkSeed, ChunkSigner, ChunkSigningKey, DecodedLength, IngestPipeline, IngestPolicy,
+    MAX_SCOPE_LINE_BYTES, MIN_CHUNK_META_BYTES, ModeConfusion, PayloadFramingSource, ScopeId, SigningKeyCache,
+    validate_decoded_length,
+};
+pub use crate::limits::{ChunkLimits, LimitKind, Limits};
 pub use crate::metadata::{METADATA_PREFIX, MetadataReject, validate_metadata_key, validate_metadata_value};
 pub use crate::query_view::{QueryIndex, QueryView, SINGLE_VALUED_QUERY_PARAMS};
 pub use crate::reject::WireReject;

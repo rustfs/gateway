@@ -59,10 +59,12 @@ mod error;
 #[cfg(unix)]
 mod file_region;
 mod metrics;
+mod observer;
 mod payload;
 mod read;
 mod stream;
 mod trailers;
+mod zero_copy;
 
 #[cfg(test)]
 mod tests;
@@ -75,7 +77,9 @@ pub use crate::error::{StreamError, StreamErrorKind};
 #[cfg(unix)]
 pub use crate::file_region::{FileRegion, FileRegionError};
 pub use crate::metrics::StreamMetrics;
+pub use crate::observer::{ByteCounter, ByteObserver, MAX_OBSERVER_DIGEST_BYTES, ObserverOutcome};
 pub use crate::payload::{AdaptRefusal, Payload};
 pub use crate::read::{AsyncPayloadRead, BoxPayloadReader, ReadProgress};
 pub use crate::stream::{BoxPayloadStream, PayloadRead, PayloadStream};
 pub use crate::trailers::TrailingHeaders;
+pub use crate::zero_copy::{NoZeroCopy, TransportCaps, VerificationObligation, ZeroCopyQuery};

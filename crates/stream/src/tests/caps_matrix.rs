@@ -26,6 +26,7 @@ use crate::metrics::StreamMetrics;
 use crate::payload::{AdaptRefusal, Payload};
 use crate::tests::support::{ScriptedReader, ScriptedStream, Step, drain_reader, drain_stream, joined};
 use crate::trailers::TrailingHeaders;
+use crate::zero_copy::NoZeroCopy;
 
 const IN_MEMORY_CAPS: PayloadCaps = PayloadCaps::KNOWN_LENGTH
     .union(PayloadCaps::SEEKABLE)
@@ -115,10 +116,11 @@ fn a_stream_payload_advertises_the_push_model() {
 fn an_in_memory_payload_refuses_a_file_region_and_comes_back_whole() {
     let payload = Payload::from_bytes(Bytes::from_static(b"still here"));
 
-    let returned = payload
+    let (returned, reason) = payload
         .try_into_file_region()
         .expect_err("an in-memory payload is not a file region");
 
+    assert_eq!(reason, NoZeroCopy::NotFileBacked);
     assert_eq!(returned.len_hint(), Some(10));
     let (bytes, _) = drain_reader(
         returned
@@ -140,7 +142,8 @@ fn a_reader_payload_refuses_a_file_region_and_stays_readable() {
     )
     .expect("caps are consistent");
 
-    let returned = payload.try_into_file_region().expect_err("a reader is not a file region");
+    let (returned, reason) = payload.try_into_file_region().expect_err("a reader is not a file region");
+    assert_eq!(reason, NoZeroCopy::NotFileBacked);
 
     let (reader, _) = returned
         .try_into_reader(&StreamMetrics::new())

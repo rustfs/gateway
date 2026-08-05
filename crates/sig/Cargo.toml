@@ -21,6 +21,16 @@ ring = 0
 [lints]
 workspace = true
 
+[features]
+# Replaces the built-in SigV4 computation. The name is the warning, and it is not a default.
+#
+# What it turns off is the *computation*: `SecurityFloor::admit` still runs H1..H7 and still
+# produces the `SealedAws` a replacement is handed, so a replacement that authenticates everything
+# never sees a skewed timestamp, an expired presigned URL, a duplicated signature parameter or a
+# presigned request aimed at a privileged operation. `DangerAck` and `AwsSignatureVerifier` exist
+# only under this feature, so a build that does not enable it cannot name the replacement point.
+dangerous-replace-signature-verifier = []
+
 [dependencies]
 # Exactly one internal edge, added when the two `effective_host` drafts were merged into one.
 #

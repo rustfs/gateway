@@ -98,12 +98,11 @@ pub struct VerifiedScope {
 impl VerifiedScope {
     /// Builds a scope from parts a caller inside this crate has already cross-checked.
     ///
-    /// `#[cfg(test)]` and `pub(crate)` on purpose: today the only caller that has done the
-    /// cross-checking is the crate's own fixture, so no released binary contains a route to a
-    /// `VerifiedScope` at all. P2-04 replaces this with the public constructor that performs the
-    /// cross-check itself; widening it without that check is the one edit in this file that
-    /// silently removes the guarantee the file exists for.
-    #[cfg(test)]
+    /// `pub(crate)`, and it must stay that way. The one caller that has done the cross-checking is
+    /// [`crate::enforce_scope`], which compares the day against the timestamp that passed the skew
+    /// check, the region against the configured set and the service against the routed operation.
+    /// Making this public — or adding any other in-crate caller that has not done those three
+    /// comparisons — silently removes the guarantee this file exists for.
     pub(crate) fn from_checked_parts(date: ScopeDate, region: &str, service: &str) -> Self {
         Self {
             date,

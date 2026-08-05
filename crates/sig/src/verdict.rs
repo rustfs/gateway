@@ -179,6 +179,22 @@ pub enum AuthError {
     AuthorizationHeaderMalformed,
     /// The signature verified, but the request may not proceed.
     AccessDenied,
+    /// The signed timestamp is outside the accepted window (H1).
+    ///
+    /// The same answer on all three signing paths. A window that applied to presigned requests
+    /// only is the defect s3s#616 fixed.
+    RequestTimeTooSkewed,
+    /// A presigned URL's query parameters are missing, repeated, or not acceptable (H2, H6).
+    ///
+    /// Covers `X-Amz-Expires` outside `1..=604800` and every non-strict spelling of it, and a
+    /// signature-bearing query parameter that appeared twice.
+    AuthorizationQueryParametersError,
+    /// A presigned URL was used after its lifetime ended (H2).
+    ///
+    /// The code is `AccessDenied`, which is what S3 answers, and the message is the same as
+    /// [`AuthError::AccessDenied`]'s — expiry is not a fact worth confirming to a caller holding
+    /// a URL it did not mint.
+    RequestExpired,
     /// The scheme was recognised and is deliberately unimplemented; the caller must answer `501`.
     NotImplemented(Unimplemented),
 }
@@ -194,7 +210,9 @@ impl AuthError {
             Self::InvalidAccessKeyId => "InvalidAccessKeyId",
             Self::SignatureDoesNotMatch => "SignatureDoesNotMatch",
             Self::AuthorizationHeaderMalformed => "AuthorizationHeaderMalformed",
-            Self::AccessDenied => "AccessDenied",
+            Self::AccessDenied | Self::RequestExpired => "AccessDenied",
+            Self::RequestTimeTooSkewed => "RequestTimeTooSkewed",
+            Self::AuthorizationQueryParametersError => "AuthorizationQueryParametersError",
             Self::NotImplemented(_) => "NotImplemented",
         }
     }
@@ -209,7 +227,9 @@ impl AuthError {
         match self {
             Self::InvalidAccessKeyId | Self::SignatureDoesNotMatch => "the request was not authenticated",
             Self::AuthorizationHeaderMalformed => "the authentication material could not be parsed",
-            Self::AccessDenied => "the request is not allowed",
+            Self::AccessDenied | Self::RequestExpired => "the request is not allowed",
+            Self::RequestTimeTooSkewed => "the request timestamp is outside the accepted window",
+            Self::AuthorizationQueryParametersError => "the presigned query parameters are not acceptable",
             Self::NotImplemented(_) => "the signing algorithm is recognised but not implemented",
         }
     }

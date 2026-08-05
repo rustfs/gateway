@@ -93,6 +93,12 @@ pub enum SigParseError {
 pub enum Unimplemented {
     /// `AWS4-ECDSA-P256-SHA256` (SigV4a, used by Multi-Region Access Points).
     SigV4a,
+    /// SigV2 (`AWS <access-key>:<signature>`), whose string-to-sign is P2-06's.
+    ///
+    /// The floor recognises a SigV2 request and refuses it here rather than letting it reach the
+    /// SigV4 verifier: a SigV2 request verified as SigV4 is an algorithm downgrade, and a SigV2
+    /// presigned URL is the shape MinIO #5411 was rewritten from.
+    SigV2,
     /// `STREAMING-AWS4-ECDSA-P256-SHA256-PAYLOAD[-TRAILER]`, the streaming form of SigV4a.
     StreamingSigV4a,
 }
@@ -101,6 +107,7 @@ impl fmt::Display for Unimplemented {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let text = match self {
             Self::SigV4a => "SigV4a (AWS4-ECDSA-P256-SHA256) is not implemented",
+            Self::SigV2 => "SigV2 is recognised and not implemented",
             Self::StreamingSigV4a => "streaming SigV4a is not implemented",
         };
         f.write_str(text)

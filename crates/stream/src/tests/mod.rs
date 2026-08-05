@@ -30,5 +30,7 @@ mod caps_matrix;
 mod eof_trailers;
 #[cfg(unix)]
 mod file_region;
+mod observer;
 mod support;
 mod trailers;
+mod zero_copy;

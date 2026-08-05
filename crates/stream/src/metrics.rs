@@ -25,6 +25,7 @@
 use core::sync::atomic::{AtomicU64, Ordering};
 
 use crate::adapt::AdaptCost;
+use crate::zero_copy::NoZeroCopy;
 
 /// Counters for pull/push adaptation.
 ///
@@ -37,6 +38,11 @@ pub struct StreamMetrics {
     adapt_copies_total: AtomicU64,
     adapt_copied_bytes_total: AtomicU64,
     adapt_buffers_total: AtomicU64,
+    zero_copy_refusals_not_file_backed: AtomicU64,
+    zero_copy_refusals_transport: AtomicU64,
+    zero_copy_refusals_obligation: AtomicU64,
+    zero_copy_refusals_tls: AtomicU64,
+    zero_copy_refused_bytes_total: AtomicU64,
 }
 
 impl StreamMetrics {
@@ -80,5 +86,50 @@ impl StreamMetrics {
     #[must_use]
     pub fn adapt_buffers_total(&self) -> u64 {
         self.adapt_buffers_total.load(Ordering::Relaxed)
+    }
+
+    /// Records one refusal of the kernel-side transfer path, attributed to its reason.
+    ///
+    /// The byte count is the size of the body that had to take the slow path, when it is known.
+    /// Counting the refusals without the bytes would make a 4 KiB refusal and a 1 GiB refusal
+    /// look alike, and only one of them is worth an operator's afternoon.
+    pub fn record_zero_copy_refusal(&self, reason: NoZeroCopy, bytes: Option<u64>) {
+        let counter = match reason {
+            NoZeroCopy::NotFileBacked => &self.zero_copy_refusals_not_file_backed,
+            NoZeroCopy::TransportLacksSendfile => &self.zero_copy_refusals_transport,
+            NoZeroCopy::VerificationObligationPresent => &self.zero_copy_refusals_obligation,
+            NoZeroCopy::TlsInPath => &self.zero_copy_refusals_tls,
+        };
+        counter.fetch_add(1, Ordering::Relaxed);
+        if let Some(bytes) = bytes {
+            self.zero_copy_refused_bytes_total.fetch_add(bytes, Ordering::Relaxed);
+        }
+    }
+
+    /// How many times the kernel-side path was refused for this reason.
+    #[must_use]
+    pub fn zero_copy_refusals(&self, reason: NoZeroCopy) -> u64 {
+        match reason {
+            NoZeroCopy::NotFileBacked => self.zero_copy_refusals_not_file_backed.load(Ordering::Relaxed),
+            NoZeroCopy::TransportLacksSendfile => self.zero_copy_refusals_transport.load(Ordering::Relaxed),
+            NoZeroCopy::VerificationObligationPresent => self.zero_copy_refusals_obligation.load(Ordering::Relaxed),
+            NoZeroCopy::TlsInPath => self.zero_copy_refusals_tls.load(Ordering::Relaxed),
+        }
+    }
+
+    /// How many times the kernel-side path was refused, for any reason.
+    #[must_use]
+    pub fn zero_copy_refusals_total(&self) -> u64 {
+        self.zero_copy_refusals_not_file_backed
+            .load(Ordering::Relaxed)
+            .saturating_add(self.zero_copy_refusals_transport.load(Ordering::Relaxed))
+            .saturating_add(self.zero_copy_refusals_obligation.load(Ordering::Relaxed))
+            .saturating_add(self.zero_copy_refusals_tls.load(Ordering::Relaxed))
+    }
+
+    /// How many body bytes took the slow path because the kernel-side path was refused.
+    #[must_use]
+    pub fn zero_copy_refused_bytes_total(&self) -> u64 {
+        self.zero_copy_refused_bytes_total.load(Ordering::Relaxed)
     }
 }

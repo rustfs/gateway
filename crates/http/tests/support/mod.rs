@@ -23,6 +23,8 @@
 // and unreachable-pub lints fire on helpers another binary does use.
 #![allow(dead_code, unreachable_pub)]
 
+pub mod ingest;
+
 use http::{HeaderValue, Request, Version, header::HOST};
 use rustfs_gateway_http::{Limits, WireReject, WireRequest};
 

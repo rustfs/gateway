@@ -36,6 +36,8 @@ use crate::trailers::TrailingHeaders;
 
 #[cfg(unix)]
 use crate::file_region::FileRegion;
+#[cfg(unix)]
+use crate::zero_copy::{NoZeroCopy, ZeroCopyQuery};
 
 /// A body, in whichever shape its producer had it.
 ///
@@ -164,14 +166,55 @@ impl Payload {
     /// Takes the file region out of the payload, for a transfer that can use one.
     ///
     /// Succeeds only when [`PayloadCaps::FILE_REGION`] is set. On refusal the payload comes
-    /// back unchanged: a negotiation that consumed the body on failure would turn "this
-    /// transport cannot use a file region" into data loss, and a producer-driven body cannot
-    /// be produced a second time.
+    /// back unchanged, together with the reason: a negotiation that consumed the body on failure
+    /// would turn "this transport cannot use a file region" into data loss, and a producer-driven
+    /// body cannot be produced a second time. The reason is a named [`NoZeroCopy`] rather than a
+    /// bare `None`, because "not a file" and "the transport cannot do it" call for different
+    /// actions and a counter that cannot tell them apart is a counter nobody acts on.
+    ///
+    /// This is the payload-only form: it can only ever refuse with [`NoZeroCopy::NotFileBacked`].
+    /// A transport must use [`Payload::try_into_file_region_for`], which also sees the
+    /// transport's capabilities and the body's outstanding verification obligation.
+    ///
+    /// # Errors
+    ///
+    /// [`NoZeroCopy::NotFileBacked`] when the payload is any other variant.
     #[cfg(unix)]
-    pub fn try_into_file_region(self) -> Result<FileRegion, Self> {
+    pub fn try_into_file_region(self) -> Result<FileRegion, (Self, NoZeroCopy)> {
         match self {
             Self::File(region) => Ok(region),
-            other => Err(other),
+            other => Err((other, NoZeroCopy::NotFileBacked)),
+        }
+    }
+
+    /// Takes the file region out of the payload for a specific transport, recording a refusal.
+    ///
+    /// The query is checked before the payload's own shape. That order is the security order: a
+    /// body carrying a [`VerificationObligation::Present`] is refused as such even when it also
+    /// happens not to be a file, so the log never says "not file backed" about a body that would
+    /// have been refused anyway for the reason that matters.
+    ///
+    /// # Errors
+    ///
+    /// One of the four [`NoZeroCopy`] reasons, together with the unchanged payload.
+    ///
+    /// [`VerificationObligation::Present`]: crate::VerificationObligation::Present
+    #[cfg(unix)]
+    pub fn try_into_file_region_for(
+        self,
+        query: &ZeroCopyQuery,
+        metrics: &StreamMetrics,
+    ) -> Result<FileRegion, (Self, NoZeroCopy)> {
+        if let Some(reason) = query.refusal() {
+            metrics.record_zero_copy_refusal(reason, self.len_hint());
+            return Err((self, reason));
+        }
+        match self {
+            Self::File(region) => Ok(region),
+            other => {
+                metrics.record_zero_copy_refusal(NoZeroCopy::NotFileBacked, other.len_hint());
+                Err((other, NoZeroCopy::NotFileBacked))
+            }
         }
     }
 

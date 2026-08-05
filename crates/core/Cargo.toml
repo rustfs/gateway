@@ -25,3 +25,10 @@ workspace = true
 rustfs-gateway-sig = { workspace = true }
 rustfs-gateway-http = { workspace = true }
 rustfs-gateway-types = { workspace = true }
+http = { workspace = true }
+
+[dev-dependencies]
+# Differential testing between the readable route table and its compiled form. The compiled
+# router is only allowed to exist because a generator can be pointed at both and told to find a
+# request they disagree about.
+proptest = { workspace = true }

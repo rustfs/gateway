@@ -99,9 +99,11 @@ CHOICE_TO_BOOL_FILE='crates/sig/src/signature.rs'
 # `access_key_id` is a public identifier and `continuation_token` is paging.
 SECRET_IDENT_RE='(secret|signing_key|session_token|private_key|derived_key|passphrase|expected_signature)'
 # Baselines for rule 7. Raise them when a PR adds cases; lowering one is the
-# change a reviewer must refuse to wave through.
-COMPILE_FAIL_FLOOR=17
-NEGATIVE_LABEL_FLOOR=35
+# change a reviewer must refuse to wave through. Set to the counts measured
+# after P2-04 landed the security floor: a ratchet that trails the tree by 80
+# cases is not a ratchet, it is a number nobody has to think about.
+COMPILE_FAIL_FLOOR=25
+NEGATIVE_LABEL_FLOOR=105
 
 status=0
 sensitive_seen=0

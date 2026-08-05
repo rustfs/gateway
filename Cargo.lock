@@ -404,6 +404,8 @@ dependencies = [
 name = "rustfs-gateway-core"
 version = "0.1.0"
 dependencies = [
+ "http",
+ "proptest",
  "rustfs-gateway-http",
  "rustfs-gateway-sig",
  "rustfs-gateway-types",
@@ -413,10 +415,14 @@ dependencies = [
 name = "rustfs-gateway-http"
 version = "0.1.0"
 dependencies = [
+ "hmac",
  "http",
  "rustfs-gateway-stream",
  "rustfs-gateway-types",
+ "sha2",
  "smallvec",
+ "subtle",
+ "zeroize",
 ]
 
 [[package]]
