@@ -329,5 +329,29 @@ RS
 expect_fail check_no_exhaustive_destructuring.sh \
     'a dto destructured without a trailing ..' mut_exhaustive_destructuring
 
+
+# -----------------------------------------------------------------------------
+# English-only. The first version of this guard used a grep bracket expression,
+# which is interpreted by locale collation rather than by codepoint and matched
+# an em dash — it reported every English file in the tree. The negative control
+# is what tells the two versions apart.
+# -----------------------------------------------------------------------------
+
+# The Chinese is written as UTF-8 byte escapes so this file stays pure ASCII.
+# Spelling it literally would make the guard flag its own test, and allowing the
+# file would then permit real Chinese to sit here unnoticed forever.
+# \xe4\xb8\xad\xe6\x96\x87 is the two-character word for "Chinese".
+mut_chinese_comment() {
+    printf '\n// \xe4\xb8\xad\xe6\x96\x87\n' >>crates/core/src/lib.rs
+}
+expect_fail check_english_only.sh \
+    'a Chinese comment in a source file' mut_chinese_comment
+
+mut_chinese_markdown() {
+    printf '\n\xe4\xb8\xad\xe6\x96\x87\n' >>docs/msrv.md
+}
+expect_fail check_english_only.sh \
+    'a Chinese paragraph in a Markdown document' mut_chinese_markdown
+
 printf '\n%s case(s), %s failure(s)\n' "$cases" "$failures"
 [[ "$failures" -eq 0 ]]

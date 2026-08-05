@@ -28,13 +28,18 @@ detection between root and scoped files) in the same PR.
 
 ## Language Requirements
 
-Everything that lands in the repository is **English**: source code, identifiers, comments,
-rustdoc, error and log messages, commit messages, PR titles and descriptions, Markdown docs,
-conformance case names, and script output.
+Everything that lands is **English**: source code, identifiers, comments, rustdoc, error and log
+messages, commit messages, PR titles and descriptions, Markdown docs, conformance case names,
+script output — and **issues, issue comments, PR reviews, and release notes in this repository**.
 
-Chinese is allowed in two places only: conversation with an AI assistant, and issue bodies and
-comments (the Epic's convention). If you drafted anything in Chinese, translate before committing;
-"it is only a comment" is not an exception.
+Across the `rustfs` organisation, `rustfs/backlog` is the single exception: planning and design
+discussion there may be Chinese. Every other repository, this one included, is English-only for
+anything that lands, and that covers the GitHub surface, not just the source tree. Anything
+written once is read by everyone who touches it afterwards — including contributors who do not
+read Chinese, and the greps that go looking for it.
+
+Chinese is fine in exactly one place: conversation with an AI assistant. Translate before it
+lands. "It is only an issue comment" is not an exception, and neither is "it is only a comment".
 
 ## Workflow
 
