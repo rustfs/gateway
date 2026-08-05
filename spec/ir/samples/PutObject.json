@@ -557,7 +557,7 @@
           "summary": "Upstream had two conflicting quoting rules in different files, which is the reason the rendering context is a type parameter here."
         }
       ],
-      "cases": ["c-etag-header-quoted-putobject"]
+      "cases": ["c-etag-0010"]
     },
     {
       "id": "q-timestamp-0005",
@@ -576,7 +576,7 @@
           "summary": "Recorded request where the header value is not a date, which a parsing implementation would reject or rewrite."
         }
       ],
-      "cases": ["c-expires-opaque-roundtrip"]
+      "cases": ["c-expires-0001"]
     },
     {
       "id": "q-checksum-0006",
@@ -595,7 +595,7 @@
           "summary": "Recorded rejection when two different checksum headers are sent together."
         }
       ],
-      "cases": ["c-checksum-single-header-only", "c-checksum-spec-packed"]
+      "cases": ["c-checksum-0001", "c-checksum-0002"]
     },
     {
       "id": "q-length-0007",
@@ -609,7 +609,7 @@
           "summary": "Upstream returned a generic 400 where the reference implementation returns the dedicated 411 code."
         }
       ],
-      "cases": ["c-putobject-missing-content-length"]
+      "cases": ["c-putobject-0001"]
     },
     {
       "id": "q-content-0008",
@@ -623,7 +623,7 @@
           "summary": "Documents the S3 specific default media type applied when the request omits the header."
         }
       ],
-      "cases": ["c-putobject-default-content-type"]
+      "cases": ["c-putobject-0002"]
     },
     {
       "id": "q-meta-0009",
@@ -642,7 +642,7 @@
           "summary": "Defines the encoded word syntax used to carry non ASCII text in header field values."
         }
       ],
-      "cases": ["c-meta-nonascii-encoded", "c-meta-key-lowercased"]
+      "cases": ["c-meta-0001", "c-meta-0002"]
     },
     {
       "id": "q-sse-0010",
@@ -656,7 +656,7 @@
           "summary": "Requires a secure connection for customer provided keys and describes which of the three headers are echoed in the response."
         }
       ],
-      "cases": ["c-ssec-key-never-echoed", "c-ssec-requires-tls"]
+      "cases": ["c-ssec-0001", "c-ssec-0002"]
     },
     {
       "id": "q-timestamp-0011",
@@ -670,7 +670,7 @@
           "summary": "Specifies the retain until date header in the extended date time format while every other date header uses the HTTP date format."
         }
       ],
-      "cases": ["c-objectlock-retain-until-iso8601"]
+      "cases": ["c-objectlock-0001"]
     },
     {
       "id": "q-timestamp-0012",
@@ -684,7 +684,7 @@
           "summary": "Shows the header as a pair of quoted parameters, one of which contains a date."
         }
       ],
-      "cases": ["c-expiration-structured-header"]
+      "cases": ["c-expiration-0001"]
     }
   ],
   "ext_points": []

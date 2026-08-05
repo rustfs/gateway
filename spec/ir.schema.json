@@ -113,11 +113,11 @@
     },
     "quirk_id": {
       "type": "string",
-      "pattern": "^q-[a-z0-9]+-[0-9]{4}$"
+      "pattern": "^q-[a-z0-9]+(-[a-z0-9]+)*-[0-9]{4}$"
     },
     "case_id": {
       "type": "string",
-      "pattern": "^c-[a-z0-9][a-z0-9-]*$"
+      "pattern": "^c-[a-z0-9]+(-[a-z0-9]+)*-[0-9]{4}$"
     },
 
     "http": {
@@ -229,10 +229,26 @@
             "header": { "type": "string", "pattern": "^[a-z0-9-]+$" },
             "prefix": {
               "type": "string",
-              "description": "Matched against the header value as a prefix, so that Content-Type: multipart/form-data; boundary=... is expressible. An empty prefix degenerates to header-present."
+              "minLength": 1,
+              "description": "Matched against the header value as a prefix, so that Content-Type: multipart/form-data; boundary=... is expressible. Must be non-empty: use HeaderPresent to test for the header alone."
             }
           }
-        }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "header"],
+          "properties": {
+            "kind": { "const": "HeaderPresent" },
+            "header": { "type": "string", "pattern": "^[a-z0-9-]+$" },
+            "negated": {
+              "type": "boolean",
+              "default": false,
+              "description": "When true the predicate matches only if the header is absent."
+            }
+          },
+          "description": "Routes on the mere presence of a header, independent of its value. This is how AWS separates operations that share a method and path shape: PutObject vs CopyObject and UploadPart vs UploadPartCopy differ only by x-amz-copy-source being present. Modelling that as HeaderPrefix with an empty prefix conflates two different questions and was rejected."
+          }
       ]
     },
 

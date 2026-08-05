@@ -532,7 +532,7 @@
           "summary": "The documented response syntax uses the same root element name as the older listing operation."
         }
       ],
-      "cases": ["c-listv2-shared-root-name"]
+      "cases": ["c-listv2-0001"]
     },
     {
       "id": "q-order-0014",
@@ -551,7 +551,7 @@
           "summary": "Recorded reference response that fixes the sibling order used by the golden comparison."
         }
       ],
-      "cases": ["c-listv2-element-order-golden"]
+      "cases": ["c-listv2-0002"]
     },
     {
       "id": "q-encoding-0015",
@@ -570,7 +570,7 @@
           "summary": "Recorded response for a key containing characters that are illegal in XML, showing which members are encoded."
         }
       ],
-      "cases": ["c-listv2-encoding-url-members", "c-listv2-encoding-url-echoed"]
+      "cases": ["c-listv2-0003", "c-listv2-0004"]
     },
     {
       "id": "q-empty-0016",
@@ -584,7 +584,7 @@
           "summary": "Recorded response showing an empty prefix element present and no delimiter element at all."
         }
       ],
-      "cases": ["c-listv2-empty-prefix-emitted", "c-listv2-delimiter-omitted"]
+      "cases": ["c-listv2-0005", "c-listv2-0006"]
     },
     {
       "id": "q-owner-0017",
@@ -598,7 +598,7 @@
           "summary": "States that owner information is returned only when the fetch owner parameter is set."
         }
       ],
-      "cases": ["c-listv2-owner-only-when-fetched"]
+      "cases": ["c-listv2-0007"]
     },
     {
       "id": "q-keycount-0018",
@@ -612,7 +612,7 @@
           "summary": "Defines the count as the number of keys returned by this request, which is at most the requested maximum."
         }
       ],
-      "cases": ["c-listv2-keycount-counts-common-prefixes"]
+      "cases": ["c-listv2-0008"]
     },
     {
       "id": "q-flat-0019",
@@ -626,7 +626,7 @@
           "summary": "Defines the flattened list serialization that removes the wrapper element around repeated members."
         }
       ],
-      "cases": ["c-listv2-contents-flattened"]
+      "cases": ["c-listv2-0009"]
     },
     {
       "id": "q-etag-0020",
@@ -640,7 +640,7 @@
           "summary": "Upstream applied one quoting rule everywhere, which is wrong for one of the two body contexts."
         }
       ],
-      "cases": ["c-etag-xml-quoted-listing"]
+      "cases": ["c-etag-0011"]
     },
     {
       "id": "q-token-0021",
@@ -654,7 +654,7 @@
           "summary": "Describes the continuation token as an opaque value obtained from a previous response."
         }
       ],
-      "cases": ["c-listv2-token-opaque-roundtrip"]
+      "cases": ["c-listv2-0010"]
     },
     {
       "id": "q-storageclass-0022",
@@ -673,7 +673,7 @@
           "summary": "States that the storage class response header is returned for every object except those in the default class."
         }
       ],
-      "cases": ["c-storageclass-xml-always-emitted", "c-storageclass-header-omitted-for-default"]
+      "cases": ["c-storageclass-0001", "c-storageclass-0002"]
     }
   ],
   "ext_points": []

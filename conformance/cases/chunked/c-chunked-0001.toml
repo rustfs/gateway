@@ -25,6 +25,9 @@ operation = "PutObject"
 tags = ["streaming", "chunked", "trailer", "timing", "security"]
 timeout_ms = 15000
 quirks = ["q-chunk-0007"]
+# Scoped to HTTP/1.1: half-closing the write side is a transport-level act here, whereas over h2 the
+# equivalent is an END_STREAM or RST_STREAM frame and belongs in a sibling case driven by h2_frames.
+applies_to = { http_versions = ["http/1.1"], tls = "any" }
 
 [[case.evidence]]
 url = "https://github.com/s3s-project/s3s/issues/350"

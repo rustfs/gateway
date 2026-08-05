@@ -124,13 +124,15 @@ match word for word.
 | `docs/adr/**` | Accepted architecture decisions. Adding a new ADR is unrestricted; **modifying or deleting an existing ADR** is not |
 | `rust-toolchain.toml`, `rustfmt.toml` | Repository-wide toolchain and formatting contract |
 | `docs/msrv.md` and every `rust-version` in `Cargo.toml` | The MSRV promise made to downstream users |
+| `spec/ir.schema.json` | The frozen codegen IR. Every generated artifact is shaped by it; a change invalidates the samples and re-opens decisions P2–P10 already built on |
+| `conformance/case.schema.json` | The frozen case format. Widening it late silently weakens every case already written against the narrower form |
 
 **Pending — add the row the moment the path first exists, in the PR that creates it:**
 
 | Path | Contract it encodes |
 |---|---|
 | `model/s3.json` | The pinned AWS Smithy model. Re-pinning changes every generated artifact |
-| `model/overlays/**` | The only sanctioned hand-written protocol exception source |
+| `model/overlays/**` | The only sanctioned hand-written protocol exception source. Quirks are hand-written, so they live here and **never** under the generated `spec/` tree |
 | The error-code → HTTP status mapping table | Externally observable API surface; clients branch on it |
 | The public API snapshot | Semver contract for `s3gate` and every `s3gate-*` crate |
 | Deletion of anything under `conformance/cases/**` | A deleted case is a silently dropped guarantee. Adding cases is unrestricted |

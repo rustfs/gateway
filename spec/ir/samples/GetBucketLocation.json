@@ -145,7 +145,7 @@
           "summary": "Recorded AWS response used as the byte level reference for the unwrapped body."
         }
       ],
-      "cases": ["c-getbucketlocation-unwrapped-root"]
+      "cases": ["c-location-0001"]
     },
     {
       "id": "q-empty-0002",
@@ -164,7 +164,7 @@
           "summary": "Recorded AWS response for a us-east-1 bucket showing the self closing element rather than an absent one."
         }
       ],
-      "cases": ["c-getbucketlocation-us-east-1-empty"]
+      "cases": ["c-location-0002"]
     },
     {
       "id": "q-region-0003",
@@ -178,7 +178,7 @@
           "summary": "The enumerated constraint values include the historical EU alias alongside the modern region identifiers."
         }
       ],
-      "cases": ["c-getbucketlocation-eu-alias"]
+      "cases": ["c-location-0003"]
     }
   ],
   "ext_points": []
