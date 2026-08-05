@@ -1,0 +1,85 @@
+# c-cond-0001 — If-None-Match: * against an object that already exists.
+#
+# Schema dimensions exercised: single-exchange form, fixture preconditions, byte-exact error
+# document with redaction, header absence as proof that the write did not happen.
+
+[case]
+id = "c-cond-0001"
+schema_version = 1
+title = "Conditional write with If-None-Match: * on an existing key must fail with 412"
+rationale = """
+If-None-Match: * is the wire form of compare-and-create, and clients use it as a mutual-exclusion \
+primitive: whoever gets the 200 owns the key. Two independent ways of getting this wrong have been \
+observed in practice — treating the literal asterisk as an opaque tag and failing to parse it, and \
+evaluating the precondition after the object has already been overwritten. The first shows up as the \
+wrong status code, the second only shows up as a missing ETag on the failure response and an intact \
+object afterwards, so both are asserted here."""
+polarity = "negative"
+operation = "PutObject"
+tags = ["conditional", "preconditions", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-cond-0001"]
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/issues/241"
+summary = "Tracking report for S3 conditional writes, including If-None-Match on PutObject."
+kind = "s3s-issue"
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/issues/432"
+summary = "Typing ETag broke the wildcard form, so If-None-Match with an asterisk regressed to a 400."
+kind = "s3s-issue"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/conditional-requests.html"
+summary = "AWS documents If-None-Match with an asterisk as a conditional write that fails with 412 when the key exists."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9110#section-13.1.2"
+summary = "An If-None-Match of asterisk fails the precondition whenever the target representation exists."
+kind = "rfc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-cond"
+
+[[setup.objects]]
+bucket = "conf-cond"
+key = "cas"
+content_type = "text/plain"
+body = { utf8 = "original" }
+
+[request]
+method = "PUT"
+target = "/conf-cond/cas"
+headers = { "if-none-match" = "*", "content-type" = "text/plain" }
+body = { utf8 = "overwritten" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 412
+# No ETag and no version id: the write must not have been applied before the condition was checked.
+headers_absent = ["etag", "x-amz-version-id"]
+connection_after = "open"
+
+[expect.error]
+code = "PreconditionFailed"
+request_id_present = true
+
+[expect.headers_present]
+"content-type" = "application/xml"
+
+[expect.timing]
+terminate_within_ms = 5000
+
+# Note the absence of an xmlns on <Error>: S3 error documents are unnamespaced, and only a
+# byte-level assertion notices when a serialiser starts adding one.
+[expect.body]
+redact = ["RequestId", "HostId"]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>PreconditionFailed</Code><Message>At least one of the pre-conditions you specified did not hold</Message><Condition>If-None-Match</Condition><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''

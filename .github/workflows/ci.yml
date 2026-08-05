@@ -1,0 +1,91 @@
+name: CI
+
+# ---------------------------------------------------------------------------
+# CI TIME BUDGET — HARD CONSTRAINT
+#
+#   Total PR gate wall-clock time MUST stay <= 10 minutes.
+#
+# Why this matters more than any individual job: the concrete mechanism by
+# which build infrastructure kills a project is that the PR gate gets slow,
+# so humans and agents start batching commits and skipping local verification,
+# at which point the gate stops meaning anything.
+#
+# Rules for adding a job:
+#   1. Every PR that adds a CI job MUST report its impact on total wall-clock
+#      time in the PR description (measured, not estimated).
+#   2. If the total exceeds 10 minutes, the slowest job moves to a merge queue
+#      or a cron schedule. It does NOT stay in the PR gate.
+#   3. Jobs that are inherently slow (client matrices, Ceph s3-tests, mint,
+#      full fuzz runs) never belong in the PR gate at all.
+#   4. No "observation mode" jobs. A job that is allowed to fail without
+#      blocking the merge is not a gate: either a job blocks merge, or it is
+#      not added at all.
+# ---------------------------------------------------------------------------
+#
+# DEFERRED JOBS — do NOT add these here "while you are in the file".
+# Each line records where the job belongs and why it is not here yet.
+#
+#   doc (RUSTDOCFLAGS=-D warnings)  -> once real rustdoc exists; zero value today
+#   msrv (pinned toolchain build)   -> Week-1; skeleton has no deps to break MSRV
+#   advisories (cargo-deny)         -> Week-1, together with deny.toml
+#   protected-files                 -> task P0-09 (appends a job to THIS file)
+#   arch checks                     -> task P0-07
+#   SemVer / cargo public-api       -> before the first release; no baseline yet
+#   role-verdict / ct-eq checks     -> task P0-10
+#   3-OS matrix                     -> once platform-specific code exists
+#   cargo hack --feature-powerset   -> once the workspace has >= 5 features
+#   fuzz                            -> alongside the s3gate-sig / s3gate-http parsers
+#   client matrix / s3-tests / mint -> P8 at the earliest, and on cron, never on PRs
+#
+# The three jobs below mirror, verbatim, the first three commands of the
+# four-command gate in AGENTS.md. (The fourth, `cargo xtask verify`, is a
+# per-crate fast loop for local use and is covered by the three below.)
+# If they ever disagree, fix this file to match AGENTS.md — AGENTS.md is the
+# source of truth.
+#
+# The toolchain is pinned by rust-toolchain.toml. Do NOT pass `with: toolchain:`
+# here: dtolnay/rust-toolchain reads that file, so CI and local builds cannot
+# drift, and a new rustc release cannot turn every open PR red overnight.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  fmt:
+    name: Format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+      - run: cargo fmt --all --check
+
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - run: cargo test --workspace

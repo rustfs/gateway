@@ -1,0 +1,687 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/rustfs/gateway/blob/main/conformance/case.schema.json",
+  "title": "s3gate conformance case",
+  "description": "Frozen schema (schema_version 1) for a single s3gate conformance case. Cases are authored as TOML; this JSON Schema validates the parsed TOML document, so the same contract governs the TOML files on disk and any JSON tooling built on top of them. See conformance/README.md for the freeze policy and the change procedure.",
+
+  "x-schema-version": 1,
+  "x-frozen-on": "2026-08-05",
+  "x-required-dimensions": {
+    "chunk_arrival_timing": "#/$defs/dataChunk/properties/delay_ms",
+    "abnormal_termination": "#/$defs/controlChunk/properties/action",
+    "timeout_and_cancellation": "#/$defs/expect/properties/timing",
+    "connection_reuse": "#/properties/connection/properties/reuse",
+    "backpressure": "#/properties/connection/properties/read_window_bytes",
+    "clock_injection": "#/properties/clock",
+    "tls_and_h2_framing": "#/$defs/requestSpec/properties/h2_frames",
+    "non_status_expectations": "#/$defs/expect/properties/kind",
+    "byte_exact_body": "#/$defs/bodyExpectation/properties/exact_utf8",
+    "header_set_assertions": "#/$defs/expect/properties/headers_exact",
+    "rationale_and_evidence": "#/$defs/caseMeta/properties/evidence",
+    "quirk_backreference": "#/$defs/caseMeta/properties/quirks",
+    "polarity": "#/$defs/caseMeta/properties/polarity"
+  },
+
+  "type": "object",
+  "required": ["case"],
+  "additionalProperties": false,
+  "properties": {
+    "case": { "$ref": "#/$defs/caseMeta" },
+    "setup": { "$ref": "#/$defs/setup" },
+    "clock": { "$ref": "#/$defs/clock" },
+    "connection": { "$ref": "#/$defs/connection" },
+    "request": { "$ref": "#/$defs/requestSpec" },
+    "expect": { "$ref": "#/$defs/expect" },
+    "exchanges": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/exchange" },
+      "description": "Multi-request form. Use together with connection.reuse to pin keep-alive behaviour, or to capture a value (upload id, continuation token) from one response and interpolate it into the next request."
+    }
+  },
+
+  "oneOf": [
+    {
+      "title": "single-exchange form",
+      "required": ["request", "expect"],
+      "properties": { "exchanges": false }
+    },
+    {
+      "title": "multi-exchange form",
+      "required": ["exchanges"],
+      "properties": { "request": false, "expect": false }
+    }
+  ],
+
+  "$defs": {
+    "caseMeta": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "schema_version", "rationale", "evidence", "quirks", "polarity"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^c-[a-z0-9]+(-[a-z0-9]+)*-[0-9]{4}$",
+          "description": "c-<domain>-<NNNN>. The domain segment must equal the directory the file lives in, and the file must be named <id>.toml."
+        },
+        "schema_version": {
+          "const": 1,
+          "description": "Frozen at 1. A runner MUST reject a case whose schema_version it does not know, with an explicit 'update the runner' error - never by ignoring unknown fields."
+        },
+        "title": { "type": "string", "minLength": 4, "maxLength": 120 },
+        "rationale": {
+          "type": "string",
+          "minLength": 40,
+          "description": "MANDATORY. Why this case exists, in a form that lets a future maintainer decide whether it may be deleted. A case without a rationale is unmaintainable and the runner must refuse to load it."
+        },
+        "evidence": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/evidence" },
+          "description": "MANDATORY. Where the asserted behaviour was observed. Compliance: URL plus an original one-line summary only. Never paste upstream issue or PR prose."
+        },
+        "quirks": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^q-[a-z0-9]+(-[a-z0-9]+)*-[0-9]{4}$"
+          },
+          "description": "Quirk ids from spec/quirks/*.toml that this case exercises. The mutation gate builds its quirk -> case coverage matrix from this field; a quirk no case references fails CI. May be empty only while spec/quirks/ does not yet contain the corresponding entry."
+        },
+        "polarity": {
+          "enum": ["positive", "negative"],
+          "description": "positive = asserts required behaviour on a well-formed input. negative = asserts refusal, error shape, or safe termination on a hostile or malformed input. The suite requires negative >= positive."
+        },
+        "operation": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Za-z0-9]*$",
+          "description": "AWS operation name, for coverage matrices. Omit for cases below the operation layer (framing, signing, routing)."
+        },
+        "tags": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+          "description": "Free-form by design: the vocabulary lives in conformance/README.md and a lint, not in this schema, so adding a tag is not a schema change. 'slow' is reserved and moves a case out of the PR gate."
+        },
+        "applies_to": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Applicability gates. The s3gate assembly path (--transport hyper|conn) is deliberately NOT expressible here: every case runs on every assembly path and the two runs must agree.",
+          "properties": {
+            "http_versions": {
+              "type": "array",
+              "minItems": 1,
+              "items": { "enum": ["http/1.1", "h2"] },
+              "description": "Defaults to both. Narrow it when the case is about framing that only one version has."
+            },
+            "tls": {
+              "enum": ["required", "forbidden", "any"],
+              "description": "required: only meaningful over TLS (SSE-C header gating, session resumption). forbidden: only meaningful in cleartext (plaintext downgrade, h2c prior knowledge). Default any."
+            },
+            "profiles": {
+              "type": "array",
+              "minItems": 1,
+              "items": { "enum": ["aws", "minio", "strict"] },
+              "description": "Defaults to all. Use when implementations legitimately diverge and the divergence is documented in the rationale."
+            }
+          }
+        },
+        "timeout_ms": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Whole-case wall-clock budget. Exceeding it is a case failure of kind 'hang', not an environment error."
+        }
+      }
+    },
+
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["url", "summary"],
+      "properties": {
+        "url": {
+          "type": "string",
+          "pattern": "^(https://|urn:)",
+          "description": "Stable link to the source of the behavioural fact."
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 12,
+          "maxLength": 200,
+          "description": "One original sentence, written by the case author. The 200-character ceiling is a compliance control, not a style preference: it makes pasting upstream prose structurally impossible."
+        },
+        "kind": {
+          "enum": ["s3s-issue", "s3s-pr", "aws-doc", "rfc", "smithy-model", "minio", "observed", "other"]
+        }
+      }
+    },
+
+    "setup": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Preconditions established before the case runs. Setup traffic is NOT under test: the runner may use normalised, correctly signed requests for it. Anything the case actually asserts must be in request/exchanges.",
+      "properties": {
+        "buckets": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name"],
+            "properties": {
+              "name": { "type": "string", "minLength": 3, "maxLength": 63 },
+              "region": { "type": "string" },
+              "versioning": { "enum": ["disabled", "enabled", "suspended"] },
+              "object_lock": { "type": "boolean" },
+              "absent": { "type": "boolean", "description": "Assert the bucket does not exist; delete it if it does." }
+            }
+          }
+        },
+        "objects": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["bucket", "key"],
+            "properties": {
+              "bucket": { "type": "string" },
+              "key": { "type": "string" },
+              "body": { "$ref": "#/$defs/payload" },
+              "content_type": { "type": "string" },
+              "storage_class": { "type": "string" },
+              "metadata": { "type": "object", "additionalProperties": { "type": "string" } },
+              "absent": { "type": "boolean", "description": "Assert the key does not exist. Required for If-None-Match style cases whose meaning depends on absence." }
+            }
+          }
+        },
+        "multipart_uploads": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["bucket", "key"],
+            "properties": {
+              "bucket": { "type": "string" },
+              "key": { "type": "string" },
+              "capture_upload_id_as": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_]*$",
+                "description": "Bind the created upload id to a capture name so requests can interpolate ${capture.<name>}."
+              },
+              "parts": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["part_number"],
+                  "properties": {
+                    "part_number": { "type": "integer", "minimum": 1, "maximum": 10000 },
+                    "body": { "$ref": "#/$defs/payload" },
+                    "capture_etag_as": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "cleanup": { "enum": ["auto", "none"] }
+      }
+    },
+
+    "clock": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Clock injection. Needed for clock-skew and presigned-expiry cases - and also for every byte-exact body assertion whose response embeds a timestamp (LastModified, Expires).",
+      "properties": {
+        "fixed": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?Z$",
+          "description": "RFC3339 UTC, quoted. MUST be a quoted TOML string, not a bare TOML datetime, so that the on-disk case and its JSON projection are the same value. This is the wall clock the system under test observes."
+        },
+        "skew_ms": {
+          "type": "integer",
+          "description": "Offset applied to the clock the system under test observes, relative to the runner. May be negative."
+        },
+        "request_time": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?Z$",
+          "description": "The instant the client claims: what goes into x-amz-date and the credential scope. Distinct from 'fixed' on purpose - a skew case pins both ends independently."
+        },
+        "presign_expires_s": { "type": "integer", "minimum": 0 },
+        "advance_ms_between_exchanges": { "type": "integer", "minimum": 0 }
+      }
+    },
+
+    "connection": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "reuse": {
+          "type": "boolean",
+          "description": "true: every exchange runs on one connection and the runner fails the case if the connection is torn down between exchanges. false: a fresh connection per exchange."
+        },
+        "pipeline": { "type": "boolean", "description": "Write the next request before reading the previous response." },
+        "read_window_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Backpressure knob: the runner stops reading once this many unread response bytes are buffered, so a server that ignores flow control is observable."
+        },
+        "idle_timeout_ms": { "type": "integer", "minimum": 0 },
+        "tls": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "alpn": { "type": "array", "items": { "type": "string" } },
+            "sni": { "type": "string" },
+            "min_version": { "enum": ["1.2", "1.3"] },
+            "close_notify": {
+              "type": "boolean",
+              "description": "false tears the TCP connection down without a TLS close_notify - the truncation attack shape. A correct server must not treat a truncated stream as a complete body."
+            }
+          }
+        }
+      }
+    },
+
+    "requestSpec": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "One request. Either a structured form (method + target + headers) or a raw head. Every string field may contain ${capture.<name>} references; interpolation happens BEFORE signing, so an interpolated value is covered by the signature.",
+      "properties": {
+        "method": { "type": "string", "pattern": "^[!-~]+$" },
+        "target": {
+          "type": "string",
+          "description": "Raw request-target, sent verbatim. Deliberately not a parsed URL: encoding form is frequently the thing under test."
+        },
+        "http_version": { "enum": ["http/1.1", "h2"] },
+        "host": { "type": "string", "description": "Overrides Host / :authority, including malformed or absent values." },
+        "headers": { "$ref": "#/$defs/headerMap" },
+        "raw_headers": {
+          "type": "array",
+          "description": "Ordered, duplicate-preserving header list as [name, value] pairs. Use when order or duplication is the subject of the case.",
+          "items": {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 2,
+            "items": { "type": "string" }
+          }
+        },
+        "raw_head_utf8": { "type": "string", "description": "Entire request head verbatim, including the request line and CRLFs. Escape hatch for malformed framing and request smuggling vectors." },
+        "raw_head_hex": { "type": "string", "pattern": "^([0-9a-fA-F]{2})*$" },
+        "body": { "$ref": "#/$defs/payload" },
+        "chunks": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/chunk" },
+          "description": "Body delivered as a timed sequence. Mutually exclusive with 'body'. Truncation is expressed compositionally - declare a length in headers, send fewer bytes, then a control chunk - rather than as its own action."
+        },
+        "h2_frames": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/h2Frame" },
+          "description": "Frame-level scripting. Only valid when case.applies_to.http_versions is exactly [\"h2\"]."
+        },
+        "sign": { "$ref": "#/$defs/signSpec" }
+      },
+      "oneOf": [
+        {
+          "title": "structured head",
+          "required": ["method", "target"],
+          "properties": { "raw_head_utf8": false, "raw_head_hex": false }
+        },
+        {
+          "title": "raw head (utf8)",
+          "required": ["raw_head_utf8"],
+          "properties": { "method": false, "target": false, "headers": false, "raw_headers": false, "raw_head_hex": false }
+        },
+        {
+          "title": "raw head (hex)",
+          "required": ["raw_head_hex"],
+          "properties": { "method": false, "target": false, "headers": false, "raw_headers": false, "raw_head_utf8": false }
+        }
+      ],
+      "allOf": [
+        { "not": { "required": ["body", "chunks"] } }
+      ]
+    },
+
+    "signSpec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode"],
+      "description": "How the runner signs. Signing is computed by the runner, not hand-written into the case, so that a case stays readable and does not rot when a fixture changes. Negative signature cases sign correctly and then tamper with exactly one canonical component.",
+      "properties": {
+        "mode": {
+          "enum": [
+            "sigv4_header",
+            "sigv4_streaming",
+            "sigv4_streaming_trailer",
+            "sigv4_unsigned_payload",
+            "presigned_v4",
+            "sigv2_header",
+            "presigned_v2",
+            "post_policy",
+            "anonymous",
+            "none"
+          ],
+          "description": "'anonymous' sends no credential at all. 'none' means the case supplies its own Authorization bytes verbatim and the runner must not touch them."
+        },
+        "service": { "enum": ["s3", "sts"] },
+        "region": { "type": "string" },
+        "credential": { "enum": ["valid", "unknown_access_key", "expired_session", "wrong_secret"] },
+        "signed_headers": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/headerName" },
+          "description": "Explicit SignedHeaders list. Use to under-sign deliberately (the complement-of-a-denylist bypass shape)."
+        },
+        "payload_hash": {
+          "enum": ["computed", "unsigned", "streaming", "streaming_trailer", "base64", "empty", "literal"]
+        },
+        "payload_hash_literal": { "type": "string" },
+        "expires_s": { "type": "integer", "minimum": 0 },
+        "tamper": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["component"],
+          "description": "Applied AFTER a correct signature is computed. Exactly one canonical component changes, so a failure names the component rather than 'the signature was wrong somewhere'.",
+          "properties": {
+            "component": {
+              "enum": [
+                "signature",
+                "access_key",
+                "scope_date",
+                "scope_region",
+                "scope_service",
+                "signed_headers_list",
+                "canonical_query",
+                "canonical_path",
+                "canonical_header_value",
+                "payload_hash",
+                "date_header"
+              ]
+            },
+            "target": { "type": "string", "description": "Which query parameter or header name the component refers to." },
+            "new_value": { "type": "string" },
+            "flip_byte_at": { "type": "integer", "minimum": 0 }
+          }
+        }
+      }
+    },
+
+    "chunk": {
+      "oneOf": [
+        { "$ref": "#/$defs/dataChunk" },
+        { "$ref": "#/$defs/controlChunk" }
+      ]
+    },
+
+    "dataChunk": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "One unit of body data. 'utf8'/'hex'/'file' carry the LOGICAL payload: when sign.mode is a streaming mode the runner adds aws-chunked framing and per-chunk signatures. 'raw_utf8'/'raw_hex' bypass framing entirely and go on the wire byte for byte.",
+      "properties": {
+        "utf8": { "type": "string" },
+        "hex": { "type": "string", "pattern": "^([0-9a-fA-F]{2})*$" },
+        "file": { "$ref": "#/$defs/relPath" },
+        "raw_utf8": { "type": "string" },
+        "raw_hex": { "type": "string", "pattern": "^([0-9a-fA-F]{2})*$" },
+        "repeat": { "type": "integer", "minimum": 1 },
+        "delay_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Wall-clock pause before this chunk is written. This is the field that makes arrival timing - and therefore chunk state machines, backpressure and timeouts - expressible at all."
+        },
+        "flush": { "type": "boolean" }
+      },
+      "oneOf": [
+        { "required": ["utf8"], "properties": { "hex": false, "file": false, "raw_utf8": false, "raw_hex": false } },
+        { "required": ["hex"], "properties": { "utf8": false, "file": false, "raw_utf8": false, "raw_hex": false } },
+        { "required": ["file"], "properties": { "utf8": false, "hex": false, "raw_utf8": false, "raw_hex": false } },
+        { "required": ["raw_utf8"], "properties": { "utf8": false, "hex": false, "file": false, "raw_hex": false } },
+        { "required": ["raw_hex"], "properties": { "utf8": false, "hex": false, "file": false, "raw_utf8": false } }
+      ]
+    },
+
+    "controlChunk": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["action"],
+      "properties": {
+        "action": {
+          "enum": ["close", "rst", "half_close", "flush", "stall", "stop_reading", "resume_reading", "tls_close_without_notify"],
+          "description": "close: full close, the outcome becomes unobservable to the client - use only when 'no 200 was received' is the whole assertion. half_close: shutdown(WR), the server can still answer, which is what makes an abrupt-termination case assertable. rst: TCP reset. stall: hold the connection open and send nothing. stop_reading/resume_reading: induce and release backpressure."
+        },
+        "delay_ms": { "type": "integer", "minimum": 0 },
+        "duration_ms": { "type": "integer", "minimum": 0, "description": "For 'stall' and 'stop_reading'." }
+      }
+    },
+
+    "h2Frame": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type"],
+      "properties": {
+        "type": { "enum": ["headers", "continuation", "data", "rst_stream", "window_update", "settings", "priority", "goaway", "raw"] },
+        "stream_id": { "type": "integer", "minimum": 0 },
+        "flags": { "type": "array", "items": { "type": "string" } },
+        "payload_hex": { "type": "string", "pattern": "^([0-9a-fA-F]{2})*$" },
+        "error_code": { "type": "string" },
+        "increment": { "type": "integer" },
+        "delay_ms": { "type": "integer", "minimum": 0 }
+      }
+    },
+
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "A byte string. Exactly one source.",
+      "properties": {
+        "utf8": { "type": "string" },
+        "hex": { "type": "string", "pattern": "^([0-9a-fA-F]{2})*$" },
+        "file": { "$ref": "#/$defs/relPath" },
+        "size": { "type": "integer", "minimum": 0, "description": "Generated payload of this length." },
+        "fill": { "type": "string", "description": "Byte pattern repeated to reach 'size'. Defaults to a deterministic pattern." }
+      },
+      "oneOf": [
+        { "required": ["utf8"], "properties": { "hex": false, "file": false, "size": false } },
+        { "required": ["hex"], "properties": { "utf8": false, "file": false, "size": false } },
+        { "required": ["file"], "properties": { "utf8": false, "hex": false, "size": false } },
+        { "required": ["size"], "properties": { "utf8": false, "hex": false, "file": false } }
+      ]
+    },
+
+    "relPath": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-zA-Z0-9._/-]*$",
+      "not": { "pattern": "\\.\\." },
+      "description": "Path relative to conformance/. No parent traversal."
+    },
+
+    "headerName": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9!#$%&'*+.^_`|~-]+$"
+    },
+
+    "headerMap": {
+      "type": "object",
+      "description": "Header name -> value. A value may be a list to express a repeated header. In expectations the value \"*\" asserts presence with any value.",
+      "propertyNames": { "$ref": "#/$defs/headerName" },
+      "additionalProperties": {
+        "oneOf": [
+          { "type": "string" },
+          { "type": "array", "items": { "type": "string" } }
+        ]
+      }
+    },
+
+    "exchange": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["request", "expect"],
+      "properties": {
+        "name": { "type": "string", "maxLength": 80 },
+        "delay_ms": { "type": "integer", "minimum": 0 },
+        "request": { "$ref": "#/$defs/requestSpec" },
+        "expect": { "$ref": "#/$defs/expect" }
+      }
+    },
+
+    "expect": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind"],
+      "properties": {
+        "kind": {
+          "enum": ["response", "stream_error", "event_stream", "hang", "connection_reset"],
+          "description": "response: a complete response, success or error, head and body intact. stream_error: the operation failed AFTER the response head was committed - either an error document inside a success status, or an abrupt end of the body. event_stream: a framed event sequence. hang: no complete response within case.timeout_ms; only ever asserted to document a known defect of a foreign implementation, never as required behaviour. connection_reset: the peer reset without a response."
+        },
+        "stream_termination": {
+          "enum": ["error_document", "abrupt_close", "reset", "trailer_error"],
+          "description": "How a stream_error ended. Distinguishes 'a 200 that carries an <Error>' from 'the body just stopped', which are different bugs with the same symptom."
+        },
+        "status": { "type": "integer", "minimum": 100, "maximum": 599 },
+        "http_version": { "enum": ["http/1.1", "h2"] },
+        "error": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "code": { "type": "string", "description": "S3 error code, e.g. SignatureDoesNotMatch. Asserted against the <Code> element, not the status alone." },
+            "resource": { "type": "string" },
+            "message_present": { "type": "boolean" },
+            "request_id_present": { "type": "boolean" }
+          }
+        },
+        "headers_present": { "$ref": "#/$defs/headerMap" },
+        "headers_exact": {
+          "$ref": "#/$defs/headerMap",
+          "description": "The complete header set. Any header not listed is a failure. Hop-by-hop headers the runner itself adds are excluded; conformance/README.md lists them."
+        },
+        "headers_absent": { "type": "array", "items": { "$ref": "#/$defs/headerName" } },
+        "header_order": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/headerName" },
+          "description": "Relative order of the listed headers on the wire."
+        },
+        "header_name_bytes_exact": {
+          "type": "boolean",
+          "description": "Compare header names case-sensitively, byte for byte, instead of case-insensitively."
+        },
+        "trailers_present": { "$ref": "#/$defs/headerMap" },
+        "trailers_absent": { "type": "array", "items": { "$ref": "#/$defs/headerName" } },
+        "body": { "$ref": "#/$defs/bodyExpectation" },
+        "body_bytes_before_error": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "RESPONSE body bytes received before the stream_error marker. Required when kind is stream_error. Not to be confused with request_progress.body_bytes_sent_at_response, which is the client-side counterpart."
+        },
+        "events": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["type"],
+            "properties": {
+              "type": { "type": "string" },
+              "headers": { "$ref": "#/$defs/headerMap" },
+              "payload": { "$ref": "#/$defs/bodyExpectation" },
+              "min_count": { "type": "integer", "minimum": 0 },
+              "max_count": { "type": "integer", "minimum": 0 }
+            }
+          }
+        },
+        "timing": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Time-domain assertions. terminate_within_ms is the assertion that catches the client-hang family, which no status-code assertion can see.",
+          "properties": {
+            "terminate_within_ms": { "type": "integer", "minimum": 1 },
+            "no_response_before_ms": { "type": "integer", "minimum": 0 },
+            "ttfb_max_ms": { "type": "integer", "minimum": 0 },
+            "ttfb_min_ms": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "request_progress": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "What the client had managed to send when the response head arrived. This is how 'the server rejected before consuming the body' becomes assertable.",
+          "properties": {
+            "body_bytes_sent_at_response": { "type": "integer", "minimum": 0 },
+            "body_fully_sent": { "type": "boolean" }
+          }
+        },
+        "connection_after": {
+          "enum": ["open", "closed", "reset", "half_closed"],
+          "description": "State of the connection once the exchange finished. 'open' asserts the connection stayed reusable."
+        },
+        "capture": {
+          "type": "object",
+          "description": "Bind values out of this response for later exchanges to interpolate as ${capture.<name>}. Necessary for anything with a server-minted opaque value: upload ids, continuation tokens, version ids.",
+          "propertyNames": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "xml_text": { "type": "string", "description": "Text of the first element with this name." },
+              "header": { "$ref": "#/$defs/headerName" }
+            },
+            "oneOf": [
+              { "required": ["xml_text"], "properties": { "header": false } },
+              { "required": ["header"], "properties": { "xml_text": false } }
+            ]
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "kind": { "const": "response" } }, "required": ["kind"] },
+          "then": { "required": ["status"] }
+        },
+        {
+          "if": { "properties": { "kind": { "const": "stream_error" } }, "required": ["kind"] },
+          "then": { "required": ["body_bytes_before_error", "stream_termination"] }
+        },
+        {
+          "if": { "properties": { "kind": { "const": "event_stream" } }, "required": ["kind"] },
+          "then": { "required": ["events"] }
+        }
+      ]
+    },
+
+    "bodyExpectation": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "description": "Body assertions. Byte-exactness is the first-class citizen: exact_utf8 / exact_hex / golden compare the wire bytes. The 'xml' block is an additive diagnostic aid, never a substitute - a case that only asserts parsed structure cannot catch an element-order, xmlns, or empty-element regression.",
+      "properties": {
+        "exact_utf8": { "type": "string" },
+        "exact_hex": { "type": "string", "pattern": "^([0-9a-fA-F]{2})*$" },
+        "golden": { "$ref": "#/$defs/relPath" },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "size": { "type": "integer", "minimum": 0 },
+        "contains_utf8": { "type": "array", "items": { "type": "string" } },
+        "not_contains_utf8": { "type": "array", "items": { "type": "string" } },
+        "redact": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "XML element names whose text is replaced by __REDACTED__ in both the observed body and the expectation before comparison. The element's presence and position are still asserted byte for byte. Without this, no response containing a server-minted opaque value could ever be pinned to bytes."
+        },
+        "xml": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "root": { "type": "string" },
+            "xmlns": { "type": "string" },
+            "declaration": { "type": "boolean" },
+            "element_order": { "type": "array", "items": { "type": "string" } },
+            "empty_elements": { "enum": ["self_closing", "paired", "absent"] }
+          }
+        }
+      },
+      "allOf": [
+        { "not": { "required": ["exact_utf8", "exact_hex"] } },
+        { "not": { "required": ["exact_utf8", "golden"] } },
+        { "not": { "required": ["exact_hex", "golden"] } }
+      ]
+    }
+  }
+}

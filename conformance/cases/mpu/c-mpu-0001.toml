@@ -1,0 +1,91 @@
+# c-mpu-0001 — a failure that arrives inside a 200 response.
+#
+# Schema dimensions exercised: expect.kind = "stream_error" with stream_termination and
+# body_bytes_before_error, multipart fixtures, capture of a server-minted upload id.
+
+[case]
+id = "c-mpu-0001"
+schema_version = 1
+title = "CompleteMultipartUpload failure is delivered as an Error document inside a 200 response"
+rationale = """
+Completing a multipart upload can take long enough that S3 commits the response head before it knows \
+the outcome, so a failure is delivered as an <Error> document under a 200 status. Any implementation \
+or test that decides success from the status line alone reports this as a successful upload, and the \
+client goes on to read an object that does not exist. This is the reason the schema has a response \
+kind that is neither a plain response nor a transport failure: the status code and the outcome are \
+genuinely different facts here, and body_bytes_before_error pins how much of the body had already \
+been committed when the outcome became known."""
+polarity = "negative"
+operation = "CompleteMultipartUpload"
+tags = ["multipart", "error-shape", "streaming", "wire-bytes"]
+timeout_ms = 20000
+quirks = ["q-mpu-0002"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CompleteMultipartUpload.html"
+summary = "AWS states the request can return a 200 whose body carries an error, and that clients must inspect the body."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/issues/550"
+summary = "Multipart completion produced a whole-object checksum instead of the part-concatenation form."
+kind = "s3s-issue"
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/pull/556"
+summary = "Fix that rejects an empty part list with InvalidPart and derives the ETag from the part digests."
+kind = "s3s-pr"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-mpu"
+
+[[setup.multipart_uploads]]
+bucket = "conf-mpu"
+key = "late-failure"
+capture_upload_id_as = "upload_id"
+
+[[setup.multipart_uploads.parts]]
+part_number = 1
+body = { size = 5242880 }
+capture_etag_as = "part1_etag"
+
+[request]
+method = "POST"
+target = "/conf-mpu/late-failure?uploadId=${capture.upload_id}"
+headers = { "content-type" = "application/xml" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+# A part digest that was never uploaded. The upload id is real, so the request reaches the point
+# where the response head has already been sent.
+[request.body]
+utf8 = '''
+<CompleteMultipartUpload xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Part><PartNumber>1</PartNumber><ETag>&quot;00000000000000000000000000000000&quot;</ETag></Part></CompleteMultipartUpload>'''
+
+[expect]
+kind = "stream_error"
+stream_termination = "error_document"
+status = 200
+connection_after = "open"
+headers_absent = ["etag", "x-amz-version-id"]
+
+# Bytes of the XML declaration and its newline: everything the server had committed before it knew
+# the operation had failed.
+body_bytes_before_error = 39
+
+[expect.error]
+code = "InvalidPart"
+request_id_present = true
+
+[expect.headers_present]
+"content-type" = "application/xml"
+
+[expect.timing]
+terminate_within_ms = 10000
+
+[expect.body]
+redact = ["RequestId", "HostId", "UploadId"]
+contains_utf8 = ["<Code>InvalidPart</Code>"]
+not_contains_utf8 = ["<CompleteMultipartUploadResult"]

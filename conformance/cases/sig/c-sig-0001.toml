@@ -1,0 +1,109 @@
+# c-sig-0001 — one canonical component tampered with after signing.
+#
+# Schema dimensions exercised: sign.tamper (negative signing without hand-written hex),
+# chunk timing used as an instrument rather than as content, request-side progress assertion.
+
+[case]
+id = "c-sig-0001"
+schema_version = 1
+title = "A query parameter altered after signing must be rejected before any body is consumed"
+rationale = """
+The signature must cover the canonical query string, and the rejection must happen before the server \
+reads the payload — otherwise an unauthenticated client can make the server buffer gigabytes by \
+sending a request it was always going to refuse. Both halves are asserted: the status and error code \
+prove the signature was actually checked, and body_bytes_sent_at_response = 0 proves the check ran \
+first. The request body here is deliberately paced with delay_ms so that a server which answers only \
+after draining the body is distinguishable from one that answers immediately; without the pacing the \
+body would be gone before the response arrived and the second assertion would be vacuous."""
+polarity = "negative"
+operation = "PutObject"
+tags = ["signature", "sigv4", "security", "dos", "timing"]
+timeout_ms = 15000
+quirks = ["q-sig-0004"]
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/pull/616"
+summary = "Signature comparison was moved to constant time and the skew window was extended to header auth."
+kind = "s3s-pr"
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/pull/430"
+summary = "A malformed signing input produced a 500 instead of the standard 403, which some clients cannot read."
+kind = "s3s-pr"
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/issues/367"
+summary = "Tracking report for unbounded body buffering: request bodies were aggregated with no ceiling."
+kind = "s3s-issue"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/sig-v4-header-based-auth.html"
+summary = "The canonical request includes the canonical query string, so altering a parameter invalidates the signature."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+request_time = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-sig"
+
+[[setup.objects]]
+bucket = "conf-sig"
+key = "tampered"
+absent = true
+
+[request]
+method = "PUT"
+target = "/conf-sig/tampered?x-id=PutObject"
+headers = { "content-type" = "application/octet-stream" }
+
+[request.sign]
+mode = "sigv4_header"
+service = "s3"
+region = "us-east-1"
+credential = "valid"
+payload_hash = "computed"
+
+# Sign correctly, then change exactly one canonical component. A failure therefore names the
+# component instead of reporting that the signature was wrong somewhere.
+[request.sign.tamper]
+component = "canonical_query"
+target = "x-id"
+new_value = "DeleteObject"
+
+# Paced so that the response can be observed to arrive before the payload does.
+[[request.chunks]]
+utf8 = "first-slice-"
+delay_ms = 300
+
+[[request.chunks]]
+utf8 = "second-slice"
+delay_ms = 300
+
+[expect]
+kind = "response"
+status = 403
+connection_after = "closed"
+headers_absent = ["etag", "x-amz-version-id"]
+
+[expect.error]
+code = "SignatureDoesNotMatch"
+request_id_present = true
+
+[expect.headers_present]
+"content-type" = "application/xml"
+
+# The assertion that makes this case worth having: nothing of the body had been written when the
+# refusal came back.
+[expect.request_progress]
+body_bytes_sent_at_response = 0
+body_fully_sent = false
+
+[expect.timing]
+terminate_within_ms = 3000
+
+[expect.body]
+redact = ["RequestId", "HostId", "StringToSign", "CanonicalRequest", "SignatureProvided", "StringToSignBytes"]
+contains_utf8 = ["<Code>SignatureDoesNotMatch</Code>"]
+not_contains_utf8 = ["AWS4-HMAC-SHA256 Credential", "SecretAccessKey"]

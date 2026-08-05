@@ -1,0 +1,355 @@
+# AGENTS.md — s3gate
+
+This repository is developed primarily by AI agents. This is the single rule file: read it end to
+end before your first edit, and you know the rule order, what to run before committing, which files
+need a Breaking Change process, what is forbidden outright, which way dependencies may point, what
+to tick on a PR — and **which files you must never open**.
+
+Governance context lives in `README.md` (scope fence, relationship to s3s), `CONTRIBUTING.md`
+(contribution process), and `SECURITY.md` (disclosure). This file never contradicts them.
+
+## Rule Precedence
+
+Highest wins on conflict:
+
+1. **Absolute Prohibitions** in this file. No exceptions, no "just this once", no task-specific waiver.
+2. Explicit instructions from the user or from the task issue.
+3. The remaining sections of this file.
+4. A crate-scoped `AGENTS.md` (none exists today).
+5. Source comments and rustdoc.
+6. General Rust convention.
+
+**Layering trigger — do not create a scoped AGENTS.md before it fires.** A crate may get its own
+scoped AGENTS.md only when it has **5 or more rules that apply to that crate alone**. The known failure
+mode of layered rule files is that an agent reads the nearest scoped file and never reads the root
+one; with total rules under 400 lines, layering only dilutes and duplicates. The PR that introduces
+the first scoped file must land `scripts/check_agents_no_dup.sh` (sentence-level duplicate
+detection between root and scoped files) in the same PR.
+
+## Language Requirements
+
+Everything that lands in the repository is **English**: source code, identifiers, comments,
+rustdoc, error and log messages, commit messages, PR titles and descriptions, Markdown docs,
+conformance case names, and script output.
+
+Chinese is allowed in two places only: conversation with an AI assistant, and issue bodies and
+comments (the Epic's convention). If you drafted anything in Chinese, translate before committing;
+"it is only a comment" is not an exception.
+
+## Workflow
+
+### Branch and baseline
+
+- Always branch from the **latest `origin/main`**. `git fetch origin` first, every time.
+- Branch name: `<phase>/<issue-id>-<slug>`, e.g. `p2/142-sigv4-streaming`. The issue id in the
+  branch name is what lets any device do `git fetch && git switch p2/142-sigv4-streaming` and
+  continue the same task.
+- One task, one worktree. **Never commit in a shared checkout.**
+- Prefer **stacked PRs** over waiting: if task B depends on unmerged task A, branch B from A and
+  set A as the PR base. Serial waiting is the main throughput killer with parallel agents.
+
+### The four-command gate
+
+Run in this order; all four must pass before you create a commit.
+
+```bash
+cargo fmt --all --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace
+cargo xtask verify --crate <the crate you changed>
+```
+
+Exemption: a change that touches **only** Markdown files unrelated to executable behaviour may skip
+the gate. This does not extend to schemas, generated output, CI config, or scripts.
+
+### Feedback-loop latency
+
+Feedback latency is the first-order metric of an AI-friendly codebase, ahead of naming and directory
+shape. The rule: after changing a crate you must **know exactly one command to run**, and that
+command must go red or green in **≤30 seconds**. `cargo xtask verify --crate <name>` is that
+command. If it exceeds 30 seconds for any crate, that is a bug — open an issue, do not absorb it.
+
+### TDD
+
+Write the failing test first, watch it fail, then implement. Implementing first and back-filling
+tests afterwards is forbidden: a test written against code you just wrote asserts what the code
+does, not what the protocol requires. Negative cases (rejections, malformed input, boundary
+violations) must outnumber positive ones.
+
+### Multi-device and multi-agent collaboration
+
+- **The GitHub issue is the single source of truth.** Progress, decisions, dead ends, and surprises
+  go into issue comments — never into a file in this repository.
+- Before handing off or ending a session, append a **Handoff comment** to the issue in exactly this
+  shape:
+
+  ```markdown
+  ### Handoff
+  - Done: <what is finished and verified>
+  - Not done: <what remains, and why it stopped>
+  - Next command: <the exact command the next agent should run first>
+  - Gotcha: <the trap that cost you time, or "none">
+  ```
+
+- `main` runs the full suite daily. The dominant risk with parallel agents is "every PR was green,
+  the merge is red" — if the daily run breaks, fixing it outranks new work.
+
+### Expert review roles
+
+The full trigger table is appended by task `P0-10`. Until then, two rules already bind:
+
+- **At most 2 expert roles per PR by default.** More reviewers per PR does not find more defects; it
+  costs context and delays the merge.
+- **Only deterministic scripts block CI.** LLM judgement is advisory: it is not reproducible and
+  offers no appeal path, so it must never gate a merge. Anything worth blocking on must first be
+  reduced to a script.
+
+### CI budget
+
+**Total PR gate wall time ≤10 minutes.** This is a hard constraint, not an aspiration. The concrete
+mechanism by which infrastructure kills a project is: the gate gets slow → humans and agents start
+skipping local verification → the gate stops catching anything. A PR that pushes the gate past 10
+minutes must make it faster elsewhere in the same PR.
+
+## Protected Files
+
+Changing any path below requires the **Breaking Change process**: bump the affected version, write
+the migration path into the PR description, and include the literal word `BREAKING` in the PR
+description. Enforced by the `protected-files` CI job (`P0-09`); the job's list and this list must
+match word for word.
+
+| Path | Contract it encodes |
+|---|---|
+| `LICENSE`, `NOTICE` | Legal contract |
+| `docs/adr/**` | Accepted architecture decisions. Adding a new ADR is unrestricted; **modifying or deleting an existing ADR** is not |
+| `rust-toolchain.toml`, `rustfmt.toml` | Repository-wide toolchain and formatting contract |
+| `docs/msrv.md` and every `rust-version` in `Cargo.toml` | The MSRV promise made to downstream users |
+
+**Pending — add the row the moment the path first exists, in the PR that creates it:**
+
+| Path | Contract it encodes |
+|---|---|
+| `model/s3.json` | The pinned AWS Smithy model. Re-pinning changes every generated artifact |
+| `model/overlays/**` | The only sanctioned hand-written protocol exception source |
+| The error-code → HTTP status mapping table | Externally observable API surface; clients branch on it |
+| The public API snapshot | Semver contract for `s3gate` and every `s3gate-*` crate |
+| Deletion of anything under `conformance/cases/**` | A deleted case is a silently dropped guarantee. Adding cases is unrestricted |
+
+## Absolute Prohibitions
+
+No exceptions. If you believe you have found one, stop and ask on the issue.
+
+**Provenance**
+
+- Never copy **code** from s3s into this repository — including its tests, CI workflows, and
+  reporting scripts. Behavioural **facts** recorded in s3s issues and PRs may be used (facts are not
+  copyrightable), but evidence is stored as **a URL plus one sentence you wrote yourself**. Pasting
+  issue prose is forbidden; issue text stays under its author's copyright.
+- Never paste AWS service documentation prose into this repository or into generated output.
+
+**Code**
+
+- Never commit a `.rs` file without the Apache-2.0 license header. Every Rust source file starts
+  with this block verbatim, before the `//!` module docs (see `crates/s3gate-core/src/lib.rs`),
+  enforced by `scripts/check_license_headers.sh` (`P0-09`):
+
+  ```rust
+  // Copyright 2026 RustFS Team
+  //
+  // Licensed under the Apache License, Version 2.0 (the "License");
+  // you may not use this file except in compliance with the License.
+  // You may obtain a copy of the License at
+  //
+  //     http://www.apache.org/licenses/LICENSE-2.0
+  //
+  // Unless required by applicable law or agreed to in writing, software
+  // distributed under the License is distributed on an "AS IS" BASIS,
+  // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  // See the License for the specific language governing permissions and
+  // limitations under the License.
+  ```
+
+  Shell scripts may carry the header but are not required to.
+- No `unsafe`. The workspace sets `unsafe_code = "forbid"`; lifting it anywhere needs an ADR plus an
+  explicit allowance list first.
+- No `.unwrap()` / `.expect()` on anything that can fail from external input (requests, headers,
+  bodies, config, filesystem, network). Test code is exempt; `expect` on a genuinely
+  unrepresentable state is allowed only with a same-line comment stating why it cannot fail.
+- Never write credentials, signatures, SSE-C keys, session tokens, or **expected** signature values
+  into logs or error responses. "Expected vs actual" in an auth error is a signing oracle.
+- Never compare signatures or key material with `==`. Use a constant-time comparison, and do not
+  derive `PartialEq` on such types at all.
+- No `#[non_exhaustive]` on DTO structs (see `P0-08` ADR-0004).
+- No dependency on `inventory` or `linkme` (see `P0-07` ADR-0003). Registration must be explicit and
+  greppable.
+
+**Process**
+
+- Never delete a test, weaken an assertion, or add `#[ignore]` to make CI green.
+- Never use `git commit --no-verify`.
+- Never commit in a shared checkout; one task, one worktree.
+- **Never commit agent working notes, plan documents, or analysis reports.** The issue is the single
+  source of truth (`P0-09` adds `check_no_planning_docs.sh`).
+- Never refactor across a crate boundary without an ADR merged first.
+
+## Dependency Boundaries
+
+Three rings. **Ring 0/1 must never depend on any rustfs crate, and never on ring 2.** That is the
+axiom that keeps `gateway → ecstore → dto types → gateway` from becoming a cross-repository cycle,
+and it is what lets the protocol kernel be published and consumed on its own.
+
+- **Ring 0/1 — protocol kernel**: every `s3gate*` crate in this workspace. Zero rustfs dependencies,
+  independent release cadence.
+- **Ring 2 — rustfs adapters**: `rustfs-gateway-*`. Not present in this workspace yet. Ring 2 may
+  depend on ring 0/1 and on rustfs crates; the reverse is permanently forbidden.
+
+`A ──▶ B` reads "A depends on B".
+
+```
+             s3gate-conformance          test-only product; runs against any S3 implementation
+                    │
+                    ▼
+                 s3gate                  public facade: ServiceBuilder, hyper/tower adapters
+                    │
+                    ▼
+              s3gate-core                Operation, route table, typed pipeline, extension traits
+                    │
+                    ▼
+               s3gate-sig                SigV2/SigV4 state machine; freezes PayloadMode
+                    │
+                    ▼
+              s3gate-http                wire layer: header/query views, limits, aws-chunked
+                 │       │
+                 ▼       ▼
+        s3gate-types ──▶ s3gate-stream ──▶ http / bytes
+                 │
+                 ▼
+           s3gate-xml ──▶ quick-xml
+
+  build-time only, never present in a runtime dependency tree:
+        s3gate-codegen ──▶ s3gate-model   codegen emits generated/**, spec/, OPERATIONS.md
+```
+
+Three annotations you must not lose:
+
+- **`s3gate-stream` exists to break a cycle.** `GetObjectOutput.body: StreamingBlob` would make
+  `s3gate-types` and `s3gate-http` mutually dependent. `s3gate-stream` holds `Body`, `ByteStream`,
+  `Payload`, and trailing-header typing, and **no S3 semantics whatsoever**. Do not put an S3 type
+  in it.
+- **`s3gate-sig` freezes `PayloadMode` before `s3gate-http` decodes chunked framing.** The framing
+  mode is derived from the signature, not sniffed from the body. This is why the signature phase
+  (P2) is numbered before the wire phase (P3).
+- **The `compat-s3s` feature of `s3gate-types` is the only place a kernel crate may depend on s3s**
+  (orphan rule, measured E0117: a third-party crate cannot write
+  `impl From<s3s::X> for s3gate::X`). It must carry a `# DELETE BY <milestone>` marker.
+
+Direction violations are hard-blocked by `scripts/check_layer_dependencies.sh` (`P0-09`).
+
+## Context Budget & Do-Not-Read List
+
+**Do not read these. Reading one destroys the rest of your session.**
+
+| Path | Why | Read this instead |
+|---|---|---|
+| `generated/**` | Generated code at s3s scale: `dto/generated.rs` alone is 39,374 lines, all `generated.rs` files total 73,019. Once 70k lines of it are in context, every `grep ETag` returns hundreds of noise hits and you can no longer locate anything | `OPERATIONS.md` for operation shapes |
+| `model/s3.json` | 3MB. One read consumes the entire session budget | `spec/operations/*.toml`, which is generated from it |
+| `Cargo.lock` | Large and information-free | `cargo tree -p <crate>` |
+
+For field-level bindings read `spec/`; for operation shapes read `OPERATIONS.md`. These rules apply
+before the paths exist — the first PR that generates `generated/**` must not be the PR where an
+agent reads it.
+
+**Context budget rules**
+
+- A task's "read this and you can start" file set is **≤8 files / ≤40k tokens**. A task that cannot
+  fit must be split. This is the test behind the `estimated context budget` field of the issue
+  template — if you cannot fill that field honestly, the task is too big.
+- Every crate root carries a `MAP.md` (≤100 lines): file → one-sentence responsibility → **when you
+  would need to read it**. `MAP.md` is an agent entry point, not an architecture document for humans.
+- Every source file opens with `//!` answering three questions: **what this file is responsible for
+  / what it is explicitly not responsible for / who is upstream and downstream**. A file whose `//!`
+  answers only the first question is incomplete.
+- **Hard limit: 800 lines per file.** Over the limit, split it, or register an exemption in
+  `docs/file-size-allowances.txt` with a reason. Large files are the number one context killer.
+
+## One Operation Per File
+
+> **The real value of one operation per file is that it is the unit of parallel edit conflict — not
+> that it makes things easy to grep.**
+
+Nobody ever failed to find `GetObject`. Even with 99 methods on a single trait, `grep get_object`
+locates it. The actual payoff is that two agents changing two operations produce **zero git
+conflicts**. Do not let a DRY argument overturn this rule without addressing that reason.
+
+The counterweight is an **explicit shared contract**. Without it, the List/Copy/Conditional clusters
+reproduce the s3s #499 vs #632 defect, where one rule lived in two places and two fixes contradicted
+each other:
+
+- `ops/<snake_name>.rs` contains exactly one `impl Operation`, and nothing else does.
+- The file header declares its shared surface — `//! Shares: precondition, copy_source, pagination`
+  — and may `use` only modules listed in `ops/shared/`.
+- Every `ops/shared/**` module lists its member operations — `//! Members: ListObjects,
+  ListObjectsV2, ...` — and the member set must agree with the actual `use` sites in both
+  directions.
+- The 800-line limit applies here too.
+
+Known cross-operation clusters, for reference when you touch one of them:
+
+| Cluster | Operations | Shared logic |
+|---|---|---|
+| List | ListObjects, ListObjectsV2, ListObjectVersions, ListMultipartUploads | pagination, delimiter rollup, CommonPrefixes, encoding-type, continuation-token codec |
+| Copy | CopyObject, UploadPartCopy | `x-amz-copy-source` parsing, copy-source conditional headers, source-resource extraction for two-stage authorization |
+| Conditional | GetObject, HeadObject, CopyObject, PutObject | RFC 9110 precondition evaluation, strong/weak ETag comparison |
+| ACL | Get/Put Bucket and Object ACL, canned ACL headers | grant parsing and canonicalization |
+| Checksum | every operation accepting `x-amz-checksum-*` | header/trailer cross-validation |
+
+`scripts/check_op_file_shape.sh` enforces this from P1; the rule binds now.
+
+## Macro Governance
+
+The `#[s3gate::handlers]` attribute macro is the single largest threat to agent comprehension: an
+agent cannot answer "why is my method never called?" or "where did this trait bound come from?" when
+the answer only exists after expansion. Four rules:
+
+1. The macro performs **declarative registration only** — it registers functions into a registry. It
+   must never rewrite a function body and must never mint a new public type name. A generated type
+   name that `grep` cannot find blinds every agent instantly.
+2. `cargo expand` goldens are checked in at `macros/tests/expand/*.expanded.rs`. An agent reads the
+   expansion; understanding the macro is never a prerequisite.
+3. A macro-free equivalent must exist and be documented side by side (`impl Handler<GetObject> for
+   Fs`). The macro is permanently optional sugar, never the only path.
+4. A test must prove the macro form and the hand-written form produce **identical registry
+   contents**. The moment that equivalence breaks, the macro is broken.
+
+## PR Checklist
+
+- [ ] The four-command gate passed (fmt, clippy, test, `cargo xtask verify`)
+- [ ] New or changed public API has rustdoc
+- [ ] Negative test cases outnumber positive ones
+- [ ] No Protected File touched; if one was, the PR description contains `BREAKING` and a migration path
+- [ ] No `unsafe` introduced
+- [ ] No `inventory` / `linkme` introduced
+- [ ] No `#[non_exhaustive]` added to a DTO
+- [ ] No s3s code copied; behavioural evidence is URL + self-written summary
+- [ ] No credentials, signatures, or expected-signature values reachable from logs or error bodies
+- [ ] No plan document, analysis report, or working note committed
+- [ ] Commits follow Conventional Commits; PR title ≤72 characters
+- [ ] A Handoff comment has been appended to the issue
+
+## Common Errors and Fixes
+
+| Wrong | Right |
+|---|---|
+| Test fails → change the assertion / add `#[ignore]` / delete the test | Fix the implementation. If the test really was wrong, explain in the PR description why the original assertion was incorrect |
+| clippy complains → add `#[allow(...)]` | Fix the code. If an allow is genuinely required, a same-line comment must state why |
+| Need logic in several operations → copy it three times | Extract into `ops/shared/`, and update both the `//! Shares:` and `//! Members:` declarations |
+| Unsure about protocol behaviour → write it from memory | Check the AWS documentation and record URL + your own one-sentence summary as evidence |
+| Want to record progress → create `PLAN.md` in the repo | Write it into the issue as a comment |
+| Cannot find a type → `grep` the whole repository including `generated/` | Read `OPERATIONS.md` / `spec/`; `generated/**` is on the do-not-read list |
+| New `.rs` file starts straight at `//!` | License header first, `//!` module docs second; `scripts/check_license_headers.sh` blocks the PR otherwise |
+| Compare signatures with `==` | Constant-time comparison, and do not give the type `PartialEq` at all |
+| Need a new crate-level rule → start a scoped `AGENTS.md` | Add it here, unless that crate already has 5 or more rules of its own |
+| Gate got slower → accept it | Make it faster in the same PR; the gate budget is 10 minutes total |
+| `cargo xtask verify --crate X` takes minutes → wait it out | Open an issue; the ≤30s loop is a contract, not a hope |
+
+<!-- P0-10 appends: Expert Roles & Trigger Table -->

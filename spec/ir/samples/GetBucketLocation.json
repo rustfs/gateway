@@ -1,0 +1,185 @@
+{
+  "ir_version": "1",
+  "operation": "GetBucketLocation",
+  "http": {
+    "method": "GET",
+    "target": "Bucket",
+    "precedence": 300,
+    "predicates": [
+      { "kind": "Method", "method": "GET" },
+      { "kind": "Target", "target": "Bucket" },
+      { "kind": "QueryPresent", "key": "location" }
+    ],
+    "success_status": 200,
+    "alt_success_statuses": [],
+    "path_shape": "/{Bucket}"
+  },
+  "auth": {
+    "requirement": "Required",
+    "action": "s3:GetBucketLocation",
+    "presigned_allowed": true,
+    "service": "s3"
+  },
+  "payload": {
+    "request": { "kind": "None", "buffering": "None", "max_bytes": null },
+    "response": { "kind": "XmlBody", "buffering": "Full", "max_bytes": 4096 }
+  },
+  "checksum": {
+    "http_checksum_required": false,
+    "request_algorithms": [],
+    "response_algorithms": []
+  },
+  "input": {
+    "fields": [
+      {
+        "name": "Bucket",
+        "wire_name": "Bucket",
+        "required": true,
+        "binding": { "kind": "UriLabel", "greedy": false },
+        "type": { "kind": "BucketName" },
+        "hot": true,
+        "quirk_refs": []
+      },
+      {
+        "name": "ExpectedBucketOwner",
+        "wire_name": "x-amz-expected-bucket-owner",
+        "required": false,
+        "binding": { "kind": "Header" },
+        "type": { "kind": "String" },
+        "hot": false,
+        "quirk_refs": []
+      }
+    ]
+  },
+  "output": {
+    "fields": [
+      {
+        "name": "LocationConstraint",
+        "wire_name": "LocationConstraint",
+        "required": false,
+        "binding": { "kind": "BodyXml" },
+        "type": {
+          "kind": "StringEnum",
+          "values": [
+            "af-south-1",
+            "ap-east-1",
+            "ap-northeast-1",
+            "ap-northeast-2",
+            "ap-northeast-3",
+            "ap-south-1",
+            "ap-south-2",
+            "ap-southeast-1",
+            "ap-southeast-2",
+            "ap-southeast-3",
+            "ap-southeast-4",
+            "ap-southeast-5",
+            "ca-central-1",
+            "cn-north-1",
+            "cn-northwest-1",
+            "EU",
+            "eu-central-1",
+            "eu-central-2",
+            "eu-north-1",
+            "eu-south-1",
+            "eu-south-2",
+            "eu-west-1",
+            "eu-west-2",
+            "eu-west-3",
+            "il-central-1",
+            "me-central-1",
+            "me-south-1",
+            "sa-east-1",
+            "us-east-2",
+            "us-gov-east-1",
+            "us-gov-west-1",
+            "us-west-1",
+            "us-west-2"
+          ]
+        },
+        "hot": true,
+        "quirk_refs": ["q-empty-0002", "q-region-0003"]
+      }
+    ]
+  },
+  "shapes": {},
+  "xml": {
+    "request_root": null,
+    "request_root_aliases": [],
+    "response_root": "LocationConstraint",
+    "xmlns": "emit",
+    "unwrapped_output": true,
+    "element_order": [],
+    "empty_value_policy": { "LocationConstraint": "emit" },
+    "url_encoded_fields": [],
+    "attributes": [],
+    "body_literal": false
+  },
+  "errors": {
+    "not_configured": null,
+    "allows_error_after_200": false,
+    "codes": ["NoSuchBucket", "AccessDenied", "PermanentRedirect"]
+  },
+  "derived_resources": [],
+  "head_mirrors": null,
+  "quirk_refs": ["q-unwrapped-0001"],
+  "quirks": [
+    {
+      "id": "q-unwrapped-0001",
+      "kind": "unwrapped_output",
+      "target": "GetBucketLocation",
+      "summary": "The response body is the single element LocationConstraint itself; the generic restXml output wrapper must not be written.",
+      "evidence": [
+        {
+          "kind": "aws-doc",
+          "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketLocation.html",
+          "summary": "The documented response syntax shows one top level LocationConstraint element with no enclosing output element."
+        },
+        {
+          "kind": "s3s-pr",
+          "ref": "https://github.com/s3s-project/s3s/pull/127",
+          "summary": "Upstream shipped a double wrapped body until this change, which is why the unwrapping must be data in the IR rather than a codegen special case."
+        },
+        {
+          "kind": "capture",
+          "ref": "captures/get-bucket-location-aws.http",
+          "summary": "Recorded AWS response used as the byte level reference for the unwrapped body."
+        }
+      ],
+      "cases": ["c-getbucketlocation-unwrapped-root"]
+    },
+    {
+      "id": "q-empty-0002",
+      "kind": "empty_value",
+      "target": "GetBucketLocation.LocationConstraint",
+      "summary": "For us-east-1 the constraint is null and an empty element must still be written, so this member is emit rather than omit.",
+      "evidence": [
+        {
+          "kind": "aws-doc",
+          "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketLocation.html",
+          "summary": "States that buckets in us-east-1 have a null location constraint, while the element itself is still part of the response."
+        },
+        {
+          "kind": "capture",
+          "ref": "captures/get-bucket-location-us-east-1.http",
+          "summary": "Recorded AWS response for a us-east-1 bucket showing the self closing element rather than an absent one."
+        }
+      ],
+      "cases": ["c-getbucketlocation-us-east-1-empty"]
+    },
+    {
+      "id": "q-region-0003",
+      "kind": "legacy_alias",
+      "target": "GetBucketLocation.LocationConstraint",
+      "summary": "EU is a legacy alias that denotes eu-west-1 and must stay an accepted and returnable value of the enum.",
+      "evidence": [
+        {
+          "kind": "aws-doc",
+          "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketLocation.html",
+          "summary": "The enumerated constraint values include the historical EU alias alongside the modern region identifiers."
+        }
+      ],
+      "cases": ["c-getbucketlocation-eu-alias"]
+    }
+  ],
+  "ext_points": []
+}

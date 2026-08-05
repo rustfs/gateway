@@ -1,0 +1,779 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/rustfs/gateway/spec/ir.schema.json",
+  "title": "s3gate operation IR, version 1 (frozen)",
+  "description": "Shape of one operation IR document. One AWS operation per file. IR is a generated artifact: model/s3.json (pinned) + model/overlays/*.toml -> xtask codegen -> IR -> spec/, OPERATIONS.md, generated/**. Never hand-edit outside spec/ir/samples/, which are hand-written goldens for codegen. additionalProperties:false is enforced on every object so that a leaked Smithy trait (notably smithy.api#documentation) fails validation instead of entering the wire contract.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "ir_version",
+    "operation",
+    "http",
+    "auth",
+    "payload",
+    "checksum",
+    "input",
+    "output",
+    "shapes",
+    "xml",
+    "errors",
+    "derived_resources",
+    "head_mirrors",
+    "quirk_refs",
+    "quirks",
+    "ext_points"
+  ],
+  "properties": {
+    "ir_version": {
+      "const": "1",
+      "description": "Bumped on any breaking change to this schema. A bump requires a fresh IR-FREEZE review."
+    },
+    "operation": {
+      "$ref": "#/$defs/ident",
+      "description": "AWS official operation name. Equals the file stem."
+    },
+    "http": { "$ref": "#/$defs/http" },
+    "auth": { "$ref": "#/$defs/auth" },
+    "payload": { "$ref": "#/$defs/payload" },
+    "checksum": { "$ref": "#/$defs/checksum" },
+    "input": { "$ref": "#/$defs/field_set" },
+    "output": { "$ref": "#/$defs/field_set" },
+    "shapes": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Every structure/union shape reachable from input or output, keyed by shape name. Denormalized on purpose: an IR document is self-contained, so no consumer ever needs a second file to emit a codec. Divergence is impossible because all copies come from one codegen run.",
+      "patternProperties": {
+        "^[A-Za-z][A-Za-z0-9]*$": { "$ref": "#/$defs/shape" }
+      }
+    },
+    "xml": { "$ref": "#/$defs/xml" },
+    "errors": { "$ref": "#/$defs/errors" },
+    "derived_resources": {
+      "type": "array",
+      "description": "Resources that can only be read out of the input after a second authorization step (CopySource is the canonical case). Empty for operations with a single resource.",
+      "items": { "$ref": "#/$defs/derived_resource" }
+    },
+    "head_mirrors": {
+      "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/ident" }],
+      "description": "For HEAD operations: the GET operation whose response header set must be reproduced field for field. Derived relation, never two hand-written bindings."
+    },
+    "quirk_refs": {
+      "type": "array",
+      "description": "Operation-scoped quirks. Field-scoped and shape-member-scoped quirks are referenced from the field itself.",
+      "items": { "$ref": "#/$defs/quirk_id" }
+    },
+    "quirks": {
+      "type": "array",
+      "description": "Resolved quirk records for every id referenced anywhere in this document. Set equality with the union of all quirk_refs is a semantic check, not a schema check.",
+      "items": { "$ref": "#/$defs/quirk" }
+    },
+    "ext_points": {
+      "type": "array",
+      "description": "Dialect extension points. Shape is frozen here; the P1-08 spike decides which strategy value is used in practice.",
+      "items": { "$ref": "#/$defs/ext_point" }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "auth": { "properties": { "requirement": { "const": "Privileged" } }, "required": ["requirement"] } },
+        "required": ["auth"]
+      },
+      "then": {
+        "properties": { "auth": { "properties": { "presigned_allowed": { "const": false } } } },
+        "description": "A privileged surface must never be reachable through a presigned URL."
+      }
+    },
+    {
+      "if": {
+        "properties": { "xml": { "properties": { "unwrapped_output": { "const": true } }, "required": ["unwrapped_output"] } },
+        "required": ["xml"]
+      },
+      "then": {
+        "properties": { "xml": { "properties": { "element_order": { "maxItems": 0 } } } },
+        "description": "With an unwrapped output the single BodyXml field is the root element, so there is no sibling order to fix."
+      }
+    }
+  ],
+  "$defs": {
+    "ident": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9]*$",
+      "minLength": 1
+    },
+    "member_path": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9]*(\\.[A-Za-z][A-Za-z0-9]*)*$",
+      "description": "A member name, or a dotted path into a nested shape (Contents.Key)."
+    },
+    "error_code": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9]*$",
+      "minLength": 1
+    },
+    "quirk_id": {
+      "type": "string",
+      "pattern": "^q-[a-z0-9]+-[0-9]{4}$"
+    },
+    "case_id": {
+      "type": "string",
+      "pattern": "^c-[a-z0-9][a-z0-9-]*$"
+    },
+
+    "http": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["method", "target", "precedence", "predicates", "success_status", "alt_success_statuses", "path_shape"],
+      "properties": {
+        "method": { "$ref": "#/$defs/method" },
+        "target": { "$ref": "#/$defs/target_kind" },
+        "precedence": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535,
+          "description": "Explicit position in the ordered first-match route table; lower wins. Assigned by codegen from model/overlays/route.toml, never hand-written in Rust."
+        },
+        "predicates": {
+          "type": "array",
+          "minItems": 1,
+          "description": "Conjunction that decides WHICH operation this is. Routing only: a query key that is merely mandatory (?analytics needs id) belongs in input.fields[].required with a missing_error, so that omitting it is a 400, not a 501.",
+          "items": { "$ref": "#/$defs/predicate" }
+        },
+        "success_status": {
+          "enum": [200, 201, 204, 206, 303],
+          "description": "Default success status. 204 for the delete family, 206 for a satisfied Range GET, 303 for a POST Object redirect."
+        },
+        "alt_success_statuses": {
+          "type": "array",
+          "description": "Other success statuses this operation may legitimately return, e.g. POST Object with success_action_status / success_action_redirect.",
+          "items": { "enum": [200, 201, 204, 206, 303] }
+        },
+        "path_shape": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Reverse index key for OPERATIONS.md: /, /{Bucket}, /{Bucket}/{Key+}, or a literal path."
+        }
+      }
+    },
+    "method": { "enum": ["GET", "PUT", "POST", "DELETE", "HEAD", "OPTIONS"] },
+    "target_kind": { "enum": ["Service", "Bucket", "Object"] },
+    "host_class": {
+      "enum": ["Standard", "ObjectLambda", "S3Express", "Website", "Outposts", "Accelerate", "Dualstack"]
+    },
+    "arn_form": { "enum": ["AccessPoint", "Outposts", "MRAP"] },
+
+    "predicate": {
+      "description": "The nine route predicates. This list is closed and mirrors s3gate-core RouteSelector one for one.",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "method"],
+          "properties": { "kind": { "const": "Method" }, "method": { "$ref": "#/$defs/method" } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "target"],
+          "properties": { "kind": { "const": "Target" }, "target": { "$ref": "#/$defs/target_kind" } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "key"],
+          "properties": { "kind": { "const": "QueryPresent" }, "key": { "type": "string", "minLength": 1 } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "key", "value"],
+          "properties": {
+            "kind": { "const": "QueryEquals" },
+            "key": { "type": "string", "minLength": 1 },
+            "value": { "type": "string" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "key"],
+          "properties": { "kind": { "const": "QueryAbsent" }, "key": { "type": "string", "minLength": 1 } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "class"],
+          "properties": { "kind": { "const": "HostClass" }, "class": { "$ref": "#/$defs/host_class" } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "path"],
+          "properties": {
+            "kind": { "const": "PathLiteral" },
+            "path": { "type": "string", "pattern": "^/" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "form"],
+          "properties": { "kind": { "const": "ArnForm" }, "form": { "$ref": "#/$defs/arn_form" } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "header", "prefix"],
+          "properties": {
+            "kind": { "const": "HeaderPrefix" },
+            "header": { "type": "string", "pattern": "^[a-z0-9-]+$" },
+            "prefix": {
+              "type": "string",
+              "description": "Matched against the header value as a prefix, so that Content-Type: multipart/form-data; boundary=... is expressible. An empty prefix degenerates to header-present."
+            }
+          }
+        }
+      ]
+    },
+
+    "auth": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["requirement", "action", "presigned_allowed", "service"],
+      "properties": {
+        "requirement": {
+          "enum": ["Required", "AnonymousAllowed", "Privileged"],
+          "description": "AnonymousAllowed means anonymous is a legitimate identity, never a fallback after a failed signature."
+        },
+        "action": {
+          "type": "string",
+          "pattern": "^[a-z0-9-]+:[A-Za-z0-9*]+$",
+          "description": "IAM action. An operation without an action mapping must not be registered, so this is never empty."
+        },
+        "presigned_allowed": { "type": "boolean" },
+        "service": {
+          "enum": ["s3", "sts", "s3express", "s3-object-lambda", "s3-outposts"],
+          "description": "SigV4 credential-scope service. Cross-checked against the routed operation so an sts-scoped signature cannot reach an s3 operation."
+        }
+      }
+    },
+
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["request", "response"],
+      "properties": {
+        "request": { "$ref": "#/$defs/payload_spec" },
+        "response": { "$ref": "#/$defs/payload_spec" }
+      }
+    },
+    "payload_spec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "buffering", "max_bytes"],
+      "properties": {
+        "kind": {
+          "enum": ["None", "XmlBody", "StreamingBlob", "Multipart", "Literal", "EventStream"],
+          "description": "Literal is a bare non-XML body (a MinIO dialect case). EventStream is the SelectObjectContent framing."
+        },
+        "buffering": {
+          "enum": ["None", "Full", "Streaming", "Deferred"],
+          "description": "Full means the body must be complete before the handler runs. Deferred means headers are flushed before the outcome is known, which is only legal together with errors.allows_error_after_200."
+        },
+        "max_bytes": {
+          "type": ["integer", "null"],
+          "minimum": 0,
+          "description": "Hard size cap for a buffered body (XML bomb ceiling). null only for streaming or empty bodies."
+        }
+      }
+    },
+
+    "checksum": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["http_checksum_required", "request_algorithms", "response_algorithms"],
+      "properties": {
+        "http_checksum_required": {
+          "type": "boolean",
+          "description": "The httpChecksumRequired operation set: a missing Content-MD5 and missing x-amz-checksum-* is a 400 InvalidRequest before the handler runs."
+        },
+        "request_algorithms": { "type": "array", "items": { "$ref": "#/$defs/checksum_algo" } },
+        "response_algorithms": { "type": "array", "items": { "$ref": "#/$defs/checksum_algo" } }
+      }
+    },
+    "checksum_algo": { "enum": ["CRC32", "CRC32C", "CRC64NVME", "SHA1", "SHA256"] },
+
+    "field_set": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fields"],
+      "properties": {
+        "fields": { "type": "array", "items": { "$ref": "#/$defs/field" } }
+      }
+    },
+
+    "field": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "wire_name", "required", "binding", "type", "hot", "quirk_refs"],
+      "properties": {
+        "name": { "$ref": "#/$defs/ident" },
+        "wire_name": {
+          "type": ["string", "null"],
+          "minLength": 1,
+          "description": "Name on the wire: header name, query key, URI label, x-amz-meta- prefix, or XML element name. null only for Payload and StatusCode bindings, which have no name."
+        },
+        "required": {
+          "type": "boolean",
+          "description": "Wire-level requirement. Missing a required field is a parameter validation failure (missing_error), never a routing failure."
+        },
+        "binding": { "$ref": "#/$defs/binding" },
+        "type": { "$ref": "#/$defs/type" },
+        "hot": {
+          "type": "boolean",
+          "description": "Cold/hot split: hot fields live on the stack, cold fields move into Option<Box<ColdOpts>> so Req<O> stays small."
+        },
+        "default": {
+          "type": ["string", "number", "boolean", "null"],
+          "description": "Wire default applied when the field is absent (MaxKeys 1000). Emitted only when non-null."
+        },
+        "omit_when": { "$ref": "#/$defs/omit_when" },
+        "missing_error": {
+          "$ref": "#/$defs/error_code",
+          "description": "Error code returned when a required field is absent. Emitted only for required fields. This is what keeps missing ?analytics&id a 400 instead of a 501."
+        },
+        "quirk_refs": { "type": "array", "items": { "$ref": "#/$defs/quirk_id" } }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "binding": {
+                "properties": { "kind": { "enum": ["Header", "Query", "UriLabel", "PrefixHeaders", "BodyXml", "FormField"] } },
+                "required": ["kind"]
+              }
+            },
+            "required": ["binding"]
+          },
+          "then": { "properties": { "wire_name": { "type": "string", "minLength": 1 } } }
+        },
+        {
+          "if": {
+            "properties": {
+              "binding": { "properties": { "kind": { "enum": ["Payload", "StatusCode"] } }, "required": ["kind"] }
+            },
+            "required": ["binding"]
+          },
+          "then": { "properties": { "wire_name": { "type": "null" } } }
+        },
+        {
+          "if": { "properties": { "required": { "const": false } }, "required": ["required"] },
+          "then": { "not": { "required": ["missing_error"] } }
+        }
+      ]
+    },
+
+    "binding": {
+      "description": "The Smithy http binding traits, plus FormField for POST Object where the key arrives as a multipart form field.",
+      "oneOf": [
+        { "type": "object", "additionalProperties": false, "required": ["kind"], "properties": { "kind": { "const": "Header" } } },
+        { "type": "object", "additionalProperties": false, "required": ["kind"], "properties": { "kind": { "const": "Query" } } },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "greedy"],
+          "properties": { "kind": { "const": "UriLabel" }, "greedy": { "type": "boolean" } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind"],
+          "properties": { "kind": { "const": "PrefixHeaders" } },
+          "description": "wire_name carries the prefix itself, e.g. x-amz-meta-."
+        },
+        { "type": "object", "additionalProperties": false, "required": ["kind"], "properties": { "kind": { "const": "Payload" } } },
+        { "type": "object", "additionalProperties": false, "required": ["kind"], "properties": { "kind": { "const": "BodyXml" } } },
+        { "type": "object", "additionalProperties": false, "required": ["kind"], "properties": { "kind": { "const": "StatusCode" } } },
+        { "type": "object", "additionalProperties": false, "required": ["kind"], "properties": { "kind": { "const": "FormField" } } }
+      ]
+    },
+
+    "omit_when": {
+      "description": "When a present value must still not be written to the wire. x-amz-storage-class is omitted for STANDARD while the XML StorageClass element is always written, so this is per field, not per shape.",
+      "oneOf": [
+        { "type": "object", "additionalProperties": false, "required": ["kind"], "properties": { "kind": { "const": "Empty" } } },
+        { "type": "object", "additionalProperties": false, "required": ["kind"], "properties": { "kind": { "const": "Default" } } },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "value"],
+          "properties": { "kind": { "const": "ValueEquals" }, "value": { "type": "string" } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "field", "equals"],
+          "properties": {
+            "kind": { "const": "RequestField" },
+            "field": { "$ref": "#/$defs/ident" },
+            "equals": { "type": "string" }
+          },
+          "description": "Emitted only when a request field has some value, e.g. Owner appears only when fetch-owner=true."
+        }
+      ]
+    },
+
+    "type": {
+      "description": "Scalar vocabulary. The IR only names a type; s3gate-types implements it. Nothing here has a default, so every rendering context is stated explicitly.",
+      "oneOf": [
+        { "type": "object", "additionalProperties": false, "required": ["kind"], "properties": { "kind": { "const": "String" } } },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind"],
+          "properties": { "kind": { "const": "OpaqueString" } },
+          "description": "Round-tripped byte for byte, never parsed. Expires uses this: stored values are frequently not dates."
+        },
+        { "type": "object", "additionalProperties": false, "required": ["kind"], "properties": { "kind": { "const": "Integer" } } },
+        { "type": "object", "additionalProperties": false, "required": ["kind"], "properties": { "kind": { "const": "Long" } } },
+        { "type": "object", "additionalProperties": false, "required": ["kind"], "properties": { "kind": { "const": "Boolean" } } },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "format"],
+          "properties": {
+            "kind": { "const": "Timestamp" },
+            "format": { "enum": ["HttpDate", "Iso8601", "Iso8601Basic", "EpochSeconds"] }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "render"],
+          "properties": {
+            "kind": { "const": "ETag" },
+            "render": { "enum": ["HeaderQuoted", "XmlQuoted", "XmlBare"] }
+          },
+          "description": "Three rendering contexts, no default: header always quoted, XML normally quoted, GetObjectAttributes bare."
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "algo"],
+          "properties": { "kind": { "const": "Checksum" }, "algo": { "$ref": "#/$defs/checksum_algo" } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind"],
+          "properties": { "kind": { "const": "ChecksumSpec" } },
+          "description": "The packed algorithm+value form that replaces eleven Option<String> members on the hot path."
+        },
+        { "type": "object", "additionalProperties": false, "required": ["kind"], "properties": { "kind": { "const": "ObjectKey" } } },
+        { "type": "object", "additionalProperties": false, "required": ["kind"], "properties": { "kind": { "const": "BucketName" } } },
+        { "type": "object", "additionalProperties": false, "required": ["kind"], "properties": { "kind": { "const": "Range" } } },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "values"],
+          "properties": {
+            "kind": { "const": "StringEnum" },
+            "values": { "type": "array", "minItems": 1, "items": { "type": "string" } }
+          },
+          "description": "Generates a newtype over Cow<'static, str> with associated constants, never a real enum: AWS adds values every quarter."
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "shape"],
+          "properties": { "kind": { "const": "Structure" }, "shape": { "$ref": "#/$defs/ident" } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "member", "flattened", "wrapper_name"],
+          "properties": {
+            "kind": { "const": "List" },
+            "member": { "$ref": "#/$defs/type" },
+            "flattened": { "type": "boolean" },
+            "wrapper_name": { "type": ["string", "null"], "minLength": 1 }
+          },
+          "allOf": [
+            {
+              "if": { "properties": { "flattened": { "const": true } }, "required": ["flattened"] },
+              "then": { "properties": { "wrapper_name": { "type": "null" } } }
+            },
+            {
+              "if": { "properties": { "flattened": { "const": false } }, "required": ["flattened"] },
+              "then": { "properties": { "wrapper_name": { "type": "string" } } }
+            }
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "key", "value"],
+          "properties": {
+            "kind": { "const": "Map" },
+            "key": { "$ref": "#/$defs/type" },
+            "value": { "$ref": "#/$defs/type" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "streaming"],
+          "properties": { "kind": { "const": "Blob" }, "streaming": { "type": "boolean" } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "shape"],
+          "properties": { "kind": { "const": "Union" }, "shape": { "$ref": "#/$defs/ident" } }
+        }
+      ]
+    },
+
+    "shape": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "fields", "xml"],
+      "properties": {
+        "kind": { "enum": ["Structure", "Union"] },
+        "fields": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/field" },
+          "description": "Members of a nested shape. Bindings are BodyXml (or Header for shapes reused in header positions)."
+        },
+        "xml": { "$ref": "#/$defs/shape_xml" }
+      }
+    },
+    "shape_xml": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["element_order", "empty_value_policy", "attributes"],
+      "properties": {
+        "element_order": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ident" },
+          "description": "Wire contract for this shape's direct children. Must cover exactly the shape's BodyXml members."
+        },
+        "empty_value_policy": { "$ref": "#/$defs/empty_value_policy" },
+        "attributes": { "type": "array", "items": { "$ref": "#/$defs/xml_attribute" } }
+      }
+    },
+
+    "xml": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "request_root",
+        "request_root_aliases",
+        "response_root",
+        "xmlns",
+        "unwrapped_output",
+        "element_order",
+        "empty_value_policy",
+        "url_encoded_fields",
+        "attributes",
+        "body_literal"
+      ],
+      "properties": {
+        "request_root": {
+          "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/ident" }],
+          "description": "Wire root element of the request body, which frequently differs from the Smithy shape name (CompleteMultipartUpload vs CompletedMultipartUpload)."
+        },
+        "request_root_aliases": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ident" },
+          "description": "Additional root element names accepted on decode."
+        },
+        "response_root": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/ident" }] },
+        "xmlns": {
+          "enum": ["emit", "suppress"],
+          "description": "emit writes the 2006-03-01 namespace on the root. The Error root must suppress it. Namespaces on request bodies are always ignored, which is a global rule and not per operation."
+        },
+        "unwrapped_output": {
+          "type": "boolean",
+          "description": "true when the single BodyXml output member IS the root element rather than a child of an output wrapper (GetBucketLocation)."
+        },
+        "element_order": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ident" },
+          "description": "Order of the response root's direct children. Wire contract: strict clients break when Name follows Contents."
+        },
+        "empty_value_policy": { "$ref": "#/$defs/empty_value_policy" },
+        "url_encoded_fields": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/member_path" },
+          "description": "Members that must be percent-encoded when encoding-type=url was requested. Dotted paths reach into nested shapes."
+        },
+        "attributes": { "type": "array", "items": { "$ref": "#/$defs/xml_attribute" } },
+        "body_literal": {
+          "type": "boolean",
+          "description": "Accept a bare literal (non-XML) body. MinIO dialect only."
+        }
+      }
+    },
+    "empty_value_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Per member: emit an empty element or omit it entirely. ListObjects must write <Prefix></Prefix>; GetBucketVersioning must not write <Status></Status>.",
+      "patternProperties": {
+        "^[A-Za-z][A-Za-z0-9]*$": { "enum": ["emit", "omit"] }
+      }
+    },
+    "xml_attribute": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["element", "name", "source"],
+      "properties": {
+        "element": { "$ref": "#/$defs/ident" },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Attribute name including any prefix, e.g. xsi:type on Grantee."
+        },
+        "source": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["kind", "field"],
+              "properties": { "kind": { "const": "Field" }, "field": { "$ref": "#/$defs/ident" } }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["kind", "value"],
+              "properties": { "kind": { "const": "Constant" }, "value": { "type": "string" } }
+            }
+          ]
+        }
+      }
+    },
+
+    "errors": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["not_configured", "allows_error_after_200", "codes"],
+      "properties": {
+        "not_configured": {
+          "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/error_code" }],
+          "description": "The operation-specific 404 returned when a bucket subresource was never configured (NoSuchLifecycleConfiguration, NoSuchTagSet, ...). A code-to-status table alone cannot express this."
+        },
+        "allows_error_after_200": {
+          "type": "boolean",
+          "description": "The response can carry an Error body after a 200 status line and headers were already flushed (CompleteMultipartUpload, CopyObject, UploadPartCopy). Forces the deferred-outcome response type."
+        },
+        "codes": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/error_code" },
+          "description": "Error codes this operation can produce; feeds the error-code to operation reverse index."
+        }
+      }
+    },
+
+    "derived_resource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "source_field", "kind", "action", "required"],
+      "properties": {
+        "name": { "$ref": "#/$defs/ident" },
+        "source_field": { "$ref": "#/$defs/ident" },
+        "kind": { "enum": ["ObjectRef", "BucketRef", "AccessPointArn", "OutpostsArn"] },
+        "action": { "type": "string", "pattern": "^[a-z0-9-]+:[A-Za-z0-9*]+$" },
+        "required": { "type": "boolean" }
+      },
+      "description": "The associated type that makes a second authorization mandatory before the value can be read (CopySource). Missing this is how GHSA-mx42/-wfxj happened."
+    },
+
+    "quirk": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "target", "summary", "evidence", "cases"],
+      "properties": {
+        "id": { "$ref": "#/$defs/quirk_id" },
+        "kind": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "description": "Quirk category (xmlns, root_name, flattened, element_order, timestamp_format, empty_value, omit_when, encoding_type, etag_render, unwrapped_output, xml_attribute, success_status, checksum_required, body_literal, ...). Deliberately not an enum: new AWS behaviour must not require a schema bump."
+        },
+        "target": {
+          "type": "string",
+          "minLength": 1,
+          "description": "What the quirk applies to: Operation, Shape, Shape.Member, or Operation.Field."
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 16,
+          "description": "Self-written one-liner. Never paste upstream prose."
+        },
+        "evidence": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/evidence" } },
+        "cases": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/case_id" },
+          "description": "Conformance cases that would fail if the quirk were flipped. The reverse direction (case references quirk) is checked by scripts/check_quirks_evidence.sh."
+        }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "ref", "summary"],
+      "properties": {
+        "kind": { "enum": ["aws-doc", "smithy-spec", "rfc", "s3s-issue", "s3s-pr", "capture", "observed"] },
+        "ref": {
+          "type": "string",
+          "minLength": 1,
+          "description": "URL, issue number, or repo-relative capture path."
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 16,
+          "description": "Self-written summary of what the source establishes. Upstream issue text stays copyrighted, so only URL plus own words are stored."
+        }
+      }
+    },
+
+    "ext_point": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "parent_shape", "local_name", "dialect", "strategy", "position", "unknown_policy"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^ext-[a-z0-9-]+$" },
+        "parent_shape": { "$ref": "#/$defs/ident" },
+        "local_name": { "$ref": "#/$defs/ident" },
+        "dialect": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+        "strategy": {
+          "enum": ["ExtField", "GeneratedVariant"],
+          "description": "The two possible outcomes of the P1-08 spike. ExtField means one generated codec plus a runtime vtable. GeneratedVariant means a second generated codec behind cfg_feature, i.e. the spike failed and generated code doubles for this dialect."
+        },
+        "cfg_feature": {
+          "type": ["string", "null"],
+          "pattern": "^[a-z][a-z0-9-]*$",
+          "description": "Cargo feature gating the second codec. Required by GeneratedVariant, must be null for ExtField."
+        },
+        "position": {
+          "enum": ["AfterKnownFields"],
+          "description": "Extension elements are written after every known member. Frozen as a single value so that element order stays a wire contract."
+        },
+        "unknown_policy": {
+          "enum": ["lenient", "allow-registered", "deny"],
+          "description": "Decode behaviour for unregistered unknown elements. Security-relevant configuration bodies default to allow-registered; ordinary request XML defaults to lenient for AWS forward compatibility."
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "strategy": { "const": "GeneratedVariant" } }, "required": ["strategy"] },
+          "then": { "required": ["cfg_feature"], "properties": { "cfg_feature": { "type": "string" } } }
+        },
+        {
+          "if": { "properties": { "strategy": { "const": "ExtField" } }, "required": ["strategy"] },
+          "then": { "properties": { "cfg_feature": { "type": "null" } } }
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,128 @@
+# c-list-0001 — KeyCount must count common prefixes, and pagination must terminate.
+#
+# Schema dimensions exercised: golden files, redaction of server-minted opaque values, capture
+# and interpolation across exchanges, empty-element rendering, element order.
+
+[case]
+id = "c-list-0001"
+schema_version = 1
+title = "Delimited ListObjectsV2 pagination: KeyCount = Contents + CommonPrefixes, MaxKeys echoed"
+rationale = """
+Clients decide whether to ask for another page by comparing KeyCount and MaxKeys against what they \
+received. A server that omits common prefixes from KeyCount, or that echoes its own effective page \
+size instead of the requested MaxKeys, makes that arithmetic produce a page request that returns the \
+same thing forever — the client never crashes, it simply never stops. The failure is therefore not \
+observable in any single response; it needs both pages, the token that links them, and byte-exact \
+counts. The second page is reached with the token captured from the first, which is also the only \
+honest way to test pagination: a token written into the case file would be a token the server never \
+minted."""
+polarity = "positive"
+operation = "ListObjectsV2"
+tags = ["list", "pagination", "wire-bytes", "xml"]
+timeout_ms = 15000
+quirks = ["q-list-0003", "q-list-0004"]
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/issues/350"
+summary = "KeyCount excluded common prefixes and MaxKeys was not echoed, so a client paged forever."
+kind = "s3s-issue"
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/pull/351"
+summary = "Fix that counts common prefixes into KeyCount and echoes the requested MaxKeys."
+kind = "s3s-pr"
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/issues/300"
+summary = "With a delimiter set, keys were returned individually instead of being folded into common prefixes."
+kind = "s3s-issue"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectsV2.html"
+summary = "AWS defines KeyCount as the number of keys returned, which includes common prefix entries."
+kind = "aws-doc"
+
+# LastModified appears in the page-2 golden, so the server clock is pinned.
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = true
+
+[[setup.buckets]]
+name = "conf-list"
+
+[[setup.objects]]
+bucket = "conf-list"
+key = "a/1.txt"
+body = { utf8 = "a1" }
+
+[[setup.objects]]
+bucket = "conf-list"
+key = "a/2.txt"
+body = { utf8 = "a2" }
+
+[[setup.objects]]
+bucket = "conf-list"
+key = "b/1.txt"
+body = { utf8 = "b1" }
+
+[[setup.objects]]
+bucket = "conf-list"
+key = "top.txt"
+body = { utf8 = "top" }
+
+# ── page 1: two common prefixes, no contents, truncated ────────────────────────
+[[exchanges]]
+name = "page-1"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-list?list-type=2&delimiter=%2F&max-keys=2"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+headers_present = { "content-type" = "application/xml" }
+
+[exchanges.expect.capture]
+next_token = { xml_text = "NextContinuationToken" }
+
+# The golden keeps <Prefix></Prefix> as a paired empty element on purpose: switching to <Prefix/>
+# or dropping it entirely are both real regressions that only a byte comparison catches.
+[exchanges.expect.body]
+golden = "goldens/c-list-0001.page1.xml"
+redact = ["NextContinuationToken"]
+
+[exchanges.expect.body.xml]
+root = "ListBucketResult"
+xmlns = "http://s3.amazonaws.com/doc/2006-03-01/"
+empty_elements = "paired"
+element_order = ["IsTruncated", "Name", "Prefix", "Delimiter", "MaxKeys", "CommonPrefixes", "KeyCount", "NextContinuationToken"]
+
+# ── page 2: the remaining key, reached with the captured token ─────────────────
+[[exchanges]]
+name = "page-2"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-list?list-type=2&delimiter=%2F&max-keys=2&continuation-token=${capture.next_token}"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+headers_present = { "content-type" = "application/xml" }
+
+[exchanges.expect.body]
+golden = "goldens/c-list-0001.page2.xml"
+redact = ["ContinuationToken"]
+
+[exchanges.expect.body.xml]
+root = "ListBucketResult"
+xmlns = "http://s3.amazonaws.com/doc/2006-03-01/"
+empty_elements = "paired"
+element_order = ["IsTruncated", "Contents", "Name", "Prefix", "Delimiter", "MaxKeys", "KeyCount", "ContinuationToken"]

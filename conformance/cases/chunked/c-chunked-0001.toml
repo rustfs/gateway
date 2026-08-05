@@ -1,0 +1,112 @@
+# c-chunked-0001 — aws-chunked upload that announces a trailer and dies before sending it.
+#
+# Schema dimensions exercised: chunk arrival timing (delay_ms), abnormal termination
+# (control chunk), timeout assertion, request-side progress assertion, connection state.
+#
+# Why half_close and not close: with a full close the client cannot read anything back, so the
+# only assertable statement would be "no 200 arrived" — which is also true of a server that
+# crashed. half_close shuts down the write side only, leaving the server able to answer, so the
+# case can assert the actual required behaviour: a 400 IncompleteBody, promptly. The hard-close
+# variant belongs in a sibling case whose expectation is deliberately weaker.
+
+[case]
+id = "c-chunked-0001"
+schema_version = 1
+title = "Trailer announced, connection half-closed before the trailer — must fail, must not hang"
+rationale = """
+An aws-chunked PUT that declares x-amz-trailer and then stops mid-stream is the exact shape behind \
+the hardest class of bug in this problem space: the server has already accepted every byte it was \
+given, so a naive implementation completes the object and answers 200, and a slightly less naive one \
+waits for a trailer that will never arrive and leaves the client hanging forever. Both failures are \
+invisible to any assertion that only looks at a status code on a well-formed request, which is why \
+this case is written against the wire and against the clock."""
+polarity = "negative"
+operation = "PutObject"
+tags = ["streaming", "chunked", "trailer", "timing", "security"]
+timeout_ms = 15000
+quirks = ["q-chunk-0007"]
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/issues/350"
+summary = "An incomplete response left the client waiting instead of terminating; hangs are the failure mode here."
+kind = "s3s-issue"
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/issues/54"
+summary = "Earlier report of the same family: a response that never terminates suspends the client indefinitely."
+kind = "s3s-issue"
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/pull/338"
+summary = "Support for STREAMING-AWS4-HMAC-SHA256-PAYLOAD-TRAILER and decoding of aws-chunked trailer checksums."
+kind = "s3s-pr"
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9110#section-8.6"
+summary = "Content-Length states the exact body length, so a short body is a protocol error rather than a shorter body."
+kind = "rfc"
+
+[[setup.buckets]]
+name = "conf-chunked"
+
+[[setup.objects]]
+bucket = "conf-chunked"
+key = "trailer-abort"
+absent = true
+
+[request]
+method = "PUT"
+target = "/conf-chunked/trailer-abort"
+
+[request.headers]
+"content-encoding" = "aws-chunked"
+"x-amz-trailer" = "x-amz-checksum-crc32"
+"x-amz-decoded-content-length" = "11"
+
+# The runner computes Content-Length from the complete declared chunk sequence, including the
+# terminating zero-length chunk and the trailer it will never get to send. That is what makes the
+# half_close below a real truncation rather than a merely short body.
+[request.sign]
+mode = "sigv4_streaming_trailer"
+service = "s3"
+region = "us-east-1"
+credential = "valid"
+payload_hash = "streaming_trailer"
+
+[[request.chunks]]
+utf8 = "hello"
+delay_ms = 0
+
+[[request.chunks]]
+utf8 = " world"
+delay_ms = 40
+
+[[request.chunks]]
+action = "half_close"
+delay_ms = 20
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "closed"
+# A rejected upload must not leak a committed-object header into the failure response.
+headers_absent = ["etag", "x-amz-checksum-crc32", "x-amz-version-id"]
+
+[expect.error]
+code = "IncompleteBody"
+request_id_present = true
+
+[expect.timing]
+terminate_within_ms = 5000
+
+[expect.request_progress]
+body_fully_sent = false
+
+[expect.headers_present]
+"content-type" = "application/xml"
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>IncompleteBody</Code><Message>You did not provide the number of bytes specified by the Content-Length HTTP header.</Message><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''

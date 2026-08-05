@@ -1,0 +1,101 @@
+# c-etag-0001 — the ETag quoting exception, pinned on both sides of the exception.
+#
+# Schema dimensions exercised: multi-exchange + connection reuse, clock injection as a
+# determinism tool, byte-exact XML bodies, header absence assertions.
+
+[case]
+id = "c-etag-0001"
+schema_version = 1
+title = "GetObjectAttributes returns a bare ETag while ListObjectsV2 returns a quoted one"
+rationale = """
+S3 serialises ETag with literal double quotes in every XML response except GetObjectAttributes, \
+where the value is bare. An implementation that applies one rule everywhere is wrong in one of the \
+two places, and a suite that checks only one of them cannot tell which. Both halves therefore live \
+in a single case, on a single connection, so the contrast can never drift apart or be half-deleted."""
+polarity = "positive"
+operation = "GetObjectAttributes"
+tags = ["xml", "etag", "wire-bytes"]
+timeout_ms = 10000
+quirks = ["q-etag-0001", "q-etag-0002"]
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/issues/629"
+summary = "Report that GetObjectAttributes must emit the ETag without quotes, unlike every other response."
+kind = "s3s-issue"
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/pull/499"
+summary = "Change that added literal quotes around ETag in XML output for list and multipart responses."
+kind = "s3s-pr"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObjectAttributes.html"
+summary = "AWS response syntax for GetObjectAttributes shows a bare ETag value in the XML body."
+kind = "aws-doc"
+
+# A byte-exact list response embeds LastModified, so the clock the server observes must be pinned.
+# This is the second reason clock injection has to exist on day one, next to skew and presign expiry.
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = true
+
+[[setup.buckets]]
+name = "conf-etag"
+versioning = "disabled"
+
+[[setup.objects]]
+bucket = "conf-etag"
+key = "hello"
+content_type = "text/plain"
+body = { utf8 = "hello" }
+
+# ── exchange 1: the exception — bare ETag ──────────────────────────────────────
+[[exchanges]]
+name = "attributes-bare-etag"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-etag/hello?attributes"
+headers = { "x-amz-object-attributes" = "ETag" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+headers_present = { "content-type" = "application/xml", "last-modified" = "*" }
+headers_absent = ["x-amz-version-id", "etag"]
+connection_after = "open"
+
+[exchanges.expect.body]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<GetObjectAttributesOutput xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><ETag>5d41402abc4b2a76b9719d911017c592</ETag></GetObjectAttributesOutput>'''
+not_contains_utf8 = ["&quot;", "\""]
+
+# ── exchange 2: the rule — quoted ETag, same connection ────────────────────────
+[[exchanges]]
+name = "list-quoted-etag"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-etag?list-type=2&prefix=hello"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+headers_present = { "content-type" = "application/xml" }
+connection_after = "open"
+
+[exchanges.expect.body]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><IsTruncated>false</IsTruncated><Contents><Key>hello</Key><LastModified>2026-01-02T03:04:05.000Z</LastModified><ETag>&quot;5d41402abc4b2a76b9719d911017c592&quot;</ETag><Size>5</Size><StorageClass>STANDARD</StorageClass></Contents><Name>conf-etag</Name><Prefix>hello</Prefix><MaxKeys>1000</MaxKeys><KeyCount>1</KeyCount></ListBucketResult>'''
+
+[exchanges.expect.body.xml]
+root = "ListBucketResult"
+xmlns = "http://s3.amazonaws.com/doc/2006-03-01/"
+declaration = true
+element_order = ["IsTruncated", "Contents", "Name", "Prefix", "MaxKeys", "KeyCount"]

@@ -1,0 +1,680 @@
+{
+  "ir_version": "1",
+  "operation": "ListObjectsV2",
+  "http": {
+    "method": "GET",
+    "target": "Bucket",
+    "precedence": 600,
+    "predicates": [
+      { "kind": "Method", "method": "GET" },
+      { "kind": "Target", "target": "Bucket" },
+      { "kind": "QueryEquals", "key": "list-type", "value": "2" }
+    ],
+    "success_status": 200,
+    "alt_success_statuses": [],
+    "path_shape": "/{Bucket}"
+  },
+  "auth": {
+    "requirement": "Required",
+    "action": "s3:ListBucket",
+    "presigned_allowed": true,
+    "service": "s3"
+  },
+  "payload": {
+    "request": { "kind": "None", "buffering": "None", "max_bytes": null },
+    "response": { "kind": "XmlBody", "buffering": "Full", "max_bytes": null }
+  },
+  "checksum": {
+    "http_checksum_required": false,
+    "request_algorithms": [],
+    "response_algorithms": []
+  },
+  "input": {
+    "fields": [
+      {
+        "name": "Bucket",
+        "wire_name": "Bucket",
+        "required": true,
+        "binding": { "kind": "UriLabel", "greedy": false },
+        "type": { "kind": "BucketName" },
+        "hot": true,
+        "quirk_refs": []
+      },
+      {
+        "name": "Prefix",
+        "wire_name": "prefix",
+        "required": false,
+        "binding": { "kind": "Query" },
+        "type": { "kind": "String" },
+        "hot": true,
+        "quirk_refs": []
+      },
+      {
+        "name": "Delimiter",
+        "wire_name": "delimiter",
+        "required": false,
+        "binding": { "kind": "Query" },
+        "type": { "kind": "String" },
+        "hot": true,
+        "quirk_refs": []
+      },
+      {
+        "name": "MaxKeys",
+        "wire_name": "max-keys",
+        "required": false,
+        "binding": { "kind": "Query" },
+        "type": { "kind": "Integer" },
+        "hot": true,
+        "default": 1000,
+        "quirk_refs": []
+      },
+      {
+        "name": "ContinuationToken",
+        "wire_name": "continuation-token",
+        "required": false,
+        "binding": { "kind": "Query" },
+        "type": { "kind": "OpaqueString" },
+        "hot": true,
+        "quirk_refs": ["q-token-0021"]
+      },
+      {
+        "name": "StartAfter",
+        "wire_name": "start-after",
+        "required": false,
+        "binding": { "kind": "Query" },
+        "type": { "kind": "String" },
+        "hot": false,
+        "quirk_refs": []
+      },
+      {
+        "name": "FetchOwner",
+        "wire_name": "fetch-owner",
+        "required": false,
+        "binding": { "kind": "Query" },
+        "type": { "kind": "Boolean" },
+        "hot": false,
+        "default": false,
+        "quirk_refs": ["q-owner-0017"]
+      },
+      {
+        "name": "EncodingType",
+        "wire_name": "encoding-type",
+        "required": false,
+        "binding": { "kind": "Query" },
+        "type": { "kind": "StringEnum", "values": ["url"] },
+        "hot": false,
+        "quirk_refs": ["q-encoding-0015"]
+      },
+      {
+        "name": "RequestPayer",
+        "wire_name": "x-amz-request-payer",
+        "required": false,
+        "binding": { "kind": "Header" },
+        "type": { "kind": "StringEnum", "values": ["requester"] },
+        "hot": false,
+        "quirk_refs": []
+      },
+      {
+        "name": "ExpectedBucketOwner",
+        "wire_name": "x-amz-expected-bucket-owner",
+        "required": false,
+        "binding": { "kind": "Header" },
+        "type": { "kind": "String" },
+        "hot": false,
+        "quirk_refs": []
+      }
+    ]
+  },
+  "output": {
+    "fields": [
+      {
+        "name": "Name",
+        "wire_name": "Name",
+        "required": true,
+        "binding": { "kind": "BodyXml" },
+        "type": { "kind": "BucketName" },
+        "hot": true,
+        "quirk_refs": ["q-order-0014"]
+      },
+      {
+        "name": "Prefix",
+        "wire_name": "Prefix",
+        "required": true,
+        "binding": { "kind": "BodyXml" },
+        "type": { "kind": "String" },
+        "hot": true,
+        "quirk_refs": ["q-empty-0016"]
+      },
+      {
+        "name": "KeyCount",
+        "wire_name": "KeyCount",
+        "required": true,
+        "binding": { "kind": "BodyXml" },
+        "type": { "kind": "Integer" },
+        "hot": true,
+        "quirk_refs": ["q-keycount-0018"]
+      },
+      {
+        "name": "MaxKeys",
+        "wire_name": "MaxKeys",
+        "required": true,
+        "binding": { "kind": "BodyXml" },
+        "type": { "kind": "Integer" },
+        "hot": true,
+        "quirk_refs": []
+      },
+      {
+        "name": "Delimiter",
+        "wire_name": "Delimiter",
+        "required": false,
+        "binding": { "kind": "BodyXml" },
+        "type": { "kind": "String" },
+        "hot": true,
+        "quirk_refs": ["q-empty-0016"]
+      },
+      {
+        "name": "IsTruncated",
+        "wire_name": "IsTruncated",
+        "required": true,
+        "binding": { "kind": "BodyXml" },
+        "type": { "kind": "Boolean" },
+        "hot": true,
+        "quirk_refs": []
+      },
+      {
+        "name": "Contents",
+        "wire_name": "Contents",
+        "required": false,
+        "binding": { "kind": "BodyXml" },
+        "type": {
+          "kind": "List",
+          "member": { "kind": "Structure", "shape": "Object" },
+          "flattened": true,
+          "wrapper_name": null
+        },
+        "hot": true,
+        "quirk_refs": ["q-flat-0019"]
+      },
+      {
+        "name": "CommonPrefixes",
+        "wire_name": "CommonPrefixes",
+        "required": false,
+        "binding": { "kind": "BodyXml" },
+        "type": {
+          "kind": "List",
+          "member": { "kind": "Structure", "shape": "CommonPrefix" },
+          "flattened": true,
+          "wrapper_name": null
+        },
+        "hot": true,
+        "quirk_refs": ["q-flat-0019"]
+      },
+      {
+        "name": "EncodingType",
+        "wire_name": "EncodingType",
+        "required": false,
+        "binding": { "kind": "BodyXml" },
+        "type": { "kind": "StringEnum", "values": ["url"] },
+        "hot": false,
+        "quirk_refs": ["q-encoding-0015"]
+      },
+      {
+        "name": "ContinuationToken",
+        "wire_name": "ContinuationToken",
+        "required": false,
+        "binding": { "kind": "BodyXml" },
+        "type": { "kind": "OpaqueString" },
+        "hot": false,
+        "quirk_refs": ["q-token-0021"]
+      },
+      {
+        "name": "NextContinuationToken",
+        "wire_name": "NextContinuationToken",
+        "required": false,
+        "binding": { "kind": "BodyXml" },
+        "type": { "kind": "OpaqueString" },
+        "hot": false,
+        "quirk_refs": ["q-token-0021"]
+      },
+      {
+        "name": "StartAfter",
+        "wire_name": "StartAfter",
+        "required": false,
+        "binding": { "kind": "BodyXml" },
+        "type": { "kind": "String" },
+        "hot": false,
+        "quirk_refs": []
+      },
+      {
+        "name": "RequestCharged",
+        "wire_name": "x-amz-request-charged",
+        "required": false,
+        "binding": { "kind": "Header" },
+        "type": { "kind": "StringEnum", "values": ["requester"] },
+        "hot": false,
+        "quirk_refs": []
+      }
+    ]
+  },
+  "shapes": {
+    "Object": {
+      "kind": "Structure",
+      "fields": [
+        {
+          "name": "Key",
+          "wire_name": "Key",
+          "required": true,
+          "binding": { "kind": "BodyXml" },
+          "type": { "kind": "ObjectKey" },
+          "hot": true,
+          "quirk_refs": ["q-encoding-0015"]
+        },
+        {
+          "name": "LastModified",
+          "wire_name": "LastModified",
+          "required": true,
+          "binding": { "kind": "BodyXml" },
+          "type": { "kind": "Timestamp", "format": "Iso8601" },
+          "hot": true,
+          "quirk_refs": []
+        },
+        {
+          "name": "ETag",
+          "wire_name": "ETag",
+          "required": true,
+          "binding": { "kind": "BodyXml" },
+          "type": { "kind": "ETag", "render": "XmlQuoted" },
+          "hot": true,
+          "quirk_refs": ["q-etag-0020"]
+        },
+        {
+          "name": "ChecksumAlgorithm",
+          "wire_name": "ChecksumAlgorithm",
+          "required": false,
+          "binding": { "kind": "BodyXml" },
+          "type": {
+            "kind": "List",
+            "member": { "kind": "StringEnum", "values": ["CRC32", "CRC32C", "CRC64NVME", "SHA1", "SHA256"] },
+            "flattened": true,
+            "wrapper_name": null
+          },
+          "hot": false,
+          "quirk_refs": ["q-flat-0019"]
+        },
+        {
+          "name": "ChecksumType",
+          "wire_name": "ChecksumType",
+          "required": false,
+          "binding": { "kind": "BodyXml" },
+          "type": { "kind": "StringEnum", "values": ["COMPOSITE", "FULL_OBJECT"] },
+          "hot": false,
+          "quirk_refs": []
+        },
+        {
+          "name": "Size",
+          "wire_name": "Size",
+          "required": true,
+          "binding": { "kind": "BodyXml" },
+          "type": { "kind": "Long" },
+          "hot": true,
+          "quirk_refs": []
+        },
+        {
+          "name": "StorageClass",
+          "wire_name": "StorageClass",
+          "required": true,
+          "binding": { "kind": "BodyXml" },
+          "type": {
+            "kind": "StringEnum",
+            "values": [
+              "STANDARD",
+              "REDUCED_REDUNDANCY",
+              "GLACIER",
+              "STANDARD_IA",
+              "ONEZONE_IA",
+              "INTELLIGENT_TIERING",
+              "DEEP_ARCHIVE",
+              "OUTPOSTS",
+              "GLACIER_IR",
+              "SNOW",
+              "EXPRESS_ONEZONE"
+            ]
+          },
+          "hot": false,
+          "quirk_refs": ["q-storageclass-0022"]
+        },
+        {
+          "name": "Owner",
+          "wire_name": "Owner",
+          "required": false,
+          "binding": { "kind": "BodyXml" },
+          "type": { "kind": "Structure", "shape": "Owner" },
+          "hot": false,
+          "omit_when": { "kind": "RequestField", "field": "FetchOwner", "equals": "false" },
+          "quirk_refs": ["q-owner-0017"]
+        },
+        {
+          "name": "RestoreStatus",
+          "wire_name": "RestoreStatus",
+          "required": false,
+          "binding": { "kind": "BodyXml" },
+          "type": { "kind": "Structure", "shape": "RestoreStatus" },
+          "hot": false,
+          "quirk_refs": []
+        }
+      ],
+      "xml": {
+        "element_order": [
+          "Key",
+          "LastModified",
+          "ETag",
+          "ChecksumAlgorithm",
+          "ChecksumType",
+          "Size",
+          "StorageClass",
+          "Owner",
+          "RestoreStatus"
+        ],
+        "empty_value_policy": {
+          "Key": "emit",
+          "LastModified": "emit",
+          "ETag": "emit",
+          "ChecksumAlgorithm": "omit",
+          "ChecksumType": "omit",
+          "Size": "emit",
+          "StorageClass": "emit",
+          "Owner": "omit",
+          "RestoreStatus": "omit"
+        },
+        "attributes": []
+      }
+    },
+    "CommonPrefix": {
+      "kind": "Structure",
+      "fields": [
+        {
+          "name": "Prefix",
+          "wire_name": "Prefix",
+          "required": true,
+          "binding": { "kind": "BodyXml" },
+          "type": { "kind": "String" },
+          "hot": true,
+          "quirk_refs": ["q-encoding-0015"]
+        }
+      ],
+      "xml": {
+        "element_order": ["Prefix"],
+        "empty_value_policy": { "Prefix": "emit" },
+        "attributes": []
+      }
+    },
+    "Owner": {
+      "kind": "Structure",
+      "fields": [
+        {
+          "name": "ID",
+          "wire_name": "ID",
+          "required": false,
+          "binding": { "kind": "BodyXml" },
+          "type": { "kind": "String" },
+          "hot": false,
+          "quirk_refs": []
+        },
+        {
+          "name": "DisplayName",
+          "wire_name": "DisplayName",
+          "required": false,
+          "binding": { "kind": "BodyXml" },
+          "type": { "kind": "String" },
+          "hot": false,
+          "quirk_refs": []
+        }
+      ],
+      "xml": {
+        "element_order": ["ID", "DisplayName"],
+        "empty_value_policy": { "ID": "omit", "DisplayName": "omit" },
+        "attributes": []
+      }
+    },
+    "RestoreStatus": {
+      "kind": "Structure",
+      "fields": [
+        {
+          "name": "IsRestoreInProgress",
+          "wire_name": "IsRestoreInProgress",
+          "required": false,
+          "binding": { "kind": "BodyXml" },
+          "type": { "kind": "Boolean" },
+          "hot": false,
+          "quirk_refs": []
+        },
+        {
+          "name": "RestoreExpiryDate",
+          "wire_name": "RestoreExpiryDate",
+          "required": false,
+          "binding": { "kind": "BodyXml" },
+          "type": { "kind": "Timestamp", "format": "Iso8601" },
+          "hot": false,
+          "quirk_refs": []
+        }
+      ],
+      "xml": {
+        "element_order": ["IsRestoreInProgress", "RestoreExpiryDate"],
+        "empty_value_policy": { "IsRestoreInProgress": "omit", "RestoreExpiryDate": "omit" },
+        "attributes": []
+      }
+    }
+  },
+  "xml": {
+    "request_root": null,
+    "request_root_aliases": [],
+    "response_root": "ListBucketResult",
+    "xmlns": "emit",
+    "unwrapped_output": false,
+    "element_order": [
+      "Name",
+      "Prefix",
+      "KeyCount",
+      "MaxKeys",
+      "Delimiter",
+      "IsTruncated",
+      "Contents",
+      "CommonPrefixes",
+      "EncodingType",
+      "ContinuationToken",
+      "NextContinuationToken",
+      "StartAfter"
+    ],
+    "empty_value_policy": {
+      "Name": "emit",
+      "Prefix": "emit",
+      "KeyCount": "emit",
+      "MaxKeys": "emit",
+      "IsTruncated": "emit",
+      "Delimiter": "omit",
+      "Contents": "omit",
+      "CommonPrefixes": "omit",
+      "EncodingType": "omit",
+      "ContinuationToken": "omit",
+      "NextContinuationToken": "omit",
+      "StartAfter": "omit"
+    },
+    "url_encoded_fields": [
+      "Prefix",
+      "Delimiter",
+      "StartAfter",
+      "ContinuationToken",
+      "NextContinuationToken",
+      "Contents.Key",
+      "CommonPrefixes.Prefix"
+    ],
+    "attributes": [],
+    "body_literal": false
+  },
+  "errors": {
+    "not_configured": null,
+    "allows_error_after_200": false,
+    "codes": ["NoSuchBucket", "AccessDenied", "InvalidArgument", "PermanentRedirect"]
+  },
+  "derived_resources": [],
+  "head_mirrors": null,
+  "quirk_refs": ["q-root-0013", "q-order-0014", "q-encoding-0015"],
+  "quirks": [
+    {
+      "id": "q-root-0013",
+      "kind": "root_name",
+      "target": "ListObjectsV2",
+      "summary": "The response root element is shared verbatim with the first version of the listing operation, so the root name cannot be derived from the operation or output shape name.",
+      "evidence": [
+        {
+          "kind": "aws-doc",
+          "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectsV2.html#API_ListObjectsV2_ResponseSyntax",
+          "summary": "The documented response syntax uses the same root element name as the older listing operation."
+        }
+      ],
+      "cases": ["c-listv2-shared-root-name"]
+    },
+    {
+      "id": "q-order-0014",
+      "kind": "element_order",
+      "target": "ListObjectsV2",
+      "summary": "Sibling order in the listing result is part of the wire contract; strict clients fail to parse when the bucket name follows the entry list.",
+      "evidence": [
+        {
+          "kind": "s3s-pr",
+          "ref": "https://github.com/s3s-project/s3s/pull/480",
+          "summary": "Upstream emitted the listing elements in model order and broke a strict client until the order was corrected."
+        },
+        {
+          "kind": "capture",
+          "ref": "captures/list-objects-v2-aws.http",
+          "summary": "Recorded reference response that fixes the sibling order used by the golden comparison."
+        }
+      ],
+      "cases": ["c-listv2-element-order-golden"]
+    },
+    {
+      "id": "q-encoding-0015",
+      "kind": "encoding_type",
+      "target": "ListObjectsV2",
+      "summary": "When url encoding is requested, a fixed per operation set of members is percent encoded and the encoding type is echoed back; keys containing control characters are otherwise unparseable.",
+      "evidence": [
+        {
+          "kind": "aws-doc",
+          "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectsV2.html",
+          "summary": "Describes the request parameter and states that the response echoes the encoding type when it was requested."
+        },
+        {
+          "kind": "capture",
+          "ref": "captures/list-objects-v2-encoding-url.http",
+          "summary": "Recorded response for a key containing characters that are illegal in XML, showing which members are encoded."
+        }
+      ],
+      "cases": ["c-listv2-encoding-url-members", "c-listv2-encoding-url-echoed"]
+    },
+    {
+      "id": "q-empty-0016",
+      "kind": "empty_value",
+      "target": "ListObjectsV2",
+      "summary": "The prefix element is always written even when empty, while the delimiter element only appears when the request supplied one.",
+      "evidence": [
+        {
+          "kind": "capture",
+          "ref": "captures/list-objects-v2-empty-prefix.http",
+          "summary": "Recorded response showing an empty prefix element present and no delimiter element at all."
+        }
+      ],
+      "cases": ["c-listv2-empty-prefix-emitted", "c-listv2-delimiter-omitted"]
+    },
+    {
+      "id": "q-owner-0017",
+      "kind": "omit_when",
+      "target": "Object.Owner",
+      "summary": "Owner information is written only when the request asked for it, so emission depends on a request field rather than on the value itself.",
+      "evidence": [
+        {
+          "kind": "aws-doc",
+          "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectsV2.html",
+          "summary": "States that owner information is returned only when the fetch owner parameter is set."
+        }
+      ],
+      "cases": ["c-listv2-owner-only-when-fetched"]
+    },
+    {
+      "id": "q-keycount-0018",
+      "kind": "computed_member",
+      "target": "ListObjectsV2.KeyCount",
+      "summary": "The key count is the number of entries plus common prefixes actually returned, not the requested maximum, and is always written.",
+      "evidence": [
+        {
+          "kind": "aws-doc",
+          "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectsV2.html",
+          "summary": "Defines the count as the number of keys returned by this request, which is at most the requested maximum."
+        }
+      ],
+      "cases": ["c-listv2-keycount-counts-common-prefixes"]
+    },
+    {
+      "id": "q-flat-0019",
+      "kind": "flattened",
+      "target": "ListObjectsV2",
+      "summary": "Entry and common prefix lists repeat their element with no enclosing wrapper, unlike the wrapped lists used by tag sets and grant lists.",
+      "evidence": [
+        {
+          "kind": "smithy-spec",
+          "ref": "https://smithy.io/2.0/spec/protocol-traits.html#xmlflattened-trait",
+          "summary": "Defines the flattened list serialization that removes the wrapper element around repeated members."
+        }
+      ],
+      "cases": ["c-listv2-contents-flattened"]
+    },
+    {
+      "id": "q-etag-0020",
+      "kind": "etag_render",
+      "target": "Object.ETag",
+      "summary": "Inside the listing body the entity tag keeps its surrounding quotes, in contrast with the bare form used by the object attributes operation.",
+      "evidence": [
+        {
+          "kind": "s3s-issue",
+          "ref": "https://github.com/s3s-project/s3s/issues/632",
+          "summary": "Upstream applied one quoting rule everywhere, which is wrong for one of the two body contexts."
+        }
+      ],
+      "cases": ["c-etag-xml-quoted-listing"]
+    },
+    {
+      "id": "q-token-0021",
+      "kind": "opaque_token",
+      "target": "ListObjectsV2",
+      "summary": "Pagination tokens are attacker controlled opaque bytes; they are never parsed as keys or paths and must survive url encoding unchanged.",
+      "evidence": [
+        {
+          "kind": "aws-doc",
+          "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectsV2.html",
+          "summary": "Describes the continuation token as an opaque value obtained from a previous response."
+        }
+      ],
+      "cases": ["c-listv2-token-opaque-roundtrip"]
+    },
+    {
+      "id": "q-storageclass-0022",
+      "kind": "omit_when",
+      "target": "Object.StorageClass",
+      "summary": "The storage class element in a listing is always written including the default class, which is the opposite of the header form that is suppressed for the default class.",
+      "evidence": [
+        {
+          "kind": "aws-doc",
+          "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectsV2.html",
+          "summary": "The documented listing response includes the storage class element for every entry."
+        },
+        {
+          "kind": "aws-doc",
+          "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObject.html",
+          "summary": "States that the storage class response header is returned for every object except those in the default class."
+        }
+      ],
+      "cases": ["c-storageclass-xml-always-emitted", "c-storageclass-header-omitted-for-default"]
+    }
+  ],
+  "ext_points": []
+}
