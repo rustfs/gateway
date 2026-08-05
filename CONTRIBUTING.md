@@ -89,7 +89,7 @@ described in the license, without additional terms.
 
 ## Engineering expectations
 
-- MSRV is **1.89** and the policy in [docs/msrv.md](docs/msrv.md) is enforced strictly; a pull
+- MSRV is **1.97.1** and the policy in [docs/msrv.md](docs/msrv.md) is enforced strictly; a pull
   request that raises the MSRV outside a minor release is rejected without discussion.
 - `unsafe_code` is forbidden workspace-wide, and `missing_docs` is denied. Every public item
   needs a doc comment.

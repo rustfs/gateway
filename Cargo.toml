@@ -5,7 +5,7 @@ members = ["crates/*", "xtask"]
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.89"
+rust-version = "1.97.1"
 license = "Apache-2.0"
 repository = "https://github.com/rustfs/gateway"
 authors = ["RustFS Team"]
@@ -13,19 +13,19 @@ authors = ["RustFS Team"]
 [workspace.dependencies]
 # Internal crates. Path only: nothing here is published, so the version double-write
 # that crates.io would require is just another thing to keep in sync.
-rustfs-gateway = { path = "crates/gateway" }
-rustfs-gateway-codegen = { path = "crates/codegen" }
-rustfs-gateway-core = { path = "crates/core" }
-rustfs-gateway-http = { path = "crates/http" }
-rustfs-gateway-model = { path = "crates/model" }
-rustfs-gateway-sig = { path = "crates/sig" }
-rustfs-gateway-stream = { path = "crates/stream" }
-rustfs-gateway-types = { path = "crates/types" }
-rustfs-gateway-xml = { path = "crates/xml" }
+rustfs-gateway = { path = "crates/gateway", version = "0.1.0" }
+rustfs-gateway-codegen = { path = "crates/codegen", version = "0.1.0" }
+rustfs-gateway-core = { path = "crates/core", version = "0.1.0" }
+rustfs-gateway-http = { path = "crates/http", version = "0.1.0" }
+rustfs-gateway-model = { path = "crates/model", version = "0.1.0" }
+rustfs-gateway-sig = { path = "crates/sig", version = "0.1.0" }
+rustfs-gateway-stream = { path = "crates/stream", version = "0.1.0" }
+rustfs-gateway-types = { path = "crates/types", version = "0.1.0" }
+rustfs-gateway-xml = { path = "crates/xml", version = "0.1.0" }
 
-# Third-party. Versions verified against crates.io on 2026-08-05; MSRV 1.89 constrains this set —
-# `aws-sigv4` is deliberately absent (it would force MSRV 1.94.1, and its server-side verification
-# has measured defects; see docs/msrv.md and ADR-0001).
+# Third-party. Versions verified against crates.io on 2026-08-05; MSRV 1.97.1 constrains this set.
+# `aws-sigv4` is deliberately absent: its server-side verification has measured defects; see
+# docs/msrv.md and ADR-0001.
 bitflags = "2.13"
 bytes = "1.12"
 # default-features off: the crate's default pulls in optional backends we do not use. Declared

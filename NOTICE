@@ -31,8 +31,8 @@ Third-party material
    License: Apache License 2.0
    Notes:   rustfs-gateway does not depend on this crate. Two pure helper functions
             required for SigV4 canonicalisation are ported into
-            `crates/sig` instead, so that this repository can keep its
-            MSRV at 1.89 (see docs/msrv.md). Ported code carries an in-file
+            `crates/sig` instead, so that this repository can keep only the
+            small pure helpers it needs (see docs/msrv.md). Ported code carries an in-file
             attribution comment naming the upstream file and revision.
             TODO(P1): record the upstream revision here when the port lands.
 
