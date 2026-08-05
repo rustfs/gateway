@@ -1,0 +1,28 @@
+[package]
+name = "s3gate-types"
+description = "S3 scalar types, operation inputs/outputs and their generated codecs"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[lints]
+workspace = true
+
+[dependencies]
+s3gate-xml = { workspace = true }
+s3gate-stream = { workspace = true }
+
+[features]
+# The ONLY place a ring-0 crate may ever depend on s3s. Reason (measured, E0117): the orphan
+# rule forbids a third-party crate from writing `impl From<s3s::X> for s3gate::X`, so the
+# migration conversions must live here. Empty placeholder until P9.
+# DELETE BY: end of P9 migration.
+# see ADR-0004: version carries +aws.<model-date> once the model is pinned
+compat-s3s = []

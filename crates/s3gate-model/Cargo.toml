@@ -1,0 +1,18 @@
+[package]
+name = "s3gate-model"
+description = "Smithy model parsing and the frozen s3gate IR (build-time only)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[lints]
+workspace = true
+
+[dependencies]

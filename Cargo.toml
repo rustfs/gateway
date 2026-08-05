@@ -1,0 +1,36 @@
+[workspace]
+resolver = "3"
+members = ["crates/*", "xtask"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.89"
+license = "Apache-2.0"
+repository = "https://github.com/rustfs/gateway"
+authors = ["RustFS Team"]
+
+[workspace.dependencies]
+# Ring 0/1 internal crates — path + version double-write is required for publishing.
+s3gate = { path = "crates/s3gate", version = "0.1.0" }
+s3gate-codegen = { path = "crates/s3gate-codegen", version = "0.1.0" }
+s3gate-core = { path = "crates/s3gate-core", version = "0.1.0" }
+s3gate-http = { path = "crates/s3gate-http", version = "0.1.0" }
+s3gate-model = { path = "crates/s3gate-model", version = "0.1.0" }
+s3gate-sig = { path = "crates/s3gate-sig", version = "0.1.0" }
+s3gate-stream = { path = "crates/s3gate-stream", version = "0.1.0" }
+s3gate-types = { path = "crates/s3gate-types", version = "0.1.0" }
+s3gate-xml = { path = "crates/s3gate-xml", version = "0.1.0" }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_docs = "deny"
+unreachable_pub = "warn"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true

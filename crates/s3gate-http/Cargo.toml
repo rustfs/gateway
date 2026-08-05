@@ -1,0 +1,20 @@
+[package]
+name = "s3gate-http"
+description = "HTTP wire layer: header/query views, limits, aws-chunked framing"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[lints]
+workspace = true
+
+[dependencies]
+s3gate-types = { workspace = true }
+s3gate-stream = { workspace = true }
