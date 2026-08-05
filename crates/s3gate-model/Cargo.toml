@@ -16,3 +16,4 @@ rustdoc-args = ["--cfg", "docsrs"]
 workspace = true
 
 [dependencies]
+thiserror = { workspace = true }

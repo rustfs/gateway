@@ -86,6 +86,11 @@ jobs:
           done
       - name: Guard self-test
         run: bash scripts/test_guard_scripts.sh
+      # Generated artefacts are a pure function of (model, overlays). If regenerating moves a
+      # byte, the checked-in output and the generator disagree, and every review that read the
+      # output was reading something the generator no longer produces.
+      - name: Generated output is up to date
+        run: cargo xtask spec verify
 
   clippy:
     name: Clippy

@@ -351,7 +351,11 @@ impl CredentialPresence {
     /// [`CredentialsWerePresented`] if any surface was populated. This is the whole point: the
     /// evidence cannot be manufactured on a request that failed verification.
     pub const fn into_evidence(self) -> Result<AnonymousAck, CredentialsWerePresented> {
-        if self.any() { Err(CredentialsWerePresented) } else { Ok(AnonymousAck(())) }
+        if self.any() {
+            Err(CredentialsWerePresented)
+        } else {
+            Ok(AnonymousAck(()))
+        }
     }
 }
 

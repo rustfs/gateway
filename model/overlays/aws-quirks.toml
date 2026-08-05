@@ -1,0 +1,333 @@
+# Copyright 2026 RustFS Team
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# AWS protocol quirks: every wire behaviour that the pinned Smithy model does not state.
+#
+# One [[quirk]] per behaviour. `summary` and every `evidence.summary` are written by this project;
+# upstream issue and documentation prose stays under its author's copyright and is never pasted
+# here. See overlays/README.md for the entry shape and the evidence rules.
+
+[[quirk]]
+id      = "q-checksum-0006"
+kind    = "checksum_headers"
+target  = "PutObject"
+summary = "The eleven separate checksum members collapse into one packed spec, and more than one checksum header on a request is a hard error rather than a merge."
+cases   = ["c-checksum-0001", "c-checksum-0002"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObject.html"
+  summary = "Only one checksum algorithm header is accepted per request and the value is base64 encoded."
+
+  [[quirk.evidence]]
+  kind    = "capture"
+  ref     = "captures/put-object-two-checksums.http"
+  summary = "Recorded rejection when two different checksum headers are sent together."
+
+[[quirk]]
+id      = "q-content-0008"
+kind    = "default_value"
+target  = "PutObject.ContentType"
+summary = "The default media type is the S3 specific binary form, not the IANA registered octet stream spelling."
+cases   = ["c-putobject-0002"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObject.html"
+  summary = "Documents the S3 specific default media type applied when the request omits the header."
+
+[[quirk]]
+id      = "q-empty-0002"
+kind    = "empty_value"
+target  = "GetBucketLocation.LocationConstraint"
+summary = "For us-east-1 the constraint is null and an empty element must still be written, so this member is emit rather than omit."
+cases   = ["c-location-0002"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketLocation.html"
+  summary = "States that buckets in us-east-1 have a null location constraint, while the element itself is still part of the response."
+
+  [[quirk.evidence]]
+  kind    = "capture"
+  ref     = "captures/get-bucket-location-us-east-1.http"
+  summary = "Recorded AWS response for a us-east-1 bucket showing the self closing element rather than an absent one."
+
+[[quirk]]
+id      = "q-empty-0016"
+kind    = "empty_value"
+target  = "ListObjectsV2"
+summary = "The prefix element is always written even when empty, while the delimiter element only appears when the request supplied one."
+cases   = ["c-listv2-0005", "c-listv2-0006"]
+
+  [[quirk.evidence]]
+  kind    = "capture"
+  ref     = "captures/list-objects-v2-empty-prefix.http"
+  summary = "Recorded response showing an empty prefix element present and no delimiter element at all."
+
+[[quirk]]
+id      = "q-encoding-0015"
+kind    = "encoding_type"
+target  = "ListObjectsV2"
+summary = "When url encoding is requested, a fixed per operation set of members is percent encoded and the encoding type is echoed back; keys containing control characters are otherwise unparseable."
+cases   = ["c-listv2-0003", "c-listv2-0004"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectsV2.html"
+  summary = "Describes the request parameter and states that the response echoes the encoding type when it was requested."
+
+  [[quirk.evidence]]
+  kind    = "capture"
+  ref     = "captures/list-objects-v2-encoding-url.http"
+  summary = "Recorded response for a key containing characters that are illegal in XML, showing which members are encoded."
+
+[[quirk]]
+id      = "q-etag-0004"
+kind    = "etag_render"
+target  = "PutObject.ETag"
+summary = "In a header position the entity tag is always written with surrounding double quotes, unlike the bare form used by GetObjectAttributes."
+cases   = ["c-etag-0010"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObject.html#API_PutObject_ResponseSyntax"
+  summary = "The documented response header shows the entity tag surrounded by quotes."
+
+  [[quirk.evidence]]
+  kind    = "s3s-issue"
+  ref     = "https://github.com/s3s-project/s3s/issues/632"
+  summary = "Upstream had two conflicting quoting rules in different files, which is the reason the rendering context is a type parameter here."
+
+[[quirk]]
+id      = "q-etag-0020"
+kind    = "etag_render"
+target  = "Object.ETag"
+summary = "Inside the listing body the entity tag keeps its surrounding quotes, in contrast with the bare form used by the object attributes operation."
+cases   = ["c-etag-0011"]
+
+  [[quirk.evidence]]
+  kind    = "s3s-issue"
+  ref     = "https://github.com/s3s-project/s3s/issues/632"
+  summary = "Upstream applied one quoting rule everywhere, which is wrong for one of the two body contexts."
+
+[[quirk]]
+id      = "q-flat-0019"
+kind    = "flattened"
+target  = "ListObjectsV2"
+summary = "Entry and common prefix lists repeat their element with no enclosing wrapper, unlike the wrapped lists used by tag sets and grant lists."
+cases   = ["c-listv2-0009"]
+
+  [[quirk.evidence]]
+  kind    = "smithy-spec"
+  ref     = "https://smithy.io/2.0/spec/protocol-traits.html#xmlflattened-trait"
+  summary = "Defines the flattened list serialization that removes the wrapper element around repeated members."
+
+[[quirk]]
+id      = "q-keycount-0018"
+kind    = "computed_member"
+target  = "ListObjectsV2.KeyCount"
+summary = "The key count is the number of entries plus common prefixes actually returned, not the requested maximum, and is always written."
+cases   = ["c-listv2-0008"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectsV2.html"
+  summary = "Defines the count as the number of keys returned by this request, which is at most the requested maximum."
+
+[[quirk]]
+id      = "q-length-0007"
+kind    = "error_code"
+target  = "PutObject.ContentLength"
+summary = "A PUT without a content length is rejected with a dedicated 411 code rather than a generic bad request."
+cases   = ["c-putobject-0001"]
+
+  [[quirk.evidence]]
+  kind    = "s3s-issue"
+  ref     = "https://github.com/s3s-project/s3s/issues/526"
+  summary = "Upstream returned a generic 400 where the reference implementation returns the dedicated 411 code."
+
+[[quirk]]
+id      = "q-meta-0009"
+kind    = "prefix_headers"
+target  = "PutObject.Metadata"
+summary = "User metadata keys are lowercased on return, non ASCII values use encoded word syntax, and the combined size is capped."
+cases   = ["c-meta-0001", "c-meta-0002"]
+
+  [[quirk.evidence]]
+  kind    = "s3s-issue"
+  ref     = "https://github.com/s3s-project/s3s/issues/405"
+  summary = "Upstream did not encode non ASCII metadata values, producing headers that violate the field value grammar."
+
+  [[quirk.evidence]]
+  kind    = "rfc"
+  ref     = "https://www.rfc-editor.org/rfc/rfc2047"
+  summary = "Defines the encoded word syntax used to carry non ASCII text in header field values."
+
+[[quirk]]
+id      = "q-order-0014"
+kind    = "element_order"
+target  = "ListObjectsV2"
+summary = "Sibling order in the listing result is part of the wire contract; strict clients fail to parse when the bucket name follows the entry list."
+cases   = ["c-listv2-0002"]
+
+  [[quirk.evidence]]
+  kind    = "s3s-pr"
+  ref     = "https://github.com/s3s-project/s3s/pull/480"
+  summary = "Upstream emitted the listing elements in model order and broke a strict client until the order was corrected."
+
+  [[quirk.evidence]]
+  kind    = "capture"
+  ref     = "captures/list-objects-v2-aws.http"
+  summary = "Recorded reference response that fixes the sibling order used by the golden comparison."
+
+[[quirk]]
+id      = "q-owner-0017"
+kind    = "omit_when"
+target  = "Object.Owner"
+summary = "Owner information is written only when the request asked for it, so emission depends on a request field rather than on the value itself."
+cases   = ["c-listv2-0007"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectsV2.html"
+  summary = "States that owner information is returned only when the fetch owner parameter is set."
+
+[[quirk]]
+id      = "q-region-0003"
+kind    = "legacy_alias"
+target  = "GetBucketLocation.LocationConstraint"
+summary = "EU is a legacy alias that denotes eu-west-1 and must stay an accepted and returnable value of the enum."
+cases   = ["c-location-0003"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketLocation.html"
+  summary = "The enumerated constraint values include the historical EU alias alongside the modern region identifiers."
+
+[[quirk]]
+id      = "q-root-0013"
+kind    = "root_name"
+target  = "ListObjectsV2"
+summary = "The response root element is shared verbatim with the first version of the listing operation, so the root name cannot be derived from the operation or output shape name."
+cases   = ["c-listv2-0001"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectsV2.html#API_ListObjectsV2_ResponseSyntax"
+  summary = "The documented response syntax uses the same root element name as the older listing operation."
+
+[[quirk]]
+id      = "q-sse-0010"
+kind    = "secret_hygiene"
+target  = "PutObject"
+summary = "The customer key is never echoed back and never logged, while the algorithm and key digest must be echoed; customer keys over a plaintext connection are refused."
+cases   = ["c-ssec-0001", "c-ssec-0002"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/dev/ServerSideEncryptionCustomerKeys.html"
+  summary = "Requires a secure connection for customer provided keys and describes which of the three headers are echoed in the response."
+
+[[quirk]]
+id      = "q-storageclass-0022"
+kind    = "omit_when"
+target  = "Object.StorageClass"
+summary = "The storage class element in a listing is always written including the default class, which is the opposite of the header form that is suppressed for the default class."
+cases   = ["c-storageclass-0001", "c-storageclass-0002"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectsV2.html"
+  summary = "The documented listing response includes the storage class element for every entry."
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObject.html"
+  summary = "States that the storage class response header is returned for every object except those in the default class."
+
+[[quirk]]
+id      = "q-timestamp-0005"
+kind    = "timestamp_format"
+target  = "PutObject.Expires"
+summary = "The value must be round tripped as an opaque string, because stored values are frequently not parseable dates at all."
+cases   = ["c-expires-0001"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObject.html"
+  summary = "The SDKs added a separate string valued member for this header after non date values were observed in production data."
+
+  [[quirk.evidence]]
+  kind    = "observed"
+  ref     = "captures/put-object-expires-nondate.http"
+  summary = "Recorded request where the header value is not a date, which a parsing implementation would reject or rewrite."
+
+[[quirk]]
+id      = "q-timestamp-0011"
+kind    = "timestamp_format"
+target  = "PutObject.ObjectLockRetainUntilDate"
+summary = "This is the only request header carrying the extended date time format instead of the HTTP date format."
+cases   = ["c-objectlock-0001"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObject.html"
+  summary = "Specifies the retain until date header in the extended date time format while every other date header uses the HTTP date format."
+
+[[quirk]]
+id      = "q-timestamp-0012"
+kind    = "structured_header"
+target  = "PutObject.Expiration"
+summary = "The expiration header is a structured value whose quoted parameter embeds an HTTP date, so it must not be modelled as a timestamp."
+cases   = ["c-expiration-0001"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObject.html#API_PutObject_ResponseSyntax"
+  summary = "Shows the header as a pair of quoted parameters, one of which contains a date."
+
+[[quirk]]
+id      = "q-token-0021"
+kind    = "opaque_token"
+target  = "ListObjectsV2"
+summary = "Pagination tokens are attacker controlled opaque bytes; they are never parsed as keys or paths and must survive url encoding unchanged."
+cases   = ["c-listv2-0010"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectsV2.html"
+  summary = "Describes the continuation token as an opaque value obtained from a previous response."
+
+[[quirk]]
+id      = "q-unwrapped-0001"
+kind    = "unwrapped_output"
+target  = "GetBucketLocation"
+summary = "The response body is the single element LocationConstraint itself; the generic restXml output wrapper must not be written."
+cases   = ["c-location-0001"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketLocation.html"
+  summary = "The documented response syntax shows one top level LocationConstraint element with no enclosing output element."
+
+  [[quirk.evidence]]
+  kind    = "s3s-pr"
+  ref     = "https://github.com/s3s-project/s3s/pull/127"
+  summary = "Upstream shipped a double wrapped body until this change, which is why the unwrapping must be data in the IR rather than a codegen special case."
+
+  [[quirk.evidence]]
+  kind    = "capture"
+  ref     = "captures/get-bucket-location-aws.http"
+  summary = "Recorded AWS response used as the byte level reference for the unwrapped body."

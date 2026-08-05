@@ -161,8 +161,16 @@ fn the_side_channel_register_is_complete() {
         .filter(|channel| channel.disposition == Disposition::ClosedHere)
         .count();
     assert!(closed >= 7, "most channels must be closed here, not deferred; saw {closed}");
-    assert!(SIDE_CHANNELS.iter().any(|channel| matches!(channel.disposition, Disposition::AcceptedRisk(_))));
-    assert!(SIDE_CHANNELS.iter().any(|channel| matches!(channel.disposition, Disposition::DeferredTo(_))));
+    assert!(
+        SIDE_CHANNELS
+            .iter()
+            .any(|channel| matches!(channel.disposition, Disposition::AcceptedRisk(_)))
+    );
+    assert!(
+        SIDE_CHANNELS
+            .iter()
+            .any(|channel| matches!(channel.disposition, Disposition::DeferredTo(_)))
+    );
 }
 
 /// Positive — the unauthenticated credential lookup is bounded in both dimensions (T2).
@@ -170,7 +178,10 @@ fn the_side_channel_register_is_complete() {
 fn the_credential_lookup_is_bounded_and_negatively_cached() {
     let budget = LookupBudget::DEFAULT;
     assert!(!budget.timeout().is_zero(), "an unbounded provider call is an unauthenticated hang");
-    assert!(!budget.negative_ttl().is_zero(), "without a negative cache every forged key is a round trip");
+    assert!(
+        !budget.negative_ttl().is_zero(),
+        "without a negative cache every forged key is a round trip"
+    );
     assert!(!budget.negative_ttl_jitter().is_zero(), "unjittered expiry is a thundering herd");
     assert!(budget.jittered_negative_ttl(0.5) <= budget.negative_ttl());
 }
@@ -246,7 +257,10 @@ fn c_sig_0110_a_known_key_with_a_wrong_signature_is_rejected() {
     let verdict = authenticate(signed_request(), CredentialLookup::Found(real_secret()), &forged);
     assert!(!verdict.is_authenticated());
     assert_eq!(verdict.rejection(), Some(AuthError::SignatureDoesNotMatch));
-    assert!(verdict.identity().is_none(), "a rejected request must not be attributed to the key it claimed");
+    assert!(
+        verdict.identity().is_none(),
+        "a rejected request must not be attributed to the key it claimed"
+    );
 }
 
 /// Negative — c-sig-0111 (functional half): an unknown access key and a bad signature are rejected
@@ -277,7 +291,11 @@ fn c_sig_0111_the_two_credential_rejections_differ_only_in_their_code() {
 #[test]
 fn c_sig_0112_wrong_length_hex_is_rejected() {
     for length in [0usize, 63, 65, 128] {
-        assert_eq!(decode_hex_lower::<32>(&"a".repeat(length)), Err(SigParseError::MalformedHex), "length {length}");
+        assert_eq!(
+            decode_hex_lower::<32>(&"a".repeat(length)),
+            Err(SigParseError::MalformedHex),
+            "length {length}"
+        );
     }
 }
 
@@ -364,10 +382,17 @@ fn c_sig_0128_nothing_printable_carries_a_credential() {
         assert!(!rendered.contains(forbidden), "{forbidden:?} leaked into {rendered}");
     }
     assert!(rendered.contains("<redacted>"), "the session token must be named but not printed");
-    assert!(rendered.contains(KEY_ID), "the access key id is the one value that belongs in an audit record");
+    assert!(
+        rendered.contains(KEY_ID),
+        "the access key id is the one value that belongs in an audit record"
+    );
 
     // The rejection side carries nothing at all.
-    for error in [AuthError::InvalidAccessKeyId, AuthError::SignatureDoesNotMatch, AuthError::AccessDenied] {
+    for error in [
+        AuthError::InvalidAccessKeyId,
+        AuthError::SignatureDoesNotMatch,
+        AuthError::AccessDenied,
+    ] {
         let rendered = format!("{:?} {}", Verdict::reject(error), error);
         assert!(!rendered.contains(KEY_ID));
         assert!(!rendered.contains("wJalrXUtnFEMI"));
@@ -386,7 +411,11 @@ fn presented_credentials_are_never_downgraded_to_anonymous() {
     for presence in surfaces {
         assert!(presence.any());
         assert_eq!(presence.into_evidence().err(), Some(CredentialsWerePresented));
-        let verdict = authenticate(presence, CredentialLookup::Unknown, &Signature::HmacSha256(CtBytes::from_array([0u8; 32])));
+        let verdict = authenticate(
+            presence,
+            CredentialLookup::Unknown,
+            &Signature::HmacSha256(CtBytes::from_array([0u8; 32])),
+        );
         assert!(!verdict.is_anonymous(), "a presented credential must be verified or rejected");
     }
 }
@@ -398,7 +427,12 @@ fn two_signature_surfaces_are_ambiguous() {
     assert!(both.is_ambiguous());
     assert!(!CredentialPresence::NONE.with_authorization_header().is_ambiguous());
     // A security token alongside one signature is normal, not ambiguous.
-    assert!(!CredentialPresence::NONE.with_query_signature().with_security_token().is_ambiguous());
+    assert!(
+        !CredentialPresence::NONE
+            .with_query_signature()
+            .with_security_token()
+            .is_ambiguous()
+    );
 }
 
 /// Negative — a credential provider that cannot answer never produces an authentication failure.
@@ -414,7 +448,14 @@ fn an_unavailable_provider_is_not_an_authentication_failure() {
 /// Negative — an access key id that could corrupt an audit record is rejected at construction.
 #[test]
 fn access_key_ids_that_could_inject_into_a_log_are_rejected() {
-    for bad in ["", "AKIA\r\nLevel: forged", "AKIA KEY", "AKIA\u{0}KEY", "AKIA\u{e9}KEY", "\u{7f}"] {
+    for bad in [
+        "",
+        "AKIA\r\nLevel: forged",
+        "AKIA KEY",
+        "AKIA\u{0}KEY",
+        "AKIA\u{e9}KEY",
+        "\u{7f}",
+    ] {
         assert_eq!(Identity::new(bad), Err(SigParseError::InvalidAccessKeyId), "must reject {bad:?}");
     }
     assert_eq!(Identity::new(&"A".repeat(129)), Err(SigParseError::InvalidAccessKeyId));
@@ -499,7 +540,10 @@ fn negative_cases_outnumber_positive_ones() {
     let positive = source.lines().filter(|line| line.starts_with("/// Positive")).count();
     let total = source.lines().filter(|line| line.trim() == "#[test]").count();
     assert_eq!(negative + positive, total, "every test must be labelled Positive or Negative");
-    assert!(negative >= positive, "negative cases must outnumber positive ones: {negative} vs {positive}");
+    assert!(
+        negative >= positive,
+        "negative cases must outnumber positive ones: {negative} vs {positive}"
+    );
 }
 
 fn sources() -> Vec<(&'static str, &'static str)> {

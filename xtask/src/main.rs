@@ -18,12 +18,25 @@
 //! needs them; this file only owns dispatch.
 //! NOT responsible for: any protocol logic.
 
+mod codegen;
+
 use std::process::ExitCode;
 
 fn main() -> ExitCode {
     let mut args = std::env::args().skip(1);
-    match args.next().as_deref() {
-        Some("verify") => verify(args.collect()),
+    let first = args.next();
+    let rest: Vec<String> = args.collect();
+    match first.as_deref() {
+        Some("verify") => verify(rest),
+        Some("codegen") => codegen::codegen(&rest),
+        Some("spec") => match rest.first().map(String::as_str) {
+            Some("verify") => codegen::verify(&rest[1..]),
+            other => {
+                eprintln!("unknown `spec` subcommand: {}\n\n{USAGE}", other.unwrap_or("(none)"));
+                ExitCode::FAILURE
+            }
+        },
+        Some("why") => codegen::why(&rest),
         Some("bootstrap") => {
             println!("nothing to bootstrap yet");
             ExitCode::SUCCESS
@@ -44,6 +57,11 @@ usage: cargo xtask <command>
 
 commands:
   verify [--crate <name>]   run the test suite (whole workspace, or one crate)
+  codegen                   regenerate spec/operations, OPERATIONS.md and generated/
+  codegen --diff            print the semantic diff between the working tree and a fresh run
+  spec verify               fail when any generated artefact differs from a fresh run
+  why <target>              why a behaviour is the way it is: quirk id, operation, error code,
+                            header or query key
   bootstrap                 prepare a fresh checkout for work
 ";
 

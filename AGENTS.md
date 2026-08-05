@@ -128,11 +128,12 @@ match word for word.
 | `conformance/case.schema.json` | The frozen case format. Widening it late silently weakens every case already written against the narrower form |
 | `model/s3.json`, `model/sts.json`, their `.sha256` sidecars, `model/PROVENANCE.md` | The pinned AWS service models. Re-pinning changes every generated artifact, so it is a reviewed protocol event, never a dependency bump |
 
+| `model/overlays/**` | The only sanctioned hand-written protocol exception source. Quirks are hand-written, so they live here and **never** under the generated `spec/` tree |
+
 **Pending — add the row the moment the path first exists, in the PR that creates it:**
 
 | Path | Contract it encodes |
 | --- | --- |
-| `model/overlays/**` | The only sanctioned hand-written protocol exception source. Quirks are hand-written, so they live here and **never** under the generated `spec/` tree |
 | The error-code → HTTP status mapping table | Externally observable API surface; clients branch on it |
 | The public API snapshot | Semver contract for `s3gate` and every `s3gate-*` crate |
 | Deletion of anything under `conformance/cases/**` | A deleted case is a silently dropped guarantee. Adding cases is unrestricted |

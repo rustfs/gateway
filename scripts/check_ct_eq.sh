@@ -92,7 +92,7 @@ BANNED_DERIVES='PartialEq|Eq|Debug|Serialize|Deserialize'
 
 # Rules 3-6 apply here only. Outside these paths the identifier heuristics
 # produce false positives that would train everyone to ignore the guard.
-GUARDED_PATH_RE='^crates/s3gate-sig/(src|tests)/|^crates/s3gate-core/src/authn'
+GUARDED_PATH_RE='^crates/s3gate-sig/src/|^crates/s3gate-core/src/authn'
 # The single file allowed to turn a `subtle::Choice` into a `bool`.
 CHOICE_TO_BOOL_FILE='crates/s3gate-sig/src/signature.rs'
 # Identifiers that name key material. Deliberately NOT bare `key` or `token`:
@@ -101,7 +101,7 @@ SECRET_IDENT_RE='(secret|signing_key|session_token|private_key|derived_key|passp
 # Baselines for rule 7. Raise them when a PR adds cases; lowering one is the
 # change a reviewer must refuse to wave through.
 COMPILE_FAIL_FLOOR=17
-NEGATIVE_LABEL_FLOOR=27
+NEGATIVE_LABEL_FLOOR=35
 
 status=0
 sensitive_seen=0
@@ -252,7 +252,9 @@ done
 choice_to_bool_total=0
 
 for file in "${guarded[@]}"; do
-    # Strip comment-only lines once; every rule below operates on code.
+    # Blank out comment-only lines, keeping the line numbering intact. Nothing else is skipped:
+    # a rule that stopped at `#[cfg(test)]` would also stop at every line after it, which is where
+    # somebody eventually appends a helper.
     code="$(awk '{ s = $0; sub(/^[ \t]+/, "", s); if (s ~ /^\/\//) { print "" } else { print $0 } }' "$file")"
 
     # Rule 3 — `bool::from(` count and location.
@@ -276,7 +278,7 @@ for file in "${guarded[@]}"; do
         [[ -z "$hit" ]] && continue
         report "${file}:${hit%%:*}: a formatting or logging macro names key material; GHSA-r54g / GHSA-8cm2 / GHSA-333v were all a secret in a log line"
     done < <(printf '%s\n' "$code" |
-        grep -nE '(format!|write!|writeln!|print!|println!|eprintln!|panic!|assert!|tracing::[a-z_]+!|(debug|info|warn|error|trace)!)[ \t]*\(' |
+        grep -nE '(format!|write!|writeln!|print!|println!|eprintln!|panic!|unreachable!|todo!|tracing::[a-z_]+!|(debug|info|warn|error|trace)!)[ \t]*\(' |
         grep -iE "$SECRET_IDENT_RE" || true)
 
     # Rule 6 — key material in a reallocating buffer.

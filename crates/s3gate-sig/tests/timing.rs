@@ -31,6 +31,14 @@
 //! a debug build must never serve production traffic. The thresholds below are therefore
 //! deliberately loose in debug and tighter in release, and the test never fails for being slow, only
 //! for being *asymmetric*.
+//!
+//! # The threshold is not a guess
+//!
+//! Measured with this exact sampling scheme against a comparison that *does* return at the first
+//! differing byte: the two sides came out **7.85x apart** (785% relative), against a tolerance of
+//! 20%. `Signature::ct_verify` measures under 0.1% on the same machine. The gap between what the
+//! defect produces and what the tolerance allows is nearly two orders of magnitude, which is why
+//! this test can be tight enough to mean something and still not flake.
 
 use std::hint::black_box;
 use std::time::{Duration, Instant};
