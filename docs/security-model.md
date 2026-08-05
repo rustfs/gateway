@@ -35,7 +35,7 @@ control in the guard self-test.
 
 ## Timing side channels
 
-The register lives in `crates/s3gate-sig/src/timing.rs` as `SIDE_CHANNELS` — **data, not prose**,
+The register lives in `crates/sig/src/timing.rs` as `SIDE_CHANNELS` — **data, not prose**,
 so a test can assert every entry still has an owner. Ten channels, each closed here, deferred to a
 named task with its interface already constrained, or accepted with the reason recorded.
 
@@ -54,7 +54,7 @@ implementation measures 0.0008.
 
 ## Deployment constraint
 
-**Never run a debug build of `s3gate-sig` in production.** `subtle`'s invariant checks are
+**Never run a debug build of `rustfs-gateway-sig` in production.** `subtle`'s invariant checks are
 `debug_assert!`s over secret-derived values, and they branch on secret-dependent conditions. A
 debug build therefore has secret-dependent control flow that no amount of care in this crate can
 remove. `subtle`'s barriers are `read_volatile`-based and documented as best-effort, so a release

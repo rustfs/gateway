@@ -43,8 +43,8 @@ So the budget is part of the rules, not an afterthought:
 1. **Default is at most 2 roles per PR**: `simplicity-adversary` (always) plus
    whichever single role the changed path selects.
 2. More than 2 roles only when the changed path is one of the sub-agent rows
-   in the `AGENTS.md` trigger table (`crates/s3gate-http/**`,
-   `crates/s3gate-sig/**`), or the PR body is marked `HIGH-RISK`.
+   in the `AGENTS.md` trigger table (`crates/http/**`,
+   `crates/sig/**`), or the PR body is marked `HIGH-RISK`.
 3. Role work for one PR is budgeted at **≤60k tokens**. Over budget, drop to a
    single-session skill pass instead of parallel sub-agents.
 4. Documentation-only, comment-only and CI-config-only diffs need **no role**.
@@ -56,10 +56,10 @@ Condensed path map (authoritative copy lives in `AGENTS.md`):
 | `docs/**`, comments, CI config | none |
 | `conformance/cases/**` (added cases only) | `test-adversary` (light: is there a negative case?) |
 | `model/**`, `spec/**`, `generated/**` | `protocol-auditor` |
-| `crates/s3gate-types/**`, `crates/s3gate-xml/**` | `protocol-auditor`, `test-adversary` |
-| `crates/s3gate-http/**` (body, chunked, limits) | `security-adversary`, `concurrency-durability`, `perf-engineer` — sub-agents |
-| `crates/s3gate-sig/**` | `security-adversary`, `test-adversary`, correctness — sub-agents, high risk |
-| `crates/s3gate-core/**` (routing, pipeline) | correctness, `security-adversary` |
+| `crates/types/**`, `crates/xml/**` | `protocol-auditor`, `test-adversary` |
+| `crates/http/**` (body, chunked, limits) | `security-adversary`, `concurrency-durability`, `perf-engineer` — sub-agents |
+| `crates/sig/**` | `security-adversary`, `test-adversary`, correctness — sub-agents, high risk |
+| `crates/core/**` (routing, pipeline) | correctness, `security-adversary` |
 | `ops/**` | `protocol-auditor`, `test-adversary` |
 | public API change (semver alarm) | `protocol-auditor` + mandatory human review |
 | `compat-s3s`, dual-stack switches | migration safety + metadata golden |

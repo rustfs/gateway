@@ -377,6 +377,98 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 
 [[package]]
+name = "rustfs-gateway"
+version = "0.1.0"
+dependencies = [
+ "rustfs-gateway-core",
+ "rustfs-gateway-stream",
+ "rustfs-gateway-types",
+]
+
+[[package]]
+name = "rustfs-gateway-codegen"
+version = "0.1.0"
+dependencies = [
+ "rustfs-gateway-model",
+ "thiserror",
+]
+
+[[package]]
+name = "rustfs-gateway-conformance"
+version = "0.1.0"
+dependencies = [
+ "rustfs-gateway",
+]
+
+[[package]]
+name = "rustfs-gateway-core"
+version = "0.1.0"
+dependencies = [
+ "rustfs-gateway-http",
+ "rustfs-gateway-sig",
+ "rustfs-gateway-types",
+]
+
+[[package]]
+name = "rustfs-gateway-http"
+version = "0.1.0"
+dependencies = [
+ "http",
+ "rustfs-gateway-stream",
+ "rustfs-gateway-types",
+ "smallvec",
+]
+
+[[package]]
+name = "rustfs-gateway-model"
+version = "0.1.0"
+dependencies = [
+ "thiserror",
+]
+
+[[package]]
+name = "rustfs-gateway-sig"
+version = "0.1.0"
+dependencies = [
+ "hmac",
+ "http",
+ "sha2",
+ "smallvec",
+ "subtle",
+ "zeroize",
+]
+
+[[package]]
+name = "rustfs-gateway-stream"
+version = "0.1.0"
+dependencies = [
+ "bitflags",
+ "bytes",
+ "http",
+]
+
+[[package]]
+name = "rustfs-gateway-types"
+version = "0.1.0+aws.2026-08-04"
+dependencies = [
+ "bytes",
+ "crc-fast",
+ "hex",
+ "http",
+ "md-5",
+ "percent-encoding",
+ "proptest",
+ "rustfs-gateway-stream",
+ "rustfs-gateway-xml",
+ "sha1",
+ "sha2",
+]
+
+[[package]]
+name = "rustfs-gateway-xml"
+version = "0.1.0"
+
+[[package]]
 name = "rustix"
 version = "1.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -400,98 +492,6 @@ dependencies = [
  "tempfile",
  "wait-timeout",
 ]
-
-[[package]]
-name = "s3gate"
-version = "0.1.0"
-dependencies = [
- "s3gate-core",
- "s3gate-stream",
- "s3gate-types",
-]
-
-[[package]]
-name = "s3gate-codegen"
-version = "0.1.0"
-dependencies = [
- "s3gate-model",
- "thiserror",
-]
-
-[[package]]
-name = "s3gate-conformance"
-version = "0.1.0"
-dependencies = [
- "s3gate",
-]
-
-[[package]]
-name = "s3gate-core"
-version = "0.1.0"
-dependencies = [
- "s3gate-http",
- "s3gate-sig",
- "s3gate-types",
-]
-
-[[package]]
-name = "s3gate-http"
-version = "0.1.0"
-dependencies = [
- "http",
- "s3gate-stream",
- "s3gate-types",
- "smallvec",
-]
-
-[[package]]
-name = "s3gate-model"
-version = "0.1.0"
-dependencies = [
- "thiserror",
-]
-
-[[package]]
-name = "s3gate-sig"
-version = "0.1.0"
-dependencies = [
- "hmac",
- "http",
- "sha2",
- "smallvec",
- "subtle",
- "zeroize",
-]
-
-[[package]]
-name = "s3gate-stream"
-version = "0.1.0"
-dependencies = [
- "bitflags",
- "bytes",
- "http",
-]
-
-[[package]]
-name = "s3gate-types"
-version = "0.1.0+aws.2026-08-04"
-dependencies = [
- "bytes",
- "crc-fast",
- "hex",
- "http",
- "md-5",
- "percent-encoding",
- "proptest",
- "s3gate-stream",
- "s3gate-xml",
- "sha1",
- "sha2",
-]
-
-[[package]]
-name = "s3gate-xml"
-version = "0.1.0"
 
 [[package]]
 name = "sha1"
@@ -655,8 +655,8 @@ checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
 name = "xtask"
 version = "0.1.0"
 dependencies = [
- "s3gate-codegen",
- "s3gate-model",
+ "rustfs-gateway-codegen",
+ "rustfs-gateway-model",
 ]
 
 [[package]]

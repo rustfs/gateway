@@ -2,7 +2,7 @@
 
 This directory holds the conformance corpus: the data files that define what correct S3 behaviour
 looks like on the wire. It contains no Rust code. The runner that executes these files lives in
-`crates/s3gate-conformance/` and can be pointed at any S3 implementation, not only this one.
+`crates/conformance/` and can be pointed at any S3 implementation, not only this one.
 
 - `case.schema.json` — the frozen case schema (JSON Schema, draft 2020-12).
 - `cases/<domain>/c-<domain>-<NNNN>.toml` — one case per file.

@@ -1,0 +1,249 @@
+// Copyright 2026 RustFS Team
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+//! End-to-end generation against the pinned model.
+//!
+//! Case ids from the P1-03 issue are in the test names, so a red test names the acceptance
+//! criterion it broke.
+
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
+
+use crate::{CodegenInput, CodegenOutput, generate, semantic, why};
+
+fn root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("workspace root is two levels above the crate manifest")
+        .to_path_buf()
+}
+
+fn artifacts() -> crate::Artifacts {
+    let root = root();
+    generate(&CodegenInput::at(&root), &CodegenOutput::at(&root)).expect("codegen runs against the pinned model")
+}
+
+fn body(artifacts: &crate::Artifacts, suffix: &str) -> String {
+    artifacts
+        .files
+        .iter()
+        .find(|(path, _)| path.to_string_lossy().ends_with(suffix))
+        .map(|(_, body)| body.clone())
+        .unwrap_or_else(|| panic!("no generated file ends with {suffix}"))
+}
+
+#[test]
+fn c_cg_0002_the_working_tree_matches_a_fresh_run() {
+    let root = root();
+    let count = crate::verify(&CodegenInput::at(&root), &CodegenOutput::at(&root))
+        .expect("the checked-in artefacts are what codegen produces; run `cargo xtask codegen`");
+    assert!(count >= 9, "every artefact is covered by the gate, saw {count}");
+}
+
+#[test]
+fn c_cg_0004_two_runs_produce_identical_bytes() {
+    let first = artifacts();
+    let second = artifacts();
+    assert_eq!(first.files.len(), second.files.len());
+    for ((path_a, body_a), (path_b, body_b)) in first.files.iter().zip(second.files.iter()) {
+        assert_eq!(path_a, path_b);
+        assert_eq!(body_a, body_b, "{} is not deterministic", path_a.display());
+    }
+}
+
+#[test]
+fn c_cg_0003_operations_md_carries_three_reverse_indexes() {
+    let text = body(&artifacts(), "OPERATIONS.md");
+    for heading in [
+        "## Reverse index: query key to operations",
+        "## Reverse index: header to operations",
+        "## Reverse index: error code to operations",
+    ] {
+        assert!(text.contains(heading), "missing {heading}");
+    }
+    // The reverse index is only useful if it actually resolves a failure to an operation.
+    assert!(text.contains("| `list-type` | [ListObjectsV2](#listobjectsv2) |"));
+    assert!(text.contains("| `MissingContentLength` | [PutObject](#putobject) |"));
+    assert!(text.contains("| `x-amz-checksum-` | [PutObject](#putobject) |"));
+}
+
+#[test]
+fn n_c_cg_0006_no_documentation_trait_survives_into_any_artefact() {
+    for (path, text) in artifacts().files {
+        assert!(!text.contains("smithy.api#documentation"), "{} carries a stripped trait", path.display());
+    }
+}
+
+#[test]
+fn n_c_cg_0007_no_artefact_carries_upstream_prose() {
+    // The documentation traits are HTML; a single tag anywhere in an artefact means the strip
+    // failed or someone pasted service documentation into an overlay.
+    for (path, text) in artifacts().files {
+        for marker in ["<p>", "</p>", "<code>", "<important>"] {
+            assert!(!text.contains(marker), "{} contains `{marker}`", path.display());
+        }
+    }
+}
+
+#[test]
+fn c_cg_0001_the_generated_ir_is_compared_with_every_golden() {
+    let root = root();
+    let report = crate::write(&CodegenInput::at(&root), &CodegenOutput::at(&root)).expect("codegen runs");
+    assert_eq!(report.goldens.len(), 3, "all three frozen samples take part in the comparison");
+    // The differences themselves are reported by `cargo xtask codegen` and reviewed by a human:
+    // a hand-written sample can be the stale side. What must hold is that the comparison covers
+    // the wire dimensions rather than skipping them.
+    for golden in &report.goldens {
+        for difference in &golden.differences {
+            assert!(
+                !difference.path.starts_with("http") && !difference.path.starts_with("auth"),
+                "{}: routing and auth must match the golden exactly, saw {difference}",
+                golden.operation
+            );
+        }
+    }
+}
+
+#[test]
+fn n_c_cg_n001_a_hand_edited_spec_file_fails_verification() {
+    let root = root();
+    let scratch = std::env::temp_dir().join(format!("s3gate-verify-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&scratch);
+    let output = CodegenOutput {
+        spec_dir: scratch.join("spec/operations"),
+        operations_md: scratch.join("OPERATIONS.md"),
+        generated_dir: scratch.join("generated"),
+    };
+    let input = CodegenInput::at(&root);
+    crate::write(&input, &output).expect("writes into the scratch tree");
+    crate::verify(&input, &output).expect("a freshly written tree verifies");
+
+    let edited = output.spec_dir.join("ListObjectsV2.toml");
+    let text = std::fs::read_to_string(&edited).expect("read");
+    std::fs::write(&edited, text.replace("precedence = 600", "precedence = 42")).expect("write");
+
+    let err = crate::verify(&input, &output).expect_err("a hand-edited spec file must fail the gate");
+    let message = format!("{err}");
+    assert!(message.contains("ListObjectsV2.toml"), "{message}");
+    assert!(message.contains("precedence = 42"), "the failure names the changed line: {message}");
+    let _ = std::fs::remove_dir_all(&scratch);
+}
+
+#[test]
+fn n_c_cg_n002_an_edited_operations_md_fails_verification() {
+    let root = root();
+    let scratch = std::env::temp_dir().join(format!("s3gate-verify-md-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&scratch);
+    let output = CodegenOutput {
+        spec_dir: scratch.join("spec/operations"),
+        operations_md: scratch.join("OPERATIONS.md"),
+        generated_dir: scratch.join("generated"),
+    };
+    let input = CodegenInput::at(&root);
+    crate::write(&input, &output).expect("writes into the scratch tree");
+    std::fs::write(&output.operations_md, "# hand written\n").expect("write");
+    assert!(crate::verify(&input, &output).is_err(), "OPERATIONS.md is under the gate too");
+    let _ = std::fs::remove_dir_all(&scratch);
+}
+
+#[test]
+fn n_a_stale_generated_file_fails_verification() {
+    let root = root();
+    let scratch = std::env::temp_dir().join(format!("s3gate-verify-stale-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&scratch);
+    let output = CodegenOutput {
+        spec_dir: scratch.join("spec/operations"),
+        operations_md: scratch.join("OPERATIONS.md"),
+        generated_dir: scratch.join("generated"),
+    };
+    let input = CodegenInput::at(&root);
+    crate::write(&input, &output).expect("writes into the scratch tree");
+    std::fs::write(output.spec_dir.join("GetObject.toml"), "name = \"GetObject\"\n").expect("write");
+
+    let err = crate::verify(&input, &output).expect_err("a file codegen does not produce is drift");
+    assert!(format!("{err}").contains("not produced by codegen"), "{err}");
+    let _ = std::fs::remove_dir_all(&scratch);
+}
+
+#[test]
+fn c_cg_0005_why_reports_a_quirk_with_its_evidence_and_cases() {
+    let text = why::why(&artifacts().operations, "q-checksum-0006").expect("known quirk");
+    assert!(text.contains("## Quirk `q-checksum-0006`"));
+    assert!(text.contains("**Evidence**"));
+    assert!(text.contains("https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObject.html"));
+    assert!(text.contains("c-checksum-0001"));
+    assert!(text.contains("PutObject"));
+}
+
+#[test]
+fn why_resolves_headers_error_codes_and_query_keys() {
+    let artifacts = artifacts();
+    let header = why::why(&artifacts.operations, "x-amz-copy-source");
+    assert!(header.is_err(), "a header nobody binds is not found");
+
+    let found = why::why(&artifacts.operations, "X-Amz-Meta-").expect("prefix header, case-insensitively");
+    assert!(found.contains("prefix family"), "{found}");
+
+    let code = why::why(&artifacts.operations, "MissingContentLength").expect("error code");
+    assert!(code.contains("required field `ContentLength`"), "{code}");
+
+    let key = why::why(&artifacts.operations, "list-type").expect("query key");
+    assert!(key.contains("route predicate"), "{key}");
+}
+
+#[test]
+fn n_c_cg_n013_why_fails_with_candidates_for_an_unknown_target() {
+    let err = why::why(&artifacts().operations, "x-amz-nonexistent-header").expect_err("unknown target");
+    let message = format!("{err}");
+    assert!(message.contains("not a known quirk id"), "{message}");
+    assert!(message.contains("Closest candidates: x-amz-"), "suggestions are offered: {message}");
+}
+
+#[test]
+fn semantic_diff_names_the_wire_dimension_that_moved() {
+    let artifacts = artifacts();
+    let new: BTreeMap<String, rustfs_gateway_model::json::Value> = artifacts
+        .operations
+        .iter()
+        .map(|ir| (ir.operation.clone(), rustfs_gateway_model::ir::emit::to_json(ir)))
+        .collect();
+
+    let mut old = new.clone();
+    old.remove("PutObject");
+    let diff = semantic::compare_sets(&old, &new);
+    assert_eq!(diff.changes.len(), 1);
+    assert_eq!(diff.changes[0].dimension, semantic::Dimension::OperationAdded);
+    assert!(diff.render().contains("operations added"));
+
+    assert!(semantic::compare_sets(&new, &new).is_empty(), "no change is no diff");
+}
+
+#[test]
+fn n_semantic_diff_classifies_a_precedence_move_as_a_route_change() {
+    let artifacts = artifacts();
+    let mut old: BTreeMap<String, rustfs_gateway_model::json::Value> = artifacts
+        .operations
+        .iter()
+        .map(|ir| (ir.operation.clone(), rustfs_gateway_model::ir::emit::to_json(ir)))
+        .collect();
+    let new = old.clone();
+    let mut broken = artifacts.operations[0].clone();
+    broken.http.precedence = 1;
+    old.insert(broken.operation.clone(), rustfs_gateway_model::ir::emit::to_json(&broken));
+
+    let diff = semantic::compare_sets(&old, &new);
+    assert_eq!(diff.changes.len(), 1, "{:?}", diff.changes);
+    assert_eq!(diff.changes[0].dimension, semantic::Dimension::RouteSelector);
+}

@@ -78,7 +78,7 @@ described in the license, without additional terms.
 ## Commits and pull requests
 
 - **Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/)**:
-  `type(scope): summary`, e.g. `fix(s3gate-sig): reject empty x-amz-date`. Common types:
+  `type(scope): summary`, e.g. `fix(rustfs-gateway-sig): reject empty x-amz-date`. Common types:
   `feat`, `fix`, `refactor`, `perf`, `test`, `docs`, `chore`, `ci`. Breaking changes are
   marked with `!` after the scope and explained in the body.
 - **Pull request titles use the same format and stay within 72 characters.** The title is
@@ -95,7 +95,7 @@ described in the license, without additional terms.
   needs a doc comment.
 - New dependencies need justification in the pull request description: what it does, why it
   cannot be written in a few dozen lines, its license, and its MSRV.
-- Rings 0 and 1 (`s3gate*` crates) must never depend on a RustFS crate or on a ring-2
+- Rings 0 and 1 (`rustfs-gateway*` crates) must never depend on a RustFS crate or on a ring-2
   (`rustfs-gateway-*`) crate. CI enforces this; see the ring table in [README.md](README.md).
 - Behaviour changes need a test. Protocol behaviour changes need a conformance case with its
   evidence URL.

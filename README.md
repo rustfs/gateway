@@ -4,40 +4,45 @@
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![MSRV](https://img.shields.io/badge/MSRV-1.89-orange.svg)](docs/msrv.md)
 
-**A protocol-exact, security-first S3 server framework for Rust** — it does everything
-between the HTTP wire and S3 semantics correctly, and leaves storage semantics to you.
+**The HTTP layer of [RustFS](https://github.com/rustfs/rustfs).** It turns S3 traffic on the
+wire into typed operations and back, and leaves storage semantics to RustFS itself.
 
-RustFS Gateway parses, validates, frames, and signs-checks S3 traffic: request routing, header and
-query typing, `aws-chunked` framing, XML codecs, SigV2/SigV4 and presigned-URL verification,
-POST-policy handling, and the error shapes AWS actually returns. What an object does once it
-is understood — where bytes live, who is allowed to touch them — is your program's business.
+This is where request routing, header and query typing, `aws-chunked` framing, XML codecs,
+SigV2/SigV4 and presigned-URL verification, POST-policy handling, and the error shapes AWS
+actually returns all live. It exists to replace [s3s](https://github.com/Nugine/s3s) in RustFS
+with a layer we can reason about and change on our own schedule.
 
-The repository is layered into three rings: rings 0 and 1 are a reusable,
-RustFS-independent S3 protocol framework, and ring 2 hosts the RustFS-specific HTTP surface
-(admin API, console, STS, metadata extensions, RPC prefix routing) that will take over the
-entire HTTP layer of [RustFS](https://github.com/rustfs/rustfs).
+**Scope, stated plainly:** this is built for RustFS. It is not a general-purpose library, we
+do not encourage outside adoption, and nothing here is published to crates.io — RustFS consumes
+the repository as a git dependency. The API will change whenever it suits RustFS.
+
+### Why the crates are still layered
 
 | Ring | Crates | Rule |
 |---|---|---|
-| 0 — protocol kernel | `s3gate-types`, `s3gate-xml`, `s3gate-stream`, `s3gate-http`, `s3gate-sig`, `s3gate-model`, `s3gate-codegen` | Reusable, zero RustFS dependencies |
-| 1 — service runtime | `s3gate-core`, `s3gate`, `s3gate-conformance` | Reusable, zero RustFS dependencies |
-| 2 — RustFS edge | `rustfs-gateway-admin`, `-console`, `-sts`, `-metadata-ext`, `-rpc` (not created yet) | May depend on published RustFS crates |
+| 0 — protocol kernel | `rustfs-gateway-types`, `-xml`, `-stream`, `-http`, `-sig`, `-model`, `-codegen` | No dependency on any rustfs crate |
+| 1 — service runtime | `rustfs-gateway-core`, `rustfs-gateway`, `-conformance` | No dependency on any rustfs crate |
+| 2 — RustFS edge | `rustfs-gateway-admin`, `-console`, `-sts`, `-metadata-ext`, `-rpc` (not created yet) | May depend on rustfs crates |
 
-Rings 0 and 1 must never depend on a RustFS crate or on a ring-2 crate. That constraint is
-what keeps the cross-repository dependency graph acyclic, and it is enforced in CI.
+The rule survives the narrowed scope because it is not about reuse: `rustfs-gateway-types` is
+consumed by `rustfs/ecstore`, `lifecycle`, `replication` and the scanner, and ring-2 crates
+depend on `ecstore`/`iam`/`policy` in turn. **One ring-0 edge back into rustfs closes that
+cycle.** Membership is declared per crate in `[package.metadata.gateway]` — after the rename
+the crate name says nothing — and `scripts/check_ring_boundaries.sh` enforces it in CI.
 
 ## Scope fence
 
-RustFS Gateway is deliberately small at the edges. It **does not** and will not:
+The gateway is deliberately small at the edges. It **does not** and will not:
 
-- **Implement storage.** No filesystem, no erasure coding, no bucket database. RustFS Gateway hands
-  you a typed operation and expects a typed answer.
+- **Implement storage.** No filesystem, no erasure coding, no bucket database. It hands the
+  rest of RustFS a typed operation and expects a typed answer.
 - **Evaluate IAM policy.** There is no policy language, no condition-key engine, no
-  wildcard-ARN matcher. RustFS Gateway defines an `Authorizer` interface and calls it; deciding
-  "allow" or "deny" is entirely yours.
-- **Own cluster or admin business logic.** RustFS Gateway does provide a first-class mechanism for
-  registering custom operations, so admin-style APIs can be layered on top — but their
-  semantics are not part of this framework.
+  wildcard-ARN matcher. It defines an `Authorizer` interface and calls it; deciding "allow" or
+  "deny" stays in `rustfs/iam`.
+- **Own cluster or admin business logic.** Registering custom operations is a first-class
+  mechanism — that is how the admin API, STS and console become ordinary operations that go
+  through the same authentication and authorization pipeline — but their semantics live in
+  ring 2, not in the protocol core.
 - **Support non-HTTP access protocols.** SFTP and FTPS are out of scope, permanently.
 
 Anything listed above being absent is a design decision, not a missing feature.
@@ -84,7 +89,7 @@ project existed. Three things about the relationship, stated up front:
 ```bash
 cargo build --workspace          # build every crate
 cargo xtask verify               # run the test suite
-cargo xtask verify --crate s3gate-sig   # run one crate's tests
+cargo xtask verify --crate rustfs-gateway-sig   # run one crate's tests
 cargo fmt --all                  # format (settings in rustfmt.toml)
 ```
 
@@ -93,10 +98,9 @@ so that local runs and CI stay identical.
 
 ## Status
 
-**Pre-alpha.** Nothing here is stable yet: the API surface, crate boundaries, and feature
-flags all change without notice. During `0.x`, **every minor release may contain breaking
-changes** (`0.N` → `0.N+1`), and an MSRV bump is also only ever allowed in a minor release.
-Do not build production systems on it yet.
+**Pre-alpha, and internal.** The API surface, crate boundaries and feature flags change
+without notice, and there is no release channel to be compatible with: nothing is published,
+so the only consumer that matters is the RustFS commit that pins this repository.
 
 ## Contributing
 

@@ -16,7 +16,7 @@
 //
 // Which operations can produce which error code, and the per-operation code for an
 // unconfigured bucket subresource. The code to HTTP status mapping is NOT here: it is
-// owned by `s3gate-types::ErrorCode`, and a generated second copy would be able to
+// owned by `rustfs-gateway-types::ErrorCode`, and a generated second copy would be able to
 // disagree with it. Data only: the including crate defines the row types.
 
 pub static ERROR_CODE_OPERATIONS: &[(&str, &[&str])] = &[

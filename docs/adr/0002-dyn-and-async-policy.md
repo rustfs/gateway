@@ -38,7 +38,7 @@ associated `type Fut: Future`, no `async fn` in trait.
 never used as trait objects, so dyn compatibility does not apply to them.
 
 ```rust
-// The s3gate facade re-exports this so downstream never defines its own:
+// The rustfs-gateway facade re-exports this so downstream never defines its own:
 pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
 // EVERY extension point looks like this — hand-written, dyn compatible:
@@ -111,7 +111,7 @@ nothing in build time; it is not a trade against compile speed.
 
 ## Consequences
 
-- **The facade crate must re-export the alias.** `s3gate` exports
+- **The facade crate must re-export the alias.** `rustfs-gateway` exports
   `pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;` so
   that no downstream crate has to take a dependency on `futures` just to name
   the return type of a trait it implements. This is a public API commitment.

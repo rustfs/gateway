@@ -5,19 +5,19 @@ set -euo pipefail
 # check_layer_dependencies.sh
 #
 # WHAT THIS CHECKS
-#   Every internal (`s3gate` / `s3gate-*`) dependency edge declared in
+#   Every internal (`rustfs-gateway` / `rustfs-gateway-*`) dependency edge declared in
 #   `crates/*/Cargo.toml` and `xtask/Cargo.toml`, against the allow matrix
 #   below. Three rules in one pass:
 #
 #     1. Direction  — a crate may only depend on the crates its own row lists.
-#                     A reverse edge (e.g. `s3gate-xml` depending on
-#                     `s3gate-types`) fails.
+#                     A reverse edge (e.g. `rustfs-gateway-xml` depending on
+#                     `rustfs-gateway-types`) fails.
 #     2. Acyclicity — the matrix is declared in topological order and every
 #                     allowed edge must point strictly backwards in that order.
 #                     This is checked against the matrix itself before any
 #                     manifest is read, so a future edit cannot introduce a
 #                     cycle by adding a row in the wrong place.
-#     3. Facade-only — `s3gate-conformance` may depend on the `s3gate` facade
+#     3. Facade-only — `rustfs-gateway-conformance` may depend on the `rustfs-gateway` facade
 #                     and nothing else internal. It is a product other S3
 #                     implementations run against themselves, so it must
 #                     exercise the public API, not internal crates.
@@ -34,13 +34,13 @@ set -euo pipefail
 # WHY
 #   The layering is not an aesthetic preference; three concrete constraints
 #   ride on it (see rustfs/backlog#1723 and AGENTS.md "Dependency Boundaries"):
-#     - `s3gate-stream` must stay standalone, otherwise
-#       `GetObjectOutput.body: StreamingBlob` creates a `s3gate-types` <->
-#       `s3gate-http` dependency cycle;
-#     - `s3gate-types`' `compat-s3s` feature is the only place a core crate may
+#     - `rustfs-gateway-stream` must stay standalone, otherwise
+#       `GetObjectOutput.body: StreamingBlob` creates a `rustfs-gateway-types` <->
+#       `rustfs-gateway-http` dependency cycle;
+#     - `rustfs-gateway-types`' `compat-s3s` feature is the only place a core crate may
 #       ever reach for s3s, because the orphan rule (E0117) forbids writing
-#       `impl From<s3s::X> for s3gate::X` from a third crate;
-#     - `s3gate-sig` must freeze `PayloadMode` before `s3gate-http` decodes
+#       `impl From<s3s::X> for rustfs-gateway::X` from a third crate;
+#     - `rustfs-gateway-sig` must freeze `PayloadMode` before `rustfs-gateway-http` decodes
 #       chunked framing, because the framing mode is derived from the signature.
 #   The first codegen PR touches these boundaries, so they must be hard before
 #   P1 starts.
@@ -75,17 +75,17 @@ cd "$ROOT_DIR"
 # graph in AGENTS.md — AGENTS.md is the source of truth, this list follows it.
 # -----------------------------------------------------------------------------
 LAYERS=(
-    "s3gate-model|"
-    "s3gate-stream|"
-    "s3gate-xml|"
-    "s3gate-codegen|s3gate-model"
-    "s3gate-types|s3gate-xml s3gate-stream"
-    "s3gate-http|s3gate-types s3gate-stream"
-    "s3gate-sig|s3gate-http s3gate-types s3gate-stream"
-    "s3gate-core|s3gate-sig s3gate-http s3gate-types s3gate-xml s3gate-stream"
-    "s3gate|s3gate-core s3gate-sig s3gate-http s3gate-types s3gate-xml s3gate-stream"
-    "s3gate-conformance|s3gate"
-    "xtask|s3gate-codegen s3gate-model"
+    "rustfs-gateway-model|"
+    "rustfs-gateway-stream|"
+    "rustfs-gateway-xml|"
+    "rustfs-gateway-codegen|rustfs-gateway-model"
+    "rustfs-gateway-types|rustfs-gateway-xml rustfs-gateway-stream"
+    "rustfs-gateway-http|rustfs-gateway-types rustfs-gateway-stream"
+    "rustfs-gateway-sig|rustfs-gateway-http rustfs-gateway-types rustfs-gateway-stream"
+    "rustfs-gateway-core|rustfs-gateway-sig rustfs-gateway-http rustfs-gateway-types rustfs-gateway-xml rustfs-gateway-stream"
+    "rustfs-gateway|rustfs-gateway-core rustfs-gateway-sig rustfs-gateway-http rustfs-gateway-types rustfs-gateway-xml rustfs-gateway-stream"
+    "rustfs-gateway-conformance|rustfs-gateway"
+    "xtask|rustfs-gateway-codegen rustfs-gateway-model"
 )
 
 status=0
@@ -119,7 +119,7 @@ allowed_of() {
 }
 
 is_internal() {
-    [[ "$1" == "s3gate" || "$1" == s3gate-* ]]
+    [[ "$1" == "rustfs-gateway" || "$1" == rustfs-gateway-* ]]
 }
 
 # -----------------------------------------------------------------------------
@@ -181,7 +181,14 @@ if [[ "${#manifests[@]}" -eq 0 ]]; then
 fi
 
 for manifest in "${manifests[@]}"; do
-    crate="$(basename "$(dirname "$manifest")")"
+    # The matrix is keyed by PACKAGE name, which no longer equals the directory name:
+    # directories dropped the prefix (crates/types) while packages kept it
+    # (rustfs-gateway-types), matching the convention in the rustfs main repository.
+    crate="$(awk -F'"' '/^name[[:space:]]*=/ {print $2; exit}' "$manifest")"
+    if [[ -z "$crate" ]]; then
+        fail "${manifest}: no package name found"
+        continue
+    fi
 
     if ! allowed="$(allowed_of "$crate")"; then
         fail "${manifest}: crate '${crate}' is not registered in the layer allow matrix; add a row to LAYERS in $(basename "${BASH_SOURCE[0]}") and to the dependency graph in AGENTS.md"
@@ -205,8 +212,8 @@ for manifest in "${manifests[@]}"; do
             continue
         fi
 
-        if [[ "$crate" == "s3gate-conformance" ]]; then
-            fail "${manifest}: '${crate}' depends on internal crate '${dep}' (${kind}); the conformance suite is a product run against other S3 implementations and may only use the public API of the 's3gate' facade"
+        if [[ "$crate" == "rustfs-gateway-conformance" ]]; then
+            fail "${manifest}: '${crate}' depends on internal crate '${dep}' (${kind}); the conformance suite is a product run against other S3 implementations and may only use the public API of the 'rustfs-gateway' facade"
         elif rank_of "$dep" >/dev/null 2>&1 && [[ "$(rank_of "$dep")" -gt "$(rank_of "$crate")" ]]; then
             fail "${manifest}: '${crate}' depends on '${dep}' (${kind}), which sits ABOVE it in the layering; this is a reverse dependency and would eventually close a cycle"
         else

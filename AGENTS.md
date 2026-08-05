@@ -135,7 +135,7 @@ match word for word.
 | Path | Contract it encodes |
 | --- | --- |
 | The error-code → HTTP status mapping table | Externally observable API surface; clients branch on it |
-| The public API snapshot | Semver contract for `s3gate` and every `s3gate-*` crate |
+| The public API snapshot | Semver contract for `rustfs-gateway` and every `s3gate-*` crate |
 | Deletion of anything under `conformance/cases/**` | A deleted case is a silently dropped guarantee. Adding cases is unrestricted |
 
 ## Absolute Prohibitions
@@ -153,7 +153,7 @@ No exceptions. If you believe you have found one, stop and ask on the issue.
 **Code**
 
 - Never commit a `.rs` file without the Apache-2.0 license header. Every Rust source file starts
-  with this block verbatim, before the `//!` module docs (see `crates/s3gate-core/src/lib.rs`),
+  with this block verbatim, before the `//!` module docs (see `crates/core/src/lib.rs`),
   enforced by `scripts/check_license_headers.sh` (`P0-09`):
 
   ```rust
@@ -198,53 +198,57 @@ No exceptions. If you believe you have found one, stop and ask on the issue.
 ## Dependency Boundaries
 
 Three rings. **Ring 0/1 must never depend on any rustfs crate, and never on ring 2.** That is the
-axiom that keeps `gateway → ecstore → dto types → gateway` from becoming a cross-repository cycle,
-and it is what lets the protocol kernel be published and consumed on its own.
+axiom that keeps `gateway → ecstore → dto types → gateway` from becoming a cross-repository cycle.
+The rule has nothing to do with reuse — nothing here is published — and it survives the narrowed
+scope untouched: `rustfs-gateway-types` is consumed by `rustfs/ecstore`, `lifecycle`, `replication`
+and the scanner, while ring 2 depends on `ecstore`/`iam`/`policy`. One ring-0 edge back into rustfs
+closes the cycle.
 
-- **Ring 0/1 — protocol kernel**: every `s3gate*` crate in this workspace. Zero rustfs dependencies,
-  independent release cadence.
+- **Ring 0/1 — protocol kernel**: every crate in this workspace. Zero rustfs dependencies.
+  Membership is **declared** in `[package.metadata.gateway]`, not inferred from the crate name:
+  after the rename every crate is `rustfs-gateway-*`, so the name carries no information.
 - **Ring 2 — rustfs adapters**: `rustfs-gateway-*`. Not present in this workspace yet. Ring 2 may
   depend on ring 0/1 and on rustfs crates; the reverse is permanently forbidden.
 
 `A ──▶ B` reads "A depends on B".
 
 ```
-             s3gate-conformance          test-only product; runs against any S3 implementation
+             rustfs-gateway-conformance          test-only product; runs against any S3 implementation
                     │
                     ▼
-                 s3gate                  public facade: ServiceBuilder, hyper/tower adapters
+                 rustfs-gateway                  public facade: ServiceBuilder, hyper/tower adapters
                     │
                     ▼
-              s3gate-core                Operation, route table, typed pipeline, extension traits
+              rustfs-gateway-core                Operation, route table, typed pipeline, extension traits
                     │
                     ▼
-               s3gate-sig                SigV2/SigV4 state machine; freezes PayloadMode
+               rustfs-gateway-sig                SigV2/SigV4 state machine; freezes PayloadMode
                     │
                     ▼
-              s3gate-http                wire layer: header/query views, limits, aws-chunked
+              rustfs-gateway-http                wire layer: header/query views, limits, aws-chunked
                  │       │
                  ▼       ▼
-        s3gate-types ──▶ s3gate-stream ──▶ http / bytes
+        rustfs-gateway-types ──▶ rustfs-gateway-stream ──▶ http / bytes
                  │
                  ▼
-           s3gate-xml ──▶ quick-xml
+           rustfs-gateway-xml ──▶ quick-xml
 
   build-time only, never present in a runtime dependency tree:
-        s3gate-codegen ──▶ s3gate-model   codegen emits generated/**, spec/, OPERATIONS.md
+        rustfs-gateway-codegen ──▶ rustfs-gateway-model   codegen emits generated/**, spec/, OPERATIONS.md
 ```
 
 Three annotations you must not lose:
 
-- **`s3gate-stream` exists to break a cycle.** `GetObjectOutput.body: StreamingBlob` would make
-  `s3gate-types` and `s3gate-http` mutually dependent. `s3gate-stream` holds `Body`, `ByteStream`,
+- **`rustfs-gateway-stream` exists to break a cycle.** `GetObjectOutput.body: StreamingBlob` would make
+  `rustfs-gateway-types` and `rustfs-gateway-http` mutually dependent. `rustfs-gateway-stream` holds `Body`, `ByteStream`,
   `Payload`, and trailing-header typing, and **no S3 semantics whatsoever**. Do not put an S3 type
   in it.
-- **`s3gate-sig` freezes `PayloadMode` before `s3gate-http` decodes chunked framing.** The framing
+- **`rustfs-gateway-sig` freezes `PayloadMode` before `rustfs-gateway-http` decodes chunked framing.** The framing
   mode is derived from the signature, not sniffed from the body. This is why the signature phase
   (P2) is numbered before the wire phase (P3).
-- **The `compat-s3s` feature of `s3gate-types` is the only place a kernel crate may depend on s3s**
+- **The `compat-s3s` feature of `rustfs-gateway-types` is the only place a kernel crate may depend on s3s**
   (orphan rule, measured E0117: a third-party crate cannot write
-  `impl From<s3s::X> for s3gate::X`). It must carry a `# DELETE BY <milestone>` marker.
+  `impl From<s3s::X> for rustfs-gateway::X`). It must carry a `# DELETE BY <milestone>` marker.
 
 Direction violations are hard-blocked by `scripts/check_layer_dependencies.sh` (`P0-09`).
 
@@ -310,7 +314,7 @@ Known cross-operation clusters, for reference when you touch one of them:
 
 ## Macro Governance
 
-The `#[s3gate::handlers]` attribute macro is the single largest threat to agent comprehension: an
+The `#[rustfs-gateway::handlers]` attribute macro is the single largest threat to agent comprehension: an
 agent cannot answer "why is my method never called?" or "where did this trait bound come from?" when
 the answer only exists after expansion. Four rules:
 

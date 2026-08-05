@@ -40,7 +40,7 @@ singleton.**
 
 ```rust
 // What the user writes:
-#[s3gate::handlers]
+#[rustfs-gateway::handlers]
 impl Fs {
     async fn get_object(&self, req: Req<GetObject>) -> Result<Resp<GetObject>> { /* … */ }
 }

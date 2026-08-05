@@ -17,7 +17,7 @@ set -euo pipefail
 #     - Determinism. Registration order depends on link order, so the routing
 #       table can differ between a debug build, a release build, and an LTO
 #       build. Protocol behaviour must not depend on the linker.
-#     - Discoverability. `s3gate` is meant to be readable by both humans and
+#     - Discoverability. `rustfs-gateway` is meant to be readable by both humans and
 #       agents: "where is this operation registered?" must be answerable by
 #       grep, not by knowing that a macro emitted a static into a link section.
 #     - Dead-code elimination. Registry entries are unconditionally live, so

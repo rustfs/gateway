@@ -1,4 +1,4 @@
-s3gate
+rustfs-gateway
 Copyright 2026 RustFS, Inc.
 
 This product includes software developed at RustFS (https://rustfs.com/).
@@ -29,9 +29,9 @@ Third-party material
    Source:  https://github.com/awslabs/aws-sdk-rust
    Crate:   aws-sigv4
    License: Apache License 2.0
-   Notes:   s3gate does not depend on this crate. Two pure helper functions
+   Notes:   rustfs-gateway does not depend on this crate. Two pure helper functions
             required for SigV4 canonicalisation are ported into
-            `crates/s3gate-sig` instead, so that this repository can keep its
+            `crates/sig` instead, so that this repository can keep its
             MSRV at 1.89 (see docs/msrv.md). Ported code carries an in-file
             attribution comment naming the upstream file and revision.
             TODO(P1): record the upstream revision here when the port lands.
@@ -40,11 +40,11 @@ Third-party material
 Acknowledgements
 -------------------------------------------------------------------------------
 
-s3gate's conformance corpus draws on publicly reported S3 protocol behaviours,
+rustfs-gateway's conformance corpus draws on publicly reported S3 protocol behaviours,
 including those documented in the issue history of the s3s project
 (https://github.com/Nugine/s3s, Apache License 2.0).
 
-s3gate is an independent implementation and is NOT a fork of s3s; it contains
+rustfs-gateway is an independent implementation and is NOT a fork of s3s; it contains
 no source code copied from s3s. Protocol behaviours learned from public
 discussions are re-expressed as conformance cases written from scratch, and the
 evidence recorded for each case is a URL plus an original one-line summary.

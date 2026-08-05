@@ -11,16 +11,17 @@ repository = "https://github.com/rustfs/gateway"
 authors = ["RustFS Team"]
 
 [workspace.dependencies]
-# Ring 0/1 internal crates — path + version double-write is required for publishing.
-s3gate = { path = "crates/s3gate", version = "0.1.0" }
-s3gate-codegen = { path = "crates/s3gate-codegen", version = "0.1.0" }
-s3gate-core = { path = "crates/s3gate-core", version = "0.1.0" }
-s3gate-http = { path = "crates/s3gate-http", version = "0.1.0" }
-s3gate-model = { path = "crates/s3gate-model", version = "0.1.0" }
-s3gate-sig = { path = "crates/s3gate-sig", version = "0.1.0" }
-s3gate-stream = { path = "crates/s3gate-stream", version = "0.1.0" }
-s3gate-types = { path = "crates/s3gate-types", version = "0.1.0" }
-s3gate-xml = { path = "crates/s3gate-xml", version = "0.1.0" }
+# Internal crates. Path only: nothing here is published, so the version double-write
+# that crates.io would require is just another thing to keep in sync.
+rustfs-gateway = { path = "crates/gateway" }
+rustfs-gateway-codegen = { path = "crates/codegen" }
+rustfs-gateway-core = { path = "crates/core" }
+rustfs-gateway-http = { path = "crates/http" }
+rustfs-gateway-model = { path = "crates/model" }
+rustfs-gateway-sig = { path = "crates/sig" }
+rustfs-gateway-stream = { path = "crates/stream" }
+rustfs-gateway-types = { path = "crates/types" }
+rustfs-gateway-xml = { path = "crates/xml" }
 
 # Third-party. Versions verified against crates.io on 2026-08-05; MSRV 1.89 constrains this set —
 # `aws-sigv4` is deliberately absent (it would force MSRV 1.94.1, and its server-side verification

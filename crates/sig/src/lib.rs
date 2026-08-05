@@ -1,0 +1,116 @@
+// Copyright 2026 RustFS Team
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+//! Signature verification state machine (SigV2/SigV4, presigned, POST policy).
+//!
+//! Responsible for: `PayloadMode`/`AuthScheme`, canonical request construction, the
+//! constant-time verification proof that makes "never compared" unrepresentable.
+//! NOT responsible for: authorization (that is `rustfs-gateway-core`), credential storage.
+//! Upstream: none today — the frozen dimensions are self-contained. Downstream: `rustfs-gateway-http`
+//! (framing), `rustfs-gateway-core` (authn stage).
+//!
+//! # What is frozen here, and what is not
+//!
+//! This crate currently contains the frozen signature *dimensions* and their strict parsers.
+//! Canonical request construction, key derivation and the full verification flow arrive in
+//! P2-02/P2-03 and build on these types without reshaping them.
+//!
+//! # The framing invariant
+//!
+//! The aws-chunked framing decision is derived from `x-amz-content-sha256`, and from nothing
+//! else. [`PayloadMode`] is the single source of truth, [`PayloadMode::is_framed`] is the only
+//! sanctioned input to "run the chunk parser", and no function in this crate accepts
+//! `Content-Encoding` — so the wire layer cannot re-derive framing from it even by mistake.
+//! This is why the signature phase is ordered before the wire phase: a decoder that shipped
+//! first would have invented its own enum, and the two layers would then disagree about where
+//! the body ends, which is the classic request-smuggling shape.
+//!
+//! Corollary, enforced by [`PayloadMode::requires_decoded_length`]:
+//! `x-amz-decoded-content-length` is mandatory under the two streaming modes and **forbidden**
+//! under the other four.
+//!
+//! # The comparison invariant
+//!
+//! [`Signature`], [`CtBytes`], [`SecretBytes`], [`SigningKey`] and [`SessionToken`] have no
+//! `PartialEq` and no `Debug`. `a == b` on signature material does not compile;
+//! [`Signature::ct_verify`] is the only comparison, it is constant-time and length-exact, and it is
+//! the only producer of [`SignatureMatch`].
+//!
+//! # The proof invariant
+//!
+//! [`Verdict::Authenticated`] requires that [`SignatureMatch`], and [`Verdict::Anonymous`] requires
+//! an [`AnonymousAck`] that only [`CredentialPresence::into_evidence`] hands out, and only for a
+//! request that presented nothing. So "the access key exists, therefore authenticated" — the shape
+//! of MinIO CVE-2025-31489 — does not compile, and neither does "verification failed, fall back to
+//! anonymous". Anonymous is an outcome that has to be established, never a fallback that can be
+//! reached.
+//!
+//! # Two deployment facts that belong in the release notes
+//!
+//! 1. **Never run a debug build in production.** `subtle`'s invariant checks are `debug_assert!`s
+//!    over secret-derived values: they exist only in debug builds, and they branch on
+//!    secret-dependent conditions. No amount of care in this crate removes that. `subtle`'s
+//!    barriers are `read_volatile`-based and documented as best-effort, so a release build is a
+//!    strong mitigation and not a proof.
+//! 2. **`InvalidAccessKeyId` and `SignatureDoesNotMatch` stay distinct**, because S3 clients branch
+//!    on the code and collapsing them is a compatibility break. The leak that follows is mitigated,
+//!    not removed: identical [`AuthError::message`], no detail fields, a uniform
+//!    [`timing::FailureFloor`] on the failure path, the full derivation run against
+//!    [`timing::placeholder_secret`] for unknown keys — and rate limiting, which belongs to the
+//!    `Governor` extension point (P6-08). The full reasoning is the `T1` row of
+//!    [`timing::SIDE_CHANNELS`].
+#![forbid(unsafe_code)]
+
+mod canonical;
+pub mod codec;
+mod derive;
+mod error;
+mod host;
+mod mode;
+mod parse;
+mod query;
+mod scheme;
+mod secret;
+mod signature;
+mod signed_headers;
+pub mod timing;
+mod verdict;
+
+#[cfg(test)]
+mod full_chain_tests;
+
+pub use canonical::{
+    CanonicalCandidates, CanonicalRequest, CanonicalRequestSpec, PathCandidate, SignatureMismatchDetail, StringToSign,
+    UriPathCandidates,
+};
+pub use derive::{VerifiedScope, calculate_signature, signing_key};
+pub use error::{SigParseError, Unimplemented};
+pub use host::{HostError, HostSource, RawHost, effective_host};
+pub use mode::{
+    CanonicalPayloadToken, DeclaredTrailers, EMPTY_PAYLOAD_SHA256_HEX, MAX_DECLARED_TRAILERS, PayloadMode, STREAMING_ECDSA,
+    STREAMING_ECDSA_TRAILER, STREAMING_SIGNED, STREAMING_SIGNED_TRAILER, STREAMING_UNSIGNED_TRAILER, TrailerName, TrailerSet,
+    UNSIGNED_PAYLOAD,
+};
+pub use parse::{
+    AmzDate, CredentialScope, PresignedParams, SCOPE_TERMINATOR, ScopeDate, SigV4Authorization, X_AMZ_ALGORITHM,
+    X_AMZ_CREDENTIAL, X_AMZ_DATE, X_AMZ_SIGNED_HEADERS,
+};
+pub use query::{QueryExclusion, RawQuery, X_AMZ_SIGNATURE, percent_decode, percent_encode};
+pub use scheme::{
+    ALGORITHM_SIGV2_PREFIX, ALGORITHM_SIGV4, ALGORITHM_SIGV4A, AuthScheme, SigFamily, SigIdentity, SigLocation, SigService,
+};
+pub use secret::{SafeToLog, SecretBytes, SessionToken, SigningKey, assert_safe_to_log};
+pub use signature::{CtBytes, Signature, SignatureMatch, VerifyRejection};
+pub use signed_headers::{AMZ_HEADER_PREFIX, SignedHeaderSet, UNSIGNED_HEADER_EXEMPTIONS};
+pub use verdict::{AnonymousAck, AuthError, CredentialPresence, CredentialsWerePresented, Identity, Verdict};

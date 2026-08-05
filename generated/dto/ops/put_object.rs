@@ -60,7 +60,7 @@ pub struct Input {
     /// Wire `x-amz-acl`, bound as Header. Optional.
     pub acl: Option<crate::ops::enums::Acl>,
     /// The message body. Optional.
-    pub body: Option<s3gate_stream::ByteStream>,
+    pub body: Option<rustfs_gateway_stream::ByteStream>,
     /// Wire `Bucket`, bound as UriLabel. Required.
     pub bucket: Option<crate::BucketName>,
     /// Wire `cache-control`, bound as Header. Optional.
@@ -268,7 +268,7 @@ impl InputBuilder {
 
     /// Sets `Body`.
     #[must_use]
-    pub fn body(mut self, value: s3gate_stream::ByteStream) -> Self {
+    pub fn body(mut self, value: rustfs_gateway_stream::ByteStream) -> Self {
         self.input.body = Some(value);
         self
     }

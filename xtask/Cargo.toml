@@ -8,8 +8,8 @@ license.workspace = true
 publish = false
 
 [dependencies]
-s3gate-codegen = { workspace = true }
-s3gate-model = { workspace = true }
+rustfs-gateway-codegen = { workspace = true }
+rustfs-gateway-model = { workspace = true }
 
 [lints]
 workspace = true

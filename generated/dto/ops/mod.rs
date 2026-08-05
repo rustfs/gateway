@@ -19,7 +19,7 @@
 //! Responsible for: mounting one module per generated operation, plus the two shared
 //! vocabulary modules every operation points at.
 //! NOT responsible for: the flat aliases, which are `crate::dto`.
-//! Upstream: `cargo xtask codegen`. Downstream: `s3gate-types`.
+//! Upstream: `cargo xtask codegen`. Downstream: `rustfs-gateway-types`.
 
 pub mod enums;
 pub mod shapes;

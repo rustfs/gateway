@@ -15,14 +15,14 @@
 //! The `codegen`, `spec verify` and `why` subcommands.
 //!
 //! Responsible for: argument handling, the run report, and exit codes.
-//! NOT responsible for: any generation logic, which lives in `s3gate-codegen` so that it can be
+//! NOT responsible for: any generation logic, which lives in `rustfs-gateway-codegen` so that it can be
 //! tested without a process boundary.
-//! Upstream: `xtask::main`. Downstream: `s3gate-codegen`.
+//! Upstream: `xtask::main`. Downstream: `rustfs-gateway-codegen`.
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use s3gate_codegen::{CodegenInput, CodegenOutput, Report, semantic, why};
+use rustfs_gateway_codegen::{CodegenInput, CodegenOutput, Report, semantic, why};
 
 /// The repository root, derived from this crate's manifest directory so the commands work from
 /// any working directory.
@@ -46,7 +46,7 @@ pub(crate) fn codegen(args: &[String]) -> ExitCode {
         return verify(&[]);
     }
 
-    match s3gate_codegen::write(&input, &output) {
+    match rustfs_gateway_codegen::write(&input, &output) {
         Ok(report) => {
             print_report(&root, &report);
             if report.goldens.iter().any(|g| !g.differences.is_empty()) {
@@ -64,7 +64,7 @@ pub(crate) fn codegen(args: &[String]) -> ExitCode {
 /// `cargo xtask spec verify` — the zero-diff gate.
 pub(crate) fn verify(_args: &[String]) -> ExitCode {
     let root = repo_root();
-    match s3gate_codegen::verify(&CodegenInput::at(&root), &CodegenOutput::at(&root)) {
+    match rustfs_gateway_codegen::verify(&CodegenInput::at(&root), &CodegenOutput::at(&root)) {
         Ok(count) => {
             println!("spec verify: clean ({count} files, 0 differ)");
             ExitCode::SUCCESS
@@ -79,14 +79,14 @@ fn diff(input: &CodegenInput, output: &CodegenOutput) -> ExitCode {
         Ok(old) => old,
         Err(err) => return fail(err),
     };
-    let artifacts = match s3gate_codegen::generate(input, output) {
+    let artifacts = match rustfs_gateway_codegen::generate(input, output) {
         Ok(artifacts) => artifacts,
         Err(err) => return fail(err),
     };
     let new = artifacts
         .operations
         .iter()
-        .map(|ir| (ir.operation.clone(), s3gate_model::ir::emit::to_json(ir)))
+        .map(|ir| (ir.operation.clone(), rustfs_gateway_model::ir::emit::to_json(ir)))
         .collect();
     print!("{}", semantic::compare_sets(&old, &new).render());
     ExitCode::SUCCESS
@@ -99,7 +99,7 @@ pub(crate) fn why(args: &[String]) -> ExitCode {
         return ExitCode::FAILURE;
     };
     let root = repo_root();
-    let artifacts = match s3gate_codegen::generate(&CodegenInput::at(&root), &CodegenOutput::at(&root)) {
+    let artifacts = match rustfs_gateway_codegen::generate(&CodegenInput::at(&root), &CodegenOutput::at(&root)) {
         Ok(artifacts) => artifacts,
         Err(err) => return fail(err),
     };

@@ -35,7 +35,7 @@ Nine rules govern the generated shape and the versioning of this workspace.
 | P5 | **Structural unions** (`AnalyticsFilter`, `SelectObjectContentEvent`, …) stay real `enum`s and **are** `#[non_exhaustive]`. Downstream matches on them but never constructs them, so the attribute is semantically right there |
 | P6 | `S3ErrorCode` keeps its `Custom(String)` escape hatch and is `#[non_exhaustive]`. Adding an error code is a **minor** bump |
 | P7 | Builders are the **recommended** construction path, not the only one. Codegen emits a builder for every Input, and that must never become a reason to remove the public fields |
-| P8 | **The version carries the model snapshot**: `s3gate-types = "0.4.2+aws.2026-05-13"`. A model-date change gets its own CHANGELOG section. Field **removals and renames** from the model are batched and released only in a planned major version |
+| P8 | **The version carries the model snapshot**: `rustfs-gateway-types = "0.4.2+aws.2026-05-13"`. A model-date change gets its own CHANGELOG section. Field **removals and renames** from the model are batched and released only in a planned major version |
 | P9 | `OperationSpec` is the **inverse case** and **should** be `#[non_exhaustive]` with a builder — it has very few construction sites, all of them inside this workspace |
 
 Three additional rules cover the extension-point traits from ADR-0002:
@@ -45,7 +45,7 @@ Three additional rules cover the extension-point traits from ADR-0002:
 - Adding a supertrait is **always** major, which is why `Send + Sync + 'static`
   is fixed once and for all now.
 - During `0.x`, each minor release may break. After `1.0`, strict SemVer applies.
-  `s3gate-conformance` carries its own independent version number, because it is
+  `rustfs-gateway-conformance` carries its own independent version number, because it is
   a product with a different release cadence from the framework.
 
 ## Evidence
@@ -149,8 +149,9 @@ builder form.
   | "dto public field count never decreases" ratchet | when dto codegen lands (`P1`) | It needs a baseline snapshot, which would be empty today. **The format is fixed now**: `docs/dto-field-counts.txt`, one `<TypeName> <count>` per line, sorted by name |
   | P2's hard CI failure on a new required non-`Option` field | when dto codegen lands (`P1`) | It needs codegen's semantic diff capability |
 
-- **The version string grows a build-metadata suffix.** Release tooling, the
-  CHANGELOG and any publishing automation must preserve `+aws.<model-date>`, and
-  must understand that it does not affect version precedence.
-- **`s3gate-conformance` versions independently** of the framework crates, so
-  the workspace cannot assume a single shared version number forever.
+- **The version string grows a build-metadata suffix.** The CHANGELOG must preserve
+  `+aws.<model-date>`, and must understand that it does not affect version precedence.
+- **Nothing is published to crates.io** (decided after this ADR was accepted; see the
+  Epic's scope amendment). rustfs consumes this repository as a git dependency, so the
+  SemVer rules here bind the *source* contract with rustfs, not a registry release.
+  `cargo-semver-checks` therefore compares against a git ref, not a published version.

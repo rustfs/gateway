@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/rustfs/gateway/spec/ir.schema.json",
-  "title": "s3gate operation IR, version 1 (frozen)",
+  "title": "rustfs-gateway operation IR, version 1 (frozen)",
   "description": "Shape of one operation IR document. One AWS operation per file. IR is a generated artifact: model/s3.json (pinned) + model/overlays/*.toml -> xtask codegen -> IR -> spec/, OPERATIONS.md, generated/**. Never hand-edit outside spec/ir/samples/, which are hand-written goldens for codegen. additionalProperties:false is enforced on every object so that a leaked Smithy trait (notably smithy.api#documentation) fails validation instead of entering the wire contract.",
   "type": "object",
   "additionalProperties": false,
@@ -163,7 +163,7 @@
     "arn_form": { "enum": ["AccessPoint", "Outposts", "MRAP"] },
 
     "predicate": {
-      "description": "The nine route predicates. This list is closed and mirrors s3gate-core RouteSelector one for one.",
+      "description": "The nine route predicates. This list is closed and mirrors rustfs-gateway-core RouteSelector one for one.",
       "oneOf": [
         {
           "type": "object",
@@ -440,7 +440,7 @@
     },
 
     "type": {
-      "description": "Scalar vocabulary. The IR only names a type; s3gate-types implements it. Nothing here has a default, so every rendering context is stated explicitly.",
+      "description": "Scalar vocabulary. The IR only names a type; rustfs-gateway-types implements it. Nothing here has a default, so every rendering context is stated explicitly.",
       "oneOf": [
         { "type": "object", "additionalProperties": false, "required": ["kind"], "properties": { "kind": { "const": "String" } } },
         {

@@ -1,0 +1,59 @@
+[package]
+name = "rustfs-gateway-types"
+description = "S3 scalar types, operation inputs/outputs and their generated codecs"
+# Not `version.workspace = true`: ADR-0004 P8 requires the crate that carries the generated dto to
+# name the AWS model snapshot it was generated from, so a consumer can tell which model their build
+# corresponds to. The suffix is SemVer build metadata and takes no part in version precedence, so
+# the workspace's `version = "0.1.0"` requirement still matches it. Keep the numeric part equal to
+# `[workspace.package].version`, and move the date whenever `model/s3.json` is re-pinned — the value
+# is `model/PROVENANCE.md`'s "Pinned commit date".
+version = "0.1.0+aws.2026-08-04"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+# Not published. rustfs consumes this repository as a git dependency, exactly as it
+# consumed s3s. Publishing would buy nothing and cost a cross-repository version
+# lockstep on every change to a ring-0 type.
+publish = false
+
+[package.metadata.gateway]
+ring = 0
+# Ring 0 and 1 must not depend on any rustfs-* business crate or on a ring-2 crate.
+# This is what keeps the cross-repository graph acyclic: ring-0 types are consumed by
+# rustfs crates, which ring-2 then depends on. Enforced by check_ring_boundaries.sh.
+
+[lints]
+workspace = true
+
+[dependencies]
+rustfs-gateway-xml = { workspace = true }
+rustfs-gateway-stream = { workspace = true }
+bytes = { workspace = true }
+hex = { workspace = true }
+http = { workspace = true }
+percent-encoding = { workspace = true }
+sha2 = { workspace = true }
+
+# Pinned here rather than inherited, and each line states why. Hoisting them into
+# `[workspace.dependencies]` is a root-manifest change and belongs to whoever owns that file.
+#
+# `crc-fast` MUST keep `default-features = false`: the default set pulls in `ffi` (C bindings for
+# building a cdylib, which a server does not need) and `panic-handler` (which upstream advises
+# against when building a binary). Workspace inheritance cannot express the override, because a
+# member may not turn off default features that the workspace entry left on.
+crc-fast = { workspace = true }
+md-5 = { workspace = true }
+sha1 = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
+
+[features]
+# The ONLY place a ring-0 crate may ever depend on s3s. Reason (measured, E0117): the orphan
+# rule forbids a third-party crate from writing `impl From<s3s::X> for rustfs-gateway::X`, so the
+# migration conversions must live here. Empty placeholder until P9.
+# DELETE BY: end of P9 migration.
+# see ADR-0004: version carries +aws.<model-date> once the model is pinned
+compat-s3s = []

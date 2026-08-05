@@ -1,0 +1,30 @@
+[package]
+name = "rustfs-gateway-stream"
+description = "Payload and body primitives, free of S3 semantics"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+# Not published. rustfs consumes this repository as a git dependency, exactly as it
+# consumed s3s. Publishing would buy nothing and cost a cross-repository version
+# lockstep on every change to a ring-0 type.
+publish = false
+
+[package.metadata.gateway]
+ring = 0
+# Ring 0 and 1 must not depend on any rustfs-* business crate or on a ring-2 crate.
+# This is what keeps the cross-repository graph acyclic: ring-0 types are consumed by
+# rustfs crates, which ring-2 then depends on. Enforced by check_ring_boundaries.sh.
+
+[lints]
+workspace = true
+
+[dependencies]
+# Deliberately three dependencies, none of them internal. This crate sits below `rustfs-gateway-types`
+# so that it is reachable from both `rustfs-gateway-types` and `rustfs-gateway-http`; every extra edge declared
+# here becomes an edge in every downstream dependency tree.
+bitflags = { workspace = true }
+bytes = { workspace = true }
+http = { workspace = true }

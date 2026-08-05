@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/rustfs/gateway/blob/main/conformance/case.schema.json",
-  "title": "s3gate conformance case",
-  "description": "Frozen schema (schema_version 1) for a single s3gate conformance case. Cases are authored as TOML; this JSON Schema validates the parsed TOML document, so the same contract governs the TOML files on disk and any JSON tooling built on top of them. See conformance/README.md for the freeze policy and the change procedure.",
+  "title": "rustfs-gateway conformance case",
+  "description": "Frozen schema (schema_version 1) for a single rustfs-gateway conformance case. Cases are authored as TOML; this JSON Schema validates the parsed TOML document, so the same contract governs the TOML files on disk and any JSON tooling built on top of them. See conformance/README.md for the freeze policy and the change procedure.",
 
   "x-schema-version": 1,
   "x-frozen-on": "2026-08-05",
@@ -105,7 +105,7 @@
         "applies_to": {
           "type": "object",
           "additionalProperties": false,
-          "description": "Applicability gates. The s3gate assembly path (--transport hyper|conn) is deliberately NOT expressible here: every case runs on every assembly path and the two runs must agree.",
+          "description": "Applicability gates. The rustfs-gateway assembly path (--transport hyper|conn) is deliberately NOT expressible here: every case runs on every assembly path and the two runs must agree.",
           "properties": {
             "http_versions": {
               "type": "array",

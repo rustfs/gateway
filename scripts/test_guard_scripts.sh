@@ -94,44 +94,59 @@ done
 printf '\nNegative cases (guards must fail)\n'
 
 mut_reverse_edge() {
-    printf 's3gate-types = { workspace = true }\n' >>crates/s3gate-xml/Cargo.toml
+    printf 'rustfs-gateway-types = { workspace = true }\n' >>crates/xml/Cargo.toml
 }
 expect_fail check_layer_dependencies.sh \
-    'reverse edge s3gate-xml -> s3gate-types' mut_reverse_edge
+    'reverse edge rustfs-gateway-xml -> rustfs-gateway-types' mut_reverse_edge
 
 mut_conformance_internal() {
-    printf 's3gate-core = { workspace = true }\n' >>crates/s3gate-conformance/Cargo.toml
+    printf 'rustfs-gateway-core = { workspace = true }\n' >>crates/conformance/Cargo.toml
 }
 expect_fail check_layer_dependencies.sh \
-    'conformance reaching past the facade into s3gate-core' mut_conformance_internal
+    'conformance reaching past the facade into rustfs-gateway-core' mut_conformance_internal
 
 mut_unregistered_crate() {
-    mkdir -p crates/s3gate-newthing
-    printf '[package]\nname = "s3gate-newthing"\n\n[dependencies]\n' >crates/s3gate-newthing/Cargo.toml
+    mkdir -p crates/newthing
+    printf '[package]\nname = "rustfs-gateway-newthing"\n\n[dependencies]\n' >crates/newthing/Cargo.toml
 }
 expect_fail check_layer_dependencies.sh \
     'a new crate that is not registered in the allow matrix' mut_unregistered_crate
 
 mut_rustfs_dep() {
-    printf 'rustfs-ecstore = "0.1"\n' >>crates/s3gate-core/Cargo.toml
+    printf 'rustfs-ecstore = "0.1"\n' >>crates/core/Cargo.toml
 }
 expect_fail check_ring_boundaries.sh \
     'ring-0 crate depending on a rustfs crate' mut_rustfs_dep
 
 mut_ring2_dep() {
-    printf 'rustfs-gateway-admin = "0.1"\n' >>crates/s3gate-http/Cargo.toml
+    printf 'rustfs-gateway-admin = "0.1"\n' >>crates/http/Cargo.toml
 }
 expect_fail check_ring_boundaries.sh \
-    'ring-0 crate depending on a ring-2 crate' mut_ring2_dep
+    'ring-0 crate depending on a ring-2 crate not declared in this workspace' mut_ring2_dep
+
+# After the rename the crate name carries no ring information, so the declaration is
+# the only thing the guard can read. A crate without one must fail rather than be
+# silently treated as ring 0.
+mut_missing_ring_decl() {
+    grep -v '^ring = ' crates/http/Cargo.toml >/tmp/.rd.$$ && mv /tmp/.rd.$$ crates/http/Cargo.toml
+}
+expect_fail check_ring_boundaries.sh \
+    'a crate with no [package.metadata.gateway] ring declaration' mut_missing_ring_decl
+
+mut_bad_ring_value() {
+    sed 's/^ring = 0$/ring = 2/' crates/http/Cargo.toml >/tmp/.rv.$$ && mv /tmp/.rv.$$ crates/http/Cargo.toml
+}
+expect_fail check_ring_boundaries.sh \
+    'a crate declaring ring 2, which does not live in this repository' mut_bad_ring_value
 
 mut_stray_s3s() {
-    printf 's3s = "0.11"\n' >>crates/s3gate-http/Cargo.toml
+    printf 's3s = "0.11"\n' >>crates/http/Cargo.toml
 }
 expect_fail check_ring_boundaries.sh \
-    's3s dependency outside s3gate-types' mut_stray_s3s
+    's3s dependency outside rustfs-gateway-types' mut_stray_s3s
 
 mut_drop_delete_by() {
-    grep -v '# DELETE BY' crates/s3gate-types/Cargo.toml >/tmp/.ct.$$ && mv /tmp/.ct.$$ crates/s3gate-types/Cargo.toml
+    grep -v '# DELETE BY' crates/types/Cargo.toml >/tmp/.ct.$$ && mv /tmp/.ct.$$ crates/types/Cargo.toml
 }
 expect_fail check_ring_boundaries.sh \
     'compat-s3s losing its "# DELETE BY" expiry marker' mut_drop_delete_by
@@ -150,22 +165,22 @@ expect_fail check_no_planning_docs.sh \
     'a root-level MIGRATION_PLAN.md' mut_planning_name
 
 mut_inventory() {
-    printf 'inventory = "0.3"\n' >>crates/s3gate-core/Cargo.toml
+    printf 'inventory = "0.3"\n' >>crates/core/Cargo.toml
 }
 expect_fail check_no_global_registry_deps.sh \
     'an `inventory` dependency' mut_inventory
 
 # NOTE: appended to a manifest whose last table is `[dependencies]`. Appending
-# to s3gate-types would land the line in its `[features]` table, where it is
+# to rustfs-gateway-types would land the line in its `[features]` table, where it is
 # correctly NOT a dependency.
 mut_ctor() {
-    printf 'ctor = "0.2"\n' >>crates/s3gate-xml/Cargo.toml
+    printf 'ctor = "0.2"\n' >>crates/xml/Cargo.toml
 }
 expect_fail check_no_global_registry_deps.sh \
     'a `ctor` dependency' mut_ctor
 
 mut_derived_signature() {
-    cat >crates/s3gate-sig/src/proof.rs <<'RS'
+    cat >crates/sig/src/proof.rs <<'RS'
 // Copyright 2026 RustFS Team
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -191,8 +206,8 @@ expect_fail check_ct_eq.sh \
     'a Signature type deriving Debug/PartialEq/Eq' mut_derived_signature
 
 mut_strip_header() {
-    grep -v 'Licensed under the Apache License' crates/s3gate-core/src/lib.rs >/tmp/.lh.$$ &&
-        mv /tmp/.lh.$$ crates/s3gate-core/src/lib.rs
+    grep -v 'Licensed under the Apache License' crates/core/src/lib.rs >/tmp/.lh.$$ &&
+        mv /tmp/.lh.$$ crates/core/src/lib.rs
 }
 expect_fail check_license_headers.sh \
     'a Rust file with the licence header removed' mut_strip_header
@@ -206,35 +221,35 @@ expect_fail check_license_headers.sh \
 
 mut_secret_display() {
     printf '\nimpl core::fmt::Display for SecretBytes {\n    fn fmt(&self, _: &mut core::fmt::Formatter<\x27_>) -> core::fmt::Result { Ok(()) }\n}\n' \
-        >>crates/s3gate-sig/src/secret.rs
+        >>crates/sig/src/secret.rs
 }
 expect_fail check_ct_eq.sh \
     'a Display impl on a secret-bearing type' mut_secret_display
 
 mut_second_bool_from() {
     printf '\nfn leak(c: subtle::Choice) -> bool { bool::from(c) }\n' \
-        >>crates/s3gate-sig/src/verdict.rs
+        >>crates/sig/src/verdict.rs
 }
 expect_fail check_ct_eq.sh \
     'a second bool::from(Choice), which turns constant time back into a branch' mut_second_bool_from
 
 mut_unwrap_u8() {
     printf '\nfn peek(c: subtle::Choice) -> u8 { c.unwrap_u8() }\n' \
-        >>crates/s3gate-sig/src/verdict.rs
+        >>crates/sig/src/verdict.rs
 }
 expect_fail check_ct_eq.sh \
     'Choice::unwrap_u8, which discards the constant-time wrapper' mut_unwrap_u8
 
 mut_secret_in_log() {
     printf '\nfn oops(s: &SecretBytes) -> String { format!("secret={s:?}") }\n' \
-        >>crates/s3gate-sig/src/secret.rs
+        >>crates/sig/src/secret.rs
 }
 expect_fail check_ct_eq.sh \
     'a secret interpolated into a formatting macro' mut_secret_in_log
 
 mut_unboxed_key_material() {
     printf '\npub(crate) struct Leaky { signing_key: Vec<u8> }\n' \
-        >>crates/s3gate-sig/src/timing.rs
+        >>crates/sig/src/timing.rs
 }
 expect_fail check_ct_eq.sh \
     'key material held in Vec<u8> instead of a zeroizing box' mut_unboxed_key_material
@@ -242,7 +257,7 @@ expect_fail check_ct_eq.sh \
 mut_strip_negative_floor() {
     # The floor counts across the whole crate, so stripping one file is not enough
     # to trip it — the mutation has to remove the annotations everywhere.
-    find crates/s3gate-sig -name '*.rs' -print0 | while IFS= read -r -d '' f; do
+    find crates/sig -name '*.rs' -print0 | while IFS= read -r -d '' f; do
         grep -v '^/// Negative' "$f" >"${f}.nf" && mv "${f}.nf" "$f"
     done
 }

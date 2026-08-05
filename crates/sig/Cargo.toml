@@ -1,0 +1,56 @@
+[package]
+name = "rustfs-gateway-sig"
+description = "SigV2/SigV4 verification state machine"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+# Not published. rustfs consumes this repository as a git dependency, exactly as it
+# consumed s3s. Publishing would buy nothing and cost a cross-repository version
+# lockstep on every change to a ring-0 type.
+publish = false
+
+[package.metadata.gateway]
+ring = 0
+# Ring 0 and 1 must not depend on any rustfs-* business crate or on a ring-2 crate.
+# This is what keeps the cross-repository graph acyclic: ring-0 types are consumed by
+# rustfs crates, which ring-2 then depends on. Enforced by check_ring_boundaries.sh.
+
+[lints]
+workspace = true
+
+[dependencies]
+# No internal dependency, on purpose.
+#
+# `rustfs-gateway-http` is absent by acceptance criterion (P2-01): the framing mode is decided here and
+# consumed there, and depending on the wire layer would put both ends of that decision in one crate
+# graph and invite re-deriving framing from `Content-Encoding`.
+#
+# `rustfs-gateway-types` is absent because the frozen dimensions do not use a single S3 type. The layer
+# matrix permits the edge, so a later P2 task may add it back the moment it needs one; until then,
+# zero internal edges keep `cargo test -p rustfs-gateway-sig` under the 30-second feedback contract.
+#
+# `aws-sigv4` is absent permanently (ADR-0001, docs/msrv.md).
+#
+# P2-03 adds three third-party edges and no internal one.
+#
+# `http` carries `Request`, `HeaderMap` and `HeaderName`. `effective_host` has to read both
+# `uri().authority()` and every `host` header off one request value; handing the signature layer a
+# pre-digested view built by the wire layer is the exact split that lets the router and the
+# signature disagree about which host was effective.
+#
+# `hmac` + `sha2` are the SigV4 primitives: four HMAC-SHA256 steps, and one SHA-256 over the
+# canonical request. They are what makes porting the two `aws-sigv4` pure functions into
+# `src/derive.rs` cheaper than depending on the crate they came from.
+#
+# `percent-encoding` is deliberately NOT here: its decoder is lossy on a malformed escape (`%zz`
+# passes through unchanged), and a signature input may never have two spellings. `src/query.rs`
+# hand-rolls a strict codec instead, in the same spirit as `src/codec.rs`.
+hmac = { workspace = true }
+http = { workspace = true }
+sha2 = { workspace = true }
+smallvec = { workspace = true }
+subtle = { workspace = true }
+zeroize = { workspace = true }

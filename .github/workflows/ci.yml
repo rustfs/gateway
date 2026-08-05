@@ -34,7 +34,7 @@ name: CI
 #   role-verdict / ct-eq checks     -> task P0-10
 #   3-OS matrix                     -> once platform-specific code exists
 #   cargo hack --feature-powerset   -> once the workspace has >= 5 features
-#   fuzz                            -> alongside the s3gate-sig / s3gate-http parsers
+#   fuzz                            -> alongside the rustfs-gateway-sig / rustfs-gateway-http parsers
 #   client matrix / s3-tests / mint -> P8 at the earliest, and on cron, never on PRs
 #
 # The three jobs below mirror, verbatim, the first three commands of the

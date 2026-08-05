@@ -1,0 +1,33 @@
+[package]
+name = "rustfs-gateway-http"
+description = "HTTP wire layer: header/query views, limits, aws-chunked framing"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+# Not published. rustfs consumes this repository as a git dependency, exactly as it
+# consumed s3s. Publishing would buy nothing and cost a cross-repository version
+# lockstep on every change to a ring-0 type.
+publish = false
+
+[package.metadata.gateway]
+ring = 0
+# Ring 0 and 1 must not depend on any rustfs-* business crate or on a ring-2 crate.
+# This is what keeps the cross-repository graph acyclic: ring-0 types are consumed by
+# rustfs crates, which ring-2 then depends on. Enforced by check_ring_boundaries.sh.
+
+[lints]
+workspace = true
+
+[dependencies]
+rustfs-gateway-types = { workspace = true }
+rustfs-gateway-stream = { workspace = true }
+
+# `http` supplies the request head this crate consumes and the `HeaderMap` its views borrow.
+http = { workspace = true }
+# `smallvec` keeps the query index and the normalised host off the heap for the sizes that
+# actually occur; the acceptance path performs no allocation for a typical request, and a `Vec`
+# here would put one malloc per request back.
+smallvec = { workspace = true }

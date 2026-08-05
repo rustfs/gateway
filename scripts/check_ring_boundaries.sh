@@ -5,14 +5,14 @@ set -euo pipefail
 # check_ring_boundaries.sh
 #
 # WHAT THIS CHECKS
-#   That no ring-0/ring-1 crate (everything named `s3gate*` in this repository,
+#   That no ring-0/ring-1 crate (membership declared by `[package.metadata.gateway]
 #   plus `xtask` and the workspace root) declares a dependency on:
 #
 #     a) any `rustfs-*` crate published by the rustfs/rustfs main repository, or
 #     b) any ring-2 `rustfs-gateway-*` crate (RustFS-specific edge crates), or
 #     c) `s3s` / `s3s-*`.
 #
-#   Exactly one exception exists for (c): `s3gate-types` may carry an OPTIONAL
+#   Exactly one exception exists for (c): `rustfs-gateway-types` may carry an OPTIONAL
 #   `s3s` dependency behind its `compat-s3s` feature. That feature must keep a
 #   `# DELETE BY` marker in the manifest — the guard fails if the marker is
 #   removed, whether or not the dependency itself is present yet.
@@ -30,13 +30,10 @@ set -euo pipefail
 #   loop and makes the whole thing unbuildable. See rustfs/backlog#1677 §2
 #   ("cross-repo dependency graph is a DAG") and ADR-0005.
 #
-#   The second reason is reuse: ring 0 + ring 1 are published as general-purpose
-#   crates. Any project depending on them must not transitively pull in RustFS
-#   business logic.
 #
 #   The s3s clause exists because the orphan rule (E0117, measured) forbids a
-#   third crate from writing `impl From<s3s::X> for s3gate::X`. That forces the
-#   migration conversions into `s3gate-types`, and an un-dated exception spreads.
+#   third crate from writing `impl From<s3s::X> for rustfs-gateway::X`. That forces the
+#   migration conversions into `rustfs-gateway-types`, and an un-dated exception spreads.
 #
 # HOW TO EXEMPT
 #   Add a line to `scripts/allowances/ring-boundary-allowances.txt`
@@ -59,7 +56,7 @@ DEPS_AWK="${SCRIPT_DIR}/lib/cargo_deps.awk"
 ALLOWANCE_FILE="${SCRIPT_DIR}/allowances/ring-boundary-allowances.txt"
 
 # The one crate allowed to carry an s3s compat edge, and the feature gating it.
-COMPAT_CRATE="s3gate-types"
+COMPAT_CRATE="rustfs-gateway-types"
 COMPAT_FEATURE="compat-s3s"
 
 cd "$ROOT_DIR"
@@ -90,6 +87,29 @@ is_allowed_exception() {
     printf '%s' "$ALLOWANCES" | grep -qxF "${crate} -> ${dep}"
 }
 
+# Ring membership is declared, not inferred from the crate name: after the rename every
+# crate in this repository is `rustfs-gateway-*`, so the name carries no information. Each
+# manifest under crates/ must say which ring it is in.
+LOCAL_CRATES=""
+for m in crates/*/Cargo.toml; do
+    [[ -f "$m" ]] || continue
+    n="$(awk -F'"' '/^name[[:space:]]*=/ {print $2; exit}' "$m")"
+    r="$(awk '/^\[package\.metadata\.gateway\]/{f=1; next} f && /^ring[[:space:]]*=/{gsub(/[^0-9]/,"",$0); print; exit} f && /^\[/{exit}' "$m")"
+    if [[ -z "$r" ]]; then
+        fail "${m}: no '[package.metadata.gateway] ring = N' declaration; ring membership is what this guard checks and cannot be guessed from the crate name"
+        continue
+    fi
+    if [[ "$r" != "0" && "$r" != "1" ]]; then
+        fail "${m}: declares ring ${r}; only rings 0 and 1 live in this repository today"
+    fi
+    LOCAL_CRATES="${LOCAL_CRATES}${n}
+"
+done
+
+is_local_crate() {
+    printf '%s' "$LOCAL_CRATES" | grep -qxF "$1"
+}
+
 manifests=()
 while IFS= read -r manifest; do
     [[ -n "$manifest" ]] && manifests+=("$manifest")
@@ -111,13 +131,13 @@ for manifest in "${manifests[@]}"; do
         [[ -z "${dep:-}" ]] && continue
 
         case "$dep" in
-        rustfs-gateway | rustfs-gateway-*)
-            if is_allowed_exception "$crate" "$dep"; then continue; fi
-            fail "${manifest}: ring-0/1 crate '${crate}' depends on ring-2 crate '${dep}' (${kind}); ring 2 is RustFS-specific and must never be reachable from the reusable rings"
-            ;;
         rustfs | rustfs-* | rustfs_*)
+            # Crates declared in THIS workspace are ring 0/1 and always fine. Anything else
+            # wearing the rustfs- prefix is either a rustfs business crate or a ring-2 edge
+            # crate, and both close the cross-repository cycle.
+            if is_local_crate "$dep"; then continue; fi
             if is_allowed_exception "$crate" "$dep"; then continue; fi
-            fail "${manifest}: ring-0/1 crate '${crate}' depends on rustfs crate '${dep}' (${kind}); this closes the cross-repository dependency cycle (rustfs consumes ring 0, so ring 0 must never consume rustfs)"
+            fail "${manifest}: ring-0/1 crate '${crate}' depends on '${dep}' (${kind}), which is not a ring-0/1 crate of this workspace; rustfs consumes ring 0, so ring 0 consuming rustfs (or a ring-2 edge crate) closes the cycle"
             ;;
         s3s | s3s-*)
             if is_allowed_exception "$crate" "$dep"; then continue; fi
@@ -141,7 +161,7 @@ done
 # This runs even while the feature is an empty placeholder: the marker is what
 # stops the exception from quietly becoming permanent.
 # -----------------------------------------------------------------------------
-compat_manifest="crates/${COMPAT_CRATE}/Cargo.toml"
+compat_manifest="crates/types/Cargo.toml"
 if [[ -f "$compat_manifest" ]] && grep -Eq "^[[:space:]]*${COMPAT_FEATURE}[[:space:]]*=" "$compat_manifest"; then
     if ! grep -q '# DELETE BY' "$compat_manifest"; then
         fail "${compat_manifest}: the '${COMPAT_FEATURE}' feature is the only sanctioned s3s escape hatch and must carry a '# DELETE BY <milestone>' marker; without an expiry the exception spreads"
@@ -152,9 +172,9 @@ if [[ "$status" -ne 0 ]]; then
     cat >&2 <<'EOF'
 
 Ring boundary violation. See rustfs/backlog#1677 and ADR-0005.
-Ring 0 (protocol core) and ring 1 (server runtime) are published as
-general-purpose crates and are consumed by rustfs itself; an edge back into
-rustfs or into a ring-2 crate makes the cross-repository graph cyclic.
+Ring 0 (protocol core) and ring 1 (server runtime) are consumed by rustfs
+itself, so an edge back into rustfs or into a ring-2 edge crate makes the
+cross-repository graph cyclic.
 Move the RustFS-specific code into a ring-2 crate instead.
 EOF
 fi

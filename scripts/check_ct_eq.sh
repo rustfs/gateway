@@ -6,7 +6,7 @@ set -euo pipefail
 #
 # WHAT THIS CHECKS
 #   Seven rules. The first two are repository-wide; the rest are scoped to the
-#   crates that hold key material (`crates/s3gate-sig`, and `s3gate-core`'s
+#   crates that hold key material (`crates/sig`, and `rustfs-gateway-core`'s
 #   authn modules once they exist), because outside those a `Vec<u8>` named
 #   `token` is a pagination token, not a credential.
 #
@@ -30,13 +30,13 @@ set -euo pipefail
 #      reach the buffers a growing `Vec` left behind, so a secret that was
 #      accumulated has copies on the heap that no `Drop` will ever wipe.
 #   7. Negative-case floors: the number of `compile_fail` doctests and of
-#      `/// Negative` test labels in `crates/s3gate-sig` may not fall below the
+#      `/// Negative` test labels in `crates/sig` may not fall below the
 #      recorded baselines. Aligns with rustfs/rustfs#4815 — a negative suite
 #      that is quietly emptied leaves a green check mark and no coverage.
 #
 #   Comment and doc-comment lines are skipped by rules 3-6. This matters: the
 #   codebase explains these rules in prose right next to the code they govern
-#   (`crates/s3gate-stream` documents that it deliberately has no `as_any()`,
+#   (`crates/stream` documents that it deliberately has no `as_any()`,
 #   `secret.rs` shows `format!("{token}")` inside a `compile_fail` example), and
 #   a guard that fires on its own documentation gets deleted within a week.
 #
@@ -59,7 +59,7 @@ set -euo pipefail
 #
 #   None of this touches MinIO CVE-2025-31489, where the signature was never
 #   compared at all. That defect is answered by the type shape in
-#   `crates/s3gate-sig/src/verdict.rs` — `Verdict::Authenticated` requires a
+#   `crates/sig/src/verdict.rs` — `Verdict::Authenticated` requires a
 #   `SignatureMatch` that only a real constant-time comparison produces — and
 #   rules 3 and 7 exist to keep that shape from being hollowed out.
 #
@@ -92,9 +92,9 @@ BANNED_DERIVES='PartialEq|Eq|Debug|Serialize|Deserialize'
 
 # Rules 3-6 apply here only. Outside these paths the identifier heuristics
 # produce false positives that would train everyone to ignore the guard.
-GUARDED_PATH_RE='^crates/s3gate-sig/src/|^crates/s3gate-core/src/authn'
+GUARDED_PATH_RE='^crates/sig/src/|^crates/core/src/authn'
 # The single file allowed to turn a `subtle::Choice` into a `bool`.
-CHOICE_TO_BOOL_FILE='crates/s3gate-sig/src/signature.rs'
+CHOICE_TO_BOOL_FILE='crates/sig/src/signature.rs'
 # Identifiers that name key material. Deliberately NOT bare `key` or `token`:
 # `access_key_id` is a public identifier and `continuation_token` is paging.
 SECRET_IDENT_RE='(secret|signing_key|session_token|private_key|derived_key|passphrase|expected_signature)'
@@ -298,7 +298,7 @@ fi
 compile_fail_count=0
 negative_label_count=0
 for file in "${sources[@]}"; do
-    [[ "$file" == crates/s3gate-sig/* ]] || continue
+    [[ "$file" == crates/sig/* ]] || continue
     n="$(grep -c '```compile_fail' "$file" || true)"
     compile_fail_count=$((compile_fail_count + n))
     n="$(grep -cE '^[ \t]*/// Negative' "$file" || true)"
@@ -306,10 +306,10 @@ for file in "${sources[@]}"; do
 done
 
 if [[ "$compile_fail_count" -lt "$COMPILE_FAIL_FLOOR" ]]; then
-    report "compile_fail doctests in crates/s3gate-sig fell to ${compile_fail_count}, below the ${COMPILE_FAIL_FLOOR} baseline; a deleted compile_fail case is a deleted guarantee (rustfs/rustfs#4815)"
+    report "compile_fail doctests in crates/sig fell to ${compile_fail_count}, below the ${COMPILE_FAIL_FLOOR} baseline; a deleted compile_fail case is a deleted guarantee (rustfs/rustfs#4815)"
 fi
 if [[ "$negative_label_count" -lt "$NEGATIVE_LABEL_FLOOR" ]]; then
-    report "'/// Negative' cases in crates/s3gate-sig fell to ${negative_label_count}, below the ${NEGATIVE_LABEL_FLOOR} baseline; negative cases must outnumber positive ones"
+    report "'/// Negative' cases in crates/sig fell to ${negative_label_count}, below the ${NEGATIVE_LABEL_FLOOR} baseline; negative cases must outnumber positive ones"
 fi
 
 if [[ "$status" -ne 0 ]]; then
@@ -326,7 +326,7 @@ fi
 
 if [[ "$sensitive_seen" -eq 0 ]]; then
     printf 'check_ct_eq: no secret-bearing type declarations found yet (matching /%s/).\n' "$SENSITIVE_NAME_RE"
-    printf '             The guard is in place and will activate automatically when crates/s3gate-sig lands in P2.\n'
+    printf '             The guard is in place and will activate automatically when crates/sig lands in P2.\n'
 else
     printf 'OK: constant-time guards satisfied (0 violations; %s bool::from, compile_fail %s >= %s, negative cases %s >= %s)\n' \
         "$choice_to_bool_total" "$compile_fail_count" "$COMPILE_FAIL_FLOOR" "$negative_label_count" "$NEGATIVE_LABEL_FLOOR"

@@ -47,11 +47,11 @@ fixed now so that the same check does not get written twice under two names.
 
 | Script | Checks | Phase |
 |---|---|---|
-| `check_layer_dependencies.sh` | Internal crate dependency direction is one-way; the allow matrix is a DAG; `s3gate-conformance` may only use the `s3gate` facade | P0 (Week-1, before P1) |
-| `check_ring_boundaries.sh` | Ring 0/1 (`s3gate*`) depends on no `rustfs-*` crate and no ring-2 `rustfs-gateway-*` crate; `s3s` only via `s3gate-types`' `compat-s3s` feature, which must keep its `# DELETE BY` marker | P0 (Week-1) |
+| `check_layer_dependencies.sh` | Internal crate dependency direction is one-way; the allow matrix is a DAG; `rustfs-gateway-conformance` may only use the `rustfs-gateway` facade | P0 (Week-1, before P1) |
+| `check_ring_boundaries.sh` | Ring 0/1 (`rustfs-gateway*`) depends on no `rustfs-*` crate and no ring-2 `rustfs-gateway-*` crate; `s3s` only via `rustfs-gateway-types`' `compat-s3s` feature, which must keep its `# DELETE BY` marker | P0 (Week-1) |
 | `check_no_planning_docs.sh` | Agent notes and planning documents are not tracked by git (closes the `git add -f` hole that `.gitignore` leaves open) | P0 |
 | `check_no_global_registry_deps.sh` | No `inventory` / `linkme` / `ctor` dependency in any `Cargo.toml` (ADR-0003) | P0-07 |
-| `check_ct_eq.sh` | Secret-bearing types (`Signature`, `Secret`, `SigningKey`, …) derive no `PartialEq` / `Eq` / `Debug`; comparison must go through `ct_eq`. No-ops with an explanation until `crates/s3gate-sig` lands | P0 (before P2) |
+| `check_ct_eq.sh` | Secret-bearing types (`Signature`, `Secret`, `SigningKey`, …) derive no `PartialEq` / `Eq` / `Debug`; comparison must go through `ct_eq`. No-ops with an explanation until `crates/sig` lands | P0 (before P2) |
 | `check_license_headers.sh` | Every tracked `.rs` file opens with the Apache-2.0 licence header (ADR-0001 provenance boundary) | P0 |
 | `test_guard_scripts.sh` | Not a guard: runs every guard on the tree and asserts each one fails on an injected violation | P0 |
 
