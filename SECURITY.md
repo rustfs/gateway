@@ -1,6 +1,6 @@
 # Security Policy
 
-s3gate sits directly on untrusted input: it terminates S3 traffic before anything else in the
+RustFS Gateway sits directly on untrusted input: it terminates S3 traffic before anything else in the
 system sees it. We treat that position as the product's core responsibility, and we would much
 rather hear about a problem from you than from an incident report.
 
@@ -67,17 +67,17 @@ finding is not obviously on either list, report it anyway and let us decide.
 
 ### Out of scope
 
-- **Bugs in your own `Authorizer`, `SignatureVerifier`, or storage implementation.** s3gate
+- **Bugs in your own `Authorizer`, `SignatureVerifier`, or storage implementation.** RustFS Gateway
   defines these interfaces and calls them correctly; the decision logic behind them is yours.
-- **Plaintext credential exposure caused by not terminating TLS.** Deploying s3gate without
+- **Plaintext credential exposure caused by not terminating TLS.** Deploying RustFS Gateway without
   TLS is a deployment choice, not a framework defect.
 - **A `501 Not Implemented` for an S3 feature documented as unsupported.** Missing coverage is
   tracked as a normal issue.
 - **Performance shortfalls**, unless you can construct an amplification attack — a small,
   cheap request that costs the server disproportionately more than it costs you.
-- **Vulnerabilities in dependencies whose affected code path s3gate never reaches.** We will
+- **Vulnerabilities in dependencies whose affected code path RustFS Gateway never reaches.** We will
   still update the dependency, but a security report needs a reachability analysis showing a
-  path from an s3gate entry point to the vulnerable call.
+  path from an RustFS Gateway entry point to the vulnerable call.
 - **Attacks that presuppose local root, an already-compromised host, or leaked long-term
   credentials.** If the attacker already has the keys, signature verification working as
   designed is not a finding.

@@ -1,4 +1,4 @@
-# Contributing to s3gate
+# Contributing to RustFS Gateway
 
 Thanks for considering a contribution. This project is pre-alpha and moves quickly, so please
 open an issue describing what you intend to do before writing a large change — it is much
@@ -24,7 +24,7 @@ later contributions across RustFS repositories that use this CLA.
 
 ## The s3s rule: copy knowledge, never code
 
-s3gate is an independent implementation and must remain provably free of code taken from
+RustFS Gateway is an independent implementation and must remain provably free of code taken from
 [s3s](https://github.com/Nugine/s3s). Three kinds of material get three different treatments,
 and the difference is not negotiable:
 

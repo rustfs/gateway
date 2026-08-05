@@ -2,12 +2,12 @@
 
 - Status: Accepted
 - Date: 2026-08-05
-- Trigger: s3gate axiom A4 (extension points are symmetric in granularity) and dependency policy
+- Trigger: RustFS Gateway axiom A4 (extension points are symmetric in granularity) and dependency policy
 - Supersedes / Superseded by: none
 
 ## Context
 
-s3gate dispatches per operation: one `Handler<O>` implementation per S3
+RustFS Gateway dispatches per operation: one `Handler<O>` implementation per S3
 operation, collected into an explicit registry that a `RouterBuilder` turns into
 a router. Seventy-three operations means seventy-three registrations, and the
 obvious "improvement" is to make them automatic — annotate the implementations
@@ -26,7 +26,7 @@ something the language supports, and each rediscovery of that fact costs a day.
 
 ## Decision
 
-**s3gate must not depend on `inventory`, `linkme`, `ctor`, or any equivalent
+**RustFS Gateway must not depend on `inventory`, `linkme`, `ctor`, or any equivalent
 crate that performs global collection via linker sections or start-up side
 effects.** This applies to every `Cargo.toml` in the repository, including
 `xtask`, examples, fuzz targets and dev-dependencies.
@@ -72,7 +72,7 @@ error[E0117]: only traits defined in the current crate can be implemented
               for arbitrary types
 ```
 
-`Collect` is `inventory`'s trait and `HandlerEntry` is s3gate's type. `Fs` being
+`Collect` is `inventory`'s trait and `HandlerEntry` is RustFS Gateway's type. `Fs` being
 local does not help: under the coherence rules, `ForeignType<LocalType>` is not
 a local type. This is not a spelling that can be adjusted — it is the orphan
 rule itself.

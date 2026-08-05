@@ -1,9 +1,9 @@
 ---
 name: gateway-adversarial
-description: Run the s3gate expert-role probe playbook — protocol-auditor, security-adversary, simplicity-adversary, concurrency-durability, perf-engineer, test-adversary — with S3-specific attack probes (signature bypass, header injection, XXE, chunked-encoding boundaries, request smuggling, routing ambiguity, mid-stream stream errors). Use on every behavior-affecting change to this repository before declaring it done.
+description: Run the RustFS Gateway expert-role probe playbook — protocol-auditor, security-adversary, simplicity-adversary, concurrency-durability, perf-engineer, test-adversary — with S3-specific attack probes (signature bypass, header injection, XXE, chunked-encoding boundaries, request smuggling, routing ambiguity, mid-stream stream errors). Use on every behavior-affecting change to this repository before declaring it done.
 ---
 
-# s3gate Adversarial Review Playbook
+# RustFS Gateway Adversarial Review Playbook
 
 This repository parses untrusted network input and verifies request
 signatures. Both of those fail silently and expensively, so review here is

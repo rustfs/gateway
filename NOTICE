@@ -1,5 +1,5 @@
 s3gate
-Copyright 2026 Beijing Henghesha Technology Co., Ltd.
+Copyright 2026 RustFS, Inc.
 
 This product includes software developed at RustFS (https://rustfs.com/).
 
@@ -11,16 +11,19 @@ repository, and is also available at http://www.apache.org/licenses/LICENSE-2.0.
 Third-party material
 -------------------------------------------------------------------------------
 
-1. AWS S3 Smithy model
+1. AWS service models (S3, STS)
    Source:  https://github.com/aws/api-models-aws
-   Path:    models/s3/service/2006-03-01/s3-2006-03-01.json
    License: Apache License 2.0
-   Commit:  TODO(P1): pin commit SHA and retrieval date
-   Notes:   The upstream repository publishes no tags, so the model can only be
-            pinned by commit SHA. The pinned SHA and its retrieval date are
-            recorded by the P1 model-pinning task; until then this entry is a
-            placeholder and no generated artefact in this repository is
-            considered reproducible.
+   Commit:  7ca34eee8c313368fd1fad80566fa177ba4a1c0a (retrieved 2026-08-05)
+   Notes:   The upstream repository publishes no tags or releases, so the
+            models can only be pinned by commit SHA.
+
+   Copyright Amazon.com, Inc. or its affiliates.
+
+   The vendored files are:
+     model/s3.json   (from models/s3/service/2006-03-01/s3-2006-03-01.json)
+     model/sts.json  (from models/sts/service/2011-06-15/sts-2011-06-15.json)
+   See model/PROVENANCE.md for the pinned upstream commit and checksums.
 
 2. aws-sigv4 (AWS SDK for Rust)
    Source:  https://github.com/awslabs/aws-sdk-rust

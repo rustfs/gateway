@@ -1,0 +1,336 @@
+name: Model drift
+
+# ---------------------------------------------------------------------------
+# WHAT THIS JOB DOES, AND THE ONE THING IT MUST NEVER DO
+#
+#   It watches https://github.com/aws/api-models-aws for a model release that
+#   changes something a server can observe on the wire, and files ONE issue
+#   describing the change.
+#
+#   It never bumps the pin. It opens no pull request and writes no file in the
+#   repository. A model bump is a protocol decision — a new required member or
+#   a renamed query parameter needs a human to decide whether it is in scope
+#   and whether it needs an ADR. A bot-authored "update the model" PR would
+#   manufacture the impression that someone already looked.
+#
+#   Nor is it in the PR gate: it is a cron job, it talks to the network, and
+#   nothing about a pull request is answered by asking what AWS shipped today.
+#   Model integrity — which IS a PR concern — is `model/tools/verify.py`.
+#
+# WHY IT FILTERS INSTEAD OF DIFFING
+#
+#   AWS ships a model release every 2-4 weeks and rewrites documentation prose
+#   in most of them. A byte diff would file an issue every time; within a
+#   quarter every one of them would be closed unread and the channel would be
+#   worthless. So the report is produced by model/tools/drift.py, which
+#   compares only wire-affecting facts. A documentation-only release produces
+#   an empty diff and no issue — that is the feature, not a gap.
+#
+# FAILURE POSTURE
+#
+#   Every network call uses `curl --fail` / `gh api` under `set -euo pipefail`.
+#   An unreachable upstream fails the job loudly. It must never be mistaken for
+#   "no drift", which is the one bug that would make this job worse than not
+#   having it.
+# ---------------------------------------------------------------------------
+
+on:
+  schedule:
+    # Mondays, 03:00 UTC. Weekly is well inside the 2-4 week upstream cadence.
+    - cron: "0 3 * * 1"
+  workflow_dispatch:
+    inputs:
+      simulate:
+        description: >-
+          Self-test the reporting path against a locally mutated copy of the
+          pinned model instead of upstream. `documentation` must produce NO
+          issue; `optionality` must produce an issue flagged BREAKING.
+        type: choice
+        default: none
+        options:
+          - none
+          - documentation
+          - optionality
+      dry_run:
+        description: "Render the report to the job log and file no issue."
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  # Never let two runs race to create the same issue.
+  group: model-drift
+  cancel-in-progress: false
+
+jobs:
+  drift:
+    name: Detect upstream model drift
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+
+      - name: Read the pinned commit from model/PROVENANCE.md
+        id: pin
+        run: |
+          set -euo pipefail
+          pinned="$(grep -E '^\| Pinned commit \|' model/PROVENANCE.md \
+            | grep -oE '[0-9a-f]{40}' | head -1)"
+          if [ -z "$pinned" ]; then
+            echo "::error::could not read a 40-hex pinned commit from model/PROVENANCE.md"
+            exit 1
+          fi
+          echo "pinned=$pinned" >>"$GITHUB_OUTPUT"
+          echo "Pinned upstream commit: $pinned"
+
+      - name: Query upstream HEAD
+        id: upstream
+        if: inputs.simulate == 'none' || inputs.simulate == ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # gh api exits non-zero on transport or API failure, so an unreachable
+          # upstream fails the job instead of looking like "no drift".
+          head="$(gh api repos/aws/api-models-aws/commits/main --jq .sha)"
+          s3_commit="$(gh api 'repos/aws/api-models-aws/commits?path=models/s3&per_page=1' --jq '.[0].sha')"
+          sts_commit="$(gh api 'repos/aws/api-models-aws/commits?path=models/sts&per_page=1' --jq '.[0].sha')"
+          for value in "$head" "$s3_commit" "$sts_commit"; do
+            if ! printf '%s' "$value" | grep -qE '^[0-9a-f]{40}$'; then
+              echo "::error::upstream returned an unusable commit id: '$value'"
+              exit 1
+            fi
+          done
+          if [ "$head" = "${{ steps.pin.outputs.pinned }}" ]; then
+            changed=false
+            echo "Upstream HEAD equals the pinned commit. Nothing to do."
+          else
+            changed=true
+            echo "Upstream moved to $head (pinned: ${{ steps.pin.outputs.pinned }})."
+          fi
+          {
+            echo "head=$head"
+            echo "short=${head:0:9}"
+            echo "s3_commit=$s3_commit"
+            echo "sts_commit=$sts_commit"
+            echo "changed=$changed"
+          } >>"$GITHUB_OUTPUT"
+
+      - name: Download the candidate models
+        id: candidate
+        if: >-
+          (inputs.simulate == 'none' || inputs.simulate == '')
+          && steps.upstream.outputs.changed == 'true'
+        run: |
+          set -euo pipefail
+          dir="$RUNNER_TEMP/candidate"
+          mkdir -p "$dir"
+          base="https://raw.githubusercontent.com/aws/api-models-aws/${{ steps.upstream.outputs.head }}"
+          curl --fail --show-error --silent --location --retry 3 --retry-all-errors --max-time 180 \
+            -o "$dir/s3.json"  "$base/models/s3/service/2006-03-01/s3-2006-03-01.json"
+          curl --fail --show-error --silent --location --retry 3 --retry-all-errors --max-time 180 \
+            -o "$dir/sts.json" "$base/models/sts/service/2011-06-15/sts-2011-06-15.json"
+          # A model that does not parse is an upstream problem worth a red job,
+          # not something to diff around.
+          python3 -c "import json,sys;[json.load(open(p)) for p in sys.argv[1:]]" \
+            "$dir/s3.json" "$dir/sts.json"
+          echo "dir=$dir" >>"$GITHUB_OUTPUT"
+
+      - name: Build a mutated candidate (self-test only)
+        id: simulated
+        if: inputs.simulate != 'none' && inputs.simulate != ''
+        env:
+          SIMULATE: ${{ inputs.simulate }}
+        run: |
+          set -euo pipefail
+          dir="$RUNNER_TEMP/candidate"
+          mkdir -p "$dir"
+          cp model/s3.json model/sts.json "$dir/"
+          python3 - "$dir/s3.json" "$SIMULATE" <<'PY'
+          import json, sys
+
+          path, mode = sys.argv[1], sys.argv[2]
+          model = json.load(open(path))
+          shapes = model["shapes"]
+
+          if mode == "documentation":
+              # Rewrite every documentation string and every client-side endpoint
+              # rule. The semantic diff must stay empty.
+              def walk(node):
+                  if isinstance(node, dict):
+                      for key, value in list(node.items()):
+                          if key == "smithy.api#documentation":
+                              node[key] = "SIMULATED DOCUMENTATION REWRITE"
+                          elif key in (
+                              "smithy.rules#endpointRuleSet",
+                              "smithy.rules#endpointBdd",
+                              "smithy.rules#endpointTests",
+                          ):
+                              node[key] = {"simulated": True}
+                          else:
+                              walk(value)
+                  elif isinstance(node, list):
+                      for value in node:
+                          walk(value)
+
+              walk(model)
+          elif mode == "optionality":
+              member = shapes["com.amazonaws.s3#GetObjectRequest"]["members"]["VersionId"]
+              member.setdefault("traits", {})["smithy.api#required"] = {}
+          else:
+              raise SystemExit(f"unknown simulation mode: {mode}")
+
+          json.dump(model, open(path, "w"))
+          print(f"simulated '{mode}' mutation in {path}")
+          PY
+          echo "dir=$dir" >>"$GITHUB_OUTPUT"
+
+      - name: Semantic diff
+        id: diff
+        if: steps.candidate.outputs.dir != '' || steps.simulated.outputs.dir != ''
+        run: |
+          set -euo pipefail
+          dir="${{ steps.candidate.outputs.dir }}${{ steps.simulated.outputs.dir }}"
+          report="$RUNNER_TEMP/drift.md"
+          summary="$RUNNER_TEMP/drift.json"
+          set +e
+          python3 model/tools/drift.py --against "$dir" --markdown "$report"
+          status=$?
+          set -e
+          if [ "$status" -gt 1 ]; then
+            echo "::error::drift.py failed with exit code $status"
+            exit "$status"
+          fi
+          python3 model/tools/drift.py --against "$dir" --json >"$summary" || true
+          breaking="$(python3 -c "import json;print(json.load(open('$summary'))['breaking'])")"
+          total="$(python3 -c "import json;print(json.load(open('$summary'))['total'])")"
+          {
+            echo "found=$status"
+            echo "total=$total"
+            echo "breaking=$breaking"
+            echo "report=$report"
+          } >>"$GITHUB_OUTPUT"
+          {
+            echo "## Model drift"
+            echo
+            echo "- wire-affecting changes: $total"
+            echo "- breaking: $breaking"
+            echo
+            if [ "$status" -eq 0 ]; then
+              echo "Upstream moved but nothing wire-affecting changed; no issue filed."
+            else
+              cat "$report"
+            fi
+          } >>"$GITHUB_STEP_SUMMARY"
+
+      - name: Compose the issue body
+        id: body
+        if: steps.diff.outputs.found == '1'
+        env:
+          PINNED: ${{ steps.pin.outputs.pinned }}
+          HEAD_SHA: ${{ steps.upstream.outputs.head }}
+          S3_COMMIT: ${{ steps.upstream.outputs.s3_commit }}
+          STS_COMMIT: ${{ steps.upstream.outputs.sts_commit }}
+          SIMULATE: ${{ inputs.simulate }}
+          TOTAL: ${{ steps.diff.outputs.total }}
+          BREAKING: ${{ steps.diff.outputs.breaking }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          body="$RUNNER_TEMP/body.md"
+          if [ -n "${SIMULATE:-}" ] && [ "$SIMULATE" != "none" ]; then
+            short="sim-$SIMULATE"
+            candidate_line="**This is a self-test run** (\`simulate: $SIMULATE\`), not a real upstream release."
+          else
+            short="${HEAD_SHA:0:9}"
+            candidate_line="Upstream \`main\` moved to \`$HEAD_SHA\`."
+          fi
+          echo "short=$short" >>"$GITHUB_OUTPUT"
+          {
+            echo "$candidate_line"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Pinned commit | \`$PINNED\` |"
+            echo "| Upstream HEAD | \`${HEAD_SHA:-n/a}\` |"
+            echo "| Last commit touching \`models/s3\` | \`${S3_COMMIT:-n/a}\` |"
+            echo "| Last commit touching \`models/sts\` | \`${STS_COMMIT:-n/a}\` |"
+            echo "| Wire-affecting changes | $TOTAL |"
+            echo "| Breaking | $BREAKING |"
+            echo "| Workflow run | $RUN_URL |"
+            echo
+            if [ -n "${HEAD_SHA:-}" ]; then
+              echo "Upstream compare: https://github.com/aws/api-models-aws/compare/$PINNED...$HEAD_SHA"
+              echo
+            fi
+            if [ "$BREAKING" != "0" ]; then
+              echo "> **$BREAKING breaking change(s).** A breaking entry is a protocol event:"
+              echo "> decide whether it needs an ADR before any bump lands. Do not treat this"
+              echo "> as a dependency update."
+              echo
+            fi
+            head -c 55000 "${{ steps.diff.outputs.report }}"
+            echo
+            echo "---"
+            echo
+            echo "### What to do"
+            echo
+            echo "1. Review the entries above; breaking ones first."
+            echo "2. If the bump is wanted, follow \`Bumping\` in \`model/PROVENANCE.md\`."
+            echo "   The bump is its own PR and updates every field of both tables."
+            echo "3. If it is not wanted yet, say so in a comment and close. This issue"
+            echo "   will be re-created the next time upstream moves again."
+            echo
+            echo "This job changed no file and opened no pull request, by design."
+            echo "_Filed automatically by \`.github/workflows/model-drift.yml\`._"
+          } >"$body"
+          echo "path=$body" >>"$GITHUB_OUTPUT"
+
+      - name: Assert the workspace is untouched
+        run: |
+          set -euo pipefail
+          # The whole design rests on this job never editing the repository.
+          # Assert it rather than trusting it.
+          dirty="$(git status --porcelain)"
+          if [ -n "$dirty" ]; then
+            echo "::error::model-drift modified the working tree, which it must never do:"
+            printf '%s\n' "$dirty"
+            exit 1
+          fi
+          echo "working tree clean"
+
+      - name: File or update the drift issue
+        if: steps.diff.outputs.found == '1' && inputs.dry_run != true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TITLE: "chore(model): upstream drift detected (${{ steps.body.outputs.short }})"
+          BODY: ${{ steps.body.outputs.path }}
+        run: |
+          set -euo pipefail
+          # One issue per upstream SHA. A second cron run before the first is
+          # handled must update that issue, not stack another one on top.
+          existing="$(gh issue list --state open --limit 200 --json number,title \
+            --jq "[.[] | select(.title == \"$TITLE\")] | .[0].number // empty")"
+          if [ -n "$existing" ]; then
+            gh issue edit "$existing" --body-file "$BODY"
+            echo "updated issue #$existing"
+          else
+            number="$(gh issue create --title "$TITLE" --body-file "$BODY" | grep -oE '[0-9]+$')"
+            echo "opened issue #$number"
+            # Labels are cosmetic; a missing label must not fail the job.
+            gh issue edit "$number" --add-label model-drift || \
+              echo "::warning::label 'model-drift' not applied (create it once in repo settings)"
+          fi
+
+      - name: Report a clean result
+        if: steps.diff.outputs.found == '0' || steps.diff.outputs.found == ''
+        run: |
+          set -euo pipefail
+          case "${{ steps.upstream.outputs.changed }}" in
+            false) echo "Upstream HEAD equals the pinned commit; no drift." ;;
+            true)  echo "Upstream moved, but no wire-affecting change. No issue filed." ;;
+            *)     echo "Self-test run produced no wire-affecting change. No issue filed." ;;
+          esac

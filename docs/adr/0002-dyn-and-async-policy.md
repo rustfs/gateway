@@ -2,12 +2,12 @@
 
 - Status: Accepted
 - Date: 2026-08-05
-- Trigger: s3gate axiom A4 (extension points are symmetric in granularity)
+- Trigger: RustFS Gateway axiom A4 (extension points are symmetric in granularity)
 - Supersedes / Superseded by: none
 
 ## Context
 
-s3gate exposes eleven extension points — `Authorizer`, `HostResolver`,
+RustFS Gateway exposes eleven extension points — `Authorizer`, `HostResolver`,
 `SignatureVerifier`, `Observer`, `Governor`, `StageFilter`, `OpLayer<O>` and the
 rest. Every one of them is asynchronous, and every one of them is stored in a
 `ServiceConfig` and held as `Arc<dyn _>` so that a service can be assembled at

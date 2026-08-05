@@ -1,0 +1,4 @@
+# Vendored verbatim from aws/api-models-aws at the pinned commit; never hand-edited.
+# See PROVENANCE.md. Excluded from language statistics, NOT from diff review:
+# a reviewer must still be able to expand a change to these files.
+*.json linguist-vendored

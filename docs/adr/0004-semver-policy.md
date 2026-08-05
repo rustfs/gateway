@@ -7,7 +7,7 @@
 
 ## Context
 
-s3gate is a library. Its public API is a hard contract with everyone who builds
+RustFS Gateway is a library. Its public API is a hard contract with everyone who builds
 on it, and the largest part of that API is generated: roughly 73 operations'
 worth of Input and Output data-transfer objects, produced by codegen from the
 AWS Smithy model. Once the generated shape is fixed it is extremely expensive to

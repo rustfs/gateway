@@ -1,4 +1,4 @@
-# AGENTS.md — s3gate
+# AGENTS.md
 
 This repository is developed primarily by AI agents. This is the single rule file: read it end to
 end before your first edit, and you know the rule order, what to run before committing, which files
@@ -119,19 +119,19 @@ description. Enforced by the `protected-files` CI job (`P0-09`); the job's list 
 match word for word.
 
 | Path | Contract it encodes |
-|---|---|
+| --- | --- |
 | `LICENSE`, `NOTICE` | Legal contract |
 | `docs/adr/**` | Accepted architecture decisions. Adding a new ADR is unrestricted; **modifying or deleting an existing ADR** is not |
 | `rust-toolchain.toml`, `rustfmt.toml` | Repository-wide toolchain and formatting contract |
 | `docs/msrv.md` and every `rust-version` in `Cargo.toml` | The MSRV promise made to downstream users |
 | `spec/ir.schema.json` | The frozen codegen IR. Every generated artifact is shaped by it; a change invalidates the samples and re-opens decisions P2–P10 already built on |
 | `conformance/case.schema.json` | The frozen case format. Widening it late silently weakens every case already written against the narrower form |
+| `model/s3.json`, `model/sts.json`, their `.sha256` sidecars, `model/PROVENANCE.md` | The pinned AWS service models. Re-pinning changes every generated artifact, so it is a reviewed protocol event, never a dependency bump |
 
 **Pending — add the row the moment the path first exists, in the PR that creates it:**
 
 | Path | Contract it encodes |
-|---|---|
-| `model/s3.json` | The pinned AWS Smithy model. Re-pinning changes every generated artifact |
+| --- | --- |
 | `model/overlays/**` | The only sanctioned hand-written protocol exception source. Quirks are hand-written, so they live here and **never** under the generated `spec/` tree |
 | The error-code → HTTP status mapping table | Externally observable API surface; clients branch on it |
 | The public API snapshot | Semver contract for `s3gate` and every `s3gate-*` crate |
@@ -252,7 +252,7 @@ Direction violations are hard-blocked by `scripts/check_layer_dependencies.sh` (
 **Do not read these. Reading one destroys the rest of your session.**
 
 | Path | Why | Read this instead |
-|---|---|---|
+| --- | --- | --- |
 | `generated/**` | Generated code at s3s scale: `dto/generated.rs` alone is 39,374 lines, all `generated.rs` files total 73,019. Once 70k lines of it are in context, every `grep ETag` returns hundreds of noise hits and you can no longer locate anything | `OPERATIONS.md` for operation shapes |
 | `model/s3.json` | 3MB. One read consumes the entire session budget | `spec/operations/*.toml`, which is generated from it |
 | `Cargo.lock` | Large and information-free | `cargo tree -p <crate>` |
@@ -298,7 +298,7 @@ each other:
 Known cross-operation clusters, for reference when you touch one of them:
 
 | Cluster | Operations | Shared logic |
-|---|---|---|
+| --- | --- | --- |
 | List | ListObjects, ListObjectsV2, ListObjectVersions, ListMultipartUploads | pagination, delimiter rollup, CommonPrefixes, encoding-type, continuation-token codec |
 | Copy | CopyObject, UploadPartCopy | `x-amz-copy-source` parsing, copy-source conditional headers, source-resource extraction for two-stage authorization |
 | Conditional | GetObject, HeadObject, CopyObject, PutObject | RFC 9110 precondition evaluation, strong/weak ETag comparison |
@@ -341,7 +341,7 @@ the answer only exists after expansion. Four rules:
 ## Common Errors and Fixes
 
 | Wrong | Right |
-|---|---|
+| --- | --- |
 | Test fails → change the assertion / add `#[ignore]` / delete the test | Fix the implementation. If the test really was wrong, explain in the PR description why the original assertion was incorrect |
 | clippy complains → add `#[allow(...)]` | Fix the code. If an allow is genuinely required, a same-line comment must state why |
 | Need logic in several operations → copy it three times | Extract into `ops/shared/`, and update both the `//! Shares:` and `//! Members:` declarations |

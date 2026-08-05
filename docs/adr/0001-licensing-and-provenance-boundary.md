@@ -7,7 +7,7 @@
 
 ## Context
 
-s3gate is an independent implementation of the server side of the S3 protocol.
+RustFS Gateway is an independent implementation of the server side of the S3 protocol.
 It is not a fork of [`s3s`](https://github.com/s3s-project/s3s), but it is being
 written by people who have read s3s closely, who have mined its issue tracker
 for behavioural facts, and who intend the result to be adopted by the RustFS
@@ -17,7 +17,7 @@ concern rather than a paperwork exercise.
 Two questions had to be answered before the first line of generated or
 hand-written code landed:
 
-1. **Which licence does s3gate ship under** — Apache-2.0 only, or the Rust
+1. **Which licence does RustFS Gateway ship under** — Apache-2.0 only, or the Rust
    ecosystem's customary `MIT OR Apache-2.0` dual licence?
 2. **What exactly may be taken from the projects we learn from** — s3s source,
    s3s issues and pull requests, the AWS Smithy model, external conformance
@@ -29,7 +29,7 @@ licensing" pull request can be answered with a document instead of a debate.
 
 ## Decision
 
-**s3gate is licensed under Apache-2.0 only.** No `LICENSE-MIT`, no dual-licence
+**RustFS Gateway is licensed under Apache-2.0 only.** No `LICENSE-MIT`, no dual-licence
 header, no per-file `SPDX-License-Identifier` claiming otherwise.
 
 **Provenance is governed by three categories**, and every contributor —human or
@@ -44,7 +44,7 @@ agent— must classify what they are about to reuse before reusing it:
 **Adjacent rules that follow from the same reasoning:**
 
 - **MinIO is clean-room only.** `minio/minio` is AGPL-3.0 and the repository is
-  archived. Any s3gate work that targets MinIO behavioural compatibility must be
+  archived. Any RustFS Gateway work that targets MinIO behavioural compatibility must be
   derived from observable behaviour, captured traffic, or public documentation —
   never from reading MinIO source. Contributors who have read MinIO source
   recently should not be the ones writing the corresponding compatibility code.
@@ -95,7 +95,7 @@ that we are entitled to implement.
 
 | Alternative | Why it was rejected |
 |---|---|
-| **`MIT OR Apache-2.0` dual licence** (the Rust ecosystem convention; rustfs/cli uses it) | Dual licensing hands downstream users a pure-MIT option, and a derivative of Apache-2.0 code cannot be offered under pure MIT. Keeping that promise honest would require proving, continuously and forever, that s3gate is a clean-room implementation containing zero s3s code. That standing burden of proof outweighs the convenience the MIT option buys downstream |
+| **`MIT OR Apache-2.0` dual licence** (the Rust ecosystem convention; rustfs/cli uses it) | Dual licensing hands downstream users a pure-MIT option, and a derivative of Apache-2.0 code cannot be offered under pure MIT. Keeping that promise honest would require proving, continuously and forever, that RustFS Gateway is a clean-room implementation containing zero s3s code. That standing burden of proof outweighs the convenience the MIT option buys downstream |
 | **MIT only** | Loses the explicit patent grant, which is the single most valuable clause for a project that implements a published protocol and may brush against patents |
 | **Copy s3s code with attribution** (permitted by Apache-2.0 §4) | Legal, but every copied file becomes a permanent provenance obligation: header, `NOTICE` entry, and a merge decision every time upstream changes. Rewriting from behavioural knowledge is cheaper on a horizon longer than a few months, and it is what "independent implementation" in the README must mean to stay true |
 | **Vendor Ceph `s3-tests` and `mint` into the tree** | Mixes MIT and Apache-2.0 sources into our distribution for no benefit; pinning an external revision gives the same reproducibility with none of the licence surface |

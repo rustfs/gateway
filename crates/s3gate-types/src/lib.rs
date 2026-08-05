@@ -19,3 +19,11 @@
 //! NOT responsible for: wire framing, signing, routing.
 //! Upstream: `s3gate-xml`, `s3gate-stream`. Downstream: `s3gate-http` and everything above.
 #![forbid(unsafe_code)]
+
+mod scalar;
+
+pub use crate::scalar::{
+    BucketName, ByteRange, ChecksumAlgorithm, ChecksumDigest, ChecksumError, ChecksumSpec, ChecksumType, Checksummer, ContentMd5,
+    ETag, ErrorCode, ErrorContext, EtagRender, ObjectKey, OpaqueString, ParseError, RangeOutcome, RangeParse, Timestamp,
+    TimestampFormat, mask_for_authorization, parse_request_checksum, rules, status_of, validate_bucket_name, validate_object_key,
+};

@@ -64,13 +64,28 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  fmt:
-    name: Format
+  # Everything deterministic and sub-second lives here rather than in jobs of its own:
+  # a runner spin-up costs ~20s, which is more than all of these put together.
+  static:
+    name: Static checks
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
       - run: cargo fmt --all --check
+      # Pinned models must match their recorded checksums before anything is generated from them.
+      - name: Model integrity
+        run: python3 model/tools/verify.py
+      # Architecture guards. A guard that does not run in CI is decoration.
+      - name: Repository guards
+        run: |
+          for guard in scripts/check_*.sh; do
+            echo "::group::$guard"
+            bash "$guard"
+            echo "::endgroup::"
+          done
+      - name: Guard self-test
+        run: bash scripts/test_guard_scripts.sh
 
   clippy:
     name: Clippy

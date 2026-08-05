@@ -1,4 +1,4 @@
-# s3gate conformance suite
+# RustFS Gateway conformance suite
 
 This directory holds the conformance corpus: the data files that define what correct S3 behaviour
 looks like on the wire. It contains no Rust code. The runner that executes these files lives in

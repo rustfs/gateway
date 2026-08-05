@@ -1,6 +1,6 @@
 # Architecture Decision Records
 
-This directory is the durable record of the decisions that shape s3gate. It is
+This directory is the durable record of the decisions that shape this project. It is
 deliberately tiny: a numbering rule, a status vocabulary, an immutability rule,
 a template, and a hand-maintained index. There is no review board, no state
 machine, and no generator.
@@ -9,7 +9,7 @@ machine, and no generator.
 
 Exactly three triggers. Nothing else qualifies.
 
-1. Overturning one of the five s3gate axioms (A1 protocol exceptions are data,
+1. Overturning one of the project's five axioms (A1 protocol exceptions are data,
    not code branches; A2 unsafe spellings must fail to compile; A3 ordering
    contracts are fixed by types; A4 extension points are symmetric in
    granularity; A5 generated code is minimal and diffable).
@@ -24,8 +24,8 @@ all; the issue is the single source of truth for those.
 ## Rules
 
 - **File name**: `NNNN-kebab-case-title.md`, four decimal digits, monotonically
-  increasing from `0001`, never reused. `README.md` is the only other file
-  allowed in this directory.
+  increasing from `0001`, never reused. `README.md` and `0000-template.md` are
+  the only other files allowed in this directory.
 - **Status** is exactly one of `Accepted`, `Superseded by ADR-NNNN`, or
   `Rejected`. There is no `Proposed` state: an ADR is reviewed inside its own
   pull request and becomes `Accepted` the moment that PR merges.
@@ -48,41 +48,9 @@ all; the issue is the single source of truth for those.
 
 Every ADR has a metadata block followed by exactly five level-2 sections, in
 this order: `Context`, `Decision`, `Evidence`, `Rejected alternatives`,
-`Consequences`. Copy the template below into `docs/adr/NNNN-your-title.md`.
-
-```markdown
-# ADR-NNNN: <Title>
-
-- Status: Accepted
-- Date: YYYY-MM-DD
-- Trigger: <axiom | crate boundary | licensing/dependency policy>
-- Supersedes / Superseded by: <none | ADR-NNNN>
-
-## Context
-
-What forced this decision. Facts only, with links. No advocacy.
-
-## Decision
-
-One paragraph, imperative, in the present tense. What we WILL do — and, where
-it matters, what we will NOT do.
-
-## Evidence
-
-Measured facts: compiler error codes, measured counts, benchmark numbers. Cite
-the exact toolchain and the exact command. Mark anything not directly measured
-as `[inferred]`.
-
-## Rejected alternatives
-
-Each alternative with the concrete reason it was rejected.
-
-## Consequences
-
-What becomes harder, what downstream users must now do, and which guardrail
-(script, CI job, or Protected Files entry) enforces this decision. A decision
-with no enforcement mechanism is a wish.
-```
+`Consequences`. Copy [`0000-template.md`](0000-template.md) into `docs/adr/NNNN-your-title.md`.
+The template lives in exactly one place; it is deliberately not reproduced here, because a
+second copy is a second thing to keep in sync.
 
 ## Index
 

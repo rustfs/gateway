@@ -1,4 +1,4 @@
-# s3gate
+# RustFS Gateway
 
 [![CI](https://github.com/rustfs/gateway/actions/workflows/ci.yml/badge.svg)](https://github.com/rustfs/gateway/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
@@ -7,12 +7,12 @@
 **A protocol-exact, security-first S3 server framework for Rust** — it does everything
 between the HTTP wire and S3 semantics correctly, and leaves storage semantics to you.
 
-s3gate parses, validates, frames, and signs-checks S3 traffic: request routing, header and
+RustFS Gateway parses, validates, frames, and signs-checks S3 traffic: request routing, header and
 query typing, `aws-chunked` framing, XML codecs, SigV2/SigV4 and presigned-URL verification,
 POST-policy handling, and the error shapes AWS actually returns. What an object does once it
 is understood — where bytes live, who is allowed to touch them — is your program's business.
 
-This repository is also the home of the RustFS gateway: rings 0 and 1 are a reusable,
+The repository is layered into three rings: rings 0 and 1 are a reusable,
 RustFS-independent S3 protocol framework, and ring 2 hosts the RustFS-specific HTTP surface
 (admin API, console, STS, metadata extensions, RPC prefix routing) that will take over the
 entire HTTP layer of [RustFS](https://github.com/rustfs/rustfs).
@@ -28,14 +28,14 @@ what keeps the cross-repository dependency graph acyclic, and it is enforced in 
 
 ## Scope fence
 
-s3gate is deliberately small at the edges. It **does not** and will not:
+RustFS Gateway is deliberately small at the edges. It **does not** and will not:
 
-- **Implement storage.** No filesystem, no erasure coding, no bucket database. s3gate hands
+- **Implement storage.** No filesystem, no erasure coding, no bucket database. RustFS Gateway hands
   you a typed operation and expects a typed answer.
 - **Evaluate IAM policy.** There is no policy language, no condition-key engine, no
-  wildcard-ARN matcher. s3gate defines an `Authorizer` interface and calls it; deciding
+  wildcard-ARN matcher. RustFS Gateway defines an `Authorizer` interface and calls it; deciding
   "allow" or "deny" is entirely yours.
-- **Own cluster or admin business logic.** s3gate does provide a first-class mechanism for
+- **Own cluster or admin business logic.** RustFS Gateway does provide a first-class mechanism for
   registering custom operations, so admin-style APIs can be layered on top — but their
   semantics are not part of this framework.
 - **Support non-HTTP access protocols.** SFTP and FTPS are out of scope, permanently.
@@ -49,13 +49,13 @@ project existed. Three things about the relationship, stated up front:
 
 1. **Acknowledgement.** The issue and pull-request history of s3s is a valuable public record
    of how real S3 clients and the real AWS service behave. Those *facts about the protocol*
-   are an important source for s3gate's conformance corpus, and we are grateful for the work
+   are an important source for RustFS Gateway's conformance corpus, and we are grateful for the work
    that produced them. Each conformance case cites its evidence as a URL plus an original
    one-line summary; discussion text itself is never pasted into this repository.
-2. **s3gate is not a fork of s3s.** It is an independent implementation, written from
+2. **RustFS Gateway is not a fork of s3s.** It is an independent implementation, written from
    scratch. It contains no source code copied from s3s, and contributors are explicitly
    forbidden from introducing any — see [CONTRIBUTING.md](CONTRIBUTING.md).
-3. **Both projects are licensed under Apache-2.0.** s3s is Apache-2.0; so is s3gate. There is
+3. **Both projects are licensed under Apache-2.0.** s3s is Apache-2.0; so is RustFS Gateway. There is
    no license incompatibility between them, and no license-derived obligation is being evaded
    by the choice above.
 

@@ -16,3 +16,9 @@ rustdoc-args = ["--cfg", "docsrs"]
 workspace = true
 
 [dependencies]
+# Deliberately three dependencies, none of them internal. This crate sits below `s3gate-types`
+# so that it is reachable from both `s3gate-types` and `s3gate-http`; every extra edge declared
+# here becomes an edge in every downstream dependency tree.
+bitflags = { workspace = true }
+bytes = { workspace = true }
+http = { workspace = true }

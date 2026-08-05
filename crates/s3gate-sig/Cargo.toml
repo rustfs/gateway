@@ -16,5 +16,17 @@ rustdoc-args = ["--cfg", "docsrs"]
 workspace = true
 
 [dependencies]
-s3gate-http = { workspace = true }
-s3gate-types = { workspace = true }
+# No internal dependency, on purpose.
+#
+# `s3gate-http` is absent by acceptance criterion (P2-01): the framing mode is decided here and
+# consumed there, and depending on the wire layer would put both ends of that decision in one crate
+# graph and invite re-deriving framing from `Content-Encoding`.
+#
+# `s3gate-types` is absent because the frozen dimensions do not use a single S3 type. The layer
+# matrix permits the edge, so a later P2 task may add it back the moment it needs one; until then,
+# zero internal edges keep `cargo test -p s3gate-sig` under the 30-second feedback contract.
+#
+# `aws-sigv4` is absent permanently (ADR-0001, docs/msrv.md).
+smallvec = { workspace = true }
+subtle = { workspace = true }
+zeroize = { workspace = true }

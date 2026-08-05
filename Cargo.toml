@@ -22,6 +22,35 @@ s3gate-stream = { path = "crates/s3gate-stream", version = "0.1.0" }
 s3gate-types = { path = "crates/s3gate-types", version = "0.1.0" }
 s3gate-xml = { path = "crates/s3gate-xml", version = "0.1.0" }
 
+# Third-party. Versions verified against crates.io on 2026-08-05; MSRV 1.89 constrains this set —
+# `aws-sigv4` is deliberately absent (it would force MSRV 1.94.1, and its server-side verification
+# has measured defects; see docs/msrv.md and ADR-0001).
+bitflags = "2.13"
+bytes = "1.12"
+# default-features off: the crate's default pulls in optional backends we do not use. Declared
+# here rather than per-crate because a member cannot narrow features it inherits.
+crc-fast = { version = "1.10", default-features = false, features = ["std"] }   # crc32 / crc32c / crc64nvme, SIMD
+form_urlencoded = "1.2"
+futures-core = "0.3"
+hex = "0.4"
+hmac = "0.13"
+http = "1.5"
+md-5 = "0.11"                                       # entity tags, single-part and multipart alike
+memchr = "2.8"
+percent-encoding = "2.3"
+pin-project-lite = "0.2"
+quick-xml = "0.41"                                  # never expands entities; DOCTYPE must be rejected by us
+sha1 = "0.11"                                       # one of the five S3 checksum algorithms
+sha2 = "0.11"
+smallvec = "1.15"
+subtle = "2.6"                                      # constant-time comparison
+thiserror = "2.0"
+zeroize = { version = "1.9", features = ["zeroize_derive"] }
+
+# Dev-only.
+insta = "1.48"
+proptest = "1.11"
+
 [workspace.lints.rust]
 unsafe_code = "forbid"
 missing_docs = "deny"
