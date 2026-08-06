@@ -1,0 +1,684 @@
+{
+  "ir_version": "1",
+  "operation": "GetObjectAttributes",
+  "http": {
+            "method": "GET",
+            "target": "Object",
+            "precedence": 470,
+            "predicates": [
+                            { "kind": "Method", "method": "GET" },
+                            { "kind": "Target", "target": "Object" },
+                            { "kind": "QueryPresent", "key": "attributes" }
+                          ],
+            "success_status": 200,
+            "alt_success_statuses": [],
+            "path_shape": "/{Bucket}/{Key+}"
+          },
+  "auth": { "requirement": "Required", "action": "s3:GetObject", "presigned_allowed": true, "service": "s3" },
+  "payload": {
+               "request": { "kind": "None", "buffering": "None", "max_bytes": null },
+               "response": { "kind": "XmlBody", "buffering": "Full", "max_bytes": 65536 }
+             },
+  "checksum": { "http_checksum_required": false, "request_algorithms": [], "response_algorithms": [] },
+  "input": {
+             "fields": [
+                         {
+                           "name": "Bucket",
+                           "wire_name": "Bucket",
+                           "required": true,
+                           "binding": { "kind": "UriLabel", "greedy": false },
+                           "type": { "kind": "BucketName" },
+                           "hot": true,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "Key",
+                           "wire_name": "Key",
+                           "required": true,
+                           "binding": { "kind": "UriLabel", "greedy": true },
+                           "type": { "kind": "ObjectKey" },
+                           "hot": true,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "VersionId",
+                           "wire_name": "versionId",
+                           "required": false,
+                           "binding": { "kind": "Query" },
+                           "type": { "kind": "String" },
+                           "hot": false,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "MaxParts",
+                           "wire_name": "x-amz-max-parts",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "Integer" },
+                           "hot": false,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "PartNumberMarker",
+                           "wire_name": "x-amz-part-number-marker",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "String" },
+                           "hot": false,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "SSECustomerAlgorithm",
+                           "wire_name": "x-amz-server-side-encryption-customer-algorithm",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "String" },
+                           "hot": false,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "SSECustomerKey",
+                           "wire_name": "x-amz-server-side-encryption-customer-key",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "String" },
+                           "hot": false,
+                           "quirk_refs": ["q-sse-0010"]
+                         },
+                         {
+                           "name": "SSECustomerKeyMD5",
+                           "wire_name": "x-amz-server-side-encryption-customer-key-md5",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "String" },
+                           "hot": false,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "RequestPayer",
+                           "wire_name": "x-amz-request-payer",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "StringEnum", "values": ["requester"] },
+                           "hot": false,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "ExpectedBucketOwner",
+                           "wire_name": "x-amz-expected-bucket-owner",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "String" },
+                           "hot": false,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "ObjectAttributes",
+                           "wire_name": "x-amz-object-attributes",
+                           "required": true,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "String" },
+                           "hot": true,
+                           "missing_error": "InvalidRequest",
+                           "quirk_refs": []
+                         }
+                       ]
+           },
+  "output": {
+              "fields": [
+                          {
+                            "name": "DeleteMarker",
+                            "wire_name": "x-amz-delete-marker",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": { "kind": "Boolean" },
+                            "hot": false,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "LastModified",
+                            "wire_name": "last-modified",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": { "kind": "Timestamp", "format": "HttpDate" },
+                            "hot": false,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "VersionId",
+                            "wire_name": "x-amz-version-id",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": { "kind": "String" },
+                            "hot": false,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "RequestCharged",
+                            "wire_name": "x-amz-request-charged",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": { "kind": "StringEnum", "values": ["requester"] },
+                            "hot": false,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "ETag",
+                            "wire_name": "ETag",
+                            "required": false,
+                            "binding": { "kind": "BodyXml" },
+                            "type": { "kind": "ETag", "render": "XmlBare" },
+                            "hot": true,
+                            "quirk_refs": ["q-mpu-attributes-etag-0036"]
+                          },
+                          {
+                            "name": "Checksum",
+                            "wire_name": "Checksum",
+                            "required": false,
+                            "binding": { "kind": "BodyXml" },
+                            "type": { "kind": "Structure", "shape": "Checksum" },
+                            "hot": false,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "ObjectParts",
+                            "wire_name": "ObjectParts",
+                            "required": false,
+                            "binding": { "kind": "BodyXml" },
+                            "type": { "kind": "Structure", "shape": "GetObjectAttributesParts" },
+                            "hot": false,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "StorageClass",
+                            "wire_name": "StorageClass",
+                            "required": false,
+                            "binding": { "kind": "BodyXml" },
+                            "type": {
+                                      "kind": "StringEnum",
+                                      "values": [
+                                                  "STANDARD",
+                                                  "REDUCED_REDUNDANCY",
+                                                  "STANDARD_IA",
+                                                  "ONEZONE_IA",
+                                                  "INTELLIGENT_TIERING",
+                                                  "GLACIER",
+                                                  "DEEP_ARCHIVE",
+                                                  "OUTPOSTS",
+                                                  "GLACIER_IR",
+                                                  "SNOW",
+                                                  "EXPRESS_ONEZONE",
+                                                  "FSX_OPENZFS",
+                                                  "FSX_ONTAP"
+                                                ]
+                                    },
+                            "hot": true,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "ObjectSize",
+                            "wire_name": "ObjectSize",
+                            "required": false,
+                            "binding": { "kind": "BodyXml" },
+                            "type": { "kind": "Long" },
+                            "hot": true,
+                            "quirk_refs": []
+                          }
+                        ]
+            },
+  "shapes": {
+              "Checksum": {
+                            "kind": "Structure",
+                            "fields": [
+                                        {
+                                          "name": "ChecksumCRC32",
+                                          "wire_name": "ChecksumCRC32",
+                                          "required": false,
+                                          "binding": { "kind": "BodyXml" },
+                                          "type": { "kind": "String" },
+                                          "hot": false,
+                                          "quirk_refs": []
+                                        },
+                                        {
+                                          "name": "ChecksumCRC32C",
+                                          "wire_name": "ChecksumCRC32C",
+                                          "required": false,
+                                          "binding": { "kind": "BodyXml" },
+                                          "type": { "kind": "String" },
+                                          "hot": false,
+                                          "quirk_refs": []
+                                        },
+                                        {
+                                          "name": "ChecksumCRC64NVME",
+                                          "wire_name": "ChecksumCRC64NVME",
+                                          "required": false,
+                                          "binding": { "kind": "BodyXml" },
+                                          "type": { "kind": "String" },
+                                          "hot": false,
+                                          "quirk_refs": []
+                                        },
+                                        {
+                                          "name": "ChecksumSHA1",
+                                          "wire_name": "ChecksumSHA1",
+                                          "required": false,
+                                          "binding": { "kind": "BodyXml" },
+                                          "type": { "kind": "String" },
+                                          "hot": false,
+                                          "quirk_refs": []
+                                        },
+                                        {
+                                          "name": "ChecksumSHA256",
+                                          "wire_name": "ChecksumSHA256",
+                                          "required": false,
+                                          "binding": { "kind": "BodyXml" },
+                                          "type": { "kind": "String" },
+                                          "hot": false,
+                                          "quirk_refs": []
+                                        },
+                                        {
+                                          "name": "ChecksumSHA512",
+                                          "wire_name": "ChecksumSHA512",
+                                          "required": false,
+                                          "binding": { "kind": "BodyXml" },
+                                          "type": { "kind": "String" },
+                                          "hot": false,
+                                          "quirk_refs": []
+                                        },
+                                        {
+                                          "name": "ChecksumMD5",
+                                          "wire_name": "ChecksumMD5",
+                                          "required": false,
+                                          "binding": { "kind": "BodyXml" },
+                                          "type": { "kind": "String" },
+                                          "hot": false,
+                                          "quirk_refs": []
+                                        },
+                                        {
+                                          "name": "ChecksumXXHASH64",
+                                          "wire_name": "ChecksumXXHASH64",
+                                          "required": false,
+                                          "binding": { "kind": "BodyXml" },
+                                          "type": { "kind": "String" },
+                                          "hot": false,
+                                          "quirk_refs": []
+                                        },
+                                        {
+                                          "name": "ChecksumXXHASH3",
+                                          "wire_name": "ChecksumXXHASH3",
+                                          "required": false,
+                                          "binding": { "kind": "BodyXml" },
+                                          "type": { "kind": "String" },
+                                          "hot": false,
+                                          "quirk_refs": []
+                                        },
+                                        {
+                                          "name": "ChecksumXXHASH128",
+                                          "wire_name": "ChecksumXXHASH128",
+                                          "required": false,
+                                          "binding": { "kind": "BodyXml" },
+                                          "type": { "kind": "String" },
+                                          "hot": false,
+                                          "quirk_refs": []
+                                        },
+                                        {
+                                          "name": "ChecksumType",
+                                          "wire_name": "ChecksumType",
+                                          "required": false,
+                                          "binding": { "kind": "BodyXml" },
+                                          "type": { "kind": "StringEnum", "values": ["COMPOSITE", "FULL_OBJECT"] },
+                                          "hot": false,
+                                          "quirk_refs": []
+                                        }
+                                      ],
+                            "xml": {
+                                     "element_order": [
+                                                        "ChecksumCRC32",
+                                                        "ChecksumCRC32C",
+                                                        "ChecksumCRC64NVME",
+                                                        "ChecksumSHA1",
+                                                        "ChecksumSHA256",
+                                                        "ChecksumSHA512",
+                                                        "ChecksumMD5",
+                                                        "ChecksumXXHASH64",
+                                                        "ChecksumXXHASH3",
+                                                        "ChecksumXXHASH128",
+                                                        "ChecksumType"
+                                                      ],
+                                     "empty_value_policy": {
+                                                             "ChecksumCRC32": "omit",
+                                                             "ChecksumCRC32C": "omit",
+                                                             "ChecksumCRC64NVME": "omit",
+                                                             "ChecksumSHA1": "omit",
+                                                             "ChecksumSHA256": "omit",
+                                                             "ChecksumSHA512": "omit",
+                                                             "ChecksumMD5": "omit",
+                                                             "ChecksumXXHASH64": "omit",
+                                                             "ChecksumXXHASH3": "omit",
+                                                             "ChecksumXXHASH128": "omit",
+                                                             "ChecksumType": "omit"
+                                                           },
+                                     "attributes": []
+                                   }
+                          },
+              "GetObjectAttributesParts": {
+                                            "kind": "Structure",
+                                            "fields": [
+                                                        {
+                                                          "name": "TotalPartsCount",
+                                                          "wire_name": "PartsCount",
+                                                          "required": true,
+                                                          "binding": { "kind": "BodyXml" },
+                                                          "type": { "kind": "Integer" },
+                                                          "hot": true,
+                                                          "quirk_refs": []
+                                                        },
+                                                        {
+                                                          "name": "PartNumberMarker",
+                                                          "wire_name": "PartNumberMarker",
+                                                          "required": false,
+                                                          "binding": { "kind": "BodyXml" },
+                                                          "type": { "kind": "String" },
+                                                          "hot": false,
+                                                          "quirk_refs": []
+                                                        },
+                                                        {
+                                                          "name": "NextPartNumberMarker",
+                                                          "wire_name": "NextPartNumberMarker",
+                                                          "required": false,
+                                                          "binding": { "kind": "BodyXml" },
+                                                          "type": { "kind": "String" },
+                                                          "hot": false,
+                                                          "quirk_refs": []
+                                                        },
+                                                        {
+                                                          "name": "MaxParts",
+                                                          "wire_name": "MaxParts",
+                                                          "required": true,
+                                                          "binding": { "kind": "BodyXml" },
+                                                          "type": { "kind": "Integer" },
+                                                          "hot": false,
+                                                          "quirk_refs": []
+                                                        },
+                                                        {
+                                                          "name": "IsTruncated",
+                                                          "wire_name": "IsTruncated",
+                                                          "required": true,
+                                                          "binding": { "kind": "BodyXml" },
+                                                          "type": { "kind": "Boolean" },
+                                                          "hot": false,
+                                                          "quirk_refs": []
+                                                        },
+                                                        {
+                                                          "name": "Parts",
+                                                          "wire_name": "Part",
+                                                          "required": false,
+                                                          "binding": { "kind": "BodyXml" },
+                                                          "type": {
+                                                                    "kind": "List",
+                                                                    "member": {
+                                                                                "kind": "Structure",
+                                                                                "shape": "ObjectPart"
+                                                                              },
+                                                                    "flattened": true,
+                                                                    "wrapper_name": null
+                                                                  },
+                                                          "hot": true,
+                                                          "quirk_refs": ["q-mpu-part-0031"]
+                                                        }
+                                                      ],
+                                            "xml": {
+                                                     "element_order": [
+                                                                        "TotalPartsCount",
+                                                                        "PartNumberMarker",
+                                                                        "NextPartNumberMarker",
+                                                                        "MaxParts",
+                                                                        "IsTruncated",
+                                                                        "Parts"
+                                                                      ],
+                                                     "empty_value_policy": {
+                                                                             "TotalPartsCount": "emit",
+                                                                             "PartNumberMarker": "omit",
+                                                                             "NextPartNumberMarker": "omit",
+                                                                             "MaxParts": "emit",
+                                                                             "IsTruncated": "emit",
+                                                                             "Parts": "omit"
+                                                                           },
+                                                     "attributes": []
+                                                   }
+                                          },
+              "ObjectPart": {
+                              "kind": "Structure",
+                              "fields": [
+                                          {
+                                            "name": "PartNumber",
+                                            "wire_name": "PartNumber",
+                                            "required": true,
+                                            "binding": { "kind": "BodyXml" },
+                                            "type": { "kind": "Integer" },
+                                            "hot": true,
+                                            "quirk_refs": []
+                                          },
+                                          {
+                                            "name": "Size",
+                                            "wire_name": "Size",
+                                            "required": true,
+                                            "binding": { "kind": "BodyXml" },
+                                            "type": { "kind": "Long" },
+                                            "hot": true,
+                                            "quirk_refs": []
+                                          },
+                                          {
+                                            "name": "ChecksumCRC32",
+                                            "wire_name": "ChecksumCRC32",
+                                            "required": false,
+                                            "binding": { "kind": "BodyXml" },
+                                            "type": { "kind": "String" },
+                                            "hot": false,
+                                            "quirk_refs": []
+                                          },
+                                          {
+                                            "name": "ChecksumCRC32C",
+                                            "wire_name": "ChecksumCRC32C",
+                                            "required": false,
+                                            "binding": { "kind": "BodyXml" },
+                                            "type": { "kind": "String" },
+                                            "hot": false,
+                                            "quirk_refs": []
+                                          },
+                                          {
+                                            "name": "ChecksumCRC64NVME",
+                                            "wire_name": "ChecksumCRC64NVME",
+                                            "required": false,
+                                            "binding": { "kind": "BodyXml" },
+                                            "type": { "kind": "String" },
+                                            "hot": false,
+                                            "quirk_refs": []
+                                          },
+                                          {
+                                            "name": "ChecksumSHA1",
+                                            "wire_name": "ChecksumSHA1",
+                                            "required": false,
+                                            "binding": { "kind": "BodyXml" },
+                                            "type": { "kind": "String" },
+                                            "hot": false,
+                                            "quirk_refs": []
+                                          },
+                                          {
+                                            "name": "ChecksumSHA256",
+                                            "wire_name": "ChecksumSHA256",
+                                            "required": false,
+                                            "binding": { "kind": "BodyXml" },
+                                            "type": { "kind": "String" },
+                                            "hot": false,
+                                            "quirk_refs": []
+                                          },
+                                          {
+                                            "name": "ChecksumSHA512",
+                                            "wire_name": "ChecksumSHA512",
+                                            "required": false,
+                                            "binding": { "kind": "BodyXml" },
+                                            "type": { "kind": "String" },
+                                            "hot": false,
+                                            "quirk_refs": []
+                                          },
+                                          {
+                                            "name": "ChecksumMD5",
+                                            "wire_name": "ChecksumMD5",
+                                            "required": false,
+                                            "binding": { "kind": "BodyXml" },
+                                            "type": { "kind": "String" },
+                                            "hot": false,
+                                            "quirk_refs": []
+                                          },
+                                          {
+                                            "name": "ChecksumXXHASH64",
+                                            "wire_name": "ChecksumXXHASH64",
+                                            "required": false,
+                                            "binding": { "kind": "BodyXml" },
+                                            "type": { "kind": "String" },
+                                            "hot": false,
+                                            "quirk_refs": []
+                                          },
+                                          {
+                                            "name": "ChecksumXXHASH3",
+                                            "wire_name": "ChecksumXXHASH3",
+                                            "required": false,
+                                            "binding": { "kind": "BodyXml" },
+                                            "type": { "kind": "String" },
+                                            "hot": false,
+                                            "quirk_refs": []
+                                          },
+                                          {
+                                            "name": "ChecksumXXHASH128",
+                                            "wire_name": "ChecksumXXHASH128",
+                                            "required": false,
+                                            "binding": { "kind": "BodyXml" },
+                                            "type": { "kind": "String" },
+                                            "hot": false,
+                                            "quirk_refs": []
+                                          }
+                                        ],
+                              "xml": {
+                                       "element_order": [
+                                                          "PartNumber",
+                                                          "Size",
+                                                          "ChecksumCRC32",
+                                                          "ChecksumCRC32C",
+                                                          "ChecksumCRC64NVME",
+                                                          "ChecksumSHA1",
+                                                          "ChecksumSHA256",
+                                                          "ChecksumSHA512",
+                                                          "ChecksumMD5",
+                                                          "ChecksumXXHASH64",
+                                                          "ChecksumXXHASH3",
+                                                          "ChecksumXXHASH128"
+                                                        ],
+                                       "empty_value_policy": {
+                                                               "PartNumber": "emit",
+                                                               "Size": "emit",
+                                                               "ChecksumCRC32": "omit",
+                                                               "ChecksumCRC32C": "omit",
+                                                               "ChecksumCRC64NVME": "omit",
+                                                               "ChecksumSHA1": "omit",
+                                                               "ChecksumSHA256": "omit",
+                                                               "ChecksumSHA512": "omit",
+                                                               "ChecksumMD5": "omit",
+                                                               "ChecksumXXHASH64": "omit",
+                                                               "ChecksumXXHASH3": "omit",
+                                                               "ChecksumXXHASH128": "omit"
+                                                             },
+                                       "attributes": []
+                                     }
+                            }
+            },
+  "xml": {
+           "request_root": null,
+           "request_root_aliases": [],
+           "response_root": "GetObjectAttributesOutput",
+           "xmlns": "emit",
+           "unwrapped_output": false,
+           "element_order": ["ETag", "Checksum", "ObjectParts", "StorageClass", "ObjectSize"],
+           "empty_value_policy": {
+                                   "ETag": "omit",
+                                   "Checksum": "omit",
+                                   "ObjectParts": "omit",
+                                   "StorageClass": "omit",
+                                   "ObjectSize": "omit"
+                                 },
+           "url_encoded_fields": [],
+           "attributes": [],
+           "body_literal": false
+         },
+  "errors": {
+              "not_configured": null,
+              "allows_error_after_200": false,
+              "codes": ["NoSuchBucket", "NoSuchKey", "AccessDenied", "InvalidArgument"]
+            },
+  "derived_resources": [],
+  "head_mirrors": null,
+  "quirk_refs": ["q-mpu-attributes-etag-0036", "q-attributes-root-0087"],
+  "quirks": [
+              {
+                "id": "q-sse-0010",
+                "kind": "secret_hygiene",
+                "target": "PutObject",
+                "summary": "The customer key is never echoed back and never logged, while the algorithm and key digest must be echoed; customer keys over a plaintext connection are refused.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/dev/ServerSideEncryptionCustomerKeys.html",
+                                "summary": "Requires a secure connection for customer provided keys and describes which of the three headers are echoed in the response."
+                              }
+                            ],
+                "cases": ["c-ssec-0001", "c-ssec-0002"]
+              },
+              {
+                "id": "q-mpu-part-0031",
+                "kind": "flattened_list",
+                "target": "ListParts.Parts",
+                "summary": "Each part element repeats directly under the result root with no wrapper element around the sequence, so a wrapped rendering is a document every SDK reads as an empty page.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListParts.html",
+                                "summary": "The documented response syntax repeats the part element as a direct child of the result root."
+                              }
+                            ],
+                "cases": ["c-mpu-0010"]
+              },
+              {
+                "id": "q-mpu-attributes-etag-0036",
+                "kind": "etag_render",
+                "target": "GetObjectAttributes.ETag",
+                "summary": "The object attributes response is the one place an entity tag is written without the surrounding quotes; it is registered with the multipart family because the value it renders is the composite tag this family produces, while the operation itself lands with its own family.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObjectAttributes.html",
+                                "summary": "The documented response syntax shows the entity tag element without the quotes every other rendering of the same value carries."
+                              },
+                              {
+                                "kind": "s3s-issue",
+                                "ref": "https://github.com/s3s-project/s3s/issues/632",
+                                "summary": "Upstream held two conflicting quoting rules in two files, which is why the rendering context is part of the type here rather than a convention."
+                              }
+                            ],
+                "cases": ["c-mpu-0002", "c-mpu-0018"]
+              },
+              {
+                "id": "q-attributes-root-0087",
+                "kind": "root_name",
+                "target": "GetObjectAttributes",
+                "summary": "The attributes response is rooted at an element named after the output shape itself, not after the `xmlName` the model gives that shape, so the generated root has to be stated here instead of derived.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObjectAttributes.html",
+                                "summary": "The documented response syntax opens with an element whose name is the output shape's own, which is not the name the pinned model's xmlName trait carries."
+                              }
+                            ],
+                "cases": ["c-etag-0001"]
+              }
+            ],
+  "ext_points": []
+}

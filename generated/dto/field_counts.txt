@@ -1,6 +1,7 @@
 AbortMultipartUploadInput 6
 AbortMultipartUploadOutput 1
 Bucket 4
+Checksum 11
 CommonPrefix 1
 CompleteMultipartUploadInput 14
 CompleteMultipartUploadOutput 21
@@ -20,6 +21,9 @@ DeletedObject 4
 Error 4
 GetBucketLocationInput 2
 GetBucketLocationOutput 1
+GetObjectAttributesInput 11
+GetObjectAttributesOutput 9
+GetObjectAttributesParts 6
 GetObjectInput 21
 GetObjectOutput 43
 HeadObjectInput 21
@@ -40,6 +44,7 @@ ListPartsOutput 16
 MultipartUpload 8
 Object 9
 ObjectIdentifier 5
+ObjectPart 12
 ObjectVersion 11
 Owner 2
 Part 14

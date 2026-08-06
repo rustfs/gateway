@@ -29,6 +29,7 @@ mod delete_object;
 mod delete_objects;
 mod get_bucket_location;
 mod get_object;
+mod get_object_attributes;
 mod head_object;
 mod list_buckets;
 mod list_multipart_uploads;

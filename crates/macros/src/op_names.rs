@@ -45,6 +45,7 @@ pub(crate) static OPERATION_NAMES: &[&str] = &[
     "DeleteObjects",
     "GetBucketLocation",
     "GetObject",
+    "GetObjectAttributes",
     "HeadObject",
     "ListBuckets",
     "ListMultipartUploads",

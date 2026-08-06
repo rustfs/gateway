@@ -24,6 +24,7 @@
 //! Upstream: `cargo xtask codegen`. Downstream: the generated dto and its codecs.
 
 mod bucket;
+mod checksum;
 mod common_prefix;
 mod completed_multipart_upload;
 mod completed_part;
@@ -31,16 +32,19 @@ mod delete;
 mod delete_marker_entry;
 mod deleted_object;
 mod error;
+mod get_object_attributes_parts;
 mod initiator;
 mod multipart_upload;
 mod object;
 mod object_identifier;
+mod object_part;
 mod object_version;
 mod owner;
 mod part;
 mod restore_status;
 
 pub use self::bucket::Bucket;
+pub use self::checksum::Checksum;
 pub use self::common_prefix::CommonPrefix;
 pub use self::completed_multipart_upload::CompletedMultipartUpload;
 pub use self::completed_part::CompletedPart;
@@ -48,10 +52,12 @@ pub use self::delete::Delete;
 pub use self::delete_marker_entry::DeleteMarkerEntry;
 pub use self::deleted_object::DeletedObject;
 pub use self::error::Error;
+pub use self::get_object_attributes_parts::GetObjectAttributesParts;
 pub use self::initiator::Initiator;
 pub use self::multipart_upload::MultipartUpload;
 pub use self::object::Object;
 pub use self::object_identifier::ObjectIdentifier;
+pub use self::object_part::ObjectPart;
 pub use self::object_version::ObjectVersion;
 pub use self::owner::Owner;
 pub use self::part::Part;

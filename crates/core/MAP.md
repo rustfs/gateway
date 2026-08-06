@@ -33,6 +33,7 @@ the one file that awaits, and it runs after the floor has admitted the request.
 | `src/codec/value.rs` | One function per IR scalar, in each direction, plus the one-checksum-header rule, the bounded-integer refusal, the two wire-form refusals (entity tag, server-minted cursor), the `httpChecksumRequired` body guard, and the decode-path placeholder exit | A wire value is parsed or rendered wrongly, or a request is refused before its body is read |
 | `src/codec/tests.rs` | 34 tests over the object family: what the generated codecs do to bytes, including the bounded scalars and the required integrity check | You changed an emitter or a conversion |
 | `src/ops/*.rs` | One AWS operation per file: spec, floor, `impl Operation`, `impl HasOperation` | You are adding an operation — copy the nearest one |
+| `src/ops/get_object_attributes.rs` | The attributes read. Present with no backend behind it anywhere in this workspace, on purpose: without its row `?attributes` is claimed by `GetObject` and answered with the object's bytes | You are asking why an operation nobody handles has a module |
 | `src/ops/shared/copy_source.rs` | `x-amz-copy-source`: the three grammars, the split-before-decode order, the source-authorization type state, the self-copy classification and the stricter copy-range rule | You are touching anything a copy reads from, or asking why the source's bucket cannot be read without a proof |
 | `src/ops/shared/etag.rs` | Which RFC 9110 comparison each conditional entity-tag header uses, and how its value is read | An entity-tag condition matched when it should not have, or the other way round |
 | `src/ops/shared/precondition.rs` | The fixed precondition order, the two places S3 departs from RFC 9110, the 200/206/416 range decision, and six inline tests for the one validator shape `tests/precondition_range.rs` never builds — a representation that exists with no entity tag, where `*` must still hold | You are wiring a conditional or ranged operation, or a 304/412/416 came out wrong |
@@ -46,8 +47,8 @@ the one file that awaits, and it runs after the floor has admitted the request.
 | `src/registry/builder.rs` | `RouterBuilder`: `handle`, `route`, `require`, `build`, and `BuildError` | You are assembling a service |
 | `src/error.rs` | `PreAuthError` and the closed pre-authentication status set | You are raising an error before authn |
 | `src/dispatch.rs` | `Router`: route, then registration, then parameters — three failures, not one | You are wiring the pipeline |
-| `tests/route_table.rs` | 9 positive / 25 negative — every routing and build-refusal case | You changed `table.rs` or `lattice.rs` |
-| `tests/params_and_dispatch.rs` | 4 positive / 14 negative — the 400-not-501 rule and the error properties | You changed `registry.rs` or `error.rs` |
+| `tests/route_table.rs` | 11 positive / 30 negative — every routing and build-refusal case, plus the attributes row that keeps an unimplemented operation off its neighbour's route | You changed `table.rs` or `lattice.rs` |
+| `tests/params_and_dispatch.rs` | 5 positive / 15 negative — the 400-not-501 rule, the error properties, and the routed-but-unhandled `501` over the generated table | You changed `registry.rs` or `error.rs` |
 | `tests/hot_path.rs` | 7 positive / 10 negative — cost, the key ceiling, and the differential generator | You changed `compiled.rs` or `mask.rs` |
 | `tests/golden.rs` + `tests/golden/route-table.txt` | The whole table as text, so a routing change shows up in a diff | Codegen changed |
 | `tests/registration.rs` | 7 positive / 17 negative — the registration rules, erasure, `require`, the 501 | You changed anything under `registry/` |
@@ -109,6 +110,42 @@ the one file that awaits, and it runs after the floor has admitted the request.
   Sixty-four short sorted keys is six comparisons and no build script.
 
 ## Open for maintainer review
+
+- **A deferred operation contributes no route row, so forty-six of the model's operations are
+  still answered by a neighbour instead of being refused.** `GetObjectAttributes` was the reported
+  case and is fixed by giving it a row; the class is not. The overlay declares the protocol-known
+  operation set as `include ∪ deferred` — 19 + 93 = the 112 operations the pinned model defines —
+  and codegen already refuses an operation that is in neither list. What it does *not* do is emit a
+  selector for a deferred one, so the route table knows 19 shapes and the first-match order gives
+  the rest away. Measured against `generated/routes.rs` by replaying each deferred operation's own
+  `@http` selector through the table: `ListObjects` claims 29 (`?acl`, `?policy`, `?versioning`,
+  `?encryption`, every bucket subresource read), `GetObject` claims 7 (`?acl`, `?tagging`,
+  `?legal-hold`, `?retention`, `?torrent`), `PutObject` claims 7 (`?acl`, `?tagging`,
+  `?retention`, `?legal-hold`, `RenameObject`), `DeleteObject` 2, `ListBuckets` 1; 47 are correctly
+  refused because their method or target matches nothing. The `PutObject` group is the sharp one:
+  `PUT /b/k?acl` with an ACL document as its body is currently a *write of that document over the
+  object*. The fix is structural rather than per-operation — the `@http` trait already carries the
+  method, the target and the query literals for all 112, as `GetObjectAttributes`' own row shows
+  (its `QueryPresent("attributes")` predicate was derived, not hand-written), so codegen could emit
+  a row for a deferred operation from the model alone, with precedence as the only overlay
+  decision. Two things stop that landing here: `ShadowingPolicy::EveryOverlap` would ask for
+  several hundred declarations for the bucket subresources (the trade-off already recorded above),
+  and it is a route-table change of a size that wants its own review. Recorded rather than
+  attempted.
+- **`c-etag-0001` and four passing list cases assert contradictory `ListBucketResult` element
+  orders, and nothing checks a case's assertion against the IR.** `c-etag-0001` exchange #2 asserts
+  `IsTruncated, Contents, Name, Prefix, MaxKeys, KeyCount` — the `ListObjectsV2Output` member
+  declaration order. `c-list-0001` (both pages), `c-list-0002`, `c-list-0012` and `c-list-0018`
+  assert the order that starts with `<Name>`, as do all four checked-in reference bodies under
+  `conformance/goldens/`, and as `q-order-0014` records with its own evidence. The two cannot both
+  hold for one operation. The encoder is not the disagreement: it writes `ir.xml.element_order`
+  faithfully, `lower/support.rs` already refuses an `element_order` that is not exactly the body
+  member set, and the order it is given comes from `model/overlays/ops/list.toml`, deliberately and
+  with a quirk attached. So this is a case-versus-case contradiction for a maintainer to adjudicate,
+  not an implementation defect — and it survived because no gate compares a case's
+  `expect.body.xml.element_order` with the operation's IR. Such a check is cheap and would have
+  caught it at authoring time; it cannot land green until the contradiction is resolved, which is
+  why it is recorded here instead.
 
 - **The conditional cluster's declarations are wired; its *evaluation* cannot be, and the fixture's
   private mirror is what the suite is actually measuring.** `ops/get_object.rs`,

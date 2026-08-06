@@ -32,6 +32,7 @@ pub mod delete_object;
 pub mod delete_objects;
 pub mod get_bucket_location;
 pub mod get_object;
+pub mod get_object_attributes;
 pub mod head_object;
 pub mod list_buckets;
 pub mod list_multipart_uploads;

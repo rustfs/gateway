@@ -267,17 +267,17 @@ mod tests {
     struct NotInTheTable;
 
     static SPEC: OperationSpec = OperationSpec {
-        name: "GetObjectAttributes",
+        name: "RestoreObject",
         success_status: 200,
         required_params: &[],
         not_configured_error: None,
-        auth: Some(AuthRequirement::new("s3:GetObjectAttributes", ResourceShape::Object)),
+        auth: Some(AuthRequirement::new("s3:RestoreObject", ResourceShape::Object)),
     };
 
-    static FLOOR: OperationFloor = OperationFloor::builtin("GetObjectAttributes", SigService::S3);
+    static FLOOR: OperationFloor = OperationFloor::builtin("RestoreObject", SigService::S3);
 
     impl Operation for NotInTheTable {
-        const NAME: &'static str = "GetObjectAttributes";
+        const NAME: &'static str = "RestoreObject";
         const ORIGIN: OperationOrigin = OperationOrigin::Standard(StandardOperation::TOKEN);
         type Input = ();
         type Output = ();
@@ -296,9 +296,7 @@ mod tests {
     fn a_standard_operation_the_route_table_does_not_have_is_refused() {
         assert_eq!(
             check_operation::<NotInTheTable>(),
-            Err(RegistryError::UnknownStandardOperation {
-                name: "GetObjectAttributes"
-            })
+            Err(RegistryError::UnknownStandardOperation { name: "RestoreObject" })
         );
     }
 

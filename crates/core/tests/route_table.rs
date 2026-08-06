@@ -14,8 +14,9 @@
 
 //! The ordered table: what it routes, and everything it refuses to be built from.
 //!
-//! Responsible for: the twenty-nine route cases — nine positive, twenty negative — including the
-//! one that falsifies a fake overlap check.
+//! Responsible for: the route cases — eleven positive, thirty negative — including the one that
+//! falsifies a fake overlap check, and the pair that pins an operation the protocol defines and
+//! this build does not serve to its own row rather than to its neighbour's.
 //! NOT responsible for: parameter validation (`params_and_dispatch.rs`), the compiled form
 //! (`hot_path.rs`), the golden rendering (`golden.rs`).
 //! Upstream: `support`. Downstream: nothing.
@@ -41,6 +42,13 @@ const FIXTURE_EVIDENCE: &[&str] = &["fixture: exercised by crates/core/tests/rou
 
 fn routed(table: &RouteTable, request: &Req) -> Option<&'static str> {
     table.resolve(&request.parts()).map(|entry| entry.op_name)
+}
+
+/// The generated table, built under the strict shadowing policy the crate ships with.
+fn generated_table() -> RouteTable {
+    let entries = generated_entries().expect("the generated rows parse");
+    RouteTable::build(entries, &ShadowingDecls::new(rustfs_gateway_core::route::PROVISIONAL_SHADOWING))
+        .expect("the generated table is well formed under the strict shadowing policy")
 }
 
 // ── positive ─────────────────────────────────────────────────────────────────────────────────
@@ -142,7 +150,96 @@ fn the_generated_table_builds_and_routes() {
     assert_eq!(routed(&table, &Req::new("GET /bucket?list-type=2")), Some("ListObjectsV2"));
 }
 
+/// The attributes subresource selects the attributes operation, in the generated table.
+///
+/// Positive half of the pair below. `?attributes` is one query key away from a plain object read,
+/// so the interesting assertion is not that the row exists but that it is tried first — hence the
+/// precedence check beside it.
+#[test]
+fn the_attributes_subresource_routes_to_the_attributes_operation() {
+    let table = generated_table();
+    let hit = table
+        .resolve(&Req::new("GET /bucket/key?attributes").parts())
+        .expect("an attributes read has a route");
+    assert_eq!(hit.op_name, "GetObjectAttributes");
+    assert!(
+        hit.precedence < 800,
+        "the attributes row must sit ahead of the object band, got {}",
+        hit.precedence
+    );
+}
+
+/// A plain object read is untouched by the row that was added ahead of it.
+#[test]
+fn a_plain_object_read_still_routes_to_get_object() {
+    let table = generated_table();
+    assert_eq!(routed(&table, &Req::new("GET /bucket/key")), Some("GetObject"));
+    assert_eq!(routed(&table, &Req::new("GET /bucket/key?versionId=v")), Some("GetObject"));
+}
+
 // ── negative ─────────────────────────────────────────────────────────────────────────────────
+
+/// An attributes read must never be answered by the object read.
+///
+/// This is the defect the row exists for: with no `?attributes` row the request is not refused,
+/// it is claimed by `GetObject` and answered with the object's bytes. The assertion is written as
+/// an inequality rather than an equality so that it keeps its meaning if the winner ever changes
+/// for some other reason.
+#[test]
+fn an_attributes_read_is_never_claimed_by_the_object_read() {
+    let table = generated_table();
+    let hit = table
+        .resolve(&Req::new("GET /bucket/key?attributes").parts())
+        .expect("an attributes read has a route");
+    assert_ne!(
+        hit.op_name, "GetObject",
+        "an attributes read answered by GetObject returns the object's bytes for a metadata question"
+    );
+}
+
+/// The two routers agree about it, so the fast path cannot answer it differently.
+#[test]
+fn the_readable_and_compiled_tables_agree_about_the_attributes_read() {
+    let table = generated_table();
+    let request = Req::new("GET /bucket/key?attributes");
+    let explanation = table.explain(&request.parts());
+    assert_eq!(explanation.matched.map(|hit| hit.op_name), Some("GetObjectAttributes"));
+    let shadowed: Vec<_> = explanation.shadowed.iter().map(|hit| hit.op_name).collect();
+    assert!(
+        shadowed.contains(&"GetObject"),
+        "GetObject must be reported as the route that was hidden, got {shadowed:?}"
+    );
+}
+
+/// A part listing that also names `?attributes` stays with the part listing.
+///
+/// Both keys in one request is undocumented, so the answer is the declared one rather than source
+/// order. Reversing it would answer a part-listing request with an attributes document.
+#[test]
+fn a_part_listing_that_also_names_attributes_stays_with_the_part_listing() {
+    let table = generated_table();
+    assert_eq!(routed(&table, &Req::new("GET /bucket/key?uploadId=u&attributes")), Some("ListParts"));
+}
+
+/// `?attributes` on a bucket is not an attributes read, and must not become one.
+#[test]
+fn the_attributes_key_on_a_bucket_is_not_an_attributes_read() {
+    let table = generated_table();
+    assert_ne!(routed(&table, &Req::new("GET /bucket?attributes")), Some("GetObjectAttributes"));
+}
+
+/// The attributes row is a `GET`; the same key under another method must not reach it.
+#[test]
+fn the_attributes_key_under_another_method_does_not_reach_the_attributes_row() {
+    let table = generated_table();
+    for line in ["PUT /bucket/key?attributes", "DELETE /bucket/key?attributes"] {
+        assert_ne!(
+            routed(&table, &Req::new(line)),
+            Some("GetObjectAttributes"),
+            "{line} must not route to a GET-only operation"
+        );
+    }
+}
 
 /// c-route-1001 — two subresources at one precedence, reachable together.
 #[test]

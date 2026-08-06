@@ -138,6 +138,19 @@ pub static ROUTES: &[RouteRow] = &[
         ],
     },
     RouteRow {
+        operation: "GetObjectAttributes",
+        precedence: 470,
+        method: "GET",
+        target: "Object",
+        path_shape: "/{Bucket}/{Key+}",
+        success_status: 200,
+        predicates: &[
+            RoutePredicate::Method("GET"),
+            RoutePredicate::Target("Object"),
+            RoutePredicate::QueryPresent("attributes"),
+        ],
+    },
+    RouteRow {
         operation: "ListObjectsV2",
         precedence: 600,
         method: "GET",

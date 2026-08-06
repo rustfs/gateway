@@ -29,8 +29,9 @@ pub use crate::ops::enums::{
     StorageClass, TaggingDirective,
 };
 pub use crate::ops::shapes::{
-    Bucket, CommonPrefix, CompletedMultipartUpload, CompletedPart, Delete, DeleteMarkerEntry, DeletedObject, Error, Initiator,
-    MultipartUpload, Object, ObjectIdentifier, ObjectVersion, Owner, Part, RestoreStatus,
+    Bucket, Checksum, CommonPrefix, CompletedMultipartUpload, CompletedPart, Delete, DeleteMarkerEntry, DeletedObject, Error,
+    GetObjectAttributesParts, Initiator, MultipartUpload, Object, ObjectIdentifier, ObjectPart, ObjectVersion, Owner, Part,
+    RestoreStatus,
 };
 
 pub use crate::ops::abort_multipart_upload::{
@@ -60,6 +61,10 @@ pub use crate::ops::get_bucket_location::{
 };
 pub use crate::ops::get_object::{
     GetObject, Input as GetObjectInput, InputBuilder as GetObjectInputBuilder, Output as GetObjectOutput,
+};
+pub use crate::ops::get_object_attributes::{
+    GetObjectAttributes, Input as GetObjectAttributesInput, InputBuilder as GetObjectAttributesInputBuilder,
+    Output as GetObjectAttributesOutput,
 };
 pub use crate::ops::head_object::{
     HeadObject, Input as HeadObjectInput, InputBuilder as HeadObjectInputBuilder, Output as HeadObjectOutput,

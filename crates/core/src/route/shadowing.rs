@@ -259,6 +259,32 @@ pub static PROVISIONAL_SHADOWING: &[ShadowingDecl] = &[
                  the common case where the object does not exist yet, with a not-found error.",
         evidence: &[LIST_PARTS_DOC, GET_OBJECT_DOC],
     },
+    // The attributes operation is the fourth shape, and the reason it is in the table at all.
+    // `?attributes` is one query key away from a plain object read, so with no row of its own the
+    // request is not refused — it is answered by `GetObject`, with the object's bytes. Both rows
+    // below record that the narrow reading is deliberately tried first, whether or not this build
+    // has a handler for it: an operation the protocol defines answers "not implemented", never
+    // another operation's payload.
+    ShadowingDecl {
+        winner: "ListParts",
+        shadowed: "GetObjectAttributes",
+        reason: "A GET on an object key carrying both ?uploadId and ?attributes asks for the parts \
+                 of an in-progress upload and for the attributes of the committed object at once. \
+                 AWS documents no such combination, so the answer is fixed here rather than left to \
+                 source order: the multipart band (440) is tried before the attributes row (470), \
+                 and the attributes reading is ignored rather than merged into the answer.",
+        evidence: &[LIST_PARTS_DOC, OBJECT_ATTRIBUTES_DOC],
+    },
+    ShadowingDecl {
+        winner: "GetObjectAttributes",
+        shadowed: "GetObject",
+        reason: "Reading an object's attributes is a GET to the object key plus ?attributes, and \
+                 GetObject accepts every such request. GetObjectAttributes is tried first (470 \
+                 before 900). The other order is not a mis-route but a disclosure: the caller asked \
+                 for metadata and would receive the object's bytes, under GetObject's content type \
+                 and entity tag, with no signal that a different operation answered.",
+        evidence: &[OBJECT_ATTRIBUTES_DOC, GET_OBJECT_DOC],
+    },
     // The copy family adds the third shape: one header's presence, and nothing else, separates two
     // operations that share a method and a path. Every row but the last is a refinement — the
     // winner's selector is the loser's plus `x-amz-copy-source` — so the overlap is the design
@@ -369,6 +395,10 @@ const DELETE_OBJECT_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API
 /// AWS's own reference for the part listing.
 const LIST_PARTS_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListParts.html \
      — a part listing is a GET to the object key carrying the upload id as a query parameter.";
+
+/// AWS's own reference for the attributes read.
+const OBJECT_ATTRIBUTES_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObjectAttributes.html \
+     — an attributes read is a GET to the object key carrying the ?attributes subresource, and it answers with metadata rather than with the object.";
 
 /// AWS's own reference for the plain object read.
 const GET_OBJECT_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObject.html \

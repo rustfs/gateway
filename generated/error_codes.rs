@@ -20,14 +20,14 @@
 // disagree with it. Data only: the including crate defines the row types.
 
 pub static ERROR_CODE_OPERATIONS: &[(&str, &[&str])] = &[
-    ("AccessDenied", &["AbortMultipartUpload", "CompleteMultipartUpload", "CopyObject", "CreateMultipartUpload", "DeleteObject", "DeleteObjects", "GetBucketLocation", "GetObject", "HeadObject", "ListBuckets", "ListMultipartUploads", "ListObjectVersions", "ListObjects", "ListObjectsV2", "ListParts", "PutObject", "UploadPart", "UploadPartCopy"]),
+    ("AccessDenied", &["AbortMultipartUpload", "CompleteMultipartUpload", "CopyObject", "CreateMultipartUpload", "DeleteObject", "DeleteObjects", "GetBucketLocation", "GetObject", "GetObjectAttributes", "HeadObject", "ListBuckets", "ListMultipartUploads", "ListObjectVersions", "ListObjects", "ListObjectsV2", "ListParts", "PutObject", "UploadPart", "UploadPartCopy"]),
     ("BadDigest", &["PutObject", "UploadPart"]),
     ("ConditionalRequestConflict", &["CompleteMultipartUpload", "PutObject"]),
     ("EncryptionTypeMismatch", &["PutObject"]),
     ("EntityTooLarge", &["CopyObject", "PutObject", "UploadPart"]),
     ("EntityTooSmall", &["CompleteMultipartUpload"]),
     ("IncompleteBody", &["PutObject", "UploadPart"]),
-    ("InvalidArgument", &["AbortMultipartUpload", "CompleteMultipartUpload", "CopyObject", "CreateMultipartUpload", "DeleteObject", "DeleteObjects", "GetObject", "ListMultipartUploads", "ListObjectVersions", "ListObjects", "ListObjectsV2", "ListParts", "PutObject", "UploadPart", "UploadPartCopy"]),
+    ("InvalidArgument", &["AbortMultipartUpload", "CompleteMultipartUpload", "CopyObject", "CreateMultipartUpload", "DeleteObject", "DeleteObjects", "GetObject", "GetObjectAttributes", "ListMultipartUploads", "ListObjectVersions", "ListObjects", "ListObjectsV2", "ListParts", "PutObject", "UploadPart", "UploadPartCopy"]),
     ("InvalidDigest", &["PutObject", "UploadPart"]),
     ("InvalidObjectState", &["GetObject"]),
     ("InvalidPart", &["CompleteMultipartUpload"]),
@@ -39,8 +39,8 @@ pub static ERROR_CODE_OPERATIONS: &[(&str, &[&str])] = &[
     ("MalformedXML", &["CompleteMultipartUpload", "DeleteObjects"]),
     ("MethodNotAllowed", &["CopyObject", "UploadPartCopy"]),
     ("MissingContentLength", &["PutObject", "UploadPart"]),
-    ("NoSuchBucket", &["AbortMultipartUpload", "CompleteMultipartUpload", "CopyObject", "CreateMultipartUpload", "DeleteObject", "DeleteObjects", "GetBucketLocation", "GetObject", "HeadObject", "ListMultipartUploads", "ListObjectVersions", "ListObjects", "ListObjectsV2", "ListParts", "PutObject", "UploadPart", "UploadPartCopy"]),
-    ("NoSuchKey", &["CopyObject", "GetObject", "HeadObject", "UploadPartCopy"]),
+    ("NoSuchBucket", &["AbortMultipartUpload", "CompleteMultipartUpload", "CopyObject", "CreateMultipartUpload", "DeleteObject", "DeleteObjects", "GetBucketLocation", "GetObject", "GetObjectAttributes", "HeadObject", "ListMultipartUploads", "ListObjectVersions", "ListObjects", "ListObjectsV2", "ListParts", "PutObject", "UploadPart", "UploadPartCopy"]),
+    ("NoSuchKey", &["CopyObject", "GetObject", "GetObjectAttributes", "HeadObject", "UploadPartCopy"]),
     ("NoSuchUpload", &["AbortMultipartUpload", "CompleteMultipartUpload", "ListParts", "UploadPart", "UploadPartCopy"]),
     ("NotFound", &["HeadObject"]),
     ("NotModified", &["GetObject", "HeadObject"]),

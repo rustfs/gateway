@@ -15,13 +15,128 @@
 # Family: the object operations that are neither data plane nor metadata. Attributes, torrent,
 # restore, select, encryption update.
 #
-# Nothing is generated yet. Each of these has a body or a framing of its own — the select
-# operation carries an event stream — so they do not travel with the data-plane family.
+# Each of the deferred members below carries a body or a framing of its own — the select operation
+# carries an event stream — so they do not travel with the data-plane family.
+#
+# `GetObjectAttributes` is `include`d rather than deferred, and the reason is routing, not
+# readiness. A deferred operation contributes no row to `generated/routes.rs`, and the route table
+# is ordered first-match: with no `?attributes` row, `GET /{Bucket}/{Key+}?attributes` is claimed by
+# `GetObject`, which answers it with the object's bytes. Deferring an operation must not change what
+# a request *means*, only whether it can be served — so the selector lands here now and the handler
+# lands with the rest of the family.
+
+include = ["GetObjectAttributes"]
+
+# =============================================================================================
+# GetObjectAttributes
+#
+# The metadata twin of GetObject: same method and path, distinguished by the `?attributes`
+# subresource alone, which is why its precedence has to sit ahead of the object band.
+#
+# Two departures from the model are recorded as quirks rather than assumed:
+#   * the response root element is not the shape's `xmlName` (q-attributes-root-0087);
+#   * the entity tag is written without the quotes every other XML rendering carries
+#     (q-mpu-attributes-etag-0036, owned by the multipart family that mints the value).
+# =============================================================================================
+[op.GetObjectAttributes]
+precedence = 470
+auth_action = "s3:GetObject"
+# The response is a fixed handful of scalars plus one bounded part page; it never carries object
+# data, so the same generous ceiling GetBucketLocation uses bounds the XML surface here too.
+response_max_bytes = 65536
+error_codes = ["NoSuchBucket", "NoSuchKey", "AccessDenied", "InvalidArgument"]
+quirk_refs = ["q-attributes-root-0087", "q-mpu-attributes-etag-0036"]
+# AWS names the response element after the output shape, not after its `xmlName` trait.
+response_root = "GetObjectAttributesOutput"
+element_order = ["ETag", "Checksum", "ObjectParts", "StorageClass", "ObjectSize"]
+url_encoded_fields = []
+input_hot = ["Key", "ObjectAttributes"]
+output_hot = ["ETag", "ObjectSize", "StorageClass"]
+
+# `x-amz-object-attributes` is a comma-delimited list in a header position, the same shape
+# `ListObjectsV2.OptionalObjectAttributes` has. The frozen IR can only describe a list through the
+# XML notions `flattened` and `wrapper_name`, so there is no truthful way to give it a list type
+# here. It is carried as the string the wire actually holds rather than dropped: it is a *required*
+# member, and dropping it would leave the decoder unable to refuse a request that omits it.
+[[op.GetObjectAttributes.field]]
+side = "input"
+name = "ObjectAttributes"
+type = "String"
+required = true
+missing_error = "InvalidRequest"
+hot = true
+
+[[op.GetObjectAttributes.field]]
+side = "input"
+name = "SSECustomerKey"
+quirks = ["q-sse-0010"]
+
+# The one place S3 writes an entity tag without quotes. The rendering is part of the type, not a
+# convention a writer has to remember — see q-mpu-attributes-etag-0036.
+[[op.GetObjectAttributes.field]]
+side = "output"
+name = "ETag"
+type = "ETag:XmlBare"
+quirks = ["q-mpu-attributes-etag-0036"]
+
+# The checksum block of an attributes response. Written only when the object carries one, so every
+# member keeps the default "optional member is omitted when empty" rule.
+[shape.Checksum]
+element_order = [
+  "ChecksumCRC32",
+  "ChecksumCRC32C",
+  "ChecksumCRC64NVME",
+  "ChecksumSHA1",
+  "ChecksumSHA256",
+  "ChecksumSHA512",
+  "ChecksumMD5",
+  "ChecksumXXHASH64",
+  "ChecksumXXHASH3",
+  "ChecksumXXHASH128",
+  "ChecksumType",
+]
+
+# The part page of an attributes response: the same cursor shape ListParts has, over the same part
+# table, which is why `Part` repeats with no wrapper here too.
+[shape.GetObjectAttributesParts]
+required = ["TotalPartsCount", "MaxParts", "IsTruncated"]
+hot = ["TotalPartsCount", "Parts"]
+element_order = [
+  "TotalPartsCount",
+  "PartNumberMarker",
+  "NextPartNumberMarker",
+  "MaxParts",
+  "IsTruncated",
+  "Parts",
+]
+
+[[shape.GetObjectAttributesParts.field]]
+name = "Parts"
+quirks = ["q-mpu-part-0031"]
+
+# One entry of that page. Unlike `Part` in a ListParts response it carries no entity tag and no
+# timestamp — only the size and whichever checksums were recorded.
+[shape.ObjectPart]
+required = ["PartNumber", "Size"]
+hot = ["PartNumber", "Size"]
+element_order = [
+  "PartNumber",
+  "Size",
+  "ChecksumCRC32",
+  "ChecksumCRC32C",
+  "ChecksumCRC64NVME",
+  "ChecksumSHA1",
+  "ChecksumSHA256",
+  "ChecksumSHA512",
+  "ChecksumMD5",
+  "ChecksumXXHASH64",
+  "ChecksumXXHASH3",
+  "ChecksumXXHASH128",
+]
 
 [[deferred]]
 reason = "P5 advanced object family; each member carries a body shape or a framing the data plane does not have."
 operations = [
-  "GetObjectAttributes",
   "GetObjectTorrent",
   "RestoreObject",
   "SelectObjectContent",

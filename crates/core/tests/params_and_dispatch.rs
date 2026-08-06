@@ -396,6 +396,42 @@ fn an_empty_registry_answers_the_second_not_implemented() {
     assert_eq!(error.operation(), Some("GetObject"));
 }
 
+/// An operation the protocol defines and this build does not handle is refused, not substituted.
+///
+/// The generated table, not the fixture: the point of the case is that routing is settled by the
+/// protocol before registration is consulted, so a backend that handles `GetObject` and nothing
+/// else must answer an attributes read with the second `501` naming `GetObjectAttributes` — never
+/// with `GetObject`'s answer. Registering a handler may change whether a request can be *served*;
+/// it must not change what the request *means*.
+#[test]
+fn an_unhandled_attributes_read_is_refused_rather_than_answered_by_the_object_read() {
+    let mut registry = Registry::new();
+    registry.register(&GET_OBJECT).expect("a registrable spec");
+    let router = Router::from_generated(registry).expect("the generated table builds");
+
+    let error = router
+        .dispatch(&Req::new("GET /bucket/key?attributes").parts())
+        .expect_err("no backend in this workspace handles the attributes read");
+    assert_eq!(*error.code(), ErrorCode::NOT_IMPLEMENTED);
+    assert_eq!(error.message(), NOT_REGISTERED_MESSAGE);
+    assert_eq!(
+        error.operation(),
+        Some("GetObjectAttributes"),
+        "the refusal must name the operation the request asked for"
+    );
+}
+
+/// The registered neighbour is still served, so the refusal above is not a blanket one.
+#[test]
+fn the_generated_router_still_serves_the_plain_object_read() {
+    let mut registry = Registry::new();
+    registry.register(&GET_OBJECT).expect("a registrable spec");
+    let router = Router::from_generated(registry).expect("the generated table builds");
+
+    let dispatch = router.dispatch(&Req::new("GET /bucket/key").parts()).expect("routed");
+    assert_eq!(dispatch.entry.op_name, "GetObject");
+}
+
 /// A parameter check without a route never runs: the order of the three questions is fixed.
 #[test]
 fn a_request_that_does_not_route_never_reaches_parameter_validation() {
