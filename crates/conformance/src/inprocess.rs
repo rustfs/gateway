@@ -115,6 +115,7 @@ impl InProcess {
         ServiceBuilder::new()
             .register::<dto::AbortMultipartUpload, _>(Arc::clone(&backend))
             .register::<dto::CompleteMultipartUpload, _>(Arc::clone(&backend))
+            .register::<dto::CopyObject, _>(Arc::clone(&backend))
             .register::<dto::CreateMultipartUpload, _>(Arc::clone(&backend))
             .register::<dto::DeleteObject, _>(Arc::clone(&backend))
             .register::<dto::DeleteObjects, _>(Arc::clone(&backend))
@@ -129,6 +130,7 @@ impl InProcess {
             .register::<dto::ListParts, _>(Arc::clone(&backend))
             .register::<dto::PutObject, _>(Arc::clone(&backend))
             .register::<dto::UploadPart, _>(Arc::clone(&backend))
+            .register::<dto::UploadPartCopy, _>(Arc::clone(&backend))
             .authenticator(SigV4Authenticator::new(provider, regions))
             // Authorisation is not what this corpus measures: every case that reaches a handler is
             // signed with the one identity the fixtures know, and a policy engine here would turn

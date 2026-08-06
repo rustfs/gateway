@@ -113,6 +113,16 @@ pub use rustfs_gateway_core::{
     MissingHandlers, Operation, OperationCodec, OperationSet, OperationSpec, ParamKind, PreAuthError, Predicate, Req,
     RequestBody, RequiredParam, ResourceShape, Resp, ResponseBody, ResponseOverride, RouteEntry, RouteSelector, TargetKind,
 };
+// The copy-source contract. Exported because a backend cannot honour it otherwise: the
+// conformance fixture had to mirror `CopySource`, `authorize_source` and `classify_self_copy`
+// by hand, and every backend outside this workspace would have done the same. A type state
+// that only this workspace can reach is a type state that does not prevent the defect it was
+// written for — GHSA-mx42 and GHSA-wfxj were both a second implementation forgetting the
+// check the first one made.
+pub use rustfs_gateway_core::ops::shared::copy_source::{
+    CopyRange, CopySource, CopySourceForm, CopySourceRejection, ResolvedCopySource, SelfCopy, SourceAccess, SourceAuthorized,
+    SourceResource, authorize_source, classify_self_copy, resolve_copy_range,
+};
 pub use rustfs_gateway_http::{EffectiveHost, Limits, WireReject, WireRequest};
 pub use rustfs_gateway_sig::{Identity, OperationFloor, RegionSet, SecurityFloor, SigService, SkewWindow, Verdict};
 pub use rustfs_gateway_stream::{Body, ByteStream, Payload, TrailingHeaders};

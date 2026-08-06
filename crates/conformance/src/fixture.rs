@@ -56,6 +56,21 @@
 //! An identity is the one thing a listing needs that no fixture declares: `<Owner>` is a required
 //! element of a v1 listing and of `ListAllMyBucketsResult`. [`OWNER_ID`] is that identity, fixed
 //! and shared, so the value is the same in every run and every golden redacts one thing.
+//!
+//! # The copy half, and the parser it had to write twice
+//!
+//! `CopyObject` and `UploadPartCopy` name a *second* object the caller chose, so both go through
+//! [`parse_copy_source`], [`confirm_source_owner`] and [`read_copy_source`] — one set of functions,
+//! called from both, because the two published advisories on this family were a part copy that
+//! authorized the upload it wrote to and never the object it read from.
+//!
+//! Those functions mirror `crates/core/src/ops/shared/copy_source.rs` rather than calling it: the
+//! facade exports the service, the dto and the handler traits, and exports none of the copy-source
+//! contract, so no backend outside this workspace can reach the rules it is held to. The mirror is
+//! faithful **including where it and the corpus disagree**, and each disagreement is recorded on
+//! the function that carries it. A stub that answered what a case wanted rather than what the
+//! implementation says would report a green for a gap that is still open, which is the one thing a
+//! conformance backend must never do.
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
@@ -212,12 +227,16 @@ impl Fixture {
         self.objects.retain(|(bucket, _), _| bucket != name);
     }
 
-    /// Places an object.
+    /// Places an object, answering with the version id it was given.
     ///
     /// In a versioned bucket this appends a version and leaves the earlier ones reachable through
     /// [`Fixture::versions_in`]; everywhere else it replaces the single `null` version. Either way
     /// the newest version is what a read sees, which is why `GetObject` needed no change.
-    pub fn put_object(&mut self, bucket: &str, key: &str, object: StoredObject) {
+    ///
+    /// The id comes back because a copy has to report it: `x-amz-version-id` names the version the
+    /// copy *wrote*, and a caller that re-read the newest version to find it would be answering
+    /// from state rather than from the write it just performed.
+    pub fn put_object(&mut self, bucket: &str, key: &str, object: StoredObject) -> String {
         let last_modified = object.last_modified;
         let version = self.mint_version(bucket);
         let versions = self.objects.entry((bucket.to_owned(), key.to_owned())).or_default();
@@ -225,35 +244,38 @@ impl Fixture {
             versions.clear();
         }
         versions.push(StoredVersion {
-            version_id: version,
+            version_id: version.clone(),
             object: Some(object),
             last_modified,
         });
+        version
     }
 
-    /// Removes an object, for `setup.objects[].absent`.
+    /// Removes an object, for `setup.objects[].absent` and for `DeleteObject`.
     ///
     /// A versioned bucket keeps the versions and hides them behind a delete marker, which is what
-    /// makes `<DeleteMarker>` and `<IsLatest>false</IsLatest>` observable at all.
-    pub fn remove_object(&mut self, bucket: &str, key: &str) {
+    /// makes `<DeleteMarker>` and `<IsLatest>false</IsLatest>` observable at all. The id of that
+    /// marker comes back so that `DeleteObject` can report it, which is the only way a case can
+    /// name one afterwards. An unversioned bucket mints nothing and answers `None`.
+    pub fn remove_object(&mut self, bucket: &str, key: &str) -> Option<String> {
         let identity = (bucket.to_owned(), key.to_owned());
         if !self.is_versioned(bucket) {
             self.objects.remove(&identity);
-            return;
+            return None;
         }
-        let Some(versions) = self.objects.get(&identity) else { return };
+        let versions = self.objects.get(&identity)?;
         if versions.is_empty() {
-            return;
+            return None;
         }
         let last_modified = self.now;
         let version_id = self.mint_version(bucket);
-        if let Some(versions) = self.objects.get_mut(&identity) {
-            versions.push(StoredVersion {
-                version_id,
-                object: None,
-                last_modified,
-            });
-        }
+        let versions = self.objects.get_mut(&identity)?;
+        versions.push(StoredVersion {
+            version_id: version_id.clone(),
+            object: None,
+            last_modified,
+        });
+        Some(version_id)
     }
 
     /// Whether a bucket was declared with versioning enabled.
@@ -318,6 +340,28 @@ impl Fixture {
             .get(&(bucket.to_owned(), key.to_owned()))
             .and_then(|versions| versions.last())
             .and_then(|version| version.object.as_ref())
+    }
+
+    /// One named version of one key, or `None` for an id this fixture never minted.
+    ///
+    /// The version is answered whether or not it carries an object, because a delete marker and an
+    /// id that names nothing are different facts and a copy source has to tell them apart: one is
+    /// `MethodNotAllowed` and the other is `NoSuchVersion`.
+    #[must_use]
+    pub fn version(&self, bucket: &str, key: &str, version_id: &str) -> Option<&StoredVersion> {
+        self.objects
+            .get(&(bucket.to_owned(), key.to_owned()))?
+            .iter()
+            .find(|version| version.version_id == version_id)
+    }
+
+    /// The id of the newest version of a key, whatever it holds.
+    #[must_use]
+    pub fn newest_version_id(&self, bucket: &str, key: &str) -> Option<&str> {
+        self.objects
+            .get(&(bucket.to_owned(), key.to_owned()))?
+            .last()
+            .map(|version| version.version_id.as_str())
     }
 
     /// Every live key in a bucket, in the lexicographic order S3 lists in.
@@ -614,6 +658,341 @@ fn unsatisfiable() -> HandlerError {
     HandlerError::new(ErrorCode::INVALID_RANGE, "The requested range is not satisfiable")
 }
 
+/// `x-amz-copy-source`, resolved to the object it names.
+///
+/// # Why this parser is written again here
+///
+/// `crates/core/src/ops/shared/copy_source.rs` is this gateway's copy-source contract — the split
+/// rule, the two ARN grammars, the self-copy classification and the stricter range rule — and it is
+/// deliberately mirrored below rather than called. It cannot be called: the facade exports the
+/// service and the dto, and `CopySource`, `authorize_source`, `classify_self_copy` and
+/// `resolve_copy_range` are none of them, so a backend outside the workspace has no way to reach
+/// the contract it is being held to. That is itself a finding, and the mirror is what makes it
+/// visible: every rule duplicated here is a rule the *next* backend will also duplicate, and a rule
+/// two implementations hold separately is a rule they can hold differently — which is the shape of
+/// the two advisories the shared module was written to prevent.
+///
+/// The mirror is faithful, including where the shared module and the corpus disagree. Those
+/// disagreements are recorded on the functions that carry them; none of them is smoothed over here,
+/// because a stub that answers what a case wants rather than what the implementation says would
+/// report a green for a gap that is still open.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CopySource {
+    /// The source bucket, or the access point name standing in for one.
+    bucket: BucketName,
+    /// The source key, decoded exactly once and never normalised.
+    key: ObjectKey,
+    /// The version the header named, when it named one.
+    version_id: Option<String>,
+}
+
+/// `InvalidArgument`, in AWS's own wording, for a copy source this fixture will not read.
+///
+/// The explanation is a `&'static str` chosen from a fixed set, never assembled from the rejected
+/// value: this header carries a bucket name the caller may have no right to learn the existence of,
+/// and echoing it into an error document turns a refusal into an oracle.
+fn bad_copy_source(reason: &'static str) -> HandlerError {
+    HandlerError::new(ErrorCode::INVALID_ARGUMENT, reason)
+}
+
+/// Parses one `x-amz-copy-source` value.
+///
+/// The order is the point: the optional `?versionId=` suffix is split off the **raw** value at its
+/// last `?`, and only then is each half percent-decoded. Decode first and `a%3Fb?versionId=v1`
+/// becomes `a?b?versionId=v1`, where no split rule recovers which `?` the client sent.
+fn parse_copy_source(raw: &str) -> Result<CopySource, HandlerError> {
+    if raw.is_empty() {
+        return Err(bad_copy_source("x-amz-copy-source must name a source object"));
+    }
+    let (path, version_id) = split_source_version(raw)?;
+    let (bucket, key) = if path.starts_with("arn:") {
+        parse_source_arn(path)?
+    } else {
+        parse_source_path(path)?
+    };
+    Ok(CopySource {
+        bucket: source_bucket(&bucket)?,
+        key: source_key(&key)?,
+        version_id,
+    })
+}
+
+/// Splits the version suffix off the raw value, before anything is decoded.
+///
+/// The rule is fixed rather than heuristic: the split is at the last `?`, and what follows must be
+/// `versionId=<value>`. A suffix that is anything else is refused instead of folded back into the
+/// key, because folding it back makes one header mean two things depending on whether the value
+/// happens to parse.
+fn split_source_version(raw: &str) -> Result<(&str, Option<String>), HandlerError> {
+    let Some((path, query)) = raw.rsplit_once('?') else {
+        return Ok((raw, None));
+    };
+    let Some(value) = query.strip_prefix("versionId=") else {
+        return Err(bad_copy_source("the only query x-amz-copy-source accepts is versionId"));
+    };
+    let value = decode_source(value)?;
+    if value.is_empty() {
+        return Err(bad_copy_source("the versionId of x-amz-copy-source must not be empty"));
+    }
+    Ok((path, Some(value)))
+}
+
+/// Parses `bucket/key`, with or without the leading slash AWS also accepts.
+///
+/// The two halves are separated on the still-encoded value, so a key containing `%2F` keeps it
+/// rather than being cut at a separator the client escaped on purpose.
+fn parse_source_path(path: &str) -> Result<(String, String), HandlerError> {
+    let path = path.strip_prefix('/').unwrap_or(path);
+    let Some((bucket, key)) = path.split_once('/') else {
+        return Err(bad_copy_source("x-amz-copy-source must name a key as well as a bucket"));
+    };
+    Ok((decode_source(bucket)?, decode_source(key)?))
+}
+
+/// Parses the two S3 ARN spellings, and refuses every other ARN.
+///
+/// An unrecognised ARN is never demoted to a bucket name. `arn:aws:iam::1:user/bob` would otherwise
+/// address a bucket literally called `arn:aws:iam::1:user`, and in a deployment where somebody has
+/// created one, every unrecognised ARN copy is silently redirected into it.
+fn parse_source_arn(path: &str) -> Result<(String, String), HandlerError> {
+    // arn : partition : service : region : account : resource…, where the resource half contains
+    // colons in neither form, so five splits is the whole grammar.
+    let mut parts = path.splitn(6, ':');
+    let (Some(_arn), Some(_partition), Some(service), Some(_region), Some(_account), Some(resource)) =
+        (parts.next(), parts.next(), parts.next(), parts.next(), parts.next(), parts.next())
+    else {
+        return Err(unknown_source_arn());
+    };
+    match service {
+        // An access point is addressed by name; the bucket behind it is the control plane's to
+        // resolve, so the name is what stands in for the bucket until then.
+        "s3" => {
+            let rest = resource.strip_prefix("accesspoint/").ok_or_else(unknown_source_arn)?;
+            let (name, key) = rest.split_once("/object/").ok_or_else(unknown_source_arn)?;
+            if name.is_empty() {
+                return Err(unknown_source_arn());
+            }
+            Ok((name.to_owned(), decode_source(key)?))
+        }
+        "s3-outposts" => {
+            let rest = resource.strip_prefix("outpost/").ok_or_else(unknown_source_arn)?;
+            let (outpost, rest) = rest.split_once("/bucket/").ok_or_else(unknown_source_arn)?;
+            let (bucket, key) = rest.split_once("/object/").ok_or_else(unknown_source_arn)?;
+            if outpost.is_empty() {
+                return Err(unknown_source_arn());
+            }
+            Ok((bucket.to_owned(), decode_source(key)?))
+        }
+        _ => Err(unknown_source_arn()),
+    }
+}
+
+/// The one refusal every unrecognised ARN shares.
+fn unknown_source_arn() -> HandlerError {
+    bad_copy_source("x-amz-copy-source accepts an access point or Outposts ARN, or a bucket and key")
+}
+
+/// Percent-decodes one half of the copy-source header, refusing bytes that are not UTF-8.
+///
+/// `%XX` is one octet and everything else is itself — a `+` stays a plus sign, because this is a
+/// path and not a form. Percent encoding carries octets rather than characters, so a client can
+/// spell a source whose decoded bytes are not text; that is a refusal and never a panic.
+fn decode_source(value: &str) -> Result<String, HandlerError> {
+    let bytes = value.as_bytes();
+    let mut out: Vec<u8> = Vec::with_capacity(bytes.len());
+    let mut index = 0usize;
+    while let Some(&byte) = bytes.get(index) {
+        let pair = (
+            bytes.get(index + 1).and_then(|digit| char::from(*digit).to_digit(16)),
+            bytes.get(index + 2).and_then(|digit| char::from(*digit).to_digit(16)),
+        );
+        if byte == b'%'
+            && let (Some(high), Some(low)) = pair
+        {
+            out.push((((high * 16) + low) & 0xff) as u8);
+            index += 3;
+            continue;
+        }
+        out.push(byte);
+        index += 1;
+    }
+    String::from_utf8(out).map_err(|_| bad_copy_source("x-amz-copy-source is not valid UTF-8 once decoded"))
+}
+
+/// Validates the bucket half of a copy source.
+fn source_bucket(name: &str) -> Result<BucketName, HandlerError> {
+    BucketName::new(name.to_owned())
+        .map_err(|_| bad_copy_source("the bucket named by x-amz-copy-source is not a valid bucket name"))
+}
+
+/// Validates the key half. Never normalised: `../` is three ordinary bytes of a key.
+fn source_key(key: &str) -> Result<ObjectKey, HandlerError> {
+    ObjectKey::new(key.to_owned()).map_err(|_| bad_copy_source("the key named by x-amz-copy-source is not a valid object key"))
+}
+
+/// The source-side ownership gate, answered from what `[setup]` declared and nothing else.
+///
+/// A fixture declares buckets, objects and uploads; it declares no account. So an
+/// `x-amz-source-expected-bucket-owner` assertion is one this backend cannot confirm, and an
+/// assertion that cannot be confirmed is refused rather than assumed to hold. Letting it pass by
+/// default would be the cheaper answer and it is the wrong one: this is the stage GHSA-mx42 and
+/// GHSA-wfxj were missing, and a stub that skipped it would answer the two cases written for it
+/// with a success and report nothing.
+///
+/// The destination-side `x-amz-expected-bucket-owner` is deliberately *not* gated the same way. It
+/// is carried by half the write operations in the corpus and refusing it here would make this one
+/// backend disagree with itself about the same header depending on which operation carried it.
+fn confirm_source_owner(expected: Option<&str>) -> Result<(), HandlerError> {
+    if expected.is_some() {
+        // Names no bucket and no key: a refusal that reports *which* source was denied is an
+        // existence oracle over every bucket in the deployment.
+        return Err(HandlerError::new(ErrorCode::ACCESS_DENIED, "Access Denied"));
+    }
+    Ok(())
+}
+
+/// Where a copy's metadata — or its tag set — comes from.
+///
+/// One type for both directives because they are one rule over two field groups. `REPLACE` rebuilds
+/// from the request; `COPY`, which is also the answer when the header is absent, takes the source's
+/// and discards every `x-amz-meta-*` the request carried. There is no third answer: a merge would
+/// produce objects whose metadata no single request asked for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MetadataFrom {
+    /// The source object's.
+    Source,
+    /// The request's, rebuilt from scratch.
+    Request,
+}
+
+/// Reads a directive header. An unrecognised spelling is refused rather than read as the default.
+fn directive_of(value: Option<&str>, reason: &'static str) -> Result<MetadataFrom, HandlerError> {
+    match value {
+        None | Some("COPY") => Ok(MetadataFrom::Source),
+        Some("REPLACE") => Ok(MetadataFrom::Request),
+        Some(_) => Err(HandlerError::new(ErrorCode::INVALID_ARGUMENT, reason)),
+    }
+}
+
+/// The source object a copy will read, and the version id to report for it.
+///
+/// Every refusal here is the *source's*: a copy that reports on the destination answers a missing
+/// source with a success. The three not-found answers are kept apart on purpose — a client branches
+/// on them to decide whether to create a bucket, and a delete marker is a version that exists and
+/// has no representation rather than a version that is unknown.
+fn read_copy_source(fixture: &Fixture, source: &CopySource) -> Result<(StoredObject, Option<String>), HandlerError> {
+    let (bucket, key) = (source.bucket.as_str(), source.key.as_str());
+    if !fixture.has_bucket(bucket) {
+        return Err(HandlerError::new(ErrorCode::NO_SUCH_BUCKET, "The specified bucket does not exist"));
+    }
+    let Some(requested) = source.version_id.as_deref() else {
+        let object = fixture
+            .object(bucket, key)
+            .ok_or_else(|| HandlerError::new(ErrorCode::NO_SUCH_KEY, "The specified key does not exist."))?
+            .clone();
+        // Reported only for a versioned bucket: `null` is the version of an object in a bucket that
+        // was never versioned, and a header carrying it tells a client its unversioned copy has a
+        // version to come back for.
+        let reported = fixture
+            .is_versioned(bucket)
+            .then(|| fixture.newest_version_id(bucket, key).map(ToOwned::to_owned))
+            .flatten();
+        return Ok((object, reported));
+    };
+    let version = fixture
+        .version(bucket, key, requested)
+        .ok_or_else(|| HandlerError::new(ErrorCode::NO_SUCH_VERSION, "The specified version does not exist."))?;
+    let object = version.object.as_ref().ok_or_else(|| {
+        HandlerError::new(
+            ErrorCode::METHOD_NOT_ALLOWED,
+            "The specified method is not allowed against this resource.",
+        )
+    })?;
+    Ok((object.clone(), Some(requested.to_owned())))
+}
+
+/// The span of a source object a part copy will read: first byte and last byte, both inclusive.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct CopySpan {
+    start: usize,
+    end_inclusive: usize,
+}
+
+impl CopySpan {
+    /// The number of bytes the span carries: `end - start + 1`.
+    ///
+    /// Both positions are inclusive. Dropping the plus one copies a part one byte short, the upload
+    /// completes, and the corruption surfaces on a read months later rather than on the write that
+    /// caused it.
+    const fn len(self) -> usize {
+        self.end_inclusive.saturating_sub(self.start).saturating_add(1)
+    }
+}
+
+/// Resolves `x-amz-copy-source-range` against the source's length.
+///
+/// Mirrors `resolve_copy_range` in `crates/core/src/ops/shared/copy_source.rs`, including two
+/// places where that function and the corpus disagree. Both are left as they are:
+///
+/// * **A span past the end answers `InvalidRange` (416), and `c-copy-0036` asserts
+///   `InvalidArgument` (400).** AWS answers the copy-source range with `InvalidArgument` — the
+///   header names a length the client committed to, not a window of a representation being served
+///   — so the case is right and the shared module is wrong. Answering `InvalidArgument` here would
+///   turn that case green while every backend using the shared module stayed red.
+/// * **The doc comment on the shared function says an overlong span is "not clamped, it is
+///   refused", and the code clamps it.** `ByteRange::resolve` answers `bytes=0-100` over ten bytes
+///   with `0-9`, so only a span whose *start* is past the end is refused. No case sees it, because
+///   `c-copy-0036` starts past the end; a part one byte short with a 200 attached is exactly the
+///   failure that function's own doc comment describes.
+///
+/// A `None` header copies the whole source, including a source of zero bytes, which resolves to
+/// `None` rather than to an empty span.
+fn resolve_copy_span(header: Option<&str>, source_len: usize) -> Result<Option<CopySpan>, HandlerError> {
+    let Some(header) = header else {
+        return Ok(None);
+    };
+    // A read answers a multi-range request with the whole representation; there is no such fallback
+    // for a copy, and taking the first span would be a guess that produces a part of the wrong
+    // length with a success attached.
+    if header.contains(',') {
+        return Err(bad_copy_source("x-amz-copy-source-range accepts one byte span"));
+    }
+    let Some(spec) = header.trim().strip_prefix("bytes=") else {
+        // An unparseable `Range` is ignored on a read; on a copy it would silently copy the whole
+        // source under a header that asked for part of it.
+        return Err(bad_copy_source("x-amz-copy-source-range is not a byte range"));
+    };
+    let outside = || HandlerError::new(ErrorCode::INVALID_RANGE, "x-amz-copy-source-range lies outside the source object");
+    let Some(last_byte) = source_len.checked_sub(1) else {
+        return Err(outside());
+    };
+    let (first, last) = spec
+        .split_once('-')
+        .ok_or_else(|| bad_copy_source("x-amz-copy-source-range is not a byte range"))?;
+    let parse = |text: &str| -> Result<Option<usize>, HandlerError> {
+        if text.is_empty() {
+            return Ok(None);
+        }
+        text.parse::<usize>()
+            .map(Some)
+            .map_err(|_| bad_copy_source("x-amz-copy-source-range is not a byte range"))
+    };
+    match (parse(first)?, parse(last)?) {
+        // `bytes=a-b` and `bytes=a-`: refused when the start is past the end, clamped otherwise.
+        (Some(start), end) if start <= last_byte => Ok(Some(CopySpan {
+            start,
+            end_inclusive: end.unwrap_or(last_byte).min(last_byte),
+        })),
+        (Some(_), _) => Err(outside()),
+        // `bytes=-n`: the last n bytes. A zero-length suffix names nothing.
+        (None, Some(length)) if length > 0 => Ok(Some(CopySpan {
+            start: source_len.saturating_sub(length),
+            end_inclusive: last_byte,
+        })),
+        (None, _) => Err(outside()),
+    }
+}
+
 impl Handler<dto::GetObject> for Stub {
     fn call(&self, request: Req<dto::GetObject>) -> impl core::future::Future<Output = HandlerResult<dto::GetObject>> + Send {
         let outcome = self.get_object(request.input());
@@ -624,6 +1003,23 @@ impl Handler<dto::GetObject> for Stub {
 impl Handler<dto::HeadObject> for Stub {
     fn call(&self, request: Req<dto::HeadObject>) -> impl core::future::Future<Output = HandlerResult<dto::HeadObject>> + Send {
         let outcome = self.head_object(request.input());
+        async move { outcome }
+    }
+}
+
+impl Handler<dto::CopyObject> for Stub {
+    fn call(&self, request: Req<dto::CopyObject>) -> impl core::future::Future<Output = HandlerResult<dto::CopyObject>> + Send {
+        let outcome = self.copy_object(request.input());
+        async move { outcome }
+    }
+}
+
+impl Handler<dto::UploadPartCopy> for Stub {
+    fn call(
+        &self,
+        request: Req<dto::UploadPartCopy>,
+    ) -> impl core::future::Future<Output = HandlerResult<dto::UploadPartCopy>> + Send {
+        let outcome = self.upload_part_copy(request.input());
         async move { outcome }
     }
 }
@@ -921,11 +1317,173 @@ impl Stub {
         ))
     }
 
+    /// A server-side copy: read the source, then write the destination. In that order.
+    ///
+    /// The order is the whole of this handler. Every refusal below happens before a single byte of
+    /// the destination is touched, because the two published failures on this path are not wrong
+    /// answers — they are correct answers delivered after the destination was already gone. A self
+    /// copy that opens the target for writing before reading the source truncates the object it was
+    /// asked to rewrite, and an authorization stage that runs after the write refuses the caller
+    /// and destroys the object anyway.
+    ///
+    /// Reading the source into an owned [`StoredObject`] before anything else is what makes that
+    /// impossible here rather than merely unlikely: the bytes the copy will write are already in
+    /// hand when the destination is opened, so `source == dest` is not a special case to remember.
+    fn copy_object(&self, input: &dto::CopyObjectInput) -> HandlerResult<dto::CopyObject> {
+        let source = parse_copy_source(&input.copy_source)?;
+        let metadata_from = directive_of(
+            input.metadata_directive.as_ref().map(dto::MetadataDirective::as_str),
+            "Unknown metadata directive.",
+        )?;
+        let tagging_from = directive_of(
+            input.tagging_directive.as_ref().map(dto::TaggingDirective::as_str),
+            "Unknown tagging directive.",
+        )?;
+        confirm_source_owner(input.expected_source_bucket_owner.as_deref())?;
+
+        let mut fixture = self.borrow()?;
+        let (found, source_version) = read_copy_source(&fixture, &source)?;
+        evaluate_conditions(
+            &found,
+            input.copy_source_if_match.as_deref(),
+            input.copy_source_if_unmodified_since.as_ref().map(Timestamp::secs),
+            input.copy_source_if_none_match.as_deref(),
+            input.copy_source_if_modified_since.as_ref().map(Timestamp::secs),
+            // A copy is a write however much its source side looks like a read: a failed none-match
+            // is a 412 and never a 304, which would tell the client its copy is up to date when no
+            // copy was ever made.
+            false,
+        )?;
+        require_bucket(&fixture, &input.bucket)?;
+
+        // A version suffix makes the source a different representation, so a copy of an old version
+        // onto the current key is not a self copy even though the key matches.
+        let onto_itself = source.version_id.is_none()
+            && source.bucket.as_str() == input.bucket.as_str()
+            && source.key.as_str() == input.key.as_str();
+        let changes_something =
+            metadata_from == MetadataFrom::Request || tagging_from == MetadataFrom::Request || input.storage_class.is_some();
+        if onto_itself && !changes_something {
+            return Err(HandlerError::new(
+                ErrorCode::INVALID_REQUEST,
+                "This copy request is illegal because it is trying to copy an object to itself \
+                 without changing the object's metadata, storage class, website redirect location \
+                 or encryption attributes.",
+            ));
+        }
+
+        // The destination's own conditions, evaluated against the destination. The four names are
+        // spelled the same as the source's and name a different representation; one evaluator over
+        // both would overwrite an object the client guarded.
+        match fixture.object(input.bucket.as_str(), input.key.as_str()).cloned() {
+            Some(existing) => {
+                evaluate_conditions(&existing, input.if_match.as_deref(), None, input.if_none_match.as_deref(), None, false)?;
+            }
+            None if input.if_match.is_some() => return Err(precondition("If-Match")),
+            None => {}
+        }
+
+        let now = fixture.now;
+        let mut object = match metadata_from {
+            // COPY is not a merge: every `x-amz-meta-*` and object attribute on the request is
+            // discarded rather than layered over the source's.
+            MetadataFrom::Source => StoredObject {
+                last_modified: now,
+                ..found
+            },
+            MetadataFrom::Request => {
+                let mut rebuilt = StoredObject::new(found.body, input.content_type.clone(), now);
+                rebuilt.cache_control = input.cache_control.clone();
+                rebuilt.content_disposition = input.content_disposition.clone();
+                rebuilt.content_encoding = input.content_encoding.clone();
+                rebuilt.content_language = input.content_language.clone();
+                rebuilt.expires = input.expires.as_ref().map(|value| value.as_str().to_owned());
+                rebuilt.metadata = input.metadata.clone();
+                rebuilt
+            }
+        };
+        if let Some(class) = input.storage_class.as_ref() {
+            object.storage_class = class.to_string();
+        }
+        let etag = object.etag.clone();
+        let written = fixture.put_object(input.bucket.as_str(), input.key.as_str(), object);
+        let destination_version = (written != UNVERSIONED).then_some(written);
+
+        Ok(Resp::new(dto::CopyObjectOutput {
+            e_tag: entity_tag(&etag)?,
+            last_modified: Some(Timestamp::from_secs(now)),
+            // Two headers, never one value written into both: one names the version the copy read
+            // and the other the version it created, and a client told they are the same records the
+            // source as its new object.
+            copy_source_version_id: source_version,
+            version_id: destination_version,
+            ..dto::CopyObjectOutput::default()
+        }))
+    }
+
+    /// One part of a multipart upload, copied out of an object rather than sent.
+    ///
+    /// Shares [`parse_copy_source`] and [`confirm_source_owner`] with [`Stub::copy_object`], and
+    /// that sharing is the point: both advisories on this family were a part copy that authorized
+    /// the upload it was writing to and never the object it read from, so "both operations gate the
+    /// source the same way" has to be a fact about which function is called and not a claim in a
+    /// comment.
+    fn upload_part_copy(&self, input: &dto::UploadPartCopyInput) -> HandlerResult<dto::UploadPartCopy> {
+        let source = parse_copy_source(&input.copy_source)?;
+        confirm_source_owner(input.expected_source_bucket_owner.as_deref())?;
+
+        let mut fixture = self.borrow()?;
+        require_bucket(&fixture, &input.bucket)?;
+        if !fixture.uploads.contains_key(&input.upload_id) {
+            return Err(HandlerError::new(
+                ErrorCode::NO_SUCH_UPLOAD,
+                "The specified upload does not exist. The upload ID may be invalid, or the upload may have been aborted or completed.",
+            ));
+        }
+        let (found, source_version) = read_copy_source(&fixture, &source)?;
+        evaluate_conditions(
+            &found,
+            input.copy_source_if_match.as_deref(),
+            input.copy_source_if_unmodified_since.as_ref().map(Timestamp::secs),
+            input.copy_source_if_none_match.as_deref(),
+            input.copy_source_if_modified_since.as_ref().map(Timestamp::secs),
+            false,
+        )?;
+
+        // A zero-byte source has no span and is not an arithmetic edge: the copy of nothing is a
+        // legal copy, and upstream aborted the process on it.
+        let bytes = match resolve_copy_span(input.copy_source_range.as_deref(), found.body.len())? {
+            None => found.body.clone(),
+            Some(span) => found
+                .body
+                .get(span.start..span.start.saturating_add(span.len()))
+                .unwrap_or_default()
+                .to_vec(),
+        };
+        let now = fixture.now;
+        let etag = fixture.put_part(&input.upload_id, input.part_number, bytes);
+
+        Ok(Resp::new(dto::UploadPartCopyOutput {
+            e_tag: entity_tag(&etag)?,
+            last_modified: Some(Timestamp::from_secs(now)),
+            copy_source_version_id: source_version,
+            ..dto::UploadPartCopyOutput::default()
+        }))
+    }
+
     fn delete_object(&self, input: &dto::DeleteObjectInput) -> HandlerResult<dto::DeleteObject> {
         let mut fixture = self.borrow()?;
         require_bucket(&fixture, &input.bucket)?;
-        fixture.remove_object(input.bucket.as_str(), input.key.as_str());
-        Ok(Resp::new(dto::DeleteObjectOutput::default()))
+        // A versioned delete records a marker and reports it; an unversioned one removes the object
+        // and reports nothing, because there is no version for a client to come back for. Without
+        // the two headers a case cannot name the marker it just created, and a delete marker that
+        // cannot be named cannot be asserted about.
+        let marker = fixture.remove_object(input.bucket.as_str(), input.key.as_str());
+        Ok(Resp::new(dto::DeleteObjectOutput {
+            delete_marker: marker.is_some().then_some(true),
+            version_id: marker,
+            ..dto::DeleteObjectOutput::default()
+        }))
     }
 
     fn delete_objects(&self, input: &dto::DeleteObjectsInput) -> HandlerResult<dto::DeleteObjects> {
@@ -1708,6 +2266,130 @@ mod tests {
         assert!(!is_minted_upload_id("conformance-upload-"));
         assert!(!is_minted_upload_id("../../../etc/passwd"));
         assert!(!is_minted_upload_id("conformance-upload-00x1"));
+    }
+
+    /// The version suffix is split off the raw value, so a key whose own bytes spell the separator
+    /// survives. Decoding first makes the two indistinguishable and copies a different object.
+    #[test]
+    fn a_copy_source_splits_its_version_before_it_decodes_anything() {
+        let source = parse_copy_source("bucket/a%3Fb?versionId=v1").expect("parses");
+        assert_eq!(source.key.as_str(), "a?b");
+        assert_eq!(source.version_id.as_deref(), Some("v1"));
+        // The same bytes with no raw `?` are one key and no version at all.
+        let literal = parse_copy_source("bucket/a%3FversionId%3Dv1").expect("parses");
+        assert_eq!(literal.key.as_str(), "a?versionId=v1");
+        assert_eq!(literal.version_id, None);
+    }
+
+    /// A key decodes exactly once, and a plus sign is a plus sign: this is a path, not a form.
+    #[test]
+    fn a_copy_source_key_decodes_once_and_keeps_its_plus() {
+        let source = parse_copy_source("/bucket/na%C3%AFve%20%E2%82%AC%26a%2Bb.txt").expect("parses");
+        assert_eq!(source.key.as_str(), "naïve €&a+b.txt");
+        assert_eq!(source.bucket.as_str(), "bucket");
+        // A traversal spelling is ordinary key bytes, never a path.
+        assert_eq!(
+            parse_copy_source("/bucket/../../etc/passwd").expect("parses").key.as_str(),
+            "../../etc/passwd"
+        );
+    }
+
+    /// Both S3 ARN spellings resolve, and every other ARN is refused rather than demoted to a
+    /// bucket name — a demotion turns into a redirect the moment somebody creates that bucket.
+    #[test]
+    fn the_two_s3_arns_parse_and_every_other_arn_is_refused() {
+        let access_point = parse_copy_source("arn:aws:s3:us-east-1:1:accesspoint/my-ap/object/dir/key.txt").expect("parses");
+        assert_eq!((access_point.bucket.as_str(), access_point.key.as_str()), ("my-ap", "dir/key.txt"));
+        let outposts =
+            parse_copy_source("arn:aws:s3-outposts:us-east-1:1:outpost/op-1/bucket/src-bucket/object/k").expect("parses");
+        assert_eq!((outposts.bucket.as_str(), outposts.key.as_str()), ("src-bucket", "k"));
+        assert!(parse_copy_source("arn:aws:iam::1:user/bob").is_err());
+    }
+
+    /// Negative — every spelling that names no object is refused, and a non-UTF-8 decode is a
+    /// refusal rather than a panic.
+    #[test]
+    fn a_copy_source_that_names_no_object_is_refused_without_faulting() {
+        for raw in [
+            "",
+            "bucket",
+            "bucket/",
+            "/bucket",
+            "bucket/a?b",
+            "bucket/a?versionId=",
+            "bucket/%FF%FE%FD",
+        ] {
+            assert!(parse_copy_source(raw).is_err(), "{raw}");
+        }
+    }
+
+    /// A span carries `end - start + 1` bytes, and the two implicit-endpoint forms mean what they
+    /// mean for a read.
+    #[test]
+    fn a_copied_span_is_end_minus_start_plus_one() {
+        assert_eq!(resolve_copy_span(Some("bytes=0-9"), 10).expect("resolves").map(CopySpan::len), Some(10));
+        assert_eq!(resolve_copy_span(Some("bytes=-5"), 10).expect("resolves").map(CopySpan::len), Some(5));
+        assert_eq!(resolve_copy_span(Some("bytes=3-"), 10).expect("resolves").map(CopySpan::len), Some(7));
+        // No header copies the whole source, and a zero-byte source is not an arithmetic edge.
+        assert_eq!(resolve_copy_span(None, 0).expect("resolves"), None);
+    }
+
+    /// Negative — and the record of where this mirror and the corpus disagree.
+    ///
+    /// A start past the end answers `InvalidRange`, which is what
+    /// `crates/core/src/ops/shared/copy_source.rs` answers and what `c-copy-0036` says is wrong.
+    /// The overlong end is clamped, which is what that module's code does and the opposite of what
+    /// its own doc comment claims. Both are pinned here so that fixing either is a change to this
+    /// test rather than a silent drift.
+    #[test]
+    fn a_span_outside_the_source_is_refused_and_an_overlong_end_is_clamped() {
+        assert!(resolve_copy_span(Some("bytes=100-200"), 10).is_err());
+        assert!(resolve_copy_span(Some("bytes=0-1,5-6"), 10).is_err());
+        assert!(resolve_copy_span(Some("bytes=0-0"), 0).is_err());
+        assert_eq!(
+            resolve_copy_span(Some("bytes=0-100"), 10)
+                .expect("clamped")
+                .map(CopySpan::len),
+            Some(10)
+        );
+    }
+
+    /// An ownership assertion the fixtures never declared is refused, not assumed to hold. This is
+    /// the stage both published advisories on this family were missing.
+    #[test]
+    fn a_source_ownership_assertion_is_refused_rather_than_assumed() {
+        assert!(confirm_source_owner(None).is_ok());
+        assert!(confirm_source_owner(Some("000000000000")).is_err());
+    }
+
+    /// An unrecognised directive is not silently the default: a client with a typo would otherwise
+    /// get the source's metadata while believing it asked for the request's.
+    #[test]
+    fn a_directive_is_read_exactly_or_refused() {
+        assert_eq!(directive_of(None, "x").ok(), Some(MetadataFrom::Source));
+        assert_eq!(directive_of(Some("COPY"), "x").ok(), Some(MetadataFrom::Source));
+        assert_eq!(directive_of(Some("REPLACE"), "x").ok(), Some(MetadataFrom::Request));
+        for value in ["replace", "Replace", "REPLACE ", "", "COPY_ALL"] {
+            assert!(directive_of(Some(value), "x").is_err(), "{value}");
+        }
+    }
+
+    /// A delete in a versioned bucket names the marker it recorded; an unversioned one names
+    /// nothing, because there is no version for a client to come back for.
+    #[test]
+    fn a_versioned_delete_names_the_marker_it_recorded() {
+        let mut fixture = Fixture::at(7);
+        fixture.declare_bucket("v", true);
+        fixture.declare_bucket("u", false);
+        fixture.put_object("v", "doc", StoredObject::new(b"1".to_vec(), None, 7));
+        fixture.put_object("u", "doc", StoredObject::new(b"1".to_vec(), None, 7));
+        let marker = fixture.remove_object("v", "doc").expect("a marker");
+        assert!(
+            fixture
+                .version("v", "doc", &marker)
+                .is_some_and(|version| version.object.is_none())
+        );
+        assert_eq!(fixture.remove_object("u", "doc"), None);
     }
 
     /// An empty delimiter is no delimiter: folding on it would put every key under one prefix.

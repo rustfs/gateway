@@ -45,7 +45,7 @@ reach its target must not be recordable as a run whose assertions failed.
 | `src/md5.rs` | MD5, because an S3 entity tag is one. The fixture stamps objects with it | An `If-Match` case disagrees about a tag |
 | `src/time.rs` | `[clock] fixed` / `request_time` into a Unix second and a SigV4 stamp | A clock-pinned case is an hour out |
 | `src/exec.rs` | Twenty lines of `std` that run one future to completion | Never, unless a run hangs |
-| `src/fixture.rs` | **The stub backend**: what `[setup]` established, and the answers built out of it — including the six listings, their pagination and their cursors | A case fails on a value the fixture chose |
+| `src/fixture.rs` | **The stub backend**: what `[setup]` established, and the answers built out of it — the six listings with their pagination and cursors, and the copy family with its source parser, source gate and span rule | A case fails on a value the fixture chose |
 | `src/inprocess.rs` | **The wired target**: request in, signature, `call_bytes`, `Observation` out | A case is skipped, or signs wrongly |
 | `src/runner.rs` (+ `runner/tests.rs`) | Selection, interpolation, driving exchanges, one verdict per case | A case reached the wrong conclusion |
 | `src/report.rs` | Verdicts, grouping by capability domain, baseline comparison, text/JSON/JUnit output | You are changing what fails a run |
@@ -78,8 +78,8 @@ response head — in wire order — to the expectation engine. `sut::Unwired` is
 The baseline on disk is older than the current run:
 
 ```text
-conformance/baseline.json   157 cases: 21 passed, 131 failed, 5 skipped
-current                     157 cases: 79 passed,  73 failed, 5 skipped
+conformance/baseline.json   195 cases: 87 passed, 103 failed, 5 skipped
+current                     195 cases: 124 passed, 66 failed, 5 skipped
 ```
 
 Regenerate it with `baseline > conformance/baseline.json` in the same change that moves the
@@ -92,35 +92,42 @@ expected to be red, and the baseline exists to freeze how red rather than to exc
 
 ### What the red is made of, in descending order
 
-1. **Error documents carry no `<RequestId>` or `<HostId>`.** `render::render` emits `<Code>`,
-   `<Message>` and an optional `<Resource>` and stops — deliberately, and its own unit test pins
-   that ("a rendered refusal echoes nothing from the request"). 48 cases assert
-   `error.request_id_present = true`, and 15 of them fail on nothing else. This is a design
-   decision in conflict with a documented AWS invariant, and only a maintainer can resolve it: a
-   request id is minted by the server, not echoed from the request, so emitting one leaks nothing.
-2. **`encoding-type` is decoded, echoed, and never applied.** `spec/operations/ListObjects.toml`,
+1. **`encoding-type` is decoded, echoed, and never applied.** `spec/operations/ListObjects.toml`,
    `ListObjectsV2.toml`, `ListObjectVersions.toml` and `ListMultipartUploads.toml` each declare
    `url_encoded_fields`, and no generated codec reads it — nor does anything call
    `ObjectKey::needs_url_encoding`, which exists for exactly this. `c-list-0017`, `c-list-0035` and
    `c-mpu-0013` are the cases that see it. The fixture deliberately does **not** encode on the way
    out: doing it in a backend would hide a code-generator gap behind code every other backend would
    then have to write too.
-3. **An XML entity tag is written with literal quotes where AWS writes `&quot;`.**
-   `EtagRender::XmlQuoted` renders `"tag"` and `xml::escape_text` does not escape `"`, so the wire
-   carries `<ETag>"…"</ETag>`. Both types document the opposite in their own doc comments.
-   `c-list-0001`, `c-list-0021` and `c-etag-0001` are the cases that see it.
-4. **`ListBuckets` nests its entries the wrong way round.** The generated codec opens `Bucket` once
+2. **`ListBuckets` nests its entries the wrong way round.** The generated codec opens `Bucket` once
    and writes a `Buckets` element per entry, so the body reads
    `<Bucket><Buckets><Name>…</Name></Buckets></Bucket>` where AWS reads
    `<Buckets><Bucket><Name>…</Name></Bucket></Buckets>`. `c-list-0015` is the case that sees it.
-5. **Genuine protocol disagreements**, which is what the suite is for. Among them:
+3. **Genuine protocol disagreements**, which is what the suite is for. Among them:
    `partNumber > 10000` is accepted; `DeleteObjects` does not require an integrity header; a `304`
    and a `HEAD` refusal both carry an XML body; a `416` carries no `Content-Range`;
    `MaxMessageLengthExceeded` where AWS says `InvalidArgument`.
-4. **Three operations the corpus exercises are not implemented at all** — `CopyObject`,
-   `UploadPartCopy`, `GetObjectAttributes` — so their requests fall through to a neighbouring route
-   (`PUT /{bucket}/{key}` → `PutObject`, `GET …?attributes` → `GetObject`) and are answered wrongly
-   rather than refused. `c-etag-0001`, `c-cond-0004`, `c-range-0006` are the cases that see it.
+4. **`GetObjectAttributes` is not implemented**, so `GET …?attributes` falls through to
+   `GetObject` and is answered wrongly rather than refused. `c-etag-0001` is the case that sees it.
+   `CopyObject` and `UploadPartCopy` were in this list and no longer are: both are registered by
+   `inprocess` and answered by `fixture`.
+5. **The copy-source contract is not reachable through the facade.**
+   `crates/core/src/ops/shared/copy_source.rs` holds the split rule, the two ARN grammars, the
+   source-authorization type state, the self-copy classification and the copy range rule, and the
+   facade exports none of it. `fixture` therefore *mirrors* the module rather than calling it — see
+   its module documentation — and so will every other backend. Two divergences inside that module
+   are pinned by `fixture`'s own tests rather than smoothed over:
+   `resolve_copy_range` answers a span outside the source with `InvalidRange` (416) where AWS and
+   `c-copy-0036` say `InvalidArgument` (400), and its doc comment says an overlong span is "not
+   clamped, it is refused" while `ByteRange::resolve` clamps the end.
+6. **A copy cannot fail after its head is committed.** A `HandlerResult` is a status *or* an
+   answer, so there is no way for a backend to commit a `200` and then stream an `Error` document
+   — the shape AWS uses for a long copy, and the shape `c-copy-0038` asserts. It is a facade
+   capability rather than a backend decision, and the fixture does not approximate it.
+7. **Object tagging has no operation at all.** `GetObjectTagging` and `PutObjectTagging` are absent
+   from the model, so `x-amz-tagging` and `x-amz-tagging-directive` can be sent and never read
+   back. `c-copy-0008` copies with `TaggingDirective: REPLACE` and its read-back reaches
+   `GetObject`, which is the case that sees it.
 
 ### What this target cannot measure, and never pretends to
 
