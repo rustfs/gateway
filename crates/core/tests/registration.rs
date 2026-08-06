@@ -258,7 +258,12 @@ fn an_erased_registration_still_calls_the_typed_handler() {
 
     assert_eq!(response.status(), 200);
     assert_eq!(
-        response.output().location_constraint.as_ref().map(|region| region.as_str()),
+        response
+            .output()
+            .expect("a settled answer")
+            .location_constraint
+            .as_ref()
+            .map(|region| region.as_str()),
         Some("eu-central-1")
     );
     assert_eq!(fs.calls.load(Ordering::Relaxed), 1);
@@ -289,6 +294,7 @@ fn two_backends_coexist_in_one_process() {
         block_on(invocation)
             .expect("answered")
             .output()
+            .expect("a settled answer")
             .location_constraint
             .as_ref()
             .map(|region| region.as_str().to_owned())
@@ -534,7 +540,12 @@ fn a_second_registration_does_not_win() {
     )
     .expect("answered");
     assert_eq!(
-        answer.output().location_constraint.as_ref().map(|region| region.as_str()),
+        answer
+            .output()
+            .expect("a settled answer")
+            .location_constraint
+            .as_ref()
+            .map(|region| region.as_str()),
         Some("first-region"),
         "a refused registration must not have replaced the handler that was already there"
     );

@@ -72,8 +72,10 @@ mod adapt;
 mod assembly;
 mod builder;
 mod clock;
+pub mod commit;
 mod dispatch;
 mod ext;
+mod invariants;
 mod render;
 mod service;
 mod stamp;
@@ -92,7 +94,7 @@ pub use crate::ext::{
     GovernorRequest, HostQuery, HostResolver, Lease, NoObserver, Observer, PathStyleOnly, RequestEvent, ResolvedHost,
     SigV4Authenticator, StaticCredentials, Unavailable, Unlimited,
 };
-pub use crate::render::{S3Error, declaration, document, render};
+pub use crate::render::{S3Error, declaration, document, document_body, render};
 pub use crate::service::S3Service;
 pub use crate::trace::{
     FixedTrace, HOST_ID_HEADER, HostId, MintedTraces, REQUEST_ID_HEADER, RequestId, RequestTrace, TraceSource,

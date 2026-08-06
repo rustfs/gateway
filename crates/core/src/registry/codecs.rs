@@ -76,6 +76,14 @@ pub type ErasedEncode = Arc<dyn Fn(ErasedResponse, &MetaView<'_>) -> Result<Enco
 const RESPONSE_MISMATCH: CodecError =
     CodecError::internal("the registered encoder for this operation was called with another operation's response");
 
+/// The answer this erasure gives when it is handed a committed response.
+///
+/// A committed head is driven by the facade's dispatch table, which awaits; this file is on the far
+/// side of the no-await rule and cannot. Refused in the open rather than silently encoded as an
+/// empty body, which would answer a success status with no document at all.
+const COMMITTED_UNSUPPORTED: &str =
+    "a committed response has no output to encode yet; drive it through the facade's dispatch table";
+
 /// One operation's wire codec, with the operation type erased.
 ///
 /// Produced only by [`erase`], and only from a `register_handler::<O, B>` call, so the decoder and
@@ -146,8 +154,15 @@ pub(crate) fn erase<O: OperationCodec>() -> ErasedCodec {
     });
     let encode: ErasedEncode = Arc::new(|response: ErasedResponse, request: &MetaView<'_>| {
         let response = response.downcast::<Resp<O>>().map_err(|_| RESPONSE_MISMATCH)?;
-        let (output, status) = response.into_parts();
-        O::encode(output, request, status)
+        let (answer, status) = response.into_parts();
+        match answer {
+            crate::handler::Answer::Settled(output) => O::encode(output, request, status),
+            // This erasure encodes what a handler already produced; a committed answer has not
+            // produced it yet, and driving the continuation would mean awaiting — which this file
+            // may not do (`tests/purity_guard.rs`). The facade's own table is the path that drives
+            // one, and it is the path every request actually takes.
+            crate::handler::Answer::Committed(_) => Err(CodecError::internal(COMMITTED_UNSUPPORTED)),
+        }
     });
     ErasedCodec {
         operation: O::NAME,

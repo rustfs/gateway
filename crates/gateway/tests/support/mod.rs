@@ -115,6 +115,217 @@ pub fn ping_route() -> RouteEntry {
     }
 }
 
+// ── a vendor operation answering HEAD, so the RFC 9110 body rules are reachable ─────────────────
+
+/// The length [`HeadPing`]'s encoder writes into `Content-Length`, and the length of the content it
+/// would have sent to a `GET`.
+pub const HEAD_PING_LENGTH: usize = 5;
+
+/// A vendor operation reached by `HEAD /`.
+///
+/// The suite needs one because every AWS `HEAD` operation is header-signatures-only and this crate
+/// cannot sign; the point is the method, not the operation.
+pub struct HeadPing;
+
+/// Which answer a request asked for. Read from the query, so one operation covers every shape a
+/// response can take without a route entry each.
+pub enum HeadPingInput {
+    /// Answer `200` with content.
+    Content,
+    /// Refuse with `412`, which renders an `<Error>` document.
+    Refuse,
+    /// Refuse with `304`, which is bodyless whatever the method.
+    NotModified,
+    /// Commit the head, then answer.
+    CommitThenAnswer,
+    /// Commit the head, then fail — the shape `CompleteMultipartUpload` and `CopyObject` need.
+    CommitThenFail,
+}
+
+pub static HEAD_PING_SPEC: OperationSpec = OperationSpec {
+    name: "example:HeadPing",
+    success_status: 200,
+    required_params: &[],
+    not_configured_error: None,
+    auth: Some(AuthRequirement::new("example:HeadPing", ResourceShape::Service)),
+};
+
+pub static HEAD_PING_FLOOR: OperationFloor =
+    OperationFloor::custom("example:HeadPing", SigService::S3).allow_anonymous_after_listing_in_the_posture_report();
+
+/// `HEAD /`, which no AWS operation claims.
+pub static HEAD_PING_PREDICATES: &[Predicate] = &[Predicate::Method(http::Method::HEAD), Predicate::Target(TargetKind::Service)];
+
+/// `PUT /`, which no AWS operation claims either.
+///
+/// The same operation, the same handler and the same encoder reached by a method that *may* carry
+/// content. Without it a `HEAD` assertion could only compare against a number written down by hand,
+/// and the number is the half of RFC 9110 §9.3.2 that is easiest to get wrong.
+pub static CONTENT_PING_PREDICATES: &[Predicate] =
+    &[Predicate::Method(http::Method::PUT), Predicate::Target(TargetKind::Service)];
+
+impl Operation for HeadPing {
+    const NAME: &'static str = "example:HeadPing";
+
+    type Input = HeadPingInput;
+    type Output = PingOutput;
+
+    fn spec() -> &'static OperationSpec {
+        &HEAD_PING_SPEC
+    }
+
+    fn floor() -> &'static OperationFloor {
+        &HEAD_PING_FLOOR
+    }
+}
+
+impl OperationCodec for HeadPing {
+    fn decode(request: &MetaView<'_>, _body: RequestBody) -> Result<HeadPingInput, CodecError> {
+        if request.query("refuse").is_some() {
+            return Ok(HeadPingInput::Refuse);
+        }
+        if request.query("not-modified").is_some() {
+            return Ok(HeadPingInput::NotModified);
+        }
+        if request.query("commit-then-answer").is_some() {
+            return Ok(HeadPingInput::CommitThenAnswer);
+        }
+        if request.query("commit-then-fail").is_some() {
+            return Ok(HeadPingInput::CommitThenFail);
+        }
+        Ok(HeadPingInput::Content)
+    }
+
+    fn encode(output: PingOutput, request: &MetaView<'_>, status: u16) -> Result<EncodedResponse, CodecError> {
+        let mut encoded = EncodedResponse::of(status);
+        encoded.set_header("content-type", "application/xml");
+        // Written by hand because nothing else writes it on the answered path, and it is the number
+        // the `HEAD` rule is about: the bytes go, this stays.
+        encoded.set_header("content-length", &output.message.len().to_string());
+        encoded.body = ResponseBody::Complete(output.message.into_bytes());
+        // The same line every generated encoder ends with. It is deliberately *not* the only
+        // enforcement: the facade applies the same decision to the refusal path, which never
+        // reaches an encoder at all.
+        encoded.enforce_http_invariants(request.method());
+        Ok(encoded)
+    }
+}
+
+/// The route entry that reaches [`HeadPing`] under `HEAD`.
+#[must_use]
+pub fn head_ping_route() -> RouteEntry {
+    RouteEntry {
+        precedence: 51,
+        selector: RouteSelector::new(HEAD_PING_PREDICATES),
+        op_name: "example:HeadPing",
+        path_shape: "/",
+    }
+}
+
+/// The twin of [`HeadPing`] reached by a method that may carry content.
+///
+/// A separate operation rather than a second route entry, because a route table refuses two entries
+/// naming one operation. Everything below it is shared: the same input, the same output, the same
+/// decoder, the same encoder and the same handler body — so a difference between the two responses
+/// is a difference the method made and nothing else.
+pub struct ContentPing;
+
+pub static CONTENT_PING_SPEC: OperationSpec = OperationSpec {
+    name: "example:ContentPing",
+    success_status: 200,
+    required_params: &[],
+    not_configured_error: None,
+    auth: Some(AuthRequirement::new("example:ContentPing", ResourceShape::Service)),
+};
+
+pub static CONTENT_PING_FLOOR: OperationFloor =
+    OperationFloor::custom("example:ContentPing", SigService::S3).allow_anonymous_after_listing_in_the_posture_report();
+
+impl Operation for ContentPing {
+    const NAME: &'static str = "example:ContentPing";
+
+    type Input = HeadPingInput;
+    type Output = PingOutput;
+
+    fn spec() -> &'static OperationSpec {
+        &CONTENT_PING_SPEC
+    }
+
+    fn floor() -> &'static OperationFloor {
+        &CONTENT_PING_FLOOR
+    }
+}
+
+impl OperationCodec for ContentPing {
+    fn decode(request: &MetaView<'_>, body: RequestBody) -> Result<HeadPingInput, CodecError> {
+        HeadPing::decode(request, body)
+    }
+
+    fn encode(output: PingOutput, request: &MetaView<'_>, status: u16) -> Result<EncodedResponse, CodecError> {
+        HeadPing::encode(output, request, status)
+    }
+}
+
+impl Handler<ContentPing> for Backend {
+    async fn call(&self, request: Req<ContentPing>) -> HandlerResult<ContentPing> {
+        answer_ping(request.input())
+    }
+}
+
+/// The route entry that reaches [`ContentPing`].
+#[must_use]
+pub fn content_ping_route() -> RouteEntry {
+    RouteEntry {
+        precedence: 52,
+        selector: RouteSelector::new(CONTENT_PING_PREDICATES),
+        op_name: "example:ContentPing",
+        path_shape: "/",
+    }
+}
+
+/// What a committed answer's encoder is handed: a whole document, declaration included, because that
+/// is what a generated encoder produces and the framework has to remove exactly one of them.
+#[must_use]
+pub fn committed_answer_document() -> String {
+    format!("{}<Ping>committed</Ping>", rustfs_gateway::declaration())
+}
+
+/// The one answer both twins give, so neither can drift from the other.
+///
+/// `Resp` rather than `PingOutput`, because two of the five shapes are a *response* decision rather
+/// than an output: committing the head is choosing a status before the content exists.
+fn answer_ping<O>(input: &HeadPingInput) -> HandlerResult<O>
+where
+    O: Operation<Output = PingOutput>,
+{
+    match input {
+        HeadPingInput::Content => Ok(Resp::new(PingOutput {
+            message: "hello".to_owned(),
+        })),
+        HeadPingInput::Refuse => Err(HandlerError::precondition_failed("If-Match")),
+        HeadPingInput::NotModified => Err(HandlerError::new(
+            rustfs_gateway::ErrorCode::NOT_MODIFIED,
+            "the representation has not changed",
+        )),
+        // The head goes out here. What follows can no longer choose a status: the continuation's
+        // output type is `Result<O::Output, HandlerError>` and neither arm carries one.
+        HeadPingInput::CommitThenAnswer => Ok(Resp::commit(Box::pin(async {
+            Ok(PingOutput {
+                message: committed_answer_document(),
+            })
+        }))),
+        HeadPingInput::CommitThenFail => Ok(Resp::commit(Box::pin(async {
+            Err(HandlerError::new(rustfs_gateway::ErrorCode::NO_SUCH_KEY, "the source is gone"))
+        }))),
+    }
+}
+
+impl Handler<HeadPing> for Backend {
+    async fn call(&self, request: Req<HeadPing>) -> HandlerResult<HeadPing> {
+        answer_ping(request.input())
+    }
+}
+
 // ── a vendor operation whose name is not namespaced ─────────────────────────────────────────────
 
 /// A vendor operation that forgot its namespace. Registration must refuse it.
@@ -258,12 +469,18 @@ impl Governor for RefuseEverything {
 #[derive(Default)]
 pub struct Recorder {
     pub seen: std::sync::Mutex<Vec<(Option<String>, u16)>>,
+    /// The error code each response carried, if any. Separate from `seen` because a committed
+    /// failure is a `200` *and* an error, and a recorder that kept only the status could not say so.
+    pub errors: std::sync::Mutex<Vec<Option<String>>>,
 }
 
 impl Observer for Recorder {
     fn on_response(&self, event: &RequestEvent<'_>) {
         if let Ok(mut seen) = self.seen.lock() {
             seen.push((event.operation.map(str::to_owned), event.status));
+        }
+        if let Ok(mut errors) = self.errors.lock() {
+            errors.push(event.error.map(ToString::to_string));
         }
     }
 }
@@ -336,14 +553,18 @@ pub fn wired() -> ServiceBuilder {
         .authorizer(allow_when(|_| true))
 }
 
-/// The service both suites drive: `example:Ping` plus `ListBuckets`.
+/// The service both suites drive: `example:Ping`, `example:HeadPing` and `ListBuckets`.
 #[must_use]
 pub fn service() -> S3Service {
     let backend = Arc::new(Backend);
     wired()
         .register::<Ping, _>(Arc::clone(&backend))
+        .register::<HeadPing, _>(Arc::clone(&backend))
+        .register::<ContentPing, _>(Arc::clone(&backend))
         .register::<ListBuckets, _>(backend)
         .route(ping_route())
+        .route(head_ping_route())
+        .route(content_ping_route())
         .build()
         .expect("a complete assembly")
 }

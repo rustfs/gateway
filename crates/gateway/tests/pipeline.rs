@@ -354,3 +354,167 @@ async fn a_fixed_source_makes_a_response_byte_comparable() {
     assert_eq!(first.header("x-amz-request-id"), Some("0123456789ABCDEF"));
     assert_eq!(first.body(), second.body());
 }
+
+// ── the RFC 9110 body invariants, on the answered path and the refused one ─────────────────────
+
+/// Negative — a refusal answered to a `HEAD` carries no content, and still reports the length the
+/// same refusal reported to a method that may carry one.
+///
+/// RFC 9110 §9.3.2 states the rule with no status exception, and this is the exchange that used to
+/// break it: a refusal never reaches an encoder, so the `<Error>` document went out under a method
+/// that forbids content. On a keep-alive connection the peer frames by `Content-Length` and does not
+/// read the content because the method is `HEAD`, so it reads the next response starting from the
+/// middle of ours. That is response smuggling, not a cosmetic defect.
+///
+/// The expected length is *measured* from the twin exchange rather than written down: a fix that
+/// answered `0` would satisfy "no content" and tell every client the representation is empty.
+#[tokio::test]
+async fn a_refusal_answered_to_a_head_carries_no_content_and_still_reports_the_length_it_would_have_sent() {
+    let service = support::service();
+    let with_content = support::exchange_wire(&service, plain(http::Method::PUT, "/?refuse")).await;
+    let head = support::exchange_wire(&service, plain(http::Method::HEAD, "/?refuse")).await;
+
+    assert_eq!(head.status(), http::StatusCode::PRECONDITION_FAILED);
+    assert_eq!(head.body().len(), 0, "a HEAD refusal carried content");
+    let length = head.header("content-length").expect("a HEAD refusal keeps its length");
+    assert_ne!(length, "0", "the length was rewritten rather than the content dropped");
+    assert_eq!(
+        length,
+        with_content.body().len().to_string(),
+        "the length is not the one the same refusal reported to a method that may carry content"
+    );
+}
+
+/// Negative — the same refusal answered to a method that may carry content still carries its
+/// document. A fix that dropped every error body would pass the assertion above and leave every
+/// client with nothing to branch on.
+#[tokio::test]
+async fn the_same_refusal_answered_to_a_method_that_may_carry_content_keeps_its_document() {
+    let refused = support::exchange_wire(&support::service(), plain(http::Method::PUT, "/?refuse")).await;
+    assert_eq!(refused.status(), http::StatusCode::PRECONDITION_FAILED);
+    assert!(!refused.body().is_empty(), "the refusal lost its document");
+    let body = String::from_utf8(refused.body().to_vec()).expect("utf-8");
+    assert!(body.contains("<Code>PreconditionFailed</Code>"), "{body}");
+    assert_eq!(refused.header("content-length"), Some(refused.body().len().to_string().as_str()));
+}
+
+/// Negative — a `HEAD` that *succeeds* carries no content either, and reports the length of the
+/// content it did not send. That number is the answer the request was asking for.
+#[tokio::test]
+async fn a_success_answered_to_a_head_carries_no_content_and_still_reports_a_length() {
+    let head = support::exchange_wire(&support::service(), plain(http::Method::HEAD, "/")).await;
+    assert_eq!(head.status(), http::StatusCode::OK);
+    assert_eq!(head.body().len(), 0, "a HEAD success carried content");
+    let length = head.header("content-length").expect("a HEAD success keeps its length");
+    assert_ne!(length, "0", "the length was rewritten rather than the content dropped");
+    assert_eq!(length, support::HEAD_PING_LENGTH.to_string());
+}
+
+/// Negative — a `304` carries no content and no framing header describing one, whichever method
+/// asked for it. A `304` announcing bytes it will never send desynchronises a connection exactly as
+/// the `HEAD` case does, and the framing header goes with the content here and only here — which is
+/// what `c-cond-0005`, `c-cond-0007`, `c-cond-0010`, `c-cond-0017` and `c-cond-0022` pin, and why
+/// this is the one status where the length is *not* kept.
+#[tokio::test]
+async fn a_not_modified_refusal_carries_neither_content_nor_a_framing_header() {
+    for method in [http::Method::PUT, http::Method::HEAD] {
+        let response = support::exchange_wire(&support::service(), plain(method.clone(), "/?not-modified")).await;
+        assert_eq!(response.status(), http::StatusCode::NOT_MODIFIED, "{method}");
+        assert_eq!(response.body().len(), 0, "{method}: a 304 carried content");
+        assert_eq!(response.header("content-length"), None, "{method}: a 304 announced content");
+        assert_eq!(response.header("transfer-encoding"), None, "{method}");
+    }
+}
+
+/// Negative — dropping the content must not turn into dropping the head. A `HEAD` whose headers went
+/// with its body answers nothing at all, which is worse than the defect this fix is about.
+#[tokio::test]
+async fn a_head_keeps_the_headers_a_get_would_have_carried() {
+    let head = support::exchange_wire(&support::service(), plain(http::Method::HEAD, "/")).await;
+    assert_eq!(head.header("content-type"), Some("application/xml"));
+    assert!(head.header("x-amz-request-id").is_some());
+    assert!(head.header("x-amz-id-2").is_some());
+    assert!(head.header("server").is_some());
+    assert!(head.header("date").is_some());
+}
+
+// ── the commit seam: a head that goes out before the outcome is known ──────────────────────────
+
+/// Negative — a failure discovered after the head was committed keeps the committed status and puts
+/// the `<Error>` document in the body.
+///
+/// The shape AWS documents for `CompleteMultipartUpload` and `CopyObject`, and the one a
+/// `Result<Resp<O>, HandlerError>` could not express: choosing `Err` gave up the head and choosing
+/// `Ok` gave up the right to fail. A client that decides from the status line records an upload that
+/// never happened, which is why the document has to be there and the status has to stay.
+#[tokio::test]
+async fn a_failure_after_the_head_is_committed_keeps_the_status_and_carries_the_document() {
+    let response = support::exchange_wire(&support::service(), plain(http::Method::PUT, "/?commit-then-fail")).await;
+    assert_eq!(response.status(), http::StatusCode::OK, "the refusal changed the status line");
+    let body = String::from_utf8(response.body().to_vec()).expect("utf-8");
+    assert!(body.starts_with(rustfs_gateway::commit::PROLOGUE), "{body}");
+    assert!(body.contains("<Code>NoSuchKey</Code>"), "{body}");
+    assert_eq!(response.header("content-type"), Some("application/xml"));
+}
+
+/// Negative — the committed body carries one XML declaration, in the prologue, and none after it.
+/// A second declaration inside a body is a syntax error reported instead of the failure the body was
+/// carrying, and it is the trap `c-mpu-0038` exists for.
+#[tokio::test]
+async fn a_committed_body_carries_exactly_one_declaration_whichever_way_it_ends() {
+    for query in ["/?commit-then-fail", "/?commit-then-answer"] {
+        let response = support::exchange_wire(&support::service(), plain(http::Method::PUT, query)).await;
+        let body = String::from_utf8(response.body().to_vec()).expect("utf-8");
+        assert_eq!(body.matches("<?xml").count(), 1, "{query}: {body}");
+        assert!(body.starts_with(rustfs_gateway::commit::PROLOGUE), "{query}: {body}");
+    }
+}
+
+/// Negative — a committed response announces no length and no trailer section. Both are promises the
+/// head would have had to carry, and the head went out before either was knowable; a `Trailer` that
+/// never arrives leaves a client waiting, which turns a reported failure into a hang.
+#[tokio::test]
+async fn a_committed_response_announces_neither_a_length_nor_a_trailer_section() {
+    for query in ["/?commit-then-fail", "/?commit-then-answer"] {
+        let response = support::exchange_wire(&support::service(), plain(http::Method::PUT, query)).await;
+        assert_eq!(response.header("content-length"), None, "{query}");
+        assert_eq!(response.header("trailer"), None, "{query}");
+        assert_eq!(response.header("transfer-encoding"), None, "{query}");
+    }
+}
+
+/// Negative — the observer is told the failure even though the status line says `200`. An audit
+/// trail that read the status would record a success, which is the exact mistake the shape invites.
+#[tokio::test]
+async fn the_observer_sees_a_committed_failure_as_a_failure() {
+    let recorder = Arc::new(Recorder::default());
+    let service = wired()
+        .register::<support::ContentPing, _>(Arc::new(Backend))
+        .route(support::content_ping_route())
+        .observer(Arc::clone(&recorder) as Arc<dyn rustfs_gateway::Observer>)
+        .build()
+        .expect("a complete assembly");
+    let response = support::exchange_wire(&service, plain(http::Method::PUT, "/?commit-then-fail")).await;
+    assert_eq!(response.status(), http::StatusCode::OK);
+    let seen = recorder.seen.lock().expect("the recorder");
+    assert_eq!(seen.len(), 1);
+    assert_eq!(seen[0].1, 200, "the status the client saw");
+    let errors = recorder.errors.lock().expect("the recorder");
+    assert_eq!(
+        errors.first().and_then(Option::as_deref),
+        Some("NoSuchKey"),
+        "a committed failure must reach the observer as a failure"
+    );
+}
+
+/// Positive — a committed response that succeeds carries the encoder's document after the prologue,
+/// and nothing of the refusal path. The commit seam must not turn every committed answer into an
+/// error document.
+#[tokio::test]
+async fn a_committed_response_that_succeeds_carries_the_encoders_document() {
+    let response = support::exchange_wire(&support::service(), plain(http::Method::PUT, "/?commit-then-answer")).await;
+    assert_eq!(response.status(), http::StatusCode::OK);
+    let body = String::from_utf8(response.body().to_vec()).expect("utf-8");
+    assert!(body.ends_with("<Ping>committed</Ping>"), "{body}");
+    assert!(!body.contains("<Error>"), "{body}");
+}

@@ -190,7 +190,7 @@ fn every_refusal_is_greppable_by_its_rule() {
 fn a_complete_assembly_builds() {
     let service = support::service();
     let operations: Vec<&str> = service.operations().collect();
-    assert_eq!(operations, ["ListBuckets", "example:Ping"]);
+    assert_eq!(operations, ["ListBuckets", "example:ContentPing", "example:HeadPing", "example:Ping"]);
 }
 
 /// Positive — cloning a service is one pointer's worth of work, which is what makes cloning it per

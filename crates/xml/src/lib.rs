@@ -37,4 +37,6 @@ mod tests;
 
 pub use crate::error::XmlError;
 pub use crate::read::{MAX_DEPTH, MAX_ELEMENTS, XmlNode, parse};
-pub use crate::write::{DECLARATION, S3_XMLNS, XmlWriter, escape_attribute, escape_text, escape_text_and_quotes};
+pub use crate::write::{
+    DECLARATION, S3_XMLNS, XmlWriter, escape_attribute, escape_text, escape_text_and_quotes, strip_declaration,
+};

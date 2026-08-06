@@ -41,6 +41,27 @@
 //! dyn compatible either. Completeness is asserted at run time instead, by
 //! [`crate::registry::RouterBuilder::require`], whose failure is one sentence naming what is
 //! missing.
+//!
+//! # The third thing a handler can say: "the status is settled and the outcome is not"
+//!
+//! `CompleteMultipartUpload` and `CopyObject` are documented by AWS as flushing a `200` before they
+//! know whether they succeeded, because assembling the parts can outlast a client's timeout. A
+//! `Result<Resp<O>, HandlerError>` cannot express that: choosing `Err` gives up the head, and
+//! choosing `Ok` gives up the right to fail.
+//!
+//! [`Resp::commit`] is the third choice, and the shape of the pipeline's own `wire → targeted →
+//! routed → …` type states is what it copies. `Resp<O>` is the state in which the status is still
+//! being chosen — every constructor takes or reads one. [`Answer::Committed`] is the state after it
+//! has been chosen, and what it holds is a [`CommitWork`] whose output is a [`CommitOutcome`]: an
+//! `O::Output` or a [`HandlerError`], and **neither carries a status**. So "change the status after
+//! committing" is not a rule anything checks at run time — after the transition there is no value a
+//! status could be written into, and `Resp` has no setter to write one with either. The framework
+//! reads the status from the `Resp` that committed it and from nowhere else.
+//!
+//! What a committed response *looks like* on the wire — the prologue, the keep-alive bytes that hold
+//! the connection while the work runs, and the fact that the trailing document carries no XML
+//! declaration of its own — is the facade's, not a backend's. A backend that could choose the
+//! keep-alive cadence would be choosing an observable contract that clients time out against.
 
 use std::borrow::Cow;
 use std::fmt;
@@ -113,9 +134,46 @@ where
     }
 }
 
+/// What a committed operation eventually produced: the answer, or the refusal.
+///
+/// Deliberately statusless. The status went out with the head, so a value that could carry a second
+/// one would be a value that can contradict the wire — and the contradiction would be discovered by
+/// the client, not by a test. This type is the whole of "a committed response cannot change its
+/// status": there is nowhere left to put one.
+pub type CommitOutcome<O> = Result<<O as Operation>::Output, HandlerError>;
+
+/// The work that decides a committed response, handed to the framework to drive.
+///
+/// Boxed rather than generic because the registry erases the operation and the backend, and a
+/// continuation that stayed generic would have to be named by every layer it passes through.
+pub type CommitWork<O> = BoxFuture<'static, CommitOutcome<O>>;
+
+/// The content half of a [`Resp`]: known now, or committed and still running.
+///
+/// Not `#[non_exhaustive]`: the facade matches on it exhaustively and a third arm is a change to how
+/// every response is written, which is precisely the review a compile error should force.
+pub enum Answer<O: Operation> {
+    /// The status and the content were decided together.
+    Settled(O::Output),
+    /// The status is decided; the content is not, and the head has gone out on the strength of it.
+    Committed(CommitWork<O>),
+}
+
+impl<O: Operation> fmt::Debug for Answer<O>
+where
+    O::Output: fmt::Debug,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Settled(output) => f.debug_tuple("Settled").field(output).finish(),
+            Self::Committed(_) => f.write_str("Committed(..)"),
+        }
+    }
+}
+
 /// An answer on its way back to the wire.
 pub struct Resp<O: Operation> {
-    output: O::Output,
+    answer: Answer<O>,
     status: u16,
 }
 
@@ -127,7 +185,7 @@ impl<O: Operation> Resp<O> {
     /// carries.
     pub fn new(output: O::Output) -> Self {
         Self {
-            output,
+            answer: Answer::Settled(output),
             status: O::spec().success_status,
         }
     }
@@ -135,12 +193,63 @@ impl<O: Operation> Resp<O> {
     /// The answer with a status other than the declared one — `206` for a ranged read, `200` for a
     /// delete that reports per-key results.
     pub const fn with_status(output: O::Output, status: u16) -> Self {
-        Self { output, status }
+        Self {
+            answer: Answer::Settled(output),
+            status,
+        }
     }
 
-    /// The output.
-    pub const fn output(&self) -> &O::Output {
-        &self.output
+    /// Commits the operation's declared success status **before** the outcome is known.
+    ///
+    /// For the operators AWS documents as flushing their head early — `CompleteMultipartUpload`,
+    /// `CopyObject` — because the work can outlast a client's timeout and a status that waited for
+    /// it would arrive after the client had given up.
+    ///
+    /// Everything the backend still has to decide travels in `work`, whose output is a
+    /// [`CommitOutcome`]: an output or a [`HandlerError`], and no status. That is not a convention —
+    /// it is why a committed response cannot change its status, and why this call is the last place
+    /// the status is nameable.
+    ///
+    /// A refusal that arrives through `work` is rendered as the same `<Error>` document a refusal
+    /// before the commit would have produced, into a body whose head has already gone out. What it
+    /// cannot do is change the status line, add a response header, or hold the connection on its own
+    /// terms: the keep-alive bytes are the framework's.
+    ///
+    /// Call it only after every check that can refuse *before* the head is committed has run. A
+    /// malformed completion request is a `400`, and it stays a `400` because the backend has not
+    /// committed anything yet.
+    #[must_use]
+    pub fn commit(work: CommitWork<O>) -> Self {
+        Self {
+            answer: Answer::Committed(work),
+            status: O::spec().success_status,
+        }
+    }
+
+    /// [`Self::commit`] with a status other than the declared one.
+    #[must_use]
+    pub const fn commit_with_status(work: CommitWork<O>, status: u16) -> Self {
+        Self {
+            answer: Answer::Committed(work),
+            status,
+        }
+    }
+
+    /// The output, when there already is one.
+    ///
+    /// `None` for a committed answer, whose output does not exist yet. An accessor that could not
+    /// say so would have to invent one.
+    pub const fn output(&self) -> Option<&O::Output> {
+        match &self.answer {
+            Answer::Settled(output) => Some(output),
+            Answer::Committed(_) => None,
+        }
+    }
+
+    /// Whether the head is committed and the outcome still pending.
+    #[must_use]
+    pub const fn is_committed(&self) -> bool {
+        matches!(self.answer, Answer::Committed(_))
     }
 
     /// The status this answer goes out with.
@@ -149,14 +258,17 @@ impl<O: Operation> Resp<O> {
         self.status
     }
 
-    /// Takes the output out.
-    pub fn into_output(self) -> O::Output {
-        self.output
+    /// Takes the output out, when there already is one.
+    pub fn into_output(self) -> Option<O::Output> {
+        match self.answer {
+            Answer::Settled(output) => Some(output),
+            Answer::Committed(_) => None,
+        }
     }
 
-    /// Takes the output and the status.
-    pub fn into_parts(self) -> (O::Output, u16) {
-        (self.output, self.status)
+    /// Takes the content and the status.
+    pub fn into_parts(self) -> (Answer<O>, u16) {
+        (self.answer, self.status)
     }
 }
 
@@ -168,7 +280,7 @@ where
         f.debug_struct("Resp")
             .field("operation", &O::NAME)
             .field("status", &self.status)
-            .field("output", &self.output)
+            .field("answer", &self.answer)
             .finish()
     }
 }

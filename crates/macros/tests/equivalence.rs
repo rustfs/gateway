@@ -244,8 +244,16 @@ fn the_two_forms_answer_identically() {
     )
     .expect("answered");
     assert_eq!(
-        one.output().location_constraint.as_ref().map(LocationConstraint::as_str),
-        two.output().location_constraint.as_ref().map(LocationConstraint::as_str),
+        one.output()
+            .expect("settled")
+            .location_constraint
+            .as_ref()
+            .map(LocationConstraint::as_str),
+        two.output()
+            .expect("settled")
+            .location_constraint
+            .as_ref()
+            .map(LocationConstraint::as_str),
     );
 
     let one = block_on(
@@ -262,7 +270,7 @@ fn the_two_forms_answer_identically() {
             .expect("registered"),
     )
     .expect("answered");
-    assert_eq!(one.output().key_count, two.output().key_count);
+    assert_eq!(one.output().expect("settled").key_count, two.output().expect("settled").key_count);
     assert_eq!(one.status(), two.status());
 
     let one = block_on(
@@ -279,7 +287,7 @@ fn the_two_forms_answer_identically() {
             .expect("registered"),
     )
     .expect("answered");
-    assert_eq!(one.output().e_tag, two.output().e_tag);
+    assert_eq!(one.output().expect("settled").e_tag, two.output().expect("settled").e_tag);
 }
 
 /// Positive — two groups compose, and each generated function registers only its own block.

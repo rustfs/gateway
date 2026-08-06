@@ -10,10 +10,10 @@ name and every ordering is supplied by the caller, from IR data.
 | File | Responsibility | Read it when |
 |---|---|---|
 | `src/lib.rs` | Module wiring and the re-export list. | First stop. |
-| `src/write.rs` | `XmlWriter`: the declaration, elements, attributes, escaping, and the paired empty-element form. No formatting options, because both S3 shapes are byte-observable. | A response body byte is wrong, or you need a new element form. |
+| `src/write.rs` | `XmlWriter`: the declaration, elements, attributes, escaping, and the paired empty-element form. No formatting options, because both S3 shapes are byte-observable. Plus `strip_declaration`, the inverse of the one declaration this crate writes. | A response body byte is wrong, you need a new element form, or a body is carrying two declarations. |
 | `src/read.rs` | `parse` into a bounded `XmlNode` tree, with the `DOCTYPE`, entity, depth and element-count refusals. Namespace prefixes are dropped, so a prefixed body and a bare one decode identically. | A request body is refused, or you are changing a ceiling. |
 | `src/error.rs` | `XmlError`, one variant per refusal. No variant carries a fragment of the input. | You are mapping a refusal onto an S3 error code. |
-| `src/tests.rs` | 17 tests: 6 writer byte shapes, 11 reader cases of which 8 are refusals. | Before changing either half. |
+| `src/tests.rs` | 21 tests: 4 declaration-removal cases of which 3 are refusals to guess, 6 writer byte shapes, 11 reader cases of which 8 are refusals. | Before changing either half. |
 
 ## Shape decisions worth not re-litigating
 
@@ -28,6 +28,10 @@ name and every ordering is supplied by the caller, from IR data.
 - **An empty element is written `<X></X>`, never self-closing, and there is no whitespace between
   elements.** Both are what S3 does and both are visible to a byte-exact conformance case, so
   neither is an option a caller can set the other way.
+- **`strip_declaration` matches the exact prefix and never scans.** The one caller is the committed
+  response, whose head already carried a declaration; a scanner that skipped "any prolog" would
+  truncate a document whose first bytes were written by something else, and this crate wrote the
+  bytes it is asked to trim, so the one form it emits is the one form worth recognising.
 - **`finish` closes whatever is still open.** An encoder that returned early would otherwise emit a
   truncated document, which is the one failure a client cannot tell from a dropped connection.
 

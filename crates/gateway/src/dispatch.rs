@@ -49,8 +49,8 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use rustfs_gateway_core::{
-    AuthRequirement, BoxFuture, CodecError, EncodedResponse, Handler, HandlerError, MetaView, OperationCodec, Req, RequestBody,
-    Resp, RouteEntry, TargetKind,
+    Answer as CoreAnswer, AuthRequirement, BoxFuture, CodecError, EncodedResponse, Handler, HandlerError, MetaView,
+    OperationCodec, Req, RequestBody, Resp, RouteEntry, TargetKind,
 };
 use rustfs_gateway_sig::OperationFloor;
 use rustfs_gateway_stream::ByteStream;
@@ -59,8 +59,23 @@ use rustfs_gateway_types::ErrorCode;
 /// A `Resp<O>`'s output whose `O` this table has forgotten.
 type ErasedOutput = Box<dyn std::any::Any + Send>;
 
+/// The continuation of a committed response, with `O` forgotten.
+pub(crate) type ErasedCommitWork = BoxFuture<'static, Result<ErasedOutput, HandlerError>>;
+
+/// What a backend answered with, once the operation type is gone.
+///
+/// The distinction survives erasure on purpose: it is the difference between a response whose head
+/// has not been written and one whose head is already on the wire, and the facade writes the two
+/// differently.
+pub(crate) enum ErasedAnswer {
+    /// The output is here; the response can be encoded whole.
+    Settled(ErasedOutput),
+    /// The status is committed and the outcome is still running.
+    Committed(ErasedCommitWork),
+}
+
 /// The answer a backend produced, and the status it goes out with.
-type Answer = Result<(ErasedOutput, u16), HandlerError>;
+type Answer = Result<(ErasedAnswer, u16), HandlerError>;
 
 /// A backend call in flight.
 pub(crate) type Invocation = BoxFuture<'static, Answer>;
@@ -92,8 +107,20 @@ impl OperationDispatch {
             let backend = Arc::clone(&backend);
             Ok(Box::pin(async move {
                 let response: Resp<O> = backend.call(Req::<O>::new(input)).await?;
-                let (output, status) = response.into_parts();
-                Ok((Box::new(output) as ErasedOutput, status))
+                let (answer, status) = response.into_parts();
+                let answer = match answer {
+                    CoreAnswer::Settled(output) => ErasedAnswer::Settled(Box::new(output) as ErasedOutput),
+                    // The continuation is re-boxed rather than driven here, because driving it is
+                    // what the head has already been committed against: this closure returns as
+                    // soon as the status is known, and the facade writes the head before awaiting
+                    // what is inside.
+                    CoreAnswer::Committed(work) => {
+                        ErasedAnswer::Committed(Box::pin(
+                            async move { work.await.map(|output| Box::new(output) as ErasedOutput) },
+                        ))
+                    }
+                };
+                Ok((answer, status))
             }) as Invocation)
         });
 

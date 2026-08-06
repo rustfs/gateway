@@ -16,7 +16,9 @@ everything a consumer needs so that nothing downstream depends on `-core`, `-sig
 | `src/dispatch.rs` | Codec-aware erasure of one `(operation, backend)` pair, and the per-operation table | A request routes but cannot be decoded, or you are wondering why the body is offered as a stream first |
 | `src/adapt.rs` | The `tower::Service` and `hyper::service::Service` implementations | You are wiring the service into a server, or wondering why `Error = Infallible` |
 | `src/assembly.rs` | `AssemblyError` and the `asm-*` `RuleRef` every refusal carries | You are adding an assembly-time rule; it needs a rule reference |
-| `src/render.rs` | The one place any refusal becomes an `<Error>` document; `document()` is that document without a head, for the 200-then-fail path that has none | You are adding a stage that can refuse, checking that a rejection body echoes nothing, or asking where a refusal's own headers are written |
+| `src/render.rs` | The one place any refusal becomes an `<Error>` document; `document()` is that document without a head and `document_body()` is it without a declaration either, for the 200-then-fail path that has neither | You are adding a stage that can refuse, checking that a rejection body echoes nothing, or asking where a refusal's own headers are written |
+| `src/invariants.rs` | The RFC 9110 body rules applied once to every response, answered or refused: a `HEAD` loses its content and **keeps** its `Content-Length`, a `1xx`/`204`/`205`/`304` loses both | A response carried content it must not have, or you are asking why the rule is not a parameter of `render` |
+| `src/commit.rs` | The wire shape of a response whose head went out before its outcome was known: the prologue, the keep-alive contract, and the trailing declaration-less document | A committed `200` answered a failure and you are asking who wrote which byte, or you are changing the keep-alive cadence |
 | `src/stamp.rs` | The four headers the framework guarantees on **every** response — `x-amz-request-id`, `x-amz-id-2`, `Server`, `Date` — written once and last, plus `is_reserved`, the complement a backend may not set | A response is missing `Date` or `Server`, or you are asking which headers a backend is refused and how |
 | `src/trace.rs` | `RequestId`, `HostId`, `RequestTrace`, `TraceSource`, `MintedTraces`, `FixedTrace`; one identifier per request, minted server-side | A response is missing `x-amz-request-id`, a case needs a pinned identifier, or you are asking why a source cannot echo one the caller sent |
 | `src/wire.rs` | `WireResponse`: a drained response with its **header order preserved** | You are asserting on a response, above all in the conformance runner |
@@ -35,9 +37,9 @@ everything a consumer needs so that nothing downstream depends on `-core`, `-sig
 
 | Path | What it holds |
 | --- | --- |
-| `tests/support/mod.rs` | The shared fixtures: an anonymously-reachable vendor operation, backends, a body that counts what was read |
+| `tests/support/mod.rs` | The shared fixtures: an anonymously-reachable vendor operation, its `HEAD`/content twins covering every response shape (content, refusal, `304`, commit-then-answer, commit-then-fail), backends, a body that counts what was read |
 | `tests/assembly.rs` | What `build()` refuses; 11 negative, 3 positive |
-| `tests/pipeline.rs` | What a request does, the request identifier included; 16 negative, 5 positive |
+| `tests/pipeline.rs` | What a request does, the request identifier included, the RFC 9110 body rules on both paths, and the commit seam; 25 negative, 6 positive |
 | `tests/facade_probe.rs` | Every export the conformance runner's `REQUIRED_FACADE_EXPORTS` names, checked by naming it |
 | `examples/minimal.rs` | The whole assembly in one file, asserting one answered request and one refused one |
 
@@ -61,12 +63,28 @@ everything a consumer needs so that nothing downstream depends on `-core`, `-sig
   case that wanted to assert the literal identifier cannot until `crates/conformance` installs one.
 - **`x-amz-id-2` is 32 hexadecimal digits, not AWS's longer base64-shaped token.** Opaque either
   way; the closed alphabet is worth more here than the resemblance. See `src/trace.rs`.
-- **A refusal to a `HEAD` still carries the `<Error>` document.** `render` does not know the
-  method, and the refusal path never reaches `EncodedResponse::enforce_http_invariants`, which is
-  where the "a `HEAD` response has no content" rule lives for the success path. So the second
-  exchange of `c-cond-0023` — the same 412 under `HEAD`, asserting `size = 0` — stays red for a
-  reason unrelated to what a `HandlerError` can express. Closing it means threading the request
-  method into `render`, which changes its public signature; recorded rather than done here.
+- **The `HEAD` and `304` body rules now run once, in `src/invariants.rs`, on both paths.** The
+  decision itself is `rustfs_gateway_core::body_allowance`, a function of the method and the status,
+  so `EncodedResponse::enforce_http_invariants` and this crate enforce one rule over two response
+  types rather than holding two copies of it. `render`'s signature is unchanged — threading the
+  method into it would have put the rule in two places, which is the drift the single point exists
+  to prevent. `c-cond-0023` and `c-object-0008` are green. **`Content-Length` is kept on a `HEAD`**
+  (RFC 9110 §9.3.2: it is the answer the request asked for) and dropped only on the bodyless
+  statuses, which is what `c-cond-0005`, `c-cond-0007`, `c-cond-0010`, `c-cond-0017` and
+  `c-cond-0022` pin.
+- **The commit seam exists and no in-tree backend uses it.** `Resp::commit` lets a handler flush a
+  status before its outcome is known, and `src/commit.rs` writes the result; the four cases that
+  measure it — `c-mpu-0001`, `c-mpu-0038`, `c-mpu-0040`, `c-copy-0038` — cannot move, because the
+  only backend in this repository is `crates/conformance/src/fixture.rs` and the only transport is
+  `crates/conformance/src/inprocess.rs`, which reports `Outcome::Response` and
+  `body_bytes_before_error: None` unconditionally. Both are outside this change's file scope. See
+  "Open for maintainer review" below.
+- **The keep-alive cadence is declared and not driven.** `commit::KEEPALIVE_BYTE` and
+  `commit::KEEPALIVE_INTERVAL_SECONDS` are the observable contract and have one home, but nothing
+  writes a keep-alive byte: emitting one every N seconds while a future is pending needs a timer,
+  and this crate has no runtime dependency (`tokio` is dev-only in the workspace manifest). The
+  committed body is therefore assembled once the outcome is known. A deployment behind a client
+  with a short read timeout will see the timeout, not the whitespace.
 - **`Server` is the bare product name.** No version, deliberately: see the security note in
   `src/stamp.rs`. A deployment that wants a different name has no knob for it yet — that would be a
   `ServiceBuilder` option, and nothing has asked for one.

@@ -96,11 +96,14 @@ pub mod ops;
 pub mod registry;
 pub mod route;
 
-pub use crate::codec::{CodecError, EncodedResponse, MetaView, OperationCodec, RequestBody, ResponseBody, ResponseOverride};
+pub use crate::codec::{
+    BodyAllowance, CodecError, EncodedResponse, MetaView, OperationCodec, RequestBody, ResponseBody, ResponseOverride,
+    body_allowance,
+};
 pub use crate::dispatch::{Dispatch, Router, RouterBuildError};
 pub use crate::error::{DisallowedPreAuthCode, PRE_AUTH_STATUSES, PreAuthError};
 pub use crate::fault::{ELEMENT_ORDER, ErrorDetail, ErrorHeader, PRECONDITION_FAILED_MESSAGE, RANGE_NOT_SATISFIABLE_MESSAGE};
-pub use crate::handler::{BoxFuture, Handler, HandlerError, HandlerResult, Req, Resp};
+pub use crate::handler::{Answer, BoxFuture, CommitOutcome, CommitWork, Handler, HandlerError, HandlerResult, Req, Resp};
 pub use crate::op::{
     AuthRequirement, HasOperation, Operation, OperationOrigin, ResourceShape, StandardOperation, is_standard_operation_name,
     standard_operation_names,

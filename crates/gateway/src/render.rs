@@ -230,7 +230,19 @@ impl From<HandlerError> for S3Error {
 /// type that carries them keeps them there.
 #[must_use]
 pub fn document(error: &S3Error, trace: &RequestTrace) -> String {
-    let mut xml = XmlWriter::document();
+    let mut out = String::from(DECLARATION);
+    out.push_str(&document_body(error, trace));
+    out
+}
+
+/// The `<Error>` document with neither a response head **nor an XML declaration** around it.
+///
+/// For the committed path, whose declaration went out with the head: see `crate::commit`. Element
+/// for element it is [`document`]'s output, and it is the same function producing both — a second
+/// renderer for the committed path is a second place `<Code>` could be spelled differently.
+#[must_use]
+pub fn document_body(error: &S3Error, trace: &RequestTrace) -> String {
+    let mut xml = XmlWriter::fragment();
     xml.open("Error", None);
     xml.element("Code", error.code.as_str());
     xml.element("Message", &error.message);

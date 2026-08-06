@@ -199,6 +199,24 @@ impl XmlWriter {
     }
 }
 
+/// Removes the leading [`DECLARATION`], if the bytes open with exactly it.
+///
+/// For the response whose head is committed before its outcome is known: the declaration goes out
+/// with the head, so the document that follows must not carry a second one — and a second `<?xml …?>`
+/// in the middle of a body is not something a parser recovers from, it is a syntax error reported
+/// instead of the outcome the body was carrying.
+///
+/// Exact-prefix only, and deliberately not a "skip any prolog" scanner: this crate wrote the bytes
+/// it is asked to trim, so the one form it emits is the one form worth recognising. Anything else is
+/// left alone rather than guessed at, because trimming the wrong prefix truncates a document.
+#[must_use]
+pub fn strip_declaration(document: &[u8]) -> &[u8] {
+    match document.strip_prefix(DECLARATION.as_bytes()) {
+        Some(rest) => rest,
+        None => document,
+    }
+}
+
 /// Escapes element text.
 ///
 /// The three that change meaning, plus a carriage return. `\r` is escaped because an XML parser

@@ -19,7 +19,51 @@
 
 use crate::error::XmlError;
 use crate::read::parse;
-use crate::write::{S3_XMLNS, XmlWriter};
+use crate::write::{DECLARATION, S3_XMLNS, XmlWriter, strip_declaration};
+
+// ---------------------------------------------------------------------------------------------
+// Declaration removal, for the response whose head is committed before its outcome
+// ---------------------------------------------------------------------------------------------
+
+/// Positive — the declaration this crate writes is the declaration it removes, and the rest of the
+/// document survives byte for byte.
+#[test]
+fn removes_the_declaration_this_crate_writes() {
+    let document = format!("{DECLARATION}<Result><Key>a</Key></Result>");
+    assert_eq!(strip_declaration(document.as_bytes()), b"<Result><Key>a</Key></Result>");
+}
+
+/// Negative — a body with no declaration is returned untouched. A function that trimmed a fixed
+/// number of bytes would decapitate the document element instead.
+#[test]
+fn n_leaves_a_body_without_a_declaration_alone() {
+    assert_eq!(strip_declaration(b"<Result></Result>"), b"<Result></Result>");
+    assert_eq!(strip_declaration(b""), b"");
+}
+
+/// Negative — only the exact form is removed. A declaration spelled differently — single quotes, no
+/// trailing newline, a `standalone` attribute, leading whitespace — is another writer's, and this
+/// function does not guess where it ends.
+#[test]
+fn n_removes_only_the_exact_declaration_and_never_guesses() {
+    for other in [
+        "<?xml version='1.0' encoding='UTF-8'?>\n<A></A>",
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?><A></A>",
+        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<A></A>",
+        " <?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<A></A>",
+    ] {
+        assert_eq!(strip_declaration(other.as_bytes()), other.as_bytes(), "{other}");
+    }
+}
+
+/// Negative — a second declaration further in is not removed. Only the leading one is the prologue's;
+/// removing another would hide a defect in whatever produced the body rather than reporting one.
+#[test]
+fn n_removes_at_most_one_declaration_and_only_at_the_front() {
+    let document = format!("{DECLARATION}<A>{DECLARATION}</A>");
+    let trimmed = strip_declaration(document.as_bytes());
+    assert_eq!(std::str::from_utf8(trimmed).expect("utf-8"), format!("<A>{DECLARATION}</A>"));
+}
 
 // ---------------------------------------------------------------------------------------------
 // Writer

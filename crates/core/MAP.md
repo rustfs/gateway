@@ -29,7 +29,7 @@ the one file that awaits, and it runs after the floor has admitted the request.
 | `src/op.rs` | `Operation`, `OperationOrigin` and its sealed token, `AuthRequirement`, `HasOperation`, the standard-name set | You are adding an operation, or asking what makes one standard |
 | `src/codec/mod.rs` | `OperationCodec`, and the orphan-rule reason the generated codecs are mounted here rather than in `rustfs-gateway-types` | You are adding an operation family, or asking where a wire binding lives |
 | `src/codec/view.rs` | `MetaView` — the request head a decoder reads, with the URI labels split and percent-decoded **exactly once** and repeated header field lines joined as RFC 9110 §5.3 defines them — and `RequestBody`'s three shapes | You are decoding a path label, asking what a header sent twice decodes to, or asking why a decoder cannot aggregate a streaming body |
-| `src/codec/response.rs` | `EncodedResponse`, `ResponseBody`, the `response-*` override table, and the one copy of the RFC 9110 body invariants | A response carries a body it should not, or an override did not apply |
+| `src/codec/response.rs` | `EncodedResponse`, `ResponseBody`, the `response-*` override table, and `body_allowance` — the one copy of the RFC 9110 body **decision**, which the facade enforces over its own response type too | A response carries a body it should not, or an override did not apply |
 | `src/codec/value.rs` | One function per IR scalar, in each direction, plus the one-checksum-header rule, the bounded-integer refusal, the two wire-form refusals (entity tag, server-minted cursor), the `httpChecksumRequired` body guard, and the decode-path placeholder exit | A wire value is parsed or rendered wrongly, or a request is refused before its body is read |
 | `src/codec/tests.rs` | 34 tests over the object family: what the generated codecs do to bytes, including the bounded scalars and the required integrity check | You changed an emitter or a conversion |
 | `src/ops/*.rs` | One AWS operation per file: spec, floor, `impl Operation`, `impl HasOperation` | You are adding an operation — copy the nearest one |
@@ -37,7 +37,7 @@ the one file that awaits, and it runs after the floor has admitted the request.
 | `src/ops/shared/copy_source.rs` | `x-amz-copy-source`: the three grammars, the split-before-decode order, the source-authorization type state, the self-copy classification and the stricter copy-range rule | You are touching anything a copy reads from, or asking why the source's bucket cannot be read without a proof |
 | `src/ops/shared/etag.rs` | Which RFC 9110 comparison each conditional entity-tag header uses, and how its value is read | An entity-tag condition matched when it should not have, or the other way round |
 | `src/ops/shared/precondition.rs` | The fixed precondition order, the two places S3 departs from RFC 9110, the 200/206/416 range decision, and six inline tests for the one validator shape `tests/precondition_range.rs` never builds — a representation that exists with no entity tag, where `*` must still hold | You are wiring a conditional or ranged operation, or a 304/412/416 came out wrong |
-| `src/handler.rs` | `Handler<O>`, `Req`, `Resp`, `HandlerError` (code, message, response headers, document elements), `BoxFuture` | You are implementing a backend, or a refusal needs a header or an extra element |
+| `src/handler.rs` | `Handler<O>`, `Req`, `Resp`, `Answer` / `CommitOutcome` / `CommitWork` (the "committed, then failed" shape), `HandlerError` (code, message, response headers, document elements), `BoxFuture` | You are implementing a backend, a refusal needs a header or an extra element, or an operation has to flush its status before it knows its outcome |
 | `src/fault.rs` | `ErrorHeader` and `ErrorDetail`: the two **closed sets** a refusal may add to itself, the canonical `ELEMENT_ORDER`, and the two AWS-pinned messages | You need a header or an element on an error response, or you are asking why it is not a `HeaderMap` |
 | `src/registry/mod.rs` | `OperationSpec`, `RequiredParam`, `check_required`, `Registry`, `WireEntry` — and `register_handler`, the one call that installs a handler and a codec together | You are adding a required parameter, or looking an operation up by name |
 | `src/registry/reject.rs` | `RegistryError` and the seven rules an operation passes before it registers | A registration was refused |
@@ -110,6 +110,24 @@ the one file that awaits, and it runs after the floor has admitted the request.
   Sixty-four short sorted keys is six comparisons and no build script.
 
 ## Open for maintainer review
+
+- **The commit seam is wired end to end and nothing in this repository exercises it against the
+  corpus.** `Resp::commit` and the facade's `commit` module answer `c-mpu-0001`, `c-mpu-0038`,
+  `c-mpu-0040` and `c-copy-0038` in principle; none of the four can go green, because the only
+  backend is `crates/conformance/src/fixture.rs` (which would have to call `Resp::commit` for
+  `CompleteMultipartUpload` and `CopyObject`) and the only transport is
+  `crates/conformance/src/inprocess.rs` (which reports `Outcome::Response`, `stream_termination:
+  None` and `body_bytes_before_error: None` unconditionally, so `expect.kind = "stream_error"` can
+  never be satisfied). `c-mpu-0040` needs a third thing again: a backend that stops making progress
+  and a transport that can observe an abrupt close.
+- **`c-mpu-0001` and `c-mpu-0038` disagree about the committed prologue.** `c-mpu-0001` and
+  `c-copy-0038` both pin `body_bytes_before_error = 39` and name those bytes "the XML declaration and
+  its newline"; `c-mpu-0038` asserts `declaration = false` over the whole body of a *successful*
+  completion. A prologue is chosen before the outcome is known, so it cannot be a declaration in one
+  case and absent in the other. This implementation follows the two cases that agree — the prologue
+  is the declaration, and the document after it carries none — which leaves `c-mpu-0038` unsatisfiable
+  as written. Cases are the contract and are not edited from the implementation side, so this is a
+  maintainer decision of the same kind as `c-mpu-0018` and `c-etag-0001`.
 
 - **A deferred operation contributes no route row, so forty-six of the model's operations are
   still answered by a neighbour instead of being refused.** `GetObjectAttributes` was the reported
@@ -252,7 +270,20 @@ the one file that awaits, and it runs after the floor has admitted the request.
   needs the drop of that argument, and `tests/codec_binding.rs` pins the behaviour.
 - **`OperationCodec` decides the status from the handler's `Resp`, and applies the RFC 9110 body
   invariants last.** A `HEAD` response and a `1xx`/`204`/`205`/`304` lose their body in
-  `EncodedResponse::enforce_http_invariants`, once, for every operation — never per operation.
+  `EncodedResponse::enforce_http_invariants`, once, for every operation — never per operation. The
+  *decision* behind it is `body_allowance(method, status)`, separate from the enforcement, because a
+  refusal never reaches an encoder and the facade has to reach the same conclusion over an
+  `http::Response`. One rule, two enforcement sites, and neither holds a copy of it.
+- **`Resp<O>` is a status plus an `Answer<O>`, and the second variant is the commit seam.**
+  `Answer::Settled` is what every handler produced before; `Answer::Committed` holds a `CommitWork`
+  whose output is `Result<O::Output, HandlerError>` — statusless, deliberately, because by the time
+  it resolves the status line has been sent. There is no run-time check that a committed response
+  keeps its status: after `Resp::commit` there is no value a status could be written into, and
+  `Resp` has never had a setter. **This is a breaking change** (ADR-0004: `0.x` minor releases may
+  break): `Resp::output` and `Resp::into_output` now answer `Option`, and `Resp::into_parts` yields
+  an `Answer<O>` rather than an `O::Output`. Every handler-side spelling — `Resp::new`,
+  `Resp::with_status`, `HandlerResult<O>` — is unchanged, which is what keeps existing backends
+  compiling.
 - **`OperationSet` is a name set, not a bit set, and there is no `AWS_CORE`.** An index-based set
   needs a generator to assign the indices, and a curated `AWS_CORE` would be a second source of
   truth about which operations exist. Both belong in codegen; `OperationSet::aws_full()` reads the

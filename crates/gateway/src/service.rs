@@ -71,7 +71,7 @@ use rustfs_gateway_stream::Body;
 use rustfs_gateway_types::ErrorCode;
 
 use crate::clock::Clock;
-use crate::dispatch::{DispatchTable, target_of};
+use crate::dispatch::{DispatchTable, ErasedAnswer, target_of};
 use crate::ext::{
     Authentication, Authenticator, Authorizer, AuthzRequest, Governor, GovernorRequest, HostQuery, HostResolver, Observer,
     RequestEvent,
@@ -147,8 +147,16 @@ impl S3Service {
         // window name the same moment.
         let trace = self.inner.traces.mint();
         let now = self.inner.clock.now();
+        // Read before the request is consumed, and the only thing kept out of it: the RFC 9110 body
+        // rules are stated over the request method, and every stage below has either forgotten it or
+        // never had it.
+        let method = request.method().clone();
         let mut outcome = Outcome::new(&trace);
         let mut response = self.run(request, &mut outcome, now).await;
+        // The one place the body invariants run, on both paths: the body is chosen and nothing has
+        // been written. A refusal never reaches an encoder, so this is the only position from which
+        // "a `HEAD` response has no content" can cover it.
+        crate::invariants::enforce(&mut response, &method);
         // The one stamping site, on both paths, and the last writer on either. `render` has already
         // written the identifiers on the refusal path and writes the identical bytes, so this is an
         // overwrite with the same value there; on the success path it is the only writer, including
@@ -329,9 +337,25 @@ impl S3Service {
             Ok(invocation) => invocation,
             Err(error) => return outcome.refuse(S3Error::from(error)),
         };
-        let (output, status) = match invocation.await {
+        let (answer, status) = match invocation.await {
             Ok(answer) => answer,
             Err(error) => return outcome.refuse(S3Error::from(error)),
+        };
+        let output = match answer {
+            ErasedAnswer::Settled(output) => output,
+            // The head is committed from here on. Every exit below answers `status`, and none of
+            // them can answer anything else: the continuation's `Err` is a `HandlerError`, which
+            // carries a code and a message and no status of its own.
+            ErasedAnswer::Committed(work) => {
+                let committed = StatusCode::from_u16(status).unwrap_or(StatusCode::OK);
+                return match work.await {
+                    Ok(output) => match op.encode(output, &meta, status) {
+                        Ok(encoded) => crate::commit::answered(encoded, committed),
+                        Err(error) => outcome.refuse_after_commit(S3Error::from(error), committed),
+                    },
+                    Err(error) => outcome.refuse_after_commit(S3Error::from(error), committed),
+                };
+            }
         };
         match op.encode(output, &meta, status) {
             Ok(encoded) => into_response(encoded),
@@ -367,6 +391,17 @@ impl<'a> Outcome<'a> {
     fn refuse(&mut self, error: S3Error) -> Response<Body> {
         self.error = Some(error.code().clone());
         render(&error, self.trace)
+    }
+
+    /// The same, for a refusal that arrived after the head had gone out.
+    ///
+    /// The observer is told the code either way — a `200` whose body carries `<Code>InvalidPart</Code>`
+    /// is a failed request, and an audit trail that recorded it as a success is the exact mistake the
+    /// status line invites. What differs is the status, which is the committed one and no longer
+    /// this refusal's to choose.
+    fn refuse_after_commit(&mut self, error: S3Error, committed: StatusCode) -> Response<Body> {
+        self.error = Some(error.code().clone());
+        crate::commit::refused(&error, self.trace, committed)
     }
 }
 

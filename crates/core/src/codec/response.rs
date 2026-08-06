@@ -27,6 +27,15 @@
 //! operation. Generating them per operation would produce seventy-three copies of one rule and
 //! seventy-three chances to write it once as `!=`. [`EncodedResponse::enforce_http_invariants`] is
 //! the single copy, applied to every encoder's output by the same generated line.
+//!
+//! # Why the decision is a function and the enforcement is not
+//!
+//! [`EncodedResponse`] is what an *encoder* produced, and a refusal never reaches an encoder — it
+//! is rendered straight into an `http::Response` by the facade. So this type cannot be the only
+//! place the rule runs, and a second copy of the rule written against the facade's response type
+//! is exactly the drift the paragraph above is about. [`body_allowance`] is therefore the decision
+//! on its own, over a method and a status and nothing else; both call sites enforce the same
+//! answer over their own response type, and neither can disagree about what the answer is.
 
 use http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode};
 use rustfs_gateway_stream::ByteStream;
@@ -136,27 +145,56 @@ impl EncodedResponse {
 
     /// Applies the RFC 9110 body invariants, and is the last thing every encoder does.
     ///
-    /// Two rules, and neither is negotiable per operation:
-    ///
-    /// * a response to `HEAD` carries the headers a `GET` would and no content;
-    /// * `1xx`, `204`, `205` and `304` carry no content, and no framing header describing one.
-    ///
-    /// The framing headers go with the body in the second case only. A `HEAD` keeps its
-    /// `Content-Length`, because that number is the answer the request was asking for.
+    /// The decision is [`body_allowance`]'s; this method is the half that knows how to drop a body
+    /// and a header off *this* type. The facade applies the same decision to a refusal, which never
+    /// reaches an encoder and therefore never reaches here.
     pub fn enforce_http_invariants(&mut self, method: &Method) {
-        let status = self.status.as_u16();
-        let statusless_body = self.status.is_informational() || status == 204 || status == 205 || status == 304;
-
-        if statusless_body {
-            self.body = ResponseBody::Empty;
-            self.headers.remove(http::header::CONTENT_LENGTH);
-            self.headers.remove(http::header::TRANSFER_ENCODING);
-            return;
-        }
-        if method == Method::HEAD {
-            self.body = ResponseBody::Empty;
+        match body_allowance(method, self.status) {
+            BodyAllowance::Content => {}
+            BodyAllowance::HeadOfContent => self.body = ResponseBody::Empty,
+            BodyAllowance::Bodyless => {
+                self.body = ResponseBody::Empty;
+                self.headers.remove(http::header::CONTENT_LENGTH);
+                self.headers.remove(http::header::TRANSFER_ENCODING);
+            }
         }
     }
+}
+
+/// What RFC 9110 lets a response carry, given the method it answers and the status it goes out with.
+///
+/// Three answers rather than two, because "no content" and "no content and no framing header" are
+/// different responses and the difference is the whole of [`Self::HeadOfContent`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum BodyAllowance {
+    /// Content, and the framing headers that describe it.
+    Content,
+    /// No content — and `Content-Length` still reporting the length a `GET` would have sent.
+    ///
+    /// RFC 9110 §9.3.2. The number is not a lie and must not be rewritten to `0`: it is the answer
+    /// a `HEAD` was asking for, and a client that reads `0` concludes the object is empty. Dropping
+    /// the *bytes* is the rule; reporting zero of them is a different bug.
+    HeadOfContent,
+    /// No content, and no framing header describing one — `1xx`, `204`, `205`, `304`.
+    Bodyless,
+}
+
+/// The one decision behind both body invariants.
+///
+/// A function of the method and the status alone, so that the success path and the refusal path can
+/// each enforce it over their own response type without either holding a second copy of the rule.
+/// The status is checked first: RFC 9110 §9.3.2 states the `HEAD` rule with no status exception, so
+/// the two overlap on a `304` answered to a `HEAD` and the stricter answer is the right one there.
+#[must_use]
+pub fn body_allowance(method: &Method, status: StatusCode) -> BodyAllowance {
+    let code = status.as_u16();
+    if status.is_informational() || code == 204 || code == 205 || code == 304 {
+        return BodyAllowance::Bodyless;
+    }
+    if method == Method::HEAD {
+        return BodyAllowance::HeadOfContent;
+    }
+    BodyAllowance::Content
 }
 
 /// One `response-<x>` query parameter and the response header it overwrites.
