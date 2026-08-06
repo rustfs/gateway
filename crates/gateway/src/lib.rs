@@ -111,11 +111,17 @@ pub use rustfs_gateway_types::dto;
 // The kernel surface a backend and a test harness have to name. Re-exported rather than reached
 // for directly, because `scripts/check_layer_dependencies.sh` allows the conformance suite to
 // depend on this crate and on nothing else internal.
+// `Answer`, `CommitOutcome` and `CommitWork` are here for the reason `ETag` and `Timestamp` were:
+// `Resp::commit` is exported, so a backend outside this workspace can build a committed response —
+// and then cannot name the type of the work it just handed over, cannot write a function returning
+// one, and cannot match on what `into_parts` gives back. An exported constructor whose argument
+// type is unnameable is the same defect as an unexported contract, one step further along.
 pub use rustfs_gateway_core::{
-    ArnForm, AuthRequirement, BoxFuture, CodecError, ELEMENT_ORDER, EncodedResponse, ErrorDetail, ErrorHeader, Handler,
-    HandlerError, HandlerResult, HostClass, MetaView, MissingHandlers, Operation, OperationCodec, OperationSet, OperationSpec,
-    PRECONDITION_FAILED_MESSAGE, ParamKind, PreAuthError, Predicate, RANGE_NOT_SATISFIABLE_MESSAGE, Req, RequestBody,
-    RequiredParam, ResourceShape, Resp, ResponseBody, ResponseOverride, RouteEntry, RouteSelector, TargetKind,
+    Answer, ArnForm, AuthRequirement, BoxFuture, CodecError, CommitOutcome, CommitWork, ELEMENT_ORDER, EncodedResponse,
+    ErrorDetail, ErrorHeader, Handler, HandlerError, HandlerResult, HostClass, MetaView, MissingHandlers, Operation,
+    OperationCodec, OperationSet, OperationSpec, PRECONDITION_FAILED_MESSAGE, ParamKind, PreAuthError, Predicate,
+    RANGE_NOT_SATISFIABLE_MESSAGE, Req, RequestBody, RequiredParam, ResourceShape, Resp, ResponseBody, ResponseOverride,
+    RouteEntry, RouteSelector, TargetKind,
 };
 // The pagination contract. Found unreachable by check_shared_reachable.sh the moment that
 // guard existed — the fourth contract in a row written for backends and left where no
