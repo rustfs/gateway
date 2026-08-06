@@ -29,9 +29,9 @@
 
 use std::fmt::Write as _;
 
-use rustfs_gateway_model::ir::{Binding, Field, OperationIr, Shape, Type};
+use rustfs_gateway_model::ir::{Binding, Field, OperationIr, Quirk, Shape, Type};
 
-use super::expr;
+use super::{bounds, expr};
 use crate::emit::dto::naming;
 
 /// The default code for a required member the request did not carry.
@@ -61,6 +61,15 @@ pub fn body(ir: &OperationIr) -> Result<String, String> {
     // time from bindings that may or may not fire, and `clippy::field_reassign_with_default`
     // refuses the plain form. It is also the construction ADR-0004 P1 asks callers to use.
     out.push_str("        let mut input = Input { ..Default::default() };\n");
+
+    // `checksum.http_checksum_required`, and nothing else, decides this. It is the first statement
+    // of the decoder because the operations that carry it are the ones whose body must not be read
+    // on an unverifiable request: `DeleteObjects` is a list of keys to destroy, so buffering it and
+    // refusing afterwards has already paid for the attack.
+    if ir.checksum.http_checksum_required {
+        out.push_str("        // The IR declares this operation httpChecksumRequired.\n");
+        out.push_str("        value::require_integrity(request)?;\n");
+    }
 
     for field in &ir.input {
         out.push_str(&one_field(ir, field)?);
@@ -93,14 +102,14 @@ fn one_field(ir: &OperationIr, field: &Field) -> Result<String, String> {
             out.push_str(&assign(8, &target, &format!("request.{accessor}()?")));
         }
         Binding::Header => {
-            let conversion = expr::from_wire(&field.ty, member, op, false)?;
+            let conversion = expr::from_wire(&field.ty, member, op, false, bounds::of(field, &ir.quirks, op)?)?;
             let _ = writeln!(out, "        // {member} — header `{wire}`.");
             let _ = writeln!(out, "        if let Some(raw) = request.header(\"{wire}\") {{");
             out.push_str(&assign(12, &target, &wrap(field, &conversion)));
             out.push_str(&otherwise(field, &target)?);
         }
         Binding::Query => {
-            let conversion = expr::from_wire(&field.ty, member, op, false)?;
+            let conversion = expr::from_wire(&field.ty, member, op, false, bounds::of(field, &ir.quirks, op)?)?;
             let _ = writeln!(out, "        // {member} — query `{wire}`, percent-decoded once.");
             let _ = writeln!(out, "        if let Some(raw) = request.query(\"{wire}\") {{");
             let _ = writeln!(out, "            let raw = raw.as_ref();");
@@ -226,7 +235,11 @@ fn wrap(field: &Field, inner: &str) -> String {
 }
 
 /// Renders the reader for one nested request shape.
-pub fn shape_reader(operation: &str, name: &str, shape: &Shape) -> Result<String, String> {
+///
+/// Takes the operation's resolved quirks because a bounded integer is bounded wherever it is read:
+/// `PartNumber` in a query and `PartNumber` in a completion body are the same wire contract, and a
+/// reader that consulted only the operation's own fields would enforce it in one of the two.
+pub fn shape_reader(operation: &str, name: &str, shape: &Shape, quirks: &[Quirk]) -> Result<String, String> {
     let type_name = naming::type_name(name);
     let mut out = String::new();
     let _ = writeln!(
@@ -251,7 +264,7 @@ pub fn shape_reader(operation: &str, name: &str, shape: &Shape) -> Result<String
                 flattened,
                 wrapper_name,
             } if !matches!(inner.as_ref(), Type::Structure(_)) => {
-                let conversion = expr::from_wire(inner, member, operation, true)?;
+                let conversion = expr::from_wire(inner, member, operation, true, bounds::of(field, quirks, operation)?)?;
                 let source = if *flattened {
                     format!("node.children_named(\"{wire}\")")
                 } else {
@@ -303,7 +316,7 @@ pub fn shape_reader(operation: &str, name: &str, shape: &Shape) -> Result<String
                 out.push_str("    }\n");
             }
             other => {
-                let conversion = expr::from_wire(other, member, operation, true)?;
+                let conversion = expr::from_wire(other, member, operation, true, bounds::of(field, quirks, operation)?)?;
                 let _ = writeln!(out, "    if let Some(raw) = node.child_text(\"{wire}\") {{");
                 out.push_str(&assign(8, &target, &wrap(field, &conversion)));
                 out.push_str("    }\n");

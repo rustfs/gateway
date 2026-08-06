@@ -18,6 +18,7 @@
 //! gate, the golden comparison, and `why`.
 //! NOT responsible for: the parsers, which are tested in `rustfs-gateway-model`.
 
+mod bounds_tests;
 mod codegen_tests;
 mod dto_tests;
 mod golden_tests;

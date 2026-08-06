@@ -12,11 +12,12 @@ everything a consumer needs so that nothing downstream depends on `-core`, `-sig
 | --- | --- | --- |
 | `src/lib.rs` | Module mounting and the whole re-export list; the assembly example in rustdoc | You need to know what the facade publishes, or something downstream cannot name a type |
 | `src/builder.rs` | `ServiceBuilder`: registration, extension points, and the assembly-time refusals | You are adding a builder knob, or `build()` refused and you want to know which check fired |
-| `src/service.rs` | `S3Service` and the ordered pipeline (accept → resolve → route → govern → read body → admit → authenticate → decode → authorize → dispatch → encode) | A request reached the wrong stage, or you are moving a stage — the module docs say which positions are load-bearing |
+| `src/service.rs` | `S3Service` and the ordered pipeline (mint identifiers → accept → resolve → route → govern → read body → admit → authenticate → decode → authorize → dispatch → encode → stamp identifiers) | A request reached the wrong stage, or you are moving a stage — the module docs say which positions are load-bearing |
 | `src/dispatch.rs` | Codec-aware erasure of one `(operation, backend)` pair, and the per-operation table | A request routes but cannot be decoded, or you are wondering why the body is offered as a stream first |
 | `src/adapt.rs` | The `tower::Service` and `hyper::service::Service` implementations | You are wiring the service into a server, or wondering why `Error = Infallible` |
 | `src/assembly.rs` | `AssemblyError` and the `asm-*` `RuleRef` every refusal carries | You are adding an assembly-time rule; it needs a rule reference |
 | `src/render.rs` | The one place any refusal becomes an `<Error>` document | You are adding a stage that can refuse, or checking that a rejection body echoes nothing |
+| `src/trace.rs` | `RequestId`, `HostId`, `RequestTrace`, `TraceSource`, `MintedTraces`, `FixedTrace`; one identifier per request, minted server-side | A response is missing `x-amz-request-id`, a case needs a pinned identifier, or you are asking why a source cannot echo one the caller sent |
 | `src/wire.rs` | `WireResponse`: a drained response with its **header order preserved** | You are asserting on a response, above all in the conformance runner |
 | `src/clock.rs` | `Clock`, `FixedClock`; one reading per request | A case needs a fixed timestamp, or you are tempted to read the clock twice |
 | `src/transport.rs` | `Transport` — which assembly path a run used | You are adding a path, or a runner has to name one |
@@ -27,7 +28,7 @@ everything a consumer needs so that nothing downstream depends on `-core`, `-sig
 | `src/ext/credentials.rs` | `Credentials`, `CredentialProvider`, `StaticCredentials` | You are wiring an IAM store, or a secret appeared somewhere it should not |
 | `src/ext/host.rs` | `HostResolver` (synchronous), `PathStyleOnly` | Virtual-hosted addressing is not working — the default does not read the host |
 | `src/ext/governor.rs` | `Governor`, `Unlimited`; the hook that runs after routing and before the body | You are adding a quota, or checking the hook's position |
-| `src/ext/observer.rs` | `Observer` (synchronous), `NoObserver` | You are wiring an audit trail |
+| `src/ext/observer.rs` | `Observer` (synchronous), `NoObserver`, and the `RequestEvent` that carries the request identifier | You are wiring an audit trail, or joining a log line to the identifier a caller quoted |
 
 ## Tests and examples
 
@@ -35,7 +36,7 @@ everything a consumer needs so that nothing downstream depends on `-core`, `-sig
 | --- | --- |
 | `tests/support/mod.rs` | The shared fixtures: an anonymously-reachable vendor operation, backends, a body that counts what was read |
 | `tests/assembly.rs` | What `build()` refuses; 11 negative, 3 positive |
-| `tests/pipeline.rs` | What a request does; 11 negative, 3 positive |
+| `tests/pipeline.rs` | What a request does, the request identifier included; 16 negative, 5 positive |
 | `tests/facade_probe.rs` | Every export the conformance runner's `REQUIRED_FACADE_EXPORTS` names, checked by naming it |
 | `examples/minimal.rs` | The whole assembly in one file, asserting one answered request and one refused one |
 
@@ -53,3 +54,9 @@ everything a consumer needs so that nothing downstream depends on `-core`, `-sig
   refused rather than mis-framed.
 - **The header map is cloned once per request**, because `WireRequest` publishes no way back to it
   and `SecurityFloor` is defined over the raw map.
+- **The conformance runner does not pin the request identifier yet.** `FixedTrace` and
+  `ServiceBuilder::trace_source` exist for it, and every case that compares an error document byte
+  for byte redacts `RequestId`/`HostId` today, so nothing is red for want of the injection — but a
+  case that wanted to assert the literal identifier cannot until `crates/conformance` installs one.
+- **`x-amz-id-2` is 32 hexadecimal digits, not AWS's longer base64-shaped token.** Opaque either
+  way; the closed alphabet is worth more here than the resemblance. See `src/trace.rs`.

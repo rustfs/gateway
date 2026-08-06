@@ -99,7 +99,7 @@ type = "Integer"
 required = false
 hot = true
 default = 1000
-quirks = []
+quirks = ["q-max-keys-0073"]
 
 [[input]]
 name = "Prefix"

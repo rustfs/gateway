@@ -76,6 +76,7 @@ mod dispatch;
 mod ext;
 mod render;
 mod service;
+mod trace;
 mod transport;
 mod wire;
 
@@ -92,6 +93,9 @@ pub use crate::ext::{
 };
 pub use crate::render::{S3Error, declaration, render};
 pub use crate::service::S3Service;
+pub use crate::trace::{
+    FixedTrace, HOST_ID_HEADER, HostId, MintedTraces, REQUEST_ID_HEADER, RequestId, RequestTrace, TraceSource,
+};
 pub use crate::transport::Transport;
 pub use crate::wire::{OrderedHeaders, WireResponse, collect};
 

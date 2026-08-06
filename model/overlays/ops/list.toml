@@ -74,6 +74,7 @@ url_encoded_fields = [
 side = "input"
 name = "MaxKeys"
 default_int = 1000
+quirks = ["q-max-keys-0073"]
 
 [[op.ListObjectsV2.field]]
 side = "input"

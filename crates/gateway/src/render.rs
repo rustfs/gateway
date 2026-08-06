@@ -30,12 +30,21 @@
 //!
 //! # What may appear in the body
 //!
-//! The code, a message, and — for a decode failure — the *model member* name, which is a
-//! compile-time constant from the IR. Nothing derived from the request reaches
-//! [`S3Error::message`], because the types that carry a message before authentication
+//! The code, a message, — for a decode failure — the *model member* name, which is a compile-time
+//! constant from the IR, and the two server-minted identifiers. Nothing derived from the request
+//! reaches [`S3Error::message`], because the types that carry a message before authentication
 //! (`PreAuthError`, `CodecError`) hold `&'static str` and `format!` does not typecheck into them.
 //! A [`rustfs_gateway_core::HandlerError`] may carry a dynamic message, and it may because by then
 //! the caller has been authenticated and authorised.
+//!
+//! # Why the identifiers arrive as a parameter rather than being minted here
+//!
+//! [`render`] takes the [`RequestTrace`] the service already minted. Minting one here would be the
+//! second minting site in a request, and the header the service writes and the `<RequestId>` this
+//! function writes would then name two different requests — a discrepancy no test that reads only
+//! one of them would ever see. So this function cannot mint: it holds no [`crate::TraceSource`],
+//! and the value it renders is the value the caller receives in the header, because it writes that
+//! header too.
 
 use http::header::{CONTENT_LENGTH, CONTENT_TYPE};
 use http::{Response, StatusCode};
@@ -47,6 +56,7 @@ use rustfs_gateway_types::{ErrorCode, ErrorContext, status_of};
 use rustfs_gateway_xml::{DECLARATION, XmlWriter};
 
 use crate::ext::Denial;
+use crate::trace::RequestTrace;
 
 /// A refusal, in the shape the renderer needs.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -161,8 +171,12 @@ impl From<HandlerError> for S3Error {
 /// The body is omitted for the statuses RFC 9110 says carry none, and for `HEAD`, which the
 /// service applies afterwards through `EncodedResponse::enforce_http_invariants`. Everything else
 /// gets a document, because a client that receives a bare status has nothing to branch on.
+///
+/// `trace` is written twice — into the response head and into the document — from one value, which
+/// is the whole of the request-identifier invariant. `RequestId` and `HostId` come last in the
+/// element order, after `Resource` and any code-specific element, which is where S3 puts them.
 #[must_use]
-pub fn render(error: &S3Error) -> Response<Body> {
+pub fn render(error: &S3Error, trace: &RequestTrace) -> Response<Body> {
     let mut xml = XmlWriter::document();
     xml.open("Error", None);
     xml.element("Code", error.code.as_str());
@@ -170,6 +184,8 @@ pub fn render(error: &S3Error) -> Response<Body> {
     if let Some(resource) = &error.resource {
         xml.element("Resource", resource);
     }
+    xml.element("RequestId", trace.request_id().as_str());
+    xml.element("HostId", trace.host_id().as_str());
     xml.close();
     let body = xml.finish();
 
@@ -181,6 +197,7 @@ pub fn render(error: &S3Error) -> Response<Body> {
     if let Ok(value) = http::HeaderValue::from_str(&length.to_string()) {
         headers.insert(CONTENT_LENGTH, value);
     }
+    trace.apply(headers);
     response
 }
 
@@ -196,12 +213,19 @@ pub const fn declaration() -> &'static str {
 mod tests {
     use super::*;
 
+    /// The trace the tests below render with; pinned so a body can be read literally.
+    fn trace() -> RequestTrace {
+        RequestTrace::from_bits(0x0123_4567_89AB_CDEF, 0)
+    }
+
     /// Negative — a rejection body carries the code and the message and nothing else. This is the
     /// assertion that stops a future edit from adding the request path "for debuggability".
     #[tokio::test]
     async fn a_rendered_refusal_echoes_nothing_from_the_request() {
         let error = S3Error::from(AuthError::SignatureDoesNotMatch);
-        let collected = crate::wire::collect(render(&error)).await.expect("an in-memory body");
+        let collected = crate::wire::collect(render(&error, &trace()))
+            .await
+            .expect("an in-memory body");
         let body = String::from_utf8(collected.body().to_vec()).expect("utf-8");
         assert!(body.contains("<Code>SignatureDoesNotMatch</Code>"), "{body}");
         assert!(body.contains("the request was not authenticated"), "{body}");
@@ -237,9 +261,44 @@ mod tests {
     #[tokio::test]
     async fn the_document_opens_with_the_xml_declaration() {
         let error = S3Error::new(ErrorCode::ACCESS_DENIED, "the request is not allowed");
-        let collected = crate::wire::collect(render(&error)).await.expect("an in-memory body");
+        let collected = crate::wire::collect(render(&error, &trace()))
+            .await
+            .expect("an in-memory body");
         let body = String::from_utf8(collected.body().to_vec()).expect("utf-8");
         assert!(body.starts_with(declaration()), "{body}");
         assert!(body.trim_end().ends_with("</Error>"), "{body}");
+    }
+
+    /// Negative — the header and the document carry the same identifier, byte for byte. Two
+    /// formatting sites that agree today are two that can drift apart tomorrow.
+    #[tokio::test]
+    async fn the_header_and_the_document_carry_one_identifier() {
+        let error = S3Error::new(ErrorCode::ACCESS_DENIED, "the request is not allowed");
+        let collected = crate::wire::collect(render(&error, &trace()))
+            .await
+            .expect("an in-memory body");
+        let body = String::from_utf8(collected.body().to_vec()).expect("utf-8");
+        assert!(body.contains("<RequestId>0123456789ABCDEF</RequestId>"), "{body}");
+        assert_eq!(collected.header("x-amz-request-id"), Some("0123456789ABCDEF"));
+        assert!(body.contains("<HostId>00000000000000000000000000000000</HostId>"), "{body}");
+        assert_eq!(collected.header("x-amz-id-2"), Some("00000000000000000000000000000000"));
+    }
+
+    /// Negative — the identifiers come last, after a code-specific element such as `Resource`. A
+    /// client that reads the document positionally sees the order S3 emits.
+    #[tokio::test]
+    async fn the_identifiers_are_the_last_two_elements() {
+        let error = S3Error::new(ErrorCode::ACCESS_DENIED, "the request is not allowed").about_resource("Bucket");
+        let collected = crate::wire::collect(render(&error, &trace()))
+            .await
+            .expect("an in-memory body");
+        let body = String::from_utf8(collected.body().to_vec()).expect("utf-8");
+        assert!(
+            body.trim_end().ends_with(
+                "<Resource>Bucket</Resource><RequestId>0123456789ABCDEF</RequestId>\
+                            <HostId>00000000000000000000000000000000</HostId></Error>"
+            ),
+            "{body}"
+        );
     }
 }

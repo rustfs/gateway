@@ -35,6 +35,8 @@ use crate::codec::{CodecError, MetaView, OperationCodec, RequestBody, value};
 impl OperationCodec for dto::DeleteObjects {
     fn decode(request: &MetaView<'_>, body: RequestBody) -> Result<Self::Input, CodecError> {
         let mut input = Input { ..Default::default() };
+        // The IR declares this operation httpChecksumRequired.
+        value::require_integrity(request)?;
         // Bucket — URI label, decoded once by `MetaView::of`.
         input.bucket = request.require_bucket()?;
         // Delete — the XML request body, rooted at `Delete`.

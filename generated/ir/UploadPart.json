@@ -112,7 +112,7 @@
                            "binding": { "kind": "Query" },
                            "type": { "kind": "Integer" },
                            "hot": true,
-                           "quirk_refs": ["q-mpu-limits-0038"]
+                           "quirk_refs": ["q-mpu-limits-0038", "q-part-number-0072"]
                          },
                          {
                            "name": "UploadId",
@@ -406,6 +406,25 @@
                               }
                             ],
                 "cases": ["c-mpu-0020", "c-mpu-0024", "c-mpu-0026", "c-mpu-0027"]
+              },
+              {
+                "id": "q-part-number-0072",
+                "kind": "bounded_range",
+                "target": "UploadPart.PartNumber",
+                "summary": "A part number runs from one to ten thousand inclusive, and one outside that range is refused before any byte is stored, because a part above the ceiling can never be completed and no abort enumerates it.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/userguide/qfacts.html",
+                                "summary": "States the part-number range as one through ten thousand inclusive."
+                              },
+                              {
+                                "kind": "s3s-pr",
+                                "ref": "https://github.com/s3s-project/s3s/pull/281",
+                                "summary": "Upstream did not enforce the multipart limits, so an upload could exceed the part ceiling and fail only at assembly."
+                              }
+                            ],
+                "cases": ["c-mpu-0024"]
               }
             ],
   "ext_points": []

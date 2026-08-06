@@ -121,7 +121,7 @@ binding = "Query"
 type = "Integer"
 required = true
 hot = true
-quirks = ["q-mpu-limits-0038"]
+quirks = ["q-mpu-limits-0038", "q-part-number-0072"]
 
 [[input]]
 name = "UploadId"

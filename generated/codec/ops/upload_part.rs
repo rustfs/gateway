@@ -60,7 +60,7 @@ impl OperationCodec for dto::UploadPart {
         // PartNumber — query `partNumber`, percent-decoded once.
         if let Some(raw) = request.query("partNumber") {
             let raw = raw.as_ref();
-            input.part_number = value::integer(raw, "PartNumber")?;
+            input.part_number = value::integer_in_range(raw, "PartNumber", 1, 10000)?;
         } else {
             return Err(value::missing("InvalidArgument", "PartNumber"));
         }

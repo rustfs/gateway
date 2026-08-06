@@ -222,7 +222,7 @@ quirks = ["q-length-0007"]
 [[op.UploadPart.field]]
 side = "input"
 name = "PartNumber"
-quirks = ["q-mpu-limits-0038"]
+quirks = ["q-mpu-limits-0038", "q-part-number-0072"]
 
 [[op.UploadPart.field]]
 side = "input"

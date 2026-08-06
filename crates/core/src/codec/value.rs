@@ -78,6 +78,25 @@ pub fn integer(value: &str, member: &'static str) -> Result<i32, CodecError> {
     value.trim().parse::<i32>().map_err(|_| unusable(member))
 }
 
+/// Parses a 32-bit integer and refuses one outside the range its binding declares.
+///
+/// Out of range is the same refusal as unparseable, and deliberately so: `partNumber=10001` and
+/// `partNumber=abc` are both a parameter the caller has to fix, and a client that is told
+/// `InvalidArgument` for one and something else for the other learns nothing from the difference.
+/// Clamping is the alternative this function exists to refuse — a caller asking for a hundred
+/// thousand keys and reading a thousand concludes the bucket is small.
+///
+/// # Errors
+///
+/// [`CodecError`] naming the member.
+pub fn integer_in_range(value: &str, member: &'static str, min: i32, max: i32) -> Result<i32, CodecError> {
+    let parsed = integer(value, member)?;
+    if parsed < min || parsed > max {
+        return Err(unusable(member));
+    }
+    Ok(parsed)
+}
+
 /// Parses a 64-bit integer.
 ///
 /// # Errors
@@ -242,6 +261,52 @@ pub fn checksum_spec(
         found = Some(spec);
     }
     Ok(found)
+}
+
+/// The header prefix every per-algorithm request checksum is spelled with.
+const CHECKSUM_PREFIX: &str = "x-amz-checksum-";
+
+/// The header a chunked upload uses to announce the checksum it will send as a trailer.
+const TRAILER_HEADER: &str = "x-amz-trailer";
+
+/// The header carrying the legacy whole-body digest.
+const CONTENT_MD5: &str = "content-md5";
+
+/// Refuses a request body that carries no integrity claim at all.
+///
+/// Generated into the decoder of every operation whose IR says `checksum.http_checksum_required`,
+/// and called before a single body byte is read. That order is the point: for `DeleteObjects` the
+/// body is a list of keys to destroy, so a server that buffers a megabyte of them and only then
+/// refuses has already paid for the attack, and one corrupted in transit deletes keys nobody can
+/// identify afterwards.
+///
+/// Three spellings satisfy it, and the third is why this is not a plain header lookup: a chunked
+/// upload sends its digest in a trailer and announces it in `x-amz-trailer`, so demanding a header
+/// value would refuse traffic the AWS SDKs consider well formed.
+///
+/// `x-amz-sdk-checksum-algorithm` deliberately does not satisfy it. It names an algorithm and
+/// carries no digest, so treating it as an integrity check would accept exactly the request this
+/// function exists to refuse.
+///
+/// # Errors
+///
+/// [`CodecError::invalid_request`] naming the header a caller can supply.
+pub fn require_integrity(request: &MetaView<'_>) -> Result<(), CodecError> {
+    if request.header(CONTENT_MD5).is_some() {
+        return Ok(());
+    }
+    if request.headers_with_prefix(CHECKSUM_PREFIX).next().is_some() {
+        return Ok(());
+    }
+    if request
+        .header(TRAILER_HEADER)
+        .is_some_and(|value| value.to_ascii_lowercase().contains(CHECKSUM_PREFIX))
+    {
+        return Ok(());
+    }
+    Err(CodecError::invalid_request(
+        "this operation requires an integrity check on the request body: send Content-MD5 or an x-amz-checksum-* header",
+    ))
 }
 
 /// Renders a checksum back into its `x-amz-checksum-<algorithm>` header name and value.

@@ -29,19 +29,32 @@
 //! returns, does not need to await at all. An implementation that must do I/O hands the event to
 //! its own task; that is a decision it makes visibly rather than one the signature makes for it.
 //!
+//! # Why the event carries the request identifier
+//!
+//! An audit line that cannot be joined to the caller's copy of the same event is an audit line
+//! nobody can act on: the caller quotes the `x-amz-request-id` it received, and without that value
+//! in the record there is nothing to look it up by. The event therefore carries the very same
+//! [`RequestId`] the response went out with — the one `crate::service` minted, not a second one —
+//! which is what makes "the caller's id and the log's id are the same id" true by construction.
+//!
 //! # Why the event carries no request bytes
 //!
-//! [`RequestEvent`] holds the operation name, the status, the access key id and the error code. It
-//! holds no header value, no query string and no body. An observer is the component most likely to
+//! [`RequestEvent`] holds the operation name, the status, the access key id, the error code and
+//! the server-minted request identifier. It holds no header value, no query string and no body. An observer is the component most likely to
 //! be wired to a log sink, and a log line that echoes a request header is how a session token ends
 //! up in a log aggregator.
 
 use rustfs_gateway_sig::Identity;
 use rustfs_gateway_types::ErrorCode;
 
+use crate::trace::RequestId;
+
 /// What happened to one request.
 #[derive(Debug)]
 pub struct RequestEvent<'a> {
+    /// The identifier this request was answered with, and the one the caller received. Minted by
+    /// the service, never read from the request; see [`crate::trace`].
+    pub request_id: &'a RequestId,
     /// The operation routing chose, when routing chose one. `None` when the request named none,
     /// which is the case an operator most often needs to see.
     pub operation: Option<&'a str>,
@@ -113,6 +126,7 @@ mod tests {
     fn an_unrouted_request_is_still_observed() {
         let recorder = Recorder::default();
         recorder.on_response(&RequestEvent {
+            request_id: &RequestId::from_bits(1),
             operation: None,
             status: 501,
             identity: None,
@@ -129,6 +143,7 @@ mod tests {
         let rendered = format!(
             "{:?}",
             RequestEvent {
+                request_id: &RequestId::from_bits(0xDEAD),
                 operation: Some("GetObject"),
                 status: 200,
                 identity: Some(&identity),
@@ -136,6 +151,7 @@ mod tests {
             }
         );
         assert!(rendered.contains("AKIDEXAMPLE"), "{rendered}");
+        assert!(rendered.contains("000000000000DEAD"), "{rendered}");
         assert!(!rendered.contains("Authorization"), "{rendered}");
     }
 
@@ -144,6 +160,7 @@ mod tests {
     fn the_default_records_nothing() {
         let observer: std::sync::Arc<dyn Observer> = std::sync::Arc::new(NoObserver);
         observer.on_response(&RequestEvent {
+            request_id: &RequestId::from_bits(2),
             operation: Some("ListBuckets"),
             status: 200,
             identity: None,

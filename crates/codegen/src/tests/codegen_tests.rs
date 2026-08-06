@@ -30,7 +30,7 @@ fn root() -> PathBuf {
         .to_path_buf()
 }
 
-fn artifacts() -> crate::Artifacts {
+pub(super) fn artifacts() -> crate::Artifacts {
     let root = root();
     generate(&CodegenInput::at(&root), &CodegenOutput::at(&root)).expect("codegen runs against the pinned model")
 }

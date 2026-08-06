@@ -36,6 +36,7 @@
 //! except as a comment and a type. That is the property that makes fifteen more families a matter
 //! of writing overlay entries.
 
+pub mod bounds;
 pub mod decode;
 pub mod encode;
 pub mod expr;
@@ -140,7 +141,7 @@ fn operation(ir: &OperationIr) -> Result<String, String> {
     for (name, shape) in &ir.shapes {
         if reachable_from(ir, name, Side::Input) {
             out.push('\n');
-            out.push_str(&decode::shape_reader(op, name, shape)?);
+            out.push_str(&decode::shape_reader(op, name, shape, &ir.quirks)?);
         }
         if reachable_from(ir, name, Side::Output) {
             out.push('\n');

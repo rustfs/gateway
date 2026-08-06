@@ -50,6 +50,7 @@ use crate::clock::{Clock, system_clock};
 use crate::dispatch::{DispatchTable, OperationDispatch};
 use crate::ext::{Authenticator, Authorizer, Governor, HostResolver, NoObserver, Observer, PathStyleOnly, Unlimited};
 use crate::service::{Inner, S3Service};
+use crate::trace::{MintedTraces, TraceSource};
 
 /// The ceiling on a request body this assembly will hold in memory.
 ///
@@ -77,6 +78,7 @@ pub struct ServiceBuilder {
     governor: Arc<dyn Governor>,
     observer: Arc<dyn Observer>,
     clock: Arc<dyn Clock>,
+    traces: Arc<dyn TraceSource>,
 }
 
 impl core::fmt::Debug for ServiceBuilder {
@@ -115,6 +117,7 @@ impl ServiceBuilder {
             governor: Arc::new(Unlimited),
             observer: Arc::new(NoObserver),
             clock: Arc::new(system_clock()),
+            traces: Arc::new(MintedTraces::new()),
         }
     }
 
@@ -207,6 +210,18 @@ impl ServiceBuilder {
         self
     }
 
+    /// Installs the source of the per-request identifiers. Defaults to [`MintedTraces`].
+    ///
+    /// One trace is minted per request, at the top of the pipeline, and the same value reaches the
+    /// `x-amz-request-id` header, the `<RequestId>` element of an error document and the audit
+    /// event. See [`crate::trace`] for why a source cannot echo anything the caller sent, and read
+    /// the security note on [`crate::FixedTrace`] before installing that one.
+    #[must_use]
+    pub fn trace_source(mut self, traces: impl TraceSource) -> Self {
+        self.traces = Arc::new(traces);
+        self
+    }
+
     /// Narrows the security floor.
     ///
     /// `SecurityFloor` can be narrowed and cannot be widened: its skew window is capped, its
@@ -291,6 +306,7 @@ impl ServiceBuilder {
             governor: self.governor,
             observer: self.observer,
             clock: self.clock,
+            traces: self.traces,
         }))
     }
 }

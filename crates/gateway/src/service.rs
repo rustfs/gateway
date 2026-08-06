@@ -72,6 +72,7 @@ use crate::ext::{
     RequestEvent,
 };
 use crate::render::{S3Error, render};
+use crate::trace::{RequestTrace, TraceSource};
 
 /// Everything an assembled service holds. Behind one `Arc`, so cloning the service is one
 /// refcount bump and a connection may hold its own clone.
@@ -87,6 +88,7 @@ pub(crate) struct Inner {
     pub(crate) governor: Arc<dyn Governor>,
     pub(crate) observer: Arc<dyn Observer>,
     pub(crate) clock: Arc<dyn Clock>,
+    pub(crate) traces: Arc<dyn TraceSource>,
 }
 
 /// An assembled S3 service.
@@ -134,9 +136,17 @@ impl S3Service {
         B::Data: Send,
         B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
     {
-        let mut outcome = Outcome::default();
-        let response = self.run(request, &mut outcome).await;
+        // One minting, at the top, beside the one reading of the clock. Everything below is handed
+        // the value; nothing below holds the source, so a second identifier cannot be minted.
+        let trace = self.inner.traces.mint();
+        let mut outcome = Outcome::new(&trace);
+        let mut response = self.run(request, &mut outcome).await;
+        // The one stamping site, on both paths. `render` has already written these on the refusal
+        // path and writes the identical bytes, so this is an overwrite with the same value there
+        // and the only writer on the success path — including over an encoder that wrote its own.
+        trace.apply(response.headers_mut());
         self.inner.observer.on_response(&RequestEvent {
+            request_id: trace.request_id(),
             operation: outcome.operation,
             status: response.status().as_u16(),
             identity: outcome.identity.as_ref(),
@@ -154,7 +164,7 @@ impl S3Service {
         self.call(Request::from_parts(parts, http_body_util::Full::new(body))).await
     }
 
-    async fn run<B>(&self, request: Request<B>, outcome: &mut Outcome) -> Response<Body>
+    async fn run<B>(&self, request: Request<B>, outcome: &mut Outcome<'_>) -> Response<Body>
     where
         B: http_body::Body + Send + 'static,
         B::Data: Send,
@@ -325,18 +335,32 @@ impl S3Service {
 }
 
 /// What the observer is told, accumulated as the pipeline learns it.
-#[derive(Default)]
-struct Outcome {
+///
+/// Borrows the request's [`RequestTrace`] rather than owning a source, which is what makes the one
+/// identifier per request a property of the type: every refusal below renders through
+/// [`Outcome::refuse`], and `refuse` has exactly one trace it can render with.
+struct Outcome<'a> {
+    trace: &'a RequestTrace,
     operation: Option<&'static str>,
     identity: Option<rustfs_gateway_sig::Identity>,
     error: Option<ErrorCode>,
 }
 
-impl Outcome {
+impl<'a> Outcome<'a> {
+    /// An outcome that knows nothing yet, except which request it is about.
+    const fn new(trace: &'a RequestTrace) -> Self {
+        Self {
+            trace,
+            operation: None,
+            identity: None,
+            error: None,
+        }
+    }
+
     /// Renders a refusal and records its code, so every early return goes through one place.
     fn refuse(&mut self, error: S3Error) -> Response<Body> {
         self.error = Some(error.code().clone());
-        render(&error)
+        render(&error, self.trace)
     }
 }
 

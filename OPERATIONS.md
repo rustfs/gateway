@@ -828,6 +828,7 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 - `q-token-0021` (opaque_token on `ListObjectsV2`) — Pagination tokens are attacker controlled opaque bytes; they are never parsed as keys or paths and must survive url encoding unchanged.
 - `q-storageclass-0022` (omit_when on `Object.StorageClass`) — The storage class element in a listing is always written including the default class, which is the opposite of the header form that is suppressed for the default class.
 - `q-owner-0065` (omit_when on `ListObjects.Object.Owner`) — The first listing version has no fetch owner parameter and writes owner information for every entry, so the suppression the entry shape carries applies to the second version alone.
+- `q-max-keys-0073` (bounded_range on `ListObjectsV2.MaxKeys`) — A page size runs from zero to a thousand inclusive, and a value outside it is refused rather than clamped, because a client that asked for a hundred thousand and silently read a thousand concludes the bucket is small.
 
 Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 
@@ -987,6 +988,7 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 - `q-mpu-etag-0028` (etag_composite on `CompleteMultipartUpload.ETag`) — The entity tag of a completed upload is a digest over the concatenated raw part digests followed by a hyphen and the part count, never a digest of the assembled object, and an empty part list is refused rather than digested.
 - `q-mpu-upload-id-0037` (capability_token on `UploadPart.UploadId`) — An upload id is a server-minted capability, not a name the caller chose: it is resolved against the bucket and key of the request before anything is written, an unknown id answers the not-found code, and one belonging to another resource is refused rather than honoured.
 - `q-mpu-limits-0038` (bounded_input on `CompleteMultipartUpload.MultipartUpload`) — Part numbers run from one to ten thousand, every part except the last has a floor on its size, and the completion list must be strictly ascending with no repeats; each of the three has its own code so a client can tell them apart.
+- `q-part-number-0072` (bounded_range on `UploadPart.PartNumber`) — A part number runs from one to ten thousand inclusive, and one outside that range is refused before any byte is stored, because a part above the ceiling can never be completed and no abort enumerates it.
 
 Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 

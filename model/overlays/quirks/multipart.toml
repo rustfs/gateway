@@ -233,3 +233,20 @@ cases   = ["c-mpu-0010", "c-mpu-0011", "c-mpu-0047", "c-mpu-0048"]
   kind    = "s3s-pr"
   ref     = "https://github.com/s3s-project/s3s/pull/296"
   summary = "Upstream gave the part marker the wrong type and semantics, so a second page could not be requested from the value the first page returned."
+
+[[quirk]]
+id      = "q-part-number-0072"
+kind    = "bounded_range"
+target  = "UploadPart.PartNumber"
+summary = "A part number runs from one to ten thousand inclusive, and one outside that range is refused before any byte is stored, because a part above the ceiling can never be completed and no abort enumerates it."
+cases   = ["c-mpu-0024"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/qfacts.html"
+  summary = "States the part-number range as one through ten thousand inclusive."
+
+  [[quirk.evidence]]
+  kind    = "s3s-pr"
+  ref     = "https://github.com/s3s-project/s3s/pull/281"
+  summary = "Upstream did not enforce the multipart limits, so an upload could exceed the part ceiling and fail only at assembly."

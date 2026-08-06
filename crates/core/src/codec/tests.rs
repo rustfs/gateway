@@ -134,6 +134,126 @@ fn n_refuses_a_request_carrying_two_different_checksum_algorithms() {
     assert_eq!(error.code().as_str(), "InvalidRequest");
 }
 
+// ---------------------------------------------------------------------------------------------
+// Bounded scalars and the required integrity check
+//
+// Both are protocol refusals the wire contract states and the Smithy model does not, so both are
+// asserted here rather than in a handler: a value outside its range and a body with no integrity
+// claim must be refused before any operation logic sees them.
+// ---------------------------------------------------------------------------------------------
+
+#[test]
+fn n_refuses_a_part_number_above_the_ceiling() {
+    let request = accepted("PUT", "/photos/key?partNumber=10001&uploadId=u1", &[("content-length", "0")]);
+    let view = MetaView::of(&request, TargetKind::Object).expect("view");
+    let error = dto::UploadPart::decode(&view, RequestBody::None).expect_err("ten thousand is the ceiling");
+
+    assert_eq!(error.code().as_str(), "InvalidArgument");
+    assert_eq!(error.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(error.member(), Some("PartNumber"));
+}
+
+#[test]
+fn n_refuses_a_part_number_below_the_floor() {
+    let request = accepted("PUT", "/photos/key?partNumber=0&uploadId=u1", &[("content-length", "0")]);
+    let view = MetaView::of(&request, TargetKind::Object).expect("view");
+    let error = dto::UploadPart::decode(&view, RequestBody::None).expect_err("part numbers start at one");
+
+    assert_eq!(error.code().as_str(), "InvalidArgument");
+    assert_eq!(error.member(), Some("PartNumber"));
+}
+
+#[test]
+fn accepts_the_part_number_at_the_ceiling() {
+    let request = accepted("PUT", "/photos/key?partNumber=10000&uploadId=u1", &[("content-length", "0")]);
+    let view = MetaView::of(&request, TargetKind::Object).expect("view");
+    let input = dto::UploadPart::decode(&view, RequestBody::None).expect("the ceiling itself is inside the range");
+
+    assert_eq!(input.part_number, 10_000);
+}
+
+#[test]
+fn n_refuses_a_negative_max_keys() {
+    let request = accepted("GET", "/photos?list-type=2&max-keys=-1", &[]);
+    let view = MetaView::of(&request, TargetKind::Bucket).expect("view");
+    let error = dto::ListObjectsV2::decode(&view, RequestBody::None).expect_err("a page cannot have fewer than no keys");
+
+    assert_eq!(error.code().as_str(), "InvalidArgument");
+    assert_eq!(error.member(), Some("MaxKeys"));
+}
+
+#[test]
+fn n_refuses_a_max_keys_above_the_ceiling() {
+    let request = accepted("GET", "/photos?list-type=2&max-keys=100000", &[]);
+    let view = MetaView::of(&request, TargetKind::Bucket).expect("view");
+    let error = dto::ListObjectsV2::decode(&view, RequestBody::None).expect_err("clamping would hide the client's mistake");
+
+    assert_eq!(error.code().as_str(), "InvalidArgument");
+    assert_eq!(error.member(), Some("MaxKeys"));
+}
+
+#[test]
+fn n_refuses_a_max_keys_that_is_not_a_number() {
+    let request = accepted("GET", "/photos?list-type=2&max-keys=abc", &[]);
+    let view = MetaView::of(&request, TargetKind::Bucket).expect("view");
+    let error = dto::ListObjectsV2::decode(&view, RequestBody::None).expect_err("a non-numeric page size is unusable");
+
+    assert_eq!(error.code().as_str(), "InvalidArgument");
+    assert_eq!(error.member(), Some("MaxKeys"));
+}
+
+#[test]
+fn accepts_max_keys_at_both_ends_of_its_range() {
+    for (raw, expected) in [("0", 0), ("1000", 1000)] {
+        let request = accepted("GET", &format!("/photos?list-type=2&max-keys={raw}"), &[]);
+        let view = MetaView::of(&request, TargetKind::Bucket).expect("view");
+        let input = dto::ListObjectsV2::decode(&view, RequestBody::None).expect("both bounds are inside the range");
+        assert_eq!(input.max_keys, Some(expected), "max-keys={raw}");
+    }
+}
+
+#[test]
+fn n_refuses_a_multi_object_delete_with_no_integrity_header() {
+    let request = accepted("POST", "/photos?delete", &[("content-type", "application/xml")]);
+    let view = MetaView::of(&request, TargetKind::Bucket).expect("view");
+    let body = RequestBody::Buffered(Bytes::from_static(b"<Delete><Object><Key>a</Key></Object></Delete>"));
+    let error = dto::DeleteObjects::decode(&view, body).expect_err("this operation requires an integrity check");
+
+    assert_eq!(error.code().as_str(), "InvalidRequest");
+    assert_eq!(error.status(), StatusCode::BAD_REQUEST);
+    assert!(
+        error.message().contains("Content-MD5"),
+        "the refusal names the header the caller can supply: {}",
+        error.message()
+    );
+}
+
+#[test]
+fn n_a_checksum_algorithm_selector_alone_is_not_an_integrity_claim() {
+    // `x-amz-sdk-checksum-algorithm` announces which algorithm the SDK would use; it carries no
+    // digest, so it is not the integrity check the operation requires.
+    let request = accepted("POST", "/photos?delete", &[("x-amz-sdk-checksum-algorithm", "CRC32")]);
+    let view = MetaView::of(&request, TargetKind::Bucket).expect("view");
+    let body = RequestBody::Buffered(Bytes::from_static(b"<Delete><Object><Key>a</Key></Object></Delete>"));
+    let error = dto::DeleteObjects::decode(&view, body).expect_err("an algorithm name is not a digest");
+
+    assert_eq!(error.code().as_str(), "InvalidRequest");
+}
+
+#[test]
+fn a_multi_object_delete_is_accepted_with_either_integrity_header() {
+    for headers in [
+        &[("content-md5", "1B2M2Y8AsgTpgAmY7PhCfg==")][..],
+        &[("x-amz-checksum-crc32", "AAAAAA==")][..],
+    ] {
+        let request = accepted("POST", "/photos?delete", headers);
+        let view = MetaView::of(&request, TargetKind::Bucket).expect("view");
+        let body = RequestBody::Buffered(Bytes::from_static(b"<Delete><Object><Key>a</Key></Object></Delete>"));
+        let input = dto::DeleteObjects::decode(&view, body).expect("either header satisfies the requirement");
+        assert_eq!(input.delete.objects.len(), 1);
+    }
+}
+
 #[test]
 fn n_refuses_an_object_path_with_no_key() {
     let request = accepted("GET", "/photos", &[]);
@@ -143,9 +263,14 @@ fn n_refuses_an_object_path_with_no_key() {
     assert_eq!(error.status(), StatusCode::BAD_REQUEST, "a 400 from the chosen operation, not a 501");
 }
 
+// The four body-shape refusals below carry `content-md5` for one reason only: `DeleteObjects` is
+// `httpChecksumRequired`, so the integrity check now precedes the body and a fixture without it
+// would never reach the assertion it was written for. The assertions themselves are unchanged.
+const DELETE_INTEGRITY: &[(&str, &str)] = &[("content-md5", "1B2M2Y8AsgTpgAmY7PhCfg==")];
+
 #[test]
 fn n_refuses_a_delete_objects_body_with_the_wrong_root() {
-    let request = accepted("POST", "/photos?delete", &[]);
+    let request = accepted("POST", "/photos?delete", DELETE_INTEGRITY);
     let view = MetaView::of(&request, TargetKind::Bucket).expect("view");
     let body = RequestBody::Buffered(Bytes::from_static(b"<Remove><Object><Key>a</Key></Object></Remove>"));
     let error = dto::DeleteObjects::decode(&view, body).expect_err("the root element is part of the contract");
@@ -155,7 +280,7 @@ fn n_refuses_a_delete_objects_body_with_the_wrong_root() {
 
 #[test]
 fn n_refuses_a_delete_objects_body_carrying_a_doctype() {
-    let request = accepted("POST", "/photos?delete", &[]);
+    let request = accepted("POST", "/photos?delete", DELETE_INTEGRITY);
     let view = MetaView::of(&request, TargetKind::Bucket).expect("view");
     let body = RequestBody::Buffered(Bytes::from_static(
         b"<!DOCTYPE Delete [<!ENTITY x SYSTEM \"file:///etc/passwd\">]><Delete><Object><Key>a</Key></Object></Delete>",
@@ -167,7 +292,7 @@ fn n_refuses_a_delete_objects_body_carrying_a_doctype() {
 
 #[test]
 fn n_refuses_a_delete_objects_body_with_no_object_at_all() {
-    let request = accepted("POST", "/photos?delete", &[]);
+    let request = accepted("POST", "/photos?delete", DELETE_INTEGRITY);
     let view = MetaView::of(&request, TargetKind::Bucket).expect("view");
     let body = RequestBody::Buffered(Bytes::from_static(b"<Delete><Quiet>true</Quiet></Delete>"));
     let error = dto::DeleteObjects::decode(&view, body).expect_err("the key list is required");
@@ -178,7 +303,7 @@ fn n_refuses_a_delete_objects_body_with_no_object_at_all() {
 
 #[test]
 fn decodes_a_delete_objects_body_under_a_namespace_prefix() {
-    let request = accepted("POST", "/photos?delete", &[]);
+    let request = accepted("POST", "/photos?delete", DELETE_INTEGRITY);
     let view = MetaView::of(&request, TargetKind::Bucket).expect("view");
     let body = RequestBody::Buffered(Bytes::from_static(
         b"<s3:Delete xmlns:s3=\"urn:x\"><s3:Object><s3:Key>a/b</s3:Key></s3:Object></s3:Delete>",

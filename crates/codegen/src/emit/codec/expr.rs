@@ -25,6 +25,7 @@
 
 use rustfs_gateway_model::ir::{ETagRender, TimestampFormat, Type};
 
+use super::bounds::Bound;
 use crate::emit::dto::naming;
 
 /// Why one field cannot be given a codec.
@@ -62,11 +63,18 @@ pub fn etag_render(render: ETagRender) -> &'static str {
 ///
 /// `raw` is always a `&str`. The result is the bare value; the caller decides whether to wrap it
 /// in `Some`.
-pub fn from_wire(ty: &Type, member: &str, operation: &str, in_xml: bool) -> Result<String, String> {
+///
+/// `bound` is the inclusive range the field's quirks declare, resolved by [`super::bounds`]. It is
+/// a parameter rather than something read from the type because the IR's `Integer` carries no
+/// range — see that module for why the two numbers cannot live in the IR today.
+pub fn from_wire(ty: &Type, member: &str, operation: &str, in_xml: bool, bound: Option<Bound>) -> Result<String, String> {
     Ok(match ty {
         Type::String => "raw.to_owned()".to_owned(),
         Type::OpaqueString => "value::opaque(raw)".to_owned(),
-        Type::Integer => format!("value::integer(raw, \"{member}\")?"),
+        Type::Integer => match bound {
+            Some(Bound { min, max }) => format!("value::integer_in_range(raw, \"{member}\", {min}, {max})?"),
+            None => format!("value::integer(raw, \"{member}\")?"),
+        },
         Type::Long => format!("value::long(raw, \"{member}\")?"),
         Type::Boolean => format!("value::boolean(raw, \"{member}\")?"),
         Type::Timestamp(format) => {

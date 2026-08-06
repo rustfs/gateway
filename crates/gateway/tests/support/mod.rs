@@ -44,6 +44,9 @@ use rustfs_gateway::{
 
 // ── a vendor operation, anonymously reachable ──────────────────────────────────────────────────
 
+/// What [`Ping`]'s encoder writes into the identifier headers, so a test can prove it lost.
+pub const HANDLER_CHOSEN_ID: &str = "HANDLERCHOSEN000";
+
 /// A vendor operation with a namespaced name and no input.
 pub struct Ping;
 
@@ -92,6 +95,10 @@ impl OperationCodec for Ping {
     fn encode(output: PingOutput, _request: &MetaView<'_>, status: u16) -> Result<EncodedResponse, CodecError> {
         let mut encoded = EncodedResponse::of(status);
         encoded.set_header("content-type", "application/xml");
+        // Deliberate: an encoder that claims the identifier headers for itself. The service must
+        // overwrite both, so that the value in a log line is always the one the service minted.
+        encoded.set_header("x-amz-request-id", HANDLER_CHOSEN_ID);
+        encoded.set_header("x-amz-id-2", HANDLER_CHOSEN_ID);
         encoded.body = ResponseBody::Complete(format!("<Ping>{}</Ping>", output.message).into_bytes());
         Ok(encoded)
     }
@@ -347,6 +354,28 @@ pub async fn exchange(service: &S3Service, request: http::Request<Bytes>) -> (ht
     let collected = rustfs_gateway::collect(response).await.expect("an in-memory body");
     let body = String::from_utf8(collected.body().to_vec()).expect("utf-8");
     (collected.status(), body)
+}
+
+/// Sends one request and keeps the whole response, head included.
+///
+/// `exchange` throws the head away, which is the right shape for an assertion that only reads a
+/// body. A case about a header cannot use it.
+pub async fn exchange_wire(service: &S3Service, request: http::Request<Bytes>) -> rustfs_gateway::WireResponse {
+    let response = service.call_bytes(request).await;
+    rustfs_gateway::collect(response).await.expect("an in-memory body")
+}
+
+/// The text of the first `<name>` element of a document.
+///
+/// Enough for an assertion about one element, and deliberately not a parser: a test that needed
+/// one would be asserting on `rustfs-gateway-xml` rather than on the pipeline.
+#[must_use]
+pub fn element_text<'a>(body: &'a str, name: &str) -> Option<&'a str> {
+    let open = format!("<{name}>");
+    let close = format!("</{name}>");
+    let start = body.find(&open)? + open.len();
+    let end = body.get(start..)?.find(&close)? + start;
+    body.get(start..end)
 }
 
 /// A `GET`/`POST` with a host and no body.

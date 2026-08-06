@@ -57,7 +57,7 @@
                            "type": { "kind": "Integer" },
                            "hot": true,
                            "default": 1000,
-                           "quirk_refs": []
+                           "quirk_refs": ["q-max-keys-0073"]
                          },
                          {
                            "name": "Prefix",
@@ -707,6 +707,20 @@
                               }
                             ],
                 "cases": ["c-list-0010", "c-list-0024"]
+              },
+              {
+                "id": "q-max-keys-0073",
+                "kind": "bounded_range",
+                "target": "ListObjectsV2.MaxKeys",
+                "summary": "A page size runs from zero to a thousand inclusive, and a value outside it is refused rather than clamped, because a client that asked for a hundred thousand and silently read a thousand concludes the bucket is small.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectsV2.html",
+                                "summary": "Documents the parameter as an integer with a defined ceiling, which makes a value outside that ceiling malformed input rather than a request to clamp."
+                              }
+                            ],
+                "cases": ["c-list-0028"]
               }
             ],
   "ext_points": []

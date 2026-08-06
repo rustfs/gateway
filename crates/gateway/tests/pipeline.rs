@@ -256,3 +256,101 @@ async fn both_entry_points_agree() {
     let towered = support::tower_exchange(&mut service, plain(http::Method::POST, "/")).await;
     assert_eq!(direct, towered);
 }
+
+// ── the request identifier ──────────────────────────────────────────────────────────────────────
+
+/// Negative — the header and the error document carry the *same* identifier. Two formatting sites
+/// that agree today are two that can drift; this is the assertion that notices.
+#[tokio::test]
+async fn a_refusal_carries_one_identifier_in_both_places() {
+    let response = support::exchange_wire(&support::service(), plain(http::Method::PATCH, "/nowhere")).await;
+    let body = String::from_utf8(response.body().to_vec()).expect("utf-8");
+    let header = response.header("x-amz-request-id").expect("a request id header");
+    assert_eq!(support::element_text(&body, "RequestId"), Some(header), "{body}");
+    let host_header = response.header("x-amz-id-2").expect("a host id header");
+    assert_eq!(support::element_text(&body, "HostId"), Some(host_header), "{body}");
+}
+
+/// Negative — an identifier the caller supplied is never the one that comes back. Echoing one
+/// would let a caller choose what every log line about its own request says.
+#[tokio::test]
+async fn a_caller_supplied_identifier_is_not_echoed() {
+    let request = http::Request::builder()
+        .method(http::Method::PATCH)
+        .uri("/nowhere")
+        .header("host", "s3.example.com")
+        .header("x-amz-request-id", "CALLER-CHOSEN-0001")
+        .header("x-amz-id-2", "CALLER-CHOSEN-0002")
+        .body(Bytes::new())
+        .expect("a valid request");
+    let response = support::exchange_wire(&support::service(), request).await;
+    let body = String::from_utf8(response.body().to_vec()).expect("utf-8");
+    assert_ne!(response.header("x-amz-request-id"), Some("CALLER-CHOSEN-0001"));
+    assert_ne!(response.header("x-amz-id-2"), Some("CALLER-CHOSEN-0002"));
+    assert!(!body.contains("CALLER-CHOSEN"), "{body}");
+}
+
+/// Negative — an identifier a handler's encoder wrote does not survive either. The service mints
+/// the value it will also put in a log line, so a backend cannot make the two disagree.
+#[tokio::test]
+async fn a_handler_supplied_identifier_does_not_win() {
+    let response = support::exchange_wire(&support::service(), plain(http::Method::POST, "/")).await;
+    assert_eq!(response.status(), http::StatusCode::OK);
+    assert_ne!(response.header("x-amz-request-id"), Some(support::HANDLER_CHOSEN_ID));
+    assert_eq!(response.header_values("x-amz-request-id").count(), 1);
+}
+
+/// Negative — two requests are told apart. An identifier that repeats correlates the wrong two
+/// support conversations.
+#[tokio::test]
+async fn two_requests_are_given_different_identifiers() {
+    let service = support::service();
+    let first = support::exchange_wire(&service, plain(http::Method::PATCH, "/nowhere")).await;
+    let second = support::exchange_wire(&service, plain(http::Method::PATCH, "/nowhere")).await;
+    assert_ne!(first.header("x-amz-request-id"), second.header("x-amz-request-id"));
+    assert_ne!(first.header("x-amz-id-2"), second.header("x-amz-id-2"));
+}
+
+/// Negative — the rendered alphabet is closed. Even a value that somehow came from a request could
+/// not carry a quote, an angle bracket or a newline into a log line or a document.
+#[tokio::test]
+async fn an_identifier_is_uppercase_hexadecimal_and_nothing_else() {
+    let response = support::exchange_wire(&support::service(), plain(http::Method::PATCH, "/nowhere")).await;
+    let request_id = response.header("x-amz-request-id").expect("a request id header");
+    let host_id = response.header("x-amz-id-2").expect("a host id header");
+    assert_eq!(request_id.len(), 16, "{request_id}");
+    assert_eq!(host_id.len(), 32, "{host_id}");
+    for text in [request_id, host_id] {
+        assert!(
+            text.bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'A'..=b'F').contains(&byte)),
+            "{text}"
+        );
+    }
+}
+
+/// Positive — a success carries the identifiers too. AWS sends them on every response, and an
+/// operator correlating a slow `PutObject` has nothing to paste otherwise.
+#[tokio::test]
+async fn a_success_carries_the_identifiers_as_well() {
+    let response = support::exchange_wire(&support::service(), plain(http::Method::POST, "/")).await;
+    assert_eq!(response.status(), http::StatusCode::OK);
+    assert!(response.header("x-amz-request-id").is_some());
+    assert!(response.header("x-amz-id-2").is_some());
+}
+
+/// Positive — a fixed source makes the whole response comparable byte for byte, which is what a
+/// conformance case that pins an error document needs.
+#[tokio::test]
+async fn a_fixed_source_makes_a_response_byte_comparable() {
+    let service = wired()
+        .register::<Ping, _>(Arc::new(Backend))
+        .route(ping_route())
+        .trace_source(rustfs_gateway::FixedTrace::at(0x0123_4567_89AB_CDEF, 0))
+        .build()
+        .expect("a complete assembly");
+    let first = support::exchange_wire(&service, plain(http::Method::PATCH, "/nowhere")).await;
+    let second = support::exchange_wire(&service, plain(http::Method::PATCH, "/nowhere")).await;
+    assert_eq!(first.header("x-amz-request-id"), Some("0123456789ABCDEF"));
+    assert_eq!(first.body(), second.body());
+}
