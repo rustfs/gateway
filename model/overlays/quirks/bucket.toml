@@ -1,0 +1,73 @@
+# Copyright 2026 RustFS Team
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Quirks of the bucket lifecycle and location family.
+#
+# One [[quirk]] per behaviour the pinned Smithy model does not state. `summary` and every
+# `evidence.summary` are written by this project; upstream issue and documentation prose stays
+# under its author's copyright and is never pasted here.
+#
+# One file per family, for the same reason `ops/` is sharded: it is the unit of parallel edit
+# conflict. A quirk id declared in two files is a load failure naming both.
+
+[[quirk]]
+id      = "q-empty-0002"
+kind    = "empty_value"
+target  = "GetBucketLocation.LocationConstraint"
+summary = "For us-east-1 the constraint is null and an empty element must still be written, so this member is emit rather than omit."
+cases   = ["c-location-0002"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketLocation.html"
+  summary = "States that buckets in us-east-1 have a null location constraint, while the element itself is still part of the response."
+
+  [[quirk.evidence]]
+  kind    = "capture"
+  ref     = "captures/get-bucket-location-us-east-1.http"
+  summary = "Recorded AWS response for a us-east-1 bucket showing the self closing element rather than an absent one."
+
+[[quirk]]
+id      = "q-region-0003"
+kind    = "legacy_alias"
+target  = "GetBucketLocation.LocationConstraint"
+summary = "EU is a legacy alias that denotes eu-west-1 and must stay an accepted and returnable value of the enum."
+cases   = ["c-location-0003"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketLocation.html"
+  summary = "The enumerated constraint values include the historical EU alias alongside the modern region identifiers."
+
+[[quirk]]
+id      = "q-unwrapped-0001"
+kind    = "unwrapped_output"
+target  = "GetBucketLocation"
+summary = "The response body is the single element LocationConstraint itself; the generic restXml output wrapper must not be written."
+cases   = ["c-location-0001"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketLocation.html"
+  summary = "The documented response syntax shows one top level LocationConstraint element with no enclosing output element."
+
+  [[quirk.evidence]]
+  kind    = "s3s-pr"
+  ref     = "https://github.com/s3s-project/s3s/pull/127"
+  summary = "Upstream shipped a double wrapped body until this change, which is why the unwrapping must be data in the IR rather than a codegen special case."
+
+  [[quirk.evidence]]
+  kind    = "capture"
+  ref     = "captures/get-bucket-location-aws.http"
+  summary = "Recorded AWS response used as the byte level reference for the unwrapped body."

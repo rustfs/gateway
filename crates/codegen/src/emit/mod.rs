@@ -19,6 +19,7 @@
 //! NOT responsible for: writing files (that is [`crate::run`]) or deciding content.
 //! Upstream: [`rustfs_gateway_model::ir`]. Downstream: the checked-in artefacts.
 
+pub mod codec;
 pub mod dto;
 pub mod operations_md;
 pub mod rust_files;

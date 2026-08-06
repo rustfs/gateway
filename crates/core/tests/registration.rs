@@ -586,13 +586,30 @@ fn require_reports_the_missing_operations_on_one_line() {
     let missing = RouterBuilder::new()
         .handle::<PutObject, _>(Arc::clone(&fs))
         .require(&OperationSet::aws_full())
-        .expect_err("two of the three generated operations have no handler");
+        .expect_err("every generated operation but one has no handler");
 
+    // The set is `OperationSet::aws_full()`, which reads the generated route table — so this
+    // assertion moves with the whitelist, and that is the point: a family that lands and forgets
+    // its registration shows up here.
     let text = missing.to_string();
     assert_eq!(text.lines().count(), 1, "the completeness message must be one line: {text}");
-    assert_eq!(text, "backend is missing handlers for: GetBucketLocation, ListObjectsV2 (2 of 3)");
-    assert_eq!(missing.missing(), ["GetBucketLocation", "ListObjectsV2"]);
-    assert_eq!(missing.required(), 3);
+    assert_eq!(
+        text,
+        "backend is missing handlers for: DeleteObject, DeleteObjects, GetBucketLocation, GetObject, HeadObject, \
+         ListObjectsV2 (6 of 7)"
+    );
+    assert_eq!(
+        missing.missing(),
+        [
+            "DeleteObject",
+            "DeleteObjects",
+            "GetBucketLocation",
+            "GetObject",
+            "HeadObject",
+            "ListObjectsV2"
+        ]
+    );
+    assert_eq!(missing.required(), 7);
 }
 
 /// Negative — a long list is truncated and still says how much is missing in total.

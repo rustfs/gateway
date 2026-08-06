@@ -1,0 +1,82 @@
+# c-object-0012 — the storage class header on a default-class object.
+#
+# Schema dimensions exercised: header absence as the whole assertion, two exchanges over one
+# connection contrasting the two classes.
+
+[case]
+id = "c-object-0012"
+schema_version = 1
+title = "The storage class response header is written for every class except the default one"
+rationale = """
+The suppression looks like a cosmetic detail and is not: clients use the presence of the header to \
+decide whether an object needs a restore before it can be read, and one that sees STANDARD spelled \
+out on every object learns nothing from the header at all. The rule is also the exact opposite of \
+the one that governs the same value inside a listing body, where the default class is always \
+written — so an implementation with a single shared helper gets one of the two wrong, and only an \
+absence assertion notices which."""
+polarity = "negative"
+operation = "GetObject"
+tags = ["storage-class", "read"]
+timeout_ms = 10000
+quirks = ["q-storageclass-0024", "q-storageclass-0022"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObject.html"
+summary = "States that the storage class response header is returned for every object except those in the default class."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectsV2.html"
+summary = "The documented listing response includes the storage class element for every entry, default class included."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = true
+
+[[setup.buckets]]
+name = "conf-object"
+
+[[setup.objects]]
+bucket = "conf-object"
+key = "class/standard"
+storage_class = "STANDARD"
+body = { utf8 = "1" }
+
+[[setup.objects]]
+bucket = "conf-object"
+key = "class/cold"
+storage_class = "GLACIER_IR"
+body = { utf8 = "2" }
+
+[[exchanges]]
+name = "default-class-is-silent"
+
+[exchanges.request]
+method = "HEAD"
+target = "/conf-object/class/standard"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+headers_absent = ["x-amz-storage-class"]
+connection_after = "open"
+
+[[exchanges]]
+name = "any-other-class-is-named"
+
+[exchanges.request]
+method = "HEAD"
+target = "/conf-object/class/cold"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.headers_present]
+"x-amz-storage-class" = "GLACIER_IR"

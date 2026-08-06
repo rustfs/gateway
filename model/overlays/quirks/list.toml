@@ -1,0 +1,157 @@
+# Copyright 2026 RustFS Team
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Quirks of the object listing family: ListObjectsV2 and the listings that land beside it.
+#
+# One [[quirk]] per behaviour the pinned Smithy model does not state. `summary` and every
+# `evidence.summary` are written by this project; upstream issue and documentation prose stays
+# under its author's copyright and is never pasted here.
+#
+# One file per family, for the same reason `ops/` is sharded: it is the unit of parallel edit
+# conflict. A quirk id declared in two files is a load failure naming both.
+
+[[quirk]]
+id      = "q-empty-0016"
+kind    = "empty_value"
+target  = "ListObjectsV2"
+summary = "The prefix element is always written even when empty, while the delimiter element only appears when the request supplied one."
+cases   = ["c-listv2-0005", "c-listv2-0006"]
+
+  [[quirk.evidence]]
+  kind    = "capture"
+  ref     = "captures/list-objects-v2-empty-prefix.http"
+  summary = "Recorded response showing an empty prefix element present and no delimiter element at all."
+
+[[quirk]]
+id      = "q-encoding-0015"
+kind    = "encoding_type"
+target  = "ListObjectsV2"
+summary = "When url encoding is requested, a fixed per operation set of members is percent encoded and the encoding type is echoed back; keys containing control characters are otherwise unparseable."
+cases   = ["c-listv2-0003", "c-listv2-0004"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectsV2.html"
+  summary = "Describes the request parameter and states that the response echoes the encoding type when it was requested."
+
+  [[quirk.evidence]]
+  kind    = "capture"
+  ref     = "captures/list-objects-v2-encoding-url.http"
+  summary = "Recorded response for a key containing characters that are illegal in XML, showing which members are encoded."
+
+[[quirk]]
+id      = "q-etag-0020"
+kind    = "etag_render"
+target  = "Object.ETag"
+summary = "Inside the listing body the entity tag keeps its surrounding quotes, in contrast with the bare form used by the object attributes operation."
+cases   = ["c-etag-0011"]
+
+  [[quirk.evidence]]
+  kind    = "s3s-issue"
+  ref     = "https://github.com/s3s-project/s3s/issues/632"
+  summary = "Upstream applied one quoting rule everywhere, which is wrong for one of the two body contexts."
+
+[[quirk]]
+id      = "q-flat-0019"
+kind    = "flattened"
+target  = "ListObjectsV2"
+summary = "Entry and common prefix lists repeat their element with no enclosing wrapper, unlike the wrapped lists used by tag sets and grant lists."
+cases   = ["c-listv2-0009"]
+
+  [[quirk.evidence]]
+  kind    = "smithy-spec"
+  ref     = "https://smithy.io/2.0/spec/protocol-traits.html#xmlflattened-trait"
+  summary = "Defines the flattened list serialization that removes the wrapper element around repeated members."
+
+[[quirk]]
+id      = "q-keycount-0018"
+kind    = "computed_member"
+target  = "ListObjectsV2.KeyCount"
+summary = "The key count is the number of entries plus common prefixes actually returned, not the requested maximum, and is always written."
+cases   = ["c-listv2-0008"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectsV2.html"
+  summary = "Defines the count as the number of keys returned by this request, which is at most the requested maximum."
+
+[[quirk]]
+id      = "q-order-0014"
+kind    = "element_order"
+target  = "ListObjectsV2"
+summary = "Sibling order in the listing result is part of the wire contract; strict clients fail to parse when the bucket name follows the entry list."
+cases   = ["c-listv2-0002"]
+
+  [[quirk.evidence]]
+  kind    = "s3s-pr"
+  ref     = "https://github.com/s3s-project/s3s/pull/480"
+  summary = "Upstream emitted the listing elements in model order and broke a strict client until the order was corrected."
+
+  [[quirk.evidence]]
+  kind    = "capture"
+  ref     = "captures/list-objects-v2-aws.http"
+  summary = "Recorded reference response that fixes the sibling order used by the golden comparison."
+
+[[quirk]]
+id      = "q-owner-0017"
+kind    = "omit_when"
+target  = "Object.Owner"
+summary = "Owner information is written only when the request asked for it, so emission depends on a request field rather than on the value itself."
+cases   = ["c-listv2-0007"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectsV2.html"
+  summary = "States that owner information is returned only when the fetch owner parameter is set."
+
+[[quirk]]
+id      = "q-root-0013"
+kind    = "root_name"
+target  = "ListObjectsV2"
+summary = "The response root element is shared verbatim with the first version of the listing operation, so the root name cannot be derived from the operation or output shape name."
+cases   = ["c-listv2-0001"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectsV2.html#API_ListObjectsV2_ResponseSyntax"
+  summary = "The documented response syntax uses the same root element name as the older listing operation."
+
+[[quirk]]
+id      = "q-storageclass-0022"
+kind    = "omit_when"
+target  = "Object.StorageClass"
+summary = "The storage class element in a listing is always written including the default class, which is the opposite of the header form that is suppressed for the default class."
+cases   = ["c-storageclass-0001", "c-storageclass-0002"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectsV2.html"
+  summary = "The documented listing response includes the storage class element for every entry."
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObject.html"
+  summary = "States that the storage class response header is returned for every object except those in the default class."
+
+[[quirk]]
+id      = "q-token-0021"
+kind    = "opaque_token"
+target  = "ListObjectsV2"
+summary = "Pagination tokens are attacker controlled opaque bytes; they are never parsed as keys or paths and must survive url encoding unchanged."
+cases   = ["c-listv2-0010"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectsV2.html"
+  summary = "Describes the continuation token as an opaque value obtained from a previous response."

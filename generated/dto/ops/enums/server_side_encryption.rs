@@ -23,7 +23,7 @@
 
 use std::borrow::Cow;
 
-/// The `ServerSideEncryption` string enumeration. Bound by: PutObject.
+/// The `ServerSideEncryption` string enumeration. Bound by: GetObject, HeadObject, PutObject.
 ///
 /// An open set: compare against the associated constants, and build a value the pinned
 /// model does not declare with [`ServerSideEncryption::custom`]. Adding a constant is a minor version

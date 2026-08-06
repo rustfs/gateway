@@ -1,0 +1,62 @@
+# c-object-0005 — the response-* query parameters overwrite the response headers.
+#
+# Schema dimensions exercised: header-set assertion against a header the stored object also sets.
+
+[case]
+id = "c-object-0005"
+schema_version = 1
+title = "The response- query parameters overwrite the headers the stored object would otherwise set"
+rationale = """
+This is what makes a presigned link usable: a browser given one has no way to set a filename, a \
+media type or a cache policy, so the signer puts them in the URL and the server is expected to \
+honour them over whatever the object was stored with. An implementation that ignores the \
+parameters produces a download that opens in the browser instead of saving, or saves under an \
+opaque key name; an implementation that applies them per field instead of as a final pass gets the \
+precedence wrong whenever the object carries the same attribute."""
+polarity = "positive"
+operation = "GetObject"
+tags = ["response-overrides", "presigned", "read"]
+timeout_ms = 10000
+quirks = ["q-response-0023"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObject.html"
+summary = "Six request parameters are documented as overriding the matching header in the response."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/issues/220"
+summary = "Upstream ignored the override parameters, so a presigned download link could not set the filename a browser saves."
+kind = "s3s-issue"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-object"
+
+[[setup.objects]]
+bucket = "conf-object"
+key = "overrides/photo.bin"
+content_type = "image/jpeg"
+body = { utf8 = "hello world" }
+
+[request]
+method = "GET"
+target = "/conf-object/overrides/photo.bin?response-content-type=text%2Fplain&response-content-disposition=attachment%3B%20filename%3D%22report.txt%22&response-cache-control=no-store"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+# The object was stored as image/jpeg. The parameter wins, and it wins over the object's own
+# attribute rather than only over the default.
+[expect.headers_present]
+"content-type" = "text/plain"
+"content-disposition" = "attachment; filename=\"report.txt\""
+"cache-control" = "no-store"
+
+[expect.body]
+exact_utf8 = "hello world"

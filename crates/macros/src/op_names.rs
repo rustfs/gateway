@@ -36,7 +36,15 @@
 /// Every AWS operation name this build knows, sorted.
 ///
 /// Kept in step with `rustfs_gateway_core::standard_operation_names()` by `tests/op_names.rs`.
-pub(crate) static OPERATION_NAMES: &[&str] = &["GetBucketLocation", "ListObjectsV2", "PutObject"];
+pub(crate) static OPERATION_NAMES: &[&str] = &[
+    "DeleteObject",
+    "DeleteObjects",
+    "GetBucketLocation",
+    "GetObject",
+    "HeadObject",
+    "ListObjectsV2",
+    "PutObject",
+];
 
 /// Method names that would collide with a Rust keyword if derived mechanically.
 ///

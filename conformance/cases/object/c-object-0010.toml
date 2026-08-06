@@ -1,0 +1,61 @@
+# c-object-0010 — DeleteObjects with no integrity header at all.
+#
+# Schema dimensions exercised: request-progress assertion, byte-exact error document.
+
+[case]
+id = "c-object-0010"
+schema_version = 1
+title = "A multi-object delete with neither Content-MD5 nor a checksum header is refused before the body is read"
+rationale = """
+This operation is in the set AWS marks as requiring an integrity check on the request body, and the \
+reason is specific to it: the body is a list of keys to destroy, and a body corrupted in transit \
+deletes the wrong ones with no way to notice afterwards. The refusal has to precede the body, \
+because a server that reads a megabyte of keys and then rejects the request has already paid for \
+the attack, so the case asserts how much of the body the client had managed to send when the \
+response head arrived."""
+polarity = "negative"
+operation = "DeleteObjects"
+tags = ["checksum", "delete", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-deletes-0027", "q-checksum-0006"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteObjects.html"
+summary = "The operation is documented as requiring the Content-MD5 header, and the SDKs supply a checksum header instead."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://smithy.io/2.0/aws/aws-core.html#aws-protocols-httpchecksumrequired-trait"
+summary = "The model trait marks an operation whose request body must carry an integrity check before it is processed."
+kind = "smithy-model"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-object"
+
+[request]
+method = "POST"
+target = "/conf-object?delete"
+headers = { "content-type" = "application/xml" }
+body = { utf8 = "<Delete><Object><Key>batch/one</Key></Object></Delete>" }
+sign = { mode = "sigv4_unsigned_payload", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+code = "InvalidRequest"
+request_id_present = true
+
+[expect.timing]
+terminate_within_ms = 5000
+
+# Nothing was deleted, so nothing describing a deletion may be in the response.
+[expect.body]
+redact = ["RequestId", "HostId"]
+not_contains_utf8 = ["<Deleted>", "<DeleteResult"]
+contains_utf8 = ["<Code>InvalidRequest</Code>", "Content-MD5"]

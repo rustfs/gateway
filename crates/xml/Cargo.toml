@@ -22,3 +22,5 @@ ring = 0
 workspace = true
 
 [dependencies]
+# Never expands entities, which is why a DOCTYPE only has to be refused rather than sandboxed.
+quick-xml = { workspace = true }

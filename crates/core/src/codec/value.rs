@@ -1,0 +1,251 @@
+// Copyright 2026 RustFS Team
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+//! One function per scalar the IR can bind, shared by every generated codec.
+//!
+//! Responsible for: turning a wire string into a typed value and back, with the same refusal every
+//! time.
+//! NOT responsible for: knowing which field is bound where. Every call site is generated from the
+//! IR, and every function here takes the member name so the failure can name it.
+//! Upstream: `rustfs-gateway-types`. Downstream: every generated codec.
+//!
+//! # Why this is hand-written and the call sites are generated
+//!
+//! A rule that is generated seventy-three times is a rule that can be fixed in seventy-two places.
+//! "More than one checksum header is an error, not a merge" is one sentence, and it belongs in one
+//! function; what codegen contributes is that every operation accepting checksum headers *calls*
+//! it, which is the half a human forgets.
+
+use std::collections::BTreeMap;
+
+use rustfs_gateway_types::{
+    BucketName, ByteRange, ChecksumSpec, ETag, EtagRender, ObjectKey, OpaqueString, RangeParse, Timestamp, TimestampFormat,
+};
+
+use crate::codec::error::CodecError;
+use crate::codec::view::MetaView;
+
+/// The error a decoder raises for a required member the wire did not carry.
+///
+/// The code is IR data — `PutObject.ContentLength` names `MissingContentLength` and nothing else
+/// does — so it arrives as a string from the overlay rather than being chosen here.
+#[must_use]
+pub fn missing(code: &'static str, member: &'static str) -> CodecError {
+    CodecError::new(
+        rustfs_gateway_types::ErrorCode::custom(code),
+        "the request omits a member the wire contract requires",
+    )
+    .about(member)
+}
+
+/// The error a decoder raises for a member that is present and unusable.
+#[must_use]
+pub fn unusable(member: &'static str) -> CodecError {
+    CodecError::invalid_argument("the request carries a value this member cannot hold").about(member)
+}
+
+/// The decode-path exit check, as the error a codec raises.
+///
+/// Every generated `decode` ends with this. A placeholder reaching it is never a client mistake —
+/// a request that omits a required member is refused by the binding that looked for it — so it
+/// means the decoder failed to fill the member in, and a wire-invalid `BucketName` reaching a
+/// handler is a value both authorization and storage would accept and neither would recognise.
+///
+/// # Errors
+///
+/// [`CodecError::internal`], because the fault is on this side.
+pub fn exit(outcome: Result<(), rustfs_gateway_types::PlaceholderDefault>) -> Result<(), CodecError> {
+    outcome.map_err(|_| CodecError::internal("a required member left the decoder still holding its placeholder default"))
+}
+
+/// Parses a 32-bit integer.
+///
+/// # Errors
+///
+/// [`CodecError`] naming the member.
+pub fn integer(value: &str, member: &'static str) -> Result<i32, CodecError> {
+    value.trim().parse::<i32>().map_err(|_| unusable(member))
+}
+
+/// Parses a 64-bit integer.
+///
+/// # Errors
+///
+/// [`CodecError`] naming the member.
+pub fn long(value: &str, member: &'static str) -> Result<i64, CodecError> {
+    value.trim().parse::<i64>().map_err(|_| unusable(member))
+}
+
+/// Parses a boolean, case-insensitively.
+///
+/// `True` is accepted along with `true`: the AWS CLI sends the capitalised spelling, and a
+/// case-sensitive parser refuses a request every AWS SDK considers well formed.
+///
+/// # Errors
+///
+/// [`CodecError`] naming the member.
+pub fn boolean(value: &str, member: &'static str) -> Result<bool, CodecError> {
+    if value.eq_ignore_ascii_case("true") {
+        return Ok(true);
+    }
+    if value.eq_ignore_ascii_case("false") {
+        return Ok(false);
+    }
+    Err(unusable(member))
+}
+
+/// Parses a timestamp in the format the IR bound to this field.
+///
+/// # Errors
+///
+/// [`CodecError`] naming the member.
+pub fn timestamp(value: &str, format: TimestampFormat, member: &'static str) -> Result<Timestamp, CodecError> {
+    Timestamp::parse(value, format).map_err(|_| unusable(member))
+}
+
+/// Renders a timestamp in the format the IR bound to this field.
+///
+/// # Errors
+///
+/// [`CodecError::internal`]: a value the gateway itself produced has no wire form in the format
+/// its own IR chose, which is a defect on this side rather than anything a caller did.
+pub fn render_timestamp(value: &Timestamp, format: TimestampFormat) -> Result<String, CodecError> {
+    value
+        .render(format)
+        .map_err(|_| CodecError::internal("an output timestamp has no rendering in the format its binding declares"))
+}
+
+/// Parses an entity tag out of a header value.
+///
+/// # Errors
+///
+/// [`CodecError`] naming the member.
+pub fn etag_header(value: &str, member: &'static str) -> Result<ETag, CodecError> {
+    ETag::parse_http_header(value).map_err(|_| unusable(member))
+}
+
+/// Parses an entity tag out of an XML text node, quoted or bare.
+///
+/// # Errors
+///
+/// [`CodecError`] naming the member.
+pub fn etag_xml(value: &str, member: &'static str) -> Result<ETag, CodecError> {
+    ETag::parse_xml_text(value).map_err(|_| unusable(member))
+}
+
+/// Renders an entity tag in the context the IR bound to this field.
+///
+/// There is no default context on purpose: the same tag is `"d41d…"` in a header, `&quot;d41d…&quot;`
+/// in most bodies, and bare in exactly one. The context is a parameter because a call site that
+/// had to remember it would eventually not.
+#[must_use]
+pub fn render_etag(value: &ETag, context: EtagRender) -> String {
+    value.render(context).into_owned()
+}
+
+/// Parses an object key out of a body element or a query value, already percent-decoded.
+///
+/// # Errors
+///
+/// [`CodecError`] naming the member.
+pub fn object_key(value: &str, member: &'static str) -> Result<ObjectKey, CodecError> {
+    ObjectKey::new(value.to_owned()).map_err(|_| unusable(member))
+}
+
+/// Parses a bucket name.
+///
+/// # Errors
+///
+/// [`CodecError`] naming the member.
+pub fn bucket_name(value: &str, member: &'static str) -> Result<BucketName, CodecError> {
+    BucketName::new(value.to_owned()).map_err(|_| unusable(member))
+}
+
+/// Wraps a value that is round-tripped byte for byte and never parsed.
+#[must_use]
+pub fn opaque(value: &str) -> OpaqueString {
+    OpaqueString::new(value.to_owned())
+}
+
+/// Parses a `Range` header into the one range S3 honours, or nothing.
+///
+/// Never an error. RFC 9110 requires an unsatisfiable or unparseable `Range` to be ignored and the
+/// whole representation served; refusing one breaks clients whose proxy rewrote the header, and
+/// S3 answers a multi-range request with the whole object rather than a multipart body.
+#[must_use]
+pub fn byte_range(value: &str) -> Option<ByteRange> {
+    match RangeParse::parse(value) {
+        RangeParse::One(range) => Some(range),
+        RangeParse::Absent | RangeParse::Ignore | RangeParse::MultiRange => None,
+    }
+}
+
+/// Collects every header under a prefix into a map.
+///
+/// Used for `x-amz-meta-*`. Keys arrive lowercased, which is the form AWS returns them in; the
+/// value bytes have already been through this workspace's metadata validation at acceptance.
+#[must_use]
+pub fn prefixed_map(request: &MetaView<'_>, prefix: &'static str) -> BTreeMap<String, String> {
+    request
+        .headers_with_prefix(prefix)
+        .map(|(suffix, value)| (suffix.to_owned(), value.to_owned()))
+        .collect()
+}
+
+/// Reads the one `x-amz-checksum-*` header a request is allowed to carry.
+///
+/// Three rules in one place, and they are the reason this is not inlined into each codec:
+///
+/// * a request carrying two *different* checksum headers is refused rather than merged — picking
+///   one would mean verifying an integrity claim the caller did not make;
+/// * an algorithm this build does not implement is refused, not ignored;
+/// * a value that is not the right length for its algorithm is refused here, before any body byte
+///   has been read, so an oversized upload is not consumed before the rejection.
+///
+/// # Errors
+///
+/// [`CodecError`] naming the member.
+pub fn checksum_spec(
+    request: &MetaView<'_>,
+    prefix: &'static str,
+    member: &'static str,
+) -> Result<Option<ChecksumSpec>, CodecError> {
+    let mut found: Option<ChecksumSpec> = None;
+    for (suffix, value) in request.headers_with_prefix(prefix) {
+        // `algorithm` is one of a closed set; anything else is not a checksum header this gateway
+        // recognises and is left to the signature layer to ignore.
+        let mut name = String::with_capacity(prefix.len().saturating_add(suffix.len()));
+        name.push_str(prefix);
+        name.push_str(suffix);
+        let Ok(spec) = ChecksumSpec::parse_header(&name, value) else {
+            continue;
+        };
+        if let Some(existing) = &found
+            && existing.algorithm() != spec.algorithm()
+        {
+            return Err(CodecError::invalid_request(
+                "the request carries more than one checksum algorithm, which is a contradiction rather than a choice",
+            )
+            .about(member));
+        }
+        found = Some(spec);
+    }
+    Ok(found)
+}
+
+/// Renders a checksum back into its `x-amz-checksum-<algorithm>` header name and value.
+#[must_use]
+pub fn checksum_header(spec: &ChecksumSpec) -> (&'static str, &str) {
+    (spec.algorithm().header_name(), spec.render_base64())
+}

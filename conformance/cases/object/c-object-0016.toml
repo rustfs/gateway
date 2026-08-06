@@ -1,0 +1,68 @@
+# c-object-0016 — the response-* parameters on a request that fails.
+#
+# Schema dimensions exercised: header assertion on an error response, byte-exact error document.
+
+[case]
+id = "c-object-0016"
+schema_version = 1
+title = "The response- overrides apply to a successful read and never to the error document"
+rationale = """
+The override parameters are attacker-reachable on a presigned URL, and an implementation that \
+applies them unconditionally lets a caller relabel an XML error document as text/html — which is \
+enough to get it rendered in a browser on the bucket's own origin. It also lets a Content- \
+Disposition be attached to a body the caller never authorised. The overrides describe the \
+representation of the object, so an answer that is not the object must not carry them; the case \
+asserts both halves so that a fix in one direction cannot silently disable the other."""
+polarity = "negative"
+operation = "GetObject"
+tags = ["response-overrides", "error-shape", "security"]
+timeout_ms = 10000
+quirks = ["q-response-0023"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObject.html"
+summary = "The override parameters are documented as setting headers in the response to a successful read."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/ErrorResponses.html"
+summary = "The error document is an XML body, and its media type is not something the request selects."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-object"
+
+[[setup.objects]]
+bucket = "conf-object"
+key = "missing/key"
+absent = true
+
+[request]
+method = "GET"
+target = "/conf-object/missing/key?response-content-type=text%2Fhtml&response-content-disposition=inline"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 404
+headers_absent = ["content-disposition", "etag"]
+connection_after = "open"
+
+[expect.error]
+code = "NoSuchKey"
+request_id_present = true
+
+# Still application/xml. The parameter asked for text/html and the answer is not the object.
+[expect.headers_present]
+"content-type" = "application/xml"
+
+[expect.timing]
+terminate_within_ms = 5000
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+contains_utf8 = ["<Code>NoSuchKey</Code>"]
+not_contains_utf8 = ["<html", "text/html"]

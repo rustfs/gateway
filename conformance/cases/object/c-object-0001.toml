@@ -1,0 +1,70 @@
+# c-object-0001 — GetObject returns the standard object attributes it was stored with.
+#
+# Schema dimensions exercised: clock injection for a date-bearing header, header-set assertion,
+# byte-exact body.
+
+[case]
+id = "c-object-0001"
+schema_version = 1
+title = "A read returns the body, the quoted entity tag and every standard attribute the write set"
+rationale = """
+This is the one path more than ninety per cent of production traffic takes, and the failure it \
+guards against is silent: an implementation that stores Content-Type, Content-Disposition and \
+Cache-Control on the write and does not return them on the read looks correct in every unit test \
+and breaks browsers, CDNs and download links in production. The entity tag is asserted with its \
+quotes because the header form and the listing-body form differ, and an implementation with one \
+rule for both gets one of them wrong."""
+polarity = "positive"
+operation = "GetObject"
+tags = ["object-attributes", "etag", "read"]
+timeout_ms = 10000
+quirks = ["q-etag-0004", "q-content-0008", "q-storageclass-0024"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObject.html"
+summary = "The documented response returns the stored system-defined metadata alongside the object bytes."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/issues/632"
+summary = "Upstream held two conflicting entity-tag quoting rules in two files, so one of the two contexts was always wrong."
+kind = "s3s-issue"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-object"
+
+[[setup.objects]]
+bucket = "conf-object"
+key = "attributes/plain.txt"
+content_type = "text/plain; charset=utf-8"
+body = { utf8 = "hello world" }
+
+[request]
+method = "GET"
+target = "/conf-object/attributes/plain.txt"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+# The default storage class is never named in a response header. The listing body writes it for
+# every entry; the two rules are opposite and neither is an `if` in this implementation.
+headers_absent = ["x-amz-storage-class"]
+
+[expect.headers_present]
+"content-type" = "text/plain; charset=utf-8"
+"content-length" = "11"
+"etag" = "\"5eb63bbbe01eeed093cb22bb8f5acdc3\""
+"last-modified" = "*"
+"accept-ranges" = "bytes"
+
+[expect.timing]
+terminate_within_ms = 5000
+
+[expect.body]
+exact_utf8 = "hello world"

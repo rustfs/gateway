@@ -1,0 +1,73 @@
+# c-object-0011 — a multi-object delete in which one key cannot be removed.
+#
+# Schema dimensions exercised: byte-exact XML body carrying two different child element names.
+
+[case]
+id = "c-object-0011"
+schema_version = 1
+title = "A key a multi-object delete could not remove appears in the error list, not nowhere"
+rationale = """
+The partial-failure path is where the completeness invariant is actually tested: an implementation \
+that returns every key when everything succeeds can still drop the ones that failed, and the \
+caller then reads a result in which its key is simply absent. Absent means \"deleted\" to every \
+reasonable reader, so the object stays and the caller believes it is gone — the worst possible \
+disagreement for a retention or erasure obligation. The document is pinned byte for byte because \
+the failure entry's own children have a fixed order too."""
+polarity = "negative"
+operation = "DeleteObjects"
+tags = ["delete", "batch", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-deletes-0027"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteObjects.html"
+summary = "The result reports the outcome of each key, as either a deleted entry or an error entry."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/issues/469"
+summary = "Upstream dropped keys it could not delete from the result, so a caller could not tell which of its keys survived."
+kind = "s3s-issue"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-object"
+object_lock = true
+
+[[setup.objects]]
+bucket = "conf-object"
+key = "batch/removable"
+body = { utf8 = "1" }
+
+[[setup.objects]]
+bucket = "conf-object"
+key = "batch/retained"
+body = { utf8 = "2" }
+
+[request]
+method = "POST"
+target = "/conf-object?delete"
+# The integrity header this operation requires; the value is md5 of the body below.
+headers = { "content-type" = "application/xml", "content-md5" = "yUYhL/uWbhaR/DPXkK8UvA==" }
+body = { utf8 = "<Delete><Object><Key>batch/removable</Key></Object><Object><Key>batch/retained</Key><VersionId>held</VersionId></Object></Delete>" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[expect.headers_present]
+"content-type" = "application/xml"
+
+[expect.timing]
+terminate_within_ms = 5000
+
+# Two keys in, two entries out. The status is 200 even though one key failed: a per-key failure is
+# reported in the document, never in the status line.
+[expect.body]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<DeleteResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Deleted><Key>batch/removable</Key></Deleted><Error><Key>batch/retained</Key><VersionId>held</VersionId><Code>AccessDenied</Code><Message>Access Denied</Message></Error></DeleteResult>'''

@@ -1,0 +1,408 @@
+{
+  "ir_version": "1",
+  "operation": "DeleteObjects",
+  "http": {
+            "method": "POST",
+            "target": "Bucket",
+            "precedence": 650,
+            "predicates": [
+                            { "kind": "Method", "method": "POST" },
+                            { "kind": "Target", "target": "Bucket" },
+                            { "kind": "QueryPresent", "key": "delete" }
+                          ],
+            "success_status": 200,
+            "alt_success_statuses": [],
+            "path_shape": "/{Bucket}"
+          },
+  "auth": { "requirement": "Required", "action": "s3:DeleteObject", "presigned_allowed": true, "service": "s3" },
+  "payload": {
+               "request": { "kind": "XmlBody", "buffering": "Full", "max_bytes": 2097152 },
+               "response": { "kind": "XmlBody", "buffering": "Full", "max_bytes": null }
+             },
+  "checksum": {
+                "http_checksum_required": true,
+                "request_algorithms": ["CRC32", "CRC32C", "CRC64NVME", "SHA1", "SHA256"],
+                "response_algorithms": []
+              },
+  "input": {
+             "fields": [
+                         {
+                           "name": "Bucket",
+                           "wire_name": "Bucket",
+                           "required": true,
+                           "binding": { "kind": "UriLabel", "greedy": false },
+                           "type": { "kind": "BucketName" },
+                           "hot": true,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "Delete",
+                           "wire_name": null,
+                           "required": true,
+                           "binding": { "kind": "Payload" },
+                           "type": { "kind": "Structure", "shape": "Delete" },
+                           "hot": true,
+                           "quirk_refs": ["q-deletes-0027"]
+                         },
+                         {
+                           "name": "MFA",
+                           "wire_name": "x-amz-mfa",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "String" },
+                           "hot": false,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "RequestPayer",
+                           "wire_name": "x-amz-request-payer",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "StringEnum", "values": ["requester"] },
+                           "hot": false,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "BypassGovernanceRetention",
+                           "wire_name": "x-amz-bypass-governance-retention",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "Boolean" },
+                           "hot": false,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "ExpectedBucketOwner",
+                           "wire_name": "x-amz-expected-bucket-owner",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "String" },
+                           "hot": false,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "ChecksumAlgorithm",
+                           "wire_name": "x-amz-sdk-checksum-algorithm",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": {
+                                     "kind": "StringEnum",
+                                     "values": [
+                                                 "CRC32",
+                                                 "CRC32C",
+                                                 "SHA1",
+                                                 "SHA256",
+                                                 "CRC64NVME",
+                                                 "SHA512",
+                                                 "MD5",
+                                                 "XXHASH64",
+                                                 "XXHASH3",
+                                                 "XXHASH128"
+                                               ]
+                                   },
+                           "hot": false,
+                           "quirk_refs": []
+                         }
+                       ]
+           },
+  "output": {
+              "fields": [
+                          {
+                            "name": "Deleted",
+                            "wire_name": "Deleted",
+                            "required": false,
+                            "binding": { "kind": "BodyXml" },
+                            "type": {
+                                      "kind": "List",
+                                      "member": { "kind": "Structure", "shape": "DeletedObject" },
+                                      "flattened": true,
+                                      "wrapper_name": null
+                                    },
+                            "hot": true,
+                            "quirk_refs": ["q-deletes-0027"]
+                          },
+                          {
+                            "name": "RequestCharged",
+                            "wire_name": "x-amz-request-charged",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": { "kind": "StringEnum", "values": ["requester"] },
+                            "hot": false,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "Errors",
+                            "wire_name": "Error",
+                            "required": false,
+                            "binding": { "kind": "BodyXml" },
+                            "type": {
+                                      "kind": "List",
+                                      "member": { "kind": "Structure", "shape": "Error" },
+                                      "flattened": true,
+                                      "wrapper_name": null
+                                    },
+                            "hot": true,
+                            "quirk_refs": ["q-deletes-0027"]
+                          }
+                        ]
+            },
+  "shapes": {
+              "Delete": {
+                          "kind": "Structure",
+                          "fields": [
+                                      {
+                                        "name": "Objects",
+                                        "wire_name": "Object",
+                                        "required": true,
+                                        "binding": { "kind": "BodyXml" },
+                                        "type": {
+                                                  "kind": "List",
+                                                  "member": { "kind": "Structure", "shape": "ObjectIdentifier" },
+                                                  "flattened": true,
+                                                  "wrapper_name": null
+                                                },
+                                        "hot": false,
+                                        "quirk_refs": []
+                                      },
+                                      {
+                                        "name": "Quiet",
+                                        "wire_name": "Quiet",
+                                        "required": false,
+                                        "binding": { "kind": "BodyXml" },
+                                        "type": { "kind": "Boolean" },
+                                        "hot": false,
+                                        "quirk_refs": []
+                                      }
+                                    ],
+                          "xml": {
+                                   "element_order": ["Objects", "Quiet"],
+                                   "empty_value_policy": { "Objects": "emit", "Quiet": "omit" },
+                                   "attributes": []
+                                 }
+                        },
+              "DeletedObject": {
+                                 "kind": "Structure",
+                                 "fields": [
+                                             {
+                                               "name": "Key",
+                                               "wire_name": "Key",
+                                               "required": false,
+                                               "binding": { "kind": "BodyXml" },
+                                               "type": { "kind": "ObjectKey" },
+                                               "hot": true,
+                                               "quirk_refs": []
+                                             },
+                                             {
+                                               "name": "VersionId",
+                                               "wire_name": "VersionId",
+                                               "required": false,
+                                               "binding": { "kind": "BodyXml" },
+                                               "type": { "kind": "String" },
+                                               "hot": false,
+                                               "quirk_refs": []
+                                             },
+                                             {
+                                               "name": "DeleteMarker",
+                                               "wire_name": "DeleteMarker",
+                                               "required": false,
+                                               "binding": { "kind": "BodyXml" },
+                                               "type": { "kind": "Boolean" },
+                                               "hot": false,
+                                               "quirk_refs": []
+                                             },
+                                             {
+                                               "name": "DeleteMarkerVersionId",
+                                               "wire_name": "DeleteMarkerVersionId",
+                                               "required": false,
+                                               "binding": { "kind": "BodyXml" },
+                                               "type": { "kind": "String" },
+                                               "hot": false,
+                                               "quirk_refs": []
+                                             }
+                                           ],
+                                 "xml": {
+                                          "element_order": ["Key", "VersionId", "DeleteMarker", "DeleteMarkerVersionId"],
+                                          "empty_value_policy": {
+                                                                  "Key": "omit",
+                                                                  "VersionId": "omit",
+                                                                  "DeleteMarker": "omit",
+                                                                  "DeleteMarkerVersionId": "omit"
+                                                                },
+                                          "attributes": []
+                                        }
+                               },
+              "Error": {
+                         "kind": "Structure",
+                         "fields": [
+                                     {
+                                       "name": "Key",
+                                       "wire_name": "Key",
+                                       "required": false,
+                                       "binding": { "kind": "BodyXml" },
+                                       "type": { "kind": "ObjectKey" },
+                                       "hot": false,
+                                       "quirk_refs": []
+                                     },
+                                     {
+                                       "name": "VersionId",
+                                       "wire_name": "VersionId",
+                                       "required": false,
+                                       "binding": { "kind": "BodyXml" },
+                                       "type": { "kind": "String" },
+                                       "hot": false,
+                                       "quirk_refs": []
+                                     },
+                                     {
+                                       "name": "Code",
+                                       "wire_name": "Code",
+                                       "required": false,
+                                       "binding": { "kind": "BodyXml" },
+                                       "type": { "kind": "String" },
+                                       "hot": false,
+                                       "quirk_refs": []
+                                     },
+                                     {
+                                       "name": "Message",
+                                       "wire_name": "Message",
+                                       "required": false,
+                                       "binding": { "kind": "BodyXml" },
+                                       "type": { "kind": "String" },
+                                       "hot": false,
+                                       "quirk_refs": []
+                                     }
+                                   ],
+                         "xml": {
+                                  "element_order": ["Key", "VersionId", "Code", "Message"],
+                                  "empty_value_policy": {
+                                                          "Key": "omit",
+                                                          "VersionId": "omit",
+                                                          "Code": "omit",
+                                                          "Message": "omit"
+                                                        },
+                                  "attributes": []
+                                }
+                       },
+              "ObjectIdentifier": {
+                                    "kind": "Structure",
+                                    "fields": [
+                                                {
+                                                  "name": "Key",
+                                                  "wire_name": "Key",
+                                                  "required": true,
+                                                  "binding": { "kind": "BodyXml" },
+                                                  "type": { "kind": "ObjectKey" },
+                                                  "hot": true,
+                                                  "quirk_refs": []
+                                                },
+                                                {
+                                                  "name": "VersionId",
+                                                  "wire_name": "VersionId",
+                                                  "required": false,
+                                                  "binding": { "kind": "BodyXml" },
+                                                  "type": { "kind": "String" },
+                                                  "hot": false,
+                                                  "quirk_refs": []
+                                                },
+                                                {
+                                                  "name": "ETag",
+                                                  "wire_name": "ETag",
+                                                  "required": false,
+                                                  "binding": { "kind": "BodyXml" },
+                                                  "type": { "kind": "ETag", "render": "XmlQuoted" },
+                                                  "hot": false,
+                                                  "quirk_refs": []
+                                                },
+                                                {
+                                                  "name": "LastModifiedTime",
+                                                  "wire_name": "LastModifiedTime",
+                                                  "required": false,
+                                                  "binding": { "kind": "BodyXml" },
+                                                  "type": { "kind": "Timestamp", "format": "HttpDate" },
+                                                  "hot": false,
+                                                  "quirk_refs": []
+                                                },
+                                                {
+                                                  "name": "Size",
+                                                  "wire_name": "Size",
+                                                  "required": false,
+                                                  "binding": { "kind": "BodyXml" },
+                                                  "type": { "kind": "Long" },
+                                                  "hot": false,
+                                                  "quirk_refs": []
+                                                }
+                                              ],
+                                    "xml": {
+                                             "element_order": ["Key", "VersionId", "ETag", "LastModifiedTime", "Size"],
+                                             "empty_value_policy": {
+                                                                     "Key": "emit",
+                                                                     "VersionId": "omit",
+                                                                     "ETag": "omit",
+                                                                     "LastModifiedTime": "omit",
+                                                                     "Size": "omit"
+                                                                   },
+                                             "attributes": []
+                                           }
+                                  }
+            },
+  "xml": {
+           "request_root": null,
+           "request_root_aliases": [],
+           "response_root": "DeleteResult",
+           "xmlns": "emit",
+           "unwrapped_output": false,
+           "element_order": ["Deleted", "Errors"],
+           "empty_value_policy": { "Deleted": "omit", "Errors": "omit" },
+           "url_encoded_fields": [],
+           "attributes": [],
+           "body_literal": false
+         },
+  "errors": {
+              "not_configured": null,
+              "allows_error_after_200": false,
+              "codes": ["NoSuchBucket", "AccessDenied", "MalformedXML", "InvalidRequest", "InvalidArgument"]
+            },
+  "derived_resources": [],
+  "head_mirrors": null,
+  "quirk_refs": ["q-checksum-0006", "q-deletes-0027"],
+  "quirks": [
+              {
+                "id": "q-checksum-0006",
+                "kind": "checksum_headers",
+                "target": "PutObject",
+                "summary": "The eleven separate checksum members collapse into one packed spec, and more than one checksum header on a request is a hard error rather than a merge.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObject.html",
+                                "summary": "Only one checksum algorithm header is accepted per request and the value is base64 encoded."
+                              },
+                              {
+                                "kind": "capture",
+                                "ref": "captures/put-object-two-checksums.http",
+                                "summary": "Recorded rejection when two different checksum headers are sent together."
+                              }
+                            ],
+                "cases": ["c-checksum-0001", "c-checksum-0002"]
+              },
+              {
+                "id": "q-deletes-0027",
+                "kind": "result_completeness",
+                "target": "DeleteObjects",
+                "summary": "Every key in the request appears exactly once in the result, in either the deleted list or the error list, and the two lists together have the same length as the request.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteObjects.html",
+                                "summary": "The result reports the outcome of each key, as either a deleted entry or an error entry."
+                              },
+                              {
+                                "kind": "s3s-issue",
+                                "ref": "https://github.com/s3s-project/s3s/issues/469",
+                                "summary": "Upstream dropped keys it could not delete from the result, so a caller could not tell which of its keys survived."
+                              }
+                            ],
+                "cases": ["c-object-0004", "c-object-0011"]
+              }
+            ],
+  "ext_points": []
+}

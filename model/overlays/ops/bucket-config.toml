@@ -1,0 +1,72 @@
+# Copyright 2026 RustFS Team
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Family: bucket subresource configuration.
+#
+# Nothing is generated yet. One Get/Put/Delete triple per subresource, every one of them sharing
+# the "unconfigured subresource answers a per-operation 404 code" rule.
+
+[[deferred]]
+reason = "P5 bucket subresource configuration family; one Get/Put/Delete triple per subresource, all sharing the not_configured 404 rule."
+operations = [
+  "DeleteBucketAnalyticsConfiguration",
+  "DeleteBucketCors",
+  "DeleteBucketEncryption",
+  "DeleteBucketIntelligentTieringConfiguration",
+  "DeleteBucketInventoryConfiguration",
+  "DeleteBucketLifecycle",
+  "DeleteBucketMetricsConfiguration",
+  "DeleteBucketOwnershipControls",
+  "DeleteBucketReplication",
+  "DeleteBucketTagging",
+  "DeleteBucketWebsite",
+  "GetBucketAccelerateConfiguration",
+  "GetBucketAcl",
+  "GetBucketAnalyticsConfiguration",
+  "GetBucketCors",
+  "GetBucketEncryption",
+  "GetBucketIntelligentTieringConfiguration",
+  "GetBucketInventoryConfiguration",
+  "GetBucketLifecycleConfiguration",
+  "GetBucketLogging",
+  "GetBucketMetricsConfiguration",
+  "GetBucketNotificationConfiguration",
+  "GetBucketOwnershipControls",
+  "GetBucketReplication",
+  "GetBucketRequestPayment",
+  "GetBucketTagging",
+  "GetBucketVersioning",
+  "GetBucketWebsite",
+  "ListBucketAnalyticsConfigurations",
+  "ListBucketIntelligentTieringConfigurations",
+  "ListBucketInventoryConfigurations",
+  "ListBucketMetricsConfigurations",
+  "PutBucketAccelerateConfiguration",
+  "PutBucketAcl",
+  "PutBucketAnalyticsConfiguration",
+  "PutBucketCors",
+  "PutBucketEncryption",
+  "PutBucketIntelligentTieringConfiguration",
+  "PutBucketInventoryConfiguration",
+  "PutBucketLifecycleConfiguration",
+  "PutBucketLogging",
+  "PutBucketMetricsConfiguration",
+  "PutBucketNotificationConfiguration",
+  "PutBucketOwnershipControls",
+  "PutBucketReplication",
+  "PutBucketRequestPayment",
+  "PutBucketTagging",
+  "PutBucketVersioning",
+  "PutBucketWebsite",
+]

@@ -1,0 +1,187 @@
+{
+  "ir_version": "1",
+  "operation": "DeleteObject",
+  "http": {
+            "method": "DELETE",
+            "target": "Object",
+            "precedence": 1000,
+            "predicates": [{ "kind": "Method", "method": "DELETE" }, { "kind": "Target", "target": "Object" }],
+            "success_status": 204,
+            "alt_success_statuses": [],
+            "path_shape": "/{Bucket}/{Key+}"
+          },
+  "auth": { "requirement": "Required", "action": "s3:DeleteObject", "presigned_allowed": true, "service": "s3" },
+  "payload": {
+               "request": { "kind": "None", "buffering": "None", "max_bytes": null },
+               "response": { "kind": "None", "buffering": "None", "max_bytes": null }
+             },
+  "checksum": { "http_checksum_required": false, "request_algorithms": [], "response_algorithms": [] },
+  "input": {
+             "fields": [
+                         {
+                           "name": "Bucket",
+                           "wire_name": "Bucket",
+                           "required": true,
+                           "binding": { "kind": "UriLabel", "greedy": false },
+                           "type": { "kind": "BucketName" },
+                           "hot": true,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "Key",
+                           "wire_name": "Key",
+                           "required": true,
+                           "binding": { "kind": "UriLabel", "greedy": true },
+                           "type": { "kind": "ObjectKey" },
+                           "hot": true,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "MFA",
+                           "wire_name": "x-amz-mfa",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "String" },
+                           "hot": false,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "VersionId",
+                           "wire_name": "versionId",
+                           "required": false,
+                           "binding": { "kind": "Query" },
+                           "type": { "kind": "String" },
+                           "hot": true,
+                           "quirk_refs": ["q-delete-0026"]
+                         },
+                         {
+                           "name": "RequestPayer",
+                           "wire_name": "x-amz-request-payer",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "StringEnum", "values": ["requester"] },
+                           "hot": false,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "BypassGovernanceRetention",
+                           "wire_name": "x-amz-bypass-governance-retention",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "Boolean" },
+                           "hot": false,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "ExpectedBucketOwner",
+                           "wire_name": "x-amz-expected-bucket-owner",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "String" },
+                           "hot": false,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "IfMatch",
+                           "wire_name": "if-match",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "String" },
+                           "hot": false,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "IfMatchLastModifiedTime",
+                           "wire_name": "x-amz-if-match-last-modified-time",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "Timestamp", "format": "HttpDate" },
+                           "hot": false,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "IfMatchSize",
+                           "wire_name": "x-amz-if-match-size",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "Long" },
+                           "hot": false,
+                           "quirk_refs": []
+                         }
+                       ]
+           },
+  "output": {
+              "fields": [
+                          {
+                            "name": "DeleteMarker",
+                            "wire_name": "x-amz-delete-marker",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": { "kind": "Boolean" },
+                            "hot": false,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "VersionId",
+                            "wire_name": "x-amz-version-id",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": { "kind": "String" },
+                            "hot": false,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "RequestCharged",
+                            "wire_name": "x-amz-request-charged",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": { "kind": "StringEnum", "values": ["requester"] },
+                            "hot": false,
+                            "quirk_refs": []
+                          }
+                        ]
+            },
+  "shapes": {},
+  "xml": {
+           "request_root": null,
+           "request_root_aliases": [],
+           "response_root": null,
+           "xmlns": "emit",
+           "unwrapped_output": false,
+           "element_order": [],
+           "empty_value_policy": {},
+           "url_encoded_fields": [],
+           "attributes": [],
+           "body_literal": false
+         },
+  "errors": {
+              "not_configured": null,
+              "allows_error_after_200": false,
+              "codes": ["NoSuchBucket", "AccessDenied", "InvalidArgument"]
+            },
+  "derived_resources": [],
+  "head_mirrors": null,
+  "quirk_refs": ["q-delete-0026"],
+  "quirks": [
+              {
+                "id": "q-delete-0026",
+                "kind": "idempotent_delete",
+                "target": "DeleteObject",
+                "summary": "Deleting a key that does not exist is a success and answers the same empty 204 as deleting one that does; a not-found status here breaks every retrying client.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteObject.html",
+                                "summary": "The documented response is the same whether or not the key was present."
+                              },
+                              {
+                                "kind": "s3s-issue",
+                                "ref": "https://github.com/s3s-project/s3s/issues/455",
+                                "summary": "Upstream answered not-found for an absent key, which turned a retried delete into a client-visible failure."
+                              }
+                            ],
+                "cases": ["c-object-0003"]
+              }
+            ],
+  "ext_points": []
+}

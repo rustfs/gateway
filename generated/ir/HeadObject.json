@@ -1,0 +1,753 @@
+{
+  "ir_version": "1",
+  "operation": "HeadObject",
+  "http": {
+            "method": "HEAD",
+            "target": "Object",
+            "precedence": 950,
+            "predicates": [{ "kind": "Method", "method": "HEAD" }, { "kind": "Target", "target": "Object" }],
+            "success_status": 200,
+            "alt_success_statuses": [],
+            "path_shape": "/{Bucket}/{Key+}"
+          },
+  "auth": { "requirement": "Required", "action": "s3:GetObject", "presigned_allowed": true, "service": "s3" },
+  "payload": {
+               "request": { "kind": "None", "buffering": "None", "max_bytes": null },
+               "response": { "kind": "None", "buffering": "None", "max_bytes": null }
+             },
+  "checksum": { "http_checksum_required": false, "request_algorithms": [], "response_algorithms": [] },
+  "input": {
+             "fields": [
+                         {
+                           "name": "Bucket",
+                           "wire_name": "Bucket",
+                           "required": true,
+                           "binding": { "kind": "UriLabel", "greedy": false },
+                           "type": { "kind": "BucketName" },
+                           "hot": true,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "IfMatch",
+                           "wire_name": "if-match",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "String" },
+                           "hot": false,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "IfModifiedSince",
+                           "wire_name": "if-modified-since",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "Timestamp", "format": "HttpDate" },
+                           "hot": false,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "IfNoneMatch",
+                           "wire_name": "if-none-match",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "String" },
+                           "hot": false,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "IfUnmodifiedSince",
+                           "wire_name": "if-unmodified-since",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "Timestamp", "format": "HttpDate" },
+                           "hot": false,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "Key",
+                           "wire_name": "Key",
+                           "required": true,
+                           "binding": { "kind": "UriLabel", "greedy": true },
+                           "type": { "kind": "ObjectKey" },
+                           "hot": true,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "Range",
+                           "wire_name": "range",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "Range" },
+                           "hot": false,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "ResponseCacheControl",
+                           "wire_name": "response-cache-control",
+                           "required": false,
+                           "binding": { "kind": "Query" },
+                           "type": { "kind": "String" },
+                           "hot": false,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "ResponseContentDisposition",
+                           "wire_name": "response-content-disposition",
+                           "required": false,
+                           "binding": { "kind": "Query" },
+                           "type": { "kind": "String" },
+                           "hot": false,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "ResponseContentEncoding",
+                           "wire_name": "response-content-encoding",
+                           "required": false,
+                           "binding": { "kind": "Query" },
+                           "type": { "kind": "String" },
+                           "hot": false,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "ResponseContentLanguage",
+                           "wire_name": "response-content-language",
+                           "required": false,
+                           "binding": { "kind": "Query" },
+                           "type": { "kind": "String" },
+                           "hot": false,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "ResponseContentType",
+                           "wire_name": "response-content-type",
+                           "required": false,
+                           "binding": { "kind": "Query" },
+                           "type": { "kind": "String" },
+                           "hot": false,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "ResponseExpires",
+                           "wire_name": "response-expires",
+                           "required": false,
+                           "binding": { "kind": "Query" },
+                           "type": { "kind": "Timestamp", "format": "HttpDate" },
+                           "hot": false,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "VersionId",
+                           "wire_name": "versionId",
+                           "required": false,
+                           "binding": { "kind": "Query" },
+                           "type": { "kind": "String" },
+                           "hot": false,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "SSECustomerAlgorithm",
+                           "wire_name": "x-amz-server-side-encryption-customer-algorithm",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "String" },
+                           "hot": false,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "SSECustomerKey",
+                           "wire_name": "x-amz-server-side-encryption-customer-key",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "String" },
+                           "hot": false,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "SSECustomerKeyMD5",
+                           "wire_name": "x-amz-server-side-encryption-customer-key-md5",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "String" },
+                           "hot": false,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "RequestPayer",
+                           "wire_name": "x-amz-request-payer",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "StringEnum", "values": ["requester"] },
+                           "hot": false,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "PartNumber",
+                           "wire_name": "partNumber",
+                           "required": false,
+                           "binding": { "kind": "Query" },
+                           "type": { "kind": "Integer" },
+                           "hot": false,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "ExpectedBucketOwner",
+                           "wire_name": "x-amz-expected-bucket-owner",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "String" },
+                           "hot": false,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "ChecksumMode",
+                           "wire_name": "x-amz-checksum-mode",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "StringEnum", "values": ["ENABLED"] },
+                           "hot": false,
+                           "quirk_refs": []
+                         }
+                       ]
+           },
+  "output": {
+              "fields": [
+                          {
+                            "name": "DeleteMarker",
+                            "wire_name": "x-amz-delete-marker",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": { "kind": "Boolean" },
+                            "hot": false,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "AcceptRanges",
+                            "wire_name": "accept-ranges",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": { "kind": "String" },
+                            "hot": false,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "Expiration",
+                            "wire_name": "x-amz-expiration",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": { "kind": "OpaqueString" },
+                            "hot": false,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "Restore",
+                            "wire_name": "x-amz-restore",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": { "kind": "String" },
+                            "hot": false,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "ArchiveStatus",
+                            "wire_name": "x-amz-archive-status",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": { "kind": "StringEnum", "values": ["ARCHIVE_ACCESS", "DEEP_ARCHIVE_ACCESS"] },
+                            "hot": false,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "LastModified",
+                            "wire_name": "last-modified",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": { "kind": "Timestamp", "format": "HttpDate" },
+                            "hot": true,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "ContentLength",
+                            "wire_name": "content-length",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": { "kind": "Long" },
+                            "hot": true,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "ChecksumCRC32",
+                            "wire_name": "x-amz-checksum-crc32",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": { "kind": "String" },
+                            "hot": false,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "ChecksumCRC32C",
+                            "wire_name": "x-amz-checksum-crc32c",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": { "kind": "String" },
+                            "hot": false,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "ChecksumCRC64NVME",
+                            "wire_name": "x-amz-checksum-crc64nvme",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": { "kind": "String" },
+                            "hot": false,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "ChecksumSHA1",
+                            "wire_name": "x-amz-checksum-sha1",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": { "kind": "String" },
+                            "hot": false,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "ChecksumSHA256",
+                            "wire_name": "x-amz-checksum-sha256",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": { "kind": "String" },
+                            "hot": false,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "ChecksumSHA512",
+                            "wire_name": "x-amz-checksum-sha512",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": { "kind": "String" },
+                            "hot": false,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "ChecksumMD5",
+                            "wire_name": "x-amz-checksum-md5",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": { "kind": "String" },
+                            "hot": false,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "ChecksumXXHASH64",
+                            "wire_name": "x-amz-checksum-xxhash64",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": { "kind": "String" },
+                            "hot": false,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "ChecksumXXHASH3",
+                            "wire_name": "x-amz-checksum-xxhash3",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": { "kind": "String" },
+                            "hot": false,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "ChecksumXXHASH128",
+                            "wire_name": "x-amz-checksum-xxhash128",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": { "kind": "String" },
+                            "hot": false,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "ChecksumType",
+                            "wire_name": "x-amz-checksum-type",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": { "kind": "StringEnum", "values": ["COMPOSITE", "FULL_OBJECT"] },
+                            "hot": false,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "ETag",
+                            "wire_name": "etag",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": { "kind": "ETag", "render": "HeaderQuoted" },
+                            "hot": true,
+                            "quirk_refs": ["q-etag-0004", "q-head-0025"]
+                          },
+                          {
+                            "name": "MissingMeta",
+                            "wire_name": "x-amz-missing-meta",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": { "kind": "Integer" },
+                            "hot": false,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "VersionId",
+                            "wire_name": "x-amz-version-id",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": { "kind": "String" },
+                            "hot": false,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "CacheControl",
+                            "wire_name": "cache-control",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": { "kind": "String" },
+                            "hot": false,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "ContentDisposition",
+                            "wire_name": "content-disposition",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": { "kind": "String" },
+                            "hot": false,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "ContentEncoding",
+                            "wire_name": "content-encoding",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": { "kind": "String" },
+                            "hot": false,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "ContentLanguage",
+                            "wire_name": "content-language",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": { "kind": "String" },
+                            "hot": false,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "ContentType",
+                            "wire_name": "content-type",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": { "kind": "String" },
+                            "hot": true,
+                            "default": "binary/octet-stream",
+                            "quirk_refs": ["q-content-0008"]
+                          },
+                          {
+                            "name": "ContentRange",
+                            "wire_name": "content-range",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": { "kind": "String" },
+                            "hot": false,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "Expires",
+                            "wire_name": "expires",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": { "kind": "OpaqueString" },
+                            "hot": false,
+                            "quirk_refs": ["q-timestamp-0005"]
+                          },
+                          {
+                            "name": "WebsiteRedirectLocation",
+                            "wire_name": "x-amz-website-redirect-location",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": { "kind": "String" },
+                            "hot": false,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "ServerSideEncryption",
+                            "wire_name": "x-amz-server-side-encryption",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": { "kind": "StringEnum", "values": ["AES256", "aws:fsx", "aws:kms", "aws:kms:dsse"] },
+                            "hot": false,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "Metadata",
+                            "wire_name": "x-amz-meta-",
+                            "required": false,
+                            "binding": { "kind": "PrefixHeaders" },
+                            "type": { "kind": "Map", "key": { "kind": "String" }, "value": { "kind": "String" } },
+                            "hot": false,
+                            "quirk_refs": ["q-meta-0009"]
+                          },
+                          {
+                            "name": "SSECustomerAlgorithm",
+                            "wire_name": "x-amz-server-side-encryption-customer-algorithm",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": { "kind": "String" },
+                            "hot": false,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "SSECustomerKeyMD5",
+                            "wire_name": "x-amz-server-side-encryption-customer-key-md5",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": { "kind": "String" },
+                            "hot": false,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "SSEKMSKeyId",
+                            "wire_name": "x-amz-server-side-encryption-aws-kms-key-id",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": { "kind": "String" },
+                            "hot": false,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "BucketKeyEnabled",
+                            "wire_name": "x-amz-server-side-encryption-bucket-key-enabled",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": { "kind": "Boolean" },
+                            "hot": false,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "StorageClass",
+                            "wire_name": "x-amz-storage-class",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": {
+                                      "kind": "StringEnum",
+                                      "values": [
+                                                  "STANDARD",
+                                                  "REDUCED_REDUNDANCY",
+                                                  "STANDARD_IA",
+                                                  "ONEZONE_IA",
+                                                  "INTELLIGENT_TIERING",
+                                                  "GLACIER",
+                                                  "DEEP_ARCHIVE",
+                                                  "OUTPOSTS",
+                                                  "GLACIER_IR",
+                                                  "SNOW",
+                                                  "EXPRESS_ONEZONE",
+                                                  "FSX_OPENZFS",
+                                                  "FSX_ONTAP"
+                                                ]
+                                    },
+                            "hot": false,
+                            "omit_when": { "kind": "ValueEquals", "value": "STANDARD" },
+                            "quirk_refs": ["q-storageclass-0024"]
+                          },
+                          {
+                            "name": "RequestCharged",
+                            "wire_name": "x-amz-request-charged",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": { "kind": "StringEnum", "values": ["requester"] },
+                            "hot": false,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "ReplicationStatus",
+                            "wire_name": "x-amz-replication-status",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": {
+                                      "kind": "StringEnum",
+                                      "values": ["COMPLETE", "PENDING", "FAILED", "REPLICA", "COMPLETED"]
+                                    },
+                            "hot": false,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "PartsCount",
+                            "wire_name": "x-amz-mp-parts-count",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": { "kind": "Integer" },
+                            "hot": false,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "TagCount",
+                            "wire_name": "x-amz-tagging-count",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": { "kind": "Integer" },
+                            "hot": false,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "ObjectLockMode",
+                            "wire_name": "x-amz-object-lock-mode",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": { "kind": "StringEnum", "values": ["GOVERNANCE", "COMPLIANCE"] },
+                            "hot": false,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "ObjectLockRetainUntilDate",
+                            "wire_name": "x-amz-object-lock-retain-until-date",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": { "kind": "Timestamp", "format": "Iso8601" },
+                            "hot": false,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "ObjectLockLegalHoldStatus",
+                            "wire_name": "x-amz-object-lock-legal-hold",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": { "kind": "StringEnum", "values": ["ON", "OFF"] },
+                            "hot": false,
+                            "quirk_refs": []
+                          }
+                        ]
+            },
+  "shapes": {},
+  "xml": {
+           "request_root": null,
+           "request_root_aliases": [],
+           "response_root": null,
+           "xmlns": "emit",
+           "unwrapped_output": false,
+           "element_order": [],
+           "empty_value_policy": {},
+           "url_encoded_fields": [],
+           "attributes": [],
+           "body_literal": false
+         },
+  "errors": {
+              "not_configured": null,
+              "allows_error_after_200": false,
+              "codes": ["NoSuchBucket", "NoSuchKey", "AccessDenied", "NotFound", "PreconditionFailed", "NotModified"]
+            },
+  "derived_resources": [],
+  "head_mirrors": "GetObject",
+  "quirk_refs": ["q-storageclass-0024", "q-head-0025"],
+  "quirks": [
+              {
+                "id": "q-etag-0004",
+                "kind": "etag_render",
+                "target": "PutObject.ETag",
+                "summary": "In a header position the entity tag is always written with surrounding double quotes, unlike the bare form used by GetObjectAttributes.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObject.html#API_PutObject_ResponseSyntax",
+                                "summary": "The documented response header shows the entity tag surrounded by quotes."
+                              },
+                              {
+                                "kind": "s3s-issue",
+                                "ref": "https://github.com/s3s-project/s3s/issues/632",
+                                "summary": "Upstream had two conflicting quoting rules in different files, which is the reason the rendering context is a type parameter here."
+                              }
+                            ],
+                "cases": ["c-etag-0010"]
+              },
+              {
+                "id": "q-timestamp-0005",
+                "kind": "timestamp_format",
+                "target": "PutObject.Expires",
+                "summary": "The value must be round tripped as an opaque string, because stored values are frequently not parseable dates at all.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObject.html",
+                                "summary": "The SDKs added a separate string valued member for this header after non date values were observed in production data."
+                              },
+                              {
+                                "kind": "observed",
+                                "ref": "captures/put-object-expires-nondate.http",
+                                "summary": "Recorded request where the header value is not a date, which a parsing implementation would reject or rewrite."
+                              }
+                            ],
+                "cases": ["c-expires-0001"]
+              },
+              {
+                "id": "q-content-0008",
+                "kind": "default_value",
+                "target": "PutObject.ContentType",
+                "summary": "The default media type is the S3 specific binary form, not the IANA registered octet stream spelling.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObject.html",
+                                "summary": "Documents the S3 specific default media type applied when the request omits the header."
+                              }
+                            ],
+                "cases": ["c-putobject-0002"]
+              },
+              {
+                "id": "q-meta-0009",
+                "kind": "prefix_headers",
+                "target": "PutObject.Metadata",
+                "summary": "User metadata keys are lowercased on return, non ASCII values use encoded word syntax, and the combined size is capped.",
+                "evidence": [
+                              {
+                                "kind": "s3s-issue",
+                                "ref": "https://github.com/s3s-project/s3s/issues/405",
+                                "summary": "Upstream did not encode non ASCII metadata values, producing headers that violate the field value grammar."
+                              },
+                              {
+                                "kind": "rfc",
+                                "ref": "https://www.rfc-editor.org/rfc/rfc2047",
+                                "summary": "Defines the encoded word syntax used to carry non ASCII text in header field values."
+                              }
+                            ],
+                "cases": ["c-meta-0001", "c-meta-0002"]
+              },
+              {
+                "id": "q-storageclass-0024",
+                "kind": "omit_when",
+                "target": "GetObject.StorageClass",
+                "summary": "The storage class response header is suppressed for the default class, which is the exact opposite of the listing body element that is always written.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObject.html",
+                                "summary": "States that the storage class response header is returned for every object except those in the default class."
+                              }
+                            ],
+                "cases": ["c-object-0012"]
+              },
+              {
+                "id": "q-head-0025",
+                "kind": "head_mirrors",
+                "target": "HeadObject",
+                "summary": "The head response carries exactly the header set of the corresponding get, and no body on any status, so the two header sets must be one derivation rather than two hand-written tables.",
+                "evidence": [
+                              {
+                                "kind": "s3s-issue",
+                                "ref": "https://github.com/s3s-project/s3s/issues/549",
+                                "summary": "Upstream lost the entity tag on the head response because its header bindings were written a second time."
+                              },
+                              {
+                                "kind": "rfc",
+                                "ref": "https://www.rfc-editor.org/rfc/rfc9110#section-9.3.2",
+                                "summary": "A response to a head request never carries content, whatever the status line says."
+                              }
+                            ],
+                "cases": ["c-object-0002", "c-object-0008"]
+              }
+            ],
+  "ext_points": []
+}

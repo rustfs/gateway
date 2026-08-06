@@ -24,14 +24,27 @@
 //! Upstream: `crate::ops`. Downstream: every consumer mid-migration.
 
 pub use crate::ops::enums::{
-    Acl, ChecksumAlgorithm, ChecksumType, EncodingType, LocationConstraint, ObjectLockLegalHoldStatus, ObjectLockMode,
-    RequestCharged, RequestPayer, ServerSideEncryption, StorageClass,
+    Acl, ArchiveStatus, ChecksumAlgorithm, ChecksumMode, ChecksumType, EncodingType, LocationConstraint,
+    ObjectLockLegalHoldStatus, ObjectLockMode, ReplicationStatus, RequestCharged, RequestPayer, ServerSideEncryption,
+    StorageClass,
 };
-pub use crate::ops::shapes::{CommonPrefix, Object, Owner, RestoreStatus};
+pub use crate::ops::shapes::{CommonPrefix, Delete, DeletedObject, Error, Object, ObjectIdentifier, Owner, RestoreStatus};
 
+pub use crate::ops::delete_object::{
+    DeleteObject, Input as DeleteObjectInput, InputBuilder as DeleteObjectInputBuilder, Output as DeleteObjectOutput,
+};
+pub use crate::ops::delete_objects::{
+    DeleteObjects, Input as DeleteObjectsInput, InputBuilder as DeleteObjectsInputBuilder, Output as DeleteObjectsOutput,
+};
 pub use crate::ops::get_bucket_location::{
     GetBucketLocation, Input as GetBucketLocationInput, InputBuilder as GetBucketLocationInputBuilder,
     Output as GetBucketLocationOutput,
+};
+pub use crate::ops::get_object::{
+    GetObject, Input as GetObjectInput, InputBuilder as GetObjectInputBuilder, Output as GetObjectOutput,
+};
+pub use crate::ops::head_object::{
+    HeadObject, Input as HeadObjectInput, InputBuilder as HeadObjectInputBuilder, Output as HeadObjectOutput,
 };
 pub use crate::ops::list_objects_v2::{
     Input as ListObjectsV2Input, InputBuilder as ListObjectsV2InputBuilder, ListObjectsV2, Output as ListObjectsV2Output,

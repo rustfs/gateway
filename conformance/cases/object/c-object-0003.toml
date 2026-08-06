@@ -1,0 +1,61 @@
+# c-object-0003 — DeleteObject on a key that does not exist.
+#
+# Schema dimensions exercised: fixture absence precondition, header-set assertion, byte-empty body.
+
+[case]
+id = "c-object-0003"
+schema_version = 1
+title = "Deleting a key that does not exist answers the same empty 204 as deleting one that does"
+rationale = """
+Every client that retries a delete depends on this. A delete is the operation most likely to be \
+sent twice — a retry after a timeout, a reconciliation loop, a lifecycle sweep — and if the second \
+attempt answers 404 the caller has to special-case a status that means the exact outcome it asked \
+for. Implementations get this wrong by checking existence first and mapping the miss onto the \
+generic not-found path, so the case asserts the status, the absence of a body, and the absence of \
+the headers a real deletion would have produced."""
+polarity = "positive"
+operation = "DeleteObject"
+tags = ["delete", "idempotence"]
+timeout_ms = 10000
+quirks = ["q-delete-0026"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteObject.html"
+summary = "The documented response is the same whether or not the key was present."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/issues/455"
+summary = "Upstream answered not-found for an absent key, which turned a retried delete into a client-visible failure."
+kind = "s3s-issue"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-object"
+
+[[setup.objects]]
+bucket = "conf-object"
+key = "never-existed"
+absent = true
+
+[request]
+method = "DELETE"
+target = "/conf-object/never-existed"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 204
+# A 204 carries no content and nothing that describes content. A Content-Length here is a body the
+# client will wait for and never receive.
+headers_absent = ["content-length", "content-type", "transfer-encoding", "x-amz-delete-marker"]
+connection_after = "open"
+
+[expect.timing]
+terminate_within_ms = 5000
+
+[expect.body]
+size = 0
+exact_utf8 = ""

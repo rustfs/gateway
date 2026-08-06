@@ -1,0 +1,84 @@
+# c-object-0014 — a Range header that cannot be satisfied, and one that cannot be parsed.
+#
+# Schema dimensions exercised: two exchanges contrasting a refusal with a deliberate non-refusal.
+
+[case]
+id = "c-object-0014"
+schema_version = 1
+title = "An unsatisfiable range is a 416 and an unparseable one is ignored, not refused"
+rationale = """
+These two look like the same mistake and have opposite correct answers, which is why they are one \
+case. A range that names bytes past the end of the object is a request the server can definitively \
+answer no to, and RFC 9110 asks for a 416 carrying the object's real length so the client can \
+retry. A range the server cannot parse — including one a proxy rewrote into a unit nobody \
+implements — must be ignored and the whole representation served, because refusing it breaks \
+clients that never asked for a range at all."""
+polarity = "negative"
+operation = "GetObject"
+tags = ["range", "rfc9110", "read"]
+timeout_ms = 10000
+quirks = []
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9110#section-14.2"
+summary = "A range unit the recipient does not support must be ignored and the request handled as if no range field were present."
+kind = "rfc"
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9110#section-15.5.17"
+summary = "A range that is entirely outside the representation answers 416 with a Content-Range naming the complete length."
+kind = "rfc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = true
+
+[[setup.buckets]]
+name = "conf-object"
+
+[[setup.objects]]
+bucket = "conf-object"
+key = "ranged/plain.txt"
+content_type = "text/plain"
+body = { utf8 = "hello world" }
+
+[[exchanges]]
+name = "past-the-end-is-refused"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-object/ranged/plain.txt"
+headers = { "range" = "bytes=99-200" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 416
+connection_after = "open"
+
+[exchanges.expect.error]
+code = "InvalidRange"
+request_id_present = true
+
+[exchanges.expect.headers_present]
+"content-range" = "bytes */11"
+
+[[exchanges]]
+name = "an-unknown-unit-is-ignored"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-object/ranged/plain.txt"
+headers = { "range" = "items=0-1" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+headers_absent = ["content-range"]
+connection_after = "open"
+
+[exchanges.expect.body]
+exact_utf8 = "hello world"

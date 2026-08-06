@@ -34,24 +34,30 @@
 //! the wire may carry.
 
 mod acl;
+mod archive_status;
 mod checksum_algorithm;
+mod checksum_mode;
 mod checksum_type;
 mod encoding_type;
 mod location_constraint;
 mod object_lock_legal_hold_status;
 mod object_lock_mode;
+mod replication_status;
 mod request_charged;
 mod request_payer;
 mod server_side_encryption;
 mod storage_class;
 
 pub use self::acl::Acl;
+pub use self::archive_status::ArchiveStatus;
 pub use self::checksum_algorithm::ChecksumAlgorithm;
+pub use self::checksum_mode::ChecksumMode;
 pub use self::checksum_type::ChecksumType;
 pub use self::encoding_type::EncodingType;
 pub use self::location_constraint::LocationConstraint;
 pub use self::object_lock_legal_hold_status::ObjectLockLegalHoldStatus;
 pub use self::object_lock_mode::ObjectLockMode;
+pub use self::replication_status::ReplicationStatus;
 pub use self::request_charged::RequestCharged;
 pub use self::request_payer::RequestPayer;
 pub use self::server_side_encryption::ServerSideEncryption;

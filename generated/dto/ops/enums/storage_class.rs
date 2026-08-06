@@ -23,7 +23,7 @@
 
 use std::borrow::Cow;
 
-/// The `StorageClass` string enumeration. Bound by: ListObjectsV2, PutObject.
+/// The `StorageClass` string enumeration. Bound by: GetObject, HeadObject, ListObjectsV2, PutObject.
 ///
 /// An open set: compare against the associated constants, and build a value the pinned
 /// model does not declare with [`StorageClass::custom`]. Adding a constant is a minor version
@@ -36,14 +36,14 @@ impl StorageClass {
     pub const STANDARD: Self = Self(Cow::Borrowed("STANDARD"));
     /// `REDUCED_REDUNDANCY`
     pub const REDUCED_REDUNDANCY: Self = Self(Cow::Borrowed("REDUCED_REDUNDANCY"));
-    /// `GLACIER`
-    pub const GLACIER: Self = Self(Cow::Borrowed("GLACIER"));
     /// `STANDARD_IA`
     pub const STANDARD_IA: Self = Self(Cow::Borrowed("STANDARD_IA"));
     /// `ONEZONE_IA`
     pub const ONEZONE_IA: Self = Self(Cow::Borrowed("ONEZONE_IA"));
     /// `INTELLIGENT_TIERING`
     pub const INTELLIGENT_TIERING: Self = Self(Cow::Borrowed("INTELLIGENT_TIERING"));
+    /// `GLACIER`
+    pub const GLACIER: Self = Self(Cow::Borrowed("GLACIER"));
     /// `DEEP_ARCHIVE`
     pub const DEEP_ARCHIVE: Self = Self(Cow::Borrowed("DEEP_ARCHIVE"));
     /// `OUTPOSTS`
@@ -63,10 +63,10 @@ impl StorageClass {
     pub const VALUES: &'static [&'static str] = &[
         "STANDARD",
         "REDUCED_REDUNDANCY",
-        "GLACIER",
         "STANDARD_IA",
         "ONEZONE_IA",
         "INTELLIGENT_TIERING",
+        "GLACIER",
         "DEEP_ARCHIVE",
         "OUTPOSTS",
         "GLACIER_IR",

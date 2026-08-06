@@ -14,8 +14,27 @@
 
 //! XML serialization/deserialization machinery.
 //!
-//! Responsible for: the `XmlSerialize`/`XmlDeserialize` traits and the reader/writer machinery.
-//! NOT responsible for: any S3 semantics — it holds no S3 types. Generated impls live in
-//! `rustfs-gateway-types` (traits here + types there satisfies the orphan rule, same shape as serde).
-//! Upstream: `quick-xml`. Downstream: `rustfs-gateway-types`.
+//! Responsible for: the writer a generated encoder writes a response body through, the bounded
+//! reader a generated decoder reads a request body through, and the refusals both of them share.
+//! NOT responsible for: any S3 semantics — it holds no S3 type, knows no element name, and has no
+//! opinion about which member goes where. Generated impls live in `rustfs-gateway-core`, whose
+//! codecs supply every name and every ordering from the IR.
+//! Upstream: `quick-xml`. Downstream: `rustfs-gateway-types`, `rustfs-gateway-core`.
+//!
+//! # Why the writer offers no formatting options
+//!
+//! S3 writes a response body with no whitespace between elements and writes an empty element in
+//! its paired form. Both are byte-observable, and a conformance case that pins a body fails on
+//! either. An option a caller could set the other way is a defect waiting for a caller.
 #![forbid(unsafe_code)]
+
+pub mod error;
+pub mod read;
+pub mod write;
+
+#[cfg(test)]
+mod tests;
+
+pub use crate::error::XmlError;
+pub use crate::read::{MAX_DEPTH, MAX_ELEMENTS, XmlNode, parse};
+pub use crate::write::{DECLARATION, S3_XMLNS, XmlWriter, escape_attribute, escape_text};

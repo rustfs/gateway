@@ -24,11 +24,19 @@
 //! Upstream: `cargo xtask codegen`. Downstream: the generated dto and its codecs.
 
 mod common_prefix;
+mod delete;
+mod deleted_object;
+mod error;
 mod object;
+mod object_identifier;
 mod owner;
 mod restore_status;
 
 pub use self::common_prefix::CommonPrefix;
+pub use self::delete::Delete;
+pub use self::deleted_object::DeletedObject;
+pub use self::error::Error;
 pub use self::object::Object;
+pub use self::object_identifier::ObjectIdentifier;
 pub use self::owner::Owner;
 pub use self::restore_status::RestoreStatus;

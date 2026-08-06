@@ -65,9 +65,6 @@ const MINI_MODEL: &str = r#"{
 const MINI_OVERLAY: &str = r#"
 include = ["GetThing"]
 
-[scalar]
-BucketName = "BucketName"
-
 [op.GetThing]
 precedence = 100
 auth_action = "s3:GetThing"
@@ -86,9 +83,14 @@ fn overlay_from(text: &str) -> crate::Result<Overlay> {
     static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
     let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let dir = std::env::temp_dir().join(format!("s3gate-overlay-{}-{n}", std::process::id()));
-    std::fs::create_dir_all(&dir).expect("temp dir");
-    std::fs::write(dir.join("operations.toml"), text).expect("write overlay");
-    std::fs::write(dir.join("aws-quirks.toml"), "").expect("write quirks");
+    std::fs::create_dir_all(dir.join("ops")).expect("temp dir");
+    std::fs::create_dir_all(dir.join("quirks")).expect("temp dir");
+    // The overlay is a directory of family files: one cross-family scalar vocabulary, one
+    // `ops/<family>.toml`, one `quirks/<family>.toml`. These tests are about lowering, so they
+    // use one family and the smallest scalar map the miniature model needs.
+    std::fs::write(dir.join("scalars.toml"), "[scalar]\nBucketName = \"BucketName\"\n").expect("write scalars");
+    std::fs::write(dir.join("ops").join("mini.toml"), text).expect("write overlay");
+    std::fs::write(dir.join("quirks").join("mini.toml"), "").expect("write quirks");
     Overlay::load(&dir)
 }
 

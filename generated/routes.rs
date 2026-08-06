@@ -45,6 +45,19 @@ pub static ROUTES: &[RouteRow] = &[
         ],
     },
     RouteRow {
+        operation: "DeleteObjects",
+        precedence: 650,
+        method: "POST",
+        target: "Bucket",
+        path_shape: "/{Bucket}",
+        success_status: 200,
+        predicates: &[
+            RoutePredicate::Method("POST"),
+            RoutePredicate::Target("Bucket"),
+            RoutePredicate::QueryPresent("delete"),
+        ],
+    },
+    RouteRow {
         operation: "PutObject",
         precedence: 800,
         method: "PUT",
@@ -53,6 +66,42 @@ pub static ROUTES: &[RouteRow] = &[
         success_status: 200,
         predicates: &[
             RoutePredicate::Method("PUT"),
+            RoutePredicate::Target("Object"),
+        ],
+    },
+    RouteRow {
+        operation: "GetObject",
+        precedence: 900,
+        method: "GET",
+        target: "Object",
+        path_shape: "/{Bucket}/{Key+}",
+        success_status: 200,
+        predicates: &[
+            RoutePredicate::Method("GET"),
+            RoutePredicate::Target("Object"),
+        ],
+    },
+    RouteRow {
+        operation: "HeadObject",
+        precedence: 950,
+        method: "HEAD",
+        target: "Object",
+        path_shape: "/{Bucket}/{Key+}",
+        success_status: 200,
+        predicates: &[
+            RoutePredicate::Method("HEAD"),
+            RoutePredicate::Target("Object"),
+        ],
+    },
+    RouteRow {
+        operation: "DeleteObject",
+        precedence: 1000,
+        method: "DELETE",
+        target: "Object",
+        path_shape: "/{Bucket}/{Key+}",
+        success_status: 204,
+        predicates: &[
+            RoutePredicate::Method("DELETE"),
             RoutePredicate::Target("Object"),
         ],
     },

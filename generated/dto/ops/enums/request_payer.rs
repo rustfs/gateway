@@ -23,7 +23,7 @@
 
 use std::borrow::Cow;
 
-/// The `RequestPayer` string enumeration. Bound by: ListObjectsV2, PutObject.
+/// The `RequestPayer` string enumeration. Bound by: DeleteObject, DeleteObjects, GetObject, HeadObject, ListObjectsV2, PutObject.
 ///
 /// An open set: compare against the associated constants, and build a value the pinned
 /// model does not declare with [`RequestPayer::custom`]. Adding a constant is a minor version

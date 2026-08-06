@@ -15,13 +15,27 @@
 //! The hand-written protocol exception source.
 //!
 //! Responsible for: the operation whitelist, the scalar vocabulary map, per-operation and
-//! per-shape wire overrides, and the quirk records with their evidence.
+//! per-shape wire overrides, and the quirk records with their evidence — merged from one file per
+//! operation family, with every cross-file collision reported as a load failure.
 //! NOT responsible for: applying any of it (that is [`crate::lower`]).
 //! Upstream: [`crate::toml_lite`]. Downstream: [`crate::lower`].
 //!
 //! Everything a human is allowed to decide about the wire lives here and nowhere else. The
 //! Smithy model is read-only and every artefact below the overlay is generated, so this is the
 //! only file an agent may edit to change wire behaviour.
+//!
+//! # Why the overlay is a directory of family files
+//!
+//! One file per operation family is the unit of parallel edit conflict, exactly as one operation
+//! per file is in `rustfs-gateway-core`. Sixteen agents landing sixteen families into one
+//! `operations.toml` would conflict on every merge; landing them into
+//! `overlays/ops/<family>.toml` produces no textual conflict at all.
+//!
+//! What that trades away is the single file in which a duplicate was previously impossible: with
+//! ten files, two families can both claim `CopyObject` and neither diff shows it. So every merge
+//! here is collision-checked and a collision is a hard failure naming **both** files. A last-write
+//! -wins merge would silently disable whichever rule lost, which is the worst outcome a
+//! hand-written file can have.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -207,13 +221,46 @@ pub enum Side {
     Output,
 }
 
+/// Which file first declared a name, so a second declaration can name both.
+type Origins = BTreeMap<String, String>;
+
+/// The one cross-family file: the Smithy shape name to IR scalar vocabulary.
+const SCALARS_FILE: &str = "scalars.toml";
+
+/// The directory holding one operation-family file.
+const OPS_DIR: &str = "ops";
+
+/// The directory holding one quirk-family file.
+const QUIRKS_DIR: &str = "quirks";
+
 impl Overlay {
-    /// Loads `operations.toml` and `aws-quirks.toml` from an overlay directory.
+    /// Loads an overlay directory: `scalars.toml`, then every `ops/*.toml`, then every
+    /// `quirks/*.toml`, merged in file-name order.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Overlay`] when a directory is missing or empty, when a file is not readable, or
+    /// when two family files declare the same operation, shape or quirk. A collision names both
+    /// files: with sixteen families being written in parallel it is the failure that actually
+    /// happens, and "declared twice" without the two paths is not actionable.
     pub fn load(dir: &Path) -> Result<Self> {
         let mut overlay = Overlay::default();
-        overlay.read_operations(&dir.join("operations.toml"))?;
-        overlay.read_quirks(&dir.join("aws-quirks.toml"))?;
-        overlay.check()?;
+        overlay.read_scalars(&dir.join(SCALARS_FILE))?;
+
+        let mut include_origin = Origins::new();
+        let mut deferred_origin = Origins::new();
+        let mut op_origin = Origins::new();
+        let mut shape_origin = Origins::new();
+        for path in family_files(dir, OPS_DIR)? {
+            overlay.read_operations(&path, &mut include_origin, &mut deferred_origin, &mut op_origin, &mut shape_origin)?;
+        }
+
+        let mut quirk_origin = Origins::new();
+        for path in family_files(dir, QUIRKS_DIR)? {
+            overlay.read_quirks(&path, &mut quirk_origin)?;
+        }
+
+        overlay.check(&include_origin, &deferred_origin)?;
         Ok(overlay)
     }
 
@@ -222,50 +269,89 @@ impl Overlay {
         self.quirks.keys().cloned().collect()
     }
 
-    fn read_operations(&mut self, path: &Path) -> Result<()> {
+    /// Reads the one cross-family file. It carries `[scalar]` and nothing else.
+    ///
+    /// The scalar vocabulary is a decision about the whole surface — `ETag` renders the same way
+    /// whichever family reads it — so it has one home rather than being merged out of ten files
+    /// where two families could disagree about one shape.
+    fn read_scalars(&mut self, path: &Path) -> Result<()> {
+        let text = read(path)?;
+        let doc = toml_lite::parse(&path.display().to_string(), &text)?;
+        for key in ["include", "deferred", "op", "shape", "quirk"] {
+            if doc.get(key).is_some() {
+                return Err(Error::Overlay(format!(
+                    "{SCALARS_FILE} carries `{key}`; it holds `[scalar]` alone, and everything \
+                     per-operation belongs in `{OPS_DIR}/<family>.toml`"
+                )));
+            }
+        }
+        let Some(Toml::Table(entries)) = doc.get("scalar") else {
+            return Err(Error::Overlay(format!("{SCALARS_FILE} declares no `[scalar]` table")));
+        };
+        for (name, value) in entries {
+            let spelling = value
+                .as_str()
+                .ok_or_else(|| Error::Overlay(format!("scalar `{name}` must be a string")))?;
+            self.scalars.insert(name.clone(), spelling.to_owned());
+        }
+        Ok(())
+    }
+
+    fn read_operations(
+        &mut self,
+        path: &Path,
+        include_origin: &mut Origins,
+        deferred_origin: &mut Origins,
+        op_origin: &mut Origins,
+        shape_origin: &mut Origins,
+    ) -> Result<()> {
+        let file = label(path);
         let text = read(path)?;
         let doc = toml_lite::parse(&path.display().to_string(), &text)?;
 
+        if doc.get("scalar").is_some() {
+            return Err(Error::Overlay(format!(
+                "{file} carries `[scalar]`; the scalar vocabulary is cross-family and lives in \
+                 `{SCALARS_FILE}` alone"
+            )));
+        }
         if let Some(include) = doc.get("include") {
-            self.include = include.string_array("include")?;
+            for op in include.string_array("include")? {
+                claim(include_origin, &op, &file, "included")?;
+                self.include.push(op);
+            }
         }
         for group in array_of_tables(&doc, "deferred") {
             let reason = group
                 .get("reason")
                 .and_then(Toml::as_str)
-                .ok_or_else(|| Error::Overlay("every [[deferred]] group needs a `reason`".into()))?;
+                .ok_or_else(|| Error::Overlay(format!("{file}: every [[deferred]] group needs a `reason`")))?;
             let operations = group
                 .get("operations")
-                .ok_or_else(|| Error::Overlay("every [[deferred]] group needs `operations`".into()))?
+                .ok_or_else(|| Error::Overlay(format!("{file}: every [[deferred]] group needs `operations`")))?
                 .string_array("deferred.operations")?;
             for op in operations {
-                if self.deferred.insert(op.clone(), reason.to_owned()).is_some() {
-                    return Err(Error::Overlay(format!("`{op}` is deferred twice")));
-                }
-            }
-        }
-        if let Some(Toml::Table(entries)) = doc.get("scalar") {
-            for (name, value) in entries {
-                let spelling = value
-                    .as_str()
-                    .ok_or_else(|| Error::Overlay(format!("scalar `{name}` must be a string")))?;
-                self.scalars.insert(name.clone(), spelling.to_owned());
+                claim(deferred_origin, &op, &file, "deferred")?;
+                self.deferred.insert(op, reason.to_owned());
             }
         }
         if let Some(Toml::Table(entries)) = doc.get("op") {
             for (name, table) in entries {
+                claim(op_origin, name, &file, "declared as `[op.<Operation>]`")?;
                 self.ops.insert(name.clone(), op_overlay(name, table)?);
             }
         }
         if let Some(Toml::Table(entries)) = doc.get("shape") {
             for (name, table) in entries {
+                claim(shape_origin, name, &file, "declared as `[shape.<Shape>]`")?;
                 self.shapes.insert(name.clone(), shape_overlay(name, table)?);
             }
         }
         Ok(())
     }
 
-    fn read_quirks(&mut self, path: &Path) -> Result<()> {
+    fn read_quirks(&mut self, path: &Path, quirk_origin: &mut Origins) -> Result<()> {
+        let file = label(path);
         let text = read(path)?;
         let doc = toml_lite::parse(&path.display().to_string(), &text)?;
         for entry in array_of_tables(&doc, "quirk") {
@@ -289,19 +375,23 @@ impl Overlay {
                     .ok_or_else(|| Error::Overlay(format!("quirk `{id}` has no `cases`")))?
                     .string_array(&format!("quirk `{id}` cases"))?,
             };
-            if self.quirks.insert(id.clone(), quirk).is_some() {
-                return Err(Error::Overlay(format!("quirk `{id}` is declared twice")));
-            }
+            claim(quirk_origin, &id, &file, "declared as `[[quirk]]`")?;
+            self.quirks.insert(id.clone(), quirk);
         }
         Ok(())
     }
 
     /// Checks the overlay against itself: id shapes, evidence presence, and no operation listed
     /// both as included and deferred.
-    fn check(&self) -> Result<()> {
+    fn check(&self, include_origin: &Origins, deferred_origin: &Origins) -> Result<()> {
         for op in &self.include {
             if self.deferred.contains_key(op) {
-                return Err(Error::Overlay(format!("`{op}` is both included and deferred")));
+                let included = include_origin.get(op).map_or("?", String::as_str);
+                let deferred = deferred_origin.get(op).map_or("?", String::as_str);
+                return Err(Error::Overlay(format!(
+                    "`{op}` is included by `{included}` and deferred by `{deferred}`; one family owns \
+                     an operation, and it decides which of the two it is"
+                )));
             }
         }
         for (id, quirk) in &self.quirks {
@@ -354,6 +444,61 @@ fn matches_id(id: &str, prefix: &str) -> bool {
 
 fn read(path: &Path) -> Result<String> {
     std::fs::read_to_string(path).map_err(|e| Error::io(path.display().to_string(), e))
+}
+
+/// How a file is named in a diagnostic: `ops/object.toml`, not the caller's absolute path.
+///
+/// A collision message has to be pasteable into an editor and comparable between two machines, and
+/// an absolute path under somebody's home directory is neither.
+fn label(path: &Path) -> String {
+    let file = path.file_name().map(|n| n.to_string_lossy().into_owned());
+    let parent = path
+        .parent()
+        .and_then(Path::file_name)
+        .map(|n| n.to_string_lossy().into_owned());
+    match (parent, file) {
+        (Some(dir), Some(name)) => format!("{dir}/{name}"),
+        (None, Some(name)) => name,
+        _ => path.display().to_string(),
+    }
+}
+
+/// Every `*.toml` directly under `<dir>/<sub>`, in file-name order.
+///
+/// Sorted rather than in readdir order: the merge is order-independent by construction (a
+/// collision is refused rather than resolved), but a run whose file order depends on the
+/// filesystem would make an unrelated failure message reorder itself between machines.
+fn family_files(dir: &Path, sub: &str) -> Result<Vec<std::path::PathBuf>> {
+    let directory = dir.join(sub);
+    let entries = std::fs::read_dir(&directory).map_err(|e| Error::io(directory.display().to_string(), e))?;
+    let mut files = Vec::new();
+    for entry in entries {
+        let entry = entry.map_err(|e| Error::io(directory.display().to_string(), e))?;
+        let path = entry.path();
+        if path.is_file() && path.extension().is_some_and(|ext| ext == "toml") {
+            files.push(path);
+        }
+    }
+    if files.is_empty() {
+        return Err(Error::Overlay(format!(
+            "overlay directory `{sub}/` holds no `.toml` file; every family file is one, and an \
+             empty directory means the overlay was moved rather than sharded"
+        )));
+    }
+    files.sort();
+    Ok(files)
+}
+
+/// Records that `file` declares `name`, or fails naming the file that already did.
+fn claim(origins: &mut Origins, name: &str, file: &str, what: &str) -> Result<()> {
+    if let Some(first) = origins.get(name) {
+        return Err(Error::Overlay(format!(
+            "`{name}` is {what} by both `{first}` and `{file}`; one family owns it, and merging the \
+             two would silently drop whichever rule lost"
+        )));
+    }
+    origins.insert(name.to_owned(), file.to_owned());
+    Ok(())
 }
 
 fn array_of_tables<'a>(doc: &'a Toml, key: &str) -> Vec<&'a Toml> {

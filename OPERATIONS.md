@@ -14,78 +14,121 @@ table and the per-operation sections follow.
 | Query key | Operations |
 | --- | --- |
 | `continuation-token` | [ListObjectsV2](#listobjectsv2) |
+| `delete` | [DeleteObjects](#deleteobjects) |
 | `delimiter` | [ListObjectsV2](#listobjectsv2) |
 | `encoding-type` | [ListObjectsV2](#listobjectsv2) |
 | `fetch-owner` | [ListObjectsV2](#listobjectsv2) |
 | `list-type` | [ListObjectsV2](#listobjectsv2) |
 | `location` | [GetBucketLocation](#getbucketlocation) |
 | `max-keys` | [ListObjectsV2](#listobjectsv2) |
+| `partNumber` | [GetObject](#getobject), [HeadObject](#headobject) |
 | `prefix` | [ListObjectsV2](#listobjectsv2) |
+| `response-cache-control` | [GetObject](#getobject), [HeadObject](#headobject) |
+| `response-content-disposition` | [GetObject](#getobject), [HeadObject](#headobject) |
+| `response-content-encoding` | [GetObject](#getobject), [HeadObject](#headobject) |
+| `response-content-language` | [GetObject](#getobject), [HeadObject](#headobject) |
+| `response-content-type` | [GetObject](#getobject), [HeadObject](#headobject) |
+| `response-expires` | [GetObject](#getobject), [HeadObject](#headobject) |
 | `start-after` | [ListObjectsV2](#listobjectsv2) |
+| `versionId` | [DeleteObject](#deleteobject), [GetObject](#getobject), [HeadObject](#headobject) |
 
 ## Reverse index: header to operations
 
 | Header | Operations |
 | --- | --- |
-| `cache-control` | [PutObject](#putobject) |
-| `content-disposition` | [PutObject](#putobject) |
-| `content-encoding` | [PutObject](#putobject) |
-| `content-language` | [PutObject](#putobject) |
-| `content-length` | [PutObject](#putobject) |
+| `accept-ranges` | [GetObject](#getobject), [HeadObject](#headobject) |
+| `cache-control` | [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject) |
+| `content-disposition` | [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject) |
+| `content-encoding` | [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject) |
+| `content-language` | [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject) |
+| `content-length` | [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject) |
 | `content-md5` | [PutObject](#putobject) |
-| `content-type` | [PutObject](#putobject) |
-| `etag` | [PutObject](#putobject) |
-| `expires` | [PutObject](#putobject) |
-| `if-match` | [PutObject](#putobject) |
-| `if-none-match` | [PutObject](#putobject) |
+| `content-range` | [GetObject](#getobject), [HeadObject](#headobject) |
+| `content-type` | [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject) |
+| `etag` | [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject) |
+| `expires` | [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject) |
+| `if-match` | [DeleteObject](#deleteobject), [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject) |
+| `if-modified-since` | [GetObject](#getobject), [HeadObject](#headobject) |
+| `if-none-match` | [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject) |
+| `if-unmodified-since` | [GetObject](#getobject), [HeadObject](#headobject) |
+| `last-modified` | [GetObject](#getobject), [HeadObject](#headobject) |
+| `range` | [GetObject](#getobject), [HeadObject](#headobject) |
 | `x-amz-acl` | [PutObject](#putobject) |
+| `x-amz-archive-status` | [HeadObject](#headobject) |
+| `x-amz-bypass-governance-retention` | [DeleteObject](#deleteobject), [DeleteObjects](#deleteobjects) |
 | `x-amz-checksum-` | [PutObject](#putobject) |
-| `x-amz-checksum-type` | [PutObject](#putobject) |
-| `x-amz-expected-bucket-owner` | [GetBucketLocation](#getbucketlocation), [ListObjectsV2](#listobjectsv2), [PutObject](#putobject) |
-| `x-amz-expiration` | [PutObject](#putobject) |
+| `x-amz-checksum-crc32` | [GetObject](#getobject), [HeadObject](#headobject) |
+| `x-amz-checksum-crc32c` | [GetObject](#getobject), [HeadObject](#headobject) |
+| `x-amz-checksum-crc64nvme` | [GetObject](#getobject), [HeadObject](#headobject) |
+| `x-amz-checksum-md5` | [GetObject](#getobject), [HeadObject](#headobject) |
+| `x-amz-checksum-mode` | [GetObject](#getobject), [HeadObject](#headobject) |
+| `x-amz-checksum-sha1` | [GetObject](#getobject), [HeadObject](#headobject) |
+| `x-amz-checksum-sha256` | [GetObject](#getobject), [HeadObject](#headobject) |
+| `x-amz-checksum-sha512` | [GetObject](#getobject), [HeadObject](#headobject) |
+| `x-amz-checksum-type` | [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject) |
+| `x-amz-checksum-xxhash128` | [GetObject](#getobject), [HeadObject](#headobject) |
+| `x-amz-checksum-xxhash3` | [GetObject](#getobject), [HeadObject](#headobject) |
+| `x-amz-checksum-xxhash64` | [GetObject](#getobject), [HeadObject](#headobject) |
+| `x-amz-delete-marker` | [DeleteObject](#deleteobject), [GetObject](#getobject), [HeadObject](#headobject) |
+| `x-amz-expected-bucket-owner` | [DeleteObject](#deleteobject), [DeleteObjects](#deleteobjects), [GetBucketLocation](#getbucketlocation), [GetObject](#getobject), [HeadObject](#headobject), [ListObjectsV2](#listobjectsv2), [PutObject](#putobject) |
+| `x-amz-expiration` | [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject) |
 | `x-amz-grant-full-control` | [PutObject](#putobject) |
 | `x-amz-grant-read` | [PutObject](#putobject) |
 | `x-amz-grant-read-acp` | [PutObject](#putobject) |
 | `x-amz-grant-write-acp` | [PutObject](#putobject) |
-| `x-amz-meta-` | [PutObject](#putobject) |
-| `x-amz-object-lock-legal-hold` | [PutObject](#putobject) |
-| `x-amz-object-lock-mode` | [PutObject](#putobject) |
-| `x-amz-object-lock-retain-until-date` | [PutObject](#putobject) |
+| `x-amz-if-match-last-modified-time` | [DeleteObject](#deleteobject) |
+| `x-amz-if-match-size` | [DeleteObject](#deleteobject) |
+| `x-amz-meta-` | [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject) |
+| `x-amz-mfa` | [DeleteObject](#deleteobject), [DeleteObjects](#deleteobjects) |
+| `x-amz-missing-meta` | [GetObject](#getobject), [HeadObject](#headobject) |
+| `x-amz-mp-parts-count` | [GetObject](#getobject), [HeadObject](#headobject) |
+| `x-amz-object-lock-legal-hold` | [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject) |
+| `x-amz-object-lock-mode` | [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject) |
+| `x-amz-object-lock-retain-until-date` | [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject) |
 | `x-amz-object-size` | [PutObject](#putobject) |
-| `x-amz-request-charged` | [ListObjectsV2](#listobjectsv2), [PutObject](#putobject) |
-| `x-amz-request-payer` | [ListObjectsV2](#listobjectsv2), [PutObject](#putobject) |
-| `x-amz-sdk-checksum-algorithm` | [PutObject](#putobject) |
-| `x-amz-server-side-encryption` | [PutObject](#putobject) |
-| `x-amz-server-side-encryption-aws-kms-key-id` | [PutObject](#putobject) |
-| `x-amz-server-side-encryption-bucket-key-enabled` | [PutObject](#putobject) |
+| `x-amz-replication-status` | [GetObject](#getobject), [HeadObject](#headobject) |
+| `x-amz-request-charged` | [DeleteObject](#deleteobject), [DeleteObjects](#deleteobjects), [GetObject](#getobject), [HeadObject](#headobject), [ListObjectsV2](#listobjectsv2), [PutObject](#putobject) |
+| `x-amz-request-payer` | [DeleteObject](#deleteobject), [DeleteObjects](#deleteobjects), [GetObject](#getobject), [HeadObject](#headobject), [ListObjectsV2](#listobjectsv2), [PutObject](#putobject) |
+| `x-amz-restore` | [GetObject](#getobject), [HeadObject](#headobject) |
+| `x-amz-sdk-checksum-algorithm` | [DeleteObjects](#deleteobjects), [PutObject](#putobject) |
+| `x-amz-server-side-encryption` | [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject) |
+| `x-amz-server-side-encryption-aws-kms-key-id` | [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject) |
+| `x-amz-server-side-encryption-bucket-key-enabled` | [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject) |
 | `x-amz-server-side-encryption-context` | [PutObject](#putobject) |
-| `x-amz-server-side-encryption-customer-algorithm` | [PutObject](#putobject) |
-| `x-amz-server-side-encryption-customer-key` | [PutObject](#putobject) |
-| `x-amz-server-side-encryption-customer-key-md5` | [PutObject](#putobject) |
-| `x-amz-storage-class` | [PutObject](#putobject) |
+| `x-amz-server-side-encryption-customer-algorithm` | [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject) |
+| `x-amz-server-side-encryption-customer-key` | [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject) |
+| `x-amz-server-side-encryption-customer-key-md5` | [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject) |
+| `x-amz-storage-class` | [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject) |
 | `x-amz-tagging` | [PutObject](#putobject) |
-| `x-amz-version-id` | [PutObject](#putobject) |
-| `x-amz-website-redirect-location` | [PutObject](#putobject) |
+| `x-amz-tagging-count` | [GetObject](#getobject), [HeadObject](#headobject) |
+| `x-amz-version-id` | [DeleteObject](#deleteobject), [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject) |
+| `x-amz-website-redirect-location` | [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject) |
 | `x-amz-write-offset-bytes` | [PutObject](#putobject) |
 
 ## Reverse index: error code to operations
 
 | Error code | Operations |
 | --- | --- |
-| `AccessDenied` | [GetBucketLocation](#getbucketlocation), [ListObjectsV2](#listobjectsv2), [PutObject](#putobject) |
+| `AccessDenied` | [DeleteObject](#deleteobject), [DeleteObjects](#deleteobjects), [GetBucketLocation](#getbucketlocation), [GetObject](#getobject), [HeadObject](#headobject), [ListObjectsV2](#listobjectsv2), [PutObject](#putobject) |
 | `BadDigest` | [PutObject](#putobject) |
 | `ConditionalRequestConflict` | [PutObject](#putobject) |
 | `EncryptionTypeMismatch` | [PutObject](#putobject) |
 | `EntityTooLarge` | [PutObject](#putobject) |
 | `IncompleteBody` | [PutObject](#putobject) |
-| `InvalidArgument` | [ListObjectsV2](#listobjectsv2), [PutObject](#putobject) |
+| `InvalidArgument` | [DeleteObject](#deleteobject), [DeleteObjects](#deleteobjects), [GetObject](#getobject), [ListObjectsV2](#listobjectsv2), [PutObject](#putobject) |
 | `InvalidDigest` | [PutObject](#putobject) |
-| `InvalidRequest` | [PutObject](#putobject) |
+| `InvalidObjectState` | [GetObject](#getobject) |
+| `InvalidRange` | [GetObject](#getobject) |
+| `InvalidRequest` | [DeleteObjects](#deleteobjects), [PutObject](#putobject) |
 | `InvalidWriteOffset` | [PutObject](#putobject) |
+| `MalformedXML` | [DeleteObjects](#deleteobjects) |
 | `MissingContentLength` | [PutObject](#putobject) |
-| `NoSuchBucket` | [GetBucketLocation](#getbucketlocation), [ListObjectsV2](#listobjectsv2), [PutObject](#putobject) |
+| `NoSuchBucket` | [DeleteObject](#deleteobject), [DeleteObjects](#deleteobjects), [GetBucketLocation](#getbucketlocation), [GetObject](#getobject), [HeadObject](#headobject), [ListObjectsV2](#listobjectsv2), [PutObject](#putobject) |
+| `NoSuchKey` | [GetObject](#getobject), [HeadObject](#headobject) |
+| `NotFound` | [HeadObject](#headobject) |
+| `NotModified` | [GetObject](#getobject), [HeadObject](#headobject) |
 | `PermanentRedirect` | [GetBucketLocation](#getbucketlocation), [ListObjectsV2](#listobjectsv2) |
-| `PreconditionFailed` | [PutObject](#putobject) |
+| `PreconditionFailed` | [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject) |
 | `TooManyParts` | [PutObject](#putobject) |
 | `XAmzContentChecksumMismatch` | [PutObject](#putobject) |
 
@@ -93,7 +136,11 @@ table and the per-operation sections follow.
 
 | Operation | Method | Path shape | Query keys | Key headers | Success | Error codes | Quirks |
 | --- | --- | --- | --- | --- | --- | --- | --- |
+| [DeleteObject](#deleteobject) | DELETE | `/{Bucket}/{Key+}` | `versionId` | — | 204 | `NoSuchBucket`, `AccessDenied`, `InvalidArgument` | `q-delete-0026` |
+| [DeleteObjects](#deleteobjects) | POST | `/{Bucket}` | `delete` | — | 200 | `NoSuchBucket`, `AccessDenied`, `MalformedXML`, `InvalidRequest`, `InvalidArgument` | `q-checksum-0006`, `q-deletes-0027` |
 | [GetBucketLocation](#getbucketlocation) | GET | `/{Bucket}` | `location` | — | 200 | `NoSuchBucket`, `AccessDenied`, `PermanentRedirect` | `q-unwrapped-0001` |
+| [GetObject](#getobject) | GET | `/{Bucket}/{Key+}` | `partNumber`, `response-cache-control`, `response-content-disposition`, `response-content-encoding`, `response-content-language`, `response-content-type`, `response-expires`, `versionId` | `x-amz-meta-` | 200 | `NoSuchBucket`, `NoSuchKey`, `AccessDenied`, `InvalidObjectState`, `InvalidArgument`, `InvalidRange`, `PreconditionFailed`, `NotModified` | `q-response-0023`, `q-storageclass-0024` |
+| [HeadObject](#headobject) | HEAD | `/{Bucket}/{Key+}` | `partNumber`, `response-cache-control`, `response-content-disposition`, `response-content-encoding`, `response-content-language`, `response-content-type`, `response-expires`, `versionId` | `x-amz-meta-` | 200 | `NoSuchBucket`, `NoSuchKey`, `AccessDenied`, `NotFound`, `PreconditionFailed`, `NotModified` | `q-storageclass-0024`, `q-head-0025` |
 | [ListObjectsV2](#listobjectsv2) | GET | `/{Bucket}` | `continuation-token`, `delimiter`, `encoding-type`, `fetch-owner`, `list-type`, `max-keys`, `prefix`, `start-after` | — | 200 | `NoSuchBucket`, `AccessDenied`, `InvalidArgument`, `PermanentRedirect` | `q-root-0013`, `q-order-0014`, `q-encoding-0015` |
 | [PutObject](#putobject) | PUT | `/{Bucket}/{Key+}` | — | `content-length`, `etag`, `x-amz-checksum-`, `x-amz-meta-` | 200 | `NoSuchBucket`, `AccessDenied`, `MissingContentLength`, `EntityTooLarge`, `IncompleteBody`, `InvalidDigest`, `BadDigest`, `XAmzContentChecksumMismatch`, `InvalidRequest`, `InvalidArgument`, `PreconditionFailed`, `ConditionalRequestConflict`, `EncryptionTypeMismatch`, `InvalidWriteOffset`, `TooManyParts` | `q-checksum-0006` |
 
@@ -109,9 +156,103 @@ First match wins; lower precedence is tried first.
 | --- | --- | --- |
 | 300 | [GetBucketLocation](#getbucketlocation) | `Method GET` AND `Target Bucket` AND `QueryPresent ?location` |
 | 600 | [ListObjectsV2](#listobjectsv2) | `Method GET` AND `Target Bucket` AND `QueryEquals ?list-type=2` |
+| 650 | [DeleteObjects](#deleteobjects) | `Method POST` AND `Target Bucket` AND `QueryPresent ?delete` |
 | 800 | [PutObject](#putobject) | `Method PUT` AND `Target Object` |
+| 900 | [GetObject](#getobject) | `Method GET` AND `Target Object` |
+| 950 | [HeadObject](#headobject) | `Method HEAD` AND `Target Object` |
+| 1000 | [DeleteObject](#deleteobject) | `Method DELETE` AND `Target Object` |
 
 ## Operation detail
+
+### DeleteObject
+
+`DELETE /{Bucket}/{Key+}` &rarr; 204 · target Object · precedence 1000 · auth Required (`s3:DeleteObject`, presigned allowed) · spec `spec/operations/DeleteObject.toml`
+
+**Route predicates**
+
+- `Method DELETE`
+- `Target Object`
+
+**Query keys**
+
+- routed on, present: —
+- routed on, exact value: —
+- routed on, absent: —
+- read as parameters: `versionId`
+
+**Headers**
+
+- request: `if-match`, `x-amz-bypass-governance-retention`, `x-amz-expected-bucket-owner`, `x-amz-if-match-last-modified-time`, `x-amz-if-match-size`, `x-amz-mfa`, `x-amz-request-payer`
+- response: `x-amz-delete-marker`, `x-amz-request-charged`, `x-amz-version-id`
+- required: —
+
+**Body**
+
+- request: None (None)
+- response: None (None)
+
+**Error codes**
+
+`NoSuchBucket`, `AccessDenied`, `InvalidArgument`
+
+**Quirks**
+
+- `q-delete-0026` (idempotent_delete on `DeleteObject`) — Deleting a key that does not exist is a success and answers the same empty 204 as deleting one that does; a not-found status here breaks every retrying client.
+
+Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
+
+### DeleteObjects
+
+`POST /{Bucket}` &rarr; 200 · target Bucket · precedence 650 · auth Required (`s3:DeleteObject`, presigned allowed) · spec `spec/operations/DeleteObjects.toml`
+
+**Route predicates**
+
+- `Method POST`
+- `Target Bucket`
+- `QueryPresent ?delete`
+
+**Query keys**
+
+- routed on, present: `delete`
+- routed on, exact value: —
+- routed on, absent: —
+- read as parameters: —
+
+**Headers**
+
+- request: `x-amz-bypass-governance-retention`, `x-amz-expected-bucket-owner`, `x-amz-mfa`, `x-amz-request-payer`, `x-amz-sdk-checksum-algorithm`
+- response: `x-amz-request-charged`
+- required: —
+
+**Body**
+
+- request: XmlBody (Full, at most 2097152 bytes)
+- response: XmlBody (Full)
+- response root: `<DeleteResult>`, xmlns emit
+- element order: `Deleted`, `Errors`
+
+**Error codes**
+
+`NoSuchBucket`, `AccessDenied`, `MalformedXML`, `InvalidRequest`, `InvalidArgument`
+
+**Checksums**
+
+- required before the handler runs: true
+- request algorithms: `CRC32`, `CRC32C`, `CRC64NVME`, `SHA1`, `SHA256`
+
+**Quirks**
+
+- `q-checksum-0006` (checksum_headers on `PutObject`) — The eleven separate checksum members collapse into one packed spec, and more than one checksum header on a request is a hard error rather than a merge.
+- `q-deletes-0027` (result_completeness on `DeleteObjects`) — Every key in the request appears exactly once in the result, in either the deleted list or the error list, and the two lists together have the same length as the request.
+
+Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
+
+**Body shapes**
+
+- `Delete` (Structure) — `Objects: List<Structure(ObjectIdentifier)>(flattened)`, `Quiet: Boolean`
+- `DeletedObject` (Structure) — `Key: ObjectKey`, `VersionId: String`, `DeleteMarker: Boolean`, `DeleteMarkerVersionId: String`
+- `Error` (Structure) — `Key: ObjectKey`, `VersionId: String`, `Code: String`, `Message: String`
+- `ObjectIdentifier` (Structure) — `Key: ObjectKey`, `VersionId: String`, `ETag: ETag(XmlQuoted)`, `LastModifiedTime: Timestamp(HttpDate)`, `Size: Long`
 
 ### GetBucketLocation
 
@@ -151,6 +292,90 @@ First match wins; lower precedence is tried first.
 - `q-unwrapped-0001` (unwrapped_output on `GetBucketLocation`) — The response body is the single element LocationConstraint itself; the generic restXml output wrapper must not be written.
 - `q-empty-0002` (empty_value on `GetBucketLocation.LocationConstraint`) — For us-east-1 the constraint is null and an empty element must still be written, so this member is emit rather than omit.
 - `q-region-0003` (legacy_alias on `GetBucketLocation.LocationConstraint`) — EU is a legacy alias that denotes eu-west-1 and must stay an accepted and returnable value of the enum.
+
+Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
+
+### GetObject
+
+`GET /{Bucket}/{Key+}` &rarr; 200 · target Object · precedence 900 · auth Required (`s3:GetObject`, presigned allowed) · spec `spec/operations/GetObject.toml`
+
+**Route predicates**
+
+- `Method GET`
+- `Target Object`
+
+**Query keys**
+
+- routed on, present: —
+- routed on, exact value: —
+- routed on, absent: —
+- read as parameters: `partNumber`, `response-cache-control`, `response-content-disposition`, `response-content-encoding`, `response-content-language`, `response-content-type`, `response-expires`, `versionId`
+
+**Headers**
+
+- request: `if-match`, `if-modified-since`, `if-none-match`, `if-unmodified-since`, `range`, `x-amz-checksum-mode`, `x-amz-expected-bucket-owner`, `x-amz-request-payer`, `x-amz-server-side-encryption-customer-algorithm`, `x-amz-server-side-encryption-customer-key`, `x-amz-server-side-encryption-customer-key-md5`
+- response: `accept-ranges`, `cache-control`, `content-disposition`, `content-encoding`, `content-language`, `content-length`, `content-range`, `content-type`, `etag`, `expires`, `last-modified`, `x-amz-checksum-crc32`, `x-amz-checksum-crc32c`, `x-amz-checksum-crc64nvme`, `x-amz-checksum-md5`, `x-amz-checksum-sha1`, `x-amz-checksum-sha256`, `x-amz-checksum-sha512`, `x-amz-checksum-type`, `x-amz-checksum-xxhash128`, `x-amz-checksum-xxhash3`, `x-amz-checksum-xxhash64`, `x-amz-delete-marker`, `x-amz-expiration`, `x-amz-meta-`, `x-amz-missing-meta`, `x-amz-mp-parts-count`, `x-amz-object-lock-legal-hold`, `x-amz-object-lock-mode`, `x-amz-object-lock-retain-until-date`, `x-amz-replication-status`, `x-amz-request-charged`, `x-amz-restore`, `x-amz-server-side-encryption`, `x-amz-server-side-encryption-aws-kms-key-id`, `x-amz-server-side-encryption-bucket-key-enabled`, `x-amz-server-side-encryption-customer-algorithm`, `x-amz-server-side-encryption-customer-key-md5`, `x-amz-storage-class`, `x-amz-tagging-count`, `x-amz-version-id`, `x-amz-website-redirect-location`
+- required: —
+
+**Body**
+
+- request: None (None)
+- response: StreamingBlob (Streaming)
+
+**Error codes**
+
+`NoSuchBucket`, `NoSuchKey`, `AccessDenied`, `InvalidObjectState`, `InvalidArgument`, `InvalidRange`, `PreconditionFailed`, `NotModified`
+
+**Quirks**
+
+- `q-etag-0004` (etag_render on `PutObject.ETag`) — In a header position the entity tag is always written with surrounding double quotes, unlike the bare form used by GetObjectAttributes.
+- `q-timestamp-0005` (timestamp_format on `PutObject.Expires`) — The value must be round tripped as an opaque string, because stored values are frequently not parseable dates at all.
+- `q-content-0008` (default_value on `PutObject.ContentType`) — The default media type is the S3 specific binary form, not the IANA registered octet stream spelling.
+- `q-meta-0009` (prefix_headers on `PutObject.Metadata`) — User metadata keys are lowercased on return, non ASCII values use encoded word syntax, and the combined size is capped.
+- `q-response-0023` (response_override on `GetObject`) — A fixed set of response- query parameters overwrites the corresponding response headers, and the overwrite is applied once at the end of encoding rather than inside each field binding.
+- `q-storageclass-0024` (omit_when on `GetObject.StorageClass`) — The storage class response header is suppressed for the default class, which is the exact opposite of the listing body element that is always written.
+
+Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
+
+### HeadObject
+
+`HEAD /{Bucket}/{Key+}` &rarr; 200 · target Object · precedence 950 · auth Required (`s3:GetObject`, presigned allowed) · spec `spec/operations/HeadObject.toml`
+
+**Route predicates**
+
+- `Method HEAD`
+- `Target Object`
+
+**Query keys**
+
+- routed on, present: —
+- routed on, exact value: —
+- routed on, absent: —
+- read as parameters: `partNumber`, `response-cache-control`, `response-content-disposition`, `response-content-encoding`, `response-content-language`, `response-content-type`, `response-expires`, `versionId`
+
+**Headers**
+
+- request: `if-match`, `if-modified-since`, `if-none-match`, `if-unmodified-since`, `range`, `x-amz-checksum-mode`, `x-amz-expected-bucket-owner`, `x-amz-request-payer`, `x-amz-server-side-encryption-customer-algorithm`, `x-amz-server-side-encryption-customer-key`, `x-amz-server-side-encryption-customer-key-md5`
+- response: `accept-ranges`, `cache-control`, `content-disposition`, `content-encoding`, `content-language`, `content-length`, `content-range`, `content-type`, `etag`, `expires`, `last-modified`, `x-amz-archive-status`, `x-amz-checksum-crc32`, `x-amz-checksum-crc32c`, `x-amz-checksum-crc64nvme`, `x-amz-checksum-md5`, `x-amz-checksum-sha1`, `x-amz-checksum-sha256`, `x-amz-checksum-sha512`, `x-amz-checksum-type`, `x-amz-checksum-xxhash128`, `x-amz-checksum-xxhash3`, `x-amz-checksum-xxhash64`, `x-amz-delete-marker`, `x-amz-expiration`, `x-amz-meta-`, `x-amz-missing-meta`, `x-amz-mp-parts-count`, `x-amz-object-lock-legal-hold`, `x-amz-object-lock-mode`, `x-amz-object-lock-retain-until-date`, `x-amz-replication-status`, `x-amz-request-charged`, `x-amz-restore`, `x-amz-server-side-encryption`, `x-amz-server-side-encryption-aws-kms-key-id`, `x-amz-server-side-encryption-bucket-key-enabled`, `x-amz-server-side-encryption-customer-algorithm`, `x-amz-server-side-encryption-customer-key-md5`, `x-amz-storage-class`, `x-amz-tagging-count`, `x-amz-version-id`, `x-amz-website-redirect-location`
+- required: —
+
+**Body**
+
+- request: None (None)
+- response: None (None)
+
+**Error codes**
+
+`NoSuchBucket`, `NoSuchKey`, `AccessDenied`, `NotFound`, `PreconditionFailed`, `NotModified`
+
+**Quirks**
+
+- `q-etag-0004` (etag_render on `PutObject.ETag`) — In a header position the entity tag is always written with surrounding double quotes, unlike the bare form used by GetObjectAttributes.
+- `q-timestamp-0005` (timestamp_format on `PutObject.Expires`) — The value must be round tripped as an opaque string, because stored values are frequently not parseable dates at all.
+- `q-content-0008` (default_value on `PutObject.ContentType`) — The default media type is the S3 specific binary form, not the IANA registered octet stream spelling.
+- `q-meta-0009` (prefix_headers on `PutObject.Metadata`) — User metadata keys are lowercased on return, non ASCII values use encoded word syntax, and the combined size is capped.
+- `q-storageclass-0024` (omit_when on `GetObject.StorageClass`) — The storage class response header is suppressed for the default class, which is the exact opposite of the listing body element that is always written.
+- `q-head-0025` (head_mirrors on `HeadObject`) — The head response carries exactly the header set of the corresponding get, and no body on any status, so the two header sets must be one derivation rather than two hand-written tables.
 
 Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 
@@ -270,7 +495,7 @@ in neither list, so this table is exhaustive by construction.
 | --- | --- |
 | AbortMultipartUpload | P5 multipart upload family; the part/checksum interaction needs its own reviewed pass. |
 | CompleteMultipartUpload | P5 multipart upload family; the part/checksum interaction needs its own reviewed pass. |
-| CopyObject | P5 core object family; GetObject and CopyObject drive the conditional and copy-source clusters. |
+| CopyObject | P5 copy family; x-amz-copy-source parsing and two-stage authorization are one reviewed pass. |
 | CreateBucket | P5 bucket lifecycle operations; CreateBucket carries the location-constraint request body. |
 | CreateBucketMetadataConfiguration | Out of scope for the gateway: S3 Tables and bucket metadata table configuration, a separate AWS surface with its own control plane. |
 | CreateBucketMetadataTableConfiguration | Out of scope for the gateway: S3 Tables and bucket metadata table configuration, a separate AWS surface with its own control plane. |
@@ -291,10 +516,8 @@ in neither list, so this table is exhaustive by construction.
 | DeleteBucketReplication | P5 bucket subresource configuration family; one Get/Put/Delete triple per subresource, all sharing the not_configured 404 rule. |
 | DeleteBucketTagging | P5 bucket subresource configuration family; one Get/Put/Delete triple per subresource, all sharing the not_configured 404 rule. |
 | DeleteBucketWebsite | P5 bucket subresource configuration family; one Get/Put/Delete triple per subresource, all sharing the not_configured 404 rule. |
-| DeleteObject | P5 core object family; GetObject and CopyObject drive the conditional and copy-source clusters. |
 | DeleteObjectAnnotation | Out of scope for the gateway: object annotations, an AWS-only metadata surface with no storage-backend equivalent. |
 | DeleteObjectTagging | P5 object tagging, ACL and object-lock family; grant parsing is a shared cluster of its own. |
-| DeleteObjects | P5 core object family; GetObject and CopyObject drive the conditional and copy-source clusters. |
 | DeletePublicAccessBlock | P5 bucket policy and public-access family; every one of these is an authorization surface and reviewed as a group. |
 | GetBucketAbac | P5 bucket policy and public-access family; every one of these is an authorization surface and reviewed as a group. |
 | GetBucketAccelerateConfiguration | P5 bucket subresource configuration family; one Get/Put/Delete triple per subresource, all sharing the not_configured 404 rule. |
@@ -318,18 +541,16 @@ in neither list, so this table is exhaustive by construction.
 | GetBucketTagging | P5 bucket subresource configuration family; one Get/Put/Delete triple per subresource, all sharing the not_configured 404 rule. |
 | GetBucketVersioning | P5 bucket subresource configuration family; one Get/Put/Delete triple per subresource, all sharing the not_configured 404 rule. |
 | GetBucketWebsite | P5 bucket subresource configuration family; one Get/Put/Delete triple per subresource, all sharing the not_configured 404 rule. |
-| GetObject | P5 core object family; GetObject and CopyObject drive the conditional and copy-source clusters. |
 | GetObjectAcl | P5 object tagging, ACL and object-lock family; grant parsing is a shared cluster of its own. |
 | GetObjectAnnotation | Out of scope for the gateway: object annotations, an AWS-only metadata surface with no storage-backend equivalent. |
-| GetObjectAttributes | P5 core object family; GetObject and CopyObject drive the conditional and copy-source clusters. |
+| GetObjectAttributes | P5 advanced object family; each member carries a body shape or a framing the data plane does not have. |
 | GetObjectLegalHold | P5 object tagging, ACL and object-lock family; grant parsing is a shared cluster of its own. |
 | GetObjectLockConfiguration | P5 object tagging, ACL and object-lock family; grant parsing is a shared cluster of its own. |
 | GetObjectRetention | P5 object tagging, ACL and object-lock family; grant parsing is a shared cluster of its own. |
 | GetObjectTagging | P5 object tagging, ACL and object-lock family; grant parsing is a shared cluster of its own. |
-| GetObjectTorrent | P5 core object family; GetObject and CopyObject drive the conditional and copy-source clusters. |
+| GetObjectTorrent | P5 advanced object family; each member carries a body shape or a framing the data plane does not have. |
 | GetPublicAccessBlock | P5 bucket policy and public-access family; every one of these is an authorization surface and reviewed as a group. |
 | HeadBucket | P5 bucket lifecycle operations; CreateBucket carries the location-constraint request body. |
-| HeadObject | P5 core object family; GetObject and CopyObject drive the conditional and copy-source clusters. |
 | ListBucketAnalyticsConfigurations | P5 bucket subresource configuration family; one Get/Put/Delete triple per subresource, all sharing the not_configured 404 rule. |
 | ListBucketIntelligentTieringConfigurations | P5 bucket subresource configuration family; one Get/Put/Delete triple per subresource, all sharing the not_configured 404 rule. |
 | ListBucketInventoryConfigurations | P5 bucket subresource configuration family; one Get/Put/Delete triple per subresource, all sharing the not_configured 404 rule. |
@@ -367,13 +588,13 @@ in neither list, so this table is exhaustive by construction.
 | PutObjectRetention | P5 object tagging, ACL and object-lock family; grant parsing is a shared cluster of its own. |
 | PutObjectTagging | P5 object tagging, ACL and object-lock family; grant parsing is a shared cluster of its own. |
 | PutPublicAccessBlock | P5 bucket policy and public-access family; every one of these is an authorization surface and reviewed as a group. |
-| RenameObject | P5 core object family; GetObject and CopyObject drive the conditional and copy-source clusters. |
-| RestoreObject | P5 core object family; GetObject and CopyObject drive the conditional and copy-source clusters. |
-| SelectObjectContent | P5 core object family; GetObject and CopyObject drive the conditional and copy-source clusters. |
+| RenameObject | P5 copy family; x-amz-copy-source parsing and two-stage authorization are one reviewed pass. |
+| RestoreObject | P5 advanced object family; each member carries a body shape or a framing the data plane does not have. |
+| SelectObjectContent | P5 advanced object family; each member carries a body shape or a framing the data plane does not have. |
 | UpdateBucketMetadataAnnotationTableConfiguration | Out of scope for the gateway: S3 Tables and bucket metadata table configuration, a separate AWS surface with its own control plane. |
 | UpdateBucketMetadataInventoryTableConfiguration | Out of scope for the gateway: S3 Tables and bucket metadata table configuration, a separate AWS surface with its own control plane. |
 | UpdateBucketMetadataJournalTableConfiguration | Out of scope for the gateway: S3 Tables and bucket metadata table configuration, a separate AWS surface with its own control plane. |
-| UpdateObjectEncryption | P5 core object family; GetObject and CopyObject drive the conditional and copy-source clusters. |
+| UpdateObjectEncryption | P5 advanced object family; each member carries a body shape or a framing the data plane does not have. |
 | UploadPart | P5 multipart upload family; the part/checksum interaction needs its own reviewed pass. |
 | UploadPartCopy | P5 multipart upload family; the part/checksum interaction needs its own reviewed pass. |
 | WriteGetObjectResponse | Out of scope for the gateway: S3 Object Lambda, which requires the Object Lambda access point host class. |

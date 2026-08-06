@@ -1,0 +1,70 @@
+# c-object-0013 — a write carrying two different checksum algorithms.
+#
+# Schema dimensions exercised: request-progress assertion, header absence proving no write happened.
+
+[case]
+id = "c-object-0013"
+schema_version = 1
+title = "A write carrying two different checksum headers is refused rather than resolved"
+rationale = """
+Two checksum headers are two integrity claims, and an implementation that picks one is verifying a \
+claim the caller did not make while ignoring one it did — which is indistinguishable from having no \
+integrity check at all for whichever half it dropped. A proxy that adds its own checksum header to \
+a request that already had one produces exactly this shape, so it is not hypothetical. The refusal \
+must also happen before the body is consumed, otherwise a rejected upload still costs the full \
+transfer."""
+polarity = "negative"
+operation = "PutObject"
+tags = ["checksum", "write", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-checksum-0006"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObject.html"
+summary = "Only one checksum algorithm header is accepted per request and the value is base64 encoded."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/checking-object-integrity.html"
+summary = "Describes the per-algorithm checksum headers as alternatives, one of which a request selects."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-object"
+
+[[setup.objects]]
+bucket = "conf-object"
+key = "checksum/two"
+absent = true
+
+[request]
+method = "PUT"
+target = "/conf-object/checksum/two"
+headers = { "content-type" = "text/plain", "x-amz-checksum-crc32" = "DUoRhQ==", "x-amz-checksum-sha1" = "Kq5sNclPz7QV2+lfQIuc6R7oRu0=" }
+body = { utf8 = "hello world" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+# No entity tag and no version id: the object must not have been written before the contradiction
+# was noticed.
+headers_absent = ["etag", "x-amz-version-id", "x-amz-checksum-crc32", "x-amz-checksum-sha1"]
+connection_after = "open"
+
+[expect.error]
+code = "InvalidRequest"
+request_id_present = true
+
+[expect.timing]
+terminate_within_ms = 5000
+
+[expect.request_progress]
+body_fully_sent = false
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+contains_utf8 = ["<Code>InvalidRequest</Code>"]

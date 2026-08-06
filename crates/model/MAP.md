@@ -7,7 +7,9 @@ Build-time only. Nothing here ever appears in a runtime dependency tree.
 ```
 model/s3.json ──strip──▶ smithy::Model ──┐
                                          ├──▶ lower::lower ──▶ ir::OperationIr ──▶ rustfs-gateway-codegen
-overlays/*.toml ──▶ overlay::Overlay ────┘
+overlays/scalars.toml   ──┐
+overlays/ops/*.toml     ──┼▶ overlay::Overlay ────┘
+overlays/quirks/*.toml  ──┘
 ```
 
 ## Files
@@ -19,7 +21,7 @@ overlays/*.toml ──▶ overlay::Overlay ────┘
 | `src/json.rs` | Hand-written JSON reader plus the canonical writer (two-space indent, flat when it fits in 120 columns, one trailing newline). | An IR document's layout changed, or you are adding a value kind. |
 | `src/toml_lite.rs` | The overlay TOML subset: tables, arrays of tables, strings, integers, booleans, arrays. Everything else is a parse error on purpose. | An overlay entry is rejected and you want to know whether the grammar or the entry is wrong. |
 | `src/smithy.rs` | Loads the pinned Smithy 2.0 AST and **deletes the documentation and client-endpoint traits before anything else sees a shape**. Shape, member, trait and enum lookups. | You need a model fact, or you are checking that a trait really cannot leak. |
-| `src/overlay.rs` | The hand-written source: whitelist, deferred groups, scalar map, per-operation and per-shape overrides, quirk records. Self-consistency checks live here. | Adding an overlay key, or a quirk is rejected. |
+| `src/overlay.rs` | The hand-written source, **merged from one file per operation family**: whitelist, deferred groups, scalar map, per-operation and per-shape overrides, quirk records. Self-consistency checks and every cross-file collision refusal live here. | Adding an overlay key, a quirk is rejected, or a load failed naming two family files. |
 | `src/ir/mod.rs` | The IR document structure — one type per construct in `spec/ir.schema.json`. Also the quirk ordering rule and the query-key/header reverse lookups. | You are adding an IR construct, or you want to know what the IR can express. |
 | `src/ir/types.rs` | The scalar and composite type vocabulary: `Type`, timestamp and entity-tag rendering, `OmitWhen`. Nothing here has a default rendering. | You are binding a field and need to know which types exist. |
 | `src/ir/emit.rs` | IR → JSON value, in the schema's key order. | A generated IR document's key order looks wrong. |
@@ -41,6 +43,15 @@ overlays/*.toml ──▶ overlay::Overlay ────┘
 
 Where the model has no opinion and the overlay is silent, lowering **stops**. Missing route
 precedence and missing IAM action are hard failures, not defaults.
+
+## The overlay is a directory, and a collision is fatal
+
+One file per operation family — `ops/<family>.toml` and `quirks/<family>.toml` — because a family
+file is the unit of parallel edit conflict. The cost is that two families can both claim one
+operation, so the loader refuses every cross-file collision and names **both** files: an operation
+included twice, deferred twice, included here and deferred there, an `[op.X]` or `[shape.X]`
+declared twice, or one quirk id declared twice. `scalars.toml` is the single cross-family file and
+may hold nothing but `[scalar]`.
 
 ## Things that will bite you
 

@@ -23,7 +23,7 @@
 
 use std::borrow::Cow;
 
-/// The `ChecksumAlgorithm` string enumeration. Bound by: ListObjectsV2, PutObject.
+/// The `ChecksumAlgorithm` string enumeration. Bound by: DeleteObjects, ListObjectsV2, PutObject.
 ///
 /// An open set: compare against the associated constants, and build a value the pinned
 /// model does not declare with [`ChecksumAlgorithm::custom`]. Adding a constant is a minor version

@@ -78,6 +78,7 @@
 #![forbid(unsafe_code)]
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing, clippy::panic)]
 
+pub mod codec;
 pub mod dispatch;
 pub mod error;
 pub mod handler;
@@ -86,6 +87,7 @@ pub mod ops;
 pub mod registry;
 pub mod route;
 
+pub use crate::codec::{CodecError, EncodedResponse, MetaView, OperationCodec, RequestBody, ResponseBody, ResponseOverride};
 pub use crate::dispatch::{Dispatch, Router, RouterBuildError};
 pub use crate::error::{DisallowedPreAuthCode, PRE_AUTH_STATUSES, PreAuthError};
 pub use crate::handler::{BoxFuture, Handler, HandlerError, HandlerResult, Req, Resp};

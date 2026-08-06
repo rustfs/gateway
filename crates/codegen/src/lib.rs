@@ -133,6 +133,8 @@ impl CodegenOutput {
         vec![
             self.spec_dir.clone(),
             self.generated_dir.join("ir"),
+            self.generated_dir.join("codec").join("ops"),
+            self.generated_dir.join("codec"),
             self.generated_dir.join("dto").join("ops").join("enums"),
             self.generated_dir.join("dto").join("ops").join("shapes"),
             self.generated_dir.join("dto").join("ops"),
@@ -210,6 +212,7 @@ pub fn generate(input: &CodegenInput, out: &CodegenOutput) -> Result<Artifacts> 
     ));
     let (dto_files, dto) = emit::dto::emit(&lowered.operations, &out.generated_dir).map_err(Error::Policy)?;
     files.extend(dto_files);
+    files.extend(emit::codec::emit(&lowered.operations, &out.generated_dir).map_err(Error::Policy)?);
     files.sort_by(|a, b| a.0.cmp(&b.0));
 
     Ok(Artifacts {

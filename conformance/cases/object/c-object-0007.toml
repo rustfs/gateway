@@ -1,0 +1,69 @@
+# c-object-0007 — GetObject on a key that does not exist.
+#
+# Schema dimensions exercised: byte-exact error document with redaction, header absence as proof
+# that no object was described.
+
+[case]
+id = "c-object-0007"
+schema_version = 1
+title = "A read of a key that does not exist is a 404 NoSuchKey with no object headers at all"
+rationale = """
+An error response that carries object headers is an error response that described something. When \
+an implementation writes the headers first and discovers the miss afterwards, the client receives \
+an ETag and a Content-Length for an object that does not exist, and a caching layer in front of it \
+will happily store the pair. Asserting the error document byte for byte also pins the two things a \
+parsed assertion cannot see: that the Error root carries no namespace, and that the requested key \
+is echoed in Resource rather than in Message."""
+polarity = "negative"
+operation = "GetObject"
+tags = ["error-shape", "read"]
+timeout_ms = 10000
+quirks = []
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/ErrorResponses.html"
+summary = "The documented error document is an unnamespaced Error element carrying Code, Message, Resource and RequestId."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObject.html"
+summary = "A read of a key the bucket does not hold answers with the dedicated no-such-key code."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-object"
+
+[[setup.objects]]
+bucket = "conf-object"
+key = "missing/key"
+absent = true
+
+[request]
+method = "GET"
+target = "/conf-object/missing/key"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 404
+headers_absent = ["etag", "last-modified", "x-amz-version-id", "accept-ranges"]
+connection_after = "open"
+
+[expect.error]
+code = "NoSuchKey"
+request_id_present = true
+
+[expect.headers_present]
+"content-type" = "application/xml"
+
+[expect.timing]
+terminate_within_ms = 5000
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>NoSuchKey</Code><Message>The specified key does not exist.</Message><Key>missing/key</Key><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''

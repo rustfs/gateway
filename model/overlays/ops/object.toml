@@ -1,0 +1,368 @@
+# Copyright 2026 RustFS Team
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Family: object data plane. GetObject, HeadObject, PutObject, DeleteObject, DeleteObjects.
+#
+# The highest-traffic family, and the one whose codecs the other families copy. Structure comes
+# from `model/s3.json`; every decision here is one the model cannot make.
+#
+# This file is the conflict unit for the family. Nothing outside it may declare these operations:
+# a second `[op.GetObject]` anywhere under `ops/` is a load failure naming both files.
+
+include = ["DeleteObject", "DeleteObjects", "GetObject", "HeadObject", "PutObject"]
+
+# =============================================================================================
+# GetObject
+# =============================================================================================
+[op.GetObject]
+precedence = 900
+auth_action = "s3:GetObject"
+error_codes = [
+  "NoSuchBucket",
+  "NoSuchKey",
+  "AccessDenied",
+  "InvalidObjectState",
+  "InvalidArgument",
+  "InvalidRange",
+  "PreconditionFailed",
+  "NotModified",
+]
+quirk_refs = ["q-response-0023", "q-storageclass-0024"]
+input_hot = ["Range", "IfMatch", "IfNoneMatch", "IfModifiedSince", "IfUnmodifiedSince"]
+output_hot = ["Body", "ETag", "ContentLength", "ContentType", "LastModified"]
+
+[[op.GetObject.field]]
+side = "input"
+name = "ResponseContentType"
+quirks = ["q-response-0023"]
+
+[[op.GetObject.field]]
+side = "input"
+name = "ResponseContentDisposition"
+quirks = ["q-response-0023"]
+
+[[op.GetObject.field]]
+side = "input"
+name = "ResponseCacheControl"
+quirks = ["q-response-0023"]
+
+[[op.GetObject.field]]
+side = "input"
+name = "ResponseContentEncoding"
+quirks = ["q-response-0023"]
+
+[[op.GetObject.field]]
+side = "input"
+name = "ResponseContentLanguage"
+quirks = ["q-response-0023"]
+
+[[op.GetObject.field]]
+side = "input"
+name = "ResponseExpires"
+quirks = ["q-response-0023", "q-timestamp-0005"]
+
+[[op.GetObject.field]]
+side = "output"
+name = "ETag"
+quirks = ["q-etag-0004"]
+
+# STANDARD is the class the header is suppressed for. The opposite rule holds inside a listing
+# body (q-storageclass-0022), which is why neither is an `if` in a codec.
+[[op.GetObject.field]]
+side = "output"
+name = "StorageClass"
+omit_when = "ValueEquals"
+omit_when_value = "STANDARD"
+quirks = ["q-storageclass-0024"]
+
+[[op.GetObject.field]]
+side = "output"
+name = "ContentType"
+default_string = "binary/octet-stream"
+quirks = ["q-content-0008"]
+
+[[op.GetObject.field]]
+side = "output"
+name = "Expires"
+quirks = ["q-timestamp-0005"]
+
+[[op.GetObject.field]]
+side = "output"
+name = "Metadata"
+quirks = ["q-meta-0009"]
+
+# =============================================================================================
+# HeadObject
+#
+# The response header set is GetObject's, minus the body. `head_mirrors` is what makes that a
+# derivation instead of a second hand-written binding table that can drift.
+# =============================================================================================
+[op.HeadObject]
+precedence = 950
+auth_action = "s3:GetObject"
+head_mirrors = "GetObject"
+error_codes = ["NoSuchBucket", "NoSuchKey", "AccessDenied", "NotFound", "PreconditionFailed", "NotModified"]
+quirk_refs = ["q-head-0025", "q-storageclass-0024"]
+output_hot = ["ETag", "ContentLength", "ContentType", "LastModified"]
+
+[[op.HeadObject.field]]
+side = "output"
+name = "ETag"
+quirks = ["q-etag-0004", "q-head-0025"]
+
+[[op.HeadObject.field]]
+side = "output"
+name = "StorageClass"
+omit_when = "ValueEquals"
+omit_when_value = "STANDARD"
+quirks = ["q-storageclass-0024"]
+
+[[op.HeadObject.field]]
+side = "output"
+name = "ContentType"
+default_string = "binary/octet-stream"
+quirks = ["q-content-0008"]
+
+[[op.HeadObject.field]]
+side = "output"
+name = "Expires"
+quirks = ["q-timestamp-0005"]
+
+[[op.HeadObject.field]]
+side = "output"
+name = "Metadata"
+quirks = ["q-meta-0009"]
+
+# =============================================================================================
+# PutObject
+# =============================================================================================
+[op.PutObject]
+precedence = 800
+auth_action = "s3:PutObject"
+error_codes = [
+  "NoSuchBucket",
+  "AccessDenied",
+  "MissingContentLength",
+  "EntityTooLarge",
+  "IncompleteBody",
+  "InvalidDigest",
+  "BadDigest",
+  "XAmzContentChecksumMismatch",
+  "InvalidRequest",
+  "InvalidArgument",
+  "PreconditionFailed",
+  "ConditionalRequestConflict",
+]
+quirk_refs = ["q-checksum-0006"]
+# The ten per-algorithm checksum headers collapse into one packed ChecksumSpec field; carrying
+# them separately would put ten Option<String> on the hot path and make "more than one checksum
+# header" a merge instead of an error. See q-checksum-0006.
+input_drop = [
+  "ChecksumCRC32",
+  "ChecksumCRC32C",
+  "ChecksumCRC64NVME",
+  "ChecksumMD5",
+  "ChecksumSHA1",
+  "ChecksumSHA256",
+  "ChecksumSHA512",
+  "ChecksumXXHASH128",
+  "ChecksumXXHASH3",
+  "ChecksumXXHASH64",
+]
+output_drop = [
+  "ChecksumCRC32",
+  "ChecksumCRC32C",
+  "ChecksumCRC64NVME",
+  "ChecksumMD5",
+  "ChecksumSHA1",
+  "ChecksumSHA256",
+  "ChecksumSHA512",
+  "ChecksumXXHASH128",
+  "ChecksumXXHASH3",
+  "ChecksumXXHASH64",
+]
+input_required = ["ContentLength"]
+input_hot = ["ContentType"]
+output_hot = ["ETag", "VersionId"]
+
+[[op.PutObject.field]]
+side = "input"
+name = "ContentLength"
+hot = true
+missing_error = "MissingContentLength"
+quirks = ["q-length-0007"]
+
+[[op.PutObject.field]]
+side = "input"
+name = "ContentType"
+default_string = "binary/octet-stream"
+quirks = ["q-content-0008"]
+
+[[op.PutObject.field]]
+side = "input"
+name = "Expires"
+quirks = ["q-timestamp-0005"]
+
+[[op.PutObject.field]]
+side = "input"
+name = "ChecksumAlgorithm"
+quirks = ["q-checksum-0006"]
+
+[[op.PutObject.field]]
+side = "input"
+name = "Metadata"
+quirks = ["q-meta-0009"]
+
+[[op.PutObject.field]]
+side = "input"
+name = "SSECustomerKey"
+quirks = ["q-sse-0010"]
+
+[[op.PutObject.field]]
+side = "input"
+name = "SSECustomerKeyMD5"
+quirks = ["q-sse-0010"]
+
+[[op.PutObject.field]]
+side = "input"
+name = "SSEKMSKeyId"
+quirks = ["q-sse-0010"]
+
+[[op.PutObject.field]]
+side = "input"
+name = "SSEKMSEncryptionContext"
+quirks = ["q-sse-0010"]
+
+[[op.PutObject.field]]
+side = "input"
+name = "ObjectLockRetainUntilDate"
+quirks = ["q-timestamp-0011"]
+
+[[op.PutObject.field]]
+side = "input"
+name = "ChecksumSpec"
+synthesize = true
+after = "ContentMD5"
+binding = "PrefixHeaders"
+wire_name = "x-amz-checksum-"
+type = "ChecksumSpec"
+hot = true
+quirks = ["q-checksum-0006"]
+
+[[op.PutObject.field]]
+side = "output"
+name = "ETag"
+required = true
+quirks = ["q-etag-0004"]
+
+[[op.PutObject.field]]
+side = "output"
+name = "Expiration"
+quirks = ["q-timestamp-0012"]
+
+[[op.PutObject.field]]
+side = "output"
+name = "SSECustomerAlgorithm"
+quirks = ["q-sse-0010"]
+
+[[op.PutObject.field]]
+side = "output"
+name = "SSECustomerKeyMD5"
+quirks = ["q-sse-0010"]
+
+[[op.PutObject.field]]
+side = "output"
+name = "SSEKMSKeyId"
+quirks = ["q-sse-0010"]
+
+[[op.PutObject.field]]
+side = "output"
+name = "SSEKMSEncryptionContext"
+quirks = ["q-sse-0010"]
+
+[[op.PutObject.field]]
+side = "output"
+name = "ChecksumSpec"
+synthesize = true
+after = "ETag"
+binding = "PrefixHeaders"
+wire_name = "x-amz-checksum-"
+type = "ChecksumSpec"
+quirks = ["q-checksum-0006"]
+
+# =============================================================================================
+# DeleteObject
+#
+# The model already answers 204, and the interesting fact is that the 204 is unconditional: a
+# delete of a key that was never there is a success. See q-delete-0026.
+# =============================================================================================
+[op.DeleteObject]
+precedence = 1000
+auth_action = "s3:DeleteObject"
+error_codes = ["NoSuchBucket", "AccessDenied", "InvalidArgument"]
+quirk_refs = ["q-delete-0026"]
+input_hot = ["VersionId"]
+
+[[op.DeleteObject.field]]
+side = "input"
+name = "VersionId"
+quirks = ["q-delete-0026"]
+
+# =============================================================================================
+# DeleteObjects
+#
+# httpChecksumRequired: the request body must carry an integrity check, so a request with neither
+# Content-MD5 nor an x-amz-checksum-* header is a 400 before the handler runs. Forced here rather
+# than read from the model, because the answer is a decision about what this gateway accepts.
+# =============================================================================================
+[op.DeleteObjects]
+precedence = 650
+auth_action = "s3:DeleteObject"
+http_checksum_required = true
+error_codes = ["NoSuchBucket", "AccessDenied", "MalformedXML", "InvalidRequest", "InvalidArgument"]
+quirk_refs = ["q-deletes-0027", "q-checksum-0006"]
+# A delete request is a list of keys; a megabyte of XML is already ten thousand of them, and an
+# unbounded body here is an XML-bomb surface with no upper bound at all.
+request_max_bytes = 2097152
+# Wire order, not model order: AWS writes every successful key before the first failure.
+element_order = ["Deleted", "Errors"]
+output_hot = ["Deleted", "Errors"]
+
+[[op.DeleteObjects.field]]
+side = "input"
+name = "Delete"
+quirks = ["q-deletes-0027"]
+
+[[op.DeleteObjects.field]]
+side = "output"
+name = "Deleted"
+quirks = ["q-deletes-0027"]
+
+[[op.DeleteObjects.field]]
+side = "output"
+name = "Errors"
+quirks = ["q-deletes-0027"]
+
+# =============================================================================================
+# Nested shapes owned by this family
+# =============================================================================================
+[shape.Delete]
+required = ["Objects"]
+
+[shape.DeletedObject]
+hot = ["Key"]
+
+[shape.ObjectIdentifier]
+required = ["Key"]
+hot = ["Key"]

@@ -1,0 +1,32 @@
+# Copyright 2026 RustFS Team
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Family: bucket policy and public access.
+#
+# Nothing is generated yet. Every member is an authorization surface, so the family is reviewed
+# as a group rather than one operation at a time.
+
+[[deferred]]
+reason = "P5 bucket policy and public-access family; every one of these is an authorization surface and reviewed as a group."
+operations = [
+  "DeleteBucketPolicy",
+  "DeletePublicAccessBlock",
+  "GetBucketAbac",
+  "GetBucketPolicy",
+  "GetBucketPolicyStatus",
+  "GetPublicAccessBlock",
+  "PutBucketAbac",
+  "PutBucketPolicy",
+  "PutPublicAccessBlock",
+]

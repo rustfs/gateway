@@ -1,0 +1,231 @@
+# Copyright 2026 RustFS Team
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Quirks of the object data-plane family: GetObject, HeadObject, PutObject, DeleteObject,
+# DeleteObjects.
+#
+# One [[quirk]] per behaviour the pinned Smithy model does not state. `summary` and every
+# `evidence.summary` are written by this project; upstream issue and documentation prose stays
+# under its author's copyright and is never pasted here.
+#
+# One file per family, for the same reason `ops/` is sharded: it is the unit of parallel edit
+# conflict. A quirk id declared in two files is a load failure naming both.
+
+[[quirk]]
+id      = "q-checksum-0006"
+kind    = "checksum_headers"
+target  = "PutObject"
+summary = "The eleven separate checksum members collapse into one packed spec, and more than one checksum header on a request is a hard error rather than a merge."
+cases   = ["c-checksum-0001", "c-checksum-0002"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObject.html"
+  summary = "Only one checksum algorithm header is accepted per request and the value is base64 encoded."
+
+  [[quirk.evidence]]
+  kind    = "capture"
+  ref     = "captures/put-object-two-checksums.http"
+  summary = "Recorded rejection when two different checksum headers are sent together."
+
+[[quirk]]
+id      = "q-content-0008"
+kind    = "default_value"
+target  = "PutObject.ContentType"
+summary = "The default media type is the S3 specific binary form, not the IANA registered octet stream spelling."
+cases   = ["c-putobject-0002"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObject.html"
+  summary = "Documents the S3 specific default media type applied when the request omits the header."
+
+[[quirk]]
+id      = "q-etag-0004"
+kind    = "etag_render"
+target  = "PutObject.ETag"
+summary = "In a header position the entity tag is always written with surrounding double quotes, unlike the bare form used by GetObjectAttributes."
+cases   = ["c-etag-0010"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObject.html#API_PutObject_ResponseSyntax"
+  summary = "The documented response header shows the entity tag surrounded by quotes."
+
+  [[quirk.evidence]]
+  kind    = "s3s-issue"
+  ref     = "https://github.com/s3s-project/s3s/issues/632"
+  summary = "Upstream had two conflicting quoting rules in different files, which is the reason the rendering context is a type parameter here."
+
+[[quirk]]
+id      = "q-length-0007"
+kind    = "error_code"
+target  = "PutObject.ContentLength"
+summary = "A PUT without a content length is rejected with a dedicated 411 code rather than a generic bad request."
+cases   = ["c-putobject-0001"]
+
+  [[quirk.evidence]]
+  kind    = "s3s-issue"
+  ref     = "https://github.com/s3s-project/s3s/issues/526"
+  summary = "Upstream returned a generic 400 where the reference implementation returns the dedicated 411 code."
+
+[[quirk]]
+id      = "q-meta-0009"
+kind    = "prefix_headers"
+target  = "PutObject.Metadata"
+summary = "User metadata keys are lowercased on return, non ASCII values use encoded word syntax, and the combined size is capped."
+cases   = ["c-meta-0001", "c-meta-0002"]
+
+  [[quirk.evidence]]
+  kind    = "s3s-issue"
+  ref     = "https://github.com/s3s-project/s3s/issues/405"
+  summary = "Upstream did not encode non ASCII metadata values, producing headers that violate the field value grammar."
+
+  [[quirk.evidence]]
+  kind    = "rfc"
+  ref     = "https://www.rfc-editor.org/rfc/rfc2047"
+  summary = "Defines the encoded word syntax used to carry non ASCII text in header field values."
+
+[[quirk]]
+id      = "q-sse-0010"
+kind    = "secret_hygiene"
+target  = "PutObject"
+summary = "The customer key is never echoed back and never logged, while the algorithm and key digest must be echoed; customer keys over a plaintext connection are refused."
+cases   = ["c-ssec-0001", "c-ssec-0002"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/dev/ServerSideEncryptionCustomerKeys.html"
+  summary = "Requires a secure connection for customer provided keys and describes which of the three headers are echoed in the response."
+
+[[quirk]]
+id      = "q-timestamp-0005"
+kind    = "timestamp_format"
+target  = "PutObject.Expires"
+summary = "The value must be round tripped as an opaque string, because stored values are frequently not parseable dates at all."
+cases   = ["c-expires-0001"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObject.html"
+  summary = "The SDKs added a separate string valued member for this header after non date values were observed in production data."
+
+  [[quirk.evidence]]
+  kind    = "observed"
+  ref     = "captures/put-object-expires-nondate.http"
+  summary = "Recorded request where the header value is not a date, which a parsing implementation would reject or rewrite."
+
+[[quirk]]
+id      = "q-timestamp-0011"
+kind    = "timestamp_format"
+target  = "PutObject.ObjectLockRetainUntilDate"
+summary = "This is the only request header carrying the extended date time format instead of the HTTP date format."
+cases   = ["c-objectlock-0001"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObject.html"
+  summary = "Specifies the retain until date header in the extended date time format while every other date header uses the HTTP date format."
+
+[[quirk]]
+id      = "q-timestamp-0012"
+kind    = "structured_header"
+target  = "PutObject.Expiration"
+summary = "The expiration header is a structured value whose quoted parameter embeds an HTTP date, so it must not be modelled as a timestamp."
+cases   = ["c-expiration-0001"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObject.html#API_PutObject_ResponseSyntax"
+  summary = "Shows the header as a pair of quoted parameters, one of which contains a date."
+
+[[quirk]]
+id      = "q-response-0023"
+kind    = "response_override"
+target  = "GetObject"
+summary = "A fixed set of response- query parameters overwrites the corresponding response headers, and the overwrite is applied once at the end of encoding rather than inside each field binding."
+cases   = ["c-object-0005", "c-object-0016"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObject.html"
+  summary = "Six request parameters are documented as overriding the matching header in the response."
+
+  [[quirk.evidence]]
+  kind    = "s3s-issue"
+  ref     = "https://github.com/s3s-project/s3s/issues/220"
+  summary = "Upstream ignored the override parameters, so a presigned download link could not set the filename a browser saves."
+
+[[quirk]]
+id      = "q-storageclass-0024"
+kind    = "omit_when"
+target  = "GetObject.StorageClass"
+summary = "The storage class response header is suppressed for the default class, which is the exact opposite of the listing body element that is always written."
+cases   = ["c-object-0012"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObject.html"
+  summary = "States that the storage class response header is returned for every object except those in the default class."
+
+[[quirk]]
+id      = "q-head-0025"
+kind    = "head_mirrors"
+target  = "HeadObject"
+summary = "The head response carries exactly the header set of the corresponding get, and no body on any status, so the two header sets must be one derivation rather than two hand-written tables."
+cases   = ["c-object-0002", "c-object-0008"]
+
+  [[quirk.evidence]]
+  kind    = "s3s-issue"
+  ref     = "https://github.com/s3s-project/s3s/issues/549"
+  summary = "Upstream lost the entity tag on the head response because its header bindings were written a second time."
+
+  [[quirk.evidence]]
+  kind    = "rfc"
+  ref     = "https://www.rfc-editor.org/rfc/rfc9110#section-9.3.2"
+  summary = "A response to a head request never carries content, whatever the status line says."
+
+[[quirk]]
+id      = "q-delete-0026"
+kind    = "idempotent_delete"
+target  = "DeleteObject"
+summary = "Deleting a key that does not exist is a success and answers the same empty 204 as deleting one that does; a not-found status here breaks every retrying client."
+cases   = ["c-object-0003"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteObject.html"
+  summary = "The documented response is the same whether or not the key was present."
+
+  [[quirk.evidence]]
+  kind    = "s3s-issue"
+  ref     = "https://github.com/s3s-project/s3s/issues/455"
+  summary = "Upstream answered not-found for an absent key, which turned a retried delete into a client-visible failure."
+
+[[quirk]]
+id      = "q-deletes-0027"
+kind    = "result_completeness"
+target  = "DeleteObjects"
+summary = "Every key in the request appears exactly once in the result, in either the deleted list or the error list, and the two lists together have the same length as the request."
+cases   = ["c-object-0004", "c-object-0011"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteObjects.html"
+  summary = "The result reports the outcome of each key, as either a deleted entry or an error entry."
+
+  [[quirk.evidence]]
+  kind    = "s3s-issue"
+  ref     = "https://github.com/s3s-project/s3s/issues/469"
+  summary = "Upstream dropped keys it could not delete from the result, so a caller could not tell which of its keys survived."

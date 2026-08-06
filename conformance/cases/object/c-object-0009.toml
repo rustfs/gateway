@@ -1,0 +1,64 @@
+# c-object-0009 — a conditional read whose precondition fails.
+#
+# Schema dimensions exercised: byte-empty body on a 304, framing-header absence.
+
+[case]
+id = "c-object-0009"
+schema_version = 1
+title = "If-None-Match on an unchanged object answers 304 with the tag and no content framing"
+rationale = """
+The 304 is the whole point of an HTTP cache, and it is the response most likely to be assembled by \
+overwriting the status of an otherwise complete 200. What survives that overwrite is a \
+Content-Length describing a body the response is forbidden to carry — and a client that reads it \
+waits for bytes that never arrive until its own timeout fires, which is a hang rather than an \
+error and therefore invisible in any status-code assertion. The entity tag must still be there: \
+without it the client cannot refresh its cache entry."""
+polarity = "negative"
+operation = "GetObject"
+tags = ["conditional", "caching", "rfc9110"]
+timeout_ms = 10000
+quirks = ["q-etag-0004"]
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9110#section-15.4.5"
+summary = "A 304 response must not carry content and must include the validator fields a 200 would have sent."
+kind = "rfc"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObject.html"
+summary = "A read whose If-None-Match matches the current entity tag answers not-modified rather than the object."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-object"
+
+[[setup.objects]]
+bucket = "conf-object"
+key = "cached/plain.txt"
+content_type = "text/plain"
+body = { utf8 = "hello world" }
+
+[request]
+method = "GET"
+target = "/conf-object/cached/plain.txt"
+headers = { "if-none-match" = "\"5eb63bbbe01eeed093cb22bb8f5acdc3\"" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 304
+headers_absent = ["content-length", "transfer-encoding"]
+connection_after = "open"
+
+[expect.headers_present]
+"etag" = "\"5eb63bbbe01eeed093cb22bb8f5acdc3\""
+
+[expect.timing]
+terminate_within_ms = 5000
+
+[expect.body]
+size = 0
+exact_utf8 = ""

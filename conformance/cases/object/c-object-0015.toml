@@ -1,0 +1,79 @@
+# c-object-0015 — a DeleteObjects body past the operation's declared cap.
+#
+# Schema dimensions exercised: paced chunks, request-progress assertion, termination timing.
+
+[case]
+id = "c-object-0015"
+schema_version = 1
+title = "A multi-object delete body past the declared cap is refused while it is still arriving"
+rationale = """
+The only bound on this body is the one the operation declares, and an implementation that \
+aggregates first and checks afterwards has already spent the memory by the time it decides. The \
+body here is sent in paced chunks so that the assertion can be about *when* the refusal happened \
+rather than only that it did: a server that answers after the last chunk passed the cap check in \
+the wrong place, and under concurrency that is an out-of-memory condition an unauthenticated \
+caller can trigger at will."""
+polarity = "negative"
+operation = "DeleteObjects"
+tags = ["limits", "delete", "resource-exhaustion"]
+timeout_ms = 20000
+quirks = ["q-deletes-0027"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteObjects.html"
+summary = "The request is documented as carrying at most one thousand key entries, which bounds a well-formed body."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/issues/367"
+summary = "Upstream aggregated a request body with no ceiling, so body size alone was a memory-exhaustion vector."
+kind = "s3s-issue"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-object"
+
+[request]
+method = "POST"
+target = "/conf-object?delete"
+# A well-formed checksum header, so the request clears the integrity-header requirement and
+# the refusal under test is the size cap and nothing else. The digest is never verified,
+# because the body never finishes arriving.
+headers = { "content-type" = "application/xml", "x-amz-checksum-crc32" = "AAAAAA==" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+# Roughly four megabytes of well-formed entries, against a two-megabyte cap, paced so the refusal
+# can be observed mid-stream.
+[[request.chunks]]
+utf8 = "<Delete>"
+
+[[request.chunks]]
+utf8 = "<Object><Key>0123456789012345678901234567890123456789012345678901234567890123</Key></Object>"
+repeat = 50000
+delay_ms = 1
+
+[[request.chunks]]
+utf8 = "</Delete>"
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "closed"
+
+[expect.error]
+code = "InvalidRequest"
+request_id_present = true
+
+[expect.timing]
+terminate_within_ms = 10000
+
+# The refusal arrived before the client finished sending. If this is true the server never held the
+# whole body.
+[expect.request_progress]
+body_fully_sent = false
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+not_contains_utf8 = ["<Deleted>"]

@@ -25,7 +25,13 @@ workspace = true
 rustfs-gateway-sig = { workspace = true }
 rustfs-gateway-http = { workspace = true }
 rustfs-gateway-types = { workspace = true }
+# The generated codecs live here (orphan rule; see `src/codec/mod.rs`), so the writer and the
+# bounded reader they use are a dependency of this crate rather than of `rustfs-gateway-types`.
+rustfs-gateway-xml = { workspace = true }
+rustfs-gateway-stream = { workspace = true }
+bytes = { workspace = true }
 http = { workspace = true }
+percent-encoding = { workspace = true }
 
 [dev-dependencies]
 # Differential testing between the readable route table and its compiled form. The compiled

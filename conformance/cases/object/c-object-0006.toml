@@ -1,0 +1,82 @@
+# c-object-0006 — a write's standard attributes and user metadata survive the read.
+#
+# Schema dimensions exercised: connection reuse, capture-free multi-exchange, header-set assertion.
+
+[case]
+id = "c-object-0006"
+schema_version = 1
+title = "Standard attributes and user metadata set on a write are returned unchanged by the read"
+rationale = """
+The write path and the read path bind the same six standard attributes, and an implementation that \
+writes them into storage but binds only three of them on the way out returns an object that looks \
+right in a listing and wrong in a browser. User metadata is included because its keys come back \
+lowercased and its values are size-capped, both of which are easy to get wrong in a way no \
+round-trip of ASCII-only, short values would reveal — so the value here is chosen to be neither."""
+polarity = "positive"
+operation = "PutObject"
+tags = ["object-attributes", "metadata", "round-trip"]
+timeout_ms = 10000
+quirks = ["q-meta-0009", "q-content-0008", "q-timestamp-0005"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObject.html"
+summary = "The write accepts the standard attribute headers and the user metadata prefix, and the read returns them."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/issues/405"
+summary = "Upstream did not encode non-ASCII metadata values, producing headers that violate the field value grammar."
+kind = "s3s-issue"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = true
+
+[[setup.buckets]]
+name = "conf-object"
+
+[[exchanges]]
+name = "write"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-object/roundtrip/doc"
+headers = { "content-type" = "text/markdown", "cache-control" = "max-age=60", "content-language" = "en-GB", "expires" = "not-a-date-at-all", "x-amz-meta-Colour" = "blue" }
+body = { utf8 = "hello world" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.headers_present]
+"etag" = "\"5eb63bbbe01eeed093cb22bb8f5acdc3\""
+
+[[exchanges]]
+name = "read-back"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-object/roundtrip/doc"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+# The Expires value is returned exactly as it was sent. It is an opaque string, not a date: a large
+# share of stored values are not parseable dates at all, and an implementation that parses and
+# re-renders them rewrites data it was asked to keep.
+[exchanges.expect.headers_present]
+"content-type" = "text/markdown"
+"cache-control" = "max-age=60"
+"content-language" = "en-GB"
+"expires" = "not-a-date-at-all"
+"x-amz-meta-colour" = "blue"
+
+[exchanges.expect.body]
+exact_utf8 = "hello world"

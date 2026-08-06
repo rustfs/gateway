@@ -25,6 +25,11 @@ admitted the request.
 | `src/route/explain.rs` | `Explanation`: what won, what it hid, and why | You are building `route explain` |
 | `src/route/generated.rs` | `RouteRow`/`RoutePredicate` and the parse of `generated/routes.rs` | Codegen changed the emitter |
 | `src/op.rs` | `Operation`, `OperationOrigin` and its sealed token, `AuthRequirement`, `HasOperation`, the standard-name set | You are adding an operation, or asking what makes one standard |
+| `src/codec/mod.rs` | `OperationCodec`, and the orphan-rule reason the generated codecs are mounted here rather than in `rustfs-gateway-types` | You are adding an operation family, or asking where a wire binding lives |
+| `src/codec/view.rs` | `MetaView` — the request head a decoder reads, with the URI labels split and percent-decoded **exactly once** — and `RequestBody`'s three shapes | You are decoding a path label, or asking why a decoder cannot aggregate a streaming body |
+| `src/codec/response.rs` | `EncodedResponse`, `ResponseBody`, the `response-*` override table, and the one copy of the RFC 9110 body invariants | A response carries a body it should not, or an override did not apply |
+| `src/codec/value.rs` | One function per IR scalar, in each direction, plus the one-checksum-header rule and the decode-path placeholder exit | A wire value is parsed or rendered wrongly |
+| `src/codec/tests.rs` | 27 tests over the object family: what the generated codecs do to bytes | You changed an emitter or a conversion |
 | `src/ops/*.rs` | One AWS operation per file: spec, floor, `impl Operation`, `impl HasOperation` | You are adding an operation — copy the nearest one |
 | `src/handler.rs` | `Handler<O>`, `Req`, `Resp`, `HandlerError`, `BoxFuture` | You are implementing a backend |
 | `src/registry/mod.rs` | `OperationSpec`, `RequiredParam`, `check_required`, `Registry` | You are adding a required parameter |
@@ -88,11 +93,14 @@ admitted the request.
   Associated types cannot have defaults, so adding one is a breaking change for every operation
   module. If P5 is to run in parallel, P4-05 should land its associated type first, or accept a
   mechanical edit across every operation file.
-- **The erased payload is `Box<dyn Any + Send>` until the codecs exist.** The design calls for the
-  closure to take a wire request and return a wire response, which needs `Operation::decode` and
-  `Operation::encode` — those arrive with generated codecs, and the three operations that exist
-  today have none. When they land, the erased signature changes and `Handler`, the macro and every
-  P5 operation stay as they are.
+- **The codecs exist; the erasure closure has not been rewired to them yet.** `OperationCodec` is a
+  separate trait from `Operation` rather than two more methods on it, so a third party can still
+  name an operation without writing a codec. The erased payload is still `Box<dyn Any + Send>`:
+  changing it to "wire request in, wire response out" is the next step and touches
+  `registry/handlers.rs` alone.
+- **`OperationCodec` decides the status from the handler's `Resp`, and applies the RFC 9110 body
+  invariants last.** A `HEAD` response and a `1xx`/`204`/`205`/`304` lose their body in
+  `EncodedResponse::enforce_http_invariants`, once, for every operation — never per operation.
 - **`OperationSet` is a name set, not a bit set, and there is no `AWS_CORE`.** An index-based set
   needs a generator to assign the indices, and a curated `AWS_CORE` would be a second source of
   truth about which operations exist. Both belong in codegen; `OperationSet::aws_full()` reads the

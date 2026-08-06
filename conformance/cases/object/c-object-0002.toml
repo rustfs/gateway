@@ -1,0 +1,95 @@
+# c-object-0002 — HeadObject returns the GetObject header set and no body.
+#
+# Schema dimensions exercised: header-set assertion, byte-empty body, multi-exchange comparison
+# against the GET whose headers this response mirrors.
+
+[case]
+id = "c-object-0002"
+schema_version = 1
+title = "A head response carries the header set of the matching read and no content at all"
+rationale = """
+The head response is the only way a client can size a download, check a cache entry or verify an \
+integrity digest without transferring the object, and every one of those uses breaks silently when \
+a single header is missing. The failure mode is structural rather than accidental: when the head \
+bindings are written a second time, beside the read's, one of the two lists stops being updated and \
+the loss shows up months later as a client that re-downloads everything. This case asserts the \
+header set on the head response and asserts, in the same run, that the read agrees with it."""
+polarity = "positive"
+operation = "HeadObject"
+tags = ["head", "object-attributes", "etag"]
+timeout_ms = 10000
+quirks = ["q-head-0025", "q-etag-0004"]
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/issues/549"
+summary = "Upstream lost the entity tag on the head response because its header bindings were written a second time."
+kind = "s3s-issue"
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9110#section-9.3.2"
+summary = "A response to a head request never carries content, whatever the status line says."
+kind = "rfc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = true
+
+[[setup.buckets]]
+name = "conf-object"
+
+[[setup.objects]]
+bucket = "conf-object"
+key = "attributes/plain.txt"
+content_type = "text/plain; charset=utf-8"
+body = { utf8 = "hello world" }
+
+[[exchanges]]
+name = "head"
+
+[exchanges.request]
+method = "HEAD"
+target = "/conf-object/attributes/plain.txt"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.headers_present]
+"content-type" = "text/plain; charset=utf-8"
+"content-length" = "11"
+"etag" = "\"5eb63bbbe01eeed093cb22bb8f5acdc3\""
+"last-modified" = "*"
+"accept-ranges" = "bytes"
+
+[exchanges.expect.body]
+size = 0
+exact_utf8 = ""
+
+[[exchanges]]
+name = "get-agrees"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-object/attributes/plain.txt"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+# The same five headers, from the same derivation. If the two ever disagree, one of them was
+# written by hand.
+[exchanges.expect.headers_present]
+"content-type" = "text/plain; charset=utf-8"
+"content-length" = "11"
+"etag" = "\"5eb63bbbe01eeed093cb22bb8f5acdc3\""
+"last-modified" = "*"
+"accept-ranges" = "bytes"
+
+[exchanges.expect.body]
+exact_utf8 = "hello world"

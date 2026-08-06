@@ -1,0 +1,78 @@
+# c-object-0004 — every key in a DeleteObjects request appears in the result.
+#
+# Schema dimensions exercised: byte-exact XML body, element order, checksum-bearing request.
+
+[case]
+id = "c-object-0004"
+schema_version = 1
+title = "A multi-object delete accounts for every key it was given, in the deleted list or the error list"
+rationale = """
+A caller sends up to a thousand keys and gets one document back; the only way it can know which of \
+its keys are gone is that each of them appears exactly once in that document. An implementation \
+that omits the keys it skipped leaves the caller with no way to distinguish \"deleted\" from \
+\"quietly ignored\" short of re-listing the bucket, and the usual consequence is a retry loop that \
+never terminates or a data-retention obligation that is silently unmet. The body is pinned byte for \
+byte because the sibling order — every success before the first failure — is part of what strict \
+parsers expect."""
+polarity = "positive"
+operation = "DeleteObjects"
+tags = ["delete", "batch", "xml"]
+timeout_ms = 10000
+quirks = ["q-deletes-0027"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteObjects.html"
+summary = "The result reports the outcome of each key, as either a deleted entry or an error entry."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/issues/469"
+summary = "Upstream dropped keys it could not delete from the result, so a caller could not tell which of its keys survived."
+kind = "s3s-issue"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-object"
+
+[[setup.objects]]
+bucket = "conf-object"
+key = "batch/one"
+body = { utf8 = "1" }
+
+[[setup.objects]]
+bucket = "conf-object"
+key = "batch/two"
+body = { utf8 = "2" }
+
+[[setup.objects]]
+bucket = "conf-object"
+key = "batch/absent"
+absent = true
+
+[request]
+method = "POST"
+target = "/conf-object?delete"
+# The integrity header this operation requires; the value is md5 of the body below.
+headers = { "content-type" = "application/xml", "content-md5" = "VK4ubZ8WQf0Vu81FdbnLGw==" }
+body = { utf8 = "<Delete><Object><Key>batch/one</Key></Object><Object><Key>batch/two</Key></Object><Object><Key>batch/absent</Key></Object></Delete>" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[expect.headers_present]
+"content-type" = "application/xml"
+
+[expect.timing]
+terminate_within_ms = 5000
+
+# Three keys in, three entries out — including the key that was never there, because a delete of an
+# absent key is a success (see c-object-0003) and must be reported as one.
+[expect.body]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<DeleteResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Deleted><Key>batch/one</Key></Deleted><Deleted><Key>batch/two</Key></Deleted><Deleted><Key>batch/absent</Key></Deleted></DeleteResult>'''

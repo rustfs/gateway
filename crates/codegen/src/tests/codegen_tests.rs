@@ -170,7 +170,9 @@ fn n_a_stale_generated_file_fails_verification() {
     };
     let input = CodegenInput::at(&root);
     crate::write(&input, &output).expect("writes into the scratch tree");
-    std::fs::write(output.spec_dir.join("GetObject.toml"), "name = \"GetObject\"\n").expect("write");
+    // A name no operation has: `GetObject` used to serve here and stopped being stale the day the
+    // object family was generated.
+    std::fs::write(output.spec_dir.join("NotAnOperation.toml"), "name = \"NotAnOperation\"\n").expect("write");
 
     let err = crate::verify(&input, &output).expect_err("a file codegen does not produce is drift");
     assert!(format!("{err}").contains("not produced by codegen"), "{err}");

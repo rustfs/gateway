@@ -35,6 +35,10 @@
 //! the operation, or if the spec declares no authorisation action — so the four pieces cannot
 //! drift apart quietly.
 
+pub mod delete_object;
+pub mod delete_objects;
 pub mod get_bucket_location;
+pub mod get_object;
+pub mod head_object;
 pub mod list_objects_v2;
 pub mod put_object;

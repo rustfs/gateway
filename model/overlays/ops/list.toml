@@ -1,0 +1,182 @@
+# Copyright 2026 RustFS Team
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Family: object listing. ListObjectsV2 today; ListObjects, ListObjectVersions,
+# ListMultipartUploads and the bucket listings arrive here.
+#
+# The family owns pagination, delimiter rollup, CommonPrefixes, encoding-type and the
+# continuation-token codec. Those are shared by every member, which is why they are one family
+# and one file rather than four.
+
+include = ["ListObjectsV2"]
+
+# =============================================================================================
+# ListObjectsV2
+# =============================================================================================
+[op.ListObjectsV2]
+precedence = 600
+auth_action = "s3:ListBucket"
+error_codes = ["NoSuchBucket", "AccessDenied", "InvalidArgument", "PermanentRedirect"]
+quirk_refs = ["q-root-0013", "q-order-0014", "q-encoding-0015"]
+# `x-amz-optional-object-attributes` is a comma-delimited list in a header position. The frozen
+# IR can only describe a list through the XML notions `flattened` and `wrapper_name`, so there is
+# no truthful way to emit it yet; it is withheld rather than described wrongly. Restoring it
+# needs an IR change (see the P1-03 handoff), not an overlay change.
+input_drop = ["OptionalObjectAttributes"]
+# AWS always writes these five, whatever the model says about optionality.
+output_required = ["Name", "Prefix", "KeyCount", "MaxKeys", "IsTruncated"]
+input_hot = ["Prefix", "Delimiter", "MaxKeys", "ContinuationToken"]
+output_hot = ["Name", "Prefix", "KeyCount", "MaxKeys", "Delimiter", "IsTruncated", "Contents", "CommonPrefixes"]
+# Wire order, not model order: strict clients fail to parse when the bucket name follows the
+# entry list. See q-order-0014.
+element_order = [
+  "Name",
+  "Prefix",
+  "KeyCount",
+  "MaxKeys",
+  "Delimiter",
+  "IsTruncated",
+  "Contents",
+  "CommonPrefixes",
+  "EncodingType",
+  "ContinuationToken",
+  "NextContinuationToken",
+  "StartAfter",
+]
+url_encoded_fields = [
+  "Prefix",
+  "Delimiter",
+  "StartAfter",
+  "ContinuationToken",
+  "NextContinuationToken",
+  "Contents.Key",
+  "CommonPrefixes.Prefix",
+]
+
+[[op.ListObjectsV2.field]]
+side = "input"
+name = "MaxKeys"
+default_int = 1000
+
+[[op.ListObjectsV2.field]]
+side = "input"
+name = "FetchOwner"
+default_bool = false
+quirks = ["q-owner-0017"]
+
+[[op.ListObjectsV2.field]]
+side = "input"
+name = "ContinuationToken"
+quirks = ["q-token-0021"]
+
+[[op.ListObjectsV2.field]]
+side = "input"
+name = "EncodingType"
+quirks = ["q-encoding-0015"]
+
+[[op.ListObjectsV2.field]]
+side = "output"
+name = "Name"
+quirks = ["q-order-0014"]
+
+[[op.ListObjectsV2.field]]
+side = "output"
+name = "Prefix"
+quirks = ["q-empty-0016"]
+
+[[op.ListObjectsV2.field]]
+side = "output"
+name = "Delimiter"
+quirks = ["q-empty-0016"]
+
+[[op.ListObjectsV2.field]]
+side = "output"
+name = "KeyCount"
+quirks = ["q-keycount-0018"]
+
+[[op.ListObjectsV2.field]]
+side = "output"
+name = "Contents"
+quirks = ["q-flat-0019"]
+
+[[op.ListObjectsV2.field]]
+side = "output"
+name = "CommonPrefixes"
+quirks = ["q-flat-0019"]
+
+[[op.ListObjectsV2.field]]
+side = "output"
+name = "EncodingType"
+quirks = ["q-encoding-0015"]
+
+[[op.ListObjectsV2.field]]
+side = "output"
+name = "ContinuationToken"
+quirks = ["q-token-0021"]
+
+[[op.ListObjectsV2.field]]
+side = "output"
+name = "NextContinuationToken"
+quirks = ["q-token-0021"]
+
+# =============================================================================================
+# Nested shapes owned by this family
+# =============================================================================================
+[shape.Object]
+required = ["Key", "LastModified", "ETag", "Size", "StorageClass"]
+hot = ["Key", "LastModified", "ETag", "Size"]
+
+[[shape.Object.field]]
+name = "Key"
+quirks = ["q-encoding-0015"]
+
+[[shape.Object.field]]
+name = "ETag"
+quirks = ["q-etag-0020"]
+
+[[shape.Object.field]]
+name = "ChecksumAlgorithm"
+quirks = ["q-flat-0019"]
+
+[[shape.Object.field]]
+name = "StorageClass"
+quirks = ["q-storageclass-0022"]
+
+[[shape.Object.field]]
+name = "Owner"
+omit_when = "RequestField"
+omit_when_field = "FetchOwner"
+omit_when_equals = "false"
+quirks = ["q-owner-0017"]
+
+[shape.CommonPrefix]
+required = ["Prefix"]
+hot = ["Prefix"]
+
+[[shape.CommonPrefix.field]]
+name = "Prefix"
+quirks = ["q-encoding-0015"]
+
+# AWS writes the identifier before the display name; the model declares them the other way round.
+[shape.Owner]
+element_order = ["ID", "DisplayName"]
+
+[[deferred]]
+reason = "P5 listing family; pagination, delimiter rollup and encoding-type are shared with ListObjectsV2 and land together."
+operations = [
+  "ListBuckets",
+  "ListDirectoryBuckets",
+  "ListObjectVersions",
+  "ListObjects",
+]
