@@ -62,6 +62,24 @@ use crate::text::{contains_forbidden_control, is_token};
 /// security label for exactly that reason), so this layer refuses to be one of the parties that
 /// picks. `host` is absent because it is handled earlier and more strictly, by
 /// [`effective_host`](crate::effective_host).
+///
+/// # Why `range` is not on this list
+///
+/// Because it is the one header in the family whose repeated form already has an answer, and the
+/// answer is not a refusal. RFC 9110 §5.3 says two field lines *are* one field whose value is the
+/// members joined by a comma, and §14.2 says a `Range` a server cannot interpret is ignored and
+/// the whole representation served. `bytes=0-4` and `bytes=9-9` join into `bytes=0-4, bytes=9-9`,
+/// which `RangeParse::parse` refuses and resolves to the whole object — the same outcome every
+/// other unusable spelling gets, reached by the same rule rather than by a second one written
+/// here. Refusing it instead would be this layer deciding a question `q-range-0057` has already
+/// answered, and it would take the decision away from the only layer that can see the object
+/// (`c-range-0017`).
+///
+/// That is the test for membership: a header belongs here when repeating it produces *two
+/// answers*, not when repeating it produces *one unusable answer*. An unusable value is the
+/// binding's problem, and every binding in this workspace already refuses one — two `If-Match`
+/// lines join into a value the entity-tag grammar rejects, which is why `if-match` is not here
+/// either.
 pub const SINGLE_VALUED_HEADERS: &[&str] = &[
     "authorization",
     "content-length",
@@ -72,7 +90,6 @@ pub const SINGLE_VALUED_HEADERS: &[&str] = &[
     "x-amz-date",
     "x-amz-decoded-content-length",
     "x-amz-security-token",
-    "range",
     "expect",
 ];
 

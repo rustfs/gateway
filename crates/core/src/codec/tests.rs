@@ -32,7 +32,7 @@ use bytes::Bytes;
 use http::{Method, Request, StatusCode};
 use rustfs_gateway_http::{Limits, WireRequest};
 use rustfs_gateway_types::dto;
-use rustfs_gateway_types::{BucketName, ETag, ErrorCode, ObjectKey, OpaqueString, Timestamp};
+use rustfs_gateway_types::{BucketName, ETag, ErrorCode, ObjectKey, OpaqueString, RangeOutcome, Timestamp};
 
 use crate::codec::response::ResponseBody;
 use crate::codec::{MetaView, OperationCodec, RequestBody};
@@ -94,7 +94,15 @@ fn decodes_the_conditional_and_range_headers_it_binds() {
         Some("\"abc\""),
         "the conditional header is bound as the model spells it: an opaque string"
     );
-    assert!(input.range.is_some(), "one well-formed range is honoured");
+    let range = input.range.expect("one well-formed range is honoured");
+    assert_eq!(
+        range.resolve(200),
+        RangeOutcome::Satisfied {
+            start: 0,
+            end_inclusive: 99
+        }
+    );
+    assert_eq!(range.as_str(), "bytes=0-99", "the header survives the parse that read it");
 }
 
 #[test]
@@ -103,7 +111,21 @@ fn n_ignores_a_range_header_it_cannot_honour() {
     let view = MetaView::of(&request, TargetKind::Object).expect("view");
     let input = dto::GetObject::decode(&view, RequestBody::None).expect("an unusable range is not a refusal");
 
-    assert!(input.range.is_none(), "RFC 9110 requires an unparseable Range to be ignored");
+    // "Ignored" is now asserted where RFC 9110 §14.2 puts it — in what gets served — rather than by
+    // the binding having forgotten the header. The previous form asserted `range.is_none()`, which
+    // held only because an unusable range and an absent one had been collapsed into one value; that
+    // collapse is what left a 416 unable to echo `<RangeRequested>` at all (issue #15).
+    let range = input.range.expect("the header arrived, so it is present");
+    assert_eq!(
+        range.resolve(200),
+        RangeOutcome::Full,
+        "RFC 9110 requires an unparseable Range to be ignored and the whole representation served"
+    );
+    assert_eq!(
+        range.as_str(),
+        "items=0-1",
+        "and the bytes the client sent are still the bytes we can quote back"
+    );
 }
 
 #[test]

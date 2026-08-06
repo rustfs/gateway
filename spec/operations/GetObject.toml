@@ -113,6 +113,15 @@ hot = true
 quirks = []
 
 [[input]]
+name = "IfRange"
+wire_name = "if-range"
+binding = "Header"
+type = "String"
+required = false
+hot = true
+quirks = ["q-range-0058"]
+
+[[input]]
 name = "ResponseCacheControl"
 wire_name = "response-cache-control"
 binding = "Query"

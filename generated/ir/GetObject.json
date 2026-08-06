@@ -82,6 +82,15 @@
                            "quirk_refs": []
                          },
                          {
+                           "name": "IfRange",
+                           "wire_name": "if-range",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "String" },
+                           "hot": true,
+                           "quirk_refs": ["q-range-0058"]
+                         },
+                         {
                            "name": "ResponseCacheControl",
                            "wire_name": "response-cache-control",
                            "required": false,
@@ -756,6 +765,20 @@
                               }
                             ],
                 "cases": ["c-object-0012"]
+              },
+              {
+                "id": "q-range-0058",
+                "kind": "range_resolution",
+                "target": "GetObject.IfRange",
+                "summary": "An If-Range validator that no longer describes the object drops the range instead of failing it, so a resumed download receives the new object whole rather than a slice of two different ones.",
+                "evidence": [
+                              {
+                                "kind": "rfc",
+                                "ref": "https://www.rfc-editor.org/rfc/rfc9110#section-13.1.5",
+                                "summary": "When the If-Range validator does not match, the server ignores the range header and returns the entire representation."
+                              }
+                            ],
+                "cases": ["c-range-0018"]
               },
               {
                 "id": "q-etag-form-0074",

@@ -74,9 +74,9 @@
 //! maintainer review".
 
 use http::StatusCode;
-use rustfs_gateway_types::{ETag, ErrorCode, RangeOutcome, RangeParse, Timestamp};
+use rustfs_gateway_types::{ETag, ErrorCode, RangeOutcome, RangeParse, Timestamp, TimestampFormat};
 
-use super::etag::{ConditionalHeader, etag_matches};
+use super::etag::{ConditionalHeader, etag_matches, parse_conditional_etag};
 
 /// The facts about the selected representation that a condition is evaluated against.
 ///
@@ -351,6 +351,41 @@ pub enum IfRange {
     Tag(ETag),
     /// An HTTP-date.
     Date(Timestamp),
+    /// A value that is neither, which is a validator this server cannot confirm.
+    ///
+    /// It exists so that [`IfRange::parse`] can be total. A fallible parse would hand a backend an
+    /// `Option` to flatten away, and flattening it produces `if_range: None` — "no `If-Range` was
+    /// sent" — which honours the range against a representation nobody checked. That is the
+    /// spliced download this header exists to prevent, reached by a `?` nobody would look at
+    /// twice. This variant matches nothing, so the range is dropped and the whole object served,
+    /// which is what RFC 9110 §13.1.5 asks of a recipient that cannot read the validator.
+    Unrecognised,
+}
+
+impl IfRange {
+    /// Reads an `If-Range` header value.
+    ///
+    /// Total, and deliberately so — see [`IfRange::Unrecognised`]. The two forms are told apart
+    /// the way RFC 9110 §13.1.5 says to: a valid entity tag begins with `"` or `W/`, and anything
+    /// else that parses at all is an HTTP-date.
+    ///
+    /// The wildcard is not a validator here. `If-Range: *` would say "the representation, whichever
+    /// one it is", a condition true of every object, which promises nothing about the one the
+    /// client already holds half of. It reads as [`IfRange::Unrecognised`] and drops the range.
+    #[must_use]
+    pub fn parse(value: &str) -> Self {
+        let trimmed = value.trim_matches(|c| c == ' ' || c == '\t');
+        if trimmed.starts_with('"') || trimmed.starts_with("W/") {
+            return match parse_conditional_etag(trimmed) {
+                Ok(tag) if !tag.is_any() => Self::Tag(tag),
+                Ok(_) | Err(_) => Self::Unrecognised,
+            };
+        }
+        match Timestamp::parse(trimmed, TimestampFormat::HttpDate) {
+            Ok(instant) => Self::Date(instant),
+            Err(_) => Self::Unrecognised,
+        }
+    }
 }
 
 /// What an operation should serve for a range request.
@@ -499,7 +534,10 @@ pub fn evaluate_range(
         },
         RangeOutcome::Unsatisfiable { actual } => RangeDecision::Unsatisfiable {
             actual_object_size: actual,
-            range_requested: header.trim().to_owned(),
+            // Verbatim, not trimmed. `<RangeRequested>` reports what the client sent; a server that
+            // tidies the value first is reporting its own reading back as though it were the
+            // request, which is the same mistake as re-spelling the range out of the parse.
+            range_requested: header.to_owned(),
         },
     })
 }
@@ -512,6 +550,9 @@ fn if_range_matches(if_range: &IfRange, validators: &ObjectValidators) -> bool {
             .as_ref()
             .is_some_and(|current| etag_matches(ConditionalHeader::IfMatch.comparison(), requested, current)),
         IfRange::Date(bound) => validators.last_modified.is_some_and(|modified| modified <= *bound),
+        // A validator nobody could read confirms nothing, so the range is dropped and the whole
+        // object served. Matching here would splice two representations together.
+        IfRange::Unrecognised => false,
     }
 }
 

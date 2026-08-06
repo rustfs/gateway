@@ -63,6 +63,7 @@ table and the per-operation sections follow.
 | `if-match` | [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [DeleteObject](#deleteobject), [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject) |
 | `if-modified-since` | [GetObject](#getobject), [HeadObject](#headobject) |
 | `if-none-match` | [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject) |
+| `if-range` | [GetObject](#getobject) |
 | `if-unmodified-since` | [GetObject](#getobject), [HeadObject](#headobject) |
 | `last-modified` | [GetObject](#getobject), [GetObjectAttributes](#getobjectattributes), [HeadObject](#headobject) |
 | `range` | [GetObject](#getobject), [HeadObject](#headobject) |
@@ -580,7 +581,7 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 
 **Headers**
 
-- request: `if-match`, `if-modified-since`, `if-none-match`, `if-unmodified-since`, `range`, `x-amz-checksum-mode`, `x-amz-expected-bucket-owner`, `x-amz-request-payer`, `x-amz-server-side-encryption-customer-algorithm`, `x-amz-server-side-encryption-customer-key`, `x-amz-server-side-encryption-customer-key-md5`
+- request: `if-match`, `if-modified-since`, `if-none-match`, `if-range`, `if-unmodified-since`, `range`, `x-amz-checksum-mode`, `x-amz-expected-bucket-owner`, `x-amz-request-payer`, `x-amz-server-side-encryption-customer-algorithm`, `x-amz-server-side-encryption-customer-key`, `x-amz-server-side-encryption-customer-key-md5`
 - response: `accept-ranges`, `cache-control`, `content-disposition`, `content-encoding`, `content-language`, `content-length`, `content-range`, `content-type`, `etag`, `expires`, `last-modified`, `x-amz-checksum-crc32`, `x-amz-checksum-crc32c`, `x-amz-checksum-crc64nvme`, `x-amz-checksum-md5`, `x-amz-checksum-sha1`, `x-amz-checksum-sha256`, `x-amz-checksum-sha512`, `x-amz-checksum-type`, `x-amz-checksum-xxhash128`, `x-amz-checksum-xxhash3`, `x-amz-checksum-xxhash64`, `x-amz-delete-marker`, `x-amz-expiration`, `x-amz-meta-`, `x-amz-missing-meta`, `x-amz-mp-parts-count`, `x-amz-object-lock-legal-hold`, `x-amz-object-lock-mode`, `x-amz-object-lock-retain-until-date`, `x-amz-replication-status`, `x-amz-request-charged`, `x-amz-restore`, `x-amz-server-side-encryption`, `x-amz-server-side-encryption-aws-kms-key-id`, `x-amz-server-side-encryption-bucket-key-enabled`, `x-amz-server-side-encryption-customer-algorithm`, `x-amz-server-side-encryption-customer-key-md5`, `x-amz-storage-class`, `x-amz-tagging-count`, `x-amz-version-id`, `x-amz-website-redirect-location`
 - required: —
 
@@ -601,6 +602,7 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 - `q-meta-0009` (prefix_headers on `PutObject.Metadata`) — User metadata keys are lowercased on return, non ASCII values use encoded word syntax, and the combined size is capped.
 - `q-response-0023` (response_override on `GetObject`) — A fixed set of response- query parameters overwrites the corresponding response headers, and the overwrite is applied once at the end of encoding rather than inside each field binding.
 - `q-storageclass-0024` (omit_when on `GetObject.StorageClass`) — The storage class response header is suppressed for the default class, which is the exact opposite of the listing body element that is always written.
+- `q-range-0058` (range_resolution on `GetObject.IfRange`) — An If-Range validator that no longer describes the object drops the range instead of failing it, so a resumed download receives the new object whole rather than a slice of two different ones.
 - `q-etag-form-0074` (wire_form on `GetObject.IfMatch`) — A conditional header carries one entity tag and is checked against that grammar before anything compares it, so an unterminated quote is a bad request rather than a tag whose first character is a quote, and two field lines joined by a comma are refused rather than reduced to whichever one arrived first.
 
 Run `cargo xtask why <quirk-id>` for the evidence behind any of these.

@@ -640,14 +640,25 @@ quirks = ["q-encoding-0015"]
 
 # The request body of CompleteMultipartUpload. `Parts` is its only member, and an absent or empty
 # list is InvalidPart rather than the completion of an empty object — the defect q-mpu-etag-0028
-# records.
+# records. `InvalidPart` is the operative word: it is the operation's code, and the operation is
+# the only layer that can produce it.
+#
+# So `Parts` is deliberately **not** required here, and the pinned model does not require it
+# either. It was, and on a flattened list the only thing that flag does is make the generated
+# decoder refuse an empty body with `MalformedXML`. That refusal ran before the handler, so the
+# code this operation owes — the same one it answers for a part number that was never uploaded —
+# was unreachable, and `c-mpu-0019` and `c-mpu-0034` read the parser's opinion instead of the
+# operation's (issue #17).
+#
+# A requirement is a fact about the wire, not a way to reach an error code. The empty list now
+# arrives as an empty `Vec` and is answered alongside the rest of the part rules, where the code
+# lives. `Delete.Objects` keeps its refusal because the model itself states that one; see the
+# module documentation of `crates/codegen/src/emit/codec/decode.rs`.
 [shape.CompletedMultipartUpload]
-required = ["Parts"]
 hot = ["Parts"]
 
 [[shape.CompletedMultipartUpload.field]]
 name = "Parts"
-required = true
 quirks = ["q-mpu-etag-0028", "q-mpu-limits-0038"]
 
 # One entry of that list. The entity tag is the value UploadPart returned, the part number is what

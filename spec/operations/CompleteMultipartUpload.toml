@@ -391,14 +391,14 @@ kind = "Structure"
 element_order = ["Parts"]
 
 [shape.CompletedMultipartUpload.empty_value]
-Parts = "emit"
+Parts = "omit"
 
 [[shape.CompletedMultipartUpload.field]]
 name = "Parts"
 wire_name = "Part"
 binding = "BodyXml"
 type = "List<Structure(CompletedPart)>(flattened)"
-required = true
+required = false
 hot = true
 quirks = ["q-mpu-etag-0028", "q-mpu-limits-0038"]
 

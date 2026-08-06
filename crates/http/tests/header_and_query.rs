@@ -204,6 +204,30 @@ fn c_wire_0041_a_repeated_content_sha256_header_is_rejected() {
     );
 }
 
+/// Negative — `range` is deliberately *not* single-valued, and this is the case that says so.
+///
+/// RFC 9110 §5.3 already defines what two field lines mean, and §14.2 already defines what a
+/// `Range` the server cannot interpret produces: the whole representation. Refusing the pair here
+/// answers `400` to a request the RFC says to serve, and it takes the decision away from the only
+/// layer that can see the object (`c-range-0017`). Acceptance lets it through and the binding joins
+/// it; the join is unparseable, which is the outcome — reached by one rule instead of two.
+#[test]
+fn n_a_repeated_range_header_is_accepted_and_joined_rather_than_refused() {
+    assert!(
+        !rustfs_gateway_http::SINGLE_VALUED_HEADERS.contains(&"range"),
+        "a `Range` sent twice has an answer in RFC 9110; it is not two answers to one question"
+    );
+    let request = put(vec![
+        (name("range"), raw_value(b"bytes=0-4")),
+        (name("range"), raw_value(b"bytes=9-9")),
+    ]);
+    let accepted = accept(request).expect("two Range headers are served, not refused");
+    assert!(
+        accepted.headers().is_multi(&name("range")),
+        "both field lines survive acceptance, for the binding to join and then refuse"
+    );
+}
+
 #[test]
 fn every_single_valued_header_is_refused_when_repeated() {
     for header in rustfs_gateway_http::SINGLE_VALUED_HEADERS {

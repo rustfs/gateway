@@ -24,7 +24,7 @@ GetBucketLocationOutput 1
 GetObjectAttributesInput 11
 GetObjectAttributesOutput 9
 GetObjectAttributesParts 6
-GetObjectInput 21
+GetObjectInput 22
 GetObjectOutput 43
 HeadObjectInput 21
 HeadObjectOutput 43

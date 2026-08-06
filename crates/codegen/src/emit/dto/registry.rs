@@ -229,7 +229,9 @@ impl Registry {
             Type::ChecksumSpec => "crate::ChecksumSpec".to_owned(),
             Type::ObjectKey => "crate::ObjectKey".to_owned(),
             Type::BucketName => "crate::BucketName".to_owned(),
-            Type::Range => "crate::ByteRange".to_owned(),
+            // `RangeSpec` and not `ByteRange`: a `416` echoes the header as the client wrote it,
+            // and a parse cannot be asked for its own source text. See `scalar::range`.
+            Type::Range => "crate::RangeSpec".to_owned(),
             Type::Blob { streaming: true } => "rustfs_gateway_stream::ByteStream".to_owned(),
             Type::Blob { streaming: false } => "bytes::Bytes".to_owned(),
             Type::StringEnum(_) => unreachable!("string enumerations are named by their member, use `field_type`"),

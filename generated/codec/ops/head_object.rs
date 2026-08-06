@@ -72,7 +72,7 @@ impl OperationCodec for dto::HeadObject {
         // Range — header `range`, repeated field lines joined.
         if let Some(raw) = request.header("range") {
             let raw = raw.as_ref();
-            input.range = value::byte_range(raw);
+            input.range = Some(value::byte_range(raw));
         }
         // ResponseCacheControl — query `response-cache-control`, percent-decoded once.
         if let Some(raw) = request.query("response-cache-control") {

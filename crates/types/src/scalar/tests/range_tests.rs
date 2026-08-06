@@ -21,7 +21,7 @@
 
 use proptest::prelude::*;
 
-use crate::scalar::{ByteRange, RangeOutcome, RangeParse};
+use crate::scalar::{ByteRange, RangeOutcome, RangeParse, RangeSpec};
 
 fn one(header: &str) -> ByteRange {
     match RangeParse::parse(header) {
@@ -137,6 +137,77 @@ fn content_range_is_rendered_for_both_answerable_and_unsatisfiable() {
     );
     assert_eq!(RangeOutcome::Full.content_range(50), None);
     assert_eq!(RangeOutcome::Full.content_length(50), 50);
+}
+
+// ---------------------------------------------------------------------------------------------
+// RangeSpec — the parse that keeps its source
+//
+// These say why the binding is `RangeSpec` and not `ByteRange`: two different headers that resolve
+// identically, and a header that resolves to nothing and still has to be quotable. Neither was
+// representable before, and both are what a 416 document needs.
+// ---------------------------------------------------------------------------------------------
+
+/// Negative — two different headers, one resolution. This is the pair that makes re-spelling the
+/// range out of the parsed value a guess rather than a derivation.
+#[test]
+fn n_two_spellings_that_resolve_alike_are_still_told_apart() {
+    let open = RangeSpec::new("bytes=0-");
+    let overlong = RangeSpec::new("bytes=0-99999");
+
+    assert_eq!(
+        open.resolve(100),
+        overlong.resolve(100),
+        "against a hundred bytes both are the same window"
+    );
+    assert_ne!(open.as_str(), overlong.as_str(), "and only one of the two is what the client wrote");
+    assert_eq!(open.as_str(), "bytes=0-");
+    assert_eq!(overlong.as_str(), "bytes=0-99999");
+}
+
+/// Negative — a header this server will not honour keeps its text. The old binding answered `None`
+/// here and the bytes were gone with it.
+#[test]
+fn n_a_header_that_cannot_be_honoured_is_still_quotable() {
+    for header in ["items=0-1", "bytes=", "bytes=9-0", "bytes=0-4, bytes=9-9", "bytes=0-1,2-3"] {
+        let spec = RangeSpec::new(header);
+        assert_eq!(spec.resolve(100), RangeOutcome::Full, "{header:?} is ignored, per RFC 9110 §14.2");
+        assert_eq!(spec.as_str(), header, "{header:?} survives the parse that refused it");
+    }
+}
+
+/// Negative — the source is verbatim, not the parser's tidied reading of it. A `<RangeRequested>`
+/// built from a normalised value reports the server's reading back as though it were the request.
+#[test]
+fn n_the_source_is_not_normalised_on_the_way_through() {
+    let spec = RangeSpec::new(" bytes=0-9 ");
+    assert_eq!(spec.as_str(), " bytes=0-9 ");
+    assert_eq!(
+        spec.resolve(100),
+        RangeOutcome::Satisfied {
+            start: 0,
+            end_inclusive: 9
+        },
+        "the parse still tolerates the whitespace it does not report"
+    );
+}
+
+/// Positive — the parse reached through the spec is the same parse.
+#[test]
+fn a_spec_resolves_exactly_as_its_parse_does() {
+    let spec = RangeSpec::new("bytes=-5");
+    assert_eq!(spec.parsed(), RangeParse::parse("bytes=-5"));
+    assert_eq!(spec.resolve(10), RangeParse::parse("bytes=-5").resolve(10));
+}
+
+proptest! {
+    /// A spec never loses, adds to, or rewrites the bytes it was built from, whatever it parsed to.
+    /// Stated as a property because the failure it guards is a silent normalisation that would show
+    /// up as exactly one wrong element in exactly one error document.
+    #[test]
+    fn a_spec_always_returns_the_bytes_it_was_built_from(header in ".{0,40}") {
+        let spec = RangeSpec::new(&header);
+        prop_assert_eq!(spec.as_str(), header.as_str());
+    }
 }
 
 proptest! {

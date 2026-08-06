@@ -41,6 +41,7 @@ everything a consumer needs so that nothing downstream depends on `-core`, `-sig
 | `tests/assembly.rs` | What `build()` refuses; 11 negative, 3 positive |
 | `tests/pipeline.rs` | What a request does, the request identifier included, the RFC 9110 body rules on both paths, and the commit seam; 25 negative, 6 positive |
 | `tests/facade_probe.rs` | Every export the conformance runner's `REQUIRED_FACADE_EXPORTS` names, checked by naming it |
+| `tests/backend_reachability.rs` | Every argument of the range contract, built from a decoded request and never from a literal; 5 negative, 1 positive. Read this before adding a constructor a backend is meant to call |
 | `examples/minimal.rs` | The whole assembly in one file, asserting one answered request and one refused one |
 
 ## Known gaps, recorded rather than discovered

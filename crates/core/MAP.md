@@ -186,6 +186,15 @@ the one file that awaits, and it runs after the floor has admitted the request.
   validator). `If-Range` and `partNumber` are absent from the mirror altogether. Closing this is
   one facade export plus one backend edit — the same two-line shape the copy-source export took —
   and it is the whole of `c-cond-0013` … `c-cond-0021`, `c-range-0015`, `c-range-0018`.
+  **Update — the inputs are no longer the obstacle.** `if-range` is now a declared binding on
+  `GetObject` (synthesized in `model/overlays/ops/object.toml`, because no version of the pinned
+  model carries the header) and `IfRange::parse` reads it, so `RangeSelectors::if_range` can be
+  populated from a request for the first time. `Range` decodes to a `RangeSpec` that keeps its own
+  source text, so `RangeSelectors::range` and the first argument of
+  `HandlerError::unsatisfiable_range` are reachable too.
+  `crates/gateway/tests/backend_reachability.rs` makes both calls using only the facade. What
+  remains for `c-range-0010` and `c-range-0018` is the fixture edit and nothing else; `partNumber`
+  is unchanged.
 - **`OperationSpec` can require a parameter and cannot forbid a combination, so `c-cond-0014` and
   `c-range-0015` have nowhere declarative to live.** `RequiredParam` is `{kind, name,
   missing_error, message}` and `check_required` tests exactly one thing — `present` — so it
@@ -215,7 +224,10 @@ the one file that awaits, and it runs after the floor has admitted the request.
   `Unsatisfiable` carries `actual_object_size` and `range_requested` for exactly this reason — so
   what remains is one edit in `crates/conformance/src/fixture.rs` to build the refusal from them
   instead of from a bare code and message. Until that lands the new capability is unexercised by the
-  suite, and the numbers do not move.
+  suite, and the numbers do not move. `range_requested` was additionally *unobtainable* until the
+  `Range` binding started carrying its own source text; it now holds the header verbatim, and
+  `crates/gateway/tests/backend_reachability.rs` builds the refusal from a decoded request to prove
+  it. The fixture edit is the only step left.
 - **The set of headers a backend may set is deliberately two variants wide.** `ErrorHeader` admits
   `Content-Range` (RFC 9110 §14.4, required on a 416) and `Retry-After` (§10.2.3). Anything a
   handler cannot express through those it cannot express at all — by design; see the admission rule

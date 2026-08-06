@@ -53,7 +53,7 @@ gates against drift. See ADR-0005; `scripts/check_generated_dto_packaged.sh` enf
 | `src/scalar/timestamp.rs` | `Timestamp` plus the four IR formats. Hand-written calendar arithmetic; no `Display`. | Binding a dated field, or a date is off by an hour, a day, or a century. |
 | `src/scalar/opaque_string.rs` | `OpaqueString`: echoed byte for byte. `Expires` uses it. | Somebody proposes parsing `Expires` as a date. Read it before agreeing. |
 | `src/scalar/name.rs` | `ObjectKey` (never normalised, keeps the encoded spelling) and `BucketName` plus the default AWS rules. | Touching routing, authorization, or anything that compares a key. |
-| `src/scalar/range.rs` | `ByteRange` / `RangeParse` / `RangeOutcome`: parse, classify, resolve against a length, render `Content-Range`. | Implementing a ranged read, or deciding between 200, 206 and 416. |
+| `src/scalar/range.rs` | `ByteRange` / `RangeParse` / `RangeOutcome` / `RangeSpec`: parse, classify, resolve against a length, render `Content-Range`, and keep the header text a 416 has to quote. | Implementing a ranged read, or deciding between 200, 206 and 416. |
 | `src/scalar/error_code.rs` | `ErrorCode` (newtype over `Cow`) and the full code → status table, declared by one macro so a constant and its row cannot drift apart. | Adding an error code, or checking which status one maps to. |
 | `src/scalar/error_status.rs` | `ErrorContext`, `status_of`, `mask_for_authorization` — the request facts that change an error's outcome. | An error's status or code depends on who is asking or where the bucket lives. |
 | `src/scalar/parse_error.rs` | `ParseError` and the `rules` identifiers every diagnostic quotes. | Writing a new validation and choosing its rule reference. |
@@ -76,8 +76,13 @@ string enumeration, the field-count ratchet — are asserted in
 - **`Timestamp` has no `Display` either**, for the same reason: pick the format.
 - **`ObjectKey` never normalises.** Do not add "helpful" collapsing of `//` or `..`. Authorization
   and storage must see identical bytes.
-- **The IR calls the range type `Range`; the Rust type is `ByteRange`**, to stay clear of
-  `std::ops::Range`.
+- **The IR calls the range type `Range`; the Rust types are `ByteRange` and `RangeSpec`**, to stay
+  clear of `std::ops::Range`. The **binding** is `RangeSpec`, which is a `RangeParse` plus the
+  header text it was parsed from. Do not "simplify" it back to `ByteRange`: a 416 has to echo
+  `<RangeRequested>` — the header as the client wrote it — and `bytes=0-` and `bytes=0-99999`
+  resolve identically against a hundred bytes, so re-spelling one out of the parse is a guess. A
+  `RangeSpec` is `Some` whenever the header arrived, including when it will not be honoured;
+  absence is spelled once, by the `Option`.
 - **An unknown `ErrorCode` maps to 400, never 500.** If you are tempted to change the fallback,
   read the reasoning in `error_code.rs` first.
 - **`crc-fast` must keep `default-features = false`** in `Cargo.toml`; the comment there says why.

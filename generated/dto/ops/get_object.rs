@@ -49,6 +49,7 @@ impl GetObject {
         "IfUnmodifiedSince",
         "Key",
         "Range",
+        "IfRange",
     ];
 
     /// Output members the IR keeps on the hot path.
@@ -81,7 +82,9 @@ pub struct Input {
     /// Wire `Key`, bound as UriLabel. Required.
     pub key: crate::ObjectKey,
     /// Wire `range`, bound as Header. Optional.
-    pub range: Option<crate::ByteRange>,
+    pub range: Option<crate::RangeSpec>,
+    /// Wire `if-range`, bound as Header. Optional.
+    pub if_range: Option<String>,
     /// Wire `response-cache-control`, bound as Query. Optional.
     pub response_cache_control: Option<String>,
     /// Wire `response-content-disposition`, bound as Query. Optional.
@@ -148,6 +151,7 @@ impl std::fmt::Debug for Input {
             .field("if_unmodified_since", &self.if_unmodified_since)
             .field("key", &self.key)
             .field("range", &self.range)
+            .field("if_range", &self.if_range)
             .field("response_cache_control", &self.response_cache_control)
             .field("response_content_disposition", &self.response_content_disposition)
             .field("response_content_encoding", &self.response_content_encoding)
@@ -351,8 +355,15 @@ impl InputBuilder {
 
     /// Sets `Range`.
     #[must_use]
-    pub fn range(mut self, value: crate::ByteRange) -> Self {
+    pub fn range(mut self, value: crate::RangeSpec) -> Self {
         self.input.range = Some(value);
+        self
+    }
+
+    /// Sets `IfRange`.
+    #[must_use]
+    pub fn if_range(mut self, value: String) -> Self {
+        self.input.if_range = Some(value);
         self
     }
 

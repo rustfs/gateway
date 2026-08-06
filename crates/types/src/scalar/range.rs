@@ -16,8 +16,9 @@
 //!
 //! Responsible for: the three byte-range forms, the RFC 9110 rule that a *syntactically* broken
 //! range is ignored rather than rejected, the S3 behaviour that a multi-range request yields the
-//! whole object, clamping a range that runs past the end, and computing the `Content-Range` value
-//! for both the satisfied and the unsatisfiable case.
+//! whole object, clamping a range that runs past the end, computing the `Content-Range` value for
+//! both the satisfied and the unsatisfiable case, and [`RangeSpec`] — the parse that keeps the
+//! bytes it was parsed from.
 //! NOT responsible for: reading bytes, choosing a status code (the caller maps
 //! [`RangeOutcome`] to 200/206/416), and the `Range` + `partNumber` conflict, which is a
 //! cross-field rule the operation layer enforces.
@@ -27,7 +28,22 @@
 //!
 //! The IR calls this type `Range`. In Rust that name collides with `std::ops::Range` at every
 //! import site, and a mistaken `use` of the wrong one compiles surprisingly far. The IR name maps
-//! to this type; the Rust spelling is unambiguous on purpose.
+//! to [`RangeSpec`]; the Rust spelling is unambiguous on purpose.
+//!
+//! # Why the binding is [`RangeSpec`] and not [`ByteRange`]
+//!
+//! Because a `416` has to echo the range **as the client wrote it**, and a parse cannot be asked
+//! for that. `bytes=0-` and `bytes=0-99999` are one [`ByteRange`] against a hundred-byte object;
+//! re-spelling either one out of the resolved value is a guess about the client's own bytes, and a
+//! guess that agrees with our parser and with nothing else. So the third shape: the parse carries
+//! the slice it came from. Neither half is optional and neither is derived from the other —
+//! [`RangeSpec::as_str`] is what arrived, [`RangeSpec::resolve`] is what it means.
+//!
+//! The absence is now spelled once. `Option<RangeSpec>` is `None` exactly when there was no
+//! `Range` header; a header that arrived and could not be honoured is `Some`, and resolves to
+//! [`RangeOutcome::Full`]. The previous binding collapsed those two into `None`, which is how a
+//! backend lost the text `<RangeRequested>` needs — and, with it, the ability to say anything at
+//! all about a range it was sent.
 
 use std::fmt::Write as _;
 
@@ -122,6 +138,67 @@ impl RangeOutcome {
                 Some(out)
             }
         }
+    }
+}
+
+/// A `Range` header, parsed, holding on to the text it was parsed from.
+///
+/// This is the type a `Range` binding decodes to, and it exists because two different consumers
+/// need two different things from one header and neither can produce the other's. The operation
+/// needs the resolved window; the `416` document needs `<RangeRequested>`, which S3 defines as the
+/// header **as it arrived**. A parse alone cannot answer the second — see the module documentation
+/// for the pair of spellings that prove it — so the parse keeps its source rather than a caller
+/// reconstructing one.
+///
+/// The source is a `Box<str>` and not a borrow: the header view it came from does not outlive the
+/// decoder, and a lifetime here would put one on every generated input struct that binds a range.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct RangeSpec {
+    /// The header value exactly as it arrived, whitespace and all.
+    raw: Box<str>,
+    /// What it parsed to.
+    parse: RangeParse,
+}
+
+impl RangeSpec {
+    /// Parses a `Range` header value, keeping the value.
+    ///
+    /// Never fails, for the same reason [`RangeParse::parse`] never fails: RFC 9110 requires an
+    /// uninterpretable `Range` to be ignored and the whole representation served. What is new is
+    /// that "ignored" no longer means "forgotten" — the text survives, so a response that has to
+    /// name it can.
+    #[must_use]
+    pub fn new(header: &str) -> Self {
+        Self {
+            raw: header.into(),
+            parse: RangeParse::parse(header),
+        }
+    }
+
+    /// The header exactly as it arrived.
+    ///
+    /// This is the value `<RangeRequested>` carries. It is returned verbatim rather than trimmed:
+    /// the element reports what the client sent, and a server that tidies it up first is reporting
+    /// its own reading back as though it were the request.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.raw
+    }
+
+    /// What the header parsed to, before it meets an object.
+    #[must_use]
+    pub const fn parsed(&self) -> RangeParse {
+        self.parse
+    }
+
+    /// Resolves the header against the object's length.
+    ///
+    /// Everything that is not exactly one range resolves to [`RangeOutcome::Full`], so an ignored
+    /// `Range` and a multi-range request both serve the whole object without the caller writing
+    /// either rule.
+    #[must_use]
+    pub fn resolve(&self, object_len: u64) -> RangeOutcome {
+        self.parse.resolve(object_len)
     }
 }
 

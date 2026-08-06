@@ -73,7 +73,7 @@ pub struct Input {
     /// Wire `Key`, bound as UriLabel. Required.
     pub key: crate::ObjectKey,
     /// Wire `range`, bound as Header. Optional.
-    pub range: Option<crate::ByteRange>,
+    pub range: Option<crate::RangeSpec>,
     /// Wire `response-cache-control`, bound as Query. Optional.
     pub response_cache_control: Option<String>,
     /// Wire `response-content-disposition`, bound as Query. Optional.
@@ -341,7 +341,7 @@ impl InputBuilder {
 
     /// Sets `Range`.
     #[must_use]
-    pub fn range(mut self, value: crate::ByteRange) -> Self {
+    pub fn range(mut self, value: crate::RangeSpec) -> Self {
         self.input.range = Some(value);
         self
     }

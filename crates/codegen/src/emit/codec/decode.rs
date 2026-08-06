@@ -26,6 +26,35 @@
 //! `411`, and every other missing member answers `InvalidArgument` and a `400`. The difference is
 //! `missing_error` in the overlay, so a family that discovers a third answer records it there
 //! rather than teaching this file a third branch.
+//!
+//! # When a decoder may refuse an empty list, and where that permission comes from
+//!
+//! From `required` in the **model**, and from nowhere else — never from an overlay that wants a
+//! refusal.
+//!
+//! Every list in the request surface is `xmlFlattened`, so its entries repeat directly under the
+//! parent with no enclosing element. For such a list "the member is absent" and "the list has no
+//! entries" are the same observation: there is nothing else on the wire to tell them apart. That
+//! is what makes refusing an empty flattened list a reading of `required` rather than an opinion
+//! about arity, and it is why `Delete.Objects` — `required` in the pinned model — is answered
+//! `MalformedXML` here.
+//!
+//! The rule that had to be written down is the other half. `CompletedMultipartUpload.Parts` is
+//! **not** required in the model; `model/overlays/ops/multipart.toml` had made it so, and the only
+//! effect of that on a flattened list is this refusal. So an overlay had manufactured a wire
+//! requirement in order to get an error out of the parser — and the error it got was the parser's
+//! `MalformedXML`, where the operation owes `InvalidPart`. The backend was never called, and the
+//! client read the wrong `<Code>` (issue #17, `c-mpu-0019`, `c-mpu-0034`).
+//!
+//! Stated so the next list member does not have to re-derive it: **a decoder may say "this is not
+//! the document" and nothing else.** It has no way to name any other code — there is no parameter
+//! here that could carry one — so a member whose emptiness has an operation-specific answer must
+//! not be made `required` by an overlay to reach it. Requiredness is a fact about the wire that
+//! the model states; wanting a particular error code is not a reason to assert one.
+//!
+//! A *wrapped* list would break the equivalence above, because `<Parts></Parts>` is present and
+//! empty at the same time. None exists in the request surface today; the day one does, this
+//! paragraph is the reason the check has to be re-derived rather than inherited.
 
 use std::fmt::Write as _;
 
@@ -260,9 +289,12 @@ fn default_literal(field: &Field, default: &rustfs_gateway_model::json::Value) -
 
 /// Wraps a value in `Some` unless the field is stored bare.
 fn wrap(field: &Field, inner: &str) -> String {
-    // A container and a required member are both stored bare, and `Type::Range` already produces
-    // an `Option` of its own — a `Range` that cannot be honoured is absent, not an error.
-    let bare = field.required || matches!(field.ty, Type::List { .. } | Type::Map { .. } | Type::Range | Type::ChecksumSpec);
+    // A container and a required member are both stored bare. `Type::Range` is *not* on this list
+    // any more: it used to produce an `Option` of its own, whose `None` conflated "no Range header"
+    // with "a Range header we will not honour" and threw away the text a 416 has to echo. It now
+    // yields a `RangeSpec` and is wrapped like any other optional binding, so absence is spelled
+    // once and by the wrapper.
+    let bare = field.required || matches!(field.ty, Type::List { .. } | Type::Map { .. } | Type::ChecksumSpec);
     if bare { inner.to_owned() } else { format!("Some({inner})") }
 }
 
@@ -327,6 +359,10 @@ pub fn shape_reader(operation: &str, name: &str, shape: &Shape, quirks: &[Quirk]
                 let _ = writeln!(out, "    for item in {source} {{");
                 let _ = writeln!(out, "        {target}.push({reader}(item)?);");
                 out.push_str("    }\n");
+                // Only the model's own `required` reaches here, and only `MalformedXML` can come
+                // out of it. See the module documentation: an overlay that makes a list required in
+                // order to reach an error code is taking the operation's answer, not stating a
+                // wire fact.
                 if field.required {
                     let _ = writeln!(out, "    if {target}.is_empty() {{");
                     let _ = writeln!(

@@ -350,7 +350,7 @@
                                                         {
                                                           "name": "Parts",
                                                           "wire_name": "Part",
-                                                          "required": true,
+                                                          "required": false,
                                                           "binding": { "kind": "BodyXml" },
                                                           "type": {
                                                                     "kind": "List",
@@ -367,7 +367,7 @@
                                                       ],
                                             "xml": {
                                                      "element_order": ["Parts"],
-                                                     "empty_value_policy": { "Parts": "emit" },
+                                                     "empty_value_policy": { "Parts": "omit" },
                                                      "attributes": []
                                                    }
                                           },

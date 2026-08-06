@@ -29,7 +29,7 @@
 /// [`CompletedMultipartUpload::check_required`] refuses to let off the decode path.
 #[derive(Debug, Clone, Default)]
 pub struct CompletedMultipartUpload {
-    /// Wire `Part`, bound as BodyXml. Required.
+    /// Wire `Part`, bound as BodyXml. Optional.
     pub parts: Vec<crate::ops::shapes::CompletedPart>,
 }
 

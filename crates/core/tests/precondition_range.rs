@@ -658,6 +658,76 @@ fn a_weak_if_range_tag_never_keeps_the_range() {
     );
 }
 
+// ── If-Range, read off the wire ──────────────────────────────────────────────────────────────
+//
+// `IfRange::parse` is the grammar a backend would otherwise write for itself, and it is total on
+// purpose: a fallible one hands a caller an `Option` whose `None` is indistinguishable from "the
+// client sent no If-Range", which honours the range against a representation nobody checked.
+
+/// Positive — the two forms RFC 9110 §13.1.5 defines, told apart by their first characters.
+#[test]
+fn the_two_if_range_forms_are_read_as_themselves() {
+    assert_eq!(IfRange::parse("\"E1\""), IfRange::Tag(tag("E1")));
+    assert_eq!(
+        IfRange::parse("Thu, 01 Jan 2026 00:00:00 GMT"),
+        IfRange::Date(at("Thu, 01 Jan 2026 00:00:00 GMT"))
+    );
+    assert_eq!(
+        IfRange::parse("  \"E1\"  "),
+        IfRange::Tag(tag("E1")),
+        "surrounding whitespace is not part of the tag"
+    );
+}
+
+/// Negative — a validator that is neither form reads as `Unrecognised`, and `Unrecognised` drops
+/// the range. Every entry here would otherwise be a resumed download spliced out of two objects.
+#[test]
+fn n_an_unreadable_if_range_drops_the_range_instead_of_honouring_it() {
+    for value in [
+        "",
+        "garbage",
+        "\"unterminated",
+        "W/",
+        "Thu, 99 Xxx 2026 00:00:00 GMT",
+        "*",
+        "\"E1\", \"E2\"",
+    ] {
+        let if_range = IfRange::parse(value);
+        assert_eq!(if_range, IfRange::Unrecognised, "{value:?} is not a validator");
+        let decision = evaluate_range(
+            &RangeSelectors {
+                range: Some("bytes=0-4"),
+                part_number: None,
+                if_range: Some(&if_range),
+            },
+            &present(),
+            10,
+        )
+        .expect("If-Range is a switch and never an error");
+        assert_eq!(decision, RangeDecision::Whole, "{value:?} must not be allowed to confirm anything");
+    }
+}
+
+/// Negative — a weak tag survives the parse and loses at the comparison, not at the grammar.
+/// Refusing it in the parser would make `W/"E1"` and a typo indistinguishable to anyone reading a
+/// trace, and it is the comparison that has the reason.
+#[test]
+fn n_a_weak_if_range_tag_parses_and_then_loses() {
+    let if_range = IfRange::parse("W/\"E1\"");
+    assert_eq!(if_range, IfRange::Tag(weak_tag("E1")));
+    let decision = evaluate_range(
+        &RangeSelectors {
+            range: Some("bytes=0-4"),
+            part_number: None,
+            if_range: Some(&if_range),
+        },
+        &present(),
+        10,
+    )
+    .expect("If-Range is a switch and never an error");
+    assert_eq!(decision, RangeDecision::Whole);
+}
+
 // ── properties ──────────────────────────────────────────────────────────────────────────────
 
 proptest! {

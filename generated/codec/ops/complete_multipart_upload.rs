@@ -203,9 +203,6 @@ fn read_completed_multipart_upload(node: &rustfs_gateway_xml::XmlNode) -> Result
     for item in node.children_named("Part") {
         shape.parts.push(read_completed_part(item)?);
     }
-    if shape.parts.is_empty() {
-        return Err(CodecError::malformed_xml("the body carries no entry for a member that requires one").about("Parts"));
-    }
     value::exit(shape.check_required())?;
     Ok(shape)
 }

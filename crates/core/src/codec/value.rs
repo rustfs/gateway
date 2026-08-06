@@ -31,7 +31,7 @@ use std::borrow::Cow;
 use std::collections::BTreeMap;
 
 use rustfs_gateway_types::{
-    BucketName, ByteRange, ChecksumSpec, ETag, EtagRender, ObjectKey, OpaqueString, RangeParse, Timestamp, TimestampFormat,
+    BucketName, ChecksumSpec, ETag, EtagRender, ObjectKey, OpaqueString, RangeSpec, Timestamp, TimestampFormat,
     is_xml_representable,
 };
 
@@ -353,17 +353,22 @@ pub fn token_form<'a>(value: &'a str, member: &'static str) -> Result<&'a str, C
     Ok(value)
 }
 
-/// Parses a `Range` header into the one range S3 honours, or nothing.
+/// Reads a `Range` header into the parse **and** the bytes it was parsed from.
 ///
 /// Never an error. RFC 9110 requires an unsatisfiable or unparseable `Range` to be ignored and the
 /// whole representation served; refusing one breaks clients whose proxy rewrote the header, and
 /// S3 answers a multi-range request with the whole object rather than a multipart body.
+///
+/// # Why this returns a value and not an `Option`
+///
+/// Because it used to return one, and that `None` meant two different things: "no `Range` header
+/// arrived" and "a `Range` header arrived that this server will not honour". The second is a fact
+/// a `416` has to be able to state — `<RangeRequested>` is the header as the client wrote it — and
+/// it was erased, along with the text, before any handler ran. `Option<RangeSpec>` now spells
+/// absence once, in the binding, and the header's own bytes survive whatever it parsed to.
 #[must_use]
-pub fn byte_range(value: &str) -> Option<ByteRange> {
-    match RangeParse::parse(value) {
-        RangeParse::One(range) => Some(range),
-        RangeParse::Absent | RangeParse::Ignore | RangeParse::MultiRange => None,
-    }
+pub fn byte_range(value: &str) -> RangeSpec {
+    RangeSpec::new(value)
 }
 
 /// Collects every header under a prefix into a map.

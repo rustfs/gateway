@@ -115,6 +115,27 @@ side = "input"
 name = "IfNoneMatch"
 quirks = ["q-etag-form-0074"]
 
+# If-Range is in RFC 9110 and in no version of the pinned S3 model, so it is synthesized here or it
+# does not exist at all — which is what it was until now: `evaluate_range` took an `IfRange` no
+# request could produce, so `q-range-0058` was a rule the contract stated and no backend could
+# reach (c-range-0018).
+#
+# It binds as a String rather than as a parsed validator because the IR has no type for "an entity
+# tag or an HTTP-date", `spec/ir.schema.json` is frozen, and inventing one is a schema event rather
+# than a binding. The grammar lives in `IfRange::parse`, which is total: an unreadable validator
+# becomes `Unrecognised` and drops the range, so the failure mode is a whole object and never a
+# spliced one.
+[[op.GetObject.field]]
+side = "input"
+name = "IfRange"
+synthesize = true
+after = "Range"
+binding = "Header"
+wire_name = "if-range"
+type = "String"
+hot = true
+quirks = ["q-range-0058"]
+
 # =============================================================================================
 # HeadObject
 #

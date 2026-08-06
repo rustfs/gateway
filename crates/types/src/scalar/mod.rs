@@ -55,5 +55,5 @@ pub use self::etag::{ETag, EtagRender};
 pub use self::name::{BucketName, ObjectKey, is_xml_representable, validate_bucket_name, validate_object_key};
 pub use self::opaque_string::OpaqueString;
 pub use self::parse_error::{ParseError, rules};
-pub use self::range::{ByteRange, RangeOutcome, RangeParse};
+pub use self::range::{ByteRange, RangeOutcome, RangeParse, RangeSpec};
 pub use self::timestamp::{Timestamp, TimestampFormat};
