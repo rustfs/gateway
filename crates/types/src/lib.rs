@@ -64,5 +64,6 @@ pub use crate::placeholder::{PlaceholderDefault, WirePlaceholder, reject_placeho
 pub use crate::scalar::{
     BucketName, ByteRange, ChecksumAlgorithm, ChecksumDigest, ChecksumError, ChecksumSpec, ChecksumType, Checksummer, ContentMd5,
     ETag, ErrorCode, ErrorContext, EtagRender, ObjectKey, OpaqueString, ParseError, RangeOutcome, RangeParse, Timestamp,
-    TimestampFormat, mask_for_authorization, parse_request_checksum, rules, status_of, validate_bucket_name, validate_object_key,
+    TimestampFormat, is_xml_representable, mask_for_authorization, parse_request_checksum, rules, status_of,
+    validate_bucket_name, validate_object_key,
 };

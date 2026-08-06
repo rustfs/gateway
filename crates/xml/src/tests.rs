@@ -64,6 +64,42 @@ fn escapes_the_characters_that_change_meaning() {
 }
 
 #[test]
+fn leaves_a_double_quote_alone_in_an_ordinary_text_node() {
+    // Pinned rather than incidental: an object key carrying a quote comes back with the literal
+    // byte (`c-list-0036`), so a writer that escaped every `"` would be wrong in that element as
+    // surely as one that escapes none is wrong in an entity tag.
+    let mut writer = XmlWriter::fragment();
+    writer.element("Key", "a&b<c>d\"e.txt");
+    assert_eq!(writer.finish(), "<Key>a&amp;b&lt;c&gt;d\"e.txt</Key>");
+}
+
+#[test]
+fn escapes_a_double_quote_in_the_quoting_form() {
+    let mut writer = XmlWriter::fragment();
+    writer.element_quoting("ETag", "\"d41d8cd98f00b204e9800998ecf8427e\"");
+    assert_eq!(writer.finish(), "<ETag>&quot;d41d8cd98f00b204e9800998ecf8427e&quot;</ETag>");
+}
+
+#[test]
+fn the_quoting_form_still_escapes_everything_the_ordinary_one_does() {
+    let mut writer = XmlWriter::fragment();
+    writer.element_quoting("ETag", "\"a&b<c>d\re\"");
+    assert_eq!(writer.finish(), "<ETag>&quot;a&amp;b&lt;c&gt;d&#13;e&quot;</ETag>");
+}
+
+#[test]
+fn n_the_quoting_form_drops_an_empty_value_under_the_omit_policy() {
+    let mut writer = XmlWriter::fragment();
+    writer.element_quoting_if_present("ETag", "");
+    writer.element_quoting_if_present("ETag", "\"abc\"");
+    assert_eq!(
+        writer.finish(),
+        "<ETag>&quot;abc&quot;</ETag>",
+        "the omit policy is the same decision whichever escaping is in force"
+    );
+}
+
+#[test]
 fn escapes_quotes_and_whitespace_inside_an_attribute() {
     let mut writer = XmlWriter::fragment();
     writer.open_with("Node", &[("id", "a\"b\nc")]);

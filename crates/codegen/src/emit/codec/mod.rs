@@ -14,8 +14,9 @@
 
 //! `generated/codec/ops/**`: one `impl OperationCodec` per operation.
 //!
-//! Responsible for: the file layout, the module facade, the `response-*` table, and the shape
-//! readers and writers each operation needs.
+//! Responsible for: the file layout, the module facade, the `response-*` table, the shape
+//! readers and writers each operation needs, and the one place that resolves a list's wrapper
+//! element and its repeated entry element from the IR ([`list_elements`]).
 //! NOT responsible for: the trait, the views, the RFC 9110 invariants or any scalar conversion.
 //! All four are hand-written in `rustfs-gateway-core`'s `codec` module, and every generated line
 //! calls into them.
@@ -41,6 +42,7 @@ pub mod decode;
 pub mod encode;
 pub mod expr;
 pub mod forms;
+pub mod url;
 
 use std::collections::BTreeSet;
 use std::fmt::Write as _;
@@ -150,6 +152,47 @@ fn operation(ir: &OperationIr) -> Result<String, String> {
         }
     }
     Ok(out)
+}
+
+/// The two element names a list is written and read through.
+///
+/// Resolved in one place because the two are easy to swap and a swap is invisible in a diff: the
+/// shipped `ListBuckets` inversion — `<Bucket><Buckets>…</Buckets></Bucket>` where AWS writes
+/// `<Buckets><Bucket>…</Bucket></Buckets>` — was one emitter reading `Type::List`'s misnamed
+/// `wrapper_name` as the enclosing element on both the encode and the decode path.
+///
+/// * `wrapper` is the enclosing element, and is always the field's own `wire_name`. `None` for a
+///   flattened list, which has no enclosing element.
+/// * `entry` is the repeated element. For a wrapped list it is `wrapper_name`, which despite its
+///   name is the list member's `xmlName`; for a flattened one it is the field's `wire_name`,
+///   which is what flattening means.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ListElements {
+    /// The enclosing element, when the list has one.
+    pub wrapper: Option<String>,
+    /// The element each entry is written into.
+    pub entry: String,
+}
+
+/// The Smithy default `xmlName` of a list member, used when the model declares none.
+const DEFAULT_LIST_MEMBER: &str = "member";
+
+/// Resolves the wrapper and entry element names of one list-typed field.
+///
+/// `wire` is the field's wire name — the wrapper of a wrapped list, and the repeated element of a
+/// flattened one.
+#[must_use]
+pub fn list_elements(flattened: bool, wrapper_name: Option<&str>, wire: &str) -> ListElements {
+    if flattened {
+        return ListElements {
+            wrapper: None,
+            entry: wire.to_owned(),
+        };
+    }
+    ListElements {
+        wrapper: Some(wire.to_owned()),
+        entry: wrapper_name.unwrap_or(DEFAULT_LIST_MEMBER).to_owned(),
+    }
 }
 
 /// Which half of an operation a shape is reachable from.

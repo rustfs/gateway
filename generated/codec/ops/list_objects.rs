@@ -88,6 +88,7 @@ impl OperationCodec for dto::ListObjects {
             let rendered = v.as_str();
             response.set_header("x-amz-request-charged", rendered);
         }
+        let url_encoding = value::url_encoding(request);
         let mut writer = rustfs_gateway_xml::XmlWriter::document();
         writer.open("ListBucketResult", Some(rustfs_gateway_xml::S3_XMLNS));
         {
@@ -96,21 +97,21 @@ impl OperationCodec for dto::ListObjects {
         }
         {
             let v = &output.prefix;
-            writer.element("Prefix", v.as_str());
+            writer.element("Prefix", &value::url_encoded(v.as_str(), url_encoding));
         }
         {
             let v = &output.marker;
-            writer.element("Marker", v.as_str());
+            writer.element("Marker", &value::url_encoded(v.as_str(), url_encoding));
         }
         if let Some(v) = output.next_marker.as_ref() {
-            writer.element_if_present("NextMarker", v.as_str());
+            writer.element_if_present("NextMarker", &value::url_encoded(v.as_str(), url_encoding));
         }
         {
             let v = &output.max_keys;
             writer.element("MaxKeys", &v.to_string());
         }
         if let Some(v) = output.delimiter.as_ref() {
-            writer.element_if_present("Delimiter", v.as_str());
+            writer.element_if_present("Delimiter", &value::url_encoded(v.as_str(), url_encoding));
         }
         {
             let v = &output.is_truncated;
@@ -118,12 +119,12 @@ impl OperationCodec for dto::ListObjects {
         }
         for item in &output.contents {
             writer.open("Contents", None);
-            write_object(&mut writer, item)?;
+            write_object(&mut writer, item, url_encoding)?;
             writer.close();
         }
         for item in &output.common_prefixes {
             writer.open("CommonPrefixes", None);
-            write_common_prefix(&mut writer, item)?;
+            write_common_prefix(&mut writer, item, url_encoding)?;
             writer.close();
         }
         if let Some(v) = output.encoding_type.as_ref() {
@@ -141,19 +142,27 @@ impl OperationCodec for dto::ListObjects {
 }
 
 /// Writes one `CommonPrefix` element's children, in the wire order the IR records.
-fn write_common_prefix(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::CommonPrefix) -> Result<(), CodecError> {
+fn write_common_prefix(
+    writer: &mut rustfs_gateway_xml::XmlWriter,
+    value: &dto::CommonPrefix,
+    url_encoding: value::UrlEncoding,
+) -> Result<(), CodecError> {
     {
         let v = &value.prefix;
-        writer.element("Prefix", v.as_str());
+        writer.element("Prefix", &value::url_encoded(v.as_str(), url_encoding));
     }
     Ok(())
 }
 
 /// Writes one `Object` element's children, in the wire order the IR records.
-fn write_object(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::Object) -> Result<(), CodecError> {
+fn write_object(
+    writer: &mut rustfs_gateway_xml::XmlWriter,
+    value: &dto::Object,
+    url_encoding: value::UrlEncoding,
+) -> Result<(), CodecError> {
     {
         let v = &value.key;
-        writer.element("Key", v.as_str());
+        writer.element("Key", &value::url_encoded_key(v, url_encoding));
     }
     {
         let v = &value.last_modified;
@@ -161,7 +170,7 @@ fn write_object(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::Object)
     }
     {
         let v = &value.e_tag;
-        writer.element("ETag", &value::render_etag(v, EtagRender::XmlQuoted));
+        writer.element_quoting("ETag", &value::render_etag(v, EtagRender::XmlQuoted));
     }
     for v in &value.checksum_algorithm {
         writer.element("ChecksumAlgorithm", v.as_str());

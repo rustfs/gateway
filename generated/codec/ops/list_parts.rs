@@ -107,6 +107,7 @@ impl OperationCodec for dto::ListParts {
             let rendered = v.as_str();
             response.set_header("x-amz-request-charged", rendered);
         }
+        let url_encoding = value::url_encoding(request);
         let mut writer = rustfs_gateway_xml::XmlWriter::document();
         writer.open("ListPartsResult", Some(rustfs_gateway_xml::S3_XMLNS));
         {
@@ -115,7 +116,7 @@ impl OperationCodec for dto::ListParts {
         }
         {
             let v = &output.key;
-            writer.element("Key", v.as_str());
+            writer.element("Key", &value::url_encoded_key(v, url_encoding));
         }
         {
             let v = &output.upload_id;
@@ -203,7 +204,7 @@ fn write_part(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::Part) -> 
     }
     {
         let v = &value.e_tag;
-        writer.element("ETag", &value::render_etag(v, EtagRender::XmlQuoted));
+        writer.element_quoting("ETag", &value::render_etag(v, EtagRender::XmlQuoted));
     }
     {
         let v = &value.size;

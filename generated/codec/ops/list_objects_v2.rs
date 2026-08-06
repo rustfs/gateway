@@ -100,6 +100,7 @@ impl OperationCodec for dto::ListObjectsV2 {
             let rendered = v.as_str();
             response.set_header("x-amz-request-charged", rendered);
         }
+        let url_encoding = value::url_encoding(request);
         let mut writer = rustfs_gateway_xml::XmlWriter::document();
         writer.open("ListBucketResult", Some(rustfs_gateway_xml::S3_XMLNS));
         {
@@ -108,7 +109,7 @@ impl OperationCodec for dto::ListObjectsV2 {
         }
         {
             let v = &output.prefix;
-            writer.element("Prefix", v.as_str());
+            writer.element("Prefix", &value::url_encoded(v.as_str(), url_encoding));
         }
         {
             let v = &output.key_count;
@@ -119,7 +120,7 @@ impl OperationCodec for dto::ListObjectsV2 {
             writer.element("MaxKeys", &v.to_string());
         }
         if let Some(v) = output.delimiter.as_ref() {
-            writer.element_if_present("Delimiter", v.as_str());
+            writer.element_if_present("Delimiter", &value::url_encoded(v.as_str(), url_encoding));
         }
         {
             let v = &output.is_truncated;
@@ -127,25 +128,25 @@ impl OperationCodec for dto::ListObjectsV2 {
         }
         for item in &output.contents {
             writer.open("Contents", None);
-            write_object(&mut writer, item)?;
+            write_object(&mut writer, item, url_encoding)?;
             writer.close();
         }
         for item in &output.common_prefixes {
             writer.open("CommonPrefixes", None);
-            write_common_prefix(&mut writer, item)?;
+            write_common_prefix(&mut writer, item, url_encoding)?;
             writer.close();
         }
         if let Some(v) = output.encoding_type.as_ref() {
             writer.element_if_present("EncodingType", v.as_str());
         }
         if let Some(v) = output.continuation_token.as_ref() {
-            writer.element_if_present("ContinuationToken", v.as_str());
+            writer.element_if_present("ContinuationToken", &value::url_encoded(v.as_str(), url_encoding));
         }
         if let Some(v) = output.next_continuation_token.as_ref() {
-            writer.element_if_present("NextContinuationToken", v.as_str());
+            writer.element_if_present("NextContinuationToken", &value::url_encoded(v.as_str(), url_encoding));
         }
         if let Some(v) = output.start_after.as_ref() {
-            writer.element_if_present("StartAfter", v.as_str());
+            writer.element_if_present("StartAfter", &value::url_encoded(v.as_str(), url_encoding));
         }
         writer.close();
         response.body = ResponseBody::Complete(writer.finish().into_bytes());
@@ -159,19 +160,27 @@ impl OperationCodec for dto::ListObjectsV2 {
 }
 
 /// Writes one `CommonPrefix` element's children, in the wire order the IR records.
-fn write_common_prefix(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::CommonPrefix) -> Result<(), CodecError> {
+fn write_common_prefix(
+    writer: &mut rustfs_gateway_xml::XmlWriter,
+    value: &dto::CommonPrefix,
+    url_encoding: value::UrlEncoding,
+) -> Result<(), CodecError> {
     {
         let v = &value.prefix;
-        writer.element("Prefix", v.as_str());
+        writer.element("Prefix", &value::url_encoded(v.as_str(), url_encoding));
     }
     Ok(())
 }
 
 /// Writes one `Object` element's children, in the wire order the IR records.
-fn write_object(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::Object) -> Result<(), CodecError> {
+fn write_object(
+    writer: &mut rustfs_gateway_xml::XmlWriter,
+    value: &dto::Object,
+    url_encoding: value::UrlEncoding,
+) -> Result<(), CodecError> {
     {
         let v = &value.key;
-        writer.element("Key", v.as_str());
+        writer.element("Key", &value::url_encoded_key(v, url_encoding));
     }
     {
         let v = &value.last_modified;
@@ -179,7 +188,7 @@ fn write_object(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::Object)
     }
     {
         let v = &value.e_tag;
-        writer.element("ETag", &value::render_etag(v, EtagRender::XmlQuoted));
+        writer.element_quoting("ETag", &value::render_etag(v, EtagRender::XmlQuoted));
     }
     for v in &value.checksum_algorithm {
         writer.element("ChecksumAlgorithm", v.as_str());

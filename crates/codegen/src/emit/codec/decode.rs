@@ -37,6 +37,23 @@ use crate::emit::dto::naming;
 /// The default code for a required member the request did not carry.
 const DEFAULT_MISSING_CODE: &str = "InvalidArgument";
 
+/// The node iterator one list-typed member reads its entries from.
+///
+/// A flattened list repeats its entry element directly under the parent; a wrapped one sits inside
+/// an enclosing element. Which name is which comes from [`super::list_elements`] rather than from
+/// here, so the reader and the writer cannot disagree about it — they did, and the disagreement
+/// was invisible because both spellings compile.
+fn list_source(flattened: bool, wrapper_name: Option<&str>, wire: &str) -> String {
+    let names = super::list_elements(flattened, wrapper_name, wire);
+    match &names.wrapper {
+        None => format!("node.children_named(\"{}\")", names.entry),
+        Some(wrapper) => format!(
+            "node.child(\"{wrapper}\").into_iter().flat_map(|w| w.children_named(\"{}\"))",
+            names.entry
+        ),
+    }
+}
+
 /// rustfmt's `max_width` for this repository.
 const MAX_WIDTH: usize = 130;
 
@@ -287,12 +304,7 @@ pub fn shape_reader(operation: &str, name: &str, shape: &Shape, quirks: &[Quirk]
                     bounds::of(field, quirks, operation)?,
                     forms::of(field, quirks, operation)?,
                 )?;
-                let source = if *flattened {
-                    format!("node.children_named(\"{wire}\")")
-                } else {
-                    let wrapper = wrapper_name.clone().unwrap_or_else(|| wire.clone());
-                    format!("node.child(\"{wrapper}\").into_iter().flat_map(|w| w.children_named(\"{wire}\"))")
-                };
+                let source = list_source(*flattened, wrapper_name.as_deref(), &wire);
                 let _ = writeln!(out, "    for item in {source} {{");
                 let _ = writeln!(out, "        let raw = item.text.as_str();");
                 let _ = writeln!(out, "        {target}.push({conversion});");
@@ -311,14 +323,7 @@ pub fn shape_reader(operation: &str, name: &str, shape: &Shape, quirks: &[Quirk]
                     ));
                 };
                 let reader = format!("read_{}", naming::module_name(inner_name));
-                // A flattened list repeats its element directly under the parent; a wrapped one
-                // sits inside a wrapper element the model names.
-                let source = if *flattened {
-                    format!("node.children_named(\"{wire}\")")
-                } else {
-                    let wrapper = wrapper_name.clone().unwrap_or_else(|| wire.clone());
-                    format!("node.child(\"{wrapper}\").into_iter().flat_map(|w| w.children_named(\"{wire}\"))")
-                };
+                let source = list_source(*flattened, wrapper_name.as_deref(), &wire);
                 let _ = writeln!(out, "    for item in {source} {{");
                 let _ = writeln!(out, "        {target}.push({reader}(item)?);");
                 out.push_str("    }\n");

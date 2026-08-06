@@ -15,23 +15,27 @@
 //! The response half: one IR binding to the lines that write it.
 //!
 //! Responsible for: the body of every generated `encode`, the XML body writer that follows
-//! `xml.element_order` and `xml.empty_value_policy`, and the per-shape writers a body needs.
+//! `xml.element_order`, `xml.empty_value_policy` and `xml.url_encoded_fields`, and the per-shape
+//! writers a body needs.
 //! NOT responsible for: the conversions ([`super::expr`]), the RFC 9110 invariants (one
 //! hand-written function in `crate::codec::response`), or the `response-*` table (IR data).
 //! Upstream: [`rustfs_gateway_model::ir`]. Downstream: the generated codec files.
 //!
-//! # The three exceptions that are data here, not branches
+//! # The four exceptions that are data here, not branches
 //!
-//! Entity-tag rendering is `Type::ETag(context)`, per field. An unwrapped body is
-//! `xml.unwrapped_output`, per operation. Emit-or-omit for an empty member is
-//! `xml.empty_value_policy`, per member. Each of them was a hand-written `if` somewhere upstream
-//! and each of them was wrong in one of the two places it lived.
+//! Entity-tag rendering is `Type::ETag(context)`, per field — and it decides the escaping of the
+//! element as well as the text, because a quoted tag is the one text node S3 spells with
+//! `&quot;`. An unwrapped body is `xml.unwrapped_output`, per operation. Emit-or-omit for an empty
+//! member is `xml.empty_value_policy`, per member. Percent-encoding under `encoding-type=url` is
+//! `xml.url_encoded_fields`, per member path, resolved by [`super::url`]. Each of them was a
+//! hand-written `if` somewhere upstream and each of them was wrong in one of the two places it
+//! lived.
 
 use std::fmt::Write as _;
 
-use rustfs_gateway_model::ir::{Binding, EmptyValue, Field, OmitWhen, OperationIr, Shape, Type};
+use rustfs_gateway_model::ir::{Binding, ETagRender, EmptyValue, Field, OmitWhen, OperationIr, Shape, Type};
 
-use super::expr;
+use super::{expr, url};
 use crate::emit::dto::naming;
 
 /// Renders the body of one operation's `encode`.
@@ -162,7 +166,13 @@ fn xml_body(ir: &OperationIr) -> Result<String, String> {
         rustfs_gateway_model::ir::Xmlns::Suppress => "None",
     };
 
+    let plan = url::plan(ir)?;
     let mut out = String::new();
+    if !plan.is_empty() {
+        // Read once, before a byte is written: `encoding-type` covers the whole document, and a
+        // member that consulted the request for itself could disagree with its siblings.
+        out.push_str("        let url_encoding = value::url_encoding(request);\n");
+    }
     out.push_str("        let mut writer = rustfs_gateway_xml::XmlWriter::document();\n");
 
     if ir.xml.unwrapped_output {
@@ -184,7 +194,7 @@ fn xml_body(ir: &OperationIr) -> Result<String, String> {
             let Some(field) = members.iter().find(|f| f.name == name) else {
                 continue;
             };
-            out.push_str(&body_member(ir, field, &format!("output.{}", naming::field_name(&field.name)), 8)?);
+            out.push_str(&body_member(ir, &plan, field, &format!("output.{}", naming::field_name(&field.name)), 8)?);
         }
         out.push_str("        writer.close();\n");
     }
@@ -206,11 +216,12 @@ fn ordered_members(ir: &OperationIr, members: &[&Field]) -> Vec<String> {
 }
 
 /// Renders one XML body member: a scalar element, a repeated structure, or a nested one.
-fn body_member(ir: &OperationIr, field: &Field, source: &str, indent: usize) -> Result<String, String> {
+fn body_member(ir: &OperationIr, plan: &url::Plan, field: &Field, source: &str, indent: usize) -> Result<String, String> {
     let pad = " ".repeat(indent);
     let member = &field.name;
     let wire = field.wire_name.clone().unwrap_or_else(|| member.clone());
     let policy = empty_policy(&ir.xml.empty_value_policy, member, field.required);
+    let encoded = plan.encodes_root(member);
     let mut out = String::new();
 
     match &field.ty {
@@ -219,19 +230,15 @@ fn body_member(ir: &OperationIr, field: &Field, source: &str, indent: usize) -> 
             flattened,
             wrapper_name,
         } if !matches!(inner.as_ref(), Type::Structure(_)) => {
-            let rendered = expr::to_wire(inner, member, &ir.operation)?;
-            let wrapper = if *flattened {
-                None
-            } else {
-                Some(wrapper_name.clone().unwrap_or_else(|| wire.clone()))
-            };
-            if let Some(name) = &wrapper {
+            let rendered = wire_expr(inner, member, &ir.operation, encoded)?;
+            let names = super::list_elements(*flattened, wrapper_name.as_deref(), &wire);
+            if let Some(name) = &names.wrapper {
                 let _ = writeln!(out, "{pad}writer.open(\"{name}\", None);");
             }
             let _ = writeln!(out, "{pad}for v in &{source} {{");
-            let _ = writeln!(out, "{pad}    writer.element(\"{wire}\", {rendered});");
+            let _ = writeln!(out, "{pad}    writer.element(\"{}\", {rendered});", names.entry);
             let _ = writeln!(out, "{pad}}}");
-            if wrapper.is_some() {
+            if names.wrapper.is_some() {
                 let _ = writeln!(out, "{pad}writer.close();");
             }
         }
@@ -248,16 +255,17 @@ fn body_member(ir: &OperationIr, field: &Field, source: &str, indent: usize) -> 
                 ));
             };
             let writer_fn = format!("write_{}", naming::module_name(inner_name));
-            if !*flattened {
-                let wrapper = wrapper_name.clone().unwrap_or_else(|| wire.clone());
+            let argument = shape_writer_argument(plan, inner_name);
+            let names = super::list_elements(*flattened, wrapper_name.as_deref(), &wire);
+            if let Some(wrapper) = &names.wrapper {
                 let _ = writeln!(out, "{pad}writer.open(\"{wrapper}\", None);");
             }
             let _ = writeln!(out, "{pad}for item in &{source} {{");
-            let _ = writeln!(out, "{pad}    writer.open(\"{wire}\", None);");
-            let _ = writeln!(out, "{pad}    {writer_fn}(&mut writer, item)?;");
+            let _ = writeln!(out, "{pad}    writer.open(\"{}\", None);", names.entry);
+            let _ = writeln!(out, "{pad}    {writer_fn}(&mut writer, item{argument})?;");
             let _ = writeln!(out, "{pad}    writer.close();");
             let _ = writeln!(out, "{pad}}}");
-            if !*flattened {
+            if names.wrapper.is_some() {
                 let _ = writeln!(out, "{pad}writer.close();");
             }
         }
@@ -267,6 +275,7 @@ fn body_member(ir: &OperationIr, field: &Field, source: &str, indent: usize) -> 
         // declared unconditional into one the encoder is free to skip.
         Type::Structure(inner_name) => {
             let writer_fn = format!("write_{}", naming::module_name(inner_name));
+            let argument = shape_writer_argument(plan, inner_name);
             if field.required {
                 let _ = writeln!(out, "{pad}{{");
                 let _ = writeln!(out, "{pad}    let v = &{source};");
@@ -274,16 +283,13 @@ fn body_member(ir: &OperationIr, field: &Field, source: &str, indent: usize) -> 
                 let _ = writeln!(out, "{pad}if let Some(v) = {source}.as_ref() {{");
             }
             let _ = writeln!(out, "{pad}    writer.open(\"{wire}\", None);");
-            let _ = writeln!(out, "{pad}    {writer_fn}(&mut writer, v)?;");
+            let _ = writeln!(out, "{pad}    {writer_fn}(&mut writer, v{argument})?;");
             let _ = writeln!(out, "{pad}    writer.close();");
             let _ = writeln!(out, "{pad}}}");
         }
         other => {
-            let rendered = expr::to_wire(other, member, &ir.operation)?;
-            let call = match policy {
-                EmptyValue::Emit => "element",
-                EmptyValue::Omit => "element_if_present",
-            };
+            let rendered = wire_expr(other, member, &ir.operation, encoded)?;
+            let call = element_call(other, policy);
             if field.required {
                 let _ = writeln!(out, "{pad}{{");
                 let _ = writeln!(out, "{pad}    let v = &{source};");
@@ -297,6 +303,44 @@ fn body_member(ir: &OperationIr, field: &Field, source: &str, indent: usize) -> 
         }
     }
     Ok(out)
+}
+
+/// The wire expression for one member, encoded or not.
+///
+/// One call rather than an `if` at each of the four sites that render a scalar: the two forms are
+/// interchangeable everywhere a value is written, and a site that forgot the encoded one would
+/// write the raw spelling into a document whose echo claims otherwise.
+fn wire_expr(ty: &Type, member: &str, operation: &str, encoded: bool) -> Result<String, String> {
+    if encoded {
+        return expr::to_wire_url_encoded(ty, member, operation);
+    }
+    expr::to_wire(ty, member, operation)
+}
+
+/// The extra argument a nested shape's writer takes, when it encodes anything.
+///
+/// Empty for every shape that does not, so a writer never carries a parameter it does not read —
+/// `-D warnings` would refuse the unused binding, and a `_`-prefixed one would hide the fact that
+/// the shape opted out.
+fn shape_writer_argument(plan: &url::Plan, shape: &str) -> &'static str {
+    if plan.encodes_shape(shape) { ", url_encoding" } else { "" }
+}
+
+/// The `XmlWriter` method one scalar body member is written with.
+///
+/// Two independent IR facts choose it and neither is a name comparison: `empty_value_policy` says
+/// whether an empty value is written as a paired element or dropped, and the type says whether the
+/// value's own wire form carries quotation marks the writer has to escape. `ETag(XmlQuoted)` is
+/// the only rendering that does — `ETag(XmlBare)` and every string are written with the ordinary
+/// escaping, which is what leaves a `"` inside an object key literal.
+fn element_call(ty: &Type, policy: EmptyValue) -> &'static str {
+    let quoting = matches!(ty, Type::ETag(ETagRender::XmlQuoted));
+    match (policy, quoting) {
+        (EmptyValue::Emit, false) => "element",
+        (EmptyValue::Omit, false) => "element_if_present",
+        (EmptyValue::Emit, true) => "element_quoting",
+        (EmptyValue::Omit, true) => "element_quoting_if_present",
+    }
 }
 
 /// Emit or omit for an empty member.
@@ -313,6 +357,7 @@ fn empty_policy(policy: &[(String, EmptyValue)], member: &str, required: bool) -
 
 /// Renders the writer for one nested response shape.
 pub fn shape_writer(ir: &OperationIr, name: &str, shape: &Shape) -> Result<String, String> {
+    let plan = url::plan(ir)?;
     let type_name = naming::type_name(name);
     let order = if shape.xml.element_order.is_empty() {
         shape.fields.iter().map(|f| f.name.clone()).collect()
@@ -322,7 +367,7 @@ pub fn shape_writer(ir: &OperationIr, name: &str, shape: &Shape) -> Result<Strin
 
     let mut out = String::new();
     let _ = writeln!(out, "/// Writes one `{name}` element's children, in the wire order the IR records.");
-    out.push_str(&shape_writer_signature(&naming::module_name(name), &type_name));
+    out.push_str(&shape_writer_signature(&naming::module_name(name), &type_name, plan.encodes_shape(name)));
     for member in order {
         let Some(field) = shape.fields.iter().find(|f| f.name == member) else {
             continue;
@@ -330,16 +375,14 @@ pub fn shape_writer(ir: &OperationIr, name: &str, shape: &Shape) -> Result<Strin
         let source = format!("value.{}", naming::field_name(&field.name));
         let wire = field.wire_name.clone().unwrap_or_else(|| field.name.clone());
         let policy = empty_policy(&shape.xml.empty_value_policy, &field.name, field.required);
+        let encoded = plan.encodes_shape_member(name, &field.name);
         match &field.ty {
             Type::Structure(_) | Type::List { .. } => {
-                out.push_str(&shape_child(ir, field, &source, &wire)?);
+                out.push_str(&shape_child(ir, &plan, field, &source, &wire)?);
             }
             other => {
-                let rendered = expr::to_wire(other, &field.name, &ir.operation)?;
-                let call = match policy {
-                    EmptyValue::Emit => "element",
-                    EmptyValue::Omit => "element_if_present",
-                };
+                let rendered = wire_expr(other, &field.name, &ir.operation, encoded)?;
+                let call = element_call(other, policy);
                 if field.required {
                     let _ = writeln!(out, "    {{");
                     let _ = writeln!(out, "        let v = &{source};");
@@ -358,11 +401,12 @@ pub fn shape_writer(ir: &OperationIr, name: &str, shape: &Shape) -> Result<Strin
 }
 
 /// A nested structure or list inside a shape.
-fn shape_child(ir: &OperationIr, field: &Field, source: &str, wire: &str) -> Result<String, String> {
+fn shape_child(ir: &OperationIr, plan: &url::Plan, field: &Field, source: &str, wire: &str) -> Result<String, String> {
     let mut out = String::new();
     match &field.ty {
         Type::Structure(inner) => {
             let writer_fn = format!("write_{}", naming::module_name(inner));
+            let argument = shape_writer_argument(plan, inner);
             if field.required {
                 let _ = writeln!(out, "    {{");
                 let _ = writeln!(out, "        let v = &{source};");
@@ -370,16 +414,17 @@ fn shape_child(ir: &OperationIr, field: &Field, source: &str, wire: &str) -> Res
                 let _ = writeln!(out, "    if let Some(v) = {source}.as_ref() {{");
             }
             let _ = writeln!(out, "        writer.open(\"{wire}\", None);");
-            let _ = writeln!(out, "        {writer_fn}(writer, v)?;");
+            let _ = writeln!(out, "        {writer_fn}(writer, v{argument})?;");
             let _ = writeln!(out, "        writer.close();");
             let _ = writeln!(out, "    }}");
         }
         Type::List { member: inner, .. } => match inner.as_ref() {
             Type::Structure(inner_name) => {
                 let writer_fn = format!("write_{}", naming::module_name(inner_name));
+                let argument = shape_writer_argument(plan, inner_name);
                 let _ = writeln!(out, "    for item in &{source} {{");
                 let _ = writeln!(out, "        writer.open(\"{wire}\", None);");
-                let _ = writeln!(out, "        {writer_fn}(writer, item)?;");
+                let _ = writeln!(out, "        {writer_fn}(writer, item{argument})?;");
                 let _ = writeln!(out, "        writer.close();");
                 let _ = writeln!(out, "    }}");
             }
@@ -405,14 +450,22 @@ const MAX_WIDTH: usize = 130;
 /// `cargo fmt` follows `#[path]` into `generated/`, so a signature past `max_width` makes
 /// `cargo xtask spec verify` fail the moment anybody formats the tree — and the shape names are
 /// upstream's, so how long they get is not something this emitter controls.
-fn shape_writer_signature(module: &str, type_name: &str) -> String {
+///
+/// `encodes` adds the url-encoding decision, for a shape that has a member to apply it to.
+fn shape_writer_signature(module: &str, type_name: &str, encodes: bool) -> String {
+    let encoding = if encodes { ", url_encoding: value::UrlEncoding" } else { "" };
     let single = format!(
-        "fn write_{module}(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::{type_name}) -> Result<(), CodecError> {{\n"
+        "fn write_{module}(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::{type_name}{encoding}) -> Result<(), CodecError> {{\n"
     );
     if single.len().saturating_sub(1) <= MAX_WIDTH {
         return single;
     }
+    let wrapped = if encodes {
+        "\n    url_encoding: value::UrlEncoding,"
+    } else {
+        ""
+    };
     format!(
-        "fn write_{module}(\n    writer: &mut rustfs_gateway_xml::XmlWriter,\n    value: &dto::{type_name},\n) -> Result<(), CodecError> {{\n"
+        "fn write_{module}(\n    writer: &mut rustfs_gateway_xml::XmlWriter,\n    value: &dto::{type_name},{wrapped}\n) -> Result<(), CodecError> {{\n"
     )
 }

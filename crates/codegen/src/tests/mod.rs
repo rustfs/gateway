@@ -15,7 +15,8 @@
 //! Tests for the generator.
 //!
 //! Responsible for: end-to-end generation against the pinned model, determinism, the zero-diff
-//! gate, the golden comparison, and `why`.
+//! gate, the golden comparison, the XML element names a list is written and read through, and
+//! `why`.
 //! NOT responsible for: the parsers, which are tested in `rustfs-gateway-model`.
 
 mod bounds_tests;
@@ -23,3 +24,5 @@ mod codegen_tests;
 mod dto_tests;
 mod forms_tests;
 mod golden_tests;
+mod url_tests;
+mod xml_list_tests;

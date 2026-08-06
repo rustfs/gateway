@@ -119,6 +119,29 @@ pub fn from_wire(
     })
 }
 
+/// The wire string for a member the operation's `xml.url_encoded_fields` covers.
+///
+/// The decision itself is held in `url_encoding`, read once per response — the encoding is a
+/// property of the request, not of the value, and a member that consulted the request for itself
+/// could disagree with its siblings inside one document.
+///
+/// Only a key or a string has a form here. A url-encoded timestamp or integer would be a path the
+/// overlay can name and this emitter cannot honour, so it fails the run rather than silently
+/// writing the unencoded spelling.
+pub fn to_wire_url_encoded(ty: &Type, member: &str, operation: &str) -> Result<String, String> {
+    Ok(match ty {
+        Type::ObjectKey => "&value::url_encoded_key(v, url_encoding)".to_owned(),
+        Type::String | Type::OpaqueString | Type::BucketName => "&value::url_encoded(v.as_str(), url_encoding)".to_owned(),
+        _ => {
+            return Err(unsupported(
+                operation,
+                member,
+                "url encoding has a wire form for an object key or a string and for nothing else",
+            ));
+        }
+    })
+}
+
 /// Turns the field's value, held in `v`, into the wire string.
 ///
 /// The result is an expression of type `&str` or `String`; the caller passes it straight to a

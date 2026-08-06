@@ -14,8 +14,9 @@
 
 //! The writer every generated encoder writes an S3 response body through.
 //!
-//! Responsible for: the declaration, elements, attributes, escaping, and the one decision that is
-//! not free — whether an empty member is written as a paired element or not written at all.
+//! Responsible for: the declaration, elements, attributes, escaping, and the two decisions that
+//! are not free — whether an empty member is written as a paired element or not written at all,
+//! and whether a text node's double quotes are escaped.
 //! NOT responsible for: knowing which members exist, in what order, or under what names. Every
 //! one of those is IR data the generated encoder supplies.
 //! Upstream: nothing. Downstream: `rustfs-gateway-core`'s generated codecs.
@@ -26,6 +27,15 @@
 //! `<X></X>` rather than `<X/>`. Both are observable: a conformance case that pins a body byte for
 //! byte fails on either. So neither is an option this writer offers — an option is a thing a
 //! caller can get wrong.
+//!
+//! # Why escaping the double quote *is* an option
+//!
+//! A `"` is legal, unescaped, in XML character data, so escaping it is a choice — and S3 makes it
+//! differently in two elements of the same body. An entity tag comes back as
+//! `<ETag>&quot;d41d…&quot;</ETag>` while an object key carrying a quote comes back with the
+//! literal byte (`c-list-0001` and `c-list-0036` pin the two against each other). That is a
+//! property of the member being written, not of the writer, so it arrives as a separate method
+//! whose call sites are chosen from the IR rather than as a flag on `escape_text`.
 
 use core::fmt::Write as _;
 
@@ -110,6 +120,29 @@ impl XmlWriter {
         self.out.push('>');
     }
 
+    /// Writes a complete element whose text is escaped *including its double quotes*.
+    ///
+    /// The difference from [`Self::element`] is one character class and it is byte-observable:
+    /// this writes `&quot;` where that writes `"`. Only a value whose own wire form carries
+    /// quotation marks asks for it — in this surface, an entity tag — and which members those are
+    /// is IR data, not something this writer knows.
+    pub fn element_quoting(&mut self, name: &str, text: &str) {
+        self.out.push('<');
+        self.out.push_str(name);
+        self.out.push('>');
+        escape_text_and_quotes(text, &mut self.out);
+        self.out.push_str("</");
+        self.out.push_str(name);
+        self.out.push('>');
+    }
+
+    /// The [`Self::element_if_present`] twin of [`Self::element_quoting`].
+    pub fn element_quoting_if_present(&mut self, name: &str, text: &str) {
+        if !text.is_empty() {
+            self.element_quoting(name, text);
+        }
+    }
+
     /// Writes escaped text into the element that is currently open.
     ///
     /// The unwrapped-output form needs it: there the single body member *is* the root, so its text
@@ -171,12 +204,34 @@ impl XmlWriter {
 /// The three that change meaning, plus a carriage return. `\r` is escaped because an XML parser
 /// normalises a literal one to `\n` on the way in, so a value containing one would not survive a
 /// round trip — and object keys and user metadata do contain them.
+///
+/// A `"` is deliberately **not** escaped: it changes nothing inside character data, and the one
+/// member whose wire form carries quotation marks reaches
+/// [`XmlWriter::element_quoting`]/[`escape_text_and_quotes`] instead.
 pub fn escape_text(text: &str, out: &mut String) {
     for character in text.chars() {
         match character {
             '&' => out.push_str("&amp;"),
             '<' => out.push_str("&lt;"),
             '>' => out.push_str("&gt;"),
+            '\r' => out.push_str("&#13;"),
+            other => out.push(other),
+        }
+    }
+}
+
+/// Everything [`escape_text`] escapes, plus the double quote as `&quot;`.
+///
+/// Not a stricter-is-safer variant to reach for by default: the two produce different bytes for
+/// the same value, both spellings are pinned by conformance cases, and picking this one for a
+/// member S3 spells with a literal `"` is as much a wire defect as the other way round.
+pub fn escape_text_and_quotes(text: &str, out: &mut String) {
+    for character in text.chars() {
+        match character {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
             '\r' => out.push_str("&#13;"),
             other => out.push(other),
         }

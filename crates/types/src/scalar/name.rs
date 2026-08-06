@@ -115,16 +115,34 @@ impl ObjectKey {
         self.key.len()
     }
 
-    /// Whether a response listing this key must use `encoding-type=url`.
+    /// Whether a response listing this key must percent-encode it even when the request did not
+    /// ask for `encoding-type=url`.
     ///
-    /// True for control characters, which XML 1.0 cannot represent at all, and for `&` and `<`,
-    /// which can be escaped but which several client XML parsers mishandle inside key elements.
-    /// Emitting such a key unencoded produces a body the client cannot parse, which reads to the
-    /// user as a corrupt listing rather than as a bad key.
+    /// True exactly when the key carries a character no XML 1.0 document may contain — see
+    /// [`is_xml_representable`]. Emitting such a key produces a body the client's parser rejects
+    /// outright, so one badly named object hides every other object in the bucket.
+    ///
+    /// `&`, `<` and `"` are **not** here, deliberately. They are representable, the writer escapes
+    /// the ones that need it, and `c-list-0036` pins that a key carrying all three comes back
+    /// XML-escaped rather than percent-encoded. Forcing encoding on them would silently change a
+    /// key every client can already read.
     #[must_use]
     pub fn needs_url_encoding(&self) -> bool {
-        self.key.chars().any(|c| c.is_control() || c == '&' || c == '<')
+        !is_xml_representable(&self.key)
     }
+}
+
+/// Whether every character of a value can appear in an XML 1.0 document at all.
+///
+/// XML 1.0 admits tab, newline and carriage return out of the C0 controls and excludes the rest
+/// entirely — escaped or not, `&#1;` is as illegal as the raw byte. A value carrying one has no
+/// XML spelling, so the only answer that leaves the response parseable is to percent-encode it.
+///
+/// This is about *representability*, not about escaping: `&`, `<`, `>` and `"` are all
+/// representable and are the writer's business, not this predicate's.
+#[must_use]
+pub fn is_xml_representable(value: &str) -> bool {
+    !value.chars().any(|c| c.is_control() && !matches!(c, '\t' | '\n' | '\r'))
 }
 
 impl Default for ObjectKey {

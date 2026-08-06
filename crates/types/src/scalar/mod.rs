@@ -52,7 +52,7 @@ pub use self::checksum::{
 pub use self::error_code::ErrorCode;
 pub use self::error_status::{ErrorContext, mask_for_authorization, status_of};
 pub use self::etag::{ETag, EtagRender};
-pub use self::name::{BucketName, ObjectKey, validate_bucket_name, validate_object_key};
+pub use self::name::{BucketName, ObjectKey, is_xml_representable, validate_bucket_name, validate_object_key};
 pub use self::opaque_string::OpaqueString;
 pub use self::parse_error::{ParseError, rules};
 pub use self::range::{ByteRange, RangeOutcome, RangeParse};

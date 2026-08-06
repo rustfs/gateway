@@ -27,10 +27,12 @@
 //! function; what codegen contributes is that every operation accepting checksum headers *calls*
 //! it, which is the half a human forgets.
 
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 
 use rustfs_gateway_types::{
     BucketName, ByteRange, ChecksumSpec, ETag, EtagRender, ObjectKey, OpaqueString, RangeParse, Timestamp, TimestampFormat,
+    is_xml_representable,
 };
 
 use crate::codec::error::CodecError;
@@ -189,6 +191,75 @@ pub fn object_key(value: &str, member: &'static str) -> Result<ObjectKey, CodecE
 /// [`CodecError`] naming the member.
 pub fn bucket_name(value: &str, member: &'static str) -> Result<BucketName, CodecError> {
     BucketName::new(value.to_owned()).map_err(|_| unusable(member))
+}
+
+/// The query parameter a listing uses to ask for percent-encoded key-shaped members.
+const ENCODING_TYPE: &str = "encoding-type";
+
+/// The one value AWS defines for it.
+const ENCODING_TYPE_URL: &str = "url";
+
+/// Whether this response percent-encodes the members its operation declares as key-shaped.
+///
+/// One decision per response rather than one per member: a listing that encoded some of its keys
+/// and not others would be undecodable, because the echo a client reads —
+/// `<EncodingType>url</EncodingType>` — is a single flag covering the whole document.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UrlEncoding {
+    /// The request asked for it: every declared member is encoded.
+    Requested,
+    /// It did not. A member is still encoded when its value has no XML spelling at all, because
+    /// the alternative is a body the client's parser rejects in full.
+    Absent,
+}
+
+/// Reads the encoding the request asked for.
+///
+/// Generated into the `encode` of every operation whose IR declares `xml.url_encoded_fields`, and
+/// nowhere else. Any value other than `url` is `Absent`: AWS defines exactly one, and treating an
+/// unknown spelling as "encode anyway" would percent-encode a listing whose echo says it did not.
+#[must_use]
+pub fn url_encoding(request: &MetaView<'_>) -> UrlEncoding {
+    match request.query(ENCODING_TYPE) {
+        Some(value) if value.eq_ignore_ascii_case(ENCODING_TYPE_URL) => UrlEncoding::Requested,
+        _ => UrlEncoding::Absent,
+    }
+}
+
+/// The single encoding pass, shared by both renderers below.
+///
+/// `rustfs_gateway_sig::percent_encode` rather than a second implementation: it is already the
+/// "every byte outside RFC 3986's unreserved set, uppercase hex" pass, which is the same one AWS
+/// documents for `encoding-type=url`. Two copies of a percent codec in one workspace is how the
+/// two come to disagree about `/`.
+fn percent_encoded(value: &str) -> Cow<'_, str> {
+    Cow::Owned(rustfs_gateway_sig::percent_encode(value.as_bytes()))
+}
+
+/// Renders a string member the operation declares as url-encodable.
+///
+/// Encoded when the request asked, and otherwise only when the value carries a character XML
+/// cannot represent. The second half is not an optimisation: `<Prefix>` echoes a value the caller
+/// chose, so a caller can put a byte in it that has no XML spelling.
+#[must_use]
+pub fn url_encoded(value: &str, encoding: UrlEncoding) -> Cow<'_, str> {
+    if encoding == UrlEncoding::Requested || !is_xml_representable(value) {
+        return percent_encoded(value);
+    }
+    Cow::Borrowed(value)
+}
+
+/// The [`ObjectKey`] twin of [`url_encoded`].
+///
+/// The forced half asks the key itself — [`ObjectKey::needs_url_encoding`] — so that "which keys
+/// cannot be written into a body" is answered by the key type rather than by whichever encoder
+/// happens to be running.
+#[must_use]
+pub fn url_encoded_key(value: &ObjectKey, encoding: UrlEncoding) -> Cow<'_, str> {
+    if encoding == UrlEncoding::Requested || value.needs_url_encoding() {
+        return percent_encoded(value.as_str());
+    }
+    Cow::Borrowed(value.as_str())
 }
 
 /// Wraps a value that is round-tripped byte for byte and never parsed.

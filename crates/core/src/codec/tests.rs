@@ -32,7 +32,7 @@ use bytes::Bytes;
 use http::{Method, Request, StatusCode};
 use rustfs_gateway_http::{Limits, WireRequest};
 use rustfs_gateway_types::dto;
-use rustfs_gateway_types::{ETag, ErrorCode, ObjectKey, OpaqueString, Timestamp};
+use rustfs_gateway_types::{BucketName, ETag, ErrorCode, ObjectKey, OpaqueString, Timestamp};
 
 use crate::codec::response::ResponseBody;
 use crate::codec::{MetaView, OperationCodec, RequestBody};
@@ -486,6 +486,123 @@ fn n_escapes_a_key_that_would_otherwise_break_the_document() {
     let response = dto::DeleteObjects::encode(output, &view, 200).expect("encodes");
 
     assert!(body_text(&response.body).contains("<Key>a&amp;b&lt;c&gt;</Key>"));
+}
+
+/// One listing page with a single entry, so an encode test can name the value it is asserting.
+fn one_entry_listing(key: &str, etag: &str) -> dto::ListObjectsV2Output {
+    dto::ListObjectsV2Output {
+        name: BucketName::new("conf-list").expect("bucket"),
+        key_count: 1,
+        max_keys: 1000,
+        is_truncated: false,
+        contents: vec![dto::Object {
+            key: ObjectKey::new(key).expect("key"),
+            e_tag: ETag::new(etag.to_owned()).expect("an entity tag"),
+            // `LastModified` is required and its placeholder default has no rendering, so a
+            // fixture that leaves it out fails on the timestamp rather than on what it asserts.
+            last_modified: Timestamp::from_secs(1_767_322_745),
+            ..Default::default()
+        }],
+        ..Default::default()
+    }
+}
+
+#[test]
+fn writes_a_listing_entity_tag_with_its_quotes_escaped() {
+    let request = accepted("GET", "/conf-list?list-type=2", &[]);
+    let view = MetaView::of(&request, TargetKind::Bucket).expect("view");
+    let output = one_entry_listing("top.txt", "b28354b543375bfa94dabaeda722927f");
+    let response = dto::ListObjectsV2::encode(output, &view, 200).expect("encodes");
+
+    let body = body_text(&response.body);
+    assert!(
+        body.contains("<ETag>&quot;b28354b543375bfa94dabaeda722927f&quot;</ETag>"),
+        "AWS writes the tag's own quotation marks as entities: {body}"
+    );
+    assert!(!body.contains("<ETag>\""), "a literal quote here is a body no golden matches: {body}");
+}
+
+#[test]
+fn n_a_quote_inside_a_key_stays_literal_while_the_entity_tag_s_is_escaped() {
+    // The two live in one document and are escaped differently, which is why the escaping belongs
+    // to the member's binding rather than to the writer.
+    let request = accepted("GET", "/conf-list?list-type=2", &[]);
+    let view = MetaView::of(&request, TargetKind::Bucket).expect("view");
+    let output = one_entry_listing("a&b<c>d\"e.txt", "b28354b543375bfa94dabaeda722927f");
+    let response = dto::ListObjectsV2::encode(output, &view, 200).expect("encodes");
+
+    let body = body_text(&response.body);
+    assert!(body.contains("<Key>a&amp;b&lt;c&gt;d\"e.txt</Key>"), "{body}");
+    assert!(body.contains("&quot;b28354b543375bfa94dabaeda722927f&quot;"), "{body}");
+}
+
+#[test]
+fn percent_encodes_every_declared_member_when_the_request_asks_for_it() {
+    let request = accepted("GET", "/conf-list?list-type=2&encoding-type=url&delimiter=%2F", &[]);
+    let view = MetaView::of(&request, TargetKind::Bucket).expect("view");
+    let mut output = one_entry_listing("with space.txt", "b28354b543375bfa94dabaeda722927f");
+    output.delimiter = Some("/".to_owned());
+    output.prefix = "a&b/".to_owned();
+    output.encoding_type = Some(dto::EncodingType::URL);
+    output.common_prefixes = vec![dto::CommonPrefix {
+        prefix: "café/".to_owned(),
+    }];
+    let response = dto::ListObjectsV2::encode(output, &view, 200).expect("encodes");
+
+    let body = body_text(&response.body);
+    for expected in [
+        "<Key>with%20space.txt</Key>",
+        "<Delimiter>%2F</Delimiter>",
+        "<Prefix>a%26b%2F</Prefix>",
+        "<Prefix>caf%C3%A9%2F</Prefix>",
+        "<EncodingType>url</EncodingType>",
+    ] {
+        assert!(body.contains(expected), "missing {expected} in {body}");
+    }
+}
+
+#[test]
+fn n_leaves_every_member_alone_when_the_request_does_not_ask() {
+    let request = accepted("GET", "/conf-list?list-type=2&delimiter=%2F", &[]);
+    let view = MetaView::of(&request, TargetKind::Bucket).expect("view");
+    let mut output = one_entry_listing("with space.txt", "b28354b543375bfa94dabaeda722927f");
+    output.delimiter = Some("/".to_owned());
+    let response = dto::ListObjectsV2::encode(output, &view, 200).expect("encodes");
+
+    let body = body_text(&response.body);
+    assert!(body.contains("<Key>with space.txt</Key>"), "{body}");
+    assert!(body.contains("<Delimiter>/</Delimiter>"), "{body}");
+    assert!(!body.contains('%'), "nothing is encoded when nothing asked for it: {body}");
+}
+
+#[test]
+fn n_encodes_a_key_xml_cannot_carry_even_though_nothing_asked() {
+    // A C0 control has no XML spelling, escaped or otherwise, so writing it produces a document
+    // the client rejects in full — one badly named object would hide the whole bucket.
+    let request = accepted("GET", "/conf-list?list-type=2", &[]);
+    let view = MetaView::of(&request, TargetKind::Bucket).expect("view");
+    let output = one_entry_listing("ctrl\u{1}key.txt", "b28354b543375bfa94dabaeda722927f");
+    let response = dto::ListObjectsV2::encode(output, &view, 200).expect("encodes");
+
+    let body = body_text(&response.body);
+    assert!(!body.contains('\u{1}'), "{body}");
+    assert!(body.contains("<Key>ctrl%01key.txt</Key>"), "{body}");
+    assert!(
+        body.contains("<Name>conf-list</Name>"),
+        "only the member that could not be written is touched: {body}"
+    );
+}
+
+#[test]
+fn n_an_unknown_encoding_type_spelling_encodes_nothing() {
+    // AWS defines exactly one value. Treating anything else as "encode anyway" would produce a
+    // document whose echo disagrees with its contents.
+    let request = accepted("GET", "/conf-list?list-type=2&encoding-type=base64", &[]);
+    let view = MetaView::of(&request, TargetKind::Bucket).expect("view");
+    let output = one_entry_listing("with space.txt", "b28354b543375bfa94dabaeda722927f");
+    let response = dto::ListObjectsV2::encode(output, &view, 200).expect("encodes");
+
+    assert!(body_text(&response.body).contains("<Key>with space.txt</Key>"));
 }
 
 #[test]

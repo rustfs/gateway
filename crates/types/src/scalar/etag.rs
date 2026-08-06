@@ -20,7 +20,7 @@
 //! NOT responsible for: reading the `ETag` header off a request or writing it into XML (the wire
 //! layers do that, by calling [`ETag::render`]), evaluating preconditions as a whole (that is the
 //! `Conditional` operation cluster), and XML escaping — [`EtagRender::XmlQuoted`] returns the text
-//! *value*, and the XML writer escapes it like any other text node.
+//! *value*, with literal quotation marks, and the writer escapes them.
 //! Upstream: [`super::parse_error`]. Downstream: every operation that carries an `ETag`, the
 //! precondition evaluator, and the multipart family.
 //!
@@ -57,8 +57,10 @@ pub enum EtagRender {
     /// An XML text node that carries *literal* double quotes around the tag.
     ///
     /// This is the normal case: `ListObjectsV2`, `HeadObject`'s body-less twin, the multipart
-    /// responses. The XML writer escapes the returned text, so the bytes on the wire read
-    /// `&quot;d41d…&quot;`.
+    /// responses. The quotes are returned as the byte `"`, and the writer this rendering is bound
+    /// to escapes them, so the bytes on the wire read `&quot;d41d…&quot;`. That escaping is *not*
+    /// something every text node gets — an object key carrying a quote comes back with the
+    /// literal byte — so it belongs to this rendering context and travels with it.
     XmlQuoted,
     /// An XML text node with no quotes at all.
     ///
@@ -236,8 +238,8 @@ impl ETag {
     ///
     /// For [`EtagRender::HeaderQuoted`] an embedded `"` or `\` is escaped as a `quoted-pair`, so
     /// the header stays parseable whatever the backend stored. For the XML contexts the value is
-    /// returned raw: escaping text nodes is the XML writer's job, and doing it twice would put
-    /// `&amp;quot;` on the wire.
+    /// returned raw, quotation marks and all: escaping text nodes is the XML writer's job, and
+    /// returning `&quot;` here would be escaped a second time into `&amp;quot;`.
     #[must_use]
     pub fn render(&self, ctx: EtagRender) -> Cow<'_, str> {
         if self.any {

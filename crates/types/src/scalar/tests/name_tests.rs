@@ -69,10 +69,34 @@ fn c_name_n003_keys_are_never_normalised() {
 
 #[test]
 fn c_name_n004_control_characters_force_url_encoding() {
-    assert!(ObjectKey::new("a\u{1}b").expect("legal key").needs_url_encoding());
-    assert!(ObjectKey::new("a&b").expect("legal key").needs_url_encoding());
-    assert!(ObjectKey::new("a<b").expect("legal key").needs_url_encoding());
-    assert!(!ObjectKey::new("a b").expect("legal key").needs_url_encoding());
+    for key in ["a\u{1}b", "a\u{7}b", "a\u{1f}b"] {
+        assert!(
+            ObjectKey::new(key).expect("legal key").needs_url_encoding(),
+            "{key:?} has no XML spelling at all, escaped or otherwise"
+        );
+    }
+    // The three characters XML *can* carry out of the C0 block do not force anything.
+    for key in ["a\tb", "a\nb", "a\rb", "a b"] {
+        assert!(!ObjectKey::new(key).expect("legal key").needs_url_encoding(), "{key:?}");
+    }
+    // `&` and `<` used to be asserted here as forcing encoding. They are XML-representable, the
+    // writer escapes them, and `conformance/cases/list/c-list-0036` pins that a key carrying `&`,
+    // `<`, `>` and `"` comes back escaped rather than percent-encoded. The original assertion
+    // therefore contradicted the wire contract: acting on it would rewrite keys every client
+    // already reads correctly, and it was only invisible because nothing called the predicate.
+    for key in ["a&b", "a<b", "a>b", "a\"b"] {
+        assert!(!ObjectKey::new(key).expect("legal key").needs_url_encoding(), "{key:?}");
+    }
+}
+
+#[test]
+fn c_name_n006_xml_representability_is_about_the_bytes_not_the_escaping() {
+    use crate::scalar::is_xml_representable;
+
+    assert!(is_xml_representable("ordinary/key.txt"));
+    assert!(is_xml_representable("a&b<c>d\"e\t\n\r"), "everything here has an XML spelling");
+    assert!(!is_xml_representable("ctrl\u{1}key.txt"));
+    assert!(!is_xml_representable("\u{b}"), "a vertical tab is excluded like the rest of C0");
 }
 
 #[test]

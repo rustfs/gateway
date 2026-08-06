@@ -150,7 +150,7 @@ impl OperationCodec for dto::CompleteMultipartUpload {
             writer.element_if_present("Key", v.as_str());
         }
         if let Some(v) = output.e_tag.as_ref() {
-            writer.element_if_present("ETag", &value::render_etag(v, EtagRender::XmlQuoted));
+            writer.element_quoting_if_present("ETag", &value::render_etag(v, EtagRender::XmlQuoted));
         }
         if let Some(v) = output.checksum_crc32.as_ref() {
             writer.element_if_present("ChecksumCRC32", v.as_str());

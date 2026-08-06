@@ -93,6 +93,7 @@ impl OperationCodec for dto::ListObjectVersions {
             let rendered = v.as_str();
             response.set_header("x-amz-request-charged", rendered);
         }
+        let url_encoding = value::url_encoding(request);
         let mut writer = rustfs_gateway_xml::XmlWriter::document();
         writer.open("ListVersionsResult", Some(rustfs_gateway_xml::S3_XMLNS));
         {
@@ -101,18 +102,18 @@ impl OperationCodec for dto::ListObjectVersions {
         }
         {
             let v = &output.prefix;
-            writer.element("Prefix", v.as_str());
+            writer.element("Prefix", &value::url_encoded(v.as_str(), url_encoding));
         }
         {
             let v = &output.key_marker;
-            writer.element("KeyMarker", v.as_str());
+            writer.element("KeyMarker", &value::url_encoded(v.as_str(), url_encoding));
         }
         {
             let v = &output.version_id_marker;
             writer.element("VersionIdMarker", v.as_str());
         }
         if let Some(v) = output.next_key_marker.as_ref() {
-            writer.element_if_present("NextKeyMarker", v.as_str());
+            writer.element_if_present("NextKeyMarker", &value::url_encoded(v.as_str(), url_encoding));
         }
         if let Some(v) = output.next_version_id_marker.as_ref() {
             writer.element_if_present("NextVersionIdMarker", v.as_str());
@@ -122,7 +123,7 @@ impl OperationCodec for dto::ListObjectVersions {
             writer.element("MaxKeys", &v.to_string());
         }
         if let Some(v) = output.delimiter.as_ref() {
-            writer.element_if_present("Delimiter", v.as_str());
+            writer.element_if_present("Delimiter", &value::url_encoded(v.as_str(), url_encoding));
         }
         {
             let v = &output.is_truncated;
@@ -130,17 +131,17 @@ impl OperationCodec for dto::ListObjectVersions {
         }
         for item in &output.versions {
             writer.open("Version", None);
-            write_object_version(&mut writer, item)?;
+            write_object_version(&mut writer, item, url_encoding)?;
             writer.close();
         }
         for item in &output.delete_markers {
             writer.open("DeleteMarker", None);
-            write_delete_marker_entry(&mut writer, item)?;
+            write_delete_marker_entry(&mut writer, item, url_encoding)?;
             writer.close();
         }
         for item in &output.common_prefixes {
             writer.open("CommonPrefixes", None);
-            write_common_prefix(&mut writer, item)?;
+            write_common_prefix(&mut writer, item, url_encoding)?;
             writer.close();
         }
         if let Some(v) = output.encoding_type.as_ref() {
@@ -158,10 +159,14 @@ impl OperationCodec for dto::ListObjectVersions {
 }
 
 /// Writes one `CommonPrefix` element's children, in the wire order the IR records.
-fn write_common_prefix(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::CommonPrefix) -> Result<(), CodecError> {
+fn write_common_prefix(
+    writer: &mut rustfs_gateway_xml::XmlWriter,
+    value: &dto::CommonPrefix,
+    url_encoding: value::UrlEncoding,
+) -> Result<(), CodecError> {
     {
         let v = &value.prefix;
-        writer.element("Prefix", v.as_str());
+        writer.element("Prefix", &value::url_encoded(v.as_str(), url_encoding));
     }
     Ok(())
 }
@@ -170,10 +175,11 @@ fn write_common_prefix(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::
 fn write_delete_marker_entry(
     writer: &mut rustfs_gateway_xml::XmlWriter,
     value: &dto::DeleteMarkerEntry,
+    url_encoding: value::UrlEncoding,
 ) -> Result<(), CodecError> {
     {
         let v = &value.key;
-        writer.element("Key", v.as_str());
+        writer.element("Key", &value::url_encoded_key(v, url_encoding));
     }
     {
         let v = &value.version_id;
@@ -196,10 +202,14 @@ fn write_delete_marker_entry(
 }
 
 /// Writes one `ObjectVersion` element's children, in the wire order the IR records.
-fn write_object_version(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::ObjectVersion) -> Result<(), CodecError> {
+fn write_object_version(
+    writer: &mut rustfs_gateway_xml::XmlWriter,
+    value: &dto::ObjectVersion,
+    url_encoding: value::UrlEncoding,
+) -> Result<(), CodecError> {
     {
         let v = &value.key;
-        writer.element("Key", v.as_str());
+        writer.element("Key", &value::url_encoded_key(v, url_encoding));
     }
     {
         let v = &value.version_id;
@@ -215,7 +225,7 @@ fn write_object_version(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto:
     }
     {
         let v = &value.e_tag;
-        writer.element("ETag", &value::render_etag(v, EtagRender::XmlQuoted));
+        writer.element_quoting("ETag", &value::render_etag(v, EtagRender::XmlQuoted));
     }
     for v in &value.checksum_algorithm {
         writer.element("ChecksumAlgorithm", v.as_str());

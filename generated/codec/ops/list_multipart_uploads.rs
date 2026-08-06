@@ -92,6 +92,7 @@ impl OperationCodec for dto::ListMultipartUploads {
             let rendered = v.as_str();
             response.set_header("x-amz-request-charged", rendered);
         }
+        let url_encoding = value::url_encoding(request);
         let mut writer = rustfs_gateway_xml::XmlWriter::document();
         writer.open("ListMultipartUploadsResult", Some(rustfs_gateway_xml::S3_XMLNS));
         {
@@ -99,19 +100,19 @@ impl OperationCodec for dto::ListMultipartUploads {
             writer.element("Bucket", v.as_str());
         }
         if let Some(v) = output.key_marker.as_ref() {
-            writer.element_if_present("KeyMarker", v.as_str());
+            writer.element_if_present("KeyMarker", &value::url_encoded(v.as_str(), url_encoding));
         }
         if let Some(v) = output.upload_id_marker.as_ref() {
             writer.element_if_present("UploadIdMarker", v.as_str());
         }
         if let Some(v) = output.next_key_marker.as_ref() {
-            writer.element_if_present("NextKeyMarker", v.as_str());
+            writer.element_if_present("NextKeyMarker", &value::url_encoded(v.as_str(), url_encoding));
         }
         if let Some(v) = output.prefix.as_ref() {
-            writer.element_if_present("Prefix", v.as_str());
+            writer.element_if_present("Prefix", &value::url_encoded(v.as_str(), url_encoding));
         }
         if let Some(v) = output.delimiter.as_ref() {
-            writer.element_if_present("Delimiter", v.as_str());
+            writer.element_if_present("Delimiter", &value::url_encoded(v.as_str(), url_encoding));
         }
         if let Some(v) = output.next_upload_id_marker.as_ref() {
             writer.element_if_present("NextUploadIdMarker", v.as_str());
@@ -126,12 +127,12 @@ impl OperationCodec for dto::ListMultipartUploads {
         }
         for item in &output.uploads {
             writer.open("Upload", None);
-            write_multipart_upload(&mut writer, item)?;
+            write_multipart_upload(&mut writer, item, url_encoding)?;
             writer.close();
         }
         for item in &output.common_prefixes {
             writer.open("CommonPrefixes", None);
-            write_common_prefix(&mut writer, item)?;
+            write_common_prefix(&mut writer, item, url_encoding)?;
             writer.close();
         }
         if let Some(v) = output.encoding_type.as_ref() {
@@ -149,10 +150,14 @@ impl OperationCodec for dto::ListMultipartUploads {
 }
 
 /// Writes one `CommonPrefix` element's children, in the wire order the IR records.
-fn write_common_prefix(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::CommonPrefix) -> Result<(), CodecError> {
+fn write_common_prefix(
+    writer: &mut rustfs_gateway_xml::XmlWriter,
+    value: &dto::CommonPrefix,
+    url_encoding: value::UrlEncoding,
+) -> Result<(), CodecError> {
     {
         let v = &value.prefix;
-        writer.element("Prefix", v.as_str());
+        writer.element("Prefix", &value::url_encoded(v.as_str(), url_encoding));
     }
     Ok(())
 }
@@ -169,12 +174,16 @@ fn write_initiator(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::Init
 }
 
 /// Writes one `MultipartUpload` element's children, in the wire order the IR records.
-fn write_multipart_upload(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::MultipartUpload) -> Result<(), CodecError> {
+fn write_multipart_upload(
+    writer: &mut rustfs_gateway_xml::XmlWriter,
+    value: &dto::MultipartUpload,
+    url_encoding: value::UrlEncoding,
+) -> Result<(), CodecError> {
     if let Some(v) = value.upload_id.as_ref() {
         writer.element_if_present("UploadId", v.as_str());
     }
     if let Some(v) = value.key.as_ref() {
-        writer.element_if_present("Key", v.as_str());
+        writer.element_if_present("Key", &value::url_encoded_key(v, url_encoding));
     }
     if let Some(v) = value.initiated.as_ref() {
         writer.element_if_present("Initiated", &value::render_timestamp(v, TimestampFormat::Iso8601)?);

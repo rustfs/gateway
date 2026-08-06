@@ -73,9 +73,9 @@ impl OperationCodec for dto::ListBuckets {
             write_owner(&mut writer, v)?;
             writer.close();
         }
-        writer.open("Bucket", None);
+        writer.open("Buckets", None);
         for item in &output.buckets {
-            writer.open("Buckets", None);
+            writer.open("Bucket", None);
             write_bucket(&mut writer, item)?;
             writer.close();
         }
