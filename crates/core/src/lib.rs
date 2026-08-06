@@ -25,6 +25,7 @@
 //!   route      which operation a request names — decided before anything is authenticated
 //!   registry   what that operation requires of the request, and whether this backend handles it
 //!   error      what may be said about a request from a caller nobody has identified yet
+//!   fault      what a refusal may add to itself: two closed sets, headers and document elements
 //!   dispatch   the three questions in order, each with its own failure
 //!   op         what an operation is as a type: name, origin, input, output, authorisation
 //!   ops        one AWS operation per file
@@ -88,6 +89,7 @@
 pub mod codec;
 pub mod dispatch;
 pub mod error;
+pub mod fault;
 pub mod handler;
 pub mod op;
 pub mod ops;
@@ -97,6 +99,7 @@ pub mod route;
 pub use crate::codec::{CodecError, EncodedResponse, MetaView, OperationCodec, RequestBody, ResponseBody, ResponseOverride};
 pub use crate::dispatch::{Dispatch, Router, RouterBuildError};
 pub use crate::error::{DisallowedPreAuthCode, PRE_AUTH_STATUSES, PreAuthError};
+pub use crate::fault::{ELEMENT_ORDER, ErrorDetail, ErrorHeader, PRECONDITION_FAILED_MESSAGE, RANGE_NOT_SATISFIABLE_MESSAGE};
 pub use crate::handler::{BoxFuture, Handler, HandlerError, HandlerResult, Req, Resp};
 pub use crate::op::{
     AuthRequirement, HasOperation, Operation, OperationOrigin, ResourceShape, StandardOperation, is_standard_operation_name,

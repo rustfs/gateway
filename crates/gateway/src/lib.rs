@@ -76,6 +76,7 @@ mod dispatch;
 mod ext;
 mod render;
 mod service;
+mod stamp;
 mod trace;
 mod transport;
 mod wire;
@@ -91,7 +92,7 @@ pub use crate::ext::{
     GovernorRequest, HostQuery, HostResolver, Lease, NoObserver, Observer, PathStyleOnly, RequestEvent, ResolvedHost,
     SigV4Authenticator, StaticCredentials, Unavailable, Unlimited,
 };
-pub use crate::render::{S3Error, declaration, render};
+pub use crate::render::{S3Error, declaration, document, render};
 pub use crate::service::S3Service;
 pub use crate::trace::{
     FixedTrace, HOST_ID_HEADER, HostId, MintedTraces, REQUEST_ID_HEADER, RequestId, RequestTrace, TraceSource,
@@ -109,9 +110,10 @@ pub use rustfs_gateway_types::dto;
 // for directly, because `scripts/check_layer_dependencies.sh` allows the conformance suite to
 // depend on this crate and on nothing else internal.
 pub use rustfs_gateway_core::{
-    ArnForm, AuthRequirement, BoxFuture, CodecError, EncodedResponse, Handler, HandlerError, HandlerResult, HostClass, MetaView,
-    MissingHandlers, Operation, OperationCodec, OperationSet, OperationSpec, ParamKind, PreAuthError, Predicate, Req,
-    RequestBody, RequiredParam, ResourceShape, Resp, ResponseBody, ResponseOverride, RouteEntry, RouteSelector, TargetKind,
+    ArnForm, AuthRequirement, BoxFuture, CodecError, ELEMENT_ORDER, EncodedResponse, ErrorDetail, ErrorHeader, Handler,
+    HandlerError, HandlerResult, HostClass, MetaView, MissingHandlers, Operation, OperationCodec, OperationSet, OperationSpec,
+    PRECONDITION_FAILED_MESSAGE, ParamKind, PreAuthError, Predicate, RANGE_NOT_SATISFIABLE_MESSAGE, Req, RequestBody,
+    RequiredParam, ResourceShape, Resp, ResponseBody, ResponseOverride, RouteEntry, RouteSelector, TargetKind,
 };
 // The pagination contract. Found unreachable by check_shared_reachable.sh the moment that
 // guard existed — the fourth contract in a row written for backends and left where no

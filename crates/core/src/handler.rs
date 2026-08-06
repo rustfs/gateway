@@ -16,13 +16,14 @@
 //!
 //! Responsible for: [`Handler`] — one obligation per operation — [`Req`] and [`Resp`],
 //! [`HandlerError`] (the error an *authenticated* request may receive, so unlike
-//! [`crate::PreAuthError`] it may carry text), and the [`BoxFuture`] alias every other extension
-//! point returns by hand.
+//! [`crate::PreAuthError`] it may carry text, response headers and extra document elements), and
+//! the [`BoxFuture`] alias every other extension point returns by hand.
 //! NOT responsible for: registering anything (`crate::registry`), erasing anything (that is
-//! `crate::registry`'s closure, and the only file in this crate that awaits), routing, or
-//! authentication.
-//! Upstream: `crate::op`. Downstream: `crate::registry`, and every backend that implements an
-//! operation.
+//! `crate::registry`'s closure, and the only file in this crate that awaits), routing,
+//! authentication, or deciding which headers and elements a refusal may carry — that closed set is
+//! [`crate::fault`]'s.
+//! Upstream: `crate::op`, `crate::fault`. Downstream: `crate::registry`, and every backend that
+//! implements an operation.
 //!
 //! # Why this trait may use RPITIT when nothing else may
 //!
@@ -49,6 +50,7 @@ use std::pin::Pin;
 use http::StatusCode;
 use rustfs_gateway_types::{ErrorCode, ErrorContext, status_of};
 
+use crate::fault::{ErrorDetail, ErrorHeader, PRECONDITION_FAILED_MESSAGE, RANGE_NOT_SATISFIABLE_MESSAGE};
 use crate::op::Operation;
 
 /// The return type every extension point in this workspace writes by hand.
@@ -178,10 +180,18 @@ where
 /// runs, the caller has been authenticated and authorised, so a message may name what went wrong.
 /// The two types exist separately so that this distinction is visible in the signature rather than
 /// remembered.
+///
+/// A code and a message alone cannot express several refusals the protocol defines: a `416` is
+/// required to carry `Content-Range`, and the `416` and `412` documents carry elements no other
+/// document has. So this also holds two lists — [`ErrorHeader`] and [`ErrorDetail`], both closed
+/// sets, for the reasons in [`crate::fault`] — and each list holds at most one entry per header and
+/// per element name.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HandlerError {
     code: ErrorCode,
     message: Cow<'static, str>,
+    headers: Vec<ErrorHeader>,
+    details: Vec<ErrorDetail>,
 }
 
 impl HandlerError {
@@ -191,6 +201,8 @@ impl HandlerError {
         Self {
             code,
             message: message.into(),
+            headers: Vec::new(),
+            details: Vec::new(),
         }
     }
 
@@ -204,6 +216,71 @@ impl HandlerError {
     #[must_use]
     pub fn not_implemented(message: impl Into<Cow<'static, str>>) -> Self {
         Self::new(ErrorCode::NOT_IMPLEMENTED, message)
+    }
+
+    /// `416 InvalidRange`, whole: the code, the message AWS pins, the `Content-Range` RFC 9110
+    /// §14.4 requires on one, and the two elements the document carries.
+    ///
+    /// One call rather than four because the length appears three times on the wire — in the
+    /// header, in `<ActualObjectSize>`, and by implication in the client's next request — and three
+    /// call sites for one number is three chances for the header and the document to disagree about
+    /// how long the object is. Here they cannot: they are the same argument.
+    #[must_use]
+    pub fn unsatisfiable_range(requested: impl Into<Cow<'static, str>>, complete_length: u64) -> Self {
+        Self::new(ErrorCode::INVALID_RANGE, RANGE_NOT_SATISFIABLE_MESSAGE)
+            .with_header(ErrorHeader::UnsatisfiedRange { complete_length })
+            .with_detail(ErrorDetail::RangeRequested(requested.into()))
+            .with_detail(ErrorDetail::ActualObjectSize(complete_length))
+    }
+
+    /// `412 PreconditionFailed`, naming the request header whose condition did not hold.
+    ///
+    /// The name is the header's — `If-Match`, `If-None-Match`, `If-Modified-Since`,
+    /// `If-Unmodified-Since` — because that is what the client can act on, and it is the only part
+    /// of the document that says which of four conditions failed.
+    #[must_use]
+    pub fn precondition_failed(condition: impl Into<Cow<'static, str>>) -> Self {
+        Self::new(ErrorCode::PRECONDITION_FAILED, PRECONDITION_FAILED_MESSAGE)
+            .with_detail(ErrorDetail::Condition(condition.into()))
+    }
+
+    /// Adds a header to the refusal's head, replacing any earlier one of the same name.
+    ///
+    /// Replacing rather than appending: a response carrying two `Content-Range` headers is one an
+    /// intermediary may pick either half of, and "the last writer wins" is the rule the rest of the
+    /// response head already follows.
+    #[must_use]
+    pub fn with_header(mut self, header: ErrorHeader) -> Self {
+        let name = header.name();
+        self.headers.retain(|existing| existing.name() != name);
+        self.headers.push(header);
+        self
+    }
+
+    /// Adds an element to the error document, replacing any earlier one of the same name.
+    ///
+    /// The list is kept in [`crate::fault::ELEMENT_ORDER`], so the document's element order is a
+    /// function of which elements it carries and never of the order they were added in. A handler
+    /// cannot produce a document whose elements are in an order no case asserted.
+    #[must_use]
+    pub fn with_detail(mut self, detail: ErrorDetail) -> Self {
+        let element = detail.element();
+        self.details.retain(|existing| existing.element() != element);
+        self.details.push(detail);
+        self.details.sort_by_key(ErrorDetail::position);
+        self
+    }
+
+    /// The headers this refusal adds to its own head, in no particular order.
+    #[must_use]
+    pub fn headers(&self) -> &[ErrorHeader] {
+        &self.headers
+    }
+
+    /// The extra elements of the error document, in the order they will be written.
+    #[must_use]
+    pub fn details(&self) -> &[ErrorDetail] {
+        &self.details
     }
 
     /// The error code.
@@ -254,4 +331,101 @@ pub trait Handler<O: Operation>: Send + Sync + 'static {
     /// RPITIT is permitted here and in [`Operation`] alone (ADR-0002): registration erases the
     /// implementation behind a closure, so this trait is never used as a trait object.
     fn call(&self, request: Req<O>) -> impl Future<Output = HandlerResult<O>> + Send;
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used, clippy::panic, clippy::unwrap_used, clippy::indexing_slicing)]
+mod tests {
+    use super::*;
+
+    /// Negative — a plain error carries no headers and no elements, so nothing this file added can
+    /// change the shape of a document that did not ask for it.
+    #[test]
+    fn a_plain_error_adds_nothing_to_the_document_or_the_head() {
+        let error = HandlerError::internal_error("no");
+        assert!(error.headers().is_empty());
+        assert!(error.details().is_empty());
+    }
+
+    /// Negative — adding the same header twice leaves one, so a response cannot carry two
+    /// `Content-Range` values for an intermediary to choose between.
+    #[test]
+    fn a_repeated_header_replaces_rather_than_appends() {
+        let error = HandlerError::internal_error("no")
+            .with_header(ErrorHeader::UnsatisfiedRange { complete_length: 1 })
+            .with_header(ErrorHeader::UnsatisfiedRange { complete_length: 2 });
+        assert_eq!(error.headers(), [ErrorHeader::UnsatisfiedRange { complete_length: 2 }]);
+    }
+
+    /// Negative — the same for elements: a document with two `<Condition>` elements names two
+    /// conditions, and only one of them failed.
+    #[test]
+    fn a_repeated_element_replaces_rather_than_appends() {
+        let error = HandlerError::internal_error("no")
+            .with_detail(ErrorDetail::Condition(Cow::Borrowed("If-Match")))
+            .with_detail(ErrorDetail::Condition(Cow::Borrowed("If-None-Match")));
+        assert_eq!(error.details().len(), 1);
+        assert_eq!(error.details()[0].text(), "If-None-Match");
+    }
+
+    /// Negative — the elements come out in the declared order whatever order they went in. This is
+    /// the assertion behind "a handler cannot get the document order wrong".
+    #[test]
+    fn elements_are_written_in_the_declared_order_not_the_order_they_were_added() {
+        let error = HandlerError::internal_error("no")
+            .with_detail(ErrorDetail::ActualObjectSize(10))
+            .with_detail(ErrorDetail::Condition(Cow::Borrowed("If-Match")))
+            .with_detail(ErrorDetail::RangeRequested(Cow::Borrowed("bytes=20-30")))
+            .with_detail(ErrorDetail::Key(Cow::Borrowed("k")));
+        let names: Vec<&str> = error.details().iter().map(ErrorDetail::element).collect();
+        assert_eq!(names, ["Key", "Condition", "RangeRequested", "ActualObjectSize"]);
+    }
+
+    /// Negative — the two facts a `416` states about the object's length come from one argument, so
+    /// the header and the document cannot disagree. A client that trusted one and retried against
+    /// the other would loop.
+    #[test]
+    fn the_range_refusal_states_one_length_in_both_places() {
+        let error = HandlerError::unsatisfiable_range("bytes=20-30", 10);
+        assert_eq!(error.status(), StatusCode::RANGE_NOT_SATISFIABLE);
+        assert_eq!(error.headers(), [ErrorHeader::UnsatisfiedRange { complete_length: 10 }]);
+        assert_eq!(error.headers()[0].value(), "bytes */10");
+        let sizes: Vec<String> = error
+            .details()
+            .iter()
+            .filter(|detail| detail.element() == "ActualObjectSize")
+            .map(|detail| detail.text().into_owned())
+            .collect();
+        assert_eq!(sizes, ["10"]);
+    }
+
+    /// Negative — a zero-length object is still a length, not an absent one: `bytes */0` is what
+    /// tells a client that no range of it is satisfiable.
+    #[test]
+    fn a_zero_length_object_still_states_its_length() {
+        let error = HandlerError::unsatisfiable_range("bytes=0-0", 0);
+        assert_eq!(error.headers()[0].value(), "bytes */0");
+        assert_eq!(error.details().last().expect("a size").text(), "0");
+    }
+
+    /// Positive — the range refusal's message and element order are the ones the wire pins.
+    #[test]
+    fn the_range_refusal_carries_the_pinned_message_and_order() {
+        let error = HandlerError::unsatisfiable_range("bytes=20-30", 10);
+        assert_eq!(error.message(), RANGE_NOT_SATISFIABLE_MESSAGE);
+        let names: Vec<&str> = error.details().iter().map(ErrorDetail::element).collect();
+        assert_eq!(names, ["RangeRequested", "ActualObjectSize"]);
+    }
+
+    /// Positive — the precondition refusal names the header that failed and adds no header of its
+    /// own; a `412` has nothing to put in its head.
+    #[test]
+    fn the_precondition_refusal_names_the_header_that_failed() {
+        let error = HandlerError::precondition_failed("If-None-Match");
+        assert_eq!(error.status(), StatusCode::PRECONDITION_FAILED);
+        assert_eq!(error.message(), PRECONDITION_FAILED_MESSAGE);
+        assert!(error.headers().is_empty());
+        assert_eq!(error.details()[0].element(), "Condition");
+        assert_eq!(error.details()[0].text(), "If-None-Match");
+    }
 }

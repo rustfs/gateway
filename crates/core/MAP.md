@@ -36,7 +36,8 @@ the one file that awaits, and it runs after the floor has admitted the request.
 | `src/ops/shared/copy_source.rs` | `x-amz-copy-source`: the three grammars, the split-before-decode order, the source-authorization type state, the self-copy classification and the stricter copy-range rule | You are touching anything a copy reads from, or asking why the source's bucket cannot be read without a proof |
 | `src/ops/shared/etag.rs` | Which RFC 9110 comparison each conditional entity-tag header uses, and how its value is read | An entity-tag condition matched when it should not have, or the other way round |
 | `src/ops/shared/precondition.rs` | The fixed precondition order, the two places S3 departs from RFC 9110, the 200/206/416 range decision, and six inline tests for the one validator shape `tests/precondition_range.rs` never builds — a representation that exists with no entity tag, where `*` must still hold | You are wiring a conditional or ranged operation, or a 304/412/416 came out wrong |
-| `src/handler.rs` | `Handler<O>`, `Req`, `Resp`, `HandlerError`, `BoxFuture` | You are implementing a backend |
+| `src/handler.rs` | `Handler<O>`, `Req`, `Resp`, `HandlerError` (code, message, response headers, document elements), `BoxFuture` | You are implementing a backend, or a refusal needs a header or an extra element |
+| `src/fault.rs` | `ErrorHeader` and `ErrorDetail`: the two **closed sets** a refusal may add to itself, the canonical `ELEMENT_ORDER`, and the two AWS-pinned messages | You need a header or an element on an error response, or you are asking why it is not a `HeaderMap` |
 | `src/registry/mod.rs` | `OperationSpec`, `RequiredParam`, `check_required`, `Registry`, `WireEntry` — and `register_handler`, the one call that installs a handler and a codec together | You are adding a required parameter, or looking an operation up by name |
 | `src/registry/reject.rs` | `RegistryError` and the seven rules an operation passes before it registers | A registration was refused |
 | `src/registry/handlers.rs` | The erasure closure, `HandlerTable` (handler **and** codec in one entry), `Invocation` — the only file here that awaits | You are wiring the pipeline to the handlers |
@@ -151,15 +152,24 @@ the one file that awaits, and it runs after the floor has admitted the request.
   Completing it changes the variant's shape — the part table has to reach `evaluate_range`, or the
   operation has to resolve `Part` itself — which is a contract decision, so it is recorded rather
   than guessed at.
-- **A `HandlerError` carries a code and a message, so five error documents cannot be produced at
-  all.** `<Condition>` on a 412 (`c-cond-0001`, `c-cond-0023`), `<Key>` on a `NoSuchKey`
-  (`c-object-0007`), and `<RangeRequested>` / `<ActualObjectSize>` on a 416 (`c-range-0010`) are
-  elements AWS emits and no backend in this workspace can put on the wire.
-  `PreconditionRejection` and `RangeDecision::Unsatisfiable` already hold the values —
+- **`HandlerError` now carries headers and document elements; nothing in this workspace calls it
+  yet.** `with_header`, `with_detail` and the two whole-refusal constructors
+  (`unsatisfiable_range`, `precondition_failed`) close the framework half of what `c-cond-0001`,
+  `c-cond-0023`, `c-object-0007`, `c-object-0014`, `c-range-0009`, `c-range-0010` and `c-range-0014`
+  need. `PreconditionRejection` and `RangeDecision::Unsatisfiable` already hold the values —
   `Unsatisfiable` carries `actual_object_size` and `range_requested` for exactly this reason — so
-  the missing piece is a per-error detail channel on `HandlerError`, in `crates/core/src/handler.rs`.
-  The 416 `Content-Range: bytes */N` header (`c-range-0009`, `c-range-0014`, `c-object-0014`) is
-  the same gap on the header axis.
+  what remains is one edit in `crates/conformance/src/fixture.rs` to build the refusal from them
+  instead of from a bare code and message. Until that lands the new capability is unexercised by the
+  suite, and the numbers do not move.
+- **The set of headers a backend may set is deliberately two variants wide.** `ErrorHeader` admits
+  `Content-Range` (RFC 9110 §14.4, required on a 416) and `Retry-After` (§10.2.3). Anything a
+  handler cannot express through those it cannot express at all — by design; see the admission rule
+  in `src/fault.rs`. `x-amz-delete-marker` on a 404 over a delete marker is the next real candidate
+  and is deliberately not pre-added.
+- **`ELEMENT_ORDER` is a guess wherever no case pins it.** `Condition`, `RangeRequested` and
+  `ActualObjectSize` are pinned byte for byte by `c-cond-0001`, `c-cond-0023` and `c-range-0010`.
+  The relative order of `Key` and `BucketName` follows AWS's `NoSuchKey` document and is asserted by
+  nothing; a case that pins it would turn the guess into a fact.
 - **The copy family's second authorization stage lives in a type, not in `AuthRequirement`.**
   `AuthRequirement` carries one action and one resource shape, so `CopyObject` and `UploadPartCopy`
   declare only the destination's `s3:PutObject`. The source's `s3:GetObject` is enforced by

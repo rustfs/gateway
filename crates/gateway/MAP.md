@@ -12,11 +12,12 @@ everything a consumer needs so that nothing downstream depends on `-core`, `-sig
 | --- | --- | --- |
 | `src/lib.rs` | Module mounting and the whole re-export list; the assembly example in rustdoc | You need to know what the facade publishes, or something downstream cannot name a type |
 | `src/builder.rs` | `ServiceBuilder`: registration, extension points, and the assembly-time refusals | You are adding a builder knob, or `build()` refused and you want to know which check fired |
-| `src/service.rs` | `S3Service` and the ordered pipeline (mint identifiers → accept → resolve → route → govern → read body → admit → authenticate → decode → authorize → dispatch → encode → stamp identifiers) | A request reached the wrong stage, or you are moving a stage — the module docs say which positions are load-bearing |
+| `src/service.rs` | `S3Service` and the ordered pipeline (mint identifiers and read the clock → accept → resolve → route → govern → read body → admit → authenticate → decode → authorize → dispatch → encode → stamp the framework headers) | A request reached the wrong stage, or you are moving a stage — the module docs say which positions are load-bearing |
 | `src/dispatch.rs` | Codec-aware erasure of one `(operation, backend)` pair, and the per-operation table | A request routes but cannot be decoded, or you are wondering why the body is offered as a stream first |
 | `src/adapt.rs` | The `tower::Service` and `hyper::service::Service` implementations | You are wiring the service into a server, or wondering why `Error = Infallible` |
 | `src/assembly.rs` | `AssemblyError` and the `asm-*` `RuleRef` every refusal carries | You are adding an assembly-time rule; it needs a rule reference |
-| `src/render.rs` | The one place any refusal becomes an `<Error>` document | You are adding a stage that can refuse, or checking that a rejection body echoes nothing |
+| `src/render.rs` | The one place any refusal becomes an `<Error>` document; `document()` is that document without a head, for the 200-then-fail path that has none | You are adding a stage that can refuse, checking that a rejection body echoes nothing, or asking where a refusal's own headers are written |
+| `src/stamp.rs` | The four headers the framework guarantees on **every** response — `x-amz-request-id`, `x-amz-id-2`, `Server`, `Date` — written once and last, plus `is_reserved`, the complement a backend may not set | A response is missing `Date` or `Server`, or you are asking which headers a backend is refused and how |
 | `src/trace.rs` | `RequestId`, `HostId`, `RequestTrace`, `TraceSource`, `MintedTraces`, `FixedTrace`; one identifier per request, minted server-side | A response is missing `x-amz-request-id`, a case needs a pinned identifier, or you are asking why a source cannot echo one the caller sent |
 | `src/wire.rs` | `WireResponse`: a drained response with its **header order preserved** | You are asserting on a response, above all in the conformance runner |
 | `src/clock.rs` | `Clock`, `FixedClock`; one reading per request | A case needs a fixed timestamp, or you are tempted to read the clock twice |
@@ -60,3 +61,15 @@ everything a consumer needs so that nothing downstream depends on `-core`, `-sig
   case that wanted to assert the literal identifier cannot until `crates/conformance` installs one.
 - **`x-amz-id-2` is 32 hexadecimal digits, not AWS's longer base64-shaped token.** Opaque either
   way; the closed alphabet is worth more here than the resemblance. See `src/trace.rs`.
+- **A refusal to a `HEAD` still carries the `<Error>` document.** `render` does not know the
+  method, and the refusal path never reaches `EncodedResponse::enforce_http_invariants`, which is
+  where the "a `HEAD` response has no content" rule lives for the success path. So the second
+  exchange of `c-cond-0023` — the same 412 under `HEAD`, asserting `size = 0` — stays red for a
+  reason unrelated to what a `HandlerError` can express. Closing it means threading the request
+  method into `render`, which changes its public signature; recorded rather than done here.
+- **`Server` is the bare product name.** No version, deliberately: see the security note in
+  `src/stamp.rs`. A deployment that wants a different name has no knob for it yet — that would be a
+  `ServiceBuilder` option, and nothing has asked for one.
+- **`Date` is omitted rather than wrong when the clock reading cannot be an `IMF-fixdate`.** Only
+  reachable with a `FixedClock` set outside the four-digit year range; the system clock cannot get
+  there.

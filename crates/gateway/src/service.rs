@@ -44,9 +44,12 @@
 //!
 //! # Why the clock is read once
 //!
-//! At the top, before acceptance, and never again. Two readings inside one request let the skew
-//! check and the expiry check straddle a second boundary, so a presigned URL can be inside its
-//! window when it is admitted and outside it when its lifetime is computed.
+//! At the top, before acceptance, and never again — the reading is taken in [`S3Service::call`] and
+//! passed into the pipeline, which has no way to take another. Two readings inside one request let
+//! the skew check and the expiry check straddle a second boundary, so a presigned URL can be inside
+//! its window when it is admitted and outside it when its lifetime is computed. The same reading is
+//! what `crate::stamp` writes into the `Date` header, so the instant a caller is told about is the
+//! instant its signature was judged against.
 //!
 //! # Why `Service::Error` is `Infallible`
 //!
@@ -61,7 +64,9 @@ use bytes::Bytes;
 use http::{Request, Response, StatusCode};
 use rustfs_gateway_core::{EncodedResponse, MetaView, ResponseBody, RouteRequestParts, Router, dispatch::NOT_REGISTERED_MESSAGE};
 use rustfs_gateway_http::{Limits, WireRequest};
-use rustfs_gateway_sig::{Admission, PayloadMode, RawQuery, SecurityFloor, TrailerSet, Verdict, WireView, detect_credentials};
+use rustfs_gateway_sig::{
+    Admission, PayloadMode, RawQuery, RequestNow, SecurityFloor, TrailerSet, Verdict, WireView, detect_credentials,
+};
 use rustfs_gateway_stream::Body;
 use rustfs_gateway_types::ErrorCode;
 
@@ -136,15 +141,19 @@ impl S3Service {
         B::Data: Send,
         B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
     {
-        // One minting, at the top, beside the one reading of the clock. Everything below is handed
-        // the value; nothing below holds the source, so a second identifier cannot be minted.
+        // One minting and one reading of the clock, at the top, side by side. Everything below is
+        // handed both values; nothing below holds either source, so neither a second identifier nor
+        // a second instant can be produced — which is what lets the `Date` header and the skew
+        // window name the same moment.
         let trace = self.inner.traces.mint();
+        let now = self.inner.clock.now();
         let mut outcome = Outcome::new(&trace);
-        let mut response = self.run(request, &mut outcome).await;
-        // The one stamping site, on both paths. `render` has already written these on the refusal
-        // path and writes the identical bytes, so this is an overwrite with the same value there
-        // and the only writer on the success path — including over an encoder that wrote its own.
-        trace.apply(response.headers_mut());
+        let mut response = self.run(request, &mut outcome, now).await;
+        // The one stamping site, on both paths, and the last writer on either. `render` has already
+        // written the identifiers on the refusal path and writes the identical bytes, so this is an
+        // overwrite with the same value there; on the success path it is the only writer, including
+        // over an encoder that wrote its own.
+        crate::stamp::stamp(response.headers_mut(), &trace, now);
         self.inner.observer.on_response(&RequestEvent {
             request_id: trace.request_id(),
             operation: outcome.operation,
@@ -164,15 +173,12 @@ impl S3Service {
         self.call(Request::from_parts(parts, http_body_util::Full::new(body))).await
     }
 
-    async fn run<B>(&self, request: Request<B>, outcome: &mut Outcome<'_>) -> Response<Body>
+    async fn run<B>(&self, request: Request<B>, outcome: &mut Outcome<'_>, now: RequestNow) -> Response<Body>
     where
         B: http_body::Body + Send + 'static,
         B::Data: Send,
         B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
     {
-        // One reading, at the top. Nothing below reads the clock again.
-        let now = self.inner.clock.now();
-
         // `WireRequest` publishes no way back to the header map — that is the boundary it exists to
         // draw — while `SecurityFloor` and the canonical request are defined over the raw map. The
         // copy is taken before acceptance and used only after it has succeeded, so what is held is
