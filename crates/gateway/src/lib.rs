@@ -113,6 +113,12 @@ pub use rustfs_gateway_core::{
     MissingHandlers, Operation, OperationCodec, OperationSet, OperationSpec, ParamKind, PreAuthError, Predicate, Req,
     RequestBody, RequiredParam, ResourceShape, Resp, ResponseBody, ResponseOverride, RouteEntry, RouteSelector, TargetKind,
 };
+// The pagination contract. Found unreachable by check_shared_reachable.sh the moment that
+// guard existed — the fourth contract in a row written for backends and left where no
+// backend could see it. key_count is the KeyCount = Contents + CommonPrefixes rule that
+// made OpenDAL page forever when a listing got it wrong.
+pub use rustfs_gateway_core::ops::shared::pagination::{CursorKind, CursorSpec, MAX_CURSOR_BYTES, key_count};
+
 // The conditional-request and entity-tag contracts, exported for the same reason as
 // copy_source below: the conformance fixture had written its own `evaluate_conditions`
 // by hand, because it could not reach this one. That mirror got strong/weak comparison

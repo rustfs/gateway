@@ -77,8 +77,9 @@ use std::sync::{Arc, Mutex};
 
 use rustfs_gateway::dto;
 use rustfs_gateway::{
-    BucketName, ByteStream, ChecksumAlgorithm, ChecksumSpec, ETag, ErrorCode, Handler, HandlerError, HandlerResult, ObjectKey,
-    Req, Resp, Timestamp, collect,
+    BucketName, ByteStream, ChecksumAlgorithm, ChecksumSpec, ConditionalOutcome, ETag, ErrorCode, Handler, HandlerError,
+    HandlerResult, ObjectKey, ObjectValidators, PreconditionRejection, Preconditions, Req, RequestKind, Resp, Timestamp, collect,
+    evaluate, parse_conditional_etag,
 };
 
 /// The canonical user id every listing reports as the owner.
@@ -579,83 +580,70 @@ fn require_bucket(fixture: &Fixture, bucket: &BucketName) -> Result<(), HandlerE
     Err(HandlerError::new(ErrorCode::NO_SUCH_BUCKET, "The specified bucket does not exist"))
 }
 
-/// The object, or `NoSuchKey`.
-fn require_object<'a>(fixture: &'a Fixture, bucket: &BucketName, key: &ObjectKey) -> Result<&'a StoredObject, HandlerError> {
-    require_bucket(fixture, bucket)?;
-    fixture
-        .object(bucket.as_str(), key.as_str())
-        .ok_or_else(|| HandlerError::new(ErrorCode::NO_SUCH_KEY, "The specified key does not exist."))
-}
-
-/// Whether an `If-Match` / `If-None-Match` header value selects `etag`.
+/// The four conditional headers, read into the shape the exported contract evaluates.
 ///
-/// The header carries a list of entity tags, or `*`. Comparison is on the opaque tag with quotes
-/// and any `W/` prefix stripped, which is the strong comparison S3 applies to both headers.
-fn etag_list_matches(header: &str, etag: &str) -> bool {
-    header.split(',').map(str::trim).any(|candidate| {
-        if candidate == "*" {
-            return true;
-        }
-        let candidate = candidate
-            .strip_prefix("W/")
-            .or_else(|| candidate.strip_prefix("w/"))
-            .unwrap_or(candidate);
-        candidate.trim_matches('"') == etag
-    })
-}
-
-/// What the conditional headers decided.
+/// This backend does not decide anything here. Every rule that used to live in this file — the
+/// strong/weak split between the two entity-tag headers, the order the four are evaluated in, the
+/// `If-Match` suppression of `If-Modified-Since`, the future-clock exemption — is
+/// [`rustfs_gateway::evaluate`]'s, and the only job left is turning wire values into its inputs.
 ///
-/// `NotModified` is deliberately not a [`HandlerError`]. A `304` is a *success* in the sense the
-/// codec cares about — RFC 9110 gives it no content, so it carries the validators of the
-/// representation the client already holds and nothing else — and an error carries a code and a
-/// message, which the codec renders as an XML document with a `Content-Type` and a
-/// `Content-Length`. Answering `304` through the error path therefore produced a body the standard
-/// forbids and lost the `ETag` a conditional client comes back for.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Precondition {
-    /// Serve the representation.
-    Serve,
-    /// Answer `304`, with validators and no content.
-    NotModified,
-}
-
-/// The four conditional headers, evaluated in the RFC 9110 order.
+/// # Errors
 ///
-/// `read` selects the two answers that differ between a read and a write: a read answers a failed
-/// `If-None-Match` with [`Precondition::NotModified`], a write answers it with `412`. A write can
-/// therefore ignore the `Ok` value — it is only ever [`Precondition::Serve`].
-fn evaluate_conditions(
-    object: &StoredObject,
+/// A value the entity-tag grammar cannot carry is a `400` rather than a silently dropped
+/// condition: a guard the server ignores is a compare-and-swap the client believes it made.
+fn conditions(
     if_match: Option<&str>,
     if_unmodified_since: Option<i64>,
     if_none_match: Option<&str>,
     if_modified_since: Option<i64>,
-    read: bool,
-) -> Result<Precondition, HandlerError> {
-    if let Some(header) = if_match {
-        if !etag_list_matches(header, &object.etag) {
-            return Err(precondition("If-Match"));
-        }
-    } else if let Some(instant) = if_unmodified_since
-        && object.last_modified > instant
-    {
-        return Err(precondition("If-Unmodified-Since"));
+    now: i64,
+) -> Result<Preconditions, HandlerError> {
+    Ok(Preconditions {
+        if_match: conditional_tag(if_match)?,
+        if_none_match: conditional_tag(if_none_match)?,
+        if_modified_since: if_modified_since.map(Timestamp::from_secs),
+        if_unmodified_since: if_unmodified_since.map(Timestamp::from_secs),
+        // The instant the case pinned. Without it the contract cannot apply the rule that ignores
+        // an `If-Modified-Since` the server has not itself reached, and a client with a fast clock
+        // is told its cached copy is current forever.
+        observed_at: Some(Timestamp::from_secs(now)),
+    })
+}
+
+/// One conditional entity-tag header, read through the contract's own parser.
+///
+/// Accepts the quoted, weak and bare spellings, and `*`. The RFC 9110 *list* form is refused by
+/// [`parse_conditional_etag`] rather than reduced to its first member, so this backend refuses it
+/// too instead of answering a question the client did not ask.
+fn conditional_tag(value: Option<&str>) -> Result<Option<ETag>, HandlerError> {
+    let Some(value) = value else { return Ok(None) };
+    parse_conditional_etag(value)
+        .map(Some)
+        .map_err(|_| HandlerError::new(ErrorCode::INVALID_ARGUMENT, "The ETag value provided is not valid."))
+}
+
+/// The facts about a representation that a condition is evaluated against.
+///
+/// `None` is an absent representation rather than an error, because the contract needs to see the
+/// absence: `If-Match` against a key that is not there fails the *condition*, and answering `404`
+/// before evaluating would report the lookup instead.
+fn validators_of(object: Option<&StoredObject>) -> Result<ObjectValidators, HandlerError> {
+    match object {
+        None => Ok(ObjectValidators::default()),
+        Some(object) => Ok(ObjectValidators {
+            exists: true,
+            etag: Some(entity_tag(&object.etag)?),
+            last_modified: Some(Timestamp::from_secs(object.last_modified)),
+        }),
     }
-    if let Some(header) = if_none_match {
-        if etag_list_matches(header, &object.etag) {
-            if read {
-                return Ok(Precondition::NotModified);
-            }
-            return Err(precondition("If-None-Match"));
-        }
-    } else if let Some(instant) = if_modified_since
-        && read
-        && object.last_modified <= instant
-    {
-        return Ok(Precondition::NotModified);
-    }
-    Ok(Precondition::Serve)
+}
+
+/// A conditional request the contract refused as malformed rather than unsatisfied.
+///
+/// The wording is the contract's own constant. It is never built from request bytes — a message
+/// assembled from the value that was rejected is a way to echo it back into a log.
+fn refused(rejection: PreconditionRejection) -> HandlerError {
+    HandlerError::new(rejection.code().clone(), rejection.reason())
 }
 
 /// A `412`, worded as AWS words it.
@@ -665,12 +653,99 @@ fn evaluate_conditions(
 /// what the conditional cases are measuring. The condition is therefore *not* smuggled into the
 /// message: doing that would make the `<Message>` text differ too, and one failure would look like
 /// two.
-fn precondition(condition: &'static str) -> HandlerError {
-    let _ = condition;
+fn precondition() -> HandlerError {
     HandlerError::new(
         ErrorCode::PRECONDITION_FAILED,
         "At least one of the pre-conditions you specified did not hold",
     )
+}
+
+/// Evaluates a write's conditions against the representation it would replace.
+///
+/// Absence is handed to the contract rather than answered first: `If-Match` against a key that is
+/// not there fails the *condition*, and a backend that looks the key up before evaluating reports
+/// `NoSuchKey` for a client that asked for a conditional overwrite.
+fn guard_write(
+    object: Option<&StoredObject>,
+    if_match: Option<&str>,
+    if_none_match: Option<&str>,
+    now: i64,
+) -> Result<(), HandlerError> {
+    settle_write(object, &conditions(if_match, None, if_none_match, None, now)?)
+}
+
+/// The copy-source conditions, evaluated against the source representation.
+///
+/// A copy is a write however much its source side looks like a read: a failed `If-None-Match` is a
+/// `412` and never a `304`, which would tell the client its copy is up to date when no copy was
+/// ever made. The four names are spelled the same as the destination's and name a different
+/// object, which is why they are evaluated in their own call rather than merged into one.
+fn guard_copy_source(
+    found: &StoredObject,
+    if_match: Option<&str>,
+    if_unmodified_since: Option<i64>,
+    if_none_match: Option<&str>,
+    if_modified_since: Option<i64>,
+    now: i64,
+) -> Result<(), HandlerError> {
+    let conditions = conditions(if_match, if_unmodified_since, if_none_match, if_modified_since, now)?;
+    settle_write(Some(found), &conditions)
+}
+
+/// Turns the contract's verdict on a write into this backend's answer.
+fn settle_write(object: Option<&StoredObject>, conditions: &Preconditions) -> Result<(), HandlerError> {
+    let validators = validators_of(object)?;
+    match evaluate(conditions, &validators, RequestKind::Write).map_err(refused)? {
+        ConditionalOutcome::Proceed => Ok(()),
+        // A write is never answered `304`, and the contract guarantees it. The arm is spelled out
+        // rather than folded into a catch-all so that an outcome added later cannot arrive here as
+        // a silent success.
+        ConditionalOutcome::NotModified | ConditionalOutcome::PreconditionFailed => Err(precondition()),
+        // Named, and unreachable from this fixture: detecting a lost race is the storage layer's
+        // job, and a fixture behind one mutex never has two writers in flight to lose one.
+        ConditionalOutcome::Conflict => Err(conflict()),
+    }
+}
+
+/// A `409`, worded as AWS words it.
+///
+/// Nothing in this fixture produces one. The contract names the outcome and leaves detection to
+/// storage, and a fixture that serialises every exchange behind one mutex has no race to lose — so
+/// this arm is written to keep the outcome from being silently folded into the `412` it is
+/// specifically not, and `c-cond-0013` stays red rather than being answered by a guess.
+fn conflict() -> HandlerError {
+    HandlerError::new(
+        ErrorCode::CONDITIONAL_REQUEST_CONFLICT,
+        "The conditional request cannot succeed due to a conflicting operation against this resource.",
+    )
+}
+
+/// The contract's verdict on a read, with the two refusals already turned into errors.
+///
+/// Returns the outcome the caller still has to act on — [`ConditionalOutcome::Proceed`] or
+/// [`ConditionalOutcome::NotModified`]. The `404` is deliberately *not* raised here: the condition
+/// is evaluated against the absence first, so a missing key whose `If-Match` failed is a `412`,
+/// and only an unconditional miss is a `NoSuchKey`.
+fn guard_read(
+    object: Option<&StoredObject>,
+    if_match: Option<&str>,
+    if_unmodified_since: Option<i64>,
+    if_none_match: Option<&str>,
+    if_modified_since: Option<i64>,
+    now: i64,
+) -> Result<ConditionalOutcome, HandlerError> {
+    let conditions = conditions(if_match, if_unmodified_since, if_none_match, if_modified_since, now)?;
+    let validators = validators_of(object)?;
+    match evaluate(&conditions, &validators, RequestKind::Read).map_err(refused)? {
+        outcome @ (ConditionalOutcome::Proceed | ConditionalOutcome::NotModified) => Ok(outcome),
+        ConditionalOutcome::PreconditionFailed => Err(precondition()),
+        ConditionalOutcome::Conflict => Err(conflict()),
+    }
+}
+
+/// `NoSuchKey`, raised only once every condition has been evaluated against the absence.
+fn no_such_key() -> HandlerError {
+    HandlerError::new(ErrorCode::NO_SUCH_KEY, "The specified key does not exist.")
 }
 
 /// A resolved range: the window to send, and the `Content-Range` value that describes it.
@@ -1277,15 +1352,9 @@ async fn put_object(state: &Arc<Mutex<Fixture>>, input: dto::PutObjectInput) -> 
         .lock()
         .map_err(|_| HandlerError::internal_error("the fixture state was left poisoned by an earlier exchange"))?;
     require_bucket(&fixture, &input.bucket)?;
-    if let Some(existing) = fixture.object(input.bucket.as_str(), input.key.as_str()) {
-        let existing = existing.clone();
-        evaluate_conditions(&existing, input.if_match.as_deref(), None, input.if_none_match.as_deref(), None, false)?;
-    } else if input.if_match.is_some() {
-        // `If-Match` against a key that is not there fails the precondition rather than 404ing:
-        // the client asked for a conditional overwrite and there was nothing to match.
-        return Err(precondition("If-Match"));
-    }
     let now = fixture.now;
+    let existing = fixture.object(input.bucket.as_str(), input.key.as_str()).cloned();
+    guard_write(existing.as_ref(), input.if_match.as_deref(), input.if_none_match.as_deref(), now)?;
     let mut object = StoredObject::new(bytes, input.content_type.clone(), now);
     object.cache_control = input.cache_control.clone();
     object.content_disposition = input.content_disposition.clone();
@@ -1343,16 +1412,18 @@ async fn upload_part(state: &Arc<Mutex<Fixture>>, input: dto::UploadPartInput) -
 impl Stub {
     fn get_object(&self, input: &dto::GetObjectInput) -> HandlerResult<dto::GetObject> {
         let fixture = self.borrow()?;
-        let object = require_object(&fixture, &input.bucket, &input.key)?;
-        let condition = evaluate_conditions(
-            object,
+        require_bucket(&fixture, &input.bucket)?;
+        let found = fixture.object(input.bucket.as_str(), input.key.as_str());
+        let condition = guard_read(
+            found,
             input.if_match.as_deref(),
             input.if_unmodified_since.as_ref().map(|stamp| stamp.secs()),
             input.if_none_match.as_deref(),
             input.if_modified_since.as_ref().map(|stamp| stamp.secs()),
-            true,
+            fixture.now,
         )?;
-        if condition == Precondition::NotModified {
+        let Some(object) = found else { return Err(no_such_key()) };
+        if condition == ConditionalOutcome::NotModified {
             return Ok(Resp::with_status(
                 dto::GetObjectOutput {
                     e_tag: Some(entity_tag(&object.etag)?),
@@ -1411,16 +1482,18 @@ impl Stub {
 
     fn head_object(&self, input: &dto::HeadObjectInput) -> HandlerResult<dto::HeadObject> {
         let fixture = self.borrow()?;
-        let object = require_object(&fixture, &input.bucket, &input.key)?;
-        let condition = evaluate_conditions(
-            object,
+        require_bucket(&fixture, &input.bucket)?;
+        let found = fixture.object(input.bucket.as_str(), input.key.as_str());
+        let condition = guard_read(
+            found,
             input.if_match.as_deref(),
             input.if_unmodified_since.as_ref().map(|stamp| stamp.secs()),
             input.if_none_match.as_deref(),
             input.if_modified_since.as_ref().map(|stamp| stamp.secs()),
-            true,
+            fixture.now,
         )?;
-        if condition == Precondition::NotModified {
+        let Some(object) = found else { return Err(no_such_key()) };
+        if condition == ConditionalOutcome::NotModified {
             return Ok(Resp::with_status(
                 dto::HeadObjectOutput {
                     e_tag: Some(entity_tag(&object.etag)?),
@@ -1499,16 +1572,13 @@ impl Stub {
 
         let mut fixture = self.borrow()?;
         let (found, source_version) = read_copy_source(&fixture, &source)?;
-        evaluate_conditions(
+        guard_copy_source(
             &found,
             input.copy_source_if_match.as_deref(),
             input.copy_source_if_unmodified_since.as_ref().map(Timestamp::secs),
             input.copy_source_if_none_match.as_deref(),
             input.copy_source_if_modified_since.as_ref().map(Timestamp::secs),
-            // A copy is a write however much its source side looks like a read: a failed none-match
-            // is a 412 and never a 304, which would tell the client its copy is up to date when no
-            // copy was ever made.
-            false,
+            fixture.now,
         )?;
         require_bucket(&fixture, &input.bucket)?;
 
@@ -1531,15 +1601,10 @@ impl Stub {
         // The destination's own conditions, evaluated against the destination. The four names are
         // spelled the same as the source's and name a different representation; one evaluator over
         // both would overwrite an object the client guarded.
-        match fixture.object(input.bucket.as_str(), input.key.as_str()).cloned() {
-            Some(existing) => {
-                evaluate_conditions(&existing, input.if_match.as_deref(), None, input.if_none_match.as_deref(), None, false)?;
-            }
-            None if input.if_match.is_some() => return Err(precondition("If-Match")),
-            None => {}
-        }
-
         let now = fixture.now;
+        let existing = fixture.object(input.bucket.as_str(), input.key.as_str()).cloned();
+        guard_write(existing.as_ref(), input.if_match.as_deref(), input.if_none_match.as_deref(), now)?;
+
         let mut object = match metadata_from {
             // COPY is not a merge: every `x-amz-meta-*` and object attribute on the request is
             // discarded rather than layered over the source's.
@@ -1597,13 +1662,13 @@ impl Stub {
             ));
         }
         let (found, source_version) = read_copy_source(&fixture, &source)?;
-        evaluate_conditions(
+        guard_copy_source(
             &found,
             input.copy_source_if_match.as_deref(),
             input.copy_source_if_unmodified_since.as_ref().map(Timestamp::secs),
             input.copy_source_if_none_match.as_deref(),
             input.copy_source_if_modified_since.as_ref().map(Timestamp::secs),
-            false,
+            fixture.now,
         )?;
 
         // A zero-byte source has no span and is not an arithmetic edge: the copy of nothing is a
@@ -1758,13 +1823,8 @@ impl Stub {
             previous = part.part_number;
         }
         // A completion is a write, and it carries the same two conditional headers a write does.
-        match fixture.object(upload.bucket.as_str(), upload.key.as_str()).cloned() {
-            Some(existing) => {
-                evaluate_conditions(&existing, input.if_match.as_deref(), None, input.if_none_match.as_deref(), None, false)?;
-            }
-            None if input.if_match.is_some() => return Err(precondition("If-Match")),
-            None => {}
-        }
+        let existing = fixture.object(upload.bucket.as_str(), upload.key.as_str()).cloned();
+        guard_write(existing.as_ref(), input.if_match.as_deref(), input.if_none_match.as_deref(), fixture.now)?;
         let mut assembled = Vec::new();
         let mut digests = Vec::new();
         let mut part_checksums = Vec::new();
@@ -2363,13 +2423,28 @@ fn paginate(fixture: &Fixture, bucket: &str, prefix: &str, delimiter: Option<&st
 mod tests {
     use super::*;
 
+    /// Every spelling the exported parser accepts arrives as a tag rather than as a 400.
+    ///
+    /// This backend no longer decides what a conditional entity tag is: the assertions below are
+    /// about the wiring into [`parse_conditional_etag`], not about the grammar, which
+    /// `crates/core` owns and tests.
     #[test]
-    fn an_entity_tag_list_matches_on_the_opaque_tag_whatever_the_quoting() {
-        assert!(etag_list_matches("\"abc\"", "abc"));
-        assert!(etag_list_matches("W/\"abc\"", "abc"));
-        assert!(etag_list_matches("*", "abc"));
-        assert!(etag_list_matches("\"zzz\", \"abc\"", "abc"));
-        assert!(!etag_list_matches("\"zzz\"", "abc"));
+    fn a_conditional_tag_accepts_every_spelling_the_contract_accepts() {
+        assert!(matches!(conditional_tag(Some("\"abc\"")), Ok(Some(_))));
+        assert!(matches!(conditional_tag(Some("W/\"abc\"")), Ok(Some(_))));
+        assert!(matches!(conditional_tag(Some("abc")), Ok(Some(_))));
+        assert!(matches!(conditional_tag(Some("*")), Ok(Some(_))));
+        assert!(matches!(conditional_tag(None), Ok(None)));
+    }
+
+    /// The list form is refused rather than reduced to its first member.
+    ///
+    /// The hand-written mirror this file used to carry accepted a list and answered on whichever
+    /// member happened to match — an answer to a question the client did not ask. The contract
+    /// refuses it, and this backend refuses it with the contract.
+    #[test]
+    fn a_conditional_tag_refuses_the_list_form() {
+        assert!(conditional_tag(Some("\"zzz\", \"abc\"")).is_err());
     }
 
     #[test]

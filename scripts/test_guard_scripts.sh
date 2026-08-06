@@ -444,5 +444,20 @@ PYEOF
 expect_fail check_shared_members.sh \
     'a Members: line naming an operation that does not use the module' mut_members_claims_unused
 
+
+# -----------------------------------------------------------------------------
+# A shared contract only this workspace can reach is one every backend rewrites.
+# It happened to copy_source, to precondition, to Checksummer, and the guard
+# caught pagination the moment it existed. The control adds a fifth to prove the
+# guard is looking at the facade rather than at a list of the four known names.
+# -----------------------------------------------------------------------------
+
+mut_unexported_shared_item() {
+    printf '\n/// A contract no backend can reach.\npub fn brand_new_contract() {}\n' \
+        >>crates/core/src/ops/shared/pagination.rs
+}
+expect_fail check_shared_reachable.sh \
+    'a new public item in shared/ that the facade does not re-export' mut_unexported_shared_item
+
 printf '\n%s case(s), %s failure(s)\n' "$cases" "$failures"
 [[ "$failures" -eq 0 ]]

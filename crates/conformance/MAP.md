@@ -146,6 +146,25 @@ expected to be red, and the baseline exists to freeze how red rather than to exc
    from the model, so `x-amz-tagging` and `x-amz-tagging-directive` can be sent and never read
    back. `c-copy-0008` copies with `TaggingDirective: REPLACE` and its read-back reaches
    `GetObject`, which is the case that sees it.
+11. **`evaluate_range` is exported but not callable.** `RangeSelectors::range` is the *raw* `Range`
+   header (`Option<&str>`) and `RangeSelectors::if_range` is an `IfRange`. A backend can supply
+   neither: the generated decoder has already parsed the header into `ByteRange`, which the facade
+   does not re-export and which offers no way back to the text it came from; `Req` carries the
+   decoded input and no header map; and **no dto declares `if-range` at all**, so the value never
+   leaves the wire. The conditional half of the same module — `evaluate` over `Preconditions` and
+   `ObjectValidators` — is fully reachable and `fixture` now calls it, which is what makes the
+   contrast the finding rather than a preference. `c-range-0015` (`Range` and `partNumber` together
+   is a 400 the contract already states) and `c-range-0018` (a stale `If-Range` drops the range)
+   are the two cases that see it. The fixture does **not** re-derive either rule by hand: the
+   mirror it used to carry is exactly what this exercise removed.
+12. **The contract states a rule the decoder makes unreachable.** `Preconditions` documents that an
+   `If-Modified-Since` which is not an HTTP-date "must arrive here as `None`", because RFC 9110
+   requires the field to be ignored. The generated codec instead does
+   `value::timestamp(raw, TimestampFormat::HttpDate, "IfModifiedSince")?`, so the request is
+   refused with a `400` before any handler runs and the rule can never fire. `c-cond-0020` is the
+   case that sees it. The neighbouring `Range` binding is `value::byte_range(raw)` with no `?`,
+   which is the shape the date bindings would need. Two `Range` headers are likewise refused at the
+   wire layer where `RangeParse` would answer the whole object — `c-range-0017`.
 
 ### What this target cannot measure, and never pretends to
 
