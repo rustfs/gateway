@@ -90,6 +90,11 @@ impl Handler<PutObject> for Fs {
 }
 
 // ── third-party operations, declared the way a plugin would ──────────────────────────────────
+//
+// None of these implements `OperationCodec`, so they register through `handle_without_codec`.
+// That is the escape hatch's whole purpose: the registration rules below are about names, actions,
+// specs and floors, and they hold identically whether or not an operation can be read off the
+// wire. The codec half of registration is `tests/codec_binding.rs`.
 
 /// A well-formed third-party operation.
 struct AdminSetConfig;
@@ -299,7 +304,7 @@ fn a_namespaced_third_party_operation_registers() {
     let fs = Fs::new("us-east-1");
     let router = RouterBuilder::new()
         .handle::<PutObject, _>(Arc::clone(&fs))
-        .handle::<AdminSetConfig, _>(Arc::clone(&fs))
+        .handle_without_codec::<AdminSetConfig, _>(Arc::clone(&fs))
         .route(entry(
             "rustfs:AdminSetConfig",
             60,
@@ -388,7 +393,11 @@ fn an_unregistered_operation_is_not_implemented() {
 #[test]
 fn a_third_party_name_without_a_namespace_is_refused() {
     let fs = Fs::new("us-east-1");
-    let error = only_error(RouterBuilder::new().handle::<NotNamespaced, _>(Arc::clone(&fs)).build());
+    let error = only_error(
+        RouterBuilder::new()
+            .handle_without_codec::<NotNamespaced, _>(Arc::clone(&fs))
+            .build(),
+    );
     assert_eq!(error, RegistryError::NameNotNamespaced { name: "AdminThing" });
 }
 
@@ -396,7 +405,11 @@ fn a_third_party_name_without_a_namespace_is_refused() {
 #[test]
 fn a_third_party_may_not_take_an_aws_name() {
     let fs = Fs::new("us-east-1");
-    let error = only_error(RouterBuilder::new().handle::<TakesAwsName, _>(Arc::clone(&fs)).build());
+    let error = only_error(
+        RouterBuilder::new()
+            .handle_without_codec::<TakesAwsName, _>(Arc::clone(&fs))
+            .build(),
+    );
     assert_eq!(
         error,
         RegistryError::NameCollidesWithStandard {
@@ -410,7 +423,11 @@ fn a_third_party_may_not_take_an_aws_name() {
 #[test]
 fn a_third_party_may_not_take_an_aws_name_in_another_case() {
     let fs = Fs::new("us-east-1");
-    let error = only_error(RouterBuilder::new().handle::<TakesAwsNameCased, _>(Arc::clone(&fs)).build());
+    let error = only_error(
+        RouterBuilder::new()
+            .handle_without_codec::<TakesAwsNameCased, _>(Arc::clone(&fs))
+            .build(),
+    );
     assert_eq!(
         error,
         RegistryError::NameCollidesWithStandard {
@@ -426,7 +443,11 @@ fn a_third_party_may_not_take_an_aws_name_in_another_case() {
 #[test]
 fn an_operation_with_no_action_cannot_be_registered() {
     let fs = Fs::new("us-east-1");
-    let error = only_error(RouterBuilder::new().handle::<NoAuth, _>(Arc::clone(&fs)).build());
+    let error = only_error(
+        RouterBuilder::new()
+            .handle_without_codec::<NoAuth, _>(Arc::clone(&fs))
+            .build(),
+    );
     assert_eq!(error, RegistryError::MissingAuthRequirement { name: "acme:NoAuth" });
 }
 
@@ -434,7 +455,11 @@ fn an_operation_with_no_action_cannot_be_registered() {
 #[test]
 fn a_malformed_action_is_refused() {
     let fs = Fs::new("us-east-1");
-    let error = only_error(RouterBuilder::new().handle::<BadAction, _>(Arc::clone(&fs)).build());
+    let error = only_error(
+        RouterBuilder::new()
+            .handle_without_codec::<BadAction, _>(Arc::clone(&fs))
+            .build(),
+    );
     assert_eq!(
         error,
         RegistryError::MalformedAuthAction {
@@ -448,7 +473,11 @@ fn a_malformed_action_is_refused() {
 #[test]
 fn a_spec_naming_another_operation_is_refused() {
     let fs = Fs::new("us-east-1");
-    let error = only_error(RouterBuilder::new().handle::<SpecRenamed, _>(Arc::clone(&fs)).build());
+    let error = only_error(
+        RouterBuilder::new()
+            .handle_without_codec::<SpecRenamed, _>(Arc::clone(&fs))
+            .build(),
+    );
     assert_eq!(
         error,
         RegistryError::SpecNameMismatch {
@@ -465,7 +494,11 @@ fn a_spec_naming_another_operation_is_refused() {
 #[test]
 fn a_floor_naming_another_operation_is_refused() {
     let fs = Fs::new("us-east-1");
-    let error = only_error(RouterBuilder::new().handle::<FloorRenamed, _>(Arc::clone(&fs)).build());
+    let error = only_error(
+        RouterBuilder::new()
+            .handle_without_codec::<FloorRenamed, _>(Arc::clone(&fs))
+            .build(),
+    );
     assert_eq!(
         error,
         RegistryError::FloorNameMismatch {
@@ -512,9 +545,9 @@ fn a_second_registration_does_not_win() {
 fn the_build_reports_every_refusal_at_once() {
     let fs = Fs::new("us-east-1");
     let result = RouterBuilder::new()
-        .handle::<NotNamespaced, _>(Arc::clone(&fs))
-        .handle::<NoAuth, _>(Arc::clone(&fs))
-        .handle::<BadAction, _>(Arc::clone(&fs))
+        .handle_without_codec::<NotNamespaced, _>(Arc::clone(&fs))
+        .handle_without_codec::<NoAuth, _>(Arc::clone(&fs))
+        .handle_without_codec::<BadAction, _>(Arc::clone(&fs))
         .build();
     match result {
         Err(BuildError::Registration(errors)) => assert_eq!(errors.len(), 3, "{errors:?}"),
@@ -565,7 +598,7 @@ fn a_failed_rebuild_leaves_the_running_router_alone() {
 
     let reloaded = RouterBuilder::new()
         .handle::<GetBucketLocation, _>(Arc::clone(&fs))
-        .handle::<NoAuth, _>(Arc::clone(&fs))
+        .handle_without_codec::<NoAuth, _>(Arc::clone(&fs))
         .build();
     assert!(reloaded.is_err(), "the reload must be refused as a whole");
 

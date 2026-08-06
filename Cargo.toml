@@ -37,6 +37,11 @@ futures-core = "0.3"
 hex = "0.4"
 hmac = "0.13"
 http = "1.5"
+http-body = "1.1"                                   # the body trait every tower/hyper service is generic over
+http-body-util = "0.1"                              # `Limited` and `collect`; the facade does not hand-roll a body reader
+# default-features off: the facade only implements `hyper::service::Service`. It listens on
+# nothing and speaks no protocol version itself, so http1/http2/client/server belong to P7-02.
+hyper = { version = "1.11", default-features = false }
 md-5 = "0.11"                                       # entity tags, single-part and multipart alike
 memchr = "2.8"
 percent-encoding = "2.3"
@@ -50,12 +55,17 @@ smallvec = "1.15"
 subtle = "2.6"                                      # constant-time comparison
 syn = { version = "3.0", features = ["full", "extra-traits"] }
 thiserror = "2.0"
+# default-features off: `tower::Service` and nothing else. The middleware stack is P6's and the
+# server is P7-02's; pulling in the full `util` feature here would put layers on the facade's
+# public surface before anything has decided what they are.
+tower = { version = "0.5", default-features = false }
 zeroize = { version = "1.9", features = ["zeroize_derive"] }
 
 # Dev-only.
 insta = "1.48"
 prettyplease = "0.3"                                # renders the macro expansion goldens; no `cargo expand` needed
 proptest = "1.11"
+tokio = { version = "1.53", default-features = false, features = ["macros", "rt"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

@@ -102,8 +102,8 @@ SECRET_IDENT_RE='(secret|signing_key|session_token|private_key|derived_key|passp
 # change a reviewer must refuse to wave through. Set to the counts measured
 # after P2-04 landed the security floor: a ratchet that trails the tree by 80
 # cases is not a ratchet, it is a number nobody has to think about.
-COMPILE_FAIL_FLOOR=25
-NEGATIVE_LABEL_FLOOR=105
+COMPILE_FAIL_FLOOR=29
+NEGATIVE_LABEL_FLOOR=143
 
 status=0
 sensitive_seen=0
@@ -132,7 +132,11 @@ report() {
 sources=()
 while IFS= read -r file; do
     [[ -n "$file" ]] && sources+=("$file")
-done < <(git ls-files -- '*.rs' ':!:target/*' ':!:generated/*' ':!:*/generated/*' 2>/dev/null || true)
+# `--cached --others --exclude-standard` rather than a bare `git ls-files`: the bare form lists
+# only *tracked* files, so a brand-new file stays invisible to this guard right up until the
+# moment `git add -A` commits it. That is how CJK text reached commit 343f044 past a guard run
+# that had just reported success. `--exclude-standard` keeps ignored files out.
+done < <(git ls-files --cached --others --exclude-standard -- '*.rs' ':!:target/*' ':!:generated/*' ':!:*/generated/*' 2>/dev/null || true)
 
 if [[ "${#sources[@]}" -eq 0 ]]; then
     printf 'check_ct_eq: no tracked Rust sources yet — nothing to check (this guard activates with the P2 signature code).\n'

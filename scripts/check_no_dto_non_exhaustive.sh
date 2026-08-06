@@ -62,7 +62,11 @@ while IFS= read -r file; do
         { if (pending && $0 !~ /^[[:space:]]*(#|\/\/|$)/) pending = 0 }
         END { exit bad ? 1 : 0 }
     ' "$file" || status=1
-done < <(git ls-files -- 'generated/dto/*' 'generated/dto/**' 2>/dev/null || true)
+# `--cached --others --exclude-standard` rather than a bare `git ls-files`: the bare form lists
+# only *tracked* files, so a brand-new file stays invisible to this guard right up until the
+# moment `git add -A` commits it. That is how CJK text reached commit 343f044 past a guard run
+# that had just reported success. `--exclude-standard` keeps ignored files out.
+done < <(git ls-files --cached --others --exclude-standard -- 'generated/dto/*' 'generated/dto/**' 2>/dev/null || true)
 
 if [[ "$status" -ne 0 ]]; then
     cat >&2 <<'EOF'

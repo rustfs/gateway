@@ -41,6 +41,7 @@
 
 use std::sync::Arc;
 
+use crate::codec::OperationCodec;
 use crate::dispatch::{Router, RouterBuildError};
 use crate::handler::Handler;
 use crate::op::{Operation, is_standard_operation_name};
@@ -121,17 +122,35 @@ impl RouterBuilder {
         Self::default()
     }
 
-    /// Registers `implementation` as the handler for `O`.
+    /// Registers `implementation` as the handler for `O`, together with `O`'s wire codec.
     ///
-    /// The `(O, B)` pair is erased here into a closure. Refusals are collected and reported by
-    /// [`RouterBuilder::build`].
+    /// The `(O, B)` pair is erased here into a closure, and `O`'s [`OperationCodec`] into two
+    /// more. Refusals are collected and reported by [`RouterBuilder::build`].
     #[must_use]
     pub fn handle<O, B>(mut self, implementation: Arc<B>) -> Self
+    where
+        O: OperationCodec,
+        B: Handler<O>,
+    {
+        if let Err(error) = self.registry.register_handler::<O, B>(implementation) {
+            self.errors.push(error);
+        }
+        self
+    }
+
+    /// Registers `implementation` as the handler for an operation with no wire codec.
+    ///
+    /// See [`Registry::register_handler_without_codec`]: the operation routes and dispatches, and
+    /// nothing here can read it off the wire. Spelled differently from [`RouterBuilder::handle`]
+    /// so that a backend cannot reach that state by accident, and so `grep` finds every place it
+    /// was chosen.
+    #[must_use]
+    pub fn handle_without_codec<O, B>(mut self, implementation: Arc<B>) -> Self
     where
         O: Operation,
         B: Handler<O>,
     {
-        if let Err(error) = self.registry.register_handler::<O, B>(implementation) {
+        if let Err(error) = self.registry.register_handler_without_codec::<O, B>(implementation) {
             self.errors.push(error);
         }
         self

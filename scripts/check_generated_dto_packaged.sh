@@ -93,7 +93,11 @@ normalize() {
 # -----------------------------------------------------------------------------
 while IFS= read -r source; do
     [[ -n "$source" ]] || continue
-    # `git ls-files` still lists a path that has been deleted in the working tree
+# `--cached --others --exclude-standard` rather than a bare `git ls-files`: the bare form
+# lists only *tracked* files, so a brand-new file is invisible to this guard right up until
+# the moment `git add -A` commits it. That is exactly how CJK text reached commit 343f044
+# past a guard that had just reported success. Ignored files stay out.
+    # `git ls-files --cached --others --exclude-standard` still lists a path that has been deleted in the working tree
     # but not yet staged. Reading it would make the guard fail with a `sed` error
     # about an unrelated file, which is a worse diagnostic than skipping it.
     [[ -f "$source" ]] || continue

@@ -1,0 +1,120 @@
+// Copyright 2026 RustFS Team
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+//! How the assembled service is reached from `tower` and from `hyper`.
+//!
+//! Responsible for: the `tower::Service` and `hyper::service::Service` implementations for
+//! [`S3Service`], and [`ServiceFuture`], the boxed future both return.
+//! NOT responsible for: any protocol decision. Both implementations forward to
+//! [`S3Service::call`] and add nothing; if a behaviour differs between the two paths, it is a
+//! defect in one of the two libraries or in this file, and never a policy.
+//! Upstream: `crate::service`. Downstream: P7-02's server, and any tower stack.
+//!
+//! # Why `poll_ready` is always ready
+//!
+//! Back-pressure in this framework is per bucket and per identity, and `poll_ready` is handed no
+//! request at all — so a limit expressed there can only be per service, which is the one dimension
+//! an object store does not need. The [`crate::Governor`] runs where the bucket is known.
+//! Connection-level admission is the accept loop's, and that is P7-02's.
+//!
+//! # Why the future is boxed
+//!
+//! `S3Service::call` is an `async fn` whose future borrows the service for the duration of the
+//! call, and `tower::Service::Future` must be `'static`. Boxing it after cloning the service — one
+//! `Arc::clone` — is the only shape that satisfies both without an `unsafe` projection, which this
+//! crate forbids. It is one allocation per request, on top of the one the erased handler already
+//! pays.
+
+use std::convert::Infallible;
+use std::future::Future;
+use std::pin::Pin;
+use std::task::{Context, Poll};
+
+use http::{Request, Response};
+use rustfs_gateway_stream::Body;
+
+use crate::service::S3Service;
+
+/// The future both adapters return.
+pub type ServiceFuture = Pin<Box<dyn Future<Output = Result<Response<Body>, Infallible>> + Send>>;
+
+impl<B> tower::Service<Request<B>> for S3Service
+where
+    B: http_body::Body + Send + 'static,
+    B::Data: Send,
+    B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+{
+    type Response = Response<Body>;
+    /// Never returned. See the module documentation for why the type is spelled this way rather
+    /// than left open.
+    type Error = Infallible;
+    type Future = ServiceFuture;
+
+    fn poll_ready(&mut self, _context: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn call(&mut self, request: Request<B>) -> Self::Future {
+        let service = self.clone();
+        Box::pin(async move { Ok(service.call(request).await) })
+    }
+}
+
+impl<B> hyper::service::Service<Request<B>> for S3Service
+where
+    B: http_body::Body + Send + 'static,
+    B::Data: Send,
+    B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+{
+    type Response = Response<Body>;
+    /// Never returned, for the same reason as the tower implementation: hyper answers an `Err` by
+    /// dropping the connection, so a `400` would reach the client as a reset.
+    type Error = Infallible;
+    type Future = ServiceFuture;
+
+    fn call(&self, request: Request<B>) -> Self::Future {
+        let service = self.clone();
+        Box::pin(async move { Ok(service.call(request).await) })
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
+mod tests {
+    use super::*;
+
+    /// Negative — the error type is `Infallible`, so "return `Err` from `call`" is not a path that
+    /// exists rather than one nobody takes. This is a compile-time assertion.
+    #[test]
+    fn neither_adapter_can_return_an_error() {
+        fn assert_infallible<S, R>()
+        where
+            S: tower::Service<R, Error = Infallible>,
+        {
+        }
+        assert_infallible::<S3Service, Request<http_body_util::Full<bytes::Bytes>>>();
+    }
+
+    /// Negative — `poll_ready` never reports pending, so a tower stack cannot mistake this service
+    /// for one that applies back-pressure.
+    #[test]
+    fn poll_ready_is_always_ready() {
+        let mut service = crate::tests::minimal_service();
+        let waker = std::task::Waker::noop();
+        let mut context = Context::from_waker(waker);
+        let ready =
+            <S3Service as tower::Service<Request<http_body_util::Full<bytes::Bytes>>>>::poll_ready(&mut service, &mut context);
+        assert!(matches!(ready, Poll::Ready(Ok(()))));
+    }
+}

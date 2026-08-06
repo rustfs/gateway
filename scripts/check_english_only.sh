@@ -92,7 +92,7 @@ if allowance_file and allowance_file.is_file():
             allowances.add(line)
 
 tracked = subprocess.run(
-    ["git", "ls-files"], capture_output=True, text=True, check=False
+    ["git", "ls-files", "--cached", "--others", "--exclude-standard"], capture_output=True, text=True, check=False
 ).stdout.splitlines()
 
 bad = False
@@ -132,4 +132,8 @@ organisation where Chinese is allowed; this is not that repository.
 EOF
 fi
 
+# `--cached --others --exclude-standard` rather than a bare `git ls-files`: the bare form
+# lists only *tracked* files, so a brand-new file is invisible to this guard right up until
+# the moment `git add -A` commits it. That is exactly how CJK text reached commit 343f044
+# past a guard that had just reported success. Ignored files stay out.
 exit "$status"

@@ -101,7 +101,11 @@ report() {
 while IFS= read -r file; do
     [[ -z "$file" ]] && continue
     report "$file" "lives in a planning/notes directory"
-done < <(git ls-files -- "${PLANNING_DIRS[@]}" 2>/dev/null || true)
+# `--cached --others --exclude-standard` rather than a bare `git ls-files`: the bare form lists
+# only *tracked* files, so a brand-new file stays invisible to this guard right up until the
+# moment `git add -A` commits it. That is how CJK text reached commit 343f044 past a guard run
+# that had just reported success. `--exclude-standard` keeps ignored files out.
+done < <(git ls-files --cached --others --exclude-standard -- "${PLANNING_DIRS[@]}" 2>/dev/null || true)
 
 # Detector 2: filenames that read like an agent working note.
 while IFS= read -r file; do
@@ -110,7 +114,7 @@ while IFS= read -r file; do
     if printf '%s' "$base" | grep -Eq "$PLANNING_NAME_RE"; then
         report "$file" "filename reads like a working note"
     fi
-done < <(git ls-files -- ':(icase)*.md' 2>/dev/null || true)
+done < <(git ls-files --cached --others --exclude-standard -- ':(icase)*.md' 2>/dev/null || true)
 
 if [[ "$status" -ne 0 ]]; then
     cat >&2 <<'EOF'

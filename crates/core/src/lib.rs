@@ -53,6 +53,13 @@
 //! seventy-three compiles and runs. Nothing has 73 default methods, and nothing needs a bundle
 //! trait: completeness is asserted where a deployment wants it, by `require`.
 //!
+//! Each `handle` call also installs the operation's wire codec, because it is the only place that
+//! holds the operation type and its name at once. Everything above the registry then works from a
+//! name: `Registry::wire("GetObject")` yields the spec, the decoder, the handler and the encoder,
+//! all four from the same registration. An operation whose wire form this crate does not define —
+//! a dialect or an admin call — registers through `handle_without_codec`, which says so at the
+//! call site and is reported afterwards by `HandlerTable::names_without_codec`.
+//!
 //! Three properties hold this together. Everything else here exists to serve them.
 //!
 //! 1. **Routing is ordered, not disjoint.** `GET /bucket?acl&tagging` names two subresources and
@@ -96,8 +103,9 @@ pub use crate::op::{
     standard_operation_names,
 };
 pub use crate::registry::{
-    BuildError, ErasedHandler, ErasedRequest, ErasedResponse, HandlerTable, Invocation, MissingHandlers, OperationSet,
-    OperationSpec, ParamKind, Registry, RegistryError, RequiredParam, RouterBuilder, check_required,
+    BuildError, ErasedCodec, ErasedDecode, ErasedEncode, ErasedHandler, ErasedRequest, ErasedResponse, HandlerTable, Invocation,
+    MissingHandlers, OperationSet, OperationSpec, ParamKind, Registry, RegistryError, RequiredParam, RouterBuilder, WireEntry,
+    check_required,
 };
 pub use crate::route::{
     ArnForm, CompileError, CompiledRouter, Explanation, HostClass, OpId, Predicate, RequestShape, RouteBuildError, RouteEntry,

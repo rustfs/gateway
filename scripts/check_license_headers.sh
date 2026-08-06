@@ -89,7 +89,11 @@ while IFS= read -r file; do
             "$file" "$HEADER_WINDOW" >&2
         status=1
     fi
-done < <(git ls-files -- '*.rs' ':!:target/*' ':!:generated/*' ':!:*/generated/*' 2>/dev/null || true)
+# `--cached --others --exclude-standard` rather than a bare `git ls-files`: the bare form lists
+# only *tracked* files, so a brand-new file stays invisible to this guard right up until the
+# moment `git add -A` commits it. That is how CJK text reached commit 343f044 past a guard run
+# that had just reported success. `--exclude-standard` keeps ignored files out.
+done < <(git ls-files --cached --others --exclude-standard -- '*.rs' ':!:target/*' ':!:generated/*' ':!:*/generated/*' 2>/dev/null || true)
 
 if [[ "$checked" -eq 0 ]]; then
     printf 'check_license_headers: no tracked Rust sources to check.\n'

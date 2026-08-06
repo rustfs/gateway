@@ -210,7 +210,11 @@ mod tests {
     /// key in a non-Latin script must not be refused for its length in characters.
     #[test]
     fn multi_byte_text_is_accepted_unchanged() {
-        let raw = "目录/文件.txt";
+        // Written as escapes so the source stays ASCII while the bytes under test stay CJK,
+        // which is the case that actually turns up in object keys. Spelling it literally puts
+        // the file in breach of the English-only rule, which has no exemption for fixtures.
+        // U+76EE U+5F55 / U+6587 U+4EF6 — "directory/file" in Chinese.
+        let raw = "\u{76ee}\u{5f55}/\u{6587}\u{4ef6}.txt";
         assert_eq!(MARKER.accept(raw).expect("multi-byte text is legal"), raw);
     }
 

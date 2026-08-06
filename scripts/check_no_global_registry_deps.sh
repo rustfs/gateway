@@ -75,7 +75,11 @@ is_allowed() {
 manifests=()
 while IFS= read -r manifest; do
     [[ -n "$manifest" ]] && manifests+=("$manifest")
-done < <(git ls-files -- 'Cargo.toml' '*/Cargo.toml' 2>/dev/null || true)
+# `--cached --others --exclude-standard` rather than a bare `git ls-files`: the bare form lists
+# only *tracked* files, so a brand-new file stays invisible to this guard right up until the
+# moment `git add -A` commits it. That is how CJK text reached commit 343f044 past a guard run
+# that had just reported success. `--exclude-standard` keeps ignored files out.
+done < <(git ls-files --cached --others --exclude-standard -- 'Cargo.toml' '*/Cargo.toml' 2>/dev/null || true)
 
 if [[ "${#manifests[@]}" -eq 0 ]]; then
     printf 'check_no_global_registry_deps: no tracked Cargo.toml found under %s\n' "$ROOT_DIR" >&2

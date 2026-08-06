@@ -4,10 +4,12 @@ Which S3 operation a request names, what that operation requires of it, whether 
 handles it, and how it is called. P4-01 landed the ordered route table and its build-time overlap
 decision, P4-02 split parameter validation from routing, P4-03 added the compiled lookup form, and
 P4-06 added the operation trait, the per-operation handler, and the registry that erases the backend
-type. Nothing on the routing path is `async`, nothing there holds a store, and nothing there can say
-a word about a request that is not a compile-time constant — routing runs before the signature is
-verified. `src/registry/handlers.rs` is the one file that awaits, and it runs after the floor has
-admitted the request.
+type — and, with the generated codecs, the operation type too: one `register_handler::<O, B>` call
+installs the decoder, the handler and the encoder in a single entry, which is what lets a layer
+holding only an operation *name* turn wire bytes into an answer. Nothing on the routing path is
+`async`, nothing there holds a store, and nothing there can say a word about a request that is not a
+compile-time constant — routing runs before the signature is verified. `src/registry/handlers.rs` is
+the one file that awaits, and it runs after the floor has admitted the request.
 
 ## Files
 
@@ -34,9 +36,10 @@ admitted the request.
 | `src/ops/shared/etag.rs` | Which RFC 9110 comparison each conditional entity-tag header uses, and how its value is read | An entity-tag condition matched when it should not have, or the other way round |
 | `src/ops/shared/precondition.rs` | The fixed precondition order, the two places S3 departs from RFC 9110, and the 200/206/416 range decision | You are wiring a conditional or ranged operation, or a 304/412/416 came out wrong |
 | `src/handler.rs` | `Handler<O>`, `Req`, `Resp`, `HandlerError`, `BoxFuture` | You are implementing a backend |
-| `src/registry/mod.rs` | `OperationSpec`, `RequiredParam`, `check_required`, `Registry` | You are adding a required parameter |
+| `src/registry/mod.rs` | `OperationSpec`, `RequiredParam`, `check_required`, `Registry`, `WireEntry` — and `register_handler`, the one call that installs a handler and a codec together | You are adding a required parameter, or looking an operation up by name |
 | `src/registry/reject.rs` | `RegistryError` and the seven rules an operation passes before it registers | A registration was refused |
-| `src/registry/handlers.rs` | The erasure closure, `HandlerTable`, `Invocation` — the only file here that awaits | You are wiring the pipeline to the handlers |
+| `src/registry/handlers.rs` | The erasure closure, `HandlerTable` (handler **and** codec in one entry), `Invocation` — the only file here that awaits | You are wiring the pipeline to the handlers |
+| `src/registry/codecs.rs` | `ErasedDecode`, `ErasedEncode`, `ErasedCodec` — where the operation type disappears, so a `&str` reaches `decode` and `encode` | You are wiring the pipeline to the codecs |
 | `src/registry/opset.rs` | `OperationSet`, `MissingHandlers` and its one-line message | You are asserting completeness |
 | `src/registry/builder.rs` | `RouterBuilder`: `handle`, `route`, `require`, `build`, and `BuildError` | You are assembling a service |
 | `src/error.rs` | `PreAuthError` and the closed pre-authentication status set | You are raising an error before authn |
@@ -46,6 +49,7 @@ admitted the request.
 | `tests/hot_path.rs` | 7 positive / 10 negative — cost, the key ceiling, and the differential generator | You changed `compiled.rs` or `mask.rs` |
 | `tests/golden.rs` + `tests/golden/route-table.txt` | The whole table as text, so a routing change shows up in a diff | Codegen changed |
 | `tests/registration.rs` | 7 positive / 17 negative — the registration rules, erasure, `require`, the 501 | You changed anything under `registry/` |
+| `tests/codec_binding.rs` | 3 positive / 6 negative — a name reaching decode, handler and encode; the uncoded escape hatch; what a duplicate cannot undo | You changed `registry/codecs.rs` or the registration signature |
 | `tests/purity_guard.rs` | 12 source guards: no `async` off the allowance list, no store, no leaked message, one `Box::pin`, file shape | You added a file or a public method |
 | `tests/precondition_range.rs` | 17 positive / 27 negative plus three properties — every conditional outcome, both S3 deviations, and the range boundaries | You changed anything under `ops/shared/` |
 
@@ -78,6 +82,18 @@ admitted the request.
   has to call `B::call`, so it has to know `B` — which is why link-time collection cannot work
   (measured `error[E0117]`, ADR-0003). Erasing `B` in a closure keeps `Router` non-generic, which is
   what lets one process hold two routers over two backends.
+- **The codec is erased in the same call, and lives in the same entry.** `OperationCodec::decode`
+  and `encode` are generic per operation; every layer above the registry holds a `&str`.
+  `register_handler::<O, B>` is the only place that has the type and the name at once, so the bridge
+  is built there — and into one `HandlerTable` entry, because two maps keyed by the same name are
+  two maps that can disagree. There is no method that attaches a codec to an entry that already
+  exists, and a duplicate registration cannot strip one off.
+- **`register_handler` requires `O: OperationCodec`; the codec-less path is spelled out.** The
+  default is the one that can actually answer a request. An operation whose wire form this crate does
+  not define registers through `register_handler_without_codec` /
+  `RouterBuilder::handle_without_codec`, which `grep` finds and which
+  `HandlerTable::names_without_codec` reports afterwards — so a facade refuses to start rather than
+  routing an operation nothing can read.
 - **Completeness is a run-time assertion, not a bundle trait.** A bundle supertrait produced 73
   `E0277` errors for one missing implementation and was not dyn compatible.
   `require(&OperationSet)` produces one sentence: `backend is missing handlers for: A, B (2 of 73)`.
@@ -96,11 +112,24 @@ admitted the request.
   Associated types cannot have defaults, so adding one is a breaking change for every operation
   module. If P5 is to run in parallel, P4-05 should land its associated type first, or accept a
   mechanical edit across every operation file.
-- **The codecs exist; the erasure closure has not been rewired to them yet.** `OperationCodec` is a
-  separate trait from `Operation` rather than two more methods on it, so a third party can still
-  name an operation without writing a codec. The erased payload is still `Box<dyn Any + Send>`:
-  changing it to "wire request in, wire response out" is the next step and touches
-  `registry/handlers.rs` alone.
+- **`register_handler` now requires `O: OperationCodec`, and that is a public API tightening.**
+  `OperationCodec` stays a separate trait from `Operation` — a third party may still *name* an
+  operation without writing a codec — but registering a handler for one now takes the explicitly
+  named `register_handler_without_codec`. Every in-tree call site is an AWS operation and all
+  sixteen have generated codecs, so nothing moved except `tests/registration.rs`, whose third-party
+  fixtures deliberately have no codec. The alternative — leaving `register_handler` at
+  `O: Operation` and adding a codec-carrying sibling — was rejected because
+  `#[rustfs_gateway_macros::handlers]` emits `RouterBuilder::handle`, so the *default* path is the
+  one that must carry the codec or every macro-registered backend would assemble unserveable.
+- **The erased payload is still `Box<dyn Any + Send>`, and now both ends of it are pinned down.**
+  It holds a `Req<O>` on the way in and a `Resp<O>` on the way back, and what produces and consumes
+  those boxes is the codec erased from the same registration. A wrong box is answered
+  (`500 InternalError`), never panicked, on both the handler side and the encoder side.
+- **`ErasedEncode` takes no status parameter, unlike `OperationCodec::encode`.** The erased form is
+  handed a `Resp<O>`, which already carries the status the handler chose — the declared success
+  status, or a `206`/`200` it overrode. A second status argument would let the caller contradict the
+  handler with nothing to say which is right. A facade written against a three-argument encoder
+  needs the drop of that argument, and `tests/codec_binding.rs` pins the behaviour.
 - **`OperationCodec` decides the status from the handler's `Resp`, and applies the RFC 9110 body
   invariants last.** A `HEAD` response and a `1xx`/`204`/`205`/`304` lose their body in
   `EncodedResponse::enforce_http_invariants`, once, for every operation — never per operation.
@@ -142,7 +171,7 @@ admitted the request.
 ## Verify
 
 ```bash
-cargo test -p rustfs-gateway-core                                  # 80 tests, 59 negative / 21 positive
+cargo test -p rustfs-gateway-core                                  # 200 tests
 cargo clippy -p rustfs-gateway-core --all-targets -- -D warnings
 cargo fmt --all --check
 bash scripts/check_license_headers.sh

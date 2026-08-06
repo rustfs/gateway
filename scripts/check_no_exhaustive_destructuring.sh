@@ -63,14 +63,18 @@ is_allowed() {
 # only in qualified position (`...::Output {`), which is how a dto is actually named
 # at a destructuring site, while a local `struct Output` in some unrelated module
 # stays out of scope.
-dto_names="$(git ls-files -- 'generated/dto/*' 'generated/dto/**' 2>/dev/null |
+# `--cached --others --exclude-standard` rather than a bare `git ls-files`: the bare form lists
+# only *tracked* files, so a brand-new file stays invisible to this guard right up until the
+# moment `git add -A` commits it. That is how CJK text reached commit 343f044 past a guard run
+# that had just reported success. `--exclude-standard` keeps ignored files out.
+dto_names="$(git ls-files --cached --others --exclude-standard -- 'generated/dto/*' 'generated/dto/**' 2>/dev/null |
     xargs grep -ho '^pub struct [A-Za-z0-9_]*' 2>/dev/null |
     sed 's/^pub struct //' |
     grep -vxE 'Input|Output' |
     sort -u || true)"
 
 # Flat aliases (`GetBucketLocationOutput`) are ordinary names and match unqualified.
-flat_names="$(git ls-files -- 'generated/dto/flat.rs' 2>/dev/null |
+flat_names="$(git ls-files --cached --others --exclude-standard -- 'generated/dto/flat.rs' 2>/dev/null |
     xargs grep -hoE 'as [A-Za-z0-9_]+' 2>/dev/null |
     sed 's/^as //' |
     sort -u || true)"
@@ -104,7 +108,7 @@ while IFS= read -r file; do
             status=1
         fi
     done < <(grep -nE "(let|if let|while let|match)[^=]*(${pattern})[[:space:]]*\{" "$file" 2>/dev/null || true)
-done < <(git ls-files -- '*.rs' 2>/dev/null || true)
+done < <(git ls-files --cached --others --exclude-standard -- '*.rs' 2>/dev/null || true)
 
 if [[ "$status" -ne 0 ]]; then
     cat >&2 <<'EOF'

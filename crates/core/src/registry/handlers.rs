@@ -17,12 +17,12 @@
 //! Responsible for: [`erase`] — turning `(O, B)` into a closure that mentions neither — the
 //! [`HandlerTable`] those closures live in, and [`Invocation`], the typed future that hands the
 //! answer back without a second heap allocation.
-//! NOT responsible for: deciding whether a registration is allowed (`super::reject`), route
-//! conflicts (`crate::route`), or any pre-authentication decision. Nothing here runs before the
-//! security floor has admitted the request.
-//! Upstream: `crate::handler`, `crate::op`. Downstream: [`super::Registry`], and P4-04's pipeline,
-//! which is what will call [`HandlerTable::invoke_erased`] with a wire request once the generated
-//! codecs exist.
+//! NOT responsible for: erasing the codec (`super::codecs`), deciding whether a registration is
+//! allowed (`super::reject`), route conflicts (`crate::route`), or any pre-authentication
+//! decision. Nothing here runs before the security floor has admitted the request.
+//! Upstream: `crate::handler`, `crate::op`. Downstream: [`super::Registry`], and the pipeline,
+//! which reaches a handler by name through [`HandlerTable::invoke_erased`] with the payload the
+//! entry's own decoder produced.
 //!
 //! # What is erased, and what is not
 //!
@@ -32,11 +32,17 @@
 //! time is what keeps `Router` and, above it, the service non-generic: one process can hold two
 //! routers over two different backends, which RustFS already does in its end-to-end tests.
 //!
-//! The payload is `Box<dyn Any + Send>` for one reason and it is temporary: the erased closure
-//! should take a wire request and return a wire response, but `Operation::decode` and
-//! `Operation::encode` arrive with the generated codecs. Until then the pipeline hands over an
-//! already-decoded `Req<O>` in a box, and the closure hands back a `Resp<O>` in a box. The
-//! signature changes when the codecs land; [`crate::handler::Handler`] and the macro do not.
+//! The payload stays `Box<dyn Any + Send>`, and it is a `Req<O>` on the way in and a `Resp<O>` on
+//! the way back. What produces and consumes those boxes is the codec erased from the *same*
+//! registration, held in the same entry here (`super::codecs`), so "which type is in this box" has
+//! one answer per operation and it was fixed at registration.
+//!
+//! # Why the codec lives in this table rather than beside it
+//!
+//! Two maps keyed by the same name are two maps that can disagree: an entry in one and not the
+//! other is a handler that routes and cannot be read, or a decoder whose answer nothing will
+//! receive. One entry holding both makes that state unrepresentable — [`HandlerTable::insert`]
+//! takes them together, and there is no method that adds either half to an entry that exists.
 //!
 //! # One `Box::pin` per invocation
 //!
@@ -55,6 +61,7 @@ use std::task::{Context, Poll};
 
 use crate::handler::{BoxFuture, Handler, HandlerError, Req, Resp};
 use crate::op::Operation;
+use crate::registry::codecs::{ErasedCodec, ErasedDecode, ErasedEncode};
 
 /// A `Req<O>` whose `O` the registry has forgotten.
 pub type ErasedRequest = Box<dyn Any + Send>;
@@ -133,10 +140,21 @@ impl<O: Operation> fmt::Debug for Invocation<O> {
     }
 }
 
-/// The erased handlers of one backend, by operation name.
+/// One registration: the erased handler, and the erased codec it was registered with.
+///
+/// Private, and there is no constructor that takes one half — the only way to make one is the
+/// single [`HandlerTable::insert`] call inside `super::Registry`, which is what makes the pair
+/// inseparable.
+#[derive(Clone)]
+struct Entry {
+    handler: ErasedHandler,
+    codec: Option<ErasedCodec>,
+}
+
+/// The erased handlers of one backend, with their codecs, by operation name.
 #[derive(Clone, Default)]
 pub struct HandlerTable {
-    entries: BTreeMap<&'static str, ErasedHandler>,
+    entries: BTreeMap<&'static str, Entry>,
 }
 
 impl HandlerTable {
@@ -146,15 +164,20 @@ impl HandlerTable {
         Self::default()
     }
 
-    /// Stores one erased handler.
+    /// Stores one erased handler together with the codec it was registered with.
+    ///
+    /// The two arrive in one call because they must: an entry can hold a handler with a codec or a
+    /// handler without one, and there is no third state and no later call that could produce one.
+    /// `None` is the operation whose wire form this crate does not define — a dialect operation
+    /// registered through `super::Registry::register_handler_without_codec`.
     ///
     /// Returns whether the name was free. The caller decides what a taken name means; the registry
     /// treats it as [`super::RegistryError::Duplicate`], never as an overwrite.
-    pub(crate) fn insert(&mut self, name: &'static str, handler: ErasedHandler) -> bool {
+    pub(crate) fn insert(&mut self, name: &'static str, handler: ErasedHandler, codec: Option<ErasedCodec>) -> bool {
         if self.entries.contains_key(name) {
             return false;
         }
-        self.entries.insert(name, handler);
+        self.entries.insert(name, Entry { handler, codec });
         true
     }
 
@@ -162,6 +185,53 @@ impl HandlerTable {
     #[must_use]
     pub fn contains(&self, name: &str) -> bool {
         self.entries.contains_key(name)
+    }
+
+    /// The erased handler registered under a name.
+    #[must_use]
+    pub fn handler(&self, name: &str) -> Option<&ErasedHandler> {
+        self.entries.get(name).map(|entry| &entry.handler)
+    }
+
+    /// The codec registered with that handler, when the operation has one.
+    #[must_use]
+    pub fn codec(&self, name: &str) -> Option<&ErasedCodec> {
+        self.entries.get(name)?.codec.as_ref()
+    }
+
+    /// Both halves of one entry, in one lookup.
+    ///
+    /// What [`super::Registry::wire`] is built on: asking for the handler and then for the codec
+    /// would search the map twice for an answer it already had, on the path every request takes.
+    pub(crate) fn pair(&self, name: &str) -> Option<(&ErasedHandler, Option<&ErasedCodec>)> {
+        let entry = self.entries.get(name)?;
+        Some((&entry.handler, entry.codec.as_ref()))
+    }
+
+    /// The decoder registered with that handler, when the operation has one.
+    #[must_use]
+    pub fn decoder(&self, name: &str) -> Option<&ErasedDecode> {
+        Some(self.codec(name)?.decoder())
+    }
+
+    /// The encoder registered with that handler, when the operation has one.
+    #[must_use]
+    pub fn encoder(&self, name: &str) -> Option<&ErasedEncode> {
+        Some(self.codec(name)?.encoder())
+    }
+
+    /// Every registered operation that has no codec, sorted.
+    ///
+    /// One call, so that an assembly-time check for "this operation would route and then have
+    /// nothing able to read it" is a loop somebody wrote once rather than a rule each caller
+    /// reimplements over [`HandlerTable::names`].
+    pub fn names_without_codec(&self) -> impl Iterator<Item = &'static str> {
+        self.entries
+            .iter()
+            .filter(|(_, entry)| entry.codec.is_none())
+            .map(|(name, _)| *name)
+            .collect::<Vec<_>>()
+            .into_iter()
     }
 
     /// How many operations have handlers.
@@ -187,7 +257,7 @@ impl HandlerTable {
     /// a 501, which is what makes a partial backend legal without a single default method.
     #[must_use]
     pub fn invoke<O: Operation>(&self, request: Req<O>) -> Option<Invocation<O>> {
-        let handler = self.entries.get(O::NAME)?;
+        let handler = self.handler(O::NAME)?;
         Some(Invocation {
             inner: handler(Box::new(request)),
             operation: PhantomData,
@@ -204,7 +274,7 @@ impl HandlerTable {
         name: &str,
         request: ErasedRequest,
     ) -> Option<BoxFuture<'static, Result<ErasedResponse, HandlerError>>> {
-        let handler = self.entries.get(name)?;
+        let handler = self.handler(name)?;
         Some(handler(request))
     }
 }
@@ -213,6 +283,7 @@ impl fmt::Debug for HandlerTable {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("HandlerTable")
             .field("operations", &self.names().collect::<Vec<_>>())
+            .field("without_codec", &self.names_without_codec().collect::<Vec<_>>())
             .finish()
     }
 }

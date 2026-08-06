@@ -98,6 +98,7 @@ mod scope;
 mod secret;
 mod signature;
 mod signed_headers;
+mod signer;
 pub mod timing;
 mod verdict;
 mod verifier;
@@ -145,6 +146,11 @@ pub use scope::{ExpectedScope, RegionSet, enforce_scope};
 pub use secret::{SafeToLog, SecretBytes, SessionToken, SigningKey, assert_safe_to_log};
 pub use signature::{CtBytes, Signature, SignatureMatch, VerifyRejection};
 pub use signed_headers::{AMZ_HEADER_PREFIX, SignedHeaderSet, UNSIGNED_HEADER_EXEMPTIONS};
+pub use signer::{
+    CHUNK_ALGORITHM, CHUNK_SIGNATURE_EXTENSION, ChunkSigner, SigV4Signer, SignedRequest, SignerError, SigningCredentials,
+    SigningRequest, SigningScope, TRAILER_ALGORITHM, Tamper, TamperComponent, X_AMZ_CONTENT_SHA256_HEADER_NAME,
+    X_AMZ_DECODED_CONTENT_LENGTH_HEADER_NAME, X_AMZ_TRAILER_HEADER_NAME,
+};
 pub use verdict::{AnonymousAck, AuthError, CredentialPresence, CredentialsWerePresented, Identity, Verdict};
 pub use verifier::{
     AUTHORIZATION_HEADER, AWS_ACCESS_KEY_ID_PARAM, AwsCredentialMarker, CustomAuthRequest, CustomAuthScheme,

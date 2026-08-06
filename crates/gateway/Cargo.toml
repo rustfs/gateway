@@ -23,5 +23,21 @@ workspace = true
 
 [dependencies]
 rustfs-gateway-core = { workspace = true }
-rustfs-gateway-types = { workspace = true }
+rustfs-gateway-http = { workspace = true }
+rustfs-gateway-sig = { workspace = true }
 rustfs-gateway-stream = { workspace = true }
+rustfs-gateway-types = { workspace = true }
+rustfs-gateway-xml = { workspace = true }
+
+bytes = { workspace = true }
+http = { workspace = true }
+http-body = { workspace = true }
+http-body-util = { workspace = true }
+hyper = { workspace = true }
+tower = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }
+
+[[example]]
+name = "minimal"

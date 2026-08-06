@@ -86,6 +86,23 @@ cleanup_sandbox() {
 }
 trap cleanup_sandbox EXIT
 
+# expect_fail_unstaged <guard> <description> <mutation-fn>
+# Same as expect_fail, but deliberately does NOT `git add` the mutation. This is what
+# distinguishes a guard that reads the working tree from one that only reads the index.
+expect_fail_unstaged() {
+    local guard="$1" desc="$2" mutate="$3"
+    local sandbox rc=0
+    cases=$((cases + 1))
+    sandbox="$(make_sandbox)"
+    (cd "$sandbox" && "$mutate" >/dev/null)
+    GATEWAY_CHECK_ROOT="$sandbox" "${SCRIPT_DIR}/${guard}" >/dev/null 2>&1 || rc=$?
+    if [[ "$rc" -ne 0 ]]; then
+        pass_msg "${guard} catches (unstaged): ${desc}"
+    else
+        fail_msg "${guard} did NOT catch (unstaged): ${desc}"
+    fi
+}
+
 # expect_fail <guard> <description> <mutation-fn>
 # Runs the mutation inside a sandbox, then asserts the guard exits non-zero.
 expect_fail() {
@@ -380,6 +397,30 @@ mut_chinese_markdown() {
 }
 expect_fail check_english_only.sh \
     'a Chinese paragraph in a Markdown document' mut_chinese_markdown
+
+
+# -----------------------------------------------------------------------------
+# The guards read `git ls-files --cached --others --exclude-standard`, not a bare
+# `git ls-files`. The bare form lists only tracked files, so a brand-new file is
+# invisible until `git add -A` commits it — which is how CJK text reached commit
+# 343f044 through a guard run that had just reported success. These two cases
+# fail if anyone drops the flags: the sandbox never stages the mutation, so an
+# untracked-blind guard sees nothing and exits 0.
+# -----------------------------------------------------------------------------
+
+mut_untracked_chinese_source() {
+    # \xe4\xb8\xad\xe6\x96\x87 is the two-character word for "Chinese"; written as
+    # bytes so this file stays ASCII and does not trip the guard it is testing.
+    printf '// \xe4\xb8\xad\xe6\x96\x87\n' >crates/core/src/brand_new_file.rs
+}
+expect_fail_unstaged check_english_only.sh \
+    'CJK in a file that has never been added to the index' mut_untracked_chinese_source
+
+mut_untracked_missing_header() {
+    printf '//! No licence header.\npub fn f() {}\n' >crates/core/src/no_header_yet.rs
+}
+expect_fail_unstaged check_license_headers.sh \
+    'a new .rs file with no licence header, still untracked' mut_untracked_missing_header
 
 printf '\n%s case(s), %s failure(s)\n' "$cases" "$failures"
 [[ "$failures" -eq 0 ]]

@@ -3,8 +3,9 @@
 The signature dimensions and their strict parsers, the verification-proof types, the canonical
 request, and the security floor that runs outside every verifier. P2-01 froze the dimensions; P2-02
 added the verdict, the key material and the side-channel register; P2-03 the canonical request, the
-effective host and the derivation; P2-04 the floor, and the only public route to a `VerifiedScope`.
-Seven invariants live here, and everything else exists to serve them.
+effective host and the derivation; P2-04 the floor and the only public route to a `VerifiedScope`;
+P2-08 the client-side signer, which reuses all of it and adds no second opinion. Eight invariants
+live here, and everything else exists to serve them.
 
 1. **Framing comes from `x-amz-content-sha256` and nothing else** — `PayloadMode` is the only
    source of truth, and no function here accepts `Content-Encoding`.
@@ -27,6 +28,10 @@ Seven invariants live here, and everything else exists to serve them.
    presented-means-verified and the duplicate rules, then returns a `SealedAws` or a
    `CustomAuthRequest`, neither constructible elsewhere — and a `SignatureVerifier` never receives
    an AWS-marked request, so "swap the verifier" cannot mean "swap out SigV4".
+8. **The signer is the verifier run backwards, never a second implementation.** It canonicalises and
+   lists headers through the verifier's own functions, and publishes no route from a client-chosen
+   `SigningScope` to a `VerifiedScope` or a `SigningKey`, so it cannot become the second door
+   invariant 6 closes. Under-signing is a **projection** of the header map, never a relaxed rule.
 
 ## Files
 
@@ -51,7 +56,12 @@ Seven invariants live here, and everything else exists to serve them.
 | `src/operation.rs` | `OperationFloor`, `AllowedSchemes`, `SchemeSlot`, `SigV2Presigned`, `FloorConfigError` (H3) | Registering an operation, or widening what it takes |
 | `src/scope.rs` | `RegionSet`, `ExpectedScope`, `enforce_scope` (H5) | The cross-check, or where `VerifiedScope` comes from |
 | `src/verifier.rs` | `SignatureVerifier`, `CustomAuthScheme`, `SealedAws`, `DangerAck`, replay hook (H7) | Adding a scheme, or asking what "sealed" means |
+| `src/signer.rs` | `SigV4Signer` (header + presigned), `SigningRequest`, `SignedRequest`, `SignerError` | Producing a signature |
+| `src/signer_material.rs` | `SigningCredentials`, `SigningScope`, the key cache; the `pub(super)` route to a `VerifiedScope` | Changing what a signer signs with |
+| `src/signer_chunked.rs` | `ChunkSigner`, the chunk and trailer algorithm lines, the signed frame | Signing an aws-chunked body |
+| `src/signer_tamper.rs` | `Tamper`, `TamperComponent`, the eleven post-signing rewrites | Building a negative case |
 | `src/full_chain_tests.rs` | `#[cfg(test)]`: the miniature loop, tamper cases, the AWS suite runner | You changed canonicalisation or derivation |
+| `src/signer_tests.rs` | `#[cfg(test)]`: the round trip, one case per tamper component, the AWS suite in the signing direction | You changed `signer.rs` |
 | `tests/frozen_dimensions.rs` | `c-sig-0001`..`0025`, plus two source guards | You changed any type here |
 | `tests/verification_proof.rs` | `c-sig-0101`..`0128`, a miniature authn stage | You changed the verdict, the secrets or the register |
 | `tests/canonical_request.rs` | `c-sig-0201`..`0246`, `0255`..`0257` | You changed canonicalisation or the query codec |
@@ -59,6 +69,7 @@ Seven invariants live here, and everything else exists to serve them.
 | `tests/security_floor.rs` | `c-sig-0301`..`0347`: the clock, expiry and scope halves | You changed `clock.rs` or `scope.rs` |
 | `tests/security_floor_schemes.rs` | `c-sig-0350`..`0380`: presence, duplicates, allow-list, sealed boundary | You changed `floor.rs`, `operation.rs` or `verifier.rs` |
 | `tests/timing.rs` | Latency parity `c-sig-0107`/`0108`/`0111`; run with `--release` | You touched a comparison or a rejection path |
+| `tests/signer_roundtrip.rs` | `c-sig-0401`..`0416`: sign through the public API, verify through the public path | You changed the signer's public surface |
 
 ## Shape decisions worth not re-litigating
 
@@ -79,6 +90,9 @@ Seven invariants live here, and everything else exists to serve them.
 - **The skew window is capped, not merely defaulted**, and the presigned ceiling is a constant, so
   a deployment may narrow the floor but never widen it; a custom operation is privileged by default.
 
+- **The access key id is not covered by a SigV4 signature** — only the scope is, so an altered key
+  id is refused by the credential lookup, never by the comparison. **A chunk string-to-sign is a
+  different grammar** from `StringToSign`, so `ChunkSigner` takes the last HMAC itself.
 - **Presigned URLs replay within their window** — the scheme's semantics, not a defect;
   `ReplayNonceStore` is the opt-in hook, unimplemented here.
 - **`rustfs-gateway-http` is the one internal edge** (sig → http, for the effective host; the
@@ -90,11 +104,13 @@ Seven invariants live here, and everything else exists to serve them.
 ```bash
 cargo test -p rustfs-gateway-sig                          # unit + case suites + compile_fail doctests
 cargo test -p rustfs-gateway-sig --features dangerous-replace-signature-verifier -- floor_still_enforced
+cargo test -p rustfs-gateway-sig --test signer_roundtrip  # the signer round trip, public API only
 cargo test -p rustfs-gateway-sig --release --test timing  # latency parity; --release is required
 bash scripts/check_ct_eq.sh && bash scripts/test_guard_scripts.sh   # guards, plus their own tests
 ```
 
 smithy-rs' `aws-signing-test-suite` is **invoked, never vendored** (ADR-0001): without it the run
 passes and prints how to fetch it (`SUITE_HOWTO` in `src/full_chain_tests.rs` pins the revision).
-The twenty-five `compile_fail` doctests sit next to the rule each enforces; rustdoc only checks that
-a snippet fails, so the `EXXXX` annotations document intent.
+The `compile_fail` doctests sit next to the rule each enforces; rustdoc only checks that a snippet
+fails, so the `EXXXX` annotations document intent. `src/signer_tests.rs` runs the same suite in the
+signing direction, under the same variable.
