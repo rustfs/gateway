@@ -37,7 +37,7 @@ reach its target must not be recordable as a run whose assertions failed.
 | `src/corpus.rs` | Finding `conformance/`, loading every case, schema-checking it | The corpus will not load, or you are adding a discovery rule |
 | `src/lint.rs` | The conventions the schema cannot express: naming, goldens, capture wiring, tag vocabulary | A case fails with a `lint/` rule |
 | `src/interpolate.rs` | `${capture.<name>}` substitution, and the refusal of every other form | You are looking at a computed-value request |
-| `src/observation.rs` | What a transport observed: head, body, trailers, the two byte counters, timing | You are writing a transport |
+| `src/observation.rs` | What a transport observed: head, body, trailers, the two byte counters, timing — plus `late_error_offset`, the one classification every transport must make identically | You are writing a transport, or a `stream_error` case reached the wrong `kind` |
 | `src/sut.rs` | The `Sut` trait, `Transport`/`Profile`, and `REQUIRED_FACADE_EXPORTS` | You are wiring a real target |
 | `src/expect.rs` (+ `expect/tests.rs`) | One `[expect]` block judged against one `Observation` | An assertion did not fire, or you are adding one |
 | `src/xml.rs` | The response-body scanner: root, xmlns, child order, empty-element style, redaction | A body assertion misreads a response |
@@ -79,9 +79,11 @@ response head — in wire order — to the expectation engine. `sut::Unwired` is
 The baseline on disk is older than the current run:
 
 ```text
-conformance/baseline.json   195 cases: 87 passed, 103 failed, 5 skipped
-current                     195 cases: 161 passed, 29 failed, 5 skipped
+conformance/baseline.json   195 cases: 166 passed, 24 failed, 5 skipped
+current                     195 cases: 168 passed, 22 failed, 5 skipped
 ```
+
+The two are `c-range-0010` and `c-range-0018`, both improvements, so the run still exits `0`.
 
 Regenerate it with `baseline > conformance/baseline.json` in the same change that moves the
 numbers, or the tolerance meant for the old failures starts hiding new ones.
@@ -110,15 +112,15 @@ expected to be red, and the baseline exists to freeze how red rather than to exc
    header — see `crates/core/src/fault.rs`. `fixture` answers a `416` with
    `ErrorHeader::UnsatisfiedRange` plus `<ActualObjectSize>`, a `412` with `<Condition>`, and a
    `404` with `<Key>`, which closed `c-range-0009`, `c-range-0014`, `c-object-0014`,
-   `c-object-0007` and `c-cond-0001`. Two remainders, both framework rather than backend:
-   * **`<RangeRequested>` cannot be filled.** `HandlerError::unsatisfiable_range` takes the `Range`
-     header *as it arrived*, and no handler ever sees that text — the codec parsed it into
-     `rustfs_gateway_types::ByteRange`, the facade does not re-export the type, and the type offers
-     no way back to its own bytes. This is finding 11's gap on the refusal path. `fixture`
-     therefore does not call `unsatisfiable_range` at all and emits the one element it can know;
-     `c-range-0010` asserts the document byte for byte and stays red. Re-spelling the range out of
-     the parsed value would be a mirror of a parser, and the test
-     `an_unsatisfiable_range_invents_no_requested_range` is what keeps one from appearing.
+   `c-object-0007` and `c-cond-0001`. It had two remainders; one is now closed and one is not:
+   * ~~**`<RangeRequested>` cannot be filled.**~~ **Closed.** The codec binds `Range` to
+     `RangeSpec`, which is the parse *plus the header bytes verbatim*, so the text a handler needs
+     now reaches it. `fixture` calls `HandlerError::unsatisfiable_range` with
+     `RangeDecision::Unsatisfiable`'s own `range_requested`, and `c-range-0010` passes. The test
+     that used to pin the omission is replaced by
+     `an_unsatisfiable_range_echoes_the_header_rather_than_re_spelling_the_parse`, which keeps the
+     rule the old one was really protecting: the element is the client's bytes, not a re-spelling of
+     the parse. `bytes=20-30` and `  bytes=20-30  ` parse identically and only one is what was sent.
    * **`<Condition>` is only nameable for a single-condition request.**
      `ConditionalOutcome::PreconditionFailed` says that a condition failed and not which, so
      `fixture::sole_condition` names the header only when exactly one arrived — a fact, not a
@@ -155,68 +157,107 @@ expected to be red, and the baseline exists to freeze how red rather than to exc
    `resolve_copy_range` answers a span outside the source with `InvalidRange` (416) where AWS and
    `c-copy-0036` say `InvalidArgument` (400), and its doc comment says an overlong span is "not
    clamped, it is refused" while `ByteRange::resolve` clamps the end.
-9. **A copy cannot fail after its head is committed.** A `HandlerResult` is a status *or* an
-   answer, so there is no way for a backend to commit a `200` and then stream an `Error` document
-   — the shape AWS uses for a long copy, and the shape `c-copy-0038` asserts. It is a facade
-   capability rather than a backend decision, and the fixture does not approximate it.
+9. **`c-copy-0038` and `c-copy-0026`/`c-copy-0034` ask for two different answers to one request.**
+   The framework gap this finding used to record is closed: `Resp::commit` exists, and
+   `fixture::copy_object` uses it — the source is named, resolved, gated and condition-checked, both
+   sets of conditions are evaluated, and *then* the head is committed, with the destination write
+   below the boundary. `every_copy_refusal_happens_before_the_head_is_committed` pins that split.
+
+   What is left is a disagreement inside the corpus. `c-copy-0026` (`/conf-copy/../../etc/passwd`)
+   and `c-copy-0034` (`/conf-copy/src/missing.txt`) each assert a **404 `NoSuchKey`** for a source
+   that is not there. `c-copy-0038` sends `/conf-copy/src/vanishes`, declared `absent = true` in its
+   own `[setup]`, and asserts a **200 with `NoSuchKey` in the body**. The three requests are the same
+   request — a copy whose source does not exist — and no implementation can answer one of them
+   differently without reading the *setup file* rather than the request.
+
+   AWS's own rule is the one this fixture follows, and it is the one that satisfies two of the three:
+   *"if the error occurs before the copy action starts, you receive a standard Amazon S3 error"*. A
+   source that cannot be opened is discovered before the copy starts. `c-copy-0038`'s comment says
+   the source "vanishes", which would be a failure *during* the copy and would indeed be a `200` —
+   but schema version 1 has no vocabulary for an object that disappears mid-operation, and
+   `absent = true` means "not there when the case began". This is a maintainer decision of the same
+   kind as findings 16 and 18: either the case needs a setup vocabulary that does not exist, or it
+   contradicts its two neighbours. Neither side is edited from the runner.
 10. **Object tagging has no operation at all.** `GetObjectTagging` and `PutObjectTagging` are absent
    from the model, so `x-amz-tagging` and `x-amz-tagging-directive` can be sent and never read
    back. `c-copy-0008` copies with `TaggingDirective: REPLACE` and its read-back reaches
    `GetObject`, which is the case that sees it.
-11. **`evaluate_range` is exported but not callable.** `RangeSelectors::range` is the *raw* `Range`
-   header (`Option<&str>`) and `RangeSelectors::if_range` is an `IfRange`. A backend can supply
-   neither: the generated decoder has already parsed the header into `ByteRange`, which the facade
-   does not re-export and which offers no way back to the text it came from; `Req` carries the
-   decoded input and no header map; and **no dto declares `if-range` at all**, so the value never
-   leaves the wire. The conditional half of the same module — `evaluate` over `Preconditions` and
-   `ObjectValidators` — is fully reachable and `fixture` now calls it, which is what makes the
-   contrast the finding rather than a preference. `c-range-0015` (`Range` and `partNumber` together
-   is a 400 the contract already states) and `c-range-0018` (a stale `If-Range` drops the range)
-   are the two cases that see it. The fixture does **not** re-derive either rule by hand: the
-   mirror it used to carry is exactly what this exercise removed.
+11. ~~**`evaluate_range` is exported but not callable.**~~ **Closed, with one ordering remainder.**
+   Both inputs a backend could not supply now reach it: `Range` binds to `RangeSpec`, which keeps
+   the header bytes beside the parse, and `if-range` is declared on `GetObject` and read through
+   `IfRange::parse`, which is total so that an unreadable validator cannot decay into "no `If-Range`
+   was sent". `fixture::resolve_range` calls the contract and the hand-rolled window arithmetic it
+   replaced — including `window_of`, which used to read the offsets back out of the `Content-Range`
+   the contract had just rendered — is deleted. `c-range-0018` passes.
+
+   `HeadObject` declares no `If-Range` binding, so a `HEAD` and a `GET` of the same object still
+   disagree about a stale validator. That is the model's, not a backend's, and `head_object` passes
+   `None` rather than inventing one. `c-range-0015` also stays red, but for an ordering reason and
+   no longer a reachability one: the `Range`-and-`partNumber` refusal is a request-shape error that
+   the contract raises, while this fixture resolves the key first and answers `NoSuchKey` because the
+   case's `[setup]` declares an upload rather than an object — the same missing setup vocabulary as
+   finding 18.
 12. **The contract states a rule the decoder makes unreachable.** `Preconditions` documents that an
    `If-Modified-Since` which is not an HTTP-date "must arrive here as `None`", because RFC 9110
    requires the field to be ignored. The generated codec instead does
    `value::timestamp(raw, TimestampFormat::HttpDate, "IfModifiedSince")?`, so the request is
    refused with a `400` before any handler runs and the rule can never fire. `c-cond-0020` is the
-   case that sees it. The neighbouring `Range` binding is `value::byte_range(raw)` with no `?`,
-   which is the shape the date bindings would need. Two `Range` headers are likewise refused at the
-   wire layer where `RangeParse` would answer the whole object — `c-range-0017`.
-13. **A completion naming no part is `MalformedXML` before any handler runs.**
-   `generated/codec/ops/complete_multipart_upload.rs::read_completed_multipart_upload` refuses an
-   empty `Parts` list as a decode failure, so the `InvalidPart` the fixture answers for the same
-   input is unreachable — the request never arrives. `c-mpu-0019` (an empty
-   `<CompleteMultipartUpload/>`) and `c-mpu-0034` (a body that parses and names no part) are the
-   cases that see it, and both are about a *semantic* refusal rather than a syntactic one: the
-   document is well-formed and the client is told it is not. Fixing it is a change to the list
-   arity the generator emits, not to a backend.
+   case that sees it. The neighbouring `Range` binding is `value::range_spec(raw)` with no `?`,
+   which is the shape the date bindings would need. The two-`Range`-headers half of this is closed:
+   `Range` is no longer in `SINGLE_VALUED_HEADERS`, so a repeated one is ignored and the whole
+   representation served, and `c-range-0017` passes.
+13. ~~**A completion naming no part is `MalformedXML` before any handler runs.**~~ **Closed.** The
+   fabricated `required` on `CompletedMultipartUpload.Parts` is gone from the overlay, so an empty
+   part list reaches the handler and the fixture's `InvalidPart` is the answer. `c-mpu-0019` and
+   `c-mpu-0034` pass. The rule it settled is worth keeping in view: a decoder may say "this is not
+   the document" and nothing else, and the moment an operation owes a different code the decision is
+   the operation's.
 14. **The `ETag` element of a body is written with escaped quotes.** The codec renders it through
    `XmlWriter::element_quoting`, whose `escape_text_and_quotes` turns the entity tag's own `"` into
    `&quot;`, so a completion answers `<ETag>&quot;…-3&quot;</ETag>`. `c-mpu-0002` and `c-mpu-0003`
    assert the literal quote, which is what an SDK's tag comparison reads. The decision is
    `crates/xml`'s and applies to every quoting element, so no backend can change it and the fixture
    does not try.
-15. **A completion cannot fail after its head is committed.** The multipart form of finding 9, and
-   the one AWS documents most loudly: `CompleteMultipartUpload` answers `200` and then streams
-   either a result or an `<Error>` document, holding the connection with whitespace while it
-   assembles. `HandlerResult` is a status *or* an answer, so `c-mpu-0001` (the error document
-   inside a `200`), `c-mpu-0040` (an abrupt close when progress stops) and `c-mpu-0038` (the
-   whitespace prologue, which also forbids the XML declaration `XmlWriter::document` always writes)
-   have no shape a backend could answer in. The fixture answers a plain `400`, which is honest and
-   red, rather than an approximation that would read green.
+15. **The three late-failure completion cases each want something a different case forbids.** The
+   framework gap is closed and `fixture::complete_multipart_upload` commits: the bucket, the upload's
+   ownership of its bucket and key, the part list's arity and order, the write's conditional headers
+   and every named part's presence, size and digest are checked *above* `Resp::commit`; the
+   concatenation, the composite entity tag, the part checksums and the write are below it.
+   `every_completion_refusal_happens_before_the_head_is_committed` is the test that keeps a check
+   from drifting below the boundary, where its status would silently become the committed `200`.
+
+   Each of the three is now red for its own reason, and none of them is the framework:
+   * **`c-mpu-0001` contradicts `c-mpu-0022` and `c-mpu-0023`.** All three send a completion naming
+     a part digest that is not the digest on file. `c-mpu-0022` and `c-mpu-0023` assert **400
+     `InvalidPart`**; `c-mpu-0001` asserts **200 with `InvalidPart` in the body**. The requests are
+     the same request. A digest mismatch is knowable before any byte is assembled, so it is a
+     refusal, and moving it below the commit to satisfy `c-mpu-0001` turns two green cases into
+     cases that report green while sending the wrong status line — the exact defect `c-mpu-0001`'s
+     own rationale is about. `c-mpu-0026` (`EntityTooSmall`) and `c-mpu-0020`/`c-mpu-0021`
+     (`InvalidPartOrder`) sit on the same side of the boundary.
+   * **`c-mpu-0038` contradicts `c-mpu-0001` and `c-copy-0038`.** This is the contradiction that was
+     already known and is unchanged by the commit seam: the prologue is written before the outcome
+     is known, so it is the same bytes in both. `c-mpu-0001` and `c-copy-0038` pin
+     `body_bytes_before_error = 39` and name those 39 bytes as the XML declaration;
+     `c-mpu-0038` asserts `declaration = false` on a successful body. `gateway::commit::PROLOGUE` is
+     the declaration, following the two-against-one reading, and `c-mpu-0038` is red for exactly one
+     assertion because of it. Nothing in this change gives the contradiction a new reading.
+   * **`c-mpu-0040` needs a progress deadline nothing drives, and a socket.**
+     `gateway::commit::KEEPALIVE_BYTE` and `KEEPALIVE_INTERVAL_SECONDS` declare the cadence, and no
+     code reads the interval — there is no bound on time-between-progress, so a stalled completion
+     is not cut off. Nor could the fixture stall honestly: `[setup]` has no vocabulary for a backend
+     that stops making progress, and inventing one from the case's key name would be reading the
+     setup file instead of the request. The case also asserts `connection_after = "closed"` and
+     `stream_termination = "abrupt_close"`, neither of which an in-process transport can produce.
 16. **`c-mpu-0018` disagrees with its own fixture.** It asserts
    `etag: "88d1a0e3f0d0eb1b06e0d9c8bd6f6d5f"` for the part body `the exact bytes of part one`,
    whose MD5 is `48df983668c1507a42914184ecc64d4a` — the value the fixture returns. Nothing in the
    implementation can satisfy it. Cases are the contract and are not edited from the runner side,
    so this is a maintainer decision; the `lint/hand-computed-digest` gap under "Known gaps" is the
    same problem one layer up.
-17. **A refusal to a `HEAD` still carries the `<Error>` document.** `render` does not know the
-   request method, and the refusal path never reaches `EncodedResponse::enforce_http_invariants`,
-   where "a `HEAD` response has no content" lives for the success path. `c-cond-0023` and
-   `c-object-0008` are now red for *only* this — every other assertion in both is green, including
-   the `<Condition>` and `<Key>` elements finding 3 closed. Fixing it means threading the method
-   into `render`, which changes a public signature and is therefore not a backend's to do; see
-   `crates/gateway/MAP.md`'s "Known gaps".
+17. ~~**A refusal to a `HEAD` still carries the `<Error>` document.**~~ **Closed.** The method now
+   reaches the refusal path and a `HEAD` never carries a body. `c-cond-0023` and `c-object-0008`
+   pass.
 18. **`c-range-0007` needs a fixture vocabulary the schema does not have.** It declares
    `[[setup.multipart_uploads]]` with two parts and then reads the key with `?partNumber=2`,
    expecting `206` and `x-amz-mp-parts-count: 2`. But `setup.multipart_uploads` creates an
@@ -226,15 +267,45 @@ expected to be red, and the baseline exists to freeze how red rather than to exc
    schema version 1 cannot express. Neither side is edited here: the case is the contract and the
    schema is frozen, so this is a maintainer decision like finding 16.
 
+### The blind spot the instrument had, and what closed it
+
+`inprocess` used to report `Outcome::Response` and `body_bytes_before_error: None` **unconditionally**.
+Every `expect.kind = "stream_error"`, every `stream_termination` and every `body_bytes_before_error`
+in the corpus was therefore judged against a constant. Those assertions could not have failed no
+matter what the server did, and a suite whose instrument cannot fail an assertion reports the
+assertion as satisfied. That is worse than an unimplemented feature: an unimplemented feature is red,
+and this was invisible.
+
+Two facts are read off the exchange now, both in `observation::late_error_offset` so a socket
+transport will decide them identically:
+
+* A response that arrived intact whose **status line and body disagree** — a `2xx` over an `<Error>`
+  document — is `stream_error` / `error_document`, and `body_bytes_before_error` is the offset at
+  which that document begins. A `4xx` or `5xx` over an `<Error>` is an ordinary refusal and is not
+  reclassified; `<ErrorDocument>` is not `<Error>`.
+* A body that could not be drained is `stream_error` / `abrupt_close`, and no longer an
+  *environment* failure that skipped the case. A skipped case asserts nothing.
+
+No corpus case exercises the first path yet, and that is finding 9 and finding 15 rather than a gap
+here: the only two operators that commit a head have no failure the corpus lets them discover after
+committing. The byte count on the second path is still unrecorded — `collect` discards what it had
+read when the stream failed — so a case pinning it stays red and says so.
+
+`Answer` and `CommitWork` are not re-exported by the facade, so a backend can *build* a committed
+response but nothing outside this workspace can drive its continuation. `fixture`'s commit tests
+assert `Resp::is_committed` and the status; the continuation is only ever driven through a real
+request.
+
 ### What this target cannot measure, and never pretends to
 
 There is no socket, so three assertion families have no honest answer. `inprocess`'s module
 documentation states each one once; in summary: `connection_after` is always reported `open`,
 `request_progress` always reports the whole body as sent, and `timing` bounds are met trivially.
-Three cases are red for this reason alone. A request shape that needs a socket — a control chunk,
-a raw head, an h2 frame script — is **skipped with the capability named**, never approximated; five
-cases are skipped that way. Wiring `--endpoint` to a real socket transport is what removes both
-limits, and until then `--endpoint` is refused rather than silently ignored.
+`stream_termination = "reset"` and `"trailer_error"` are likewise unreachable. A request shape that
+needs a socket — a control chunk, a raw head, an h2 frame script — is **skipped with the capability
+named**, never approximated; five cases are skipped that way. Wiring `--endpoint` to a real socket
+transport is what removes both limits, and until then `--endpoint` is refused rather than silently
+ignored.
 
 ## Known gaps, deliberately left as gaps
 

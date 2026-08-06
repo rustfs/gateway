@@ -95,19 +95,27 @@
 //! a client handed the plain MD5 instead would compare it against the composite and conclude the
 //! object is corrupt.
 //!
-//! What this half deliberately does **not** do is answer a `200` and then fail: `HandlerResult` is
-//! a status *or* an answer, and `CompleteMultipartUpload` is the operation AWS documents as
-//! committing the head first. Three cases assert that shape and three cases are red for it. See
-//! `MAP.md` finding 15 — an approximation here would read green for a facade gap every backend has.
+//! Completion is also the operation AWS documents most loudly as committing its head before it
+//! knows the outcome, and it does that here: every refusal above is made while a status is still
+//! choosable, and [`rustfs_gateway::Resp::commit`] is called only once none is left. The assembly —
+//! the concatenation, the composite tag, the part checksums, the write — runs below the boundary,
+//! because that is the work that outlasts a client's timeout and the reason the head goes out early.
+//!
+//! Nothing was moved below the boundary to make a case pass. A refusal below it has no status of its
+//! own left to carry, so it would go out as the committed `200`; `c-mpu-0020` … `c-mpu-0023` and
+//! `c-mpu-0026` each pin one of those refusals to a `400`, and they would report green while sending
+//! the wrong status line. `c-mpu-0001` asks for the opposite answer to the same request and stays
+//! red for it — see `MAP.md` finding 15, which names the three cases and what each one now needs.
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
 use rustfs_gateway::dto;
 use rustfs_gateway::{
-    BucketName, ByteStream, ChecksumAlgorithm, ChecksumSpec, ConditionalOutcome, ETag, ErrorCode, ErrorDetail, ErrorHeader,
-    Handler, HandlerError, HandlerResult, ObjectKey, ObjectValidators, PRECONDITION_FAILED_MESSAGE, PreconditionRejection,
-    Preconditions, RANGE_NOT_SATISFIABLE_MESSAGE, Req, RequestKind, Resp, Timestamp, collect, evaluate, parse_conditional_etag,
+    BucketName, ByteStream, ChecksumAlgorithm, ChecksumSpec, ConditionalOutcome, ETag, ErrorCode, ErrorDetail, Handler,
+    HandlerError, HandlerResult, IfRange, ObjectKey, ObjectValidators, PRECONDITION_FAILED_MESSAGE, PreconditionRejection,
+    Preconditions, RangeDecision, RangeSelectors, Req, RequestKind, Resp, Timestamp, collect, evaluate, evaluate_range,
+    parse_conditional_etag,
 };
 
 /// The canonical user id every listing reports as the owner.
@@ -947,6 +955,7 @@ fn no_such_key(key: &str) -> HandlerError {
 }
 
 /// A resolved range: the window to send, and the `Content-Range` value that describes it.
+#[derive(Debug)]
 struct Slice {
     start: usize,
     end_exclusive: usize,
@@ -964,19 +973,65 @@ impl Slice {
     }
 }
 
-/// Reads the two offsets back out of a rendered `Content-Range`.
+/// The window a read serves, decided by [`rustfs_gateway::evaluate_range`] and not here.
 ///
-/// The parsed `Range` resolves to an outcome whose *variants* cannot be named through the facade
-/// while its two accessors can, so the window is recovered from the string the outcome renders.
-/// That is narrower than re-deriving RFC 9110's clamping rules here would be: a second copy of
-/// them in the suite that checks them would agree with itself and with nothing else.
-fn window_of(content_range: &str) -> Option<(usize, usize)> {
-    let spec = content_range.strip_prefix("bytes ")?;
-    let (window, _total) = spec.split_once('/')?;
-    let (first, last) = window.split_once('-')?;
-    let first: usize = first.parse().ok()?;
-    let last: usize = last.parse().ok()?;
-    Some((first, last.checked_add(1)?))
+/// This backend decides nothing about ranges. Which selector wins, what an `If-Range` that no
+/// longer matches does to the range beside it, where a satisfied window starts and ends, and what
+/// `Content-Range` says are all the exported contract's, and the only job left is turning wire
+/// values into its inputs and its decision into bytes.
+///
+/// It could not always be called. `RangeSelectors::range` is the `Range` header *as text*, and
+/// until the codec kept the header bytes beside the parse there was no text for a backend to hand
+/// it; `if_range` was declared by no dto, so the value never left the wire. Both are reachable now,
+/// which is what let the hand-rolled window arithmetic this function replaced be deleted rather
+/// than kept beside the contract disagreeing with it.
+///
+/// # Errors
+///
+/// `Range` and `partNumber` together are the contract's own refusal, passed through. A `partNumber`
+/// on its own selects a part of a completed multipart object, and this fixture has no part table
+/// for one — `[setup]` in schema version 1 can only declare an upload that is still in progress —
+/// so it is refused by name rather than answered as though the selector had not been sent.
+fn resolve_range(
+    range: Option<&str>,
+    if_range: Option<&IfRange>,
+    part_number: Option<i32>,
+    object: &StoredObject,
+) -> Result<Slice, HandlerError> {
+    let length = object.body.len();
+    let validators = validators_of(Some(object))?;
+    let selectors = RangeSelectors {
+        range,
+        // The presence of the selector survives a value the contract's type cannot hold: a
+        // `partNumber` this backend cannot read is still a `partNumber` the client sent, and
+        // dropping it would silently un-refuse the `Range`-and-`partNumber` combination.
+        part_number: part_number.map(|number| u32::try_from(number).unwrap_or(0)),
+        if_range,
+    };
+    let decision = evaluate_range(&selectors, &validators, length as u64).map_err(refused)?;
+    let content_range = decision.content_range();
+    match decision {
+        RangeDecision::Whole => Ok(Slice::whole(length)),
+        RangeDecision::Partial {
+            start, end_inclusive, ..
+        } => {
+            let start = usize::try_from(start).unwrap_or(length).min(length);
+            let end_exclusive = usize::try_from(end_inclusive).unwrap_or(length).saturating_add(1).min(length);
+            Ok(Slice {
+                start,
+                end_exclusive,
+                content_range,
+            })
+        }
+        RangeDecision::Part { .. } => Err(HandlerError::not_implemented(
+            "this conformance fixture stores no part table for a completed multipart object, so a \
+             partNumber selector cannot be resolved to the bytes it names",
+        )),
+        RangeDecision::Unsatisfiable {
+            actual_object_size,
+            range_requested,
+        } => Err(HandlerError::unsatisfiable_range(range_requested, actual_object_size)),
+    }
 }
 
 /// The `x-amz-checksum-crc32` a read reports, and the two reasons it reports none.
@@ -1007,29 +1062,6 @@ fn storage_class_header(object: &StoredObject) -> Option<dto::StorageClass> {
         return None;
     }
     Some(dto::StorageClass::custom(object.storage_class.clone()))
-}
-
-/// `416`, carrying the `Content-Range` RFC 9110 §15.5.17 requires and the object's real length.
-///
-/// The header is not spelled here. [`ErrorHeader::UnsatisfiedRange`] holds the length and the
-/// framework renders `bytes */<length>`, which is what keeps a backend from being able to name a
-/// header at all — see `crates/core/src/fault.rs`.
-///
-/// # The one element this cannot carry, and why it is left off rather than approximated
-///
-/// AWS's document has two extra elements: `<ActualObjectSize>`, which is the length below, and
-/// `<RangeRequested>`, which is the `Range` header **as it arrived**. That text does not reach a
-/// handler. The generated decoder has already parsed the header into `rustfs_gateway_types::
-/// ByteRange`, the facade does not re-export that type, and `ByteRange` offers no way back to the
-/// bytes it was built from — the same gap `MAP.md` finding 11 records for `evaluate_range`. So
-/// [`HandlerError::unsatisfiable_range`], which takes the requested text as its first argument, is
-/// deliberately **not** called: this backend has nothing honest to pass it, and re-spelling the
-/// range out of the parsed value would be a mirror of a parser, agreeing with itself and with
-/// nothing else. `c-range-0010` asserts the element byte for byte and stays red for it.
-fn unsatisfiable(complete_length: u64) -> HandlerError {
-    HandlerError::new(ErrorCode::INVALID_RANGE, RANGE_NOT_SATISFIABLE_MESSAGE)
-        .with_header(ErrorHeader::UnsatisfiedRange { complete_length })
-        .with_detail(ErrorDetail::ActualObjectSize(complete_length))
 }
 
 /// The checksum contract an initiating request declared, if it declared one.
@@ -1662,24 +1694,17 @@ impl Stub {
                 304,
             ));
         }
-        let length = object.body.len();
-        let slice = match input.range.as_ref() {
-            None => Slice::whole(length),
-            Some(range) => {
-                let outcome = range.resolve(length as u64);
-                match outcome.content_range(length as u64) {
-                    None => Slice::whole(length),
-                    Some(text) => match window_of(&text) {
-                        None => return Err(unsatisfiable(length as u64)),
-                        Some((start, end_exclusive)) => Slice {
-                            start,
-                            end_exclusive,
-                            content_range: Some(text),
-                        },
-                    },
-                }
-            }
-        };
+        // `If-Range` is read through the contract's own total parse, never through an `Option`: a
+        // fallible read would turn a validator this server cannot confirm into "no `If-Range` was
+        // sent", which honours the range against a representation nobody checked — the spliced
+        // download the header exists to prevent.
+        let if_range = input.if_range.as_deref().map(IfRange::parse);
+        let slice = resolve_range(
+            input.range.as_ref().map(|range| range.as_str()),
+            if_range.as_ref(),
+            input.part_number,
+            object,
+        )?;
         let body = object.body.get(slice.start..slice.end_exclusive).unwrap_or_default().to_vec();
         let status = if slice.content_range.is_some() { 206 } else { 200 };
         Ok(Resp::with_status(
@@ -1733,24 +1758,11 @@ impl Stub {
                 304,
             ));
         }
-        let length = object.body.len();
-        let slice = match input.range.as_ref() {
-            None => Slice::whole(length),
-            Some(range) => {
-                let outcome = range.resolve(length as u64);
-                match outcome.content_range(length as u64) {
-                    None => Slice::whole(length),
-                    Some(text) => match window_of(&text) {
-                        None => return Err(unsatisfiable(length as u64)),
-                        Some((start, end_exclusive)) => Slice {
-                            start,
-                            end_exclusive,
-                            content_range: Some(text),
-                        },
-                    },
-                }
-            }
-        };
+        // No `if_range` argument, and that is a fact about the model rather than a simplification:
+        // `HeadObject` declares no `If-Range` binding, so the header never leaves the wire for this
+        // operation and there is nothing honest to pass. A `GET` and a `HEAD` of the same object
+        // therefore disagree about a stale validator; the disagreement is the model's.
+        let slice = resolve_range(input.range.as_ref().map(|range| range.as_str()), None, input.part_number, object)?;
         let served = slice.end_exclusive.saturating_sub(slice.start);
         let status = if slice.content_range.is_some() { 206 } else { 200 };
         Ok(Resp::with_status(
@@ -1789,6 +1801,15 @@ impl Stub {
     /// Reading the source into an owned [`StoredObject`] before anything else is what makes that
     /// impossible here rather than merely unlikely: the bytes the copy will write are already in
     /// hand when the destination is opened, so `source == dest` is not a special case to remember.
+    ///
+    /// # Where the head is committed, and why the source is not below it
+    ///
+    /// AWS documents a copy as flushing `200` before it knows the outcome, and the boundary it
+    /// documents alongside is the one used here: *"if the error occurs before the copy action
+    /// starts, you receive a standard Amazon S3 error"*. Naming the source, resolving it, gating it
+    /// and evaluating both sets of conditions all happen before the copy action starts, so all of
+    /// them keep their own status — which is what `c-copy-0026` and `c-copy-0034` assert, each a
+    /// `404` for a source that is not there. What the commit covers is the copy itself.
     fn copy_object(&self, input: &dto::CopyObjectInput) -> HandlerResult<dto::CopyObject> {
         let source = parse_copy_source(&input.copy_source)?;
         let metadata_from = directive_of(
@@ -1801,7 +1822,7 @@ impl Stub {
         )?;
         confirm_source_owner(input.expected_source_bucket_owner.as_deref())?;
 
-        let mut fixture = self.borrow()?;
+        let fixture = self.borrow()?;
         let (found, source_version) = read_copy_source(&fixture, &source)?;
         guard_copy_source(
             &found,
@@ -1857,20 +1878,36 @@ impl Stub {
         if let Some(class) = input.storage_class.as_ref() {
             object.storage_class = class.to_string();
         }
-        let etag = object.etag.clone();
-        let written = fixture.put_object(input.bucket.as_str(), input.key.as_str(), object);
-        let destination_version = (written != UNVERSIONED).then_some(written);
+        // The guard is released before the head goes out: the continuation is `'static` and takes
+        // the state back on its own, so nothing holds the fixture across the commit.
+        drop(fixture);
 
-        Ok(Resp::new(dto::CopyObjectOutput {
-            e_tag: entity_tag(&etag)?,
-            last_modified: Some(Timestamp::from_secs(now)),
-            // Two headers, never one value written into both: one names the version the copy read
-            // and the other the version it created, and a client told they are the same records the
-            // source as its new object.
-            copy_source_version_id: source_version,
-            version_id: destination_version,
-            ..dto::CopyObjectOutput::default()
-        }))
+        let state = Arc::clone(&self.state);
+        let bucket = input.bucket.clone();
+        let key = input.key.clone();
+
+        // The head is committed here. Nothing below chooses a status, and nothing below can refuse:
+        // every rule this operation has was applied above.
+        Ok(Resp::commit(Box::pin(async move {
+            let etag = object.etag.clone();
+            let mut fixture = state
+                .lock()
+                .map_err(|_| HandlerError::internal_error("the fixture state was left poisoned by an earlier exchange"))?;
+            let written = fixture.put_object(bucket.as_str(), key.as_str(), object);
+            drop(fixture);
+            let destination_version = (written != UNVERSIONED).then_some(written);
+
+            Ok(dto::CopyObjectOutput {
+                e_tag: entity_tag(&etag)?,
+                last_modified: Some(Timestamp::from_secs(now)),
+                // Two headers, never one value written into both: one names the version the copy
+                // read and the other the version it created, and a client told they are the same
+                // records the source as its new object.
+                copy_source_version_id: source_version,
+                version_id: destination_version,
+                ..dto::CopyObjectOutput::default()
+            })
+        })))
     }
 
     /// One part of a multipart upload, copied out of an object rather than sent.
@@ -2020,11 +2057,26 @@ impl Stub {
         Ok(Resp::new(dto::AbortMultipartUploadOutput::default()))
     }
 
+    /// Completes an upload, committing the head once nothing can still choose a status.
+    ///
+    /// The function reads as two halves, and the boundary is the whole point. Above the commit is
+    /// every refusal that carries a status of its own — the bucket, the upload's ownership of its
+    /// bucket and key, the part list's arity and order, the write's own conditional headers, and
+    /// then each named part resolved, size-checked and digest-checked. Below it is the assembly:
+    /// concatenating the bytes, deriving the composite entity tag and the part checksums, and
+    /// writing the object. That is the work AWS documents as outlasting a client's timeout, which is
+    /// why the head goes out before it starts.
+    ///
+    /// The split is not a stylistic one. After [`Resp::commit`] the continuation's error type is a
+    /// `HandlerError` with no status, so a refusal that moved below the boundary would silently
+    /// become a `200` — `c-mpu-0020` … `c-mpu-0023` and `c-mpu-0026` are the cases that would go
+    /// green while reporting the wrong status line. Every check that can still name a status is
+    /// therefore above it, and what is left below can only fail the way an internal error fails.
     fn complete_multipart_upload(
         &self,
         input: &dto::CompleteMultipartUploadInput,
     ) -> HandlerResult<dto::CompleteMultipartUpload> {
-        let mut fixture = self.borrow()?;
+        let fixture = self.borrow()?;
         require_bucket(&fixture, &input.bucket)?;
         let upload = require_upload(&fixture, &input.upload_id, &input.bucket, &input.key)?.clone();
         let named = &input.multipart_upload.parts;
@@ -2047,9 +2099,10 @@ impl Stub {
         // A completion is a write, and it carries the same two conditional headers a write does.
         let existing = fixture.object(upload.bucket.as_str(), upload.key.as_str()).cloned();
         guard_write(existing.as_ref(), input.if_match.as_deref(), input.if_none_match.as_deref(), fixture.now)?;
-        let mut assembled = Vec::new();
-        let mut digests = Vec::new();
-        let mut part_checksums = Vec::new();
+        // Resolved, size-checked and digest-checked *before* the head is committed, and collected
+        // in the order the request named them. Each of these three refusals carries its own status,
+        // so each has to happen while a status is still choosable.
+        let mut ordered_parts: Vec<StoredPart> = Vec::with_capacity(named.len());
         let final_part = named.len().saturating_sub(1);
         for (index, part) in named.iter().enumerate() {
             let stored = upload.parts.get(&part.part_number).ok_or_else(|| {
@@ -2078,65 +2131,90 @@ impl Stub {
                     ));
                 }
             }
-            digests.push(crate::md5::digest(&stored.body));
-            if let Some(checksum) = upload.checksum.as_ref() {
-                part_checksums.push((checksum_of(checksum, &stored.body)?, stored.body.len() as u64));
-            }
-            assembled.extend_from_slice(&stored.body);
+            ordered_parts.push(stored.clone());
         }
-        // The two ways S3 rolls part checksums into one, and they are not interchangeable: a
-        // composite is a digest *of the digests* and carries `-N`, while a full-object checksum is
-        // the digest the whole object would have had if it had arrived in one request. Emitting one
-        // where the upload asked for the other gives a client a value that never verifies.
-        let checksum_spec = match upload.checksum.as_ref() {
-            None => None,
-            Some(checksum) if checksum.kind == dto::ChecksumType::FULL_OBJECT => Some(
-                ChecksumSpec::combine_full_object(&part_checksums)
-                    .map_err(|_| HandlerError::internal_error("the part checksums do not combine"))?,
-            ),
-            Some(_) => {
-                let parts: Vec<ChecksumSpec> = part_checksums.iter().map(|(spec, _)| *spec).collect();
-                Some(
-                    ChecksumSpec::composite_of(&parts)
-                        .map_err(|_| HandlerError::internal_error("the part checksums have no composite"))?,
-                )
+        // The guard is released before the head goes out: the continuation is `'static` and takes
+        // the state back on its own, so nothing holds the fixture across the commit.
+        drop(fixture);
+
+        let state = Arc::clone(&self.state);
+        let upload_id = input.upload_id.clone();
+        let bucket = input.bucket.clone();
+        let key = input.key.clone();
+        let location = format!("/{}/{}", input.bucket.as_str(), input.key.as_str());
+
+        // The head is committed here. Everything below runs with the status line already on the
+        // wire, and the only thing it can still report is a failure with no status of its own.
+        Ok(Resp::commit(Box::pin(async move {
+            let mut assembled = Vec::new();
+            let mut digests = Vec::new();
+            let mut part_checksums = Vec::new();
+            for stored in &ordered_parts {
+                digests.push(crate::md5::digest(&stored.body));
+                if let Some(checksum) = upload.checksum.as_ref() {
+                    part_checksums.push((checksum_of(checksum, &stored.body)?, stored.body.len() as u64));
+                }
+                assembled.extend_from_slice(&stored.body);
             }
-        };
-        let checksum_type = upload.checksum.as_ref().map(|checksum| checksum.kind.clone());
-        let now = fixture.now;
-        // The entity tag of a multipart object is not the digest of its bytes. It is the digest of
-        // the concatenated part digests with the part count after a hyphen, and a client that reads
-        // the plain MD5 back would compare it against the composite and conclude the object is
-        // corrupt. `ETag::from_part_digests` is the framework's own derivation of that rule, so the
-        // two spellings cannot drift.
-        let composite =
-            ETag::from_part_digests(&digests).map_err(|_| HandlerError::internal_error("a part digest set has no entity tag"))?;
-        let object = StoredObject {
-            body: assembled,
-            etag: composite.opaque_tag().to_owned(),
-            last_modified: now,
-            ..upload.attributes.clone()
-        };
-        let written = fixture.put_object(&upload.bucket, &upload.key, object);
-        fixture.uploads.remove(&input.upload_id);
-        Ok(Resp::new(dto::CompleteMultipartUploadOutput {
-            bucket: Some(input.bucket.clone()),
-            key: Some(input.key.clone()),
-            location: Some(format!("/{}/{}", input.bucket.as_str(), input.key.as_str())),
-            e_tag: Some(composite),
-            version_id: (written != UNVERSIONED).then_some(written),
-            // The body binds one element per algorithm rather than the packed spec a header binds,
-            // so the rendering is explicit here. CRC32 is the only algorithm this fixture computes,
-            // and `upload_checksum` refuses the rest outright rather than letting one fall through
-            // to an empty element.
-            checksum_crc32: checksum_spec.as_ref().map(|spec| spec.render_base64().to_owned()),
-            checksum_type,
-            // Decided at initiation, reported here. That gap is the whole of what these cases
-            // measure: the completion's head is flushed before the body is assembled, so a value
-            // that is only looked up afterwards can never become a header.
-            server_side_encryption: upload.encryption.clone(),
-            ..dto::CompleteMultipartUploadOutput::default()
-        }))
+            // The two ways S3 rolls part checksums into one, and they are not interchangeable: a
+            // composite is a digest *of the digests* and carries `-N`, while a full-object checksum
+            // is the digest the whole object would have had if it had arrived in one request.
+            // Emitting one where the upload asked for the other gives a client a value that never
+            // verifies.
+            let checksum_spec = match upload.checksum.as_ref() {
+                None => None,
+                Some(checksum) if checksum.kind == dto::ChecksumType::FULL_OBJECT => Some(
+                    ChecksumSpec::combine_full_object(&part_checksums)
+                        .map_err(|_| HandlerError::internal_error("the part checksums do not combine"))?,
+                ),
+                Some(_) => {
+                    let parts: Vec<ChecksumSpec> = part_checksums.iter().map(|(spec, _)| *spec).collect();
+                    Some(
+                        ChecksumSpec::composite_of(&parts)
+                            .map_err(|_| HandlerError::internal_error("the part checksums have no composite"))?,
+                    )
+                }
+            };
+            let checksum_type = upload.checksum.as_ref().map(|checksum| checksum.kind.clone());
+            // The entity tag of a multipart object is not the digest of its bytes. It is the digest
+            // of the concatenated part digests with the part count after a hyphen, and a client that
+            // reads the plain MD5 back would compare it against the composite and conclude the
+            // object is corrupt. `ETag::from_part_digests` is the framework's own derivation of that
+            // rule, so the two spellings cannot drift.
+            let composite = ETag::from_part_digests(&digests)
+                .map_err(|_| HandlerError::internal_error("a part digest set has no entity tag"))?;
+            let mut fixture = state
+                .lock()
+                .map_err(|_| HandlerError::internal_error("the fixture state was left poisoned by an earlier exchange"))?;
+            let now = fixture.now;
+            let object = StoredObject {
+                body: assembled,
+                etag: composite.opaque_tag().to_owned(),
+                last_modified: now,
+                ..upload.attributes.clone()
+            };
+            let written = fixture.put_object(&upload.bucket, &upload.key, object);
+            fixture.uploads.remove(&upload_id);
+            drop(fixture);
+            Ok(dto::CompleteMultipartUploadOutput {
+                bucket: Some(bucket),
+                key: Some(key),
+                location: Some(location),
+                e_tag: Some(composite),
+                version_id: (written != UNVERSIONED).then_some(written),
+                // The body binds one element per algorithm rather than the packed spec a header
+                // binds, so the rendering is explicit here. CRC32 is the only algorithm this fixture
+                // computes, and `upload_checksum` refuses the rest outright rather than letting one
+                // fall through to an empty element.
+                checksum_crc32: checksum_spec.as_ref().map(|spec| spec.render_base64().to_owned()),
+                checksum_type,
+                // Decided at initiation, reported here. That gap is the whole of what these cases
+                // measure: the completion's head is flushed before the body is assembled, so a value
+                // that is only looked up afterwards can never become a header.
+                server_side_encryption: upload.encryption.clone(),
+                ..dto::CompleteMultipartUploadOutput::default()
+            })
+        })))
     }
 
     fn list_multipart_uploads(&self, input: &dto::ListMultipartUploadsInput) -> HandlerResult<dto::ListMultipartUploads> {
@@ -2673,6 +2751,171 @@ mod tests {
             .collect()
     }
 
+    fn name(text: &str) -> BucketName {
+        BucketName::new(text).expect("a bucket name")
+    }
+
+    fn object_key(text: &str) -> ObjectKey {
+        ObjectKey::new(text).expect("an object key")
+    }
+
+    /// A stub holding one bucket, one two-part upload, and one object to copy from.
+    ///
+    /// The parts are `MIN_PART_BYTES` and one byte, so the size floor is satisfied by a completion
+    /// that names them in order and violated by one that names them the other way round.
+    fn stub_with_an_upload() -> (Stub, String, String, String) {
+        let mut fixture = Fixture::at(0);
+        fixture.declare_bucket("conf-bucket", false);
+        fixture.put_object("conf-bucket", "src", StoredObject::new(b"source bytes".to_vec(), None, 0));
+        let upload = fixture.create_upload("conf-bucket", "k");
+        let first = fixture.put_part(&upload, 1, vec![0_u8; MIN_PART_BYTES]);
+        let second = fixture.put_part(&upload, 2, vec![1_u8]);
+        (Stub::new(Arc::new(Mutex::new(fixture))), upload, first, second)
+    }
+
+    fn completion(upload_id: &str, parts: Vec<(i32, Option<&str>)>) -> dto::CompleteMultipartUploadInput {
+        dto::CompleteMultipartUploadInput {
+            bucket: name("conf-bucket"),
+            key: object_key("k"),
+            upload_id: upload_id.to_owned(),
+            multipart_upload: dto::CompletedMultipartUpload {
+                parts: parts
+                    .into_iter()
+                    .map(|(number, tag)| dto::CompletedPart {
+                        part_number: number,
+                        e_tag: tag.map(|tag| ETag::new(format!("\"{tag}\"")).expect("an entity tag")),
+                        ..dto::CompletedPart::default()
+                    })
+                    .collect(),
+            },
+            ..dto::CompleteMultipartUploadInput::default()
+        }
+    }
+
+    fn copy(source: &str, destination: &str) -> dto::CopyObjectInput {
+        dto::CopyObjectInput {
+            bucket: name("conf-bucket"),
+            key: object_key(destination),
+            copy_source: source.to_owned(),
+            ..dto::CopyObjectInput::default()
+        }
+    }
+
+    /// Negative — **every** refusal a completion has happens while a status is still choosable.
+    ///
+    /// This is the test the `Resp::commit` boundary exists for. A check that slipped below the
+    /// commit would not fail loudly: the refusal's own status is gone by then, so the response would
+    /// go out as the `200` the head already carried and the `<Error>` inside it would be the only
+    /// sign. `c-mpu-0020` … `c-mpu-0023` and `c-mpu-0026` would all report green while putting the
+    /// wrong status line on the wire, which is precisely the failure this corpus exists to catch —
+    /// so the boundary is asserted here rather than trusted to the order of the lines above.
+    #[test]
+    fn every_completion_refusal_happens_before_the_head_is_committed() {
+        let (stub, upload, first, _second) = stub_with_an_upload();
+        let refusals = [
+            // A part list naming nothing.
+            (completion(&upload, vec![]), ErrorCode::INVALID_PART),
+            // Descending part numbers.
+            (completion(&upload, vec![(2, None), (1, None)]), ErrorCode::INVALID_PART_ORDER),
+            // A part number that was never uploaded.
+            (completion(&upload, vec![(7, None)]), ErrorCode::INVALID_PART),
+            // A digest that is not the digest of the bytes on file.
+            (
+                completion(&upload, vec![(1, Some("ffffffffffffffffffffffffffffffff"))]),
+                ErrorCode::INVALID_PART,
+            ),
+            // The one-byte part in a non-final position, which is under the floor. The floor is
+            // checked before part 3 is looked for, so this is the size refusal and not the
+            // missing-part one.
+            (completion(&upload, vec![(2, None), (3, None)]), ErrorCode::ENTITY_TOO_SMALL),
+        ];
+        for (input, code) in refusals {
+            let error = stub.complete_multipart_upload(&input).expect_err("a refusal");
+            assert_eq!(*error.code(), code);
+        }
+        // An upload id that names another key is refused too, and before anything else.
+        let mut foreign = completion(&upload, vec![(1, Some(&first))]);
+        foreign.key = object_key("someone-else");
+        assert!(stub.complete_multipart_upload(&foreign).is_err());
+    }
+
+    /// Negative — the size floor refuses a short part in the middle and exempts the last one, and
+    /// both answers are given before the head is committed.
+    ///
+    /// The exemption is not a leniency: the object is the concatenation, so every upload whose total
+    /// is not a multiple of the floor ends in a short part and applying the floor to it would make
+    /// them all uncompletable. The two halves are asserted together because a floor without the
+    /// exemption and an exemption without the floor look identical from either one alone.
+    #[test]
+    fn the_size_floor_refuses_a_short_middle_part_and_exempts_the_last_one() {
+        let mut fixture = Fixture::at(0);
+        fixture.declare_bucket("conf-bucket", false);
+        let upload = fixture.create_upload("conf-bucket", "k");
+        fixture.put_part(&upload, 1, vec![0_u8; 8]);
+        fixture.put_part(&upload, 2, vec![1_u8; 8]);
+        let stub = Stub::new(Arc::new(Mutex::new(fixture)));
+        let error = stub
+            .complete_multipart_upload(&completion(&upload, vec![(1, None), (2, None)]))
+            .expect_err("a refusal");
+        assert_eq!(*error.code(), ErrorCode::ENTITY_TOO_SMALL);
+        // The same eight-byte part, named alone, is the final part and passes.
+        let answer = stub
+            .complete_multipart_upload(&completion(&upload, vec![(1, None)]))
+            .expect("a committed answer");
+        assert!(answer.is_committed());
+    }
+
+    /// Positive — a completion with nothing left to refuse commits its head before it assembles.
+    ///
+    /// The status is the operation's declared one and the output does not exist yet, which is the
+    /// whole shape: `Resp::output` answers `None` for a committed answer because there is nothing to
+    /// answer with until the work runs.
+    #[test]
+    fn a_completion_with_nothing_left_to_refuse_commits_its_head() {
+        let (stub, upload, first, second) = stub_with_an_upload();
+        let answer = stub
+            .complete_multipart_upload(&completion(&upload, vec![(1, Some(&first)), (2, Some(&second))]))
+            .expect("a committed answer");
+        assert!(answer.is_committed());
+        assert_eq!(answer.status(), 200);
+        assert!(answer.output().is_none());
+    }
+
+    /// Negative — every refusal a copy has also happens before its head is committed.
+    ///
+    /// The source side is the half that matters. AWS draws the line at "before the copy action
+    /// starts", and a source that cannot be resolved is discovered before it starts — so a missing
+    /// key stays a `404` rather than becoming a `200` whose body says `NoSuchKey`. `c-copy-0026` and
+    /// `c-copy-0034` are the cases that would silently change status if this moved.
+    #[test]
+    fn every_copy_refusal_happens_before_the_head_is_committed() {
+        let (stub, _upload, _first, _second) = stub_with_an_upload();
+        for source in [
+            // A key that is not there.
+            "/conf-bucket/missing",
+            // A bucket that is not there.
+            "/conf-absent/src",
+            // A source that names no bucket and key at all.
+            "not-a-copy-source",
+        ] {
+            assert!(stub.copy_object(&copy(source, "dst")).is_err(), "{source}");
+        }
+        // A copy onto itself that changes nothing is refused as well.
+        assert!(stub.copy_object(&copy("/conf-bucket/src", "src")).is_err());
+    }
+
+    /// Positive — a copy with nothing left to refuse commits its head before it writes.
+    #[test]
+    fn a_copy_with_nothing_left_to_refuse_commits_its_head() {
+        let (stub, _upload, _first, _second) = stub_with_an_upload();
+        let answer = stub
+            .copy_object(&copy("/conf-bucket/src", "dst"))
+            .expect("a committed answer");
+        assert!(answer.is_committed());
+        assert_eq!(answer.status(), 200);
+        assert!(answer.output().is_none());
+    }
+
     /// Positive — one conditional header arrived, so the `412` can say which one failed.
     ///
     /// Both spellings are asserted: the destination set is the canonical mixed case a client reads
@@ -2715,34 +2958,91 @@ mod tests {
         assert_eq!(elements(&precondition(Some("If-Match"))), [("Condition", "If-Match".to_owned())]);
     }
 
-    /// Positive — a `416` carries the length in the head and in the document, from one argument.
-    ///
-    /// The header is never spelled here: [`ErrorHeader::UnsatisfiedRange`] holds the number and the
-    /// framework renders it, which is what makes the header name unwritable by a backend.
-    #[test]
-    fn an_unsatisfiable_range_reports_the_length_in_the_head_and_the_document() {
-        assert_eq!(head(&unsatisfiable(10)), [("content-range".to_owned(), "bytes */10".to_owned())]);
-        assert_eq!(elements(&unsatisfiable(10)), [("ActualObjectSize", "10".to_owned())]);
-        // A zero-byte object has no satisfiable range at all, and `bytes */0` is how a client
-        // learns that rather than retrying `bytes=0-0` for ever.
-        assert_eq!(head(&unsatisfiable(0)), [("content-range".to_owned(), "bytes */0".to_owned())]);
+    /// A ten-byte object whose entity tag is the one `c-range-0018` sends as its `If-Range`.
+    fn ten() -> StoredObject {
+        StoredObject::new(b"0123456789".to_vec(), Some("text/plain".to_owned()), 0)
     }
 
-    /// Negative — the `416` document does **not** carry `<RangeRequested>`, because the `Range`
-    /// header as it arrived does not reach a handler: the codec parsed it into a type the facade
-    /// does not re-export and which offers no way back to its own text.
+    /// Positive — a `416` carries the length in the head, the same length in the document, and the
+    /// range the client asked for, in the order AWS's document writes them.
     ///
-    /// Asserted rather than commented, so that a later change which starts re-spelling the range
-    /// out of the parsed value has to come through this test and say so.
+    /// The header is never spelled here: `ErrorHeader::UnsatisfiedRange` holds the number and the
+    /// framework renders it, which is what makes the header name unwritable by a backend.
     #[test]
-    fn an_unsatisfiable_range_invents_no_requested_range() {
-        for length in [0_u64, 1, 10, u64::MAX] {
-            let elements = elements(&unsatisfiable(length));
+    fn an_unsatisfiable_range_reports_the_length_and_the_range_that_was_refused() {
+        let error = resolve_range(Some("bytes=20-30"), None, None, &ten()).expect_err("20-30 of ten bytes");
+        assert_eq!(head(&error), [("content-range".to_owned(), "bytes */10".to_owned())]);
+        assert_eq!(
+            elements(&error),
+            [
+                ("RangeRequested", "bytes=20-30".to_owned()),
+                ("ActualObjectSize", "10".to_owned())
+            ]
+        );
+    }
+
+    /// Negative — `<RangeRequested>` is the header's own bytes and never a re-spelling of the
+    /// parse.
+    ///
+    /// This test replaces `an_unsatisfiable_range_invents_no_requested_range`, whose premise no
+    /// longer holds: the element used to be omitted because the text did not reach a handler, and
+    /// the codec now keeps the header bytes beside the parse. What survives is the rule that test
+    /// was really protecting — the value is *echoed*, not reconstructed. Padded and unpadded forms
+    /// parse identically and only one of them is what the client wrote, so a document that reports
+    /// the tidy form is reporting the server's own reading back as though it were the request.
+    #[test]
+    fn an_unsatisfiable_range_echoes_the_header_rather_than_re_spelling_the_parse() {
+        for raw in ["bytes=20-30", "  bytes=20-30  ", "bytes=20-"] {
+            let error = resolve_range(Some(raw), None, None, &ten()).expect_err("out of range");
             assert!(
-                elements.iter().all(|(element, _)| *element != "RangeRequested"),
-                "{elements:?} names a range this backend cannot have seen"
+                elements(&error).contains(&("RangeRequested", raw.to_owned())),
+                "{raw:?} was not echoed verbatim"
             );
         }
+    }
+
+    /// Positive — an `If-Range` whose validator still matches leaves the range in force.
+    #[test]
+    fn a_matching_if_range_keeps_the_window_the_client_asked_for() {
+        let object = ten();
+        let if_range = IfRange::parse(&format!("\"{}\"", object.etag));
+        let slice = resolve_range(Some("bytes=0-4"), Some(&if_range), None, &object).expect("a satisfied range");
+        assert_eq!((slice.start, slice.end_exclusive), (0, 5));
+        assert_eq!(slice.content_range.as_deref(), Some("bytes 0-4/10"));
+    }
+
+    /// Negative — a stale or unreadable `If-Range` drops the range and serves the whole object.
+    ///
+    /// Not a `412`: the header is a switch, and a client told its resumed download failed a
+    /// precondition gives up where it should have started again. The unreadable value is here for
+    /// the sharper reason — `IfRange::parse` is total precisely so that a validator this server
+    /// cannot confirm cannot decay into "no `If-Range` was sent", which would honour the range
+    /// against a representation nobody checked and splice two versions of the object together.
+    #[test]
+    fn a_stale_or_unreadable_if_range_drops_the_range_instead_of_refusing() {
+        let object = ten();
+        for value in ["\"0000000000000000000000000000dead\"", "*", "not-a-validator"] {
+            let if_range = IfRange::parse(value);
+            let slice = resolve_range(Some("bytes=0-4"), Some(&if_range), None, &object).expect("the whole object");
+            assert_eq!((slice.start, slice.end_exclusive), (0, 10), "{value}");
+            assert_eq!(slice.content_range, None, "{value}");
+        }
+    }
+
+    /// Negative — `Range` and `partNumber` together are refused, and a `partNumber` alone is
+    /// refused by name rather than answered as though it had not been sent.
+    ///
+    /// The second half is the one that matters here: `[setup]` in schema version 1 declares uploads
+    /// that are still in progress, so this fixture has no part table for a completed object.
+    /// Serving the whole object instead would answer a selector it cannot resolve with a `200` that
+    /// looks right.
+    #[test]
+    fn the_two_byte_selectors_are_refused_together_and_a_part_selector_is_refused_by_name() {
+        let object = ten();
+        let both = resolve_range(Some("bytes=0-4"), None, Some(2), &object).expect_err("two selectors");
+        assert_eq!(*both.code(), ErrorCode::INVALID_REQUEST);
+        let part = resolve_range(None, None, Some(2), &object).expect_err("no part table");
+        assert_eq!(*part.code(), ErrorCode::NOT_IMPLEMENTED);
     }
 
     /// Negative — a `404` names the key that missed and nothing else. `<BucketName>` is not added:
@@ -2807,12 +3107,26 @@ mod tests {
         assert_eq!(object.etag, "5d41402abc4b2a76b9719d911017c592");
     }
 
+    /// Positive — the window and the header it is described by come from the same decision.
+    ///
+    /// They used to come from two: the contract rendered `Content-Range` and this file read the
+    /// offsets back out of that string, because the outcome's variants could not be named through
+    /// the facade. `RangeDecision` can be, so the string is no longer parsed to recover what it was
+    /// built from — the last place in this file where a rendering was also an input.
     #[test]
-    fn a_content_range_round_trips_into_a_window() {
-        assert_eq!(window_of("bytes 0-4/10"), Some((0, 5)));
-        assert_eq!(window_of("bytes 5-9/10"), Some((5, 10)));
-        // The unsatisfiable rendering carries no window, which is how a 416 is recognised.
-        assert_eq!(window_of("bytes */10"), None);
+    fn a_window_and_its_content_range_come_from_one_decision() {
+        let object = ten();
+        let first = resolve_range(Some("bytes=0-4"), None, None, &object).expect("a window");
+        assert_eq!((first.start, first.end_exclusive), (0, 5));
+        assert_eq!(first.content_range.as_deref(), Some("bytes 0-4/10"));
+        let last = resolve_range(Some("bytes=5-9"), None, None, &object).expect("a window");
+        assert_eq!((last.start, last.end_exclusive), (5, 10));
+        assert_eq!(last.content_range.as_deref(), Some("bytes 5-9/10"));
+        // An overlong end is clamped to the object rather than refused, and the header reports the
+        // window that was actually served.
+        let clamped = resolve_range(Some("bytes=5-99"), None, None, &object).expect("a clamped window");
+        assert_eq!((clamped.start, clamped.end_exclusive), (5, 10));
+        assert_eq!(clamped.content_range.as_deref(), Some("bytes 5-9/10"));
     }
 
     #[test]

@@ -40,6 +40,28 @@
 //! Everything else — status, error code, header set, header order, body bytes, trailers, capture —
 //! is measured exactly.
 //!
+//! # What `kind` is, and what it is not allowed to be
+//!
+//! `expect.kind` was reported as `response` unconditionally, and `body_bytes_before_error` was never
+//! recorded at all. That is a worse defect than a missing feature: the four cases that assert a late
+//! failure could not have failed those assertions no matter what the server did, so the assertions
+//! read as satisfied while measuring nothing. A blind spot in the instrument is invisible in the
+//! report, which is the one place a conformance suite has to be trusted.
+//!
+//! Two things are reported now, and each is read off the exchange rather than assumed:
+//!
+//! * A response that arrived intact but whose status line and body **disagree** — a success status
+//!   over an `<Error>` document — is a `stream_error` terminating in an `error_document`, and
+//!   `body_bytes_before_error` is where that document begins. The classification is
+//!   [`crate::observation::late_error_offset`]'s, so a socket transport will make it identically.
+//! * A body that could not be drained is a `stream_error` terminating in an `abrupt_close`, and no
+//!   longer an environment failure that *skips* the case.
+//!
+//! What is still out of reach is the byte count on that second path: `collect` discards what it had
+//! read when the stream failed, so `body_bytes_before_error` is left unrecorded there rather than
+//! guessed, and a case pinning it stays red. `stream_termination = "reset"` and `"trailer_error"`
+//! need a connection and are likewise never reported.
+//!
 //! # Why a request is built twice
 //!
 //! Signing needs the host in the byte-exact form the canonical request uses, and the only way to
@@ -62,7 +84,7 @@ use rustfs_gateway::{
 use crate::exec::block_on;
 use crate::fixture::{Fixture, StoredObject, Stub};
 use crate::interpolate::Captures;
-use crate::observation::{ConnectionState, Observation, Outcome};
+use crate::observation::{ConnectionState, Observation, Outcome, StreamTermination, late_error_offset};
 use crate::sut::{ExchangePlan, Sut, SutError};
 use crate::time;
 use crate::value::Value;
@@ -494,11 +516,20 @@ impl Sut for InProcess {
         let request = assemble_request(&wire.method, &wire.target, &headers, wire.body.clone())?;
         let started = std::time::Instant::now();
         let response = block_on(service.call_bytes(request));
-        let collected = block_on(collect(response))
-            .map_err(|error| SutError::Environment(format!("the response body did not drain: {error}")))?;
+        // The head is kept before the body is drained, so that a body which fails halfway can still
+        // be reported *as a response that failed halfway* rather than as an environment problem. A
+        // drain that consumed the head first would leave the transport with nothing to report but
+        // the exception.
+        let (parts, payload) = response.into_parts();
+        let status = parts.status;
+        let head: Vec<(http::HeaderName, http::HeaderValue)> = parts
+            .headers
+            .iter()
+            .map(|(name, value)| (name.clone(), value.clone()))
+            .collect();
+        let drained = block_on(collect(http::Response::from_parts(parts, payload)));
         let elapsed_ms = started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
 
-        let (status, head, body, trailers) = collected.into_parts();
         let render = |pairs: Vec<(http::HeaderName, http::HeaderValue)>| -> Vec<(String, String)> {
             pairs
                 .into_iter()
@@ -512,15 +543,37 @@ impl Sut for InProcess {
                 })
                 .collect()
         };
+
+        let (body, trailers, outcome, termination, before_error) = match drained {
+            Ok(collected) => {
+                let (_, _, body, trailers) = collected.into_parts();
+                let body = body.to_vec();
+                // The status line and the document can disagree, and when they do the disagreement
+                // *is* the observation. Everything else about the exchange is unchanged: the head
+                // arrived, the body arrived, and the connection is reusable — what differs is that
+                // the request failed and only the body says so.
+                match late_error_offset(status.as_u16(), &body) {
+                    None => (body, trailers, Outcome::Response, None, None),
+                    Some(offset) => (body, trailers, Outcome::StreamError, Some(StreamTermination::ErrorDocument), Some(offset)),
+                }
+            }
+            // A body that could not be read to its end is a stream that stopped, which is a fact
+            // about the response and not about this harness — reporting it as an environment error
+            // would *skip* the case, and a skipped case asserts nothing. The byte count is left
+            // unrecorded rather than guessed: `collect` discards what it had read when it failed, so
+            // a case pinning `body_bytes_before_error` stays red here and says why.
+            Err(_) => (Vec::new(), Vec::new(), Outcome::StreamError, Some(StreamTermination::AbruptClose), None),
+        };
+
         Ok(Observation {
-            outcome: Outcome::Response,
-            stream_termination: None,
+            outcome,
+            stream_termination: termination,
             status: Some(status.as_u16()),
             http_version: None,
             headers: render(head),
             trailers: render(trailers),
-            body: body.to_vec(),
-            body_bytes_before_error: None,
+            body,
+            body_bytes_before_error: before_error,
             request_body_bytes_sent_at_response: Some(wire.body.len() as u64),
             request_body_fully_sent: Some(true),
             ttfb_ms: Some(elapsed_ms),
