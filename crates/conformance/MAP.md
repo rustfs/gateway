@@ -46,7 +46,7 @@ reach its target must not be recordable as a run whose assertions failed.
 | `src/crc32.rs` | CRC-32/ISO-HDLC for `x-amz-checksum-crc32`. Written out because the facade exports `ChecksumSpec` but not the `Checksummer` trait, so the framework's own implementation cannot be reached from outside the workspace | A multipart checksum case disagrees about a digest |
 | `src/time.rs` | `[clock] fixed` / `request_time` into a Unix second and a SigV4 stamp | A clock-pinned case is an hour out |
 | `src/exec.rs` | Twenty lines of `std` that run one future to completion | Never, unless a run hangs |
-| `src/fixture.rs` | **The stub backend**: what `[setup]` established, and the answers built out of it — the six listings with their pagination and cursors, the copy family with its source parser, source gate and span rule, and the multipart family with its upload-id ownership check, part-order and part-digest rules, size floor and composite entity tag | A case fails on a value the fixture chose |
+| `src/fixture.rs` | **The stub backend**: what `[setup]` established, and the answers built out of it — the six listings with their pagination and cursors, the copy family with its source parser, source gate and span rule, the multipart family with its upload-id ownership check, part-order and part-digest rules, size floor and composite entity tag, and the shape of its refusals (`unsatisfiable`, `precondition`/`sole_condition`, `no_such_key`) | A case fails on a value the fixture chose, or an error document is missing an element |
 | `src/inprocess.rs` | **The wired target**: request in, signature, `call_bytes`, `Observation` out | A case is skipped, or signs wrongly |
 | `src/runner.rs` (+ `runner/tests.rs`) | Selection, interpolation, driving exchanges, one verdict per case | A case reached the wrong conclusion |
 | `src/report.rs` | Verdicts, grouping by capability domain, baseline comparison, text/JSON/JUnit output | You are changing what fails a run |
@@ -80,7 +80,7 @@ The baseline on disk is older than the current run:
 
 ```text
 conformance/baseline.json   195 cases: 87 passed, 103 failed, 5 skipped
-current                     195 cases: 154 passed, 36 failed, 5 skipped
+current                     195 cases: 161 passed, 29 failed, 5 skipped
 ```
 
 Regenerate it with `baseline > conformance/baseline.json` in the same change that moves the
@@ -104,27 +104,44 @@ expected to be red, and the baseline exists to freeze how red rather than to exc
    and writes a `Buckets` element per entry, so the body reads
    `<Bucket><Buckets><Name>…</Name></Buckets></Bucket>` where AWS reads
    `<Buckets><Bucket><Name>…</Name></Bucket></Buckets>`. `c-list-0015` is the case that sees it.
-3. **A `HandlerError` is a code and a message, and some refusals are more than that.** It has no
-   header map and no room for an element the shared error document does not declare, so a backend
-   cannot answer a `416` with the `Content-Range: bytes */<length>` RFC 9110 §15.5.17 requires, nor
-   with the `<ActualObjectSize>` and `<RangeRequested>` elements AWS adds, nor a `412` with the
-   `<Condition>` element naming the header that failed. `c-range-0009`, `c-range-0010`,
-   `c-range-0014`, `c-object-0014` and the conditional cases that assert `<Condition>` are that
-   gap. The fixture does **not** reach around the error path to attach them: it would report a
-   green for a gap every other backend still has. The `304` half of this was a fixture bug rather
-   than a framework one and is fixed — a not-modified answer is a `Resp::with_status(_, 304)`
-   carrying the validators, never a `HandlerError`, because the codec already strips the body and
-   the framing header at that status.
+3. **A refusal can now carry its own headers and elements, and the fixture uses them.** `HandlerError`
+   gained `with_header(ErrorHeader)` / `with_detail(ErrorDetail)` and the two whole-refusal
+   constructors, both closed sets so that a backend names a *fact* and the framework spells the
+   header — see `crates/core/src/fault.rs`. `fixture` answers a `416` with
+   `ErrorHeader::UnsatisfiedRange` plus `<ActualObjectSize>`, a `412` with `<Condition>`, and a
+   `404` with `<Key>`, which closed `c-range-0009`, `c-range-0014`, `c-object-0014`,
+   `c-object-0007` and `c-cond-0001`. Two remainders, both framework rather than backend:
+   * **`<RangeRequested>` cannot be filled.** `HandlerError::unsatisfiable_range` takes the `Range`
+     header *as it arrived*, and no handler ever sees that text — the codec parsed it into
+     `rustfs_gateway_types::ByteRange`, the facade does not re-export the type, and the type offers
+     no way back to its own bytes. This is finding 11's gap on the refusal path. `fixture`
+     therefore does not call `unsatisfiable_range` at all and emits the one element it can know;
+     `c-range-0010` asserts the document byte for byte and stays red. Re-spelling the range out of
+     the parsed value would be a mirror of a parser, and the test
+     `an_unsatisfiable_range_invents_no_requested_range` is what keeps one from appearing.
+   * **`<Condition>` is only nameable for a single-condition request.**
+     `ConditionalOutcome::PreconditionFailed` says that a condition failed and not which, so
+     `fixture::sole_condition` names the header only when exactly one arrived — a fact, not a
+     deduction. Attributing a multi-condition failure means re-deriving RFC 9110 §13.2.2's
+     precedence in a backend, which is the mirror the `evaluate` export exists to remove. No case
+     currently needs it; one that did would stay red.
+
+   The `304` half of this was a fixture bug rather than a framework one and is fixed — a
+   not-modified answer is a `Resp::with_status(_, 304)` carrying the validators, never a
+   `HandlerError`, because the codec already strips the body and the framing header at that status.
 4. **No response carries `Server` or `Date`.** Nothing in the facade or the codec writes either,
    and no dto declares them, so no backend can supply them. `c-list-0044` is the case that sees it.
 5. **Genuine protocol disagreements**, which is what the suite is for. Among them:
-   `partNumber > 10000` is accepted; `DeleteObjects` does not require an integrity header; a `HEAD`
-   refusal carries an XML body; `MaxMessageLengthExceeded` where AWS says `InvalidArgument`.
+   `partNumber > 10000` is accepted; `DeleteObjects` does not require an integrity header;
+   `MaxMessageLengthExceeded` where AWS says `InvalidArgument`. A `HEAD` refusal carrying an XML
+   body was in this list and is now finding 17, because it is the *only* thing left in two cases.
 6. **The facade exports `ChecksumSpec` but not `Checksummer`.** `ChecksumAlgorithm::checksummer`
    returns `Box<dyn Checksummer>` and the trait is not re-exported, so the method on that box
    cannot be called from outside the workspace and no backend can produce an `x-amz-checksum-*`
    value without vendoring a digest. `src/crc32.rs` is this suite's copy; every other backend will
-   write one too.
+   write one too. `fixture::read_checksum` is what it is for on the read path — a whole read that
+   sent `x-amz-checksum-mode: ENABLED` gets the CRC-32 of its bytes, a `206` gets none, which is
+   `c-range-0016`'s two exchanges.
 7. **`GetObjectAttributes` is not implemented**, so `GET …?attributes` falls through to
    `GetObject` and is answered wrongly rather than refused. `c-etag-0001` is the case that sees it.
    `CopyObject` and `UploadPartCopy` were in this list and no longer are: both are registered by
@@ -193,6 +210,21 @@ expected to be red, and the baseline exists to freeze how red rather than to exc
    implementation can satisfy it. Cases are the contract and are not edited from the runner side,
    so this is a maintainer decision; the `lint/hand-computed-digest` gap under "Known gaps" is the
    same problem one layer up.
+17. **A refusal to a `HEAD` still carries the `<Error>` document.** `render` does not know the
+   request method, and the refusal path never reaches `EncodedResponse::enforce_http_invariants`,
+   where "a `HEAD` response has no content" lives for the success path. `c-cond-0023` and
+   `c-object-0008` are now red for *only* this — every other assertion in both is green, including
+   the `<Condition>` and `<Key>` elements finding 3 closed. Fixing it means threading the method
+   into `render`, which changes a public signature and is therefore not a backend's to do; see
+   `crates/gateway/MAP.md`'s "Known gaps".
+18. **`c-range-0007` needs a fixture vocabulary the schema does not have.** It declares
+   `[[setup.multipart_uploads]]` with two parts and then reads the key with `?partNumber=2`,
+   expecting `206` and `x-amz-mp-parts-count: 2`. But `setup.multipart_uploads` creates an
+   **in-progress** upload — that is what `capture_upload_id_as` is for, and what every `c-mpu-*`
+   case relies on — and an in-progress upload has no object to read, so the fixture answers
+   `NoSuchKey`. Satisfying the case needs a *completed* multipart object in `[setup]`, which
+   schema version 1 cannot express. Neither side is edited here: the case is the contract and the
+   schema is frozen, so this is a maintainer decision like finding 16.
 
 ### What this target cannot measure, and never pretends to
 

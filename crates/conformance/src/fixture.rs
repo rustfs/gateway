@@ -105,9 +105,9 @@ use std::sync::{Arc, Mutex};
 
 use rustfs_gateway::dto;
 use rustfs_gateway::{
-    BucketName, ByteStream, ChecksumAlgorithm, ChecksumSpec, ConditionalOutcome, ETag, ErrorCode, Handler, HandlerError,
-    HandlerResult, ObjectKey, ObjectValidators, PreconditionRejection, Preconditions, Req, RequestKind, Resp, Timestamp, collect,
-    evaluate, parse_conditional_etag,
+    BucketName, ByteStream, ChecksumAlgorithm, ChecksumSpec, ConditionalOutcome, ETag, ErrorCode, ErrorDetail, ErrorHeader,
+    Handler, HandlerError, HandlerResult, ObjectKey, ObjectValidators, PRECONDITION_FAILED_MESSAGE, PreconditionRejection,
+    Preconditions, RANGE_NOT_SATISFIABLE_MESSAGE, Req, RequestKind, Resp, Timestamp, collect, evaluate, parse_conditional_etag,
 };
 
 /// The canonical user id every listing reports as the owner.
@@ -774,18 +774,57 @@ fn refused(rejection: PreconditionRejection) -> HandlerError {
     HandlerError::new(rejection.code().clone(), rejection.reason())
 }
 
-/// A `412`, worded as AWS words it.
+/// The destination-side conditional headers, spelled as AWS spells them inside `<Condition>`.
 ///
-/// AWS also emits a `<Condition>` element naming the header that failed. A `HandlerError` carries
-/// a code and a message and nothing else, so this backend cannot produce one — which is itself
-/// what the conditional cases are measuring. The condition is therefore *not* smuggled into the
-/// message: doing that would make the `<Message>` text differ too, and one failure would look like
-/// two.
-fn precondition() -> HandlerError {
-    HandlerError::new(
-        ErrorCode::PRECONDITION_FAILED,
-        "At least one of the pre-conditions you specified did not hold",
-    )
+/// The canonical mixed case, not the lowercase wire name [`rustfs_gateway::ConditionalHeader`]
+/// carries: `<Condition>If-None-Match</Condition>` is what the error document reads, and a client
+/// that switches on the element sees `if-none-match` as a value it has no branch for.
+const DESTINATION_CONDITIONS: [&str; 4] = ["If-Match", "If-Unmodified-Since", "If-None-Match", "If-Modified-Since"];
+
+/// The copy-source spellings of the same four. Lowercase, because the `x-amz-` headers are.
+const COPY_SOURCE_CONDITIONS: [&str; 4] = [
+    "x-amz-copy-source-if-match",
+    "x-amz-copy-source-if-unmodified-since",
+    "x-amz-copy-source-if-none-match",
+    "x-amz-copy-source-if-modified-since",
+];
+
+/// The header a `412` names, when the request carried exactly one condition.
+///
+/// # Why only one, and why this is not the evaluation order
+///
+/// [`ConditionalOutcome::PreconditionFailed`] says *that* a condition was false and not *which*,
+/// so the name has to come from somewhere else. The only thing this backend knows for certain is
+/// which headers arrived: when exactly one did, it is the one that failed, and that is a fact
+/// rather than a deduction. When two or more arrived, naming one means re-deriving RFC 9110
+/// §13.2.2's precedence here — a second copy of a rule [`rustfs_gateway::evaluate`] already holds,
+/// which is exactly the kind of mirror this file exists to avoid. So the element is omitted
+/// instead, and a case that wants it for a multi-condition request stays red until the outcome
+/// carries the header it was decided by.
+fn sole_condition(names: &[&'static str; 4], present: [bool; 4]) -> Option<&'static str> {
+    let mut only = None;
+    for (name, present) in names.iter().zip(present) {
+        if !present {
+            continue;
+        }
+        if only.is_some() {
+            return None;
+        }
+        only = Some(*name);
+    }
+    only
+}
+
+/// A `412`, worded as AWS words it, naming the condition when [`sole_condition`] could.
+///
+/// The name goes in `<Condition>` and never into `<Message>`: a message assembled per failure
+/// would make the two byte-exact conditional cases differ in the element they are *not* about, and
+/// one failure would look like two.
+fn precondition(condition: Option<&'static str>) -> HandlerError {
+    match condition {
+        Some(name) => HandlerError::precondition_failed(name),
+        None => HandlerError::new(ErrorCode::PRECONDITION_FAILED, PRECONDITION_FAILED_MESSAGE),
+    }
 }
 
 /// Evaluates a write's conditions against the representation it would replace.
@@ -799,7 +838,8 @@ fn guard_write(
     if_none_match: Option<&str>,
     now: i64,
 ) -> Result<(), HandlerError> {
-    settle_write(object, &conditions(if_match, None, if_none_match, None, now)?)
+    let named = sole_condition(&DESTINATION_CONDITIONS, [if_match.is_some(), false, if_none_match.is_some(), false]);
+    settle_write(object, &conditions(if_match, None, if_none_match, None, now)?, named)
 }
 
 /// The copy-source conditions, evaluated against the source representation.
@@ -807,7 +847,9 @@ fn guard_write(
 /// A copy is a write however much its source side looks like a read: a failed `If-None-Match` is a
 /// `412` and never a `304`, which would tell the client its copy is up to date when no copy was
 /// ever made. The four names are spelled the same as the destination's and name a different
-/// object, which is why they are evaluated in their own call rather than merged into one.
+/// object, which is why they are evaluated in their own call rather than merged into one — and why
+/// the `<Condition>` this reports is the `x-amz-copy-source-` spelling: a client told `If-Match`
+/// failed would look at the header it sent for the destination.
 fn guard_copy_source(
     found: &StoredObject,
     if_match: Option<&str>,
@@ -817,18 +859,31 @@ fn guard_copy_source(
     now: i64,
 ) -> Result<(), HandlerError> {
     let conditions = conditions(if_match, if_unmodified_since, if_none_match, if_modified_since, now)?;
-    settle_write(Some(found), &conditions)
+    let named = sole_condition(
+        &COPY_SOURCE_CONDITIONS,
+        [
+            if_match.is_some(),
+            if_unmodified_since.is_some(),
+            if_none_match.is_some(),
+            if_modified_since.is_some(),
+        ],
+    );
+    settle_write(Some(found), &conditions, named)
 }
 
 /// Turns the contract's verdict on a write into this backend's answer.
-fn settle_write(object: Option<&StoredObject>, conditions: &Preconditions) -> Result<(), HandlerError> {
+fn settle_write(
+    object: Option<&StoredObject>,
+    conditions: &Preconditions,
+    condition: Option<&'static str>,
+) -> Result<(), HandlerError> {
     let validators = validators_of(object)?;
     match evaluate(conditions, &validators, RequestKind::Write).map_err(refused)? {
         ConditionalOutcome::Proceed => Ok(()),
         // A write is never answered `304`, and the contract guarantees it. The arm is spelled out
         // rather than folded into a catch-all so that an outcome added later cannot arrive here as
         // a silent success.
-        ConditionalOutcome::NotModified | ConditionalOutcome::PreconditionFailed => Err(precondition()),
+        ConditionalOutcome::NotModified | ConditionalOutcome::PreconditionFailed => Err(precondition(condition)),
         // Named, and unreachable from this fixture: detecting a lost race is the storage layer's
         // job, and a fixture behind one mutex never has two writers in flight to lose one.
         ConditionalOutcome::Conflict => Err(conflict()),
@@ -864,16 +919,31 @@ fn guard_read(
 ) -> Result<ConditionalOutcome, HandlerError> {
     let conditions = conditions(if_match, if_unmodified_since, if_none_match, if_modified_since, now)?;
     let validators = validators_of(object)?;
+    let named = sole_condition(
+        &DESTINATION_CONDITIONS,
+        [
+            if_match.is_some(),
+            if_unmodified_since.is_some(),
+            if_none_match.is_some(),
+            if_modified_since.is_some(),
+        ],
+    );
     match evaluate(&conditions, &validators, RequestKind::Read).map_err(refused)? {
         outcome @ (ConditionalOutcome::Proceed | ConditionalOutcome::NotModified) => Ok(outcome),
-        ConditionalOutcome::PreconditionFailed => Err(precondition()),
+        ConditionalOutcome::PreconditionFailed => Err(precondition(named)),
         ConditionalOutcome::Conflict => Err(conflict()),
     }
 }
 
 /// `NoSuchKey`, raised only once every condition has been evaluated against the absence.
-fn no_such_key() -> HandlerError {
+///
+/// The document carries `<Key>`, which is the only element in it that says *which* read missed —
+/// a client batching reads on one connection cannot tell two 404s apart without it. The key is the
+/// one the request named, so it is an echo to a caller already authenticated and authorised, and
+/// the writer escapes it: see `rustfs_gateway`'s renderer.
+fn no_such_key(key: &str) -> HandlerError {
     HandlerError::new(ErrorCode::NO_SUCH_KEY, "The specified key does not exist.")
+        .with_detail(ErrorDetail::Key(key.to_owned().into()))
 }
 
 /// A resolved range: the window to send, and the `Content-Range` value that describes it.
@@ -909,6 +979,28 @@ fn window_of(content_range: &str) -> Option<(usize, usize)> {
     Some((first, last.checked_add(1)?))
 }
 
+/// The `x-amz-checksum-crc32` a read reports, and the two reasons it reports none.
+///
+/// * **The client has to ask.** S3 emits the digest only for `x-amz-checksum-mode: ENABLED`, so a
+///   backend that volunteered it would put a header on every read that no case asked for.
+/// * **The read has to be whole.** A checksum describes the bytes it travels with. A `206`
+///   carrying the *object's* digest fails verification in every SDK that checks one, and the client
+///   then reports data corruption — which sends an operator to look at storage rather than at a
+///   header. `c-range-0016` is both halves of this, in two exchanges on one connection.
+///
+/// CRC-32 because it is the one algorithm this suite can compute: the facade exports
+/// [`ChecksumSpec`] but not the `Checksummer` trait behind `ChecksumAlgorithm::checksummer`, so
+/// `src/crc32.rs` is this suite's own, and every other backend outside the workspace will write
+/// one too. The digest is of the bytes `[setup]` declared and of nothing else.
+fn read_checksum(mode: Option<&dto::ChecksumMode>, partial: bool, whole: &[u8]) -> Option<String> {
+    if partial || mode != Some(&dto::ChecksumMode::ENABLED) {
+        return None;
+    }
+    ChecksumSpec::from_digest(ChecksumAlgorithm::Crc32, &crate::crc32::digest(whole))
+        .ok()
+        .map(|spec| spec.render_base64().to_owned())
+}
+
 /// The storage class a read reports, which S3 omits for the default class.
 fn storage_class_header(object: &StoredObject) -> Option<dto::StorageClass> {
     if object.storage_class == "STANDARD" {
@@ -917,19 +1009,27 @@ fn storage_class_header(object: &StoredObject) -> Option<dto::StorageClass> {
     Some(dto::StorageClass::custom(object.storage_class.clone()))
 }
 
-/// `416`.
+/// `416`, carrying the `Content-Range` RFC 9110 §15.5.17 requires and the object's real length.
 ///
-/// # What this cannot say, and why that is not this file's to fix
+/// The header is not spelled here. [`ErrorHeader::UnsatisfiedRange`] holds the length and the
+/// framework renders `bytes */<length>`, which is what keeps a backend from being able to name a
+/// header at all — see `crates/core/src/fault.rs`.
 ///
-/// RFC 9110 §15.5.17 requires a `416` to carry `Content-Range: bytes */<complete-length>`, and AWS
-/// puts the same two numbers in the document as `<ActualObjectSize>` and `<RangeRequested>`. A
-/// [`HandlerError`] carries an [`ErrorCode`] and a message and nothing else: it has no header map
-/// and no room for an element the shared error document does not declare. So a backend cannot
-/// answer a `416` completely no matter what it does here, and a fixture that reached around the
-/// error path to attach the header would report a green for a gap every other backend still has.
-/// `c-range-0009`, `c-range-0010`, `c-range-0014` and `c-object-0014` are that gap, held open.
-fn unsatisfiable() -> HandlerError {
-    HandlerError::new(ErrorCode::INVALID_RANGE, "The requested range is not satisfiable")
+/// # The one element this cannot carry, and why it is left off rather than approximated
+///
+/// AWS's document has two extra elements: `<ActualObjectSize>`, which is the length below, and
+/// `<RangeRequested>`, which is the `Range` header **as it arrived**. That text does not reach a
+/// handler. The generated decoder has already parsed the header into `rustfs_gateway_types::
+/// ByteRange`, the facade does not re-export that type, and `ByteRange` offers no way back to the
+/// bytes it was built from — the same gap `MAP.md` finding 11 records for `evaluate_range`. So
+/// [`HandlerError::unsatisfiable_range`], which takes the requested text as its first argument, is
+/// deliberately **not** called: this backend has nothing honest to pass it, and re-spelling the
+/// range out of the parsed value would be a mirror of a parser, agreeing with itself and with
+/// nothing else. `c-range-0010` asserts the element byte for byte and stays red for it.
+fn unsatisfiable(complete_length: u64) -> HandlerError {
+    HandlerError::new(ErrorCode::INVALID_RANGE, RANGE_NOT_SATISFIABLE_MESSAGE)
+        .with_header(ErrorHeader::UnsatisfiedRange { complete_length })
+        .with_detail(ErrorDetail::ActualObjectSize(complete_length))
 }
 
 /// The checksum contract an initiating request declared, if it declared one.
@@ -1194,10 +1294,10 @@ fn read_copy_source(fixture: &Fixture, source: &CopySource) -> Result<(StoredObj
         return Err(HandlerError::new(ErrorCode::NO_SUCH_BUCKET, "The specified bucket does not exist"));
     }
     let Some(requested) = source.version_id.as_deref() else {
-        let object = fixture
-            .object(bucket, key)
-            .ok_or_else(|| HandlerError::new(ErrorCode::NO_SUCH_KEY, "The specified key does not exist."))?
-            .clone();
+        // The key named is the *source's*, which is the whole reason the element is worth carrying
+        // here: a copy that reported the destination key would send a client looking at the object
+        // it was writing rather than the one that was missing.
+        let object = fixture.object(bucket, key).ok_or_else(|| no_such_key(key))?.clone();
         // Reported only for a versioned bucket: `null` is the version of an object in a bucket that
         // was never versioned, and a header carrying it tells a client its unversioned copy has a
         // version to come back for.
@@ -1549,7 +1649,7 @@ impl Stub {
             input.if_modified_since.as_ref().map(|stamp| stamp.secs()),
             fixture.now,
         )?;
-        let Some(object) = found else { return Err(no_such_key()) };
+        let Some(object) = found else { return Err(no_such_key(input.key.as_str())) };
         if condition == ConditionalOutcome::NotModified {
             return Ok(Resp::with_status(
                 dto::GetObjectOutput {
@@ -1570,7 +1670,7 @@ impl Stub {
                 match outcome.content_range(length as u64) {
                     None => Slice::whole(length),
                     Some(text) => match window_of(&text) {
-                        None => return Err(unsatisfiable()),
+                        None => return Err(unsatisfiable(length as u64)),
                         Some((start, end_exclusive)) => Slice {
                             start,
                             end_exclusive,
@@ -1593,6 +1693,7 @@ impl Stub {
                 // which is what makes a resumed download able to notice the object changed under it.
                 e_tag: Some(entity_tag(&object.etag)?),
                 last_modified: Some(Timestamp::from_secs(object.last_modified)),
+                checksum_crc32: read_checksum(input.checksum_mode.as_ref(), status == 206, &object.body),
                 cache_control: object.cache_control.clone(),
                 content_disposition: object.content_disposition.clone(),
                 content_encoding: object.content_encoding.clone(),
@@ -1619,7 +1720,7 @@ impl Stub {
             input.if_modified_since.as_ref().map(|stamp| stamp.secs()),
             fixture.now,
         )?;
-        let Some(object) = found else { return Err(no_such_key()) };
+        let Some(object) = found else { return Err(no_such_key(input.key.as_str())) };
         if condition == ConditionalOutcome::NotModified {
             return Ok(Resp::with_status(
                 dto::HeadObjectOutput {
@@ -1640,7 +1741,7 @@ impl Stub {
                 match outcome.content_range(length as u64) {
                     None => Slice::whole(length),
                     Some(text) => match window_of(&text) {
-                        None => return Err(unsatisfiable()),
+                        None => return Err(unsatisfiable(length as u64)),
                         Some((start, end_exclusive)) => Slice {
                             start,
                             end_exclusive,
@@ -1660,6 +1761,9 @@ impl Stub {
                 accept_ranges: Some("bytes".to_owned()),
                 e_tag: Some(entity_tag(&object.etag)?),
                 last_modified: Some(Timestamp::from_secs(object.last_modified)),
+                // The same rule as `GetObject`'s, for the same reason: a `HEAD` carries the head a
+                // `GET` would, so the two would otherwise disagree about the object's integrity.
+                checksum_crc32: read_checksum(input.checksum_mode.as_ref(), status == 206, &object.body),
                 cache_control: object.cache_control.clone(),
                 content_disposition: object.content_disposition.clone(),
                 content_encoding: object.content_encoding.clone(),
@@ -2550,6 +2654,128 @@ fn paginate(fixture: &Fixture, bucket: &str, prefix: &str, delimiter: Option<&st
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The elements of a refusal, in the order the document will write them.
+    fn elements(error: &HandlerError) -> Vec<(&'static str, String)> {
+        error
+            .details()
+            .iter()
+            .map(|detail| (detail.element(), detail.text().into_owned()))
+            .collect()
+    }
+
+    /// The headers a refusal adds to its own head, rendered.
+    fn head(error: &HandlerError) -> Vec<(String, String)> {
+        error
+            .headers()
+            .iter()
+            .map(|header| (header.name().as_str().to_owned(), header.value()))
+            .collect()
+    }
+
+    /// Positive — one conditional header arrived, so the `412` can say which one failed.
+    ///
+    /// Both spellings are asserted: the destination set is the canonical mixed case a client reads
+    /// out of `<Condition>`, and the copy-source set names the `x-amz-` header that actually
+    /// carried the condition rather than the destination header of the same shape.
+    #[test]
+    fn a_single_condition_is_named_by_the_header_that_carried_it() {
+        assert_eq!(
+            sole_condition(&DESTINATION_CONDITIONS, [false, false, true, false]),
+            Some("If-None-Match")
+        );
+        assert_eq!(sole_condition(&DESTINATION_CONDITIONS, [true, false, false, false]), Some("If-Match"));
+        assert_eq!(
+            sole_condition(&COPY_SOURCE_CONDITIONS, [true, false, false, false]),
+            Some("x-amz-copy-source-if-match")
+        );
+    }
+
+    /// Negative — a request that carried two conditions, or none, is not attributed to one.
+    ///
+    /// Picking one of two would mean re-deriving RFC 9110 §13.2.2's precedence in this file, and a
+    /// backend that guesses tells the client to fix a header that was holding fine. The element is
+    /// dropped instead, which leaves any case that wants it red rather than wrong.
+    #[test]
+    fn no_condition_is_named_when_the_request_carried_more_than_one() {
+        assert_eq!(sole_condition(&DESTINATION_CONDITIONS, [true, false, true, false]), None);
+        assert_eq!(sole_condition(&DESTINATION_CONDITIONS, [true, true, true, true]), None);
+        assert_eq!(sole_condition(&DESTINATION_CONDITIONS, [false, false, false, false]), None);
+    }
+
+    /// Negative — an unnameable condition produces a `412` with no `<Condition>` at all, and above
+    /// all with the same `<Message>`. Folding the name into the message would make the two
+    /// byte-exact conditional cases differ in the element they are not about.
+    #[test]
+    fn an_unnamed_precondition_failure_adds_no_element_and_changes_no_message() {
+        let anonymous = precondition(None);
+        assert!(elements(&anonymous).is_empty());
+        assert!(head(&anonymous).is_empty());
+        assert_eq!(anonymous.message(), precondition(Some("If-Match")).message());
+        assert_eq!(elements(&precondition(Some("If-Match"))), [("Condition", "If-Match".to_owned())]);
+    }
+
+    /// Positive — a `416` carries the length in the head and in the document, from one argument.
+    ///
+    /// The header is never spelled here: [`ErrorHeader::UnsatisfiedRange`] holds the number and the
+    /// framework renders it, which is what makes the header name unwritable by a backend.
+    #[test]
+    fn an_unsatisfiable_range_reports_the_length_in_the_head_and_the_document() {
+        assert_eq!(head(&unsatisfiable(10)), [("content-range".to_owned(), "bytes */10".to_owned())]);
+        assert_eq!(elements(&unsatisfiable(10)), [("ActualObjectSize", "10".to_owned())]);
+        // A zero-byte object has no satisfiable range at all, and `bytes */0` is how a client
+        // learns that rather than retrying `bytes=0-0` for ever.
+        assert_eq!(head(&unsatisfiable(0)), [("content-range".to_owned(), "bytes */0".to_owned())]);
+    }
+
+    /// Negative — the `416` document does **not** carry `<RangeRequested>`, because the `Range`
+    /// header as it arrived does not reach a handler: the codec parsed it into a type the facade
+    /// does not re-export and which offers no way back to its own text.
+    ///
+    /// Asserted rather than commented, so that a later change which starts re-spelling the range
+    /// out of the parsed value has to come through this test and say so.
+    #[test]
+    fn an_unsatisfiable_range_invents_no_requested_range() {
+        for length in [0_u64, 1, 10, u64::MAX] {
+            let elements = elements(&unsatisfiable(length));
+            assert!(
+                elements.iter().all(|(element, _)| *element != "RangeRequested"),
+                "{elements:?} names a range this backend cannot have seen"
+            );
+        }
+    }
+
+    /// Negative — a `404` names the key that missed and nothing else. `<BucketName>` is not added:
+    /// the bucket was found, so naming it would report a fact that is not the failure.
+    #[test]
+    fn a_missing_key_is_reported_by_key_alone() {
+        assert_eq!(elements(&no_such_key("missing/key")), [("Key", "missing/key".to_owned())]);
+        assert!(head(&no_such_key("missing/key")).is_empty());
+    }
+
+    /// Negative — no checksum travels with bytes it does not cover, and none travels unasked.
+    ///
+    /// The partial case is the one that produces a corruption report from a correct client; the
+    /// unasked case is the one that would put a header on every read in the corpus.
+    #[test]
+    fn a_read_reports_no_checksum_unless_it_was_asked_and_whole() {
+        assert_eq!(read_checksum(Some(&dto::ChecksumMode::ENABLED), true, b"123456789"), None);
+        assert_eq!(read_checksum(None, false, b"123456789"), None);
+        assert_eq!(read_checksum(None, true, b"123456789"), None);
+        // A value this build has no constant for is not `ENABLED` by resemblance.
+        assert_eq!(read_checksum(Some(&dto::ChecksumMode::custom("enabled")), false, b"123456789"), None);
+    }
+
+    /// Positive — a whole read that asked reports the CRC-32 of the bytes it sends, base64 as the
+    /// header carries it. Pinned against `crate::crc32`'s published check vector.
+    #[test]
+    fn a_whole_read_that_asked_reports_the_crc32_of_its_bytes() {
+        assert_eq!(
+            read_checksum(Some(&dto::ChecksumMode::ENABLED), false, b"123456789").as_deref(),
+            Some("y/Q5Jg==")
+        );
+        assert_eq!(read_checksum(Some(&dto::ChecksumMode::ENABLED), false, b"").as_deref(), Some("AAAAAA=="));
+    }
 
     /// Every spelling the exported parser accepts arrives as a tag rather than as a 400.
     ///
