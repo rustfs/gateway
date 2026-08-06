@@ -130,7 +130,7 @@
     "c-mpu-0016": "passed",
     "c-mpu-0017": "passed",
     "c-mpu-0018": "failed",
-    "c-mpu-0019": "failed",
+    "c-mpu-0019": "passed",
     "c-mpu-0020": "passed",
     "c-mpu-0021": "passed",
     "c-mpu-0022": "passed",
@@ -145,7 +145,7 @@
     "c-mpu-0031": "passed",
     "c-mpu-0032": "passed",
     "c-mpu-0033": "passed",
-    "c-mpu-0034": "failed",
+    "c-mpu-0034": "passed",
     "c-mpu-0035": "passed",
     "c-mpu-0036": "passed",
     "c-mpu-0037": "passed",
@@ -192,7 +192,7 @@
     "c-range-0014": "passed",
     "c-range-0015": "failed",
     "c-range-0016": "passed",
-    "c-range-0017": "failed",
+    "c-range-0017": "passed",
     "c-range-0018": "failed",
     "c-sig-0001": "failed"
   }
