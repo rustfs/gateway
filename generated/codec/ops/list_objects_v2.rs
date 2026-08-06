@@ -63,7 +63,7 @@ impl OperationCodec for dto::ListObjectsV2 {
         // ContinuationToken — query `continuation-token`, percent-decoded once.
         if let Some(raw) = request.query("continuation-token") {
             let raw = raw.as_ref();
-            input.continuation_token = Some(value::opaque(raw));
+            input.continuation_token = Some(value::opaque(value::token_form(raw, "ContinuationToken")?));
         }
         // FetchOwner — query `fetch-owner`, percent-decoded once.
         if let Some(raw) = request.query("fetch-owner") {
@@ -77,12 +77,14 @@ impl OperationCodec for dto::ListObjectsV2 {
             let raw = raw.as_ref();
             input.start_after = Some(raw.to_owned());
         }
-        // RequestPayer — header `x-amz-request-payer`.
+        // RequestPayer — header `x-amz-request-payer`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-request-payer") {
+            let raw = raw.as_ref();
             input.request_payer = Some(dto::RequestPayer::custom(raw.to_owned()));
         }
-        // ExpectedBucketOwner — header `x-amz-expected-bucket-owner`.
+        // ExpectedBucketOwner — header `x-amz-expected-bucket-owner`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-expected-bucket-owner") {
+            let raw = raw.as_ref();
             input.expected_bucket_owner = Some(raw.to_owned());
         }
         let _ = body;

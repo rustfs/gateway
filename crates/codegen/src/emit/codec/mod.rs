@@ -40,6 +40,7 @@ pub mod bounds;
 pub mod decode;
 pub mod encode;
 pub mod expr;
+pub mod forms;
 
 use std::collections::BTreeSet;
 use std::fmt::Write as _;

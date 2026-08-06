@@ -65,12 +65,14 @@ impl OperationCodec for dto::ListObjects {
             let raw = raw.as_ref();
             input.prefix = Some(raw.to_owned());
         }
-        // RequestPayer — header `x-amz-request-payer`.
+        // RequestPayer — header `x-amz-request-payer`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-request-payer") {
+            let raw = raw.as_ref();
             input.request_payer = Some(dto::RequestPayer::custom(raw.to_owned()));
         }
-        // ExpectedBucketOwner — header `x-amz-expected-bucket-owner`.
+        // ExpectedBucketOwner — header `x-amz-expected-bucket-owner`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-expected-bucket-owner") {
+            let raw = raw.as_ref();
             input.expected_bucket_owner = Some(raw.to_owned());
         }
         let _ = body;

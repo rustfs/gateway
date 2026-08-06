@@ -35,7 +35,7 @@
                            "binding": { "kind": "Query" },
                            "type": { "kind": "OpaqueString" },
                            "hot": true,
-                           "quirk_refs": ["q-token-0021", "q-buckets-0071"]
+                           "quirk_refs": ["q-token-0021", "q-buckets-0071", "q-token-form-0075"]
                          },
                          {
                            "name": "Prefix",
@@ -260,6 +260,25 @@
                               }
                             ],
                 "cases": ["c-list-0016", "c-list-0044"]
+              },
+              {
+                "id": "q-token-form-0075",
+                "kind": "wire_form",
+                "target": "ListObjectsV2.ContinuationToken",
+                "summary": "A cursor is a value this service minted, so one longer than anything it mints, one whose percent-decoded bytes are not text, and one spelling a parent traversal are all malformed input refused before the listing runs, rather than opaque bytes carried into whatever the listing does with them.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectsV2.html",
+                                "summary": "Describes the continuation token as an opaque value obtained from a previous response, which bounds both its size and the bytes it can hold."
+                              },
+                              {
+                                "kind": "observed",
+                                "ref": "https://cwe.mitre.org/data/definitions/22.html",
+                                "summary": "Building a path from external input without normalising it is a documented traversal class, and a cursor is the value in this family an implementation is most tempted to give path structure to."
+                              }
+                            ],
+                "cases": ["c-list-0029", "c-list-0030", "c-list-0031"]
               }
             ],
   "ext_points": []

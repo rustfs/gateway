@@ -35,125 +35,153 @@ use crate::codec::{CodecError, MetaView, OperationCodec, RequestBody, value};
 impl OperationCodec for dto::CreateMultipartUpload {
     fn decode(request: &MetaView<'_>, body: RequestBody) -> Result<Self::Input, CodecError> {
         let mut input = Input { ..Default::default() };
-        // ACL — header `x-amz-acl`.
+        // ACL — header `x-amz-acl`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-acl") {
+            let raw = raw.as_ref();
             input.acl = Some(dto::Acl::custom(raw.to_owned()));
         }
         // Bucket — URI label, decoded once by `MetaView::of`.
         input.bucket = request.require_bucket()?;
-        // CacheControl — header `cache-control`.
+        // CacheControl — header `cache-control`, repeated field lines joined.
         if let Some(raw) = request.header("cache-control") {
+            let raw = raw.as_ref();
             input.cache_control = Some(raw.to_owned());
         }
-        // ContentDisposition — header `content-disposition`.
+        // ContentDisposition — header `content-disposition`, repeated field lines joined.
         if let Some(raw) = request.header("content-disposition") {
+            let raw = raw.as_ref();
             input.content_disposition = Some(raw.to_owned());
         }
-        // ContentEncoding — header `content-encoding`.
+        // ContentEncoding — header `content-encoding`, repeated field lines joined.
         if let Some(raw) = request.header("content-encoding") {
+            let raw = raw.as_ref();
             input.content_encoding = Some(raw.to_owned());
         }
-        // ContentLanguage — header `content-language`.
+        // ContentLanguage — header `content-language`, repeated field lines joined.
         if let Some(raw) = request.header("content-language") {
+            let raw = raw.as_ref();
             input.content_language = Some(raw.to_owned());
         }
-        // ContentType — header `content-type`.
+        // ContentType — header `content-type`, repeated field lines joined.
         if let Some(raw) = request.header("content-type") {
+            let raw = raw.as_ref();
             input.content_type = Some(raw.to_owned());
         } else {
             input.content_type = Some("binary/octet-stream".to_owned());
         }
-        // Expires — header `expires`.
+        // Expires — header `expires`, repeated field lines joined.
         if let Some(raw) = request.header("expires") {
+            let raw = raw.as_ref();
             input.expires = Some(value::opaque(raw));
         }
-        // GrantFullControl — header `x-amz-grant-full-control`.
+        // GrantFullControl — header `x-amz-grant-full-control`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-grant-full-control") {
+            let raw = raw.as_ref();
             input.grant_full_control = Some(raw.to_owned());
         }
-        // GrantRead — header `x-amz-grant-read`.
+        // GrantRead — header `x-amz-grant-read`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-grant-read") {
+            let raw = raw.as_ref();
             input.grant_read = Some(raw.to_owned());
         }
-        // GrantReadACP — header `x-amz-grant-read-acp`.
+        // GrantReadACP — header `x-amz-grant-read-acp`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-grant-read-acp") {
+            let raw = raw.as_ref();
             input.grant_read_acp = Some(raw.to_owned());
         }
-        // GrantWriteACP — header `x-amz-grant-write-acp`.
+        // GrantWriteACP — header `x-amz-grant-write-acp`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-grant-write-acp") {
+            let raw = raw.as_ref();
             input.grant_write_acp = Some(raw.to_owned());
         }
         // Key — URI label, decoded once by `MetaView::of`.
         input.key = request.require_key()?;
         // Metadata — every header under `x-amz-meta-`.
         input.metadata = value::prefixed_map(request, "x-amz-meta-");
-        // ServerSideEncryption — header `x-amz-server-side-encryption`.
+        // ServerSideEncryption — header `x-amz-server-side-encryption`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-server-side-encryption") {
+            let raw = raw.as_ref();
             input.server_side_encryption = Some(dto::ServerSideEncryption::custom(raw.to_owned()));
         }
-        // StorageClass — header `x-amz-storage-class`.
+        // StorageClass — header `x-amz-storage-class`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-storage-class") {
+            let raw = raw.as_ref();
             input.storage_class = Some(dto::StorageClass::custom(raw.to_owned()));
         }
-        // WebsiteRedirectLocation — header `x-amz-website-redirect-location`.
+        // WebsiteRedirectLocation — header `x-amz-website-redirect-location`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-website-redirect-location") {
+            let raw = raw.as_ref();
             input.website_redirect_location = Some(raw.to_owned());
         }
-        // SSECustomerAlgorithm — header `x-amz-server-side-encryption-customer-algorithm`.
+        // SSECustomerAlgorithm — header `x-amz-server-side-encryption-customer-algorithm`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-server-side-encryption-customer-algorithm") {
+            let raw = raw.as_ref();
             input.sse_customer_algorithm = Some(raw.to_owned());
         }
-        // SSECustomerKey — header `x-amz-server-side-encryption-customer-key`.
+        // SSECustomerKey — header `x-amz-server-side-encryption-customer-key`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-server-side-encryption-customer-key") {
+            let raw = raw.as_ref();
             input.sse_customer_key = Some(raw.to_owned());
         }
-        // SSECustomerKeyMD5 — header `x-amz-server-side-encryption-customer-key-md5`.
+        // SSECustomerKeyMD5 — header `x-amz-server-side-encryption-customer-key-md5`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-server-side-encryption-customer-key-md5") {
+            let raw = raw.as_ref();
             input.sse_customer_key_md5 = Some(raw.to_owned());
         }
-        // SSEKMSKeyId — header `x-amz-server-side-encryption-aws-kms-key-id`.
+        // SSEKMSKeyId — header `x-amz-server-side-encryption-aws-kms-key-id`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-server-side-encryption-aws-kms-key-id") {
+            let raw = raw.as_ref();
             input.ssekms_key_id = Some(raw.to_owned());
         }
-        // SSEKMSEncryptionContext — header `x-amz-server-side-encryption-context`.
+        // SSEKMSEncryptionContext — header `x-amz-server-side-encryption-context`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-server-side-encryption-context") {
+            let raw = raw.as_ref();
             input.ssekms_encryption_context = Some(raw.to_owned());
         }
-        // BucketKeyEnabled — header `x-amz-server-side-encryption-bucket-key-enabled`.
+        // BucketKeyEnabled — header `x-amz-server-side-encryption-bucket-key-enabled`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-server-side-encryption-bucket-key-enabled") {
+            let raw = raw.as_ref();
             input.bucket_key_enabled = Some(value::boolean(raw, "BucketKeyEnabled")?);
         }
-        // RequestPayer — header `x-amz-request-payer`.
+        // RequestPayer — header `x-amz-request-payer`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-request-payer") {
+            let raw = raw.as_ref();
             input.request_payer = Some(dto::RequestPayer::custom(raw.to_owned()));
         }
-        // Tagging — header `x-amz-tagging`.
+        // Tagging — header `x-amz-tagging`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-tagging") {
+            let raw = raw.as_ref();
             input.tagging = Some(raw.to_owned());
         }
-        // ObjectLockMode — header `x-amz-object-lock-mode`.
+        // ObjectLockMode — header `x-amz-object-lock-mode`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-object-lock-mode") {
+            let raw = raw.as_ref();
             input.object_lock_mode = Some(dto::ObjectLockMode::custom(raw.to_owned()));
         }
-        // ObjectLockRetainUntilDate — header `x-amz-object-lock-retain-until-date`.
+        // ObjectLockRetainUntilDate — header `x-amz-object-lock-retain-until-date`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-object-lock-retain-until-date") {
+            let raw = raw.as_ref();
             input.object_lock_retain_until_date =
                 Some(value::timestamp(raw, TimestampFormat::Iso8601, "ObjectLockRetainUntilDate")?);
         }
-        // ObjectLockLegalHoldStatus — header `x-amz-object-lock-legal-hold`.
+        // ObjectLockLegalHoldStatus — header `x-amz-object-lock-legal-hold`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-object-lock-legal-hold") {
+            let raw = raw.as_ref();
             input.object_lock_legal_hold_status = Some(dto::ObjectLockLegalHoldStatus::custom(raw.to_owned()));
         }
-        // ExpectedBucketOwner — header `x-amz-expected-bucket-owner`.
+        // ExpectedBucketOwner — header `x-amz-expected-bucket-owner`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-expected-bucket-owner") {
+            let raw = raw.as_ref();
             input.expected_bucket_owner = Some(raw.to_owned());
         }
-        // ChecksumAlgorithm — header `x-amz-checksum-algorithm`.
+        // ChecksumAlgorithm — header `x-amz-checksum-algorithm`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-checksum-algorithm") {
+            let raw = raw.as_ref();
             input.checksum_algorithm = Some(dto::ChecksumAlgorithm::custom(raw.to_owned()));
         }
-        // ChecksumType — header `x-amz-checksum-type`.
+        // ChecksumType — header `x-amz-checksum-type`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-checksum-type") {
+            let raw = raw.as_ref();
             input.checksum_type = Some(dto::ChecksumType::custom(raw.to_owned()));
         }
         let _ = body;

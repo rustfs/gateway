@@ -88,7 +88,7 @@
                            "binding": { "kind": "Header" },
                            "type": { "kind": "String" },
                            "hot": false,
-                           "quirk_refs": []
+                           "quirk_refs": ["q-etag-form-0074"]
                          },
                          {
                            "name": "IfMatchLastModifiedTime",
@@ -181,6 +181,30 @@
                               }
                             ],
                 "cases": ["c-object-0003"]
+              },
+              {
+                "id": "q-etag-form-0074",
+                "kind": "wire_form",
+                "target": "GetObject.IfMatch",
+                "summary": "A conditional header carries one entity tag and is checked against that grammar before anything compares it, so an unterminated quote is a bad request rather than a tag whose first character is a quote, and two field lines joined by a comma are refused rather than reduced to whichever one arrived first.",
+                "evidence": [
+                              {
+                                "kind": "rfc",
+                                "ref": "https://www.rfc-editor.org/rfc/rfc9110#section-8.8.3",
+                                "summary": "The entity-tag grammar requires a balanced pair of quotes around the opaque tag, so an unterminated value is not a tag at all."
+                              },
+                              {
+                                "kind": "rfc",
+                                "ref": "https://www.rfc-editor.org/rfc/rfc9110#section-5.3",
+                                "summary": "Repeated field lines are one field whose value is the members joined by commas, which is a value the entity-tag grammar does not admit."
+                              },
+                              {
+                                "kind": "s3s-pr",
+                                "ref": "https://github.com/s3s-project/s3s/pull/37",
+                                "summary": "Upstream change that typed a request header after unparsed values had been reaching code unable to handle them."
+                              }
+                            ],
+                "cases": ["c-cond-0019", "c-cond-0028"]
               }
             ],
   "ext_points": []

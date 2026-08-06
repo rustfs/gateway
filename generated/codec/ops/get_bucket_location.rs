@@ -36,8 +36,9 @@ impl OperationCodec for dto::GetBucketLocation {
         let mut input = Input { ..Default::default() };
         // Bucket — URI label, decoded once by `MetaView::of`.
         input.bucket = request.require_bucket()?;
-        // ExpectedBucketOwner — header `x-amz-expected-bucket-owner`.
+        // ExpectedBucketOwner — header `x-amz-expected-bucket-owner`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-expected-bucket-owner") {
+            let raw = raw.as_ref();
             input.expected_bucket_owner = Some(raw.to_owned());
         }
         let _ = body;

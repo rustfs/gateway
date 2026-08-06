@@ -78,11 +78,55 @@ impl<'a> MetaView<'a> {
         self.method
     }
 
-    /// The first value of a header, when it is present and readable.
+    /// The value of a header, with repeated field lines joined the way RFC 9110 §5.3 defines them.
+    ///
+    /// Borrows when the field appears once, which is every request in practice; the owned form is
+    /// built only for the repeated case.
+    ///
+    /// # Why the repeats are joined rather than reduced to the first
+    ///
+    /// Because "one field whose value is the members joined by commas" is what the message
+    /// *means*, and taking the first line is a decoder answering a request the client did not
+    /// send. The family where that difference is a security property rather than a nicety is the
+    /// conditional headers: two `If-Match` lines joined produce a value no entity-tag parser
+    /// accepts, so the request is refused instead of being evaluated against whichever of the
+    /// client's two conditions happened to arrive first — a compare-and-swap defeated by a
+    /// header-parsing shortcut.
+    ///
+    /// That outcome is not written here. It falls out of the joined value reaching the type the
+    /// binding declares, which is the only place a wire refusal belongs.
+    ///
+    /// The headers acceptance already treats as single-valued — `authorization`, `content-length`,
+    /// `content-md5`, `content-type`, `range` and the rest of
+    /// `rustfs_gateway_http::SINGLE_VALUED_HEADERS` — never reach here repeated at all: a request
+    /// carrying two of them is refused before a codec runs. So this rule governs everything else,
+    /// which is where the conditional headers live.
+    ///
+    /// A field line whose bytes are not UTF-8 is skipped, exactly as `HeaderView::get_str` skips
+    /// an unreadable single value: acceptance has already refused that case for every header this
+    /// gateway treats as significant.
     #[must_use]
-    pub fn header(&self, name: &str) -> Option<&'a str> {
+    pub fn header(&self, name: &str) -> Option<Cow<'a, str>> {
         let name = http::HeaderName::from_bytes(name.as_bytes()).ok()?;
-        self.headers.get_str(&name)
+        if !self.headers.is_multi(&name) {
+            return self.headers.get_str(&name).map(Cow::Borrowed);
+        }
+        let mut joined = String::new();
+        let mut lines = 0usize;
+        for (each, value) in self.headers.iter_text() {
+            if *each != name {
+                continue;
+            }
+            if lines > 0 {
+                joined.push_str(", ");
+            }
+            joined.push_str(value);
+            lines = lines.saturating_add(1);
+        }
+        if lines == 0 {
+            return None;
+        }
+        Some(Cow::Owned(joined))
     }
 
     /// Every header under a prefix, as `(suffix, value)` pairs with the prefix stripped.

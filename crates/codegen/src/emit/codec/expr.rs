@@ -26,6 +26,7 @@
 use rustfs_gateway_model::ir::{ETagRender, TimestampFormat, Type};
 
 use super::bounds::Bound;
+use super::forms::Form;
 use crate::emit::dto::naming;
 
 /// Why one field cannot be given a codec.
@@ -67,7 +68,23 @@ pub fn etag_render(render: ETagRender) -> &'static str {
 /// `bound` is the inclusive range the field's quirks declare, resolved by [`super::bounds`]. It is
 /// a parameter rather than something read from the type because the IR's `Integer` carries no
 /// range — see that module for why the two numbers cannot live in the IR today.
-pub fn from_wire(ty: &Type, member: &str, operation: &str, in_xml: bool, bound: Option<Bound>) -> Result<String, String> {
+///
+/// `form` is the stricter wire grammar the field's quirks declare, resolved by [`super::forms`],
+/// and it is a parameter for the same reason: the IR's `String` carries no pattern. It is applied
+/// before the type is consulted at all, because [`super::forms::of`] has already refused a form
+/// attached to a type it has no grammar for — so reaching this point means the form *is* the
+/// conversion, and letting the type produce a second one would put the value through two readers.
+pub fn from_wire(
+    ty: &Type,
+    member: &str,
+    operation: &str,
+    in_xml: bool,
+    bound: Option<Bound>,
+    form: Option<Form>,
+) -> Result<String, String> {
+    if let Some(form) = form {
+        return Ok(form.call(member, ty));
+    }
     Ok(match ty {
         Type::String => "raw.to_owned()".to_owned(),
         Type::OpaqueString => "value::opaque(raw)".to_owned(),

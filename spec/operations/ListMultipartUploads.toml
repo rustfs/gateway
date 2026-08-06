@@ -126,7 +126,7 @@ binding = "Query"
 type = "String"
 required = false
 hot = true
-quirks = ["q-mpu-upload-id-0037", "q-mpu-marker-0040"]
+quirks = ["q-mpu-upload-id-0037", "q-mpu-marker-0040", "q-marker-form-0076"]
 
 [[input]]
 name = "ExpectedBucketOwner"

@@ -68,14 +68,16 @@ impl OperationCodec for dto::ListObjectVersions {
         // VersionIdMarker — query `version-id-marker`, percent-decoded once.
         if let Some(raw) = request.query("version-id-marker") {
             let raw = raw.as_ref();
-            input.version_id_marker = Some(value::opaque(raw));
+            input.version_id_marker = Some(value::opaque(value::token_form(raw, "VersionIdMarker")?));
         }
-        // ExpectedBucketOwner — header `x-amz-expected-bucket-owner`.
+        // ExpectedBucketOwner — header `x-amz-expected-bucket-owner`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-expected-bucket-owner") {
+            let raw = raw.as_ref();
             input.expected_bucket_owner = Some(raw.to_owned());
         }
-        // RequestPayer — header `x-amz-request-payer`.
+        // RequestPayer — header `x-amz-request-payer`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-request-payer") {
+            let raw = raw.as_ref();
             input.request_payer = Some(dto::RequestPayer::custom(raw.to_owned()));
         }
         let _ = body;

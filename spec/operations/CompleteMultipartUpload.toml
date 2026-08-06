@@ -156,7 +156,7 @@ binding = "Header"
 type = "String"
 required = false
 hot = false
-quirks = ["q-mpu-late-error-0033"]
+quirks = ["q-mpu-late-error-0033", "q-etag-form-0074"]
 
 [[input]]
 name = "IfNoneMatch"
@@ -165,7 +165,7 @@ binding = "Header"
 type = "String"
 required = false
 hot = false
-quirks = ["q-mpu-late-error-0033"]
+quirks = ["q-mpu-late-error-0033", "q-etag-form-0074"]
 
 [[input]]
 name = "SSECustomerAlgorithm"

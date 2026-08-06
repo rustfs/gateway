@@ -47,26 +47,31 @@ impl OperationCodec for dto::HeadObject {
         let mut input = Input { ..Default::default() };
         // Bucket — URI label, decoded once by `MetaView::of`.
         input.bucket = request.require_bucket()?;
-        // IfMatch — header `if-match`.
+        // IfMatch — header `if-match`, repeated field lines joined.
         if let Some(raw) = request.header("if-match") {
-            input.if_match = Some(raw.to_owned());
+            let raw = raw.as_ref();
+            input.if_match = Some(value::etag_form(raw, "IfMatch")?.to_owned());
         }
-        // IfModifiedSince — header `if-modified-since`.
+        // IfModifiedSince — header `if-modified-since`, repeated field lines joined.
         if let Some(raw) = request.header("if-modified-since") {
+            let raw = raw.as_ref();
             input.if_modified_since = Some(value::timestamp(raw, TimestampFormat::HttpDate, "IfModifiedSince")?);
         }
-        // IfNoneMatch — header `if-none-match`.
+        // IfNoneMatch — header `if-none-match`, repeated field lines joined.
         if let Some(raw) = request.header("if-none-match") {
-            input.if_none_match = Some(raw.to_owned());
+            let raw = raw.as_ref();
+            input.if_none_match = Some(value::etag_form(raw, "IfNoneMatch")?.to_owned());
         }
-        // IfUnmodifiedSince — header `if-unmodified-since`.
+        // IfUnmodifiedSince — header `if-unmodified-since`, repeated field lines joined.
         if let Some(raw) = request.header("if-unmodified-since") {
+            let raw = raw.as_ref();
             input.if_unmodified_since = Some(value::timestamp(raw, TimestampFormat::HttpDate, "IfUnmodifiedSince")?);
         }
         // Key — URI label, decoded once by `MetaView::of`.
         input.key = request.require_key()?;
-        // Range — header `range`.
+        // Range — header `range`, repeated field lines joined.
         if let Some(raw) = request.header("range") {
+            let raw = raw.as_ref();
             input.range = value::byte_range(raw);
         }
         // ResponseCacheControl — query `response-cache-control`, percent-decoded once.
@@ -104,20 +109,24 @@ impl OperationCodec for dto::HeadObject {
             let raw = raw.as_ref();
             input.version_id = Some(raw.to_owned());
         }
-        // SSECustomerAlgorithm — header `x-amz-server-side-encryption-customer-algorithm`.
+        // SSECustomerAlgorithm — header `x-amz-server-side-encryption-customer-algorithm`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-server-side-encryption-customer-algorithm") {
+            let raw = raw.as_ref();
             input.sse_customer_algorithm = Some(raw.to_owned());
         }
-        // SSECustomerKey — header `x-amz-server-side-encryption-customer-key`.
+        // SSECustomerKey — header `x-amz-server-side-encryption-customer-key`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-server-side-encryption-customer-key") {
+            let raw = raw.as_ref();
             input.sse_customer_key = Some(raw.to_owned());
         }
-        // SSECustomerKeyMD5 — header `x-amz-server-side-encryption-customer-key-md5`.
+        // SSECustomerKeyMD5 — header `x-amz-server-side-encryption-customer-key-md5`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-server-side-encryption-customer-key-md5") {
+            let raw = raw.as_ref();
             input.sse_customer_key_md5 = Some(raw.to_owned());
         }
-        // RequestPayer — header `x-amz-request-payer`.
+        // RequestPayer — header `x-amz-request-payer`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-request-payer") {
+            let raw = raw.as_ref();
             input.request_payer = Some(dto::RequestPayer::custom(raw.to_owned()));
         }
         // PartNumber — query `partNumber`, percent-decoded once.
@@ -125,12 +134,14 @@ impl OperationCodec for dto::HeadObject {
             let raw = raw.as_ref();
             input.part_number = Some(value::integer(raw, "PartNumber")?);
         }
-        // ExpectedBucketOwner — header `x-amz-expected-bucket-owner`.
+        // ExpectedBucketOwner — header `x-amz-expected-bucket-owner`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-expected-bucket-owner") {
+            let raw = raw.as_ref();
             input.expected_bucket_owner = Some(raw.to_owned());
         }
-        // ChecksumMode — header `x-amz-checksum-mode`.
+        // ChecksumMode — header `x-amz-checksum-mode`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-checksum-mode") {
+            let raw = raw.as_ref();
             input.checksum_mode = Some(dto::ChecksumMode::custom(raw.to_owned()));
         }
         let _ = body;

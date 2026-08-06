@@ -235,6 +235,23 @@ cases   = ["c-mpu-0010", "c-mpu-0011", "c-mpu-0047", "c-mpu-0048"]
   summary = "Upstream gave the part marker the wrong type and semantics, so a second page could not be requested from the value the first page returned."
 
 [[quirk]]
+id      = "q-marker-form-0076"
+kind    = "wire_form"
+target  = "ListMultipartUploads.UploadIdMarker"
+summary = "The upload-id cursor of an upload listing is a server-minted value that comes back through the query string, so one spelling a parent traversal — including the percent-encoded spelling, which is already decoded when the check runs — is refused before the listing reads anything."
+cases   = ["c-mpu-0047"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListMultipartUploads.html"
+  summary = "The upload-id marker is documented as a value returned by a previous listing, not as a caller-chosen name."
+
+  [[quirk.evidence]]
+  kind    = "observed"
+  ref     = "https://cwe.mitre.org/data/definitions/22.html"
+  summary = "Building an index or filesystem path from external input without normalising it is a documented traversal class, and resuming a listing from a marker is the obvious way to reach one."
+
+[[quirk]]
 id      = "q-part-number-0072"
 kind    = "bounded_range"
 target  = "UploadPart.PartNumber"

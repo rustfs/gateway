@@ -56,40 +56,49 @@ impl OperationCodec for dto::CompleteMultipartUpload {
         }
         // ChecksumSpec — the one checksum header under `x-amz-checksum-`.
         input.checksum_spec = value::checksum_spec(request, "x-amz-checksum-", "ChecksumSpec")?;
-        // ChecksumType — header `x-amz-checksum-type`.
+        // ChecksumType — header `x-amz-checksum-type`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-checksum-type") {
+            let raw = raw.as_ref();
             input.checksum_type = Some(dto::ChecksumType::custom(raw.to_owned()));
         }
-        // MpuObjectSize — header `x-amz-mp-object-size`.
+        // MpuObjectSize — header `x-amz-mp-object-size`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-mp-object-size") {
+            let raw = raw.as_ref();
             input.mpu_object_size = Some(value::long(raw, "MpuObjectSize")?);
         }
-        // RequestPayer — header `x-amz-request-payer`.
+        // RequestPayer — header `x-amz-request-payer`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-request-payer") {
+            let raw = raw.as_ref();
             input.request_payer = Some(dto::RequestPayer::custom(raw.to_owned()));
         }
-        // ExpectedBucketOwner — header `x-amz-expected-bucket-owner`.
+        // ExpectedBucketOwner — header `x-amz-expected-bucket-owner`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-expected-bucket-owner") {
+            let raw = raw.as_ref();
             input.expected_bucket_owner = Some(raw.to_owned());
         }
-        // IfMatch — header `if-match`.
+        // IfMatch — header `if-match`, repeated field lines joined.
         if let Some(raw) = request.header("if-match") {
-            input.if_match = Some(raw.to_owned());
+            let raw = raw.as_ref();
+            input.if_match = Some(value::etag_form(raw, "IfMatch")?.to_owned());
         }
-        // IfNoneMatch — header `if-none-match`.
+        // IfNoneMatch — header `if-none-match`, repeated field lines joined.
         if let Some(raw) = request.header("if-none-match") {
-            input.if_none_match = Some(raw.to_owned());
+            let raw = raw.as_ref();
+            input.if_none_match = Some(value::etag_form(raw, "IfNoneMatch")?.to_owned());
         }
-        // SSECustomerAlgorithm — header `x-amz-server-side-encryption-customer-algorithm`.
+        // SSECustomerAlgorithm — header `x-amz-server-side-encryption-customer-algorithm`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-server-side-encryption-customer-algorithm") {
+            let raw = raw.as_ref();
             input.sse_customer_algorithm = Some(raw.to_owned());
         }
-        // SSECustomerKey — header `x-amz-server-side-encryption-customer-key`.
+        // SSECustomerKey — header `x-amz-server-side-encryption-customer-key`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-server-side-encryption-customer-key") {
+            let raw = raw.as_ref();
             input.sse_customer_key = Some(raw.to_owned());
         }
-        // SSECustomerKeyMD5 — header `x-amz-server-side-encryption-customer-key-md5`.
+        // SSECustomerKeyMD5 — header `x-amz-server-side-encryption-customer-key-md5`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-server-side-encryption-customer-key-md5") {
+            let raw = raw.as_ref();
             input.sse_customer_key_md5 = Some(raw.to_owned());
         }
         value::exit(input.check_required())?;

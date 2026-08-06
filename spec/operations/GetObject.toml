@@ -65,7 +65,7 @@ binding = "Header"
 type = "String"
 required = false
 hot = true
-quirks = []
+quirks = ["q-etag-form-0074"]
 
 [[input]]
 name = "IfModifiedSince"
@@ -83,7 +83,7 @@ binding = "Header"
 type = "String"
 required = false
 hot = true
-quirks = []
+quirks = ["q-etag-form-0074"]
 
 [[input]]
 name = "IfUnmodifiedSince"

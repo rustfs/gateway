@@ -21,4 +21,5 @@
 mod bounds_tests;
 mod codegen_tests;
 mod dto_tests;
+mod forms_tests;
 mod golden_tests;

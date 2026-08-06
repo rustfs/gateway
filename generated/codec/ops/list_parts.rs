@@ -59,24 +59,29 @@ impl OperationCodec for dto::ListParts {
         } else {
             return Err(value::missing("InvalidArgument", "UploadId"));
         }
-        // RequestPayer — header `x-amz-request-payer`.
+        // RequestPayer — header `x-amz-request-payer`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-request-payer") {
+            let raw = raw.as_ref();
             input.request_payer = Some(dto::RequestPayer::custom(raw.to_owned()));
         }
-        // ExpectedBucketOwner — header `x-amz-expected-bucket-owner`.
+        // ExpectedBucketOwner — header `x-amz-expected-bucket-owner`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-expected-bucket-owner") {
+            let raw = raw.as_ref();
             input.expected_bucket_owner = Some(raw.to_owned());
         }
-        // SSECustomerAlgorithm — header `x-amz-server-side-encryption-customer-algorithm`.
+        // SSECustomerAlgorithm — header `x-amz-server-side-encryption-customer-algorithm`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-server-side-encryption-customer-algorithm") {
+            let raw = raw.as_ref();
             input.sse_customer_algorithm = Some(raw.to_owned());
         }
-        // SSECustomerKey — header `x-amz-server-side-encryption-customer-key`.
+        // SSECustomerKey — header `x-amz-server-side-encryption-customer-key`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-server-side-encryption-customer-key") {
+            let raw = raw.as_ref();
             input.sse_customer_key = Some(raw.to_owned());
         }
-        // SSECustomerKeyMD5 — header `x-amz-server-side-encryption-customer-key-md5`.
+        // SSECustomerKeyMD5 — header `x-amz-server-side-encryption-customer-key-md5`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-server-side-encryption-customer-key-md5") {
+            let raw = raw.as_ref();
             input.sse_customer_key_md5 = Some(raw.to_owned());
         }
         let _ = body;

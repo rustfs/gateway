@@ -39,8 +39,9 @@ impl OperationCodec for dto::DeleteObject {
         input.bucket = request.require_bucket()?;
         // Key — URI label, decoded once by `MetaView::of`.
         input.key = request.require_key()?;
-        // MFA — header `x-amz-mfa`.
+        // MFA — header `x-amz-mfa`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-mfa") {
+            let raw = raw.as_ref();
             input.mfa = Some(raw.to_owned());
         }
         // VersionId — query `versionId`, percent-decoded once.
@@ -48,29 +49,35 @@ impl OperationCodec for dto::DeleteObject {
             let raw = raw.as_ref();
             input.version_id = Some(raw.to_owned());
         }
-        // RequestPayer — header `x-amz-request-payer`.
+        // RequestPayer — header `x-amz-request-payer`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-request-payer") {
+            let raw = raw.as_ref();
             input.request_payer = Some(dto::RequestPayer::custom(raw.to_owned()));
         }
-        // BypassGovernanceRetention — header `x-amz-bypass-governance-retention`.
+        // BypassGovernanceRetention — header `x-amz-bypass-governance-retention`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-bypass-governance-retention") {
+            let raw = raw.as_ref();
             input.bypass_governance_retention = Some(value::boolean(raw, "BypassGovernanceRetention")?);
         }
-        // ExpectedBucketOwner — header `x-amz-expected-bucket-owner`.
+        // ExpectedBucketOwner — header `x-amz-expected-bucket-owner`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-expected-bucket-owner") {
+            let raw = raw.as_ref();
             input.expected_bucket_owner = Some(raw.to_owned());
         }
-        // IfMatch — header `if-match`.
+        // IfMatch — header `if-match`, repeated field lines joined.
         if let Some(raw) = request.header("if-match") {
-            input.if_match = Some(raw.to_owned());
+            let raw = raw.as_ref();
+            input.if_match = Some(value::etag_form(raw, "IfMatch")?.to_owned());
         }
-        // IfMatchLastModifiedTime — header `x-amz-if-match-last-modified-time`.
+        // IfMatchLastModifiedTime — header `x-amz-if-match-last-modified-time`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-if-match-last-modified-time") {
+            let raw = raw.as_ref();
             input.if_match_last_modified_time =
                 Some(value::timestamp(raw, TimestampFormat::HttpDate, "IfMatchLastModifiedTime")?);
         }
-        // IfMatchSize — header `x-amz-if-match-size`.
+        // IfMatchSize — header `x-amz-if-match-size`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-if-match-size") {
+            let raw = raw.as_ref();
             input.if_match_size = Some(value::long(raw, "IfMatchSize")?);
         }
         let _ = body;

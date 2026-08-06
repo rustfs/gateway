@@ -46,16 +46,19 @@ impl OperationCodec for dto::AbortMultipartUpload {
         } else {
             return Err(value::missing("InvalidArgument", "UploadId"));
         }
-        // RequestPayer — header `x-amz-request-payer`.
+        // RequestPayer — header `x-amz-request-payer`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-request-payer") {
+            let raw = raw.as_ref();
             input.request_payer = Some(dto::RequestPayer::custom(raw.to_owned()));
         }
-        // ExpectedBucketOwner — header `x-amz-expected-bucket-owner`.
+        // ExpectedBucketOwner — header `x-amz-expected-bucket-owner`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-expected-bucket-owner") {
+            let raw = raw.as_ref();
             input.expected_bucket_owner = Some(raw.to_owned());
         }
-        // IfMatchInitiatedTime — header `x-amz-if-match-initiated-time`.
+        // IfMatchInitiatedTime — header `x-amz-if-match-initiated-time`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-if-match-initiated-time") {
+            let raw = raw.as_ref();
             input.if_match_initiated_time = Some(value::timestamp(raw, TimestampFormat::HttpDate, "IfMatchInitiatedTime")?);
         }
         let _ = body;

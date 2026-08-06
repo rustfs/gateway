@@ -32,29 +32,58 @@
 //! pinned. When a case fails here, the failure is about the framework or about the case; it is
 //! never about a storage decision this file made quietly.
 //!
-//! # Why several operations answer `501` on a well-formed request
+//! # The listing half, and what it is allowed to know
 //!
-//! `Object`, `ObjectVersion`, `Part` and `Bucket` each carry a **required** `ETag` or `Timestamp`
-//! member, and neither type is reachable through the `rustfs-gateway` facade — the suite may
-//! depend on the facade and nothing else internal (`check_layer_dependencies.sh`). A listing with
-//! entries in it therefore cannot be *constructed* here, only refused. Those refusals name the
-//! missing export instead of inventing a value, because a listing built out of placeholder scalars
-//! would turn a facade gap into a hundred and forty mysterious byte-diffs.
+//! Six operations answer with a list — `ListObjects`, `ListObjectsV2`, `ListObjectVersions`,
+//! `ListBuckets`, `ListParts`, `ListMultipartUploads` — and every entry they emit is a fixture
+//! the case declared. Three consequences follow, and each is a rule this file keeps:
+//!
+//! * **A version is a `[setup.objects]` entry, never an invention.** In a bucket the case declared
+//!   `versioning = "enabled"`, each setup entry for a key becomes one version and each `absent =
+//!   true` becomes one delete marker, in the order the case wrote them. In every other bucket a
+//!   key has exactly one version, spelled `null`, which is what S3 calls the version of an object
+//!   in a bucket that was never versioned. Nothing else mints a version.
+//! * **A cursor is opaque and verifiable.** `NextContinuationToken` is the position it resumes
+//!   from, hex-encoded and checksummed, so a token that was altered, truncated, extended or made
+//!   up is *refused* rather than read as some other position. A verbatim marker would make four
+//!   security cases (`c-list-0029` … `c-list-0032`) unable to fail, which is worse than failing.
+//! * **`encoding-type` is echoed, never applied.** `spec/operations/*.toml` declares
+//!   `url_encoded_fields` for every listing and the generated codec does not act on it, so
+//!   percent-encoding a key here would paper over a code-generator gap with backend code that
+//!   every other backend would then have to write too. The echo is honest; the encoding is not
+//!   this file's to do.
+//!
+//! An identity is the one thing a listing needs that no fixture declares: `<Owner>` is a required
+//! element of a v1 listing and of `ListAllMyBucketsResult`. [`OWNER_ID`] is that identity, fixed
+//! and shared, so the value is the same in every run and every golden redacts one thing.
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
 use rustfs_gateway::dto;
-use rustfs_gateway::{BucketName, ByteStream, ErrorCode, Handler, HandlerError, HandlerResult, ObjectKey, Req, Resp, collect};
+use rustfs_gateway::{
+    BucketName, ByteStream, ETag, ErrorCode, Handler, HandlerError, HandlerResult, ObjectKey, Req, Resp, Timestamp, collect,
+};
 
-/// What the facade would have to export before a listing could be built here.
+/// The canonical user id every listing reports as the owner.
 ///
-/// Printed into the error a listing operation answers with, so the report says which export is
-/// missing rather than which byte differed.
-pub const MISSING_SCALAR_EXPORTS: &str = "the rustfs-gateway facade exports neither \
-     `rustfs_gateway_types::ETag` nor `rustfs_gateway_types::Timestamp`, and `Object`, \
-     `ObjectVersion`, `Part` and `Bucket` each require one; a backend outside this workspace \
-     cannot construct a listing entry at all";
+/// Fixed rather than random, and shaped like the 64 hex characters AWS uses, so that a golden can
+/// redact `<ID>` once and a run compares byte for byte against itself.
+pub const OWNER_ID: &str = "3f6e2b1c4a8d90e7b5c31f2a6d80e4c97b1a3d5f8e206c4b7a9d1e3f5c7b9a0d";
+
+/// The display name that accompanies [`OWNER_ID`].
+pub const OWNER_DISPLAY_NAME: &str = "conformance";
+
+/// The version id of a key in a bucket that was never versioned. S3's own spelling.
+pub const UNVERSIONED: &str = "null";
+
+/// The longest continuation token this stub will even look at.
+///
+/// A cursor is a hex-encoded position plus a nine-character suffix, and the longest position is a
+/// maximum-length object key — 1024 bytes, so 2057 characters. Anything past that is a token this
+/// service could not have minted, and saying so before decoding it is what keeps `c-list-0030`
+/// from being answered by the amount of work it asked for.
+const MAX_TOKEN_BYTES: usize = 2304;
 
 /// One object the fixtures established.
 ///
@@ -123,13 +152,40 @@ pub struct StoredUpload {
     pub parts: BTreeMap<i32, StoredPart>,
 }
 
+/// One version of one key: what was put there, or the delete marker that hid it.
+///
+/// A bucket the case never declared versioned holds exactly one of these per key, with
+/// [`UNVERSIONED`] as its id — so the versioned and unversioned paths are the same code and there
+/// is no second representation to keep in step.
+#[derive(Debug, Clone)]
+pub struct StoredVersion {
+    /// The id this fixture minted, or [`UNVERSIONED`].
+    pub version_id: String,
+    /// The object, or `None` when this version is a delete marker.
+    pub object: Option<StoredObject>,
+    /// The instant this version was recorded, in Unix seconds.
+    pub last_modified: i64,
+}
+
+/// One entry of a version listing, borrowed from the fixture.
+#[derive(Debug, Clone, Copy)]
+pub struct VersionRef<'a> {
+    /// The key it belongs to.
+    pub key: &'a str,
+    /// The version itself.
+    pub version: &'a StoredVersion,
+    /// Whether it is the newest version of that key.
+    pub is_latest: bool,
+}
+
 /// The state one case runs against.
 #[derive(Debug, Default)]
 pub struct Fixture {
     buckets: BTreeMap<String, bool>,
-    objects: BTreeMap<(String, String), StoredObject>,
+    objects: BTreeMap<(String, String), Vec<StoredVersion>>,
     uploads: BTreeMap<String, StoredUpload>,
     next_upload: u32,
+    next_version: u32,
     /// The instant the case pinned, stamped onto everything this fixture mints.
     pub now: i64,
 }
@@ -144,8 +200,8 @@ impl Fixture {
         }
     }
 
-    /// Declares a bucket. `versioned` records what the fixture asked for; nothing reads it yet,
-    /// and a case that needs versioning will fail rather than be answered from a guess.
+    /// Declares a bucket. `versioned` decides whether a later write appends a version or replaces
+    /// the only one there is.
     pub fn declare_bucket(&mut self, name: &str, versioned: bool) {
         self.buckets.insert(name.to_owned(), versioned);
     }
@@ -157,13 +213,62 @@ impl Fixture {
     }
 
     /// Places an object.
+    ///
+    /// In a versioned bucket this appends a version and leaves the earlier ones reachable through
+    /// [`Fixture::versions_in`]; everywhere else it replaces the single `null` version. Either way
+    /// the newest version is what a read sees, which is why `GetObject` needed no change.
     pub fn put_object(&mut self, bucket: &str, key: &str, object: StoredObject) {
-        self.objects.insert((bucket.to_owned(), key.to_owned()), object);
+        let last_modified = object.last_modified;
+        let version = self.mint_version(bucket);
+        let versions = self.objects.entry((bucket.to_owned(), key.to_owned())).or_default();
+        if version == UNVERSIONED {
+            versions.clear();
+        }
+        versions.push(StoredVersion {
+            version_id: version,
+            object: Some(object),
+            last_modified,
+        });
     }
 
     /// Removes an object, for `setup.objects[].absent`.
+    ///
+    /// A versioned bucket keeps the versions and hides them behind a delete marker, which is what
+    /// makes `<DeleteMarker>` and `<IsLatest>false</IsLatest>` observable at all.
     pub fn remove_object(&mut self, bucket: &str, key: &str) {
-        self.objects.remove(&(bucket.to_owned(), key.to_owned()));
+        let identity = (bucket.to_owned(), key.to_owned());
+        if !self.is_versioned(bucket) {
+            self.objects.remove(&identity);
+            return;
+        }
+        let Some(versions) = self.objects.get(&identity) else { return };
+        if versions.is_empty() {
+            return;
+        }
+        let last_modified = self.now;
+        let version_id = self.mint_version(bucket);
+        if let Some(versions) = self.objects.get_mut(&identity) {
+            versions.push(StoredVersion {
+                version_id,
+                object: None,
+                last_modified,
+            });
+        }
+    }
+
+    /// Whether a bucket was declared with versioning enabled.
+    #[must_use]
+    pub fn is_versioned(&self, name: &str) -> bool {
+        self.buckets.get(name).copied().unwrap_or(false)
+    }
+
+    /// The id the next version of a key in `bucket` is given.
+    fn mint_version(&mut self, bucket: &str) -> String {
+        if !self.is_versioned(bucket) {
+            return UNVERSIONED.to_owned();
+        }
+        self.next_version += 1;
+        format!("conformance-version-{:04}", self.next_version)
     }
 
     /// Creates a multipart upload and returns the id it was given.
@@ -206,20 +311,54 @@ impl Fixture {
         self.buckets.contains_key(name)
     }
 
-    /// An object, if it is there.
+    /// An object, if the newest version of that key is one.
     #[must_use]
     pub fn object(&self, bucket: &str, key: &str) -> Option<&StoredObject> {
-        self.objects.get(&(bucket.to_owned(), key.to_owned()))
+        self.objects
+            .get(&(bucket.to_owned(), key.to_owned()))
+            .and_then(|versions| versions.last())
+            .and_then(|version| version.object.as_ref())
     }
 
-    /// Every key in a bucket, in the lexicographic order S3 lists in.
+    /// Every live key in a bucket, in the lexicographic order S3 lists in.
+    ///
+    /// A key whose newest version is a delete marker is not live: `ListObjects` does not see it,
+    /// and `ListObjectVersions` does.
     #[must_use]
     pub fn keys_in(&self, bucket: &str) -> Vec<&str> {
         self.objects
-            .keys()
-            .filter(|(name, _)| name == bucket)
-            .map(|(_, key)| key.as_str())
+            .iter()
+            .filter(|((name, _), versions)| name == bucket && versions.last().is_some_and(|version| version.object.is_some()))
+            .map(|((_, key), _)| key.as_str())
             .collect()
+    }
+
+    /// Every version of every key in a bucket: keys ascending, versions newest first.
+    ///
+    /// That is S3's own order, and it is the order a key marker plus a version marker resume in.
+    #[must_use]
+    pub fn versions_in(&self, bucket: &str) -> Vec<VersionRef<'_>> {
+        let mut out = Vec::new();
+        for ((name, key), versions) in &self.objects {
+            if name != bucket {
+                continue;
+            }
+            let newest = versions.len().saturating_sub(1);
+            for (index, version) in versions.iter().enumerate().rev() {
+                out.push(VersionRef {
+                    key: key.as_str(),
+                    version,
+                    is_latest: index == newest,
+                });
+            }
+        }
+        out
+    }
+
+    /// Every bucket name, ascending.
+    #[must_use]
+    pub fn bucket_names(&self) -> Vec<&str> {
+        self.buckets.keys().map(String::as_str).collect()
     }
 }
 
@@ -244,9 +383,96 @@ impl Stub {
     }
 }
 
-/// The error a listing answers with when its entries cannot be constructed through the facade.
-fn unconstructible(shape: &'static str) -> HandlerError {
-    HandlerError::not_implemented(format!("the conformance stub cannot build a `{shape}` entry: {MISSING_SCALAR_EXPORTS}"))
+/// The owner every listing reports.
+fn owner() -> dto::Owner {
+    dto::Owner {
+        id: Some(OWNER_ID.to_owned()),
+        display_name: Some(OWNER_DISPLAY_NAME.to_owned()),
+    }
+}
+
+/// Mints a continuation token that resumes after `marker`.
+///
+/// Hex plus eight bytes of a digest over the same value. Opaque, so no client can construct one by
+/// reasoning about keys; verifiable, so one that was altered is *known* to be altered rather than
+/// read as a different position. Both properties are what `c-list-0029` … `c-list-0032` assert,
+/// and a token that was simply the marker in the clear can satisfy neither.
+fn mint_token(marker: &str) -> String {
+    let digest = crate::sha256::hex_digest(marker.as_bytes());
+    format!("{}-{}", encode_hex(marker.as_bytes()), digest.get(..8).unwrap_or_default())
+}
+
+/// Reads a token back, or `None` for anything this stub did not mint.
+fn read_token(token: &str) -> Option<String> {
+    if token.len() > MAX_TOKEN_BYTES {
+        return None;
+    }
+    let (body, checksum) = token.rsplit_once('-')?;
+    let marker = String::from_utf8(decode_hex(body)?).ok()?;
+    if crate::sha256::hex_digest(marker.as_bytes()).get(..8)? != checksum {
+        return None;
+    }
+    Some(marker)
+}
+
+fn encode_hex(bytes: &[u8]) -> String {
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        out.push(hex_digit(byte >> 4));
+        out.push(hex_digit(byte & 0x0f));
+    }
+    out
+}
+
+fn hex_digit(value: u8) -> char {
+    char::from_digit(u32::from(value), 16).unwrap_or('0')
+}
+
+fn decode_hex(text: &str) -> Option<Vec<u8>> {
+    if !text.len().is_multiple_of(2) {
+        return None;
+    }
+    let mut out = Vec::with_capacity(text.len() / 2);
+    for pair in text.as_bytes().chunks_exact(2) {
+        let high = char::from(*pair.first()?).to_digit(16)?;
+        let low = char::from(*pair.get(1)?).to_digit(16)?;
+        out.push(((high * 16) + low) as u8);
+    }
+    Some(out)
+}
+
+/// `InvalidArgument`, in AWS's own wording for a cursor the service did not issue.
+fn bad_token() -> HandlerError {
+    HandlerError::new(ErrorCode::INVALID_ARGUMENT, "The continuation token provided is incorrect")
+}
+
+/// A delimiter the request supplied, with the empty value read as "no delimiter".
+///
+/// `?delimiter=` arrives as `Some("")`, and folding on an empty string would put every key under
+/// the same common prefix. S3 treats it as absent; `c-list-0039` is the case that says so.
+fn delimiter_of(value: Option<&str>) -> Option<&str> {
+    value.filter(|text| !text.is_empty())
+}
+
+/// Builds one `Contents` entry.
+fn object_entry(key: &str, object: &StoredObject, with_owner: bool) -> Result<dto::Object, HandlerError> {
+    Ok(dto::Object {
+        key: object_key(key)?,
+        last_modified: Timestamp::from_secs(object.last_modified),
+        e_tag: entity_tag(&object.etag)?,
+        size: object.body.len() as i64,
+        storage_class: dto::StorageClass::custom(object.storage_class.clone()),
+        owner: with_owner.then(owner),
+        ..dto::Object::default()
+    })
+}
+
+fn object_key(key: &str) -> Result<ObjectKey, HandlerError> {
+    ObjectKey::new(key.to_owned()).map_err(|_| HandlerError::internal_error("a fixture key is not a valid object key"))
+}
+
+fn entity_tag(etag: &str) -> Result<ETag, HandlerError> {
+    ETag::new(etag.to_owned()).map_err(|_| HandlerError::internal_error("a fixture entity tag is not a valid entity tag"))
 }
 
 /// `NoSuchBucket` unless the fixture declared it.
@@ -838,31 +1064,87 @@ impl Stub {
     fn list_multipart_uploads(&self, input: &dto::ListMultipartUploadsInput) -> HandlerResult<dto::ListMultipartUploads> {
         let fixture = self.borrow()?;
         require_bucket(&fixture, &input.bucket)?;
+        // An upload-id marker is not a free-form string: it names an id this service minted, so
+        // one shaped like a path is refused before it is compared against anything.
+        let upload_marker = match input.upload_id_marker.as_deref().filter(|text| !text.is_empty()) {
+            None => None,
+            Some(text) if is_minted_upload_id(text) => Some(text),
+            Some(_) => {
+                return Err(HandlerError::new(
+                    ErrorCode::INVALID_ARGUMENT,
+                    "Invalid upload-id-marker: it does not name an upload id this service issued",
+                ));
+            }
+        };
         let prefix = input.prefix.clone().unwrap_or_default();
-        let mut uploads: Vec<(&String, &StoredUpload)> = fixture
+        let delimiter = delimiter_of(input.delimiter.as_deref());
+        let key_marker = input.key_marker.as_deref().unwrap_or("");
+
+        let mut ordered: Vec<(&str, &str)> = fixture
             .uploads
             .iter()
             .filter(|(_, upload)| upload.bucket == input.bucket.as_str() && upload.key.starts_with(&prefix))
+            .map(|(id, upload)| (upload.key.as_str(), id.as_str()))
             .collect();
-        uploads.sort_by(|left, right| left.1.key.cmp(&right.1.key).then(left.0.cmp(right.0)));
-        let mut listed = Vec::new();
-        for (id, upload) in uploads {
-            let key = ObjectKey::new(upload.key.clone())
-                .map_err(|_| HandlerError::internal_error("a fixture key is not a valid object key"))?;
-            listed.push(dto::MultipartUpload {
-                upload_id: Some(id.clone()),
-                key: Some(key),
-                storage_class: Some(dto::StorageClass::STANDARD),
-                ..dto::MultipartUpload::default()
-            });
+        ordered.sort_unstable();
+
+        let mut entries: Vec<UploadEntry<'_>> = Vec::new();
+        for (key, id) in ordered {
+            if !after_upload_marker(key, id, key_marker, upload_marker) {
+                continue;
+            }
+            match fold(key, &prefix, delimiter) {
+                Some(folded) => {
+                    if !entries.iter().any(|entry| entry.folded_prefix() == Some(folded.as_str())) {
+                        entries.push(UploadEntry::Folded(folded));
+                    }
+                }
+                None => entries.push(UploadEntry::Upload { key, id }),
+            }
         }
+
+        let max_uploads = input.max_uploads.unwrap_or(1000);
+        let truncated = truncate_to(&mut entries, max_uploads);
+        let (mut next_key, mut next_upload) = (None, None);
+        if truncated {
+            match entries.last() {
+                Some(UploadEntry::Upload { key, id }) => {
+                    next_key = Some((*key).to_owned());
+                    next_upload = Some((*id).to_owned());
+                }
+                Some(UploadEntry::Folded(prefix)) => next_key = Some(prefix.clone()),
+                None => {}
+            }
+        }
+
+        let mut uploads = Vec::new();
+        let mut common_prefixes = Vec::new();
+        for entry in &entries {
+            match entry {
+                UploadEntry::Upload { key, id } => uploads.push(dto::MultipartUpload {
+                    upload_id: Some((*id).to_owned()),
+                    key: Some(object_key(key)?),
+                    initiated: Some(Timestamp::from_secs(fixture.now)),
+                    storage_class: Some(dto::StorageClass::STANDARD),
+                    ..dto::MultipartUpload::default()
+                }),
+                UploadEntry::Folded(prefix) => common_prefixes.push(dto::CommonPrefix { prefix: prefix.clone() }),
+            }
+        }
+
         Ok(Resp::new(dto::ListMultipartUploadsOutput {
             bucket: input.bucket.clone(),
             prefix: input.prefix.clone(),
             delimiter: input.delimiter.clone(),
-            max_uploads: input.max_uploads.unwrap_or(1000),
-            is_truncated: false,
-            uploads: listed,
+            encoding_type: input.encoding_type.clone(),
+            key_marker: input.key_marker.clone(),
+            upload_id_marker: input.upload_id_marker.clone(),
+            next_key_marker: next_key,
+            next_upload_id_marker: next_upload,
+            max_uploads,
+            is_truncated: truncated,
+            uploads,
+            common_prefixes,
             ..dto::ListMultipartUploadsOutput::default()
         }))
     }
@@ -870,52 +1152,121 @@ impl Stub {
     fn list_parts(&self, input: &dto::ListPartsInput) -> HandlerResult<dto::ListParts> {
         let fixture = self.borrow()?;
         require_bucket(&fixture, &input.bucket)?;
+        // The part-number marker is bound as a string by the model, so nothing before this point
+        // has checked that it is a number. `c-mpu-0046` is the case that noticed.
+        let marker: i32 = match input.part_number_marker.as_deref().filter(|text| !text.is_empty()) {
+            None => 0,
+            Some(text) => text.parse().ok().filter(|value| *value >= 0).ok_or_else(|| {
+                HandlerError::new(
+                    ErrorCode::INVALID_ARGUMENT,
+                    "Argument part-number-marker must be an integer between 0 and 2147483647",
+                )
+            })?,
+        };
         let upload = fixture.uploads.get(&input.upload_id).ok_or_else(|| {
             HandlerError::new(ErrorCode::NO_SUCH_UPLOAD, "The specified upload does not exist. The upload ID may be invalid, or the upload may have been aborted or completed.")
         })?;
-        if !upload.parts.is_empty() {
-            return Err(unconstructible("Part"));
+
+        // `BTreeMap` already holds the parts in ascending part-number order, which is the order
+        // `ListParts` answers in and the order a marker resumes.
+        let mut numbers: Vec<i32> = upload.parts.keys().copied().filter(|number| *number > marker).collect();
+        let max_parts = input.max_parts.unwrap_or(1000);
+        let truncated = truncate_to(&mut numbers, max_parts);
+        let next_marker = truncated.then(|| numbers.last().map(i32::to_string)).flatten();
+
+        let mut parts = Vec::new();
+        for number in numbers {
+            let Some(stored) = upload.parts.get(&number) else { continue };
+            parts.push(dto::Part {
+                part_number: number,
+                size: stored.body.len() as i64,
+                e_tag: entity_tag(&stored.etag)?,
+                last_modified: Some(Timestamp::from_secs(fixture.now)),
+                ..dto::Part::default()
+            });
         }
+
         Ok(Resp::new(dto::ListPartsOutput {
             bucket: input.bucket.clone(),
             key: input.key.clone(),
             upload_id: input.upload_id.clone(),
-            max_parts: input.max_parts.unwrap_or(1000),
-            is_truncated: false,
+            part_number_marker: input.part_number_marker.clone(),
+            next_part_number_marker: next_marker,
+            max_parts,
+            is_truncated: truncated,
+            parts,
+            storage_class: Some(dto::StorageClass::STANDARD),
             ..dto::ListPartsOutput::default()
         }))
     }
 
-    fn list_buckets(&self, _input: &dto::ListBucketsInput) -> HandlerResult<dto::ListBuckets> {
+    fn list_buckets(&self, input: &dto::ListBucketsInput) -> HandlerResult<dto::ListBuckets> {
         let fixture = self.borrow()?;
-        if !fixture.buckets.is_empty() {
-            return Err(unconstructible("Bucket"));
+        let after = match input.continuation_token.as_ref() {
+            None => None,
+            Some(token) => Some(read_token(token.as_str()).ok_or_else(bad_token)?),
+        };
+        let prefix = input.prefix.clone().unwrap_or_default();
+        // `bucket-region` is accepted and not applied: this fixture models one deployment and no
+        // region at all, so filtering on it would be a decision made out of nothing. A filter that
+        // is ignored can only over-return, which no case can mistake for a correct answer it asked
+        // for — unlike a filter answered from an invented region, which could.
+        let mut names: Vec<&str> = fixture
+            .bucket_names()
+            .into_iter()
+            .filter(|name| name.starts_with(&prefix))
+            .filter(|name| after.as_deref().is_none_or(|marker| *name > marker))
+            .collect();
+        let max_buckets = input.max_buckets.unwrap_or(10_000);
+        let truncated = truncate_to(&mut names, max_buckets);
+        let next = truncated.then(|| names.last().map(|name| mint_token(name))).flatten();
+
+        let mut buckets = Vec::new();
+        for name in names {
+            buckets.push(dto::Bucket {
+                name: BucketName::new(name.to_owned())
+                    .map_err(|_| HandlerError::internal_error("a fixture bucket name is not a valid bucket name"))?,
+                creation_date: Timestamp::from_secs(fixture.now),
+                ..dto::Bucket::default()
+            });
         }
-        Ok(Resp::new(dto::ListBucketsOutput::default()))
+
+        Ok(Resp::new(dto::ListBucketsOutput {
+            buckets,
+            owner: owner(),
+            continuation_token: next.map(Into::into),
+            prefix: input.prefix.clone(),
+        }))
     }
 
     fn list_objects(&self, input: &dto::ListObjectsInput) -> HandlerResult<dto::ListObjects> {
         let fixture = self.borrow()?;
         require_bucket(&fixture, &input.bucket)?;
+        let max_keys = input.max_keys.unwrap_or(1000);
         let page = paginate(
             &fixture,
             input.bucket.as_str(),
             input.prefix.as_deref().unwrap_or(""),
-            input.delimiter.as_deref(),
+            delimiter_of(input.delimiter.as_deref()),
             input.marker.as_deref(),
-            input.max_keys.unwrap_or(1000),
+            max_keys,
         );
-        if !page.keys.is_empty() {
-            return Err(unconstructible("Object"));
-        }
+        // The first listing version writes an owner for every entry with nothing having asked for
+        // one; the second writes one only for `fetch-owner=true`. That asymmetry is the whole of
+        // `c-list-0010` and `c-list-0024`.
+        let contents = page.contents(&fixture, input.bucket.as_str(), true)?;
         Ok(Resp::new(dto::ListObjectsOutput {
             name: input.bucket.clone(),
             prefix: input.prefix.clone().unwrap_or_default(),
             marker: input.marker.clone().unwrap_or_default(),
             delimiter: input.delimiter.clone(),
-            max_keys: input.max_keys.unwrap_or(1000),
+            encoding_type: input.encoding_type.clone(),
+            max_keys,
             is_truncated: page.truncated,
+            // A v1 next marker is the last entry in the clear, because that is what the client
+            // sends back as `?marker=` and what AWS documents it to be.
             next_marker: page.next.clone(),
+            contents,
             common_prefixes: page.common_prefixes(),
             ..dto::ListObjectsOutput::default()
         }))
@@ -924,33 +1275,32 @@ impl Stub {
     fn list_objects_v2(&self, input: &dto::ListObjectsV2Input) -> HandlerResult<dto::ListObjectsV2> {
         let fixture = self.borrow()?;
         require_bucket(&fixture, &input.bucket)?;
-        // The continuation token this stub mints is the last key of the previous page, verbatim.
-        // An opaque token would be more faithful to S3 and would make the pagination cases assert
-        // something the fixture cannot honour, so the token is exactly what it means.
-        let start = input
-            .continuation_token
-            .as_ref()
-            .map(|token| token.as_str().to_owned())
-            .or_else(|| input.start_after.clone());
+        // A continuation token decides the page on its own; `start-after` is read only when there
+        // is no token to read. Both arriving together is `c-list-0007`.
+        let start = match input.continuation_token.as_ref() {
+            Some(token) => Some(read_token(token.as_str()).ok_or_else(bad_token)?),
+            None => input.start_after.clone(),
+        };
+        let max_keys = input.max_keys.unwrap_or(1000);
         let page = paginate(
             &fixture,
             input.bucket.as_str(),
             input.prefix.as_deref().unwrap_or(""),
-            input.delimiter.as_deref(),
+            delimiter_of(input.delimiter.as_deref()),
             start.as_deref(),
-            input.max_keys.unwrap_or(1000),
+            max_keys,
         );
-        if !page.keys.is_empty() {
-            return Err(unconstructible("Object"));
-        }
+        let contents = page.contents(&fixture, input.bucket.as_str(), input.fetch_owner.unwrap_or(false))?;
         Ok(Resp::new(dto::ListObjectsV2Output {
             name: input.bucket.clone(),
             prefix: input.prefix.clone().unwrap_or_default(),
             delimiter: input.delimiter.clone(),
-            max_keys: input.max_keys.unwrap_or(1000),
+            encoding_type: input.encoding_type.clone(),
+            max_keys,
             key_count: page.count(),
             is_truncated: page.truncated,
-            next_continuation_token: page.next.clone().map(Into::into),
+            next_continuation_token: page.next.as_deref().map(|marker| mint_token(marker).into()),
+            contents,
             common_prefixes: page.common_prefixes(),
             continuation_token: input.continuation_token.clone(),
             start_after: input.start_after.clone(),
@@ -961,18 +1311,186 @@ impl Stub {
     fn list_object_versions(&self, input: &dto::ListObjectVersionsInput) -> HandlerResult<dto::ListObjectVersions> {
         let fixture = self.borrow()?;
         require_bucket(&fixture, &input.bucket)?;
-        if !fixture.keys_in(input.bucket.as_str()).is_empty() {
-            return Err(unconstructible("ObjectVersion"));
+        // A version marker names a position *within* a key, so without a key marker there is no
+        // position for it to name. AWS refuses the pair rather than guessing one.
+        if input.version_id_marker.is_some() && input.key_marker.is_none() {
+            return Err(HandlerError::new(
+                ErrorCode::INVALID_ARGUMENT,
+                "A version-id marker cannot be specified without a key marker.",
+            ));
         }
+        let key_marker = input.key_marker.as_deref().unwrap_or("");
+        let version_marker = input
+            .version_id_marker
+            .as_ref()
+            .map(|marker| marker.as_str())
+            .filter(|marker| !marker.is_empty());
+        let prefix = input.prefix.clone().unwrap_or_default();
+        let delimiter = delimiter_of(input.delimiter.as_deref());
+
+        let all = fixture.versions_in(input.bucket.as_str());
+        let mut resumed = version_marker.is_none();
+        let mut entries: Vec<VersionEntry<'_>> = Vec::new();
+        for entry in &all {
+            if !entry.key.starts_with(&prefix) {
+                continue;
+            }
+            if !resumed {
+                // A version marker resumes *after* the entry it names. A marker that names no
+                // entry of this key leaves the key skipped entirely, which is the same answer as
+                // a key marker one character short of it.
+                if entry.key == key_marker && entry.version.version_id == version_marker.unwrap_or_default() {
+                    resumed = true;
+                }
+                continue;
+            }
+            if version_marker.is_none() && entry.key <= key_marker {
+                continue;
+            }
+            match fold(entry.key, &prefix, delimiter) {
+                Some(folded) => {
+                    if !entries.iter().any(|held| held.folded_prefix() == Some(folded.as_str())) {
+                        entries.push(VersionEntry::Folded(folded));
+                    }
+                }
+                None => entries.push(VersionEntry::Version(*entry)),
+            }
+        }
+
+        let max_keys = input.max_keys.unwrap_or(1000);
+        let truncated = truncate_to(&mut entries, max_keys);
+        let (mut next_key, mut next_version) = (None, None);
+        if truncated {
+            match entries.last() {
+                Some(VersionEntry::Version(entry)) => {
+                    next_key = Some(entry.key.to_owned());
+                    next_version = Some(entry.version.version_id.clone());
+                }
+                Some(VersionEntry::Folded(prefix)) => next_key = Some(prefix.clone()),
+                None => {}
+            }
+        }
+
+        let mut versions = Vec::new();
+        let mut delete_markers = Vec::new();
+        let mut common_prefixes = Vec::new();
+        for entry in &entries {
+            match entry {
+                VersionEntry::Folded(prefix) => common_prefixes.push(dto::CommonPrefix { prefix: prefix.clone() }),
+                VersionEntry::Version(held) => match held.version.object.as_ref() {
+                    Some(object) => versions.push(dto::ObjectVersion {
+                        key: object_key(held.key)?,
+                        version_id: held.version.version_id.clone().into(),
+                        is_latest: held.is_latest,
+                        last_modified: Timestamp::from_secs(held.version.last_modified),
+                        e_tag: entity_tag(&object.etag)?,
+                        size: object.body.len() as i64,
+                        storage_class: dto::StorageClass::custom(object.storage_class.clone()),
+                        owner: Some(owner()),
+                        ..dto::ObjectVersion::default()
+                    }),
+                    None => delete_markers.push(dto::DeleteMarkerEntry {
+                        key: object_key(held.key)?,
+                        version_id: held.version.version_id.clone().into(),
+                        is_latest: held.is_latest,
+                        last_modified: Timestamp::from_secs(held.version.last_modified),
+                        owner: Some(owner()),
+                    }),
+                },
+            }
+        }
+
         Ok(Resp::new(dto::ListObjectVersionsOutput {
             name: input.bucket.clone(),
             prefix: input.prefix.clone().unwrap_or_default(),
             delimiter: input.delimiter.clone(),
-            max_keys: input.max_keys.unwrap_or(1000),
-            is_truncated: false,
+            encoding_type: input.encoding_type.clone(),
+            key_marker: input.key_marker.clone().unwrap_or_default(),
+            version_id_marker: input.version_id_marker.clone().unwrap_or_default(),
+            next_key_marker: next_key,
+            next_version_id_marker: next_version.map(Into::into),
+            max_keys,
+            is_truncated: truncated,
+            versions,
+            delete_markers,
+            common_prefixes,
             ..dto::ListObjectVersionsOutput::default()
         }))
     }
+}
+
+/// One entry of an upload listing: an upload, or the prefix a delimiter folded it into.
+enum UploadEntry<'a> {
+    /// An upload, by key and id.
+    Upload {
+        /// The key it will become.
+        key: &'a str,
+        /// The id it was minted with.
+        id: &'a str,
+    },
+    /// A folded common prefix.
+    Folded(String),
+}
+
+impl UploadEntry<'_> {
+    fn folded_prefix(&self) -> Option<&str> {
+        match self {
+            UploadEntry::Folded(prefix) => Some(prefix.as_str()),
+            UploadEntry::Upload { .. } => None,
+        }
+    }
+}
+
+/// One entry of a version listing: a version, or the prefix a delimiter folded it into.
+enum VersionEntry<'a> {
+    /// One version or delete marker.
+    Version(VersionRef<'a>),
+    /// A folded common prefix.
+    Folded(String),
+}
+
+impl VersionEntry<'_> {
+    fn folded_prefix(&self) -> Option<&str> {
+        match self {
+            VersionEntry::Folded(prefix) => Some(prefix.as_str()),
+            VersionEntry::Version(_) => None,
+        }
+    }
+}
+
+/// Whether an upload sits after the `(key, upload id)` position the markers name.
+fn after_upload_marker(key: &str, id: &str, key_marker: &str, upload_marker: Option<&str>) -> bool {
+    match upload_marker {
+        None => key > key_marker,
+        Some(marker) => key > key_marker || (key == key_marker && id > marker),
+    }
+}
+
+/// Whether a value has the shape of an upload id this fixture mints.
+fn is_minted_upload_id(value: &str) -> bool {
+    value
+        .strip_prefix("conformance-upload-")
+        .is_some_and(|digits| !digits.is_empty() && digits.chars().all(|character| character.is_ascii_digit()))
+}
+
+/// The common prefix `key` folds into under `delimiter`, if it folds at all.
+fn fold(key: &str, prefix: &str, delimiter: Option<&str>) -> Option<String> {
+    let delimiter = delimiter?;
+    let rest = key.get(prefix.len()..)?;
+    let at = rest.find(delimiter)?;
+    key.get(..prefix.len() + at + delimiter.len()).map(ToOwned::to_owned)
+}
+
+/// Cuts `entries` down to `max`, answering whether anything was left behind.
+///
+/// `max = 0` is not a truncation: S3 answers a zero page size with an empty listing and
+/// `IsTruncated` false, because a client that saw `true` would ask for the next page of nothing
+/// forever. `c-list-0027` is the case that pins it.
+fn truncate_to<T>(entries: &mut Vec<T>, max: i32) -> bool {
+    let limit = usize::try_from(max.max(0)).unwrap_or(usize::MAX);
+    let truncated = limit > 0 && entries.len() > limit;
+    entries.truncate(limit);
+    truncated
 }
 
 /// One page of a listing: the keys that survived the delimiter, and the folded prefixes.
@@ -998,6 +1516,18 @@ impl Page {
     fn count(&self) -> i32 {
         i32::try_from(self.keys.len() + self.common_prefixes.len()).unwrap_or(i32::MAX)
     }
+
+    /// The `Contents` entries for the keys on this page.
+    fn contents(&self, fixture: &Fixture, bucket: &str, with_owner: bool) -> Result<Vec<dto::Object>, HandlerError> {
+        let mut out = Vec::with_capacity(self.keys.len());
+        for key in &self.keys {
+            let object = fixture
+                .object(bucket, key)
+                .ok_or_else(|| HandlerError::internal_error("a key this listing selected is no longer in the fixture"))?;
+            out.push(object_entry(key, object, with_owner)?);
+        }
+        Ok(out)
+    }
 }
 
 /// Applies prefix, delimiter, start position and page size, in that order.
@@ -1011,27 +1541,23 @@ fn paginate(fixture: &Fixture, bucket: &str, prefix: &str, delimiter: Option<&st
         if !key.starts_with(prefix) {
             continue;
         }
-        if after.is_some_and(|marker| key <= marker) {
+        // The marker is compared against the *entry*, not against the key: with a delimiter in
+        // play, the last thing page one emitted may have been a folded prefix, and resuming after
+        // `b/` has to drop every key underneath it rather than only the one that spelled it.
+        let entry = match fold(key, prefix, delimiter) {
+            Some(folded) => (folded, true),
+            None => (key.to_owned(), false),
+        };
+        if after.is_some_and(|marker| entry.0.as_str() <= marker) {
             continue;
         }
-        let folded = delimiter.and_then(|delimiter| {
-            key.get(prefix.len()..)
-                .and_then(|rest| rest.find(delimiter).map(|at| prefix.len() + at + delimiter.len()))
-        });
-        match folded {
-            Some(end) => {
-                let prefix = key.get(..end).unwrap_or(key).to_owned();
-                if !entries.iter().any(|(value, is_prefix)| *is_prefix && *value == prefix) {
-                    entries.push((prefix, true));
-                }
-            }
-            None => entries.push((key.to_owned(), false)),
+        if entry.1 && entries.iter().any(|(value, is_prefix)| *is_prefix && *value == entry.0) {
+            continue;
         }
+        entries.push(entry);
     }
     entries.sort();
-    let limit = usize::try_from(max.max(0)).unwrap_or(usize::MAX);
-    let truncated = entries.len() > limit;
-    entries.truncate(limit);
+    let truncated = truncate_to(&mut entries, max);
     let next = truncated.then(|| entries.last().map(|(value, _)| value.clone())).flatten();
     Page {
         keys: entries
@@ -1093,5 +1619,103 @@ mod tests {
         let page = paginate(&fixture, "b", "", Some("/"), None, 1000);
         assert_eq!(page.common_prefixes, ["a/"]);
         assert_eq!(page.keys, ["top"]);
+    }
+
+    /// A marker that names a folded prefix drops *every* key underneath it, not just the one whose
+    /// spelling produced it. Resuming on the key alone repeats `b/1.txt` on the second page, and
+    /// no single-response assertion can see that.
+    #[test]
+    fn a_marker_naming_a_common_prefix_resumes_past_every_key_under_it() {
+        let mut fixture = Fixture::at(0);
+        fixture.declare_bucket("b", false);
+        for key in ["a/1.txt", "b/1.txt", "top.txt"] {
+            fixture.put_object("b", key, StoredObject::new(b"x".to_vec(), None, 0));
+        }
+        let first = paginate(&fixture, "b", "", Some("/"), None, 2);
+        assert!(first.truncated);
+        assert_eq!(first.next.as_deref(), Some("b/"));
+        let second = paginate(&fixture, "b", "", Some("/"), Some("b/"), 2);
+        assert_eq!(second.keys, ["top.txt"]);
+        assert!(second.common_prefixes.is_empty());
+        assert_eq!(second.count(), 1);
+    }
+
+    /// `max-keys=0` is an empty page, not a truncated one: a client told `true` asks for the next
+    /// page of nothing for ever.
+    #[test]
+    fn a_zero_page_size_is_not_a_truncation() {
+        let mut fixture = Fixture::at(0);
+        fixture.declare_bucket("b", false);
+        fixture.put_object("b", "k", StoredObject::new(b"x".to_vec(), None, 0));
+        let page = paginate(&fixture, "b", "", None, None, 0);
+        assert_eq!(page.count(), 0);
+        assert!(!page.truncated);
+        assert_eq!(page.next, None);
+    }
+
+    /// The cursor round-trips, and every spelling this stub did not mint is refused rather than
+    /// read as some other position.
+    #[test]
+    fn a_continuation_token_round_trips_and_refuses_everything_else() {
+        let token = mint_token("a/2.txt");
+        assert_ne!(token, "a/2.txt", "a cursor a client can read is a cursor a client can forge");
+        assert_eq!(read_token(&token).as_deref(), Some("a/2.txt"));
+        assert_eq!(read_token(&format!("{token}X")), None);
+        assert_eq!(read_token("../../etc/passwd"), None);
+        assert_eq!(read_token("\u{ff}\u{fe}\u{0}\u{1}"), None);
+        assert_eq!(read_token(&"A".repeat(MAX_TOKEN_BYTES + 1)), None);
+        // The first page of an empty prefix resumes from the empty marker, which must survive too.
+        assert_eq!(read_token(&mint_token("")).as_deref(), Some(""));
+    }
+
+    /// A versioned bucket keeps what `[setup]` declared, in the order it declared it; an
+    /// unversioned one keeps one `null` version and no history at all.
+    #[test]
+    fn versions_are_the_setup_entries_and_nothing_more() {
+        let mut fixture = Fixture::at(7);
+        fixture.declare_bucket("v", true);
+        fixture.declare_bucket("u", false);
+        fixture.put_object("v", "doc", StoredObject::new(b"1".to_vec(), None, 7));
+        fixture.put_object("v", "doc", StoredObject::new(b"2".to_vec(), None, 7));
+        fixture.put_object("v", "gone", StoredObject::new(b"g".to_vec(), None, 7));
+        fixture.remove_object("v", "gone");
+        fixture.put_object("u", "doc", StoredObject::new(b"1".to_vec(), None, 7));
+        fixture.put_object("u", "doc", StoredObject::new(b"2".to_vec(), None, 7));
+
+        let versioned = fixture.versions_in("v");
+        // Two versions of `doc`, then the delete marker over `gone` and the version it hides.
+        assert_eq!(versioned.len(), 4);
+        assert_eq!(versioned.first().map(|entry| entry.key), Some("doc"));
+        assert!(versioned.first().is_some_and(|entry| entry.is_latest));
+        assert!(versioned.get(1).is_some_and(|entry| !entry.is_latest));
+        assert!(versioned.get(2).is_some_and(|entry| entry.key == "gone" && entry.is_latest));
+        assert!(versioned.get(2).is_some_and(|entry| entry.version.object.is_none()));
+        assert!(versioned.get(3).is_some_and(|entry| entry.version.object.is_some()));
+        // The delete marker hides the key from a plain listing and from a read, and only from those.
+        assert_eq!(fixture.keys_in("v"), ["doc"]);
+        assert!(fixture.object("v", "gone").is_none());
+
+        let unversioned = fixture.versions_in("u");
+        assert_eq!(unversioned.len(), 1);
+        assert_eq!(unversioned.first().map(|entry| entry.version.version_id.as_str()), Some(UNVERSIONED));
+    }
+
+    /// Negative — an upload-id marker that is not an id this service issued is refused by shape,
+    /// before it is compared against anything.
+    #[test]
+    fn an_upload_id_marker_is_recognised_by_shape() {
+        assert!(is_minted_upload_id("conformance-upload-0001"));
+        assert!(!is_minted_upload_id("conformance-upload-"));
+        assert!(!is_minted_upload_id("../../../etc/passwd"));
+        assert!(!is_minted_upload_id("conformance-upload-00x1"));
+    }
+
+    /// An empty delimiter is no delimiter: folding on it would put every key under one prefix.
+    #[test]
+    fn an_empty_delimiter_folds_nothing() {
+        assert_eq!(delimiter_of(Some("")), None);
+        assert_eq!(delimiter_of(Some("/")), Some("/"));
+        assert_eq!(fold("xxABtail", "", Some("AB")).as_deref(), Some("xxAB"));
+        assert_eq!(fold("xxAother", "", Some("AB")), None);
     }
 }

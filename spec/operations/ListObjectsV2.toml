@@ -117,7 +117,7 @@ binding = "Query"
 type = "OpaqueString"
 required = false
 hot = true
-quirks = ["q-token-0021"]
+quirks = ["q-token-0021", "q-token-form-0075"]
 
 [[input]]
 name = "FetchOwner"

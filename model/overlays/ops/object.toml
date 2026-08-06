@@ -102,6 +102,19 @@ side = "output"
 name = "Metadata"
 quirks = ["q-meta-0009"]
 
+# The two conditional headers keep their string type and gain the grammar that string is spelled
+# in. The refusal and the storage are different questions: nothing downstream needs a parsed tag
+# in order for an unterminated one to stop being accepted.
+[[op.GetObject.field]]
+side = "input"
+name = "IfMatch"
+quirks = ["q-etag-form-0074"]
+
+[[op.GetObject.field]]
+side = "input"
+name = "IfNoneMatch"
+quirks = ["q-etag-form-0074"]
+
 # =============================================================================================
 # HeadObject
 #
@@ -143,6 +156,16 @@ quirks = ["q-timestamp-0005"]
 side = "output"
 name = "Metadata"
 quirks = ["q-meta-0009"]
+
+[[op.HeadObject.field]]
+side = "input"
+name = "IfMatch"
+quirks = ["q-etag-form-0074"]
+
+[[op.HeadObject.field]]
+side = "input"
+name = "IfNoneMatch"
+quirks = ["q-etag-form-0074"]
 
 # =============================================================================================
 # PutObject
@@ -301,6 +324,16 @@ wire_name = "x-amz-checksum-"
 type = "ChecksumSpec"
 quirks = ["q-checksum-0006"]
 
+[[op.PutObject.field]]
+side = "input"
+name = "IfMatch"
+quirks = ["q-etag-form-0074"]
+
+[[op.PutObject.field]]
+side = "input"
+name = "IfNoneMatch"
+quirks = ["q-etag-form-0074"]
+
 # =============================================================================================
 # DeleteObject
 #
@@ -318,6 +351,11 @@ input_hot = ["VersionId"]
 side = "input"
 name = "VersionId"
 quirks = ["q-delete-0026"]
+
+[[op.DeleteObject.field]]
+side = "input"
+name = "IfMatch"
+quirks = ["q-etag-form-0074"]
 
 # =============================================================================================
 # DeleteObjects

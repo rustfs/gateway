@@ -197,6 +197,91 @@ pub fn opaque(value: &str) -> OpaqueString {
     OpaqueString::new(value.to_owned())
 }
 
+/// Checks that a value the wire spells as an entity tag actually is one, and hands it back
+/// unchanged.
+///
+/// The member keeps its string type: what the IR declares here is the *wire form*, not the stored
+/// shape, so this refuses `"5d41…` — an opening quote with no closing one — without moving the
+/// value into [`ETag`] and changing what every reader of that member is handed. `*`, a bare tag, a
+/// quoted tag and a `W/` validator all parse, which is the whole set a conditional header may
+/// carry.
+///
+/// It is also what makes a repeated conditional header a refusal rather than a coin flip: two
+/// field lines reach here joined by a comma, and the joined value carries an embedded quote, which
+/// no entity tag may.
+///
+/// # Errors
+///
+/// [`CodecError`] naming the member.
+pub fn etag_form<'a>(value: &'a str, member: &'static str) -> Result<&'a str, CodecError> {
+    ETag::parse_http_header(value).map_err(|_| unusable(member))?;
+    Ok(value)
+}
+
+/// The longest token this service could have minted, in bytes.
+///
+/// Deliberately the same number as `crate::ops::shared::pagination::MAX_CURSOR_BYTES`, which is
+/// the ceiling the listing operations read a cursor under once they have one. It is written twice
+/// rather than shared because the two live on opposite sides of the codec/handler boundary and
+/// `codec` does not depend on `ops`; the copy collapses into the shared one the day a cursor has a
+/// type the IR can name. Until then the two must move together, and this sentence is the only
+/// thing saying so.
+///
+/// The ceiling is checked before anything else for the reason the case that pins it gives: a
+/// decoder that parses first has already done the work the ceiling exists to prevent.
+const MAX_TOKEN_LEN: usize = 2048;
+
+/// Checks that a value the wire spells as a server-minted opaque token could have been minted
+/// here, and hands it back unchanged.
+///
+/// Four refusals, and every one of them is about a value the caller did not get from a previous
+/// response:
+///
+/// * longer than anything this service mints — an unbounded allocation an unauthenticated caller
+///   controls, once per request;
+/// * carrying the replacement character — the single percent-decode is deliberately lossy because
+///   S3 query values carry keys and a key is bytes, so a replacement character in the decoded form
+///   means the wire bytes were not text, and no token this service minted is not text;
+/// * carrying a control character, for the same reason and with the same conclusion;
+/// * spelling a parent traversal — a `..` segment or a backslash. A cursor is the one
+///   attacker-controlled value in the listing families that an implementation is tempted to give
+///   structure to, and the moment it is joined onto a path it is a traversal performed on request.
+///   Refusing the spelling here is what makes that impossible rather than merely unintended.
+///
+/// A `/` is *not* refused: a cursor derived from a key contains them, and a token drawn from the
+/// standard base64 alphabet does too.
+///
+/// The last refusal is the one that distinguishes this from
+/// `crate::ops::shared::pagination::CursorSpec::accept`, which shares the first three and
+/// deliberately treats a traversal spelling as inert data. The two are not in conflict: that
+/// function reads *every* cursor including `marker` and `key-marker`, which are object keys the
+/// client is entitled to compose, and a key may spell whatever a key may spell. This one is
+/// attached only to the cursors the overlay marks as server-minted, where a spelling the server
+/// could not have produced is by definition not a cursor it produced.
+///
+/// # Errors
+///
+/// [`CodecError`] naming the member.
+/// The value is returned rather than wrapped so that the one grammar serves both spellings a
+/// cursor has in this surface: an `OpaqueString` member wraps the result, and the members the
+/// model left as plain strings own it. A second function per storage type would be two places for
+/// the rule to drift apart.
+pub fn token_form<'a>(value: &'a str, member: &'static str) -> Result<&'a str, CodecError> {
+    if value.len() > MAX_TOKEN_LEN {
+        return Err(unusable(member));
+    }
+    if value
+        .chars()
+        .any(|c| c == char::REPLACEMENT_CHARACTER || c.is_control() || c == '\\')
+    {
+        return Err(unusable(member));
+    }
+    if value.split('/').any(|segment| segment == "..") {
+        return Err(unusable(member));
+    }
+    Ok(value)
+}
+
 /// Parses a `Range` header into the one range S3 honours, or nothing.
 ///
 /// Never an error. RFC 9110 requires an unsatisfiable or unparseable `Range` to be ignored and the

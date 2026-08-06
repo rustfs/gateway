@@ -47,24 +47,29 @@ impl OperationCodec for dto::DeleteObjects {
             return Err(CodecError::malformed_xml("the request body has the wrong root element").about("Delete"));
         }
         input.delete = read_delete(&root)?;
-        // MFA — header `x-amz-mfa`.
+        // MFA — header `x-amz-mfa`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-mfa") {
+            let raw = raw.as_ref();
             input.mfa = Some(raw.to_owned());
         }
-        // RequestPayer — header `x-amz-request-payer`.
+        // RequestPayer — header `x-amz-request-payer`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-request-payer") {
+            let raw = raw.as_ref();
             input.request_payer = Some(dto::RequestPayer::custom(raw.to_owned()));
         }
-        // BypassGovernanceRetention — header `x-amz-bypass-governance-retention`.
+        // BypassGovernanceRetention — header `x-amz-bypass-governance-retention`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-bypass-governance-retention") {
+            let raw = raw.as_ref();
             input.bypass_governance_retention = Some(value::boolean(raw, "BypassGovernanceRetention")?);
         }
-        // ExpectedBucketOwner — header `x-amz-expected-bucket-owner`.
+        // ExpectedBucketOwner — header `x-amz-expected-bucket-owner`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-expected-bucket-owner") {
+            let raw = raw.as_ref();
             input.expected_bucket_owner = Some(raw.to_owned());
         }
-        // ChecksumAlgorithm — header `x-amz-sdk-checksum-algorithm`.
+        // ChecksumAlgorithm — header `x-amz-sdk-checksum-algorithm`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-sdk-checksum-algorithm") {
+            let raw = raw.as_ref();
             input.checksum_algorithm = Some(dto::ChecksumAlgorithm::custom(raw.to_owned()));
         }
         value::exit(input.check_required())?;

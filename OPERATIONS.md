@@ -293,6 +293,7 @@ An `Error` body can follow an already-flushed `200`.
 - `q-mpu-upload-id-0037` (capability_token on `UploadPart.UploadId`) — An upload id is a server-minted capability, not a name the caller chose: it is resolved against the bucket and key of the request before anything is written, an unknown id answers the not-found code, and one belonging to another resource is refused rather than honoured.
 - `q-mpu-limits-0038` (bounded_input on `CompleteMultipartUpload.MultipartUpload`) — Part numbers run from one to ten thousand, every part except the last has a floor on its size, and the completion list must be strictly ascending with no repeats; each of the three has its own code so a client can tell them apart.
 - `q-mpu-metadata-0039` (deferred_metadata on `CreateMultipartUpload`) — User metadata, content type, storage class and the encryption settings are carried on the initiating request alone and take effect on the assembled object; a part upload carries none of them, so losing them at initiation loses them permanently.
+- `q-etag-form-0074` (wire_form on `GetObject.IfMatch`) — A conditional header carries one entity tag and is checked against that grammar before anything compares it, so an unterminated quote is a bad request rather than a tag whose first character is a quote, and two field lines joined by a comma are refused rather than reduced to whichever one arrived first.
 
 Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 
@@ -382,6 +383,7 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 **Quirks**
 
 - `q-delete-0026` (idempotent_delete on `DeleteObject`) — Deleting a key that does not exist is a success and answers the same empty 204 as deleting one that does; a not-found status here breaks every retrying client.
+- `q-etag-form-0074` (wire_form on `GetObject.IfMatch`) — A conditional header carries one entity tag and is checked against that grammar before anything compares it, so an unterminated quote is a bad request rather than a tag whose first character is a quote, and two field lines joined by a comma are refused rather than reduced to whichever one arrived first.
 
 Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 
@@ -518,6 +520,7 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 - `q-meta-0009` (prefix_headers on `PutObject.Metadata`) — User metadata keys are lowercased on return, non ASCII values use encoded word syntax, and the combined size is capped.
 - `q-response-0023` (response_override on `GetObject`) — A fixed set of response- query parameters overwrites the corresponding response headers, and the overwrite is applied once at the end of encoding rather than inside each field binding.
 - `q-storageclass-0024` (omit_when on `GetObject.StorageClass`) — The storage class response header is suppressed for the default class, which is the exact opposite of the listing body element that is always written.
+- `q-etag-form-0074` (wire_form on `GetObject.IfMatch`) — A conditional header carries one entity tag and is checked against that grammar before anything compares it, so an unterminated quote is a bad request rather than a tag whose first character is a quote, and two field lines joined by a comma are refused rather than reduced to whichever one arrived first.
 
 Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 
@@ -560,6 +563,7 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 - `q-meta-0009` (prefix_headers on `PutObject.Metadata`) — User metadata keys are lowercased on return, non ASCII values use encoded word syntax, and the combined size is capped.
 - `q-storageclass-0024` (omit_when on `GetObject.StorageClass`) — The storage class response header is suppressed for the default class, which is the exact opposite of the listing body element that is always written.
 - `q-head-0025` (head_mirrors on `HeadObject`) — The head response carries exactly the header set of the corresponding get, and no body on any status, so the two header sets must be one derivation rather than two hand-written tables.
+- `q-etag-form-0074` (wire_form on `GetObject.IfMatch`) — A conditional header carries one entity tag and is checked against that grammar before anything compares it, so an unterminated quote is a bad request rather than a tag whose first character is a quote, and two field lines joined by a comma are refused rather than reduced to whichever one arrived first.
 
 Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 
@@ -602,6 +606,7 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 - `q-wrapped-0062` (flattened on `ListBuckets`) — The bucket listing wraps its entries in an enclosing element, the one listing in this family that is not flattened.
 - `q-order-0066` (element_order on `ListObjects`) — Sibling order is a wire contract in every listing of this family and inside the version entry as well; the bucket name and the cursors precede the entry list.
 - `q-buckets-0071` (pagination on `ListBuckets`) — The bucket listing gained a cursor, a page size, a prefix and a region filter long after the key listings, so a response carrying none of them is still a complete one.
+- `q-token-form-0075` (wire_form on `ListObjectsV2.ContinuationToken`) — A cursor is a value this service minted, so one longer than anything it mints, one whose percent-decoded bytes are not text, and one spelling a parent traversal are all malformed input refused before the listing runs, rather than opaque bytes carried into whatever the listing does with them.
 
 Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 
@@ -652,6 +657,7 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 - `q-mpu-upload-0032` (flattened_list on `ListMultipartUploads.Uploads`) — Each upload element repeats directly under the result root with no wrapper, and the element name is not the member name, so both halves have to come from the model rather than from the member spelling.
 - `q-mpu-upload-id-0037` (capability_token on `UploadPart.UploadId`) — An upload id is a server-minted capability, not a name the caller chose: it is resolved against the bucket and key of the request before anything is written, an unknown id answers the not-found code, and one belonging to another resource is refused rather than honoured.
 - `q-mpu-marker-0040` (pagination_cursor on `ListParts.NextPartNumberMarker`) — A truncated listing hands back a cursor that is valid as the next request's marker, the page-size limit is echoed as the caller sent it rather than as the server clamped it, and a listing of uploads needs both the key cursor and the upload-id cursor because one key can carry several uploads.
+- `q-marker-form-0076` (wire_form on `ListMultipartUploads.UploadIdMarker`) — The upload-id cursor of an upload listing is a server-minted value that comes back through the query string, so one spelling a parent traversal — including the percent-encoded spelling, which is already decoded when the check runs — is refused before the listing reads anything.
 
 Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 
@@ -711,6 +717,7 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 - `q-maxkeys-0068` (computed_member on `ListObjects.MaxKeys`) — Every listing echoes the page size the request asked for rather than the number of entries it returned, which is what lets a client tell a short page from a last page.
 - `q-interleave-0069` (element_order on `ListObjectVersions`) — Version entries and delete marker entries are one sequence ordered by key and version, not two blocks, so the two element names alternate within a page.
 - `q-marker-0070` (opaque_token on `ListObjectVersions`) — The version listing has two cursors and they are ordered: the version cursor is meaningless without the key cursor, so it alone is a malformed request rather than a page one.
+- `q-token-form-0075` (wire_form on `ListObjectsV2.ContinuationToken`) — A cursor is a value this service minted, so one longer than anything it mints, one whose percent-decoded bytes are not text, and one spelling a parent traversal are all malformed input refused before the listing runs, rather than opaque bytes carried into whatever the listing does with them.
 
 Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 
@@ -829,6 +836,7 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 - `q-storageclass-0022` (omit_when on `Object.StorageClass`) — The storage class element in a listing is always written including the default class, which is the opposite of the header form that is suppressed for the default class.
 - `q-owner-0065` (omit_when on `ListObjects.Object.Owner`) — The first listing version has no fetch owner parameter and writes owner information for every entry, so the suppression the entry shape carries applies to the second version alone.
 - `q-max-keys-0073` (bounded_range on `ListObjectsV2.MaxKeys`) — A page size runs from zero to a thousand inclusive, and a value outside it is refused rather than clamped, because a client that asked for a hundred thousand and silently read a thousand concludes the bucket is small.
+- `q-token-form-0075` (wire_form on `ListObjectsV2.ContinuationToken`) — A cursor is a value this service minted, so one longer than anything it mints, one whose percent-decoded bytes are not text, and one spelling a parent traversal are all malformed input refused before the listing runs, rather than opaque bytes carried into whatever the listing does with them.
 
 Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 
@@ -938,6 +946,7 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 - `q-sse-0010` (secret_hygiene on `PutObject`) — The customer key is never echoed back and never logged, while the algorithm and key digest must be echoed; customer keys over a plaintext connection are refused.
 - `q-timestamp-0011` (timestamp_format on `PutObject.ObjectLockRetainUntilDate`) — This is the only request header carrying the extended date time format instead of the HTTP date format.
 - `q-timestamp-0012` (structured_header on `PutObject.Expiration`) — The expiration header is a structured value whose quoted parameter embeds an HTTP date, so it must not be modelled as a timestamp.
+- `q-etag-form-0074` (wire_form on `GetObject.IfMatch`) — A conditional header carries one entity tag and is checked against that grammar before anything compares it, so an unterminated quote is a bad request rather than a tag whose first character is a quote, and two field lines joined by a comma are refused rather than reduced to whichever one arrived first.
 
 Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 

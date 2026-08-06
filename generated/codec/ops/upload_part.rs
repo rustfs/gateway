@@ -39,20 +39,23 @@ impl OperationCodec for dto::UploadPart {
         input.body = body.into_stream();
         // Bucket — URI label, decoded once by `MetaView::of`.
         input.bucket = request.require_bucket()?;
-        // ContentLength — header `content-length`.
+        // ContentLength — header `content-length`, repeated field lines joined.
         if let Some(raw) = request.header("content-length") {
+            let raw = raw.as_ref();
             input.content_length = value::long(raw, "ContentLength")?;
         } else {
             return Err(value::missing("MissingContentLength", "ContentLength"));
         }
-        // ContentMD5 — header `content-md5`.
+        // ContentMD5 — header `content-md5`, repeated field lines joined.
         if let Some(raw) = request.header("content-md5") {
+            let raw = raw.as_ref();
             input.content_md5 = Some(raw.to_owned());
         }
         // ChecksumSpec — the one checksum header under `x-amz-checksum-`.
         input.checksum_spec = value::checksum_spec(request, "x-amz-checksum-", "ChecksumSpec")?;
-        // ChecksumAlgorithm — header `x-amz-sdk-checksum-algorithm`.
+        // ChecksumAlgorithm — header `x-amz-sdk-checksum-algorithm`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-sdk-checksum-algorithm") {
+            let raw = raw.as_ref();
             input.checksum_algorithm = Some(dto::ChecksumAlgorithm::custom(raw.to_owned()));
         }
         // Key — URI label, decoded once by `MetaView::of`.
@@ -71,24 +74,29 @@ impl OperationCodec for dto::UploadPart {
         } else {
             return Err(value::missing("InvalidArgument", "UploadId"));
         }
-        // SSECustomerAlgorithm — header `x-amz-server-side-encryption-customer-algorithm`.
+        // SSECustomerAlgorithm — header `x-amz-server-side-encryption-customer-algorithm`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-server-side-encryption-customer-algorithm") {
+            let raw = raw.as_ref();
             input.sse_customer_algorithm = Some(raw.to_owned());
         }
-        // SSECustomerKey — header `x-amz-server-side-encryption-customer-key`.
+        // SSECustomerKey — header `x-amz-server-side-encryption-customer-key`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-server-side-encryption-customer-key") {
+            let raw = raw.as_ref();
             input.sse_customer_key = Some(raw.to_owned());
         }
-        // SSECustomerKeyMD5 — header `x-amz-server-side-encryption-customer-key-md5`.
+        // SSECustomerKeyMD5 — header `x-amz-server-side-encryption-customer-key-md5`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-server-side-encryption-customer-key-md5") {
+            let raw = raw.as_ref();
             input.sse_customer_key_md5 = Some(raw.to_owned());
         }
-        // RequestPayer — header `x-amz-request-payer`.
+        // RequestPayer — header `x-amz-request-payer`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-request-payer") {
+            let raw = raw.as_ref();
             input.request_payer = Some(dto::RequestPayer::custom(raw.to_owned()));
         }
-        // ExpectedBucketOwner — header `x-amz-expected-bucket-owner`.
+        // ExpectedBucketOwner — header `x-amz-expected-bucket-owner`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-expected-bucket-owner") {
+            let raw = raw.as_ref();
             input.expected_bucket_owner = Some(raw.to_owned());
         }
         value::exit(input.check_required())?;

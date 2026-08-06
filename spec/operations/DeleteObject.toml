@@ -120,7 +120,7 @@ binding = "Header"
 type = "String"
 required = false
 hot = false
-quirks = []
+quirks = ["q-etag-form-0074"]
 
 [[input]]
 name = "IfMatchLastModifiedTime"

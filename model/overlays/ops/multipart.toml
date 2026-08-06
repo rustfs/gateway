@@ -374,12 +374,12 @@ quirks = ["q-mpu-upload-id-0037"]
 [[op.CompleteMultipartUpload.field]]
 side = "input"
 name = "IfMatch"
-quirks = ["q-mpu-late-error-0033"]
+quirks = ["q-mpu-late-error-0033", "q-etag-form-0074"]
 
 [[op.CompleteMultipartUpload.field]]
 side = "input"
 name = "IfNoneMatch"
-quirks = ["q-mpu-late-error-0033"]
+quirks = ["q-mpu-late-error-0033", "q-etag-form-0074"]
 
 [[op.CompleteMultipartUpload.field]]
 side = "input"
@@ -592,7 +592,7 @@ quirks = ["q-mpu-marker-0040"]
 [[op.ListMultipartUploads.field]]
 side = "input"
 name = "UploadIdMarker"
-quirks = ["q-mpu-upload-id-0037", "q-mpu-marker-0040"]
+quirks = ["q-mpu-upload-id-0037", "q-mpu-marker-0040", "q-marker-form-0076"]
 
 [[op.ListMultipartUploads.field]]
 side = "input"

@@ -31,7 +31,7 @@ use std::fmt::Write as _;
 
 use rustfs_gateway_model::ir::{Binding, Field, OperationIr, Quirk, Shape, Type};
 
-use super::{bounds, expr};
+use super::{bounds, expr, forms};
 use crate::emit::dto::naming;
 
 /// The default code for a required member the request did not carry.
@@ -102,14 +102,29 @@ fn one_field(ir: &OperationIr, field: &Field) -> Result<String, String> {
             out.push_str(&assign(8, &target, &format!("request.{accessor}()?")));
         }
         Binding::Header => {
-            let conversion = expr::from_wire(&field.ty, member, op, false, bounds::of(field, &ir.quirks, op)?)?;
-            let _ = writeln!(out, "        // {member} — header `{wire}`.");
+            let conversion = expr::from_wire(
+                &field.ty,
+                member,
+                op,
+                false,
+                bounds::of(field, &ir.quirks, op)?,
+                forms::of(field, &ir.quirks, op)?,
+            )?;
+            let _ = writeln!(out, "        // {member} — header `{wire}`, repeated field lines joined.");
             let _ = writeln!(out, "        if let Some(raw) = request.header(\"{wire}\") {{");
+            let _ = writeln!(out, "            let raw = raw.as_ref();");
             out.push_str(&assign(12, &target, &wrap(field, &conversion)));
             out.push_str(&otherwise(field, &target)?);
         }
         Binding::Query => {
-            let conversion = expr::from_wire(&field.ty, member, op, false, bounds::of(field, &ir.quirks, op)?)?;
+            let conversion = expr::from_wire(
+                &field.ty,
+                member,
+                op,
+                false,
+                bounds::of(field, &ir.quirks, op)?,
+                forms::of(field, &ir.quirks, op)?,
+            )?;
             let _ = writeln!(out, "        // {member} — query `{wire}`, percent-decoded once.");
             let _ = writeln!(out, "        if let Some(raw) = request.query(\"{wire}\") {{");
             let _ = writeln!(out, "            let raw = raw.as_ref();");
@@ -264,7 +279,14 @@ pub fn shape_reader(operation: &str, name: &str, shape: &Shape, quirks: &[Quirk]
                 flattened,
                 wrapper_name,
             } if !matches!(inner.as_ref(), Type::Structure(_)) => {
-                let conversion = expr::from_wire(inner, member, operation, true, bounds::of(field, quirks, operation)?)?;
+                let conversion = expr::from_wire(
+                    inner,
+                    member,
+                    operation,
+                    true,
+                    bounds::of(field, quirks, operation)?,
+                    forms::of(field, quirks, operation)?,
+                )?;
                 let source = if *flattened {
                     format!("node.children_named(\"{wire}\")")
                 } else {
@@ -316,7 +338,14 @@ pub fn shape_reader(operation: &str, name: &str, shape: &Shape, quirks: &[Quirk]
                 out.push_str("    }\n");
             }
             other => {
-                let conversion = expr::from_wire(other, member, operation, true, bounds::of(field, quirks, operation)?)?;
+                let conversion = expr::from_wire(
+                    other,
+                    member,
+                    operation,
+                    true,
+                    bounds::of(field, quirks, operation)?,
+                    forms::of(field, quirks, operation)?,
+                )?;
                 let _ = writeln!(out, "    if let Some(raw) = node.child_text(\"{wire}\") {{");
                 out.push_str(&assign(8, &target, &wrap(field, &conversion)));
                 out.push_str("    }\n");

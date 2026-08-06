@@ -85,7 +85,7 @@ quirks = ["q-owner-0017"]
 [[op.ListObjectsV2.field]]
 side = "input"
 name = "ContinuationToken"
-quirks = ["q-token-0021"]
+quirks = ["q-token-0021", "q-token-form-0075"]
 
 [[op.ListObjectsV2.field]]
 side = "input"
@@ -302,7 +302,7 @@ quirks = ["q-encoding-0067"]
 side = "input"
 name = "VersionIdMarker"
 type = "OpaqueString"
-quirks = ["q-token-0021", "q-marker-0070"]
+quirks = ["q-token-0021", "q-marker-0070", "q-token-form-0075"]
 
 [[op.ListObjectVersions.field]]
 side = "input"
@@ -377,7 +377,7 @@ quirks = ["q-buckets-0071"]
 [[op.ListBuckets.field]]
 side = "input"
 name = "ContinuationToken"
-quirks = ["q-token-0021", "q-buckets-0071"]
+quirks = ["q-token-0021", "q-buckets-0071", "q-token-form-0075"]
 
 [[op.ListBuckets.field]]
 side = "input"
