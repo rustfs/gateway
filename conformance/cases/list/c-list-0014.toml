@@ -1,0 +1,90 @@
+# c-list-0014 — the two version cursors resume without repeating or skipping.
+#
+# Schema dimensions exercised: multi-exchange pagination with two captured cursors.
+
+[case]
+id = "c-list-0014"
+schema_version = 1
+title = "A key marker and a version marker together resume a version listing exactly where it stopped"
+rationale = """
+One cursor is not enough here: a key may hold more versions than a page can carry, so resuming on the key alone either repeats the versions already returned or skips the rest of them. Both are silent — the client gets a plausible history that is wrong — so the case pages the whole set and asserts the join."""
+polarity = "positive"
+operation = "ListObjectVersions"
+tags = ["list", "versions", "pagination"]
+timeout_ms = 15000
+quirks = ["q-marker-0070", "q-interleave-0069"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectVersions.html"
+summary = "States that the version cursor resumes within the key the key cursor names."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-list-versions"
+versioning = "enabled"
+
+[[setup.objects]]
+bucket = "conf-list-versions"
+key = "doc.txt"
+body = { utf8 = "v1" }
+
+[[setup.objects]]
+bucket = "conf-list-versions"
+key = "doc.txt"
+body = { utf8 = "v2" }
+
+[[setup.objects]]
+bucket = "conf-list-versions"
+key = "doc.txt"
+body = { utf8 = "v3" }
+
+[[setup.objects]]
+bucket = "conf-list-versions"
+key = "gone.txt"
+body = { utf8 = "here" }
+
+[connection]
+reuse = true
+
+[[exchanges]]
+name = "page-1"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-list-versions?versions&max-keys=2"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+
+[exchanges.expect.capture]
+key_marker = { xml_text = "NextKeyMarker" }
+version_marker = { xml_text = "NextVersionIdMarker" }
+
+[exchanges.expect.body]
+redact = ["NextKeyMarker", "NextVersionIdMarker", "VersionId"]
+contains_utf8 = ["<IsTruncated>true</IsTruncated>"]
+
+[[exchanges]]
+name = "page-2"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-list-versions?versions&max-keys=2&key-marker=${capture.key_marker}&version-id-marker=${capture.version_marker}"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+
+[exchanges.expect.body]
+redact = ["VersionId", "KeyMarker", "VersionIdMarker"]
+
+[exchanges.expect.body.xml]
+root = "ListVersionsResult"
+xmlns = "http://s3.amazonaws.com/doc/2006-03-01/"
+empty_elements = "paired"

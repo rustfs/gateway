@@ -1,0 +1,75 @@
+# c-mpu-0038 — the keep-alive whitespace leaves the document well formed.
+
+[case]
+id = "c-mpu-0038"
+schema_version = 1
+title = "Whitespace written while the outcome is pending leaves the response a valid document"
+rationale = """
+The whitespace exists because the head has to be flushed before the outcome is known, and it is \
+only safe because leading whitespace before an XML declaration-less document is well formed. Two \
+ways to get it wrong both produce a document no parser accepts: writing the whitespace after the \
+declaration, or writing it between the root element's own children. Asserting the parsed shape as \
+well as the presence of the result element is what separates 'the bytes arrived' from 'the bytes \
+parse'."""
+polarity = "negative"
+operation = "CompleteMultipartUpload"
+tags = ["multipart", "streaming", "xml-shape"]
+quirks = ["q-mpu-late-error-0033"]
+timeout_ms = 60000
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/pull/348"
+summary = "The upstream fix writes whitespace while the outcome is pending and relies on it being legal before the document."
+kind = "s3s-pr"
+
+[[case.evidence]]
+url = "https://www.w3.org/TR/xml/#sec-prolog-dtd"
+summary = "White space is permitted in the prolog, before the document element."
+kind = "other"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-mpu"
+
+[[setup.multipart_uploads]]
+bucket = "conf-mpu"
+key = "whitespace-prologue"
+capture_upload_id_as = "upload_id"
+
+[[setup.multipart_uploads.parts]]
+part_number = 1
+body = { size = 5242880 }
+capture_etag_as = "part1_etag"
+
+[[setup.multipart_uploads.parts]]
+part_number = 2
+body = { size = 5242880 }
+capture_etag_as = "part2_etag"
+
+[request]
+method = "POST"
+target = "/conf-mpu/whitespace-prologue?uploadId=${capture.upload_id}"
+headers = { "content-type" = "application/xml" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[request.body]
+utf8 = '''
+<CompleteMultipartUpload xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Part><PartNumber>1</PartNumber><ETag>${capture.part1_etag}</ETag></Part><Part><PartNumber>2</PartNumber><ETag>${capture.part2_etag}</ETag></Part></CompleteMultipartUpload>'''
+
+[expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[expect.timing]
+terminate_within_ms = 45000
+
+[expect.body]
+redact = ["Location", "ETag", "UploadId"]
+
+[expect.body.xml]
+root = "CompleteMultipartUploadResult"
+declaration = false
+element_order = ["Location", "Bucket", "Key", "ETag"]

@@ -1,0 +1,63 @@
+# c-list-0020 — a body timestamp and a header timestamp are the same instant in two formats.
+#
+# Schema dimensions exercised: clock injection, a body timestamp format asserted to the millisecond.
+
+[case]
+id = "c-list-0020"
+schema_version = 1
+title = "LastModified in a listing is ISO 8601 with milliseconds and names the same instant as the header form"
+rationale = """
+The two wire formats for this instant are not interchangeable and neither is derivable from the other by a client: the header form has one-second resolution and the body form has three decimal places. An implementation that renders the body form without the fractional part produces a value some SDKs reject outright, and one that renders a different instant makes conditional requests fail intermittently."""
+polarity = "positive"
+operation = "ListObjectsV2"
+tags = ["list", "timestamp", "xml"]
+timeout_ms = 15000
+quirks = ["q-keycount-0018"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectsV2.html"
+summary = "The documented listing response renders the modification time in the ISO 8601 form with a fractional second."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-list"
+
+[[setup.objects]]
+bucket = "conf-list"
+key = "a/1.txt"
+body = { utf8 = "a1" }
+
+[[setup.objects]]
+bucket = "conf-list"
+key = "a/2.txt"
+body = { utf8 = "a2" }
+
+[[setup.objects]]
+bucket = "conf-list"
+key = "b/1.txt"
+body = { utf8 = "b1" }
+
+[[setup.objects]]
+bucket = "conf-list"
+key = "top.txt"
+body = { utf8 = "top" }
+
+[request]
+method = "GET"
+target = "/conf-list?list-type=2&prefix=top"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+
+[expect.body]
+contains_utf8 = ["<LastModified>2026-01-02T03:04:05.000Z</LastModified>"]
+
+[expect.body.xml]
+root = "ListBucketResult"
+xmlns = "http://s3.amazonaws.com/doc/2006-03-01/"
+empty_elements = "paired"

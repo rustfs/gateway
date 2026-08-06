@@ -1,0 +1,52 @@
+# c-mpu-0033 — a completion with no body at all.
+
+[case]
+id = "c-mpu-0033"
+schema_version = 1
+title = "A completion with no request body is refused with MalformedXML"
+rationale = """
+The part list is the whole content of this request, so an empty body carries no statement about \
+what to assemble. An implementation that treats the absent body as an empty list walks straight \
+into the empty-part-list defect and reports a zero-length object as created; one that panics on the \
+absent body turns a trivially malformed request into a lost connection. The dedicated malformed-body \
+code is also what tells the client the problem is its body rather than its credentials."""
+polarity = "negative"
+operation = "CompleteMultipartUpload"
+tags = ["multipart", "xml-shape", "error-shape"]
+quirks = ["q-mpu-request-root-0030", "q-mpu-etag-0028"]
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/pull/377"
+summary = "Upstream needed a fix so that a completion with no body answers a malformed-body error."
+kind = "s3s-pr"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-mpu"
+
+[[setup.multipart_uploads]]
+bucket = "conf-mpu"
+key = "empty-body"
+capture_upload_id_as = "upload_id"
+
+[[setup.multipart_uploads.parts]]
+part_number = 1
+body = { size = 1024 }
+
+[request]
+method = "POST"
+target = "/conf-mpu/empty-body?uploadId=${capture.upload_id}"
+headers = { "content-length" = "0" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+headers_absent = ["etag", "x-amz-version-id"]
+
+[expect.error]
+code = "MalformedXML"
+request_id_present = true

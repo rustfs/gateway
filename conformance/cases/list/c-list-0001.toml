@@ -20,7 +20,7 @@ polarity = "positive"
 operation = "ListObjectsV2"
 tags = ["list", "pagination", "wire-bytes", "xml"]
 timeout_ms = 15000
-quirks = ["q-list-0003", "q-list-0004"]
+quirks = ["q-keycount-0018", "q-maxkeys-0068", "q-order-0014", "q-token-0021"]
 
 [[case.evidence]]
 url = "https://github.com/s3s-project/s3s/issues/350"
@@ -100,7 +100,7 @@ redact = ["NextContinuationToken"]
 root = "ListBucketResult"
 xmlns = "http://s3.amazonaws.com/doc/2006-03-01/"
 empty_elements = "paired"
-element_order = ["IsTruncated", "Name", "Prefix", "Delimiter", "MaxKeys", "CommonPrefixes", "KeyCount", "NextContinuationToken"]
+element_order = ["Name", "Prefix", "KeyCount", "MaxKeys", "Delimiter", "IsTruncated", "CommonPrefixes", "NextContinuationToken"]
 
 # ── page 2: the remaining key, reached with the captured token ─────────────────
 [[exchanges]]
@@ -125,4 +125,4 @@ redact = ["ContinuationToken"]
 root = "ListBucketResult"
 xmlns = "http://s3.amazonaws.com/doc/2006-03-01/"
 empty_elements = "paired"
-element_order = ["IsTruncated", "Contents", "Name", "Prefix", "Delimiter", "MaxKeys", "KeyCount", "ContinuationToken"]
+element_order = ["Name", "Prefix", "KeyCount", "MaxKeys", "Delimiter", "IsTruncated", "Contents", "ContinuationToken"]

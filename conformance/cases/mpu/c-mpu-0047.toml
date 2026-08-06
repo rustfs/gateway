@@ -1,0 +1,54 @@
+# c-mpu-0047 — a hostile upload-id marker.
+
+[case]
+id = "c-mpu-0047"
+schema_version = 1
+title = "An upload-id marker shaped like a path traversal is refused and reaches nothing"
+rationale = """
+The marker is a server-minted opaque value that comes back through the query string, so it is \
+attacker-controlled by construction. An implementation that uses it to build a filesystem or index \
+path — the obvious way to resume a listing — turns it into a traversal, and one that only rejects \
+the exact traversal spelling is defeated by the encoded one. The assertion is both that the request \
+is refused and that no listing content came back with the refusal."""
+polarity = "negative"
+operation = "ListMultipartUploads"
+tags = ["multipart", "security", "pagination", "error-shape"]
+quirks = ["q-mpu-marker-0040", "q-mpu-upload-id-0037"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListMultipartUploads.html"
+summary = "The upload-id marker is documented as a value returned by a previous listing, not as a caller-chosen name."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://cwe.mitre.org/data/definitions/22.html"
+summary = "Building a path from external input without normalising it is a documented traversal class."
+kind = "other"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-mpu"
+
+[[setup.multipart_uploads]]
+bucket = "conf-mpu"
+key = "listed-upload"
+
+[request]
+method = "GET"
+target = "/conf-mpu?uploads&key-marker=listed-upload&upload-id-marker=..%2F..%2F..%2Fetc%2Fpasswd"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+code = "InvalidArgument"
+request_id_present = true
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+not_contains_utf8 = ["<ListMultipartUploadsResult", "root:"]

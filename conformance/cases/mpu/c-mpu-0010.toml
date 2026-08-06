@@ -1,0 +1,103 @@
+# c-mpu-0010 — the part listing paginates on the marker it handed back.
+#
+# Schema dimensions exercised: a captured cursor carried into the next request, a flattened element
+# assertion, and the echo of the requested page size.
+
+[case]
+id = "c-mpu-0010"
+schema_version = 1
+title = "The part marker returned by one page is the marker that fetches the next"
+rationale = """
+A cursor is only a cursor if the value the server hands back is the value the client may send. \
+Upstream gave this one the wrong type and semantics, so the second page could not be requested at \
+all and an upload with more parts than one page could never be enumerated — which also means its \
+parts could never be checked before completion. The page size is asserted as an echo of the request \
+rather than of the server's clamp, because a listing that rewrites the caller's own parameter in \
+its answer leaves the caller no way to tell how much it asked for."""
+polarity = "positive"
+operation = "ListParts"
+tags = ["multipart", "pagination", "xml-shape"]
+quirks = ["q-mpu-part-0031", "q-mpu-marker-0040"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListParts.html"
+summary = "The documented response repeats the part element under the result root and returns a next marker when truncated."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/pull/296"
+summary = "Upstream gave the part marker the wrong type and semantics, so a second page could not be requested."
+kind = "s3s-pr"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = true
+
+[[setup.buckets]]
+name = "conf-mpu"
+
+[[setup.multipart_uploads]]
+bucket = "conf-mpu"
+key = "many-parts"
+capture_upload_id_as = "upload_id"
+
+[[setup.multipart_uploads.parts]]
+part_number = 1
+body = { size = 5242880 }
+
+[[setup.multipart_uploads.parts]]
+part_number = 2
+body = { size = 5242880 }
+
+[[setup.multipart_uploads.parts]]
+part_number = 3
+body = { size = 5242880 }
+
+[[exchanges]]
+name = "first-page"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-mpu/many-parts?uploadId=${capture.upload_id}&max-parts=2"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.capture]
+next_marker = { xml_text = "NextPartNumberMarker" }
+
+[exchanges.expect.body]
+redact = ["UploadId", "LastModified", "ETag"]
+contains_utf8 = [
+  "<MaxParts>2</MaxParts>",
+  "<IsTruncated>true</IsTruncated>",
+  "<PartNumber>1</PartNumber>",
+  "<PartNumber>2</PartNumber>",
+]
+not_contains_utf8 = ["<PartNumber>3</PartNumber>", "<Parts>"]
+
+[exchanges.expect.body.xml]
+root = "ListPartsResult"
+
+[[exchanges]]
+name = "second-page"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-mpu/many-parts?uploadId=${capture.upload_id}&max-parts=2&part-number-marker=${capture.next_marker}"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.body]
+redact = ["UploadId", "LastModified", "ETag"]
+contains_utf8 = ["<IsTruncated>false</IsTruncated>", "<PartNumber>3</PartNumber>"]
+not_contains_utf8 = ["<PartNumber>1</PartNumber>", "<PartNumber>2</PartNumber>"]

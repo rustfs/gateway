@@ -1,0 +1,61 @@
+# c-range-0005 — a suffix longer than the object.
+#
+# Schema dimensions exercised: byte-exact body, and a Content-Range that must start at zero.
+
+[case]
+id = "c-range-0005"
+schema_version = 1
+title = "A suffix longer than the object yields the whole object, still as a 206"
+rationale = """
+A client asking for the last hundred bytes of a ten-byte object is asking for something \
+satisfiable, and the two obvious wrong answers are an unsatisfiable-range error and an underflowed \
+start offset. The second is the dangerous one: computing the start as length minus suffix in \
+unsigned arithmetic wraps to an enormous number, which then either panics or produces a range \
+nobody can serve. The status stays partial even though every byte is being sent, because the \
+client asked for a range and a 200 would tell it something different."""
+polarity = "positive"
+operation = "GetObject"
+tags = ["range", "read", "wire-bytes"]
+timeout_ms = 10000
+quirks = ["q-range-0052", "q-range-0053"]
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9110#section-14.1.2"
+summary = "A suffix length greater than the representation is taken to mean the entire representation."
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/pull/95"
+summary = "Upstream change adding the suffix form, whose boundary behaviour had no implementation to be wrong about before it."
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-range"
+
+[[setup.objects]]
+bucket = "conf-range"
+key = "ten"
+content_type = "text/plain"
+body = { utf8 = "0123456789" }
+
+[request]
+method = "GET"
+target = "/conf-range/ten"
+headers = { "range" = "bytes=-100" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 206
+connection_after = "open"
+
+[expect.headers_present]
+"content-range" = "bytes 0-9/10"
+"content-length" = "10"
+
+[expect.timing]
+terminate_within_ms = 5000
+
+[expect.body]
+exact_utf8 = "0123456789"

@@ -1,0 +1,48 @@
+# c-mpu-0025 — below the part-number floor.
+
+[case]
+id = "c-mpu-0025"
+schema_version = 1
+title = "A part number of zero is refused"
+rationale = """
+Part numbers start at one, so zero is the value a client produces from a zero-based loop index — the \
+single most common way to get this wrong. It is also the value most likely to be parsed into a \
+default and then used, because zero is what an integer parse returns on failure in several \
+languages. A part stored under it sorts before every real part and silently prefixes the assembled \
+object, so the refusal has to be explicit rather than a consequence of the value being unusable."""
+polarity = "negative"
+operation = "UploadPart"
+tags = ["multipart", "limits", "boundary", "error-shape"]
+quirks = ["q-mpu-limits-0038"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/qfacts.html"
+summary = "States the part-number range as one through ten thousand inclusive."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-mpu"
+
+[[setup.multipart_uploads]]
+bucket = "conf-mpu"
+key = "below-the-floor"
+capture_upload_id_as = "upload_id"
+
+[request]
+method = "PUT"
+target = "/conf-mpu/below-the-floor?partNumber=0&uploadId=${capture.upload_id}"
+body = { utf8 = "these bytes must not be stored" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+headers_absent = ["etag"]
+
+[expect.error]
+code = "InvalidArgument"
+request_id_present = true

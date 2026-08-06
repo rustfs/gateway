@@ -1,0 +1,61 @@
+# c-range-0003 — the suffix form.
+#
+# Schema dimensions exercised: byte-exact body, which is the only assertion that catches a suffix
+# read from the wrong end.
+
+[case]
+id = "c-range-0003"
+schema_version = 1
+title = "A suffix range returns the last bytes of the object"
+rationale = """
+The suffix form is how clients read trailers: archive indexes, footer records, the last lines of a \
+log. An implementation that omits it answers the whole object, and the client silently parses the \
+wrong bytes as a footer; an implementation that reads the number as an offset instead of a length \
+returns the wrong end of the object with a plausible-looking length. Only the bytes themselves \
+distinguish the two failures."""
+polarity = "positive"
+operation = "GetObject"
+tags = ["range", "read", "wire-bytes"]
+timeout_ms = 10000
+quirks = ["q-range-0053"]
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/pull/95"
+summary = "Upstream change adding the suffix form, which had not been parsed at all."
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9110#section-14.1.2"
+summary = "The suffix form names a count of trailing bytes rather than a starting offset."
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-range"
+
+[[setup.objects]]
+bucket = "conf-range"
+key = "ten"
+content_type = "text/plain"
+body = { utf8 = "0123456789" }
+
+[request]
+method = "GET"
+target = "/conf-range/ten"
+headers = { "range" = "bytes=-5" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 206
+connection_after = "open"
+
+[expect.headers_present]
+"content-range" = "bytes 5-9/10"
+"content-length" = "5"
+
+[expect.timing]
+terminate_within_ms = 5000
+
+[expect.body]
+exact_utf8 = "56789"

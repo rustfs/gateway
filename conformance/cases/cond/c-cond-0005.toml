@@ -1,0 +1,60 @@
+# c-cond-0005 — If-None-Match uses weak comparison, and that is not a detail.
+#
+# Schema dimensions exercised: header absence on a 304, a request value whose weakness prefix is
+# the whole point.
+
+[case]
+id = "c-cond-0005"
+schema_version = 1
+title = "A weak request validator still revalidates against a strong stored entity tag"
+rationale = """
+The two entity-tag conditions differ on exactly one point — whether a weak validator may satisfy \
+them — and an implementation that runs both through the same comparison is wrong on one of them. \
+Getting this direction wrong is the expensive one: a cache that sends the weak form it was given \
+receives the whole object on every revalidation, so the failure is a bandwidth bill rather than an \
+error anybody sees. The opposite direction is pinned by c-cond-0018."""
+polarity = "positive"
+operation = "GetObject"
+tags = ["conditional", "preconditions", "etag"]
+timeout_ms = 10000
+quirks = ["q-cond-0046", "q-cond-0047"]
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9110#section-8.8.3.2"
+summary = "Defines weak comparison and names If-None-Match as the condition evaluated with it."
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObject.html"
+summary = "Documents the not-modified answer to a read whose entity-tag condition already holds."
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-cond"
+
+[[setup.objects]]
+bucket = "conf-cond"
+key = "weak/request"
+body = { utf8 = "hello" }
+
+[request]
+method = "GET"
+target = "/conf-cond/weak/request"
+headers = { "if-none-match" = "W/\"5d41402abc4b2a76b9719d911017c592\"" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 304
+headers_absent = ["content-length", "content-type"]
+connection_after = "open"
+
+[expect.headers_present]
+"etag" = "\"5d41402abc4b2a76b9719d911017c592\""
+
+[expect.timing]
+terminate_within_ms = 5000
+
+[expect.body]
+size = 0

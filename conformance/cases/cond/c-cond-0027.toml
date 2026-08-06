@@ -1,0 +1,99 @@
+# c-cond-0027 — the source-side and target-side conditions do not interfere.
+#
+# Schema dimensions exercised: three exchanges over one connection, each varying exactly one of the
+# two condition sides.
+
+[case]
+id = "c-cond-0027"
+schema_version = 1
+title = "Copy-source conditions and target conditions are evaluated against their own object"
+rationale = """
+A copy carries up to four source conditions and up to four target conditions with nearly identical \
+names, and the failure mode is a shared evaluator that reads the wrong object's validators — which \
+produces a copy that succeeds when it should have been refused, or is refused when the client's \
+guard was satisfied. Neither is visible from a single request, because a single request cannot \
+tell which side answered. Varying one side at a time against a fixture where the two objects have \
+different entity tags is what separates them."""
+polarity = "negative"
+operation = "CopyObject"
+tags = ["conditional", "preconditions", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-cond-0046"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CopyObject.html"
+summary = "Documents the source-side conditional headers as a separate set from the ordinary conditional headers a write accepts."
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/pull/577"
+summary = "Upstream change adding source-side condition evaluation, which had previously shared nothing with the target side."
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = true
+
+[[setup.buckets]]
+name = "conf-cond"
+
+[[setup.objects]]
+bucket = "conf-cond"
+key = "sides/source"
+body = { utf8 = "hello" }
+
+[[setup.objects]]
+bucket = "conf-cond"
+key = "sides/target"
+body = { utf8 = "original" }
+
+[[exchanges]]
+name = "source-condition-holds-target-condition-holds"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-cond/sides/target"
+headers = { "x-amz-copy-source" = "/conf-cond/sides/source", "x-amz-copy-source-if-match" = "\"5d41402abc4b2a76b9719d911017c592\"", "if-match" = "\"919c8b643b7133116b02fc0d9bb7df3f\"" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.body]
+contains_utf8 = ["<CopyObjectResult"]
+
+[[exchanges]]
+name = "the-source-tag-is-not-accepted-on-the-target-condition"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-cond/sides/target"
+headers = { "x-amz-copy-source" = "/conf-cond/sides/source", "x-amz-copy-source-if-match" = "\"5d41402abc4b2a76b9719d911017c592\"", "if-match" = "\"5d41402abc4b2a76b9719d911017c592\"" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 412
+connection_after = "open"
+
+[exchanges.expect.error]
+code = "PreconditionFailed"
+
+[[exchanges]]
+name = "and-the-target-tag-is-not-accepted-on-the-source-condition"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-cond/sides/target"
+headers = { "x-amz-copy-source" = "/conf-cond/sides/source", "x-amz-copy-source-if-match" = "\"919c8b643b7133116b02fc0d9bb7df3f\"" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 412
+connection_after = "open"
+
+[exchanges.expect.error]
+code = "PreconditionFailed"

@@ -1,0 +1,58 @@
+# c-mpu-0046 — a part marker that is not a part number.
+
+[case]
+id = "c-mpu-0046"
+schema_version = 1
+title = "A non-numeric part-number marker is refused with an argument error and no panic"
+rationale = """
+The marker is an opaque value to the client but a number to the server, and it arrives from a query \
+string that anybody may edit. Parsing it with an unchecked conversion is a panic; parsing it \
+leniently is worse, because a marker that silently becomes zero restarts the listing from the \
+beginning and an enumeration loop that trusts it never terminates. The case sends three shapes at \
+once so that a fix for one of them cannot pass while another still panics."""
+polarity = "negative"
+operation = "ListParts"
+tags = ["multipart", "pagination", "error-shape", "robustness"]
+quirks = ["q-mpu-marker-0040"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListParts.html"
+summary = "The part-number marker is documented as a part number, so a value that is not one has no meaning."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/pull/296"
+summary = "Upstream gave the part marker the wrong type, which is what makes its parsing a live question."
+kind = "s3s-pr"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-mpu"
+
+[[setup.multipart_uploads]]
+bucket = "conf-mpu"
+key = "marker-parsing"
+capture_upload_id_as = "upload_id"
+
+[[setup.multipart_uploads.parts]]
+part_number = 1
+body = { size = 1024 }
+
+[request]
+method = "GET"
+target = "/conf-mpu/marker-parsing?uploadId=${capture.upload_id}&part-number-marker=not-a-number"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+code = "InvalidArgument"
+request_id_present = true
+
+[expect.timing]
+terminate_within_ms = 5000

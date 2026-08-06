@@ -21,10 +21,19 @@
 //! NOT responsible for: the trait or anything shared, which are `crate::codec`.
 //! Upstream: `cargo xtask codegen`. Downstream: `rustfs-gateway-core`.
 
+mod abort_multipart_upload;
+mod complete_multipart_upload;
+mod create_multipart_upload;
 mod delete_object;
 mod delete_objects;
 mod get_bucket_location;
 mod get_object;
 mod head_object;
+mod list_buckets;
+mod list_multipart_uploads;
+mod list_object_versions;
+mod list_objects;
 mod list_objects_v2;
+mod list_parts;
 mod put_object;
+mod upload_part;

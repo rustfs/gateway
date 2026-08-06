@@ -1,0 +1,64 @@
+# c-range-0007 — the part-number read.
+#
+# Schema dimensions exercised: setup.multipart_uploads as a fixture, header-set assertion on the
+# part count.
+
+[case]
+id = "c-range-0007"
+schema_version = 1
+title = "A read of one part is a 206 that reports how many parts the object has"
+rationale = """
+Reading by part number is how a client parallelises a download without knowing the object's part \
+boundaries, and the part count is the only way it learns how many requests to issue. An \
+implementation that serves the part but omits the count leaves the client guessing, and one that \
+answers 200 tells it the object is one part long. Both failures produce a download that is missing \
+everything after the first part, with no error to explain it."""
+polarity = "positive"
+operation = "GetObject"
+tags = ["range", "multipart", "read"]
+timeout_ms = 10000
+quirks = ["q-range-0056"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObject.html"
+summary = "Documents the part-number parameter as returning one part with a header naming the total number of parts."
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/checking-object-integrity.html"
+summary = "Describes part-level reads as the unit a multipart object's checksums are defined over."
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-range"
+
+[[setup.multipart_uploads]]
+bucket = "conf-range"
+key = "parted"
+
+[[setup.multipart_uploads.parts]]
+part_number = 1
+body = { size = 5242880 }
+
+[[setup.multipart_uploads.parts]]
+part_number = 2
+body = { size = 16 }
+
+[request]
+method = "GET"
+target = "/conf-range/parted?partNumber=2"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 206
+connection_after = "open"
+
+[expect.headers_present]
+"x-amz-mp-parts-count" = "2"
+"content-length" = "16"
+"content-range" = "*"
+
+[expect.timing]
+terminate_within_ms = 5000

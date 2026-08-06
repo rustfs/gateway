@@ -1,0 +1,51 @@
+# c-mpu-0029 — a real upload id belonging to another bucket.
+
+[case]
+id = "c-mpu-0029"
+schema_version = 1
+title = "A valid upload id from another bucket is refused against this one"
+rationale = """
+This is the cross-tenant form of the same defect, and the dangerous one: the id is genuine, so any \
+check that only asks 'does this id exist' passes it. The write then lands in an upload the caller \
+does not own, and the owner completes it without ever learning that somebody else contributed \
+bytes. Resolving the id against the bucket and key of the request, rather than on its own, is the \
+only check that separates the two cases."""
+polarity = "negative"
+operation = "UploadPart"
+tags = ["multipart", "security", "upload-id", "error-shape"]
+quirks = ["q-mpu-upload-id-0037"]
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/issues/51"
+summary = "Knowing an upload id was enough to act on the upload it named, whoever created it."
+kind = "s3s-issue"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-mpu"
+
+[[setup.buckets]]
+name = "conf-mpu-other"
+
+[[setup.multipart_uploads]]
+bucket = "conf-mpu-other"
+key = "someone-elses-object"
+capture_upload_id_as = "foreign_upload_id"
+
+[request]
+method = "PUT"
+target = "/conf-mpu/someone-elses-object?partNumber=1&uploadId=${capture.foreign_upload_id}"
+body = { utf8 = "these bytes must not be stored" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 404
+connection_after = "open"
+headers_absent = ["etag"]
+
+[expect.error]
+code = "NoSuchUpload"
+request_id_present = true

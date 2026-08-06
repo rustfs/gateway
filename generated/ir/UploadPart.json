@@ -1,0 +1,412 @@
+{
+  "ir_version": "1",
+  "operation": "UploadPart",
+  "http": {
+            "method": "PUT",
+            "target": "Object",
+            "precedence": 410,
+            "predicates": [
+                            { "kind": "Method", "method": "PUT" },
+                            { "kind": "Target", "target": "Object" },
+                            { "kind": "QueryPresent", "key": "partNumber" },
+                            { "kind": "QueryPresent", "key": "uploadId" }
+                          ],
+            "success_status": 200,
+            "alt_success_statuses": [],
+            "path_shape": "/{Bucket}/{Key+}"
+          },
+  "auth": { "requirement": "Required", "action": "s3:PutObject", "presigned_allowed": true, "service": "s3" },
+  "payload": {
+               "request": { "kind": "StreamingBlob", "buffering": "Streaming", "max_bytes": null },
+               "response": { "kind": "None", "buffering": "None", "max_bytes": null }
+             },
+  "checksum": {
+                "http_checksum_required": false,
+                "request_algorithms": ["CRC32", "CRC32C", "CRC64NVME", "SHA1", "SHA256"],
+                "response_algorithms": []
+              },
+  "input": {
+             "fields": [
+                         {
+                           "name": "Body",
+                           "wire_name": null,
+                           "required": false,
+                           "binding": { "kind": "Payload" },
+                           "type": { "kind": "Blob", "streaming": true },
+                           "hot": true,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "Bucket",
+                           "wire_name": "Bucket",
+                           "required": true,
+                           "binding": { "kind": "UriLabel", "greedy": false },
+                           "type": { "kind": "BucketName" },
+                           "hot": true,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "ContentLength",
+                           "wire_name": "content-length",
+                           "required": true,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "Long" },
+                           "hot": true,
+                           "missing_error": "MissingContentLength",
+                           "quirk_refs": ["q-length-0007"]
+                         },
+                         {
+                           "name": "ContentMD5",
+                           "wire_name": "content-md5",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "String" },
+                           "hot": false,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "ChecksumSpec",
+                           "wire_name": "x-amz-checksum-",
+                           "required": false,
+                           "binding": { "kind": "PrefixHeaders" },
+                           "type": { "kind": "ChecksumSpec" },
+                           "hot": true,
+                           "quirk_refs": ["q-checksum-0006"]
+                         },
+                         {
+                           "name": "ChecksumAlgorithm",
+                           "wire_name": "x-amz-sdk-checksum-algorithm",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": {
+                                     "kind": "StringEnum",
+                                     "values": [
+                                                 "CRC32",
+                                                 "CRC32C",
+                                                 "SHA1",
+                                                 "SHA256",
+                                                 "CRC64NVME",
+                                                 "SHA512",
+                                                 "MD5",
+                                                 "XXHASH64",
+                                                 "XXHASH3",
+                                                 "XXHASH128"
+                                               ]
+                                   },
+                           "hot": false,
+                           "quirk_refs": ["q-checksum-0006"]
+                         },
+                         {
+                           "name": "Key",
+                           "wire_name": "Key",
+                           "required": true,
+                           "binding": { "kind": "UriLabel", "greedy": true },
+                           "type": { "kind": "ObjectKey" },
+                           "hot": true,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "PartNumber",
+                           "wire_name": "partNumber",
+                           "required": true,
+                           "binding": { "kind": "Query" },
+                           "type": { "kind": "Integer" },
+                           "hot": true,
+                           "quirk_refs": ["q-mpu-limits-0038"]
+                         },
+                         {
+                           "name": "UploadId",
+                           "wire_name": "uploadId",
+                           "required": true,
+                           "binding": { "kind": "Query" },
+                           "type": { "kind": "String" },
+                           "hot": true,
+                           "quirk_refs": ["q-mpu-upload-id-0037"]
+                         },
+                         {
+                           "name": "SSECustomerAlgorithm",
+                           "wire_name": "x-amz-server-side-encryption-customer-algorithm",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "String" },
+                           "hot": false,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "SSECustomerKey",
+                           "wire_name": "x-amz-server-side-encryption-customer-key",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "String" },
+                           "hot": false,
+                           "quirk_refs": ["q-sse-0010"]
+                         },
+                         {
+                           "name": "SSECustomerKeyMD5",
+                           "wire_name": "x-amz-server-side-encryption-customer-key-md5",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "String" },
+                           "hot": false,
+                           "quirk_refs": ["q-sse-0010"]
+                         },
+                         {
+                           "name": "RequestPayer",
+                           "wire_name": "x-amz-request-payer",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "StringEnum", "values": ["requester"] },
+                           "hot": false,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "ExpectedBucketOwner",
+                           "wire_name": "x-amz-expected-bucket-owner",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "String" },
+                           "hot": false,
+                           "quirk_refs": []
+                         }
+                       ]
+           },
+  "output": {
+              "fields": [
+                          {
+                            "name": "ServerSideEncryption",
+                            "wire_name": "x-amz-server-side-encryption",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": { "kind": "StringEnum", "values": ["AES256", "aws:fsx", "aws:kms", "aws:kms:dsse"] },
+                            "hot": false,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "ETag",
+                            "wire_name": "etag",
+                            "required": true,
+                            "binding": { "kind": "Header" },
+                            "type": { "kind": "ETag", "render": "HeaderQuoted" },
+                            "hot": true,
+                            "quirk_refs": ["q-etag-0004", "q-mpu-etag-0028"]
+                          },
+                          {
+                            "name": "ChecksumSpec",
+                            "wire_name": "x-amz-checksum-",
+                            "required": false,
+                            "binding": { "kind": "PrefixHeaders" },
+                            "type": { "kind": "ChecksumSpec" },
+                            "hot": false,
+                            "quirk_refs": ["q-checksum-0006"]
+                          },
+                          {
+                            "name": "SSECustomerAlgorithm",
+                            "wire_name": "x-amz-server-side-encryption-customer-algorithm",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": { "kind": "String" },
+                            "hot": false,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "SSECustomerKeyMD5",
+                            "wire_name": "x-amz-server-side-encryption-customer-key-md5",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": { "kind": "String" },
+                            "hot": false,
+                            "quirk_refs": ["q-sse-0010"]
+                          },
+                          {
+                            "name": "SSEKMSKeyId",
+                            "wire_name": "x-amz-server-side-encryption-aws-kms-key-id",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": { "kind": "String" },
+                            "hot": false,
+                            "quirk_refs": ["q-sse-0010"]
+                          },
+                          {
+                            "name": "BucketKeyEnabled",
+                            "wire_name": "x-amz-server-side-encryption-bucket-key-enabled",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": { "kind": "Boolean" },
+                            "hot": false,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "RequestCharged",
+                            "wire_name": "x-amz-request-charged",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": { "kind": "StringEnum", "values": ["requester"] },
+                            "hot": false,
+                            "quirk_refs": []
+                          }
+                        ]
+            },
+  "shapes": {},
+  "xml": {
+           "request_root": null,
+           "request_root_aliases": [],
+           "response_root": null,
+           "xmlns": "emit",
+           "unwrapped_output": false,
+           "element_order": [],
+           "empty_value_policy": {},
+           "url_encoded_fields": [],
+           "attributes": [],
+           "body_literal": false
+         },
+  "errors": {
+              "not_configured": null,
+              "allows_error_after_200": false,
+              "codes": [
+                         "NoSuchBucket",
+                         "NoSuchUpload",
+                         "AccessDenied",
+                         "InvalidArgument",
+                         "MissingContentLength",
+                         "EntityTooLarge",
+                         "IncompleteBody",
+                         "BadDigest",
+                         "InvalidDigest",
+                         "XAmzContentChecksumMismatch"
+                       ]
+            },
+  "derived_resources": [],
+  "head_mirrors": null,
+  "quirk_refs": ["q-checksum-0006", "q-mpu-upload-id-0037", "q-mpu-limits-0038"],
+  "quirks": [
+              {
+                "id": "q-etag-0004",
+                "kind": "etag_render",
+                "target": "PutObject.ETag",
+                "summary": "In a header position the entity tag is always written with surrounding double quotes, unlike the bare form used by GetObjectAttributes.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObject.html#API_PutObject_ResponseSyntax",
+                                "summary": "The documented response header shows the entity tag surrounded by quotes."
+                              },
+                              {
+                                "kind": "s3s-issue",
+                                "ref": "https://github.com/s3s-project/s3s/issues/632",
+                                "summary": "Upstream had two conflicting quoting rules in different files, which is the reason the rendering context is a type parameter here."
+                              }
+                            ],
+                "cases": ["c-etag-0010"]
+              },
+              {
+                "id": "q-checksum-0006",
+                "kind": "checksum_headers",
+                "target": "PutObject",
+                "summary": "The eleven separate checksum members collapse into one packed spec, and more than one checksum header on a request is a hard error rather than a merge.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObject.html",
+                                "summary": "Only one checksum algorithm header is accepted per request and the value is base64 encoded."
+                              },
+                              {
+                                "kind": "capture",
+                                "ref": "captures/put-object-two-checksums.http",
+                                "summary": "Recorded rejection when two different checksum headers are sent together."
+                              }
+                            ],
+                "cases": ["c-checksum-0001", "c-checksum-0002"]
+              },
+              {
+                "id": "q-length-0007",
+                "kind": "error_code",
+                "target": "PutObject.ContentLength",
+                "summary": "A PUT without a content length is rejected with a dedicated 411 code rather than a generic bad request.",
+                "evidence": [
+                              {
+                                "kind": "s3s-issue",
+                                "ref": "https://github.com/s3s-project/s3s/issues/526",
+                                "summary": "Upstream returned a generic 400 where the reference implementation returns the dedicated 411 code."
+                              }
+                            ],
+                "cases": ["c-putobject-0001"]
+              },
+              {
+                "id": "q-sse-0010",
+                "kind": "secret_hygiene",
+                "target": "PutObject",
+                "summary": "The customer key is never echoed back and never logged, while the algorithm and key digest must be echoed; customer keys over a plaintext connection are refused.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/dev/ServerSideEncryptionCustomerKeys.html",
+                                "summary": "Requires a secure connection for customer provided keys and describes which of the three headers are echoed in the response."
+                              }
+                            ],
+                "cases": ["c-ssec-0001", "c-ssec-0002"]
+              },
+              {
+                "id": "q-mpu-etag-0028",
+                "kind": "etag_composite",
+                "target": "CompleteMultipartUpload.ETag",
+                "summary": "The entity tag of a completed upload is a digest over the concatenated raw part digests followed by a hyphen and the part count, never a digest of the assembled object, and an empty part list is refused rather than digested.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/userguide/checking-object-integrity.html",
+                                "summary": "Describes the multipart entity tag as a digest of the part digests carrying a part-count suffix, distinguishing it from a whole-object digest."
+                              },
+                              {
+                                "kind": "s3s-issue",
+                                "ref": "https://github.com/s3s-project/s3s/issues/550",
+                                "summary": "Upstream computed the tag over the assembled object, so every client that verified integrity concluded the object was corrupt."
+                              },
+                              {
+                                "kind": "s3s-pr",
+                                "ref": "https://github.com/s3s-project/s3s/pull/556",
+                                "summary": "The fix derives the tag from the part digests and refuses an empty part list with a dedicated code."
+                              }
+                            ],
+                "cases": ["c-mpu-0002", "c-mpu-0003", "c-mpu-0019"]
+              },
+              {
+                "id": "q-mpu-upload-id-0037",
+                "kind": "capability_token",
+                "target": "UploadPart.UploadId",
+                "summary": "An upload id is a server-minted capability, not a name the caller chose: it is resolved against the bucket and key of the request before anything is written, an unknown id answers the not-found code, and one belonging to another resource is refused rather than honoured.",
+                "evidence": [
+                              {
+                                "kind": "s3s-issue",
+                                "ref": "https://github.com/s3s-project/s3s/issues/51",
+                                "summary": "Upstream accepted any upload id without checking what it belonged to, so knowing an id was enough to act on somebody else's upload."
+                              },
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UploadPart.html",
+                                "summary": "The request is documented as naming a bucket, a key and an upload id together, and the id is only meaningful for that pair."
+                              }
+                            ],
+                "cases": ["c-mpu-0028", "c-mpu-0029", "c-mpu-0030", "c-mpu-0031"]
+              },
+              {
+                "id": "q-mpu-limits-0038",
+                "kind": "bounded_input",
+                "target": "CompleteMultipartUpload.MultipartUpload",
+                "summary": "Part numbers run from one to ten thousand, every part except the last has a floor on its size, and the completion list must be strictly ascending with no repeats; each of the three has its own code so a client can tell them apart.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/userguide/qfacts.html",
+                                "summary": "States the part-number range and the minimum size every part except the final one must reach."
+                              },
+                              {
+                                "kind": "s3s-pr",
+                                "ref": "https://github.com/s3s-project/s3s/pull/281",
+                                "summary": "Upstream did not enforce the multipart limits, so an upload could exceed the part ceiling and fail only at assembly."
+                              }
+                            ],
+                "cases": ["c-mpu-0020", "c-mpu-0024", "c-mpu-0026", "c-mpu-0027"]
+              }
+            ],
+  "ext_points": []
+}

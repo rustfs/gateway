@@ -261,9 +261,18 @@ fn body_member(ir: &OperationIr, field: &Field, source: &str, indent: usize) -> 
                 let _ = writeln!(out, "{pad}writer.close();");
             }
         }
+        // A required nested structure is not an `Option` in the dto, so it is written
+        // unconditionally. Emitting the `as_ref()` form regardless does not compile, which is the
+        // good half of the failure; the bad half is that it would turn a member the overlay
+        // declared unconditional into one the encoder is free to skip.
         Type::Structure(inner_name) => {
             let writer_fn = format!("write_{}", naming::module_name(inner_name));
-            let _ = writeln!(out, "{pad}if let Some(v) = {source}.as_ref() {{");
+            if field.required {
+                let _ = writeln!(out, "{pad}{{");
+                let _ = writeln!(out, "{pad}    let v = &{source};");
+            } else {
+                let _ = writeln!(out, "{pad}if let Some(v) = {source}.as_ref() {{");
+            }
             let _ = writeln!(out, "{pad}    writer.open(\"{wire}\", None);");
             let _ = writeln!(out, "{pad}    {writer_fn}(&mut writer, v)?;");
             let _ = writeln!(out, "{pad}    writer.close();");
@@ -313,11 +322,7 @@ pub fn shape_writer(ir: &OperationIr, name: &str, shape: &Shape) -> Result<Strin
 
     let mut out = String::new();
     let _ = writeln!(out, "/// Writes one `{name}` element's children, in the wire order the IR records.");
-    let _ = writeln!(
-        out,
-        "fn write_{}(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::{type_name}) -> Result<(), CodecError> {{",
-        naming::module_name(name)
-    );
+    out.push_str(&shape_writer_signature(&naming::module_name(name), &type_name));
     for member in order {
         let Some(field) = shape.fields.iter().find(|f| f.name == member) else {
             continue;
@@ -358,7 +363,12 @@ fn shape_child(ir: &OperationIr, field: &Field, source: &str, wire: &str) -> Res
     match &field.ty {
         Type::Structure(inner) => {
             let writer_fn = format!("write_{}", naming::module_name(inner));
-            let _ = writeln!(out, "    if let Some(v) = {source}.as_ref() {{");
+            if field.required {
+                let _ = writeln!(out, "    {{");
+                let _ = writeln!(out, "        let v = &{source};");
+            } else {
+                let _ = writeln!(out, "    if let Some(v) = {source}.as_ref() {{");
+            }
             let _ = writeln!(out, "        writer.open(\"{wire}\", None);");
             let _ = writeln!(out, "        {writer_fn}(writer, v)?;");
             let _ = writeln!(out, "        writer.close();");
@@ -385,4 +395,24 @@ fn shape_child(ir: &OperationIr, field: &Field, source: &str, wire: &str) -> Res
         _ => {}
     }
     Ok(out)
+}
+
+/// rustfmt's `max_width` for this repository.
+const MAX_WIDTH: usize = 130;
+
+/// The signature of one shape writer, laid out the way rustfmt would lay it out.
+///
+/// `cargo fmt` follows `#[path]` into `generated/`, so a signature past `max_width` makes
+/// `cargo xtask spec verify` fail the moment anybody formats the tree — and the shape names are
+/// upstream's, so how long they get is not something this emitter controls.
+fn shape_writer_signature(module: &str, type_name: &str) -> String {
+    let single = format!(
+        "fn write_{module}(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::{type_name}) -> Result<(), CodecError> {{\n"
+    );
+    if single.len().saturating_sub(1) <= MAX_WIDTH {
+        return single;
+    }
+    format!(
+        "fn write_{module}(\n    writer: &mut rustfs_gateway_xml::XmlWriter,\n    value: &dto::{type_name},\n) -> Result<(), CodecError> {{\n"
+    )
 }

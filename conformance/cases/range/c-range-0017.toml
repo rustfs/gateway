@@ -1,0 +1,65 @@
+# c-range-0017 — the same header twice.
+#
+# Schema dimensions exercised: raw_headers, the only way to put one field on the wire twice.
+
+[case]
+id = "c-range-0017"
+schema_version = 1
+title = "Two Range headers are not a range set, and the whole object is served"
+rationale = """
+Two field lines become one value with a comma in it, which is not a range set this server parses — \
+and there are two tempting shortcuts, taking the first member or treating the join as a \
+multiple-range request. Both hand the client a span it did not ask for while labelling the \
+response as though it had. Falling through to the whole object is the same answer every other \
+unusable spelling gets, which is the point: the outcome is determined by one rule rather than by \
+which shortcut somebody reached for."""
+polarity = "negative"
+operation = "GetObject"
+tags = ["range", "security", "wire-bytes"]
+timeout_ms = 10000
+quirks = ["q-range-0051", "q-range-0057"]
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9110#section-5.3"
+summary = "Repeated field lines are equivalent to one field whose value is the members joined by commas."
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9110#section-14.2"
+summary = "A server that cannot interpret the resulting range header ignores it and sends the entire representation."
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-range"
+
+[[setup.objects]]
+bucket = "conf-range"
+key = "ten"
+content_type = "text/plain"
+body = { utf8 = "0123456789" }
+
+[request]
+method = "GET"
+target = "/conf-range/ten"
+raw_headers = [
+  ["host", "s3.us-east-1.amazonaws.com"],
+  ["range", "bytes=0-4"],
+  ["range", "bytes=9-9"],
+]
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+headers_absent = ["content-range"]
+connection_after = "open"
+
+[expect.headers_present]
+"content-length" = "10"
+
+[expect.timing]
+terminate_within_ms = 5000
+
+[expect.body]
+exact_utf8 = "0123456789"

@@ -1,0 +1,88 @@
+# c-list-0011 — two operations share one response root.
+#
+# Schema dimensions exercised: two exchanges asserting the same root name for different operations.
+
+[case]
+id = "c-list-0011"
+schema_version = 1
+title = "ListObjects and ListObjectsV2 both answer under ListBucketResult with the S3 namespace"
+rationale = """
+The root element name cannot be derived from the operation or from the output shape, because these two operations share it. A generator that derives it produces ListObjectsV2Result for one of them, which no SDK parses. The namespace is asserted in the same breath: a root without it is what made aws-sdk-js fail to read otherwise correct responses."""
+polarity = "positive"
+operation = "ListObjects"
+tags = ["list", "xml", "root"]
+timeout_ms = 15000
+quirks = ["q-root-0013"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectsV2.html"
+summary = "The documented response syntax uses the same root element name as the older listing operation."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/issues/264"
+summary = "A response root without the S3 namespace was rejected by a browser SDK that otherwise had correct bytes."
+kind = "s3s-issue"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-list"
+
+[[setup.objects]]
+bucket = "conf-list"
+key = "a/1.txt"
+body = { utf8 = "a1" }
+
+[[setup.objects]]
+bucket = "conf-list"
+key = "a/2.txt"
+body = { utf8 = "a2" }
+
+[[setup.objects]]
+bucket = "conf-list"
+key = "b/1.txt"
+body = { utf8 = "b1" }
+
+[[setup.objects]]
+bucket = "conf-list"
+key = "top.txt"
+body = { utf8 = "top" }
+
+[connection]
+reuse = true
+
+[[exchanges]]
+name = "version-one"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-list"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+
+[exchanges.expect.body.xml]
+root = "ListBucketResult"
+xmlns = "http://s3.amazonaws.com/doc/2006-03-01/"
+empty_elements = "paired"
+
+[[exchanges]]
+name = "version-two"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-list?list-type=2"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+
+[exchanges.expect.body.xml]
+root = "ListBucketResult"
+xmlns = "http://s3.amazonaws.com/doc/2006-03-01/"
+empty_elements = "paired"

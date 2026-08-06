@@ -1,0 +1,59 @@
+# c-cond-0009 — the other date condition, in the direction that proceeds.
+#
+# Schema dimensions exercised: clock injection, a write whose success is the assertion.
+
+[case]
+id = "c-cond-0009"
+schema_version = 1
+title = "A write whose If-Unmodified-Since postdates the object is carried out"
+rationale = """
+If-Unmodified-Since is the date-shaped compare-and-swap, and the direction that must proceed is \
+the one nobody writes a test for: a client that guards every write with it and is refused anyway \
+has no way to make progress, and the operator sees a stream of precondition failures with no \
+failing precondition behind them. Pinning the satisfied direction is what makes the refusals in \
+c-cond-0011 and c-cond-0012 mean something."""
+polarity = "positive"
+operation = "PutObject"
+tags = ["conditional", "preconditions", "timing"]
+timeout_ms = 10000
+quirks = ["q-cond-0050"]
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9110#section-13.1.4"
+summary = "The condition holds when the last modification is no later than the supplied date, and the request then proceeds."
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObject.html"
+summary = "Documents the conditional headers a write accepts and the failure they produce when unsatisfied."
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-cond"
+
+[[setup.objects]]
+bucket = "conf-cond"
+key = "dates/unmodified"
+body = { utf8 = "original" }
+
+[request]
+method = "PUT"
+target = "/conf-cond/dates/unmodified"
+headers = { "if-unmodified-since" = "Sun, 01 Feb 2026 00:00:00 GMT", "content-type" = "text/plain" }
+body = { utf8 = "hello" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[expect.headers_present]
+"etag" = "\"5d41402abc4b2a76b9719d911017c592\""
+
+[expect.timing]
+terminate_within_ms = 5000
+
+[expect.body]
+size = 0

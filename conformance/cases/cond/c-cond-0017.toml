@@ -1,0 +1,61 @@
+# c-cond-0017 — the second place S3 does not follow RFC 9110.
+#
+# Schema dimensions exercised: clock injection, header absence on a 304, zero-length body.
+
+[case]
+id = "c-cond-0017"
+schema_version = 1
+title = "A missed If-None-Match with a satisfied If-Unmodified-Since is answered 304"
+rationale = """
+Read strictly, neither of these two conditions produces a not-modified response: the entity-tag \
+condition did not match, so the request proceeds, and the date condition held, so it does not \
+interfere. S3 answers 304 anyway. The consequence of getting it wrong is the opposite of the other \
+deviation — an implementation following the RFC sends the whole object where the client expected a \
+revalidation, which costs bandwidth rather than correctness, and therefore goes unnoticed until \
+somebody reads a bill. Both deviations belong to one evaluator so that neither can be fixed \
+without the other."""
+polarity = "negative"
+operation = "GetObject"
+tags = ["conditional", "preconditions", "known-divergence"]
+timeout_ms = 10000
+quirks = ["q-cond-0043", "q-cond-0047"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObject.html"
+summary = "The request-header section states the outcome when the entity-tag condition fails and the modification-date condition holds."
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9110#section-13.2.2"
+summary = "Under the specification neither of those conditions yields a not-modified response, which is the behaviour S3 departs from."
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-cond"
+
+[[setup.objects]]
+bucket = "conf-cond"
+key = "deviation/second"
+body = { utf8 = "hello" }
+
+[request]
+method = "GET"
+target = "/conf-cond/deviation/second"
+headers = { "if-none-match" = "\"0000000000000000000000000000dead\"", "if-unmodified-since" = "Sun, 01 Feb 2026 00:00:00 GMT" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 304
+headers_absent = ["content-length", "content-type"]
+connection_after = "open"
+
+[expect.headers_present]
+"etag" = "\"5d41402abc4b2a76b9719d911017c592\""
+
+[expect.timing]
+terminate_within_ms = 5000
+
+[expect.body]
+size = 0

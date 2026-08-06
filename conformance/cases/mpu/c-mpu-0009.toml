@@ -1,0 +1,93 @@
+# c-mpu-0009 — the full-object checksum has no part count.
+#
+# Schema dimensions exercised: the counterpart of c-mpu-0008; the suffix separates the two
+# constructions, so its absence is the assertion.
+
+[case]
+id = "c-mpu-0009"
+schema_version = 1
+title = "An upload declared full-object completes into a checksum with no part count"
+rationale = """
+The two checksum constructions are told apart by the part-count suffix and by the checksum type, \
+and an upload that asked for the full-object form must get neither the suffix nor the composite \
+type. Answering a composite value to a client that asked for a full-object checksum is worse than \
+answering nothing: the client compares it against a digest of the object bytes, the comparison \
+fails, and an intact object is reported corrupt."""
+polarity = "positive"
+operation = "CompleteMultipartUpload"
+tags = ["multipart", "checksum", "integrity"]
+quirks = ["q-mpu-etag-0028", "q-checksum-0006"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/checking-object-integrity.html"
+summary = "Distinguishes the full-object checksum from the composite one and states which carries a part count."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = true
+
+[[setup.buckets]]
+name = "conf-mpu"
+
+[[exchanges]]
+name = "initiate"
+
+[exchanges.request]
+method = "POST"
+target = "/conf-mpu/full-object-checksum?uploads"
+headers = { "x-amz-checksum-algorithm" = "CRC32", "x-amz-checksum-type" = "FULL_OBJECT" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.headers_present]
+"x-amz-checksum-type" = "FULL_OBJECT"
+
+[exchanges.expect.capture]
+upload_id = { xml_text = "UploadId" }
+
+[[exchanges]]
+name = "part-one"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-mpu/full-object-checksum?partNumber=1&uploadId=${capture.upload_id}"
+body = { utf8 = "part one payload" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.capture]
+part1_etag = { header = "etag" }
+
+[[exchanges]]
+name = "complete"
+
+[exchanges.request]
+method = "POST"
+target = "/conf-mpu/full-object-checksum?uploadId=${capture.upload_id}"
+headers = { "content-type" = "application/xml" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.request.body]
+utf8 = '''
+<CompleteMultipartUpload xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Part><PartNumber>1</PartNumber><ETag>${capture.part1_etag}</ETag></Part></CompleteMultipartUpload>'''
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.body]
+redact = ["Location", "ETag", "ChecksumCRC32"]
+contains_utf8 = ["<ChecksumType>FULL_OBJECT</ChecksumType>"]
+not_contains_utf8 = ["<ChecksumType>COMPOSITE</ChecksumType>", "-1</ChecksumCRC32>"]

@@ -1,0 +1,68 @@
+# c-list-0004 — the key count includes common prefixes.
+#
+# Schema dimensions exercised: byte-level element assertions on a computed member.
+
+[case]
+id = "c-list-0004"
+schema_version = 1
+title = "KeyCount equals the number of entries plus the number of common prefixes"
+rationale = """
+A client compares KeyCount against MaxKeys to decide whether the page was full. On a delimited listing where every result is a common prefix, an implementation that counts only entries reports zero, the client reads a short page as the last page — or, with a truncation flag set, asks for the same page forever. Neither failure appears in a single response read by a human."""
+polarity = "positive"
+operation = "ListObjectsV2"
+tags = ["list", "pagination", "xml"]
+timeout_ms = 15000
+quirks = ["q-keycount-0018", "q-flat-0019"]
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/issues/350"
+summary = "Common prefixes were left out of the count and a client that trusted the arithmetic paged forever."
+kind = "s3s-issue"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectsV2.html"
+summary = "Defines the count as the number of keys the request returned, which includes the common prefix entries."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-list"
+
+[[setup.objects]]
+bucket = "conf-list"
+key = "a/1.txt"
+body = { utf8 = "a1" }
+
+[[setup.objects]]
+bucket = "conf-list"
+key = "a/2.txt"
+body = { utf8 = "a2" }
+
+[[setup.objects]]
+bucket = "conf-list"
+key = "b/1.txt"
+body = { utf8 = "b1" }
+
+[[setup.objects]]
+bucket = "conf-list"
+key = "top.txt"
+body = { utf8 = "top" }
+
+[request]
+method = "GET"
+target = "/conf-list?list-type=2&delimiter=%2F"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+
+[expect.body]
+contains_utf8 = ["<KeyCount>3</KeyCount>", "<Key>top.txt</Key>", "<Prefix>a/</Prefix>", "<Prefix>b/</Prefix>"]
+
+[expect.body.xml]
+root = "ListBucketResult"
+xmlns = "http://s3.amazonaws.com/doc/2006-03-01/"
+empty_elements = "paired"

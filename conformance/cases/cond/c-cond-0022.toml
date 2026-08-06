@@ -1,0 +1,83 @@
+# c-cond-0022 — the shape of a 304, asserted as a header set rather than as a status.
+#
+# Schema dimensions exercised: headers_absent as the entire assertion, a zero-length body, and a
+# second exchange proving the connection survived a response with no framing of its own.
+
+[case]
+id = "c-cond-0022"
+schema_version = 1
+title = "A 304 carries the entity tag and no body framing whatsoever"
+rationale = """
+A not-modified response has no content, which means it has no content length either — and the \
+difference matters at the transport rather than at the application. A 304 that announces a length \
+leaves the connection in a state where the client is waiting for bytes the server will never \
+write, so the next request on that connection either hangs or is read as a continuation of a body. \
+The entity tag must still be there, because a cache that receives a 304 without one has nothing to \
+update its stored entry with. The second exchange is what proves the connection was still usable."""
+polarity = "negative"
+operation = "GetObject"
+tags = ["conditional", "preconditions", "connection", "wire-bytes"]
+timeout_ms = 10000
+quirks = ["q-cond-0047"]
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9110#section-15.4.5"
+summary = "A not-modified response has no content and carries the metadata a cache needs to update its stored entry."
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9110#section-6.4.1"
+summary = "A response with no content must not frame one, because the recipient uses the framing to find the next message."
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = true
+
+[[setup.buckets]]
+name = "conf-cond"
+
+[[setup.objects]]
+bucket = "conf-cond"
+key = "shape/304"
+body = { utf8 = "hello" }
+
+[[exchanges]]
+name = "the-not-modified-response"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-cond/shape/304"
+headers = { "if-none-match" = "\"5d41402abc4b2a76b9719d911017c592\"" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 304
+headers_absent = ["content-length", "content-type", "transfer-encoding"]
+connection_after = "open"
+
+[exchanges.expect.headers_present]
+"etag" = "\"5d41402abc4b2a76b9719d911017c592\""
+
+[exchanges.expect.timing]
+terminate_within_ms = 5000
+
+[exchanges.expect.body]
+size = 0
+
+[[exchanges]]
+name = "the-connection-is-still-usable"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-cond/shape/304"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.body]
+exact_utf8 = "hello"

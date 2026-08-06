@@ -1,0 +1,44 @@
+# c-list-0025 — an empty bucket is an empty listing, not a missing one.
+#
+# Schema dimensions exercised: a success status asserted together with the absence of a repeated element.
+
+[case]
+id = "c-list-0025"
+schema_version = 1
+title = "Listing an empty bucket answers 200 with a zero key count and no entries"
+rationale = """
+Answering 404 for an empty bucket conflates "there is nothing here" with "there is no here", and a client that creates a bucket and immediately lists it treats the 404 as a failed create. The key count must still be present and zero: an absent count is not the same as zero to a client doing arithmetic on it."""
+polarity = "negative"
+operation = "ListObjectsV2"
+tags = ["list", "empty", "xml"]
+timeout_ms = 15000
+quirks = ["q-keycount-0018", "q-empty-0016"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectsV2.html"
+summary = "The documented response for a bucket with no matching keys is a success carrying a zero count."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-list-empty"
+
+[request]
+method = "GET"
+target = "/conf-list-empty?list-type=2"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+
+[expect.body]
+contains_utf8 = ["<KeyCount>0</KeyCount>", "<IsTruncated>false</IsTruncated>"]
+not_contains_utf8 = ["<Contents>"]
+
+[expect.body.xml]
+root = "ListBucketResult"
+xmlns = "http://s3.amazonaws.com/doc/2006-03-01/"
+empty_elements = "paired"

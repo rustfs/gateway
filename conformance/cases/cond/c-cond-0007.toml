@@ -1,0 +1,59 @@
+# c-cond-0007 — the ordinary revalidation, and the body that must not be there.
+#
+# Schema dimensions exercised: header absence as the assertion, zero-length body.
+
+[case]
+id = "c-cond-0007"
+schema_version = 1
+title = "A read whose If-None-Match matches is answered 304 with no body at all"
+rationale = """
+This is the highest-volume conditional request there is, and the way it goes wrong is not the \
+status code. An implementation that computes the response and then swaps the status for 304 \
+leaves the body, or the content length, or both — and a client that reads a length it will never \
+be sent bytes for waits until its own timeout rather than reporting an error. Asserting the \
+absence of those two headers is the only way that shows up."""
+polarity = "positive"
+operation = "GetObject"
+tags = ["conditional", "preconditions", "etag"]
+timeout_ms = 10000
+quirks = ["q-cond-0047"]
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9110#section-15.4.5"
+summary = "A not-modified response carries no content and carries the metadata a cache needs to update its entry."
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObject.html"
+summary = "Documents the not-modified answer to a read whose entity-tag condition already holds."
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-cond"
+
+[[setup.objects]]
+bucket = "conf-cond"
+key = "revalidate/hit"
+body = { utf8 = "hello" }
+
+[request]
+method = "GET"
+target = "/conf-cond/revalidate/hit"
+headers = { "if-none-match" = "\"5d41402abc4b2a76b9719d911017c592\"" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 304
+headers_absent = ["content-length", "content-type", "x-amz-storage-class"]
+connection_after = "open"
+
+[expect.headers_present]
+"etag" = "\"5d41402abc4b2a76b9719d911017c592\""
+
+[expect.timing]
+terminate_within_ms = 5000
+
+[expect.body]
+size = 0

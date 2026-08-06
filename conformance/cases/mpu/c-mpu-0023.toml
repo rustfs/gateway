@@ -1,0 +1,56 @@
+# c-mpu-0023 — a part digest that does not match what was stored.
+
+[case]
+id = "c-mpu-0023"
+schema_version = 1
+title = "A completion whose part digest disagrees with the stored part is refused"
+rationale = """
+The digests in the completion request are the client's statement of what it uploaded, and comparing \
+them against what was stored is the one end-to-end integrity check the multipart flow has. An \
+implementation that ignores them assembles whatever it happens to hold — including a part from an \
+earlier, half-retried attempt — and reports success. The client's own record then disagrees with \
+the object, and nothing detected it at the moment it could still have been fixed."""
+polarity = "negative"
+operation = "CompleteMultipartUpload"
+tags = ["multipart", "integrity", "error-shape"]
+quirks = ["q-mpu-etag-0028"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CompleteMultipartUpload.html"
+summary = "The entity tag of each part is documented as part of the completion request and is checked against the stored part."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-mpu"
+
+[[setup.multipart_uploads]]
+bucket = "conf-mpu"
+key = "wrong-digest"
+capture_upload_id_as = "upload_id"
+
+[[setup.multipart_uploads.parts]]
+part_number = 1
+body = { size = 5242880 }
+
+[request]
+method = "POST"
+target = "/conf-mpu/wrong-digest?uploadId=${capture.upload_id}"
+headers = { "content-type" = "application/xml" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[request.body]
+utf8 = '''
+<CompleteMultipartUpload xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Part><PartNumber>1</PartNumber><ETag>&quot;ffffffffffffffffffffffffffffffff&quot;</ETag></Part></CompleteMultipartUpload>'''
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+headers_absent = ["etag", "x-amz-version-id"]
+
+[expect.error]
+code = "InvalidPart"
+request_id_present = true

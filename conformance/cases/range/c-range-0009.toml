@@ -1,0 +1,62 @@
+# c-range-0009 — a range that starts past the end.
+#
+# Schema dimensions exercised: the Content-Range form that carries no span, byte-exact error
+# document.
+
+[case]
+id = "c-range-0009"
+schema_version = 1
+title = "A range starting past the end is a 416 that reports the object's real length"
+rationale = """
+This is the one range that genuinely cannot be served, and the response has to tell the client \
+why: without the unsatisfied form of Content-Range the client cannot learn the object's real \
+length from the failure, so it retries the same impossible range. It is also the boundary against \
+c-range-0002 — a range that merely runs past the end is clamped and served, and an implementation \
+that treats the two the same is wrong on whichever one it did not test."""
+polarity = "negative"
+operation = "GetObject"
+tags = ["range", "read", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-range-0052", "q-range-0054"]
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9110#section-15.5.17"
+summary = "An unsatisfiable range is answered with the range-not-satisfiable status and a Content-Range naming the current length."
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/ErrorResponses.html"
+summary = "The error-response reference lists the code S3 returns for a range it cannot satisfy."
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-range"
+
+[[setup.objects]]
+bucket = "conf-range"
+key = "ten"
+content_type = "text/plain"
+body = { utf8 = "0123456789" }
+
+[request]
+method = "GET"
+target = "/conf-range/ten"
+headers = { "range" = "bytes=20-30" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 416
+connection_after = "open"
+
+[expect.error]
+code = "InvalidRange"
+request_id_present = true
+
+[expect.headers_present]
+"content-range" = "bytes */10"
+"content-type" = "application/xml"
+
+[expect.timing]
+terminate_within_ms = 5000

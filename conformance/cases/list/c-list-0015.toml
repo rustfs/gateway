@@ -1,0 +1,50 @@
+# c-list-0015 — the bucket listing wraps its entries.
+#
+# Schema dimensions exercised: a wrapped list where every sibling family member is flattened.
+
+[case]
+id = "c-list-0015"
+schema_version = 1
+title = "ListBuckets answers under ListAllMyBucketsResult with every entry inside one Buckets element"
+rationale = """
+Every other listing in this family repeats its entry element directly under the root, and this one nests them. There is no rule that derives which, so an implementation that applies its neighbour's shape emits entries a client cannot find — and finds nothing rather than failing. The owner element is asserted with it because it precedes the list and its position is part of the same contract."""
+polarity = "positive"
+operation = "ListBuckets"
+tags = ["list", "buckets", "xml", "root"]
+timeout_ms = 15000
+quirks = ["q-wrapped-0062", "q-order-0066"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListBuckets.html"
+summary = "The documented response nests every bucket entry inside a single enclosing element after the owner."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-list-alpha"
+
+[[setup.buckets]]
+name = "conf-list-beta"
+
+[[setup.buckets]]
+name = "conf-list-gamma"
+
+[request]
+method = "GET"
+target = "/"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+
+[expect.body]
+contains_utf8 = ["<Buckets><Bucket><Name>conf-list-alpha</Name>", "</Bucket></Buckets>"]
+
+[expect.body.xml]
+root = "ListAllMyBucketsResult"
+xmlns = "http://s3.amazonaws.com/doc/2006-03-01/"
+empty_elements = "paired"
+element_order = ["Owner", "Buckets"]

@@ -1,0 +1,691 @@
+{
+  "ir_version": "1",
+  "operation": "ListParts",
+  "http": {
+            "method": "GET",
+            "target": "Object",
+            "precedence": 440,
+            "predicates": [
+                            { "kind": "Method", "method": "GET" },
+                            { "kind": "Target", "target": "Object" },
+                            { "kind": "QueryPresent", "key": "uploadId" }
+                          ],
+            "success_status": 200,
+            "alt_success_statuses": [],
+            "path_shape": "/{Bucket}/{Key+}"
+          },
+  "auth": {
+            "requirement": "Required",
+            "action": "s3:ListMultipartUploadParts",
+            "presigned_allowed": true,
+            "service": "s3"
+          },
+  "payload": {
+               "request": { "kind": "None", "buffering": "None", "max_bytes": null },
+               "response": { "kind": "XmlBody", "buffering": "Full", "max_bytes": null }
+             },
+  "checksum": { "http_checksum_required": false, "request_algorithms": [], "response_algorithms": [] },
+  "input": {
+             "fields": [
+                         {
+                           "name": "Bucket",
+                           "wire_name": "Bucket",
+                           "required": true,
+                           "binding": { "kind": "UriLabel", "greedy": false },
+                           "type": { "kind": "BucketName" },
+                           "hot": true,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "Key",
+                           "wire_name": "Key",
+                           "required": true,
+                           "binding": { "kind": "UriLabel", "greedy": true },
+                           "type": { "kind": "ObjectKey" },
+                           "hot": true,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "MaxParts",
+                           "wire_name": "max-parts",
+                           "required": false,
+                           "binding": { "kind": "Query" },
+                           "type": { "kind": "Integer" },
+                           "hot": true,
+                           "default": 1000,
+                           "quirk_refs": ["q-mpu-marker-0040"]
+                         },
+                         {
+                           "name": "PartNumberMarker",
+                           "wire_name": "part-number-marker",
+                           "required": false,
+                           "binding": { "kind": "Query" },
+                           "type": { "kind": "String" },
+                           "hot": true,
+                           "quirk_refs": ["q-mpu-marker-0040"]
+                         },
+                         {
+                           "name": "UploadId",
+                           "wire_name": "uploadId",
+                           "required": true,
+                           "binding": { "kind": "Query" },
+                           "type": { "kind": "String" },
+                           "hot": true,
+                           "quirk_refs": ["q-mpu-upload-id-0037"]
+                         },
+                         {
+                           "name": "RequestPayer",
+                           "wire_name": "x-amz-request-payer",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "StringEnum", "values": ["requester"] },
+                           "hot": false,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "ExpectedBucketOwner",
+                           "wire_name": "x-amz-expected-bucket-owner",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "String" },
+                           "hot": false,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "SSECustomerAlgorithm",
+                           "wire_name": "x-amz-server-side-encryption-customer-algorithm",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "String" },
+                           "hot": false,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "SSECustomerKey",
+                           "wire_name": "x-amz-server-side-encryption-customer-key",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "String" },
+                           "hot": false,
+                           "quirk_refs": ["q-sse-0010"]
+                         },
+                         {
+                           "name": "SSECustomerKeyMD5",
+                           "wire_name": "x-amz-server-side-encryption-customer-key-md5",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "String" },
+                           "hot": false,
+                           "quirk_refs": []
+                         }
+                       ]
+           },
+  "output": {
+              "fields": [
+                          {
+                            "name": "AbortDate",
+                            "wire_name": "x-amz-abort-date",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": { "kind": "Timestamp", "format": "HttpDate" },
+                            "hot": false,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "AbortRuleId",
+                            "wire_name": "x-amz-abort-rule-id",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": { "kind": "String" },
+                            "hot": false,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "Bucket",
+                            "wire_name": "Bucket",
+                            "required": true,
+                            "binding": { "kind": "BodyXml" },
+                            "type": { "kind": "BucketName" },
+                            "hot": true,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "Key",
+                            "wire_name": "Key",
+                            "required": true,
+                            "binding": { "kind": "BodyXml" },
+                            "type": { "kind": "ObjectKey" },
+                            "hot": true,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "UploadId",
+                            "wire_name": "UploadId",
+                            "required": true,
+                            "binding": { "kind": "BodyXml" },
+                            "type": { "kind": "String" },
+                            "hot": true,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "PartNumberMarker",
+                            "wire_name": "PartNumberMarker",
+                            "required": false,
+                            "binding": { "kind": "BodyXml" },
+                            "type": { "kind": "String" },
+                            "hot": false,
+                            "quirk_refs": ["q-mpu-marker-0040"]
+                          },
+                          {
+                            "name": "NextPartNumberMarker",
+                            "wire_name": "NextPartNumberMarker",
+                            "required": false,
+                            "binding": { "kind": "BodyXml" },
+                            "type": { "kind": "String" },
+                            "hot": false,
+                            "quirk_refs": ["q-mpu-marker-0040"]
+                          },
+                          {
+                            "name": "MaxParts",
+                            "wire_name": "MaxParts",
+                            "required": true,
+                            "binding": { "kind": "BodyXml" },
+                            "type": { "kind": "Integer" },
+                            "hot": true,
+                            "quirk_refs": ["q-mpu-marker-0040"]
+                          },
+                          {
+                            "name": "IsTruncated",
+                            "wire_name": "IsTruncated",
+                            "required": true,
+                            "binding": { "kind": "BodyXml" },
+                            "type": { "kind": "Boolean" },
+                            "hot": true,
+                            "quirk_refs": ["q-mpu-marker-0040"]
+                          },
+                          {
+                            "name": "Parts",
+                            "wire_name": "Part",
+                            "required": false,
+                            "binding": { "kind": "BodyXml" },
+                            "type": {
+                                      "kind": "List",
+                                      "member": { "kind": "Structure", "shape": "Part" },
+                                      "flattened": true,
+                                      "wrapper_name": null
+                                    },
+                            "hot": true,
+                            "quirk_refs": ["q-mpu-part-0031"]
+                          },
+                          {
+                            "name": "Initiator",
+                            "wire_name": "Initiator",
+                            "required": false,
+                            "binding": { "kind": "BodyXml" },
+                            "type": { "kind": "Structure", "shape": "Initiator" },
+                            "hot": false,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "Owner",
+                            "wire_name": "Owner",
+                            "required": false,
+                            "binding": { "kind": "BodyXml" },
+                            "type": { "kind": "Structure", "shape": "Owner" },
+                            "hot": false,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "StorageClass",
+                            "wire_name": "StorageClass",
+                            "required": false,
+                            "binding": { "kind": "BodyXml" },
+                            "type": {
+                                      "kind": "StringEnum",
+                                      "values": [
+                                                  "STANDARD",
+                                                  "REDUCED_REDUNDANCY",
+                                                  "STANDARD_IA",
+                                                  "ONEZONE_IA",
+                                                  "INTELLIGENT_TIERING",
+                                                  "GLACIER",
+                                                  "DEEP_ARCHIVE",
+                                                  "OUTPOSTS",
+                                                  "GLACIER_IR",
+                                                  "SNOW",
+                                                  "EXPRESS_ONEZONE",
+                                                  "FSX_OPENZFS",
+                                                  "FSX_ONTAP"
+                                                ]
+                                    },
+                            "hot": false,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "RequestCharged",
+                            "wire_name": "x-amz-request-charged",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": { "kind": "StringEnum", "values": ["requester"] },
+                            "hot": false,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "ChecksumAlgorithm",
+                            "wire_name": "ChecksumAlgorithm",
+                            "required": false,
+                            "binding": { "kind": "BodyXml" },
+                            "type": {
+                                      "kind": "StringEnum",
+                                      "values": [
+                                                  "CRC32",
+                                                  "CRC32C",
+                                                  "SHA1",
+                                                  "SHA256",
+                                                  "CRC64NVME",
+                                                  "SHA512",
+                                                  "MD5",
+                                                  "XXHASH64",
+                                                  "XXHASH3",
+                                                  "XXHASH128"
+                                                ]
+                                    },
+                            "hot": false,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "ChecksumType",
+                            "wire_name": "ChecksumType",
+                            "required": false,
+                            "binding": { "kind": "BodyXml" },
+                            "type": { "kind": "StringEnum", "values": ["COMPOSITE", "FULL_OBJECT"] },
+                            "hot": false,
+                            "quirk_refs": []
+                          }
+                        ]
+            },
+  "shapes": {
+              "Initiator": {
+                             "kind": "Structure",
+                             "fields": [
+                                         {
+                                           "name": "ID",
+                                           "wire_name": "ID",
+                                           "required": false,
+                                           "binding": { "kind": "BodyXml" },
+                                           "type": { "kind": "String" },
+                                           "hot": false,
+                                           "quirk_refs": []
+                                         },
+                                         {
+                                           "name": "DisplayName",
+                                           "wire_name": "DisplayName",
+                                           "required": false,
+                                           "binding": { "kind": "BodyXml" },
+                                           "type": { "kind": "String" },
+                                           "hot": false,
+                                           "quirk_refs": []
+                                         }
+                                       ],
+                             "xml": {
+                                      "element_order": ["ID", "DisplayName"],
+                                      "empty_value_policy": { "ID": "omit", "DisplayName": "omit" },
+                                      "attributes": []
+                                    }
+                           },
+              "Owner": {
+                         "kind": "Structure",
+                         "fields": [
+                                     {
+                                       "name": "DisplayName",
+                                       "wire_name": "DisplayName",
+                                       "required": false,
+                                       "binding": { "kind": "BodyXml" },
+                                       "type": { "kind": "String" },
+                                       "hot": false,
+                                       "quirk_refs": []
+                                     },
+                                     {
+                                       "name": "ID",
+                                       "wire_name": "ID",
+                                       "required": false,
+                                       "binding": { "kind": "BodyXml" },
+                                       "type": { "kind": "String" },
+                                       "hot": false,
+                                       "quirk_refs": []
+                                     }
+                                   ],
+                         "xml": {
+                                  "element_order": ["ID", "DisplayName"],
+                                  "empty_value_policy": { "DisplayName": "omit", "ID": "omit" },
+                                  "attributes": []
+                                }
+                       },
+              "Part": {
+                        "kind": "Structure",
+                        "fields": [
+                                    {
+                                      "name": "PartNumber",
+                                      "wire_name": "PartNumber",
+                                      "required": true,
+                                      "binding": { "kind": "BodyXml" },
+                                      "type": { "kind": "Integer" },
+                                      "hot": true,
+                                      "quirk_refs": ["q-mpu-limits-0038", "q-mpu-marker-0040"]
+                                    },
+                                    {
+                                      "name": "LastModified",
+                                      "wire_name": "LastModified",
+                                      "required": false,
+                                      "binding": { "kind": "BodyXml" },
+                                      "type": { "kind": "Timestamp", "format": "Iso8601" },
+                                      "hot": false,
+                                      "quirk_refs": []
+                                    },
+                                    {
+                                      "name": "ETag",
+                                      "wire_name": "ETag",
+                                      "required": true,
+                                      "binding": { "kind": "BodyXml" },
+                                      "type": { "kind": "ETag", "render": "XmlQuoted" },
+                                      "hot": true,
+                                      "quirk_refs": ["q-mpu-etag-0028"]
+                                    },
+                                    {
+                                      "name": "Size",
+                                      "wire_name": "Size",
+                                      "required": true,
+                                      "binding": { "kind": "BodyXml" },
+                                      "type": { "kind": "Long" },
+                                      "hot": true,
+                                      "quirk_refs": []
+                                    },
+                                    {
+                                      "name": "ChecksumCRC32",
+                                      "wire_name": "ChecksumCRC32",
+                                      "required": false,
+                                      "binding": { "kind": "BodyXml" },
+                                      "type": { "kind": "String" },
+                                      "hot": false,
+                                      "quirk_refs": []
+                                    },
+                                    {
+                                      "name": "ChecksumCRC32C",
+                                      "wire_name": "ChecksumCRC32C",
+                                      "required": false,
+                                      "binding": { "kind": "BodyXml" },
+                                      "type": { "kind": "String" },
+                                      "hot": false,
+                                      "quirk_refs": []
+                                    },
+                                    {
+                                      "name": "ChecksumCRC64NVME",
+                                      "wire_name": "ChecksumCRC64NVME",
+                                      "required": false,
+                                      "binding": { "kind": "BodyXml" },
+                                      "type": { "kind": "String" },
+                                      "hot": false,
+                                      "quirk_refs": []
+                                    },
+                                    {
+                                      "name": "ChecksumSHA1",
+                                      "wire_name": "ChecksumSHA1",
+                                      "required": false,
+                                      "binding": { "kind": "BodyXml" },
+                                      "type": { "kind": "String" },
+                                      "hot": false,
+                                      "quirk_refs": []
+                                    },
+                                    {
+                                      "name": "ChecksumSHA256",
+                                      "wire_name": "ChecksumSHA256",
+                                      "required": false,
+                                      "binding": { "kind": "BodyXml" },
+                                      "type": { "kind": "String" },
+                                      "hot": false,
+                                      "quirk_refs": []
+                                    },
+                                    {
+                                      "name": "ChecksumSHA512",
+                                      "wire_name": "ChecksumSHA512",
+                                      "required": false,
+                                      "binding": { "kind": "BodyXml" },
+                                      "type": { "kind": "String" },
+                                      "hot": false,
+                                      "quirk_refs": []
+                                    },
+                                    {
+                                      "name": "ChecksumMD5",
+                                      "wire_name": "ChecksumMD5",
+                                      "required": false,
+                                      "binding": { "kind": "BodyXml" },
+                                      "type": { "kind": "String" },
+                                      "hot": false,
+                                      "quirk_refs": []
+                                    },
+                                    {
+                                      "name": "ChecksumXXHASH64",
+                                      "wire_name": "ChecksumXXHASH64",
+                                      "required": false,
+                                      "binding": { "kind": "BodyXml" },
+                                      "type": { "kind": "String" },
+                                      "hot": false,
+                                      "quirk_refs": []
+                                    },
+                                    {
+                                      "name": "ChecksumXXHASH3",
+                                      "wire_name": "ChecksumXXHASH3",
+                                      "required": false,
+                                      "binding": { "kind": "BodyXml" },
+                                      "type": { "kind": "String" },
+                                      "hot": false,
+                                      "quirk_refs": []
+                                    },
+                                    {
+                                      "name": "ChecksumXXHASH128",
+                                      "wire_name": "ChecksumXXHASH128",
+                                      "required": false,
+                                      "binding": { "kind": "BodyXml" },
+                                      "type": { "kind": "String" },
+                                      "hot": false,
+                                      "quirk_refs": []
+                                    }
+                                  ],
+                        "xml": {
+                                 "element_order": [
+                                                    "PartNumber",
+                                                    "LastModified",
+                                                    "ETag",
+                                                    "Size",
+                                                    "ChecksumCRC32",
+                                                    "ChecksumCRC32C",
+                                                    "ChecksumCRC64NVME",
+                                                    "ChecksumSHA1",
+                                                    "ChecksumSHA256",
+                                                    "ChecksumSHA512",
+                                                    "ChecksumMD5",
+                                                    "ChecksumXXHASH64",
+                                                    "ChecksumXXHASH3",
+                                                    "ChecksumXXHASH128"
+                                                  ],
+                                 "empty_value_policy": {
+                                                         "PartNumber": "emit",
+                                                         "LastModified": "omit",
+                                                         "ETag": "emit",
+                                                         "Size": "emit",
+                                                         "ChecksumCRC32": "omit",
+                                                         "ChecksumCRC32C": "omit",
+                                                         "ChecksumCRC64NVME": "omit",
+                                                         "ChecksumSHA1": "omit",
+                                                         "ChecksumSHA256": "omit",
+                                                         "ChecksumSHA512": "omit",
+                                                         "ChecksumMD5": "omit",
+                                                         "ChecksumXXHASH64": "omit",
+                                                         "ChecksumXXHASH3": "omit",
+                                                         "ChecksumXXHASH128": "omit"
+                                                       },
+                                 "attributes": []
+                               }
+                      }
+            },
+  "xml": {
+           "request_root": null,
+           "request_root_aliases": [],
+           "response_root": "ListPartsResult",
+           "xmlns": "emit",
+           "unwrapped_output": false,
+           "element_order": [
+                              "Bucket",
+                              "Key",
+                              "UploadId",
+                              "PartNumberMarker",
+                              "NextPartNumberMarker",
+                              "MaxParts",
+                              "IsTruncated",
+                              "Parts",
+                              "Initiator",
+                              "Owner",
+                              "StorageClass",
+                              "ChecksumAlgorithm",
+                              "ChecksumType"
+                            ],
+           "empty_value_policy": {
+                                   "Bucket": "emit",
+                                   "Key": "emit",
+                                   "UploadId": "emit",
+                                   "PartNumberMarker": "omit",
+                                   "NextPartNumberMarker": "omit",
+                                   "MaxParts": "emit",
+                                   "IsTruncated": "emit",
+                                   "Parts": "omit",
+                                   "Initiator": "omit",
+                                   "Owner": "omit",
+                                   "StorageClass": "omit",
+                                   "ChecksumAlgorithm": "omit",
+                                   "ChecksumType": "omit"
+                                 },
+           "url_encoded_fields": ["Key"],
+           "attributes": [],
+           "body_literal": false
+         },
+  "errors": {
+              "not_configured": null,
+              "allows_error_after_200": false,
+              "codes": ["NoSuchBucket", "NoSuchUpload", "AccessDenied", "InvalidArgument"]
+            },
+  "derived_resources": [],
+  "head_mirrors": null,
+  "quirk_refs": ["q-mpu-part-0031", "q-mpu-upload-id-0037", "q-mpu-marker-0040"],
+  "quirks": [
+              {
+                "id": "q-sse-0010",
+                "kind": "secret_hygiene",
+                "target": "PutObject",
+                "summary": "The customer key is never echoed back and never logged, while the algorithm and key digest must be echoed; customer keys over a plaintext connection are refused.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/dev/ServerSideEncryptionCustomerKeys.html",
+                                "summary": "Requires a secure connection for customer provided keys and describes which of the three headers are echoed in the response."
+                              }
+                            ],
+                "cases": ["c-ssec-0001", "c-ssec-0002"]
+              },
+              {
+                "id": "q-mpu-etag-0028",
+                "kind": "etag_composite",
+                "target": "CompleteMultipartUpload.ETag",
+                "summary": "The entity tag of a completed upload is a digest over the concatenated raw part digests followed by a hyphen and the part count, never a digest of the assembled object, and an empty part list is refused rather than digested.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/userguide/checking-object-integrity.html",
+                                "summary": "Describes the multipart entity tag as a digest of the part digests carrying a part-count suffix, distinguishing it from a whole-object digest."
+                              },
+                              {
+                                "kind": "s3s-issue",
+                                "ref": "https://github.com/s3s-project/s3s/issues/550",
+                                "summary": "Upstream computed the tag over the assembled object, so every client that verified integrity concluded the object was corrupt."
+                              },
+                              {
+                                "kind": "s3s-pr",
+                                "ref": "https://github.com/s3s-project/s3s/pull/556",
+                                "summary": "The fix derives the tag from the part digests and refuses an empty part list with a dedicated code."
+                              }
+                            ],
+                "cases": ["c-mpu-0002", "c-mpu-0003", "c-mpu-0019"]
+              },
+              {
+                "id": "q-mpu-part-0031",
+                "kind": "flattened_list",
+                "target": "ListParts.Parts",
+                "summary": "Each part element repeats directly under the result root with no wrapper element around the sequence, so a wrapped rendering is a document every SDK reads as an empty page.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListParts.html",
+                                "summary": "The documented response syntax repeats the part element as a direct child of the result root."
+                              }
+                            ],
+                "cases": ["c-mpu-0010"]
+              },
+              {
+                "id": "q-mpu-upload-id-0037",
+                "kind": "capability_token",
+                "target": "UploadPart.UploadId",
+                "summary": "An upload id is a server-minted capability, not a name the caller chose: it is resolved against the bucket and key of the request before anything is written, an unknown id answers the not-found code, and one belonging to another resource is refused rather than honoured.",
+                "evidence": [
+                              {
+                                "kind": "s3s-issue",
+                                "ref": "https://github.com/s3s-project/s3s/issues/51",
+                                "summary": "Upstream accepted any upload id without checking what it belonged to, so knowing an id was enough to act on somebody else's upload."
+                              },
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UploadPart.html",
+                                "summary": "The request is documented as naming a bucket, a key and an upload id together, and the id is only meaningful for that pair."
+                              }
+                            ],
+                "cases": ["c-mpu-0028", "c-mpu-0029", "c-mpu-0030", "c-mpu-0031"]
+              },
+              {
+                "id": "q-mpu-limits-0038",
+                "kind": "bounded_input",
+                "target": "CompleteMultipartUpload.MultipartUpload",
+                "summary": "Part numbers run from one to ten thousand, every part except the last has a floor on its size, and the completion list must be strictly ascending with no repeats; each of the three has its own code so a client can tell them apart.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/userguide/qfacts.html",
+                                "summary": "States the part-number range and the minimum size every part except the final one must reach."
+                              },
+                              {
+                                "kind": "s3s-pr",
+                                "ref": "https://github.com/s3s-project/s3s/pull/281",
+                                "summary": "Upstream did not enforce the multipart limits, so an upload could exceed the part ceiling and fail only at assembly."
+                              }
+                            ],
+                "cases": ["c-mpu-0020", "c-mpu-0024", "c-mpu-0026", "c-mpu-0027"]
+              },
+              {
+                "id": "q-mpu-marker-0040",
+                "kind": "pagination_cursor",
+                "target": "ListParts.NextPartNumberMarker",
+                "summary": "A truncated listing hands back a cursor that is valid as the next request's marker, the page-size limit is echoed as the caller sent it rather than as the server clamped it, and a listing of uploads needs both the key cursor and the upload-id cursor because one key can carry several uploads.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListMultipartUploads.html",
+                                "summary": "Documents the pair of cursors a truncated upload listing returns and how the next request supplies them."
+                              },
+                              {
+                                "kind": "s3s-pr",
+                                "ref": "https://github.com/s3s-project/s3s/pull/296",
+                                "summary": "Upstream gave the part marker the wrong type and semantics, so a second page could not be requested from the value the first page returned."
+                              }
+                            ],
+                "cases": ["c-mpu-0010", "c-mpu-0011", "c-mpu-0047", "c-mpu-0048"]
+              }
+            ],
+  "ext_points": []
+}

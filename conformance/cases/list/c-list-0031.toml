@@ -1,0 +1,63 @@
+# c-list-0031 — a cursor that is not text is refused without a panic.
+#
+# Schema dimensions exercised: bytes that are not valid text in a parameter, asserted not to crash.
+
+[case]
+id = "c-list-0031"
+schema_version = 1
+title = "A continuation token carrying non-text bytes is answered with InvalidArgument and no reset"
+rationale = """
+Two failures hide here. The first is a panic on the decode path, which an unauthenticated client can trigger at will and which takes the connection — or worse — with it. The second is accepting the bytes and echoing them into the response, producing a document the client cannot parse from input the client chose. The case asserts a complete response, which rules out both."""
+polarity = "negative"
+operation = "ListObjectsV2"
+tags = ["list", "security", "validation"]
+timeout_ms = 15000
+quirks = ["q-token-0021", "q-encoding-0015"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectsV2.html"
+summary = "Describes the token as a value the service produced, so bytes it could not have produced are malformed input."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-list"
+
+[[setup.objects]]
+bucket = "conf-list"
+key = "a/1.txt"
+body = { utf8 = "a1" }
+
+[[setup.objects]]
+bucket = "conf-list"
+key = "a/2.txt"
+body = { utf8 = "a2" }
+
+[[setup.objects]]
+bucket = "conf-list"
+key = "b/1.txt"
+body = { utf8 = "b1" }
+
+[[setup.objects]]
+bucket = "conf-list"
+key = "top.txt"
+body = { utf8 = "top" }
+
+[request]
+method = "GET"
+target = "/conf-list?list-type=2&continuation-token=%FF%FE%00%01"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+code = "InvalidArgument"
+message_present = true
+
+[expect.timing]
+terminate_within_ms = 5000

@@ -1,0 +1,69 @@
+# c-list-0005 — the page size is echoed, not recomputed.
+#
+# Schema dimensions exercised: an element whose value must not depend on the result.
+
+[case]
+id = "c-list-0005"
+schema_version = 1
+title = "MaxKeys echoes the requested page size even when fewer entries were returned"
+rationale = """
+MaxKeys is the question, not the answer. An implementation that writes back the number of entries it actually produced makes every page look full, so a client comparing the two never concludes it has reached the end. Combined with a wrong key count this is the exact pair that hangs a client library in a loop that never errors and never finishes."""
+polarity = "positive"
+operation = "ListObjectsV2"
+tags = ["list", "pagination", "xml"]
+timeout_ms = 15000
+quirks = ["q-maxkeys-0068", "q-keycount-0018"]
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/issues/350"
+summary = "Upstream echoed its own effective page size rather than the requested one and a client looped."
+kind = "s3s-issue"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectsV2.html"
+summary = "Defines the element as the maximum number of keys the request asked to be returned."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-list"
+
+[[setup.objects]]
+bucket = "conf-list"
+key = "a/1.txt"
+body = { utf8 = "a1" }
+
+[[setup.objects]]
+bucket = "conf-list"
+key = "a/2.txt"
+body = { utf8 = "a2" }
+
+[[setup.objects]]
+bucket = "conf-list"
+key = "b/1.txt"
+body = { utf8 = "b1" }
+
+[[setup.objects]]
+bucket = "conf-list"
+key = "top.txt"
+body = { utf8 = "top" }
+
+[request]
+method = "GET"
+target = "/conf-list?list-type=2&prefix=a%2F&max-keys=5"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+
+[expect.body]
+contains_utf8 = ["<MaxKeys>5</MaxKeys>", "<KeyCount>2</KeyCount>", "<IsTruncated>false</IsTruncated>"]
+not_contains_utf8 = ["<MaxKeys>2</MaxKeys>"]
+
+[expect.body.xml]
+root = "ListBucketResult"
+xmlns = "http://s3.amazonaws.com/doc/2006-03-01/"
+empty_elements = "paired"

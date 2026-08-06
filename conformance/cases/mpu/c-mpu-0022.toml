@@ -1,0 +1,57 @@
+# c-mpu-0022 — a part that was never uploaded.
+
+[case]
+id = "c-mpu-0022"
+schema_version = 1
+title = "A completion naming a part number that was never uploaded is refused with InvalidPart"
+rationale = """
+This is the ordinary shape of a lost part: the client believes it uploaded five and the server holds \
+four, usually because one request failed and the retry went to a different endpoint. An \
+implementation that quietly assembles the parts it does have produces a truncated object under the \
+name the caller expects, and nothing in the response says so. The refusal is what lets the client \
+re-upload the missing part instead of discovering the hole months later."""
+polarity = "negative"
+operation = "CompleteMultipartUpload"
+tags = ["multipart", "error-shape", "data-loss"]
+quirks = ["q-mpu-etag-0028"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CompleteMultipartUpload.html"
+summary = "A part entry that does not correspond to an uploaded part is documented as an error rather than ignored."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-mpu"
+
+[[setup.multipart_uploads]]
+bucket = "conf-mpu"
+key = "missing-part"
+capture_upload_id_as = "upload_id"
+
+[[setup.multipart_uploads.parts]]
+part_number = 1
+body = { size = 5242880 }
+capture_etag_as = "part1_etag"
+
+[request]
+method = "POST"
+target = "/conf-mpu/missing-part?uploadId=${capture.upload_id}"
+headers = { "content-type" = "application/xml" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[request.body]
+utf8 = '''
+<CompleteMultipartUpload xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Part><PartNumber>1</PartNumber><ETag>${capture.part1_etag}</ETag></Part><Part><PartNumber>7</PartNumber><ETag>&quot;00000000000000000000000000000000&quot;</ETag></Part></CompleteMultipartUpload>'''
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+headers_absent = ["etag", "x-amz-version-id"]
+
+[expect.error]
+code = "InvalidPart"
+request_id_present = true

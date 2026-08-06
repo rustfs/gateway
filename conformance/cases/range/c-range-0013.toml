@@ -1,0 +1,89 @@
+# c-range-0013 — the arithmetic boundary.
+#
+# Schema dimensions exercised: two exchanges over one connection, terminate_within_ms as the
+# assertion that separates a clamp from a hang.
+
+[case]
+id = "c-range-0013"
+schema_version = 1
+title = "Range positions at the edge of the addressable space neither overflow nor hang"
+rationale = """
+The largest representable position costs an attacker nothing to send and reaches the parser before \
+any authorisation decision. The failure it is looking for is arithmetic: a length computed as end \
+minus start plus one wraps to zero at the top of the range, and a start clamped against a smaller \
+object underflows in the other direction. Either produces a response the server cannot honour, and \
+the symptom the client sees is a stall rather than an error — which is why the time bound is part \
+of the assertion and not a convenience."""
+polarity = "negative"
+operation = "GetObject"
+tags = ["range", "security", "dos", "timing"]
+timeout_ms = 10000
+quirks = ["q-range-0052", "q-range-0057"]
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9110#section-14.1.1"
+summary = "Range positions are decimal digit strings with no stated ceiling, so a recipient must handle values beyond its own arithmetic."
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/pull/37"
+summary = "Upstream change that typed the range header, after unchecked values had been reaching code that assumed they fit."
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = true
+
+[[setup.buckets]]
+name = "conf-range"
+
+[[setup.objects]]
+bucket = "conf-range"
+key = "ten"
+content_type = "text/plain"
+body = { utf8 = "0123456789" }
+
+[[exchanges]]
+name = "the-largest-representable-end"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-range/ten"
+headers = { "range" = "bytes=0-18446744073709551615" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 206
+connection_after = "open"
+
+[exchanges.expect.headers_present]
+"content-range" = "bytes 0-9/10"
+"content-length" = "10"
+
+[exchanges.expect.timing]
+terminate_within_ms = 5000
+
+[exchanges.expect.body]
+exact_utf8 = "0123456789"
+
+[[exchanges]]
+name = "a-value-past-the-representable-space"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-range/ten"
+headers = { "range" = "bytes=0-18446744073709551616" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+headers_absent = ["content-range"]
+connection_after = "open"
+
+[exchanges.expect.timing]
+terminate_within_ms = 5000
+
+[exchanges.expect.body]
+exact_utf8 = "0123456789"

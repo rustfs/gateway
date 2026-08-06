@@ -1,0 +1,58 @@
+# c-mpu-0018 — the part entity tag is quoted, and it is the whole response.
+#
+# Schema dimensions exercised: a header value asserted with its literal quotes, plus a body-size
+# assertion.
+
+[case]
+id = "c-mpu-0018"
+schema_version = 1
+title = "A successful part upload answers a quoted entity tag header and no body"
+rationale = """
+The value returned here is the value a completion request has to echo back, so the two renderings \
+have to agree down to the quotes. A part tag written without them is not equal to the tag the \
+client sends back, so every completion built from those tags is refused as if the parts had \
+changed — and the client has no way to see why, because both spellings look correct in isolation. \
+The body assertion is the other half: a part upload has no body, and bytes after this head \
+desynchronise a reused connection."""
+polarity = "positive"
+operation = "UploadPart"
+tags = ["multipart", "etag", "framing"]
+quirks = ["q-etag-0004", "q-mpu-etag-0028", "q-mpu-attributes-etag-0036"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UploadPart.html"
+summary = "The documented part response carries the entity tag as a header and no body."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/issues/632"
+summary = "Upstream held two conflicting entity-tag quoting rules in two files, and the two fixes contradicted each other."
+kind = "s3s-issue"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-mpu"
+
+[[setup.multipart_uploads]]
+bucket = "conf-mpu"
+key = "one-part-upload"
+capture_upload_id_as = "upload_id"
+
+[request]
+method = "PUT"
+target = "/conf-mpu/one-part-upload?partNumber=1&uploadId=${capture.upload_id}"
+body = { utf8 = "the exact bytes of part one" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[expect.headers_present]
+etag = "\"88d1a0e3f0d0eb1b06e0d9c8bd6f6d5f\""
+
+[expect.body]
+size = 0

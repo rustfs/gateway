@@ -1,0 +1,69 @@
+# c-range-0010 — the two extra elements in the unsatisfiable-range document.
+#
+# Schema dimensions exercised: byte-exact error body with redaction, which is the only way an extra
+# element's presence and position can be asserted at once.
+
+[case]
+id = "c-range-0010"
+schema_version = 1
+title = "The 416 document carries the object size and the requested range as extra elements"
+rationale = """
+The unsatisfied Content-Range gives a client the object's length; the body gives it the same fact \
+plus the range that was rejected, and clients that log failures read the body rather than the \
+headers. The elements are easy to lose, because they exist in no other error document and a \
+generic error serialiser has no reason to emit them — which is exactly why they need a byte-level \
+assertion rather than a check that the code is right. Their position is asserted too: an element \
+appended after the request id is a document some parsers stop reading before."""
+polarity = "negative"
+operation = "GetObject"
+tags = ["range", "error-shape", "wire-bytes", "xml"]
+timeout_ms = 10000
+quirks = ["q-range-0054"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/ErrorResponses.html"
+summary = "The error-response reference shows the additional elements carried by the unsatisfiable-range document."
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9110#section-15.5.17"
+summary = "The unsatisfiable-range response is defined to tell the client the current length of the selected representation."
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-range"
+
+[[setup.objects]]
+bucket = "conf-range"
+key = "ten"
+content_type = "text/plain"
+body = { utf8 = "0123456789" }
+
+[request]
+method = "GET"
+target = "/conf-range/ten"
+headers = { "range" = "bytes=20-30" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 416
+connection_after = "open"
+
+[expect.headers_present]
+"content-type" = "application/xml"
+
+[expect.timing]
+terminate_within_ms = 5000
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>InvalidRange</Code><Message>The requested range is not satisfiable</Message><RangeRequested>bytes=20-30</RangeRequested><ActualObjectSize>10</ActualObjectSize><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''
+
+[expect.body.xml]
+root = "Error"
+declaration = true
+element_order = ["Code", "Message", "RangeRequested", "ActualObjectSize", "RequestId", "HostId"]

@@ -1,0 +1,82 @@
+# c-range-0006 — the inclusive length of a copied range.
+#
+# Schema dimensions exercised: setup.multipart_uploads with a captured upload id, and a body
+# assertion on the part that was copied.
+
+[case]
+id = "c-range-0006"
+schema_version = 1
+title = "A copied range of bytes 0-9 is ten bytes long, not nine"
+rationale = """
+Both range positions are inclusive, so a span carries end minus start plus one bytes. Dropping the \
+plus one is the single most common range bug there is, and on a copy it is the most expensive: the \
+copied part is one byte short, the multipart upload completes, and the corruption is discovered \
+whenever somebody reads the object rather than when it was written. The length is asserted through \
+the bytes that arrive, because a declared length can be right while the payload is not."""
+polarity = "positive"
+operation = "UploadPartCopy"
+tags = ["range", "multipart", "wire-bytes"]
+timeout_ms = 10000
+quirks = ["q-range-0053"]
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/pull/95"
+summary = "Upstream change correcting a copied range that was one byte short of the span the client asked for."
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9110#section-14.1.2"
+summary = "Both positions of a byte range are inclusive, so the span length is the difference plus one."
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = true
+
+[[setup.buckets]]
+name = "conf-range"
+
+[[setup.objects]]
+bucket = "conf-range"
+key = "ten"
+content_type = "text/plain"
+body = { utf8 = "0123456789" }
+
+[[setup.multipart_uploads]]
+bucket = "conf-range"
+key = "copied"
+capture_upload_id_as = "upload"
+
+[[exchanges]]
+name = "copy-ten-inclusive-bytes"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-range/copied?partNumber=1&uploadId=${capture.upload}"
+headers = { "x-amz-copy-source" = "/conf-range/ten", "x-amz-copy-source-range" = "bytes=0-9" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.body]
+contains_utf8 = ["<CopyPartResult"]
+
+[[exchanges]]
+name = "the-part-carries-ten-bytes"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-range/copied?uploadId=${capture.upload}"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.body]
+contains_utf8 = ["<Size>10</Size>"]
+not_contains_utf8 = ["<Size>9</Size>"]

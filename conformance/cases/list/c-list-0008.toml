@@ -1,0 +1,59 @@
+# c-list-0008 — prefix and delimiter together select one level of the hierarchy.
+#
+# Schema dimensions exercised: two request parameters interacting, both-direction body assertions.
+
+[case]
+id = "c-list-0008"
+schema_version = 1
+title = "A prefix with a delimiter returns the direct children and the next level as common prefixes"
+rationale = """
+This pair is how every object browser renders a folder, and getting it wrong is how a browser renders a million rows. The prefix must be stripped from neither the keys nor the common prefixes — both are absolute — and the common prefixes must be the next level down, not the leaves. All three mistakes produce a well-formed response that a client renders wrongly."""
+polarity = "positive"
+operation = "ListObjectsV2"
+tags = ["list", "delimiter", "prefix"]
+timeout_ms = 15000
+quirks = ["q-flat-0019", "q-keycount-0018"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectsV2.html"
+summary = "Describes the prefix as limiting the response to keys that begin with it, and the delimiter as grouping what follows."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-list"
+
+[[setup.objects]]
+bucket = "conf-list"
+key = "a/direct.txt"
+body = { utf8 = "d" }
+
+[[setup.objects]]
+bucket = "conf-list"
+key = "a/deep/1.txt"
+body = { utf8 = "x" }
+
+[[setup.objects]]
+bucket = "conf-list"
+key = "a/deep/2.txt"
+body = { utf8 = "y" }
+
+[request]
+method = "GET"
+target = "/conf-list?list-type=2&prefix=a%2F&delimiter=%2F"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+
+[expect.body]
+contains_utf8 = ["<Key>a/direct.txt</Key>", "<CommonPrefixes><Prefix>a/deep/</Prefix></CommonPrefixes>", "<KeyCount>2</KeyCount>"]
+not_contains_utf8 = ["<Key>a/deep/1.txt</Key>", "<Key>a/deep/2.txt</Key>"]
+
+[expect.body.xml]
+root = "ListBucketResult"
+xmlns = "http://s3.amazonaws.com/doc/2006-03-01/"
+empty_elements = "paired"

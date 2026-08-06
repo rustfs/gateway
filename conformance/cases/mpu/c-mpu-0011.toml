@@ -1,0 +1,90 @@
+# c-mpu-0011 — the upload listing paginates on two cursors.
+#
+# Schema dimensions exercised: two captured cursors carried into one follow-up request.
+
+[case]
+id = "c-mpu-0011"
+schema_version = 1
+title = "An upload listing resumes from the key marker and the upload-id marker together"
+rationale = """
+One key can carry several concurrent uploads, so the key alone does not identify a position in the \
+listing. A resume that carries only the key cursor either repeats every upload sharing the boundary \
+key or skips all of them, and both failures are silent — the client sees a plausible list. \
+Lifecycle tooling that enumerates uploads to abort the abandoned ones then leaves storage allocated \
+forever, or aborts an upload that is still in progress."""
+polarity = "positive"
+operation = "ListMultipartUploads"
+tags = ["multipart", "pagination", "xml-shape"]
+quirks = ["q-mpu-upload-0032", "q-mpu-marker-0040"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListMultipartUploads.html"
+summary = "Documents the pair of cursors a truncated upload listing returns and how the next request supplies them."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = true
+
+[[setup.buckets]]
+name = "conf-mpu"
+
+[[setup.multipart_uploads]]
+bucket = "conf-mpu"
+key = "shared-key"
+
+[[setup.multipart_uploads]]
+bucket = "conf-mpu"
+key = "shared-key"
+
+[[setup.multipart_uploads]]
+bucket = "conf-mpu"
+key = "zzz-later-key"
+
+[[exchanges]]
+name = "first-page"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-mpu?uploads&max-uploads=1"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.capture]
+key_marker = { xml_text = "NextKeyMarker" }
+upload_id_marker = { xml_text = "NextUploadIdMarker" }
+
+[exchanges.expect.body]
+redact = ["UploadId", "NextUploadIdMarker", "Initiated"]
+contains_utf8 = [
+  "<MaxUploads>1</MaxUploads>",
+  "<IsTruncated>true</IsTruncated>",
+  "<Upload>",
+]
+not_contains_utf8 = ["<Uploads>"]
+
+[exchanges.expect.body.xml]
+root = "ListMultipartUploadsResult"
+
+[[exchanges]]
+name = "second-page"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-mpu?uploads&max-uploads=1&key-marker=${capture.key_marker}&upload-id-marker=${capture.upload_id_marker}"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.body]
+redact = ["UploadId", "NextUploadIdMarker", "Initiated"]
+contains_utf8 = ["<KeyMarker>shared-key</KeyMarker>", "<Upload>"]

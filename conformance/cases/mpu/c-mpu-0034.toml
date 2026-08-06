@@ -1,0 +1,59 @@
+# c-mpu-0034 — a well-formed body with no part entries.
+
+[case]
+id = "c-mpu-0034"
+schema_version = 1
+title = "A completion whose body parses but names no part is refused"
+rationale = """
+This body is valid XML with the right root, so every check short of looking at the part list lets it \
+through — which is exactly the path that reaches the empty-digest defect from a request that looks \
+entirely well formed. It is also what an SDK produces when the caller's part collection was empty, \
+so it is a routine client bug rather than a hostile input, and the answer has to name the part list \
+rather than the document."""
+polarity = "negative"
+operation = "CompleteMultipartUpload"
+tags = ["multipart", "xml-shape", "error-shape"]
+quirks = ["q-mpu-etag-0028", "q-mpu-request-root-0030"]
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/pull/556"
+summary = "The upstream fix refuses a completion that names no part rather than digesting the empty list."
+kind = "s3s-pr"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-mpu"
+
+[[setup.multipart_uploads]]
+bucket = "conf-mpu"
+key = "well-formed-but-empty"
+capture_upload_id_as = "upload_id"
+
+[[setup.multipart_uploads.parts]]
+part_number = 1
+body = { size = 1024 }
+
+[request]
+method = "POST"
+target = "/conf-mpu/well-formed-but-empty?uploadId=${capture.upload_id}"
+headers = { "content-type" = "application/xml" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[request.body]
+utf8 = "<CompleteMultipartUpload xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\"></CompleteMultipartUpload>"
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+headers_absent = ["etag", "x-amz-version-id"]
+
+[expect.error]
+code = "InvalidPart"
+request_id_present = true
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+not_contains_utf8 = ["<CompleteMultipartUploadResult"]

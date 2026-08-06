@@ -1,0 +1,48 @@
+# c-list-0022 — an empty value is an empty element here, not an absent one.
+#
+# Schema dimensions exercised: golden byte comparison proving paired empty elements are present.
+
+[case]
+id = "c-list-0022"
+schema_version = 1
+title = "The first listing version writes Prefix and Marker as empty elements when the request supplied neither"
+rationale = """
+Absent and empty are different values on this wire, and clients written against the documented response read the empty elements positionally. Dropping them, or writing them self-closing, both parse and both break readers that index children. Only a byte comparison can tell the three apart, which is why this case is a golden and not a structural assertion."""
+polarity = "negative"
+operation = "ListObjects"
+tags = ["list", "empty-elements", "wire-bytes", "xml"]
+timeout_ms = 15000
+quirks = ["q-empty-0063", "q-order-0066"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjects.html"
+summary = "The documented response syntax carries both elements unconditionally."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/issues/229"
+summary = "Upstream treated an empty element and an absent element as different values in the wrong direction."
+kind = "s3s-issue"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-list-empty"
+
+[request]
+method = "GET"
+target = "/conf-list-empty"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+
+[expect.body]
+golden = "goldens/c-list-0022.xml"
+
+[expect.body.xml]
+root = "ListBucketResult"
+xmlns = "http://s3.amazonaws.com/doc/2006-03-01/"
+empty_elements = "paired"

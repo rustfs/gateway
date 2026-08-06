@@ -20,30 +20,37 @@
 // disagree with it. Data only: the including crate defines the row types.
 
 pub static ERROR_CODE_OPERATIONS: &[(&str, &[&str])] = &[
-    ("AccessDenied", &["DeleteObject", "DeleteObjects", "GetBucketLocation", "GetObject", "HeadObject", "ListObjectsV2", "PutObject"]),
-    ("BadDigest", &["PutObject"]),
-    ("ConditionalRequestConflict", &["PutObject"]),
+    ("AccessDenied", &["AbortMultipartUpload", "CompleteMultipartUpload", "CreateMultipartUpload", "DeleteObject", "DeleteObjects", "GetBucketLocation", "GetObject", "HeadObject", "ListBuckets", "ListMultipartUploads", "ListObjectVersions", "ListObjects", "ListObjectsV2", "ListParts", "PutObject", "UploadPart"]),
+    ("BadDigest", &["PutObject", "UploadPart"]),
+    ("ConditionalRequestConflict", &["CompleteMultipartUpload", "PutObject"]),
     ("EncryptionTypeMismatch", &["PutObject"]),
-    ("EntityTooLarge", &["PutObject"]),
-    ("IncompleteBody", &["PutObject"]),
-    ("InvalidArgument", &["DeleteObject", "DeleteObjects", "GetObject", "ListObjectsV2", "PutObject"]),
-    ("InvalidDigest", &["PutObject"]),
+    ("EntityTooLarge", &["PutObject", "UploadPart"]),
+    ("EntityTooSmall", &["CompleteMultipartUpload"]),
+    ("IncompleteBody", &["PutObject", "UploadPart"]),
+    ("InvalidArgument", &["AbortMultipartUpload", "CompleteMultipartUpload", "CreateMultipartUpload", "DeleteObject", "DeleteObjects", "GetObject", "ListMultipartUploads", "ListObjectVersions", "ListObjects", "ListObjectsV2", "ListParts", "PutObject", "UploadPart"]),
+    ("InvalidDigest", &["PutObject", "UploadPart"]),
     ("InvalidObjectState", &["GetObject"]),
+    ("InvalidPart", &["CompleteMultipartUpload"]),
+    ("InvalidPartOrder", &["CompleteMultipartUpload"]),
     ("InvalidRange", &["GetObject"]),
-    ("InvalidRequest", &["DeleteObjects", "PutObject"]),
+    ("InvalidRequest", &["CompleteMultipartUpload", "CreateMultipartUpload", "DeleteObjects", "PutObject"]),
+    ("InvalidStorageClass", &["CreateMultipartUpload"]),
     ("InvalidWriteOffset", &["PutObject"]),
-    ("MalformedXML", &["DeleteObjects"]),
-    ("MissingContentLength", &["PutObject"]),
-    ("NoSuchBucket", &["DeleteObject", "DeleteObjects", "GetBucketLocation", "GetObject", "HeadObject", "ListObjectsV2", "PutObject"]),
+    ("MalformedXML", &["CompleteMultipartUpload", "DeleteObjects"]),
+    ("MissingContentLength", &["PutObject", "UploadPart"]),
+    ("NoSuchBucket", &["AbortMultipartUpload", "CompleteMultipartUpload", "CreateMultipartUpload", "DeleteObject", "DeleteObjects", "GetBucketLocation", "GetObject", "HeadObject", "ListMultipartUploads", "ListObjectVersions", "ListObjects", "ListObjectsV2", "ListParts", "PutObject", "UploadPart"]),
     ("NoSuchKey", &["GetObject", "HeadObject"]),
+    ("NoSuchUpload", &["AbortMultipartUpload", "CompleteMultipartUpload", "ListParts", "UploadPart"]),
     ("NotFound", &["HeadObject"]),
     ("NotModified", &["GetObject", "HeadObject"]),
-    ("PermanentRedirect", &["GetBucketLocation", "ListObjectsV2"]),
-    ("PreconditionFailed", &["GetObject", "HeadObject", "PutObject"]),
+    ("PermanentRedirect", &["GetBucketLocation", "ListMultipartUploads", "ListObjectVersions", "ListObjects", "ListObjectsV2"]),
+    ("PreconditionFailed", &["CompleteMultipartUpload", "GetObject", "HeadObject", "PutObject"]),
     ("TooManyParts", &["PutObject"]),
-    ("XAmzContentChecksumMismatch", &["PutObject"]),
+    ("XAmzContentChecksumMismatch", &["PutObject", "UploadPart"]),
 ];
 
 pub static NOT_CONFIGURED_CODES: &[(&str, &str)] = &[];
 
-pub static ERROR_AFTER_200: &[&str] = &[];
+pub static ERROR_AFTER_200: &[&str] = &[
+    "CompleteMultipartUpload",
+];

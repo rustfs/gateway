@@ -380,7 +380,7 @@ type = "Structure(Owner)"
 required = false
 hot = false
 omit_when = "RequestField(FetchOwner==false)"
-quirks = ["q-owner-0017"]
+quirks = ["q-owner-0017", "q-owner-0065"]
 
 [[shape.Object.field]]
 name = "RestoreStatus"

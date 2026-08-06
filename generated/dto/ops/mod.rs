@@ -24,10 +24,19 @@
 pub mod enums;
 pub mod shapes;
 
+pub mod abort_multipart_upload;
+pub mod complete_multipart_upload;
+pub mod create_multipart_upload;
 pub mod delete_object;
 pub mod delete_objects;
 pub mod get_bucket_location;
 pub mod get_object;
 pub mod head_object;
+pub mod list_buckets;
+pub mod list_multipart_uploads;
+pub mod list_object_versions;
+pub mod list_objects;
 pub mod list_objects_v2;
+pub mod list_parts;
 pub mod put_object;
+pub mod upload_part;

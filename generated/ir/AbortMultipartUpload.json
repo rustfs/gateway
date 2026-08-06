@@ -1,0 +1,165 @@
+{
+  "ir_version": "1",
+  "operation": "AbortMultipartUpload",
+  "http": {
+            "method": "DELETE",
+            "target": "Object",
+            "precedence": 430,
+            "predicates": [
+                            { "kind": "Method", "method": "DELETE" },
+                            { "kind": "Target", "target": "Object" },
+                            { "kind": "QueryPresent", "key": "uploadId" }
+                          ],
+            "success_status": 204,
+            "alt_success_statuses": [],
+            "path_shape": "/{Bucket}/{Key+}"
+          },
+  "auth": { "requirement": "Required", "action": "s3:AbortMultipartUpload", "presigned_allowed": true, "service": "s3" },
+  "payload": {
+               "request": { "kind": "None", "buffering": "None", "max_bytes": null },
+               "response": { "kind": "None", "buffering": "None", "max_bytes": null }
+             },
+  "checksum": { "http_checksum_required": false, "request_algorithms": [], "response_algorithms": [] },
+  "input": {
+             "fields": [
+                         {
+                           "name": "Bucket",
+                           "wire_name": "Bucket",
+                           "required": true,
+                           "binding": { "kind": "UriLabel", "greedy": false },
+                           "type": { "kind": "BucketName" },
+                           "hot": true,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "Key",
+                           "wire_name": "Key",
+                           "required": true,
+                           "binding": { "kind": "UriLabel", "greedy": true },
+                           "type": { "kind": "ObjectKey" },
+                           "hot": true,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "UploadId",
+                           "wire_name": "uploadId",
+                           "required": true,
+                           "binding": { "kind": "Query" },
+                           "type": { "kind": "String" },
+                           "hot": true,
+                           "quirk_refs": ["q-mpu-abort-0035", "q-mpu-upload-id-0037"]
+                         },
+                         {
+                           "name": "RequestPayer",
+                           "wire_name": "x-amz-request-payer",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "StringEnum", "values": ["requester"] },
+                           "hot": false,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "ExpectedBucketOwner",
+                           "wire_name": "x-amz-expected-bucket-owner",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "String" },
+                           "hot": false,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "IfMatchInitiatedTime",
+                           "wire_name": "x-amz-if-match-initiated-time",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "Timestamp", "format": "HttpDate" },
+                           "hot": false,
+                           "quirk_refs": ["q-timestamp-0011"]
+                         }
+                       ]
+           },
+  "output": {
+              "fields": [
+                          {
+                            "name": "RequestCharged",
+                            "wire_name": "x-amz-request-charged",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": { "kind": "StringEnum", "values": ["requester"] },
+                            "hot": false,
+                            "quirk_refs": []
+                          }
+                        ]
+            },
+  "shapes": {},
+  "xml": {
+           "request_root": null,
+           "request_root_aliases": [],
+           "response_root": null,
+           "xmlns": "emit",
+           "unwrapped_output": false,
+           "element_order": [],
+           "empty_value_policy": {},
+           "url_encoded_fields": [],
+           "attributes": [],
+           "body_literal": false
+         },
+  "errors": {
+              "not_configured": null,
+              "allows_error_after_200": false,
+              "codes": ["NoSuchBucket", "NoSuchUpload", "AccessDenied", "InvalidArgument"]
+            },
+  "derived_resources": [],
+  "head_mirrors": null,
+  "quirk_refs": ["q-mpu-abort-0035", "q-mpu-upload-id-0037"],
+  "quirks": [
+              {
+                "id": "q-timestamp-0011",
+                "kind": "timestamp_format",
+                "target": "PutObject.ObjectLockRetainUntilDate",
+                "summary": "This is the only request header carrying the extended date time format instead of the HTTP date format.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObject.html",
+                                "summary": "Specifies the retain until date header in the extended date time format while every other date header uses the HTTP date format."
+                              }
+                            ],
+                "cases": ["c-objectlock-0001"]
+              },
+              {
+                "id": "q-mpu-abort-0035",
+                "kind": "non_idempotent_delete",
+                "target": "AbortMultipartUpload",
+                "summary": "Aborting succeeds with an empty no-content response and, unlike deleting an object, is not idempotent: an upload id that is unknown or already aborted answers the dedicated not-found code.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_AbortMultipartUpload.html",
+                                "summary": "The documented success response carries no content, and an unknown upload id is documented as a dedicated error rather than a success."
+                              }
+                            ],
+                "cases": ["c-mpu-0014", "c-mpu-0032"]
+              },
+              {
+                "id": "q-mpu-upload-id-0037",
+                "kind": "capability_token",
+                "target": "UploadPart.UploadId",
+                "summary": "An upload id is a server-minted capability, not a name the caller chose: it is resolved against the bucket and key of the request before anything is written, an unknown id answers the not-found code, and one belonging to another resource is refused rather than honoured.",
+                "evidence": [
+                              {
+                                "kind": "s3s-issue",
+                                "ref": "https://github.com/s3s-project/s3s/issues/51",
+                                "summary": "Upstream accepted any upload id without checking what it belonged to, so knowing an id was enough to act on somebody else's upload."
+                              },
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UploadPart.html",
+                                "summary": "The request is documented as naming a bucket, a key and an upload id together, and the id is only meaningful for that pair."
+                              }
+                            ],
+                "cases": ["c-mpu-0028", "c-mpu-0029", "c-mpu-0030", "c-mpu-0031"]
+              }
+            ],
+  "ext_points": []
+}

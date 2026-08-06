@@ -1,0 +1,88 @@
+# c-cond-0023 — the failure document, byte for byte, and its absence on a HEAD.
+#
+# Schema dimensions exercised: byte-exact error body with redaction, two exchanges contrasting the
+# same failure under two methods.
+
+[case]
+id = "c-cond-0023"
+schema_version = 1
+title = "A precondition failure is an unnamespaced Error document, and a HEAD carries none of it"
+rationale = """
+Error bodies are the part of the protocol clients parse most and implementations assert least. S3 \
+error documents carry no XML namespace, and a serialiser that adds one — which most XML libraries \
+do by default — produces a document that strict parsers reject with a message about the wrong \
+element rather than about the failure that actually occurred. The HEAD half is the counterweight: \
+the same failure must still compute its code, because the code travels in the status line, but the \
+body has to be dropped. Only a byte-level assertion sees either of these."""
+polarity = "negative"
+operation = "GetObject"
+tags = ["conditional", "preconditions", "error-shape", "wire-bytes", "xml"]
+timeout_ms = 10000
+quirks = ["q-cond-0046"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/ErrorResponses.html"
+summary = "The error-response reference shows the document with an unnamespaced root element."
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9110#section-9.3.2"
+summary = "A response to HEAD carries the same header fields as the equivalent GET and no content."
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = true
+
+[[setup.buckets]]
+name = "conf-cond"
+
+[[setup.objects]]
+bucket = "conf-cond"
+key = "shape/412"
+body = { utf8 = "hello" }
+
+[[exchanges]]
+name = "the-error-document"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-cond/shape/412"
+headers = { "if-match" = "\"0000000000000000000000000000dead\"" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 412
+connection_after = "open"
+
+[exchanges.expect.error]
+code = "PreconditionFailed"
+request_id_present = true
+
+[exchanges.expect.headers_present]
+"content-type" = "application/xml"
+
+[exchanges.expect.body]
+redact = ["RequestId", "HostId"]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>PreconditionFailed</Code><Message>At least one of the pre-conditions you specified did not hold</Message><Condition>If-Match</Condition><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''
+not_contains_utf8 = ["xmlns"]
+
+[[exchanges]]
+name = "the-same-failure-under-head-has-no-body"
+
+[exchanges.request]
+method = "HEAD"
+target = "/conf-cond/shape/412"
+headers = { "if-match" = "\"0000000000000000000000000000dead\"" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 412
+connection_after = "open"
+
+[exchanges.expect.body]
+size = 0

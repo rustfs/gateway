@@ -103,11 +103,15 @@ fn string_enum(def: &EnumDef) -> String {
             naming::const_name(value)
         );
     }
-    let values = super::slice_literal(&def.values.iter().map(|v| format!("\"{v}\"")).collect::<Vec<_>>(), 4);
+    let values = super::slice_literal(
+        &def.values.iter().map(|v| format!("\"{v}\"")).collect::<Vec<_>>(),
+        4,
+        "    pub const VALUES: &'static [&'static str] = ",
+    );
     let _ = write!(
         out,
         "\n    /// Every value the pinned model declares, in model order.\n    \
-             pub const VALUES: &'static [&'static str] = {values};\n\n    \
+             pub const VALUES: &'static [&'static str] ={values};\n\n    \
              /// Wraps a value this build has no constant for.\n    \
              #[must_use]\n    \
              pub fn custom(value: impl Into<Cow<'static, str>>) -> Self {{\n        Self(value.into())\n    }}\n\n    \

@@ -1,0 +1,59 @@
+# c-cond-0004 — the copy-source condition accepts the spelling real clients send.
+#
+# Schema dimensions exercised: single-exchange form, a header whose tolerance is the assertion.
+
+[case]
+id = "c-cond-0004"
+schema_version = 1
+title = "An unquoted copy-source entity tag is evaluated rather than rejected as malformed"
+rationale = """
+The copy-source conditions are where the unquoted spelling shows up most, because the value the \
+client has in hand usually came out of a listing body or a database column rather than straight \
+off a response header. Refusing it turns a working conditional copy into an argument error, and \
+the client has no way to tell from the error that the quotes were the problem. Accepting the bare \
+form costs nothing: this implementation renders entity tags rather than echoing them."""
+polarity = "positive"
+operation = "CopyObject"
+tags = ["conditional", "preconditions", "etag"]
+timeout_ms = 10000
+quirks = ["q-cond-0046"]
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/issues/448"
+summary = "Clients sending an unquoted conditional entity tag were answered with an invalid-argument error instead of having it evaluated."
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/pull/577"
+summary = "Upstream change that added evaluation of the four copy-source conditional headers."
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-cond"
+
+[[setup.objects]]
+bucket = "conf-cond"
+key = "copy/source"
+body = { utf8 = "hello" }
+
+[request]
+method = "PUT"
+target = "/conf-cond/copy/target"
+headers = { "x-amz-copy-source" = "/conf-cond/copy/source", "x-amz-copy-source-if-match" = "5d41402abc4b2a76b9719d911017c592" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[expect.headers_present]
+"content-type" = "application/xml"
+
+[expect.timing]
+terminate_within_ms = 5000
+
+[expect.body]
+contains_utf8 = ["<CopyObjectResult", "5d41402abc4b2a76b9719d911017c592"]
+not_contains_utf8 = ["InvalidArgument", "PreconditionFailed"]

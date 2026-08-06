@@ -127,6 +127,15 @@ fn lower_one(model: &Model, overlay: &Overlay, name: &str) -> Result<OperationIr
             None => predicates.push(Predicate::QueryPresent(key.clone())),
         }
     }
+    for key in &ov.query_present {
+        if route.query.iter().any(|(existing, _)| existing == key) {
+            return Err(Error::ir(
+                name,
+                format!("`query_present` repeats `{key}`, which the model's uri already pins"),
+            ));
+        }
+        predicates.push(Predicate::QueryPresent(key.clone()));
+    }
     for key in &ov.query_absent {
         predicates.push(Predicate::QueryAbsent(key.clone()));
     }

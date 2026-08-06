@@ -1,0 +1,108 @@
+# c-mpu-0002 — the entity tag of a three-part upload.
+#
+# Schema dimensions exercised: multipart fixtures with captured part digests, multi-exchange form
+# with connection reuse, byte-level assertion on the entity-tag suffix.
+
+[case]
+id = "c-mpu-0002"
+schema_version = 1
+title = "A completed three-part upload answers an entity tag carrying the part count"
+rationale = """
+The entity tag of a multipart object is a digest over the concatenated raw part digests followed by \
+a hyphen and the number of parts. An implementation that digests the assembled object instead \
+produces a value of the right shape and the wrong content, and every client that verifies integrity \
+against it concludes the object is corrupt and re-uploads. The suffix is what makes the two forms \
+distinguishable on the wire at all, so it is asserted on both the completion result and the \
+subsequent head, which is where a client actually reads it."""
+polarity = "positive"
+operation = "CompleteMultipartUpload"
+tags = ["multipart", "etag", "integrity"]
+quirks = ["q-mpu-etag-0028", "q-mpu-attributes-etag-0036"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/checking-object-integrity.html"
+summary = "Describes the multipart entity tag as a digest of the part digests carrying a part-count suffix."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/issues/550"
+summary = "Upstream digested the assembled object, so integrity-checking clients read every multipart object as corrupt."
+kind = "s3s-issue"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = true
+
+[[setup.buckets]]
+name = "conf-mpu"
+
+[[setup.multipart_uploads]]
+bucket = "conf-mpu"
+key = "three-parts"
+capture_upload_id_as = "upload_id"
+
+[[setup.multipart_uploads.parts]]
+part_number = 1
+body = { size = 5242880 }
+capture_etag_as = "part1_etag"
+
+[[setup.multipart_uploads.parts]]
+part_number = 2
+body = { size = 5242880 }
+capture_etag_as = "part2_etag"
+
+[[setup.multipart_uploads.parts]]
+part_number = 3
+body = { size = 17 }
+capture_etag_as = "part3_etag"
+
+[[exchanges]]
+name = "complete"
+
+[exchanges.request]
+method = "POST"
+target = "/conf-mpu/three-parts?uploadId=${capture.upload_id}"
+headers = { "content-type" = "application/xml" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.request.body]
+utf8 = '''
+<CompleteMultipartUpload xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Part><PartNumber>1</PartNumber><ETag>${capture.part1_etag}</ETag></Part><Part><PartNumber>2</PartNumber><ETag>${capture.part2_etag}</ETag></Part><Part><PartNumber>3</PartNumber><ETag>${capture.part3_etag}</ETag></Part></CompleteMultipartUpload>'''
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.capture]
+object_etag = { xml_text = "ETag" }
+
+[exchanges.expect.body]
+redact = ["Location", "UploadId"]
+contains_utf8 = ["<CompleteMultipartUploadResult", "-3\"</ETag>"]
+not_contains_utf8 = ["<Error>"]
+
+[exchanges.expect.body.xml]
+root = "CompleteMultipartUploadResult"
+element_order = ["Location", "Bucket", "Key", "ETag"]
+
+[[exchanges]]
+name = "head"
+
+[exchanges.request]
+method = "HEAD"
+target = "/conf-mpu/three-parts"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.headers_present]
+etag = "*"
+
+[exchanges.expect.body]
+size = 0

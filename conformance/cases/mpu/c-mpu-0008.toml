@@ -1,0 +1,99 @@
+# c-mpu-0008 — the composite checksum.
+#
+# Schema dimensions exercised: per-part checksum headers, and a response value whose form — not
+# whose bytes — is the assertion.
+
+[case]
+id = "c-mpu-0008"
+schema_version = 1
+title = "Parts carrying a checksum complete into a composite checksum with a part count"
+rationale = """
+A checksum over parts follows the same construction as the entity tag: the raw per-part digests are \
+concatenated, digested again, and the result carries the part count. It is a different value from a \
+checksum of the object bytes, and the checksum type is what tells a client which of the two it is \
+holding. An implementation that answers a whole-object checksum here, or omits the type, makes a \
+verifying client fail every download of a multipart object and gives it no way to tell that the \
+value it compared against was never comparable."""
+polarity = "positive"
+operation = "CompleteMultipartUpload"
+tags = ["multipart", "checksum", "integrity"]
+quirks = ["q-mpu-etag-0028", "q-checksum-0006"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/checking-object-integrity.html"
+summary = "Describes the composite construction and the type that distinguishes it from a full-object checksum."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/pull/374"
+summary = "Upstream needed end-to-end coverage of the per-part and the composite checksum before the two agreed."
+kind = "s3s-pr"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = true
+
+[[setup.buckets]]
+name = "conf-mpu"
+
+[[exchanges]]
+name = "initiate"
+
+[exchanges.request]
+method = "POST"
+target = "/conf-mpu/checksummed?uploads"
+headers = { "x-amz-checksum-algorithm" = "CRC32" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.capture]
+upload_id = { xml_text = "UploadId" }
+
+[[exchanges]]
+name = "part-one"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-mpu/checksummed?partNumber=1&uploadId=${capture.upload_id}"
+body = { utf8 = "part one payload" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.headers_present]
+"x-amz-checksum-crc32" = "*"
+
+[exchanges.expect.capture]
+part1_etag = { header = "etag" }
+part1_crc32 = { header = "x-amz-checksum-crc32" }
+
+[[exchanges]]
+name = "complete"
+
+[exchanges.request]
+method = "POST"
+target = "/conf-mpu/checksummed?uploadId=${capture.upload_id}"
+headers = { "content-type" = "application/xml" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.request.body]
+utf8 = '''
+<CompleteMultipartUpload xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Part><PartNumber>1</PartNumber><ETag>${capture.part1_etag}</ETag><ChecksumCRC32>${capture.part1_crc32}</ChecksumCRC32></Part></CompleteMultipartUpload>'''
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.body]
+redact = ["Location", "ETag"]
+contains_utf8 = ["-1</ChecksumCRC32>", "<ChecksumType>COMPOSITE</ChecksumType>"]

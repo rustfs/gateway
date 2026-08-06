@@ -1,0 +1,107 @@
+# c-cond-0024 — a failed condition must not cost the client its upload.
+#
+# Schema dimensions exercised: setup.multipart_uploads with a captured upload id, interpolation
+# into a later request, three exchanges over one connection.
+
+[case]
+id = "c-cond-0024"
+schema_version = 1
+title = "A conditional completion that fails leaves the multipart upload usable"
+rationale = """
+Completion is the one point in a multipart upload where a failure is expensive: the parts are \
+already on the server, and an implementation that discards the upload when the condition fails \
+makes the client re-send every byte. The failure is invisible from the failing response — it looks \
+like an ordinary 412 — and only shows up on the retry, as a missing-upload error for an upload the \
+client is holding a perfectly good id for. The third exchange retries without the condition, which \
+is the only assertion that can see it."""
+polarity = "negative"
+operation = "CompleteMultipartUpload"
+tags = ["conditional", "preconditions", "multipart", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-cond-0041", "q-cond-0048"]
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/pull/560"
+summary = "Upstream change recording that a failed condition on completion must not consume the upload it was checking."
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CompleteMultipartUpload.html"
+summary = "Documents the conditional headers accepted on completion and the errors that leave the upload intact."
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = true
+
+[[setup.buckets]]
+name = "conf-cond"
+
+[[setup.objects]]
+bucket = "conf-cond"
+key = "mpu/taken"
+body = { utf8 = "original" }
+
+[[setup.multipart_uploads]]
+bucket = "conf-cond"
+key = "mpu/taken"
+capture_upload_id_as = "upload"
+
+[[setup.multipart_uploads.parts]]
+part_number = 1
+body = { size = 5242880 }
+capture_etag_as = "part_one"
+
+[[exchanges]]
+name = "the-conditional-completion-fails"
+
+[exchanges.request]
+method = "POST"
+target = "/conf-cond/mpu/taken?uploadId=${capture.upload}"
+headers = { "if-none-match" = "*", "content-type" = "application/xml" }
+body = { utf8 = "<CompleteMultipartUpload><Part><PartNumber>1</PartNumber><ETag>${capture.part_one}</ETag></Part></CompleteMultipartUpload>" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 412
+headers_absent = ["etag"]
+connection_after = "open"
+
+[exchanges.expect.error]
+code = "PreconditionFailed"
+request_id_present = true
+
+[[exchanges]]
+name = "the-upload-still-lists-its-part"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-cond/mpu/taken?uploadId=${capture.upload}"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.body]
+contains_utf8 = ["<PartNumber>1</PartNumber>"]
+
+[[exchanges]]
+name = "and-completes-once-the-condition-is-dropped"
+
+[exchanges.request]
+method = "POST"
+target = "/conf-cond/mpu/taken?uploadId=${capture.upload}"
+headers = { "content-type" = "application/xml" }
+body = { utf8 = "<CompleteMultipartUpload><Part><PartNumber>1</PartNumber><ETag>${capture.part_one}</ETag></Part></CompleteMultipartUpload>" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.body]
+contains_utf8 = ["<CompleteMultipartUploadResult"]

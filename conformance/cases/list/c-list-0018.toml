@@ -1,0 +1,56 @@
+# c-list-0018 — sibling order is a wire contract, pinned to bytes.
+#
+# Schema dimensions exercised: golden byte comparison of a whole body, element order, paired empty elements.
+
+[case]
+id = "c-list-0018"
+schema_version = 1
+title = "The first listing version emits its elements in the AWS order, with the bucket name before the entries"
+rationale = """
+Element order is not something XML requires and is something strict clients enforce, so it is exactly the kind of contract that drifts without anybody noticing until a specific SDK breaks. A structural assertion cannot catch a reordering; only bytes can. The golden also pins the paired empty elements and the namespace, which are two more things a refactor silently changes."""
+polarity = "positive"
+operation = "ListObjects"
+tags = ["list", "wire-bytes", "xml"]
+timeout_ms = 15000
+quirks = ["q-order-0066", "q-empty-0063", "q-storageclass-0022"]
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/pull/480"
+summary = "Upstream emitted the listing elements in model order and broke a strict client until the order was corrected."
+kind = "s3s-pr"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjects.html"
+summary = "The documented response syntax fixes the sibling order this golden pins."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-list-order"
+
+[[setup.objects]]
+bucket = "conf-list-order"
+key = "only.txt"
+body = { utf8 = "one" }
+
+[request]
+method = "GET"
+target = "/conf-list-order"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+headers_present = { "content-type" = "application/xml" }
+
+[expect.body]
+golden = "goldens/c-list-0018.xml"
+redact = ["ID", "DisplayName", "ETag"]
+
+[expect.body.xml]
+root = "ListBucketResult"
+xmlns = "http://s3.amazonaws.com/doc/2006-03-01/"
+empty_elements = "paired"
+element_order = ["Name", "Prefix", "Marker", "MaxKeys", "IsTruncated", "Contents"]

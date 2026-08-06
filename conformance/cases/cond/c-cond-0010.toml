@@ -1,0 +1,78 @@
+# c-cond-0010 — the second boundary, decided once and replayable.
+#
+# Schema dimensions exercised: clock injection as the mechanism that makes the case exist at all,
+# two exchanges over one connection contrasting the two date conditions at the same instant.
+
+[case]
+id = "c-cond-0010"
+schema_version = 1
+title = "Both date conditions are decided the same way when the instants are equal to the second"
+rationale = """
+HTTP dates have one-second resolution and object modification times do not, so equality at the \
+second is not an edge case a client has to work to reach — it is what happens whenever a client \
+echoes back the Last-Modified it was just given. The two conditions are complementary at that \
+instant: not-modified-since an equal date holds, and unmodified-since an equal date also holds. An \
+implementation that types one comparison as strict and the other as inclusive is wrong for exactly \
+one second per object, which is the hardest kind of bug to reproduce without an injected clock."""
+polarity = "positive"
+operation = "GetObject"
+tags = ["conditional", "preconditions", "timing"]
+timeout_ms = 10000
+quirks = ["q-cond-0050"]
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9110#section-13.1.3"
+summary = "The not-modified answer is required when the last modification is earlier than or equal to the supplied date."
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9110#section-13.1.4"
+summary = "The unmodified-since condition holds when the last modification is earlier than or equal to the supplied date."
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = true
+
+[[setup.buckets]]
+name = "conf-cond"
+
+[[setup.objects]]
+bucket = "conf-cond"
+key = "dates/boundary"
+body = { utf8 = "hello" }
+
+[[exchanges]]
+name = "not-modified-since-the-same-second"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-cond/dates/boundary"
+headers = { "if-modified-since" = "Fri, 02 Jan 2026 03:04:05 GMT" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 304
+headers_absent = ["content-length"]
+connection_after = "open"
+
+[exchanges.expect.headers_present]
+"etag" = "\"5d41402abc4b2a76b9719d911017c592\""
+
+[[exchanges]]
+name = "unmodified-since-the-same-second"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-cond/dates/boundary"
+headers = { "if-unmodified-since" = "Fri, 02 Jan 2026 03:04:05 GMT" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.body]
+exact_utf8 = "hello"

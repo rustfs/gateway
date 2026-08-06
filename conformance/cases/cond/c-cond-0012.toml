@@ -1,0 +1,60 @@
+# c-cond-0012 — If-Match against nothing.
+#
+# Schema dimensions exercised: setup.objects.absent as the precondition, the choice between two
+# plausible error codes pinned to one.
+
+[case]
+id = "c-cond-0012"
+schema_version = 1
+title = "A write whose If-Match names a key that does not exist fails the condition, not the lookup"
+rationale = """
+There are two defensible answers here and only one correct one: an implementation that looks the \
+key up first reports that it is missing, and an implementation that evaluates the condition first \
+reports that the condition failed. The difference is not cosmetic — a client using the entity tag \
+as a lock reads a missing-key error as "create it" and a precondition failure as "somebody else \
+owns it", and those lead to opposite actions. With no representation there is nothing to match, so \
+the condition is false."""
+polarity = "negative"
+operation = "PutObject"
+tags = ["conditional", "preconditions", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-cond-0046"]
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9110#section-13.1.1"
+summary = "If-Match fails whenever no representation of the target exists, whatever value it carries."
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/conditional-writes.html"
+summary = "AWS documents the entity-tag guard on a write as producing a precondition failure rather than a missing-key error."
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-cond"
+
+[[setup.objects]]
+bucket = "conf-cond"
+key = "cas/nothing"
+absent = true
+
+[request]
+method = "PUT"
+target = "/conf-cond/cas/nothing"
+headers = { "if-match" = "\"5d41402abc4b2a76b9719d911017c592\"", "content-type" = "text/plain" }
+body = { utf8 = "hello" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 412
+headers_absent = ["etag", "x-amz-version-id"]
+connection_after = "open"
+
+[expect.error]
+code = "PreconditionFailed"
+request_id_present = true
+
+[expect.timing]
+terminate_within_ms = 5000

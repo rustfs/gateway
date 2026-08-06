@@ -23,7 +23,7 @@
 
 use std::borrow::Cow;
 
-/// The `EncodingType` string enumeration. Bound by: ListObjectsV2.
+/// The `EncodingType` string enumeration. Bound by: ListMultipartUploads, ListObjectVersions, ListObjects, ListObjectsV2.
 ///
 /// An open set: compare against the associated constants, and build a value the pinned
 /// model does not declare with [`EncodingType::custom`]. Adding a constant is a minor version

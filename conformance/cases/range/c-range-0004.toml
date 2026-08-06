@@ -1,0 +1,60 @@
+# c-range-0004 — the open-ended form.
+#
+# Schema dimensions exercised: byte-exact body and the derived content length.
+
+[case]
+id = "c-range-0004"
+schema_version = 1
+title = "An open-ended range runs from its first byte to the end of the object"
+rationale = """
+This is the form a resuming client sends when it does not know the object's length, which is most \
+of the time. An implementation that treats the missing end as zero produces an empty response with \
+a 206, and the client writes nothing and reports success — a truncated file with no error anywhere \
+in the chain. The length is asserted next to the bytes because those two failures look identical \
+until one of them is pinned."""
+polarity = "positive"
+operation = "GetObject"
+tags = ["range", "read", "wire-bytes"]
+timeout_ms = 10000
+quirks = ["q-range-0053"]
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/pull/95"
+summary = "Upstream change adding the open-ended form alongside the suffix form."
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9110#section-14.1.2"
+summary = "A range with no last position runs to the final byte of the representation."
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-range"
+
+[[setup.objects]]
+bucket = "conf-range"
+key = "ten"
+content_type = "text/plain"
+body = { utf8 = "0123456789" }
+
+[request]
+method = "GET"
+target = "/conf-range/ten"
+headers = { "range" = "bytes=3-" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 206
+connection_after = "open"
+
+[expect.headers_present]
+"content-range" = "bytes 3-9/10"
+"content-length" = "7"
+
+[expect.timing]
+terminate_within_ms = 5000
+
+[expect.body]
+exact_utf8 = "3456789"

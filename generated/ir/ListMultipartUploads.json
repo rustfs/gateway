@@ -1,0 +1,597 @@
+{
+  "ir_version": "1",
+  "operation": "ListMultipartUploads",
+  "http": {
+            "method": "GET",
+            "target": "Bucket",
+            "precedence": 460,
+            "predicates": [
+                            { "kind": "Method", "method": "GET" },
+                            { "kind": "Target", "target": "Bucket" },
+                            { "kind": "QueryPresent", "key": "uploads" }
+                          ],
+            "success_status": 200,
+            "alt_success_statuses": [],
+            "path_shape": "/{Bucket}"
+          },
+  "auth": {
+            "requirement": "Required",
+            "action": "s3:ListBucketMultipartUploads",
+            "presigned_allowed": true,
+            "service": "s3"
+          },
+  "payload": {
+               "request": { "kind": "None", "buffering": "None", "max_bytes": null },
+               "response": { "kind": "XmlBody", "buffering": "Full", "max_bytes": null }
+             },
+  "checksum": { "http_checksum_required": false, "request_algorithms": [], "response_algorithms": [] },
+  "input": {
+             "fields": [
+                         {
+                           "name": "Bucket",
+                           "wire_name": "Bucket",
+                           "required": true,
+                           "binding": { "kind": "UriLabel", "greedy": false },
+                           "type": { "kind": "BucketName" },
+                           "hot": true,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "Delimiter",
+                           "wire_name": "delimiter",
+                           "required": false,
+                           "binding": { "kind": "Query" },
+                           "type": { "kind": "String" },
+                           "hot": true,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "EncodingType",
+                           "wire_name": "encoding-type",
+                           "required": false,
+                           "binding": { "kind": "Query" },
+                           "type": { "kind": "StringEnum", "values": ["url"] },
+                           "hot": false,
+                           "quirk_refs": ["q-encoding-0015"]
+                         },
+                         {
+                           "name": "KeyMarker",
+                           "wire_name": "key-marker",
+                           "required": false,
+                           "binding": { "kind": "Query" },
+                           "type": { "kind": "String" },
+                           "hot": true,
+                           "quirk_refs": ["q-mpu-marker-0040"]
+                         },
+                         {
+                           "name": "MaxUploads",
+                           "wire_name": "max-uploads",
+                           "required": false,
+                           "binding": { "kind": "Query" },
+                           "type": { "kind": "Integer" },
+                           "hot": true,
+                           "default": 1000,
+                           "quirk_refs": ["q-mpu-marker-0040"]
+                         },
+                         {
+                           "name": "Prefix",
+                           "wire_name": "prefix",
+                           "required": false,
+                           "binding": { "kind": "Query" },
+                           "type": { "kind": "String" },
+                           "hot": true,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "UploadIdMarker",
+                           "wire_name": "upload-id-marker",
+                           "required": false,
+                           "binding": { "kind": "Query" },
+                           "type": { "kind": "String" },
+                           "hot": true,
+                           "quirk_refs": ["q-mpu-upload-id-0037", "q-mpu-marker-0040"]
+                         },
+                         {
+                           "name": "ExpectedBucketOwner",
+                           "wire_name": "x-amz-expected-bucket-owner",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "String" },
+                           "hot": false,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "RequestPayer",
+                           "wire_name": "x-amz-request-payer",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "StringEnum", "values": ["requester"] },
+                           "hot": false,
+                           "quirk_refs": []
+                         }
+                       ]
+           },
+  "output": {
+              "fields": [
+                          {
+                            "name": "Bucket",
+                            "wire_name": "Bucket",
+                            "required": true,
+                            "binding": { "kind": "BodyXml" },
+                            "type": { "kind": "BucketName" },
+                            "hot": true,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "KeyMarker",
+                            "wire_name": "KeyMarker",
+                            "required": false,
+                            "binding": { "kind": "BodyXml" },
+                            "type": { "kind": "String" },
+                            "hot": false,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "UploadIdMarker",
+                            "wire_name": "UploadIdMarker",
+                            "required": false,
+                            "binding": { "kind": "BodyXml" },
+                            "type": { "kind": "String" },
+                            "hot": false,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "NextKeyMarker",
+                            "wire_name": "NextKeyMarker",
+                            "required": false,
+                            "binding": { "kind": "BodyXml" },
+                            "type": { "kind": "String" },
+                            "hot": false,
+                            "quirk_refs": ["q-encoding-0015", "q-mpu-marker-0040"]
+                          },
+                          {
+                            "name": "Prefix",
+                            "wire_name": "Prefix",
+                            "required": false,
+                            "binding": { "kind": "BodyXml" },
+                            "type": { "kind": "String" },
+                            "hot": false,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "Delimiter",
+                            "wire_name": "Delimiter",
+                            "required": false,
+                            "binding": { "kind": "BodyXml" },
+                            "type": { "kind": "String" },
+                            "hot": false,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "NextUploadIdMarker",
+                            "wire_name": "NextUploadIdMarker",
+                            "required": false,
+                            "binding": { "kind": "BodyXml" },
+                            "type": { "kind": "String" },
+                            "hot": false,
+                            "quirk_refs": ["q-mpu-marker-0040"]
+                          },
+                          {
+                            "name": "MaxUploads",
+                            "wire_name": "MaxUploads",
+                            "required": true,
+                            "binding": { "kind": "BodyXml" },
+                            "type": { "kind": "Integer" },
+                            "hot": true,
+                            "quirk_refs": ["q-mpu-marker-0040"]
+                          },
+                          {
+                            "name": "IsTruncated",
+                            "wire_name": "IsTruncated",
+                            "required": true,
+                            "binding": { "kind": "BodyXml" },
+                            "type": { "kind": "Boolean" },
+                            "hot": true,
+                            "quirk_refs": ["q-mpu-marker-0040"]
+                          },
+                          {
+                            "name": "Uploads",
+                            "wire_name": "Upload",
+                            "required": false,
+                            "binding": { "kind": "BodyXml" },
+                            "type": {
+                                      "kind": "List",
+                                      "member": { "kind": "Structure", "shape": "MultipartUpload" },
+                                      "flattened": true,
+                                      "wrapper_name": null
+                                    },
+                            "hot": true,
+                            "quirk_refs": ["q-mpu-upload-0032"]
+                          },
+                          {
+                            "name": "CommonPrefixes",
+                            "wire_name": "CommonPrefixes",
+                            "required": false,
+                            "binding": { "kind": "BodyXml" },
+                            "type": {
+                                      "kind": "List",
+                                      "member": { "kind": "Structure", "shape": "CommonPrefix" },
+                                      "flattened": true,
+                                      "wrapper_name": null
+                                    },
+                            "hot": true,
+                            "quirk_refs": ["q-flat-0019"]
+                          },
+                          {
+                            "name": "EncodingType",
+                            "wire_name": "EncodingType",
+                            "required": false,
+                            "binding": { "kind": "BodyXml" },
+                            "type": { "kind": "StringEnum", "values": ["url"] },
+                            "hot": false,
+                            "quirk_refs": ["q-encoding-0015"]
+                          },
+                          {
+                            "name": "RequestCharged",
+                            "wire_name": "x-amz-request-charged",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": { "kind": "StringEnum", "values": ["requester"] },
+                            "hot": false,
+                            "quirk_refs": []
+                          }
+                        ]
+            },
+  "shapes": {
+              "CommonPrefix": {
+                                "kind": "Structure",
+                                "fields": [
+                                            {
+                                              "name": "Prefix",
+                                              "wire_name": "Prefix",
+                                              "required": true,
+                                              "binding": { "kind": "BodyXml" },
+                                              "type": { "kind": "String" },
+                                              "hot": true,
+                                              "quirk_refs": ["q-encoding-0015"]
+                                            }
+                                          ],
+                                "xml": {
+                                         "element_order": ["Prefix"],
+                                         "empty_value_policy": { "Prefix": "emit" },
+                                         "attributes": []
+                                       }
+                              },
+              "Initiator": {
+                             "kind": "Structure",
+                             "fields": [
+                                         {
+                                           "name": "ID",
+                                           "wire_name": "ID",
+                                           "required": false,
+                                           "binding": { "kind": "BodyXml" },
+                                           "type": { "kind": "String" },
+                                           "hot": false,
+                                           "quirk_refs": []
+                                         },
+                                         {
+                                           "name": "DisplayName",
+                                           "wire_name": "DisplayName",
+                                           "required": false,
+                                           "binding": { "kind": "BodyXml" },
+                                           "type": { "kind": "String" },
+                                           "hot": false,
+                                           "quirk_refs": []
+                                         }
+                                       ],
+                             "xml": {
+                                      "element_order": ["ID", "DisplayName"],
+                                      "empty_value_policy": { "ID": "omit", "DisplayName": "omit" },
+                                      "attributes": []
+                                    }
+                           },
+              "MultipartUpload": {
+                                   "kind": "Structure",
+                                   "fields": [
+                                               {
+                                                 "name": "UploadId",
+                                                 "wire_name": "UploadId",
+                                                 "required": false,
+                                                 "binding": { "kind": "BodyXml" },
+                                                 "type": { "kind": "String" },
+                                                 "hot": true,
+                                                 "quirk_refs": ["q-mpu-upload-id-0037", "q-mpu-marker-0040"]
+                                               },
+                                               {
+                                                 "name": "Key",
+                                                 "wire_name": "Key",
+                                                 "required": false,
+                                                 "binding": { "kind": "BodyXml" },
+                                                 "type": { "kind": "ObjectKey" },
+                                                 "hot": true,
+                                                 "quirk_refs": ["q-encoding-0015"]
+                                               },
+                                               {
+                                                 "name": "Initiated",
+                                                 "wire_name": "Initiated",
+                                                 "required": false,
+                                                 "binding": { "kind": "BodyXml" },
+                                                 "type": { "kind": "Timestamp", "format": "Iso8601" },
+                                                 "hot": false,
+                                                 "quirk_refs": []
+                                               },
+                                               {
+                                                 "name": "StorageClass",
+                                                 "wire_name": "StorageClass",
+                                                 "required": false,
+                                                 "binding": { "kind": "BodyXml" },
+                                                 "type": {
+                                                           "kind": "StringEnum",
+                                                           "values": [
+                                                                       "STANDARD",
+                                                                       "REDUCED_REDUNDANCY",
+                                                                       "STANDARD_IA",
+                                                                       "ONEZONE_IA",
+                                                                       "INTELLIGENT_TIERING",
+                                                                       "GLACIER",
+                                                                       "DEEP_ARCHIVE",
+                                                                       "OUTPOSTS",
+                                                                       "GLACIER_IR",
+                                                                       "SNOW",
+                                                                       "EXPRESS_ONEZONE",
+                                                                       "FSX_OPENZFS",
+                                                                       "FSX_ONTAP"
+                                                                     ]
+                                                         },
+                                                 "hot": false,
+                                                 "quirk_refs": []
+                                               },
+                                               {
+                                                 "name": "Owner",
+                                                 "wire_name": "Owner",
+                                                 "required": false,
+                                                 "binding": { "kind": "BodyXml" },
+                                                 "type": { "kind": "Structure", "shape": "Owner" },
+                                                 "hot": false,
+                                                 "quirk_refs": []
+                                               },
+                                               {
+                                                 "name": "Initiator",
+                                                 "wire_name": "Initiator",
+                                                 "required": false,
+                                                 "binding": { "kind": "BodyXml" },
+                                                 "type": { "kind": "Structure", "shape": "Initiator" },
+                                                 "hot": false,
+                                                 "quirk_refs": []
+                                               },
+                                               {
+                                                 "name": "ChecksumAlgorithm",
+                                                 "wire_name": "ChecksumAlgorithm",
+                                                 "required": false,
+                                                 "binding": { "kind": "BodyXml" },
+                                                 "type": {
+                                                           "kind": "StringEnum",
+                                                           "values": [
+                                                                       "CRC32",
+                                                                       "CRC32C",
+                                                                       "SHA1",
+                                                                       "SHA256",
+                                                                       "CRC64NVME",
+                                                                       "SHA512",
+                                                                       "MD5",
+                                                                       "XXHASH64",
+                                                                       "XXHASH3",
+                                                                       "XXHASH128"
+                                                                     ]
+                                                         },
+                                                 "hot": false,
+                                                 "quirk_refs": []
+                                               },
+                                               {
+                                                 "name": "ChecksumType",
+                                                 "wire_name": "ChecksumType",
+                                                 "required": false,
+                                                 "binding": { "kind": "BodyXml" },
+                                                 "type": {
+                                                           "kind": "StringEnum",
+                                                           "values": ["COMPOSITE", "FULL_OBJECT"]
+                                                         },
+                                                 "hot": false,
+                                                 "quirk_refs": []
+                                               }
+                                             ],
+                                   "xml": {
+                                            "element_order": [
+                                                               "UploadId",
+                                                               "Key",
+                                                               "Initiated",
+                                                               "StorageClass",
+                                                               "Owner",
+                                                               "Initiator",
+                                                               "ChecksumAlgorithm",
+                                                               "ChecksumType"
+                                                             ],
+                                            "empty_value_policy": {
+                                                                    "UploadId": "omit",
+                                                                    "Key": "omit",
+                                                                    "Initiated": "omit",
+                                                                    "StorageClass": "omit",
+                                                                    "Owner": "omit",
+                                                                    "Initiator": "omit",
+                                                                    "ChecksumAlgorithm": "omit",
+                                                                    "ChecksumType": "omit"
+                                                                  },
+                                            "attributes": []
+                                          }
+                                 },
+              "Owner": {
+                         "kind": "Structure",
+                         "fields": [
+                                     {
+                                       "name": "DisplayName",
+                                       "wire_name": "DisplayName",
+                                       "required": false,
+                                       "binding": { "kind": "BodyXml" },
+                                       "type": { "kind": "String" },
+                                       "hot": false,
+                                       "quirk_refs": []
+                                     },
+                                     {
+                                       "name": "ID",
+                                       "wire_name": "ID",
+                                       "required": false,
+                                       "binding": { "kind": "BodyXml" },
+                                       "type": { "kind": "String" },
+                                       "hot": false,
+                                       "quirk_refs": []
+                                     }
+                                   ],
+                         "xml": {
+                                  "element_order": ["ID", "DisplayName"],
+                                  "empty_value_policy": { "DisplayName": "omit", "ID": "omit" },
+                                  "attributes": []
+                                }
+                       }
+            },
+  "xml": {
+           "request_root": null,
+           "request_root_aliases": [],
+           "response_root": "ListMultipartUploadsResult",
+           "xmlns": "emit",
+           "unwrapped_output": false,
+           "element_order": [
+                              "Bucket",
+                              "KeyMarker",
+                              "UploadIdMarker",
+                              "NextKeyMarker",
+                              "Prefix",
+                              "Delimiter",
+                              "NextUploadIdMarker",
+                              "MaxUploads",
+                              "IsTruncated",
+                              "Uploads",
+                              "CommonPrefixes",
+                              "EncodingType"
+                            ],
+           "empty_value_policy": {
+                                   "Bucket": "emit",
+                                   "KeyMarker": "omit",
+                                   "UploadIdMarker": "omit",
+                                   "NextKeyMarker": "omit",
+                                   "Prefix": "omit",
+                                   "Delimiter": "omit",
+                                   "NextUploadIdMarker": "omit",
+                                   "MaxUploads": "emit",
+                                   "IsTruncated": "emit",
+                                   "Uploads": "omit",
+                                   "CommonPrefixes": "omit",
+                                   "EncodingType": "omit"
+                                 },
+           "url_encoded_fields": [
+                                   "Prefix",
+                                   "Delimiter",
+                                   "KeyMarker",
+                                   "NextKeyMarker",
+                                   "Uploads.Key",
+                                   "CommonPrefixes.Prefix"
+                                 ],
+           "attributes": [],
+           "body_literal": false
+         },
+  "errors": {
+              "not_configured": null,
+              "allows_error_after_200": false,
+              "codes": ["NoSuchBucket", "AccessDenied", "InvalidArgument", "PermanentRedirect"]
+            },
+  "derived_resources": [],
+  "head_mirrors": null,
+  "quirk_refs": ["q-encoding-0015", "q-mpu-upload-0032", "q-mpu-marker-0040"],
+  "quirks": [
+              {
+                "id": "q-encoding-0015",
+                "kind": "encoding_type",
+                "target": "ListObjectsV2",
+                "summary": "When url encoding is requested, a fixed per operation set of members is percent encoded and the encoding type is echoed back; keys containing control characters are otherwise unparseable.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectsV2.html",
+                                "summary": "Describes the request parameter and states that the response echoes the encoding type when it was requested."
+                              },
+                              {
+                                "kind": "capture",
+                                "ref": "captures/list-objects-v2-encoding-url.http",
+                                "summary": "Recorded response for a key containing characters that are illegal in XML, showing which members are encoded."
+                              }
+                            ],
+                "cases": ["c-list-0017", "c-list-0035", "c-list-0036"]
+              },
+              {
+                "id": "q-flat-0019",
+                "kind": "flattened",
+                "target": "ListObjectsV2",
+                "summary": "Entry and common prefix lists repeat their element with no enclosing wrapper, unlike the wrapped lists used by tag sets and grant lists.",
+                "evidence": [
+                              {
+                                "kind": "smithy-spec",
+                                "ref": "https://smithy.io/2.0/spec/protocol-traits.html#xmlflattened-trait",
+                                "summary": "Defines the flattened list serialization that removes the wrapper element around repeated members."
+                              }
+                            ],
+                "cases": ["c-list-0003", "c-list-0004", "c-list-0038"]
+              },
+              {
+                "id": "q-mpu-upload-0032",
+                "kind": "flattened_list",
+                "target": "ListMultipartUploads.Uploads",
+                "summary": "Each upload element repeats directly under the result root with no wrapper, and the element name is not the member name, so both halves have to come from the model rather than from the member spelling.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListMultipartUploads.html",
+                                "summary": "The documented response syntax repeats an upload element directly under the result root under a name that differs from the member name."
+                              }
+                            ],
+                "cases": ["c-mpu-0011", "c-mpu-0012"]
+              },
+              {
+                "id": "q-mpu-upload-id-0037",
+                "kind": "capability_token",
+                "target": "UploadPart.UploadId",
+                "summary": "An upload id is a server-minted capability, not a name the caller chose: it is resolved against the bucket and key of the request before anything is written, an unknown id answers the not-found code, and one belonging to another resource is refused rather than honoured.",
+                "evidence": [
+                              {
+                                "kind": "s3s-issue",
+                                "ref": "https://github.com/s3s-project/s3s/issues/51",
+                                "summary": "Upstream accepted any upload id without checking what it belonged to, so knowing an id was enough to act on somebody else's upload."
+                              },
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UploadPart.html",
+                                "summary": "The request is documented as naming a bucket, a key and an upload id together, and the id is only meaningful for that pair."
+                              }
+                            ],
+                "cases": ["c-mpu-0028", "c-mpu-0029", "c-mpu-0030", "c-mpu-0031"]
+              },
+              {
+                "id": "q-mpu-marker-0040",
+                "kind": "pagination_cursor",
+                "target": "ListParts.NextPartNumberMarker",
+                "summary": "A truncated listing hands back a cursor that is valid as the next request's marker, the page-size limit is echoed as the caller sent it rather than as the server clamped it, and a listing of uploads needs both the key cursor and the upload-id cursor because one key can carry several uploads.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListMultipartUploads.html",
+                                "summary": "Documents the pair of cursors a truncated upload listing returns and how the next request supplies them."
+                              },
+                              {
+                                "kind": "s3s-pr",
+                                "ref": "https://github.com/s3s-project/s3s/pull/296",
+                                "summary": "Upstream gave the part marker the wrong type and semantics, so a second page could not be requested from the value the first page returned."
+                              }
+                            ],
+                "cases": ["c-mpu-0010", "c-mpu-0011", "c-mpu-0047", "c-mpu-0048"]
+              }
+            ],
+  "ext_points": []
+}

@@ -37,13 +37,22 @@
 ///
 /// Kept in step with `rustfs_gateway_core::standard_operation_names()` by `tests/op_names.rs`.
 pub(crate) static OPERATION_NAMES: &[&str] = &[
+    "AbortMultipartUpload",
+    "CompleteMultipartUpload",
+    "CreateMultipartUpload",
     "DeleteObject",
     "DeleteObjects",
     "GetBucketLocation",
     "GetObject",
     "HeadObject",
+    "ListBuckets",
+    "ListMultipartUploads",
+    "ListObjectVersions",
+    "ListObjects",
     "ListObjectsV2",
+    "ListParts",
     "PutObject",
+    "UploadPart",
 ];
 
 /// Method names that would collide with a Rust keyword if derived mechanically.

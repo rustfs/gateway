@@ -1,0 +1,62 @@
+# c-mpu-0020 — the part list has to ascend.
+
+[case]
+id = "c-mpu-0020"
+schema_version = 1
+title = "A completion whose parts descend is refused with InvalidPartOrder"
+rationale = """
+The order of the list is the order of the bytes: the assembled object is the parts concatenated in \
+the order given. An implementation that sorts the list before using it silently produces a \
+different object from the one the caller described, and one that uses the list as written produces \
+an object whose entity tag no client can reproduce. Refusing is the only answer that leaves the \
+caller able to tell which of its two intentions the request expressed."""
+polarity = "negative"
+operation = "CompleteMultipartUpload"
+tags = ["multipart", "ordering", "error-shape"]
+quirks = ["q-mpu-limits-0038", "q-mpu-etag-0028"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CompleteMultipartUpload.html"
+summary = "The part list is documented as having to be given in ascending part-number order."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-mpu"
+
+[[setup.multipart_uploads]]
+bucket = "conf-mpu"
+key = "wrong-order"
+capture_upload_id_as = "upload_id"
+
+[[setup.multipart_uploads.parts]]
+part_number = 1
+body = { size = 5242880 }
+capture_etag_as = "part1_etag"
+
+[[setup.multipart_uploads.parts]]
+part_number = 2
+body = { size = 1024 }
+capture_etag_as = "part2_etag"
+
+[request]
+method = "POST"
+target = "/conf-mpu/wrong-order?uploadId=${capture.upload_id}"
+headers = { "content-type" = "application/xml" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[request.body]
+utf8 = '''
+<CompleteMultipartUpload xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Part><PartNumber>2</PartNumber><ETag>${capture.part2_etag}</ETag></Part><Part><PartNumber>1</PartNumber><ETag>${capture.part1_etag}</ETag></Part></CompleteMultipartUpload>'''
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+headers_absent = ["etag", "x-amz-version-id"]
+
+[expect.error]
+code = "InvalidPartOrder"
+request_id_present = true

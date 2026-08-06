@@ -1,0 +1,63 @@
+# c-mpu-0037 — no trailer is announced that never arrives.
+
+[case]
+id = "c-mpu-0037"
+schema_version = 1
+title = "A completion response announces no trailer field and sends none"
+rationale = """
+A trailer field is a promise about a section of the message that has not been written yet. Upstream \
+announced one on responses that never carried a trailer section, and a strict client that honours \
+the announcement waits for something that will never come — the request never completes, on a \
+response that was otherwise entirely correct. Asserting the header's absence and the trailer \
+section's absence together is what distinguishes 'no trailer' from 'an announced trailer that \
+happened to be empty'."""
+polarity = "negative"
+operation = "CompleteMultipartUpload"
+tags = ["multipart", "framing", "streaming"]
+quirks = ["q-mpu-trailer-0034", "q-mpu-late-error-0033"]
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/issues/326"
+summary = "Upstream announced a trailer field on responses that never carried a trailer section."
+kind = "s3s-issue"
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9110#section-6.6.2"
+summary = "The trailer field enumerates fields the sender will place in the trailer section."
+kind = "rfc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-mpu"
+
+[[setup.multipart_uploads]]
+bucket = "conf-mpu"
+key = "no-phantom-trailer"
+capture_upload_id_as = "upload_id"
+
+[[setup.multipart_uploads.parts]]
+part_number = 1
+body = { size = 1024 }
+capture_etag_as = "part1_etag"
+
+[request]
+method = "POST"
+target = "/conf-mpu/no-phantom-trailer?uploadId=${capture.upload_id}"
+headers = { "content-type" = "application/xml" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[request.body]
+utf8 = '''
+<CompleteMultipartUpload xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Part><PartNumber>1</PartNumber><ETag>${capture.part1_etag}</ETag></Part></CompleteMultipartUpload>'''
+
+[expect]
+kind = "response"
+status = 200
+connection_after = "open"
+headers_absent = ["trailer"]
+trailers_absent = ["x-amz-checksum-crc32", "x-amz-checksum-sha256"]
+
+[expect.timing]
+terminate_within_ms = 30000

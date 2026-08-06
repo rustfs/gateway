@@ -31,6 +31,8 @@ admitted the request.
 | `src/codec/value.rs` | One function per IR scalar, in each direction, plus the one-checksum-header rule and the decode-path placeholder exit | A wire value is parsed or rendered wrongly |
 | `src/codec/tests.rs` | 27 tests over the object family: what the generated codecs do to bytes | You changed an emitter or a conversion |
 | `src/ops/*.rs` | One AWS operation per file: spec, floor, `impl Operation`, `impl HasOperation` | You are adding an operation — copy the nearest one |
+| `src/ops/shared/etag.rs` | Which RFC 9110 comparison each conditional entity-tag header uses, and how its value is read | An entity-tag condition matched when it should not have, or the other way round |
+| `src/ops/shared/precondition.rs` | The fixed precondition order, the two places S3 departs from RFC 9110, and the 200/206/416 range decision | You are wiring a conditional or ranged operation, or a 304/412/416 came out wrong |
 | `src/handler.rs` | `Handler<O>`, `Req`, `Resp`, `HandlerError`, `BoxFuture` | You are implementing a backend |
 | `src/registry/mod.rs` | `OperationSpec`, `RequiredParam`, `check_required`, `Registry` | You are adding a required parameter |
 | `src/registry/reject.rs` | `RegistryError` and the seven rules an operation passes before it registers | A registration was refused |
@@ -45,6 +47,7 @@ admitted the request.
 | `tests/golden.rs` + `tests/golden/route-table.txt` | The whole table as text, so a routing change shows up in a diff | Codegen changed |
 | `tests/registration.rs` | 7 positive / 17 negative — the registration rules, erasure, `require`, the 501 | You changed anything under `registry/` |
 | `tests/purity_guard.rs` | 12 source guards: no `async` off the allowance list, no store, no leaked message, one `Box::pin`, file shape | You added a file or a public method |
+| `tests/precondition_range.rs` | 17 positive / 27 negative plus three properties — every conditional outcome, both S3 deviations, and the range boundaries | You changed anything under `ops/shared/` |
 
 ## Shape decisions worth not re-litigating
 

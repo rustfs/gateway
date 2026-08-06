@@ -1,0 +1,95 @@
+# c-mpu-0041 — a failed precondition leaves the upload usable.
+
+[case]
+id = "c-mpu-0041"
+schema_version = 1
+title = "A completion refused by If-None-Match leaves the upload completable"
+rationale = """
+A conditional completion is how a client makes 'create only if absent' atomic, and the refusal is \
+the expected outcome of a race it deliberately entered. If the refusal also consumes the upload, \
+the loser of the race has to re-upload every part to find out who won — which for a large object is \
+the entire transfer again. The second exchange is the actual assertion: the failed precondition \
+must have changed nothing."""
+polarity = "negative"
+operation = "CompleteMultipartUpload"
+tags = ["multipart", "conditional", "error-shape"]
+quirks = ["q-mpu-late-error-0033"]
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/pull/560"
+summary = "Upstream added conditional completion, where a failed condition must not consume the upload."
+kind = "s3s-pr"
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9110#section-13.1.2"
+summary = "A wildcard if-none-match fails when any current representation exists for the target."
+kind = "rfc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = true
+
+[[setup.buckets]]
+name = "conf-mpu"
+
+[[setup.objects]]
+bucket = "conf-mpu"
+key = "already-there"
+body = { utf8 = "the object that already exists" }
+
+[[setup.multipart_uploads]]
+bucket = "conf-mpu"
+key = "already-there"
+capture_upload_id_as = "upload_id"
+
+[[setup.multipart_uploads.parts]]
+part_number = 1
+body = { size = 1024 }
+capture_etag_as = "part1_etag"
+
+[[exchanges]]
+name = "refused-by-precondition"
+
+[exchanges.request]
+method = "POST"
+target = "/conf-mpu/already-there?uploadId=${capture.upload_id}"
+headers = { "content-type" = "application/xml", "If-None-Match" = "*" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.request.body]
+utf8 = '''
+<CompleteMultipartUpload xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Part><PartNumber>1</PartNumber><ETag>${capture.part1_etag}</ETag></Part></CompleteMultipartUpload>'''
+
+[exchanges.expect]
+kind = "response"
+status = 412
+connection_after = "open"
+headers_absent = ["x-amz-version-id"]
+
+[exchanges.expect.error]
+code = "PreconditionFailed"
+request_id_present = true
+
+[[exchanges]]
+name = "the-upload-is-still-good"
+
+[exchanges.request]
+method = "POST"
+target = "/conf-mpu/already-there?uploadId=${capture.upload_id}"
+headers = { "content-type" = "application/xml" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.request.body]
+utf8 = '''
+<CompleteMultipartUpload xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Part><PartNumber>1</PartNumber><ETag>${capture.part1_etag}</ETag></Part></CompleteMultipartUpload>'''
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.body]
+redact = ["Location", "ETag", "UploadId"]
+contains_utf8 = ["<CompleteMultipartUploadResult"]

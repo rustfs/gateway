@@ -1,0 +1,75 @@
+# c-list-0044 — every response is traceable, and the error document is not namespaced.
+#
+# Schema dimensions exercised: a required header set on a success, and the root of an error document.
+
+[case]
+id = "c-list-0044"
+schema_version = 1
+title = "A listing carries the diagnostic headers, and a failed one answers with an Error root that has no namespace"
+rationale = """
+Without the request identifiers a support conversation about a listing has nothing to correlate, and these are the headers operators paste into one. The error half is the odd one: the success bodies in this family carry the S3 namespace and the error document does not, so an implementation that applies one rule to both emits a namespaced Error that several SDKs decline to parse — turning a clear error into a parse failure at the client."""
+polarity = "negative"
+operation = "ListBuckets"
+tags = ["list", "headers", "error", "xml"]
+timeout_ms = 15000
+quirks = ["q-buckets-0071"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListBuckets.html"
+summary = "The documented response carries the request identifier headers alongside the listing body."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/issues/264"
+summary = "A namespace on a root element where the client did not expect one made an otherwise correct document unreadable."
+kind = "s3s-issue"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-list-alpha"
+
+[connection]
+reuse = true
+
+[[exchanges]]
+name = "success-carries-the-identifiers"
+
+[exchanges.request]
+method = "GET"
+target = "/"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+
+[exchanges.expect.headers_present]
+"x-amz-request-id" = "*"
+"x-amz-id-2" = "*"
+"server" = "*"
+"date" = "*"
+
+[[exchanges]]
+name = "failure-carries-them-too"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-list-absent-bucket?list-type=2"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 404
+
+[exchanges.expect.headers_present]
+"x-amz-request-id" = "*"
+"x-amz-id-2" = "*"
+
+[exchanges.expect.error]
+code = "NoSuchBucket"
+request_id_present = true
+
+[exchanges.expect.body.xml]
+root = "Error"

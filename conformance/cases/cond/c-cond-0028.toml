@@ -1,0 +1,63 @@
+# c-cond-0028 — one condition per header, and a repeated header is not a choice.
+#
+# Schema dimensions exercised: raw_headers, which is the only way to put the same field on the wire
+# twice with two different values.
+
+[case]
+id = "c-cond-0028"
+schema_version = 1
+title = "Two If-Match headers with different values are refused, not reduced to one of them"
+rationale = """
+When a field appears twice the recipient sees one value with a comma in it, and an implementation \
+that splits on the comma and takes a member has picked one of the client's two conditions at \
+random from the client's point of view. If the one it picked happens to match, a guarded write \
+lands even though the other condition was false — which is the failure a compare-and-swap exists \
+to prevent, arrived at through a header-parsing shortcut rather than through the condition logic. \
+Refusing is the only answer that cannot be silently wrong."""
+polarity = "negative"
+operation = "GetObject"
+tags = ["conditional", "preconditions", "security", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-cond-0044", "q-cond-0046"]
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9110#section-5.3"
+summary = "Repeated field lines are equivalent to one field whose value is the members joined by commas."
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/conditional-requests.html"
+summary = "AWS describes the entity-tag condition as carrying a single tag, with no list form to select from."
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-cond"
+
+[[setup.objects]]
+bucket = "conf-cond"
+key = "repeated/if-match"
+body = { utf8 = "hello" }
+
+[request]
+method = "GET"
+target = "/conf-cond/repeated/if-match"
+raw_headers = [
+  ["host", "s3.us-east-1.amazonaws.com"],
+  ["if-match", "\"5d41402abc4b2a76b9719d911017c592\""],
+  ["if-match", "\"0000000000000000000000000000dead\""],
+]
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+headers_absent = ["etag"]
+connection_after = "open"
+
+[expect.error]
+code = "InvalidArgument"
+request_id_present = true
+
+[expect.timing]
+terminate_within_ms = 5000

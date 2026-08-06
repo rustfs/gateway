@@ -1,0 +1,64 @@
+# c-list-0041 — the last page carries no cursor.
+#
+# Schema dimensions exercised: absence of the cursor elements as the assertion.
+
+[case]
+id = "c-list-0041"
+schema_version = 1
+title = "A listing that was not truncated writes neither NextContinuationToken nor NextMarker"
+rationale = """
+A cursor on a page that was not truncated is an invitation to ask for a page that does not exist, and a client that accepts the invitation pages forever against a server that keeps answering. This is the mirror of c-list-0042 and the pair has to hold in both directions, because an implementation that always writes the cursor passes the other case perfectly."""
+polarity = "negative"
+operation = "ListObjectsV2"
+tags = ["list", "pagination", "xml"]
+timeout_ms = 15000
+quirks = ["q-token-0021", "q-marker-0064"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectsV2.html"
+summary = "The documented response carries the next cursor when the result was truncated."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-list"
+
+[[setup.objects]]
+bucket = "conf-list"
+key = "a/1.txt"
+body = { utf8 = "a1" }
+
+[[setup.objects]]
+bucket = "conf-list"
+key = "a/2.txt"
+body = { utf8 = "a2" }
+
+[[setup.objects]]
+bucket = "conf-list"
+key = "b/1.txt"
+body = { utf8 = "b1" }
+
+[[setup.objects]]
+bucket = "conf-list"
+key = "top.txt"
+body = { utf8 = "top" }
+
+[request]
+method = "GET"
+target = "/conf-list?list-type=2&max-keys=100"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+
+[expect.body]
+contains_utf8 = ["<IsTruncated>false</IsTruncated>"]
+not_contains_utf8 = ["<NextContinuationToken>", "<NextMarker>"]
+
+[expect.body.xml]
+root = "ListBucketResult"
+xmlns = "http://s3.amazonaws.com/doc/2006-03-01/"
+empty_elements = "paired"

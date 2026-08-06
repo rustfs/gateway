@@ -1,0 +1,77 @@
+# c-list-0016 — the bucket listing pages with the parameters it gained later.
+#
+# Schema dimensions exercised: four request parameters at once, capture across exchanges.
+
+[case]
+id = "c-list-0016"
+schema_version = 1
+title = "max-buckets, continuation-token, prefix and bucket-region page the bucket listing without gaps"
+rationale = """
+These four parameters arrived long after the operation, so an implementation written against the older shape accepts them and ignores them — which returns every bucket on every page and looks correct until an account has more buckets than one page holds. Paging the whole set and asserting the join is the only way to tell "paged correctly" from "ignored the cursor"."""
+polarity = "positive"
+operation = "ListBuckets"
+tags = ["list", "buckets", "pagination"]
+timeout_ms = 15000
+quirks = ["q-buckets-0071", "q-token-0021"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListBuckets.html"
+summary = "Documents the four request parameters the bucket listing gained and the cursor the response echoes."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-list-alpha"
+
+[[setup.buckets]]
+name = "conf-list-beta"
+
+[[setup.buckets]]
+name = "conf-list-gamma"
+
+[connection]
+reuse = true
+
+[[exchanges]]
+name = "page-1"
+
+[exchanges.request]
+method = "GET"
+target = "/?max-buckets=2&prefix=conf-list-&bucket-region=us-east-1"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+
+[exchanges.expect.capture]
+next_token = { xml_text = "ContinuationToken" }
+
+[exchanges.expect.body]
+redact = ["ContinuationToken"]
+contains_utf8 = ["<Name>conf-list-alpha</Name>", "<Name>conf-list-beta</Name>"]
+not_contains_utf8 = ["<Name>conf-list-gamma</Name>"]
+
+[[exchanges]]
+name = "page-2"
+
+[exchanges.request]
+method = "GET"
+target = "/?max-buckets=2&prefix=conf-list-&bucket-region=us-east-1&continuation-token=${capture.next_token}"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+
+[exchanges.expect.body]
+redact = ["ContinuationToken"]
+contains_utf8 = ["<Name>conf-list-gamma</Name>"]
+not_contains_utf8 = ["<Name>conf-list-alpha</Name>"]
+
+[exchanges.expect.body.xml]
+root = "ListAllMyBucketsResult"
+xmlns = "http://s3.amazonaws.com/doc/2006-03-01/"
+empty_elements = "paired"

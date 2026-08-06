@@ -1,0 +1,112 @@
+# c-mpu-0006 — metadata stated at initiation survives completion.
+#
+# Schema dimensions exercised: multi-exchange with connection reuse; header assertions on a later
+# exchange than the one that carried the values.
+
+[case]
+id = "c-mpu-0006"
+schema_version = 1
+title = "User metadata and content type given at initiation are on the assembled object"
+rationale = """
+The initiating request is the only one that carries the object's metadata: a part upload has no \
+place to put it, and the completion request carries only the part list. An implementation that \
+records the metadata nowhere loses it permanently, and the loss is invisible until somebody reads \
+the finished object — by which time the source bytes are usually gone. Asserting it on the head of \
+the completed object, rather than on the initiate response, is what makes the round trip the \
+subject of the case."""
+polarity = "positive"
+operation = "CreateMultipartUpload"
+tags = ["multipart", "metadata", "round-trip"]
+quirks = ["q-mpu-metadata-0039"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CreateMultipartUpload.html"
+summary = "The object metadata headers are documented on the initiating request and not on the part request."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/pull/129"
+summary = "Upstream dropped the metadata supplied at initiation, so it was absent from the object after completion."
+kind = "s3s-pr"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = true
+
+[[setup.buckets]]
+name = "conf-mpu"
+
+[[exchanges]]
+name = "initiate"
+
+[exchanges.request]
+method = "POST"
+target = "/conf-mpu/with-metadata?uploads"
+headers = { "content-type" = "text/plain; charset=utf-8", "x-amz-meta-project" = "gateway", "x-amz-meta-Stage" = "p5" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.capture]
+upload_id = { xml_text = "UploadId" }
+
+[[exchanges]]
+name = "upload-part"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-mpu/with-metadata?partNumber=1&uploadId=${capture.upload_id}"
+body = { size = 64 }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.capture]
+part1_etag = { header = "etag" }
+
+[[exchanges]]
+name = "complete"
+
+[exchanges.request]
+method = "POST"
+target = "/conf-mpu/with-metadata?uploadId=${capture.upload_id}"
+headers = { "content-type" = "application/xml" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.request.body]
+utf8 = '''
+<CompleteMultipartUpload xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Part><PartNumber>1</PartNumber><ETag>${capture.part1_etag}</ETag></Part></CompleteMultipartUpload>'''
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[[exchanges]]
+name = "head"
+
+[exchanges.request]
+method = "HEAD"
+target = "/conf-mpu/with-metadata"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.headers_present]
+"content-type" = "text/plain; charset=utf-8"
+"x-amz-meta-project" = "gateway"
+"x-amz-meta-stage" = "p5"
+
+[exchanges.expect.body]
+size = 0

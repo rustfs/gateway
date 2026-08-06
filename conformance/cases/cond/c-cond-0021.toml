@@ -1,0 +1,61 @@
+# c-cond-0021 — a date the server has not reached yet.
+#
+# Schema dimensions exercised: clock injection as the only way to make "the future" a fixed value,
+# byte-exact body proving the object was served.
+
+[case]
+id = "c-cond-0021"
+schema_version = 1
+title = "An If-Modified-Since later than the server's own clock is ignored"
+rationale = """
+A client whose clock runs fast sends a date the server has not reached. Compared naively the \
+object is older than the date, so the answer is 304 — and the client is told its cached copy is \
+current forever, because every later request repeats the same comparison. The object becomes \
+unreachable for that client until its clock is fixed. Ignoring a date from the server's own future \
+is what keeps a clock error from turning into a cache that never expires; the injected clock is \
+what makes "the future" a value the case can name."""
+polarity = "negative"
+operation = "GetObject"
+tags = ["conditional", "preconditions", "timing"]
+timeout_ms = 10000
+quirks = ["q-cond-0050"]
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9110#section-13.1.3"
+summary = "An origin server does not answer not-modified for a modification date it has not itself reached."
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObject.html"
+summary = "Documents the modification-date condition without defining any not-modified answer for a date beyond the present."
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-cond"
+
+[[setup.objects]]
+bucket = "conf-cond"
+key = "dates/future"
+body = { utf8 = "hello" }
+
+[request]
+method = "GET"
+target = "/conf-cond/dates/future"
+headers = { "if-modified-since" = "Wed, 01 Jan 2031 00:00:00 GMT" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[expect.headers_present]
+"content-length" = "5"
+"last-modified" = "Fri, 02 Jan 2026 03:04:05 GMT"
+
+[expect.timing]
+terminate_within_ms = 5000
+
+[expect.body]
+exact_utf8 = "hello"

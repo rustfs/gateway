@@ -1,0 +1,68 @@
+# c-list-0019 — the listing body names the default storage class the response header omits.
+#
+# Schema dimensions exercised: two opposite rules for one value in two wire positions.
+
+[case]
+id = "c-list-0019"
+schema_version = 1
+title = "A listing entry carries StorageClass STANDARD, which the object response header suppresses"
+rationale = """
+The same value follows opposite rules in two places: written for every entry in a listing, omitted from the response header when it is the default. An implementation with one rule for both is wrong in one of the two, and the listing half is the one that breaks lifecycle tooling, which reads the class per entry and treats an absent element as unknown rather than as standard."""
+polarity = "positive"
+operation = "ListObjects"
+tags = ["list", "storage-class", "xml"]
+timeout_ms = 15000
+quirks = ["q-storageclass-0022"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjects.html"
+summary = "The documented listing response includes the storage class element for every entry."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObject.html"
+summary = "States the storage class response header is returned for every object except those in the default class."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-list"
+
+[[setup.objects]]
+bucket = "conf-list"
+key = "a/1.txt"
+body = { utf8 = "a1" }
+
+[[setup.objects]]
+bucket = "conf-list"
+key = "a/2.txt"
+body = { utf8 = "a2" }
+
+[[setup.objects]]
+bucket = "conf-list"
+key = "b/1.txt"
+body = { utf8 = "b1" }
+
+[[setup.objects]]
+bucket = "conf-list"
+key = "top.txt"
+body = { utf8 = "top" }
+
+[request]
+method = "GET"
+target = "/conf-list"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+
+[expect.body]
+contains_utf8 = ["<StorageClass>STANDARD</StorageClass>"]
+
+[expect.body.xml]
+root = "ListBucketResult"
+xmlns = "http://s3.amazonaws.com/doc/2006-03-01/"
+empty_elements = "paired"

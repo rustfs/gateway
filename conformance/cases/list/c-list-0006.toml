@@ -1,0 +1,69 @@
+# c-list-0006 — start-after is exclusive.
+#
+# Schema dimensions exercised: substring assertions proving a boundary is exclusive rather than inclusive.
+
+[case]
+id = "c-list-0006"
+schema_version = 1
+title = "start-after returns only keys strictly greater than the value given"
+rationale = """
+An inclusive reading returns the boundary key again on every page, so a client that pages by feeding the last key back makes no progress and re-processes one object forever. The off-by-one is invisible on a single page; it only shows as a loop, which is why the boundary is asserted from both sides here."""
+polarity = "positive"
+operation = "ListObjectsV2"
+tags = ["list", "pagination"]
+timeout_ms = 15000
+quirks = ["q-keycount-0018"]
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/issues/102"
+summary = "start-after was accepted and then ignored, so the parameter silently did nothing."
+kind = "s3s-issue"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectsV2.html"
+summary = "Describes the parameter as the key to start listing after, so the named key itself is not returned."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-list"
+
+[[setup.objects]]
+bucket = "conf-list"
+key = "a/1.txt"
+body = { utf8 = "a1" }
+
+[[setup.objects]]
+bucket = "conf-list"
+key = "a/2.txt"
+body = { utf8 = "a2" }
+
+[[setup.objects]]
+bucket = "conf-list"
+key = "b/1.txt"
+body = { utf8 = "b1" }
+
+[[setup.objects]]
+bucket = "conf-list"
+key = "top.txt"
+body = { utf8 = "top" }
+
+[request]
+method = "GET"
+target = "/conf-list?list-type=2&start-after=a%2F1.txt"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+
+[expect.body]
+contains_utf8 = ["<Key>a/2.txt</Key>", "<Key>b/1.txt</Key>", "<Key>top.txt</Key>", "<StartAfter>a/1.txt</StartAfter>"]
+not_contains_utf8 = ["<Key>a/1.txt</Key>"]
+
+[expect.body.xml]
+root = "ListBucketResult"
+xmlns = "http://s3.amazonaws.com/doc/2006-03-01/"
+empty_elements = "paired"

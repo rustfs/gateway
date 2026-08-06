@@ -1,0 +1,70 @@
+# c-list-0042 — a truncated page always carries a usable cursor.
+#
+# Schema dimensions exercised: an element asserted present and non-empty on a truncated page.
+
+[case]
+id = "c-list-0042"
+schema_version = 1
+title = "A truncated listing writes a next cursor that is present and not empty"
+rationale = """
+A truncation flag with no cursor is the worst of the three possible states: the client knows there is more and has no way to ask for it, so it either stops silently or retries the same request. An empty cursor element is the same failure wearing a valid document, which is why presence alone is not enough here."""
+polarity = "negative"
+operation = "ListObjectsV2"
+tags = ["list", "pagination", "xml"]
+timeout_ms = 15000
+quirks = ["q-token-0021"]
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/issues/542"
+summary = "The next cursor was never written, so a truncated listing could not be continued at all."
+kind = "s3s-issue"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectsV2.html"
+summary = "The documented response carries the next cursor whenever the truncation flag is set."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-list"
+
+[[setup.objects]]
+bucket = "conf-list"
+key = "a/1.txt"
+body = { utf8 = "a1" }
+
+[[setup.objects]]
+bucket = "conf-list"
+key = "a/2.txt"
+body = { utf8 = "a2" }
+
+[[setup.objects]]
+bucket = "conf-list"
+key = "b/1.txt"
+body = { utf8 = "b1" }
+
+[[setup.objects]]
+bucket = "conf-list"
+key = "top.txt"
+body = { utf8 = "top" }
+
+[request]
+method = "GET"
+target = "/conf-list?list-type=2&max-keys=1"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+
+[expect.body]
+redact = ["NextContinuationToken"]
+contains_utf8 = ["<IsTruncated>true</IsTruncated>", "<NextContinuationToken>__REDACTED__</NextContinuationToken>"]
+not_contains_utf8 = ["<NextContinuationToken></NextContinuationToken>"]
+
+[expect.body.xml]
+root = "ListBucketResult"
+xmlns = "http://s3.amazonaws.com/doc/2006-03-01/"
+empty_elements = "paired"

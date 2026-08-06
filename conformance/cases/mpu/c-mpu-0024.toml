@@ -1,0 +1,53 @@
+# c-mpu-0024 — above the part-number ceiling.
+
+[case]
+id = "c-mpu-0024"
+schema_version = 1
+title = "A part number above ten thousand is refused before any bytes are stored"
+rationale = """
+Ten thousand is the ceiling, and the request that exceeds it is usually a client that computed its \
+part size from the wrong object length — it will send thousands of such requests. Accepting them \
+stores parts that can never be completed and that no abort enumerates, which is storage nobody ever \
+reclaims. Refusing at the boundary, with an argument error rather than a generic failure, is also \
+what tells the client which of its parameters to fix."""
+polarity = "negative"
+operation = "UploadPart"
+tags = ["multipart", "limits", "boundary", "error-shape"]
+quirks = ["q-mpu-limits-0038"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/qfacts.html"
+summary = "States the part-number range as one through ten thousand inclusive."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/pull/281"
+summary = "Upstream did not enforce the multipart limits, so an upload could exceed the part ceiling."
+kind = "s3s-pr"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-mpu"
+
+[[setup.multipart_uploads]]
+bucket = "conf-mpu"
+key = "over-the-ceiling"
+capture_upload_id_as = "upload_id"
+
+[request]
+method = "PUT"
+target = "/conf-mpu/over-the-ceiling?partNumber=10001&uploadId=${capture.upload_id}"
+body = { utf8 = "these bytes must not be stored" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+headers_absent = ["etag"]
+
+[expect.error]
+code = "InvalidArgument"
+request_id_present = true

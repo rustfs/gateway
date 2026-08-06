@@ -73,10 +73,14 @@ fn c_cg_0003_operations_md_carries_three_reverse_indexes() {
     ] {
         assert!(text.contains(heading), "missing {heading}");
     }
-    // The reverse index is only useful if it actually resolves a failure to an operation.
+    // The reverse index is only useful if it actually resolves a failure to an operation. A row is
+    // asserted up to the first operation it names and no further: a code or a header that a second
+    // family also declares gains an entry in the same row, and pinning the whole row would make
+    // this test fail for every family that legitimately shares one — which says nothing about
+    // whether the index resolves.
     assert!(text.contains("| `list-type` | [ListObjectsV2](#listobjectsv2) |"));
-    assert!(text.contains("| `MissingContentLength` | [PutObject](#putobject) |"));
-    assert!(text.contains("| `x-amz-checksum-` | [PutObject](#putobject) |"));
+    assert!(text.contains("| `MissingContentLength` | [PutObject](#putobject)"));
+    assert!(text.contains("| `x-amz-checksum-` | [CompleteMultipartUpload](#completemultipartupload)"));
 }
 
 #[test]

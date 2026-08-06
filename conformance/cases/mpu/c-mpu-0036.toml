@@ -1,0 +1,65 @@
+# c-mpu-0036 — a body built to exhaust the parser.
+
+[case]
+id = "c-mpu-0036"
+schema_version = 1
+title = "A deeply nested completion body is refused at the parser limit rather than exhausting memory"
+rationale = """
+This operation accepts a repeated element and is reachable by any authenticated caller, which makes \
+it the widest XML surface in the family. A recursive-descent parser with no depth limit turns this \
+body into a stack overflow, and one with no size limit turns it into an allocation the process \
+cannot survive — in both cases a single request takes down every connection the server is holding. \
+The assertion is therefore that the request is refused and the connection remains usable, not \
+merely that the status is an error."""
+polarity = "negative"
+operation = "CompleteMultipartUpload"
+tags = ["multipart", "security", "limits", "xml-shape"]
+quirks = ["q-mpu-request-root-0030"]
+timeout_ms = 15000
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CompleteMultipartUpload.html"
+summary = "The documented body is a flat list of parts, so nesting beyond that depth is never a legitimate request."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://cwe.mitre.org/data/definitions/674.html"
+summary = "Uncontrolled recursion over attacker-supplied nesting is a documented denial-of-service class."
+kind = "other"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-mpu"
+
+[[setup.multipart_uploads]]
+bucket = "conf-mpu"
+key = "hostile-body"
+capture_upload_id_as = "upload_id"
+
+[[setup.multipart_uploads.parts]]
+part_number = 1
+body = { size = 1024 }
+
+[request]
+method = "POST"
+target = "/conf-mpu/hostile-body?uploadId=${capture.upload_id}"
+headers = { "content-type" = "application/xml" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[request.body]
+file = "fixtures/mpu/deeply-nested-complete.xml"
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+headers_absent = ["etag", "x-amz-version-id"]
+
+[expect.error]
+code = "MalformedXML"
+request_id_present = true
+
+[expect.timing]
+terminate_within_ms = 10000

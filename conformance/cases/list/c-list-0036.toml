@@ -1,0 +1,54 @@
+# c-list-0036 — markup characters in a key are escaped, not passed through.
+#
+# Schema dimensions exercised: XML escaping of a stored value, asserted in both directions.
+
+[case]
+id = "c-list-0036"
+schema_version = 1
+title = "A key holding ampersand, angle brackets and a quote round-trips through the listing unchanged"
+rationale = """
+These four characters are legal in a key and structural in the document, so passing them through does not corrupt one element — it changes where the elements are. A key containing a closing tag can therefore inject siblings into the response, which is the listing equivalent of an injection bug and not merely a formatting one. The escaped forms are asserted directly because a parser-level check would accept the injected document as well-formed."""
+polarity = "negative"
+operation = "ListObjectsV2"
+tags = ["list", "escaping", "xml"]
+timeout_ms = 15000
+quirks = ["q-encoding-0015"]
+
+[[case.evidence]]
+url = "https://www.w3.org/TR/xml/#syntax"
+summary = "The XML specification requires the ampersand and the left angle bracket to be escaped wherever they appear in character data."
+kind = "other"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectsV2.html"
+summary = "The documented response returns the stored key, which makes escaping the implementation's responsibility."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-list-odd"
+
+[[setup.objects]]
+bucket = "conf-list-odd"
+key = "a&b<c>d\"e.txt"
+body = { utf8 = "m" }
+
+[request]
+method = "GET"
+target = "/conf-list-odd?list-type=2"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+
+[expect.body]
+contains_utf8 = ["<Key>a&amp;b&lt;c&gt;d\"e.txt</Key>"]
+not_contains_utf8 = ["<Key>a&b<c>d"]
+
+[expect.body.xml]
+root = "ListBucketResult"
+xmlns = "http://s3.amazonaws.com/doc/2006-03-01/"
+empty_elements = "paired"

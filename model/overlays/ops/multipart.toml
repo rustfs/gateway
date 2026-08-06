@@ -12,19 +12,689 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Family: multipart upload.
+# Family: multipart upload. CreateMultipartUpload, UploadPart, CompleteMultipartUpload,
+# AbortMultipartUpload, ListParts, ListMultipartUploads.
 #
-# Nothing is generated yet. The part-number and checksum interaction — a checksum of checksums,
-# with a distinct entity-tag form — needs its own reviewed pass.
+# The family owns three things no other family has to answer:
+#
+# 1. `CompleteMultipartUpload` is the one operation whose response may fail after the head has
+#    been flushed. That is `allows_error_after_200`, an IR field, so the response shape is decided
+#    by the spec rather than by a branch somebody remembers to write.
+# 2. The entity tag of a completed upload is a digest of the part digests with a `-N` suffix, not
+#    a digest of the object. It is a value rule, so it belongs to the handler and to
+#    `conformance/cases/mpu/`, not to a binding — but the quirk that records it is here.
+# 3. Four of the six operations are spelled `/{Bucket}/{Key+}?x-id=<Operation>` in the model, and
+#    `x-id` is inert. Their routing discriminator is `uploadId` (and `partNumber`), which the
+#    model's uri does not pin — hence `query_present` on each of them.
+#
+# This file is the conflict unit for the family. Nothing outside it may declare these operations.
 
-[[deferred]]
-reason = "P5 multipart upload family; the part/checksum interaction needs its own reviewed pass."
-operations = [
+include = [
   "AbortMultipartUpload",
   "CompleteMultipartUpload",
   "CreateMultipartUpload",
   "ListMultipartUploads",
   "ListParts",
   "UploadPart",
-  "UploadPartCopy",
 ]
+
+# =============================================================================================
+# Precedence, in one place so the ordering argument is reviewable without reading six tables.
+#
+#   400  UploadPartCopy         reserved — the same selector as UploadPart plus x-amz-copy-source,
+#                               so it must be tried first. Deferred to P5-04.
+#   410  UploadPart             PUT + Object + partNumber + uploadId — the narrowest of the six.
+#   420  CompleteMultipartUpload
+#   430  AbortMultipartUpload
+#   440  ListParts
+#   450  CreateMultipartUpload  POST + Object + uploads
+#   460  ListMultipartUploads   GET + Bucket + uploads
+#
+# All seven sit in the 200..=699 subresource band, ahead of the plain object band (800..) they
+# would otherwise be indistinguishable from. Every resulting cross-precedence overlap is declared
+# in `crates/core/src/route/shadowing.rs`; none of them is decided by source order.
+# =============================================================================================
+
+# =============================================================================================
+# CreateMultipartUpload
+#
+# The response root is `InitiateMultipartUploadResult`, which is not the shape name. The model
+# states it, and q-mpu-root-0029 records that the decoupling is load-bearing rather than a typo
+# somebody may later "fix" by using the shape name.
+#
+# Everything this request carries — user metadata, content type, storage class, SSE settings — is
+# recorded now and applied at completion. `UploadPart` carries none of it.
+# =============================================================================================
+[op.CreateMultipartUpload]
+precedence = 450
+auth_action = "s3:PutObject"
+error_codes = [
+  "NoSuchBucket",
+  "AccessDenied",
+  "InvalidArgument",
+  "InvalidRequest",
+  "InvalidStorageClass",
+]
+quirk_refs = ["q-mpu-root-0029", "q-mpu-metadata-0039"]
+input_hot = ["ContentType", "StorageClass"]
+output_hot = ["Bucket", "Key", "UploadId"]
+output_required = ["Bucket", "Key", "UploadId"]
+element_order = ["Bucket", "Key", "UploadId"]
+
+[[op.CreateMultipartUpload.field]]
+side = "input"
+name = "ContentType"
+default_string = "binary/octet-stream"
+quirks = ["q-content-0008", "q-mpu-metadata-0039"]
+
+[[op.CreateMultipartUpload.field]]
+side = "input"
+name = "Metadata"
+quirks = ["q-meta-0009", "q-mpu-metadata-0039"]
+
+[[op.CreateMultipartUpload.field]]
+side = "input"
+name = "StorageClass"
+quirks = ["q-mpu-metadata-0039"]
+
+[[op.CreateMultipartUpload.field]]
+side = "input"
+name = "Expires"
+quirks = ["q-timestamp-0005"]
+
+[[op.CreateMultipartUpload.field]]
+side = "input"
+name = "ObjectLockRetainUntilDate"
+quirks = ["q-timestamp-0011"]
+
+[[op.CreateMultipartUpload.field]]
+side = "input"
+name = "SSECustomerKey"
+quirks = ["q-sse-0010"]
+
+[[op.CreateMultipartUpload.field]]
+side = "input"
+name = "SSECustomerKeyMD5"
+quirks = ["q-sse-0010"]
+
+[[op.CreateMultipartUpload.field]]
+side = "input"
+name = "SSEKMSKeyId"
+quirks = ["q-sse-0010"]
+
+[[op.CreateMultipartUpload.field]]
+side = "input"
+name = "SSEKMSEncryptionContext"
+quirks = ["q-sse-0010"]
+
+[[op.CreateMultipartUpload.field]]
+side = "output"
+name = "Bucket"
+quirks = ["q-mpu-root-0029"]
+
+[[op.CreateMultipartUpload.field]]
+side = "output"
+name = "UploadId"
+quirks = ["q-mpu-upload-id-0037"]
+
+[[op.CreateMultipartUpload.field]]
+side = "output"
+name = "SSECustomerKeyMD5"
+quirks = ["q-sse-0010"]
+
+[[op.CreateMultipartUpload.field]]
+side = "output"
+name = "SSEKMSKeyId"
+quirks = ["q-sse-0010"]
+
+[[op.CreateMultipartUpload.field]]
+side = "output"
+name = "SSEKMSEncryptionContext"
+quirks = ["q-sse-0010"]
+
+# =============================================================================================
+# UploadPart
+#
+# The narrowest selector in the family: a PUT to an object carrying both `partNumber` and
+# `uploadId`. Without `query_present` it would be `PutObject`, and a part would silently
+# overwrite the object it belongs to.
+#
+# `ContentLength` is forced required with the dedicated 411 code, exactly as PutObject does: a
+# part with no declared length and no chunked framing is a framing fact, not a value fact.
+#
+# The ten per-algorithm checksum headers collapse into one packed spec. Carrying them separately
+# would put ten Option<String> on the request path and make "more than one checksum header" a
+# merge instead of an error. Same mechanism, and the same quirk, as PutObject.
+# =============================================================================================
+[op.UploadPart]
+precedence = 410
+auth_action = "s3:PutObject"
+query_present = ["partNumber", "uploadId"]
+error_codes = [
+  "NoSuchBucket",
+  "NoSuchUpload",
+  "AccessDenied",
+  "InvalidArgument",
+  "MissingContentLength",
+  "EntityTooLarge",
+  "IncompleteBody",
+  "BadDigest",
+  "InvalidDigest",
+  "XAmzContentChecksumMismatch",
+]
+quirk_refs = ["q-checksum-0006", "q-mpu-upload-id-0037", "q-mpu-limits-0038"]
+input_drop = [
+  "ChecksumCRC32",
+  "ChecksumCRC32C",
+  "ChecksumCRC64NVME",
+  "ChecksumMD5",
+  "ChecksumSHA1",
+  "ChecksumSHA256",
+  "ChecksumSHA512",
+  "ChecksumXXHASH128",
+  "ChecksumXXHASH3",
+  "ChecksumXXHASH64",
+]
+output_drop = [
+  "ChecksumCRC32",
+  "ChecksumCRC32C",
+  "ChecksumCRC64NVME",
+  "ChecksumMD5",
+  "ChecksumSHA1",
+  "ChecksumSHA256",
+  "ChecksumSHA512",
+  "ChecksumXXHASH128",
+  "ChecksumXXHASH3",
+  "ChecksumXXHASH64",
+]
+input_required = ["ContentLength"]
+input_hot = ["PartNumber", "UploadId"]
+output_hot = ["ETag"]
+output_required = ["ETag"]
+
+[[op.UploadPart.field]]
+side = "input"
+name = "ContentLength"
+hot = true
+missing_error = "MissingContentLength"
+quirks = ["q-length-0007"]
+
+[[op.UploadPart.field]]
+side = "input"
+name = "PartNumber"
+quirks = ["q-mpu-limits-0038"]
+
+[[op.UploadPart.field]]
+side = "input"
+name = "UploadId"
+quirks = ["q-mpu-upload-id-0037"]
+
+[[op.UploadPart.field]]
+side = "input"
+name = "ChecksumAlgorithm"
+quirks = ["q-checksum-0006"]
+
+[[op.UploadPart.field]]
+side = "input"
+name = "SSECustomerKey"
+quirks = ["q-sse-0010"]
+
+[[op.UploadPart.field]]
+side = "input"
+name = "SSECustomerKeyMD5"
+quirks = ["q-sse-0010"]
+
+[[op.UploadPart.field]]
+side = "input"
+name = "ChecksumSpec"
+synthesize = true
+after = "ContentMD5"
+binding = "PrefixHeaders"
+wire_name = "x-amz-checksum-"
+type = "ChecksumSpec"
+hot = true
+quirks = ["q-checksum-0006"]
+
+# The part entity tag is a header, and a header tag is always quoted. It is the value a later
+# CompleteMultipartUpload request echoes back, so the two renderings have to agree.
+[[op.UploadPart.field]]
+side = "output"
+name = "ETag"
+required = true
+quirks = ["q-etag-0004", "q-mpu-etag-0028"]
+
+[[op.UploadPart.field]]
+side = "output"
+name = "SSECustomerKeyMD5"
+quirks = ["q-sse-0010"]
+
+[[op.UploadPart.field]]
+side = "output"
+name = "SSEKMSKeyId"
+quirks = ["q-sse-0010"]
+
+[[op.UploadPart.field]]
+side = "output"
+name = "ChecksumSpec"
+synthesize = true
+after = "ETag"
+binding = "PrefixHeaders"
+wire_name = "x-amz-checksum-"
+type = "ChecksumSpec"
+quirks = ["q-checksum-0006"]
+
+# =============================================================================================
+# CompleteMultipartUpload
+#
+# The 200-then-error operation. `allows_error_after_200` is what makes the response shape
+# `(head, deferred outcome)` for this operation and a plain response for every other one; no
+# encoder anywhere reads the operation name to find that out.
+#
+# The request root is `CompleteMultipartUpload` while the shape is `CompletedMultipartUpload`.
+# The model carries the wire name on the member rather than on the shape, so a payload decoder
+# would otherwise look for the shape name and reject every SDK request. See q-mpu-request-root-0030.
+#
+# The body is a list of parts and nothing else. Ten thousand parts is the AWS ceiling, and four
+# megabytes is comfortably above the largest well-formed request while still bounding the XML
+# bomb surface of an operation that accepts a repeated element.
+# =============================================================================================
+[op.CompleteMultipartUpload]
+precedence = 420
+auth_action = "s3:PutObject"
+query_present = ["uploadId"]
+allows_error_after_200 = true
+request_root = "CompleteMultipartUpload"
+request_max_bytes = 4194304
+error_codes = [
+  "NoSuchBucket",
+  "NoSuchUpload",
+  "AccessDenied",
+  "InvalidPart",
+  "InvalidPartOrder",
+  "EntityTooSmall",
+  "MalformedXML",
+  "InvalidArgument",
+  "InvalidRequest",
+  "PreconditionFailed",
+  "ConditionalRequestConflict",
+]
+quirk_refs = [
+  "q-mpu-etag-0028",
+  "q-mpu-request-root-0030",
+  "q-mpu-late-error-0033",
+  "q-mpu-trailer-0034",
+  "q-mpu-upload-id-0037",
+  "q-mpu-limits-0038",
+  "q-mpu-metadata-0039",
+]
+input_drop = [
+  "ChecksumCRC32",
+  "ChecksumCRC32C",
+  "ChecksumCRC64NVME",
+  "ChecksumMD5",
+  "ChecksumSHA1",
+  "ChecksumSHA256",
+  "ChecksumSHA512",
+  "ChecksumXXHASH128",
+  "ChecksumXXHASH3",
+  "ChecksumXXHASH64",
+]
+input_hot = ["MultipartUpload", "UploadId"]
+output_hot = ["Location", "Bucket", "Key", "ETag", "VersionId"]
+# Wire order, not model order. Location leads; the checksum block follows the entity tag.
+element_order = [
+  "Location",
+  "Bucket",
+  "Key",
+  "ETag",
+  "ChecksumCRC32",
+  "ChecksumCRC32C",
+  "ChecksumCRC64NVME",
+  "ChecksumSHA1",
+  "ChecksumSHA256",
+  "ChecksumSHA512",
+  "ChecksumMD5",
+  "ChecksumXXHASH64",
+  "ChecksumXXHASH3",
+  "ChecksumXXHASH128",
+  "ChecksumType",
+]
+
+[[op.CompleteMultipartUpload.field]]
+side = "input"
+name = "MultipartUpload"
+required = true
+quirks = ["q-mpu-request-root-0030", "q-mpu-limits-0038"]
+
+[[op.CompleteMultipartUpload.field]]
+side = "input"
+name = "UploadId"
+quirks = ["q-mpu-upload-id-0037"]
+
+[[op.CompleteMultipartUpload.field]]
+side = "input"
+name = "IfMatch"
+quirks = ["q-mpu-late-error-0033"]
+
+[[op.CompleteMultipartUpload.field]]
+side = "input"
+name = "IfNoneMatch"
+quirks = ["q-mpu-late-error-0033"]
+
+[[op.CompleteMultipartUpload.field]]
+side = "input"
+name = "SSECustomerKey"
+quirks = ["q-sse-0010"]
+
+[[op.CompleteMultipartUpload.field]]
+side = "input"
+name = "SSECustomerKeyMD5"
+quirks = ["q-sse-0010"]
+
+[[op.CompleteMultipartUpload.field]]
+side = "input"
+name = "ChecksumSpec"
+synthesize = true
+after = "UploadId"
+binding = "PrefixHeaders"
+wire_name = "x-amz-checksum-"
+type = "ChecksumSpec"
+quirks = ["q-checksum-0006"]
+
+# The composite tag: the digest of the concatenated raw part digests, then "-N". In a body
+# position an entity tag is quoted; the bare spelling belongs to GetObjectAttributes alone, which
+# is why q-mpu-attributes-etag-0036 is registered against the value this field produces.
+[[op.CompleteMultipartUpload.field]]
+side = "output"
+name = "ETag"
+quirks = ["q-mpu-etag-0028", "q-mpu-attributes-etag-0036"]
+
+[[op.CompleteMultipartUpload.field]]
+side = "output"
+name = "ChecksumType"
+quirks = ["q-mpu-etag-0028"]
+
+# Every one of these is known before the head is flushed, so it travels in the head. A value that
+# could only be known afterwards would have to be a body member; it must never be a header the
+# encoder hopes to add later. See q-mpu-late-error-0033.
+[[op.CompleteMultipartUpload.field]]
+side = "output"
+name = "ServerSideEncryption"
+quirks = ["q-sse-0010", "q-mpu-late-error-0033"]
+
+[[op.CompleteMultipartUpload.field]]
+side = "output"
+name = "VersionId"
+quirks = ["q-mpu-late-error-0033"]
+
+[[op.CompleteMultipartUpload.field]]
+side = "output"
+name = "Expiration"
+quirks = ["q-timestamp-0012", "q-mpu-late-error-0033"]
+
+[[op.CompleteMultipartUpload.field]]
+side = "output"
+name = "SSEKMSKeyId"
+quirks = ["q-sse-0010"]
+
+# =============================================================================================
+# AbortMultipartUpload
+#
+# 204 and an empty body, from the model. Unlike DeleteObject it is *not* idempotent: aborting an
+# upload that is not there is NoSuchUpload, because the id is a server-minted capability rather
+# than a name the caller chose. See q-mpu-abort-0035.
+# =============================================================================================
+[op.AbortMultipartUpload]
+precedence = 430
+auth_action = "s3:AbortMultipartUpload"
+query_present = ["uploadId"]
+error_codes = ["NoSuchBucket", "NoSuchUpload", "AccessDenied", "InvalidArgument"]
+quirk_refs = ["q-mpu-abort-0035", "q-mpu-upload-id-0037"]
+input_hot = ["UploadId"]
+
+[[op.AbortMultipartUpload.field]]
+side = "input"
+name = "UploadId"
+quirks = ["q-mpu-upload-id-0037", "q-mpu-abort-0035"]
+
+[[op.AbortMultipartUpload.field]]
+side = "input"
+name = "IfMatchInitiatedTime"
+quirks = ["q-timestamp-0011"]
+
+# =============================================================================================
+# ListParts
+#
+# `Part` repeats with no wrapper, and `NextPartNumberMarker` is the cursor the next page is asked
+# for. The pagination module itself is P5-05's; this family only declares the wire contract that
+# module has to satisfy.
+# =============================================================================================
+[op.ListParts]
+precedence = 440
+auth_action = "s3:ListMultipartUploadParts"
+query_present = ["uploadId"]
+error_codes = ["NoSuchBucket", "NoSuchUpload", "AccessDenied", "InvalidArgument"]
+quirk_refs = ["q-mpu-part-0031", "q-mpu-upload-id-0037", "q-mpu-marker-0040"]
+output_required = ["Bucket", "Key", "UploadId", "MaxParts", "IsTruncated"]
+input_hot = ["UploadId", "MaxParts", "PartNumberMarker"]
+output_hot = ["Bucket", "Key", "UploadId", "MaxParts", "IsTruncated", "Parts"]
+element_order = [
+  "Bucket",
+  "Key",
+  "UploadId",
+  "PartNumberMarker",
+  "NextPartNumberMarker",
+  "MaxParts",
+  "IsTruncated",
+  "Parts",
+  "Initiator",
+  "Owner",
+  "StorageClass",
+  "ChecksumAlgorithm",
+  "ChecksumType",
+]
+url_encoded_fields = ["Key"]
+
+[[op.ListParts.field]]
+side = "input"
+name = "MaxParts"
+default_int = 1000
+quirks = ["q-mpu-marker-0040"]
+
+[[op.ListParts.field]]
+side = "input"
+name = "PartNumberMarker"
+quirks = ["q-mpu-marker-0040"]
+
+[[op.ListParts.field]]
+side = "input"
+name = "UploadId"
+quirks = ["q-mpu-upload-id-0037"]
+
+[[op.ListParts.field]]
+side = "input"
+name = "SSECustomerKey"
+quirks = ["q-sse-0010"]
+
+[[op.ListParts.field]]
+side = "output"
+name = "Parts"
+quirks = ["q-mpu-part-0031"]
+
+[[op.ListParts.field]]
+side = "output"
+name = "MaxParts"
+quirks = ["q-mpu-marker-0040"]
+
+[[op.ListParts.field]]
+side = "output"
+name = "PartNumberMarker"
+quirks = ["q-mpu-marker-0040"]
+
+[[op.ListParts.field]]
+side = "output"
+name = "NextPartNumberMarker"
+quirks = ["q-mpu-marker-0040"]
+
+[[op.ListParts.field]]
+side = "output"
+name = "IsTruncated"
+quirks = ["q-mpu-marker-0040"]
+
+# =============================================================================================
+# ListMultipartUploads
+#
+# Two cursors, not one: a page resumes from `key-marker` *and* `upload-id-marker`, because one
+# key can carry several concurrent uploads. `Upload` repeats with no wrapper.
+# =============================================================================================
+[op.ListMultipartUploads]
+precedence = 460
+auth_action = "s3:ListBucketMultipartUploads"
+error_codes = ["NoSuchBucket", "AccessDenied", "InvalidArgument", "PermanentRedirect"]
+quirk_refs = ["q-encoding-0015", "q-mpu-upload-0032", "q-mpu-marker-0040"]
+output_required = ["Bucket", "MaxUploads", "IsTruncated"]
+input_hot = ["Prefix", "Delimiter", "MaxUploads", "KeyMarker", "UploadIdMarker"]
+output_hot = ["Bucket", "MaxUploads", "IsTruncated", "Uploads", "CommonPrefixes"]
+element_order = [
+  "Bucket",
+  "KeyMarker",
+  "UploadIdMarker",
+  "NextKeyMarker",
+  "Prefix",
+  "Delimiter",
+  "NextUploadIdMarker",
+  "MaxUploads",
+  "IsTruncated",
+  "Uploads",
+  "CommonPrefixes",
+  "EncodingType",
+]
+url_encoded_fields = [
+  "Prefix",
+  "Delimiter",
+  "KeyMarker",
+  "NextKeyMarker",
+  "Uploads.Key",
+  "CommonPrefixes.Prefix",
+]
+
+[[op.ListMultipartUploads.field]]
+side = "input"
+name = "MaxUploads"
+default_int = 1000
+quirks = ["q-mpu-marker-0040"]
+
+[[op.ListMultipartUploads.field]]
+side = "input"
+name = "KeyMarker"
+quirks = ["q-mpu-marker-0040"]
+
+[[op.ListMultipartUploads.field]]
+side = "input"
+name = "UploadIdMarker"
+quirks = ["q-mpu-upload-id-0037", "q-mpu-marker-0040"]
+
+[[op.ListMultipartUploads.field]]
+side = "input"
+name = "EncodingType"
+quirks = ["q-encoding-0015"]
+
+[[op.ListMultipartUploads.field]]
+side = "output"
+name = "Uploads"
+quirks = ["q-mpu-upload-0032"]
+
+[[op.ListMultipartUploads.field]]
+side = "output"
+name = "CommonPrefixes"
+quirks = ["q-flat-0019"]
+
+[[op.ListMultipartUploads.field]]
+side = "output"
+name = "MaxUploads"
+quirks = ["q-mpu-marker-0040"]
+
+[[op.ListMultipartUploads.field]]
+side = "output"
+name = "IsTruncated"
+quirks = ["q-mpu-marker-0040"]
+
+[[op.ListMultipartUploads.field]]
+side = "output"
+name = "NextKeyMarker"
+quirks = ["q-encoding-0015", "q-mpu-marker-0040"]
+
+[[op.ListMultipartUploads.field]]
+side = "output"
+name = "NextUploadIdMarker"
+quirks = ["q-mpu-marker-0040"]
+
+[[op.ListMultipartUploads.field]]
+side = "output"
+name = "EncodingType"
+quirks = ["q-encoding-0015"]
+
+# =============================================================================================
+# Nested shapes owned by this family
+# =============================================================================================
+
+# The request body of CompleteMultipartUpload. `Parts` is its only member, and an absent or empty
+# list is InvalidPart rather than the completion of an empty object — the defect q-mpu-etag-0028
+# records.
+[shape.CompletedMultipartUpload]
+required = ["Parts"]
+hot = ["Parts"]
+
+[[shape.CompletedMultipartUpload.field]]
+name = "Parts"
+required = true
+quirks = ["q-mpu-etag-0028", "q-mpu-limits-0038"]
+
+# One entry of that list. The entity tag is the value UploadPart returned, the part number is what
+# fixes the order, and the two together are what the composite tag is derived from.
+[shape.CompletedPart]
+required = ["PartNumber"]
+hot = ["PartNumber", "ETag"]
+
+[[shape.CompletedPart.field]]
+name = "ETag"
+quirks = ["q-mpu-etag-0028"]
+
+[[shape.CompletedPart.field]]
+name = "PartNumber"
+required = true
+quirks = ["q-mpu-limits-0038"]
+
+# One entry of a ListParts response.
+[shape.Part]
+required = ["PartNumber", "ETag", "Size"]
+hot = ["PartNumber", "ETag", "Size"]
+
+[[shape.Part.field]]
+name = "ETag"
+quirks = ["q-mpu-etag-0028"]
+
+[[shape.Part.field]]
+name = "PartNumber"
+quirks = ["q-mpu-limits-0038", "q-mpu-marker-0040"]
+
+# One entry of a ListMultipartUploads response.
+[shape.MultipartUpload]
+hot = ["UploadId", "Key"]
+
+[[shape.MultipartUpload.field]]
+name = "Key"
+quirks = ["q-encoding-0015"]
+
+[[shape.MultipartUpload.field]]
+name = "UploadId"
+quirks = ["q-mpu-upload-id-0037", "q-mpu-marker-0040"]
+
+# AWS writes the identifier before the display name, as it does for Owner; the model declares
+# them the other way round.
+[shape.Initiator]
+element_order = ["ID", "DisplayName"]
+
+[[deferred]]
+reason = "P5-04 copy family; UploadPartCopy shares x-amz-copy-source with CopyObject and the part semantics with this family, and lands there."
+operations = ["UploadPartCopy"]

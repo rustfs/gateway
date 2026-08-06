@@ -1,0 +1,65 @@
+# c-range-0015 — two ways of selecting bytes, sent at once.
+#
+# Schema dimensions exercised: byte-exact error document with redaction, header absence proving no
+# partial response was begun.
+
+[case]
+id = "c-range-0015"
+schema_version = 1
+title = "A request carrying both Range and partNumber is refused rather than resolved"
+rationale = """
+The two select overlapping spans by different mechanisms, and any rule for combining them is one \
+the client did not ask for: intersecting them silently returns fewer bytes than either asked for, \
+and preferring one silently ignores the other. A client that sends both has a bug it needs to be \
+told about, and a 400 is the only answer that tells it. Refusing also keeps the two paths \
+independent in the implementation, which is what stops a part read from growing range arithmetic."""
+polarity = "negative"
+operation = "GetObject"
+tags = ["range", "multipart", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-range-0056"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObject.html"
+summary = "Documents the part-number parameter and the range header as alternative ways of asking for part of an object."
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9110#section-14.2"
+summary = "The range header selects a span of the selected representation, which a part-number selection has already narrowed."
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-range"
+
+[[setup.multipart_uploads]]
+bucket = "conf-range"
+key = "both-selectors"
+
+[[setup.multipart_uploads.parts]]
+part_number = 1
+body = { size = 5242880 }
+
+[[setup.multipart_uploads.parts]]
+part_number = 2
+body = { size = 16 }
+
+[request]
+method = "GET"
+target = "/conf-range/both-selectors?partNumber=2"
+headers = { "range" = "bytes=0-4" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+headers_absent = ["content-range", "x-amz-mp-parts-count"]
+connection_after = "open"
+
+[expect.error]
+code = "InvalidRequest"
+request_id_present = true
+
+[expect.timing]
+terminate_within_ms = 5000

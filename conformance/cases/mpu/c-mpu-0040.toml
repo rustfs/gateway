@@ -1,0 +1,59 @@
+# c-mpu-0040 — a stalled completion ends the stream instead of hanging.
+
+[case]
+id = "c-mpu-0040"
+schema_version = 1
+title = "A completion that stops making progress terminates the response instead of hanging"
+rationale = """
+The whitespace that keeps a slow completion alive also keeps a stuck one alive, and a client cannot \
+tell the two apart: both look like a response in progress. Without a bound on time between \
+progress, a backend that has stopped answering holds every such request open until the client's own \
+timeout, and a retry storm follows. The bound has to be on progress rather than on total duration, \
+because a legitimately slow completion must not be cut off. The fixture needs a backend that stops \
+making progress, which is why this case is not in the fast gate."""
+polarity = "negative"
+operation = "CompleteMultipartUpload"
+tags = ["multipart", "streaming", "timing", "slow"]
+quirks = ["q-mpu-late-error-0033"]
+timeout_ms = 120000
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/issues/54"
+summary = "An incomplete response leaves the client waiting with no way to decide what happened."
+kind = "s3s-issue"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-mpu"
+
+[[setup.multipart_uploads]]
+bucket = "conf-mpu"
+key = "stalled-completion"
+capture_upload_id_as = "upload_id"
+
+[[setup.multipart_uploads.parts]]
+part_number = 1
+body = { size = 5242880 }
+capture_etag_as = "part1_etag"
+
+[request]
+method = "POST"
+target = "/conf-mpu/stalled-completion?uploadId=${capture.upload_id}"
+headers = { "content-type" = "application/xml" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[request.body]
+utf8 = '''
+<CompleteMultipartUpload xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Part><PartNumber>1</PartNumber><ETag>${capture.part1_etag}</ETag></Part></CompleteMultipartUpload>'''
+
+[expect]
+kind = "stream_error"
+stream_termination = "abrupt_close"
+status = 200
+body_bytes_before_error = 0
+connection_after = "closed"
+
+[expect.timing]
+terminate_within_ms = 90000

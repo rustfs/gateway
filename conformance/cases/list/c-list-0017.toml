@@ -1,0 +1,59 @@
+# c-list-0017 — url encoding covers the members the operation defines and is echoed back.
+#
+# Schema dimensions exercised: percent-encoded body members and an echoed request parameter.
+
+[case]
+id = "c-list-0017"
+schema_version = 1
+title = "encoding-type=url percent-encodes the keys, the prefix and the delimiter, and echoes EncodingType"
+rationale = """
+A key may contain any byte sequence, including bytes that cannot appear in an XML document at all. Without url encoding those keys produce a body the client's parser rejects, and the client loses the whole page rather than one object. The echo matters as much as the encoding: a client that does not know the response was encoded double-decodes every other key."""
+polarity = "positive"
+operation = "ListObjectsV2"
+tags = ["list", "encoding", "xml"]
+timeout_ms = 15000
+quirks = ["q-encoding-0015", "q-encoding-0067"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectsV2.html"
+summary = "Describes the request parameter and states the response echoes the encoding type when it was asked for."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-list-odd"
+
+[[setup.objects]]
+bucket = "conf-list-odd"
+key = "a&b.txt"
+body = { utf8 = "amp" }
+
+[[setup.objects]]
+bucket = "conf-list-odd"
+key = "with space.txt"
+body = { utf8 = "sp" }
+
+[[setup.objects]]
+bucket = "conf-list-odd"
+key = "\u76ee\u5f55/\u6587\u4ef6.txt"
+body = { utf8 = "cjk" }
+
+[request]
+method = "GET"
+target = "/conf-list-odd?list-type=2&encoding-type=url&delimiter=%2F"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+
+[expect.body]
+contains_utf8 = ["<EncodingType>url</EncodingType>", "<Key>a%26b.txt</Key>", "<Key>with%20space.txt</Key>", "<Delimiter>%2F</Delimiter>"]
+not_contains_utf8 = ["<Key>a&amp;b.txt</Key>"]
+
+[expect.body.xml]
+root = "ListBucketResult"
+xmlns = "http://s3.amazonaws.com/doc/2006-03-01/"
+empty_elements = "paired"

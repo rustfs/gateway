@@ -1,0 +1,63 @@
+# c-mpu-0005 — the completion request root is the verb, not the shape name.
+#
+# Schema dimensions exercised: a request body whose root element name is the subject of the case.
+
+[case]
+id = "c-mpu-0005"
+schema_version = 1
+title = "A completion body rooted at the verb spelling is accepted"
+rationale = """
+Every AWS SDK writes this body with the completion verb as the root element, while the service \
+model names the same structure with the participle. A decoder that matched the structure name would \
+reject ordinary, correctly formed SDK traffic with a malformed-body error, and the operator reading \
+that error would go looking for a client bug that does not exist. This is the positive half of the \
+pair; c-mpu-0033 is the negative half."""
+polarity = "positive"
+operation = "CompleteMultipartUpload"
+tags = ["multipart", "xml-shape", "compatibility"]
+quirks = ["q-mpu-request-root-0030"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CompleteMultipartUpload.html"
+summary = "The documented request syntax names a root element that differs from the structure name in the model."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/issues/2"
+summary = "Upstream rejected ordinary SDK traffic because it matched the request body against the shape name."
+kind = "s3s-issue"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-mpu"
+
+[[setup.multipart_uploads]]
+bucket = "conf-mpu"
+key = "sdk-shaped"
+capture_upload_id_as = "upload_id"
+
+[[setup.multipart_uploads.parts]]
+part_number = 1
+body = { size = 1024 }
+capture_etag_as = "part1_etag"
+
+[request]
+method = "POST"
+target = "/conf-mpu/sdk-shaped?uploadId=${capture.upload_id}"
+headers = { "content-type" = "application/xml" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[request.body]
+utf8 = '''
+<CompleteMultipartUpload xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Part><PartNumber>1</PartNumber><ETag>${capture.part1_etag}</ETag></Part></CompleteMultipartUpload>'''
+
+[expect]
+kind = "response"
+status = 200
+
+[expect.body]
+redact = ["Location", "UploadId", "ETag"]
+contains_utf8 = ["<CompleteMultipartUploadResult"]
+not_contains_utf8 = ["<Error>", "MalformedXML"]

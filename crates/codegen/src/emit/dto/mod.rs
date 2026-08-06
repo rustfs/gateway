@@ -316,10 +316,14 @@ pub fn check_required_impl(type_name: &str, baseline_name: &str, fields: &[Field
 }
 
 /// A `&'static [&'static str]` literal of model member names.
+///
+/// `lead` is the text that precedes the literal on its line, indent included. rustfmt decides the
+/// layout from the whole line, not from the literal alone, so a caller that cannot say what comes
+/// before it cannot produce rustfmt's answer.
 #[must_use]
-pub fn name_list(names: &[String], indent: usize) -> String {
+pub fn name_list(names: &[String], indent: usize, lead: &str) -> String {
     let quoted: Vec<String> = names.iter().map(|n| format!("\"{n}\"")).collect();
-    slice_literal(&quoted, indent)
+    slice_literal(&quoted, indent, lead)
 }
 
 /// rustfmt's `array_width` for this repository: 60% of the configured `max_width` of 130.
@@ -333,16 +337,44 @@ const ARRAY_WIDTH: usize = 78;
 /// rustfmt's `max_width` for this repository.
 const MAX_WIDTH: usize = 130;
 
+/// The terminator that follows a constant's literal and counts towards the line.
+const SEMICOLON: usize = 1;
+
 /// A slice literal, laid out the way rustfmt would lay it out.
+///
+/// `lead` is what precedes the literal on the same line, indent and the trailing `= ` included.
+/// The returned text carries its own separator — a space, or a newline and an indent — so the
+/// caller's template must not put one in front of it, or the continuation form would leave
+/// trailing whitespace on the line above.
+///
+/// Two limits decide the layout and both have to hold: the bracketed expression fits
+/// `array_width`, and the finished line fits `max_width`. Checking only the first produces a line
+/// that is under seventy-eight characters of literal and over a hundred and thirty of line, which
+/// rustfmt then rewrites — and `cargo xtask spec verify` reports as drift the next time anybody
+/// formats the tree.
 #[must_use]
-pub fn slice_literal(items: &[String], indent: usize) -> String {
+pub fn slice_literal(items: &[String], indent: usize, lead: &str) -> String {
     let single = format!("&[{}]", items.join(", "));
-    if single.len() <= ARRAY_WIDTH {
-        return single;
+    // `array_width` measures the bracketed expression; the borrow in front of it is a separate
+    // expression and does not count towards it. One character, and it decides the layout of every
+    // list that lands between seventy-eight and seventy-nine.
+    let bracketed = single.len().saturating_sub(1);
+    // The declaration in front, the literal, and the semicolon after it: that is the line rustfmt
+    // measures, so it is the line measured here.
+    let inline_line = lead.len() + single.len() + SEMICOLON;
+    if bracketed <= ARRAY_WIDTH && inline_line <= MAX_WIDTH {
+        return format!(" {single}");
     }
-    let pad = " ".repeat(indent + 4);
+    // Before expanding one item per line, rustfmt tries the whole literal on the next line at one
+    // further indent. Skipping that step produces a vertical list rustfmt immediately collapses.
+    let continued = indent + 4;
+    let continued_line = continued + single.len() + SEMICOLON;
+    if bracketed <= ARRAY_WIDTH && continued_line <= MAX_WIDTH {
+        return format!("\n{}{single}", " ".repeat(continued));
+    }
+    let pad = " ".repeat(continued);
     let body: String = items.iter().map(|item| format!("{pad}{item},\n")).collect();
-    format!("&[\n{body}{}]", " ".repeat(indent))
+    format!(" &[\n{body}{}]", " ".repeat(indent))
 }
 
 /// A `pub use` with a brace group, laid out the way rustfmt would lay it out.

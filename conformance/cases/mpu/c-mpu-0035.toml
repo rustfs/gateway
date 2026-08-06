@@ -1,0 +1,58 @@
+# c-mpu-0035 — an unknown element is ignored, not refused.
+
+[case]
+id = "c-mpu-0035"
+schema_version = 1
+title = "A completion body carrying an unknown element is processed normally"
+rationale = """
+AWS adds members to request bodies, and SDKs send them to endpoints that predate them; a decoder \
+that refuses anything it does not recognise breaks on the day a client library is upgraded, for \
+requests that are entirely valid. The failure is also badly diagnosable — the client sees a \
+malformed-body error for a body it produced correctly. This is the one case in the family whose \
+correct answer to hostile-looking input is to carry on, which is why it is listed as negative: the \
+input is unexpected and the assertion is that nothing was rejected."""
+polarity = "negative"
+operation = "CompleteMultipartUpload"
+tags = ["multipart", "xml-shape", "compatibility"]
+quirks = ["q-mpu-request-root-0030"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CompleteMultipartUpload.html"
+summary = "The request body is documented by the members it carries, and unlisted members are not described as errors."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-mpu"
+
+[[setup.multipart_uploads]]
+bucket = "conf-mpu"
+key = "forward-compatible"
+capture_upload_id_as = "upload_id"
+
+[[setup.multipart_uploads.parts]]
+part_number = 1
+body = { size = 1024 }
+capture_etag_as = "part1_etag"
+
+[request]
+method = "POST"
+target = "/conf-mpu/forward-compatible?uploadId=${capture.upload_id}"
+headers = { "content-type" = "application/xml" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[request.body]
+utf8 = '''
+<CompleteMultipartUpload xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><FutureMember>ignored</FutureMember><Part><PartNumber>1</PartNumber><ETag>${capture.part1_etag}</ETag><FuturePartMember>also ignored</FuturePartMember></Part></CompleteMultipartUpload>'''
+
+[expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[expect.body]
+redact = ["Location", "ETag", "UploadId"]
+contains_utf8 = ["<CompleteMultipartUploadResult"]
+not_contains_utf8 = ["<Error>", "MalformedXML", "FutureMember"]

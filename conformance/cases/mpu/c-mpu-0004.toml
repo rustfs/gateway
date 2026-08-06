@@ -1,0 +1,51 @@
+# c-mpu-0004 — the initiate response root.
+#
+# Schema dimensions exercised: body.xml root and element_order, redaction of a server-minted id.
+
+[case]
+id = "c-mpu-0004"
+schema_version = 1
+title = "CreateMultipartUpload answers a document rooted at the initiate result element"
+rationale = """
+The root element of this response is neither the operation name nor the name of the structure the \
+service model uses for it. Every SDK matches the root by name, so a generator that derived it from \
+either would produce a document that parses as nothing and an upload id no client can read — the \
+upload would be created and then unusable. Pinning the root and the child order is the only way \
+that failure shows up as a test rather than as a client that silently stops uploading."""
+polarity = "positive"
+operation = "CreateMultipartUpload"
+tags = ["multipart", "xml-shape"]
+quirks = ["q-mpu-root-0029"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CreateMultipartUpload.html"
+summary = "The documented response syntax shows a root element whose name does not match the operation name."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-mpu"
+
+[request]
+method = "POST"
+target = "/conf-mpu/initiate-me?uploads"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+
+[expect.headers_present]
+"content-type" = "application/xml"
+
+[expect.body]
+redact = ["UploadId"]
+contains_utf8 = ["<InitiateMultipartUploadResult", "<Bucket>conf-mpu</Bucket>", "<Key>initiate-me</Key>"]
+not_contains_utf8 = ["<CreateMultipartUploadOutput", "<CreateMultipartUploadResult"]
+
+[expect.body.xml]
+root = "InitiateMultipartUploadResult"
+xmlns = "http://s3.amazonaws.com/doc/2006-03-01/"
+element_order = ["Bucket", "Key", "UploadId"]

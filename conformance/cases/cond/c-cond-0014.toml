@@ -1,0 +1,61 @@
+# c-cond-0014 — the two entity-tag conditions cannot both be answered.
+#
+# Schema dimensions exercised: byte-exact error document with redaction, header absence proving no
+# evaluation took place.
+
+[case]
+id = "c-cond-0014"
+schema_version = 1
+title = "A request carrying both If-Match and If-None-Match is refused instead of half-evaluated"
+rationale = """
+The two conditions cannot both be satisfied against the same representation, so a request that \
+sends both is a client bug — and the dangerous response is a successful one. An implementation \
+that evaluates whichever it checks first silently answers a question the client did not ask, and \
+the client concludes its guard is working. Refusing outright is the only answer that tells the \
+client something is wrong while it can still be fixed."""
+polarity = "negative"
+operation = "GetObject"
+tags = ["conditional", "preconditions", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-cond-0044"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/conditional-requests.html"
+summary = "AWS presents the two entity-tag conditions as alternatives and refuses a request carrying both."
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/pull/588"
+summary = "The upstream conditional-write change left the combination unhandled, so one condition was evaluated and the other silently dropped."
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-cond"
+
+[[setup.objects]]
+bucket = "conf-cond"
+key = "both/headers"
+body = { utf8 = "hello" }
+
+[request]
+method = "GET"
+target = "/conf-cond/both/headers"
+headers = { "if-match" = "\"5d41402abc4b2a76b9719d911017c592\"", "if-none-match" = "*" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+headers_absent = ["etag"]
+connection_after = "open"
+
+[expect.error]
+code = "InvalidRequest"
+request_id_present = true
+
+[expect.headers_present]
+"content-type" = "application/xml"
+
+[expect.timing]
+terminate_within_ms = 5000

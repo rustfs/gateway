@@ -1,0 +1,60 @@
+# c-cond-0002 — the satisfied If-Match, which every conditional read is measured against.
+#
+# Schema dimensions exercised: single-exchange form, fixture preconditions, byte-exact body.
+
+[case]
+id = "c-cond-0002"
+schema_version = 1
+title = "A read whose If-Match names the current entity tag returns the object with 200"
+rationale = """
+This is the baseline the whole family is calibrated against: if a satisfied condition does not \
+produce an ordinary 200 with an ordinary body, none of the negative cases below prove anything, \
+because a failing evaluator that refuses everything would pass all of them. It also pins the \
+quoted header form, which is what clients read back out of a previous response and send here \
+unchanged."""
+polarity = "positive"
+operation = "GetObject"
+tags = ["conditional", "preconditions", "etag"]
+timeout_ms = 10000
+quirks = ["q-cond-0046"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObject.html"
+summary = "A read whose entity-tag condition is satisfied is served exactly as an unconditional read would be."
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9110#section-13.1.1"
+summary = "A satisfied If-Match means the request proceeds as though the condition had not been sent."
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-cond"
+
+[[setup.objects]]
+bucket = "conf-cond"
+key = "match/hit"
+content_type = "text/plain"
+body = { utf8 = "hello" }
+
+[request]
+method = "GET"
+target = "/conf-cond/match/hit"
+headers = { "if-match" = "\"5d41402abc4b2a76b9719d911017c592\"" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[expect.headers_present]
+"etag" = "\"5d41402abc4b2a76b9719d911017c592\""
+"content-length" = "5"
+
+[expect.timing]
+terminate_within_ms = 5000
+
+[expect.body]
+exact_utf8 = "hello"

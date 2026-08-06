@@ -1,0 +1,80 @@
+# c-cond-0003 — quoting is not part of the entity tag.
+#
+# Schema dimensions exercised: two exchanges over one connection, contrasting the two spellings of
+# one value.
+
+[case]
+id = "c-cond-0003"
+schema_version = 1
+title = "An entity tag compares equal whether or not the request quoted it"
+rationale = """
+An entity tag is an opaque tag with a wire spelling, and an implementation that compares the \
+spelling instead of the tag rejects half its clients: SDKs differ on whether they echo the quotes \
+they received. The symptom is not a parse error but a 412 on a request that should have succeeded, \
+which reads to an operator as data loss rather than as a string bug. Both spellings run against \
+one stored object here, so an implementation cannot pass by being consistently wrong."""
+polarity = "positive"
+operation = "GetObject"
+tags = ["conditional", "preconditions", "etag"]
+timeout_ms = 10000
+quirks = ["q-cond-0046"]
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/issues/397"
+summary = "Comparing entity tags as plain strings made a quoted header value fail against an unquoted stored tag."
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/issues/448"
+summary = "Several widely used clients send the conditional entity tag without quotes and were answered with an argument error."
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9110#section-8.8.3"
+summary = "The entity tag is the opaque value inside the quotes; the quotes are part of the field syntax."
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = true
+
+[[setup.buckets]]
+name = "conf-cond"
+
+[[setup.objects]]
+bucket = "conf-cond"
+key = "quoting/one"
+body = { utf8 = "hello" }
+
+[[exchanges]]
+name = "quoted-request-value"
+
+[exchanges.request]
+method = "HEAD"
+target = "/conf-cond/quoting/one"
+headers = { "if-match" = "\"5d41402abc4b2a76b9719d911017c592\"" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.headers_present]
+"etag" = "\"5d41402abc4b2a76b9719d911017c592\""
+
+[[exchanges]]
+name = "bare-request-value"
+
+[exchanges.request]
+method = "HEAD"
+target = "/conf-cond/quoting/one"
+headers = { "if-match" = "5d41402abc4b2a76b9719d911017c592" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.headers_present]
+"etag" = "\"5d41402abc4b2a76b9719d911017c592\""

@@ -23,7 +23,7 @@
 
 use std::borrow::Cow;
 
-/// The `ChecksumType` string enumeration. Bound by: GetObject, HeadObject, ListObjectsV2, PutObject.
+/// The `ChecksumType` string enumeration. Bound by: CompleteMultipartUpload, CreateMultipartUpload, GetObject, HeadObject, ListMultipartUploads, ListObjectVersions, ListObjects, ListObjectsV2, ListParts, PutObject.
 ///
 /// An open set: compare against the associated constants, and build a value the pinned
 /// model does not declare with [`ChecksumType::custom`]. Adding a constant is a minor version

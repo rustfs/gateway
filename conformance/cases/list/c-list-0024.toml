@@ -1,0 +1,63 @@
+# c-list-0024 — owner information is withheld unless the second listing version was asked for it.
+#
+# Schema dimensions exercised: absence of a nested structure as the assertion.
+
+[case]
+id = "c-list-0024"
+schema_version = 1
+title = "ListObjectsV2 writes no Owner element when fetch-owner was not set"
+rationale = """
+This is the disclosure half of the pair whose other half is c-list-0010. The canonical user id is account-identifying, and returning it on every listing hands it to anybody who can list the bucket — including, on a public bucket, anybody at all. An implementation that shares one code path with the first listing version leaks it here without any test noticing, because the response is otherwise correct."""
+polarity = "negative"
+operation = "ListObjectsV2"
+tags = ["list", "owner", "xml"]
+timeout_ms = 15000
+quirks = ["q-owner-0017", "q-owner-0065"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectsV2.html"
+summary = "States that owner information is returned only when the fetch owner parameter asks for it."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-list"
+
+[[setup.objects]]
+bucket = "conf-list"
+key = "a/1.txt"
+body = { utf8 = "a1" }
+
+[[setup.objects]]
+bucket = "conf-list"
+key = "a/2.txt"
+body = { utf8 = "a2" }
+
+[[setup.objects]]
+bucket = "conf-list"
+key = "b/1.txt"
+body = { utf8 = "b1" }
+
+[[setup.objects]]
+bucket = "conf-list"
+key = "top.txt"
+body = { utf8 = "top" }
+
+[request]
+method = "GET"
+target = "/conf-list?list-type=2"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+
+[expect.body]
+not_contains_utf8 = ["<Owner>"]
+
+[expect.body.xml]
+root = "ListBucketResult"
+xmlns = "http://s3.amazonaws.com/doc/2006-03-01/"
+empty_elements = "paired"

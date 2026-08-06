@@ -1,0 +1,550 @@
+// Copyright 2026 RustFS Team
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+//! Verdicts, grouping, and baseline-aware reporting.
+//!
+//! Responsible for: one conclusion per case with the reason attached, grouped by capability
+//! domain, and the decision of what fails a run. A first run against a foreign implementation is
+//! always largely red, so a run fails on a *regression* against a checked-in baseline rather than
+//! on the absolute failure count — that tolerance is the only reason anyone runs a foreign suite
+//! against their own server twice.
+//! NOT responsible for: producing verdicts (`crate::runner`) or judging assertions
+//! (`crate::expect`).
+//! Upstream: `crate::diagnostic`, `crate::json`. Downstream: `crate::cli`.
+
+use crate::diagnostic::{Diagnostic, Severity};
+use crate::json;
+use crate::value::Value;
+use std::collections::BTreeMap;
+
+/// The conclusion for one case.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Verdict {
+    /// Every assertion held.
+    Passed,
+    /// At least one assertion or convention failed.
+    Failed,
+    /// The case did not run, and why is recorded.
+    Skipped,
+}
+
+impl Verdict {
+    /// The lowercase spelling used in reports and baselines.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Verdict::Passed => "passed",
+            Verdict::Failed => "failed",
+            Verdict::Skipped => "skipped",
+        }
+    }
+}
+
+/// How far a case got.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Phase {
+    /// Reading and parsing the file.
+    Load,
+    /// Validation against the frozen schema.
+    Schema,
+    /// The conventions the schema cannot express.
+    Convention,
+    /// Running the exchanges against a target.
+    Execute,
+}
+
+impl Phase {
+    /// The lowercase spelling used in reports.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Phase::Load => "load",
+            Phase::Schema => "schema",
+            Phase::Convention => "convention",
+            Phase::Execute => "execute",
+        }
+    }
+}
+
+/// One case's conclusion.
+#[derive(Debug, Clone)]
+pub struct CaseOutcome {
+    /// The case identifier.
+    pub id: String,
+    /// The capability domain, which is the directory.
+    pub domain: String,
+    /// Path relative to the corpus root, for jumping straight to the file.
+    pub relative: String,
+    /// The case title, when it declares one.
+    pub title: Option<String>,
+    /// The conclusion.
+    pub verdict: Verdict,
+    /// How far it got.
+    pub phase: Phase,
+    /// Why it was skipped, when it was.
+    pub skip_reason: Option<String>,
+    /// Every finding, failing and advisory alike.
+    pub diagnostics: Vec<Diagnostic>,
+    /// The quirks this case declares, printed with a failure so the reader knows what it protects.
+    pub quirks: Vec<String>,
+    /// The evidence URLs, for the same reason.
+    pub evidence: Vec<String>,
+}
+
+impl CaseOutcome {
+    /// The findings that failed the case.
+    #[must_use]
+    pub fn failures(&self) -> Vec<&Diagnostic> {
+        self.diagnostics.iter().filter(|d| d.severity == Severity::Deny).collect()
+    }
+
+    /// The advisory findings.
+    #[must_use]
+    pub fn warnings(&self) -> Vec<&Diagnostic> {
+        self.diagnostics.iter().filter(|d| d.severity == Severity::Warn).collect()
+    }
+}
+
+/// The result of a run.
+#[derive(Debug, Clone)]
+pub struct Report {
+    /// What the run was pointed at.
+    pub target: String,
+    /// The assembly path.
+    pub transport: String,
+    /// The profile the target claims.
+    pub profile: String,
+    /// One conclusion per case, in corpus order.
+    pub outcomes: Vec<CaseOutcome>,
+    /// Cases filtered out before anything ran.
+    pub filtered_out: usize,
+    /// Run-wide notes, printed once at the end.
+    ///
+    /// A reason that applies to every case — "no target is wired, and here is what the facade
+    /// must expose" — is a property of the run, not of a hundred and fifty cases. Repeating it
+    /// per case buries the per-case conclusions it was meant to explain.
+    pub notes: Vec<String>,
+    /// Negative and positive case counts, for the corpus-wide polarity requirement.
+    pub polarity: (usize, usize),
+}
+
+impl Report {
+    /// Counts of each verdict.
+    #[must_use]
+    pub fn tally(&self) -> BTreeMap<Verdict, usize> {
+        let mut tally = BTreeMap::new();
+        for outcome in &self.outcomes {
+            *tally.entry(outcome.verdict).or_insert(0) += 1;
+        }
+        tally
+    }
+
+    /// Outcomes grouped by capability domain, in name order.
+    #[must_use]
+    pub fn by_domain(&self) -> BTreeMap<&str, Vec<&CaseOutcome>> {
+        let mut grouped: BTreeMap<&str, Vec<&CaseOutcome>> = BTreeMap::new();
+        for outcome in &self.outcomes {
+            grouped.entry(outcome.domain.as_str()).or_default().push(outcome);
+        }
+        grouped
+    }
+
+    /// Cases that fail now and did not fail in the baseline.
+    ///
+    /// With no baseline every failure is a regression, which is the right default for this
+    /// repository and the wrong one for a first run against a foreign server — hence the file.
+    #[must_use]
+    pub fn regressions<'a>(&'a self, baseline: Option<&Baseline>) -> Vec<&'a CaseOutcome> {
+        self.outcomes
+            .iter()
+            .filter(|outcome| outcome.verdict == Verdict::Failed)
+            .filter(|outcome| match baseline {
+                None => true,
+                Some(baseline) => baseline.expected(&outcome.id) != Some(Verdict::Failed),
+            })
+            .collect()
+    }
+
+    /// Cases the baseline records as failing that now pass — the ratchet's other end.
+    #[must_use]
+    pub fn improvements<'a>(&'a self, baseline: Option<&Baseline>) -> Vec<&'a CaseOutcome> {
+        let Some(baseline) = baseline else { return Vec::new() };
+        self.outcomes
+            .iter()
+            .filter(|outcome| outcome.verdict == Verdict::Passed)
+            .filter(|outcome| baseline.expected(&outcome.id) == Some(Verdict::Failed))
+            .collect()
+    }
+
+    /// The human-readable report.
+    #[must_use]
+    pub fn render_text(&self, baseline: Option<&Baseline>) -> String {
+        let mut out = String::new();
+        out.push_str(&format!("conformance: {} cases\n", self.outcomes.len()));
+        out.push_str(&format!("  target    {}\n", self.target));
+        out.push_str(&format!("  transport {}\n", self.transport));
+        out.push_str(&format!("  profile   {}\n", self.profile));
+        if self.filtered_out > 0 {
+            out.push_str(&format!("  filtered  {} case(s) excluded by --filter\n", self.filtered_out));
+        }
+        out.push('\n');
+
+        for (domain, outcomes) in self.by_domain() {
+            let passed = outcomes.iter().filter(|o| o.verdict == Verdict::Passed).count();
+            let failed = outcomes.iter().filter(|o| o.verdict == Verdict::Failed).count();
+            let skipped = outcomes.iter().filter(|o| o.verdict == Verdict::Skipped).count();
+            out.push_str(&format!(
+                "{domain}/  {} case(s): {passed} passed, {failed} failed, {skipped} skipped\n",
+                outcomes.len()
+            ));
+            for outcome in outcomes {
+                out.push_str(&format!(
+                    "  {:<8} {:<16} {}\n",
+                    outcome.verdict.as_str(),
+                    outcome.id,
+                    outcome.title.as_deref().unwrap_or("")
+                ));
+                if let Some(reason) = &outcome.skip_reason {
+                    out.push_str(&format!("      reason: {reason}\n"));
+                }
+                for failure in outcome.failures() {
+                    out.push_str(&format!("      FAIL {failure}\n"));
+                }
+                if outcome.verdict == Verdict::Failed {
+                    out.push_str(&format!("      file: {}\n", outcome.relative));
+                    if !outcome.quirks.is_empty() {
+                        out.push_str(&format!("      quirks: {}\n", outcome.quirks.join(", ")));
+                    }
+                    for url in &outcome.evidence {
+                        out.push_str(&format!("      evidence: {url}\n"));
+                    }
+                }
+                for warning in outcome.warnings() {
+                    out.push_str(&format!("      warn {warning}\n"));
+                }
+            }
+            out.push('\n');
+        }
+
+        for note in &self.notes {
+            out.push_str(&format!("note: {note}\n"));
+        }
+        if !self.notes.is_empty() {
+            out.push('\n');
+        }
+
+        let tally = self.tally();
+        let count = |verdict: Verdict| tally.get(&verdict).copied().unwrap_or(0);
+        out.push_str(&format!(
+            "summary: {} passed, {} failed, {} skipped\n",
+            count(Verdict::Passed),
+            count(Verdict::Failed),
+            count(Verdict::Skipped)
+        ));
+        let (negative, positive) = self.polarity;
+        out.push_str(&format!(
+            "polarity: {negative} negative, {positive} positive ({})\n",
+            if negative >= positive {
+                "ok"
+            } else {
+                "negative cases must outnumber positive ones"
+            }
+        ));
+        let regressions = self.regressions(baseline);
+        if baseline.is_some() {
+            out.push_str(&format!(
+                "baseline: {} regression(s), {} improvement(s)\n",
+                regressions.len(),
+                self.improvements(baseline).len()
+            ));
+        }
+        for outcome in &regressions {
+            out.push_str(&format!("regression: {} ({})\n", outcome.id, outcome.relative));
+        }
+        out
+    }
+
+    /// The machine-readable report.
+    #[must_use]
+    pub fn render_json(&self) -> String {
+        let mut out = String::from("{\n");
+        out.push_str(&format!("  \"target\": {},\n", quote(&self.target)));
+        out.push_str(&format!("  \"transport\": {},\n", quote(&self.transport)));
+        out.push_str(&format!("  \"profile\": {},\n", quote(&self.profile)));
+        out.push_str("  \"cases\": [\n");
+        for (index, outcome) in self.outcomes.iter().enumerate() {
+            let comma = if index + 1 == self.outcomes.len() { "" } else { "," };
+            let failures: Vec<String> = outcome.failures().iter().map(|d| quote(&d.to_string())).collect();
+            out.push_str(&format!(
+                "    {{\"id\": {}, \"domain\": {}, \"file\": {}, \"verdict\": {}, \"phase\": {}, \"reason\": {}, \"failures\": [{}]}}{comma}\n",
+                quote(&outcome.id),
+                quote(&outcome.domain),
+                quote(&outcome.relative),
+                quote(outcome.verdict.as_str()),
+                quote(outcome.phase.as_str()),
+                quote(outcome.skip_reason.as_deref().unwrap_or("")),
+                failures.join(", "),
+            ));
+        }
+        out.push_str("  ]\n}\n");
+        out
+    }
+
+    /// A JUnit document, for a CI system that already knows how to read one.
+    #[must_use]
+    pub fn render_junit(&self) -> String {
+        let failures = self.outcomes.iter().filter(|o| o.verdict == Verdict::Failed).count();
+        let skipped = self.outcomes.iter().filter(|o| o.verdict == Verdict::Skipped).count();
+        let mut out = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
+        out.push_str(&format!(
+            "<testsuite name=\"conformance\" tests=\"{}\" failures=\"{failures}\" skipped=\"{skipped}\">\n",
+            self.outcomes.len()
+        ));
+        for outcome in &self.outcomes {
+            out.push_str(&format!(
+                "  <testcase classname=\"{}\" name=\"{}\"",
+                escape_xml(&outcome.domain),
+                escape_xml(&outcome.id)
+            ));
+            match outcome.verdict {
+                Verdict::Passed => out.push_str("/>\n"),
+                Verdict::Skipped => {
+                    out.push_str(">\n");
+                    out.push_str(&format!(
+                        "    <skipped message=\"{}\"/>\n",
+                        escape_xml(outcome.skip_reason.as_deref().unwrap_or("not run"))
+                    ));
+                    out.push_str("  </testcase>\n");
+                }
+                Verdict::Failed => {
+                    out.push_str(">\n");
+                    for failure in outcome.failures() {
+                        out.push_str(&format!(
+                            "    <failure message=\"{}\">{}</failure>\n",
+                            escape_xml(&failure.rule),
+                            escape_xml(&failure.to_string())
+                        ));
+                    }
+                    out.push_str("  </testcase>\n");
+                }
+            }
+        }
+        out.push_str("</testsuite>\n");
+        out
+    }
+}
+
+/// The failures a previous run recorded, so only a regression fails CI.
+#[derive(Debug, Clone, Default)]
+pub struct Baseline {
+    entries: BTreeMap<String, Verdict>,
+}
+
+impl Baseline {
+    /// Reads a baseline document: `{"cases": {"c-etag-0001": "failed", ...}}`.
+    ///
+    /// # Errors
+    ///
+    /// Returns a message when the document is not JSON or does not have that shape.
+    pub fn from_json(source: &str) -> Result<Baseline, String> {
+        let document = json::parse(source).map_err(|error| error.to_string())?;
+        let Some(Value::Table(cases)) = document.get("cases") else {
+            return Err("a baseline needs a `cases` object mapping case id to verdict".to_owned());
+        };
+        let mut entries = BTreeMap::new();
+        for (id, verdict) in cases {
+            let verdict = match verdict.as_str() {
+                Some("passed") => Verdict::Passed,
+                Some("failed") => Verdict::Failed,
+                Some("skipped") => Verdict::Skipped,
+                other => return Err(format!("{id}: unknown verdict {other:?}")),
+            };
+            entries.insert(id.clone(), verdict);
+        }
+        Ok(Baseline { entries })
+    }
+
+    /// The verdict the baseline records for a case.
+    #[must_use]
+    pub fn expected(&self, id: &str) -> Option<Verdict> {
+        self.entries.get(id).copied()
+    }
+
+    /// Renders the current report as a baseline document, for the maintainer to check in.
+    #[must_use]
+    pub fn render(report: &Report) -> String {
+        let mut out = String::from("{\n  \"cases\": {\n");
+        for (index, outcome) in report.outcomes.iter().enumerate() {
+            let comma = if index + 1 == report.outcomes.len() { "" } else { "," };
+            out.push_str(&format!("    {}: {}{comma}\n", quote(&outcome.id), quote(outcome.verdict.as_str())));
+        }
+        out.push_str("  }\n}\n");
+        out
+    }
+}
+
+fn quote(text: &str) -> String {
+    let mut out = String::with_capacity(text.len() + 2);
+    out.push('"');
+    for ch in text.chars() {
+        match ch {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            ch if (ch as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", ch as u32)),
+            ch => out.push(ch),
+        }
+    }
+    out.push('"');
+    out
+}
+
+fn escape_xml(text: &str) -> String {
+    text.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&apos;")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn outcome(id: &str, domain: &str, verdict: Verdict) -> CaseOutcome {
+        CaseOutcome {
+            id: id.to_owned(),
+            domain: domain.to_owned(),
+            relative: format!("cases/{domain}/{id}.toml"),
+            title: Some("a title".to_owned()),
+            verdict,
+            phase: Phase::Execute,
+            skip_reason: (verdict == Verdict::Skipped).then(|| "no target".to_owned()),
+            diagnostics: if verdict == Verdict::Failed {
+                vec![Diagnostic::deny(
+                    "expect/status",
+                    "/expect/status",
+                    "expected 200, observed 500",
+                )]
+            } else {
+                Vec::new()
+            },
+            quirks: vec!["q-etag-0001".to_owned()],
+            evidence: vec!["https://example.test/a".to_owned()],
+        }
+    }
+
+    fn report() -> Report {
+        Report {
+            target: "scripted".to_owned(),
+            transport: "hyper".to_owned(),
+            profile: "aws".to_owned(),
+            outcomes: vec![
+                outcome("c-etag-0001", "etag", Verdict::Passed),
+                outcome("c-sig-0001", "sig", Verdict::Failed),
+                outcome("c-mpu-0001", "mpu", Verdict::Skipped),
+            ],
+            filtered_out: 0,
+            notes: vec!["the facade must expose: a service entry point".to_owned()],
+            polarity: (2, 1),
+        }
+    }
+
+    #[test]
+    fn the_text_report_groups_by_capability_domain() {
+        let rendered = report().render_text(None);
+        assert!(rendered.contains("etag/  1 case(s)"));
+        assert!(rendered.contains("sig/  1 case(s)"));
+        assert!(rendered.contains("summary: 1 passed, 1 failed, 1 skipped"));
+    }
+
+    #[test]
+    fn a_failure_carries_the_file_the_quirks_and_the_evidence() {
+        let rendered = report().render_text(None);
+        assert!(rendered.contains("file: cases/sig/c-sig-0001.toml"));
+        assert!(rendered.contains("quirks: q-etag-0001"));
+        assert!(rendered.contains("evidence: https://example.test/a"));
+    }
+
+    #[test]
+    fn a_skip_always_states_its_reason() {
+        let rendered = report().render_text(None);
+        assert!(rendered.contains("reason: no target"));
+    }
+
+    #[test]
+    fn without_a_baseline_every_failure_is_a_regression() {
+        assert_eq!(report().regressions(None).len(), 1);
+    }
+
+    #[test]
+    fn a_baseline_tolerates_a_recorded_failure() {
+        let baseline = Baseline::from_json(r#"{"cases": {"c-sig-0001": "failed"}}"#).expect("valid baseline");
+        assert!(report().regressions(Some(&baseline)).is_empty());
+    }
+
+    #[test]
+    fn a_baseline_does_not_tolerate_a_new_failure() {
+        let baseline = Baseline::from_json(r#"{"cases": {"c-etag-0001": "failed"}}"#).expect("valid baseline");
+        assert_eq!(report().regressions(Some(&baseline)).len(), 1);
+    }
+
+    #[test]
+    fn an_improvement_is_reported_so_the_ratchet_can_tighten() {
+        let baseline = Baseline::from_json(r#"{"cases": {"c-etag-0001": "failed"}}"#).expect("valid baseline");
+        assert_eq!(report().improvements(Some(&baseline)).len(), 1);
+    }
+
+    #[test]
+    fn a_baseline_with_an_unknown_verdict_is_refused() {
+        assert!(Baseline::from_json(r#"{"cases": {"c-etag-0001": "flaky"}}"#).is_err());
+    }
+
+    #[test]
+    fn a_rendered_baseline_reloads() {
+        let rendered = Baseline::render(&report());
+        let baseline = Baseline::from_json(&rendered).expect("round trip");
+        assert_eq!(baseline.expected("c-sig-0001"), Some(Verdict::Failed));
+    }
+
+    #[test]
+    fn the_junit_document_escapes_and_counts() {
+        let rendered = report().render_junit();
+        assert!(rendered.contains("tests=\"3\" failures=\"1\" skipped=\"1\""));
+        assert!(rendered.contains("<skipped message=\"no target\"/>"));
+        assert!(rendered.contains("<failure message=\"expect/status\">"));
+    }
+
+    #[test]
+    fn junit_escapes_markup_in_a_failure_message() {
+        let mut subject = report();
+        subject.outcomes[1].diagnostics = vec![Diagnostic::deny(
+            "expect/body",
+            "/expect/body",
+            "expected <Prefix/> observed <Prefix></Prefix>",
+        )];
+        let rendered = subject.render_junit();
+        assert!(rendered.contains("&lt;Prefix/&gt;"));
+        assert!(!rendered.contains("observed <Prefix>"));
+    }
+
+    #[test]
+    fn the_json_report_is_parseable() {
+        let rendered = report().render_json();
+        let parsed = json::parse(&rendered).expect("valid JSON");
+        assert_eq!(parsed.path("cases").and_then(Value::as_array).map(<[Value]>::len), Some(3));
+    }
+}

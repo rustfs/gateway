@@ -1,0 +1,95 @@
+# c-list-0028 — an unusable page size is refused rather than guessed at.
+#
+# Schema dimensions exercised: three malformed values for one parameter across three exchanges.
+
+[case]
+id = "c-list-0028"
+schema_version = 1
+title = "A negative, a non-numeric and an over-large max-keys are each answered with InvalidArgument"
+rationale = """
+Each of the three has a tempting default — clamp to zero, fall back to a thousand, clamp to the ceiling — and each default turns a client bug into a server behaviour nobody can debug from the outside. The over-large value is the one that matters most: silently clamping it means a client asking for a hundred thousand keys reads a thousand and concludes the bucket is small."""
+polarity = "negative"
+operation = "ListObjectsV2"
+tags = ["list", "pagination", "validation"]
+timeout_ms = 15000
+quirks = ["q-maxkeys-0068"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectsV2.html"
+summary = "Documents the parameter as an integer with a defined ceiling, which makes values outside it malformed input."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-list"
+
+[[setup.objects]]
+bucket = "conf-list"
+key = "a/1.txt"
+body = { utf8 = "a1" }
+
+[[setup.objects]]
+bucket = "conf-list"
+key = "a/2.txt"
+body = { utf8 = "a2" }
+
+[[setup.objects]]
+bucket = "conf-list"
+key = "b/1.txt"
+body = { utf8 = "b1" }
+
+[[setup.objects]]
+bucket = "conf-list"
+key = "top.txt"
+body = { utf8 = "top" }
+
+[connection]
+reuse = true
+
+[[exchanges]]
+name = "negative"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-list?list-type=2&max-keys=-1"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 400
+
+[exchanges.expect.error]
+code = "InvalidArgument"
+message_present = true
+
+[[exchanges]]
+name = "not-a-number"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-list?list-type=2&max-keys=abc"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 400
+
+[exchanges.expect.error]
+code = "InvalidArgument"
+
+[[exchanges]]
+name = "over-the-ceiling"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-list?list-type=2&max-keys=100000"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 400
+
+[exchanges.expect.error]
+code = "InvalidArgument"

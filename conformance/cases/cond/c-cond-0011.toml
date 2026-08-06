@@ -1,0 +1,82 @@
+# c-cond-0011 — the refused compare-and-swap, and the proof that nothing was written.
+#
+# Schema dimensions exercised: two exchanges over one connection, byte-exact error document,
+# header absence as evidence that the write did not happen, a follow-up read as the real assertion.
+
+[case]
+id = "c-cond-0011"
+schema_version = 1
+title = "A write whose If-Match names a stale entity tag is refused and leaves the object intact"
+rationale = """
+This is compare-and-swap, and the failure that matters is not the status code — it is the write \
+that happened anyway. An implementation that streams the body into place and then evaluates the \
+condition returns a perfectly correct 412 over an object it has already destroyed, and no \
+assertion on the failing response can see that. The second exchange reads the object back, which \
+is the only assertion that can."""
+polarity = "negative"
+operation = "PutObject"
+tags = ["conditional", "preconditions", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-cond-0046"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/conditional-writes.html"
+summary = "AWS documents the entity-tag guard on a write as failing with a precondition error when the tag does not match."
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/issues/241"
+summary = "Upstream tracking report for conditional writes, recording that the guard was not evaluated at all."
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = true
+
+[[setup.buckets]]
+name = "conf-cond"
+
+[[setup.objects]]
+bucket = "conf-cond"
+key = "cas/stale"
+content_type = "text/plain"
+body = { utf8 = "original" }
+
+[[exchanges]]
+name = "the-refusal"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-cond/cas/stale"
+headers = { "if-match" = "\"919c8b643b7133116b02fc0d9bb7df3f-wrong\"", "content-type" = "text/plain" }
+body = { utf8 = "overwritten" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 412
+headers_absent = ["etag", "x-amz-version-id"]
+connection_after = "open"
+
+[exchanges.expect.error]
+code = "PreconditionFailed"
+request_id_present = true
+
+[[exchanges]]
+name = "the-object-is-untouched"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-cond/cas/stale"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.headers_present]
+"etag" = "\"919c8b643b7133116b02fc0d9bb7df3f\""
+
+[exchanges.expect.body]
+exact_utf8 = "original"

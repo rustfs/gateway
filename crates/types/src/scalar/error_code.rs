@@ -239,6 +239,10 @@ error_codes! {
     /// why the status is context-sensitive rather than a plain table lookup.
     BUCKET_ALREADY_OWNED_BY_YOU = "BucketAlreadyOwnedByYou" => CONFLICT;
     BUCKET_NOT_EMPTY = "BucketNotEmpty" => CONFLICT;
+    /// Two conditional writes raced for the same key and this one lost. A 409 rather than a 412:
+    /// the precondition was true when it was evaluated, so the client is being told to retry, not
+    /// that its condition was false.
+    CONDITIONAL_REQUEST_CONFLICT = "ConditionalRequestConflict" => CONFLICT;
     INVALID_BUCKET_STATE = "InvalidBucketState" => CONFLICT;
     OPERATION_ABORTED = "OperationAborted" => CONFLICT;
     /// A `PUT` with no `Content-Length`. A 411, not a 400: the client must add the header, not fix

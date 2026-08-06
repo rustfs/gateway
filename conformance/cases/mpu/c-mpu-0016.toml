@@ -1,0 +1,96 @@
+# c-mpu-0016 — a header the operation produces is in the committed head.
+#
+# Schema dimensions exercised: header presence on a response whose body was produced later.
+
+[case]
+id = "c-mpu-0016"
+schema_version = 1
+title = "The encryption header of a completed upload survives the early head commit"
+rationale = """
+Because the head is flushed before the outcome is known, a value that is only decided afterwards \
+can never become a header. Upstream lost the encryption headers exactly this way: they were \
+produced after the point where headers could still be written, so the response was correct in every \
+respect except that it did not say the object was encrypted. A client that keys retention or \
+compliance decisions on that header then treats an encrypted object as unencrypted, and the \
+mistake is not visible in any log."""
+polarity = "positive"
+operation = "CompleteMultipartUpload"
+tags = ["multipart", "streaming", "sse"]
+quirks = ["q-mpu-late-error-0033", "q-sse-0010"]
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/issues/325"
+summary = "Encryption headers were lost once the head had been flushed, because the values were produced afterwards."
+kind = "s3s-issue"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CompleteMultipartUpload.html"
+summary = "The documented response for a completion carries the server-side encryption header."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = true
+
+[[setup.buckets]]
+name = "conf-mpu"
+
+[[exchanges]]
+name = "initiate-encrypted"
+
+[exchanges.request]
+method = "POST"
+target = "/conf-mpu/encrypted-object?uploads"
+headers = { "x-amz-server-side-encryption" = "AES256" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.headers_present]
+"x-amz-server-side-encryption" = "AES256"
+
+[exchanges.expect.capture]
+upload_id = { xml_text = "UploadId" }
+
+[[exchanges]]
+name = "upload-part"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-mpu/encrypted-object?partNumber=1&uploadId=${capture.upload_id}"
+body = { size = 64 }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.capture]
+part1_etag = { header = "etag" }
+
+[[exchanges]]
+name = "complete"
+
+[exchanges.request]
+method = "POST"
+target = "/conf-mpu/encrypted-object?uploadId=${capture.upload_id}"
+headers = { "content-type" = "application/xml" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.request.body]
+utf8 = '''
+<CompleteMultipartUpload xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Part><PartNumber>1</PartNumber><ETag>${capture.part1_etag}</ETag></Part></CompleteMultipartUpload>'''
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.headers_present]
+"x-amz-server-side-encryption" = "AES256"

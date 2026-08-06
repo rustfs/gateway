@@ -1,0 +1,61 @@
+# c-cond-0016 — the first place S3 does not follow RFC 9110.
+#
+# Schema dimensions exercised: clock injection so both conditions are decidable, byte-exact body
+# proving the object really was served.
+
+[case]
+id = "c-cond-0016"
+schema_version = 1
+title = "A matching If-Match suppresses a failing If-Modified-Since and the object is served"
+rationale = """
+Read strictly, RFC 9110 evaluates the modification-date condition after the entity-tag condition \
+and answers 304 here. S3 answers 200, and every client in existence was written against S3 — so an \
+implementation that follows the specification returns an empty response to a client that is \
+waiting for bytes, and the bug reads as a hang rather than as a disagreement about precedence. \
+This is one of exactly two places where the rule has to be S3's and not the RFC's, and the reason \
+that rule is hard-coded in the shared evaluator rather than offered as a setting."""
+polarity = "negative"
+operation = "GetObject"
+tags = ["conditional", "preconditions", "known-divergence"]
+timeout_ms = 10000
+quirks = ["q-cond-0042"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObject.html"
+summary = "The request-header section states the outcome when the entity-tag condition holds and the modification-date condition does not."
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9110#section-13.2.2"
+summary = "The specification's precedence list reaches the modification-date condition independently, which is the behaviour S3 departs from."
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-cond"
+
+[[setup.objects]]
+bucket = "conf-cond"
+key = "deviation/first"
+body = { utf8 = "hello" }
+
+[request]
+method = "GET"
+target = "/conf-cond/deviation/first"
+headers = { "if-match" = "\"5d41402abc4b2a76b9719d911017c592\"", "if-modified-since" = "Fri, 02 Jan 2026 03:04:05 GMT" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[expect.headers_present]
+"content-length" = "5"
+"etag" = "\"5d41402abc4b2a76b9719d911017c592\""
+
+[expect.timing]
+terminate_within_ms = 5000
+
+[expect.body]
+exact_utf8 = "hello"

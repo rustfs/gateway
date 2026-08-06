@@ -1,0 +1,68 @@
+# c-list-0037 — an empty query value means the parameter was not given.
+#
+# Schema dimensions exercised: a present-but-empty request parameter.
+
+[case]
+id = "c-list-0037"
+schema_version = 1
+title = "prefix= with no value behaves exactly as a request with no prefix at all"
+rationale = """
+Clients build query strings by concatenation and send empty values constantly. Treating an empty prefix as a filter that matches nothing returns an empty listing for a bucket full of objects, which the client reads as an empty bucket. The failure is a data-loss-shaped one for any tool that mirrors a listing, and it is triggered by the most ordinary client bug there is."""
+polarity = "negative"
+operation = "ListObjectsV2"
+tags = ["list", "validation", "xml"]
+timeout_ms = 15000
+quirks = ["q-empty-0016"]
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/issues/229"
+summary = "Upstream distinguished an empty value from an absent one where the wire does not."
+kind = "s3s-issue"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectsV2.html"
+summary = "Documents the prefix as an optional filter, which an empty string does not narrow."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-list"
+
+[[setup.objects]]
+bucket = "conf-list"
+key = "a/1.txt"
+body = { utf8 = "a1" }
+
+[[setup.objects]]
+bucket = "conf-list"
+key = "a/2.txt"
+body = { utf8 = "a2" }
+
+[[setup.objects]]
+bucket = "conf-list"
+key = "b/1.txt"
+body = { utf8 = "b1" }
+
+[[setup.objects]]
+bucket = "conf-list"
+key = "top.txt"
+body = { utf8 = "top" }
+
+[request]
+method = "GET"
+target = "/conf-list?list-type=2&prefix="
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+
+[expect.body]
+contains_utf8 = ["<Key>a/1.txt</Key>", "<Key>top.txt</Key>", "<KeyCount>4</KeyCount>"]
+
+[expect.body.xml]
+root = "ListBucketResult"
+xmlns = "http://s3.amazonaws.com/doc/2006-03-01/"
+empty_elements = "paired"

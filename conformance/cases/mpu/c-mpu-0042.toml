@@ -1,0 +1,67 @@
+# c-mpu-0042 — a wildcard If-Match against an absent object.
+
+[case]
+id = "c-mpu-0042"
+schema_version = 1
+title = "A completion conditioned on the object existing is refused when it does not"
+rationale = """
+The wildcard form of this condition means 'only if some representation exists', and it is how a \
+client expresses overwrite-but-never-create. An implementation that treats the wildcard as always \
+satisfied — the easy reading, since there is no tag to compare — turns that into create-anyway, and \
+the caller ends up with an object it explicitly asked not to bring into existence. The absent \
+version header is asserted because a 412 that still carries one has written something."""
+polarity = "negative"
+operation = "CompleteMultipartUpload"
+tags = ["multipart", "conditional", "error-shape"]
+quirks = ["q-mpu-late-error-0033"]
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9110#section-13.1.1"
+summary = "A wildcard if-match succeeds only when a current representation exists for the target."
+kind = "rfc"
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/pull/560"
+summary = "Upstream added conditional completion with the wildcard forms of both condition headers."
+kind = "s3s-pr"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-mpu"
+
+[[setup.objects]]
+bucket = "conf-mpu"
+key = "not-yet-there"
+absent = true
+
+[[setup.multipart_uploads]]
+bucket = "conf-mpu"
+key = "not-yet-there"
+capture_upload_id_as = "upload_id"
+
+[[setup.multipart_uploads.parts]]
+part_number = 1
+body = { size = 1024 }
+capture_etag_as = "part1_etag"
+
+[request]
+method = "POST"
+target = "/conf-mpu/not-yet-there?uploadId=${capture.upload_id}"
+headers = { "content-type" = "application/xml", "If-Match" = "*" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[request.body]
+utf8 = '''
+<CompleteMultipartUpload xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Part><PartNumber>1</PartNumber><ETag>${capture.part1_etag}</ETag></Part></CompleteMultipartUpload>'''
+
+[expect]
+kind = "response"
+status = 412
+connection_after = "open"
+headers_absent = ["x-amz-version-id", "etag"]
+
+[expect.error]
+code = "PreconditionFailed"
+request_id_present = true

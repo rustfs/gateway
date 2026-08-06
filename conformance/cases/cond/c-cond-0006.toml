@@ -1,0 +1,60 @@
+# c-cond-0006 — the wildcard is a value, and this is the half of it that must succeed.
+#
+# Schema dimensions exercised: setup.objects.absent as a precondition, byte-exact absence of a
+# body.
+
+[case]
+id = "c-cond-0006"
+schema_version = 1
+title = "A conditional create with If-None-Match: * succeeds when the key does not exist"
+rationale = """
+The wildcard write is how clients build mutual exclusion on top of object storage, and the failure \
+mode that has actually shipped is not a wrong status but a parse error: typing the entity tag and \
+forgetting that an asterisk is one of its values turns every conditional create into a bad \
+request. That breaks the primitive completely rather than partially, and it is invisible to any \
+test that only exercises the case where the key already exists."""
+polarity = "positive"
+operation = "PutObject"
+tags = ["conditional", "preconditions", "etag"]
+timeout_ms = 10000
+quirks = ["q-cond-0041", "q-cond-0045"]
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/issues/432"
+summary = "Typing the entity tag dropped the wildcard case, and the wildcard conditional write regressed into a bad request."
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/conditional-writes.html"
+summary = "AWS documents the wildcard form as the write that succeeds only when no object exists under the key."
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-cond"
+
+[[setup.objects]]
+bucket = "conf-cond"
+key = "cas/fresh"
+absent = true
+
+[request]
+method = "PUT"
+target = "/conf-cond/cas/fresh"
+headers = { "if-none-match" = "*", "content-type" = "text/plain" }
+body = { utf8 = "hello" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[expect.headers_present]
+"etag" = "\"5d41402abc4b2a76b9719d911017c592\""
+
+[expect.timing]
+terminate_within_ms = 5000
+
+[expect.body]
+size = 0

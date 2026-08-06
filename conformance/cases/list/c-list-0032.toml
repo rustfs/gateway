@@ -1,0 +1,83 @@
+# c-list-0032 — a cursor the service did not mint is not honoured.
+#
+# Schema dimensions exercised: capture followed by a deliberately altered replay of the captured value.
+
+[case]
+id = "c-list-0032"
+schema_version = 1
+title = "A continuation token altered after it was issued is refused rather than read as a page request"
+rationale = """
+A cursor is trusted input in every implementation that reads it, so the question is not whether the altered value decodes but what happens when it does. If a one-byte change lands on a different page the listing is a read primitive the client steers; if it lands on nothing the listing is a silent empty result. Refusing is the only answer that is neither. Where cursors carry an integrity tag this is the case that proves the tag is checked."""
+polarity = "negative"
+operation = "ListObjectsV2"
+tags = ["list", "security", "pagination"]
+timeout_ms = 15000
+quirks = ["q-token-0021"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectsV2.html"
+summary = "Describes the token as a value obtained from a previous response of this service."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-list"
+
+[[setup.objects]]
+bucket = "conf-list"
+key = "a/1.txt"
+body = { utf8 = "a1" }
+
+[[setup.objects]]
+bucket = "conf-list"
+key = "a/2.txt"
+body = { utf8 = "a2" }
+
+[[setup.objects]]
+bucket = "conf-list"
+key = "b/1.txt"
+body = { utf8 = "b1" }
+
+[[setup.objects]]
+bucket = "conf-list"
+key = "top.txt"
+body = { utf8 = "top" }
+
+[connection]
+reuse = true
+
+[[exchanges]]
+name = "mint-a-token"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-list?list-type=2&max-keys=2"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+
+[exchanges.expect.capture]
+next_token = { xml_text = "NextContinuationToken" }
+
+[exchanges.expect.body]
+redact = ["NextContinuationToken"]
+
+[[exchanges]]
+name = "replay-it-altered"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-list?list-type=2&max-keys=2&continuation-token=${capture.next_token}X"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 400
+
+[exchanges.expect.error]
+code = "InvalidArgument"
+message_present = true

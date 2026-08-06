@@ -1,0 +1,69 @@
+# c-list-0003 — a delimiter folds keys into common prefixes instead of listing the leaves.
+#
+# Schema dimensions exercised: body substring assertions in both directions.
+
+[case]
+id = "c-list-0003"
+schema_version = 1
+title = "A delimited listing returns the common prefix and not the objects underneath it"
+rationale = """
+This is the difference between `aws s3 ls` printing three directory names and printing every object in the bucket. An implementation that ignores the delimiter still returns correct data, so no status code and no schema check catches it; what changes is the shape of the answer, and for a bucket with a million keys under one prefix the shape is the whole cost of the call."""
+polarity = "positive"
+operation = "ListObjects"
+tags = ["list", "delimiter", "xml"]
+timeout_ms = 15000
+quirks = ["q-flat-0019", "q-empty-0063"]
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/issues/300"
+summary = "With a delimiter set upstream returned every leaf key instead of folding them into common prefixes."
+kind = "s3s-issue"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjects.html"
+summary = "Describes the delimiter as the character that rolls the keys between it and the prefix into one entry."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-list"
+
+[[setup.objects]]
+bucket = "conf-list"
+key = "a/1.txt"
+body = { utf8 = "a1" }
+
+[[setup.objects]]
+bucket = "conf-list"
+key = "a/2.txt"
+body = { utf8 = "a2" }
+
+[[setup.objects]]
+bucket = "conf-list"
+key = "b/1.txt"
+body = { utf8 = "b1" }
+
+[[setup.objects]]
+bucket = "conf-list"
+key = "top.txt"
+body = { utf8 = "top" }
+
+[request]
+method = "GET"
+target = "/conf-list?delimiter=%2F"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+
+[expect.body]
+contains_utf8 = ["<CommonPrefixes><Prefix>a/</Prefix></CommonPrefixes>", "<CommonPrefixes><Prefix>b/</Prefix></CommonPrefixes>"]
+not_contains_utf8 = ["<Key>a/1.txt</Key>", "<Key>a/2.txt</Key>", "<Key>b/1.txt</Key>"]
+
+[expect.body.xml]
+root = "ListBucketResult"
+xmlns = "http://s3.amazonaws.com/doc/2006-03-01/"
+empty_elements = "paired"

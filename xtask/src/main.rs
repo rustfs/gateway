@@ -37,6 +37,7 @@ fn main() -> ExitCode {
             }
         },
         Some("why") => codegen::why(&rest),
+        Some("conformance") => conformance(rest),
         Some("bootstrap") => {
             println!("nothing to bootstrap yet");
             ExitCode::SUCCESS
@@ -63,6 +64,8 @@ commands:
   why <target>              why a behaviour is the way it is: quirk id, operation, error code,
                             header or query key
   bootstrap                 prepare a fresh checkout for work
+  conformance <run|validate|baseline> [--filter <glob>] [--transport hyper|conn]
+              [--profile aws|minio|strict] [--baseline <f>] [--json <f>] [--junit <f>]
 ";
 
 /// Forwards to `cargo test`. Widened by later tasks into the <=30s per-crate feedback loop.
@@ -84,6 +87,34 @@ fn verify(args: Vec<String>) -> ExitCode {
     match cmd.status() {
         Ok(status) if status.success() => ExitCode::SUCCESS,
         Ok(_) => ExitCode::FAILURE,
+        Err(err) => {
+            eprintln!("failed to run cargo: {err}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// Shells out to the conformance binary.
+///
+/// `xtask` may not depend on `rustfs-gateway-conformance`: the layer matrix gives it
+/// `-codegen` and `-model` only, and the suite is meant to exercise the public facade the
+/// way an outside implementation would, not to reach into the workspace from a build tool.
+fn conformance(args: Vec<String>) -> ExitCode {
+    let mut cmd = std::process::Command::new(env!("CARGO"));
+    cmd.args([
+        "run",
+        "--quiet",
+        "--package",
+        "rustfs-gateway-conformance",
+        "--bin",
+        "rustfs-gateway-conformance",
+        "--",
+    ]);
+    cmd.args(&args);
+    match cmd.status() {
+        // Exit code 3 means "no case executed", which is not success. Passing the child's
+        // code through unchanged is what keeps that distinction visible to CI.
+        Ok(status) => ExitCode::from(u8::try_from(status.code().unwrap_or(3)).unwrap_or(3)),
         Err(err) => {
             eprintln!("failed to run cargo: {err}");
             ExitCode::FAILURE

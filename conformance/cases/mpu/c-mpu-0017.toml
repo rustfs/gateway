@@ -1,0 +1,66 @@
+# c-mpu-0017 — the completion result and the version header.
+#
+# Schema dimensions exercised: element_order on the result body plus a header only a versioned
+# bucket produces.
+
+[case]
+id = "c-mpu-0017"
+schema_version = 1
+title = "A completion on a versioned bucket returns the version header and the full result body"
+rationale = """
+The version identifier is how a caller names the object it just created; without it a client that \
+writes concurrently cannot refer to its own write, and every subsequent read is a race it cannot \
+detect. Like the encryption header it has to be in the head that was flushed before the outcome was \
+known, so it is asserted together with the body elements a client reads on success — a response \
+missing either half looks successful and is unusable."""
+polarity = "positive"
+operation = "CompleteMultipartUpload"
+tags = ["multipart", "versioning", "xml-shape"]
+quirks = ["q-mpu-late-error-0033"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CompleteMultipartUpload.html"
+summary = "The documented response carries the version header and a result naming the location, bucket, key and entity tag."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-mpu-versioned"
+versioning = "enabled"
+
+[[setup.multipart_uploads]]
+bucket = "conf-mpu-versioned"
+key = "versioned-object"
+capture_upload_id_as = "upload_id"
+
+[[setup.multipart_uploads.parts]]
+part_number = 1
+body = { size = 1024 }
+capture_etag_as = "part1_etag"
+
+[request]
+method = "POST"
+target = "/conf-mpu-versioned/versioned-object?uploadId=${capture.upload_id}"
+headers = { "content-type" = "application/xml" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[request.body]
+utf8 = '''
+<CompleteMultipartUpload xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Part><PartNumber>1</PartNumber><ETag>${capture.part1_etag}</ETag></Part></CompleteMultipartUpload>'''
+
+[expect]
+kind = "response"
+status = 200
+
+[expect.headers_present]
+"x-amz-version-id" = "*"
+
+[expect.body]
+redact = ["Location", "ETag"]
+contains_utf8 = ["<Bucket>conf-mpu-versioned</Bucket>", "<Key>versioned-object</Key>"]
+
+[expect.body.xml]
+root = "CompleteMultipartUploadResult"
+element_order = ["Location", "Bucket", "Key", "ETag"]

@@ -1,0 +1,61 @@
+# c-list-0021 — the listing keeps the quotes around an entity tag.
+#
+# Schema dimensions exercised: an entity tag rendered in the body rather than in a header.
+
+[case]
+id = "c-list-0021"
+schema_version = 1
+title = "A multipart object's entity tag appears in the listing with its part suffix and its literal quotes"
+rationale = """
+The entity tag is quoted in the listing body and bare in the object-attributes body, and one rule applied to both gets one wrong. The multipart form is the harder half: the suffix after the dash is part of the value, so an implementation that parses the tag to re-render it drops the suffix and every client comparing tags across a copy decides the object changed."""
+polarity = "positive"
+operation = "ListObjectsV2"
+tags = ["list", "etag", "xml"]
+timeout_ms = 15000
+quirks = ["q-etag-0020"]
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/issues/632"
+summary = "Upstream held one quoting rule for two body contexts, so one of the two was always wrong."
+kind = "s3s-issue"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectsV2.html"
+summary = "The documented listing response carries the entity tag with its surrounding quotes."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-list-mpu"
+
+[[setup.multipart_uploads]]
+bucket = "conf-list-mpu"
+key = "big.bin"
+capture_upload_id_as = "upload_id"
+
+[[setup.multipart_uploads.parts]]
+part_number = 1
+body = { size = 5242880, fill = "00" }
+
+[[setup.multipart_uploads.parts]]
+part_number = 2
+body = { size = 1024, fill = "ff" }
+
+[request]
+method = "GET"
+target = "/conf-list-mpu?list-type=2"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+
+[expect.body]
+contains_utf8 = ["-2&quot;</ETag>"]
+
+[expect.body.xml]
+root = "ListBucketResult"
+xmlns = "http://s3.amazonaws.com/doc/2006-03-01/"
+empty_elements = "paired"

@@ -1,0 +1,812 @@
+{
+  "ir_version": "1",
+  "operation": "ListObjectVersions",
+  "http": {
+            "method": "GET",
+            "target": "Bucket",
+            "precedence": 610,
+            "predicates": [
+                            { "kind": "Method", "method": "GET" },
+                            { "kind": "Target", "target": "Bucket" },
+                            { "kind": "QueryPresent", "key": "versions" }
+                          ],
+            "success_status": 200,
+            "alt_success_statuses": [],
+            "path_shape": "/{Bucket}"
+          },
+  "auth": { "requirement": "Required", "action": "s3:ListBucket", "presigned_allowed": true, "service": "s3" },
+  "payload": {
+               "request": { "kind": "None", "buffering": "None", "max_bytes": null },
+               "response": { "kind": "XmlBody", "buffering": "Full", "max_bytes": null }
+             },
+  "checksum": { "http_checksum_required": false, "request_algorithms": [], "response_algorithms": [] },
+  "input": {
+             "fields": [
+                         {
+                           "name": "Bucket",
+                           "wire_name": "Bucket",
+                           "required": true,
+                           "binding": { "kind": "UriLabel", "greedy": false },
+                           "type": { "kind": "BucketName" },
+                           "hot": true,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "Delimiter",
+                           "wire_name": "delimiter",
+                           "required": false,
+                           "binding": { "kind": "Query" },
+                           "type": { "kind": "String" },
+                           "hot": true,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "EncodingType",
+                           "wire_name": "encoding-type",
+                           "required": false,
+                           "binding": { "kind": "Query" },
+                           "type": { "kind": "StringEnum", "values": ["url"] },
+                           "hot": false,
+                           "quirk_refs": ["q-encoding-0067"]
+                         },
+                         {
+                           "name": "KeyMarker",
+                           "wire_name": "key-marker",
+                           "required": false,
+                           "binding": { "kind": "Query" },
+                           "type": { "kind": "String" },
+                           "hot": true,
+                           "quirk_refs": ["q-marker-0070"]
+                         },
+                         {
+                           "name": "MaxKeys",
+                           "wire_name": "max-keys",
+                           "required": false,
+                           "binding": { "kind": "Query" },
+                           "type": { "kind": "Integer" },
+                           "hot": true,
+                           "default": 1000,
+                           "quirk_refs": ["q-maxkeys-0068"]
+                         },
+                         {
+                           "name": "Prefix",
+                           "wire_name": "prefix",
+                           "required": false,
+                           "binding": { "kind": "Query" },
+                           "type": { "kind": "String" },
+                           "hot": true,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "VersionIdMarker",
+                           "wire_name": "version-id-marker",
+                           "required": false,
+                           "binding": { "kind": "Query" },
+                           "type": { "kind": "OpaqueString" },
+                           "hot": true,
+                           "quirk_refs": ["q-token-0021", "q-marker-0070"]
+                         },
+                         {
+                           "name": "ExpectedBucketOwner",
+                           "wire_name": "x-amz-expected-bucket-owner",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "String" },
+                           "hot": false,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "RequestPayer",
+                           "wire_name": "x-amz-request-payer",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "StringEnum", "values": ["requester"] },
+                           "hot": false,
+                           "quirk_refs": []
+                         }
+                       ]
+           },
+  "output": {
+              "fields": [
+                          {
+                            "name": "IsTruncated",
+                            "wire_name": "IsTruncated",
+                            "required": true,
+                            "binding": { "kind": "BodyXml" },
+                            "type": { "kind": "Boolean" },
+                            "hot": true,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "KeyMarker",
+                            "wire_name": "KeyMarker",
+                            "required": true,
+                            "binding": { "kind": "BodyXml" },
+                            "type": { "kind": "String" },
+                            "hot": true,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "VersionIdMarker",
+                            "wire_name": "VersionIdMarker",
+                            "required": true,
+                            "binding": { "kind": "BodyXml" },
+                            "type": { "kind": "OpaqueString" },
+                            "hot": false,
+                            "quirk_refs": ["q-token-0021"]
+                          },
+                          {
+                            "name": "NextKeyMarker",
+                            "wire_name": "NextKeyMarker",
+                            "required": false,
+                            "binding": { "kind": "BodyXml" },
+                            "type": { "kind": "String" },
+                            "hot": false,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "NextVersionIdMarker",
+                            "wire_name": "NextVersionIdMarker",
+                            "required": false,
+                            "binding": { "kind": "BodyXml" },
+                            "type": { "kind": "OpaqueString" },
+                            "hot": false,
+                            "quirk_refs": ["q-token-0021"]
+                          },
+                          {
+                            "name": "Versions",
+                            "wire_name": "Version",
+                            "required": false,
+                            "binding": { "kind": "BodyXml" },
+                            "type": {
+                                      "kind": "List",
+                                      "member": { "kind": "Structure", "shape": "ObjectVersion" },
+                                      "flattened": true,
+                                      "wrapper_name": null
+                                    },
+                            "hot": true,
+                            "quirk_refs": ["q-flat-0019", "q-version-0061", "q-interleave-0069"]
+                          },
+                          {
+                            "name": "DeleteMarkers",
+                            "wire_name": "DeleteMarker",
+                            "required": false,
+                            "binding": { "kind": "BodyXml" },
+                            "type": {
+                                      "kind": "List",
+                                      "member": { "kind": "Structure", "shape": "DeleteMarkerEntry" },
+                                      "flattened": true,
+                                      "wrapper_name": null
+                                    },
+                            "hot": true,
+                            "quirk_refs": ["q-flat-0019", "q-version-0061", "q-interleave-0069"]
+                          },
+                          {
+                            "name": "Name",
+                            "wire_name": "Name",
+                            "required": true,
+                            "binding": { "kind": "BodyXml" },
+                            "type": { "kind": "BucketName" },
+                            "hot": true,
+                            "quirk_refs": ["q-order-0066"]
+                          },
+                          {
+                            "name": "Prefix",
+                            "wire_name": "Prefix",
+                            "required": true,
+                            "binding": { "kind": "BodyXml" },
+                            "type": { "kind": "String" },
+                            "hot": true,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "Delimiter",
+                            "wire_name": "Delimiter",
+                            "required": false,
+                            "binding": { "kind": "BodyXml" },
+                            "type": { "kind": "String" },
+                            "hot": true,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "MaxKeys",
+                            "wire_name": "MaxKeys",
+                            "required": true,
+                            "binding": { "kind": "BodyXml" },
+                            "type": { "kind": "Integer" },
+                            "hot": true,
+                            "quirk_refs": ["q-maxkeys-0068"]
+                          },
+                          {
+                            "name": "CommonPrefixes",
+                            "wire_name": "CommonPrefixes",
+                            "required": false,
+                            "binding": { "kind": "BodyXml" },
+                            "type": {
+                                      "kind": "List",
+                                      "member": { "kind": "Structure", "shape": "CommonPrefix" },
+                                      "flattened": true,
+                                      "wrapper_name": null
+                                    },
+                            "hot": true,
+                            "quirk_refs": ["q-flat-0019"]
+                          },
+                          {
+                            "name": "EncodingType",
+                            "wire_name": "EncodingType",
+                            "required": false,
+                            "binding": { "kind": "BodyXml" },
+                            "type": { "kind": "StringEnum", "values": ["url"] },
+                            "hot": false,
+                            "quirk_refs": ["q-encoding-0067"]
+                          },
+                          {
+                            "name": "RequestCharged",
+                            "wire_name": "x-amz-request-charged",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": { "kind": "StringEnum", "values": ["requester"] },
+                            "hot": false,
+                            "quirk_refs": []
+                          }
+                        ]
+            },
+  "shapes": {
+              "CommonPrefix": {
+                                "kind": "Structure",
+                                "fields": [
+                                            {
+                                              "name": "Prefix",
+                                              "wire_name": "Prefix",
+                                              "required": true,
+                                              "binding": { "kind": "BodyXml" },
+                                              "type": { "kind": "String" },
+                                              "hot": true,
+                                              "quirk_refs": ["q-encoding-0015"]
+                                            }
+                                          ],
+                                "xml": {
+                                         "element_order": ["Prefix"],
+                                         "empty_value_policy": { "Prefix": "emit" },
+                                         "attributes": []
+                                       }
+                              },
+              "DeleteMarkerEntry": {
+                                     "kind": "Structure",
+                                     "fields": [
+                                                 {
+                                                   "name": "Owner",
+                                                   "wire_name": "Owner",
+                                                   "required": false,
+                                                   "binding": { "kind": "BodyXml" },
+                                                   "type": { "kind": "Structure", "shape": "Owner" },
+                                                   "hot": false,
+                                                   "quirk_refs": []
+                                                 },
+                                                 {
+                                                   "name": "Key",
+                                                   "wire_name": "Key",
+                                                   "required": true,
+                                                   "binding": { "kind": "BodyXml" },
+                                                   "type": { "kind": "ObjectKey" },
+                                                   "hot": true,
+                                                   "quirk_refs": ["q-encoding-0067"]
+                                                 },
+                                                 {
+                                                   "name": "VersionId",
+                                                   "wire_name": "VersionId",
+                                                   "required": true,
+                                                   "binding": { "kind": "BodyXml" },
+                                                   "type": { "kind": "OpaqueString" },
+                                                   "hot": true,
+                                                   "quirk_refs": ["q-token-0021"]
+                                                 },
+                                                 {
+                                                   "name": "IsLatest",
+                                                   "wire_name": "IsLatest",
+                                                   "required": true,
+                                                   "binding": { "kind": "BodyXml" },
+                                                   "type": { "kind": "Boolean" },
+                                                   "hot": true,
+                                                   "quirk_refs": []
+                                                 },
+                                                 {
+                                                   "name": "LastModified",
+                                                   "wire_name": "LastModified",
+                                                   "required": true,
+                                                   "binding": { "kind": "BodyXml" },
+                                                   "type": { "kind": "Timestamp", "format": "Iso8601" },
+                                                   "hot": true,
+                                                   "quirk_refs": []
+                                                 }
+                                               ],
+                                     "xml": {
+                                              "element_order": ["Key", "VersionId", "IsLatest", "LastModified", "Owner"],
+                                              "empty_value_policy": {
+                                                                      "Owner": "omit",
+                                                                      "Key": "emit",
+                                                                      "VersionId": "emit",
+                                                                      "IsLatest": "emit",
+                                                                      "LastModified": "emit"
+                                                                    },
+                                              "attributes": []
+                                            }
+                                   },
+              "ObjectVersion": {
+                                 "kind": "Structure",
+                                 "fields": [
+                                             {
+                                               "name": "ETag",
+                                               "wire_name": "ETag",
+                                               "required": true,
+                                               "binding": { "kind": "BodyXml" },
+                                               "type": { "kind": "ETag", "render": "XmlQuoted" },
+                                               "hot": true,
+                                               "quirk_refs": ["q-etag-0020"]
+                                             },
+                                             {
+                                               "name": "ChecksumAlgorithm",
+                                               "wire_name": "ChecksumAlgorithm",
+                                               "required": false,
+                                               "binding": { "kind": "BodyXml" },
+                                               "type": {
+                                                         "kind": "List",
+                                                         "member": {
+                                                                     "kind": "StringEnum",
+                                                                     "values": [
+                                                                                 "CRC32",
+                                                                                 "CRC32C",
+                                                                                 "SHA1",
+                                                                                 "SHA256",
+                                                                                 "CRC64NVME",
+                                                                                 "SHA512",
+                                                                                 "MD5",
+                                                                                 "XXHASH64",
+                                                                                 "XXHASH3",
+                                                                                 "XXHASH128"
+                                                                               ]
+                                                                   },
+                                                         "flattened": true,
+                                                         "wrapper_name": null
+                                                       },
+                                               "hot": false,
+                                               "quirk_refs": ["q-flat-0019"]
+                                             },
+                                             {
+                                               "name": "ChecksumType",
+                                               "wire_name": "ChecksumType",
+                                               "required": false,
+                                               "binding": { "kind": "BodyXml" },
+                                               "type": { "kind": "StringEnum", "values": ["COMPOSITE", "FULL_OBJECT"] },
+                                               "hot": false,
+                                               "quirk_refs": []
+                                             },
+                                             {
+                                               "name": "Size",
+                                               "wire_name": "Size",
+                                               "required": true,
+                                               "binding": { "kind": "BodyXml" },
+                                               "type": { "kind": "Long" },
+                                               "hot": true,
+                                               "quirk_refs": []
+                                             },
+                                             {
+                                               "name": "StorageClass",
+                                               "wire_name": "StorageClass",
+                                               "required": true,
+                                               "binding": { "kind": "BodyXml" },
+                                               "type": { "kind": "StringEnum", "values": ["STANDARD"] },
+                                               "hot": false,
+                                               "quirk_refs": ["q-storageclass-0022"]
+                                             },
+                                             {
+                                               "name": "Key",
+                                               "wire_name": "Key",
+                                               "required": true,
+                                               "binding": { "kind": "BodyXml" },
+                                               "type": { "kind": "ObjectKey" },
+                                               "hot": true,
+                                               "quirk_refs": ["q-encoding-0067"]
+                                             },
+                                             {
+                                               "name": "VersionId",
+                                               "wire_name": "VersionId",
+                                               "required": true,
+                                               "binding": { "kind": "BodyXml" },
+                                               "type": { "kind": "OpaqueString" },
+                                               "hot": true,
+                                               "quirk_refs": ["q-token-0021"]
+                                             },
+                                             {
+                                               "name": "IsLatest",
+                                               "wire_name": "IsLatest",
+                                               "required": true,
+                                               "binding": { "kind": "BodyXml" },
+                                               "type": { "kind": "Boolean" },
+                                               "hot": true,
+                                               "quirk_refs": []
+                                             },
+                                             {
+                                               "name": "LastModified",
+                                               "wire_name": "LastModified",
+                                               "required": true,
+                                               "binding": { "kind": "BodyXml" },
+                                               "type": { "kind": "Timestamp", "format": "Iso8601" },
+                                               "hot": true,
+                                               "quirk_refs": []
+                                             },
+                                             {
+                                               "name": "Owner",
+                                               "wire_name": "Owner",
+                                               "required": false,
+                                               "binding": { "kind": "BodyXml" },
+                                               "type": { "kind": "Structure", "shape": "Owner" },
+                                               "hot": false,
+                                               "quirk_refs": []
+                                             },
+                                             {
+                                               "name": "RestoreStatus",
+                                               "wire_name": "RestoreStatus",
+                                               "required": false,
+                                               "binding": { "kind": "BodyXml" },
+                                               "type": { "kind": "Structure", "shape": "RestoreStatus" },
+                                               "hot": false,
+                                               "quirk_refs": []
+                                             }
+                                           ],
+                                 "xml": {
+                                          "element_order": [
+                                                             "Key",
+                                                             "VersionId",
+                                                             "IsLatest",
+                                                             "LastModified",
+                                                             "ETag",
+                                                             "ChecksumAlgorithm",
+                                                             "ChecksumType",
+                                                             "Size",
+                                                             "StorageClass",
+                                                             "Owner",
+                                                             "RestoreStatus"
+                                                           ],
+                                          "empty_value_policy": {
+                                                                  "ETag": "emit",
+                                                                  "ChecksumAlgorithm": "omit",
+                                                                  "ChecksumType": "omit",
+                                                                  "Size": "emit",
+                                                                  "StorageClass": "emit",
+                                                                  "Key": "emit",
+                                                                  "VersionId": "emit",
+                                                                  "IsLatest": "emit",
+                                                                  "LastModified": "emit",
+                                                                  "Owner": "omit",
+                                                                  "RestoreStatus": "omit"
+                                                                },
+                                          "attributes": []
+                                        }
+                               },
+              "Owner": {
+                         "kind": "Structure",
+                         "fields": [
+                                     {
+                                       "name": "DisplayName",
+                                       "wire_name": "DisplayName",
+                                       "required": false,
+                                       "binding": { "kind": "BodyXml" },
+                                       "type": { "kind": "String" },
+                                       "hot": false,
+                                       "quirk_refs": []
+                                     },
+                                     {
+                                       "name": "ID",
+                                       "wire_name": "ID",
+                                       "required": false,
+                                       "binding": { "kind": "BodyXml" },
+                                       "type": { "kind": "String" },
+                                       "hot": false,
+                                       "quirk_refs": []
+                                     }
+                                   ],
+                         "xml": {
+                                  "element_order": ["ID", "DisplayName"],
+                                  "empty_value_policy": { "DisplayName": "omit", "ID": "omit" },
+                                  "attributes": []
+                                }
+                       },
+              "RestoreStatus": {
+                                 "kind": "Structure",
+                                 "fields": [
+                                             {
+                                               "name": "IsRestoreInProgress",
+                                               "wire_name": "IsRestoreInProgress",
+                                               "required": false,
+                                               "binding": { "kind": "BodyXml" },
+                                               "type": { "kind": "Boolean" },
+                                               "hot": false,
+                                               "quirk_refs": []
+                                             },
+                                             {
+                                               "name": "RestoreExpiryDate",
+                                               "wire_name": "RestoreExpiryDate",
+                                               "required": false,
+                                               "binding": { "kind": "BodyXml" },
+                                               "type": { "kind": "Timestamp", "format": "Iso8601" },
+                                               "hot": false,
+                                               "quirk_refs": []
+                                             }
+                                           ],
+                                 "xml": {
+                                          "element_order": ["IsRestoreInProgress", "RestoreExpiryDate"],
+                                          "empty_value_policy": {
+                                                                  "IsRestoreInProgress": "omit",
+                                                                  "RestoreExpiryDate": "omit"
+                                                                },
+                                          "attributes": []
+                                        }
+                               }
+            },
+  "xml": {
+           "request_root": null,
+           "request_root_aliases": [],
+           "response_root": "ListVersionsResult",
+           "xmlns": "emit",
+           "unwrapped_output": false,
+           "element_order": [
+                              "Name",
+                              "Prefix",
+                              "KeyMarker",
+                              "VersionIdMarker",
+                              "NextKeyMarker",
+                              "NextVersionIdMarker",
+                              "MaxKeys",
+                              "Delimiter",
+                              "IsTruncated",
+                              "Versions",
+                              "DeleteMarkers",
+                              "CommonPrefixes",
+                              "EncodingType"
+                            ],
+           "empty_value_policy": {
+                                   "IsTruncated": "emit",
+                                   "KeyMarker": "emit",
+                                   "VersionIdMarker": "emit",
+                                   "NextKeyMarker": "omit",
+                                   "NextVersionIdMarker": "omit",
+                                   "Versions": "omit",
+                                   "DeleteMarkers": "omit",
+                                   "Name": "emit",
+                                   "Prefix": "emit",
+                                   "Delimiter": "omit",
+                                   "MaxKeys": "emit",
+                                   "CommonPrefixes": "omit",
+                                   "EncodingType": "omit"
+                                 },
+           "url_encoded_fields": [
+                                   "Prefix",
+                                   "Delimiter",
+                                   "KeyMarker",
+                                   "NextKeyMarker",
+                                   "Versions.Key",
+                                   "DeleteMarkers.Key",
+                                   "CommonPrefixes.Prefix"
+                                 ],
+           "attributes": [],
+           "body_literal": false
+         },
+  "errors": {
+              "not_configured": null,
+              "allows_error_after_200": false,
+              "codes": ["NoSuchBucket", "AccessDenied", "InvalidArgument", "PermanentRedirect"]
+            },
+  "derived_resources": [],
+  "head_mirrors": null,
+  "quirk_refs": [
+                  "q-root-0060",
+                  "q-version-0061",
+                  "q-order-0066",
+                  "q-encoding-0067",
+                  "q-maxkeys-0068",
+                  "q-interleave-0069",
+                  "q-marker-0070"
+                ],
+  "quirks": [
+              {
+                "id": "q-encoding-0015",
+                "kind": "encoding_type",
+                "target": "ListObjectsV2",
+                "summary": "When url encoding is requested, a fixed per operation set of members is percent encoded and the encoding type is echoed back; keys containing control characters are otherwise unparseable.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectsV2.html",
+                                "summary": "Describes the request parameter and states that the response echoes the encoding type when it was requested."
+                              },
+                              {
+                                "kind": "capture",
+                                "ref": "captures/list-objects-v2-encoding-url.http",
+                                "summary": "Recorded response for a key containing characters that are illegal in XML, showing which members are encoded."
+                              }
+                            ],
+                "cases": ["c-list-0017", "c-list-0035", "c-list-0036"]
+              },
+              {
+                "id": "q-flat-0019",
+                "kind": "flattened",
+                "target": "ListObjectsV2",
+                "summary": "Entry and common prefix lists repeat their element with no enclosing wrapper, unlike the wrapped lists used by tag sets and grant lists.",
+                "evidence": [
+                              {
+                                "kind": "smithy-spec",
+                                "ref": "https://smithy.io/2.0/spec/protocol-traits.html#xmlflattened-trait",
+                                "summary": "Defines the flattened list serialization that removes the wrapper element around repeated members."
+                              }
+                            ],
+                "cases": ["c-list-0003", "c-list-0004", "c-list-0038"]
+              },
+              {
+                "id": "q-etag-0020",
+                "kind": "etag_render",
+                "target": "Object.ETag",
+                "summary": "Inside the listing body the entity tag keeps its surrounding quotes, in contrast with the bare form used by the object attributes operation.",
+                "evidence": [
+                              {
+                                "kind": "s3s-issue",
+                                "ref": "https://github.com/s3s-project/s3s/issues/632",
+                                "summary": "Upstream applied one quoting rule everywhere, which is wrong for one of the two body contexts."
+                              }
+                            ],
+                "cases": ["c-list-0021"]
+              },
+              {
+                "id": "q-token-0021",
+                "kind": "opaque_token",
+                "target": "ListObjectsV2",
+                "summary": "Pagination tokens are attacker controlled opaque bytes; they are never parsed as keys or paths and must survive url encoding unchanged.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectsV2.html",
+                                "summary": "Describes the continuation token as an opaque value obtained from a previous response."
+                              }
+                            ],
+                "cases": ["c-list-0029", "c-list-0030", "c-list-0031", "c-list-0032"]
+              },
+              {
+                "id": "q-storageclass-0022",
+                "kind": "omit_when",
+                "target": "Object.StorageClass",
+                "summary": "The storage class element in a listing is always written including the default class, which is the opposite of the header form that is suppressed for the default class.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectsV2.html",
+                                "summary": "The documented listing response includes the storage class element for every entry."
+                              },
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObject.html",
+                                "summary": "States that the storage class response header is returned for every object except those in the default class."
+                              }
+                            ],
+                "cases": ["c-list-0018", "c-list-0019"]
+              },
+              {
+                "id": "q-root-0060",
+                "kind": "root_name",
+                "target": "ListObjectVersions",
+                "summary": "The version listing has a response root of its own, while the two key listings share theirs, so no rule derives a root name from the operation.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectVersions.html",
+                                "summary": "The documented response syntax uses a root element that names versions rather than the bucket listing root."
+                              }
+                            ],
+                "cases": ["c-list-0012"]
+              },
+              {
+                "id": "q-version-0061",
+                "kind": "element_name",
+                "target": "ListObjectVersions",
+                "summary": "Version entries are written under an element named for a single version and deleted entries under a delete marker element; neither is named after the shape behind it.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectVersions.html",
+                                "summary": "The documented response repeats two differently named entry elements inside one result."
+                              },
+                              {
+                                "kind": "smithy-spec",
+                                "ref": "https://smithy.io/2.0/spec/protocol-traits.html#xmlname-trait",
+                                "summary": "Defines the trait that renames a member on the wire independently of the shape it targets."
+                              }
+                            ],
+                "cases": ["c-list-0012", "c-list-0013"]
+              },
+              {
+                "id": "q-order-0066",
+                "kind": "element_order",
+                "target": "ListObjects",
+                "summary": "Sibling order is a wire contract in every listing of this family and inside the version entry as well; the bucket name and the cursors precede the entry list.",
+                "evidence": [
+                              {
+                                "kind": "s3s-pr",
+                                "ref": "https://github.com/s3s-project/s3s/pull/480",
+                                "summary": "Upstream emitted listing elements in model order and broke a strict client until the order was corrected."
+                              },
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjects.html",
+                                "summary": "The documented response syntax fixes the sibling order the golden comparison pins."
+                              }
+                            ],
+                "cases": ["c-list-0018"]
+              },
+              {
+                "id": "q-encoding-0067",
+                "kind": "encoding_type",
+                "target": "ListObjects",
+                "summary": "The set of members percent encoded under url encoding is defined per operation, so the first version encodes its marker pair and the version listing encodes its key marker pair instead.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjects.html",
+                                "summary": "Names the members the first listing version encodes and states that the encoding type is echoed back."
+                              },
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectVersions.html",
+                                "summary": "Names a different member set for the version listing, including its key marker pair."
+                              }
+                            ],
+                "cases": ["c-list-0017", "c-list-0035"]
+              },
+              {
+                "id": "q-maxkeys-0068",
+                "kind": "computed_member",
+                "target": "ListObjects.MaxKeys",
+                "summary": "Every listing echoes the page size the request asked for rather than the number of entries it returned, which is what lets a client tell a short page from a last page.",
+                "evidence": [
+                              {
+                                "kind": "s3s-issue",
+                                "ref": "https://github.com/s3s-project/s3s/issues/350",
+                                "summary": "Upstream echoed its own effective page size, and a client comparing it against the request paged forever."
+                              },
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectsV2.html",
+                                "summary": "Defines the element as the maximum number of keys the request asked to be returned."
+                              }
+                            ],
+                "cases": ["c-list-0005", "c-list-0027", "c-list-0028"]
+              },
+              {
+                "id": "q-interleave-0069",
+                "kind": "element_order",
+                "target": "ListObjectVersions",
+                "summary": "Version entries and delete marker entries are one sequence ordered by key and version, not two blocks, so the two element names alternate within a page.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectVersions.html",
+                                "summary": "Describes one ordered result whose entries are the versions and delete markers of the same key range."
+                              }
+                            ],
+                "cases": ["c-list-0013", "c-list-0014"]
+              },
+              {
+                "id": "q-marker-0070",
+                "kind": "opaque_token",
+                "target": "ListObjectVersions",
+                "summary": "The version listing has two cursors and they are ordered: the version cursor is meaningless without the key cursor, so it alone is a malformed request rather than a page one.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectVersions.html",
+                                "summary": "States that the version cursor is only honoured when the key cursor is supplied with it."
+                              }
+                            ],
+                "cases": ["c-list-0033", "c-list-0034"]
+              }
+            ],
+  "ext_points": []
+}

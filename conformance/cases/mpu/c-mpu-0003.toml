@@ -1,0 +1,63 @@
+# c-mpu-0003 — a single-part upload still carries the suffix.
+#
+# Schema dimensions exercised: the boundary of the part-count suffix rule.
+
+[case]
+id = "c-mpu-0003"
+schema_version = 1
+title = "A completed single-part upload answers an entity tag suffixed with one"
+rationale = """
+One part is the case where the composite entity tag and the whole-object digest are most easily \
+confused, because the digest of one part's digest is still a single digest. AWS keeps the suffix \
+anyway, and clients use its presence to decide whether the value may be compared against a locally \
+computed object digest at all. Dropping it for a one-part upload makes a client believe it can \
+verify the object that way, and every such comparison then fails."""
+polarity = "positive"
+operation = "CompleteMultipartUpload"
+tags = ["multipart", "etag", "integrity", "boundary"]
+quirks = ["q-mpu-etag-0028"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/checking-object-integrity.html"
+summary = "The part-count suffix is what tells a client the tag is not a digest of the object bytes."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/pull/556"
+summary = "The upstream fix derives the tag from the part digests and keeps the count suffix in every case."
+kind = "s3s-pr"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-mpu"
+
+[[setup.multipart_uploads]]
+bucket = "conf-mpu"
+key = "one-part"
+capture_upload_id_as = "upload_id"
+
+[[setup.multipart_uploads.parts]]
+part_number = 1
+body = { size = 1024 }
+capture_etag_as = "part1_etag"
+
+[request]
+method = "POST"
+target = "/conf-mpu/one-part?uploadId=${capture.upload_id}"
+headers = { "content-type" = "application/xml" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[request.body]
+utf8 = '''
+<CompleteMultipartUpload xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Part><PartNumber>1</PartNumber><ETag>${capture.part1_etag}</ETag></Part></CompleteMultipartUpload>'''
+
+[expect]
+kind = "response"
+status = 200
+
+[expect.body]
+redact = ["Location", "UploadId"]
+contains_utf8 = ["-1\"</ETag>"]
+not_contains_utf8 = ["<Error>"]

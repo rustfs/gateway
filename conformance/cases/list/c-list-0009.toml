@@ -1,0 +1,63 @@
+# c-list-0009 — owner information appears when the second listing version is asked for it.
+#
+# Schema dimensions exercised: a member whose emission depends on a request field.
+
+[case]
+id = "c-list-0009"
+schema_version = 1
+title = "ListObjectsV2 with fetch-owner=true writes an Owner element for every entry"
+rationale = """
+Owner is the one element in this family whose presence is decided by the request rather than by the value, so it is the one an encoder cannot get right by looking at the output alone. A client that asked for owners and receives none has no way to tell that from a bucket whose objects have no owner."""
+polarity = "positive"
+operation = "ListObjectsV2"
+tags = ["list", "owner", "xml"]
+timeout_ms = 15000
+quirks = ["q-owner-0017"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectsV2.html"
+summary = "States that owner information is returned only when the fetch owner parameter asks for it."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-list"
+
+[[setup.objects]]
+bucket = "conf-list"
+key = "a/1.txt"
+body = { utf8 = "a1" }
+
+[[setup.objects]]
+bucket = "conf-list"
+key = "a/2.txt"
+body = { utf8 = "a2" }
+
+[[setup.objects]]
+bucket = "conf-list"
+key = "b/1.txt"
+body = { utf8 = "b1" }
+
+[[setup.objects]]
+bucket = "conf-list"
+key = "top.txt"
+body = { utf8 = "top" }
+
+[request]
+method = "GET"
+target = "/conf-list?list-type=2&fetch-owner=true"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+
+[expect.body]
+contains_utf8 = ["<Owner><ID>"]
+
+[expect.body.xml]
+root = "ListBucketResult"
+xmlns = "http://s3.amazonaws.com/doc/2006-03-01/"
+empty_elements = "paired"

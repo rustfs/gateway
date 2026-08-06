@@ -1,0 +1,48 @@
+# c-mpu-0030 — a real upload id against the wrong key.
+
+[case]
+id = "c-mpu-0030"
+schema_version = 1
+title = "A valid upload id used with a different key in the same bucket is refused"
+rationale = """
+Within one bucket the id is still only meaningful for the key it was created for, and this is the \
+case a bucket-scoped check misses: same bucket, same credentials, wrong object. Accepting it \
+appends the caller's bytes to an unrelated object's upload, which the owner then completes — a \
+corruption with no failed request anywhere in either party's logs. Making the key part of the \
+resolution is what closes it."""
+polarity = "negative"
+operation = "UploadPart"
+tags = ["multipart", "security", "upload-id", "error-shape"]
+quirks = ["q-mpu-upload-id-0037"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UploadPart.html"
+summary = "The request names a bucket, a key and an upload id together, and the id is meaningful only for that pair."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-mpu"
+
+[[setup.multipart_uploads]]
+bucket = "conf-mpu"
+key = "the-right-key"
+capture_upload_id_as = "upload_id"
+
+[request]
+method = "PUT"
+target = "/conf-mpu/the-wrong-key?partNumber=1&uploadId=${capture.upload_id}"
+body = { utf8 = "these bytes must not be stored" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 404
+connection_after = "open"
+headers_absent = ["etag"]
+
+[expect.error]
+code = "NoSuchUpload"
+request_id_present = true

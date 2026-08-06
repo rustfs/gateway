@@ -1,0 +1,266 @@
+{
+  "ir_version": "1",
+  "operation": "ListBuckets",
+  "http": {
+            "method": "GET",
+            "target": "Service",
+            "precedence": 100,
+            "predicates": [{ "kind": "Method", "method": "GET" }, { "kind": "Target", "target": "Service" }],
+            "success_status": 200,
+            "alt_success_statuses": [],
+            "path_shape": "/"
+          },
+  "auth": { "requirement": "Required", "action": "s3:ListAllMyBuckets", "presigned_allowed": true, "service": "s3" },
+  "payload": {
+               "request": { "kind": "None", "buffering": "None", "max_bytes": null },
+               "response": { "kind": "XmlBody", "buffering": "Full", "max_bytes": null }
+             },
+  "checksum": { "http_checksum_required": false, "request_algorithms": [], "response_algorithms": [] },
+  "input": {
+             "fields": [
+                         {
+                           "name": "MaxBuckets",
+                           "wire_name": "max-buckets",
+                           "required": false,
+                           "binding": { "kind": "Query" },
+                           "type": { "kind": "Integer" },
+                           "hot": true,
+                           "default": 10000,
+                           "quirk_refs": ["q-buckets-0071"]
+                         },
+                         {
+                           "name": "ContinuationToken",
+                           "wire_name": "continuation-token",
+                           "required": false,
+                           "binding": { "kind": "Query" },
+                           "type": { "kind": "OpaqueString" },
+                           "hot": true,
+                           "quirk_refs": ["q-token-0021", "q-buckets-0071"]
+                         },
+                         {
+                           "name": "Prefix",
+                           "wire_name": "prefix",
+                           "required": false,
+                           "binding": { "kind": "Query" },
+                           "type": { "kind": "String" },
+                           "hot": true,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "BucketRegion",
+                           "wire_name": "bucket-region",
+                           "required": false,
+                           "binding": { "kind": "Query" },
+                           "type": { "kind": "String" },
+                           "hot": false,
+                           "quirk_refs": ["q-buckets-0071"]
+                         }
+                       ]
+           },
+  "output": {
+              "fields": [
+                          {
+                            "name": "Buckets",
+                            "wire_name": "Buckets",
+                            "required": true,
+                            "binding": { "kind": "BodyXml" },
+                            "type": {
+                                      "kind": "List",
+                                      "member": { "kind": "Structure", "shape": "Bucket" },
+                                      "flattened": false,
+                                      "wrapper_name": "Bucket"
+                                    },
+                            "hot": true,
+                            "quirk_refs": ["q-wrapped-0062", "q-order-0066"]
+                          },
+                          {
+                            "name": "Owner",
+                            "wire_name": "Owner",
+                            "required": true,
+                            "binding": { "kind": "BodyXml" },
+                            "type": { "kind": "Structure", "shape": "Owner" },
+                            "hot": true,
+                            "quirk_refs": ["q-buckets-0071"]
+                          },
+                          {
+                            "name": "ContinuationToken",
+                            "wire_name": "ContinuationToken",
+                            "required": false,
+                            "binding": { "kind": "BodyXml" },
+                            "type": { "kind": "OpaqueString" },
+                            "hot": false,
+                            "quirk_refs": ["q-token-0021"]
+                          },
+                          {
+                            "name": "Prefix",
+                            "wire_name": "Prefix",
+                            "required": false,
+                            "binding": { "kind": "BodyXml" },
+                            "type": { "kind": "String" },
+                            "hot": false,
+                            "quirk_refs": []
+                          }
+                        ]
+            },
+  "shapes": {
+              "Bucket": {
+                          "kind": "Structure",
+                          "fields": [
+                                      {
+                                        "name": "Name",
+                                        "wire_name": "Name",
+                                        "required": true,
+                                        "binding": { "kind": "BodyXml" },
+                                        "type": { "kind": "BucketName" },
+                                        "hot": true,
+                                        "quirk_refs": ["q-wrapped-0062"]
+                                      },
+                                      {
+                                        "name": "CreationDate",
+                                        "wire_name": "CreationDate",
+                                        "required": true,
+                                        "binding": { "kind": "BodyXml" },
+                                        "type": { "kind": "Timestamp", "format": "Iso8601" },
+                                        "hot": true,
+                                        "quirk_refs": []
+                                      },
+                                      {
+                                        "name": "BucketRegion",
+                                        "wire_name": "BucketRegion",
+                                        "required": false,
+                                        "binding": { "kind": "BodyXml" },
+                                        "type": { "kind": "String" },
+                                        "hot": false,
+                                        "quirk_refs": []
+                                      },
+                                      {
+                                        "name": "BucketArn",
+                                        "wire_name": "BucketArn",
+                                        "required": false,
+                                        "binding": { "kind": "BodyXml" },
+                                        "type": { "kind": "String" },
+                                        "hot": false,
+                                        "quirk_refs": []
+                                      }
+                                    ],
+                          "xml": {
+                                   "element_order": ["Name", "CreationDate", "BucketRegion", "BucketArn"],
+                                   "empty_value_policy": {
+                                                           "Name": "emit",
+                                                           "CreationDate": "emit",
+                                                           "BucketRegion": "omit",
+                                                           "BucketArn": "omit"
+                                                         },
+                                   "attributes": []
+                                 }
+                        },
+              "Owner": {
+                         "kind": "Structure",
+                         "fields": [
+                                     {
+                                       "name": "DisplayName",
+                                       "wire_name": "DisplayName",
+                                       "required": false,
+                                       "binding": { "kind": "BodyXml" },
+                                       "type": { "kind": "String" },
+                                       "hot": false,
+                                       "quirk_refs": []
+                                     },
+                                     {
+                                       "name": "ID",
+                                       "wire_name": "ID",
+                                       "required": false,
+                                       "binding": { "kind": "BodyXml" },
+                                       "type": { "kind": "String" },
+                                       "hot": false,
+                                       "quirk_refs": []
+                                     }
+                                   ],
+                         "xml": {
+                                  "element_order": ["ID", "DisplayName"],
+                                  "empty_value_policy": { "DisplayName": "omit", "ID": "omit" },
+                                  "attributes": []
+                                }
+                       }
+            },
+  "xml": {
+           "request_root": null,
+           "request_root_aliases": [],
+           "response_root": "ListAllMyBucketsResult",
+           "xmlns": "emit",
+           "unwrapped_output": false,
+           "element_order": ["Owner", "Buckets", "ContinuationToken", "Prefix"],
+           "empty_value_policy": { "Buckets": "emit", "Owner": "emit", "ContinuationToken": "omit", "Prefix": "omit" },
+           "url_encoded_fields": [],
+           "attributes": [],
+           "body_literal": false
+         },
+  "errors": { "not_configured": null, "allows_error_after_200": false, "codes": ["AccessDenied"] },
+  "derived_resources": [],
+  "head_mirrors": null,
+  "quirk_refs": ["q-token-0021", "q-wrapped-0062", "q-order-0066", "q-buckets-0071"],
+  "quirks": [
+              {
+                "id": "q-token-0021",
+                "kind": "opaque_token",
+                "target": "ListObjectsV2",
+                "summary": "Pagination tokens are attacker controlled opaque bytes; they are never parsed as keys or paths and must survive url encoding unchanged.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectsV2.html",
+                                "summary": "Describes the continuation token as an opaque value obtained from a previous response."
+                              }
+                            ],
+                "cases": ["c-list-0029", "c-list-0030", "c-list-0031", "c-list-0032"]
+              },
+              {
+                "id": "q-wrapped-0062",
+                "kind": "flattened",
+                "target": "ListBuckets",
+                "summary": "The bucket listing wraps its entries in an enclosing element, the one listing in this family that is not flattened.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListBuckets.html",
+                                "summary": "The documented response nests every bucket entry inside a single enclosing element."
+                              }
+                            ],
+                "cases": ["c-list-0015"]
+              },
+              {
+                "id": "q-order-0066",
+                "kind": "element_order",
+                "target": "ListObjects",
+                "summary": "Sibling order is a wire contract in every listing of this family and inside the version entry as well; the bucket name and the cursors precede the entry list.",
+                "evidence": [
+                              {
+                                "kind": "s3s-pr",
+                                "ref": "https://github.com/s3s-project/s3s/pull/480",
+                                "summary": "Upstream emitted listing elements in model order and broke a strict client until the order was corrected."
+                              },
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjects.html",
+                                "summary": "The documented response syntax fixes the sibling order the golden comparison pins."
+                              }
+                            ],
+                "cases": ["c-list-0018"]
+              },
+              {
+                "id": "q-buckets-0071",
+                "kind": "pagination",
+                "target": "ListBuckets",
+                "summary": "The bucket listing gained a cursor, a page size, a prefix and a region filter long after the key listings, so a response carrying none of them is still a complete one.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListBuckets.html",
+                                "summary": "Documents the four request parameters the bucket listing gained and the cursor element the response echoes."
+                              }
+                            ],
+                "cases": ["c-list-0016", "c-list-0044"]
+              }
+            ],
+  "ext_points": []
+}

@@ -1,0 +1,51 @@
+# c-mpu-0045 — a part with no declared length.
+
+[case]
+id = "c-mpu-0045"
+schema_version = 1
+title = "A part with neither a declared length nor chunked framing is refused with the dedicated code"
+rationale = """
+Without a length and without chunked framing there is no way to know where the part ends, so the \
+server would have to read until the peer closes — which makes an unbounded write out of a request \
+that declared nothing. The dedicated status is not cosmetic: a generic bad-request tells the client \
+its part was wrong, while this one tells it the framing was, and only one of those leads to a fix. \
+It is the same rule the plain object write already carries."""
+polarity = "negative"
+operation = "UploadPart"
+tags = ["multipart", "framing", "error-shape"]
+quirks = ["q-length-0007"]
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/issues/526"
+summary = "Upstream returned a generic bad request where the reference implementation returns the dedicated length code."
+kind = "s3s-issue"
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9110#section-15.5.11"
+summary = "The dedicated status exists for a request that must declare a length and does not."
+kind = "rfc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-mpu"
+
+[[setup.multipart_uploads]]
+bucket = "conf-mpu"
+key = "no-length-part"
+capture_upload_id_as = "upload_id"
+
+[request]
+raw_head_utf8 = "PUT /conf-mpu/no-length-part?partNumber=1&uploadId=${capture.upload_id} HTTP/1.1\r\nhost: s3.localhost\r\nx-amz-content-sha256: UNSIGNED-PAYLOAD\r\n\r\n"
+sign = { mode = "sigv4_unsigned_payload", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 411
+connection_after = "closed"
+headers_absent = ["etag"]
+
+[expect.error]
+code = "MissingContentLength"
+request_id_present = true

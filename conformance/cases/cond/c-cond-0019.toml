@@ -1,0 +1,58 @@
+# c-cond-0019 — a malformed entity tag is refused, and refused calmly.
+#
+# Schema dimensions exercised: connection_after and terminate_within_ms, which together are what
+# distinguish a rejection from a crash.
+
+[case]
+id = "c-cond-0019"
+schema_version = 1
+title = "An unterminated entity tag is a bad request and never a panic or a dropped connection"
+rationale = """
+An entity tag arrives as attacker-controlled bytes on an unauthenticated-shaped path, so the only \
+acceptable outcomes are a parse failure or an evaluation — never an index out of range. The \
+assertions that matter here are not the status code but the two beside it: the connection stays \
+open and the answer arrives inside the budget, which is what tells a reader that the value was \
+rejected rather than that the worker died holding it."""
+polarity = "negative"
+operation = "GetObject"
+tags = ["conditional", "preconditions", "etag", "security", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-cond-0046"]
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9110#section-8.8.3"
+summary = "The entity-tag grammar requires a balanced pair of quotes, so an unterminated value is not a tag."
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/pull/37"
+summary = "Upstream change that typed a request header after unparsed values had been reaching code unable to handle them."
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-cond"
+
+[[setup.objects]]
+bucket = "conf-cond"
+key = "malformed/tag"
+body = { utf8 = "hello" }
+
+[request]
+method = "GET"
+target = "/conf-cond/malformed/tag"
+headers = { "if-match" = "\"5d41402abc4b2a76b9719d911017c592" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+headers_absent = ["etag"]
+connection_after = "open"
+
+[expect.error]
+code = "InvalidArgument"
+request_id_present = true
+
+[expect.timing]
+terminate_within_ms = 5000

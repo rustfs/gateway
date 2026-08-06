@@ -1,0 +1,64 @@
+# c-list-0027 — a page size of zero returns nothing and says so unambiguously.
+#
+# Schema dimensions exercised: a boundary value whose truncation semantics must be pinned.
+
+[case]
+id = "c-list-0027"
+schema_version = 1
+title = "max-keys=0 returns no entries and a truncation flag a client can act on"
+rationale = """
+Zero is the boundary where the two plausible readings diverge: "no entries, and there is more" or "no entries, and that is all". A client that receives the first reading with no cursor pages forever on an empty response, which is the cheapest possible infinite loop to trigger — one query parameter. Pinning one reading is what makes it not a loop."""
+polarity = "negative"
+operation = "ListObjectsV2"
+tags = ["list", "pagination", "boundary"]
+timeout_ms = 15000
+quirks = ["q-maxkeys-0068", "q-keycount-0018"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectsV2.html"
+summary = "Documents the parameter as a bound on the number of keys returned, with no exception for zero."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-list"
+
+[[setup.objects]]
+bucket = "conf-list"
+key = "a/1.txt"
+body = { utf8 = "a1" }
+
+[[setup.objects]]
+bucket = "conf-list"
+key = "a/2.txt"
+body = { utf8 = "a2" }
+
+[[setup.objects]]
+bucket = "conf-list"
+key = "b/1.txt"
+body = { utf8 = "b1" }
+
+[[setup.objects]]
+bucket = "conf-list"
+key = "top.txt"
+body = { utf8 = "top" }
+
+[request]
+method = "GET"
+target = "/conf-list?list-type=2&max-keys=0"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+
+[expect.body]
+contains_utf8 = ["<KeyCount>0</KeyCount>", "<MaxKeys>0</MaxKeys>", "<IsTruncated>false</IsTruncated>"]
+not_contains_utf8 = ["<Contents>", "<NextContinuationToken>"]
+
+[expect.body.xml]
+root = "ListBucketResult"
+xmlns = "http://s3.amazonaws.com/doc/2006-03-01/"
+empty_elements = "paired"

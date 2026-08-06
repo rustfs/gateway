@@ -1,0 +1,63 @@
+# c-range-0008 — more than one range is not a partial response at all.
+#
+# Schema dimensions exercised: byte-exact body proving the whole object arrived, header absence
+# proving no partial framing was written.
+
+[case]
+id = "c-range-0008"
+schema_version = 1
+title = "A request for two ranges is answered with the whole object and a 200"
+rationale = """
+There are three plausible answers here and S3 gives the least obvious one. It does not emit a \
+multipart byteranges body, and it does not refuse the request — it ignores the range set entirely. \
+An implementation that returns 206 with the first range hands the client bytes from the middle of \
+the object labelled as the whole of it; one that returns unsatisfiable-range breaks a client that \
+was merely being efficient. The absence of Content-Range is what proves the response is a complete \
+one rather than a partial one wearing the wrong status."""
+polarity = "negative"
+operation = "GetObject"
+tags = ["range", "read", "wire-bytes"]
+timeout_ms = 10000
+quirks = ["q-range-0051"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObject.html"
+summary = "The request syntax states that only a single range is honoured and additional ranges are not served."
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9110#section-14.2"
+summary = "A server that does not support a multiple-range request may ignore the header and send the entire representation."
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-range"
+
+[[setup.objects]]
+bucket = "conf-range"
+key = "ten"
+content_type = "text/plain"
+body = { utf8 = "0123456789" }
+
+[request]
+method = "GET"
+target = "/conf-range/ten"
+headers = { "range" = "bytes=0-1,5-6" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+headers_absent = ["content-range"]
+connection_after = "open"
+
+[expect.headers_present]
+"content-length" = "10"
+
+[expect.timing]
+terminate_within_ms = 5000
+
+[expect.body]
+exact_utf8 = "0123456789"
+not_contains_utf8 = ["multipart/byteranges", "--"]

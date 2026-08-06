@@ -1,0 +1,87 @@
+# c-mpu-0043 — a part whose body is cut short never becomes visible.
+
+[case]
+id = "c-mpu-0043"
+schema_version = 1
+title = "A part whose body ends early is refused and does not appear in the part listing"
+rationale = """
+A truncated upload is the ordinary consequence of a dropped connection, and the dangerous outcome \
+is not the failed request but a partial part left behind under a real part number. The client \
+retries, the retry succeeds, and if the truncated write was ever visible the completion may assemble \
+either one — an object that is intact or silently short, with the same entity tag arithmetic in \
+both cases. The listing exchange is the assertion; the status alone would not distinguish them."""
+polarity = "negative"
+operation = "UploadPart"
+tags = ["multipart", "streaming", "durability"]
+quirks = ["q-mpu-upload-id-0037"]
+timeout_ms = 20000
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UploadPart.html"
+summary = "A part is only addressable once it has been uploaded, and the response reports it only then."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9112#section-6.3"
+summary = "A message body shorter than its declared length is an incomplete message, not a shorter one."
+kind = "rfc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = false
+
+[[setup.buckets]]
+name = "conf-mpu"
+
+[[setup.multipart_uploads]]
+bucket = "conf-mpu"
+key = "truncated-part"
+capture_upload_id_as = "upload_id"
+
+[[exchanges]]
+name = "cut-the-part-short"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-mpu/truncated-part?partNumber=1&uploadId=${capture.upload_id}"
+headers = { "content-length" = "1048576" }
+sign = { mode = "sigv4_unsigned_payload", service = "s3", region = "us-east-1", credential = "valid" }
+
+[[exchanges.request.chunks]]
+raw_utf8 = "only a few bytes of a megabyte"
+flush = true
+
+[[exchanges.request.chunks]]
+action = "half_close"
+delay_ms = 50
+
+[exchanges.expect]
+kind = "response"
+status = 400
+headers_absent = ["etag"]
+
+[exchanges.expect.error]
+code = "IncompleteBody"
+request_id_present = true
+
+[exchanges.expect.timing]
+terminate_within_ms = 10000
+
+[[exchanges]]
+name = "the-part-is-not-listed"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-mpu/truncated-part?uploadId=${capture.upload_id}"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+
+[exchanges.expect.body]
+redact = ["UploadId"]
+contains_utf8 = ["<IsTruncated>false</IsTruncated>"]
+not_contains_utf8 = ["<PartNumber>1</PartNumber>"]

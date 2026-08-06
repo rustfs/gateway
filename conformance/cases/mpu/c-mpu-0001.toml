@@ -19,7 +19,7 @@ polarity = "negative"
 operation = "CompleteMultipartUpload"
 tags = ["multipart", "error-shape", "streaming", "wire-bytes"]
 timeout_ms = 20000
-quirks = ["q-mpu-0002"]
+quirks = ["q-mpu-etag-0028", "q-mpu-late-error-0033", "q-mpu-trailer-0034"]
 
 [[case.evidence]]
 url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CompleteMultipartUpload.html"

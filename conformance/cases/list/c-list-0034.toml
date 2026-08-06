@@ -1,0 +1,63 @@
+# c-list-0034 — the second version cursor is meaningless without the first.
+#
+# Schema dimensions exercised: a request parameter that is only legal in the presence of another.
+
+[case]
+id = "c-list-0034"
+schema_version = 1
+title = "A version marker sent without a key marker is refused with InvalidArgument"
+rationale = """
+The version cursor resumes within a key, so without a key there is nothing for it to be relative to. The two wrong answers are ignoring it, which returns page one while the client believes it asked for page two and silently repeats every entry, and guessing a key, which skips entries instead. Both are silent; the refusal is the only observable answer."""
+polarity = "negative"
+operation = "ListObjectVersions"
+tags = ["list", "versions", "validation"]
+timeout_ms = 15000
+quirks = ["q-marker-0070"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectVersions.html"
+summary = "States that the version cursor is honoured only when the key cursor is supplied with it."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-list-versions"
+versioning = "enabled"
+
+[[setup.objects]]
+bucket = "conf-list-versions"
+key = "doc.txt"
+body = { utf8 = "v1" }
+
+[[setup.objects]]
+bucket = "conf-list-versions"
+key = "doc.txt"
+body = { utf8 = "v2" }
+
+[[setup.objects]]
+bucket = "conf-list-versions"
+key = "doc.txt"
+body = { utf8 = "v3" }
+
+[[setup.objects]]
+bucket = "conf-list-versions"
+key = "gone.txt"
+body = { utf8 = "here" }
+
+[request]
+method = "GET"
+target = "/conf-list-versions?versions&version-id-marker=abcdef"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+
+[expect.error]
+code = "InvalidArgument"
+message_present = true
+
+[expect.body.xml]
+root = "Error"

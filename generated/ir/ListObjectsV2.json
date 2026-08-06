@@ -381,7 +381,7 @@
                                                        "field": "FetchOwner",
                                                        "equals": "false"
                                                      },
-                                        "quirk_refs": ["q-owner-0017"]
+                                        "quirk_refs": ["q-owner-0017", "q-owner-0065"]
                                       },
                                       {
                                         "name": "RestoreStatus",
@@ -546,7 +546,7 @@
                                 "summary": "The documented response syntax uses the same root element name as the older listing operation."
                               }
                             ],
-                "cases": ["c-listv2-0001"]
+                "cases": ["c-list-0011"]
               },
               {
                 "id": "q-order-0014",
@@ -565,7 +565,7 @@
                                 "summary": "Recorded reference response that fixes the sibling order used by the golden comparison."
                               }
                             ],
-                "cases": ["c-listv2-0002"]
+                "cases": ["c-list-0001"]
               },
               {
                 "id": "q-encoding-0015",
@@ -584,7 +584,7 @@
                                 "summary": "Recorded response for a key containing characters that are illegal in XML, showing which members are encoded."
                               }
                             ],
-                "cases": ["c-listv2-0003", "c-listv2-0004"]
+                "cases": ["c-list-0017", "c-list-0035", "c-list-0036"]
               },
               {
                 "id": "q-empty-0016",
@@ -598,7 +598,7 @@
                                 "summary": "Recorded response showing an empty prefix element present and no delimiter element at all."
                               }
                             ],
-                "cases": ["c-listv2-0005", "c-listv2-0006"]
+                "cases": ["c-list-0023", "c-list-0025", "c-list-0037"]
               },
               {
                 "id": "q-owner-0017",
@@ -612,7 +612,7 @@
                                 "summary": "States that owner information is returned only when the fetch owner parameter is set."
                               }
                             ],
-                "cases": ["c-listv2-0007"]
+                "cases": ["c-list-0009", "c-list-0024"]
               },
               {
                 "id": "q-keycount-0018",
@@ -626,7 +626,7 @@
                                 "summary": "Defines the count as the number of keys returned by this request, which is at most the requested maximum."
                               }
                             ],
-                "cases": ["c-listv2-0008"]
+                "cases": ["c-list-0001", "c-list-0004", "c-list-0025"]
               },
               {
                 "id": "q-flat-0019",
@@ -640,7 +640,7 @@
                                 "summary": "Defines the flattened list serialization that removes the wrapper element around repeated members."
                               }
                             ],
-                "cases": ["c-listv2-0009"]
+                "cases": ["c-list-0003", "c-list-0004", "c-list-0038"]
               },
               {
                 "id": "q-etag-0020",
@@ -654,7 +654,7 @@
                                 "summary": "Upstream applied one quoting rule everywhere, which is wrong for one of the two body contexts."
                               }
                             ],
-                "cases": ["c-etag-0011"]
+                "cases": ["c-list-0021"]
               },
               {
                 "id": "q-token-0021",
@@ -668,7 +668,7 @@
                                 "summary": "Describes the continuation token as an opaque value obtained from a previous response."
                               }
                             ],
-                "cases": ["c-listv2-0010"]
+                "cases": ["c-list-0029", "c-list-0030", "c-list-0031", "c-list-0032"]
               },
               {
                 "id": "q-storageclass-0022",
@@ -687,7 +687,26 @@
                                 "summary": "States that the storage class response header is returned for every object except those in the default class."
                               }
                             ],
-                "cases": ["c-storageclass-0001", "c-storageclass-0002"]
+                "cases": ["c-list-0018", "c-list-0019"]
+              },
+              {
+                "id": "q-owner-0065",
+                "kind": "omit_when",
+                "target": "ListObjects.Object.Owner",
+                "summary": "The first listing version has no fetch owner parameter and writes owner information for every entry, so the suppression the entry shape carries applies to the second version alone.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjects.html",
+                                "summary": "The documented response carries owner information for every entry and the request has no parameter that would suppress it."
+                              },
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectsV2.html",
+                                "summary": "States that the second version returns owner information only when the request asked for it."
+                              }
+                            ],
+                "cases": ["c-list-0010", "c-list-0024"]
               }
             ],
   "ext_points": []

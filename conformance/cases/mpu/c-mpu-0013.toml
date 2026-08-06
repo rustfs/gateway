@@ -1,0 +1,52 @@
+# c-mpu-0013 — url encoding reaches every key-shaped member.
+#
+# Schema dimensions exercised: the encoding echo, and encoding applied to members other than the
+# obvious one.
+
+[case]
+id = "c-mpu-0013"
+schema_version = 1
+title = "Under url encoding every key-shaped member of an upload listing is encoded and the echo says so"
+rationale = """
+A key may contain characters that are not valid XML character data at all, which is why the \
+encoding parameter exists. A listing that encodes only the key element and leaves the prefix, the \
+delimiter and the markers raw produces a document that is either malformed or silently \
+mis-decodable, and the client cannot tell which, because the echo claims everything was encoded. \
+The echo is part of the contract: without it a client does not know whether to decode."""
+polarity = "positive"
+operation = "ListMultipartUploads"
+tags = ["multipart", "encoding", "pagination"]
+quirks = ["q-encoding-0015", "q-mpu-upload-0032"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListMultipartUploads.html"
+summary = "The encoding parameter is documented as applying to the key-shaped members and as being echoed in the response."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-mpu"
+
+[[setup.multipart_uploads]]
+bucket = "conf-mpu"
+key = "needs encoding/a+b.txt"
+
+[request]
+method = "GET"
+target = "/conf-mpu?uploads&encoding-type=url&prefix=needs%20encoding%2F&delimiter=%2F"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+
+[expect.body]
+redact = ["UploadId", "Initiated"]
+contains_utf8 = [
+  "<EncodingType>url</EncodingType>",
+  "<Prefix>needs%20encoding%2F</Prefix>",
+  "<Delimiter>%2F</Delimiter>",
+]
+not_contains_utf8 = ["<Prefix>needs encoding/</Prefix>", "<Delimiter>/</Delimiter>"]

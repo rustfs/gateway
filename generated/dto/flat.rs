@@ -28,8 +28,23 @@ pub use crate::ops::enums::{
     ObjectLockLegalHoldStatus, ObjectLockMode, ReplicationStatus, RequestCharged, RequestPayer, ServerSideEncryption,
     StorageClass,
 };
-pub use crate::ops::shapes::{CommonPrefix, Delete, DeletedObject, Error, Object, ObjectIdentifier, Owner, RestoreStatus};
+pub use crate::ops::shapes::{
+    Bucket, CommonPrefix, CompletedMultipartUpload, CompletedPart, Delete, DeleteMarkerEntry, DeletedObject, Error, Initiator,
+    MultipartUpload, Object, ObjectIdentifier, ObjectVersion, Owner, Part, RestoreStatus,
+};
 
+pub use crate::ops::abort_multipart_upload::{
+    AbortMultipartUpload, Input as AbortMultipartUploadInput, InputBuilder as AbortMultipartUploadInputBuilder,
+    Output as AbortMultipartUploadOutput,
+};
+pub use crate::ops::complete_multipart_upload::{
+    CompleteMultipartUpload, Input as CompleteMultipartUploadInput, InputBuilder as CompleteMultipartUploadInputBuilder,
+    Output as CompleteMultipartUploadOutput,
+};
+pub use crate::ops::create_multipart_upload::{
+    CreateMultipartUpload, Input as CreateMultipartUploadInput, InputBuilder as CreateMultipartUploadInputBuilder,
+    Output as CreateMultipartUploadOutput,
+};
 pub use crate::ops::delete_object::{
     DeleteObject, Input as DeleteObjectInput, InputBuilder as DeleteObjectInputBuilder, Output as DeleteObjectOutput,
 };
@@ -46,9 +61,29 @@ pub use crate::ops::get_object::{
 pub use crate::ops::head_object::{
     HeadObject, Input as HeadObjectInput, InputBuilder as HeadObjectInputBuilder, Output as HeadObjectOutput,
 };
+pub use crate::ops::list_buckets::{
+    Input as ListBucketsInput, InputBuilder as ListBucketsInputBuilder, ListBuckets, Output as ListBucketsOutput,
+};
+pub use crate::ops::list_multipart_uploads::{
+    Input as ListMultipartUploadsInput, InputBuilder as ListMultipartUploadsInputBuilder, ListMultipartUploads,
+    Output as ListMultipartUploadsOutput,
+};
+pub use crate::ops::list_object_versions::{
+    Input as ListObjectVersionsInput, InputBuilder as ListObjectVersionsInputBuilder, ListObjectVersions,
+    Output as ListObjectVersionsOutput,
+};
+pub use crate::ops::list_objects::{
+    Input as ListObjectsInput, InputBuilder as ListObjectsInputBuilder, ListObjects, Output as ListObjectsOutput,
+};
 pub use crate::ops::list_objects_v2::{
     Input as ListObjectsV2Input, InputBuilder as ListObjectsV2InputBuilder, ListObjectsV2, Output as ListObjectsV2Output,
 };
+pub use crate::ops::list_parts::{
+    Input as ListPartsInput, InputBuilder as ListPartsInputBuilder, ListParts, Output as ListPartsOutput,
+};
 pub use crate::ops::put_object::{
     Input as PutObjectInput, InputBuilder as PutObjectInputBuilder, Output as PutObjectOutput, PutObject,
+};
+pub use crate::ops::upload_part::{
+    Input as UploadPartInput, InputBuilder as UploadPartInputBuilder, Output as UploadPartOutput, UploadPart,
 };

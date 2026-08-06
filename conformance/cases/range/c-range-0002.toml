@@ -1,0 +1,60 @@
+# c-range-0002 — a range that runs past the end is clamped.
+#
+# Schema dimensions exercised: byte-exact body proving the clamp landed on the right byte.
+
+[case]
+id = "c-range-0002"
+schema_version = 1
+title = "A range whose end runs past the object is served up to the last byte, not refused"
+rationale = """
+Resumable downloads routinely ask for more than is there: a client that lost its connection at \
+byte five asks for five onwards in whatever chunk size it uses, without knowing where the object \
+ends. An implementation that answers unsatisfiable-range breaks every one of those, and the \
+symptom reaches the user as a download that fails only when it is nearly finished. Clamping is \
+what the specification asks for and what makes the request satisfiable at all."""
+polarity = "positive"
+operation = "GetObject"
+tags = ["range", "read", "wire-bytes"]
+timeout_ms = 10000
+quirks = ["q-range-0052"]
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/pull/128"
+summary = "Upstream change replacing a refusal of an overlong range with the clamping behaviour resumable downloads depend on."
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9110#section-14.1.1"
+summary = "A last position beyond the representation is taken to mean the final byte, so the range remains satisfiable."
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-range"
+
+[[setup.objects]]
+bucket = "conf-range"
+key = "ten"
+content_type = "text/plain"
+body = { utf8 = "0123456789" }
+
+[request]
+method = "GET"
+target = "/conf-range/ten"
+headers = { "range" = "bytes=5-100" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 206
+connection_after = "open"
+
+[expect.headers_present]
+"content-range" = "bytes 5-9/10"
+"content-length" = "5"
+
+[expect.timing]
+terminate_within_ms = 5000
+
+[expect.body]
+exact_utf8 = "56789"

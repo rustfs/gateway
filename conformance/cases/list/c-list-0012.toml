@@ -1,0 +1,66 @@
+# c-list-0012 — the version listing has its own root and its own entry element names.
+#
+# Schema dimensions exercised: root name and repeated element names that are not shape names.
+
+[case]
+id = "c-list-0012"
+schema_version = 1
+title = "ListObjectVersions answers under ListVersionsResult with Version and DeleteMarker entries"
+rationale = """
+Three names in this response are not derivable from anything: the root, and the two entry elements. The shape behind an entry is called ObjectVersion and the element is called Version; a generator that uses the shape name emits a document every SDK ignores, and the client sees an empty listing rather than an error. Silence is the failure mode, which is why the element names are asserted directly."""
+polarity = "positive"
+operation = "ListObjectVersions"
+tags = ["list", "versions", "xml", "root"]
+timeout_ms = 15000
+quirks = ["q-root-0060", "q-version-0061"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectVersions.html"
+summary = "The documented response uses a versions-specific root and two differently named entry elements."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-list-versions"
+versioning = "enabled"
+
+[[setup.objects]]
+bucket = "conf-list-versions"
+key = "doc.txt"
+body = { utf8 = "v1" }
+
+[[setup.objects]]
+bucket = "conf-list-versions"
+key = "doc.txt"
+body = { utf8 = "v2" }
+
+[[setup.objects]]
+bucket = "conf-list-versions"
+key = "doc.txt"
+body = { utf8 = "v3" }
+
+[[setup.objects]]
+bucket = "conf-list-versions"
+key = "gone.txt"
+body = { utf8 = "here" }
+
+[request]
+method = "GET"
+target = "/conf-list-versions?versions"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+
+[expect.body]
+contains_utf8 = ["<Version><Key>doc.txt</Key>"]
+not_contains_utf8 = ["<ObjectVersion>", "<DeleteMarkerEntry>"]
+
+[expect.body.xml]
+root = "ListVersionsResult"
+xmlns = "http://s3.amazonaws.com/doc/2006-03-01/"
+empty_elements = "paired"
+element_order = ["Name", "Prefix", "KeyMarker", "VersionIdMarker", "MaxKeys", "IsTruncated", "Version"]

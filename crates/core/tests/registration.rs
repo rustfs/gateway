@@ -595,21 +595,31 @@ fn require_reports_the_missing_operations_on_one_line() {
     assert_eq!(text.lines().count(), 1, "the completeness message must be one line: {text}");
     assert_eq!(
         text,
-        "backend is missing handlers for: DeleteObject, DeleteObjects, GetBucketLocation, GetObject, HeadObject, \
-         ListObjectsV2 (6 of 7)"
+        "backend is missing handlers for: AbortMultipartUpload, CompleteMultipartUpload, CreateMultipartUpload, \
+         DeleteObject, DeleteObjects, GetBucketLocation, GetObject, HeadObject, ListBuckets, ListMultipartUploads, \
+         ... and 5 more (15 of 16)"
     );
     assert_eq!(
         missing.missing(),
         [
+            "AbortMultipartUpload",
+            "CompleteMultipartUpload",
+            "CreateMultipartUpload",
             "DeleteObject",
             "DeleteObjects",
             "GetBucketLocation",
             "GetObject",
             "HeadObject",
-            "ListObjectsV2"
+            "ListBuckets",
+            "ListMultipartUploads",
+            "ListObjectVersions",
+            "ListObjects",
+            "ListObjectsV2",
+            "ListParts",
+            "UploadPart"
         ]
     );
-    assert_eq!(missing.required(), 7);
+    assert_eq!(missing.required(), 16);
 }
 
 /// Negative — a long list is truncated and still says how much is missing in total.

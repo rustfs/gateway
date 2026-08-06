@@ -1,0 +1,99 @@
+# c-range-0011 — an unusable Range header is ignored, and the connection survives it.
+#
+# Schema dimensions exercised: three exchanges over one connection, each carrying a different
+# unusable spelling; connection_after proving none of them cost the connection.
+
+[case]
+id = "c-range-0011"
+schema_version = 1
+title = "A Range header that cannot be parsed is ignored and the whole object is served"
+rationale = """
+The Range header is attacker-reachable and arrives before anything about the request has been \
+verified, so the only two acceptable outcomes are "parsed" and "ignored". Refusing is wrong for a \
+different reason than crashing: a proxy that rewrites the header, or a client that sends a unit \
+this server does not know, would have its otherwise valid request turned into an error it cannot \
+act on. Three spellings run on one connection because the failure being guarded against — a parser \
+that indexes past the end of a short value — is per-spelling, and a torn-down connection is how it \
+would show up."""
+polarity = "negative"
+operation = "GetObject"
+tags = ["range", "security", "connection", "dos"]
+timeout_ms = 10000
+quirks = ["q-range-0057"]
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9110#section-14.2"
+summary = "A server that cannot interpret a range header ignores it and responds as though it were not present."
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/pull/37"
+summary = "Upstream change that typed the range header after unparsed values had been reaching code that could not handle them."
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = true
+
+[[setup.buckets]]
+name = "conf-range"
+
+[[setup.objects]]
+bucket = "conf-range"
+key = "ten"
+content_type = "text/plain"
+body = { utf8 = "0123456789" }
+
+[[exchanges]]
+name = "not-a-number"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-range/ten"
+headers = { "range" = "bytes=abc" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+headers_absent = ["content-range"]
+connection_after = "open"
+
+[exchanges.expect.body]
+exact_utf8 = "0123456789"
+
+[[exchanges]]
+name = "empty-value"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-range/ten"
+headers = { "range" = "" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+headers_absent = ["content-range"]
+connection_after = "open"
+
+[exchanges.expect.body]
+exact_utf8 = "0123456789"
+
+[[exchanges]]
+name = "a-unit-this-server-does-not-know"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-range/ten"
+headers = { "range" = "items=0-1" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+headers_absent = ["content-range"]
+connection_after = "open"
+
+[exchanges.expect.body]
+exact_utf8 = "0123456789"

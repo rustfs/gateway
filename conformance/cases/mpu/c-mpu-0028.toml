@@ -1,0 +1,44 @@
+# c-mpu-0028 — a forged upload id.
+
+[case]
+id = "c-mpu-0028"
+schema_version = 1
+title = "A part sent under an upload id the server never minted is refused and stores nothing"
+rationale = """
+An upload id is a capability the server hands out; a request carrying one it never issued is a \
+guess. Upstream accepted any id without checking what it belonged to, so a guess that happened to \
+land wrote data into somebody else's upload. Even against an id that matches nothing, an \
+implementation that stores the bytes first and resolves the id afterwards gives an unauthenticated \
+shape of write amplification: the refusal has to happen before anything is written, which is what \
+the absent entity tag asserts."""
+polarity = "negative"
+operation = "UploadPart"
+tags = ["multipart", "security", "upload-id", "error-shape"]
+quirks = ["q-mpu-upload-id-0037"]
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/issues/51"
+summary = "Upstream accepted any upload id without checking what it belonged to."
+kind = "s3s-issue"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-mpu"
+
+[request]
+method = "PUT"
+target = "/conf-mpu/forged-target?partNumber=1&uploadId=ZmFrZS11cGxvYWQtaWQtdGhhdC13YXMtbmV2ZXItbWludGVk"
+body = { utf8 = "these bytes must not be stored" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 404
+connection_after = "open"
+headers_absent = ["etag"]
+
+[expect.error]
+code = "NoSuchUpload"
+request_id_present = true

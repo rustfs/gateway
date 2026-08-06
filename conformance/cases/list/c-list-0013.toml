@@ -1,0 +1,69 @@
+# c-list-0013 — versions and delete markers are one ordered sequence.
+#
+# Schema dimensions exercised: interleaved repeated elements of two different names, and a computed flag.
+
+[case]
+id = "c-list-0013"
+schema_version = 1
+title = "Versions and delete markers of a key interleave in order, and only one entry is the latest"
+rationale = """
+Grouping the two element kinds into two blocks produces a document that parses and is wrong: a client reconstructing history reads the delete markers as if they all happened after every version, so an object that was deleted and re-uploaded looks deleted. The latest flag is asserted alongside because it is the other half of the same reconstruction, and exactly one entry per key may carry it."""
+polarity = "positive"
+operation = "ListObjectVersions"
+tags = ["list", "versions", "xml"]
+timeout_ms = 15000
+quirks = ["q-interleave-0069", "q-version-0061"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectVersions.html"
+summary = "Describes one ordered result whose entries are the versions and delete markers of the same key range."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-list-versions"
+versioning = "enabled"
+
+[[setup.objects]]
+bucket = "conf-list-versions"
+key = "doc.txt"
+body = { utf8 = "v1" }
+
+[[setup.objects]]
+bucket = "conf-list-versions"
+key = "doc.txt"
+body = { utf8 = "v2" }
+
+[[setup.objects]]
+bucket = "conf-list-versions"
+key = "doc.txt"
+body = { utf8 = "v3" }
+
+[[setup.objects]]
+bucket = "conf-list-versions"
+key = "gone.txt"
+body = { utf8 = "here" }
+
+[[setup.objects]]
+bucket = "conf-list-versions"
+key = "gone.txt"
+absent = true
+
+[request]
+method = "GET"
+target = "/conf-list-versions?versions"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+
+[expect.body]
+contains_utf8 = ["<DeleteMarker>", "<IsLatest>true</IsLatest>", "<IsLatest>false</IsLatest>"]
+
+[expect.body.xml]
+root = "ListVersionsResult"
+xmlns = "http://s3.amazonaws.com/doc/2006-03-01/"
+empty_elements = "paired"

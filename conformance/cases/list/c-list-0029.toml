@@ -1,0 +1,62 @@
+# c-list-0029 — a cursor is never a path.
+#
+# Schema dimensions exercised: a hostile value in a parameter that is echoed into the response.
+
+[case]
+id = "c-list-0029"
+schema_version = 1
+title = "A continuation token spelling a parent traversal is refused and reads nothing outside the bucket"
+rationale = """
+A cursor is the one attacker-controlled value in this family that an implementation is tempted to give structure to, because the server minted the last one and knows what is in it. The moment it is joined onto a path or used as a key prefix, this value is a traversal the listing performs on request. The assertion is that the response contains nothing from outside the bucket, not merely that the status was an error: an error that already read the file is not a fix."""
+polarity = "negative"
+operation = "ListObjectsV2"
+tags = ["list", "security", "pagination"]
+timeout_ms = 15000
+quirks = ["q-token-0021"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectsV2.html"
+summary = "Describes the continuation token as an opaque value obtained from a previous response, with no client-visible structure."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-list"
+
+[[setup.objects]]
+bucket = "conf-list"
+key = "a/1.txt"
+body = { utf8 = "a1" }
+
+[[setup.objects]]
+bucket = "conf-list"
+key = "a/2.txt"
+body = { utf8 = "a2" }
+
+[[setup.objects]]
+bucket = "conf-list"
+key = "b/1.txt"
+body = { utf8 = "b1" }
+
+[[setup.objects]]
+bucket = "conf-list"
+key = "top.txt"
+body = { utf8 = "top" }
+
+[request]
+method = "GET"
+target = "/conf-list?list-type=2&continuation-token=..%2F..%2Fetc%2Fpasswd"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+
+[expect.error]
+code = "InvalidArgument"
+message_present = true
+
+[expect.body]
+not_contains_utf8 = ["root:", "/etc/passwd"]

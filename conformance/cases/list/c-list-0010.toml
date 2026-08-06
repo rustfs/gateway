@@ -1,0 +1,63 @@
+# c-list-0010 — the first listing version has no owner switch and always writes owners.
+#
+# Schema dimensions exercised: the opposite half of a rule the entry shape shares between two operations.
+
+[case]
+id = "c-list-0010"
+schema_version = 1
+title = "ListObjects writes an Owner element for every entry with no parameter asking for it"
+rationale = """
+The two key listings share one entry shape and hold opposite rules about its owner element. An implementation with one code path for both gets one of the two wrong, and the failure is asymmetric: the second version leaking owners is an information disclosure, the first version omitting them breaks every tool that reads them. Both halves are pinned, this one and c-list-0024."""
+polarity = "positive"
+operation = "ListObjects"
+tags = ["list", "owner", "xml"]
+timeout_ms = 15000
+quirks = ["q-owner-0065", "q-owner-0017"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjects.html"
+summary = "The documented response carries owner information for every entry and the request has no parameter that suppresses it."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-list"
+
+[[setup.objects]]
+bucket = "conf-list"
+key = "a/1.txt"
+body = { utf8 = "a1" }
+
+[[setup.objects]]
+bucket = "conf-list"
+key = "a/2.txt"
+body = { utf8 = "a2" }
+
+[[setup.objects]]
+bucket = "conf-list"
+key = "b/1.txt"
+body = { utf8 = "b1" }
+
+[[setup.objects]]
+bucket = "conf-list"
+key = "top.txt"
+body = { utf8 = "top" }
+
+[request]
+method = "GET"
+target = "/conf-list"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+
+[expect.body]
+contains_utf8 = ["<Owner><ID>"]
+
+[expect.body.xml]
+root = "ListBucketResult"
+xmlns = "http://s3.amazonaws.com/doc/2006-03-01/"
+empty_elements = "paired"

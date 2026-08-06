@@ -1,0 +1,61 @@
+# c-mpu-0019 — an empty part list is refused, not digested.
+
+[case]
+id = "c-mpu-0019"
+schema_version = 1
+title = "A completion carrying no parts is refused with InvalidPart"
+rationale = """
+The digest of nothing is a perfectly good digest, so an implementation that runs its entity-tag \
+construction over an empty part list produces the well-known empty digest with a zero part count \
+and reports success. The caller is then told an object exists, at a length of zero, with a tag that \
+looks legitimate — and the upload it actually made is gone. Refusing the empty list is what turns \
+that silent data loss into an error the caller can retry."""
+polarity = "negative"
+operation = "CompleteMultipartUpload"
+tags = ["multipart", "etag", "error-shape"]
+quirks = ["q-mpu-etag-0028"]
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/pull/556"
+summary = "The upstream fix rejects an empty part list rather than deriving a tag from it."
+kind = "s3s-pr"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-mpu"
+
+[[setup.multipart_uploads]]
+bucket = "conf-mpu"
+key = "no-parts-listed"
+capture_upload_id_as = "upload_id"
+
+[[setup.multipart_uploads.parts]]
+part_number = 1
+body = { size = 1024 }
+
+[request]
+method = "POST"
+target = "/conf-mpu/no-parts-listed?uploadId=${capture.upload_id}"
+headers = { "content-type" = "application/xml" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[request.body]
+utf8 = '''
+<CompleteMultipartUpload xmlns="http://s3.amazonaws.com/doc/2006-03-01/"></CompleteMultipartUpload>'''
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+headers_absent = ["etag", "x-amz-version-id"]
+
+[expect.error]
+code = "InvalidPart"
+message_present = true
+request_id_present = true
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+not_contains_utf8 = ["d41d8cd98f00b204e9800998ecf8427e", "-0"]

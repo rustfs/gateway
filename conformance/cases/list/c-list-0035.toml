@@ -1,0 +1,53 @@
+# c-list-0035 — a key that cannot be written into xml is not written into xml.
+#
+# Schema dimensions exercised: a stored key containing a byte no XML document may carry.
+
+[case]
+id = "c-list-0035"
+schema_version = 1
+title = "A key holding a control character is answered in a form a client can still parse"
+rationale = """
+Object keys are byte strings and the C0 controls are legal in them; XML 1.0 has no representation for most of those bytes at all, escaped or otherwise. An implementation that writes the byte produces a document the client's parser rejects, so one badly named object hides every other object in the bucket from every client. The answer must be parseable, and this case fails if it is not."""
+polarity = "negative"
+operation = "ListObjectsV2"
+tags = ["list", "encoding", "xml"]
+timeout_ms = 15000
+quirks = ["q-encoding-0015", "q-encoding-0067"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectsV2.html"
+summary = "Recommends url encoding for keys that contain characters the response document cannot represent."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://www.w3.org/TR/xml/#charsets"
+summary = "The XML specification excludes most C0 control characters from documents entirely, escaped or not."
+kind = "other"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-list-odd"
+
+[[setup.objects]]
+bucket = "conf-list-odd"
+key = "ctrl\u0001key.txt"
+body = { utf8 = "c" }
+
+[request]
+method = "GET"
+target = "/conf-list-odd?list-type=2"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+
+[expect.body]
+not_contains_utf8 = ["\u0001"]
+
+[expect.body.xml]
+root = "ListBucketResult"
+xmlns = "http://s3.amazonaws.com/doc/2006-03-01/"
+empty_elements = "paired"

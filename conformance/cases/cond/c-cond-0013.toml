@@ -1,0 +1,80 @@
+# c-cond-0013 — two conditional creates in flight at once.
+#
+# Schema dimensions exercised: connection.pipeline, so the second request is on the wire before the
+# first response is read; two exchanges over one connection; the distinct conflict code.
+
+[case]
+id = "c-cond-0013"
+schema_version = 1
+title = "Racing conditional creates leave one winner and tell the loser to retry, not to give up"
+rationale = """
+The whole value of a conditional create is that exactly one caller wins, and the interesting part \
+is what the loser is told. A precondition failure means "your condition was false" and clients \
+stop; the conflict code means "your condition held and somebody else got there first" and clients \
+retry. An implementation that collapses the two turns a recoverable race into a permanent failure \
+for whichever caller was unlucky. Pipelining is how a data-file case reaches the race at all: both \
+writes are written before either response is read, so the second cannot have been ordered behind \
+the first by the client."""
+polarity = "negative"
+operation = "PutObject"
+tags = ["conditional", "preconditions", "connection", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-cond-0049"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/conditional-requests.html"
+summary = "AWS names a separate conflict code for two conditional writes that raced for one key, distinct from the precondition failure."
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/issues/241"
+summary = "Upstream tracking report for conditional writes, which did not distinguish a lost race from a false condition."
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = true
+pipeline = true
+
+[[setup.buckets]]
+name = "conf-cond"
+
+[[setup.objects]]
+bucket = "conf-cond"
+key = "cas/race"
+absent = true
+
+[[exchanges]]
+name = "the-winner"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-cond/cas/race"
+headers = { "if-none-match" = "*", "content-type" = "text/plain" }
+body = { utf8 = "first" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[[exchanges]]
+name = "the-loser"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-cond/cas/race"
+headers = { "if-none-match" = "*", "content-type" = "text/plain" }
+body = { utf8 = "second" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 409
+headers_absent = ["etag", "x-amz-version-id"]
+connection_after = "open"
+
+[exchanges.expect.error]
+code = "ConditionalRequestConflict"
+request_id_present = true

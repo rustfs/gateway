@@ -1,0 +1,64 @@
+# c-list-0039 — an empty delimiter groups nothing.
+#
+# Schema dimensions exercised: a boundary value for a parameter whose non-empty form changes the whole result shape.
+
+[case]
+id = "c-list-0039"
+schema_version = 1
+title = "delimiter= with no value lists every key and produces no common prefixes"
+rationale = """
+An empty delimiter matches at every position, so an implementation that does not special-case it produces one common prefix per key — or a single empty one — and no entries at all. The listing then contains none of the data it was asked for while returning 200, and the client sees an empty folder tree rather than an error."""
+polarity = "negative"
+operation = "ListObjectsV2"
+tags = ["list", "delimiter", "boundary"]
+timeout_ms = 15000
+quirks = ["q-empty-0016", "q-flat-0019"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectsV2.html"
+summary = "Documents the delimiter as the character that begins the grouping, which an empty string cannot do."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-list"
+
+[[setup.objects]]
+bucket = "conf-list"
+key = "a/1.txt"
+body = { utf8 = "a1" }
+
+[[setup.objects]]
+bucket = "conf-list"
+key = "a/2.txt"
+body = { utf8 = "a2" }
+
+[[setup.objects]]
+bucket = "conf-list"
+key = "b/1.txt"
+body = { utf8 = "b1" }
+
+[[setup.objects]]
+bucket = "conf-list"
+key = "top.txt"
+body = { utf8 = "top" }
+
+[request]
+method = "GET"
+target = "/conf-list?list-type=2&delimiter="
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+
+[expect.body]
+contains_utf8 = ["<Key>a/1.txt</Key>", "<Key>top.txt</Key>", "<KeyCount>4</KeyCount>"]
+not_contains_utf8 = ["<CommonPrefixes>", "<Delimiter>"]
+
+[expect.body.xml]
+root = "ListBucketResult"
+xmlns = "http://s3.amazonaws.com/doc/2006-03-01/"
+empty_elements = "paired"

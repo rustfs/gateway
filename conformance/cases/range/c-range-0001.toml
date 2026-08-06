@@ -1,0 +1,62 @@
+# c-range-0001 — the baseline ranged read.
+#
+# Schema dimensions exercised: byte-exact body, header-set assertion including the two headers a
+# partial response is defined by.
+
+[case]
+id = "c-range-0001"
+schema_version = 1
+title = "A satisfied range is answered 206 with a Content-Range naming the span and the total"
+rationale = """
+An implementation that serves the right bytes with a 200 looks correct to anything that only \
+compares payloads, and is broken for every client that resumes a download: the client asked for a \
+span, received what it reads as the whole object, and writes those bytes at offset zero. The \
+status and the Content-Range are what distinguish a partial response from a complete one, so both \
+are asserted here alongside the bytes."""
+polarity = "positive"
+operation = "GetObject"
+tags = ["range", "read", "wire-bytes"]
+timeout_ms = 10000
+quirks = ["q-range-0053"]
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/issues/118"
+summary = "A satisfied range request was answered with the success status of a complete response instead of the partial-content status."
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9110#section-15.3.7"
+summary = "A partial-content response carries the partial status and a Content-Range describing the span and the total length."
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-range"
+
+[[setup.objects]]
+bucket = "conf-range"
+key = "ten"
+content_type = "text/plain"
+body = { utf8 = "0123456789" }
+
+[request]
+method = "GET"
+target = "/conf-range/ten"
+headers = { "range" = "bytes=0-4" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 206
+connection_after = "open"
+
+[expect.headers_present]
+"content-range" = "bytes 0-4/10"
+"content-length" = "5"
+"accept-ranges" = "bytes"
+
+[expect.timing]
+terminate_within_ms = 5000
+
+[expect.body]
+exact_utf8 = "01234"

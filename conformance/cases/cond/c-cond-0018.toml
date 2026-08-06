@@ -1,0 +1,84 @@
+# c-cond-0018 — strong comparison, in the direction that must refuse.
+#
+# Schema dimensions exercised: byte-exact error document, header absence proving the guarded write
+# did not happen.
+
+[case]
+id = "c-cond-0018"
+schema_version = 1
+title = "A weak validator never satisfies If-Match, whichever side of the comparison it is on"
+rationale = """
+A weak validator promises semantic equivalence, not identical bytes, so it cannot carry a \
+compare-and-swap: two representations that share a weak tag may differ, and a write guarded by one \
+would overwrite a version the client never saw. An implementation that strips the weakness prefix \
+before comparing — the obvious way to be tolerant about spelling — turns every weak tag into a \
+strong one and loses the guarantee silently. The weakness is put on the request side because the \
+fixture format has no way to store a weak tag; strong comparison requires both sides to be strong, \
+so this asserts the same rule from the side a case can actually reach. It is the opposite \
+direction of c-cond-0005, and one comparison shared by both conditions fails exactly one of them."""
+polarity = "negative"
+operation = "PutObject"
+tags = ["conditional", "preconditions", "etag", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-cond-0046"]
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9110#section-8.8.3.2"
+summary = "Strong comparison requires both validators to be strong, which is why a weak tag on either side cannot satisfy If-Match."
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9110#section-13.1.1"
+summary = "If-Match is evaluated with strong comparison precisely because it guards state-changing requests."
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = true
+
+[[setup.buckets]]
+name = "conf-cond"
+
+[[setup.objects]]
+bucket = "conf-cond"
+key = "weak/guard"
+content_type = "text/plain"
+body = { utf8 = "original" }
+
+[[exchanges]]
+name = "the-weak-guard-is-refused"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-cond/weak/guard"
+headers = { "if-match" = "W/\"919c8b643b7133116b02fc0d9bb7df3f\"", "content-type" = "text/plain" }
+body = { utf8 = "overwritten" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 412
+headers_absent = ["etag", "x-amz-version-id"]
+connection_after = "open"
+
+[exchanges.expect.error]
+code = "PreconditionFailed"
+request_id_present = true
+
+[[exchanges]]
+name = "the-same-tag-without-the-weakness-prefix-is-accepted"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-cond/weak/guard"
+headers = { "if-match" = "\"919c8b643b7133116b02fc0d9bb7df3f\"", "content-type" = "text/plain" }
+body = { utf8 = "overwritten" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.headers_present]
+"etag" = "\"509ff4bfff30a77103aac34068ea46c7\""

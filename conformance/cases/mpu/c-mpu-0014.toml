@@ -1,0 +1,57 @@
+# c-mpu-0014 — a successful abort is empty.
+#
+# Schema dimensions exercised: a body-size assertion and header absence on a no-content status.
+
+[case]
+id = "c-mpu-0014"
+schema_version = 1
+title = "A successful abort answers no content and no body"
+rationale = """
+The success answer here carries no content, and a body written under a no-content status is a \
+framing error rather than a cosmetic one: a client reading the connection as a stream takes those \
+bytes as the head of the next response, and every subsequent exchange on that connection is \
+misparsed. Asserting the empty body, and that no entity tag came back with it, is what separates \
+'the abort worked' from 'something was written and reported as an abort'."""
+polarity = "positive"
+operation = "AbortMultipartUpload"
+tags = ["multipart", "status", "framing"]
+quirks = ["q-mpu-abort-0035"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_AbortMultipartUpload.html"
+summary = "The documented success response for an abort carries no content."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9110#section-15.3.5"
+summary = "A no-content response terminates at the end of the header section and never carries body bytes."
+kind = "rfc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-mpu"
+
+[[setup.multipart_uploads]]
+bucket = "conf-mpu"
+key = "to-abandon"
+capture_upload_id_as = "upload_id"
+
+[[setup.multipart_uploads.parts]]
+part_number = 1
+body = { size = 1024 }
+
+[request]
+method = "DELETE"
+target = "/conf-mpu/to-abandon?uploadId=${capture.upload_id}"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 204
+connection_after = "open"
+headers_absent = ["etag", "content-type"]
+
+[expect.body]
+size = 0

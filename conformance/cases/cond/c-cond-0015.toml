@@ -1,0 +1,57 @@
+# c-cond-0015 — the wildcard in the direction that must fail.
+#
+# Schema dimensions exercised: setup.objects.absent, byte-exact error document with redaction.
+
+[case]
+id = "c-cond-0015"
+schema_version = 1
+title = "An If-Match of * against a key that does not exist fails the condition"
+rationale = """
+The wildcard means "any current representation", so with no representation it is false — and an \
+implementation that treats the asterisk as "skip the check" inverts exactly this case, letting a \
+guarded write land on a key the client believed it was protecting. This is the mirror of \
+c-cond-0006: the same value, the same absent key, and the opposite required answer, which is what \
+makes an implementation that special-cases the asterisk fail one of the two."""
+polarity = "negative"
+operation = "GetObject"
+tags = ["conditional", "preconditions", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-cond-0045"]
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9110#section-13.1.1"
+summary = "An If-Match of asterisk fails whenever the target has no current representation."
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/issues/432"
+summary = "Typing the entity tag lost the wildcard variant, so requests carrying it stopped being evaluated correctly."
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-cond"
+
+[[setup.objects]]
+bucket = "conf-cond"
+key = "wildcard/absent"
+absent = true
+
+[request]
+method = "GET"
+target = "/conf-cond/wildcard/absent"
+headers = { "if-match" = "*" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 412
+headers_absent = ["etag"]
+connection_after = "open"
+
+[expect.error]
+code = "PreconditionFailed"
+request_id_present = true
+
+[expect.timing]
+terminate_within_ms = 5000

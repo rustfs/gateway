@@ -64,18 +64,30 @@ pub fn operation(ir: &OperationIr, registry: &Registry, report: &mut DtoReport) 
              /// The AWS operation name.\n    \
              pub const NAME: &'static str = \"{op}\";\n\n    \
              /// Input members the wire contract requires, under their model names.\n    \
-             pub const REQUIRED_INPUT: &'static [&'static str] = {};\n\n    \
+             pub const REQUIRED_INPUT: &'static [&'static str] ={};\n\n    \
              /// Output members the wire contract requires, under their model names.\n    \
-             pub const REQUIRED_OUTPUT: &'static [&'static str] = {};\n\n    \
+             pub const REQUIRED_OUTPUT: &'static [&'static str] ={};\n\n    \
              /// Input members the IR keeps on the hot path.\n    \
-             pub const HOT_INPUT: &'static [&'static str] = {};\n\n    \
+             pub const HOT_INPUT: &'static [&'static str] ={};\n\n    \
              /// Output members the IR keeps on the hot path.\n    \
-             pub const HOT_OUTPUT: &'static [&'static str] = {};\n\
+             pub const HOT_OUTPUT: &'static [&'static str] ={};\n\
          }}\n\n",
-        name_list(&selected(&ir.input, |f| f.required), 4),
-        name_list(&selected(&ir.output, |f| f.required), 4),
-        name_list(&selected(&ir.input, |f| f.hot), 4),
-        name_list(&selected(&ir.output, |f| f.hot), 4),
+        name_list(
+            &selected(&ir.input, |f| f.required),
+            4,
+            "    pub const REQUIRED_INPUT: &'static [&'static str] = "
+        ),
+        name_list(
+            &selected(&ir.output, |f| f.required),
+            4,
+            "    pub const REQUIRED_OUTPUT: &'static [&'static str] = "
+        ),
+        name_list(&selected(&ir.input, |f| f.hot), 4, "    pub const HOT_INPUT: &'static [&'static str] = "),
+        name_list(
+            &selected(&ir.output, |f| f.hot),
+            4,
+            "    pub const HOT_OUTPUT: &'static [&'static str] = "
+        ),
     );
 
     out.push_str(&data_struct(

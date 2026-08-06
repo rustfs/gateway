@@ -1,0 +1,60 @@
+# c-mpu-0048 — the page size is echoed, and truncation agrees with the cursor.
+
+[case]
+id = "c-mpu-0048"
+schema_version = 1
+title = "A listing echoes the requested page size and its truncation flag agrees with its cursor"
+rationale = """
+Two facts in a listing can disagree, and a client believes whichever it reads first. If the \
+truncation flag says there is more and no cursor comes back, an enumeration loop either stops early \
+or spins on the same page forever; if the echoed page size is the server's clamp rather than the \
+caller's request, the caller cannot reconcile its own accounting. Requesting a size above the \
+server's ceiling is what makes the two failures separable in one exchange."""
+polarity = "negative"
+operation = "ListParts"
+tags = ["multipart", "pagination", "consistency"]
+quirks = ["q-mpu-marker-0040", "q-mpu-part-0031"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListParts.html"
+summary = "The response echoes the requested maximum and returns a next marker exactly when the listing is truncated."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/pull/296"
+summary = "Upstream's marker handling made the truncation flag and the cursor disagree."
+kind = "s3s-pr"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-mpu"
+
+[[setup.multipart_uploads]]
+bucket = "conf-mpu"
+key = "echo-the-request"
+capture_upload_id_as = "upload_id"
+
+[[setup.multipart_uploads.parts]]
+part_number = 1
+body = { size = 1024 }
+
+[[setup.multipart_uploads.parts]]
+part_number = 2
+body = { size = 1024 }
+
+[request]
+method = "GET"
+target = "/conf-mpu/echo-the-request?uploadId=${capture.upload_id}&max-parts=5000"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[expect.body]
+redact = ["UploadId", "LastModified", "ETag"]
+contains_utf8 = ["<MaxParts>5000</MaxParts>", "<IsTruncated>false</IsTruncated>"]
+not_contains_utf8 = ["<MaxParts>1000</MaxParts>", "<NextPartNumberMarker>"]

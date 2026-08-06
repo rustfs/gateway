@@ -1,0 +1,44 @@
+# c-list-0026 — a bucket that does not exist is a named error.
+#
+# Schema dimensions exercised: an error code asserted against the error document rather than the status.
+
+[case]
+id = "c-list-0026"
+schema_version = 1
+title = "Listing a bucket that does not exist answers 404 NoSuchBucket"
+rationale = """
+The status alone is not enough: several conditions answer 404 here and a client branches on the code, not the number. Answering an empty listing instead is worse than answering the wrong code, because a sync tool reads it as "the bucket is empty" and deletes its local copy."""
+polarity = "negative"
+operation = "ListObjectsV2"
+tags = ["list", "error"]
+timeout_ms = 15000
+quirks = ["q-keycount-0018"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectsV2.html"
+summary = "Lists the no-such-bucket error as the documented answer for a bucket that does not exist."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-list-absent"
+absent = true
+
+[request]
+method = "GET"
+target = "/conf-list-absent?list-type=2"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 404
+
+[expect.error]
+code = "NoSuchBucket"
+message_present = true
+request_id_present = true
+
+[expect.body.xml]
+root = "Error"

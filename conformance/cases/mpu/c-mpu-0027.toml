@@ -1,0 +1,64 @@
+# c-mpu-0027 — a part above the size ceiling is refused before its body is read.
+#
+# Schema dimensions exercised: request_progress.body_bytes_sent_at_response — the assertion that
+# the refusal preceded the payload.
+
+[case]
+id = "c-mpu-0027"
+schema_version = 1
+title = "A part declaring a length above the ceiling is refused without consuming the body"
+rationale = """
+The declared length is available in the head, so a part too large to store must be refused there \
+rather than after five gigabytes have crossed the network and been written somewhere. An \
+implementation that reads first and checks afterwards turns one malformed client into a bandwidth \
+and disk amplifier, and a retry loop around it into an outage. The assertion is therefore about \
+what the client had managed to send when the answer arrived, not only about the status."""
+polarity = "negative"
+operation = "UploadPart"
+tags = ["multipart", "limits", "streaming", "error-shape"]
+quirks = ["q-mpu-limits-0038"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/qfacts.html"
+summary = "States the maximum size a single part may have."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-mpu"
+
+[[setup.multipart_uploads]]
+bucket = "conf-mpu"
+key = "oversized-part"
+capture_upload_id_as = "upload_id"
+
+[request]
+method = "PUT"
+target = "/conf-mpu/oversized-part?partNumber=1&uploadId=${capture.upload_id}"
+headers = { "content-length" = "5368709121" }
+sign = { mode = "sigv4_unsigned_payload", service = "s3", region = "us-east-1", credential = "valid" }
+
+[[request.chunks]]
+raw_utf8 = "0123456789"
+flush = true
+
+[[request.chunks]]
+action = "stall"
+duration_ms = 3000
+
+[expect]
+kind = "response"
+status = 400
+headers_absent = ["etag"]
+
+[expect.error]
+code = "EntityTooLarge"
+request_id_present = true
+
+[expect.request_progress]
+body_fully_sent = false
+
+[expect.timing]
+terminate_within_ms = 5000

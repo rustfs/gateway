@@ -1,0 +1,54 @@
+# c-list-0038 — a delimiter is a string, not a character.
+#
+# Schema dimensions exercised: a multi-character value in a parameter usually seen as one byte.
+
+[case]
+id = "c-list-0038"
+schema_version = 1
+title = "A two-character delimiter groups keys on that string rather than on its first byte"
+rationale = """
+Every implementation is written against a single slash and most store the delimiter in something that holds one character. Taking the first byte of a longer delimiter silently groups on the wrong boundary, which produces common prefixes that look plausible and are not; rejecting it breaks a documented input. Neither failure is visible without a delimiter longer than one byte."""
+polarity = "negative"
+operation = "ListObjectsV2"
+tags = ["list", "delimiter", "validation"]
+timeout_ms = 15000
+quirks = ["q-flat-0019"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectsV2.html"
+summary = "Documents the delimiter as a string parameter with no length restriction to one character."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-list-odd"
+
+[[setup.objects]]
+bucket = "conf-list-odd"
+key = "xxABtail.txt"
+body = { utf8 = "1" }
+
+[[setup.objects]]
+bucket = "conf-list-odd"
+key = "xxAother.txt"
+body = { utf8 = "2" }
+
+[request]
+method = "GET"
+target = "/conf-list-odd?list-type=2&delimiter=AB"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+
+[expect.body]
+contains_utf8 = ["<CommonPrefixes><Prefix>xxAB</Prefix></CommonPrefixes>", "<Key>xxAother.txt</Key>", "<Delimiter>AB</Delimiter>"]
+not_contains_utf8 = ["<Prefix>xxA</Prefix></CommonPrefixes>"]
+
+[expect.body.xml]
+root = "ListBucketResult"
+xmlns = "http://s3.amazonaws.com/doc/2006-03-01/"
+empty_elements = "paired"

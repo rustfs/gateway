@@ -1,0 +1,81 @@
+# c-mpu-0015 — the head arrives long before the outcome.
+#
+# Schema dimensions exercised: expect.timing.ttfb_max_ms and terminate_within_ms against
+# case.timeout_ms — the assertion no status code can make.
+
+[case]
+id = "c-mpu-0015"
+schema_version = 1
+title = "A slow completion sends its head immediately and terminates within the budget"
+rationale = """
+Assembling a large upload can outlast a client's read timeout, so the response head is committed \
+before the outcome is known and whitespace is written while the work runs. A server that waits for \
+the outcome before answering anything hits the client's timeout; the client retries, and the retry \
+races the completion that is still running, which is how one upload becomes two objects or none. \
+The assertion that matters is about time, not bytes: the first byte arrives early and the response \
+terminates."""
+polarity = "positive"
+operation = "CompleteMultipartUpload"
+tags = ["multipart", "streaming", "timing"]
+quirks = ["q-mpu-late-error-0033"]
+timeout_ms = 60000
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/issues/30"
+summary = "Completion took long enough that clients timed out before any bytes arrived."
+kind = "s3s-issue"
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/pull/348"
+summary = "The upstream fix commits the head first and writes whitespace until the outcome is known."
+kind = "s3s-pr"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-mpu"
+
+[[setup.multipart_uploads]]
+bucket = "conf-mpu"
+key = "slow-assembly"
+capture_upload_id_as = "upload_id"
+
+[[setup.multipart_uploads.parts]]
+part_number = 1
+body = { size = 5242880 }
+capture_etag_as = "part1_etag"
+
+[[setup.multipart_uploads.parts]]
+part_number = 2
+body = { size = 5242880 }
+capture_etag_as = "part2_etag"
+
+[request]
+method = "POST"
+target = "/conf-mpu/slow-assembly?uploadId=${capture.upload_id}"
+headers = { "content-type" = "application/xml" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[request.body]
+utf8 = '''
+<CompleteMultipartUpload xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Part><PartNumber>1</PartNumber><ETag>${capture.part1_etag}</ETag></Part><Part><PartNumber>2</PartNumber><ETag>${capture.part2_etag}</ETag></Part></CompleteMultipartUpload>'''
+
+[expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[expect.headers_present]
+"content-type" = "application/xml"
+
+[expect.timing]
+ttfb_max_ms = 5000
+terminate_within_ms = 45000
+
+[expect.body]
+redact = ["Location", "ETag", "UploadId"]
+not_contains_utf8 = ["<Error>"]
+
+[expect.body.xml]
+root = "CompleteMultipartUploadResult"

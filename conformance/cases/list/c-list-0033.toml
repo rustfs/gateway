@@ -1,0 +1,64 @@
+# c-list-0033 — a key cursor names a position, not an object.
+#
+# Schema dimensions exercised: a cursor value that matches nothing, asserted to continue rather than fail.
+
+[case]
+id = "c-list-0033"
+schema_version = 1
+title = "A key marker naming a key that does not exist resumes from the position after it"
+rationale = """
+A key cursor is a position in a sorted space and the key it names need not exist — it will not exist as soon as somebody deletes it between two pages, which is the ordinary case rather than the exotic one. An implementation that looks the key up and fails turns a concurrent delete into a paging error the client cannot recover from."""
+polarity = "negative"
+operation = "ListObjectVersions"
+tags = ["list", "versions", "pagination"]
+timeout_ms = 15000
+quirks = ["q-marker-0070"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectVersions.html"
+summary = "Describes the key cursor as the position in the key space where the listing resumes."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-list-versions"
+versioning = "enabled"
+
+[[setup.objects]]
+bucket = "conf-list-versions"
+key = "doc.txt"
+body = { utf8 = "v1" }
+
+[[setup.objects]]
+bucket = "conf-list-versions"
+key = "doc.txt"
+body = { utf8 = "v2" }
+
+[[setup.objects]]
+bucket = "conf-list-versions"
+key = "doc.txt"
+body = { utf8 = "v3" }
+
+[[setup.objects]]
+bucket = "conf-list-versions"
+key = "gone.txt"
+body = { utf8 = "here" }
+
+[request]
+method = "GET"
+target = "/conf-list-versions?versions&key-marker=doc.tx"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+
+[expect.body]
+contains_utf8 = ["<Key>doc.txt</Key>"]
+
+[expect.body.xml]
+root = "ListVersionsResult"
+xmlns = "http://s3.amazonaws.com/doc/2006-03-01/"
+empty_elements = "paired"

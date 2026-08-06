@@ -12,14 +12,20 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Family: object listing. ListObjectsV2 today; ListObjects, ListObjectVersions,
-# ListMultipartUploads and the bucket listings arrive here.
+# Family: object listing. Both key listings, the version listing and the bucket listing;
+# ListMultipartUploads and ListParts belong to the multipart family and reuse the pagination
+# contract from there.
 #
 # The family owns pagination, delimiter rollup, CommonPrefixes, encoding-type and the
 # continuation-token codec. Those are shared by every member, which is why they are one family
 # and one file rather than four.
+#
+# The two key listings share a response root and an entry shape and differ in their cursor, their
+# owner rule and their key count. The differences are data in this file — `element_order`,
+# `empty_value` through `output_required`, `url_encoded_fields`, `default_int` — so that neither
+# operation's implementation branches on which version it is.
 
-include = ["ListObjectsV2"]
+include = ["ListBuckets", "ListObjectVersions", "ListObjects", "ListObjectsV2"]
 
 # =============================================================================================
 # ListObjectsV2
@@ -131,6 +137,268 @@ name = "NextContinuationToken"
 quirks = ["q-token-0021"]
 
 # =============================================================================================
+# ListObjects
+#
+# The first listing version. It reaches `GET /{Bucket}` with no discriminating query key at all,
+# which is why it sits at the end of the bucket band: every keyed bucket route is tried first and
+# this one answers whatever is left. Its cursor is a key (`marker`), not an opaque token, and its
+# owner element is unconditional — both are the opposite of the second version, and both are data
+# here rather than a branch in the operation module.
+# =============================================================================================
+[op.ListObjects]
+precedence = 700
+auth_action = "s3:ListBucket"
+error_codes = ["NoSuchBucket", "AccessDenied", "InvalidArgument", "PermanentRedirect"]
+quirk_refs = ["q-root-0013", "q-order-0066", "q-encoding-0067", "q-empty-0063", "q-marker-0064", "q-owner-0065", "q-maxkeys-0068"]
+# Withheld for the same reason as ListObjectsV2: a comma-delimited list in a header position has
+# no truthful IR form yet. Restoring it needs an IR change, not an overlay change.
+input_drop = ["OptionalObjectAttributes"]
+# AWS writes all five whatever the model says about optionality, and writes the first three even
+# when they are empty. Requiring them here is what turns `<Prefix></Prefix>` from a handler's good
+# intention into an encoder invariant.
+output_required = ["Name", "Prefix", "Marker", "MaxKeys", "IsTruncated"]
+input_hot = ["Prefix", "Delimiter", "MaxKeys", "Marker"]
+output_hot = ["Name", "Prefix", "Marker", "MaxKeys", "Delimiter", "IsTruncated", "Contents", "CommonPrefixes"]
+# Wire order, not model order: the bucket name precedes the entry list. Same contract as the
+# second version, different member set. See q-order-0066.
+element_order = [
+  "Name",
+  "Prefix",
+  "Marker",
+  "NextMarker",
+  "MaxKeys",
+  "Delimiter",
+  "IsTruncated",
+  "Contents",
+  "CommonPrefixes",
+  "EncodingType",
+]
+# Per operation, not per family: this version encodes its own two cursor members, and knows
+# nothing about continuation tokens. See q-encoding-0067.
+url_encoded_fields = [
+  "Prefix",
+  "Delimiter",
+  "Marker",
+  "NextMarker",
+  "Contents.Key",
+  "CommonPrefixes.Prefix",
+]
+
+[[op.ListObjects.field]]
+side = "input"
+name = "MaxKeys"
+default_int = 1000
+quirks = ["q-maxkeys-0068"]
+
+[[op.ListObjects.field]]
+side = "input"
+name = "EncodingType"
+quirks = ["q-encoding-0067"]
+
+[[op.ListObjects.field]]
+side = "output"
+name = "Name"
+quirks = ["q-order-0066"]
+
+[[op.ListObjects.field]]
+side = "output"
+name = "Prefix"
+quirks = ["q-empty-0063"]
+
+[[op.ListObjects.field]]
+side = "output"
+name = "Marker"
+quirks = ["q-empty-0063"]
+
+[[op.ListObjects.field]]
+side = "output"
+name = "NextMarker"
+quirks = ["q-marker-0064"]
+
+[[op.ListObjects.field]]
+side = "output"
+name = "MaxKeys"
+quirks = ["q-maxkeys-0068"]
+
+[[op.ListObjects.field]]
+side = "output"
+name = "Contents"
+quirks = ["q-flat-0019", "q-owner-0065"]
+
+[[op.ListObjects.field]]
+side = "output"
+name = "CommonPrefixes"
+quirks = ["q-flat-0019"]
+
+[[op.ListObjects.field]]
+side = "output"
+name = "EncodingType"
+quirks = ["q-encoding-0067"]
+
+# =============================================================================================
+# ListObjectVersions
+#
+# The only listing with two cursors and two entry element names. `Versions` is written as
+# `<Version>` and `DeleteMarkers` as `<DeleteMarker>`; neither element is named after its shape,
+# and a reader who assumes otherwise produces a body no SDK will parse.
+# =============================================================================================
+[op.ListObjectVersions]
+precedence = 610
+auth_action = "s3:ListBucket"
+error_codes = ["NoSuchBucket", "AccessDenied", "InvalidArgument", "PermanentRedirect"]
+quirk_refs = [
+  "q-root-0060",
+  "q-version-0061",
+  "q-order-0066",
+  "q-encoding-0067",
+  "q-maxkeys-0068",
+  "q-interleave-0069",
+  "q-marker-0070",
+]
+input_drop = ["OptionalObjectAttributes"]
+output_required = ["Name", "Prefix", "KeyMarker", "VersionIdMarker", "MaxKeys", "IsTruncated"]
+input_hot = ["Prefix", "Delimiter", "MaxKeys", "KeyMarker", "VersionIdMarker"]
+output_hot = ["Name", "Prefix", "KeyMarker", "MaxKeys", "Delimiter", "IsTruncated", "Versions", "DeleteMarkers", "CommonPrefixes"]
+element_order = [
+  "Name",
+  "Prefix",
+  "KeyMarker",
+  "VersionIdMarker",
+  "NextKeyMarker",
+  "NextVersionIdMarker",
+  "MaxKeys",
+  "Delimiter",
+  "IsTruncated",
+  "Versions",
+  "DeleteMarkers",
+  "CommonPrefixes",
+  "EncodingType",
+]
+url_encoded_fields = [
+  "Prefix",
+  "Delimiter",
+  "KeyMarker",
+  "NextKeyMarker",
+  "Versions.Key",
+  "DeleteMarkers.Key",
+  "CommonPrefixes.Prefix",
+]
+
+[[op.ListObjectVersions.field]]
+side = "input"
+name = "MaxKeys"
+default_int = 1000
+quirks = ["q-maxkeys-0068"]
+
+[[op.ListObjectVersions.field]]
+side = "input"
+name = "EncodingType"
+quirks = ["q-encoding-0067"]
+
+# A version id is a server-minted opaque string, and it arrives from the client. Typing it as
+# opaque is what keeps it out of every code path that would treat it as a key or a path.
+[[op.ListObjectVersions.field]]
+side = "input"
+name = "VersionIdMarker"
+type = "OpaqueString"
+quirks = ["q-token-0021", "q-marker-0070"]
+
+[[op.ListObjectVersions.field]]
+side = "input"
+name = "KeyMarker"
+quirks = ["q-marker-0070"]
+
+[[op.ListObjectVersions.field]]
+side = "output"
+name = "Name"
+quirks = ["q-order-0066"]
+
+[[op.ListObjectVersions.field]]
+side = "output"
+name = "MaxKeys"
+quirks = ["q-maxkeys-0068"]
+
+[[op.ListObjectVersions.field]]
+side = "output"
+name = "VersionIdMarker"
+type = "OpaqueString"
+quirks = ["q-token-0021"]
+
+[[op.ListObjectVersions.field]]
+side = "output"
+name = "NextVersionIdMarker"
+type = "OpaqueString"
+quirks = ["q-token-0021"]
+
+[[op.ListObjectVersions.field]]
+side = "output"
+name = "Versions"
+quirks = ["q-version-0061", "q-flat-0019", "q-interleave-0069"]
+
+[[op.ListObjectVersions.field]]
+side = "output"
+name = "DeleteMarkers"
+quirks = ["q-version-0061", "q-flat-0019", "q-interleave-0069"]
+
+[[op.ListObjectVersions.field]]
+side = "output"
+name = "CommonPrefixes"
+quirks = ["q-flat-0019"]
+
+[[op.ListObjectVersions.field]]
+side = "output"
+name = "EncodingType"
+quirks = ["q-encoding-0067"]
+
+# =============================================================================================
+# ListBuckets
+#
+# The one listing addressed at the service rather than a bucket, the one whose entry list is
+# wrapped rather than flattened, and the one that gained pagination long after the other three.
+# =============================================================================================
+[op.ListBuckets]
+precedence = 100
+auth_action = "s3:ListAllMyBuckets"
+error_codes = ["AccessDenied"]
+quirk_refs = ["q-wrapped-0062", "q-order-0066", "q-buckets-0071", "q-token-0021"]
+output_required = ["Owner", "Buckets"]
+input_hot = ["ContinuationToken", "MaxBuckets", "Prefix"]
+output_hot = ["Owner", "Buckets"]
+# AWS writes the owner before the entry list.
+element_order = ["Owner", "Buckets", "ContinuationToken", "Prefix"]
+
+[[op.ListBuckets.field]]
+side = "input"
+name = "MaxBuckets"
+default_int = 10000
+quirks = ["q-buckets-0071"]
+
+[[op.ListBuckets.field]]
+side = "input"
+name = "ContinuationToken"
+quirks = ["q-token-0021", "q-buckets-0071"]
+
+[[op.ListBuckets.field]]
+side = "input"
+name = "BucketRegion"
+quirks = ["q-buckets-0071"]
+
+[[op.ListBuckets.field]]
+side = "output"
+name = "Buckets"
+quirks = ["q-wrapped-0062", "q-order-0066"]
+
+[[op.ListBuckets.field]]
+side = "output"
+name = "Owner"
+quirks = ["q-buckets-0071"]
+
+[[op.ListBuckets.field]]
+side = "output"
+name = "ContinuationToken"
+quirks = ["q-token-0021"]
+
+# =============================================================================================
 # Nested shapes owned by this family
 # =============================================================================================
 [shape.Object]
@@ -153,12 +421,17 @@ quirks = ["q-flat-0019"]
 name = "StorageClass"
 quirks = ["q-storageclass-0022"]
 
+# The suppression names a request field, and only the second listing version has it. The first
+# version writes the owner unconditionally, which is q-owner-0065; a shape overlay is keyed by
+# shape name and cannot say that per operation, so the rule is recorded there and this entry is
+# read as "suppressed where the field exists". An encoder that starts acting on `RequestField`
+# must resolve an absent field to "do not suppress" rather than to an error.
 [[shape.Object.field]]
 name = "Owner"
 omit_when = "RequestField"
 omit_when_field = "FetchOwner"
 omit_when_equals = "false"
-quirks = ["q-owner-0017"]
+quirks = ["q-owner-0017", "q-owner-0065"]
 
 [shape.CommonPrefix]
 required = ["Prefix"]
@@ -172,11 +445,72 @@ quirks = ["q-encoding-0015"]
 [shape.Owner]
 element_order = ["ID", "DisplayName"]
 
-[[deferred]]
-reason = "P5 listing family; pagination, delimiter rollup and encoding-type are shared with ListObjectsV2 and land together."
-operations = [
-  "ListBuckets",
-  "ListDirectoryBuckets",
-  "ListObjectVersions",
-  "ListObjects",
+# The version entry. AWS writes the identity of the version first and its content afterwards; the
+# model declares the content members first, so the order is fixed here. Element order inside an
+# entry is as much a wire contract as it is at the root — see q-order-0066.
+[shape.ObjectVersion]
+element_order = [
+  "Key",
+  "VersionId",
+  "IsLatest",
+  "LastModified",
+  "ETag",
+  "ChecksumAlgorithm",
+  "ChecksumType",
+  "Size",
+  "StorageClass",
+  "Owner",
+  "RestoreStatus",
 ]
+required = ["Key", "VersionId", "IsLatest", "LastModified", "ETag", "Size", "StorageClass"]
+hot = ["Key", "VersionId", "IsLatest", "LastModified", "ETag", "Size"]
+
+[[shape.ObjectVersion.field]]
+name = "Key"
+quirks = ["q-encoding-0067"]
+
+[[shape.ObjectVersion.field]]
+name = "ETag"
+quirks = ["q-etag-0020"]
+
+[[shape.ObjectVersion.field]]
+name = "ChecksumAlgorithm"
+quirks = ["q-flat-0019"]
+
+[[shape.ObjectVersion.field]]
+name = "StorageClass"
+quirks = ["q-storageclass-0022"]
+
+[[shape.ObjectVersion.field]]
+name = "VersionId"
+type = "OpaqueString"
+quirks = ["q-token-0021"]
+
+# A delete marker is an entry in the same list, not a second list. It carries no size, no entity
+# tag and no storage class, which is the whole reason it is a separate shape.
+[shape.DeleteMarkerEntry]
+element_order = ["Key", "VersionId", "IsLatest", "LastModified", "Owner"]
+required = ["Key", "VersionId", "IsLatest", "LastModified"]
+hot = ["Key", "VersionId", "IsLatest", "LastModified"]
+
+[[shape.DeleteMarkerEntry.field]]
+name = "Key"
+quirks = ["q-encoding-0067"]
+
+[[shape.DeleteMarkerEntry.field]]
+name = "VersionId"
+type = "OpaqueString"
+quirks = ["q-token-0021"]
+
+# One entry of the wrapped bucket list. AWS always writes the name and the creation date.
+[shape.Bucket]
+required = ["Name", "CreationDate"]
+hot = ["Name", "CreationDate"]
+
+[[shape.Bucket.field]]
+name = "Name"
+quirks = ["q-wrapped-0062"]
+
+[[deferred]]
+reason = "Directory buckets are an S3 Express dialect with their own endpoint and session auth; the listing shape is shared with this family but the addressing is not, and it needs its own reviewed pass."
+operations = ["ListDirectoryBuckets"]

@@ -1,0 +1,82 @@
+# c-list-0043 — a boolean is spelled the way xml spells it.
+#
+# Schema dimensions exercised: the literal text of a boolean element.
+
+[case]
+id = "c-list-0043"
+schema_version = 1
+title = "The truncation flag is written as lowercase true or false and never in another casing"
+rationale = """
+Rust, Java and C# all render a boolean with a casing of their own, and two of the three are wrong here. Strict parsers reject the wrong casing outright and lenient ones read it as false, which turns a truncated listing into a complete one — a silent short read rather than an error. Both pages are asserted so that neither spelling can be right by accident."""
+polarity = "negative"
+operation = "ListObjectsV2"
+tags = ["list", "xml", "boolean"]
+timeout_ms = 15000
+quirks = ["q-empty-0016"]
+
+[[case.evidence]]
+url = "https://www.w3.org/TR/xmlschema-2/#boolean"
+summary = "The XML Schema boolean lexical space admits only the lowercase spellings and the digits."
+kind = "other"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-list"
+
+[[setup.objects]]
+bucket = "conf-list"
+key = "a/1.txt"
+body = { utf8 = "a1" }
+
+[[setup.objects]]
+bucket = "conf-list"
+key = "a/2.txt"
+body = { utf8 = "a2" }
+
+[[setup.objects]]
+bucket = "conf-list"
+key = "b/1.txt"
+body = { utf8 = "b1" }
+
+[[setup.objects]]
+bucket = "conf-list"
+key = "top.txt"
+body = { utf8 = "top" }
+
+[connection]
+reuse = true
+
+[[exchanges]]
+name = "not-truncated"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-list?list-type=2"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+
+[exchanges.expect.body]
+contains_utf8 = ["<IsTruncated>false</IsTruncated>"]
+not_contains_utf8 = ["<IsTruncated>False</IsTruncated>", "<IsTruncated>FALSE</IsTruncated>"]
+
+[[exchanges]]
+name = "truncated"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-list?list-type=2&max-keys=1"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+
+[exchanges.expect.body]
+redact = ["NextContinuationToken"]
+contains_utf8 = ["<IsTruncated>true</IsTruncated>"]
+not_contains_utf8 = ["<IsTruncated>True</IsTruncated>", "<IsTruncated>TRUE</IsTruncated>"]

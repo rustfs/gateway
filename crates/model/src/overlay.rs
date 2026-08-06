@@ -74,6 +74,14 @@ pub struct OpOverlay {
     pub success_status: Option<u16>,
     /// Other legitimate success statuses.
     pub alt_success_statuses: Vec<u16>,
+    /// Query keys that must be present for this route to match.
+    ///
+    /// The model's `http` uri pins a literal query for some operations (`?uploads`, `?delete`)
+    /// and not for others: `UploadPart`, `CompleteMultipartUpload`, `AbortMultipartUpload` and
+    /// `ListParts` are spelled `/{Bucket}/{Key+}?x-id=<Operation>`, and `x-id` is inert. Without
+    /// this field those four selectors would be indistinguishable from `PutObject`, `GetObject`
+    /// and `DeleteObject`, so the discriminator is declared here rather than inferred.
+    pub query_present: Vec<String>,
     /// Query keys that must be absent for this route to match.
     pub query_absent: Vec<String>,
     /// Headers that must be present for this route to match.
@@ -594,6 +602,7 @@ fn op_overlay(name: &str, table: &Toml) -> Result<OpOverlay> {
                     .collect()
             })
             .unwrap_or_default(),
+        query_present: list(table, "query_present", &what)?,
         query_absent: list(table, "query_absent", &what)?,
         header_present: list(table, "header_present", &what)?,
         header_absent: list(table, "header_absent", &what)?,

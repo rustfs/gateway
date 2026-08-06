@@ -1,0 +1,57 @@
+# c-mpu-0021 — a part number may not appear twice.
+
+[case]
+id = "c-mpu-0021"
+schema_version = 1
+title = "A completion naming one part twice is refused"
+rationale = """
+A repeated part number is ambiguous in two ways at once: it is not strictly ascending, and it asks \
+for the same stored part to appear twice in the object. An implementation that accepts it either \
+doubles the part — producing an object of a length the caller never asked for — or silently drops \
+the duplicate, producing a shorter one. Both are wrong in a way the caller cannot detect from the \
+response, which is why the request is refused rather than interpreted."""
+polarity = "negative"
+operation = "CompleteMultipartUpload"
+tags = ["multipart", "ordering", "error-shape"]
+quirks = ["q-mpu-limits-0038"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CompleteMultipartUpload.html"
+summary = "The part list is documented as ascending, which admits no repeated part number."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-mpu"
+
+[[setup.multipart_uploads]]
+bucket = "conf-mpu"
+key = "duplicated-part"
+capture_upload_id_as = "upload_id"
+
+[[setup.multipart_uploads.parts]]
+part_number = 1
+body = { size = 5242880 }
+capture_etag_as = "part1_etag"
+
+[request]
+method = "POST"
+target = "/conf-mpu/duplicated-part?uploadId=${capture.upload_id}"
+headers = { "content-type" = "application/xml" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[request.body]
+utf8 = '''
+<CompleteMultipartUpload xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Part><PartNumber>1</PartNumber><ETag>${capture.part1_etag}</ETag></Part><Part><PartNumber>1</PartNumber><ETag>${capture.part1_etag}</ETag></Part></CompleteMultipartUpload>'''
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+headers_absent = ["etag", "x-amz-version-id"]
+
+[expect.error]
+code = "InvalidPartOrder"
+request_id_present = true

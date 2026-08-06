@@ -1,0 +1,94 @@
+# c-list-0007 — a resumption cursor outranks a starting key.
+#
+# Schema dimensions exercised: capture across exchanges, precedence between two request parameters.
+
+[case]
+id = "c-list-0007"
+schema_version = 1
+title = "When both a continuation token and start-after arrive, the token decides the page"
+rationale = """
+The two parameters answer different questions and a request carrying both is ambiguous. Resolving it the other way round — letting the starting key win — restarts the listing at a point the client has already read past, so a paging loop returns the same window forever. Fixing the precedence in a case is what stops the ambiguity from being resolved differently on the next refactor."""
+polarity = "positive"
+operation = "ListObjectsV2"
+tags = ["list", "pagination", "xml"]
+timeout_ms = 15000
+quirks = ["q-token-0021", "q-keycount-0018"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectsV2.html"
+summary = "Describes the continuation token as the resumption point obtained from a previous response."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/issues/542"
+summary = "The continuation token was neither read from the request nor written to the response, so paging could not work at all."
+kind = "s3s-issue"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-list"
+
+[[setup.objects]]
+bucket = "conf-list"
+key = "a/1.txt"
+body = { utf8 = "a1" }
+
+[[setup.objects]]
+bucket = "conf-list"
+key = "a/2.txt"
+body = { utf8 = "a2" }
+
+[[setup.objects]]
+bucket = "conf-list"
+key = "b/1.txt"
+body = { utf8 = "b1" }
+
+[[setup.objects]]
+bucket = "conf-list"
+key = "top.txt"
+body = { utf8 = "top" }
+
+[connection]
+reuse = true
+
+[[exchanges]]
+name = "page-1"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-list?list-type=2&max-keys=2"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+
+[exchanges.expect.capture]
+next_token = { xml_text = "NextContinuationToken" }
+
+[exchanges.expect.body]
+redact = ["NextContinuationToken"]
+contains_utf8 = ["<IsTruncated>true</IsTruncated>"]
+
+[[exchanges]]
+name = "token-wins-over-start-after"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-list?list-type=2&max-keys=2&start-after=top.txt&continuation-token=${capture.next_token}"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+
+[exchanges.expect.body]
+contains_utf8 = ["<Key>b/1.txt</Key>"]
+not_contains_utf8 = ["<Key>a/1.txt</Key>"]
+
+[exchanges.expect.body.xml]
+root = "ListBucketResult"
+xmlns = "http://s3.amazonaws.com/doc/2006-03-01/"
+empty_elements = "paired"

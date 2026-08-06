@@ -23,7 +23,7 @@
 
 use std::borrow::Cow;
 
-/// The `ObjectLockLegalHoldStatus` string enumeration. Bound by: GetObject, HeadObject, PutObject.
+/// The `ObjectLockLegalHoldStatus` string enumeration. Bound by: CreateMultipartUpload, GetObject, HeadObject, PutObject.
 ///
 /// An open set: compare against the associated constants, and build a value the pinned
 /// model does not declare with [`ObjectLockLegalHoldStatus::custom`]. Adding a constant is a minor version

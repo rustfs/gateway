@@ -1,0 +1,79 @@
+# c-cond-0026 — the copy-source condition, in the direction that must refuse.
+#
+# Schema dimensions exercised: two exchanges over one connection, the second proving the target was
+# never created.
+
+[case]
+id = "c-cond-0026"
+schema_version = 1
+title = "A copy whose source condition does not match is refused and writes no target object"
+rationale = """
+A copy has two objects and therefore two places a condition can be evaluated, and the source-side \
+one is the harder to get right because the source is read rather than written: an implementation \
+that streams the source into the target and then checks reports a precondition failure over an \
+object it has already created. The second exchange is what catches that, and it is the reason a \
+status-only assertion here would prove nothing."""
+polarity = "negative"
+operation = "CopyObject"
+tags = ["conditional", "preconditions", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-cond-0046"]
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/pull/577"
+summary = "Upstream change that added evaluation of the four copy-source conditional headers, which had previously been accepted and ignored."
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CopyObject.html"
+summary = "Documents the four source-side conditional headers and the precondition failure an unsatisfied one produces."
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = true
+
+[[setup.buckets]]
+name = "conf-cond"
+
+[[setup.objects]]
+bucket = "conf-cond"
+key = "copy/stale-source"
+body = { utf8 = "hello" }
+
+[[setup.objects]]
+bucket = "conf-cond"
+key = "copy/never-written"
+absent = true
+
+[[exchanges]]
+name = "the-copy-is-refused"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-cond/copy/never-written"
+headers = { "x-amz-copy-source" = "/conf-cond/copy/stale-source", "x-amz-copy-source-if-match" = "\"0000000000000000000000000000dead\"" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 412
+headers_absent = ["etag", "x-amz-copy-source-version-id"]
+connection_after = "open"
+
+[exchanges.expect.error]
+code = "PreconditionFailed"
+request_id_present = true
+
+[[exchanges]]
+name = "and-the-target-does-not-exist"
+
+[exchanges.request]
+method = "HEAD"
+target = "/conf-cond/copy/never-written"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 404
+connection_after = "open"

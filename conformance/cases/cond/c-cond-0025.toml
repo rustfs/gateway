@@ -1,0 +1,69 @@
+# c-cond-0025 — the wildcard guard on a completion that has nothing to guard.
+#
+# Schema dimensions exercised: setup.objects.absent alongside a captured upload id.
+
+[case]
+id = "c-cond-0025"
+schema_version = 1
+title = "An If-Match of * on a completion fails when the key does not exist yet"
+rationale = """
+Completion is a write, and the entity-tag conditions mean on it exactly what they mean on any \
+other write — which is not obvious, because completion is also the moment the object first comes \
+into existence. An implementation that evaluates the condition against the object it is about to \
+create rather than against the one that is there now inverts this case and reports success, which \
+is precisely the wrong answer for a client using the condition to avoid clobbering a key it does \
+not own."""
+polarity = "negative"
+operation = "CompleteMultipartUpload"
+tags = ["conditional", "preconditions", "multipart", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-cond-0045", "q-cond-0048"]
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9110#section-13.1.1"
+summary = "An If-Match of asterisk fails whenever the target has no current representation, whatever the request would create."
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CompleteMultipartUpload.html"
+summary = "Documents the conditional headers accepted on completion and the precondition failure they raise."
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-cond"
+
+[[setup.objects]]
+bucket = "conf-cond"
+key = "mpu/fresh"
+absent = true
+
+[[setup.multipart_uploads]]
+bucket = "conf-cond"
+key = "mpu/fresh"
+capture_upload_id_as = "upload"
+
+[[setup.multipart_uploads.parts]]
+part_number = 1
+body = { size = 5242880 }
+capture_etag_as = "part_one"
+
+[request]
+method = "POST"
+target = "/conf-cond/mpu/fresh?uploadId=${capture.upload}"
+headers = { "if-match" = "*", "content-type" = "application/xml" }
+body = { utf8 = "<CompleteMultipartUpload><Part><PartNumber>1</PartNumber><ETag>${capture.part_one}</ETag></Part></CompleteMultipartUpload>" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 412
+headers_absent = ["etag"]
+connection_after = "open"
+
+[expect.error]
+code = "PreconditionFailed"
+request_id_present = true
+
+[expect.timing]
+terminate_within_ms = 5000

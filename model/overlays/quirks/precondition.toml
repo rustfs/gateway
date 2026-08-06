@@ -1,0 +1,302 @@
+# Copyright 2026 RustFS Team
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Quirks of the precondition and range family. These are not the quirks of one operation: they are
+# the rules GetObject, HeadObject, PutObject, CopyObject, UploadPartCopy and
+# CompleteMultipartUpload all obey, and the reason they live in one file is the same reason the
+# evaluator lives in `ops/shared/precondition.rs` — a rule split across six operation files gets
+# fixed in five of them.
+#
+# Two of the entries below record where S3 answers differently from RFC 9110. They are the two most
+# expensive rows in this file: an implementation written from the RFC alone is wrong on both, and
+# no client compensates, because every client was written against S3.
+#
+# `summary` and every `evidence.summary` are sentences written by this project. Upstream issue and
+# documentation prose stays under its author's copyright and is never pasted here.
+
+[[quirk]]
+id      = "q-cond-0041"
+kind    = "conditional_write"
+target  = "PutObject"
+summary = "An If-None-Match of asterisk is compare-and-create: the write is refused with 412 when the key already exists, and nothing is written before the condition is evaluated."
+cases   = ["c-cond-0001", "c-cond-0006", "c-cond-0024"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/conditional-writes.html"
+  summary = "AWS documents the wildcard form of If-None-Match as a write that only succeeds when no object exists under the key."
+
+  [[quirk.evidence]]
+  kind    = "s3s-issue"
+  ref     = "https://github.com/s3s-project/s3s/issues/241"
+  summary = "Upstream tracking report for the conditional write feature, recording that the wildcard write was not evaluated at all."
+
+[[quirk]]
+id      = "q-cond-0042"
+kind    = "aws_deviation"
+target  = "GetObject"
+summary = "A matching If-Match suppresses a failing If-Modified-Since and the object is served with 200, where RFC 9110 evaluation order would answer 304."
+cases   = ["c-cond-0016"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObject.html"
+  summary = "The request-header section states the outcome for the combination of a satisfied entity-tag condition and an unsatisfied modification-date condition."
+
+  [[quirk.evidence]]
+  kind    = "rfc"
+  ref     = "https://www.rfc-editor.org/rfc/rfc9110#section-13.2.2"
+  summary = "The specification's precedence list evaluates the modification-date condition independently of the entity-tag condition, which is the behaviour S3 departs from."
+
+[[quirk]]
+id      = "q-cond-0043"
+kind    = "aws_deviation"
+target  = "GetObject"
+summary = "An If-None-Match that does not match combined with an If-Unmodified-Since that does is answered with 304, where RFC 9110 would serve the representation."
+cases   = ["c-cond-0017"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObject.html"
+  summary = "The request-header section states the outcome for the combination of an unsatisfied entity-tag condition and a satisfied modification-date condition."
+
+  [[quirk.evidence]]
+  kind    = "rfc"
+  ref     = "https://www.rfc-editor.org/rfc/rfc9110#section-13.2.2"
+  summary = "Under the specification neither of those two conditions produces a not-modified response, which is the behaviour S3 departs from."
+
+[[quirk]]
+id      = "q-cond-0044"
+kind    = "error_code"
+target  = "GetObject"
+summary = "If-Match and If-None-Match in one request are refused with 400 InvalidRequest rather than evaluated in some order that silently drops one of them."
+cases   = ["c-cond-0014", "c-cond-0028"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/conditional-requests.html"
+  summary = "AWS describes the two entity-tag conditions as alternatives and rejects a request that carries both."
+
+  [[quirk.evidence]]
+  kind    = "s3s-pr"
+  ref     = "https://github.com/s3s-project/s3s/pull/588"
+  summary = "The upstream conditional-write change left the combination of both headers unhandled, so one condition was evaluated and the other ignored."
+
+[[quirk]]
+id      = "q-cond-0045"
+kind    = "etag_parse"
+target  = "GetObject.IfNoneMatch"
+summary = "An asterisk is a value of the entity-tag conditional headers, not a malformed tag, and reading it as one turns every conditional create into a 400."
+cases   = ["c-cond-0001", "c-cond-0006", "c-cond-0015", "c-cond-0025"]
+
+  [[quirk.evidence]]
+  kind    = "s3s-issue"
+  ref     = "https://github.com/s3s-project/s3s/issues/432"
+  summary = "Giving the entity tag a type dropped the wildcard case, and the wildcard conditional write regressed into a bad request."
+
+  [[quirk.evidence]]
+  kind    = "rfc"
+  ref     = "https://www.rfc-editor.org/rfc/rfc9110#section-13.1.2"
+  summary = "The grammar for the entity-tag conditional headers admits the asterisk as an alternative to a tag list."
+
+[[quirk]]
+id      = "q-cond-0046"
+kind    = "etag_compare"
+target  = "GetObject.IfMatch"
+summary = "If-Match uses strong comparison so a weak validator never satisfies it, while If-None-Match on a read uses weak comparison; quoting differences never decide either."
+cases   = ["c-cond-0002", "c-cond-0003", "c-cond-0004", "c-cond-0005", "c-cond-0011", "c-cond-0012", "c-cond-0018", "c-cond-0019", "c-cond-0023", "c-cond-0026", "c-cond-0027", "c-cond-0028"]
+
+  [[quirk.evidence]]
+  kind    = "rfc"
+  ref     = "https://www.rfc-editor.org/rfc/rfc9110#section-8.8.3.2"
+  summary = "Defines the two comparison functions and which conditional header each is evaluated with."
+
+  [[quirk.evidence]]
+  kind    = "s3s-issue"
+  ref     = "https://github.com/s3s-project/s3s/issues/397"
+  summary = "Comparing entity tags as plain strings made a quoted header value fail to match an unquoted stored tag."
+
+[[quirk]]
+id      = "q-cond-0047"
+kind    = "response_shape"
+target  = "GetObject"
+summary = "A not-modified response carries the entity tag and nothing else: no body, and no content length announcing bytes that will never arrive."
+cases   = ["c-cond-0005", "c-cond-0007", "c-cond-0017", "c-cond-0022"]
+
+  [[quirk.evidence]]
+  kind    = "rfc"
+  ref     = "https://www.rfc-editor.org/rfc/rfc9110#section-15.4.5"
+  summary = "A not-modified response has no content and carries the metadata a cache needs to update its stored entry."
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObject.html"
+  summary = "The documented response for a satisfied read condition is the bare status with the object's entity tag."
+
+[[quirk]]
+id      = "q-cond-0048"
+kind    = "conditional_write"
+target  = "CompleteMultipartUpload"
+summary = "A precondition that fails on completion leaves the multipart upload intact, so the client can fix its condition and retry rather than re-uploading every part."
+cases   = ["c-cond-0024", "c-cond-0025"]
+
+  [[quirk.evidence]]
+  kind    = "s3s-pr"
+  ref     = "https://github.com/s3s-project/s3s/pull/560"
+  summary = "Upstream change recording that a failed condition on completion must not consume the upload it was checking."
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CompleteMultipartUpload.html"
+  summary = "Documents the conditional headers accepted on completion alongside the errors that leave the upload usable."
+
+[[quirk]]
+id      = "q-cond-0049"
+kind    = "error_code"
+target  = "PutObject"
+summary = "A conditional write that held when it was evaluated and then lost a race is a retryable 409 ConditionalRequestConflict, not the 412 a client stops retrying."
+cases   = ["c-cond-0013"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/conditional-requests.html"
+  summary = "AWS names a distinct conflict code for two conditional writes that raced for the same key, separate from the precondition failure."
+
+[[quirk]]
+id      = "q-cond-0050"
+kind    = "header_tolerance"
+target  = "GetObject.IfModifiedSince"
+summary = "A date condition whose value is not a valid HTTP-date, or which points into the server's own future, is ignored rather than rejected or answered with a stale 304."
+cases   = ["c-cond-0008", "c-cond-0009", "c-cond-0010", "c-cond-0020", "c-cond-0021"]
+
+  [[quirk.evidence]]
+  kind    = "rfc"
+  ref     = "https://www.rfc-editor.org/rfc/rfc9110#section-13.1.3"
+  summary = "A recipient ignores a modification-date condition it cannot parse, and an origin server does not answer not-modified for a date it has not yet reached."
+
+[[quirk]]
+id      = "q-range-0051"
+kind    = "range_resolution"
+target  = "GetObject.Range"
+summary = "A request for more than one range is answered with the whole object and 200: S3 emits no multipart byteranges body, and it is neither a partial content nor an unsatisfiable range."
+cases   = ["c-range-0008", "c-range-0017"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObject.html"
+  summary = "The request syntax states that only a single range is honoured and that additional ranges are not served."
+
+[[quirk]]
+id      = "q-range-0052"
+kind    = "range_resolution"
+target  = "GetObject.Range"
+summary = "A range whose end runs past the object is clamped to the last byte and answered with 206; only a range that starts past the end is unsatisfiable."
+cases   = ["c-range-0002", "c-range-0005", "c-range-0009", "c-range-0013", "c-range-0014"]
+
+  [[quirk.evidence]]
+  kind    = "rfc"
+  ref     = "https://www.rfc-editor.org/rfc/rfc9110#section-14.1.1"
+  summary = "A range whose last position exceeds the representation is interpreted as running to the final byte, so the range is still satisfiable."
+
+  [[quirk.evidence]]
+  kind    = "s3s-pr"
+  ref     = "https://github.com/s3s-project/s3s/pull/128"
+  summary = "Upstream change that replaced a refusal of an overlong range with the clamping behaviour resumable downloads depend on."
+
+[[quirk]]
+id      = "q-range-0053"
+kind    = "range_form"
+target  = "GetObject.Range"
+summary = "The suffix and open-ended forms are both honoured, and a satisfied range carries end minus start plus one bytes — the off-by-one in the other direction truncates a ranged copy."
+cases   = ["c-range-0001", "c-range-0003", "c-range-0004", "c-range-0005", "c-range-0006"]
+
+  [[quirk.evidence]]
+  kind    = "rfc"
+  ref     = "https://www.rfc-editor.org/rfc/rfc9110#section-14.1.2"
+  summary = "Defines both the suffix form and the form with no last position, and the inclusive interpretation of both positions."
+
+  [[quirk.evidence]]
+  kind    = "s3s-pr"
+  ref     = "https://github.com/s3s-project/s3s/pull/95"
+  summary = "Upstream change adding the two missing range forms and correcting a copied range that was one byte short."
+
+[[quirk]]
+id      = "q-range-0054"
+kind    = "error_body"
+target  = "GetObject"
+summary = "The unsatisfiable-range error document carries two elements beyond the standard error shape, reporting the object's real size and the range that was asked for."
+cases   = ["c-range-0009", "c-range-0010", "c-range-0014"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/ErrorResponses.html"
+  summary = "The error-response reference shows the additional elements the unsatisfiable-range document carries."
+
+[[quirk]]
+id      = "q-range-0055"
+kind    = "checksum_headers"
+target  = "GetObject"
+summary = "A partial read must not carry the checksum of the whole object; an SDK that verifies checksums by default fails every ranged download when it does."
+cases   = ["c-range-0016"]
+
+  [[quirk.evidence]]
+  kind    = "s3s-issue"
+  ref     = "https://github.com/s3s-project/s3s/issues/284"
+  summary = "A ranged read returned the entire object's checksum, so the client's verification of the received bytes could not succeed."
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/checking-object-integrity.html"
+  summary = "Describes checksums as covering the bytes they are returned with, which for a multipart object means a part-level value."
+
+[[quirk]]
+id      = "q-range-0056"
+kind    = "cross_field"
+target  = "GetObject.PartNumber"
+summary = "A part number alone is a 206 carrying the object's part count; a part number sent together with a range is refused with 400, because the two select bytes by different mechanisms."
+cases   = ["c-range-0007", "c-range-0015"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObject.html"
+  summary = "Documents the part-number parameter as returning one part with a header naming the total number of parts."
+
+[[quirk]]
+id      = "q-range-0057"
+kind    = "header_tolerance"
+target  = "GetObject.Range"
+summary = "A range header that cannot be parsed — a bad unit, a missing value, a descending span, a number beyond the addressable size — is ignored and the whole object is served."
+cases   = ["c-range-0011", "c-range-0012", "c-range-0013", "c-range-0017"]
+
+  [[quirk.evidence]]
+  kind    = "rfc"
+  ref     = "https://www.rfc-editor.org/rfc/rfc9110#section-14.2"
+  summary = "A server that cannot interpret a range header ignores it and responds as though it were not present."
+
+  [[quirk.evidence]]
+  kind    = "s3s-pr"
+  ref     = "https://github.com/s3s-project/s3s/pull/37"
+  summary = "Upstream change that typed the range header after unparsed values had been reaching code that could not handle them."
+
+[[quirk]]
+id      = "q-range-0058"
+kind    = "range_resolution"
+target  = "GetObject.IfRange"
+summary = "An If-Range validator that no longer describes the object drops the range instead of failing it, so a resumed download receives the new object whole rather than a slice of two different ones."
+cases   = ["c-range-0018"]
+
+  [[quirk.evidence]]
+  kind    = "rfc"
+  ref     = "https://www.rfc-editor.org/rfc/rfc9110#section-13.1.5"
+  summary = "When the If-Range validator does not match, the server ignores the range header and returns the entire representation."

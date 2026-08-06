@@ -1,0 +1,62 @@
+# c-mpu-0026 — a middle part below the size floor.
+
+[case]
+id = "c-mpu-0026"
+schema_version = 1
+title = "A completion whose non-final part is under the size floor is refused with EntityTooSmall"
+rationale = """
+Every part except the last has a floor on its size, and the check can only happen at completion, \
+because until then no part knows whether it is the last. A client that split its object too finely \
+therefore uploads everything successfully and fails only at the end; an implementation that skips \
+the check instead produces an object AWS itself would have refused to create, and the divergence \
+surfaces later as a replication or migration failure against a real S3 endpoint."""
+polarity = "negative"
+operation = "CompleteMultipartUpload"
+tags = ["multipart", "limits", "error-shape"]
+quirks = ["q-mpu-limits-0038"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/qfacts.html"
+summary = "States the minimum size every part except the final one must reach."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-mpu"
+
+[[setup.multipart_uploads]]
+bucket = "conf-mpu"
+key = "tiny-middle-part"
+capture_upload_id_as = "upload_id"
+
+[[setup.multipart_uploads.parts]]
+part_number = 1
+body = { size = 1024 }
+capture_etag_as = "part1_etag"
+
+[[setup.multipart_uploads.parts]]
+part_number = 2
+body = { size = 1024 }
+capture_etag_as = "part2_etag"
+
+[request]
+method = "POST"
+target = "/conf-mpu/tiny-middle-part?uploadId=${capture.upload_id}"
+headers = { "content-type" = "application/xml" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[request.body]
+utf8 = '''
+<CompleteMultipartUpload xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Part><PartNumber>1</PartNumber><ETag>${capture.part1_etag}</ETag></Part><Part><PartNumber>2</PartNumber><ETag>${capture.part2_etag}</ETag></Part></CompleteMultipartUpload>'''
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+headers_absent = ["etag", "x-amz-version-id"]
+
+[expect.error]
+code = "EntityTooSmall"
+request_id_present = true

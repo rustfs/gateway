@@ -1,0 +1,67 @@
+# c-mpu-0031 — an upload id that has been aborted.
+
+[case]
+id = "c-mpu-0031"
+schema_version = 1
+title = "A part sent under an aborted upload id is refused"
+rationale = """
+An abort is a promise that the upload's storage is reclaimable, and a part accepted afterwards \
+breaks it: the bytes are written into an upload that will never be completed and that no listing \
+enumerates, so nothing ever frees them. It is also the shape a slow client produces naturally — a \
+part request already in flight when a lifecycle rule aborts the upload — so it is a routine event \
+rather than an attack, and the refusal has to be the ordinary answer."""
+polarity = "negative"
+operation = "UploadPart"
+tags = ["multipart", "upload-id", "lifecycle", "error-shape"]
+quirks = ["q-mpu-upload-id-0037", "q-mpu-abort-0035"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_AbortMultipartUpload.html"
+summary = "After an abort the upload id is no longer usable and its parts are no longer addressable."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = true
+
+[[setup.buckets]]
+name = "conf-mpu"
+
+[[setup.multipart_uploads]]
+bucket = "conf-mpu"
+key = "aborted-then-used"
+capture_upload_id_as = "upload_id"
+
+[[exchanges]]
+name = "abort"
+
+[exchanges.request]
+method = "DELETE"
+target = "/conf-mpu/aborted-then-used?uploadId=${capture.upload_id}"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 204
+connection_after = "open"
+
+[[exchanges]]
+name = "part-after-abort"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-mpu/aborted-then-used?partNumber=1&uploadId=${capture.upload_id}"
+body = { utf8 = "these bytes must not be stored" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 404
+connection_after = "open"
+headers_absent = ["etag"]
+
+[exchanges.expect.error]
+code = "NoSuchUpload"
+request_id_present = true

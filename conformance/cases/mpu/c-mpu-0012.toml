@@ -1,0 +1,59 @@
+# c-mpu-0012 — delimiter rollup and the page-size echo.
+#
+# Schema dimensions exercised: common prefixes on a listing that is not the object listing.
+
+[case]
+id = "c-mpu-0012"
+schema_version = 1
+title = "An upload listing rolls keys up under a delimiter and echoes the requested page size"
+rationale = """
+The upload listing carries the same delimiter rollup as the object listing, and an implementation \
+that treats it as an unrelated family gets one of the two right. A console that draws upload \
+progress as a folder tree reads the rolled-up prefixes; without them it shows one flat list of \
+every in-flight upload in the bucket. The page size is asserted as the value the caller sent, \
+because a listing that echoes its own clamp instead makes the caller's record of its own request \
+wrong."""
+polarity = "positive"
+operation = "ListMultipartUploads"
+tags = ["multipart", "pagination", "delimiter"]
+quirks = ["q-mpu-upload-0032", "q-flat-0019"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListMultipartUploads.html"
+summary = "Documents the delimiter rollup into common prefixes and the echo of the requested maximum."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-mpu"
+
+[[setup.multipart_uploads]]
+bucket = "conf-mpu"
+key = "logs/2026/a.txt"
+
+[[setup.multipart_uploads]]
+bucket = "conf-mpu"
+key = "logs/2026/b.txt"
+
+[[setup.multipart_uploads]]
+bucket = "conf-mpu"
+key = "top-level.txt"
+
+[request]
+method = "GET"
+target = "/conf-mpu?uploads&delimiter=%2F&max-uploads=100"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+
+[expect.body]
+redact = ["UploadId", "Initiated"]
+contains_utf8 = [
+  "<Delimiter>/</Delimiter>",
+  "<MaxUploads>100</MaxUploads>",
+  "<CommonPrefixes><Prefix>logs/</Prefix></CommonPrefixes>",
+]

@@ -1,0 +1,87 @@
+# c-mpu-0039 — the client goes away and the completion still happens.
+
+[case]
+id = "c-mpu-0039"
+schema_version = 1
+title = "A completion runs to the end after the client disconnects"
+rationale = """
+A completion is a commit: half of it is a set of parts nobody can address any more and an object \
+that does not exist. If the work is tied to the connection, a client that times out or is killed \
+mid-request leaves exactly that state behind, and the storage it consumed is unreachable by any \
+listing. The assertion is made from a second connection, because the first one is gone by \
+construction — which is the only way this property can be observed at all."""
+polarity = "negative"
+operation = "CompleteMultipartUpload"
+tags = ["multipart", "durability", "streaming"]
+quirks = ["q-mpu-late-error-0033"]
+timeout_ms = 60000
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/issues/54"
+summary = "A response that does not terminate leaves the client unable to tell whether the operation happened."
+kind = "s3s-issue"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CompleteMultipartUpload.html"
+summary = "Completion is described as assembling the parts into the object, with no dependence on the caller remaining connected."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = false
+
+[[setup.buckets]]
+name = "conf-mpu"
+
+[[setup.multipart_uploads]]
+bucket = "conf-mpu"
+key = "disconnected-completion"
+capture_upload_id_as = "upload_id"
+
+[[setup.multipart_uploads.parts]]
+part_number = 1
+body = { size = 5242880 }
+capture_etag_as = "part1_etag"
+
+[[exchanges]]
+name = "complete-then-vanish"
+
+[exchanges.request]
+method = "POST"
+target = "/conf-mpu/disconnected-completion?uploadId=${capture.upload_id}"
+headers = { "content-type" = "application/xml" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[[exchanges.request.chunks]]
+utf8 = '''
+<CompleteMultipartUpload xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Part><PartNumber>1</PartNumber><ETag>${capture.part1_etag}</ETag></Part></CompleteMultipartUpload>'''
+flush = true
+
+[[exchanges.request.chunks]]
+action = "close"
+delay_ms = 50
+
+[exchanges.expect]
+kind = "connection_reset"
+connection_after = "closed"
+
+[[exchanges]]
+name = "the-object-is-there-anyway"
+delay_ms = 5000
+
+[exchanges.request]
+method = "HEAD"
+target = "/conf-mpu/disconnected-completion"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+
+[exchanges.expect.headers_present]
+etag = "*"
+
+[exchanges.expect.body]
+size = 0

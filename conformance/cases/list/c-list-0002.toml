@@ -1,0 +1,100 @@
+# c-list-0002 — the first listing version must emit a next marker when it truncates a delimited page.
+#
+# Schema dimensions exercised: multi-exchange pagination, capture and interpolation, empty-element rendering.
+
+[case]
+id = "c-list-0002"
+schema_version = 1
+title = "A truncated v1 listing with a delimiter emits NextMarker, and that marker resumes the listing"
+rationale = """
+A client that receives a truncated page and no next marker has no way to ask for page two: with a delimiter in play it cannot derive the marker from the last entry either, because the last thing it saw may be a common prefix rather than a key. The listing therefore looks complete when it is not, and the client silently drops every object after the cut. Two exchanges are the minimum that can show this: one to produce the marker, one to prove the marker is usable."""
+polarity = "positive"
+operation = "ListObjects"
+tags = ["list", "pagination", "xml"]
+timeout_ms = 15000
+quirks = ["q-marker-0064", "q-empty-0063", "q-maxkeys-0068"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjects.html"
+summary = "The documented response carries a next marker when the result was truncated with a delimiter set."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/issues/544"
+summary = "Upstream truncated a delimited listing and sent no next marker, stranding the client on page one."
+kind = "s3s-issue"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-list"
+
+[[setup.objects]]
+bucket = "conf-list"
+key = "a/1.txt"
+body = { utf8 = "a1" }
+
+[[setup.objects]]
+bucket = "conf-list"
+key = "a/2.txt"
+body = { utf8 = "a2" }
+
+[[setup.objects]]
+bucket = "conf-list"
+key = "b/1.txt"
+body = { utf8 = "b1" }
+
+[[setup.objects]]
+bucket = "conf-list"
+key = "top.txt"
+body = { utf8 = "top" }
+
+[connection]
+reuse = true
+
+[[exchanges]]
+name = "page-1"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-list?delimiter=%2F&max-keys=2"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+headers_present = { "content-type" = "application/xml" }
+
+[exchanges.expect.capture]
+next_marker = { xml_text = "NextMarker" }
+
+[exchanges.expect.body]
+redact = ["NextMarker"]
+contains_utf8 = ["<IsTruncated>true</IsTruncated>"]
+
+[exchanges.expect.body.xml]
+root = "ListBucketResult"
+xmlns = "http://s3.amazonaws.com/doc/2006-03-01/"
+empty_elements = "paired"
+element_order = ["Name", "Prefix", "Marker", "NextMarker", "MaxKeys", "Delimiter", "IsTruncated", "CommonPrefixes"]
+
+[[exchanges]]
+name = "page-2"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-list?delimiter=%2F&max-keys=2&marker=${capture.next_marker}"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+
+[exchanges.expect.body]
+not_contains_utf8 = ["<Prefix>a/</Prefix>"]
+
+[exchanges.expect.body.xml]
+root = "ListBucketResult"
+xmlns = "http://s3.amazonaws.com/doc/2006-03-01/"
+empty_elements = "paired"

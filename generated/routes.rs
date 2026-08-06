@@ -19,6 +19,18 @@
 
 pub static ROUTES: &[RouteRow] = &[
     RouteRow {
+        operation: "ListBuckets",
+        precedence: 100,
+        method: "GET",
+        target: "Service",
+        path_shape: "/",
+        success_status: 200,
+        predicates: &[
+            RoutePredicate::Method("GET"),
+            RoutePredicate::Target("Service"),
+        ],
+    },
+    RouteRow {
         operation: "GetBucketLocation",
         precedence: 300,
         method: "GET",
@@ -29,6 +41,85 @@ pub static ROUTES: &[RouteRow] = &[
             RoutePredicate::Method("GET"),
             RoutePredicate::Target("Bucket"),
             RoutePredicate::QueryPresent("location"),
+        ],
+    },
+    RouteRow {
+        operation: "UploadPart",
+        precedence: 410,
+        method: "PUT",
+        target: "Object",
+        path_shape: "/{Bucket}/{Key+}",
+        success_status: 200,
+        predicates: &[
+            RoutePredicate::Method("PUT"),
+            RoutePredicate::Target("Object"),
+            RoutePredicate::QueryPresent("partNumber"),
+            RoutePredicate::QueryPresent("uploadId"),
+        ],
+    },
+    RouteRow {
+        operation: "CompleteMultipartUpload",
+        precedence: 420,
+        method: "POST",
+        target: "Object",
+        path_shape: "/{Bucket}/{Key+}",
+        success_status: 200,
+        predicates: &[
+            RoutePredicate::Method("POST"),
+            RoutePredicate::Target("Object"),
+            RoutePredicate::QueryPresent("uploadId"),
+        ],
+    },
+    RouteRow {
+        operation: "AbortMultipartUpload",
+        precedence: 430,
+        method: "DELETE",
+        target: "Object",
+        path_shape: "/{Bucket}/{Key+}",
+        success_status: 204,
+        predicates: &[
+            RoutePredicate::Method("DELETE"),
+            RoutePredicate::Target("Object"),
+            RoutePredicate::QueryPresent("uploadId"),
+        ],
+    },
+    RouteRow {
+        operation: "ListParts",
+        precedence: 440,
+        method: "GET",
+        target: "Object",
+        path_shape: "/{Bucket}/{Key+}",
+        success_status: 200,
+        predicates: &[
+            RoutePredicate::Method("GET"),
+            RoutePredicate::Target("Object"),
+            RoutePredicate::QueryPresent("uploadId"),
+        ],
+    },
+    RouteRow {
+        operation: "CreateMultipartUpload",
+        precedence: 450,
+        method: "POST",
+        target: "Object",
+        path_shape: "/{Bucket}/{Key+}",
+        success_status: 200,
+        predicates: &[
+            RoutePredicate::Method("POST"),
+            RoutePredicate::Target("Object"),
+            RoutePredicate::QueryPresent("uploads"),
+        ],
+    },
+    RouteRow {
+        operation: "ListMultipartUploads",
+        precedence: 460,
+        method: "GET",
+        target: "Bucket",
+        path_shape: "/{Bucket}",
+        success_status: 200,
+        predicates: &[
+            RoutePredicate::Method("GET"),
+            RoutePredicate::Target("Bucket"),
+            RoutePredicate::QueryPresent("uploads"),
         ],
     },
     RouteRow {
@@ -45,6 +136,19 @@ pub static ROUTES: &[RouteRow] = &[
         ],
     },
     RouteRow {
+        operation: "ListObjectVersions",
+        precedence: 610,
+        method: "GET",
+        target: "Bucket",
+        path_shape: "/{Bucket}",
+        success_status: 200,
+        predicates: &[
+            RoutePredicate::Method("GET"),
+            RoutePredicate::Target("Bucket"),
+            RoutePredicate::QueryPresent("versions"),
+        ],
+    },
+    RouteRow {
         operation: "DeleteObjects",
         precedence: 650,
         method: "POST",
@@ -55,6 +159,18 @@ pub static ROUTES: &[RouteRow] = &[
             RoutePredicate::Method("POST"),
             RoutePredicate::Target("Bucket"),
             RoutePredicate::QueryPresent("delete"),
+        ],
+    },
+    RouteRow {
+        operation: "ListObjects",
+        precedence: 700,
+        method: "GET",
+        target: "Bucket",
+        path_shape: "/{Bucket}",
+        success_status: 200,
+        predicates: &[
+            RoutePredicate::Method("GET"),
+            RoutePredicate::Target("Bucket"),
         ],
     },
     RouteRow {

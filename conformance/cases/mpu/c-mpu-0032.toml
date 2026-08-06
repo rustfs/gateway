@@ -1,0 +1,41 @@
+# c-mpu-0032 — abort is not idempotent.
+
+[case]
+id = "c-mpu-0032"
+schema_version = 1
+title = "Aborting an upload id that does not exist is an error, not a success"
+rationale = """
+Deleting an object that is not there succeeds, because the key is a name the caller chose and a \
+retried delete must not become a failure. An upload id is the opposite: it is server-minted, so a \
+request naming one that does not exist is a request about something the caller was never given, and \
+answering success tells a lifecycle process it reclaimed storage it never touched. Copying the \
+object-delete rule across to this operation is the mistake this case exists to catch."""
+polarity = "negative"
+operation = "AbortMultipartUpload"
+tags = ["multipart", "upload-id", "error-shape"]
+quirks = ["q-mpu-abort-0035", "q-mpu-upload-id-0037"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_AbortMultipartUpload.html"
+summary = "An unknown upload id is documented as a dedicated error rather than a success."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-mpu"
+
+[request]
+method = "DELETE"
+target = "/conf-mpu/never-initiated?uploadId=bm8tc3VjaC11cGxvYWQtaWQtaGVyZQ"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 404
+connection_after = "open"
+
+[expect.error]
+code = "NoSuchUpload"
+request_id_present = true

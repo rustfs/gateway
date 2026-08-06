@@ -1,0 +1,50 @@
+# c-mpu-0044 — a part digest that disagrees with the bytes.
+
+[case]
+id = "c-mpu-0044"
+schema_version = 1
+title = "A part whose content digest disagrees with its body is refused and not stored"
+rationale = """
+The digest header is the client's statement about the bytes it just sent, and it is the only check \
+that catches corruption introduced between the client's buffer and the server's — a middlebox, a \
+bad NIC, a truncated retry. An implementation that stores the part and reports the mismatch \
+afterwards, or that ignores the header, lets the corrupt part be completed into the object under an \
+entity tag that will never reproduce. The absent entity tag on the refusal is what asserts nothing \
+was kept."""
+polarity = "negative"
+operation = "UploadPart"
+tags = ["multipart", "integrity", "error-shape"]
+quirks = ["q-checksum-0006"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UploadPart.html"
+summary = "The content digest header is documented as verified against the body of the part request."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-mpu"
+
+[[setup.multipart_uploads]]
+bucket = "conf-mpu"
+key = "bad-digest-part"
+capture_upload_id_as = "upload_id"
+
+[request]
+method = "PUT"
+target = "/conf-mpu/bad-digest-part?partNumber=1&uploadId=${capture.upload_id}"
+headers = { "content-md5" = "AAAAAAAAAAAAAAAAAAAAAA==" }
+body = { utf8 = "bytes that do not have that digest" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+headers_absent = ["etag"]
+
+[expect.error]
+code = "BadDigest"
+request_id_present = true
