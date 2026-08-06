@@ -22,9 +22,10 @@
 //! Upstream: `crate::runner`, `crate::report`. Downstream: `src/bin/rustfs-gateway-conformance.rs`.
 
 use crate::corpus::Corpus;
+use crate::inprocess::InProcess;
 use crate::report::{Baseline, Report, Verdict};
 use crate::runner::{self, RunOptions};
-use crate::sut::{Profile, Sut, Transport, Unwired};
+use crate::sut::{Profile, Sut, Transport};
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -84,7 +85,34 @@ pub fn main(args: &[String]) -> ExitCode {
             return ExitCode::from(exit::USAGE);
         }
     };
-    execute(&options, &mut Unwired)
+    // `--endpoint` is refused rather than ignored. A run that silently measured a service in this
+    // process while the operator believed it was measuring a server on a socket is the single
+    // worst thing this binary could do.
+    if let Some(endpoint) = &options.endpoint {
+        eprintln!(
+            "conformance: `--endpoint {endpoint}` has no transport behind it. The wired target is \
+             assembled in process from the `rustfs-gateway` facade; a socket transport is a \
+             separate piece of work and this run will not pretend to be one."
+        );
+        return ExitCode::from(exit::ENVIRONMENT);
+    }
+    let root = match resolve_root(&options) {
+        Ok(root) => root,
+        Err(message) => {
+            eprintln!("conformance: {message}");
+            return ExitCode::from(exit::ENVIRONMENT);
+        }
+    };
+    execute(&options, &mut InProcess::new(root))
+}
+
+/// The corpus directory this run reads, from `--root` or by discovery.
+fn resolve_root(options: &Options) -> Result<PathBuf, String> {
+    options
+        .root
+        .clone()
+        .map_or_else(Corpus::discover_root, Ok)
+        .map_err(|error| error.to_string())
 }
 
 /// Runs the command line against a caller-supplied target.

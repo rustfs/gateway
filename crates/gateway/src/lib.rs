@@ -112,7 +112,15 @@ pub use rustfs_gateway_core::{
 pub use rustfs_gateway_http::{EffectiveHost, Limits, WireReject, WireRequest};
 pub use rustfs_gateway_sig::{Identity, OperationFloor, RegionSet, SecurityFloor, SigService, SkewWindow, Verdict};
 pub use rustfs_gateway_stream::{Body, ByteStream, Payload, TrailingHeaders};
-pub use rustfs_gateway_types::{BucketName, ErrorCode, ObjectKey};
+// `ETag`, `Timestamp` and the checksum types are here because a backend cannot answer without
+// them: `Object`, `ObjectVersion`, `Part` and `Bucket` all require one, so without these a
+// listing entry is unbuildable and `PutObject` cannot return an etag from outside this
+// workspace. The conformance suite found this — 58 cases were failing behind two missing lines
+// while `REQUIRED_FACADE_EXPORTS` was satisfied to the letter. A facade that exports the
+// service but not the values the service returns is not a facade.
+pub use rustfs_gateway_types::{
+    BucketName, ChecksumAlgorithm, ChecksumDigest, ChecksumSpec, ChecksumType, ETag, ErrorCode, ObjectKey, Timestamp,
+};
 
 pub use crate::ext::allow_when;
 
