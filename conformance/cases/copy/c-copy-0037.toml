@@ -1,0 +1,63 @@
+# c-copy-0037 — one span, or none
+#
+# Schema dimensions exercised: a multi-range value on a header that accepts a single span
+
+[case]
+id = "c-copy-0037"
+schema_version = 1
+title = "A copy-source range naming more than one span is refused"
+rationale = """
+A read answers a multi-range request by falling back to the whole representation, and there is no equivalent fallback for a copy: the part would have to be either the whole source or the first span, and both are guesses about what the client meant. Silently taking the first span is the version that produces a part of the wrong length with a success attached, so the header is held to one span and anything else is an argument error."""
+polarity = "negative"
+operation = "UploadPartCopy"
+tags = ["range", "multipart", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-copy-range-0085"]
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9110#section-14.1.2"
+summary = "Both positions of a byte range are inclusive, so a span carries the difference plus one bytes."
+kind = "rfc"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UploadPartCopy.html"
+summary = "The documented part copy: the response root it uses and the byte span its range header names."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-copy"
+
+[[setup.objects]]
+bucket = "conf-copy"
+key = "src/ten"
+content_type = "text/plain"
+body = { utf8 = "0123456789" }
+
+[[setup.multipart_uploads]]
+bucket = "conf-copy"
+key = "dst/0037"
+capture_upload_id_as = "upload"
+
+[request]
+method = "PUT"
+target = "/conf-copy/dst/0037?partNumber=1&uploadId=${capture.upload}"
+headers = { "x-amz-copy-source" = "/conf-copy/src/ten", "x-amz-copy-source-range" = "bytes=0-1,5-6" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+headers_absent = ["etag", "x-amz-version-id", "x-amz-copy-source-version-id"]
+
+[expect.error]
+code = "InvalidArgument"
+request_id_present = true
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+contains_utf8 = ["<Code>InvalidArgument</Code>"]
+not_contains_utf8 = ["<CopyPartResult"]

@@ -1,0 +1,74 @@
+# c-copy-0008 — the tagging directive is the same rule over a different field group
+#
+# Schema dimensions exercised: a second directive header and the tagging subresource as the read-back
+
+[case]
+id = "c-copy-0008"
+schema_version = 1
+title = "A copy with the replacing tagging directive stores the tag set the request sent"
+rationale = """
+The tagging directive repeats the metadata directive's shape over the tag set, and it is the half most often left unimplemented because the tags travel in one packed header rather than in a family of them. When it is ignored the destination inherits the source's tags, which is a policy problem rather than a cosmetic one: lifecycle rules and access policies are written against tags, so the copy lands in the wrong retention class and nothing reports it."""
+polarity = "positive"
+operation = "CopyObject"
+tags = ["wire-bytes"]
+timeout_ms = 10000
+quirks = ["q-copy-directive-0079"]
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/issues/584"
+summary = "Report that the metadata directive was ignored, so a copy could never change the metadata it wrote."
+kind = "s3s-issue"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CopyObject.html"
+summary = "The documented copy: how the source is named, what the two directives mean, and that a failure can arrive inside a success."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = true
+
+[[setup.buckets]]
+name = "conf-copy"
+
+[[setup.objects]]
+bucket = "conf-copy"
+key = "src/plain.txt"
+content_type = "text/plain"
+body = { utf8 = "hello world" }
+metadata = { "origin" = "source" }
+
+[[exchanges]]
+name = "copy-replacing-the-tag-set"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-copy/dst/0008"
+headers = { "x-amz-copy-source" = "/conf-copy/src/plain.txt", "x-amz-tagging-directive" = "REPLACE", "x-amz-tagging" = "a=1&b=2" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.body]
+contains_utf8 = ["<CopyObjectResult"]
+
+[[exchanges]]
+name = "the-destination-carries-the-new-tags"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-copy/dst/0008?tagging"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.body]
+contains_utf8 = ["<Key>a</Key>", "<Value>1</Value>", "<Key>b</Key>", "<Value>2</Value>"]

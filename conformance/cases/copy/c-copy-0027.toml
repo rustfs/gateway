@@ -1,0 +1,61 @@
+# c-copy-0027 — percent-encoded bytes that are not text
+#
+# Schema dimensions exercised: a header whose decoded bytes are not valid UTF-8, and the requirement that the process survives it
+
+[case]
+id = "c-copy-0027"
+schema_version = 1
+title = "A copy source that decodes to invalid UTF-8 is refused without faulting"
+rationale = """
+Percent encoding carries octets, not characters, so a client can spell a source whose decoded bytes are not text at all. Every decoder on this path has to answer that with a refusal rather than with a panic, because a panic on an input any caller can send is a denial of service against every request sharing the process. The case asserts the refusal, an open connection and a bounded response time, which together are what "did not fault" actually means on the wire."""
+polarity = "negative"
+operation = "CopyObject"
+tags = ["security", "dos", "encoding"]
+timeout_ms = 10000
+quirks = ["q-copy-source-split-0077"]
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc3986#section-2.1"
+summary = "A percent-encoded octet is defined only as an octet; nothing guarantees a sequence of them is valid text."
+kind = "rfc"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CopyObject.html"
+summary = "The documented copy: how the source is named, what the two directives mean, and that a failure can arrive inside a success."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-copy"
+
+[[setup.objects]]
+bucket = "conf-copy"
+key = "src/plain.txt"
+content_type = "text/plain"
+body = { utf8 = "hello world" }
+metadata = { "origin" = "source" }
+
+[request]
+method = "PUT"
+target = "/conf-copy/dst/0027"
+headers = { "x-amz-copy-source" = "/conf-copy/%FF%FE%FD" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+headers_absent = ["etag", "x-amz-version-id", "x-amz-copy-source-version-id"]
+
+[expect.error]
+code = "InvalidArgument"
+request_id_present = true
+
+[expect.timing]
+terminate_within_ms = 5000
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+contains_utf8 = ["<Code>InvalidArgument</Code>"]

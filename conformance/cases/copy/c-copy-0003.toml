@@ -1,0 +1,73 @@
+# c-copy-0003 — the key decodes exactly once, byte for byte
+#
+# Schema dimensions exercised: a non-ASCII key with the three characters percent-decoding most often gets wrong
+
+[case]
+id = "c-copy-0003"
+schema_version = 1
+title = "A copy source key decodes once and a plus sign stays a plus sign"
+rationale = """
+Three decoding mistakes live in this one header and each produces a different wrong object: decoding twice turns a key containing a literal percent sequence into another key, decoding a plus as a space applies form encoding rules to a path, and decoding zero times looks for a key nobody stored. The key here carries multi-byte text, a space, an ampersand and a plus so that all three are visible at once, and the read-back asserts the bytes rather than the status."""
+polarity = "positive"
+operation = "CopyObject"
+tags = ["encoding", "wire-bytes"]
+timeout_ms = 10000
+quirks = ["q-copy-source-split-0077"]
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/pull/462"
+summary = "Upstream change correcting a copy-source parser that decoded the value before splitting its version suffix off."
+kind = "s3s-pr"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/object-keys.html"
+summary = "An object key is an opaque sequence of Unicode characters, so no segment of it has any path meaning to the service."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = true
+
+[[setup.buckets]]
+name = "conf-copy"
+
+[[setup.objects]]
+bucket = "conf-copy"
+key = "src/naïve €&a+b.txt"
+content_type = "text/plain"
+body = { utf8 = "decoded once" }
+
+[[exchanges]]
+name = "copy-the-awkward-key"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-copy/dst/0003"
+headers = { "x-amz-copy-source" = "/conf-copy/src/na%C3%AFve%20%E2%82%AC%26a%2Bb.txt" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.body]
+contains_utf8 = ["<CopyObjectResult"]
+
+[[exchanges]]
+name = "the-destination-holds-the-source-bytes"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-copy/dst/0003"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.body]
+exact_utf8 = "decoded once"

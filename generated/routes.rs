@@ -44,6 +44,21 @@ pub static ROUTES: &[RouteRow] = &[
         ],
     },
     RouteRow {
+        operation: "UploadPartCopy",
+        precedence: 400,
+        method: "PUT",
+        target: "Object",
+        path_shape: "/{Bucket}/{Key+}",
+        success_status: 200,
+        predicates: &[
+            RoutePredicate::Method("PUT"),
+            RoutePredicate::Target("Object"),
+            RoutePredicate::QueryPresent("partNumber"),
+            RoutePredicate::QueryPresent("uploadId"),
+            RoutePredicate::HeaderPresent("x-amz-copy-source", false),
+        ],
+    },
+    RouteRow {
         operation: "UploadPart",
         precedence: 410,
         method: "PUT",
@@ -171,6 +186,19 @@ pub static ROUTES: &[RouteRow] = &[
         predicates: &[
             RoutePredicate::Method("GET"),
             RoutePredicate::Target("Bucket"),
+        ],
+    },
+    RouteRow {
+        operation: "CopyObject",
+        precedence: 790,
+        method: "PUT",
+        target: "Object",
+        path_shape: "/{Bucket}/{Key+}",
+        success_status: 200,
+        predicates: &[
+            RoutePredicate::Method("PUT"),
+            RoutePredicate::Target("Object"),
+            RoutePredicate::HeaderPresent("x-amz-copy-source", false),
         ],
     },
     RouteRow {

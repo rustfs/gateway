@@ -1,0 +1,59 @@
+# c-copy-0028 — a question mark that is not a version separator
+#
+# Schema dimensions exercised: the fixed split rule at its ambiguous input, pinned so the behaviour cannot drift
+
+[case]
+id = "c-copy-0028"
+schema_version = 1
+title = "A copy source whose suffix after the last question mark is not a version is refused"
+rationale = """
+A raw question mark in the header is ambiguous by construction: it could be an unencoded key byte or the start of the version suffix, and no rule recovers the client's intent. What matters is that the answer is fixed rather than incidental, because an implementation that guesses will guess differently after any refactor and the same request will start naming a different object. The rule pinned here is the one the parser states: split at the last question mark, and refuse anything after it that is not a version — a client that means a literal question mark encodes it."""
+polarity = "negative"
+operation = "CopyObject"
+tags = ["encoding", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-copy-source-split-0077"]
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/pull/462"
+summary = "Upstream change correcting a copy-source parser that decoded the value before splitting its version suffix off."
+kind = "s3s-pr"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CopyObject.html"
+summary = "The documented copy: how the source is named, what the two directives mean, and that a failure can arrive inside a success."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-copy"
+
+[[setup.objects]]
+bucket = "conf-copy"
+key = "src/plain.txt"
+content_type = "text/plain"
+body = { utf8 = "hello world" }
+metadata = { "origin" = "source" }
+
+[request]
+method = "PUT"
+target = "/conf-copy/dst/0028"
+headers = { "x-amz-copy-source" = "/conf-copy/src/plain.txt?notaversion=1" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+headers_absent = ["etag", "x-amz-version-id", "x-amz-copy-source-version-id"]
+
+[expect.error]
+code = "InvalidArgument"
+request_id_present = true
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+contains_utf8 = ["<Code>InvalidArgument</Code>"]
+not_contains_utf8 = ["<CopyObjectResult"]

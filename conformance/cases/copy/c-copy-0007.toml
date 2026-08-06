@@ -1,0 +1,75 @@
+# c-copy-0007 — the default directive copies and discards the request headers
+#
+# Schema dimensions exercised: the absent-directive path, asserted by the header the request tried to set and did not
+
+[case]
+id = "c-copy-0007"
+schema_version = 1
+title = "A copy with no metadata directive takes the metadata from the source and ignores the request"
+rationale = """
+The absent directive means COPY, and COPY is not a merge: every x-amz-meta-* and object attribute on the request is discarded rather than layered over the source's. An implementation that merges looks right in the common case and produces objects whose metadata is a mixture no single request asked for, which is undiagnosable afterwards because the request that caused it succeeded. The case sends metadata that must not survive and asserts the source's values instead."""
+polarity = "positive"
+operation = "CopyObject"
+tags = ["wire-bytes"]
+timeout_ms = 10000
+quirks = ["q-copy-directive-0079"]
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/issues/584"
+summary = "Report that the metadata directive was ignored, so a copy could never change the metadata it wrote."
+kind = "s3s-issue"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CopyObject.html"
+summary = "The documented copy: how the source is named, what the two directives mean, and that a failure can arrive inside a success."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = true
+
+[[setup.buckets]]
+name = "conf-copy"
+
+[[setup.objects]]
+bucket = "conf-copy"
+key = "src/plain.txt"
+content_type = "text/plain"
+body = { utf8 = "hello world" }
+metadata = { "origin" = "source" }
+
+[[exchanges]]
+name = "copy-with-no-directive-but-with-metadata-headers"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-copy/dst/0007"
+headers = { "x-amz-copy-source" = "/conf-copy/src/plain.txt", "content-type" = "application/json", "x-amz-meta-origin" = "request" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.body]
+contains_utf8 = ["<CopyObjectResult"]
+
+[[exchanges]]
+name = "the-destination-carries-the-source-metadata"
+
+[exchanges.request]
+method = "HEAD"
+target = "/conf-copy/dst/0007"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.headers_present]
+"content-type" = "text/plain"
+"x-amz-meta-origin" = "source"

@@ -1,0 +1,86 @@
+# c-copy-0033 — two condition sets, evaluated independently
+#
+# Schema dimensions exercised: copy-source and destination conditions in one request, reaching opposite conclusions
+
+[case]
+id = "c-copy-0033"
+schema_version = 1
+title = "The copy-source conditions and the destination conditions are evaluated against different objects"
+rationale = """
+The two sets name two representations — the source and the destination — and merging them is easy to do by accident, because both are spelled with the same four condition names and a single evaluator is the obvious implementation. Merged, a request whose source condition holds and whose destination condition does not is answered as though both held, which silently overwrites an object the client guarded. The request here makes the two disagree on purpose so that a merged evaluator cannot produce the right answer by luck."""
+polarity = "negative"
+operation = "CopyObject"
+tags = ["conditional", "preconditions"]
+timeout_ms = 10000
+quirks = ["q-copy-conditions-0081"]
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/pull/577"
+summary = "Upstream change adding the four copy-source conditional headers, which were decoded and never evaluated."
+kind = "s3s-pr"
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9110#section-13.1"
+summary = "Preconditions are evaluated against one selected representation, which is what makes two representations two independent evaluations."
+kind = "rfc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = true
+
+[[setup.buckets]]
+name = "conf-copy"
+
+[[setup.objects]]
+bucket = "conf-copy"
+key = "src/plain.txt"
+content_type = "text/plain"
+body = { utf8 = "hello world" }
+metadata = { "origin" = "source" }
+
+[[setup.objects]]
+bucket = "conf-copy"
+key = "dst/existing"
+content_type = "text/plain"
+body = { utf8 = "keep me" }
+
+[[exchanges]]
+name = "source-condition-holds-destination-condition-does-not"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-copy/dst/existing"
+headers = { "x-amz-copy-source" = "/conf-copy/src/plain.txt", "x-amz-copy-source-if-match" = "\"5eb63bbbe01eeed093cb22bb8f5acdc3\"", "if-match" = "\"00000000000000000000000000000000\"" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 412
+connection_after = "open"
+headers_absent = ["etag", "x-amz-version-id", "x-amz-copy-source-version-id"]
+
+[exchanges.expect.error]
+code = "PreconditionFailed"
+request_id_present = true
+
+[exchanges.expect.body]
+redact = ["RequestId", "HostId"]
+contains_utf8 = ["<Code>PreconditionFailed</Code>"]
+
+[[exchanges]]
+name = "the-destination-was-not-written"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-copy/dst/existing"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.body]
+exact_utf8 = "keep me"

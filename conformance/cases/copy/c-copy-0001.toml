@@ -1,0 +1,79 @@
+# c-copy-0001 — the version suffix is split before the key is decoded
+#
+# Schema dimensions exercised: single exchange plus a read-back, a key whose own bytes spell the version separator
+
+[case]
+id = "c-copy-0001"
+schema_version = 1
+title = "A copy source whose key encodes ?versionId= keeps it as key bytes rather than losing it to the parser"
+rationale = """
+The copy-source header carries a URL-encoded key and an optional version suffix in one string, and the order the two are separated in is not a matter of taste: decode first and a key containing an encoded question mark becomes indistinguishable from the separator that was never sent. This case picks the key that makes the difference visible — its own bytes spell the version suffix — so an implementation that decodes before splitting copies the wrong object, or reports the source as missing, instead of failing loudly. The read-back is what proves which object was actually copied; the copy's own 200 tells you nothing about that."""
+polarity = "positive"
+operation = "CopyObject"
+tags = ["wire-bytes", "encoding", "routing"]
+timeout_ms = 10000
+quirks = ["q-copy-source-split-0077"]
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/pull/462"
+summary = "Upstream change correcting a copy-source parser that decoded the value before splitting its version suffix off."
+kind = "s3s-pr"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CopyObject.html"
+summary = "The documented copy: how the source is named, what the two directives mean, and that a failure can arrive inside a success."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = true
+
+[[setup.buckets]]
+name = "conf-copy"
+
+[[setup.objects]]
+bucket = "conf-copy"
+key = "weird?versionId=x"
+content_type = "text/plain"
+body = { utf8 = "the real one" }
+
+[[setup.objects]]
+bucket = "conf-copy"
+key = "weird"
+content_type = "text/plain"
+body = { utf8 = "the decoy" }
+
+[[exchanges]]
+name = "copy-the-key-whose-bytes-spell-a-version"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-copy/dst/0001"
+headers = { "x-amz-copy-source" = "/conf-copy/weird%3FversionId%3Dx" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.body]
+contains_utf8 = ["<CopyObjectResult"]
+
+[[exchanges]]
+name = "the-destination-holds-the-real-object"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-copy/dst/0001"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.body]
+exact_utf8 = "the real one"

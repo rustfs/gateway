@@ -1,0 +1,56 @@
+# c-copy-0010 — the copy result document, to the byte
+#
+# Schema dimensions exercised: byte-exact body with a pinned clock, and the quoted entity tag inside an XML element
+
+[case]
+id = "c-copy-0010"
+schema_version = 1
+title = "A successful copy returns CopyObjectResult with a quoted entity tag and a last-modified instant"
+rationale = """
+Two independent things go wrong in this small document. The root element is named for the result structure rather than for the operation, so a generator that derives roots from operation names emits a document no SDK parses; and the entity tag inside it carries its quotes, which is the opposite of nothing and the same as the header form — the rule that has been held two different ways in two files before. Pinning the whole body is the only assertion that notices either, and the clock is fixed so that the instant inside it can be compared at all."""
+polarity = "positive"
+operation = "CopyObject"
+tags = ["wire-bytes", "xml", "etag"]
+timeout_ms = 10000
+quirks = ["q-copy-source-version-0083"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CopyObject.html"
+summary = "The documented copy: how the source is named, what the two directives mean, and that a failure can arrive inside a success."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-copy"
+
+[[setup.objects]]
+bucket = "conf-copy"
+key = "src/plain.txt"
+content_type = "text/plain"
+body = { utf8 = "hello world" }
+metadata = { "origin" = "source" }
+
+[request]
+method = "PUT"
+target = "/conf-copy/dst/0010"
+headers = { "x-amz-copy-source" = "/conf-copy/src/plain.txt" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[expect.headers_present]
+"content-type" = "application/xml"
+
+[expect.body.xml]
+root = "CopyObjectResult"
+element_order = ["ETag", "LastModified"]
+
+[expect.body]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<CopyObjectResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><ETag>&quot;5eb63bbbe01eeed093cb22bb8f5acdc3&quot;</ETag><LastModified>2026-01-02T03:04:05.000Z</LastModified></CopyObjectResult>'''

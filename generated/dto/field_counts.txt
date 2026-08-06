@@ -6,6 +6,8 @@ CompleteMultipartUploadInput 14
 CompleteMultipartUploadOutput 21
 CompletedMultipartUpload 1
 CompletedPart 12
+CopyObjectInput 43
+CopyObjectOutput 12
 CreateMultipartUploadInput 31
 CreateMultipartUploadOutput 14
 Delete 2
@@ -44,5 +46,7 @@ Part 14
 PutObjectInput 37
 PutObjectOutput 13
 RestoreStatus 2
+UploadPartCopyInput 19
+UploadPartCopyOutput 9
 UploadPartInput 14
 UploadPartOutput 8

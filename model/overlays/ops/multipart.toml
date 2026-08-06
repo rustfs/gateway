@@ -695,6 +695,6 @@ quirks = ["q-mpu-upload-id-0037", "q-mpu-marker-0040"]
 [shape.Initiator]
 element_order = ["ID", "DisplayName"]
 
-[[deferred]]
-reason = "P5-04 copy family; UploadPartCopy shares x-amz-copy-source with CopyObject and the part semantics with this family, and lands there."
-operations = ["UploadPartCopy"]
+# `UploadPartCopy` is no longer deferred here: it is `include`d by `ops/object-copy.toml`, which
+# owns it. The loader refuses an operation that is included in one family file and deferred in
+# another, so the group this comment replaces had to go in the same change that generated it.

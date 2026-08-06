@@ -1,0 +1,83 @@
+# c-copy-0009 — a self copy that replaces metadata keeps every byte
+#
+# Schema dimensions exercised: source and destination naming one object, with the length asserted before and after
+
+[case]
+id = "c-copy-0009"
+schema_version = 1
+title = "A copy onto the same key with the replacing directive updates metadata and keeps the bytes"
+rationale = """
+This is the documented way to change an object's metadata in place, so it is a path clients take routinely and an implementation that opens the destination for writing before reading the source truncates the object to nothing while answering 200. The data is gone and the request that destroyed it looks like every successful copy in the log. The length is asserted through a read-back rather than through the response, because the response of a truncating implementation is indistinguishable from the response of a correct one."""
+polarity = "positive"
+operation = "CopyObject"
+tags = ["wire-bytes", "security"]
+timeout_ms = 10000
+quirks = ["q-copy-self-0080", "q-copy-directive-0079"]
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/issues/583"
+summary = "Report that a copy onto the same object truncated it to zero bytes because the target was opened before the source was read."
+kind = "s3s-issue"
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/issues/585"
+summary = "The follow-up on the same data loss, confirming it happens on the metadata-rewrite path AWS documents as supported."
+kind = "s3s-issue"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CopyObject.html"
+summary = "The documented copy: how the source is named, what the two directives mean, and that a failure can arrive inside a success."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = true
+
+[[setup.buckets]]
+name = "conf-copy"
+
+[[setup.objects]]
+bucket = "conf-copy"
+key = "src/plain.txt"
+content_type = "text/plain"
+body = { utf8 = "hello world" }
+metadata = { "origin" = "source" }
+
+[[exchanges]]
+name = "rewrite-the-metadata-in-place"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-copy/src/plain.txt"
+headers = { "x-amz-copy-source" = "/conf-copy/src/plain.txt", "x-amz-metadata-directive" = "REPLACE", "content-type" = "text/markdown" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.body]
+contains_utf8 = ["<CopyObjectResult"]
+
+[[exchanges]]
+name = "the-object-still-holds-its-eleven-bytes"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-copy/src/plain.txt"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.headers_present]
+"content-length" = "11"
+"content-type" = "text/markdown"
+
+[exchanges.expect.body]
+exact_utf8 = "hello world"

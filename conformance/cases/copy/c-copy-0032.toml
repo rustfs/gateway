@@ -1,0 +1,59 @@
+# c-copy-0032 — a copy-source none-match that hits
+#
+# Schema dimensions exercised: the write-side reading of a failed none-match, which must be 412 and never 304
+
+[case]
+id = "c-copy-0032"
+schema_version = 1
+title = "A copy whose copy-source none-match condition matches is refused with 412, not 304"
+rationale = """
+A failed none-match is a 304 for a read and a 412 for a write, and a copy is a write however much its source side looks like a read. Answering 304 tells the client its copy is up to date when in fact no copy was ever made, and a 304 must carry no body, so the client also gets no error to log. The case pins the status and the absence of the not-modified answer together."""
+polarity = "negative"
+operation = "CopyObject"
+tags = ["conditional", "preconditions", "etag"]
+timeout_ms = 10000
+quirks = ["q-copy-conditions-0081"]
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/pull/577"
+summary = "Upstream change adding the four copy-source conditional headers, which were decoded and never evaluated."
+kind = "s3s-pr"
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9110#section-13.1"
+summary = "Preconditions are evaluated against one selected representation, which is what makes two representations two independent evaluations."
+kind = "rfc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-copy"
+
+[[setup.objects]]
+bucket = "conf-copy"
+key = "src/plain.txt"
+content_type = "text/plain"
+body = { utf8 = "hello world" }
+metadata = { "origin" = "source" }
+
+[request]
+method = "PUT"
+target = "/conf-copy/dst/0032"
+headers = { "x-amz-copy-source" = "/conf-copy/src/plain.txt", "x-amz-copy-source-if-none-match" = "\"5eb63bbbe01eeed093cb22bb8f5acdc3\"" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 412
+connection_after = "open"
+headers_absent = ["etag", "x-amz-version-id", "x-amz-copy-source-version-id"]
+
+[expect.error]
+code = "PreconditionFailed"
+request_id_present = true
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+contains_utf8 = ["<Code>PreconditionFailed</Code>"]
+not_contains_utf8 = ["<CopyObjectResult"]

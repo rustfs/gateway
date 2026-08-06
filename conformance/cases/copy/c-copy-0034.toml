@@ -1,0 +1,84 @@
+# c-copy-0034 — a missing source, and a missing source bucket
+#
+# Schema dimensions exercised: two exchanges distinguishing the two not-found codes on the source side
+
+[case]
+id = "c-copy-0034"
+schema_version = 1
+title = "A copy from a missing key answers NoSuchKey and from a missing bucket answers NoSuchBucket"
+rationale = """
+Clients branch on these two codes to decide whether to create the bucket, so collapsing them into one — or reporting the destination bucket's existence instead of the source's — sends a retry loop in the wrong direction and can end with a bucket created that nobody wanted. The pair also pins that the source side is consulted at all: an implementation that reports on the destination answers both of these with a success."""
+polarity = "negative"
+operation = "CopyObject"
+tags = ["error-shape"]
+timeout_ms = 10000
+quirks = ["q-copy-source-arn-0078"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CopyObject.html"
+summary = "The documented copy: how the source is named, what the two directives mean, and that a failure can arrive inside a success."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = true
+
+[[setup.buckets]]
+name = "conf-copy"
+
+[[setup.objects]]
+bucket = "conf-copy"
+key = "src/plain.txt"
+content_type = "text/plain"
+body = { utf8 = "hello world" }
+metadata = { "origin" = "source" }
+
+[[setup.buckets]]
+name = "conf-copy-absent"
+absent = true
+
+[[exchanges]]
+name = "the-key-is-not-there"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-copy/dst/0034a"
+headers = { "x-amz-copy-source" = "/conf-copy/src/missing.txt" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 404
+connection_after = "open"
+headers_absent = ["etag", "x-amz-version-id", "x-amz-copy-source-version-id"]
+
+[exchanges.expect.error]
+code = "NoSuchKey"
+
+[exchanges.expect.body]
+redact = ["RequestId", "HostId"]
+contains_utf8 = ["<Code>NoSuchKey</Code>"]
+
+[[exchanges]]
+name = "the-source-bucket-is-not-there"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-copy/dst/0034b"
+headers = { "x-amz-copy-source" = "/conf-copy-absent/src/plain.txt" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 404
+connection_after = "open"
+headers_absent = ["etag", "x-amz-version-id", "x-amz-copy-source-version-id"]
+
+[exchanges.expect.error]
+code = "NoSuchBucket"
+
+[exchanges.expect.body]
+redact = ["RequestId", "HostId"]
+contains_utf8 = ["<Code>NoSuchBucket</Code>"]

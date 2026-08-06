@@ -1,0 +1,56 @@
+# c-copy-0018 — an entity tag that arrived without its quotes
+#
+# Schema dimensions exercised: the same condition as the case above with the quotes the SDKs omit
+
+[case]
+id = "c-copy-0018"
+schema_version = 1
+title = "A copy-source entity tag sent without quotes is compared as an opaque tag, not refused"
+rationale = """
+More than one widely used SDK sends this header without quotes, so a parser that demands the RFC form refuses ordinary production traffic with a 400 and the client has no way to correct it. The lenient reading is not a weakening of the comparison — the tag is still compared as an opaque string against the source's — it is a decision about which spellings of the same value are accepted, and it has to be pinned or the next tightening of the parser reintroduces the refusal."""
+polarity = "positive"
+operation = "CopyObject"
+tags = ["conditional", "preconditions", "etag", "known-divergence"]
+timeout_ms = 10000
+quirks = ["q-copy-conditions-0081"]
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/issues/448"
+summary = "Report that widely used SDKs send the copy-source entity tag without quotes, so demanding them refuses ordinary traffic."
+kind = "s3s-issue"
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/pull/577"
+summary = "Upstream change adding the four copy-source conditional headers, which were decoded and never evaluated."
+kind = "s3s-pr"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-copy"
+
+[[setup.objects]]
+bucket = "conf-copy"
+key = "src/plain.txt"
+content_type = "text/plain"
+body = { utf8 = "hello world" }
+metadata = { "origin" = "source" }
+
+[request]
+method = "PUT"
+target = "/conf-copy/dst/0018"
+headers = { "x-amz-copy-source" = "/conf-copy/src/plain.txt", "x-amz-copy-source-if-match" = "5eb63bbbe01eeed093cb22bb8f5acdc3" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[expect.headers_present]
+"content-type" = "application/xml"
+
+[expect.body]
+contains_utf8 = ["<CopyObjectResult"]
+not_contains_utf8 = ["<Code>InvalidArgument</Code>", "<Code>PreconditionFailed</Code>"]

@@ -1,0 +1,85 @@
+# c-copy-0035 — a delete marker is not a source
+#
+# Schema dimensions exercised: a versioned bucket, a captured delete-marker version id, and the copy that names it
+
+[case]
+id = "c-copy-0035"
+schema_version = 1
+title = "A copy naming the version id of a delete marker is refused with 405"
+rationale = """
+A delete marker is a version with no data behind it, so naming one as a copy source is a request that cannot be satisfied and must not be answered with bytes. The dedicated status is what tells a client the version exists but has no representation, as opposed to the not-found that means the version is unknown; an implementation that returns a zero-byte object here quietly manufactures data where a deletion was recorded."""
+polarity = "negative"
+operation = "CopyObject"
+tags = ["error-shape"]
+timeout_ms = 10000
+quirks = ["q-copy-source-version-0083"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/DeleteMarker.html"
+summary = "A delete marker is a version with no data, so a read that names it is answered with a method-not-allowed rather than with bytes."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CopyObject.html"
+summary = "The documented copy: how the source is named, what the two directives mean, and that a failure can arrive inside a success."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = true
+
+[[setup.buckets]]
+name = "conf-copy"
+versioning = "enabled"
+
+[[setup.objects]]
+bucket = "conf-copy"
+key = "src/plain.txt"
+content_type = "text/plain"
+body = { utf8 = "hello world" }
+metadata = { "origin" = "source" }
+
+[[exchanges]]
+name = "delete-the-source-and-capture-the-marker"
+
+[exchanges.request]
+method = "DELETE"
+target = "/conf-copy/src/plain.txt"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 204
+connection_after = "open"
+
+[exchanges.expect.headers_present]
+"x-amz-delete-marker" = "true"
+
+[exchanges.expect.capture]
+marker = { header = "x-amz-version-id" }
+
+[[exchanges]]
+name = "copying-the-marker-is-not-allowed"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-copy/dst/0035"
+headers = { "x-amz-copy-source" = "/conf-copy/src/plain.txt?versionId=${capture.marker}" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 405
+connection_after = "open"
+headers_absent = ["etag", "x-amz-version-id", "x-amz-copy-source-version-id"]
+
+[exchanges.expect.error]
+code = "MethodNotAllowed"
+request_id_present = true
+
+[exchanges.expect.body]
+redact = ["RequestId", "HostId"]
+contains_utf8 = ["<Code>MethodNotAllowed</Code>"]
+not_contains_utf8 = ["<CopyObjectResult"]

@@ -1,0 +1,56 @@
+# c-copy-0004 — an access point ARN names an access point, not a bucket
+#
+# Schema dimensions exercised: the ARN spelling of the copy source, and the header set of a successful copy
+
+[case]
+id = "c-copy-0004"
+schema_version = 1
+title = "A copy source written as an access point ARN is parsed as an ARN"
+rationale = """
+An ARN that is quietly read as a bucket name addresses a bucket literally called arn:aws:s3:us-east-1:...:accesspoint, which does not exist, so the request fails with a source-not- found error that tells the client nothing about what went wrong. It is also the more dangerous direction to get wrong in the other order: a deployment that does create such a bucket would have every access point copy silently routed into it. The assertion is the copy result body, because a status alone cannot distinguish a parsed ARN from a bucket that happened to exist."""
+polarity = "positive"
+operation = "CopyObject"
+tags = ["wire-bytes", "routing"]
+timeout_ms = 10000
+quirks = ["q-copy-source-arn-0078"]
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/pull/527"
+summary = "Upstream change teaching the copy-source parser the two ARN spellings it had never accepted."
+kind = "s3s-pr"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CopyObject.html"
+summary = "The documented copy: how the source is named, what the two directives mean, and that a failure can arrive inside a success."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-copy"
+
+[[setup.objects]]
+bucket = "conf-copy"
+key = "src/plain.txt"
+content_type = "text/plain"
+body = { utf8 = "hello world" }
+metadata = { "origin" = "source" }
+
+[request]
+method = "PUT"
+target = "/conf-copy/dst/0004"
+headers = { "x-amz-copy-source" = "arn:aws:s3:us-east-1:123456789012:accesspoint/conf-copy/object/src/plain.txt" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[expect.headers_present]
+"content-type" = "application/xml"
+
+[expect.body]
+contains_utf8 = ["<CopyObjectResult", "<ETag>"]
+not_contains_utf8 = ["<Code>NoSuchBucket</Code>"]

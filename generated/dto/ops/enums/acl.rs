@@ -23,7 +23,7 @@
 
 use std::borrow::Cow;
 
-/// The `Acl` string enumeration. Bound by: CreateMultipartUpload, PutObject.
+/// The `Acl` string enumeration. Bound by: CopyObject, CreateMultipartUpload, PutObject.
 ///
 /// An open set: compare against the associated constants, and build a value the pinned
 /// model does not declare with [`Acl::custom`]. Adding a constant is a minor version

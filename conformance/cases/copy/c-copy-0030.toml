@@ -1,0 +1,83 @@
+# c-copy-0030 — the refusal must not have already destroyed the object
+#
+# Schema dimensions exercised: the refused self copy of the case above, with the object read back afterwards
+
+[case]
+id = "c-copy-0030"
+schema_version = 1
+title = "A refused self copy leaves the object with the bytes it had"
+rationale = """
+The published data loss on this path is not the refusal, it is the order: an implementation that opens the destination for writing before deciding anything truncates the object to nothing and then answers with an error, so the caller is told the request failed while the object it named is gone. That is unrecoverable and looks in the logs exactly like a correct refusal. Only reading the object back distinguishes them, which is why this case exists separately from the one that asserts the code."""
+polarity = "negative"
+operation = "CopyObject"
+tags = ["security", "wire-bytes"]
+timeout_ms = 10000
+quirks = ["q-copy-self-0080"]
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/issues/583"
+summary = "Report that a copy onto the same object truncated it to zero bytes because the target was opened before the source was read."
+kind = "s3s-issue"
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/issues/585"
+summary = "The follow-up on the same data loss, confirming it happens on the metadata-rewrite path AWS documents as supported."
+kind = "s3s-issue"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CopyObject.html"
+summary = "The documented copy: how the source is named, what the two directives mean, and that a failure can arrive inside a success."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = true
+
+[[setup.buckets]]
+name = "conf-copy"
+
+[[setup.objects]]
+bucket = "conf-copy"
+key = "src/plain.txt"
+content_type = "text/plain"
+body = { utf8 = "hello world" }
+metadata = { "origin" = "source" }
+
+[[exchanges]]
+name = "the-self-copy-is-refused"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-copy/src/plain.txt"
+headers = { "x-amz-copy-source" = "/conf-copy/src/plain.txt" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 400
+connection_after = "open"
+headers_absent = ["etag", "x-amz-version-id", "x-amz-copy-source-version-id"]
+
+[exchanges.expect.error]
+code = "InvalidRequest"
+
+[[exchanges]]
+name = "the-object-was-not-truncated"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-copy/src/plain.txt"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.headers_present]
+"content-length" = "11"
+
+[exchanges.expect.body]
+exact_utf8 = "hello world"

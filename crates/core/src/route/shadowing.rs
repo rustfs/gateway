@@ -259,7 +259,68 @@ pub static PROVISIONAL_SHADOWING: &[ShadowingDecl] = &[
                  the common case where the object does not exist yet, with a not-found error.",
         evidence: &[LIST_PARTS_DOC, GET_OBJECT_DOC],
     },
+    // The copy family adds the third shape: one header's presence, and nothing else, separates two
+    // operations that share a method and a path. Every row but the last is a refinement — the
+    // winner's selector is the loser's plus `x-amz-copy-source` — so the overlap is the design
+    // rather than an accident, and the order is what keeps a copy from being executed as a write
+    // of an empty body.
+    ShadowingDecl {
+        winner: "CopyObject",
+        shadowed: "PutObject",
+        reason: "A copy is a PUT to an object key carrying x-amz-copy-source, so PutObject's \
+                 selector accepts it too. The header is the whole discriminator, which puts \
+                 CopyObject at 790, ahead of PutObject at 800. The other order is data loss rather \
+                 than a mis-route: a copy carries no request body, so PutObject would answer a \
+                 success after replacing the destination with zero bytes.",
+        evidence: &[COPY_OBJECT_DOC, PUT_OBJECT_DOC],
+    },
+    ShadowingDecl {
+        winner: "UploadPartCopy",
+        shadowed: "UploadPart",
+        reason: "A part copy is a part upload plus x-amz-copy-source, so UploadPart accepts every \
+                 request UploadPartCopy does. The copy is the narrower reading and is tried first \
+                 (400 before 410) — the precedence ops/multipart.toml reserved for it. The other \
+                 order would store the empty request body as the part and report its digest as the \
+                 copied range's.",
+        evidence: &[UPLOAD_PART_COPY_DOC, UPLOAD_PART_DOC],
+    },
+    ShadowingDecl {
+        winner: "UploadPartCopy",
+        shadowed: "CopyObject",
+        reason: "A part copy carries x-amz-copy-source, which is the whole of CopyObject's own \
+                 discriminator, so the two meet on any PUT that also names a part and an upload. \
+                 The part copy is the narrower reading and wins at 400. The other order would \
+                 commit the copy as a whole object at the upload's key, bypassing the upload.",
+        evidence: &[UPLOAD_PART_COPY_DOC, COPY_OBJECT_DOC],
+    },
+    ShadowingDecl {
+        winner: "UploadPartCopy",
+        shadowed: "PutObject",
+        reason: "The transitive case of the two rows above: a part copy satisfies PutObject's \
+                 selector as well, because PutObject pins nothing but the method and the target. \
+                 It is recorded rather than inferred, so that removing either intermediate row \
+                 cannot silently leave this pair undeclared.",
+        evidence: &[UPLOAD_PART_COPY_DOC, PUT_OBJECT_DOC],
+    },
+    ShadowingDecl {
+        winner: "UploadPart",
+        shadowed: "CopyObject",
+        reason: "A PUT naming a part, an upload and a copy source satisfies both. This is the one \
+                 pair in the family neither selector resolves by refinement — neither contains the \
+                 other — so it is resolved by the band: the multipart band (410) is tried before \
+                 the object band (790). In practice UploadPartCopy at 400 claims every such \
+                 request first, and this row records what the table would do if it did not.",
+        evidence: &[UPLOAD_PART_DOC, COPY_OBJECT_DOC],
+    },
 ];
+
+/// AWS's own reference for the server-side object copy.
+const COPY_OBJECT_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CopyObject.html \
+     — a copy is a PUT to the destination key whose source is named by a header, and which carries no request body.";
+
+/// AWS's own reference for the part copy.
+const UPLOAD_PART_COPY_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UploadPartCopy.html \
+     — a part copy is a part upload whose bytes come from a source object named by a header rather than from the body.";
 
 /// AWS's own reference for the operation selected by the `?location` subresource.
 const LOCATION_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketLocation.html \

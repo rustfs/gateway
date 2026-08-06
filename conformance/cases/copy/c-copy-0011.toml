@@ -1,0 +1,59 @@
+# c-copy-0011 — the part copy result has a root of its own
+#
+# Schema dimensions exercised: multipart setup with a captured upload id, and an XML root assertion
+
+[case]
+id = "c-copy-0011"
+schema_version = 1
+title = "A part copy returns CopyPartResult, which is neither the operation name nor the shape name"
+rationale = """
+The response root of a part copy matches neither the operation nor the output structure the model names for it, so every mechanical derivation of the root produces the wrong element and every SDK fails to parse the answer to a request that in fact succeeded. The part is committed, the client believes it is not, and the upload is retried or abandoned. The root is asserted structurally as well as by substring so that a document with the right text in the wrong place still fails."""
+polarity = "positive"
+operation = "UploadPartCopy"
+tags = ["wire-bytes", "xml", "multipart", "etag"]
+timeout_ms = 10000
+quirks = ["q-copy-part-root-0084"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UploadPartCopy.html"
+summary = "The documented part copy: the response root it uses and the byte span its range header names."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-copy"
+
+[[setup.objects]]
+bucket = "conf-copy"
+key = "src/plain.txt"
+content_type = "text/plain"
+body = { utf8 = "hello world" }
+metadata = { "origin" = "source" }
+
+[[setup.multipart_uploads]]
+bucket = "conf-copy"
+key = "dst/0011"
+capture_upload_id_as = "upload"
+
+[request]
+method = "PUT"
+target = "/conf-copy/dst/0011?partNumber=1&uploadId=${capture.upload}"
+headers = { "x-amz-copy-source" = "/conf-copy/src/plain.txt" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[expect.headers_present]
+"content-type" = "application/xml"
+
+[expect.body.xml]
+root = "CopyPartResult"
+
+[expect.body]
+contains_utf8 = ["<CopyPartResult", "<ETag>&quot;5eb63bbbe01eeed093cb22bb8f5acdc3&quot;</ETag>"]
+not_contains_utf8 = ["<UploadPartCopyResult", "<UploadPartCopyOutput"]

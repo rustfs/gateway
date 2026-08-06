@@ -1,0 +1,59 @@
+# c-copy-0026 — a key that looks like a path is still a key
+#
+# Schema dimensions exercised: a traversal spelling in the copy source, answered as data rather than as a path
+
+[case]
+id = "c-copy-0026"
+schema_version = 1
+title = "A copy source key containing dot-dot segments is treated as literal key bytes"
+rationale = """
+An object key is opaque text and the storage layer behind it is a filesystem often enough that a key spelled like a traversal is the first thing an attacker tries. The correct behaviour is boring and has to be pinned as boring: the key is looked up literally, nothing outside the bucket is ever opened, and the answer is an ordinary not-found. What must never appear is a success — that would mean a file outside the bucket was read — and the case asserts that directly."""
+polarity = "negative"
+operation = "CopyObject"
+tags = ["security", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-copy-source-split-0077"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/object-keys.html"
+summary = "An object key is an opaque sequence of Unicode characters, so no segment of it has any path meaning to the service."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CopyObject.html"
+summary = "The documented copy: how the source is named, what the two directives mean, and that a failure can arrive inside a success."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-copy"
+
+[[setup.objects]]
+bucket = "conf-copy"
+key = "src/plain.txt"
+content_type = "text/plain"
+body = { utf8 = "hello world" }
+metadata = { "origin" = "source" }
+
+[request]
+method = "PUT"
+target = "/conf-copy/dst/0026"
+headers = { "x-amz-copy-source" = "/conf-copy/../../etc/passwd" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 404
+connection_after = "open"
+headers_absent = ["etag", "x-amz-version-id", "x-amz-copy-source-version-id"]
+
+[expect.error]
+code = "NoSuchKey"
+request_id_present = true
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+contains_utf8 = ["<Code>NoSuchKey</Code>"]
+not_contains_utf8 = ["<CopyObjectResult", "root:"]

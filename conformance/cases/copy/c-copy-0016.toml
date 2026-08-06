@@ -1,0 +1,73 @@
+# c-copy-0016 — copying an empty object produces an empty object
+#
+# Schema dimensions exercised: a zero-length source on the whole-object path, with the digest of no bytes asserted
+
+[case]
+id = "c-copy-0016"
+schema_version = 1
+title = "A copy of a zero-byte object stores zero bytes and reports the digest of nothing"
+rationale = """
+The empty object is legal, common as a directory placeholder, and the input on which a copy that special-cases "no bytes to move" quietly does nothing at all — leaving the destination absent while answering 200. Asserting the digest of the empty string rather than only the status is what separates a copy that created an empty object from one that created nothing."""
+polarity = "positive"
+operation = "CopyObject"
+tags = ["wire-bytes", "etag"]
+timeout_ms = 10000
+quirks = ["q-copy-range-0085"]
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/issues/547"
+summary = "Report that copying a part from a zero-byte source aborted the process instead of answering."
+kind = "s3s-issue"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CopyObject.html"
+summary = "The documented copy: how the source is named, what the two directives mean, and that a failure can arrive inside a success."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = true
+
+[[setup.buckets]]
+name = "conf-copy"
+
+[[setup.objects]]
+bucket = "conf-copy"
+key = "src/empty"
+content_type = "text/plain"
+body = { utf8 = "" }
+
+[[exchanges]]
+name = "copy-the-empty-object"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-copy/dst/0016"
+headers = { "x-amz-copy-source" = "/conf-copy/src/empty" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.body]
+contains_utf8 = ["<ETag>&quot;d41d8cd98f00b204e9800998ecf8427e&quot;</ETag>"]
+
+[[exchanges]]
+name = "the-destination-exists-and-is-empty"
+
+[exchanges.request]
+method = "HEAD"
+target = "/conf-copy/dst/0016"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.headers_present]
+"content-length" = "0"

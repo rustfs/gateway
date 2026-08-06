@@ -1,0 +1,54 @@
+# c-copy-0023 — an empty copy source is not a copy of nothing
+#
+# Schema dimensions exercised: the empty-string edge of a routing header, and the error document that must answer it
+
+[case]
+id = "c-copy-0023"
+schema_version = 1
+title = "An empty copy-source header is refused with InvalidArgument"
+rationale = """
+An empty header value is present for routing and unusable for parsing, which is the gap where a request reaches the copy path and then divides by zero somewhere further down — most often by treating the empty string as a bucket name and answering with a not-found for a bucket the client never named. The refusal has to be the argument error, and the response must carry no entity tag: an empty source that produced a destination has created an object out of nothing."""
+polarity = "negative"
+operation = "CopyObject"
+tags = ["error-shape", "routing"]
+timeout_ms = 10000
+quirks = ["q-copy-source-arn-0078"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CopyObject.html"
+summary = "The documented copy: how the source is named, what the two directives mean, and that a failure can arrive inside a success."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-copy"
+
+[[setup.objects]]
+bucket = "conf-copy"
+key = "src/plain.txt"
+content_type = "text/plain"
+body = { utf8 = "hello world" }
+metadata = { "origin" = "source" }
+
+[request]
+method = "PUT"
+target = "/conf-copy/dst/0023"
+headers = { "x-amz-copy-source" = "" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+headers_absent = ["etag", "x-amz-version-id", "x-amz-copy-source-version-id"]
+
+[expect.error]
+code = "InvalidArgument"
+request_id_present = true
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+contains_utf8 = ["<Code>InvalidArgument</Code>"]
+not_contains_utf8 = ["<CopyObjectResult"]

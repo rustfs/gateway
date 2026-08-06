@@ -23,6 +23,7 @@
 
 mod abort_multipart_upload;
 mod complete_multipart_upload;
+mod copy_object;
 mod create_multipart_upload;
 mod delete_object;
 mod delete_objects;
@@ -37,3 +38,4 @@ mod list_objects_v2;
 mod list_parts;
 mod put_object;
 mod upload_part;
+mod upload_part_copy;

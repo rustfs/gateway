@@ -1,0 +1,64 @@
+# c-copy-0020 — the same gate, on the operation the advisories named
+#
+# Schema dimensions exercised: the part-copy form of the source-side owner assertion
+
+[case]
+id = "c-copy-0020"
+schema_version = 1
+title = "A part copy whose source-side ownership assertion fails is refused with 403"
+rationale = """
+This is the regression case for the published advisories: the part copy authorized the upload and never the object it read from, so any caller who could start an upload could read any object in the deployment. The destination here is an upload the caller legitimately owns — that is the whole point — and the refusal must come from the source side alone. Sharing one contract with CopyObject is what makes this case and the one before it assert the same code path rather than two."""
+polarity = "negative"
+operation = "UploadPartCopy"
+tags = ["security", "multipart", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-copy-source-authz-0086"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UploadPartCopy.html#API_UploadPartCopy_RequestSyntax"
+summary = "The documented permissions for a part copy require read access to the source in addition to write access to the destination."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UploadPartCopy.html"
+summary = "The documented part copy: the response root it uses and the byte span its range header names."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-copy"
+
+[[setup.objects]]
+bucket = "conf-copy"
+key = "src/plain.txt"
+content_type = "text/plain"
+body = { utf8 = "hello world" }
+metadata = { "origin" = "source" }
+
+[[setup.multipart_uploads]]
+bucket = "conf-copy"
+key = "dst/0020"
+capture_upload_id_as = "upload"
+
+[request]
+method = "PUT"
+target = "/conf-copy/dst/0020?partNumber=1&uploadId=${capture.upload}"
+headers = { "x-amz-copy-source" = "/conf-copy/src/plain.txt", "x-amz-source-expected-bucket-owner" = "000000000000" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 403
+connection_after = "open"
+headers_absent = ["etag", "x-amz-version-id", "x-amz-copy-source-version-id"]
+
+[expect.error]
+code = "AccessDenied"
+request_id_present = true
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+contains_utf8 = ["<Code>AccessDenied</Code>"]
+not_contains_utf8 = ["<CopyPartResult"]

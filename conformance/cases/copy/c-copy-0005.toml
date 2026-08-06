@@ -1,0 +1,56 @@
+# c-copy-0005 — an Outposts ARN carries an outpost, a bucket and a key
+#
+# Schema dimensions exercised: the second ARN spelling, whose resource half has three components rather than two
+
+[case]
+id = "c-copy-0005"
+schema_version = 1
+title = "A copy source written as an Outposts ARN yields its outpost, bucket and key"
+rationale = """
+The Outposts spelling is the longer of the two ARN forms and the one a parser written for the access point form silently mishandles: its resource half names an outpost, then a bucket, then the key, so a split that expects two components takes the bucket name to be part of the outpost id. The failure is a source-not-found on an object that exists, which sends the operator looking at permissions rather than at parsing."""
+polarity = "positive"
+operation = "CopyObject"
+tags = ["wire-bytes", "routing"]
+timeout_ms = 10000
+quirks = ["q-copy-source-arn-0078"]
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/pull/527"
+summary = "Upstream change teaching the copy-source parser the two ARN spellings it had never accepted."
+kind = "s3s-pr"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CopyObject.html"
+summary = "The documented copy: how the source is named, what the two directives mean, and that a failure can arrive inside a success."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-copy"
+
+[[setup.objects]]
+bucket = "conf-copy"
+key = "src/plain.txt"
+content_type = "text/plain"
+body = { utf8 = "hello world" }
+metadata = { "origin" = "source" }
+
+[request]
+method = "PUT"
+target = "/conf-copy/dst/0005"
+headers = { "x-amz-copy-source" = "arn:aws:s3-outposts:us-east-1:123456789012:outpost/op-01234567890abcdef/bucket/conf-copy/object/src/plain.txt" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[expect.headers_present]
+"content-type" = "application/xml"
+
+[expect.body]
+contains_utf8 = ["<CopyObjectResult", "<ETag>"]
+not_contains_utf8 = ["<Code>NoSuchBucket</Code>"]

@@ -39,6 +39,7 @@
 pub(crate) static OPERATION_NAMES: &[&str] = &[
     "AbortMultipartUpload",
     "CompleteMultipartUpload",
+    "CopyObject",
     "CreateMultipartUpload",
     "DeleteObject",
     "DeleteObjects",
@@ -53,6 +54,7 @@ pub(crate) static OPERATION_NAMES: &[&str] = &[
     "ListParts",
     "PutObject",
     "UploadPart",
+    "UploadPartCopy",
 ];
 
 /// Method names that would collide with a Rust keyword if derived mechanically.

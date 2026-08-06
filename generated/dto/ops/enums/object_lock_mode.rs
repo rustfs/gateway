@@ -23,7 +23,7 @@
 
 use std::borrow::Cow;
 
-/// The `ObjectLockMode` string enumeration. Bound by: CreateMultipartUpload, GetObject, HeadObject, PutObject.
+/// The `ObjectLockMode` string enumeration. Bound by: CopyObject, CreateMultipartUpload, GetObject, HeadObject, PutObject.
 ///
 /// An open set: compare against the associated constants, and build a value the pinned
 /// model does not declare with [`ObjectLockMode::custom`]. Adding a constant is a minor version

@@ -1,0 +1,59 @@
+# c-copy-0019 — the source has a gate of its own
+#
+# Schema dimensions exercised: the source-side owner assertion, and the absence of every header a successful write would set
+
+[case]
+id = "c-copy-0019"
+schema_version = 1
+title = "A copy whose source-side ownership assertion fails is refused with 403"
+rationale = """
+The copy source names a second resource the caller chose, and authorizing only the destination is the shape of the two advisories this family exists to prevent: an attacker writes into a bucket they own and reads out of one they do not. The source-side assertion header is the part of that gate a conformance case can drive without a policy engine, and it is exactly the header an implementation drops when it treats the source as an internal read rather than as a request the caller made. The response headers are asserted absent because a refusal that already wrote something is not a refusal."""
+polarity = "negative"
+operation = "CopyObject"
+tags = ["security", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-copy-source-authz-0086"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CopyObject.html#API_CopyObject_RequestSyntax"
+summary = "The source bucket owner is asserted by a header of its own, separate from the destination's, so the source side has its own gate."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CopyObject.html"
+summary = "The documented copy: how the source is named, what the two directives mean, and that a failure can arrive inside a success."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-copy"
+
+[[setup.objects]]
+bucket = "conf-copy"
+key = "src/plain.txt"
+content_type = "text/plain"
+body = { utf8 = "hello world" }
+metadata = { "origin" = "source" }
+
+[request]
+method = "PUT"
+target = "/conf-copy/dst/0019"
+headers = { "x-amz-copy-source" = "/conf-copy/src/plain.txt", "x-amz-source-expected-bucket-owner" = "000000000000" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 403
+connection_after = "open"
+headers_absent = ["etag", "x-amz-version-id", "x-amz-copy-source-version-id"]
+
+[expect.error]
+code = "AccessDenied"
+request_id_present = true
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+contains_utf8 = ["<Code>AccessDenied</Code>"]
+not_contains_utf8 = ["<CopyObjectResult"]

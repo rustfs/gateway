@@ -33,6 +33,7 @@ the one file that awaits, and it runs after the floor has admitted the request.
 | `src/codec/value.rs` | One function per IR scalar, in each direction, plus the one-checksum-header rule, the bounded-integer refusal, the two wire-form refusals (entity tag, server-minted cursor), the `httpChecksumRequired` body guard, and the decode-path placeholder exit | A wire value is parsed or rendered wrongly, or a request is refused before its body is read |
 | `src/codec/tests.rs` | 34 tests over the object family: what the generated codecs do to bytes, including the bounded scalars and the required integrity check | You changed an emitter or a conversion |
 | `src/ops/*.rs` | One AWS operation per file: spec, floor, `impl Operation`, `impl HasOperation` | You are adding an operation — copy the nearest one |
+| `src/ops/shared/copy_source.rs` | `x-amz-copy-source`: the three grammars, the split-before-decode order, the source-authorization type state, the self-copy classification and the stricter copy-range rule | You are touching anything a copy reads from, or asking why the source's bucket cannot be read without a proof |
 | `src/ops/shared/etag.rs` | Which RFC 9110 comparison each conditional entity-tag header uses, and how its value is read | An entity-tag condition matched when it should not have, or the other way round |
 | `src/ops/shared/precondition.rs` | The fixed precondition order, the two places S3 departs from RFC 9110, and the 200/206/416 range decision | You are wiring a conditional or ranged operation, or a 304/412/416 came out wrong |
 | `src/handler.rs` | `Handler<O>`, `Req`, `Resp`, `HandlerError`, `BoxFuture` | You are implementing a backend |
@@ -108,6 +109,27 @@ the one file that awaits, and it runs after the floor has admitted the request.
 
 ## Open for maintainer review
 
+- **The copy family's second authorization stage lives in a type, not in `AuthRequirement`.**
+  `AuthRequirement` carries one action and one resource shape, so `CopyObject` and `UploadPartCopy`
+  declare only the destination's `s3:PutObject`. The source's `s3:GetObject` is enforced by
+  `ops/shared/copy_source.rs`: `CopySource` has no accessor for its bucket or key, and the only way
+  to a readable `ResolvedCopySource` is `resolve(&SourceAuthorized)`, whose argument only
+  `authorize_source` can produce. That makes the omission behind GHSA-mx42 / GHSA-wfxj a compile
+  error rather than a review miss, and it is deliberately *not* a second `AuthRequirement` field —
+  when P4-05 lands `DerivedResources`, the two should be joined and this note deleted.
+- **The copy result structures are flattened by the overlay, because the encoder has no structure
+  payload.** `CopyObjectOutput.CopyObjectResult` and `UploadPartCopyOutput.CopyPartResult` are
+  `httpPayload` structures, and `emit/codec/encode.rs` accepts only a blob in payload position. The
+  overlay therefore drops each structure and synthesizes its two wire members as ordinary body
+  members under a root named for the structure, which produces identical bytes and a flatter dto.
+  A structure form in the payload encoder would let the model shape be kept; that file belongs to
+  the codec task, so this is recorded rather than fixed here. `GetObjectAttributes` will hit the
+  same wall.
+- **`PROVISIONAL_SHADOWING` gained five copy rows, and the last one is not a refinement.**
+  `UploadPart` over `CopyObject` is the only pair in the table where neither selector contains the
+  other, so it is resolved by band order rather than by specificity. `UploadPartCopy` at 400 claims
+  every request that could reach it, so the row records a decision nothing currently exercises —
+  which is exactly the kind of row `ShadowingPolicy::TotalOnly` would stop requiring.
 - **P4-05 will add `Operation::DerivedResources`, and that breaks every `impl Operation`.**
   Associated types cannot have defaults, so adding one is a breaking change for every operation
   module. If P5 is to run in parallel, P4-05 should land its associated type first, or accept a

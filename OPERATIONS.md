@@ -28,7 +28,7 @@ table and the per-operation sections follow.
 | `max-parts` | [ListParts](#listparts) |
 | `max-uploads` | [ListMultipartUploads](#listmultipartuploads) |
 | `part-number-marker` | [ListParts](#listparts) |
-| `partNumber` | [GetObject](#getobject), [HeadObject](#headobject), [UploadPart](#uploadpart) |
+| `partNumber` | [GetObject](#getobject), [HeadObject](#headobject), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
 | `prefix` | [ListBuckets](#listbuckets), [ListMultipartUploads](#listmultipartuploads), [ListObjectVersions](#listobjectversions), [ListObjects](#listobjects), [ListObjectsV2](#listobjectsv2) |
 | `response-cache-control` | [GetObject](#getobject), [HeadObject](#headobject) |
 | `response-content-disposition` | [GetObject](#getobject), [HeadObject](#headobject) |
@@ -38,7 +38,7 @@ table and the per-operation sections follow.
 | `response-expires` | [GetObject](#getobject), [HeadObject](#headobject) |
 | `start-after` | [ListObjectsV2](#listobjectsv2) |
 | `upload-id-marker` | [ListMultipartUploads](#listmultipartuploads) |
-| `uploadId` | [AbortMultipartUpload](#abortmultipartupload), [CompleteMultipartUpload](#completemultipartupload), [ListParts](#listparts), [UploadPart](#uploadpart) |
+| `uploadId` | [AbortMultipartUpload](#abortmultipartupload), [CompleteMultipartUpload](#completemultipartupload), [ListParts](#listparts), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
 | `uploads` | [CreateMultipartUpload](#createmultipartupload), [ListMultipartUploads](#listmultipartuploads) |
 | `version-id-marker` | [ListObjectVersions](#listobjectversions) |
 | `versionId` | [DeleteObject](#deleteobject), [GetObject](#getobject), [HeadObject](#headobject) |
@@ -49,29 +49,29 @@ table and the per-operation sections follow.
 | Header | Operations |
 | --- | --- |
 | `accept-ranges` | [GetObject](#getobject), [HeadObject](#headobject) |
-| `cache-control` | [CreateMultipartUpload](#createmultipartupload), [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject) |
-| `content-disposition` | [CreateMultipartUpload](#createmultipartupload), [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject) |
-| `content-encoding` | [CreateMultipartUpload](#createmultipartupload), [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject) |
-| `content-language` | [CreateMultipartUpload](#createmultipartupload), [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject) |
+| `cache-control` | [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject) |
+| `content-disposition` | [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject) |
+| `content-encoding` | [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject) |
+| `content-language` | [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject) |
 | `content-length` | [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject), [UploadPart](#uploadpart) |
 | `content-md5` | [PutObject](#putobject), [UploadPart](#uploadpart) |
 | `content-range` | [GetObject](#getobject), [HeadObject](#headobject) |
-| `content-type` | [CreateMultipartUpload](#createmultipartupload), [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject) |
+| `content-type` | [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject) |
 | `etag` | [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject), [UploadPart](#uploadpart) |
-| `expires` | [CreateMultipartUpload](#createmultipartupload), [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject) |
-| `if-match` | [CompleteMultipartUpload](#completemultipartupload), [DeleteObject](#deleteobject), [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject) |
+| `expires` | [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject) |
+| `if-match` | [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [DeleteObject](#deleteobject), [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject) |
 | `if-modified-since` | [GetObject](#getobject), [HeadObject](#headobject) |
-| `if-none-match` | [CompleteMultipartUpload](#completemultipartupload), [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject) |
+| `if-none-match` | [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject) |
 | `if-unmodified-since` | [GetObject](#getobject), [HeadObject](#headobject) |
 | `last-modified` | [GetObject](#getobject), [HeadObject](#headobject) |
 | `range` | [GetObject](#getobject), [HeadObject](#headobject) |
 | `x-amz-abort-date` | [CreateMultipartUpload](#createmultipartupload), [ListParts](#listparts) |
 | `x-amz-abort-rule-id` | [CreateMultipartUpload](#createmultipartupload), [ListParts](#listparts) |
-| `x-amz-acl` | [CreateMultipartUpload](#createmultipartupload), [PutObject](#putobject) |
+| `x-amz-acl` | [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [PutObject](#putobject) |
 | `x-amz-archive-status` | [HeadObject](#headobject) |
 | `x-amz-bypass-governance-retention` | [DeleteObject](#deleteobject), [DeleteObjects](#deleteobjects) |
 | `x-amz-checksum-` | [CompleteMultipartUpload](#completemultipartupload), [PutObject](#putobject), [UploadPart](#uploadpart) |
-| `x-amz-checksum-algorithm` | [CreateMultipartUpload](#createmultipartupload) |
+| `x-amz-checksum-algorithm` | [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload) |
 | `x-amz-checksum-crc32` | [GetObject](#getobject), [HeadObject](#headobject) |
 | `x-amz-checksum-crc32c` | [GetObject](#getobject), [HeadObject](#headobject) |
 | `x-amz-checksum-crc64nvme` | [GetObject](#getobject), [HeadObject](#headobject) |
@@ -84,73 +84,88 @@ table and the per-operation sections follow.
 | `x-amz-checksum-xxhash128` | [GetObject](#getobject), [HeadObject](#headobject) |
 | `x-amz-checksum-xxhash3` | [GetObject](#getobject), [HeadObject](#headobject) |
 | `x-amz-checksum-xxhash64` | [GetObject](#getobject), [HeadObject](#headobject) |
+| `x-amz-copy-source` | [CopyObject](#copyobject), [UploadPartCopy](#uploadpartcopy) |
+| `x-amz-copy-source-if-match` | [CopyObject](#copyobject), [UploadPartCopy](#uploadpartcopy) |
+| `x-amz-copy-source-if-modified-since` | [CopyObject](#copyobject), [UploadPartCopy](#uploadpartcopy) |
+| `x-amz-copy-source-if-none-match` | [CopyObject](#copyobject), [UploadPartCopy](#uploadpartcopy) |
+| `x-amz-copy-source-if-unmodified-since` | [CopyObject](#copyobject), [UploadPartCopy](#uploadpartcopy) |
+| `x-amz-copy-source-range` | [UploadPartCopy](#uploadpartcopy) |
+| `x-amz-copy-source-server-side-encryption-customer-algorithm` | [CopyObject](#copyobject), [UploadPartCopy](#uploadpartcopy) |
+| `x-amz-copy-source-server-side-encryption-customer-key` | [CopyObject](#copyobject), [UploadPartCopy](#uploadpartcopy) |
+| `x-amz-copy-source-server-side-encryption-customer-key-md5` | [CopyObject](#copyobject), [UploadPartCopy](#uploadpartcopy) |
+| `x-amz-copy-source-version-id` | [CopyObject](#copyobject), [UploadPartCopy](#uploadpartcopy) |
 | `x-amz-delete-marker` | [DeleteObject](#deleteobject), [GetObject](#getobject), [HeadObject](#headobject) |
-| `x-amz-expected-bucket-owner` | [AbortMultipartUpload](#abortmultipartupload), [CompleteMultipartUpload](#completemultipartupload), [CreateMultipartUpload](#createmultipartupload), [DeleteObject](#deleteobject), [DeleteObjects](#deleteobjects), [GetBucketLocation](#getbucketlocation), [GetObject](#getobject), [HeadObject](#headobject), [ListMultipartUploads](#listmultipartuploads), [ListObjectVersions](#listobjectversions), [ListObjects](#listobjects), [ListObjectsV2](#listobjectsv2), [ListParts](#listparts), [PutObject](#putobject), [UploadPart](#uploadpart) |
-| `x-amz-expiration` | [CompleteMultipartUpload](#completemultipartupload), [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject) |
-| `x-amz-grant-full-control` | [CreateMultipartUpload](#createmultipartupload), [PutObject](#putobject) |
-| `x-amz-grant-read` | [CreateMultipartUpload](#createmultipartupload), [PutObject](#putobject) |
-| `x-amz-grant-read-acp` | [CreateMultipartUpload](#createmultipartupload), [PutObject](#putobject) |
-| `x-amz-grant-write-acp` | [CreateMultipartUpload](#createmultipartupload), [PutObject](#putobject) |
+| `x-amz-expected-bucket-owner` | [AbortMultipartUpload](#abortmultipartupload), [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [DeleteObject](#deleteobject), [DeleteObjects](#deleteobjects), [GetBucketLocation](#getbucketlocation), [GetObject](#getobject), [HeadObject](#headobject), [ListMultipartUploads](#listmultipartuploads), [ListObjectVersions](#listobjectversions), [ListObjects](#listobjects), [ListObjectsV2](#listobjectsv2), [ListParts](#listparts), [PutObject](#putobject), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
+| `x-amz-expiration` | [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject) |
+| `x-amz-grant-full-control` | [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [PutObject](#putobject) |
+| `x-amz-grant-read` | [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [PutObject](#putobject) |
+| `x-amz-grant-read-acp` | [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [PutObject](#putobject) |
+| `x-amz-grant-write-acp` | [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [PutObject](#putobject) |
 | `x-amz-if-match-initiated-time` | [AbortMultipartUpload](#abortmultipartupload) |
 | `x-amz-if-match-last-modified-time` | [DeleteObject](#deleteobject) |
 | `x-amz-if-match-size` | [DeleteObject](#deleteobject) |
-| `x-amz-meta-` | [CreateMultipartUpload](#createmultipartupload), [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject) |
+| `x-amz-meta-` | [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject) |
+| `x-amz-metadata-directive` | [CopyObject](#copyobject) |
 | `x-amz-mfa` | [DeleteObject](#deleteobject), [DeleteObjects](#deleteobjects) |
 | `x-amz-missing-meta` | [GetObject](#getobject), [HeadObject](#headobject) |
 | `x-amz-mp-object-size` | [CompleteMultipartUpload](#completemultipartupload) |
 | `x-amz-mp-parts-count` | [GetObject](#getobject), [HeadObject](#headobject) |
-| `x-amz-object-lock-legal-hold` | [CreateMultipartUpload](#createmultipartupload), [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject) |
-| `x-amz-object-lock-mode` | [CreateMultipartUpload](#createmultipartupload), [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject) |
-| `x-amz-object-lock-retain-until-date` | [CreateMultipartUpload](#createmultipartupload), [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject) |
+| `x-amz-object-lock-legal-hold` | [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject) |
+| `x-amz-object-lock-mode` | [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject) |
+| `x-amz-object-lock-retain-until-date` | [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject) |
 | `x-amz-object-size` | [PutObject](#putobject) |
 | `x-amz-replication-status` | [GetObject](#getobject), [HeadObject](#headobject) |
-| `x-amz-request-charged` | [AbortMultipartUpload](#abortmultipartupload), [CompleteMultipartUpload](#completemultipartupload), [CreateMultipartUpload](#createmultipartupload), [DeleteObject](#deleteobject), [DeleteObjects](#deleteobjects), [GetObject](#getobject), [HeadObject](#headobject), [ListMultipartUploads](#listmultipartuploads), [ListObjectVersions](#listobjectversions), [ListObjects](#listobjects), [ListObjectsV2](#listobjectsv2), [ListParts](#listparts), [PutObject](#putobject), [UploadPart](#uploadpart) |
-| `x-amz-request-payer` | [AbortMultipartUpload](#abortmultipartupload), [CompleteMultipartUpload](#completemultipartupload), [CreateMultipartUpload](#createmultipartupload), [DeleteObject](#deleteobject), [DeleteObjects](#deleteobjects), [GetObject](#getobject), [HeadObject](#headobject), [ListMultipartUploads](#listmultipartuploads), [ListObjectVersions](#listobjectversions), [ListObjects](#listobjects), [ListObjectsV2](#listobjectsv2), [ListParts](#listparts), [PutObject](#putobject), [UploadPart](#uploadpart) |
+| `x-amz-request-charged` | [AbortMultipartUpload](#abortmultipartupload), [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [DeleteObject](#deleteobject), [DeleteObjects](#deleteobjects), [GetObject](#getobject), [HeadObject](#headobject), [ListMultipartUploads](#listmultipartuploads), [ListObjectVersions](#listobjectversions), [ListObjects](#listobjects), [ListObjectsV2](#listobjectsv2), [ListParts](#listparts), [PutObject](#putobject), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
+| `x-amz-request-payer` | [AbortMultipartUpload](#abortmultipartupload), [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [DeleteObject](#deleteobject), [DeleteObjects](#deleteobjects), [GetObject](#getobject), [HeadObject](#headobject), [ListMultipartUploads](#listmultipartuploads), [ListObjectVersions](#listobjectversions), [ListObjects](#listobjects), [ListObjectsV2](#listobjectsv2), [ListParts](#listparts), [PutObject](#putobject), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
 | `x-amz-restore` | [GetObject](#getobject), [HeadObject](#headobject) |
 | `x-amz-sdk-checksum-algorithm` | [DeleteObjects](#deleteobjects), [PutObject](#putobject), [UploadPart](#uploadpart) |
-| `x-amz-server-side-encryption` | [CompleteMultipartUpload](#completemultipartupload), [CreateMultipartUpload](#createmultipartupload), [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject), [UploadPart](#uploadpart) |
-| `x-amz-server-side-encryption-aws-kms-key-id` | [CompleteMultipartUpload](#completemultipartupload), [CreateMultipartUpload](#createmultipartupload), [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject), [UploadPart](#uploadpart) |
-| `x-amz-server-side-encryption-bucket-key-enabled` | [CompleteMultipartUpload](#completemultipartupload), [CreateMultipartUpload](#createmultipartupload), [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject), [UploadPart](#uploadpart) |
-| `x-amz-server-side-encryption-context` | [CreateMultipartUpload](#createmultipartupload), [PutObject](#putobject) |
-| `x-amz-server-side-encryption-customer-algorithm` | [CompleteMultipartUpload](#completemultipartupload), [CreateMultipartUpload](#createmultipartupload), [GetObject](#getobject), [HeadObject](#headobject), [ListParts](#listparts), [PutObject](#putobject), [UploadPart](#uploadpart) |
-| `x-amz-server-side-encryption-customer-key` | [CompleteMultipartUpload](#completemultipartupload), [CreateMultipartUpload](#createmultipartupload), [GetObject](#getobject), [HeadObject](#headobject), [ListParts](#listparts), [PutObject](#putobject), [UploadPart](#uploadpart) |
-| `x-amz-server-side-encryption-customer-key-md5` | [CompleteMultipartUpload](#completemultipartupload), [CreateMultipartUpload](#createmultipartupload), [GetObject](#getobject), [HeadObject](#headobject), [ListParts](#listparts), [PutObject](#putobject), [UploadPart](#uploadpart) |
-| `x-amz-storage-class` | [CreateMultipartUpload](#createmultipartupload), [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject) |
-| `x-amz-tagging` | [CreateMultipartUpload](#createmultipartupload), [PutObject](#putobject) |
+| `x-amz-server-side-encryption` | [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
+| `x-amz-server-side-encryption-aws-kms-key-id` | [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
+| `x-amz-server-side-encryption-bucket-key-enabled` | [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
+| `x-amz-server-side-encryption-context` | [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [PutObject](#putobject) |
+| `x-amz-server-side-encryption-customer-algorithm` | [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [GetObject](#getobject), [HeadObject](#headobject), [ListParts](#listparts), [PutObject](#putobject), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
+| `x-amz-server-side-encryption-customer-key` | [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [GetObject](#getobject), [HeadObject](#headobject), [ListParts](#listparts), [PutObject](#putobject), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
+| `x-amz-server-side-encryption-customer-key-md5` | [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [GetObject](#getobject), [HeadObject](#headobject), [ListParts](#listparts), [PutObject](#putobject), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
+| `x-amz-source-expected-bucket-owner` | [CopyObject](#copyobject), [UploadPartCopy](#uploadpartcopy) |
+| `x-amz-storage-class` | [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject) |
+| `x-amz-tagging` | [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [PutObject](#putobject) |
 | `x-amz-tagging-count` | [GetObject](#getobject), [HeadObject](#headobject) |
-| `x-amz-version-id` | [CompleteMultipartUpload](#completemultipartupload), [DeleteObject](#deleteobject), [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject) |
-| `x-amz-website-redirect-location` | [CreateMultipartUpload](#createmultipartupload), [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject) |
+| `x-amz-tagging-directive` | [CopyObject](#copyobject) |
+| `x-amz-version-id` | [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [DeleteObject](#deleteobject), [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject) |
+| `x-amz-website-redirect-location` | [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject) |
 | `x-amz-write-offset-bytes` | [PutObject](#putobject) |
 
 ## Reverse index: error code to operations
 
 | Error code | Operations |
 | --- | --- |
-| `AccessDenied` | [AbortMultipartUpload](#abortmultipartupload), [CompleteMultipartUpload](#completemultipartupload), [CreateMultipartUpload](#createmultipartupload), [DeleteObject](#deleteobject), [DeleteObjects](#deleteobjects), [GetBucketLocation](#getbucketlocation), [GetObject](#getobject), [HeadObject](#headobject), [ListBuckets](#listbuckets), [ListMultipartUploads](#listmultipartuploads), [ListObjectVersions](#listobjectversions), [ListObjects](#listobjects), [ListObjectsV2](#listobjectsv2), [ListParts](#listparts), [PutObject](#putobject), [UploadPart](#uploadpart) |
+| `AccessDenied` | [AbortMultipartUpload](#abortmultipartupload), [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [DeleteObject](#deleteobject), [DeleteObjects](#deleteobjects), [GetBucketLocation](#getbucketlocation), [GetObject](#getobject), [HeadObject](#headobject), [ListBuckets](#listbuckets), [ListMultipartUploads](#listmultipartuploads), [ListObjectVersions](#listobjectversions), [ListObjects](#listobjects), [ListObjectsV2](#listobjectsv2), [ListParts](#listparts), [PutObject](#putobject), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
 | `BadDigest` | [PutObject](#putobject), [UploadPart](#uploadpart) |
 | `ConditionalRequestConflict` | [CompleteMultipartUpload](#completemultipartupload), [PutObject](#putobject) |
 | `EncryptionTypeMismatch` | [PutObject](#putobject) |
-| `EntityTooLarge` | [PutObject](#putobject), [UploadPart](#uploadpart) |
+| `EntityTooLarge` | [CopyObject](#copyobject), [PutObject](#putobject), [UploadPart](#uploadpart) |
 | `EntityTooSmall` | [CompleteMultipartUpload](#completemultipartupload) |
 | `IncompleteBody` | [PutObject](#putobject), [UploadPart](#uploadpart) |
-| `InvalidArgument` | [AbortMultipartUpload](#abortmultipartupload), [CompleteMultipartUpload](#completemultipartupload), [CreateMultipartUpload](#createmultipartupload), [DeleteObject](#deleteobject), [DeleteObjects](#deleteobjects), [GetObject](#getobject), [ListMultipartUploads](#listmultipartuploads), [ListObjectVersions](#listobjectversions), [ListObjects](#listobjects), [ListObjectsV2](#listobjectsv2), [ListParts](#listparts), [PutObject](#putobject), [UploadPart](#uploadpart) |
+| `InvalidArgument` | [AbortMultipartUpload](#abortmultipartupload), [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [DeleteObject](#deleteobject), [DeleteObjects](#deleteobjects), [GetObject](#getobject), [ListMultipartUploads](#listmultipartuploads), [ListObjectVersions](#listobjectversions), [ListObjects](#listobjects), [ListObjectsV2](#listobjectsv2), [ListParts](#listparts), [PutObject](#putobject), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
 | `InvalidDigest` | [PutObject](#putobject), [UploadPart](#uploadpart) |
 | `InvalidObjectState` | [GetObject](#getobject) |
 | `InvalidPart` | [CompleteMultipartUpload](#completemultipartupload) |
 | `InvalidPartOrder` | [CompleteMultipartUpload](#completemultipartupload) |
-| `InvalidRange` | [GetObject](#getobject) |
-| `InvalidRequest` | [CompleteMultipartUpload](#completemultipartupload), [CreateMultipartUpload](#createmultipartupload), [DeleteObjects](#deleteobjects), [PutObject](#putobject) |
+| `InvalidRange` | [GetObject](#getobject), [UploadPartCopy](#uploadpartcopy) |
+| `InvalidRequest` | [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [DeleteObjects](#deleteobjects), [PutObject](#putobject), [UploadPartCopy](#uploadpartcopy) |
 | `InvalidStorageClass` | [CreateMultipartUpload](#createmultipartupload) |
 | `InvalidWriteOffset` | [PutObject](#putobject) |
 | `MalformedXML` | [CompleteMultipartUpload](#completemultipartupload), [DeleteObjects](#deleteobjects) |
+| `MethodNotAllowed` | [CopyObject](#copyobject), [UploadPartCopy](#uploadpartcopy) |
 | `MissingContentLength` | [PutObject](#putobject), [UploadPart](#uploadpart) |
-| `NoSuchBucket` | [AbortMultipartUpload](#abortmultipartupload), [CompleteMultipartUpload](#completemultipartupload), [CreateMultipartUpload](#createmultipartupload), [DeleteObject](#deleteobject), [DeleteObjects](#deleteobjects), [GetBucketLocation](#getbucketlocation), [GetObject](#getobject), [HeadObject](#headobject), [ListMultipartUploads](#listmultipartuploads), [ListObjectVersions](#listobjectversions), [ListObjects](#listobjects), [ListObjectsV2](#listobjectsv2), [ListParts](#listparts), [PutObject](#putobject), [UploadPart](#uploadpart) |
-| `NoSuchKey` | [GetObject](#getobject), [HeadObject](#headobject) |
-| `NoSuchUpload` | [AbortMultipartUpload](#abortmultipartupload), [CompleteMultipartUpload](#completemultipartupload), [ListParts](#listparts), [UploadPart](#uploadpart) |
+| `NoSuchBucket` | [AbortMultipartUpload](#abortmultipartupload), [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [DeleteObject](#deleteobject), [DeleteObjects](#deleteobjects), [GetBucketLocation](#getbucketlocation), [GetObject](#getobject), [HeadObject](#headobject), [ListMultipartUploads](#listmultipartuploads), [ListObjectVersions](#listobjectversions), [ListObjects](#listobjects), [ListObjectsV2](#listobjectsv2), [ListParts](#listparts), [PutObject](#putobject), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
+| `NoSuchKey` | [CopyObject](#copyobject), [GetObject](#getobject), [HeadObject](#headobject), [UploadPartCopy](#uploadpartcopy) |
+| `NoSuchUpload` | [AbortMultipartUpload](#abortmultipartupload), [CompleteMultipartUpload](#completemultipartupload), [ListParts](#listparts), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
 | `NotFound` | [HeadObject](#headobject) |
 | `NotModified` | [GetObject](#getobject), [HeadObject](#headobject) |
+| `ObjectNotInActiveTierError` | [CopyObject](#copyobject) |
 | `PermanentRedirect` | [GetBucketLocation](#getbucketlocation), [ListMultipartUploads](#listmultipartuploads), [ListObjectVersions](#listobjectversions), [ListObjects](#listobjects), [ListObjectsV2](#listobjectsv2) |
-| `PreconditionFailed` | [CompleteMultipartUpload](#completemultipartupload), [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject) |
+| `PreconditionFailed` | [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject), [UploadPartCopy](#uploadpartcopy) |
 | `TooManyParts` | [PutObject](#putobject) |
 | `XAmzContentChecksumMismatch` | [PutObject](#putobject), [UploadPart](#uploadpart) |
 
@@ -160,6 +175,7 @@ table and the per-operation sections follow.
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | [AbortMultipartUpload](#abortmultipartupload) | DELETE | `/{Bucket}/{Key+}` | `uploadId` | — | 204 | `NoSuchBucket`, `NoSuchUpload`, `AccessDenied`, `InvalidArgument` | `q-mpu-abort-0035`, `q-mpu-upload-id-0037` |
 | [CompleteMultipartUpload](#completemultipartupload) | POST | `/{Bucket}/{Key+}` | `uploadId` | `x-amz-checksum-` | 200 | `NoSuchBucket`, `NoSuchUpload`, `AccessDenied`, `InvalidPart`, `InvalidPartOrder`, `EntityTooSmall`, `MalformedXML`, `InvalidArgument`, `InvalidRequest`, `PreconditionFailed`, `ConditionalRequestConflict` | `q-mpu-etag-0028`, `q-mpu-request-root-0030`, `q-mpu-late-error-0033`, `q-mpu-trailer-0034`, `q-mpu-upload-id-0037`, `q-mpu-limits-0038`, `q-mpu-metadata-0039` |
+| [CopyObject](#copyobject) | PUT | `/{Bucket}/{Key+}` | — | `x-amz-copy-source`, `x-amz-meta-` | 200 | `NoSuchBucket`, `NoSuchKey`, `AccessDenied`, `InvalidRequest`, `InvalidArgument`, `PreconditionFailed`, `MethodNotAllowed`, `EntityTooLarge`, `ObjectNotInActiveTierError` | `q-copy-source-split-0077`, `q-copy-source-arn-0078`, `q-copy-directive-0079`, `q-copy-self-0080`, `q-copy-error-after-200-0082`, `q-copy-source-version-0083` |
 | [CreateMultipartUpload](#createmultipartupload) | POST | `/{Bucket}/{Key+}` | `uploads` | `x-amz-meta-` | 200 | `NoSuchBucket`, `AccessDenied`, `InvalidArgument`, `InvalidRequest`, `InvalidStorageClass` | `q-mpu-root-0029`, `q-mpu-metadata-0039` |
 | [DeleteObject](#deleteobject) | DELETE | `/{Bucket}/{Key+}` | `versionId` | — | 204 | `NoSuchBucket`, `AccessDenied`, `InvalidArgument` | `q-delete-0026` |
 | [DeleteObjects](#deleteobjects) | POST | `/{Bucket}` | `delete` | — | 200 | `NoSuchBucket`, `AccessDenied`, `MalformedXML`, `InvalidRequest`, `InvalidArgument` | `q-checksum-0006`, `q-deletes-0027` |
@@ -174,6 +190,7 @@ table and the per-operation sections follow.
 | [ListParts](#listparts) | GET | `/{Bucket}/{Key+}` | `max-parts`, `part-number-marker`, `uploadId` | — | 200 | `NoSuchBucket`, `NoSuchUpload`, `AccessDenied`, `InvalidArgument` | `q-mpu-part-0031`, `q-mpu-upload-id-0037`, `q-mpu-marker-0040` |
 | [PutObject](#putobject) | PUT | `/{Bucket}/{Key+}` | — | `content-length`, `etag`, `x-amz-checksum-`, `x-amz-meta-` | 200 | `NoSuchBucket`, `AccessDenied`, `MissingContentLength`, `EntityTooLarge`, `IncompleteBody`, `InvalidDigest`, `BadDigest`, `XAmzContentChecksumMismatch`, `InvalidRequest`, `InvalidArgument`, `PreconditionFailed`, `ConditionalRequestConflict`, `EncryptionTypeMismatch`, `InvalidWriteOffset`, `TooManyParts` | `q-checksum-0006` |
 | [UploadPart](#uploadpart) | PUT | `/{Bucket}/{Key+}` | `partNumber`, `uploadId` | `content-length`, `etag`, `x-amz-checksum-` | 200 | `NoSuchBucket`, `NoSuchUpload`, `AccessDenied`, `InvalidArgument`, `MissingContentLength`, `EntityTooLarge`, `IncompleteBody`, `BadDigest`, `InvalidDigest`, `XAmzContentChecksumMismatch` | `q-checksum-0006`, `q-mpu-upload-id-0037`, `q-mpu-limits-0038` |
+| [UploadPartCopy](#uploadpartcopy) | PUT | `/{Bucket}/{Key+}` | `partNumber`, `uploadId` | `x-amz-copy-source` | 200 | `NoSuchBucket`, `NoSuchKey`, `NoSuchUpload`, `AccessDenied`, `InvalidRequest`, `InvalidArgument`, `InvalidRange`, `PreconditionFailed`, `MethodNotAllowed` | `q-copy-source-split-0077`, `q-copy-source-arn-0078`, `q-copy-error-after-200-0082`, `q-copy-source-version-0083`, `q-copy-part-root-0084`, `q-copy-range-0085` |
 
 **Key headers** are the ones with protocol weight: headers a route matches on, prefix
 header families, and headers carrying a required field. Every other bound header is listed
@@ -187,6 +204,7 @@ First match wins; lower precedence is tried first.
 | --- | --- | --- |
 | 100 | [ListBuckets](#listbuckets) | `Method GET` AND `Target Service` |
 | 300 | [GetBucketLocation](#getbucketlocation) | `Method GET` AND `Target Bucket` AND `QueryPresent ?location` |
+| 400 | [UploadPartCopy](#uploadpartcopy) | `Method PUT` AND `Target Object` AND `QueryPresent ?partNumber` AND `QueryPresent ?uploadId` AND `HeaderPresent x-amz-copy-source` |
 | 410 | [UploadPart](#uploadpart) | `Method PUT` AND `Target Object` AND `QueryPresent ?partNumber` AND `QueryPresent ?uploadId` |
 | 420 | [CompleteMultipartUpload](#completemultipartupload) | `Method POST` AND `Target Object` AND `QueryPresent ?uploadId` |
 | 430 | [AbortMultipartUpload](#abortmultipartupload) | `Method DELETE` AND `Target Object` AND `QueryPresent ?uploadId` |
@@ -197,6 +215,7 @@ First match wins; lower precedence is tried first.
 | 610 | [ListObjectVersions](#listobjectversions) | `Method GET` AND `Target Bucket` AND `QueryPresent ?versions` |
 | 650 | [DeleteObjects](#deleteobjects) | `Method POST` AND `Target Bucket` AND `QueryPresent ?delete` |
 | 700 | [ListObjects](#listobjects) | `Method GET` AND `Target Bucket` |
+| 790 | [CopyObject](#copyobject) | `Method PUT` AND `Target Object` AND `HeaderPresent x-amz-copy-source` |
 | 800 | [PutObject](#putobject) | `Method PUT` AND `Target Object` |
 | 900 | [GetObject](#getobject) | `Method GET` AND `Target Object` |
 | 950 | [HeadObject](#headobject) | `Method HEAD` AND `Target Object` |
@@ -301,6 +320,62 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 
 - `CompletedMultipartUpload` (Structure) — `Parts: List<Structure(CompletedPart)>(flattened)`
 - `CompletedPart` (Structure) — `ETag: ETag(XmlQuoted)`, `ChecksumCRC32: String`, `ChecksumCRC32C: String`, `ChecksumCRC64NVME: String`, `ChecksumSHA1: String`, `ChecksumSHA256: String`, `ChecksumSHA512: String`, `ChecksumMD5: String`, `ChecksumXXHASH64: String`, `ChecksumXXHASH3: String`, `ChecksumXXHASH128: String`, `PartNumber: Integer`
+
+### CopyObject
+
+`PUT /{Bucket}/{Key+}` &rarr; 200 · target Object · precedence 790 · auth Required (`s3:PutObject`, presigned allowed) · spec `spec/operations/CopyObject.toml`
+
+**Route predicates**
+
+- `Method PUT`
+- `Target Object`
+- `HeaderPresent x-amz-copy-source`
+
+**Query keys**
+
+- routed on, present: —
+- routed on, exact value: —
+- routed on, absent: —
+- read as parameters: —
+
+**Headers**
+
+- request: `cache-control`, `content-disposition`, `content-encoding`, `content-language`, `content-type`, `expires`, `if-match`, `if-none-match`, `x-amz-acl`, `x-amz-checksum-algorithm`, `x-amz-copy-source`, `x-amz-copy-source-if-match`, `x-amz-copy-source-if-modified-since`, `x-amz-copy-source-if-none-match`, `x-amz-copy-source-if-unmodified-since`, `x-amz-copy-source-server-side-encryption-customer-algorithm`, `x-amz-copy-source-server-side-encryption-customer-key`, `x-amz-copy-source-server-side-encryption-customer-key-md5`, `x-amz-expected-bucket-owner`, `x-amz-grant-full-control`, `x-amz-grant-read`, `x-amz-grant-read-acp`, `x-amz-grant-write-acp`, `x-amz-meta-`, `x-amz-metadata-directive`, `x-amz-object-lock-legal-hold`, `x-amz-object-lock-mode`, `x-amz-object-lock-retain-until-date`, `x-amz-request-payer`, `x-amz-server-side-encryption`, `x-amz-server-side-encryption-aws-kms-key-id`, `x-amz-server-side-encryption-bucket-key-enabled`, `x-amz-server-side-encryption-context`, `x-amz-server-side-encryption-customer-algorithm`, `x-amz-server-side-encryption-customer-key`, `x-amz-server-side-encryption-customer-key-md5`, `x-amz-source-expected-bucket-owner`, `x-amz-storage-class`, `x-amz-tagging`, `x-amz-tagging-directive`, `x-amz-website-redirect-location`
+- response: `x-amz-copy-source-version-id`, `x-amz-expiration`, `x-amz-request-charged`, `x-amz-server-side-encryption`, `x-amz-server-side-encryption-aws-kms-key-id`, `x-amz-server-side-encryption-bucket-key-enabled`, `x-amz-server-side-encryption-context`, `x-amz-server-side-encryption-customer-algorithm`, `x-amz-server-side-encryption-customer-key-md5`, `x-amz-version-id`
+- required: `x-amz-copy-source`
+
+**Body**
+
+- request: None (None)
+- response: XmlBody (Full)
+- response root: `<CopyObjectResult>`, xmlns emit
+- element order: `ETag`, `LastModified`
+
+**Error codes**
+
+`NoSuchBucket`, `NoSuchKey`, `AccessDenied`, `InvalidRequest`, `InvalidArgument`, `PreconditionFailed`, `MethodNotAllowed`, `EntityTooLarge`, `ObjectNotInActiveTierError`
+
+An `Error` body can follow an already-flushed `200`.
+
+**Quirks**
+
+- `q-etag-0004` (etag_render on `PutObject.ETag`) — In a header position the entity tag is always written with surrounding double quotes, unlike the bare form used by GetObjectAttributes.
+- `q-timestamp-0005` (timestamp_format on `PutObject.Expires`) — The value must be round tripped as an opaque string, because stored values are frequently not parseable dates at all.
+- `q-content-0008` (default_value on `PutObject.ContentType`) — The default media type is the S3 specific binary form, not the IANA registered octet stream spelling.
+- `q-meta-0009` (prefix_headers on `PutObject.Metadata`) — User metadata keys are lowercased on return, non ASCII values use encoded word syntax, and the combined size is capped.
+- `q-sse-0010` (secret_hygiene on `PutObject`) — The customer key is never echoed back and never logged, while the algorithm and key digest must be echoed; customer keys over a plaintext connection are refused.
+- `q-timestamp-0011` (timestamp_format on `PutObject.ObjectLockRetainUntilDate`) — This is the only request header carrying the extended date time format instead of the HTTP date format.
+- `q-timestamp-0012` (structured_header on `PutObject.Expiration`) — The expiration header is a structured value whose quoted parameter embeds an HTTP date, so it must not be modelled as a timestamp.
+- `q-etag-form-0074` (wire_form on `GetObject.IfMatch`) — A conditional header carries one entity tag and is checked against that grammar before anything compares it, so an unterminated quote is a bad request rather than a tag whose first character is a quote, and two field lines joined by a comma are refused rather than reduced to whichever one arrived first.
+- `q-copy-source-split-0077` (wire_parse_order on `CopyObject.CopySource`) — The optional `?versionId=` suffix of the copy-source header is split off at the last question mark of the raw header value and only then is each half percent-decoded, so a key whose own bytes encode a question mark keeps it instead of being cut in two at a separator that was never sent.
+- `q-copy-source-arn-0078` (wire_grammar_union on `CopyObject.CopySource`) — The copy-source header admits three grammars — a bucket-and-key path with an optional leading slash, an access point ARN, and an Outposts ARN — and a value matching none of them is refused with InvalidArgument rather than being demoted to a bucket name, because demoting it would silently address a bucket literally called `arn:aws:iam::...`.
+- `q-copy-directive-0079` (directive_rebuild on `CopyObject.MetadataDirective`) — REPLACE rebuilds the destination's user metadata and standard object attributes from the request alone rather than merging them over the source's, and the default COPY discards every `x-amz-meta-*` and attribute header the request carried; the tagging directive is the same rule over `x-amz-tagging`.
+- `q-copy-self-0080` (self_copy_rules on `CopyObject`) — A copy whose resolved source names the same bucket, key and version as the destination is refused with InvalidRequest when nothing about the object would change, and is otherwise the sanctioned way to rewrite metadata in place — so the destination's bytes must survive it untouched and must never be truncated by opening the target before the source has been read.
+- `q-copy-conditions-0081` (independent_conditions on `CopyObject.CopySourceIfMatch`) — The four `x-amz-copy-source-if-*` conditions are evaluated against the source object and the four unprefixed conditions against the destination, as two independent verdicts that are never merged, and a copy-source entity tag arrives unquoted from more than one SDK and is compared as an opaque tag rather than refused.
+- `q-copy-error-after-200-0082` (error_after_200 on `CopyObject`) — A copy that fails after the response head has been flushed answers with the success status and an `<Error>` document in the body, so the status alone never decides the outcome, and the response must not announce a trailer section it will not send.
+- `q-copy-source-version-0083` (response_header_pair on `CopyObject.CopySourceVersionId`) — The version of the object that was read and the version of the object that was written travel in two different response headers, so an implementation that writes one value into both tells the client the copy it just made is the version it copied from.
+
+Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 
 ### CreateMultipartUpload
 
@@ -1001,6 +1076,60 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 
 Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 
+### UploadPartCopy
+
+`PUT /{Bucket}/{Key+}` &rarr; 200 · target Object · precedence 400 · auth Required (`s3:PutObject`, presigned allowed) · spec `spec/operations/UploadPartCopy.toml`
+
+**Route predicates**
+
+- `Method PUT`
+- `Target Object`
+- `QueryPresent ?partNumber`
+- `QueryPresent ?uploadId`
+- `HeaderPresent x-amz-copy-source`
+
+**Query keys**
+
+- routed on, present: `partNumber`, `uploadId`
+- routed on, exact value: —
+- routed on, absent: —
+- read as parameters: `partNumber`, `uploadId`
+
+**Headers**
+
+- request: `x-amz-copy-source`, `x-amz-copy-source-if-match`, `x-amz-copy-source-if-modified-since`, `x-amz-copy-source-if-none-match`, `x-amz-copy-source-if-unmodified-since`, `x-amz-copy-source-range`, `x-amz-copy-source-server-side-encryption-customer-algorithm`, `x-amz-copy-source-server-side-encryption-customer-key`, `x-amz-copy-source-server-side-encryption-customer-key-md5`, `x-amz-expected-bucket-owner`, `x-amz-request-payer`, `x-amz-server-side-encryption-customer-algorithm`, `x-amz-server-side-encryption-customer-key`, `x-amz-server-side-encryption-customer-key-md5`, `x-amz-source-expected-bucket-owner`
+- response: `x-amz-copy-source-version-id`, `x-amz-request-charged`, `x-amz-server-side-encryption`, `x-amz-server-side-encryption-aws-kms-key-id`, `x-amz-server-side-encryption-bucket-key-enabled`, `x-amz-server-side-encryption-customer-algorithm`, `x-amz-server-side-encryption-customer-key-md5`
+- required: `x-amz-copy-source`
+
+**Body**
+
+- request: None (None)
+- response: XmlBody (Full)
+- response root: `<CopyPartResult>`, xmlns emit
+- element order: `ETag`, `LastModified`
+
+**Error codes**
+
+`NoSuchBucket`, `NoSuchKey`, `NoSuchUpload`, `AccessDenied`, `InvalidRequest`, `InvalidArgument`, `InvalidRange`, `PreconditionFailed`, `MethodNotAllowed`
+
+An `Error` body can follow an already-flushed `200`.
+
+**Quirks**
+
+- `q-etag-0004` (etag_render on `PutObject.ETag`) — In a header position the entity tag is always written with surrounding double quotes, unlike the bare form used by GetObjectAttributes.
+- `q-timestamp-0005` (timestamp_format on `PutObject.Expires`) — The value must be round tripped as an opaque string, because stored values are frequently not parseable dates at all.
+- `q-sse-0010` (secret_hygiene on `PutObject`) — The customer key is never echoed back and never logged, while the algorithm and key digest must be echoed; customer keys over a plaintext connection are refused.
+- `q-etag-form-0074` (wire_form on `GetObject.IfMatch`) — A conditional header carries one entity tag and is checked against that grammar before anything compares it, so an unterminated quote is a bad request rather than a tag whose first character is a quote, and two field lines joined by a comma are refused rather than reduced to whichever one arrived first.
+- `q-copy-source-split-0077` (wire_parse_order on `CopyObject.CopySource`) — The optional `?versionId=` suffix of the copy-source header is split off at the last question mark of the raw header value and only then is each half percent-decoded, so a key whose own bytes encode a question mark keeps it instead of being cut in two at a separator that was never sent.
+- `q-copy-source-arn-0078` (wire_grammar_union on `CopyObject.CopySource`) — The copy-source header admits three grammars — a bucket-and-key path with an optional leading slash, an access point ARN, and an Outposts ARN — and a value matching none of them is refused with InvalidArgument rather than being demoted to a bucket name, because demoting it would silently address a bucket literally called `arn:aws:iam::...`.
+- `q-copy-conditions-0081` (independent_conditions on `CopyObject.CopySourceIfMatch`) — The four `x-amz-copy-source-if-*` conditions are evaluated against the source object and the four unprefixed conditions against the destination, as two independent verdicts that are never merged, and a copy-source entity tag arrives unquoted from more than one SDK and is compared as an opaque tag rather than refused.
+- `q-copy-error-after-200-0082` (error_after_200 on `CopyObject`) — A copy that fails after the response head has been flushed answers with the success status and an `<Error>` document in the body, so the status alone never decides the outcome, and the response must not announce a trailer section it will not send.
+- `q-copy-source-version-0083` (response_header_pair on `CopyObject.CopySourceVersionId`) — The version of the object that was read and the version of the object that was written travel in two different response headers, so an implementation that writes one value into both tells the client the copy it just made is the version it copied from.
+- `q-copy-part-root-0084` (wire_root_name on `UploadPartCopy`) — The response root element of a part copy is the copy-part spelling rather than the operation name or the output shape name, so a generator that derived the root from either emits a document no SDK parses.
+- `q-copy-range-0085` (range_strictness on `UploadPartCopy.CopySourceRange`) — A copy-source range carries end minus start plus one bytes, and unlike a read range it is refused rather than clamped when it runs past the end of the source and refused outright when it names more than one span; a zero-byte source is a legal copy of nothing rather than an arithmetic edge that faults.
+
+Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
+
 ## Deferred operations
 
 In the pinned model but deliberately not generated. Codegen fails on any operation that is
@@ -1008,7 +1137,6 @@ in neither list, so this table is exhaustive by construction.
 
 | Operation | Reason |
 | --- | --- |
-| CopyObject | P5 copy family; x-amz-copy-source parsing and two-stage authorization are one reviewed pass. |
 | CreateBucket | P5 bucket lifecycle operations; CreateBucket carries the location-constraint request body. |
 | CreateBucketMetadataConfiguration | Out of scope for the gateway: S3 Tables and bucket metadata table configuration, a separate AWS surface with its own control plane. |
 | CreateBucketMetadataTableConfiguration | Out of scope for the gateway: S3 Tables and bucket metadata table configuration, a separate AWS surface with its own control plane. |
@@ -1095,12 +1223,11 @@ in neither list, so this table is exhaustive by construction.
 | PutObjectRetention | P5 object tagging, ACL and object-lock family; grant parsing is a shared cluster of its own. |
 | PutObjectTagging | P5 object tagging, ACL and object-lock family; grant parsing is a shared cluster of its own. |
 | PutPublicAccessBlock | P5 bucket policy and public-access family; every one of these is an authorization surface and reviewed as a group. |
-| RenameObject | P5 copy family; x-amz-copy-source parsing and two-stage authorization are one reviewed pass. |
+| RenameObject | P5 copy family; RenameObject is a single-bucket move with no source-authorization stage and no AWS wire form to conform to. |
 | RestoreObject | P5 advanced object family; each member carries a body shape or a framing the data plane does not have. |
 | SelectObjectContent | P5 advanced object family; each member carries a body shape or a framing the data plane does not have. |
 | UpdateBucketMetadataAnnotationTableConfiguration | Out of scope for the gateway: S3 Tables and bucket metadata table configuration, a separate AWS surface with its own control plane. |
 | UpdateBucketMetadataInventoryTableConfiguration | Out of scope for the gateway: S3 Tables and bucket metadata table configuration, a separate AWS surface with its own control plane. |
 | UpdateBucketMetadataJournalTableConfiguration | Out of scope for the gateway: S3 Tables and bucket metadata table configuration, a separate AWS surface with its own control plane. |
 | UpdateObjectEncryption | P5 advanced object family; each member carries a body shape or a framing the data plane does not have. |
-| UploadPartCopy | P5-04 copy family; UploadPartCopy shares x-amz-copy-source with CopyObject and the part semantics with this family, and lands there. |
 | WriteGetObjectResponse | Out of scope for the gateway: S3 Object Lambda, which requires the Object Lambda access point host class. |

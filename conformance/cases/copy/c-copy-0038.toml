@@ -1,0 +1,78 @@
+# c-copy-0038 — a failure delivered inside a success
+#
+# Schema dimensions exercised: expect.kind = "stream_error" with an error document, and the trailer that must not be announced
+
+[case]
+id = "c-copy-0038"
+schema_version = 1
+title = "A copy that fails after its head is flushed answers with an Error document under a success status"
+rationale = """
+A long copy commits its response head before it knows the outcome, so a failure arrives as an error document under a success status. Any client — or test — that decides from the status line records a copy that never happened, and goes on to read a destination that does not exist. The second half of the assertion is that no trailer section is announced: a response that promises trailers it will never send leaves the client waiting for them, which turns a reported failure into a hang."""
+polarity = "negative"
+operation = "CopyObject"
+tags = ["error-shape", "streaming", "trailer", "wire-bytes"]
+timeout_ms = 10000
+quirks = ["q-copy-error-after-200-0082"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CopyObject.html"
+summary = "The documented copy: how the source is named, what the two directives mean, and that a failure can arrive inside a success."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CompleteMultipartUpload.html"
+summary = "The documented late-failure shape: a success status whose body carries the error, for an operation that commits its head early."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9110#section-6.6.2"
+summary = "A trailer section may only be announced by a message that will actually send one."
+kind = "rfc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-copy"
+
+# The source is declared absent: the copy is admitted, the head is committed, and the failure is
+# only discovered once the source is opened — which is the shape this case exists to pin.
+[[setup.objects]]
+bucket = "conf-copy"
+key = "src/vanishes"
+absent = true
+
+[request]
+method = "PUT"
+target = "/conf-copy/dst/0038"
+headers = { "x-amz-copy-source" = "/conf-copy/src/vanishes" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "stream_error"
+stream_termination = "error_document"
+status = 200
+connection_after = "open"
+# No entity tag, no version — and no announced trailer section, which is the half of this rule
+# that turns a reported failure into a client that waits forever.
+headers_absent = ["etag", "x-amz-version-id", "x-amz-copy-source-version-id", "trailer"]
+trailers_absent = ["x-amz-checksum-crc32", "x-amz-checksum-sha256"]
+
+# The XML declaration and its newline: everything the response had committed before the copy
+# discovered it could not proceed.
+body_bytes_before_error = 39
+
+[expect.error]
+code = "NoSuchKey"
+request_id_present = true
+
+[expect.headers_present]
+"content-type" = "application/xml"
+
+[expect.timing]
+terminate_within_ms = 5000
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+contains_utf8 = ["<Code>NoSuchKey</Code>"]
+not_contains_utf8 = ["<CopyObjectResult"]

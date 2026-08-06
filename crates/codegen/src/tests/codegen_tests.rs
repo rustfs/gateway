@@ -196,8 +196,19 @@ fn c_cg_0005_why_reports_a_quirk_with_its_evidence_and_cases() {
 #[test]
 fn why_resolves_headers_error_codes_and_query_keys() {
     let artifacts = artifacts();
-    let header = why::why(&artifacts.operations, "x-amz-copy-source");
+    // A real AWS header no operation in this build binds: the annotation surface is out of scope
+    // in `ops/excluded.toml`, and `CopyObject` drops the directive it would otherwise carry. The
+    // example used to be `x-amz-copy-source`, which the copy family now binds — so the same
+    // property is asserted twice: a bound header resolves to the operations that bind it, and an
+    // unbound one is not found.
+    let header = why::why(&artifacts.operations, "x-amz-object-annotation-directive");
     assert!(header.is_err(), "a header nobody binds is not found");
+
+    let copy_source = why::why(&artifacts.operations, "x-amz-copy-source").expect("a bound header");
+    assert!(
+        copy_source.contains("CopyObject") && copy_source.contains("UploadPartCopy"),
+        "{copy_source}"
+    );
 
     let found = why::why(&artifacts.operations, "X-Amz-Meta-").expect("prefix header, case-insensitively");
     assert!(found.contains("prefix family"), "{found}");

@@ -24,9 +24,9 @@
 //! Upstream: `crate::ops`. Downstream: every consumer mid-migration.
 
 pub use crate::ops::enums::{
-    Acl, ArchiveStatus, ChecksumAlgorithm, ChecksumMode, ChecksumType, EncodingType, LocationConstraint,
+    Acl, ArchiveStatus, ChecksumAlgorithm, ChecksumMode, ChecksumType, EncodingType, LocationConstraint, MetadataDirective,
     ObjectLockLegalHoldStatus, ObjectLockMode, ReplicationStatus, RequestCharged, RequestPayer, ServerSideEncryption,
-    StorageClass,
+    StorageClass, TaggingDirective,
 };
 pub use crate::ops::shapes::{
     Bucket, CommonPrefix, CompletedMultipartUpload, CompletedPart, Delete, DeleteMarkerEntry, DeletedObject, Error, Initiator,
@@ -40,6 +40,9 @@ pub use crate::ops::abort_multipart_upload::{
 pub use crate::ops::complete_multipart_upload::{
     CompleteMultipartUpload, Input as CompleteMultipartUploadInput, InputBuilder as CompleteMultipartUploadInputBuilder,
     Output as CompleteMultipartUploadOutput,
+};
+pub use crate::ops::copy_object::{
+    CopyObject, Input as CopyObjectInput, InputBuilder as CopyObjectInputBuilder, Output as CopyObjectOutput,
 };
 pub use crate::ops::create_multipart_upload::{
     CreateMultipartUpload, Input as CreateMultipartUploadInput, InputBuilder as CreateMultipartUploadInputBuilder,
@@ -86,4 +89,7 @@ pub use crate::ops::put_object::{
 };
 pub use crate::ops::upload_part::{
     Input as UploadPartInput, InputBuilder as UploadPartInputBuilder, Output as UploadPartOutput, UploadPart,
+};
+pub use crate::ops::upload_part_copy::{
+    Input as UploadPartCopyInput, InputBuilder as UploadPartCopyInputBuilder, Output as UploadPartCopyOutput, UploadPartCopy,
 };

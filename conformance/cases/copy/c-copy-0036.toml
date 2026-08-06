@@ -1,0 +1,68 @@
+# c-copy-0036 — a copy range is refused, never clamped
+#
+# Schema dimensions exercised: a span outside the source, on the one operation whose range rule differs from a read range
+
+[case]
+id = "c-copy-0036"
+schema_version = 1
+title = "A copy-source range beyond the end of the source is refused rather than trimmed"
+rationale = """
+This is where a copy range deliberately parts company with a read range. A read that asks for more than exists is answered with what exists, and applying that rule to a copy produces a part shorter than the client asked for with a success to go with it — the upload then completes and the assembled object is missing bytes nobody can account for. Refusing is the only answer that keeps the length the client asked for and the length it got the same number."""
+polarity = "negative"
+operation = "UploadPartCopy"
+tags = ["range", "multipart", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-copy-range-0085"]
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/pull/95"
+summary = "Upstream change correcting a copied range that was one byte short of the span the client asked for."
+kind = "s3s-pr"
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9110#section-14.2"
+summary = "A read range that cannot be satisfied is answered with a dedicated status rather than with a different span."
+kind = "rfc"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UploadPartCopy.html"
+summary = "The documented part copy: the response root it uses and the byte span its range header names."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-copy"
+
+[[setup.objects]]
+bucket = "conf-copy"
+key = "src/ten"
+content_type = "text/plain"
+body = { utf8 = "0123456789" }
+
+[[setup.multipart_uploads]]
+bucket = "conf-copy"
+key = "dst/0036"
+capture_upload_id_as = "upload"
+
+[request]
+method = "PUT"
+target = "/conf-copy/dst/0036?partNumber=1&uploadId=${capture.upload}"
+headers = { "x-amz-copy-source" = "/conf-copy/src/ten", "x-amz-copy-source-range" = "bytes=100-200" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+headers_absent = ["etag", "x-amz-version-id", "x-amz-copy-source-version-id"]
+
+[expect.error]
+code = "InvalidArgument"
+request_id_present = true
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+contains_utf8 = ["<Code>InvalidArgument</Code>"]
+not_contains_utf8 = ["<CopyPartResult"]

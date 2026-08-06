@@ -12,15 +12,355 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Family: server-side copy. CopyObject and RenameObject.
+# Family: server-side copy. CopyObject, UploadPartCopy and RenameObject.
 #
-# Nothing is generated yet. The family owns `x-amz-copy-source` parsing, the copy-source
-# conditional headers, and the source-resource extraction that makes copy a two-stage
-# authorization — none of which the model states.
+# The family owns `x-amz-copy-source` parsing, the copy-source conditional headers, and the
+# source-resource extraction that makes copy a two-stage authorization — none of which the model
+# states. `UploadPartCopy` lives here rather than in `ops/multipart.toml` because the half of it
+# that goes wrong is the copy half: it shares `x-amz-copy-source`, the four copy-source conditions
+# and the source authorization with `CopyObject`, and shares only the part numbering with the
+# multipart family.
+#
+# This file is the conflict unit for the family. Nothing outside it may declare these operations.
+
+include = ["CopyObject", "UploadPartCopy"]
 
 [[deferred]]
-reason = "P5 copy family; x-amz-copy-source parsing and two-stage authorization are one reviewed pass."
+reason = "P5 copy family; RenameObject is a single-bucket move with no source-authorization stage and no AWS wire form to conform to."
 operations = [
-  "CopyObject",
   "RenameObject",
 ]
+
+# =============================================================================================
+# Precedence, in one place so the ordering argument is reviewable without reading two tables.
+#
+#   400  UploadPartCopy  PUT + Object + partNumber + uploadId + x-amz-copy-source. Reserved for
+#                        this operation by `ops/multipart.toml`, ahead of UploadPart at 410.
+#   790  CopyObject      PUT + Object + x-amz-copy-source, immediately ahead of PutObject at 800.
+#
+# Both are the same shape: a request AWS distinguishes from its neighbour by one header existing.
+# That is `header_present`, which lowers to `Predicate::HeaderPresent` — not a `HeaderPrefix` with
+# an empty prefix, which would conflate "exists" with "has a value starting with". Each of the two
+# totally shadows its neighbour, so `crates/core/src/route/shadowing.rs` carries a reviewed
+# declaration for every resulting pair; none of them is decided by source order.
+# =============================================================================================
+
+# =============================================================================================
+# CopyObject
+#
+# `allows_error_after_200` is the fact that makes this operation's response shape a spec field
+# rather than a branch: a copy that fails after the head has been flushed answers `200` with an
+# `<Error>` document in the body, and a client that reads the status alone concludes success.
+# =============================================================================================
+[op.CopyObject]
+precedence = 790
+header_present = ["x-amz-copy-source"]
+auth_action = "s3:PutObject"
+allows_error_after_200 = true
+error_codes = [
+  "NoSuchBucket",
+  "NoSuchKey",
+  "AccessDenied",
+  "InvalidRequest",
+  "InvalidArgument",
+  "PreconditionFailed",
+  "MethodNotAllowed",
+  "EntityTooLarge",
+  "ObjectNotInActiveTierError",
+]
+quirk_refs = [
+  "q-copy-source-split-0077",
+  "q-copy-source-arn-0078",
+  "q-copy-directive-0079",
+  "q-copy-self-0080",
+  "q-copy-error-after-200-0082",
+  "q-copy-source-version-0083",
+]
+response_root = "CopyObjectResult"
+element_order = ["ETag", "LastModified"]
+input_hot = ["CopySource", "MetadataDirective"]
+output_hot = ["CopySourceVersionId", "VersionId"]
+
+# The model binds the whole result structure as the response payload. Today's codec surface has no
+# encoder for a structure in payload position — only a blob — so the structure is dropped and its
+# two wire members are synthesized as ordinary body members under a root named for the structure.
+# The bytes are identical; what is lost is the nesting in the dto, and what is gained is that the
+# response is generated rather than hand-written. See the note in `MAP.md`.
+output_drop = ["CopyObjectResult"]
+input_drop = ["AnnotationDirective"]
+
+[[op.CopyObject.field]]
+side = "output"
+name = "ETag"
+synthesize = true
+binding = "BodyXml"
+wire_name = "ETag"
+type = "ETag"
+required = true
+quirks = ["q-etag-0004"]
+
+[[op.CopyObject.field]]
+side = "output"
+name = "LastModified"
+synthesize = true
+binding = "BodyXml"
+wire_name = "LastModified"
+type = "Timestamp:Iso8601"
+quirks = ["q-timestamp-0005"]
+
+# The wire value is a single opaque string that three different grammars can inhabit, and the
+# `?versionId` suffix has to be split off it *before* percent-decoding. Neither fact is
+# expressible as a binding, so the field keeps its string type and gains the quirks that say the
+# grammar is `shared::copy_source`'s, not the decoder's.
+[[op.CopyObject.field]]
+side = "input"
+name = "CopySource"
+hot = true
+quirks = ["q-copy-source-split-0077", "q-copy-source-arn-0078"]
+
+[[op.CopyObject.field]]
+side = "input"
+name = "MetadataDirective"
+hot = true
+quirks = ["q-copy-directive-0079"]
+
+[[op.CopyObject.field]]
+side = "input"
+name = "TaggingDirective"
+quirks = ["q-copy-directive-0079"]
+
+[[op.CopyObject.field]]
+side = "input"
+name = "Metadata"
+quirks = ["q-meta-0009", "q-copy-directive-0079"]
+
+[[op.CopyObject.field]]
+side = "input"
+name = "ContentType"
+quirks = ["q-content-0008"]
+
+[[op.CopyObject.field]]
+side = "input"
+name = "Expires"
+quirks = ["q-timestamp-0005"]
+
+[[op.CopyObject.field]]
+side = "input"
+name = "ObjectLockRetainUntilDate"
+quirks = ["q-timestamp-0011"]
+
+[[op.CopyObject.field]]
+side = "input"
+name = "SSECustomerKey"
+quirks = ["q-sse-0010"]
+
+[[op.CopyObject.field]]
+side = "input"
+name = "SSECustomerKeyMD5"
+quirks = ["q-sse-0010"]
+
+[[op.CopyObject.field]]
+side = "input"
+name = "SSEKMSKeyId"
+quirks = ["q-sse-0010"]
+
+[[op.CopyObject.field]]
+side = "input"
+name = "SSEKMSEncryptionContext"
+quirks = ["q-sse-0010"]
+
+# The copy-source key is the one SSE-C triple that must never reach a log or an error document,
+# and it is a different triple from the destination's. P5-12 owns the semantics; the binding is
+# here so the three headers are decoded rather than silently dropped into the unknown-header bin.
+[[op.CopyObject.field]]
+side = "input"
+name = "CopySourceSSECustomerKey"
+quirks = ["q-sse-0010"]
+
+[[op.CopyObject.field]]
+side = "input"
+name = "CopySourceSSECustomerKeyMD5"
+quirks = ["q-sse-0010"]
+
+# The four copy-source conditions are evaluated independently of the destination-side four, and
+# their entity tags arrive unquoted from more than one SDK. Same grammar, different header names.
+[[op.CopyObject.field]]
+side = "input"
+name = "CopySourceIfMatch"
+quirks = ["q-etag-form-0074", "q-copy-conditions-0081"]
+
+[[op.CopyObject.field]]
+side = "input"
+name = "CopySourceIfNoneMatch"
+quirks = ["q-etag-form-0074", "q-copy-conditions-0081"]
+
+[[op.CopyObject.field]]
+side = "input"
+name = "CopySourceIfModifiedSince"
+quirks = ["q-timestamp-0005", "q-copy-conditions-0081"]
+
+[[op.CopyObject.field]]
+side = "input"
+name = "CopySourceIfUnmodifiedSince"
+quirks = ["q-timestamp-0005", "q-copy-conditions-0081"]
+
+[[op.CopyObject.field]]
+side = "output"
+name = "CopySourceVersionId"
+quirks = ["q-copy-source-version-0083"]
+
+[[op.CopyObject.field]]
+side = "output"
+name = "VersionId"
+quirks = ["q-copy-source-version-0083"]
+
+[[op.CopyObject.field]]
+side = "output"
+name = "Expiration"
+quirks = ["q-timestamp-0012"]
+
+[[op.CopyObject.field]]
+side = "output"
+name = "SSECustomerKeyMD5"
+quirks = ["q-sse-0010"]
+
+[[op.CopyObject.field]]
+side = "output"
+name = "SSEKMSKeyId"
+quirks = ["q-sse-0010"]
+
+[[op.CopyObject.field]]
+side = "output"
+name = "SSEKMSEncryptionContext"
+quirks = ["q-sse-0010"]
+
+# =============================================================================================
+# UploadPartCopy
+#
+# The same two-stage authorization as CopyObject, plus a part number and an upload id. The
+# response root is `CopyPartResult` — neither the operation name nor the output shape name — and
+# a generator that derived it from either would emit a document no SDK parses.
+# =============================================================================================
+[op.UploadPartCopy]
+precedence = 400
+query_present = ["partNumber", "uploadId"]
+header_present = ["x-amz-copy-source"]
+auth_action = "s3:PutObject"
+allows_error_after_200 = true
+error_codes = [
+  "NoSuchBucket",
+  "NoSuchKey",
+  "NoSuchUpload",
+  "AccessDenied",
+  "InvalidRequest",
+  "InvalidArgument",
+  "InvalidRange",
+  "PreconditionFailed",
+  "MethodNotAllowed",
+]
+quirk_refs = [
+  "q-copy-source-split-0077",
+  "q-copy-source-arn-0078",
+  "q-copy-part-root-0084",
+  "q-copy-range-0085",
+  "q-copy-error-after-200-0082",
+  "q-copy-source-version-0083",
+]
+response_root = "CopyPartResult"
+element_order = ["ETag", "LastModified"]
+input_hot = ["CopySource", "CopySourceRange"]
+output_hot = ["CopySourceVersionId"]
+
+# Same treatment as CopyObject's result structure, and the same reason: the payload binding has no
+# structure form in today's encoder. The root name is the fact worth keeping — it is neither the
+# operation name nor the shape name (q-copy-part-root-0084).
+output_drop = ["CopyPartResult"]
+
+[[op.UploadPartCopy.field]]
+side = "output"
+name = "ETag"
+synthesize = true
+binding = "BodyXml"
+wire_name = "ETag"
+type = "ETag"
+required = true
+quirks = ["q-etag-0004", "q-copy-part-root-0084"]
+
+[[op.UploadPartCopy.field]]
+side = "output"
+name = "LastModified"
+synthesize = true
+binding = "BodyXml"
+wire_name = "LastModified"
+type = "Timestamp:Iso8601"
+quirks = ["q-timestamp-0005"]
+
+[[op.UploadPartCopy.field]]
+side = "input"
+name = "CopySource"
+hot = true
+quirks = ["q-copy-source-split-0077", "q-copy-source-arn-0078"]
+
+# Parsed by the same grammar as `Range`, and then held to a stricter rule: a copy range that runs
+# past the end of the source is refused rather than clamped, and a multi-range value is refused
+# outright. Both are `shared::copy_source`'s job, not the decoder's.
+[[op.UploadPartCopy.field]]
+side = "input"
+name = "CopySourceRange"
+hot = true
+quirks = ["q-copy-range-0085"]
+
+[[op.UploadPartCopy.field]]
+side = "input"
+name = "CopySourceIfMatch"
+quirks = ["q-etag-form-0074", "q-copy-conditions-0081"]
+
+[[op.UploadPartCopy.field]]
+side = "input"
+name = "CopySourceIfNoneMatch"
+quirks = ["q-etag-form-0074", "q-copy-conditions-0081"]
+
+[[op.UploadPartCopy.field]]
+side = "input"
+name = "CopySourceIfModifiedSince"
+quirks = ["q-timestamp-0005", "q-copy-conditions-0081"]
+
+[[op.UploadPartCopy.field]]
+side = "input"
+name = "CopySourceIfUnmodifiedSince"
+quirks = ["q-timestamp-0005", "q-copy-conditions-0081"]
+
+[[op.UploadPartCopy.field]]
+side = "input"
+name = "SSECustomerKey"
+quirks = ["q-sse-0010"]
+
+[[op.UploadPartCopy.field]]
+side = "input"
+name = "SSECustomerKeyMD5"
+quirks = ["q-sse-0010"]
+
+[[op.UploadPartCopy.field]]
+side = "input"
+name = "CopySourceSSECustomerKey"
+quirks = ["q-sse-0010"]
+
+[[op.UploadPartCopy.field]]
+side = "input"
+name = "CopySourceSSECustomerKeyMD5"
+quirks = ["q-sse-0010"]
+
+[[op.UploadPartCopy.field]]
+side = "output"
+name = "CopySourceVersionId"
+quirks = ["q-copy-source-version-0083"]
+
+[[op.UploadPartCopy.field]]
+side = "output"
+name = "SSECustomerKeyMD5"
+quirks = ["q-sse-0010"]
+
+[[op.UploadPartCopy.field]]
+side = "output"
+name = "SSEKMSKeyId"
+quirks = ["q-sse-0010"]

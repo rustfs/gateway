@@ -1,0 +1,75 @@
+# c-copy-0002 — a leading slash on the copy source means nothing
+#
+# Schema dimensions exercised: two exchanges asserting one entity tag twice, one per spelling
+
+[case]
+id = "c-copy-0002"
+schema_version = 1
+title = "The copy source is accepted with and without its leading slash and both name the same object"
+rationale = """
+AWS accepts both spellings and SDKs are split on which they send, so an implementation that handles only one refuses roughly half of real traffic with a source-not-found error that names an object the client is certain exists. The two exchanges assert the same entity tag rather than only two successes, because a parser that treated the leading slash as part of the bucket name could still return 200 by creating an empty destination."""
+polarity = "positive"
+operation = "CopyObject"
+tags = ["wire-bytes", "routing"]
+timeout_ms = 10000
+quirks = ["q-copy-source-arn-0078"]
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/pull/527"
+summary = "Upstream change teaching the copy-source parser the two ARN spellings it had never accepted."
+kind = "s3s-pr"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CopyObject.html"
+summary = "The documented copy: how the source is named, what the two directives mean, and that a failure can arrive inside a success."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = true
+
+[[setup.buckets]]
+name = "conf-copy"
+
+[[setup.objects]]
+bucket = "conf-copy"
+key = "src/plain.txt"
+content_type = "text/plain"
+body = { utf8 = "hello world" }
+metadata = { "origin" = "source" }
+
+[[exchanges]]
+name = "with-the-leading-slash"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-copy/dst/0002a"
+headers = { "x-amz-copy-source" = "/conf-copy/src/plain.txt" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.body]
+contains_utf8 = ["<ETag>&quot;5eb63bbbe01eeed093cb22bb8f5acdc3&quot;</ETag>"]
+
+[[exchanges]]
+name = "without-the-leading-slash"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-copy/dst/0002b"
+headers = { "x-amz-copy-source" = "conf-copy/src/plain.txt" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.body]
+contains_utf8 = ["<ETag>&quot;5eb63bbbe01eeed093cb22bb8f5acdc3&quot;</ETag>"]

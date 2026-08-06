@@ -1,0 +1,85 @@
+# c-copy-0024 — a bucket is not a source
+#
+# Schema dimensions exercised: two exchanges covering both spellings of a copy source that names no key
+
+[case]
+id = "c-copy-0024"
+schema_version = 1
+title = "A copy source naming only a bucket is refused with InvalidArgument"
+rationale = """
+Both spellings — with and without the trailing slash — are values a client can construct by joining a bucket and an empty key, and a parser that accepts them ends up with an empty key, which is not a legal object key and cannot be reported honestly as not-found either. Answering an argument error tells the client the header was malformed; answering a not-found sends them looking for an object that never had a name."""
+polarity = "negative"
+operation = "CopyObject"
+tags = ["error-shape"]
+timeout_ms = 10000
+quirks = ["q-copy-source-arn-0078"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CopyObject.html"
+summary = "The documented copy: how the source is named, what the two directives mean, and that a failure can arrive inside a success."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/object-keys.html"
+summary = "An object key is an opaque sequence of Unicode characters, so no segment of it has any path meaning to the service."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = true
+
+[[setup.buckets]]
+name = "conf-copy"
+
+[[setup.objects]]
+bucket = "conf-copy"
+key = "src/plain.txt"
+content_type = "text/plain"
+body = { utf8 = "hello world" }
+metadata = { "origin" = "source" }
+
+[[exchanges]]
+name = "a-bare-bucket-name"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-copy/dst/0024a"
+headers = { "x-amz-copy-source" = "conf-copy" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 400
+connection_after = "open"
+headers_absent = ["etag", "x-amz-version-id", "x-amz-copy-source-version-id"]
+
+[exchanges.expect.error]
+code = "InvalidArgument"
+
+[exchanges.expect.body]
+redact = ["RequestId", "HostId"]
+contains_utf8 = ["<Code>InvalidArgument</Code>"]
+
+[[exchanges]]
+name = "a-bucket-with-a-trailing-slash-and-no-key"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-copy/dst/0024b"
+headers = { "x-amz-copy-source" = "/conf-copy/" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 400
+connection_after = "open"
+headers_absent = ["etag", "x-amz-version-id", "x-amz-copy-source-version-id"]
+
+[exchanges.expect.error]
+code = "InvalidArgument"
+
+[exchanges.expect.body]
+redact = ["RequestId", "HostId"]
+contains_utf8 = ["<Code>InvalidArgument</Code>"]

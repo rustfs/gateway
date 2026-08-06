@@ -1,0 +1,100 @@
+# c-copy-0014 — the suffix and open-ended range forms
+#
+# Schema dimensions exercised: two exchanges over one upload, each using a different range spelling
+
+[case]
+id = "c-copy-0014"
+schema_version = 1
+title = "A copy-source range accepts the suffix and open-ended forms with the same meaning a read gives them"
+rationale = """
+A copy range is parsed by the same grammar as a read range, and the two forms with an implicit endpoint are where a second, copy-specific parser diverges first: a suffix range counts backwards from the end and an open-ended one runs to it, and getting either wrong copies a span the client never asked for without any error to show for it. Both are asserted through the stored part sizes, so a parser that accepts the spelling and resolves it wrongly still fails."""
+polarity = "positive"
+operation = "UploadPartCopy"
+tags = ["range", "multipart", "wire-bytes"]
+timeout_ms = 10000
+quirks = ["q-copy-range-0085"]
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/pull/95"
+summary = "Upstream change correcting a copied range that was one byte short of the span the client asked for."
+kind = "s3s-pr"
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9110#section-14.1.2"
+summary = "Both positions of a byte range are inclusive, so a span carries the difference plus one bytes."
+kind = "rfc"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UploadPartCopy.html"
+summary = "The documented part copy: the response root it uses and the byte span its range header names."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = true
+
+[[setup.buckets]]
+name = "conf-copy"
+
+[[setup.objects]]
+bucket = "conf-copy"
+key = "src/ten"
+content_type = "text/plain"
+body = { utf8 = "0123456789" }
+
+[[setup.multipart_uploads]]
+bucket = "conf-copy"
+key = "dst/0014"
+capture_upload_id_as = "upload"
+
+[[exchanges]]
+name = "the-last-five-bytes"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-copy/dst/0014?partNumber=1&uploadId=${capture.upload}"
+headers = { "x-amz-copy-source" = "/conf-copy/src/ten", "x-amz-copy-source-range" = "bytes=-5" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.body]
+contains_utf8 = ["<CopyPartResult"]
+
+[[exchanges]]
+name = "from-byte-three-to-the-end"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-copy/dst/0014?partNumber=2&uploadId=${capture.upload}"
+headers = { "x-amz-copy-source" = "/conf-copy/src/ten", "x-amz-copy-source-range" = "bytes=3-" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.body]
+contains_utf8 = ["<CopyPartResult"]
+
+[[exchanges]]
+name = "five-bytes-and-seven-bytes"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-copy/dst/0014?uploadId=${capture.upload}"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.body]
+contains_utf8 = ["<Size>5</Size>", "<Size>7</Size>"]

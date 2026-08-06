@@ -1,0 +1,62 @@
+# c-copy-0015 — a part copied from nothing
+#
+# Schema dimensions exercised: a zero-length source object, and the response of an operation that used to fault on it
+
+[case]
+id = "c-copy-0015"
+schema_version = 1
+title = "A part copy from a zero-byte source answers rather than faulting"
+rationale = """
+A zero-length source is the degenerate input every range and digest calculation on this path has to survive, and upstream did not: the part copy aborted the process. A crash on a request any unauthenticated-but-permitted caller can send is a denial of service against every other request sharing the process, which is why this case asserts a well-formed answer and an open connection rather than merely a non-500."""
+polarity = "positive"
+operation = "UploadPartCopy"
+tags = ["multipart", "range", "dos"]
+timeout_ms = 10000
+quirks = ["q-copy-range-0085"]
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/issues/547"
+summary = "Report that copying a part from a zero-byte source aborted the process instead of answering."
+kind = "s3s-issue"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UploadPartCopy.html"
+summary = "The documented part copy: the response root it uses and the byte span its range header names."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-copy"
+
+[[setup.objects]]
+bucket = "conf-copy"
+key = "src/empty"
+content_type = "text/plain"
+body = { utf8 = "" }
+
+[[setup.multipart_uploads]]
+bucket = "conf-copy"
+key = "dst/0015"
+capture_upload_id_as = "upload"
+
+[request]
+method = "PUT"
+target = "/conf-copy/dst/0015?partNumber=1&uploadId=${capture.upload}"
+headers = { "x-amz-copy-source" = "/conf-copy/src/empty" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[expect.headers_present]
+"content-type" = "application/xml"
+
+[expect.timing]
+terminate_within_ms = 5000
+
+[expect.body]
+contains_utf8 = ["<CopyPartResult", "<ETag>&quot;d41d8cd98f00b204e9800998ecf8427e&quot;</ETag>"]

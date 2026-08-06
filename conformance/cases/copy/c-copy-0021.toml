@@ -1,0 +1,84 @@
+# c-copy-0021 — a refused source leaves the destination as it was
+#
+# Schema dimensions exercised: a pre-existing destination object read back after the refusal
+
+[case]
+id = "c-copy-0021"
+schema_version = 1
+title = "A copy refused at the source stage does not touch the destination that already existed"
+rationale = """
+The source stage has to run before anything is opened for writing, and the observable consequence of running it too late is not the status code — a late refusal still answers 403 — it is that the destination has already been replaced. That makes an authorization failure destructive, which is the worst combination available: the caller is told they had no access, and the object they had no access to write is gone anyway. The read-back is the only assertion that sees the difference."""
+polarity = "negative"
+operation = "CopyObject"
+tags = ["security", "wire-bytes"]
+timeout_ms = 10000
+quirks = ["q-copy-source-authz-0086"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CopyObject.html#API_CopyObject_RequestSyntax"
+summary = "The source bucket owner is asserted by a header of its own, separate from the destination's, so the source side has its own gate."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CopyObject.html"
+summary = "The documented copy: how the source is named, what the two directives mean, and that a failure can arrive inside a success."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = true
+
+[[setup.buckets]]
+name = "conf-copy"
+
+[[setup.objects]]
+bucket = "conf-copy"
+key = "src/plain.txt"
+content_type = "text/plain"
+body = { utf8 = "hello world" }
+metadata = { "origin" = "source" }
+
+[[setup.objects]]
+bucket = "conf-copy"
+key = "dst/existing"
+content_type = "text/plain"
+body = { utf8 = "keep me" }
+
+[[exchanges]]
+name = "the-copy-is-refused-at-the-source"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-copy/dst/existing"
+headers = { "x-amz-copy-source" = "/conf-copy/src/plain.txt", "x-amz-source-expected-bucket-owner" = "000000000000" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 403
+connection_after = "open"
+headers_absent = ["etag", "x-amz-version-id", "x-amz-copy-source-version-id"]
+
+[exchanges.expect.error]
+code = "AccessDenied"
+
+[[exchanges]]
+name = "the-destination-is-untouched"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-copy/dst/existing"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.headers_present]
+"content-length" = "7"
+
+[exchanges.expect.body]
+exact_utf8 = "keep me"

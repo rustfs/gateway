@@ -1,0 +1,56 @@
+# c-copy-0017 — a satisfied copy-source condition
+#
+# Schema dimensions exercised: the positive half of the copy-source conditional pair
+
+[case]
+id = "c-copy-0017"
+schema_version = 1
+title = "A copy whose copy-source entity tag matches the source proceeds"
+rationale = """
+The copy-source conditions are how a client makes a copy idempotent against a source that may have changed under it, and they were decoded and never evaluated upstream. An evaluator that is missing answers every request the same way, so the positive half has to be pinned alongside the negative one: a condition that always fails is as broken as a condition that always passes, and only asserting both catches either."""
+polarity = "positive"
+operation = "CopyObject"
+tags = ["conditional", "preconditions", "etag"]
+timeout_ms = 10000
+quirks = ["q-copy-conditions-0081"]
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/pull/577"
+summary = "Upstream change adding the four copy-source conditional headers, which were decoded and never evaluated."
+kind = "s3s-pr"
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9110#section-13.1"
+summary = "Preconditions are evaluated against one selected representation, which is what makes two representations two independent evaluations."
+kind = "rfc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-copy"
+
+[[setup.objects]]
+bucket = "conf-copy"
+key = "src/plain.txt"
+content_type = "text/plain"
+body = { utf8 = "hello world" }
+metadata = { "origin" = "source" }
+
+[request]
+method = "PUT"
+target = "/conf-copy/dst/0017"
+headers = { "x-amz-copy-source" = "/conf-copy/src/plain.txt", "x-amz-copy-source-if-match" = "\"5eb63bbbe01eeed093cb22bb8f5acdc3\"" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[expect.headers_present]
+"content-type" = "application/xml"
+
+[expect.body]
+contains_utf8 = ["<CopyObjectResult"]
+not_contains_utf8 = ["<Code>PreconditionFailed</Code>"]

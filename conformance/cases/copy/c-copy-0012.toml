@@ -1,0 +1,52 @@
+# c-copy-0012 — the source version and the destination version are two headers
+#
+# Schema dimensions exercised: a versioned bucket, and two response headers that must not carry the same value
+
+[case]
+id = "c-copy-0012"
+schema_version = 1
+title = "A copy reports the version it read and the version it wrote in two separate headers"
+rationale = """
+One header names the version the copy read and the other names the version it created, and an implementation that writes one value into both tells the client its new object is the old one. Everything built on that answer is then wrong in a way that survives: a client recording the returned version for later retrieval fetches the source, and a replication or backup tool concludes the copy never happened. The two headers are asserted as present and distinct rather than by value, because both values are minted by the server."""
+polarity = "positive"
+operation = "CopyObject"
+tags = ["wire-bytes"]
+timeout_ms = 10000
+quirks = ["q-copy-source-version-0083"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CopyObject.html"
+summary = "The documented copy: how the source is named, what the two directives mean, and that a failure can arrive inside a success."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-copy"
+versioning = "enabled"
+
+[[setup.objects]]
+bucket = "conf-copy"
+key = "src/plain.txt"
+content_type = "text/plain"
+body = { utf8 = "hello world" }
+metadata = { "origin" = "source" }
+
+[request]
+method = "PUT"
+target = "/conf-copy/dst/0012"
+headers = { "x-amz-copy-source" = "/conf-copy/src/plain.txt" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[expect.headers_present]
+"x-amz-copy-source-version-id" = "*"
+"x-amz-version-id" = "*"
+
+[expect.body]
+contains_utf8 = ["<CopyObjectResult"]

@@ -1,0 +1,59 @@
+# c-copy-0025 — an unrecognised ARN is refused, never demoted
+#
+# Schema dimensions exercised: an ARN from another service, and the error code that must not be a not-found
+
+[case]
+id = "c-copy-0025"
+schema_version = 1
+title = "A copy source that is an ARN of another service is refused rather than read as a bucket name"
+rationale = """
+Demoting an unparsed ARN to a bucket name is the dangerous failure in this family. The request then addresses a bucket whose name is a full ARN, which normally does not exist and produces a confusing not-found — but in a deployment where such a bucket does exist, every unrecognised ARN copy is silently redirected into it. Refusing with an argument error is the only answer that cannot be turned into a redirect by creating a bucket, and asserting the absence of the not-found code is what distinguishes the two behaviours."""
+polarity = "negative"
+operation = "CopyObject"
+tags = ["security", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-copy-source-arn-0078"]
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/pull/527"
+summary = "Upstream change teaching the copy-source parser the two ARN spellings it had never accepted."
+kind = "s3s-pr"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CopyObject.html"
+summary = "The documented copy: how the source is named, what the two directives mean, and that a failure can arrive inside a success."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-copy"
+
+[[setup.objects]]
+bucket = "conf-copy"
+key = "src/plain.txt"
+content_type = "text/plain"
+body = { utf8 = "hello world" }
+metadata = { "origin" = "source" }
+
+[request]
+method = "PUT"
+target = "/conf-copy/dst/0025"
+headers = { "x-amz-copy-source" = "arn:aws:iam::123456789012:user/bob" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+headers_absent = ["etag", "x-amz-version-id", "x-amz-copy-source-version-id"]
+
+[expect.error]
+code = "InvalidArgument"
+request_id_present = true
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+contains_utf8 = ["<Code>InvalidArgument</Code>"]
+not_contains_utf8 = ["<Code>NoSuchBucket</Code>", "<Code>NoSuchKey</Code>", "<CopyObjectResult"]

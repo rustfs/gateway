@@ -1,0 +1,59 @@
+# c-copy-0029 — a copy that changes nothing is refused
+#
+# Schema dimensions exercised: source and destination naming one object with the default directive
+
+[case]
+id = "c-copy-0029"
+schema_version = 1
+title = "A copy onto the same object that changes nothing is refused with InvalidRequest"
+rationale = """
+AWS refuses this request, and the reason is worth keeping: a self copy with the copying directive asks the service to rewrite an object into itself with no difference, which is either a client bug or a retry loop, and answering 200 makes both invisible. It also matters that the refusal is the request error rather than an argument error, because clients branch on the code to decide whether to add a directive and retry."""
+polarity = "negative"
+operation = "CopyObject"
+tags = ["error-shape"]
+timeout_ms = 10000
+quirks = ["q-copy-self-0080"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CopyObject.html"
+summary = "The documented copy: how the source is named, what the two directives mean, and that a failure can arrive inside a success."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/issues/583"
+summary = "Report that a copy onto the same object truncated it to zero bytes because the target was opened before the source was read."
+kind = "s3s-issue"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-copy"
+
+[[setup.objects]]
+bucket = "conf-copy"
+key = "src/plain.txt"
+content_type = "text/plain"
+body = { utf8 = "hello world" }
+metadata = { "origin" = "source" }
+
+[request]
+method = "PUT"
+target = "/conf-copy/src/plain.txt"
+headers = { "x-amz-copy-source" = "/conf-copy/src/plain.txt" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+headers_absent = ["etag", "x-amz-version-id", "x-amz-copy-source-version-id"]
+
+[expect.error]
+code = "InvalidRequest"
+request_id_present = true
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+contains_utf8 = ["<Code>InvalidRequest</Code>"]
+not_contains_utf8 = ["<CopyObjectResult"]

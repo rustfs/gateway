@@ -1,0 +1,71 @@
+# c-copy-0022 — without the header it is not a copy
+#
+# Schema dimensions exercised: the routing discriminator by its absence, on a request that must reach a different operation
+
+[case]
+id = "c-copy-0022"
+schema_version = 1
+title = "A PUT without the copy-source header routes to PutObject and never mentions copying"
+rationale = """
+One header's presence is the whole difference between two operations that share a method and a path, so a route that matches on the path alone answers ordinary writes with copy-source errors and a route that matches too eagerly writes empty objects over real ones. This case pins the absent direction: an ordinary write must be answered as a write, with the body it sent stored, and no copy diagnostic anywhere in the response."""
+polarity = "negative"
+operation = "PutObject"
+tags = ["routing"]
+timeout_ms = 10000
+quirks = ["q-copy-source-arn-0078"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObject.html"
+summary = "A plain object write is the same method and path as a copy, with no source header and a request body."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CopyObject.html"
+summary = "The documented copy: how the source is named, what the two directives mean, and that a failure can arrive inside a success."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = true
+
+[[setup.buckets]]
+name = "conf-copy"
+
+[[exchanges]]
+name = "an-ordinary-write-to-the-same-path-shape"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-copy/dst/0022"
+headers = { "content-type" = "text/plain" }
+body = { utf8 = "not a copy" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.headers_present]
+"etag" = "*"
+
+[exchanges.expect.body]
+not_contains_utf8 = ["<CopyObjectResult", "copy-source", "CopySource"]
+
+[[exchanges]]
+name = "the-body-was-stored-as-the-object"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-copy/dst/0022"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.body]
+exact_utf8 = "not a copy"
