@@ -15,8 +15,12 @@
 //! Which entity-tag comparison each conditional header uses, and how its value is read.
 //!
 //! Shares: etag
-//! Members: GetObject, HeadObject, PutObject, CopyObject, UploadPartCopy,
-//!          CompleteMultipartUpload, DeleteObject
+//! Members: GetObject, HeadObject, PutObject
+//!
+//! CopyObject, UploadPartCopy, CompleteMultipartUpload and DeleteObject also carry
+//! conditional headers, but none of them reaches this module yet. They are deliberately
+//! absent from `Members:` above: the list states what the use graph is, not what it ought
+//! to be, because a list that states intent cannot be checked against anything.
 //!
 //! Responsible for: naming the four conditional entity-tag headers, binding each to the RFC 9110
 //! comparison function it is evaluated with, reading a header value into an
@@ -37,13 +41,17 @@
 //! forgotten, so `If-None-Match: *` regressed into a 400. Here the header names the comparison,
 //! and there is no way to ask for a comparison without naming the header it belongs to.
 //!
-//! # Members are declared before they are wired
+//! # What the members declare, and what is still declaration-only
 //!
-//! None of the operations listed above `use` this module yet. Their call sites are the few lines
-//! of wiring the operation-family task adds to each `ops/<name>.rs`, and this task does not edit
-//! those files. The member list is therefore the surface this contract was written for, not a
-//! reading of today's `use` graph; the guard that checks the two against each other has to land
-//! with the first wiring, not before it.
+//! `GetObject`, `HeadObject` and `PutObject` `use` this module for the `CONDITIONS` list each of
+//! them declares — which of the four headers that operation evaluates, and so implicitly which
+//! representation each is evaluated against. The other four members do not `use` it yet.
+//!
+//! [`parse_conditional_etag`] and [`etag_matches`] are a different matter, and the reason is the
+//! one recorded at length in [`super::precondition`]: both need a request or a stored tag in hand,
+//! so their call site is the backend's, and the facade does not export this module for a backend
+//! to reach. The guard that checks `Members:` against `Shares:` in both directions can land now
+//! for the three operations above; it cannot yet be made total.
 
 use rustfs_gateway_types::{ETag, ParseError, rules};
 

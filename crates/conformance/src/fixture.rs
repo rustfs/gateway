@@ -77,7 +77,8 @@ use std::sync::{Arc, Mutex};
 
 use rustfs_gateway::dto;
 use rustfs_gateway::{
-    BucketName, ByteStream, ETag, ErrorCode, Handler, HandlerError, HandlerResult, ObjectKey, Req, Resp, Timestamp, collect,
+    BucketName, ByteStream, ChecksumAlgorithm, ChecksumSpec, ETag, ErrorCode, Handler, HandlerError, HandlerResult, ObjectKey,
+    Req, Resp, Timestamp, collect,
 };
 
 /// The canonical user id every listing reports as the owner.
@@ -157,6 +158,12 @@ pub struct StoredPart {
 }
 
 /// One multipart upload the fixtures established.
+///
+/// The `attributes` and `encryption` members are here for a reason the single-request path does not
+/// have: the initiating request is the *only* one that carries the object's metadata, its content
+/// type, its storage class and its encryption mode, and the object does not exist until the
+/// completion arrives. An upload that does not carry them forward has nowhere else to read them
+/// from, so they are lost silently and only a later `HeadObject` can tell.
 #[derive(Debug, Clone)]
 pub struct StoredUpload {
     /// The bucket it belongs to.
@@ -165,6 +172,49 @@ pub struct StoredUpload {
     pub key: String,
     /// Parts by part number.
     pub parts: BTreeMap<i32, StoredPart>,
+    /// The representation metadata the initiating request named, minus the bytes and the tag.
+    pub attributes: StoredObject,
+    /// The `x-amz-server-side-encryption` the initiating request named, echoed on the completion.
+    ///
+    /// Stored and echoed, never acted on: this fixture encrypts nothing and says so here so that
+    /// nobody reads the header as evidence it did. What the cases measure is whether a value
+    /// decided at initiation can still reach a response head that is flushed at completion.
+    pub encryption: Option<dto::ServerSideEncryption>,
+    /// The `x-amz-checksum-algorithm` the initiating request named, and the `x-amz-checksum-type`
+    /// beside it.
+    ///
+    /// Both are carried for the same reason as [`StoredUpload::encryption`]: the completion reports
+    /// them and only the initiation could state them. The *digest* is never carried — it is
+    /// recomputed from the part bytes, so nothing here can claim an integrity check that did not
+    /// happen.
+    pub checksum: Option<UploadChecksum>,
+}
+
+/// The checksum contract an upload was opened under.
+#[derive(Debug, Clone)]
+pub struct UploadChecksum {
+    /// The algorithm every part is digested with.
+    pub algorithm: ChecksumAlgorithm,
+    /// `COMPOSITE` unless the initiation asked for `FULL_OBJECT`.
+    pub kind: dto::ChecksumType,
+}
+
+impl StoredUpload {
+    /// An upload with no parts and no attributes, which is what `setup.multipart_uploads` declares.
+    #[must_use]
+    pub fn bare(bucket: &str, key: &str) -> StoredUpload {
+        StoredUpload {
+            bucket: bucket.to_owned(),
+            key: key.to_owned(),
+            parts: BTreeMap::new(),
+            attributes: StoredObject {
+                storage_class: "STANDARD".to_owned(),
+                ..StoredObject::default()
+            },
+            encryption: None,
+            checksum: None,
+        }
+    }
 }
 
 /// One version of one key: what was put there, or the delete marker that hid it.
@@ -298,16 +348,14 @@ impl Fixture {
     /// Ids are minted from a counter rather than randomly: a case that captures one and redacts it
     /// compares byte for byte, and a random id would make the same run differ from itself.
     pub fn create_upload(&mut self, bucket: &str, key: &str) -> String {
+        self.begin_upload(StoredUpload::bare(bucket, key))
+    }
+
+    /// Creates a multipart upload that carries the attributes its initiating request named.
+    pub fn begin_upload(&mut self, upload: StoredUpload) -> String {
         self.next_upload += 1;
         let id = format!("conformance-upload-{:04}", self.next_upload);
-        self.uploads.insert(
-            id.clone(),
-            StoredUpload {
-                bucket: bucket.to_owned(),
-                key: key.to_owned(),
-                parts: BTreeMap::new(),
-            },
-        );
+        self.uploads.insert(id.clone(), upload);
         id
     }
 
@@ -556,10 +604,27 @@ fn etag_list_matches(header: &str, etag: &str) -> bool {
     })
 }
 
+/// What the conditional headers decided.
+///
+/// `NotModified` is deliberately not a [`HandlerError`]. A `304` is a *success* in the sense the
+/// codec cares about — RFC 9110 gives it no content, so it carries the validators of the
+/// representation the client already holds and nothing else — and an error carries a code and a
+/// message, which the codec renders as an XML document with a `Content-Type` and a
+/// `Content-Length`. Answering `304` through the error path therefore produced a body the standard
+/// forbids and lost the `ETag` a conditional client comes back for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Precondition {
+    /// Serve the representation.
+    Serve,
+    /// Answer `304`, with validators and no content.
+    NotModified,
+}
+
 /// The four conditional headers, evaluated in the RFC 9110 order.
 ///
-/// `read_kind` selects the two answers that differ between a read and a write: a read answers a
-/// failed `If-None-Match` with `304`, a write answers it with `412`.
+/// `read` selects the two answers that differ between a read and a write: a read answers a failed
+/// `If-None-Match` with [`Precondition::NotModified`], a write answers it with `412`. A write can
+/// therefore ignore the `Ok` value — it is only ever [`Precondition::Serve`].
 fn evaluate_conditions(
     object: &StoredObject,
     if_match: Option<&str>,
@@ -567,7 +632,7 @@ fn evaluate_conditions(
     if_none_match: Option<&str>,
     if_modified_since: Option<i64>,
     read: bool,
-) -> Result<(), HandlerError> {
+) -> Result<Precondition, HandlerError> {
     if let Some(header) = if_match {
         if !etag_list_matches(header, &object.etag) {
             return Err(precondition("If-Match"));
@@ -579,22 +644,18 @@ fn evaluate_conditions(
     }
     if let Some(header) = if_none_match {
         if etag_list_matches(header, &object.etag) {
-            return Err(if read {
-                HandlerError::new(ErrorCode::NOT_MODIFIED, "If-None-Match selected the current representation")
-            } else {
-                precondition("If-None-Match")
-            });
+            if read {
+                return Ok(Precondition::NotModified);
+            }
+            return Err(precondition("If-None-Match"));
         }
     } else if let Some(instant) = if_modified_since
         && read
         && object.last_modified <= instant
     {
-        return Err(HandlerError::new(
-            ErrorCode::NOT_MODIFIED,
-            "the representation has not changed since the instant given",
-        ));
+        return Ok(Precondition::NotModified);
     }
-    Ok(())
+    Ok(Precondition::Serve)
 }
 
 /// A `412`, worded as AWS words it.
@@ -653,9 +714,53 @@ fn storage_class_header(object: &StoredObject) -> Option<dto::StorageClass> {
     Some(dto::StorageClass::custom(object.storage_class.clone()))
 }
 
-/// `416`, with the `Content-Range` an unsatisfiable request must carry.
+/// `416`.
+///
+/// # What this cannot say, and why that is not this file's to fix
+///
+/// RFC 9110 §15.5.17 requires a `416` to carry `Content-Range: bytes */<complete-length>`, and AWS
+/// puts the same two numbers in the document as `<ActualObjectSize>` and `<RangeRequested>`. A
+/// [`HandlerError`] carries an [`ErrorCode`] and a message and nothing else: it has no header map
+/// and no room for an element the shared error document does not declare. So a backend cannot
+/// answer a `416` completely no matter what it does here, and a fixture that reached around the
+/// error path to attach the header would report a green for a gap every other backend still has.
+/// `c-range-0009`, `c-range-0010`, `c-range-0014` and `c-object-0014` are that gap, held open.
 fn unsatisfiable() -> HandlerError {
     HandlerError::new(ErrorCode::INVALID_RANGE, "The requested range is not satisfiable")
+}
+
+/// The checksum contract an initiating request declared, if it declared one.
+///
+/// An algorithm this suite cannot compute is refused rather than dropped: answering the upload
+/// without the digests it asked for would look like success and produce parts no client could
+/// verify.
+fn upload_checksum(
+    algorithm: Option<&dto::ChecksumAlgorithm>,
+    kind: Option<&dto::ChecksumType>,
+) -> Result<Option<UploadChecksum>, HandlerError> {
+    let Some(algorithm) = algorithm else { return Ok(None) };
+    let resolved = ChecksumAlgorithm::from_wire_name(algorithm.as_str()).ok_or_else(|| {
+        HandlerError::new(
+            ErrorCode::INVALID_REQUEST,
+            "Checksum algorithm provided is unsupported. Please try again with any of the valid types: [CRC32, CRC32C, SHA1, SHA256, CRC64NVME]",
+        )
+    })?;
+    if resolved != ChecksumAlgorithm::Crc32 {
+        return Err(HandlerError::not_implemented(
+            "this conformance fixture digests parts with CRC32 only; every other algorithm would have to be answered with a digest it did not compute",
+        ));
+    }
+    Ok(Some(UploadChecksum {
+        algorithm: resolved,
+        kind: kind.cloned().unwrap_or(dto::ChecksumType::COMPOSITE),
+    }))
+}
+
+/// The `x-amz-checksum-*` value for one run of bytes, under the algorithm the upload declared.
+fn checksum_of(checksum: &UploadChecksum, bytes: &[u8]) -> Result<ChecksumSpec, HandlerError> {
+    let digest = crate::crc32::digest(bytes);
+    ChecksumSpec::from_digest(checksum.algorithm, &digest)
+        .map_err(|_| HandlerError::internal_error("a computed digest is not a valid checksum"))
 }
 
 /// `x-amz-copy-source`, resolved to the object it names.
@@ -1192,9 +1297,15 @@ async fn put_object(state: &Arc<Mutex<Fixture>>, input: dto::PutObjectInput) -> 
         object.storage_class = class.to_string();
     }
     let size = object.body.len() as i64;
-    fixture.put_object(input.bucket.as_str(), input.key.as_str(), object);
+    let etag = object.etag.clone();
+    let written = fixture.put_object(input.bucket.as_str(), input.key.as_str(), object);
     Ok(Resp::new(dto::PutObjectOutput {
         size: Some(size),
+        // `ETag` is a *required* member of this output, so leaving it at its default did not omit
+        // the header — it emitted an empty one, which is worse than omitting it: a client that
+        // stores the value it was handed records `""` as the digest of the object it just wrote.
+        e_tag: entity_tag(&etag)?,
+        version_id: (written != UNVERSIONED).then_some(written),
         ..dto::PutObjectOutput::default()
     }))
 }
@@ -1205,21 +1316,35 @@ async fn upload_part(state: &Arc<Mutex<Fixture>>, input: dto::UploadPartInput) -
         .lock()
         .map_err(|_| HandlerError::internal_error("the fixture state was left poisoned by an earlier exchange"))?;
     require_bucket(&fixture, &input.bucket)?;
-    if !fixture.uploads.contains_key(&input.upload_id) {
+    let Some(upload) = fixture.uploads.get(&input.upload_id) else {
         return Err(HandlerError::new(
             ErrorCode::NO_SUCH_UPLOAD,
             "The specified upload does not exist. The upload ID may be invalid, or the upload may have been aborted or completed.",
         ));
-    }
-    fixture.put_part(&input.upload_id, input.part_number, bytes);
-    Ok(Resp::new(dto::UploadPartOutput::default()))
+    };
+    // The digest of the bytes that just arrived, under the algorithm the *initiation* named. A part
+    // request carries no algorithm of its own, so an upload opened without one gets no checksum
+    // header rather than a default one nobody asked for.
+    let checksum_spec = match upload.checksum.clone() {
+        None => None,
+        Some(checksum) => Some(checksum_of(&checksum, &bytes)?),
+    };
+    let etag = fixture.put_part(&input.upload_id, input.part_number, bytes);
+    Ok(Resp::new(dto::UploadPartOutput {
+        checksum_spec,
+        // Required, like `PutObject`'s. Nine multipart cases capture this header and quote it back
+        // in the completion document, so an empty one did not merely lose a header — it made the
+        // completion body they built unparseable.
+        e_tag: entity_tag(&etag)?,
+        ..dto::UploadPartOutput::default()
+    }))
 }
 
 impl Stub {
     fn get_object(&self, input: &dto::GetObjectInput) -> HandlerResult<dto::GetObject> {
         let fixture = self.borrow()?;
         let object = require_object(&fixture, &input.bucket, &input.key)?;
-        evaluate_conditions(
+        let condition = evaluate_conditions(
             object,
             input.if_match.as_deref(),
             input.if_unmodified_since.as_ref().map(|stamp| stamp.secs()),
@@ -1227,6 +1352,18 @@ impl Stub {
             input.if_modified_since.as_ref().map(|stamp| stamp.secs()),
             true,
         )?;
+        if condition == Precondition::NotModified {
+            return Ok(Resp::with_status(
+                dto::GetObjectOutput {
+                    e_tag: Some(entity_tag(&object.etag)?),
+                    last_modified: Some(Timestamp::from_secs(object.last_modified)),
+                    cache_control: object.cache_control.clone(),
+                    expires: object.expires.clone().map(Into::into),
+                    ..dto::GetObjectOutput::default()
+                },
+                304,
+            ));
+        }
         let length = object.body.len();
         let slice = match input.range.as_ref() {
             None => Slice::whole(length),
@@ -1253,6 +1390,11 @@ impl Stub {
                 content_type: object.content_type.clone(),
                 content_range: slice.content_range,
                 accept_ranges: Some("bytes".to_owned()),
+                // The two validators. They describe the *representation*, never the window served,
+                // so a 206 reports the entity tag and the modification time of the whole object —
+                // which is what makes a resumed download able to notice the object changed under it.
+                e_tag: Some(entity_tag(&object.etag)?),
+                last_modified: Some(Timestamp::from_secs(object.last_modified)),
                 cache_control: object.cache_control.clone(),
                 content_disposition: object.content_disposition.clone(),
                 content_encoding: object.content_encoding.clone(),
@@ -1270,7 +1412,7 @@ impl Stub {
     fn head_object(&self, input: &dto::HeadObjectInput) -> HandlerResult<dto::HeadObject> {
         let fixture = self.borrow()?;
         let object = require_object(&fixture, &input.bucket, &input.key)?;
-        evaluate_conditions(
+        let condition = evaluate_conditions(
             object,
             input.if_match.as_deref(),
             input.if_unmodified_since.as_ref().map(|stamp| stamp.secs()),
@@ -1278,6 +1420,18 @@ impl Stub {
             input.if_modified_since.as_ref().map(|stamp| stamp.secs()),
             true,
         )?;
+        if condition == Precondition::NotModified {
+            return Ok(Resp::with_status(
+                dto::HeadObjectOutput {
+                    e_tag: Some(entity_tag(&object.etag)?),
+                    last_modified: Some(Timestamp::from_secs(object.last_modified)),
+                    cache_control: object.cache_control.clone(),
+                    expires: object.expires.clone().map(Into::into),
+                    ..dto::HeadObjectOutput::default()
+                },
+                304,
+            ));
+        }
         let length = object.body.len();
         let slice = match input.range.as_ref() {
             None => Slice::whole(length),
@@ -1304,6 +1458,8 @@ impl Stub {
                 content_type: object.content_type.clone(),
                 content_range: slice.content_range,
                 accept_ranges: Some("bytes".to_owned()),
+                e_tag: Some(entity_tag(&object.etag)?),
+                last_modified: Some(Timestamp::from_secs(object.last_modified)),
                 cache_control: object.cache_control.clone(),
                 content_disposition: object.content_disposition.clone(),
                 content_encoding: object.content_encoding.clone(),
@@ -1526,14 +1682,39 @@ impl Stub {
         Ok(Resp::new(dto::GetBucketLocationOutput::default()))
     }
 
+    /// Opens a multipart upload, and records the attributes only this request can state.
+    ///
+    /// Nothing here is invented: every value stored is one the initiating request carried, and the
+    /// two that come back out as headers come back out unchanged. What the fixture must not do is
+    /// *drop* them, because the object they describe does not exist yet and there is no second
+    /// request that could restate them.
     fn create_multipart_upload(&self, input: &dto::CreateMultipartUploadInput) -> HandlerResult<dto::CreateMultipartUpload> {
         let mut fixture = self.borrow()?;
         require_bucket(&fixture, &input.bucket)?;
-        let upload_id = fixture.create_upload(input.bucket.as_str(), input.key.as_str());
+        let mut upload = StoredUpload::bare(input.bucket.as_str(), input.key.as_str());
+        upload.attributes.content_type = input.content_type.clone();
+        upload.attributes.cache_control = input.cache_control.clone();
+        upload.attributes.content_disposition = input.content_disposition.clone();
+        upload.attributes.content_encoding = input.content_encoding.clone();
+        upload.attributes.content_language = input.content_language.clone();
+        upload.attributes.expires = input.expires.as_ref().map(|value| value.as_str().to_owned());
+        upload.attributes.metadata = input.metadata.clone();
+        if let Some(class) = input.storage_class.as_ref() {
+            upload.attributes.storage_class = class.to_string();
+        }
+        upload.encryption = input.server_side_encryption.clone();
+        upload.checksum = upload_checksum(input.checksum_algorithm.as_ref(), input.checksum_type.as_ref())?;
+        let server_side_encryption = input.server_side_encryption.clone();
+        let checksum_algorithm = input.checksum_algorithm.clone();
+        let checksum_type = upload.checksum.as_ref().map(|checksum| checksum.kind.clone());
+        let upload_id = fixture.begin_upload(upload);
         Ok(Resp::new(dto::CreateMultipartUploadOutput {
             bucket: input.bucket.clone(),
             key: input.key.clone(),
             upload_id,
+            server_side_encryption,
+            checksum_algorithm,
+            checksum_type,
             ..dto::CreateMultipartUploadOutput::default()
         }))
     }
@@ -1579,42 +1760,87 @@ impl Stub {
         // A completion is a write, and it carries the same two conditional headers a write does.
         match fixture.object(upload.bucket.as_str(), upload.key.as_str()).cloned() {
             Some(existing) => {
-                evaluate_conditions(&existing, input.if_match.as_deref(), None, input.if_none_match.as_deref(), None, false)?
+                evaluate_conditions(&existing, input.if_match.as_deref(), None, input.if_none_match.as_deref(), None, false)?;
             }
             None if input.if_match.is_some() => return Err(precondition("If-Match")),
             None => {}
         }
         let mut assembled = Vec::new();
+        let mut digests = Vec::new();
+        let mut part_checksums = Vec::new();
         for part in named {
             let stored = upload.parts.get(&part.part_number).ok_or_else(|| {
                 HandlerError::new(ErrorCode::INVALID_PART, "One or more of the specified parts could not be found.")
             })?;
-            // The entity tag is compared through its `Debug` rendering. `ETag`'s accessors are not
-            // reachable through the facade — the same gap that makes a listing unbuildable — and
-            // `Debug` is the only surface left that carries the opaque tag. An empty claim is
-            // accepted rather than refused: this backend's own `UploadPart` cannot answer with an
-            // entity tag either, so a case that echoes what it was given is unverifiable here and
-            // refusing it would report a digest mismatch that never happened.
+            // An empty claim is accepted rather than refused: a case that echoes back a header some
+            // *other* implementation did not send is asserting about that implementation, and a
+            // digest mismatch reported here would name a mismatch that never happened.
             if let Some(claimed) = part.e_tag.as_ref() {
-                let rendered = format!("{claimed:?}");
-                let claims_nothing = rendered.contains("tag: \"\"");
-                if !claims_nothing && !rendered.contains(&stored.etag) {
+                let claimed = claimed.opaque_tag();
+                if !claimed.is_empty() && claimed != stored.etag {
                     return Err(HandlerError::new(
                         ErrorCode::INVALID_PART,
                         "One or more of the specified parts could not be found.",
                     ));
                 }
             }
+            digests.push(crate::md5::digest(&stored.body));
+            if let Some(checksum) = upload.checksum.as_ref() {
+                part_checksums.push((checksum_of(checksum, &stored.body)?, stored.body.len() as u64));
+            }
             assembled.extend_from_slice(&stored.body);
         }
+        // The two ways S3 rolls part checksums into one, and they are not interchangeable: a
+        // composite is a digest *of the digests* and carries `-N`, while a full-object checksum is
+        // the digest the whole object would have had if it had arrived in one request. Emitting one
+        // where the upload asked for the other gives a client a value that never verifies.
+        let checksum_spec = match upload.checksum.as_ref() {
+            None => None,
+            Some(checksum) if checksum.kind == dto::ChecksumType::FULL_OBJECT => Some(
+                ChecksumSpec::combine_full_object(&part_checksums)
+                    .map_err(|_| HandlerError::internal_error("the part checksums do not combine"))?,
+            ),
+            Some(_) => {
+                let parts: Vec<ChecksumSpec> = part_checksums.iter().map(|(spec, _)| *spec).collect();
+                Some(
+                    ChecksumSpec::composite_of(&parts)
+                        .map_err(|_| HandlerError::internal_error("the part checksums have no composite"))?,
+                )
+            }
+        };
+        let checksum_type = upload.checksum.as_ref().map(|checksum| checksum.kind.clone());
         let now = fixture.now;
-        let assembled = StoredObject::new(assembled, None, now);
-        fixture.put_object(&upload.bucket, &upload.key, assembled);
+        // The entity tag of a multipart object is not the digest of its bytes. It is the digest of
+        // the concatenated part digests with the part count after a hyphen, and a client that reads
+        // the plain MD5 back would compare it against the composite and conclude the object is
+        // corrupt. `ETag::from_part_digests` is the framework's own derivation of that rule, so the
+        // two spellings cannot drift.
+        let composite =
+            ETag::from_part_digests(&digests).map_err(|_| HandlerError::internal_error("a part digest set has no entity tag"))?;
+        let object = StoredObject {
+            body: assembled,
+            etag: composite.opaque_tag().to_owned(),
+            last_modified: now,
+            ..upload.attributes.clone()
+        };
+        let written = fixture.put_object(&upload.bucket, &upload.key, object);
         fixture.uploads.remove(&input.upload_id);
         Ok(Resp::new(dto::CompleteMultipartUploadOutput {
             bucket: Some(input.bucket.clone()),
             key: Some(input.key.clone()),
             location: Some(format!("/{}/{}", input.bucket.as_str(), input.key.as_str())),
+            e_tag: Some(composite),
+            version_id: (written != UNVERSIONED).then_some(written),
+            // The body binds one element per algorithm rather than the packed spec a header binds,
+            // so the rendering is explicit here. CRC32 is the only algorithm this fixture computes,
+            // and `upload_checksum` refuses the rest outright rather than letting one fall through
+            // to an empty element.
+            checksum_crc32: checksum_spec.as_ref().map(|spec| spec.render_base64().to_owned()),
+            checksum_type,
+            // Decided at initiation, reported here. That gap is the whole of what these cases
+            // measure: the completion's head is flushed before the body is assembled, so a value
+            // that is only looked up afterwards can never become a header.
+            server_side_encryption: upload.encryption.clone(),
             ..dto::CompleteMultipartUploadOutput::default()
         }))
     }

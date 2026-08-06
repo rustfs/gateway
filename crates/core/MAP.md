@@ -35,7 +35,7 @@ the one file that awaits, and it runs after the floor has admitted the request.
 | `src/ops/*.rs` | One AWS operation per file: spec, floor, `impl Operation`, `impl HasOperation` | You are adding an operation — copy the nearest one |
 | `src/ops/shared/copy_source.rs` | `x-amz-copy-source`: the three grammars, the split-before-decode order, the source-authorization type state, the self-copy classification and the stricter copy-range rule | You are touching anything a copy reads from, or asking why the source's bucket cannot be read without a proof |
 | `src/ops/shared/etag.rs` | Which RFC 9110 comparison each conditional entity-tag header uses, and how its value is read | An entity-tag condition matched when it should not have, or the other way round |
-| `src/ops/shared/precondition.rs` | The fixed precondition order, the two places S3 departs from RFC 9110, and the 200/206/416 range decision | You are wiring a conditional or ranged operation, or a 304/412/416 came out wrong |
+| `src/ops/shared/precondition.rs` | The fixed precondition order, the two places S3 departs from RFC 9110, the 200/206/416 range decision, and six inline tests for the one validator shape `tests/precondition_range.rs` never builds — a representation that exists with no entity tag, where `*` must still hold | You are wiring a conditional or ranged operation, or a 304/412/416 came out wrong |
 | `src/handler.rs` | `Handler<O>`, `Req`, `Resp`, `HandlerError`, `BoxFuture` | You are implementing a backend |
 | `src/registry/mod.rs` | `OperationSpec`, `RequiredParam`, `check_required`, `Registry`, `WireEntry` — and `register_handler`, the one call that installs a handler and a codec together | You are adding a required parameter, or looking an operation up by name |
 | `src/registry/reject.rs` | `RegistryError` and the seven rules an operation passes before it registers | A registration was refused |
@@ -109,6 +109,57 @@ the one file that awaits, and it runs after the floor has admitted the request.
 
 ## Open for maintainer review
 
+- **The conditional cluster's declarations are wired; its *evaluation* cannot be, and the fixture's
+  private mirror is what the suite is actually measuring.** `ops/get_object.rs`,
+  `ops/head_object.rs` and `ops/put_object.rs` now `use` `shared::precondition` and `shared::etag`
+  and declare a `CONDITION_KIND` and a `CONDITIONS` list each — the same declarative shape the four
+  listing operations use for `shared::pagination`'s `CursorSpec`, and, like those, read by nothing
+  yet. Three of the seven names in the two `//! Members:` lines are therefore now checkable against
+  the `use` graph; `CopyObject`, `UploadPartCopy`, `CompleteMultipartUpload` and `DeleteObject`
+  stay declaration-only, so the both-directions guard AGENTS.md asks for can be written for the
+  object family but cannot yet be made total. What no `ops/<name>.rs` file can hold is the call to
+  `evaluate`: each is a static `OperationSpec` and a floor, settled before a request is read, while
+  evaluating a condition needs the object the *handler* resolved. So the caller is the backend, and
+  `crates/gateway/src/lib.rs` re-exports `ops::shared::copy_source` and nothing else from this
+  directory. `crates/conformance/src/fixture.rs` therefore answers `If-Match` out of
+  `evaluate_conditions`, a hand-written mirror that disagrees with this crate on six outcomes:
+  `If-Match` + `If-None-Match` together (400 here, 304 there), `If-Match: *` on a missing key (412
+  / 404), a matching `If-Match` suppressing a failing `If-Modified-Since` (200 / 304), a missed
+  `If-None-Match` with a satisfied `If-Unmodified-Since` (304 / 200), an `If-Modified-Since` in the
+  server's future (200 / 304), and the strong comparison `If-Match` requires (412 / 200 on a weak
+  validator). `If-Range` and `partNumber` are absent from the mirror altogether. Closing this is
+  one facade export plus one backend edit — the same two-line shape the copy-source export took —
+  and it is the whole of `c-cond-0013` … `c-cond-0021`, `c-range-0015`, `c-range-0018`.
+- **`OperationSpec` can require a parameter and cannot forbid a combination, so `c-cond-0014` and
+  `c-range-0015` have nowhere declarative to live.** `RequiredParam` is `{kind, name,
+  missing_error, message}` and `check_required` tests exactly one thing — `present` — so it
+  expresses "this operation cannot proceed without X" and has no form for "X and Y must not both
+  be sent". The two mutual exclusions the conditional cluster needs are `If-Match` with
+  `If-None-Match` (400 `InvalidRequest`) and `Range` with `partNumber` (400 `InvalidRequest`);
+  `evaluate` and `evaluate_range` already return them as a `PreconditionRejection`, but that is a
+  value a *handler* produces, and both are properties of the request head alone — decidable before
+  authentication, and `400` is already in the pre-auth status set. A `RequiredParam` sibling —
+  `MutuallyExclusive { kind, names, error, message }`, checked in the same loop — would put them
+  where the rest of the request-shape rules are. Recorded rather than worked around: the
+  alternative is an `if` in every backend's handler, which is the per-implementation duplication
+  `ops/shared/` exists to prevent. The change is in `crates/core/src/registry/mod.rs`.
+- **`RangeDecision::Part` is a selector that `status()` already calls a `206`.**
+  `evaluate_range` is given the object's total length and nothing about its part boundaries, so
+  `Part` carries only the requested `partNumber`: `content_range()` answers `None` and
+  `content_length()` answers the *whole* object's length. A `206` with no `Content-Range` is not a
+  response RFC 9110 §15.3.7 allows, and `c-range-0007` asserts `x-amz-mp-parts-count` besides.
+  Completing it changes the variant's shape — the part table has to reach `evaluate_range`, or the
+  operation has to resolve `Part` itself — which is a contract decision, so it is recorded rather
+  than guessed at.
+- **A `HandlerError` carries a code and a message, so five error documents cannot be produced at
+  all.** `<Condition>` on a 412 (`c-cond-0001`, `c-cond-0023`), `<Key>` on a `NoSuchKey`
+  (`c-object-0007`), and `<RangeRequested>` / `<ActualObjectSize>` on a 416 (`c-range-0010`) are
+  elements AWS emits and no backend in this workspace can put on the wire.
+  `PreconditionRejection` and `RangeDecision::Unsatisfiable` already hold the values —
+  `Unsatisfiable` carries `actual_object_size` and `range_requested` for exactly this reason — so
+  the missing piece is a per-error detail channel on `HandlerError`, in `crates/core/src/handler.rs`.
+  The 416 `Content-Range: bytes */N` header (`c-range-0009`, `c-range-0014`, `c-object-0014`) is
+  the same gap on the header axis.
 - **The copy family's second authorization stage lives in a type, not in `AuthRequirement`.**
   `AuthRequirement` carries one action and one resource shape, so `CopyObject` and `UploadPartCopy`
   declare only the destination's `s3:PutObject`. The source's `s3:GetObject` is enforced by
@@ -193,7 +244,7 @@ the one file that awaits, and it runs after the floor has admitted the request.
 ## Verify
 
 ```bash
-cargo test -p rustfs-gateway-core                                  # 200 tests
+cargo test -p rustfs-gateway-core                                  # 250 tests
 cargo clippy -p rustfs-gateway-core --all-targets -- -D warnings
 cargo fmt --all --check
 bash scripts/check_license_headers.sh

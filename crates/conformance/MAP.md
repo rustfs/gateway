@@ -8,8 +8,8 @@ Two third-party dependencies, and only two: `http` and `bytes`. They are the par
 facade's own entry point — `S3Service::call_bytes(http::Request<bytes::Bytes>)` — so a caller
 cannot name that call without them. Everything else is still hand-written here, because this crate
 is a product other implementations run against themselves and every dependency it carries is one
-they inherit: the TOML reader, JSON reader, schema evaluator, pattern matcher, SHA-256, MD5 and the
-single-threaded executor are all in this crate, small and unit-tested.
+they inherit: the TOML reader, JSON reader, schema evaluator, pattern matcher, SHA-256, MD5,
+CRC-32 and the single-threaded executor are all in this crate, small and unit-tested.
 
 ## Entry points
 
@@ -43,6 +43,7 @@ reach its target must not be recordable as a run whose assertions failed.
 | `src/xml.rs` | The response-body scanner: root, xmlns, child order, empty-element style, redaction | A body assertion misreads a response |
 | `src/sha256.rs` | SHA-256 for `expect.body.sha256`. Never authenticates anything | Rarely |
 | `src/md5.rs` | MD5, because an S3 entity tag is one. The fixture stamps objects with it | An `If-Match` case disagrees about a tag |
+| `src/crc32.rs` | CRC-32/ISO-HDLC for `x-amz-checksum-crc32`. Written out because the facade exports `ChecksumSpec` but not the `Checksummer` trait, so the framework's own implementation cannot be reached from outside the workspace | A multipart checksum case disagrees about a digest |
 | `src/time.rs` | `[clock] fixed` / `request_time` into a Unix second and a SigV4 stamp | A clock-pinned case is an hour out |
 | `src/exec.rs` | Twenty lines of `std` that run one future to completion | Never, unless a run hangs |
 | `src/fixture.rs` | **The stub backend**: what `[setup]` established, and the answers built out of it — the six listings with their pagination and cursors, and the copy family with its source parser, source gate and span rule | A case fails on a value the fixture chose |
@@ -79,7 +80,7 @@ The baseline on disk is older than the current run:
 
 ```text
 conformance/baseline.json   195 cases: 87 passed, 103 failed, 5 skipped
-current                     195 cases: 124 passed, 66 failed, 5 skipped
+current                     195 cases: 144 passed, 46 failed, 5 skipped
 ```
 
 Regenerate it with `baseline > conformance/baseline.json` in the same change that moves the
@@ -103,15 +104,32 @@ expected to be red, and the baseline exists to freeze how red rather than to exc
    and writes a `Buckets` element per entry, so the body reads
    `<Bucket><Buckets><Name>…</Name></Buckets></Bucket>` where AWS reads
    `<Buckets><Bucket><Name>…</Name></Bucket></Buckets>`. `c-list-0015` is the case that sees it.
-3. **Genuine protocol disagreements**, which is what the suite is for. Among them:
-   `partNumber > 10000` is accepted; `DeleteObjects` does not require an integrity header; a `304`
-   and a `HEAD` refusal both carry an XML body; a `416` carries no `Content-Range`;
-   `MaxMessageLengthExceeded` where AWS says `InvalidArgument`.
-4. **`GetObjectAttributes` is not implemented**, so `GET …?attributes` falls through to
+3. **A `HandlerError` is a code and a message, and some refusals are more than that.** It has no
+   header map and no room for an element the shared error document does not declare, so a backend
+   cannot answer a `416` with the `Content-Range: bytes */<length>` RFC 9110 §15.5.17 requires, nor
+   with the `<ActualObjectSize>` and `<RangeRequested>` elements AWS adds, nor a `412` with the
+   `<Condition>` element naming the header that failed. `c-range-0009`, `c-range-0010`,
+   `c-range-0014`, `c-object-0014` and the conditional cases that assert `<Condition>` are that
+   gap. The fixture does **not** reach around the error path to attach them: it would report a
+   green for a gap every other backend still has. The `304` half of this was a fixture bug rather
+   than a framework one and is fixed — a not-modified answer is a `Resp::with_status(_, 304)`
+   carrying the validators, never a `HandlerError`, because the codec already strips the body and
+   the framing header at that status.
+4. **No response carries `Server` or `Date`.** Nothing in the facade or the codec writes either,
+   and no dto declares them, so no backend can supply them. `c-list-0044` is the case that sees it.
+5. **Genuine protocol disagreements**, which is what the suite is for. Among them:
+   `partNumber > 10000` is accepted; `DeleteObjects` does not require an integrity header; a `HEAD`
+   refusal carries an XML body; `MaxMessageLengthExceeded` where AWS says `InvalidArgument`.
+6. **The facade exports `ChecksumSpec` but not `Checksummer`.** `ChecksumAlgorithm::checksummer`
+   returns `Box<dyn Checksummer>` and the trait is not re-exported, so the method on that box
+   cannot be called from outside the workspace and no backend can produce an `x-amz-checksum-*`
+   value without vendoring a digest. `src/crc32.rs` is this suite's copy; every other backend will
+   write one too.
+7. **`GetObjectAttributes` is not implemented**, so `GET …?attributes` falls through to
    `GetObject` and is answered wrongly rather than refused. `c-etag-0001` is the case that sees it.
    `CopyObject` and `UploadPartCopy` were in this list and no longer are: both are registered by
    `inprocess` and answered by `fixture`.
-5. **The copy-source contract is not reachable through the facade.**
+8. **The copy-source contract is not reachable through the facade.**
    `crates/core/src/ops/shared/copy_source.rs` holds the split rule, the two ARN grammars, the
    source-authorization type state, the self-copy classification and the copy range rule, and the
    facade exports none of it. `fixture` therefore *mirrors* the module rather than calling it — see
@@ -120,11 +138,11 @@ expected to be red, and the baseline exists to freeze how red rather than to exc
    `resolve_copy_range` answers a span outside the source with `InvalidRange` (416) where AWS and
    `c-copy-0036` say `InvalidArgument` (400), and its doc comment says an overlong span is "not
    clamped, it is refused" while `ByteRange::resolve` clamps the end.
-6. **A copy cannot fail after its head is committed.** A `HandlerResult` is a status *or* an
+9. **A copy cannot fail after its head is committed.** A `HandlerResult` is a status *or* an
    answer, so there is no way for a backend to commit a `200` and then stream an `Error` document
    — the shape AWS uses for a long copy, and the shape `c-copy-0038` asserts. It is a facade
    capability rather than a backend decision, and the fixture does not approximate it.
-7. **Object tagging has no operation at all.** `GetObjectTagging` and `PutObjectTagging` are absent
+10. **Object tagging has no operation at all.** `GetObjectTagging` and `PutObjectTagging` are absent
    from the model, so `x-amz-tagging` and `x-amz-tagging-directive` can be sent and never read
    back. `c-copy-0008` copies with `TaggingDirective: REPLACE` and its read-back reaches
    `GetObject`, which is the case that sees it.

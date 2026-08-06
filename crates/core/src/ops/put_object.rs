@@ -20,8 +20,16 @@
 //! settled in `rustfs-gateway-http` before a handler sees anything.
 //! Upstream: `rustfs-gateway-types`' generated dto. Downstream: `crate::registry`.
 //!
-//! Shares: precondition and checksum handling with the Conditional and Checksum clusters, once
-//! those modules exist.
+//! Shares: precondition, etag
+//!
+//! Both modules exist now; the checksum cluster still does not, so checksum handling stays prose.
+//! No `range` — a write selects no byte span.
+//!
+//! `PutObject` is the member that makes the read/write split in
+//! [`crate::ops::shared::precondition`] load-bearing, and [`CONDITION_KIND`] is where this file
+//! says so: a failed `If-None-Match` here is a `412`, never a `304`. It is the one value in the
+//! cluster that differs between operations, which is exactly why it is declared and not inferred.
+//! The evaluation call is not here, for the reason recorded in [`crate::ops::get_object`].
 //!
 //! `PutObject` is the operation that makes the POST-policy shape interesting: a browser upload
 //! reaches it through a signed form rather than a header signature. The floor here stays
@@ -32,7 +40,20 @@ use rustfs_gateway_sig::{OperationFloor, SigService};
 use rustfs_gateway_types::dto::{PutObject, PutObjectInput, PutObjectOutput};
 
 use crate::op::{AuthRequirement, HasOperation, Operation, OperationOrigin, ResourceShape, StandardOperation};
+use crate::ops::shared::etag::ConditionalHeader;
+use crate::ops::shared::precondition::RequestKind;
 use crate::registry::OperationSpec;
+
+/// Which side of the read/write split this operation's conditions are evaluated on.
+///
+/// A write, and the only value in the object family that is. `If-None-Match: *` here is the
+/// create-if-absent primitive, so a miss must be a `412` that tells the loser of a race the key was
+/// taken — never the `304` a read would answer, which would report an object unchanged that this
+/// request never wrote.
+pub static CONDITION_KIND: RequestKind = RequestKind::Write;
+
+/// The entity-tag conditions evaluated against the object this request would replace.
+pub static CONDITIONS: [ConditionalHeader; 2] = [ConditionalHeader::IfMatch, ConditionalHeader::IfNoneMatch];
 
 /// What this operation requires of a request once routing has chosen it.
 static SPEC: OperationSpec = OperationSpec {

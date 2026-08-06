@@ -21,7 +21,20 @@
 //! `crate::codec`.
 //! Upstream: `rustfs-gateway-types`' generated dto. Downstream: `crate::registry`.
 //!
-//! Shares: object attributes, user metadata, checksum and the `response-*` overrides with the object family.
+//! Shares: precondition, etag
+//!
+//! Also shares object attributes, user metadata, checksum and the `response-*` overrides with the
+//! object family; those have no module under `ops/shared/` because the generated codec carries
+//! them, so they are named here in prose rather than in the machine-readable line above. The range
+//! rules are part of `shared::precondition` and not a module of their own.
+//!
+//! [`CONDITION_KIND`] and [`CONDITIONS`] are what this file contributes to the conditional
+//! cluster, in the shape `ListObjects::CURSOR` contributes to the List cluster: the operation owns
+//! the facts that are constant about it, and the shared module owns the rules. What is *not* here
+//! is the call to [`evaluate`](crate::ops::shared::precondition::evaluate) — that needs the
+//! representation a handler resolved, so its call site is the backend's, and a backend outside
+//! this workspace cannot reach the function yet. See `crates/core/MAP.md`, "Open for maintainer
+//! review".
 //!
 //! The `response-*` query parameters are applied by the generated encoder as a final pass over
 //! the header set, from `OperationCodec::RESPONSE_OVERRIDES` — so an override wins over whatever
@@ -34,7 +47,24 @@ use rustfs_gateway_sig::{OperationFloor, SigService};
 use rustfs_gateway_types::dto::{GetObject, GetObjectInput, GetObjectOutput};
 
 use crate::op::{AuthRequirement, HasOperation, Operation, OperationOrigin, ResourceShape, StandardOperation};
+use crate::ops::shared::etag::ConditionalHeader;
+use crate::ops::shared::precondition::RequestKind;
 use crate::registry::OperationSpec;
+
+/// Which side of the read/write split this operation's conditions are evaluated on.
+///
+/// A read, so a satisfied `If-None-Match` is a `304` here and a `412` on `PutObject`. Declared
+/// rather than left to the caller for the reason the same split exists at all: a write answered
+/// with `304` tells a client its object is unchanged when it was never written, and "which kind is
+/// this operation?" is a fact this file owns and no backend should have to re-derive.
+pub static CONDITION_KIND: RequestKind = RequestKind::Read;
+
+/// The entity-tag conditions evaluated against the object this request names.
+///
+/// Both are evaluated against the *target*, which is the whole difference from `CopyObject` — it
+/// carries these two plus the `x-amz-copy-source-if-*` pair, and the two pairs answer to different
+/// representations.
+pub static CONDITIONS: [ConditionalHeader; 2] = [ConditionalHeader::IfMatch, ConditionalHeader::IfNoneMatch];
 
 /// What this operation requires of a request once routing has chosen it.
 static SPEC: OperationSpec = OperationSpec {

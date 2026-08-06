@@ -113,6 +113,23 @@ pub use rustfs_gateway_core::{
     MissingHandlers, Operation, OperationCodec, OperationSet, OperationSpec, ParamKind, PreAuthError, Predicate, Req,
     RequestBody, RequiredParam, ResourceShape, Resp, ResponseBody, ResponseOverride, RouteEntry, RouteSelector, TargetKind,
 };
+// The conditional-request and entity-tag contracts, exported for the same reason as
+// copy_source below: the conformance fixture had written its own `evaluate_conditions`
+// by hand, because it could not reach this one. That mirror got strong/weak comparison
+// wrong, evaluated existence before the condition, and missed the If-Match suppression
+// of If-Modified-Since — four RFC 9110 rules re-derived and re-broken, while a correct
+// implementation sat one crate away and unreachable.
+//
+// The evaluation cannot live in `ops/*.rs`: those hold a static OperationSpec settled
+// before the request is read, and evaluate() needs the representation the handler
+// resolved. So the backend is the only place it can run, and the backend can only run
+// what the facade exports.
+pub use rustfs_gateway_core::ops::shared::etag::{ConditionalHeader, EtagComparison, etag_matches, parse_conditional_etag};
+pub use rustfs_gateway_core::ops::shared::precondition::{
+    ConditionalOutcome, IfRange, ObjectValidators, PreconditionRejection, Preconditions, RangeDecision, RangeSelectors,
+    RequestKind, evaluate, evaluate_range,
+};
+
 // The copy-source contract. Exported because a backend cannot honour it otherwise: the
 // conformance fixture had to mirror `CopySource`, `authorize_source` and `classify_self_copy`
 // by hand, and every backend outside this workspace would have done the same. A type state

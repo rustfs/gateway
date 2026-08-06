@@ -57,6 +57,7 @@
 
 pub mod cli;
 pub mod corpus;
+pub mod crc32;
 pub mod diagnostic;
 pub mod exec;
 pub mod expect;

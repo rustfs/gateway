@@ -21,7 +21,15 @@
 //! `crate::codec`.
 //! Upstream: `rustfs-gateway-types`' generated dto. Downstream: `crate::registry`.
 //!
-//! Shares: its entire header contract with `GetObject`, by derivation rather than by copy.
+//! Shares: precondition, etag
+//!
+//! It also shares its entire header contract with `GetObject`, by derivation rather than by copy.
+//!
+//! [`CONDITION_KIND`] and [`CONDITIONS`] repeat `GetObject`'s two values, because a `HEAD` really
+//! does evaluate the same conditions against the same representation. They are declared here
+//! rather than re-exported so that this file states its own membership — that is what the
+//! `//! Members:` line in [`crate::ops::shared::precondition`] is checked against. The evaluation
+//! call is not here, for the reason recorded in [`crate::ops::get_object`].
 //!
 //! The header set is not written twice. The overlay declares `head_mirrors = "GetObject"`, so the
 //! two encoders are generated from one binding table; upstream lost the entity tag on this
@@ -35,7 +43,18 @@ use rustfs_gateway_sig::{OperationFloor, SigService};
 use rustfs_gateway_types::dto::{HeadObject, HeadObjectInput, HeadObjectOutput};
 
 use crate::op::{AuthRequirement, HasOperation, Operation, OperationOrigin, ResourceShape, StandardOperation};
+use crate::ops::shared::etag::ConditionalHeader;
+use crate::ops::shared::precondition::RequestKind;
 use crate::registry::OperationSpec;
+
+/// Which side of the read/write split this operation's conditions are evaluated on.
+///
+/// A read, and identical to `GetObject`'s: a `HEAD` that answered a condition differently from the
+/// `GET` it mirrors would let a client revalidate against one answer and fetch against another.
+pub static CONDITION_KIND: RequestKind = RequestKind::Read;
+
+/// The entity-tag conditions evaluated against the object this request names.
+pub static CONDITIONS: [ConditionalHeader; 2] = [ConditionalHeader::IfMatch, ConditionalHeader::IfNoneMatch];
 
 /// What this operation requires of a request once routing has chosen it.
 static SPEC: OperationSpec = OperationSpec {

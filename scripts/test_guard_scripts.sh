@@ -422,5 +422,27 @@ mut_untracked_missing_header() {
 expect_fail_unstaged check_license_headers.sh \
     'a new .rs file with no licence header, still untracked' mut_untracked_missing_header
 
+
+# -----------------------------------------------------------------------------
+# A `//! Members:` line is how a reader learns which operations share a rule. It
+# had already drifted before this guard existed — precondition.rs named seven
+# operations while one file in the tree used it — and nothing noticed for four
+# commits. Both directions matter: a claimed member that does not use the module
+# is a contract wired into nothing, and a user missing from the list hides a
+# dependency from the next person to change the rule.
+# -----------------------------------------------------------------------------
+
+mut_members_claims_unused() {
+    python3 - <<'PYEOF'
+import pathlib, re
+p = pathlib.Path("crates/core/src/ops/shared/pagination.rs")
+t = p.read_text()
+t = re.sub(r"^//! Members:.*$", "//! Members: ListBuckets, GetObject", t, count=1, flags=re.M)
+p.write_text(t)
+PYEOF
+}
+expect_fail check_shared_members.sh \
+    'a Members: line naming an operation that does not use the module' mut_members_claims_unused
+
 printf '\n%s case(s), %s failure(s)\n' "$cases" "$failures"
 [[ "$failures" -eq 0 ]]

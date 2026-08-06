@@ -15,8 +15,12 @@
 //! Preconditions and ranges, evaluated once for every operation that accepts them.
 //!
 //! Shares: precondition, etag, range
-//! Members: GetObject, HeadObject, PutObject, CopyObject, UploadPartCopy,
-//!          CompleteMultipartUpload, DeleteObject
+//! Members: GetObject, HeadObject, PutObject, CopyObject
+//!
+//! UploadPartCopy evaluates its copy-source conditions through
+//! `copy_source`; CompleteMultipartUpload and DeleteObject accept conditional headers the
+//! wire layer parses and nothing yet evaluates. None of them is named above, because
+//! `Members:` records the use graph rather than the plan.
 //!
 //! Responsible for: the fixed order the four conditional headers are evaluated in, the two points
 //! where S3 answers differently from RFC 9110, the conditional-write outcomes (412 and the racing
@@ -49,12 +53,25 @@
 //! | `If-Match` matches, `If-Modified-Since` does not | 304 | 200 |
 //! | `If-None-Match` does not match, `If-Unmodified-Since` does | 200 | 304 |
 //!
-//! # Members are declared before they are wired
+//! # What the members declare, and the one thing none of them can
 //!
-//! None of the operations listed above `use` this module yet. Their call sites are the few lines
-//! of wiring the operation-family task adds to each `ops/<name>.rs`, and this task does not edit
-//! those files. The member list is the surface this contract was written for, not a reading of
-//! today's `use` graph.
+//! `GetObject`, `HeadObject` and `PutObject` `use` this module and declare the facts about
+//! themselves that it needs: a `CONDITION_KIND` ([`RequestKind`]) and a `CONDITIONS` list. That is
+//! the shape `ops/list_objects.rs` already uses for `shared::pagination` — the operation owns what
+//! is constant about it, this module owns the rules — and it is what makes the `Members:` line
+//! above checkable against the `use` graph instead of being a claim nothing can test. The
+//! remaining four members are still declaration-only.
+//!
+//! What no member can hold is the call to [`evaluate`]. An `impl Operation` is a static
+//! [`crate::registry::OperationSpec`] and a security floor, both settled before a request is read,
+//! while a precondition needs the representation the *handler* resolved. So the call site is the
+//! backend's — and a backend outside this workspace cannot reach [`evaluate`] at all, because the
+//! facade re-exports `ops::shared::copy_source` and nothing else from this directory.
+//!
+//! That is why the conformance fixture answers `If-Match` out of a private mirror of this file
+//! rather than out of this file, and why the mirror disagrees with it on six outcomes. Closing the
+//! gap is a facade export plus a backend edit, recorded in `crates/core/MAP.md` under "Open for
+//! maintainer review".
 
 use http::StatusCode;
 use rustfs_gateway_types::{ETag, ErrorCode, RangeOutcome, RangeParse, Timestamp};
@@ -233,7 +250,17 @@ pub fn evaluate(
     // Step 1: If-Match.
     let if_match_hit = match (&conditions.if_match, &validators.etag) {
         (None, _) => false,
-        (Some(_), None) => return Ok(ConditionalOutcome::PreconditionFailed),
+        // `*` is a condition on the representation, not on its entity tag, and the existence check
+        // above already answered it. A backend that reports no entity tag — because it has not
+        // digested the object, or because the representation has none — must not turn `If-Match: *`
+        // into a 412 for a resource that is plainly there. A *named* tag still fails: there is
+        // nothing to compare it against.
+        (Some(requested), None) => {
+            if !requested.is_any() {
+                return Ok(ConditionalOutcome::PreconditionFailed);
+            }
+            true
+        }
         (Some(requested), Some(current)) => {
             let comparison = ConditionalHeader::IfMatch.comparison();
             if !etag_matches(comparison, requested, current) {
@@ -262,10 +289,15 @@ pub fn evaluate(
     // Step 3: If-None-Match.
     if let Some(requested) = &conditions.if_none_match {
         let comparison = ConditionalHeader::IfNoneMatch.comparison();
-        let hit = validators
-            .etag
-            .as_ref()
-            .is_some_and(|current| etag_matches(comparison, requested, current));
+        // The same wildcard rule as step 1, and here it is the load-bearing one: `If-None-Match: *`
+        // is the create-if-absent primitive, so a representation that exists must fail it whether
+        // or not the backend reported an entity tag. Reading `*` through the tag would let a
+        // conditional create silently overwrite exactly the objects a backend cannot digest.
+        let hit = requested.is_any()
+            || validators
+                .etag
+                .as_ref()
+                .is_some_and(|current| etag_matches(comparison, requested, current));
         if hit {
             return Ok(match kind {
                 RequestKind::Read => ConditionalOutcome::NotModified,
@@ -336,7 +368,18 @@ pub enum RangeDecision {
         /// The object's full length, which `Content-Range` reports.
         total: u64,
     },
-    /// `206` with one part of a multipart object, plus the part count.
+    /// The request selected one part of a multipart object by `partNumber`.
+    ///
+    /// This variant is the *selector*, not a resolved window: [`evaluate_range`] is given the
+    /// object's total length and nothing about where its parts begin and end, so it cannot say
+    /// which bytes the part covers or how many parts there are. The operation resolves it against
+    /// the part table and supplies `Content-Range` and `x-amz-mp-parts-count` itself.
+    ///
+    /// Until it does, [`RangeDecision::status`] answers `206` while
+    /// [`RangeDecision::content_range`] answers `None`, and a `206` without a `Content-Range` is
+    /// not a response RFC 9110 §15.3.7 allows. Recorded in `crates/core/MAP.md` under "Open for
+    /// maintainer review" rather than papered over here: completing it changes this variant's
+    /// shape, which is a contract decision and not a fix.
     Part {
         /// The requested part.
         part_number: u32,
@@ -469,5 +512,112 @@ fn if_range_matches(if_range: &IfRange, validators: &ObjectValidators) -> bool {
             .as_ref()
             .is_some_and(|current| etag_matches(ConditionalHeader::IfMatch.comparison(), requested, current)),
         IfRange::Date(bound) => validators.last_modified.is_some_and(|modified| modified <= *bound),
+    }
+}
+
+/// The wildcard against a representation whose entity tag the backend did not report.
+///
+/// `crates/core/tests/precondition_range.rs` covers the table with an entity tag in hand; these
+/// six live here because they are about the one input shape [`ObjectValidators`] allows and that
+/// table never builds — `exists: true` with `etag: None`, which is what a backend answers for a
+/// representation it has not digested. `*` is defined against the *representation*, so it must not
+/// change its mind when the tag is missing, and two of the six pin that a *named* tag does not
+/// inherit the widening.
+#[cfg(test)]
+mod wildcard_without_an_entity_tag {
+    use super::{ConditionalOutcome, ObjectValidators, Preconditions, RequestKind, evaluate};
+    use rustfs_gateway_types::{ETag, Timestamp};
+
+    /// A representation that exists and reports no entity tag.
+    fn untagged() -> ObjectValidators {
+        ObjectValidators {
+            exists: true,
+            etag: None,
+            last_modified: None,
+        }
+    }
+
+    /// A tag that names a value rather than the wildcard.
+    ///
+    /// `unwrap_or_default` and not `expect`: this crate denies `clippy::expect_used` in every
+    /// module, test modules included. The fallback is the empty *strong* tag, which is still a
+    /// named tag — the only property the two tests below ask of it.
+    fn named() -> ETag {
+        ETag::new("E1").unwrap_or_default()
+    }
+
+    #[test]
+    fn if_none_match_wildcard_still_refuses_the_write() {
+        let conditions = Preconditions {
+            if_none_match: Some(ETag::ANY),
+            ..Preconditions::default()
+        };
+        assert_eq!(
+            evaluate(&conditions, &untagged(), RequestKind::Write),
+            Ok(ConditionalOutcome::PreconditionFailed),
+            "create-if-absent guards the key, not the entity tag; proceeding here overwrites the \
+             object the client asked us not to touch"
+        );
+    }
+
+    #[test]
+    fn if_none_match_wildcard_still_answers_a_read_with_304() {
+        let conditions = Preconditions {
+            if_none_match: Some(ETag::ANY),
+            ..Preconditions::default()
+        };
+        assert_eq!(evaluate(&conditions, &untagged(), RequestKind::Read), Ok(ConditionalOutcome::NotModified));
+    }
+
+    #[test]
+    fn a_named_if_none_match_still_misses() {
+        let conditions = Preconditions {
+            if_none_match: Some(named()),
+            ..Preconditions::default()
+        };
+        assert_eq!(
+            evaluate(&conditions, &untagged(), RequestKind::Read),
+            Ok(ConditionalOutcome::Proceed),
+            "a named tag has nothing to compare against, and the wildcard rule must not widen to it"
+        );
+    }
+
+    #[test]
+    fn if_match_wildcard_holds_against_the_representation() {
+        let conditions = Preconditions {
+            if_match: Some(ETag::ANY),
+            ..Preconditions::default()
+        };
+        assert_eq!(
+            evaluate(&conditions, &untagged(), RequestKind::Write),
+            Ok(ConditionalOutcome::Proceed),
+            "`*` asks whether a representation exists, and one does"
+        );
+    }
+
+    #[test]
+    fn a_named_if_match_still_fails() {
+        let conditions = Preconditions {
+            if_match: Some(named()),
+            ..Preconditions::default()
+        };
+        assert_eq!(
+            evaluate(&conditions, &untagged(), RequestKind::Write),
+            Ok(ConditionalOutcome::PreconditionFailed)
+        );
+    }
+
+    #[test]
+    fn a_matching_if_match_wildcard_still_suppresses_if_modified_since() {
+        let conditions = Preconditions {
+            if_match: Some(ETag::ANY),
+            if_modified_since: Some(Timestamp::from_secs(0)),
+            ..Preconditions::default()
+        };
+        assert_eq!(
+            evaluate(&conditions, &untagged(), RequestKind::Read),
+            Ok(ConditionalOutcome::Proceed),
+            "the S3 deviation keys off a satisfied If-Match, whichever form satisfied it"
+        );
     }
 }
