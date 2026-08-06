@@ -185,7 +185,7 @@
     "c-range-0007": "failed",
     "c-range-0008": "passed",
     "c-range-0009": "passed",
-    "c-range-0010": "failed",
+    "c-range-0010": "passed",
     "c-range-0011": "passed",
     "c-range-0012": "passed",
     "c-range-0013": "passed",
@@ -193,7 +193,7 @@
     "c-range-0015": "failed",
     "c-range-0016": "passed",
     "c-range-0017": "passed",
-    "c-range-0018": "failed",
+    "c-range-0018": "passed",
     "c-sig-0001": "failed"
   }
 }
