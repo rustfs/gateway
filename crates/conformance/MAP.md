@@ -46,7 +46,7 @@ reach its target must not be recordable as a run whose assertions failed.
 | `src/crc32.rs` | CRC-32/ISO-HDLC for `x-amz-checksum-crc32`. Written out because the facade exports `ChecksumSpec` but not the `Checksummer` trait, so the framework's own implementation cannot be reached from outside the workspace | A multipart checksum case disagrees about a digest |
 | `src/time.rs` | `[clock] fixed` / `request_time` into a Unix second and a SigV4 stamp | A clock-pinned case is an hour out |
 | `src/exec.rs` | Twenty lines of `std` that run one future to completion | Never, unless a run hangs |
-| `src/fixture.rs` | **The stub backend**: what `[setup]` established, and the answers built out of it — the six listings with their pagination and cursors, and the copy family with its source parser, source gate and span rule | A case fails on a value the fixture chose |
+| `src/fixture.rs` | **The stub backend**: what `[setup]` established, and the answers built out of it — the six listings with their pagination and cursors, the copy family with its source parser, source gate and span rule, and the multipart family with its upload-id ownership check, part-order and part-digest rules, size floor and composite entity tag | A case fails on a value the fixture chose |
 | `src/inprocess.rs` | **The wired target**: request in, signature, `call_bytes`, `Observation` out | A case is skipped, or signs wrongly |
 | `src/runner.rs` (+ `runner/tests.rs`) | Selection, interpolation, driving exchanges, one verdict per case | A case reached the wrong conclusion |
 | `src/report.rs` | Verdicts, grouping by capability domain, baseline comparison, text/JSON/JUnit output | You are changing what fails a run |
@@ -80,7 +80,7 @@ The baseline on disk is older than the current run:
 
 ```text
 conformance/baseline.json   195 cases: 87 passed, 103 failed, 5 skipped
-current                     195 cases: 144 passed, 46 failed, 5 skipped
+current                     195 cases: 154 passed, 36 failed, 5 skipped
 ```
 
 Regenerate it with `baseline > conformance/baseline.json` in the same change that moves the
@@ -165,6 +165,34 @@ expected to be red, and the baseline exists to freeze how red rather than to exc
    case that sees it. The neighbouring `Range` binding is `value::byte_range(raw)` with no `?`,
    which is the shape the date bindings would need. Two `Range` headers are likewise refused at the
    wire layer where `RangeParse` would answer the whole object — `c-range-0017`.
+13. **A completion naming no part is `MalformedXML` before any handler runs.**
+   `generated/codec/ops/complete_multipart_upload.rs::read_completed_multipart_upload` refuses an
+   empty `Parts` list as a decode failure, so the `InvalidPart` the fixture answers for the same
+   input is unreachable — the request never arrives. `c-mpu-0019` (an empty
+   `<CompleteMultipartUpload/>`) and `c-mpu-0034` (a body that parses and names no part) are the
+   cases that see it, and both are about a *semantic* refusal rather than a syntactic one: the
+   document is well-formed and the client is told it is not. Fixing it is a change to the list
+   arity the generator emits, not to a backend.
+14. **The `ETag` element of a body is written with escaped quotes.** The codec renders it through
+   `XmlWriter::element_quoting`, whose `escape_text_and_quotes` turns the entity tag's own `"` into
+   `&quot;`, so a completion answers `<ETag>&quot;…-3&quot;</ETag>`. `c-mpu-0002` and `c-mpu-0003`
+   assert the literal quote, which is what an SDK's tag comparison reads. The decision is
+   `crates/xml`'s and applies to every quoting element, so no backend can change it and the fixture
+   does not try.
+15. **A completion cannot fail after its head is committed.** The multipart form of finding 9, and
+   the one AWS documents most loudly: `CompleteMultipartUpload` answers `200` and then streams
+   either a result or an `<Error>` document, holding the connection with whitespace while it
+   assembles. `HandlerResult` is a status *or* an answer, so `c-mpu-0001` (the error document
+   inside a `200`), `c-mpu-0040` (an abrupt close when progress stops) and `c-mpu-0038` (the
+   whitespace prologue, which also forbids the XML declaration `XmlWriter::document` always writes)
+   have no shape a backend could answer in. The fixture answers a plain `400`, which is honest and
+   red, rather than an approximation that would read green.
+16. **`c-mpu-0018` disagrees with its own fixture.** It asserts
+   `etag: "88d1a0e3f0d0eb1b06e0d9c8bd6f6d5f"` for the part body `the exact bytes of part one`,
+   whose MD5 is `48df983668c1507a42914184ecc64d4a` — the value the fixture returns. Nothing in the
+   implementation can satisfy it. Cases are the contract and are not edited from the runner side,
+   so this is a maintainer decision; the `lint/hand-computed-digest` gap under "Known gaps" is the
+   same problem one layer up.
 
 ### What this target cannot measure, and never pretends to
 

@@ -71,6 +71,34 @@
 //! the function that carries it. A stub that answered what a case wanted rather than what the
 //! implementation says would report a green for a gap that is still open, which is the one thing a
 //! conformance backend must never do.
+//!
+//! # The multipart half, and the one thing an upload id is not
+//!
+//! An upload id is the only handle in S3 that names *state a later request will write into*, and
+//! that is what makes it the family's whole security surface. Five operations accept one, and all
+//! five go through [`require_upload`], which resolves the id **against the bucket and the key of
+//! the request that named it** rather than on its own. s3s#51 is the cost of the other spelling:
+//! knowing an id was enough to push a part into a stranger's upload, and the owner completed it
+//! without ever learning that somebody else had contributed bytes. `c-mpu-0029` and `c-mpu-0030`
+//! are the two halves of that check — a genuine id from another bucket, and a genuine id from
+//! another key in the same bucket — and an implementation that scoped by bucket alone would pass
+//! the first and fail the second.
+//!
+//! Completion is the other place where accepting too much is silent. The refusals it makes, in the
+//! order it makes them, and each because the alternative is an object nobody can detect is wrong:
+//! a part list that is not strictly ascending is `InvalidPartOrder`; a part number that was never
+//! uploaded, or one whose claimed digest is not the digest of the bytes on file, is `InvalidPart`;
+//! and a non-final part under [`MIN_PART_BYTES`] is `EntityTooSmall`, because the object is the
+//! concatenation and a short part in the middle leaves a hole no later read can see. The tag the
+//! completion answers is not the digest of those bytes either — it is
+//! `ETag::from_part_digests`, the digest of the concatenated part digests with `-N` after it, and
+//! a client handed the plain MD5 instead would compare it against the composite and conclude the
+//! object is corrupt.
+//!
+//! What this half deliberately does **not** do is answer a `200` and then fail: `HandlerResult` is
+//! a status *or* an answer, and `CompleteMultipartUpload` is the operation AWS documents as
+//! committing the head first. Three cases assert that shape and three cases are red for it. See
+//! `MAP.md` finding 15 — an approximation here would read green for a facade gap every backend has.
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
@@ -101,6 +129,12 @@ pub const UNVERSIONED: &str = "null";
 /// service could not have minted, and saying so before decoding it is what keeps `c-list-0030`
 /// from being answered by the amount of work it asked for.
 const MAX_TOKEN_BYTES: usize = 2304;
+
+/// The smallest a non-final part of a multipart upload may be: 5 MiB, AWS's published floor.
+///
+/// Checked at completion rather than at upload, which is where S3 checks it and the only place it
+/// *can* be checked: whether a part is the last one is not knowable while it is arriving.
+const MIN_PART_BYTES: usize = 5 * 1024 * 1024;
 
 /// One object the fixtures established.
 ///
@@ -360,6 +394,15 @@ impl Fixture {
         id
     }
 
+    /// The upload an id names, whichever bucket and key it belongs to.
+    ///
+    /// Every handler goes through [`require_upload`] instead, which is the same lookup plus the
+    /// ownership check; this accessor exists for that function and for `setup`.
+    #[must_use]
+    pub fn upload(&self, upload_id: &str) -> Option<&StoredUpload> {
+        self.uploads.get(upload_id)
+    }
+
     /// Places a part in an upload, returning its entity tag. A part for an unknown upload is
     /// dropped, which cannot happen from `setup` and is not worth a second error path.
     pub fn put_part(&mut self, upload_id: &str, part_number: i32, body: Vec<u8>) -> String {
@@ -521,6 +564,56 @@ fn hex_digit(value: u8) -> char {
     char::from_digit(u32::from(value), 16).unwrap_or('0')
 }
 
+/// Standard base64 (RFC 4648 §4), which is the alphabet `Content-MD5` is written in.
+///
+/// Hand-written here for the same reason the digests are: a foreign implementation running this
+/// suite inherits the corpus and nothing else, so the fixture may not reach for a workspace crate
+/// the facade does not export.
+fn encode_base64(bytes: &[u8]) -> String {
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let packed = chunk
+            .iter()
+            .enumerate()
+            .fold(0_u32, |acc, (index, byte)| acc | (u32::from(*byte) << (16 - 8 * index)));
+        for slot in 0..4 {
+            if slot <= chunk.len() {
+                let index = ((packed >> (18 - 6 * slot)) & 0x3f) as usize;
+                out.push(char::from(ALPHABET[index]));
+            } else {
+                out.push('=');
+            }
+        }
+    }
+    out
+}
+
+/// Refuses a body whose `Content-MD5` is not its digest.
+///
+/// The header is an end-to-end integrity claim, so a store that reads it and does not check it is
+/// worse than one that ignores it: the client is told the round trip verified when nothing
+/// compared anything. `c-mpu-0044` is the part-upload form; the object form is the same rule and
+/// goes through the same function, because a fixture that checked the digest of a part and waved
+/// through the digest of a whole object would be asserting a distinction S3 does not make.
+///
+/// What this does *not* do is separate a malformed header from a mismatched one. AWS answers
+/// `InvalidDigest` for a value that is not 16 base64-encoded bytes at all, and no case in the
+/// corpus draws that line — so rather than guess at a code nothing asserts, both arrive here as
+/// `BadDigest`. A case that wants the distinction will find this comment.
+fn require_content_md5(claimed: Option<&str>, body: &[u8]) -> Result<(), HandlerError> {
+    let Some(claimed) = claimed.map(str::trim).filter(|text| !text.is_empty()) else {
+        return Ok(());
+    };
+    if claimed == encode_base64(&crate::md5::digest(body)) {
+        return Ok(());
+    }
+    Err(HandlerError::new(
+        ErrorCode::BAD_DIGEST,
+        "The Content-MD5 you specified did not match what we received.",
+    ))
+}
+
 fn decode_hex(text: &str) -> Option<Vec<u8>> {
     if !text.len().is_multiple_of(2) {
         return None;
@@ -578,6 +671,41 @@ fn require_bucket(fixture: &Fixture, bucket: &BucketName) -> Result<(), HandlerE
         return Ok(());
     }
     Err(HandlerError::new(ErrorCode::NO_SUCH_BUCKET, "The specified bucket does not exist"))
+}
+
+/// AWS's own wording for an upload id that names nothing this caller may act on.
+///
+/// One function rather than five literals: the five multipart operations have to be
+/// indistinguishable here, because a caller who can tell "wrong bucket" from "no such id" apart by
+/// the `<Message>` element has been told the id is genuine.
+fn no_such_upload() -> HandlerError {
+    HandlerError::new(
+        ErrorCode::NO_SUCH_UPLOAD,
+        "The specified upload does not exist. The upload ID may be invalid, or the upload may have been aborted or completed.",
+    )
+}
+
+/// Resolves an upload id **against the bucket and the key of the request that named it**.
+///
+/// An upload id is a bearer token in every implementation that looks it up on its own, and s3s#51
+/// is what that costs: knowing an id was enough to push a part into somebody else's upload, and the
+/// owner completed it without ever learning that a stranger had contributed bytes. Neither half of
+/// the check is optional — `c-mpu-0029` carries a genuine id from another bucket and `c-mpu-0030`
+/// carries a genuine id from another key in the *same* bucket, so an implementation that scoped by
+/// bucket alone would still pass the first and fail the second.
+///
+/// The refusal is [`no_such_upload`] rather than an access-denied: an id the caller does not own
+/// must not be confirmed to exist.
+fn require_upload<'a>(
+    fixture: &'a Fixture,
+    upload_id: &str,
+    bucket: &BucketName,
+    key: &ObjectKey,
+) -> Result<&'a StoredUpload, HandlerError> {
+    match fixture.upload(upload_id) {
+        Some(upload) if upload.bucket == bucket.as_str() && upload.key == key.as_str() => Ok(upload),
+        _ => Err(no_such_upload()),
+    }
 }
 
 /// The four conditional headers, read into the shape the exported contract evaluates.
@@ -1352,6 +1480,7 @@ async fn put_object(state: &Arc<Mutex<Fixture>>, input: dto::PutObjectInput) -> 
         .lock()
         .map_err(|_| HandlerError::internal_error("the fixture state was left poisoned by an earlier exchange"))?;
     require_bucket(&fixture, &input.bucket)?;
+    require_content_md5(input.content_md5.as_deref(), &bytes)?;
     let now = fixture.now;
     let existing = fixture.object(input.bucket.as_str(), input.key.as_str()).cloned();
     guard_write(existing.as_ref(), input.if_match.as_deref(), input.if_none_match.as_deref(), now)?;
@@ -1385,12 +1514,10 @@ async fn upload_part(state: &Arc<Mutex<Fixture>>, input: dto::UploadPartInput) -
         .lock()
         .map_err(|_| HandlerError::internal_error("the fixture state was left poisoned by an earlier exchange"))?;
     require_bucket(&fixture, &input.bucket)?;
-    let Some(upload) = fixture.uploads.get(&input.upload_id) else {
-        return Err(HandlerError::new(
-            ErrorCode::NO_SUCH_UPLOAD,
-            "The specified upload does not exist. The upload ID may be invalid, or the upload may have been aborted or completed.",
-        ));
-    };
+    let upload = require_upload(&fixture, &input.upload_id, &input.bucket, &input.key)?;
+    // Before a single byte is recorded: a part that failed its own integrity claim must not be
+    // reachable by the completion that follows.
+    require_content_md5(input.content_md5.as_deref(), &bytes)?;
     // The digest of the bytes that just arrived, under the algorithm the *initiation* named. A part
     // request carries no algorithm of its own, so an upload opened without one gets no checksum
     // header rather than a default one nobody asked for.
@@ -1655,12 +1782,7 @@ impl Stub {
 
         let mut fixture = self.borrow()?;
         require_bucket(&fixture, &input.bucket)?;
-        if !fixture.uploads.contains_key(&input.upload_id) {
-            return Err(HandlerError::new(
-                ErrorCode::NO_SUCH_UPLOAD,
-                "The specified upload does not exist. The upload ID may be invalid, or the upload may have been aborted or completed.",
-            ));
-        }
+        require_upload(&fixture, &input.upload_id, &input.bucket, &input.key)?;
         let (found, source_version) = read_copy_source(&fixture, &source)?;
         guard_copy_source(
             &found,
@@ -1787,12 +1909,10 @@ impl Stub {
     fn abort_multipart_upload(&self, input: &dto::AbortMultipartUploadInput) -> HandlerResult<dto::AbortMultipartUpload> {
         let mut fixture = self.borrow()?;
         require_bucket(&fixture, &input.bucket)?;
-        if fixture.uploads.remove(&input.upload_id).is_none() {
-            return Err(HandlerError::new(
-                ErrorCode::NO_SUCH_UPLOAD,
-                "The specified upload does not exist. The upload ID may be invalid, or the upload may have been aborted or completed.",
-            ));
-        }
+        // Resolved before it is removed: an abort that dropped an upload it did not own would let a
+        // stranger destroy work in progress, and the caller would see the same 204 either way.
+        require_upload(&fixture, &input.upload_id, &input.bucket, &input.key)?;
+        fixture.uploads.remove(&input.upload_id);
         Ok(Resp::new(dto::AbortMultipartUploadOutput::default()))
     }
 
@@ -1802,9 +1922,7 @@ impl Stub {
     ) -> HandlerResult<dto::CompleteMultipartUpload> {
         let mut fixture = self.borrow()?;
         require_bucket(&fixture, &input.bucket)?;
-        let upload = fixture.uploads.get(&input.upload_id).cloned().ok_or_else(|| {
-            HandlerError::new(ErrorCode::NO_SUCH_UPLOAD, "The specified upload does not exist. The upload ID may be invalid, or the upload may have been aborted or completed.")
-        })?;
+        let upload = require_upload(&fixture, &input.upload_id, &input.bucket, &input.key)?.clone();
         let named = &input.multipart_upload.parts;
         if named.is_empty() {
             return Err(HandlerError::new(
@@ -1828,10 +1946,22 @@ impl Stub {
         let mut assembled = Vec::new();
         let mut digests = Vec::new();
         let mut part_checksums = Vec::new();
-        for part in named {
+        let final_part = named.len().saturating_sub(1);
+        for (index, part) in named.iter().enumerate() {
             let stored = upload.parts.get(&part.part_number).ok_or_else(|| {
                 HandlerError::new(ErrorCode::INVALID_PART, "One or more of the specified parts could not be found.")
             })?;
+            // The size floor, and the one exemption that makes it usable: every part but the last
+            // must reach [`MIN_PART_BYTES`], because the object is the concatenation and a short
+            // part in the middle is a hole no later read can detect. Applying the floor to the final
+            // part too would make every upload whose total is not a multiple of the floor
+            // uncompletable, so the exemption is the rule rather than a leniency.
+            if index != final_part && stored.body.len() < MIN_PART_BYTES {
+                return Err(HandlerError::new(
+                    ErrorCode::ENTITY_TOO_SMALL,
+                    "Your proposed upload is smaller than the minimum allowed size",
+                ));
+            }
             // An empty claim is accepted rather than refused: a case that echoes back a header some
             // *other* implementation did not send is asserting about that implementation, and a
             // digest mismatch reported here would name a mismatch that never happened.
@@ -2007,9 +2137,7 @@ impl Stub {
                 )
             })?,
         };
-        let upload = fixture.uploads.get(&input.upload_id).ok_or_else(|| {
-            HandlerError::new(ErrorCode::NO_SUCH_UPLOAD, "The specified upload does not exist. The upload ID may be invalid, or the upload may have been aborted or completed.")
-        })?;
+        let upload = require_upload(&fixture, &input.upload_id, &input.bucket, &input.key)?;
 
         // `BTreeMap` already holds the parts in ascending part-number order, which is the order
         // `ListParts` answers in and the order a marker resumes.
@@ -2467,6 +2595,57 @@ mod tests {
         fixture.declare_bucket("b", false);
         assert_eq!(fixture.create_upload("b", "k"), "conformance-upload-0001");
         assert_eq!(fixture.create_upload("b", "k"), "conformance-upload-0002");
+    }
+
+    /// The s3s#51 check, in the two shapes the corpus separates: a genuine id from another bucket
+    /// and a genuine id from another key in the same bucket. Both are `NoSuchUpload`, and a
+    /// resolver that only compared the bucket would let the second through.
+    #[test]
+    fn an_upload_id_resolves_only_against_the_bucket_and_key_that_own_it() {
+        let mut fixture = Fixture::at(0);
+        fixture.declare_bucket("mine", false);
+        fixture.declare_bucket("theirs", false);
+        let id = fixture.create_upload("theirs", "someone-elses-object");
+
+        let bucket = |name: &str| BucketName::new(name.to_owned()).expect("a fixture bucket name is valid");
+        let key = |name: &str| ObjectKey::new(name.to_owned()).expect("a fixture key is valid");
+
+        assert!(require_upload(&fixture, &id, &bucket("theirs"), &key("someone-elses-object")).is_ok());
+        // Same key, wrong bucket.
+        let foreign = require_upload(&fixture, &id, &bucket("mine"), &key("someone-elses-object"));
+        assert_eq!(foreign.err().map(|error| error.code().clone()), Some(ErrorCode::NO_SUCH_UPLOAD));
+        // Right bucket, wrong key.
+        let crossed = require_upload(&fixture, &id, &bucket("theirs"), &key("another-object"));
+        assert_eq!(crossed.err().map(|error| error.code().clone()), Some(ErrorCode::NO_SUCH_UPLOAD));
+        // An id nothing minted.
+        let invented = require_upload(&fixture, "conformance-upload-9999", &bucket("theirs"), &key("someone-elses-object"));
+        assert_eq!(invented.err().map(|error| error.code().clone()), Some(ErrorCode::NO_SUCH_UPLOAD));
+    }
+
+    /// The alphabet and the padding, against values whose encodings are fixed by RFC 4648 §10.
+    #[test]
+    fn base64_encodes_every_padding_length() {
+        assert_eq!(encode_base64(b""), "");
+        assert_eq!(encode_base64(b"f"), "Zg==");
+        assert_eq!(encode_base64(b"fo"), "Zm8=");
+        assert_eq!(encode_base64(b"foo"), "Zm9v");
+        assert_eq!(encode_base64(b"foob"), "Zm9vYg==");
+        assert_eq!(encode_base64(b"fooba"), "Zm9vYmE=");
+        assert_eq!(encode_base64(b"foobar"), "Zm9vYmFy");
+        // The high bits of the alphabet, which a table with a typo in `+` or `/` would miss.
+        assert_eq!(encode_base64(&[0xfb, 0xff, 0xfe]), "+//+");
+    }
+
+    #[test]
+    fn a_content_md5_that_is_not_the_digest_is_refused() {
+        // The digest of the empty body, which is the one value a caller could send by accident.
+        assert!(require_content_md5(Some("1B2M2Y8AsgTpgAmY7PhCfg=="), b"").is_ok());
+        assert!(require_content_md5(Some("XUFAKrxLKna5cZ2REBfFkg=="), b"hello").is_ok());
+        // Absent and empty are the same fact: no claim was made, so there is nothing to refuse.
+        assert!(require_content_md5(None, b"hello").is_ok());
+        assert!(require_content_md5(Some("   "), b"hello").is_ok());
+        let refused = require_content_md5(Some("AAAAAAAAAAAAAAAAAAAAAA=="), b"hello");
+        assert_eq!(refused.err().map(|error| error.code().clone()), Some(ErrorCode::BAD_DIGEST));
     }
 
     #[test]
