@@ -74,6 +74,7 @@ pub mod report;
 pub mod runner;
 pub mod schema;
 pub mod sha256;
+pub mod socket;
 pub mod sut;
 pub mod time;
 pub mod toml;

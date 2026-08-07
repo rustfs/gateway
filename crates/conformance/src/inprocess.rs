@@ -133,7 +133,7 @@ impl InProcess {
     ///
     /// Rebuilt per exchange rather than once, because the clock is fixed at assembly time and is a
     /// per-case declaration. Assembly is a few table inserts; a stale clock would be a wrong answer.
-    fn assemble(&self, at_unix_seconds: i64, skew_ms: i64) -> Result<S3Service, SutError> {
+    pub(crate) fn assemble(&self, at_unix_seconds: i64, skew_ms: i64) -> Result<S3Service, SutError> {
         let backend = Arc::new(Stub::new(Arc::clone(&self.state)));
         let credentials = Credentials::new(VALID_ACCESS_KEY, VALID_SECRET)
             .map_err(|error| SutError::Environment(format!("the fixture credentials are not valid: {error}")))?;

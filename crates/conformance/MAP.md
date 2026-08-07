@@ -51,6 +51,7 @@ reach its target must not be recordable as a run whose assertions failed.
 | `src/exec.rs` | Twenty lines of `std` that run one future to completion | Never, unless a run hangs |
 | `src/fixture.rs` | **The stub backend**: what `[setup]` established, and the answers built out of it — the six listings with their pagination and cursors, the copy family with its source parser, source gate and span rule, the multipart family with its upload-id ownership check, part-order and part-digest rules, size floor and composite entity tag, and the shape of its refusals (`unsatisfiable`, `precondition`/`sole_condition`, `no_such_key`) | A case fails on a value the fixture chose, or an error document is missing an element |
 | `src/inprocess.rs` | **The wired target**: request in, signature, `call_bytes`, `Observation` out | A case is skipped, or signs wrongly |
+| `src/socket.rs` | **The connection-level pieces**: a listener on a kernel-chosen port serving the same service over hand-rolled HTTP/1.1, a raw client, and `observe_connection` — which asks the *socket* what state it is in and never a response header. The four-corner proof that it does so lives in its tests | You are working on `expect.connection_after`, or on anything that needs a real socket |
 | `src/runner.rs` (+ `runner/tests.rs`) | Selection, interpolation, driving exchanges, one verdict per case | A case reached the wrong conclusion |
 | `src/report.rs` | Verdicts, grouping by capability domain, baseline comparison, text/JSON/JUnit output | You are changing what fails a run |
 | `src/cli.rs` | Argument parsing and the exit codes | You are adding a flag |
@@ -482,7 +483,44 @@ ignored.
   running the in-process target under a flag that says otherwise. A real one writes raw bytes on a
   socket, never through an SDK: an SDK normalises away the malformed framing a negative case exists
   to send.
-- **`--transport hyper|conn`** is injected and reported but cannot yet differ, for the same reason.
+- **`--transport conn` exits `3` rather than running.** `src/socket.rs` now holds the pieces a
+  socket run needs — a listener on a kernel-chosen port serving the same `S3Service` over its own
+  HTTP/1.1 framing, a raw client, and `observe_connection`, which asks the socket what state it is
+  in and never reads a response header. What is *not* there is a `Sut` wired to them, and it is
+  deliberately absent rather than half-written, because two things a socket run must report cannot
+  be reported honestly yet:
+    - **A paced request body.** `dataChunk.delay_ms` is still unhonoured. Written into a loopback
+      socket unpaced, the whole body lands in the kernel buffer before the server has read a byte,
+      so a client-side `body_bytes_sent_at_response` measures the buffer rather than the server —
+      and every early-refusal assertion in the corpus inverts while still reading as measured.
+      `c-sig-0001` asserts `0` here, and would be handed the whole body.
+    - **The close rule.** See the entry below.
+  Until then the flag is refused. It used to parse, print `transport conn` in the report header,
+  and run every case in process — a run naming one assembly path while measuring the other.
+- **The rule separating `connection_after = "closed"` from `"open"` is unsettled**, and
+  `src/socket.rs::ClosePolicy` is a parameter rather than a constant because of it. What the corpus
+  says, which is more than issue #20 records:
+    - `c-sig-0001` (`closed`) is a **signature failure**. It is neither a `WireReject` nor a
+      `ChunkReject`, so wiring both `must_close_connection` flags — which is what issue #20 asks
+      for — cannot reach it. A third leg is needed: an authentication failure closes because the
+      peer is not who the connection assumed.
+    - `c-object-0015` (`closed`) is an over-cap body, and `c-object-0013` (`open`) is a
+      contradictory-checksum refusal. Both leave the body unread, so "an undrained body closes" is
+      not the rule.
+    - Size does not separate them either: `c-sig-0001`'s body is 24 bytes and `c-object-0013`'s is
+      11, so any lingering-drain budget that keeps one connection open keeps the other open too.
+  The rule that fits all three is *which refusal fired*, which is what `WireReject::must_close_connection`
+  already encodes and what nothing carries out of the pipeline. `render.rs` turns a `WireReject`
+  into an `S3Error` and drops the flag, so no layer that could act on it ever sees it.
+  `rfc9112_lingering_close` is the RFC-grounded default and is documented as disagreeing with
+  `c-object-0013` rather than tuned to agree with it.
+- **`half_closed` is never reported by the client-side observation.** From one end of a TCP
+  connection a peer that shut down its write side and one that closed both are indistinguishable:
+  each gives end-of-stream on a read. Telling them apart means writing, and a write that succeeds
+  corrupts the next exchange while one that fails costs the `RST` that changes the state being
+  measured. A case asserting `half_closed` is red here for that stated reason, which is better than
+  the alternative — a zero-length write, which on most platforms never touches the socket and
+  therefore reports `closed` unconditionally while reading like a measurement.
 - **Streaming and presigned signing.** `sign.mode` is honoured for `sigv4_header`,
   `sigv4_unsigned_payload`, `anonymous` and `none`. The streaming modes need aws-chunked framing on
   the wire, which is the socket transport's, and the corpus uses one of them once.

@@ -31,3 +31,9 @@ rustfs-gateway = { workspace = true }
 # here, so a foreign implementation running this suite inherits nothing else.
 bytes = { workspace = true }
 http = { workspace = true }
+# The request-body trait `S3Service::call` is generic over. The socket target must hand the service
+# a body it pulls from the socket one block at a time -- a body buffered in advance cannot show
+# that the service stopped asking, which is the whole subject of `expect.request_progress`. So this
+# is the facade's public surface too, for the same reason as the two above, and not a dependency
+# this crate chose for its own convenience.
+http-body = { workspace = true }

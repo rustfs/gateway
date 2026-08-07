@@ -99,6 +99,27 @@ pub fn main(args: &[String]) -> ExitCode {
         );
         return ExitCode::from(exit::ENVIRONMENT);
     }
+    // `--transport conn` is refused for the same reason as `--endpoint`, and it used to be worse:
+    // the flag parsed, the report printed `transport conn`, and every case ran in process. A run
+    // that names one assembly path in its header while measuring the other is the single worst
+    // thing this binary can do, and it was doing it silently.
+    //
+    // `crate::socket` now has the pieces — a listener on a kernel-chosen port, a raw client, and a
+    // socket-observed `connection_after` — but no `Sut` is wired to them yet, because two of the
+    // things a socket run must report cannot be reported honestly until they are built: a paced
+    // request body (without it `request_progress` measures the socket buffer rather than the
+    // server, and every early-refusal assertion silently inverts) and the close rule that separates
+    // `c-object-0013` from `c-sig-0001`, which is issue #20's open question. Refusing is the honest
+    // state until then.
+    if options.transport == Transport::Conn {
+        eprintln!(
+            "conformance: `--transport conn` has no target behind it yet. `crate::socket` provides \
+             the listener, the raw client and the socket observation, and no `Sut` is wired to \
+             them; running this flag against the in-process target would print `transport conn` \
+             over a run that never opened a socket. See issue #20."
+        );
+        return ExitCode::from(exit::ENVIRONMENT);
+    }
     let root = match resolve_root(&options) {
         Ok(root) => root,
         Err(message) => {
@@ -354,6 +375,18 @@ mod tests {
     #[test]
     fn an_unknown_transport_is_a_usage_error() {
         assert!(Options::parse(&args(&["run", "--transport", "h3"])).is_err());
+    }
+
+    /// Negative — `conn` parses, and `main` refuses to run it rather than measuring the in-process
+    /// target under its name. Parsing and running are two different questions and the flag being
+    /// spelled correctly is not permission to answer the second one with the wrong path.
+    #[test]
+    fn a_conn_run_is_refused_rather_than_answered_in_process() {
+        let options = Options::parse(&args(&["run", "--transport", "conn"]))
+            .expect("parses")
+            .expect("not help");
+        assert_eq!(options.transport, Transport::Conn);
+        assert_eq!(main(&args(&["run", "--transport", "conn"])), ExitCode::from(exit::ENVIRONMENT));
     }
 
     #[test]

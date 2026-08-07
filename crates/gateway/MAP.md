@@ -72,6 +72,26 @@ everything a consumer needs so that nothing downstream depends on `-core`, `-sig
   `c-object-0015`) assert `connection_after = "closed"` and are red for exactly that one assertion;
   `c-object-0013` asserts `open` for a refusal that also leaves the body unread, so the rule is not
   "any unread body closes" and the discriminator needs a maintainer's decision before it is written.
+
+  Three things found while building the socket observation in `crates/conformance/src/socket.rs`,
+  recorded here because they change what "wire the flag" would mean:
+  1. **Both methods return a constant `true`.** Neither has a variant that answers `false`, so
+     "read the flag" is not a branch — every `WireReject` and every `ChunkReject` closes. That is
+     consistent with what each type is (a framing or limit verdict leaves bytes of unknown
+     ownership), but it means the flag cannot be the thing that separates `c-object-0013` from the
+     other two.
+  2. **`c-sig-0001` is out of reach of both flags.** It is a signature failure — an `AuthError`,
+     neither a `WireReject` nor a `ChunkReject` — so wiring both flags cannot make it close. A
+     third leg is needed, and `ChunkReject::must_close_connection`'s own documentation states the
+     reason for it: a signature failure means the peer is not who the connection assumed.
+  3. **Nothing downstream can see the flag even if it read it.** `render.rs` converts
+     `WireReject -> S3Error` through `error_code`/`message`/`to_status` and drops
+     `must_close_connection`; `service.rs` calls that conversion and keeps nothing else. So the
+     refusal's own verdict never reaches a layer that owns a socket. Carrying it out needs a change
+     in `render.rs` or `service.rs`, not only in whatever serves the connection.
+
+  Size does not separate the cases either: `c-sig-0001`'s body is 24 bytes and `c-object-0013`'s is
+  11, so a lingering-drain budget that keeps one connection open keeps the other open too.
 - **`aws-chunked` framing is not decoded here.** A streaming `x-amz-content-sha256` value is
   refused rather than mis-framed.
 - **The header map is cloned once per request**, because `WireRequest` publishes no way back to it
