@@ -1,0 +1,31 @@
+[case]
+id = "c-replication-0011"
+schema_version = 1
+title = "The x-amz-bucket-object-lock-token header is accepted and does not disturb the write"
+rationale = """
+The token is how an existing bucket asks for Object Lock to ride along with replication, and its meaning — whether the token actually permits it — is the storage backend's question, not the codec's. This case pins the codec's whole contribution: the header parses into the input, the write succeeds, and no validation of the token's value is invented here. A gateway that refused the header would break every client that sends it; one that enforced semantics would answer a question it cannot know."""
+polarity = "positive"
+operation = "PutBucketReplication"
+tags = ["replication", "xml"]
+timeout_ms = 10000
+quirks = ["q-repl-0013"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketReplication.html"
+summary = "The request documents the optional x-amz-bucket-object-lock-token header as a token allowing Object Lock to be enabled for an existing bucket."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "conf-replication"
+[request]
+method = "PUT"
+target = "/conf-replication?replication"
+headers = { "content-type" = "application/xml", "content-md5" = "DIOCQC8GOqnVF/QOP0EZOg==", "x-amz-bucket-object-lock-token" = "lock-token-value" }
+body = { utf8 = '<ReplicationConfiguration><Role>arn:aws:iam::111122223333:role/replication-role</Role><Rule><Status>Enabled</Status><Destination><Bucket>arn:aws:s3:::replica-bucket</Bucket></Destination></Rule></ReplicationConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+connection_after = "open"

@@ -1,0 +1,53 @@
+[case]
+id = "c-replication-0010"
+schema_version = 1
+title = "An ExistingObjectReplication element round-trips even though AWS no longer honours it"
+rationale = """
+ExistingObjectReplication is a member AWS documents as no longer supported — Batch Replication replaced it — but stored configurations still carry it, and this family's job is to read what was written. The round-trip pins the codec's answer: the element is parsed, stored and echoed rather than refused or silently dropped, because dropping it would rewrite a stored document on the next write-through and refusing it would make an old bucket unusable under the fail-closed persistence."""
+polarity = "positive"
+operation = "PutBucketReplication"
+tags = ["replication", "xml", "known-divergence"]
+timeout_ms = 10000
+quirks = ["q-repl-0002"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ExistingObjectReplication.html"
+summary = "The type documents its required Status member, and the parameter is noted as no longer supported in favour of Batch Replication."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "conf-replication"
+[[exchanges]]
+name = "put"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-replication?replication"
+headers = { "content-type" = "application/xml", "content-md5" = "K2RH1QE9d51gah1tqtQK5w==" }
+body = { utf8 = '<ReplicationConfiguration><Role>arn:aws:iam::111122223333:role/replication-role</Role><Rule><Priority>1</Priority><Filter><Prefix>existing/</Prefix></Filter><Status>Enabled</Status><ExistingObjectReplication><Status>Enabled</Status></ExistingObjectReplication><Destination><Bucket>arn:aws:s3:::replica-bucket</Bucket></Destination><DeleteMarkerReplication><Status>Disabled</Status></DeleteMarkerReplication></Rule></ReplicationConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[[exchanges]]
+name = "read-back"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-replication?replication"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.headers_present]
+"content-type" = "application/xml"
+
+[exchanges.expect.body]
+golden = "goldens/c-replication-0010.xml"

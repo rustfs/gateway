@@ -1,0 +1,58 @@
+[case]
+id = "c-replication-0005"
+schema_version = 1
+title = "A V1 rule with a bare rule-level Prefix and no Priority is still readable and round-trips"
+rationale = """
+The earlier schema is not a compatibility footnote here: replication is the one configuration RustFS parses fail-closed, so a stored V1 document a new release stops reading does not degrade to "feature off" — it makes the bucket unusable. This case pins the V1 form end to end: the rule-level Prefix is accepted without Priority or DeleteMarkerReplication, and the read-back returns it unmodernized, because rewriting stored documents into the newer schema is a second way to surprise the next parser."""
+polarity = "positive"
+operation = "PutBucketReplication"
+tags = ["replication", "xml", "known-divergence"]
+timeout_ms = 10000
+quirks = ["q-repl-0006"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/replication-add-config.html"
+summary = "The backward-compatibility section shows the V1 format with Prefix as a direct child of Rule and no Priority or DeleteMarkerReplication."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/issues/428"
+summary = "Upstream's configuration types could not round-trip stored documents, the failure mode a V1 document faces under a V2-only codec."
+kind = "s3s-issue"
+
+
+[[setup.buckets]]
+name = "conf-replication"
+[[exchanges]]
+name = "put"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-replication?replication"
+headers = { "content-type" = "application/xml", "content-md5" = "To03nMI/VS86asxhg0I32g==" }
+body = { utf8 = '<ReplicationConfiguration><Role>arn:aws:iam::111122223333:role/replication-role</Role><Rule><ID>legacy</ID><Prefix>logs/</Prefix><Status>Enabled</Status><Destination><Bucket>arn:aws:s3:::replica-bucket</Bucket></Destination></Rule></ReplicationConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[[exchanges]]
+name = "read-back"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-replication?replication"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.headers_present]
+"content-type" = "application/xml"
+
+[exchanges.expect.body]
+golden = "goldens/c-replication-0005.xml"

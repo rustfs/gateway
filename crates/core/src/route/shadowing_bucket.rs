@@ -465,6 +465,162 @@ pub(super) const DECLS: &[ShadowingDecl] = &[
                  document is removed and the bucket keeps its default encryption.",
         evidence: &[DELETE_BUCKET_LIFECYCLE_DOC, DELETE_BUCKET_ENCRYPTION_DOC],
     },
+    // The `?replication` band repeats the `?encryption` shape one slot later, packed at 394-396
+    // for the same tens-aligned-slots-are-full reason. Four subresource triples now sit ahead of
+    // it, so all three of its rows have same-method neighbours to order against — twelve
+    // both-keys-at-once pairs — plus `?location` and the four listings on the GET side. The
+    // last pair, against ListObjects, is the fallback relationship the debt register recorded
+    // as `GetBucketReplication -> ListObjects` until this band landed.
+    ShadowingDecl {
+        winner: "GetBucketLocation",
+        shadowed: "GetBucketReplication",
+        reason: "A request carrying both ?location and ?replication asks two subresource \
+                 questions at once. AWS documents no such combination, so the answer is fixed \
+                 here rather than left to source order: ?location at 300 is tried before \
+                 ?replication at 394, and the replication reading is ignored rather than merged \
+                 into the answer.",
+        evidence: &[LOCATION_DOC, GET_BUCKET_REPLICATION_DOC],
+    },
+    ShadowingDecl {
+        winner: "GetBucketCors",
+        shadowed: "GetBucketReplication",
+        reason: "Two configuration subresources named in one GET. Neither is the narrower \
+                 question, so the earlier band wins: ?cors at 310 is tried before ?replication \
+                 at 394, the same first-band-wins rule ?location settled against ?cors.",
+        evidence: &[GET_BUCKET_CORS_DOC, GET_BUCKET_REPLICATION_DOC],
+    },
+    ShadowingDecl {
+        winner: "GetBucketTagging",
+        shadowed: "GetBucketReplication",
+        reason: "Two configuration subresources named in one GET, the same shape as the ?cors \
+                 pair above with the tagging band in its place. The earlier band wins: ?tagging \
+                 at 340 is tried before ?replication at 394, and the replication reading is \
+                 ignored.",
+        evidence: &[GET_BUCKET_TAGGING_DOC, GET_BUCKET_REPLICATION_DOC],
+    },
+    ShadowingDecl {
+        winner: "GetBucketLifecycleConfiguration",
+        shadowed: "GetBucketReplication",
+        reason: "Two configuration subresources named in one GET, the third same-method \
+                 neighbour. The earlier band wins: ?lifecycle at 370 is tried before \
+                 ?replication at 394, in the arrival order every subresource pair in the table \
+                 follows.",
+        evidence: &[GET_BUCKET_LIFECYCLE_DOC, GET_BUCKET_REPLICATION_DOC],
+    },
+    ShadowingDecl {
+        winner: "GetBucketEncryption",
+        shadowed: "GetBucketReplication",
+        reason: "Two configuration subresources named in one GET, the fourth same-method \
+                 neighbour — the first band to have one band packed directly behind it. The \
+                 earlier band wins: ?encryption at 391 is tried before ?replication at 394, and \
+                 the replication reading is ignored.",
+        evidence: &[GET_BUCKET_ENCRYPTION_DOC, GET_BUCKET_REPLICATION_DOC],
+    },
+    ShadowingDecl {
+        winner: "GetBucketReplication",
+        shadowed: "ListMultipartUploads",
+        reason: "?replication and ?uploads together name a configuration document and a listing \
+                 of one bucket. The subresource band (394) is tried before the upload listing \
+                 (460), the same order every earlier configuration band settled against the \
+                 same neighbour.",
+        evidence: &[GET_BUCKET_REPLICATION_DOC, UPLOADS_DOC],
+    },
+    ShadowingDecl {
+        winner: "GetBucketReplication",
+        shadowed: "ListObjectsV2",
+        reason: "A request carrying ?replication and ?list-type=2 asks for the replication \
+                 document and a page of keys at once. The configuration subresource is the \
+                 narrower question and is tried first (394 before 600); the listing is ignored.",
+        evidence: &[GET_BUCKET_REPLICATION_DOC, LIST_V2_DOC],
+    },
+    ShadowingDecl {
+        winner: "GetBucketReplication",
+        shadowed: "ListObjectVersions",
+        reason: "Same shape as the pair above with the version listing in place of the key page: \
+                 only a client sending ?replication and ?versions together reaches it, and the \
+                 subresource band is tried first (394 before 610).",
+        evidence: &[GET_BUCKET_REPLICATION_DOC, VERSIONS_DOC],
+    },
+    ShadowingDecl {
+        winner: "GetBucketReplication",
+        shadowed: "ListObjects",
+        reason: "ListObjects pins no query key, so every ?replication request also satisfies it. \
+                 Until this row existed that was not a latent overlap but the served behaviour: \
+                 a replication document request was answered with a key listing. The subresource \
+                 is the specific reading and wins (394 before 700); the fallback stays last in \
+                 the band.",
+        evidence: &[GET_BUCKET_REPLICATION_DOC, LIST_V1_DOC],
+    },
+    ShadowingDecl {
+        winner: "PutBucketCors",
+        shadowed: "PutBucketReplication",
+        reason: "Two configuration writes named in one PUT: a request carrying ?cors and \
+                 ?replication satisfies both selectors, and AWS documents no such combination. \
+                 The earlier band wins (320 before 395), so the body is read as a CORS document \
+                 and the replication reading is ignored rather than double-written.",
+        evidence: &[PUT_BUCKET_CORS_DOC, PUT_BUCKET_REPLICATION_DOC],
+    },
+    ShadowingDecl {
+        winner: "PutBucketTagging",
+        shadowed: "PutBucketReplication",
+        reason: "Two configuration writes named in one PUT, the tagging twin of the ?cors pair \
+                 above. The earlier band wins (350 before 395), so the body is read as a \
+                 tagging document and the replication reading is ignored rather than \
+                 double-written.",
+        evidence: &[PUT_BUCKET_TAGGING_DOC, PUT_BUCKET_REPLICATION_DOC],
+    },
+    ShadowingDecl {
+        winner: "PutBucketLifecycleConfiguration",
+        shadowed: "PutBucketReplication",
+        reason: "Two configuration writes named in one PUT, the lifecycle twin of the two pairs \
+                 above. The earlier band wins (380 before 395), so the body is read as a \
+                 lifecycle document and the replication reading is ignored rather than \
+                 double-written.",
+        evidence: &[PUT_BUCKET_LIFECYCLE_DOC, PUT_BUCKET_REPLICATION_DOC],
+    },
+    ShadowingDecl {
+        winner: "PutBucketEncryption",
+        shadowed: "PutBucketReplication",
+        reason: "Two configuration writes named in one PUT, the encryption twin of the three \
+                 pairs above. The earlier band wins (392 before 395), so the body is read as an \
+                 encryption document and the replication reading is ignored rather than \
+                 double-written.",
+        evidence: &[PUT_BUCKET_ENCRYPTION_DOC, PUT_BUCKET_REPLICATION_DOC],
+    },
+    ShadowingDecl {
+        winner: "DeleteBucketCors",
+        shadowed: "DeleteBucketReplication",
+        reason: "Two configuration deletes named in one DELETE. The earlier band wins (330 \
+                 before 396), so only the CORS document is removed: a request that destroys two \
+                 configurations because it named two query keys would turn a typo into data \
+                 loss.",
+        evidence: &[DELETE_BUCKET_CORS_DOC, DELETE_BUCKET_REPLICATION_DOC],
+    },
+    ShadowingDecl {
+        winner: "DeleteBucketTagging",
+        shadowed: "DeleteBucketReplication",
+        reason: "Two configuration deletes named in one DELETE, the tagging twin of the pair \
+                 above. The earlier band wins (360 before 396), so only the tag set is removed \
+                 and the replication document stays: silently severing cross-site replication \
+                 because of a typo is the availability spelling of the data-loss rule.",
+        evidence: &[DELETE_BUCKET_TAGGING_DOC, DELETE_BUCKET_REPLICATION_DOC],
+    },
+    ShadowingDecl {
+        winner: "DeleteBucketLifecycle",
+        shadowed: "DeleteBucketReplication",
+        reason: "Two configuration deletes named in one DELETE, the lifecycle twin of the two \
+                 pairs above. The earlier band wins (390 before 396), so only the lifecycle \
+                 document is removed and the bucket keeps replicating.",
+        evidence: &[DELETE_BUCKET_LIFECYCLE_DOC, DELETE_BUCKET_REPLICATION_DOC],
+    },
+    ShadowingDecl {
+        winner: "DeleteBucketEncryption",
+        shadowed: "DeleteBucketReplication",
+        reason: "Two configuration deletes named in one DELETE, the encryption twin of the \
+                 three pairs above. The earlier band wins (393 before 396), so only the \
+                 encryption document is removed and the replication document stays.",
+        evidence: &[DELETE_BUCKET_ENCRYPTION_DOC, DELETE_BUCKET_REPLICATION_DOC],
+    },
     // The `?object-lock` pair packs behind the `?encryption` band at 397/398 — the next gap
     // slot, with 394-396 reserved for the family in flight beside it — and brings the fourth
     // subresource family's shape with a difference: there is no DELETE row, because the pinned
@@ -513,6 +669,15 @@ pub(super) const DECLS: &[ShadowingDecl] = &[
                  neighbour and the nearest: ?encryption at 391 is tried before ?object-lock at \
                  397, in the same packed corner of the band, and the lock reading is ignored.",
         evidence: &[GET_BUCKET_ENCRYPTION_DOC, GET_OBJECT_LOCK_CONFIGURATION_DOC],
+    },
+    ShadowingDecl {
+        winner: "GetBucketReplication",
+        shadowed: "GetObjectLockConfiguration",
+        reason: "Two configuration subresources named in one GET, and the closest pair in the \
+                 table: ?replication at 394 and ?object-lock at 397 are three slots apart in the \
+                 same packed corner. Neither is the narrower question, so the earlier band wins \
+                 and the lock reading is ignored.",
+        evidence: &[GET_BUCKET_REPLICATION_DOC, GET_OBJECT_LOCK_CONFIGURATION_DOC],
     },
     ShadowingDecl {
         winner: "GetObjectLockConfiguration",
@@ -581,5 +746,14 @@ pub(super) const DECLS: &[ShadowingDecl] = &[
                  corner of the band. The earlier band wins (392 before 398), so the body is \
                  read as an encryption document and the lock reading is ignored.",
         evidence: &[PUT_BUCKET_ENCRYPTION_DOC, PUT_OBJECT_LOCK_CONFIGURATION_DOC],
+    },
+    ShadowingDecl {
+        winner: "PutBucketReplication",
+        shadowed: "PutObjectLockConfiguration",
+        reason: "Two configuration writes named in one PUT, the replication twin of the pair \
+                 above. The earlier band wins (395 before 398), so the body is read as a \
+                 replication document and the lock reading is ignored rather than \
+                 double-written.",
+        evidence: &[PUT_BUCKET_REPLICATION_DOC, PUT_OBJECT_LOCK_CONFIGURATION_DOC],
     },
 ];

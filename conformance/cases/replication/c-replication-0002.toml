@@ -1,0 +1,58 @@
+[case]
+id = "c-replication-0002"
+schema_version = 1
+title = "A stored document reads back as flattened Rule siblings under an xmlns-bearing root"
+rationale = """
+The read-back is where the flattened shape becomes observable: every SDK parses Rule as repeated children of the ReplicationConfiguration root, so a serializer that introduces a Rules wrapper returns a document in which every SDK finds zero rules — the whole replication configuration silently invisible, which for this family means clients conclude nothing is being replicated while the engine keeps shipping data. The root's xmlns is pinned for the same reason: strict parsers refuse an unnamespaced root. Byte-level comparison is the only assertion that notices either."""
+polarity = "positive"
+operation = "PutBucketReplication"
+tags = ["replication", "xml", "wire-bytes"]
+timeout_ms = 10000
+quirks = ["q-repl-0002"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketReplication.html"
+summary = "The documented response syntax shows Rule elements as direct children of the ReplicationConfiguration root with no wrapper."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/issues/264"
+summary = "Upstream shipped response roots without the S3 xmlns and strict clients refused them."
+kind = "s3s-issue"
+
+
+[[setup.buckets]]
+name = "conf-replication"
+[[exchanges]]
+name = "put"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-replication?replication"
+headers = { "content-type" = "application/xml", "content-md5" = "fEyJOqgHAHaexsOc6h70Tw==" }
+body = { utf8 = '<ReplicationConfiguration><Role>arn:aws:iam::111122223333:role/replication-role</Role><Rule><Prefix>logs/</Prefix><Status>Enabled</Status><Destination><Bucket>arn:aws:s3:::replica-bucket</Bucket></Destination></Rule><Rule><Prefix>tmp/</Prefix><Status>Disabled</Status><Destination><Bucket>arn:aws:s3:::replica-two</Bucket></Destination></Rule></ReplicationConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[[exchanges]]
+name = "read-back"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-replication?replication"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.headers_present]
+"content-type" = "application/xml"
+
+[exchanges.expect.body]
+golden = "goldens/c-replication-0002.xml"

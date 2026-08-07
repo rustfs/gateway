@@ -22,7 +22,6 @@ GetBucketNotificationConfiguration -> ListObjects
 GetBucketOwnershipControls -> ListObjects
 GetBucketPolicy -> ListObjects
 GetBucketPolicyStatus -> ListObjects
-GetBucketReplication -> ListObjects
 GetBucketRequestPayment -> ListObjects
 GetBucketVersioning -> ListObjects
 GetBucketWebsite -> ListObjects

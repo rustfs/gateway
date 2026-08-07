@@ -122,8 +122,8 @@ use rustfs_gateway::{
     PRECONDITION_FAILED_MESSAGE, PreconditionRejection, Preconditions, REGION_MATCH_POLICY, RangeDecision, RangeSelectors,
     RegionLabel, RegionSet, Req, RequestKind, Resp, TagScope, TaggingRejection, Timestamp, collect, evaluate, evaluate_range,
     parse_conditional_etag, parse_tagging_header, permanent_redirect_for, resolve_copy_range, resolve_location_constraint,
-    validate_cors, validate_encryption, validate_legal_hold, validate_lifecycle, validate_lock_configuration, validate_retention,
-    validate_tag_set,
+    validate_cors, validate_encryption, validate_legal_hold, validate_lifecycle, validate_lock_configuration,
+    validate_replication, validate_retention, validate_tag_set,
 };
 
 /// The canonical user id every listing reports as the owner.
@@ -359,6 +359,13 @@ struct BucketState {
     /// it — a recreated bucket inheriting the previous owner's KMS key would encrypt the new
     /// owner's data to somebody else's key.
     encryption: Option<dto::ServerSideEncryptionConfiguration>,
+    /// The stored replication configuration, written by `PutBucketReplication` within the case.
+    /// `None` is the observable state `ReplicationConfigurationNotFoundError` reports; there is
+    /// no "empty document" state, because the decoder refuses a document with no rule. It lives
+    /// in `BucketState` so that deleting the bucket deletes the document with it — a recreated
+    /// bucket inheriting the previous owner's replication rules would ship the new owner's data
+    /// to somebody else's destination bucket under somebody else's IAM role.
+    replication: Option<dto::ReplicationConfiguration>,
     /// The stored object-lock configuration, written by `PutObjectLockConfiguration` within the
     /// case. `None` with `object_lock` false is the observable state
     /// `ObjectLockConfigurationNotFoundError` reports; `None` with `object_lock` true answers
@@ -586,6 +593,26 @@ impl Fixture {
     pub fn clear_encryption(&mut self, name: &str) {
         if let Some(bucket) = self.buckets.get_mut(name) {
             bucket.encryption = None;
+        }
+    }
+
+    /// Installs a bucket's replication document, replacing whatever was there.
+    /// `PutBucketReplication` only.
+    pub fn set_replication(&mut self, name: &str, configuration: dto::ReplicationConfiguration) {
+        self.buckets.entry(name.to_owned()).or_default().replication = Some(configuration);
+    }
+
+    /// The stored replication document, or `None` for a bucket that never had one.
+    #[must_use]
+    fn replication(&self, name: &str) -> Option<&dto::ReplicationConfiguration> {
+        self.buckets.get(name).and_then(|bucket| bucket.replication.as_ref())
+    }
+
+    /// Removes a bucket's replication document. Idempotent on purpose: the delete answers `204`
+    /// whether or not a document was there, so this reports nothing.
+    pub fn clear_replication(&mut self, name: &str) {
+        if let Some(bucket) = self.buckets.get_mut(name) {
+            bucket.replication = None;
         }
     }
 
@@ -1309,6 +1336,13 @@ fn no_such_lifecycle_configuration() -> HandlerError {
 
 /// `ServerSideEncryptionConfigurationNotFoundError`, in AWS's own wording for a bucket that
 /// never had a default-encryption document.
+fn no_such_replication_configuration() -> HandlerError {
+    HandlerError::new(
+        ErrorCode::REPLICATION_CONFIGURATION_NOT_FOUND,
+        "The replication configuration was not found",
+    )
+}
+
 fn no_such_encryption_configuration() -> HandlerError {
     HandlerError::new(
         ErrorCode::SERVER_SIDE_ENCRYPTION_CONFIGURATION_NOT_FOUND,
@@ -2157,6 +2191,36 @@ impl Handler<dto::DeleteBucketEncryption> for Stub {
         request: Req<dto::DeleteBucketEncryption>,
     ) -> impl core::future::Future<Output = HandlerResult<dto::DeleteBucketEncryption>> + Send {
         let outcome = self.delete_bucket_encryption(request.input());
+        async move { outcome }
+    }
+}
+
+impl Handler<dto::GetBucketReplication> for Stub {
+    fn call(
+        &self,
+        request: Req<dto::GetBucketReplication>,
+    ) -> impl core::future::Future<Output = HandlerResult<dto::GetBucketReplication>> + Send {
+        let outcome = self.get_bucket_replication(request.input());
+        async move { outcome }
+    }
+}
+
+impl Handler<dto::PutBucketReplication> for Stub {
+    fn call(
+        &self,
+        request: Req<dto::PutBucketReplication>,
+    ) -> impl core::future::Future<Output = HandlerResult<dto::PutBucketReplication>> + Send {
+        let outcome = self.put_bucket_replication(request.input());
+        async move { outcome }
+    }
+}
+
+impl Handler<dto::DeleteBucketReplication> for Stub {
+    fn call(
+        &self,
+        request: Req<dto::DeleteBucketReplication>,
+    ) -> impl core::future::Future<Output = HandlerResult<dto::DeleteBucketReplication>> + Send {
+        let outcome = self.delete_bucket_replication(request.input());
         async move { outcome }
     }
 }
@@ -3105,6 +3169,55 @@ impl Stub {
         require_bucket(&fixture, &input.bucket)?;
         fixture.clear_encryption(input.bucket.as_str());
         Ok(Resp::new(dto::DeleteBucketEncryptionOutput::default()))
+    }
+
+    /// The stored replication document, or the family's defining 404.
+    ///
+    /// The bucket is resolved first, so a missing bucket is `NoSuchBucket` and only a bucket
+    /// that exists without a document is `ReplicationConfigurationNotFoundError` — two
+    /// different facts a client tearing down configuration branches on.
+    fn get_bucket_replication(&self, input: &dto::GetBucketReplicationInput) -> HandlerResult<dto::GetBucketReplication> {
+        let fixture = self.borrow()?;
+        require_bucket(&fixture, &input.bucket)?;
+        let stored = fixture
+            .replication(input.bucket.as_str())
+            .ok_or_else(no_such_replication_configuration)?;
+        Ok(Resp::new(dto::GetBucketReplicationOutput {
+            replication_configuration: Some(stored.clone()),
+        }))
+    }
+
+    /// The whole document, replaced — after the one validation pass every backend shares.
+    ///
+    /// The rules are `rustfs_gateway::validate_replication`'s, not this file's: the V1/V2
+    /// schema couplings, the filter grammar and the `ID` bounds live once in the shared
+    /// contract, and this fixture calls it rather than mirroring it. What is stored is exactly
+    /// what was sent, in the order it was sent — the read-back is a byte-level golden, and that
+    /// includes the leniencies: an unknown element was already skipped by the decoder, an
+    /// out-of-set `Status` and a duplicated `Priority` are stored whole. The
+    /// `x-amz-bucket-object-lock-token` header is available on the input and deliberately
+    /// unread: whether the token permits enabling Object Lock is a semantic question this stub,
+    /// like the codec, does not answer (`q-repl-0013`).
+    fn put_bucket_replication(&self, input: &dto::PutBucketReplicationInput) -> HandlerResult<dto::PutBucketReplication> {
+        let mut fixture = self.borrow()?;
+        require_bucket(&fixture, &input.bucket)?;
+        let configuration = &input.replication_configuration;
+        validate_replication(configuration).map_err(|rejection| HandlerError::new(rejection.code(), rejection.reason()))?;
+        fixture.set_replication(input.bucket.as_str(), configuration.clone());
+        Ok(Resp::new(dto::PutBucketReplicationOutput::default()))
+    }
+
+    /// The document removed, the bucket left alone.
+    ///
+    /// The `204` is unconditional in the same sense `DeleteBucketEncryption`'s is: removing the
+    /// replication configuration of a bucket that has none is a success, not a `404`. The
+    /// bucket itself still has to exist — a success for a bucket that is not there would tell a
+    /// caller its teardown landed on something.
+    fn delete_bucket_replication(&self, input: &dto::DeleteBucketReplicationInput) -> HandlerResult<dto::DeleteBucketReplication> {
+        let mut fixture = self.borrow()?;
+        require_bucket(&fixture, &input.bucket)?;
+        fixture.clear_replication(input.bucket.as_str());
+        Ok(Resp::new(dto::DeleteBucketReplicationOutput::default()))
     }
 
     /// The bucket's object-lock document, or the family's bucket-level 404.

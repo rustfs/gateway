@@ -1,0 +1,46 @@
+[case]
+id = "c-replication-0013"
+schema_version = 1
+title = "An unconfigured bucket answers the replication read with the family's 404, never an empty 200"
+rationale = """
+Clients branch on the code, not the number: NoSuchBucket means the bucket is gone, ReplicationConfigurationNotFoundError means the bucket is fine and no replication is configured. Worse than the wrong code is a 200 with an empty document, which monitoring tooling reads as a configuration that exists and replicates nothing — a disaster-recovery audit that should have flagged the bucket passes it instead. The body is pinned byte for byte so a renderer that swaps the code for the message, or drops the Error suffix this code unusually carries, fails here."""
+polarity = "negative"
+operation = "GetBucketReplication"
+tags = ["replication", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-repl-0001"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/ErrorResponses.html"
+summary = "The replication-related error code list documents ReplicationConfigurationNotFoundError with HTTP status 404."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/pull/515"
+summary = "Upstream had to backfill missing error codes because clients branch on the specific code string."
+kind = "s3s-pr"
+
+
+[[setup.buckets]]
+name = "conf-replication"
+[request]
+method = "GET"
+target = "/conf-replication?replication"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 404
+connection_after = "open"
+[expect.error]
+code = "ReplicationConfigurationNotFoundError"
+request_id_present = true
+
+[expect.headers_present]
+"content-type" = "application/xml"
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>ReplicationConfigurationNotFoundError</Code><Message>The replication configuration was not found</Message><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''

@@ -1,0 +1,53 @@
+[case]
+id = "c-replication-0004"
+schema_version = 1
+title = "A Filter combining a Prefix and two Tags inside one And round-trips intact"
+rationale = """
+The combined filter is the shape that exercises the whole grammar at once: one And wrapping a Prefix and a flattened Tag list, each Tag a Key/Value pair. It is the same one-direct-child rule the lifecycle family enforces, applied to this family's own filter type — and the round-trip proves the flattened Tag siblings survive without a wrapper, because a decoder that wrapped them would read one tag where the client wrote two and quietly widen the rule's scope."""
+polarity = "positive"
+operation = "PutBucketReplication"
+tags = ["replication", "xml", "wire-bytes"]
+timeout_ms = 10000
+quirks = ["q-repl-0007"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/replication-add-config.html"
+summary = "The filter walkthrough wraps a key prefix and multiple tags in a single And parent element."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "conf-replication"
+[[exchanges]]
+name = "put"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-replication?replication"
+headers = { "content-type" = "application/xml", "content-md5" = "TQzo9wqxFi6ZcsL4ffI/yQ==" }
+body = { utf8 = '<ReplicationConfiguration><Role>arn:aws:iam::111122223333:role/replication-role</Role><Rule><Priority>1</Priority><Filter><And><Prefix>logs/</Prefix><Tag><Key>env</Key><Value>prod</Value></Tag><Tag><Key>team</Key><Value>storage</Value></Tag></And></Filter><Status>Enabled</Status><Destination><Bucket>arn:aws:s3:::replica-bucket</Bucket></Destination><DeleteMarkerReplication><Status>Disabled</Status></DeleteMarkerReplication></Rule></ReplicationConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[[exchanges]]
+name = "read-back"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-replication?replication"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.headers_present]
+"content-type" = "application/xml"
+
+[exchanges.expect.body]
+golden = "goldens/c-replication-0004.xml"

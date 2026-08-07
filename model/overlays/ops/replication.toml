@@ -1,0 +1,161 @@
+# Copyright 2026 RustFS Team
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Family: bucket replication configuration. GetBucketReplication, PutBucketReplication,
+# DeleteBucketReplication.
+#
+# Configuration codec only. Nothing here replicates a byte: evaluating a rule against an object
+# write, assuming the Role, moving data between sites and maintaining the per-object
+# x-amz-replication-status header (whose production belongs to the object read/HEAD encoders,
+# task P5-01) is the replication engine's half, and the gateway's whole contribution is that the
+# document the engine reads is the document the client wrote. That fence matters more here than
+# in any sibling family: RustFS's `parse_all_configs` treats every other bucket configuration as
+# fail-open — a document that stops parsing degrades to "no configuration" — but replication is
+# the one fail-closed configuration, so a decoder that got stricter between releases would not
+# silently switch a feature off, it would make the bucket unusable. The semantic validation in
+# `ops/shared/replication.rs` therefore refuses only what AWS documents as refusals.
+#
+# The routing reason is the encryption band's one more time: a deferred operation contributes no
+# route row, so `GET /{Bucket}?replication` was claimed by `ListObjects` — a replication document
+# request answered with a key listing (the `GetBucketReplication -> ListObjects` debt-register
+# line this family retires) — while the PUT and DELETE halves were unroutable.
+
+include = ["DeleteBucketReplication", "GetBucketReplication", "PutBucketReplication"]
+
+# =============================================================================================
+# The `?replication` band: 394 (GET), 395 (PUT), 396 (DELETE)
+#
+# Packed directly after the `?encryption` band at 391-393, for the same reason that band packed
+# after `?lifecycle`: the tens-aligned bucket-subresource slots between `?location` (300) and
+# the multipart band (400) are spoken for. It cannot go after the listings: the table is
+# first-match, `ListObjects` at 700 pins no query key, and a GET row behind it would hand every
+# `GET /{Bucket}?replication` back to the key listing this family exists to stop. The GET row
+# overlaps `?location` (300), the four earlier subresource GETs and the four listings
+# (460/600/610/700); the PUT and DELETE rows overlap only their subresource method twins. Every
+# pair is declared in `route/shadowing.rs`. The bucket CRUD rows at 710/720 stay disjoint by
+# their own `QueryAbsent` lists, which already name `replication`.
+# =============================================================================================
+
+# =============================================================================================
+# GetBucketReplication
+#
+# The stored replication document, answered as `<ReplicationConfiguration>` with the rules
+# flattened: `<Rule>` elements repeat directly under the root with no wrapper. The response root
+# comes from the model's own payload shape name; only the error surface and the byte ceiling are
+# stated here.
+# =============================================================================================
+[op.GetBucketReplication]
+precedence = 394
+auth_action = "s3:GetReplicationConfiguration"
+# The pinned model documents the configuration itself as capped at 2 MB, so the same ceiling
+# bounds the read here and the write below.
+response_max_bytes = 2097152
+# The unconfigured read is the family's defining error: a bucket that never had a replication
+# document answers the operation-specific 404 — one of the few AWS codes whose literal ends in
+# `Error` — not a generic not-found and not an empty 200.
+not_configured = "ReplicationConfigurationNotFoundError"
+error_codes = ["NoSuchBucket", "AccessDenied", "ReplicationConfigurationNotFoundError"]
+url_encoded_fields = []
+input_hot = []
+output_hot = ["ReplicationConfiguration"]
+quirk_refs = ["q-repl-0001", "q-repl-0002"]
+
+# =============================================================================================
+# PutBucketReplication
+#
+# Replaces the whole document; there is no partial update. The request root comes from the
+# payload member's own `xmlName` — `ReplicationConfiguration`, wire and model in agreement — so
+# no root override is needed. The `x-amz-bucket-object-lock-token` header is parsed into the
+# input and passed through; whether the token actually permits enabling Object Lock is the
+# storage backend's question, never answered here.
+# =============================================================================================
+[op.PutBucketReplication]
+precedence = 395
+auth_action = "s3:PutReplicationConfiguration"
+# The pinned model carries `aws.protocols#httpChecksum` with `requestChecksumRequired`, which is
+# a different trait from the `smithy.api#httpChecksumRequired` lowering reads, so the requirement
+# is stated here rather than silently lost — exactly as the CORS, tagging, lifecycle and
+# encryption writes state it. A replication write with neither Content-MD5 nor an
+# x-amz-checksum-* header is refused before it is parsed.
+http_checksum_required = true
+# The documented 2 MB configuration cap again, from the read side.
+request_max_bytes = 2097152
+error_codes = ["NoSuchBucket", "AccessDenied", "MalformedXML", "InvalidRequest", "InvalidArgument", "BadDigest"]
+url_encoded_fields = []
+input_hot = ["ReplicationConfiguration"]
+quirk_refs = [
+  "q-repl-0004",
+  "q-repl-0005",
+  "q-repl-0006",
+  "q-repl-0007",
+  "q-repl-0008",
+  "q-repl-0009",
+  "q-repl-0010",
+  "q-repl-0011",
+  "q-repl-0012",
+  "q-repl-0013",
+]
+
+# =============================================================================================
+# DeleteBucketReplication
+#
+# Removes the document. The model already answers 204, and the 204 is unconditional: deleting
+# the replication configuration of a bucket that has none is a success, exactly as
+# DeleteBucketCors's is. The permission is the write's, `s3:PutReplicationConfiguration` — the
+# pinned model documents that action for the delete, and no delete-specific one exists.
+# =============================================================================================
+[op.DeleteBucketReplication]
+precedence = 396
+auth_action = "s3:PutReplicationConfiguration"
+error_codes = ["NoSuchBucket", "AccessDenied"]
+url_encoded_fields = []
+input_hot = []
+output_hot = []
+quirk_refs = ["q-repl-0003"]
+
+# =============================================================================================
+# Nested shapes owned by this family
+# =============================================================================================
+
+# The payload of a replication write and the body of a replication read are the same structure.
+# The model requires Role and Rules, so a document missing either is refused as MalformedXML
+# rather than read as "clear the configuration" — DeleteBucketReplication is the spelling for
+# that.
+[shape.ReplicationConfiguration]
+required = ["Role", "Rules"]
+hot = ["Rules"]
+element_order = ["Role", "Rules"]
+
+# The destination's `Bucket` member is typed `BucketName` in the model but carries an ARN on the
+# wire — `arn:aws:s3:::bucket` — which the bucket-name grammar (no colons) would refuse in every
+# real document ever written. The member is decoded as a plain string and no bucket-name or ARN
+# grammar is enforced on it (`q-repl-0011`): the model's own type is unenforceable here, and any
+# stricter grammar of this project's invention would be a guess a stored document could fail.
+# The model types this member as the `OwnerOverride` enum, whose one value is `Destination`.
+# The dto generator names string enumerations after the *member* — the IR does not carry the
+# Smithy shape name — and an enum named `Owner` collides with the `Owner` structure every
+# listing already exports. The member is carried as a plain string instead: the value set is
+# not validated, which is the same leniency the rest of this fail-closed family applies to
+# out-of-set enum spellings (`q-repl-0012`), and the collision never exists.
+[[shape.AccessControlTranslation.field]]
+name = "Owner"
+type = "String"
+
+[shape.Destination]
+required = ["Bucket"]
+
+[[shape.Destination.field]]
+name = "Bucket"
+type = "String"
+quirks = ["q-repl-0011"]

@@ -213,6 +213,18 @@ pub use rustfs_gateway_core::ops::shared::object_lock::{
     ObjectLockRejection, validate_legal_hold, validate_lock_configuration, validate_retention,
 };
 
+// The replication document contract, exported for the same reason as the three above: what
+// `PutBucketReplication` may store — the V1/V2 schema couplings, the filter grammar, the rule
+// cap and the id bounds — must be one implementation every backend calls, and its leniencies
+// matter even more than its refusals: this is the one configuration RustFS parses fail-closed,
+// so a backend that re-derived a stricter rule would make buckets unusable on the next
+// re-parse. The rejection reasons are constant on purpose: `ReplicaKmsKeyID` and `Account` are
+// configuration secrets, and a backend that composed its own refusal from the document's bytes
+// would copy them into an error body (`q-repl-0010`).
+pub use rustfs_gateway_core::ops::shared::replication::{
+    MAX_REPLICATION_ID_CHARS, MAX_REPLICATION_RULES, ReplicationRejection, RuleShape, classify_rule, validate_replication,
+};
+
 // The bucket lifecycle contracts, exported the day they are written rather than found
 // unreachable later. A backend answering CreateBucket needs `resolve` — the us-east-1
 // omission rule, the EU alias and the strict region match — and a backend answering any
