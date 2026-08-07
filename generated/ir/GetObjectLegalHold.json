@@ -1,0 +1,157 @@
+{
+  "ir_version": "1",
+  "operation": "GetObjectLegalHold",
+  "http": {
+            "method": "GET",
+            "target": "Object",
+            "precedence": 530,
+            "predicates": [
+                            { "kind": "Method", "method": "GET" },
+                            { "kind": "Target", "target": "Object" },
+                            { "kind": "QueryPresent", "key": "legal-hold" }
+                          ],
+            "success_status": 200,
+            "alt_success_statuses": [],
+            "path_shape": "/{Bucket}/{Key+}"
+          },
+  "auth": { "requirement": "Required", "action": "s3:GetObjectLegalHold", "presigned_allowed": true, "service": "s3" },
+  "payload": {
+               "request": { "kind": "None", "buffering": "None", "max_bytes": null },
+               "response": { "kind": "XmlBody", "buffering": "Full", "max_bytes": 65536 }
+             },
+  "checksum": { "http_checksum_required": false, "request_algorithms": [], "response_algorithms": [] },
+  "input": {
+             "fields": [
+                         {
+                           "name": "Bucket",
+                           "wire_name": "Bucket",
+                           "required": true,
+                           "binding": { "kind": "UriLabel", "greedy": false },
+                           "type": { "kind": "BucketName" },
+                           "hot": true,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "Key",
+                           "wire_name": "Key",
+                           "required": true,
+                           "binding": { "kind": "UriLabel", "greedy": true },
+                           "type": { "kind": "ObjectKey" },
+                           "hot": true,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "VersionId",
+                           "wire_name": "versionId",
+                           "required": false,
+                           "binding": { "kind": "Query" },
+                           "type": { "kind": "String" },
+                           "hot": true,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "RequestPayer",
+                           "wire_name": "x-amz-request-payer",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "StringEnum", "values": ["requester"] },
+                           "hot": false,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "ExpectedBucketOwner",
+                           "wire_name": "x-amz-expected-bucket-owner",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "String" },
+                           "hot": false,
+                           "quirk_refs": []
+                         }
+                       ]
+           },
+  "output": {
+              "fields": [
+                          {
+                            "name": "LegalHold",
+                            "wire_name": null,
+                            "required": false,
+                            "binding": { "kind": "Payload" },
+                            "type": { "kind": "Structure", "shape": "ObjectLockLegalHold" },
+                            "hot": true,
+                            "quirk_refs": []
+                          }
+                        ]
+            },
+  "shapes": {
+              "ObjectLockLegalHold": {
+                                       "kind": "Structure",
+                                       "fields": [
+                                                   {
+                                                     "name": "Status",
+                                                     "wire_name": "Status",
+                                                     "required": false,
+                                                     "binding": { "kind": "BodyXml" },
+                                                     "type": { "kind": "StringEnum", "values": ["ON", "OFF"] },
+                                                     "hot": true,
+                                                     "quirk_refs": []
+                                                   }
+                                                 ],
+                                       "xml": {
+                                                "element_order": ["Status"],
+                                                "empty_value_policy": { "Status": "omit" },
+                                                "attributes": []
+                                              }
+                                     }
+            },
+  "xml": {
+           "request_root": null,
+           "request_root_aliases": [],
+           "response_root": "LegalHold",
+           "xmlns": "emit",
+           "unwrapped_output": false,
+           "element_order": [],
+           "empty_value_policy": {},
+           "url_encoded_fields": [],
+           "attributes": [],
+           "body_literal": false
+         },
+  "errors": {
+              "not_configured": "NoSuchObjectLockConfiguration",
+              "allows_error_after_200": false,
+              "codes": ["NoSuchBucket", "NoSuchKey", "AccessDenied", "NoSuchObjectLockConfiguration"]
+            },
+  "derived_resources": [],
+  "head_mirrors": null,
+  "quirk_refs": ["q-lock-0003", "q-lock-0005"],
+  "quirks": [
+              {
+                "id": "q-lock-0003",
+                "kind": "not_configured_error",
+                "target": "GetObjectLegalHold",
+                "summary": "An object with no legal hold answers the same object-level 404 as the retention read, NoSuchObjectLockConfiguration, never an empty 200 that a compliance audit would read as an OFF hold that exists.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/ErrorResponses.html",
+                                "summary": "The error code list documents NoSuchObjectLockConfiguration with HTTP status 404, and the legal-hold read shares the object-level code with the retention read."
+                              }
+                            ],
+                "cases": ["c-lock-0013"]
+              },
+              {
+                "id": "q-lock-0005",
+                "kind": "xml_root",
+                "target": "PutObjectLegalHold",
+                "summary": "The wire root of a legal-hold document is LegalHold, not the shape name ObjectLockLegalHold, in both the request and the response.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObjectLegalHold.html",
+                                "summary": "The documented request syntax roots the body at a LegalHold element, while the structure it carries is published as ObjectLockLegalHold."
+                              }
+                            ],
+                "cases": ["c-lock-0006"]
+              }
+            ],
+  "ext_points": []
+}

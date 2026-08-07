@@ -1,0 +1,31 @@
+[case]
+id = "c-lock-0001"
+schema_version = 1
+title = "A lock configuration of ObjectLockEnabled alone is stored and answered 200"
+rationale = """
+This is the document that turns WORM on and sets no default, and it is the shape a bucket reaches when object lock is enabled without a retention policy. A decoder that demanded a Rule would refuse the most common lock configuration there is, and the caller would conclude the feature is unavailable rather than that its document was wrong."""
+polarity = "positive"
+operation = "PutObjectLockConfiguration"
+tags = ["object-lock", "xml"]
+timeout_ms = 10000
+quirks = ["q-lock-0009"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ObjectLockConfiguration.html"
+summary = "The configuration documents ObjectLockEnabled and Rule as separate members, with Rule not required."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "conf-lock"
+
+[request]
+method = "PUT"
+target = "/conf-lock?object-lock"
+headers = { "content-type" = "application/xml", "content-md5" = "CJIyG/nMmkjfQ1+FuEdwUA==" }
+body = { utf8 = '<ObjectLockConfiguration><ObjectLockEnabled>Enabled</ObjectLockEnabled></ObjectLockConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+connection_after = "open"

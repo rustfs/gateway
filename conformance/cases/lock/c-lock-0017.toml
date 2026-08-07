@@ -1,0 +1,50 @@
+[case]
+id = "c-lock-0017"
+schema_version = 1
+title = "A retention mode AWS does not define is refused rather than stored as an open enum value"
+rationale = """
+The generated enum is an open set so that a model re-pin does not break the decoder, and that openness is exactly what has to stop at this family boundary: an invented mode stored today is a lock nothing can evaluate and nothing can lift tomorrow. The refusal is the difference between an unknown value the codec tolerates and an unknown value a compliance surface tolerates."""
+polarity = "negative"
+operation = "PutObjectRetention"
+tags = ["object-lock", "xml", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-lock-0008"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ObjectLockRetention.html"
+summary = "The Mode member documents a closed two-value set for object retention."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "conf-lock"
+object_lock = true
+
+[[setup.objects]]
+bucket = "conf-lock"
+key = "doc.txt"
+body = { utf8 = "payload" }
+
+[request]
+method = "PUT"
+target = "/conf-lock/doc.txt?retention"
+headers = { "content-type" = "application/xml", "content-md5" = "+yulVBPk+1mlWovBw8ukbQ==" }
+body = { utf8 = '<Retention><Mode>ARCHIVE</Mode><RetainUntilDate>2030-01-01T00:00:00.000Z</RetainUntilDate></Retention>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+code = "MalformedXML"
+request_id_present = true
+
+[expect.headers_present]
+"content-type" = "application/xml"
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>MalformedXML</Code><Message>Mode must be GOVERNANCE or COMPLIANCE</Message><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''

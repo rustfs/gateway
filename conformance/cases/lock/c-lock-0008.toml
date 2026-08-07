@@ -1,0 +1,56 @@
+[case]
+id = "c-lock-0008"
+schema_version = 1
+title = "COMPLIANCE is accepted beside GOVERNANCE, and the instant survives to the millisecond"
+rationale = """
+COMPLIANCE is the mode nobody can lift, so a gateway that quietly accepted only GOVERNANCE would downgrade the strictest protection a client can ask for into one an administrator can bypass — a security failure with a 200 on it. The timestamp is pinned in the golden because RetainUntilDate is carried as an instant and re-rendered: a rounding that lost the seconds would move the moment protection lapses."""
+polarity = "positive"
+operation = "PutObjectRetention"
+tags = ["object-lock", "wire-bytes"]
+timeout_ms = 10000
+quirks = ["q-lock-0008"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ObjectLockRetention.html"
+summary = "The Mode member documents GOVERNANCE and COMPLIANCE as the two retention modes."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "conf-lock"
+object_lock = true
+
+[[setup.objects]]
+bucket = "conf-lock"
+key = "doc.txt"
+body = { utf8 = "payload" }
+
+[[exchanges]]
+name = "put-compliance"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-lock/doc.txt?retention"
+headers = { "content-type" = "application/xml", "content-md5" = "w6fCj1tEsSzOo9KMz1oyrw==" }
+body = { utf8 = '<Retention><Mode>COMPLIANCE</Mode><RetainUntilDate>2030-06-01T12:30:45.000Z</RetainUntilDate></Retention>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[[exchanges]]
+name = "read-back"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-lock/doc.txt?retention"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.body]
+golden = "goldens/c-lock-0008.xml"

@@ -1,0 +1,51 @@
+[case]
+id = "c-lock-0003"
+schema_version = 1
+title = "A COMPLIANCE Years default round-trips, and Years is not rewritten as Days"
+rationale = """
+Years and Days are two spellings of a period and only one of them was sent. A store that normalised seven years into 2555 days would answer an auditor a number the caller never wrote, and the difference is not cosmetic: leap years make the two disagree, so a document rewritten on the way in is a retention period silently shortened. The golden pins the spelling that came back."""
+polarity = "positive"
+operation = "GetObjectLockConfiguration"
+tags = ["object-lock", "xml", "wire-bytes"]
+timeout_ms = 10000
+quirks = ["q-lock-0010"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DefaultRetention.html"
+summary = "DefaultRetention documents Days and Years as alternative period members, each with a minimum of one."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "conf-lock"
+
+[[exchanges]]
+name = "put-compliance-years"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-lock?object-lock"
+headers = { "content-type" = "application/xml", "content-md5" = "LTLMRqUccrT+m7oL7E7aLQ==" }
+body = { utf8 = '<ObjectLockConfiguration><ObjectLockEnabled>Enabled</ObjectLockEnabled><Rule><DefaultRetention><Mode>COMPLIANCE</Mode><Years>7</Years></DefaultRetention></Rule></ObjectLockConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[[exchanges]]
+name = "read-back"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-lock?object-lock"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.body]
+golden = "goldens/c-lock-0003.xml"
+not_contains_utf8 = ["<Days>"]

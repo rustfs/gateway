@@ -1,0 +1,53 @@
+[case]
+id = "c-lock-0012"
+schema_version = 1
+title = "An object with no retention answers the object-level 404, a different code from the bucket read"
+rationale = """
+The two unconfigured answers in this family are not interchangeable: a lock-enabled bucket whose object carries no retention is a normal state, and reporting it with the bucket-level code would tell a client the whole bucket is unlocked. Tooling that walks a bucket deciding which objects are protected branches on exactly this distinction, so the code is pinned byte for byte rather than the status alone."""
+polarity = "negative"
+operation = "GetObjectRetention"
+tags = ["object-lock", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-lock-0002"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/ErrorResponses.html"
+summary = "The error code list documents NoSuchObjectLockConfiguration with HTTP status 404 for an object with no lock configuration."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObjectRetention.html"
+summary = "The retention read is documented as answering the object-level not-found rather than the bucket-level one."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "conf-lock"
+object_lock = true
+
+[[setup.objects]]
+bucket = "conf-lock"
+key = "doc.txt"
+body = { utf8 = "payload" }
+
+[request]
+method = "GET"
+target = "/conf-lock/doc.txt?retention"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 404
+connection_after = "open"
+
+[expect.error]
+code = "NoSuchObjectLockConfiguration"
+request_id_present = true
+
+[expect.headers_present]
+"content-type" = "application/xml"
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>NoSuchObjectLockConfiguration</Code><Message>The specified object does not have an ObjectLock configuration</Message><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''

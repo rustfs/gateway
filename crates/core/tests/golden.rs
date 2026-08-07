@@ -37,7 +37,7 @@
 use std::fs;
 use std::path::PathBuf;
 
-use rustfs_gateway_core::route::{PROVISIONAL_SHADOWING, RouteTable, ShadowingDecls, generated_entries};
+use rustfs_gateway_core::route::{PROVISIONAL_SHADOWING, RouteTable, generated_entries};
 
 fn golden_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/golden/route-table.txt")
@@ -45,7 +45,7 @@ fn golden_path() -> PathBuf {
 
 fn rendered() -> String {
     let entries = generated_entries().expect("the generated rows parse");
-    let table = RouteTable::build(entries, &ShadowingDecls::new(PROVISIONAL_SHADOWING)).expect("the generated table builds");
+    let table = RouteTable::build(entries, &PROVISIONAL_SHADOWING).expect("the generated table builds");
     table.render()
 }
 

@@ -146,3 +146,27 @@ pub(super) const DELETE_OBJECT_TAGGING_DOC: &str = "https://docs.aws.amazon.com/
 /// AWS's own reference for the plain object read.
 pub(super) const GET_OBJECT_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObject.html \
      — an object read is the same method and path with no upload id.";
+
+/// AWS's own reference for the bucket lock-configuration read.
+pub(super) const GET_OBJECT_LOCK_CONFIGURATION_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObjectLockConfiguration.html \
+     — the lock-configuration read is a GET on the bucket carrying the ?object-lock subresource, and it defines no other selector.";
+
+/// AWS's own reference for the bucket lock-configuration write.
+pub(super) const PUT_OBJECT_LOCK_CONFIGURATION_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObjectLockConfiguration.html \
+     — the lock-configuration write is a PUT on the bucket carrying the ?object-lock subresource, and its body is the lock document.";
+
+/// AWS's own reference for the retention read.
+pub(super) const GET_OBJECT_RETENTION_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObjectRetention.html \
+     — a retention read is a GET to the object key carrying the ?retention subresource, and it answers with the retention document rather than with the object.";
+
+/// AWS's own reference for the retention write.
+pub(super) const PUT_OBJECT_RETENTION_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObjectRetention.html \
+     — a retention write is a PUT to the object key carrying the ?retention subresource, and its body is a Retention document rather than object data.";
+
+/// AWS's own reference for the legal-hold read.
+pub(super) const GET_OBJECT_LEGAL_HOLD_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObjectLegalHold.html \
+     — a legal-hold read is a GET to the object key carrying the ?legal-hold subresource, and it answers with the hold status rather than with the object.";
+
+/// AWS's own reference for the legal-hold write.
+pub(super) const PUT_OBJECT_LEGAL_HOLD_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObjectLegalHold.html \
+     — a legal-hold write is a PUT to the object key carrying the ?legal-hold subresource, and its body is a LegalHold document rather than object data.";

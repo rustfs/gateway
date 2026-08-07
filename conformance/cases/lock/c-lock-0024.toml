@@ -1,0 +1,53 @@
+[case]
+id = "c-lock-0024"
+schema_version = 1
+title = "A retain-until date already in the past is refused against the injected clock"
+rationale = """
+A retention that expired before it was written protects nothing while looking exactly like one that does, which is the shape of every accidental unlock: a client computing the date from a stale variable gets a 200 and believes the object is held. The clock is injected rather than read from the host so that the rule is decidable at all — a case whose outcome depended on when it ran would be a case nobody could trust."""
+polarity = "negative"
+operation = "PutObjectRetention"
+tags = ["object-lock", "timing", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-lock-0013"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/object-lock.html"
+summary = "A retention period protects an object version until a timestamp ahead of the moment the retention is applied."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-01T00:00:00Z"
+
+[[setup.buckets]]
+name = "conf-lock"
+object_lock = true
+
+[[setup.objects]]
+bucket = "conf-lock"
+key = "doc.txt"
+body = { utf8 = "payload" }
+
+[request]
+method = "PUT"
+target = "/conf-lock/doc.txt?retention"
+headers = { "content-type" = "application/xml", "content-md5" = "YRWlYd4ytMZz5daKKZf7SQ==" }
+body = { utf8 = '<Retention><Mode>GOVERNANCE</Mode><RetainUntilDate>2020-01-01T00:00:00.000Z</RetainUntilDate></Retention>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+code = "InvalidArgument"
+request_id_present = true
+
+[expect.headers_present]
+"content-type" = "application/xml"
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>InvalidArgument</Code><Message>the retain until date must be in the future</Message><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''

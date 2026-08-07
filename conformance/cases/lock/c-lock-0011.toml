@@ -1,0 +1,42 @@
+[case]
+id = "c-lock-0011"
+schema_version = 1
+title = "A bucket that never enabled object lock answers the bucket-level 404, never an empty 200"
+rationale = """
+Clients branch on the code, not the number: NoSuchBucket means the bucket is gone, ObjectLockConfigurationNotFoundError means the bucket is fine and WORM is off. Worse than either wrong code is a 200 with an empty document, which compliance tooling reads as a lock configuration that exists and protects nothing — an audit that should have flagged the bucket passes it. The body is pinned byte for byte so a renderer that swaps the code for the message fails here."""
+polarity = "negative"
+operation = "GetObjectLockConfiguration"
+tags = ["object-lock", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-lock-0001"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/ErrorResponses.html"
+summary = "The error code list documents ObjectLockConfigurationNotFoundError with HTTP status 404."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "conf-lock"
+
+[request]
+method = "GET"
+target = "/conf-lock?object-lock"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 404
+connection_after = "open"
+
+[expect.error]
+code = "ObjectLockConfigurationNotFoundError"
+request_id_present = true
+
+[expect.headers_present]
+"content-type" = "application/xml"
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>ObjectLockConfigurationNotFoundError</Code><Message>Object Lock configuration does not exist for this bucket</Message><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''

@@ -1,0 +1,43 @@
+[case]
+id = "c-lock-0029"
+schema_version = 1
+title = "A lock read on a missing bucket is NoSuchBucket, not the unconfigured lock 404"
+rationale = """
+Two 404s with different meanings meet here, and collapsing them sends an operator to the wrong place: NoSuchBucket means create the bucket, ObjectLockConfigurationNotFoundError means the bucket is fine and needs a configuration. An implementation that answered the lock code for a bucket that does not exist would report a bucket into existence."""
+polarity = "negative"
+operation = "GetObjectLockConfiguration"
+tags = ["object-lock", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-lock-0001"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/ErrorResponses.html"
+summary = "NoSuchBucket and ObjectLockConfigurationNotFoundError are documented as distinct codes, both answering 404."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "conf-lock-absent"
+absent = true
+
+[request]
+method = "GET"
+target = "/conf-lock-absent?object-lock"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 404
+connection_after = "open"
+
+[expect.error]
+code = "NoSuchBucket"
+request_id_present = true
+
+[expect.headers_present]
+"content-type" = "application/xml"
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>NoSuchBucket</Code><Message>The specified bucket does not exist</Message><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''

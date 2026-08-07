@@ -1,0 +1,53 @@
+[case]
+id = "c-lock-0013"
+schema_version = 1
+title = "An object never placed on hold answers the object-level 404, not a 200 carrying OFF"
+rationale = """
+A 200 with Status OFF says a hold decision was made and its answer was no; the 404 says nobody ever made one. A compliance review reads those as opposite findings, and an implementation that synthesised OFF for every unheld object would answer the first when the truth is the second — for every object in the bucket at once."""
+polarity = "negative"
+operation = "GetObjectLegalHold"
+tags = ["object-lock", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-lock-0003"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/ErrorResponses.html"
+summary = "The error code list documents NoSuchObjectLockConfiguration with HTTP status 404."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObjectLegalHold.html"
+summary = "The legal-hold read is documented as reporting the object current hold status rather than a default."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "conf-lock"
+object_lock = true
+
+[[setup.objects]]
+bucket = "conf-lock"
+key = "doc.txt"
+body = { utf8 = "payload" }
+
+[request]
+method = "GET"
+target = "/conf-lock/doc.txt?legal-hold"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 404
+connection_after = "open"
+
+[expect.error]
+code = "NoSuchObjectLockConfiguration"
+request_id_present = true
+
+[expect.headers_present]
+"content-type" = "application/xml"
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>NoSuchObjectLockConfiguration</Code><Message>The specified object does not have an ObjectLock configuration</Message><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''

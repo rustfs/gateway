@@ -1,0 +1,221 @@
+# Copyright 2026 RustFS Team
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Quirks of the object-lock and retention family.
+#
+# One [[quirk]] per behaviour the pinned Smithy model does not state, or states in a trait the
+# lowering would otherwise lose. `summary` and every `evidence.summary` are written by this
+# project; upstream issue and documentation prose stays under its author's copyright and is
+# never pasted here.
+#
+# The enforcement quirks — whether a delete of a protected object is refused, whether a
+# COMPLIANCE retention may be shortened, what `x-amz-bypass-governance-retention` actually
+# bypasses, and the four `x-amz-object-lock-*` headers on object writes — are deliberately
+# absent: they belong to the operations that enforce the lock, and are registered by the
+# enforcement task with those operations. This family decodes intent; it never evaluates it.
+
+[[quirk]]
+id      = "q-lock-0001"
+kind    = "not_configured_error"
+target  = "GetObjectLockConfiguration"
+summary = "A bucket that never enabled object lock answers 404 with the bucket-level code ObjectLockConfigurationNotFoundError, not a generic not-found and not an empty 200."
+cases   = ["c-lock-0011", "c-lock-0029"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/ErrorResponses.html"
+  summary = "The error code list documents ObjectLockConfigurationNotFoundError with HTTP status 404 for a bucket whose object lock configuration does not exist."
+
+[[quirk]]
+id      = "q-lock-0002"
+kind    = "not_configured_error"
+target  = "GetObjectRetention"
+summary = "An object with no retention answers 404 with the object-level code NoSuchObjectLockConfiguration — a different code from the bucket read's 404, and clients branch on the difference."
+cases   = ["c-lock-0012"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/ErrorResponses.html"
+  summary = "The error code list documents NoSuchObjectLockConfiguration with HTTP status 404 for an object that has no object lock configuration."
+
+[[quirk]]
+id      = "q-lock-0003"
+kind    = "not_configured_error"
+target  = "GetObjectLegalHold"
+summary = "An object with no legal hold answers the same object-level 404 as the retention read, NoSuchObjectLockConfiguration, never an empty 200 that a compliance audit would read as an OFF hold that exists."
+cases   = ["c-lock-0013"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/ErrorResponses.html"
+  summary = "The error code list documents NoSuchObjectLockConfiguration with HTTP status 404, and the legal-hold read shares the object-level code with the retention read."
+
+[[quirk]]
+id      = "q-lock-0004"
+kind    = "xml_root"
+target  = "PutObjectRetention"
+summary = "The wire root of a retention document is Retention, not the shape name ObjectLockRetention, in both the request and the response; a decoder keyed to the shape name would refuse every real client's document."
+cases   = ["c-lock-0005", "c-lock-0030"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObjectRetention.html"
+  summary = "The documented request syntax roots the body at a Retention element, while the structure it carries is published as ObjectLockRetention."
+
+[[quirk]]
+id      = "q-lock-0005"
+kind    = "xml_root"
+target  = "PutObjectLegalHold"
+summary = "The wire root of a legal-hold document is LegalHold, not the shape name ObjectLockLegalHold, in both the request and the response."
+cases   = ["c-lock-0006"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObjectLegalHold.html"
+  summary = "The documented request syntax roots the body at a LegalHold element, while the structure it carries is published as ObjectLockLegalHold."
+
+[[quirk]]
+id      = "q-lock-0006"
+kind    = "checksum_required"
+target  = "PutObjectLockConfiguration"
+summary = "All three writes in this family demand an integrity claim on the body, so a request with neither Content-MD5 nor an x-amz-checksum header is refused with 400 before the document is parsed."
+cases   = ["c-lock-0014"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObjectLockConfiguration.html"
+  summary = "The request documents Content-MD5 as required for the operation, which the pinned model spells as a request checksum requirement shared by the retention and legal-hold writes."
+
+[[quirk]]
+id      = "q-lock-0007"
+kind    = "required_body"
+target  = "PutObjectRetention"
+summary = "The payload member of all three writes is promoted to required, so an empty body is refused as 400 MalformedXML rather than read as a defaulted document — a silently-accepted empty body is how a legal hold gets set to a value nobody sent."
+cases   = ["c-lock-0015"]
+
+  [[quirk.evidence]]
+  kind    = "s3s-pr"
+  ref     = "https://github.com/s3s-project/s3s/pull/377"
+  summary = "Upstream accepted an empty body on the retention and legal-hold writes without an error, and the fix pins the empty-required-XML answer to 400 MalformedXML."
+
+[[quirk]]
+id      = "q-lock-0008"
+kind    = "closed_value_set"
+target  = "DefaultRetention.Mode"
+summary = "A retention mode outside the documented two-value set — GOVERNANCE, COMPLIANCE, exactly in that spelling — is refused as MalformedXML: the values are case-sensitive, so a lowercase governance is out of the set, and a mode nothing can enforce is a lock that protects nothing."
+cases   = ["c-lock-0016", "c-lock-0017", "c-lock-0008"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ObjectLockRetention.html"
+  summary = "The Mode member documents the closed value set GOVERNANCE and COMPLIANCE, in upper case, for both the object retention document and the bucket default."
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/ErrorResponses.html"
+  summary = "MalformedXML is documented as the answer for a request body that does not validate against the published schema, which is what an out-of-set enum value is."
+
+[[quirk]]
+id      = "q-lock-0009"
+kind    = "closed_value_set"
+target  = "ObjectLockConfiguration.ObjectLockEnabled"
+summary = "ObjectLockEnabled has exactly one documented value, Enabled: AWS defines no Disabled spelling because object lock, once on, cannot be turned off, so any other value is refused as MalformedXML rather than read as an off switch."
+cases   = ["c-lock-0018"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ObjectLockConfiguration.html"
+  summary = "The ObjectLockEnabled member documents Enabled as its only valid value."
+
+[[quirk]]
+id      = "q-lock-0010"
+kind    = "value_constraint"
+target  = "DefaultRetention"
+summary = "A DefaultRetention must carry a mode and exactly one period: Days and Years together are refused as MalformedXML, a mode with neither period likewise, and a period under one — Days 0, Years -1 — is refused as InvalidArgument."
+cases   = ["c-lock-0019", "c-lock-0020", "c-lock-0021"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObjectLockConfiguration.html"
+  summary = "The operation documents that DefaultRetention requires both a mode and a period, and that Days and Years cannot be specified at the same time."
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DefaultRetention.html"
+  summary = "Both period members document a minimum value of one."
+
+[[quirk]]
+id      = "q-lock-0011"
+kind    = "closed_value_set"
+target  = "ObjectLockLegalHold.Status"
+summary = "A legal-hold status outside the documented two-value set — ON, OFF, exactly in that spelling — is refused as MalformedXML; a lowercase on is out of the set, and an unrecognised status stored today is a hold nobody can lift or trust tomorrow."
+cases   = ["c-lock-0022", "c-lock-0007"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ObjectLockLegalHold.html"
+  summary = "The Status member documents the closed value set ON and OFF."
+
+[[quirk]]
+id      = "q-lock-0012"
+kind    = "boolean_header"
+target  = "PutObjectRetention.BypassGovernanceRetention"
+summary = "x-amz-bypass-governance-retention is parsed ASCII-case-insensitively — True and TRUE are true, False is false — and any other value is refused as 400 InvalidArgument, never defaulted: this header is the one switch that weakens GOVERNANCE protection, so an unreadable value must fail closed rather than be guessed true."
+cases   = ["c-lock-0009", "c-lock-0023"]
+
+  [[quirk.evidence]]
+  kind    = "s3s-pr"
+  ref     = "https://github.com/s3s-project/s3s/pull/151"
+  summary = "The AWS CLI sends capitalised boolean header values such as True, and a case-sensitive parser refused requests every AWS SDK considers well formed."
+
+[[quirk]]
+id      = "q-lock-0013"
+kind    = "value_constraint"
+target  = "ObjectLockRetention.RetainUntilDate"
+summary = "A retention write whose RetainUntilDate is not in the future is refused as 400 InvalidArgument: a retain-until instant that has already passed protects nothing, and the comparison is made against an injectable clock so the rule is testable."
+cases   = ["c-lock-0024"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/object-lock.html"
+  summary = "A retention period protects an object version until a retain-until timestamp ahead of the moment the retention is applied, after which the protection lapses."
+
+[[quirk]]
+id      = "q-lock-0014"
+kind    = "lenient_unknown_elements"
+target  = "PutObjectLockConfiguration"
+summary = "Unknown elements inside a lock document are skipped rather than refused, on all three writes: a stored WORM configuration is re-parsed by every future release, and a decoder that got stricter would downgrade the document to none — silently unlocking data — which is a worse failure than tolerating an element AWS added."
+cases   = ["c-lock-0010"]
+
+  [[quirk.evidence]]
+  kind    = "s3s-issue"
+  ref     = "https://github.com/s3s-project/s3s/issues/613"
+  summary = "AWS ignores unknown elements in request XML, and upstream had to relax its decoder to match after strict parsing broke real clients."
+
+  [[quirk.evidence]]
+  kind    = "s3s-pr"
+  ref     = "https://github.com/s3s-project/s3s/pull/617"
+  summary = "The upstream fix that makes unknown request elements a skip rather than an error, which is the behaviour this decoder generates by construction."
+
+[[quirk]]
+id      = "q-lock-0015"
+kind    = "bucket_state_rule"
+target  = "PutObjectRetention"
+summary = "A retention or legal-hold write against a bucket that never enabled object lock is refused as 400 InvalidRequest: per-object lock state exists only inside a lock-enabled bucket, so accepting the write would store a protection promise no enforcement path will ever read."
+cases   = ["c-lock-0025", "c-lock-0026"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/object-lock.html"
+  summary = "Object lock settings can be applied only to objects in buckets that have object lock enabled, which is the configuration state the 400 reports."

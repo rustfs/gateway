@@ -1,0 +1,232 @@
+# Copyright 2026 RustFS Team
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Family: object lock and retention. GetObjectLockConfiguration, PutObjectLockConfiguration
+# (bucket `?object-lock`), GetObjectRetention, PutObjectRetention (object `?retention`),
+# GetObjectLegalHold, PutObjectLegalHold (object `?legal-hold`).
+#
+# Configuration codec only, and the fence matters more here than anywhere else: this is the one
+# family with a legal-compliance meaning (WORM). Nothing in this family *enforces* a lock —
+# whether a delete or overwrite of a protected object is refused, whether a COMPLIANCE retention
+# may be shortened, whether `x-amz-bypass-governance-retention` actually bypasses anything, and
+# the four `x-amz-object-lock-*` headers an object write carries are all enforcement, owned by
+# the storage side and deliberately absent here. What this family guarantees is narrower and
+# still load-bearing: the retention document the enforcement path reads is the document the
+# client wrote, the bypass intent is decoded (case-insensitively, and never guessed true from an
+# unreadable value) and carried to the handler, and none of the six requests is claimed by a
+# neighbouring operation.
+#
+# The routing reason is the object-tagging band's, with the same data-loss shape: a deferred
+# operation contributes no route row, so `GET /b/k?retention` was answered by `GetObject` with
+# the object's bytes, `PUT /b/k?retention` was answered by `PutObject` — which stored the
+# `<Retention>` document as the object, destroying it — and `GET /b?object-lock` was claimed by
+# `ListObjects`. Five debt-register lines retire with this family.
+
+include = [
+  "GetObjectLegalHold",
+  "GetObjectLockConfiguration",
+  "GetObjectRetention",
+  "PutObjectLegalHold",
+  "PutObjectLockConfiguration",
+  "PutObjectRetention",
+]
+
+# =============================================================================================
+# The `?object-lock` bucket pair: 397 (GET), 398 (PUT)
+#
+# The tens-aligned bucket-subresource slots are long gone — `?cors` holds 310-330, `?tagging`
+# 340-360, `?lifecycle` 370-390 — and the `?encryption` band already packed into 391-393, with
+# 394-396 reserved for the next family in flight. So this pair packs in behind it at 397/398.
+# It cannot go after the listings: the table is first-match, `ListObjects` at 700 pins no query
+# key, and a GET row behind it would hand every `GET /{Bucket}?object-lock` back to the key
+# listing this family exists to stop. There is no Delete: the pinned model defines no
+# DeleteObjectLockConfiguration — object lock, once enabled, has no wire spelling for "off",
+# which is the WORM promise in routing form.
+#
+# The object rows: 510 (GET ?retention), 520 (PUT ?retention), 530 (GET ?legal-hold),
+# 540 (PUT ?legal-hold). They join the object-subresource band after the `?tagging` rows at
+# 480-500 — behind the multipart band (400-460), which keeps `?uploadId` requests with the
+# upload they name, and ahead of CopyObject (790) / PutObject (800) / GetObject (900), which is
+# what stops a retention write carrying `x-amz-copy-source` from being served as a copy and a
+# bare retention write from overwriting the object. Every overlapping pair is declared in
+# `route/shadowing.rs`.
+# =============================================================================================
+
+# =============================================================================================
+# GetObjectLockConfiguration
+#
+# The bucket's stored object-lock document, answered as `<ObjectLockConfiguration>` — the one
+# shape in this family whose wire root and shape name agree. A bucket that never enabled object
+# lock answers the family's bucket-level 404, ObjectLockConfigurationNotFoundError.
+# =============================================================================================
+[op.GetObjectLockConfiguration]
+precedence = 397
+auth_action = "s3:GetBucketObjectLockConfiguration"
+# A lock configuration is one enum value and at most one rule holding a mode and one integer;
+# the 64 KiB ceiling every bucket-configuration read in this table uses bounds it with orders of
+# magnitude to spare.
+response_max_bytes = 65536
+not_configured = "ObjectLockConfigurationNotFoundError"
+error_codes = ["NoSuchBucket", "AccessDenied", "ObjectLockConfigurationNotFoundError"]
+url_encoded_fields = []
+input_hot = []
+output_hot = ["ObjectLockConfiguration"]
+quirk_refs = ["q-lock-0001"]
+
+# =============================================================================================
+# PutObjectLockConfiguration
+#
+# Replaces the bucket's object-lock document; per the pinned model's own documentation this is
+# also how object lock is enabled on an existing bucket, so the write is not conditional on the
+# bucket already being lock-enabled (the object-level writes below are). The payload member is
+# promoted to required: an empty body must be MalformedXML, never a silently-defaulted
+# configuration (q-lock-0007). The `x-amz-bucket-object-lock-token` header is decoded and
+# carried; what a governance token authorises is an enforcement question.
+# =============================================================================================
+[op.PutObjectLockConfiguration]
+precedence = 398
+auth_action = "s3:PutBucketObjectLockConfiguration"
+# The pinned model carries `aws.protocols#httpChecksum` with `requestChecksumRequired` — the
+# same trait spelling every configuration write in this table states explicitly so the lowering
+# cannot lose it. A lock write with neither Content-MD5 nor an x-amz-checksum-* header is
+# refused before it is parsed (q-lock-0006).
+http_checksum_required = true
+request_max_bytes = 65536
+input_required = ["ObjectLockConfiguration"]
+error_codes = ["NoSuchBucket", "AccessDenied", "MalformedXML", "InvalidRequest", "InvalidArgument", "BadDigest"]
+url_encoded_fields = []
+input_hot = ["ObjectLockConfiguration"]
+output_hot = []
+quirk_refs = ["q-lock-0006", "q-lock-0007", "q-lock-0008", "q-lock-0009", "q-lock-0010", "q-lock-0014"]
+
+# =============================================================================================
+# GetObjectRetention
+#
+# One object's retention document, answered as `<Retention>` — the wire root is the payload
+# member's `xmlName`, not the shape name `ObjectLockRetention` (q-lock-0004). An object with no
+# retention answers the *object-level* 404, NoSuchObjectLockConfiguration — a different code
+# from the bucket read's, and clients branch on the difference.
+# =============================================================================================
+[op.GetObjectRetention]
+precedence = 510
+auth_action = "s3:GetObjectRetention"
+# The wire root is the payload member's `xmlName`, which the lowering does not consult: without
+# this line the root would be the shape name `ObjectLockRetention`, and every SDK would refuse
+# the response (q-lock-0004).
+response_root = "Retention"
+response_max_bytes = 65536
+not_configured = "NoSuchObjectLockConfiguration"
+error_codes = ["NoSuchBucket", "NoSuchKey", "AccessDenied", "NoSuchObjectLockConfiguration"]
+url_encoded_fields = []
+input_hot = ["Key", "VersionId"]
+output_hot = ["Retention"]
+quirk_refs = ["q-lock-0002", "q-lock-0004"]
+
+# =============================================================================================
+# PutObjectRetention
+#
+# Places a retention document on one object. The payload is promoted to required (empty body →
+# MalformedXML, q-lock-0007); the write is checksum-required (q-lock-0006); and
+# `x-amz-bypass-governance-retention` is a boolean header decoded case-insensitively, refused as
+# InvalidArgument for any value that is not true/false — never guessed true, because this header
+# is the one switch that weakens GOVERNANCE protection (q-lock-0012). Whether the bypass is
+# honoured, and whether a COMPLIANCE retention may be shortened, is enforcement and not decided
+# here: the decoded intent reaches the handler whole.
+# =============================================================================================
+[op.PutObjectRetention]
+precedence = 520
+auth_action = "s3:PutObjectRetention"
+# The request document is rooted at `Retention` — the payload member's `xmlName`, not the shape
+# name `ObjectLockRetention` the lowering would otherwise use (q-lock-0004).
+request_root = "Retention"
+http_checksum_required = true
+request_max_bytes = 65536
+input_required = ["Retention"]
+error_codes = ["NoSuchBucket", "NoSuchKey", "AccessDenied", "MalformedXML", "InvalidRequest", "InvalidArgument", "BadDigest"]
+url_encoded_fields = []
+input_hot = ["Key", "Retention", "VersionId", "BypassGovernanceRetention"]
+output_hot = []
+quirk_refs = ["q-lock-0004", "q-lock-0006", "q-lock-0007", "q-lock-0008", "q-lock-0012", "q-lock-0013", "q-lock-0015"]
+
+# =============================================================================================
+# GetObjectLegalHold
+#
+# One object's legal-hold document, answered as `<LegalHold>` — again the `xmlName`, not the
+# shape name `ObjectLockLegalHold` (q-lock-0005). Unset is the same object-level 404 the
+# retention read answers.
+# =============================================================================================
+[op.GetObjectLegalHold]
+precedence = 530
+auth_action = "s3:GetObjectLegalHold"
+# The `xmlName` root again: `LegalHold`, not the shape name `ObjectLockLegalHold` (q-lock-0005).
+response_root = "LegalHold"
+response_max_bytes = 65536
+not_configured = "NoSuchObjectLockConfiguration"
+error_codes = ["NoSuchBucket", "NoSuchKey", "AccessDenied", "NoSuchObjectLockConfiguration"]
+url_encoded_fields = []
+input_hot = ["Key", "VersionId"]
+output_hot = ["LegalHold"]
+quirk_refs = ["q-lock-0003", "q-lock-0005"]
+
+# =============================================================================================
+# PutObjectLegalHold
+#
+# Places a legal-hold document on one object. Payload required (q-lock-0007), checksum required
+# (q-lock-0006), and `Status` is a closed two-value set — ON or OFF, exactly as spelled
+# (q-lock-0011). There is no bypass header here: a legal hold has no governance mode to bypass.
+# =============================================================================================
+[op.PutObjectLegalHold]
+precedence = 540
+auth_action = "s3:PutObjectLegalHold"
+# The request document is rooted at `LegalHold`, not `ObjectLockLegalHold` (q-lock-0005).
+request_root = "LegalHold"
+http_checksum_required = true
+request_max_bytes = 65536
+input_required = ["LegalHold"]
+error_codes = ["NoSuchBucket", "NoSuchKey", "AccessDenied", "MalformedXML", "InvalidRequest", "InvalidArgument", "BadDigest"]
+url_encoded_fields = []
+input_hot = ["Key", "LegalHold", "VersionId"]
+output_hot = []
+quirk_refs = ["q-lock-0005", "q-lock-0006", "q-lock-0007", "q-lock-0011", "q-lock-0015"]
+
+# =============================================================================================
+# Nested shapes owned by this family
+#
+# No member is promoted to required inside the documents: the model marks every one optional,
+# and a stored WORM configuration is re-parsed by every future release — a decoder that got
+# stricter would downgrade a lock document to "no document", which for this family means
+# silently unlocking data a court told somebody to keep. The semantic refusals — an out-of-set
+# Mode or Status, the Days/Years mutex, a period under one — live in
+# `crates/core/src/ops/shared/object_lock.rs`, after decoding, with the specific codes.
+# =============================================================================================
+
+[shape.ObjectLockConfiguration]
+hot = ["ObjectLockEnabled", "Rule"]
+element_order = ["ObjectLockEnabled", "Rule"]
+
+[shape.ObjectLockRule]
+hot = ["DefaultRetention"]
+element_order = ["DefaultRetention"]
+
+[shape.DefaultRetention]
+hot = ["Mode", "Days", "Years"]
+element_order = ["Mode", "Days", "Years"]
+
+[shape.ObjectLockRetention]
+hot = ["Mode", "RetainUntilDate"]
+element_order = ["Mode", "RetainUntilDate"]
+
+[shape.ObjectLockLegalHold]
+hot = ["Status"]
+element_order = ["Status"]

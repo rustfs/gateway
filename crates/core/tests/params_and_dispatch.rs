@@ -627,6 +627,107 @@ fn the_bucket_tagging_read_declares_its_own_not_configured_code() {
     );
 }
 
+/// Negative — an unhandled object-lock configuration request is refused by name, in both
+/// methods the family defines.
+///
+/// Same shape as the encryption block above: the registry handles the listing fallback and
+/// nothing else. Both requests must come back as the second `501` naming the lock operation
+/// the request asked for — the GET in particular must not fall through to `ListObjects`, which
+/// is exactly what it did while the operation was deferred (the
+/// `GetObjectLockConfiguration -> ListObjects` debt-register line).
+#[test]
+fn n_an_unhandled_object_lock_request_is_refused_rather_than_answered_by_the_listing() {
+    let mut registry = Registry::new();
+    registry.register(&LIST_OBJECTS).expect("a registrable spec");
+    let router = Router::from_generated(registry).expect("the generated table builds");
+
+    for (line, expected) in [
+        ("GET /bucket?object-lock", "GetObjectLockConfiguration"),
+        ("PUT /bucket?object-lock", "PutObjectLockConfiguration"),
+    ] {
+        let error = router
+            .dispatch(&Req::new(line).parts())
+            .expect_err("this registry handles no object-lock operation");
+        assert_eq!(*error.code(), ErrorCode::NOT_IMPLEMENTED, "{line}");
+        assert_eq!(error.message(), NOT_REGISTERED_MESSAGE, "{line}");
+        assert_eq!(error.operation(), Some(expected), "{line} must name the operation it asked for");
+    }
+}
+
+/// Negative — an unhandled retention or legal-hold request is refused by name, in both methods
+/// of both subresources.
+///
+/// The registry below handles the plain object band and nothing else, which is the shape of
+/// every deployment that has not implemented object lock. Each of the four must come back as
+/// the second `501` naming the lock operation the request asked for — not as a `GetObject` body
+/// and not as a `PutObject` write that stores the compliance document as the object.
+#[test]
+fn n_an_unhandled_lock_state_request_is_refused_rather_than_answered_by_the_object_band() {
+    let mut registry = Registry::new();
+    registry.register(&GET_OBJECT).expect("a registrable spec");
+    let router = Router::from_generated(registry).expect("the generated table builds");
+
+    for (line, expected) in [
+        ("GET /bucket/key?retention", "GetObjectRetention"),
+        ("PUT /bucket/key?retention", "PutObjectRetention"),
+        ("GET /bucket/key?legal-hold", "GetObjectLegalHold"),
+        ("PUT /bucket/key?legal-hold", "PutObjectLegalHold"),
+    ] {
+        let error = router
+            .dispatch(&Req::new(line).parts())
+            .expect_err("this registry handles no lock-state operation");
+        assert_eq!(*error.code(), ErrorCode::NOT_IMPLEMENTED, "{line}");
+        assert_eq!(error.message(), NOT_REGISTERED_MESSAGE, "{line}");
+        assert_eq!(error.operation(), Some(expected), "{line} must name the operation it asked for");
+    }
+}
+
+/// The family's two unconfigured answers are declared, not improvised, and they are different
+/// codes: the bucket read carries `ObjectLockConfigurationNotFoundError`, the two object reads
+/// carry `NoSuchObjectLockConfiguration`, and clients branch on the difference. The writes
+/// declare none — a write has no unconfigured answer.
+#[test]
+fn the_lock_reads_declare_their_two_distinct_not_configured_codes() {
+    use rustfs_gateway_core::op::Operation;
+    let bucket = rustfs_gateway_types::dto::GetObjectLockConfiguration::spec()
+        .not_configured_error
+        .clone()
+        .expect("the bucket read declares one");
+    assert_eq!(bucket, ErrorCode::OBJECT_LOCK_CONFIGURATION_NOT_FOUND);
+    assert_eq!(bucket.default_status(), StatusCode::NOT_FOUND);
+    for (name, code) in [
+        (
+            "GetObjectRetention",
+            rustfs_gateway_types::dto::GetObjectRetention::spec()
+                .not_configured_error
+                .clone(),
+        ),
+        (
+            "GetObjectLegalHold",
+            rustfs_gateway_types::dto::GetObjectLegalHold::spec()
+                .not_configured_error
+                .clone(),
+        ),
+    ] {
+        let code = code.expect("the object read declares one");
+        assert_eq!(code, ErrorCode::NO_SUCH_OBJECT_LOCK_CONFIGURATION, "{name}");
+        assert_eq!(code.default_status(), StatusCode::NOT_FOUND, "{name}");
+        assert_ne!(code, bucket, "{name}: the object-level code must stay distinct from the bucket-level one");
+    }
+    assert!(
+        rustfs_gateway_types::dto::PutObjectRetention::spec()
+            .not_configured_error
+            .is_none()
+            && rustfs_gateway_types::dto::PutObjectLegalHold::spec()
+                .not_configured_error
+                .is_none()
+            && rustfs_gateway_types::dto::PutObjectLockConfiguration::spec()
+                .not_configured_error
+                .is_none(),
+        "a write has no unconfigured answer"
+    );
+}
+
 /// Negative — an unhandled bucket lifecycle request is refused by name, in all three methods.
 ///
 /// The registry below handles the object band and nothing else. Each bucket-level request must

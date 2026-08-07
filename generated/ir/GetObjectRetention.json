@@ -1,0 +1,169 @@
+{
+  "ir_version": "1",
+  "operation": "GetObjectRetention",
+  "http": {
+            "method": "GET",
+            "target": "Object",
+            "precedence": 510,
+            "predicates": [
+                            { "kind": "Method", "method": "GET" },
+                            { "kind": "Target", "target": "Object" },
+                            { "kind": "QueryPresent", "key": "retention" }
+                          ],
+            "success_status": 200,
+            "alt_success_statuses": [],
+            "path_shape": "/{Bucket}/{Key+}"
+          },
+  "auth": { "requirement": "Required", "action": "s3:GetObjectRetention", "presigned_allowed": true, "service": "s3" },
+  "payload": {
+               "request": { "kind": "None", "buffering": "None", "max_bytes": null },
+               "response": { "kind": "XmlBody", "buffering": "Full", "max_bytes": 65536 }
+             },
+  "checksum": { "http_checksum_required": false, "request_algorithms": [], "response_algorithms": [] },
+  "input": {
+             "fields": [
+                         {
+                           "name": "Bucket",
+                           "wire_name": "Bucket",
+                           "required": true,
+                           "binding": { "kind": "UriLabel", "greedy": false },
+                           "type": { "kind": "BucketName" },
+                           "hot": true,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "Key",
+                           "wire_name": "Key",
+                           "required": true,
+                           "binding": { "kind": "UriLabel", "greedy": true },
+                           "type": { "kind": "ObjectKey" },
+                           "hot": true,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "VersionId",
+                           "wire_name": "versionId",
+                           "required": false,
+                           "binding": { "kind": "Query" },
+                           "type": { "kind": "String" },
+                           "hot": true,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "RequestPayer",
+                           "wire_name": "x-amz-request-payer",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "StringEnum", "values": ["requester"] },
+                           "hot": false,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "ExpectedBucketOwner",
+                           "wire_name": "x-amz-expected-bucket-owner",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "String" },
+                           "hot": false,
+                           "quirk_refs": []
+                         }
+                       ]
+           },
+  "output": {
+              "fields": [
+                          {
+                            "name": "Retention",
+                            "wire_name": null,
+                            "required": false,
+                            "binding": { "kind": "Payload" },
+                            "type": { "kind": "Structure", "shape": "ObjectLockRetention" },
+                            "hot": true,
+                            "quirk_refs": []
+                          }
+                        ]
+            },
+  "shapes": {
+              "ObjectLockRetention": {
+                                       "kind": "Structure",
+                                       "fields": [
+                                                   {
+                                                     "name": "Mode",
+                                                     "wire_name": "Mode",
+                                                     "required": false,
+                                                     "binding": { "kind": "BodyXml" },
+                                                     "type": {
+                                                               "kind": "StringEnum",
+                                                               "values": ["GOVERNANCE", "COMPLIANCE"]
+                                                             },
+                                                     "hot": true,
+                                                     "quirk_refs": []
+                                                   },
+                                                   {
+                                                     "name": "RetainUntilDate",
+                                                     "wire_name": "RetainUntilDate",
+                                                     "required": false,
+                                                     "binding": { "kind": "BodyXml" },
+                                                     "type": { "kind": "Timestamp", "format": "Iso8601" },
+                                                     "hot": true,
+                                                     "quirk_refs": []
+                                                   }
+                                                 ],
+                                       "xml": {
+                                                "element_order": ["Mode", "RetainUntilDate"],
+                                                "empty_value_policy": { "Mode": "omit", "RetainUntilDate": "omit" },
+                                                "attributes": []
+                                              }
+                                     }
+            },
+  "xml": {
+           "request_root": null,
+           "request_root_aliases": [],
+           "response_root": "Retention",
+           "xmlns": "emit",
+           "unwrapped_output": false,
+           "element_order": [],
+           "empty_value_policy": {},
+           "url_encoded_fields": [],
+           "attributes": [],
+           "body_literal": false
+         },
+  "errors": {
+              "not_configured": "NoSuchObjectLockConfiguration",
+              "allows_error_after_200": false,
+              "codes": ["NoSuchBucket", "NoSuchKey", "AccessDenied", "NoSuchObjectLockConfiguration"]
+            },
+  "derived_resources": [],
+  "head_mirrors": null,
+  "quirk_refs": ["q-lock-0002", "q-lock-0004"],
+  "quirks": [
+              {
+                "id": "q-lock-0002",
+                "kind": "not_configured_error",
+                "target": "GetObjectRetention",
+                "summary": "An object with no retention answers 404 with the object-level code NoSuchObjectLockConfiguration — a different code from the bucket read's 404, and clients branch on the difference.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/ErrorResponses.html",
+                                "summary": "The error code list documents NoSuchObjectLockConfiguration with HTTP status 404 for an object that has no object lock configuration."
+                              }
+                            ],
+                "cases": ["c-lock-0012"]
+              },
+              {
+                "id": "q-lock-0004",
+                "kind": "xml_root",
+                "target": "PutObjectRetention",
+                "summary": "The wire root of a retention document is Retention, not the shape name ObjectLockRetention, in both the request and the response; a decoder keyed to the shape name would refuse every real client's document.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObjectRetention.html",
+                                "summary": "The documented request syntax roots the body at a Retention element, while the structure it carries is published as ObjectLockRetention."
+                              }
+                            ],
+                "cases": ["c-lock-0005", "c-lock-0030"]
+              }
+            ],
+  "ext_points": []
+}

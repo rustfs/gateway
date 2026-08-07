@@ -1,0 +1,31 @@
+[case]
+id = "c-lock-0004"
+schema_version = 1
+title = "The x-amz-bucket-object-lock-token header is accepted on a lock write"
+rationale = """
+The token is how AWS gates enabling object lock on a bucket that already has versioning, and a gateway that refused the header outright would make that path unreachable for every client that sends one. Accepting and carrying it is all this family promises: what a token authorises is an enforcement decision, and the case asserts arrival rather than effect so that it stays true when enforcement lands."""
+polarity = "positive"
+operation = "PutObjectLockConfiguration"
+tags = ["object-lock"]
+timeout_ms = 10000
+quirks = ["q-lock-0006"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObjectLockConfiguration.html"
+summary = "The request documents x-amz-bucket-object-lock-token as a header the operation accepts."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "conf-lock"
+
+[request]
+method = "PUT"
+target = "/conf-lock?object-lock"
+headers = { "content-type" = "application/xml", "content-md5" = "CJIyG/nMmkjfQ1+FuEdwUA==", "x-amz-bucket-object-lock-token" = "conformance-token" }
+body = { utf8 = '<ObjectLockConfiguration><ObjectLockEnabled>Enabled</ObjectLockEnabled></ObjectLockConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+connection_after = "open"

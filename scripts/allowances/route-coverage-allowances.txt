@@ -28,9 +28,6 @@ GetBucketVersioning -> ListObjects
 GetBucketWebsite -> ListObjects
 GetObjectAcl -> GetObject
 GetObjectAnnotation -> GetObject
-GetObjectLegalHold -> GetObject
-GetObjectLockConfiguration -> ListObjects
-GetObjectRetention -> GetObject
 GetObjectTorrent -> GetObject
 GetPublicAccessBlock -> ListObjects
 ListBucketAnalyticsConfigurations -> ListObjects
@@ -41,7 +38,5 @@ ListDirectoryBuckets -> ListBuckets
 ListObjectAnnotations -> GetObject
 PutObjectAcl -> PutObject
 PutObjectAnnotation -> PutObject
-PutObjectLegalHold -> PutObject
-PutObjectRetention -> PutObject
 RenameObject -> PutObject
 UpdateObjectEncryption -> PutObject

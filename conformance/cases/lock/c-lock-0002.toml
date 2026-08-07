@@ -1,0 +1,58 @@
+[case]
+id = "c-lock-0002"
+schema_version = 1
+title = "A GOVERNANCE Days default round-trips byte for byte under an xmlns-bearing root"
+rationale = """
+The read-back is where the document becomes a compliance answer: an auditor reads it to decide whether a bucket protects its objects, so element order, the nesting of Rule and DefaultRetention, and the root namespace all have to be exactly what every SDK parses. A serializer that dropped the xmlns or reordered Mode and Days returns a document strict clients refuse — and a refused lock document reads as no lock at all. Byte-level comparison is the only assertion that notices."""
+polarity = "positive"
+operation = "GetObjectLockConfiguration"
+tags = ["object-lock", "xml", "wire-bytes"]
+timeout_ms = 10000
+quirks = ["q-lock-0008"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObjectLockConfiguration.html"
+summary = "The documented response syntax nests DefaultRetention inside Rule inside the ObjectLockConfiguration root."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/issues/264"
+summary = "Upstream shipped response roots without the S3 xmlns and strict clients refused them."
+kind = "s3s-issue"
+
+[[setup.buckets]]
+name = "conf-lock"
+
+[[exchanges]]
+name = "put-governance-days"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-lock?object-lock"
+headers = { "content-type" = "application/xml", "content-md5" = "0e4u0eMaR7+Y176UosH5CA==" }
+body = { utf8 = '<ObjectLockConfiguration><ObjectLockEnabled>Enabled</ObjectLockEnabled><Rule><DefaultRetention><Mode>GOVERNANCE</Mode><Days>30</Days></DefaultRetention></Rule></ObjectLockConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[[exchanges]]
+name = "read-back"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-lock?object-lock"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.headers_present]
+"content-type" = "application/xml"
+
+[exchanges.expect.body]
+golden = "goldens/c-lock-0002.xml"

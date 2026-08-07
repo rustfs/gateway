@@ -1,0 +1,50 @@
+[case]
+id = "c-lock-0015"
+schema_version = 1
+title = "A retention write with an empty body is refused as MalformedXML, never defaulted"
+rationale = """
+An empty body silently accepted is a retention set to whatever the decoder defaults to, which is a protection decision nobody made and nobody can see they made. Upstream shipped exactly this: the retention and legal-hold writes took an empty body without complaint. The digest is present and correct here so that the refusal is provably about the document rather than about integrity."""
+polarity = "negative"
+operation = "PutObjectRetention"
+tags = ["object-lock", "xml", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-lock-0007"]
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/pull/377"
+summary = "Upstream accepted an empty body on the retention and legal-hold writes, and the fix pins the 400 MalformedXML answer."
+kind = "s3s-pr"
+
+[[setup.buckets]]
+name = "conf-lock"
+object_lock = true
+
+[[setup.objects]]
+bucket = "conf-lock"
+key = "doc.txt"
+body = { utf8 = "payload" }
+
+[request]
+method = "PUT"
+target = "/conf-lock/doc.txt?retention"
+headers = { "content-type" = "application/xml", "content-md5" = "1B2M2Y8AsgTpgAmY7PhCfg==" }
+body = { utf8 = '' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+code = "MalformedXML"
+request_id_present = true
+
+[expect.headers_present]
+"content-type" = "application/xml"
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>MalformedXML</Code><Message>the request body is not the XML this operation accepts</Message><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''
