@@ -59,6 +59,18 @@ pub(super) const PUT_BUCKET_ENCRYPTION_DOC: &str = "https://docs.aws.amazon.com/
 pub(super) const DELETE_BUCKET_ENCRYPTION_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketEncryption.html \
      — DeleteBucketEncryption is selected by the ?encryption subresource on a bucket DELETE and removes only the encryption document.";
 
+/// AWS's own reference for the replication document read.
+pub(super) const GET_BUCKET_REPLICATION_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketReplication.html \
+     — GetBucketReplication is selected by the ?replication subresource alone and answers with the stored configuration document.";
+
+/// AWS's own reference for the replication document write.
+pub(super) const PUT_BUCKET_REPLICATION_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketReplication.html \
+     — PutBucketReplication is selected by the ?replication subresource on a bucket PUT and replaces the stored replication document.";
+
+/// AWS's own reference for the replication document delete.
+pub(super) const DELETE_BUCKET_REPLICATION_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketReplication.html \
+     — DeleteBucketReplication is selected by the ?replication subresource on a bucket DELETE and removes only the replication document.";
+
 /// AWS's own reference for the operation selected by the `?location` subresource.
 pub(super) const LOCATION_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketLocation.html \
      — GetBucketLocation is selected by the ?location subresource alone and takes no other query input.";

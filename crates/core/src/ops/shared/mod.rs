@@ -44,4 +44,5 @@ pub mod location_constraint;
 pub mod object_lock;
 pub mod pagination;
 pub mod precondition;
+pub mod replication;
 pub mod tagging;

@@ -1,0 +1,35 @@
+[case]
+id = "c-replication-0016"
+schema_version = 1
+title = "An empty ReplicationConfiguration with neither Role nor Rule is refused as MalformedXML"
+rationale = """
+Role and Rules are both required members, so the empty document is not a legal spelling of anything — in particular it is not a spelling of "clear the configuration", which is DeleteBucketReplication's job. Accepting it would create a stored third state between configured and unconfigured that the read has no honest answer for, and that the fail-closed persistence would have to keep parsing forever."""
+polarity = "negative"
+operation = "PutBucketReplication"
+tags = ["replication", "xml", "error-shape"]
+timeout_ms = 10000
+quirks = []
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketReplication.html"
+summary = "The operation documents that a replication configuration must include an IAM role and at least one rule."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "conf-replication"
+[request]
+method = "PUT"
+target = "/conf-replication?replication"
+headers = { "content-type" = "application/xml", "content-md5" = "ZMVdpeh/EaCT212vZQ6UCA==" }
+body = { utf8 = '<ReplicationConfiguration></ReplicationConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+code = "MalformedXML"
+request_id_present = true

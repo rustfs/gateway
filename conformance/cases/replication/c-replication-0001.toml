@@ -1,0 +1,36 @@
+[case]
+id = "c-replication-0001"
+schema_version = 1
+title = "A minimal replication document with Content-MD5 is accepted with 200"
+rationale = """
+The family's baseline write, and it is AWS's own minimal example: a Role, one Rule carrying nothing but a Status and a Destination — no Prefix, no Filter — replicates every object in the bucket. Everything else in this domain is a variation on this request, so it is pinned first; it also pins the deliberate absence of any invented scope requirement, because a decoder that demanded a Prefix or a Filter here would refuse the first configuration the documentation teaches."""
+polarity = "positive"
+operation = "PutBucketReplication"
+tags = ["replication", "xml"]
+timeout_ms = 10000
+quirks = ["q-repl-0004"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketReplication.html"
+summary = "The documented request syntax is a ReplicationConfiguration root with Role and Rule children and a required Content-MD5 header."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/replication-add-config.html"
+summary = "The guide's first example configuration is a single rule carrying only Status and Destination, which replicates all objects."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "conf-replication"
+[request]
+method = "PUT"
+target = "/conf-replication?replication"
+headers = { "content-type" = "application/xml", "content-md5" = "DIOCQC8GOqnVF/QOP0EZOg==" }
+body = { utf8 = '<ReplicationConfiguration><Role>arn:aws:iam::111122223333:role/replication-role</Role><Rule><Status>Enabled</Status><Destination><Bucket>arn:aws:s3:::replica-bucket</Bucket></Destination></Rule></ReplicationConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+connection_after = "open"

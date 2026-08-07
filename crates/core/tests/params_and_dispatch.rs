@@ -569,6 +569,35 @@ fn n_an_unhandled_encryption_request_is_refused_rather_than_answered_by_the_list
     }
 }
 
+/// Negative — an unhandled replication-configuration request is refused by name, in all three
+/// methods.
+///
+/// Same shape as the encryption block above: the registry handles the listing fallback and
+/// nothing else, which is the shape of every deployment that has not implemented replication.
+/// Each of the three must come back as the second `501` naming the replication operation the
+/// request asked for — the GET in particular must not fall through to `ListObjects`, which is
+/// exactly what it did while the operation was deferred (the
+/// `GetBucketReplication -> ListObjects` debt-register line).
+#[test]
+fn n_an_unhandled_replication_request_is_refused_rather_than_answered_by_the_listing() {
+    let mut registry = Registry::new();
+    registry.register(&LIST_OBJECTS).expect("a registrable spec");
+    let router = Router::from_generated(registry).expect("the generated table builds");
+
+    for (line, expected) in [
+        ("GET /bucket?replication", "GetBucketReplication"),
+        ("PUT /bucket?replication", "PutBucketReplication"),
+        ("DELETE /bucket?replication", "DeleteBucketReplication"),
+    ] {
+        let error = router
+            .dispatch(&Req::new(line).parts())
+            .expect_err("this registry handles no replication operation");
+        assert_eq!(*error.code(), ErrorCode::NOT_IMPLEMENTED, "{line}");
+        assert_eq!(error.message(), NOT_REGISTERED_MESSAGE, "{line}");
+        assert_eq!(error.operation(), Some(expected), "{line} must name the operation it asked for");
+    }
+}
+
 /// The registered fallback is still served, so the refusal above is not a blanket one.
 #[test]
 fn the_generated_router_still_serves_the_listing_beside_the_cors_rows() {
@@ -726,6 +755,49 @@ fn the_lock_reads_declare_their_two_distinct_not_configured_codes() {
                 .is_none(),
         "a write has no unconfigured answer"
     );
+}
+
+/// The replication read declares its own unconfigured code, and its two siblings declare none.
+///
+/// The declaration is what a backend outside this workspace reads to learn which 404 an
+/// unconfigured bucket owes; the conformance fixture answers the code from its own constant, so
+/// without this test the spec field could be deleted and every replication case would still pass
+/// — a value declared and never observed, which is the defect the Measurement rules exist for.
+///
+/// Both directions are asserted deliberately. A spec field stuck on `Some(..)` would satisfy the
+/// first assertion alone, and the write and the delete are exactly the operations that must
+/// carry `None`: neither reads a configuration, and a 404 from either would mean "no such
+/// bucket" to a client that branches on the code.
+#[test]
+fn the_replication_read_declares_its_own_not_configured_code() {
+    use rustfs_gateway_core::op::Operation;
+    let code = rustfs_gateway_types::dto::GetBucketReplication::spec()
+        .not_configured_error
+        .clone()
+        .expect("the bucket subresource read declares one");
+    assert_eq!(code, ErrorCode::REPLICATION_CONFIGURATION_NOT_FOUND);
+    assert_eq!(code.default_status(), StatusCode::NOT_FOUND);
+    assert_eq!(
+        code.as_str(),
+        "ReplicationConfigurationNotFoundError",
+        "the literal ends in Error, which is the spelling clients branch on"
+    );
+    for (name, declared) in [
+        (
+            "PutBucketReplication",
+            rustfs_gateway_types::dto::PutBucketReplication::spec()
+                .not_configured_error
+                .is_none(),
+        ),
+        (
+            "DeleteBucketReplication",
+            rustfs_gateway_types::dto::DeleteBucketReplication::spec()
+                .not_configured_error
+                .is_none(),
+        ),
+    ] {
+        assert!(declared, "{name} reads no configuration and must declare no unconfigured code");
+    }
 }
 
 /// Negative — an unhandled bucket lifecycle request is refused by name, in all three methods.

@@ -1,6 +1,7 @@
 AbortIncompleteMultipartUpload 1
 AbortMultipartUploadInput 6
 AbortMultipartUploadOutput 1
+AccessControlTranslation 1
 BlockedEncryptionTypes 1
 Bucket 4
 BucketLifecycleConfiguration 1
@@ -29,9 +30,12 @@ DeleteBucketInput 2
 DeleteBucketLifecycleInput 2
 DeleteBucketLifecycleOutput 0
 DeleteBucketOutput 0
+DeleteBucketReplicationInput 2
+DeleteBucketReplicationOutput 0
 DeleteBucketTaggingInput 2
 DeleteBucketTaggingOutput 0
 DeleteMarkerEntry 5
+DeleteMarkerReplication 1
 DeleteObjectInput 10
 DeleteObjectOutput 3
 DeleteObjectTaggingInput 4
@@ -39,7 +43,10 @@ DeleteObjectTaggingOutput 1
 DeleteObjectsInput 7
 DeleteObjectsOutput 3
 DeletedObject 4
+Destination 7
+EncryptionConfiguration 1
 Error 4
+ExistingObjectReplication 1
 GetBucketCorsInput 2
 GetBucketCorsOutput 1
 GetBucketEncryptionInput 2
@@ -48,6 +55,8 @@ GetBucketLifecycleConfigurationInput 2
 GetBucketLifecycleConfigurationOutput 2
 GetBucketLocationInput 2
 GetBucketLocationOutput 1
+GetBucketReplicationInput 2
+GetBucketReplicationOutput 1
 GetBucketTaggingInput 2
 GetBucketTaggingOutput 1
 GetObjectAttributesInput 11
@@ -84,6 +93,7 @@ ListObjectsV2Input 10
 ListObjectsV2Output 13
 ListPartsInput 10
 ListPartsOutput 16
+Metrics 2
 MultipartUpload 8
 NoncurrentVersionExpiration 2
 NoncurrentVersionTransition 3
@@ -103,6 +113,8 @@ PutBucketEncryptionInput 5
 PutBucketEncryptionOutput 0
 PutBucketLifecycleConfigurationInput 5
 PutBucketLifecycleConfigurationOutput 1
+PutBucketReplicationInput 6
+PutBucketReplicationOutput 0
 PutBucketTaggingInput 5
 PutBucketTaggingOutput 0
 PutObjectInput 37
@@ -115,10 +127,19 @@ PutObjectRetentionInput 9
 PutObjectRetentionOutput 1
 PutObjectTaggingInput 8
 PutObjectTaggingOutput 1
+ReplicaModifications 1
+ReplicationConfiguration 2
+ReplicationRule 9
+ReplicationRuleAndOperator 2
+ReplicationRuleFilter 3
+ReplicationTime 2
+ReplicationTimeValue 1
 RestoreStatus 2
 ServerSideEncryptionByDefault 2
 ServerSideEncryptionConfiguration 1
 ServerSideEncryptionRule 3
+SourceSelectionCriteria 2
+SseKmsEncryptedObjects 1
 Tag 2
 Tagging 1
 Transition 3

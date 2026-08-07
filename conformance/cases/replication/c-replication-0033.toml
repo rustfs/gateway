@@ -1,0 +1,35 @@
+[case]
+id = "c-replication-0033"
+schema_version = 1
+title = "A Destination missing its required Bucket is refused as MalformedXML"
+rationale = """
+Bucket is the Destination's one required member: an account and a storage class qualify a destination, they do not name one. The refusal exercises the nested-required-member path two levels down — Rule to Destination to Bucket — which is where a decoder that only checked top-level members would wave the document through and let a placeholder empty string reach the engine as an ARN."""
+polarity = "negative"
+operation = "PutBucketReplication"
+tags = ["replication", "xml", "error-shape"]
+timeout_ms = 10000
+quirks = []
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_Destination.html"
+summary = "The Bucket member is documented as required within a Destination."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "conf-replication"
+[request]
+method = "PUT"
+target = "/conf-replication?replication"
+headers = { "content-type" = "application/xml", "content-md5" = "x1C3ibWCujni3CyUJRpZ/A==" }
+body = { utf8 = '<ReplicationConfiguration><Role>arn:aws:iam::111122223333:role/replication-role</Role><Rule><Prefix>logs/</Prefix><Status>Enabled</Status><Destination><Account>111122223333</Account></Destination></Rule></ReplicationConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+code = "MalformedXML"
+request_id_present = true

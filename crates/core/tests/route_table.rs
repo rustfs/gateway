@@ -614,7 +614,6 @@ fn n_a_bucket_subresource_request_is_never_claimed_by_the_lifecycle_band() {
         "ownershipControls",
         "policy",
         "publicAccessBlock",
-        "replication",
         "requestPayment",
         "versioning",
         "website",
@@ -633,7 +632,6 @@ fn n_a_bucket_subresource_request_is_never_claimed_by_the_lifecycle_band() {
         "ownershipControls",
         "policy",
         "publicAccessBlock",
-        "replication",
         "website",
     ];
     for key in deferred_delete {
@@ -1207,6 +1205,145 @@ fn n_the_object_band_is_unchanged_by_the_lock_state_rows() {
         ("GET /bucket/key?attributes", "GetObjectAttributes"),
         ("GET /bucket/key?uploadId=u1", "ListParts"),
         ("GET /bucket?encryption", "GetBucketEncryption"),
+    ] {
+        assert_eq!(routed(&table, &Req::new(line)), Some(expected), "{line}");
+    }
+}
+
+/// The `?replication` band claims its own three requests, one per method, on the bucket target.
+///
+/// Positive half of the block below, checked as a whole for the same reason the encryption band
+/// is: a table that gained the read and forgot the write would leave a replication document to
+/// be stored by a neighbour, and a table that forgot the delete would leave
+/// `DELETE /b?replication` unroutable.
+#[test]
+fn the_replication_subresource_routes_to_the_replication_operations() {
+    let table = generated_table();
+    for (line, expected) in [
+        ("GET /bucket?replication", "GetBucketReplication"),
+        ("PUT /bucket?replication", "PutBucketReplication"),
+        ("DELETE /bucket?replication", "DeleteBucketReplication"),
+    ] {
+        let hit = table
+            .resolve(&Req::new(line).parts())
+            .unwrap_or_else(|| panic!("{line} has a route"));
+        assert_eq!(hit.op_name, expected, "{line}");
+        assert!(
+            hit.precedence < 460,
+            "{line} must sit in the bucket subresource band ahead of the listings, got {}",
+            hit.precedence
+        );
+    }
+}
+
+/// Negative — the replication read is never claimed by the bucket listing fallback.
+///
+/// `ListObjects` pins no query key, so before the row existed `GET /b?replication` was answered
+/// with a key listing — the `GetBucketReplication -> ListObjects` debt-register line this band
+/// retires. The PUT and DELETE halves had no fallback to be claimed by, so for them the fault
+/// mode was "no route at all", asserted above.
+#[test]
+fn n_the_replication_read_is_never_claimed_by_the_listing_fallback() {
+    let table = generated_table();
+    for (line, forbidden) in [
+        ("GET /bucket?replication", "ListObjects"),
+        ("GET /bucket?replication", "ListObjectsV2"),
+        ("GET /bucket?replication", "ListObjectVersions"),
+    ] {
+        assert_ne!(
+            routed(&table, &Req::new(line)),
+            Some(forbidden),
+            "{line}: a replication document request answered with a key listing"
+        );
+    }
+}
+
+/// Negative — a request naming an earlier subresource beside `?replication` stays with the
+/// earlier band.
+///
+/// AWS documents no such combination, so the order is fixed by precedence (300, 310, 340, 370
+/// and 391 before 394) rather than left to source order — the same rule every other both-keys
+/// pair in the table follows. Four configuration bands now sit ahead of this one, so every
+/// method has neighbours to lose to.
+#[test]
+fn n_a_request_naming_an_earlier_subresource_and_replication_stays_with_the_earlier_row() {
+    let table = generated_table();
+    for (line, expected) in [
+        ("GET /bucket?location&replication", "GetBucketLocation"),
+        ("GET /bucket?cors&replication", "GetBucketCors"),
+        ("GET /bucket?tagging&replication", "GetBucketTagging"),
+        ("GET /bucket?lifecycle&replication", "GetBucketLifecycleConfiguration"),
+        ("GET /bucket?encryption&replication", "GetBucketEncryption"),
+        ("PUT /bucket?cors&replication", "PutBucketCors"),
+        ("PUT /bucket?tagging&replication", "PutBucketTagging"),
+        ("PUT /bucket?lifecycle&replication", "PutBucketLifecycleConfiguration"),
+        ("PUT /bucket?encryption&replication", "PutBucketEncryption"),
+        ("DELETE /bucket?cors&replication", "DeleteBucketCors"),
+        ("DELETE /bucket?tagging&replication", "DeleteBucketTagging"),
+        ("DELETE /bucket?lifecycle&replication", "DeleteBucketLifecycle"),
+        ("DELETE /bucket?encryption&replication", "DeleteBucketEncryption"),
+    ] {
+        assert_eq!(routed(&table, &Req::new(line)), Some(expected), "{line}");
+    }
+}
+
+/// Negative — `?replication` beats the listings it overlaps, in both directions of the band.
+#[test]
+fn n_a_request_naming_replication_and_a_listing_stays_with_the_replication_row() {
+    let table = generated_table();
+    for line in [
+        "GET /bucket?replication&uploads",
+        "GET /bucket?replication&list-type=2",
+        "GET /bucket?replication&versions",
+    ] {
+        assert_eq!(routed(&table, &Req::new(line)), Some("GetBucketReplication"), "{line}");
+    }
+}
+
+/// Negative — each replication row is bound to one method, so the key alone does not reach it.
+#[test]
+fn n_a_replication_row_is_not_reachable_under_another_method() {
+    let table = generated_table();
+    for (line, forbidden) in [
+        ("PUT /bucket?replication", "GetBucketReplication"),
+        ("DELETE /bucket?replication", "PutBucketReplication"),
+        ("GET /bucket?replication", "DeleteBucketReplication"),
+        ("HEAD /bucket?replication", "GetBucketReplication"),
+        ("POST /bucket?replication", "PutBucketReplication"),
+    ] {
+        assert_ne!(routed(&table, &Req::new(line)), Some(forbidden), "{line}");
+    }
+}
+
+/// Negative — `?replication` on an object key is not a bucket subresource and must not reach
+/// the band.
+///
+/// The three replication rows pin `Target(Bucket)`, so `GET /bucket/key?replication` is a plain
+/// object read carrying an inert query key, exactly as it is on AWS.
+#[test]
+fn n_the_replication_key_on_an_object_does_not_reach_a_bucket_replication_row() {
+    let table = generated_table();
+    for (line, expected) in [
+        ("GET /bucket/key?replication", "GetObject"),
+        ("PUT /bucket/key?replication", "PutObject"),
+        ("DELETE /bucket/key?replication", "DeleteObject"),
+    ] {
+        assert_eq!(routed(&table, &Req::new(line)), Some(expected), "{line}");
+    }
+}
+
+/// Negative — the neighbouring bands still answer their own requests beside the new band.
+#[test]
+fn n_the_bucket_bands_are_unchanged_by_the_replication_band() {
+    let table = generated_table();
+    for (line, expected) in [
+        ("GET /bucket", "ListObjects"),
+        ("GET /bucket?list-type=2", "ListObjectsV2"),
+        ("GET /bucket?location", "GetBucketLocation"),
+        ("GET /bucket?encryption", "GetBucketEncryption"),
+        ("PUT /bucket?encryption", "PutBucketEncryption"),
+        ("DELETE /bucket?encryption", "DeleteBucketEncryption"),
+        ("GET /bucket?uploads", "ListMultipartUploads"),
     ] {
         assert_eq!(routed(&table, &Req::new(line)), Some(expected), "{line}");
     }

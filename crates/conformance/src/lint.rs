@@ -56,6 +56,7 @@ pub const TAG_VOCABULARY: &[&str] = &[
     "cors",
     "encryption",
     "lifecycle",
+    "replication",
     "region",
     "security",
     "dos",

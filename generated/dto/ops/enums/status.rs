@@ -23,7 +23,7 @@
 
 use std::borrow::Cow;
 
-/// The `Status` string enumeration. Bound by: GetBucketLifecycleConfiguration, GetObjectLegalHold, PutBucketLifecycleConfiguration, PutObjectLegalHold.
+/// The `Status` string enumeration. Bound by: GetBucketLifecycleConfiguration, GetBucketReplication, GetObjectLegalHold, PutBucketLifecycleConfiguration, PutBucketReplication, PutObjectLegalHold.
 ///
 /// An open set: compare against the associated constants, and build a value the pinned
 /// model does not declare with [`Status::custom`]. Adding a constant is a minor version

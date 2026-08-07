@@ -104,6 +104,9 @@ impl Harness {
             // carrying the previous owner's COMPLIANCE default would apply WORM rules nobody
             // consented to and nobody can lift.
             .register::<dto::GetObjectLockConfiguration, _>(Arc::clone(&backend))
+            // The replication read too: the unconfigured 404 is the observable proof that a
+            // recreated bucket inherited no replication document.
+            .register::<dto::GetBucketReplication, _>(Arc::clone(&backend))
             .register::<dto::PutObject, _>(Arc::clone(&backend))
             .authenticator(SigV4Authenticator::new(credentials, RegionSet::new([region]).expect("non-empty")))
             .authorizer(allow_when(|request| !request.is_anonymous()))
@@ -373,19 +376,21 @@ fn n_deleting_a_bucket_that_was_never_created_is_a_not_found() {
 /// Negative — a deleted bucket takes its configuration documents with it.
 ///
 /// The CORS document, the tag set, the lifecycle document, the default-encryption document and
-/// the object-lock document all
+/// the replication document and the object-lock document all
 /// live inside the bucket's own state entry, so removing the bucket removes them by construction
 /// — and this test is what keeps that a fact rather than a coincidence of today's layout. The
 /// failure it guards against is inheritance: delete a bucket, create a new one under the same
 /// name, and find it answering the previous owner's CORS rules to browsers, the previous owner's
 /// tags to billing, expiring the new owner's data on the previous owner's schedule — or
 /// encrypting the new owner's objects to the previous owner's KMS key, which is inheritance of
-/// *access*, not just behaviour. The object-lock document is the sharpest of the five: a
+/// *access*, not just behaviour — or shipping the new owner's objects to the previous
+/// owner's destination bucket under the previous owner's IAM role, which is inheritance of
+/// *exfiltration*. The object-lock document is the sharpest of the six: a
 /// recreated bucket that inherited a COMPLIANCE default would apply WORM retention the new owner
 /// never asked for, and COMPLIANCE is by definition the mode nobody can lift. A name is not a
 /// bucket.
 #[test]
-fn n_a_deleted_buckets_cors_tags_lifecycle_encryption_and_lock_do_not_survive_into_a_recreation() {
+fn n_a_deleted_buckets_cors_tags_lifecycle_encryption_replication_and_lock_do_not_survive_into_a_recreation() {
     let mut fixture = Fixture::at(NOW);
     fixture.declare_bucket("conf-bkt-reborn", false);
     fixture.set_cors(
@@ -439,6 +444,20 @@ fn n_a_deleted_buckets_cors_tags_lifecycle_encryption_and_lock_do_not_survive_in
             }),
         },
     );
+    fixture.set_replication(
+        "conf-bkt-reborn",
+        dto::ReplicationConfiguration {
+            role: "arn:aws:iam::111122223333:role/previous-owner-role".to_owned(),
+            rules: vec![dto::ReplicationRule {
+                status: dto::Status::ENABLED,
+                destination: dto::Destination {
+                    bucket: "arn:aws:s3:::previous-owner-destination".to_owned(),
+                    ..dto::Destination::default()
+                },
+                ..dto::ReplicationRule::default()
+            }],
+        },
+    );
     let harness = Harness::over(fixture, "us-east-1");
 
     let deleted = harness.send("DELETE", "/conf-bkt-reborn", b"");
@@ -484,6 +503,19 @@ fn n_a_deleted_buckets_cors_tags_lifecycle_encryption_and_lock_do_not_survive_in
     assert!(
         !read.body.contains("COMPLIANCE"),
         "the recreated bucket inherited the deleted bucket's WORM default: {}",
+        read.body
+    );
+
+    // The replication half likewise: the recreated bucket must answer this family's unconfigured
+    // 404, and neither the previous owner's IAM role nor its destination bucket may be anywhere
+    // in the response — a recreated bucket that still names them is a bucket whose new data
+    // ships to somebody else's account.
+    let read = harness.send("GET", "/conf-bkt-reborn?replication", b"");
+    assert_eq!(read.status, 404, "{}", read.body);
+    read.assert_contains("ReplicationConfigurationNotFoundError");
+    assert!(
+        !read.body.contains("previous-owner"),
+        "the recreated bucket leaked the deleted bucket's replication configuration: {}",
         read.body
     );
 }

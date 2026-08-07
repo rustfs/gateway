@@ -30,13 +30,16 @@ pub use crate::ops::enums::{
     TransitionDefaultMinimumObjectSize,
 };
 pub use crate::ops::shapes::{
-    AbortIncompleteMultipartUpload, BlockedEncryptionTypes, Bucket, BucketLifecycleConfiguration, Checksum, CommonPrefix,
-    CompletedMultipartUpload, CompletedPart, CorsConfiguration, CorsRule, CreateBucketConfiguration, DefaultRetention, Delete,
-    DeleteMarkerEntry, DeletedObject, Error, GetObjectAttributesParts, Initiator, LifecycleExpiration, LifecycleRule,
-    LifecycleRuleAndOperator, LifecycleRuleFilter, MultipartUpload, NoncurrentVersionExpiration, NoncurrentVersionTransition,
-    Object, ObjectIdentifier, ObjectLockConfiguration, ObjectLockLegalHold, ObjectLockRetention, ObjectLockRule, ObjectPart,
-    ObjectVersion, Owner, Part, RestoreStatus, ServerSideEncryptionByDefault, ServerSideEncryptionConfiguration,
-    ServerSideEncryptionRule, Tag, Tagging, Transition,
+    AbortIncompleteMultipartUpload, AccessControlTranslation, BlockedEncryptionTypes, Bucket, BucketLifecycleConfiguration,
+    Checksum, CommonPrefix, CompletedMultipartUpload, CompletedPart, CorsConfiguration, CorsRule, CreateBucketConfiguration,
+    DefaultRetention, Delete, DeleteMarkerEntry, DeleteMarkerReplication, DeletedObject, Destination, EncryptionConfiguration,
+    Error, ExistingObjectReplication, GetObjectAttributesParts, Initiator, LifecycleExpiration, LifecycleRule,
+    LifecycleRuleAndOperator, LifecycleRuleFilter, Metrics, MultipartUpload, NoncurrentVersionExpiration,
+    NoncurrentVersionTransition, Object, ObjectIdentifier, ObjectLockConfiguration, ObjectLockLegalHold, ObjectLockRetention,
+    ObjectLockRule, ObjectPart, ObjectVersion, Owner, Part, ReplicaModifications, ReplicationConfiguration, ReplicationRule,
+    ReplicationRuleAndOperator, ReplicationRuleFilter, ReplicationTime, ReplicationTimeValue, RestoreStatus,
+    ServerSideEncryptionByDefault, ServerSideEncryptionConfiguration, ServerSideEncryptionRule, SourceSelectionCriteria,
+    SseKmsEncryptedObjects, Tag, Tagging, Transition,
 };
 
 pub use crate::ops::abort_multipart_upload::{
@@ -72,6 +75,10 @@ pub use crate::ops::delete_bucket_lifecycle::{
     DeleteBucketLifecycle, Input as DeleteBucketLifecycleInput, InputBuilder as DeleteBucketLifecycleInputBuilder,
     Output as DeleteBucketLifecycleOutput,
 };
+pub use crate::ops::delete_bucket_replication::{
+    DeleteBucketReplication, Input as DeleteBucketReplicationInput, InputBuilder as DeleteBucketReplicationInputBuilder,
+    Output as DeleteBucketReplicationOutput,
+};
 pub use crate::ops::delete_bucket_tagging::{
     DeleteBucketTagging, Input as DeleteBucketTaggingInput, InputBuilder as DeleteBucketTaggingInputBuilder,
     Output as DeleteBucketTaggingOutput,
@@ -100,6 +107,10 @@ pub use crate::ops::get_bucket_lifecycle_configuration::{
 pub use crate::ops::get_bucket_location::{
     GetBucketLocation, Input as GetBucketLocationInput, InputBuilder as GetBucketLocationInputBuilder,
     Output as GetBucketLocationOutput,
+};
+pub use crate::ops::get_bucket_replication::{
+    GetBucketReplication, Input as GetBucketReplicationInput, InputBuilder as GetBucketReplicationInputBuilder,
+    Output as GetBucketReplicationOutput,
 };
 pub use crate::ops::get_bucket_tagging::{
     GetBucketTagging, Input as GetBucketTaggingInput, InputBuilder as GetBucketTaggingInputBuilder,
@@ -164,6 +175,10 @@ pub use crate::ops::put_bucket_encryption::{
 pub use crate::ops::put_bucket_lifecycle_configuration::{
     Input as PutBucketLifecycleConfigurationInput, InputBuilder as PutBucketLifecycleConfigurationInputBuilder,
     Output as PutBucketLifecycleConfigurationOutput, PutBucketLifecycleConfiguration,
+};
+pub use crate::ops::put_bucket_replication::{
+    Input as PutBucketReplicationInput, InputBuilder as PutBucketReplicationInputBuilder, Output as PutBucketReplicationOutput,
+    PutBucketReplication,
 };
 pub use crate::ops::put_bucket_tagging::{
     Input as PutBucketTaggingInput, InputBuilder as PutBucketTaggingInputBuilder, Output as PutBucketTaggingOutput,

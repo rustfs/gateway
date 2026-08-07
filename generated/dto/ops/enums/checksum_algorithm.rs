@@ -23,7 +23,7 @@
 
 use std::borrow::Cow;
 
-/// The `ChecksumAlgorithm` string enumeration. Bound by: CopyObject, CreateMultipartUpload, DeleteObjects, ListMultipartUploads, ListObjectVersions, ListObjects, ListObjectsV2, ListParts, PutBucketCors, PutBucketEncryption, PutBucketLifecycleConfiguration, PutBucketTagging, PutObject, PutObjectLegalHold, PutObjectLockConfiguration, PutObjectRetention, PutObjectTagging, UploadPart.
+/// The `ChecksumAlgorithm` string enumeration. Bound by: CopyObject, CreateMultipartUpload, DeleteObjects, ListMultipartUploads, ListObjectVersions, ListObjects, ListObjectsV2, ListParts, PutBucketCors, PutBucketEncryption, PutBucketLifecycleConfiguration, PutBucketReplication, PutBucketTagging, PutObject, PutObjectLegalHold, PutObjectLockConfiguration, PutObjectRetention, PutObjectTagging, UploadPart.
 ///
 /// An open set: compare against the associated constants, and build a value the pinned
 /// model does not declare with [`ChecksumAlgorithm::custom`]. Adding a constant is a minor version

@@ -1,0 +1,35 @@
+[case]
+id = "c-replication-0031"
+schema_version = 1
+title = "A rule missing its required Status is refused as MalformedXML"
+rationale = """
+Status is one of the rule's two required members, and a rule that does not say whether it is enabled is a rule the engine must either run or ignore on a guess — both wrong for somebody. The decoder refuses the omission at the member that noticed, as a client-side 400, never the internal error a placeholder default would decay into further down the pipeline."""
+polarity = "negative"
+operation = "PutBucketReplication"
+tags = ["replication", "xml", "error-shape"]
+timeout_ms = 10000
+quirks = []
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ReplicationRule.html"
+summary = "The Status member is documented as required within a replication rule."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "conf-replication"
+[request]
+method = "PUT"
+target = "/conf-replication?replication"
+headers = { "content-type" = "application/xml", "content-md5" = "9u3/IdXdk/vNyqlwoBQmfg==" }
+body = { utf8 = '<ReplicationConfiguration><Role>arn:aws:iam::111122223333:role/replication-role</Role><Rule><Prefix>logs/</Prefix><Destination><Bucket>arn:aws:s3:::replica-bucket</Bucket></Destination></Rule></ReplicationConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+code = "MalformedXML"
+request_id_present = true
