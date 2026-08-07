@@ -757,6 +757,49 @@ fn the_lock_reads_declare_their_two_distinct_not_configured_codes() {
     );
 }
 
+/// The replication read declares its own unconfigured code, and its two siblings declare none.
+///
+/// The declaration is what a backend outside this workspace reads to learn which 404 an
+/// unconfigured bucket owes; the conformance fixture answers the code from its own constant, so
+/// without this test the spec field could be deleted and every replication case would still pass
+/// — a value declared and never observed, which is the defect the Measurement rules exist for.
+///
+/// Both directions are asserted deliberately. A spec field stuck on `Some(..)` would satisfy the
+/// first assertion alone, and the write and the delete are exactly the operations that must
+/// carry `None`: neither reads a configuration, and a 404 from either would mean "no such
+/// bucket" to a client that branches on the code.
+#[test]
+fn the_replication_read_declares_its_own_not_configured_code() {
+    use rustfs_gateway_core::op::Operation;
+    let code = rustfs_gateway_types::dto::GetBucketReplication::spec()
+        .not_configured_error
+        .clone()
+        .expect("the bucket subresource read declares one");
+    assert_eq!(code, ErrorCode::REPLICATION_CONFIGURATION_NOT_FOUND);
+    assert_eq!(code.default_status(), StatusCode::NOT_FOUND);
+    assert_eq!(
+        code.as_str(),
+        "ReplicationConfigurationNotFoundError",
+        "the literal ends in Error, which is the spelling clients branch on"
+    );
+    for (name, declared) in [
+        (
+            "PutBucketReplication",
+            rustfs_gateway_types::dto::PutBucketReplication::spec()
+                .not_configured_error
+                .is_none(),
+        ),
+        (
+            "DeleteBucketReplication",
+            rustfs_gateway_types::dto::DeleteBucketReplication::spec()
+                .not_configured_error
+                .is_none(),
+        ),
+    ] {
+        assert!(declared, "{name} reads no configuration and must declare no unconfigured code");
+    }
+}
+
 /// Negative — an unhandled bucket lifecycle request is refused by name, in all three methods.
 ///
 /// The registry below handles the object band and nothing else. Each bucket-level request must
