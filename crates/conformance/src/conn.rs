@@ -1,0 +1,626 @@
+// Copyright 2026 RustFS Team
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+//! The connection target: the same service, reached by writing bytes on a socket.
+//!
+//! Responsible for: turning one `[request]` block into wire bytes, writing them on a real TCP
+//! connection at a pace the *peer* sets, reading the response back, and asking the socket what
+//! state it was left in.
+//! NOT responsible for: framing the server side or observing the socket (`crate::socket`), reading
+//! or signing a request (`crate::inprocess`, whose reader and signer this module reuses rather than
+//! copying), judging anything (`crate::expect`), or storing anything (`crate::fixture`).
+//! Upstream: `crate::socket`, `crate::inprocess`. Downstream: `crate::cli`.
+//!
+//! # What this target can see that the in-process one cannot
+//!
+//! * **`connection_after`** is asked of the socket — [`crate::socket::observe_connection`] — and
+//!   never of a `Connection:` header. See that module for why the two are different facts.
+//! * **`request_progress`** is the client's own count of payload bytes it had released when the
+//!   response existed. That number is only worth having because of the pacing below; written in one
+//!   call it would be the size of the kernel buffer.
+//! * **Control chunks** — `close`, `half_close`, `stall` — are carried out rather than refused, so
+//!   the truncation and disconnection cases run instead of being skipped.
+//! * **A raw head** goes on the wire as the case wrote it.
+//! * **`connection.reuse = false`** is honoured by opening a new connection.
+//!
+//! # What it still cannot see, and says so
+//!
+//! * **`connection.pipeline = true`** writes both requests before either response is read, which
+//!   this transport can now do — and it still refuses the flag, because the property the one case
+//!   using it asserts is not reachable that way. This server reads one request off a connection,
+//!   answers it, and only then reads the next; pipelining on the wire does not make two writes
+//!   *race*, and neither this framing layer nor the fixture has a window between evaluating a
+//!   condition and committing under it. Answering the case from a strictly ordered pair would make
+//!   it fail for a reason it is not about, which is what it already did before it was skipped.
+//! * **The close rule is the harness's, not the gateway's.** `WireReject::must_close_connection`
+//!   exists and `render.rs` drops it, so nothing the service returns carries a close decision out.
+//!   This target therefore runs [`crate::socket::honour_the_services_intent`]: a request body the
+//!   service did not read to its end ends the connection. That is a function of a *measured* fact
+//!   about the service — how much of the body it pulled — so `connection_after` is not vacuous
+//!   here. It is also not the gateway's own rule, and the corpus refutes it in one place:
+//!   `c-object-0013` leaves eleven bytes unread and asserts `open`. That case is red on this
+//!   transport for that stated reason, and tuning the policy until it passed would be deciding a
+//!   conformance verdict by assertion.
+//! * **Streaming signature modes** (`sigv4_streaming*`) still need aws-chunked framing on the wire,
+//!   which nothing here writes. `crate::inprocess::sign_request` refuses them by name.
+//! * **HTTP/2** framing does not exist on either transport.
+
+use std::sync::Arc;
+use std::time::Duration;
+
+use crate::inprocess::{ChunkStep, HOST, InProcess, Wire, clock_of, sign_request};
+use crate::interpolate::Captures;
+use crate::observation::{ConnectionState, Observation, Outcome, StreamTermination, late_error_offset};
+use crate::socket::{Announce, Connection, Demand, Listener, Pacer, ReadFailure, honour_the_services_intent, parse_head};
+use crate::sut::{ExchangePlan, Sut, SutError};
+use crate::value::Value;
+
+/// How long the client waits on a silent server before calling the exchange wedged.
+///
+/// Used only when the case declares no `timeout_ms`. This is a safety net and never the path a
+/// passing case takes: the rendezvous in [`Pacer`] is released by the server, not by this timer,
+/// and when the timer does fire the exchange is reported as an environment failure rather than as a
+/// byte count nobody measured.
+const DEFAULT_BUDGET: Duration = Duration::from_secs(15);
+
+/// The ceiling on that budget, whatever a case declares.
+///
+/// `c-mpu-0040` declares two minutes. A run that really waited two minutes for one wedged exchange
+/// would be a run nobody executes, and the case is red on its own terms long before then.
+const MAX_BUDGET: Duration = Duration::from_secs(60);
+
+/// A service behind a loopback listener, plus the fixtures the current case established.
+pub struct Conn {
+    /// The in-process target, used for everything that is not the wire: the fixture it prepares,
+    /// the service it assembles, the `[request]` block it reads, and the signature it computes.
+    /// Reused rather than copied, so the two transports cannot disagree about what a case says.
+    inner: InProcess,
+    listener: Option<Listener>,
+    connection: Option<Connection>,
+    pacer: Arc<Pacer>,
+}
+
+impl Conn {
+    /// Builds a target rooted at a corpus directory.
+    #[must_use]
+    pub fn new(root: std::path::PathBuf) -> Conn {
+        Conn {
+            inner: InProcess::new(root),
+            listener: None,
+            connection: None,
+            pacer: Arc::new(Pacer::new()),
+        }
+    }
+
+    /// The listener for this case, started on first use.
+    ///
+    /// One per case rather than one per exchange, because `[clock]` is a per-case declaration and
+    /// the clock is fixed at assembly time. The fixture behind it is shared with `inner`, so a
+    /// `prepare` that rebuilt the state is visible to a listener that was already running — which
+    /// is why the listener is dropped in `prepare` anyway: a new case means a new clock.
+    fn listener(&mut self, at_unix_seconds: i64, skew_ms: i64) -> Result<&Listener, SutError> {
+        if self.listener.is_none() {
+            let service = self.inner.assemble(at_unix_seconds, skew_ms)?;
+            self.listener = Some(Listener::start(service, honour_the_services_intent(), Announce::Matching)?);
+        }
+        self.listener
+            .as_ref()
+            .ok_or_else(|| SutError::Environment("the listener vanished between starting and using it".to_owned()))
+    }
+}
+
+/// Reads `[connection]`, refusing every instruction this transport cannot carry out.
+///
+/// `reuse` is the one that is honoured rather than refused, in both directions, and it is honoured
+/// by actually opening a socket or actually keeping one.
+fn read_connection(connection: Option<&Value>) -> Result<bool, SutError> {
+    let empty = Value::empty_table();
+    let connection = connection.unwrap_or(&empty);
+    if connection.read("connection.pipeline").and_then(Value::as_bool) == Some(true) {
+        return Err(SutError::Environment(
+            "`connection.pipeline = true` asks for the next request to be written before the \
+             previous response is read. This transport can do that — but the case that declares it \
+             asserts that two conditional creates *race*, and writing both requests onto one \
+             connection does not make them race: this server reads one request off a connection, \
+             answers it, and only then reads the next, and the fixture evaluates a condition and \
+             commits under it inside one lock. The loser therefore meets an object that is simply \
+             there, and `412` is the honest answer to a question the case did not ask. Reaching the \
+             race needs a server that dispatches pipelined requests concurrently and a store with a \
+             window between the check and the commit; neither is approximated here"
+                .to_owned(),
+        ));
+    }
+    if connection.read("connection.tls").is_some() {
+        return Err(SutError::Environment(
+            "`[connection.tls]` needs a TLS implementation; this transport writes cleartext bytes \
+             on a TCP socket and negotiates nothing"
+                .to_owned(),
+        ));
+    }
+    if connection.read("connection.read_window_bytes").is_some() {
+        return Err(SutError::Environment(
+            "`connection.read_window_bytes` induces backpressure by leaving response bytes unread; \
+             this client reads a response to its end before it judges anything, and a window it \
+             declared but did not apply would report a server that ignored flow control as one that \
+             honoured it"
+                .to_owned(),
+        ));
+    }
+    if connection.read("connection.idle_timeout_ms").is_some() {
+        return Err(SutError::Environment(
+            "`connection.idle_timeout_ms` times out an idle connection; this server holds a \
+             connection open until its own generous read timeout and has no per-case idle bound"
+                .to_owned(),
+        ));
+    }
+    Ok(connection.read("connection.reuse").and_then(Value::as_bool).unwrap_or(true))
+}
+
+/// The head bytes to write, and the payload length the framing declares.
+struct Head {
+    bytes: Vec<u8>,
+    declared_length: u64,
+}
+
+impl Conn {
+    /// Builds the request head, signed, in the form the case asked for.
+    fn head(&self, wire: &Wire, request_time: &crate::time::Instant) -> Result<Head, SutError> {
+        match &wire.raw_head {
+            Some(raw) => self.raw_head(wire, raw, request_time),
+            None => self.structured_head(wire, request_time),
+        }
+    }
+
+    /// A head assembled from `method`, `target` and the header table.
+    fn structured_head(&self, wire: &Wire, request_time: &crate::time::Instant) -> Result<Head, SutError> {
+        let mut headers = wire.headers.clone();
+        if !headers.iter().any(|(name, _)| name.eq_ignore_ascii_case("host")) {
+            headers.push(("host".to_owned(), HOST.to_owned()));
+        }
+        if !wire.body.is_empty() && !headers.iter().any(|(name, _)| name.eq_ignore_ascii_case("content-length")) {
+            headers.push(("content-length".to_owned(), wire.body.len().to_string()));
+        }
+        // The framing is the header's, not the payload's: a case that announces five gigabytes and
+        // writes ten bytes is announcing five gigabytes, and both the signature and the server's
+        // body reader have to agree with what went on the wire.
+        let declared_length = declared_content_length(&headers).unwrap_or(wire.body.len() as u64);
+        let (headers, target) = match &wire.sign {
+            None => (headers, wire.target.clone()),
+            Some(sign) => sign_request(sign, wire, &headers, request_time, self.inner.limits(), declared_length)?,
+        };
+        let mut bytes = format!("{} {} HTTP/1.1\r\n", wire.method, target).into_bytes();
+        for (name, value) in &headers {
+            bytes.extend_from_slice(format!("{name}: {value}\r\n").as_bytes());
+        }
+        bytes.extend_from_slice(b"\r\n");
+        Ok(Head { bytes, declared_length })
+    }
+
+    /// A head the case wrote out byte for byte.
+    ///
+    /// The bytes are preserved and the signature is **appended**, never merged in. A raw head is an
+    /// escape hatch for framing — `c-mpu-0045`'s whole subject is the `content-length` that is not
+    /// there — and rewriting it to carry a signature would edit the very thing under test. What is
+    /// added is what a real client adds and nothing else: the headers the signer minted that the
+    /// head does not already carry.
+    fn raw_head(&self, wire: &Wire, raw: &[u8], request_time: &crate::time::Instant) -> Result<Head, SutError> {
+        let Some(sign) = &wire.sign else {
+            return Ok(Head {
+                bytes: raw.to_vec(),
+                declared_length: 0,
+            });
+        };
+        let parsed = parse_head(raw).ok_or_else(|| {
+            SutError::Environment(
+                "`request.raw_head_utf8` declares a signature and this head cannot be parsed well \
+                 enough to compute one; a head that malformed has to be sent unsigned, which is a \
+                 different case"
+                    .to_owned(),
+            )
+        })?;
+        let declared_length = declared_content_length(&parsed.headers).unwrap_or(0);
+        // Signing needs a `Wire`, and the one the case wrote has no method or target of its own —
+        // the raw head is where they live. Rebuilt from the parse so the signer sees what the wire
+        // will carry.
+        let signable = Wire {
+            method: parsed.method.clone(),
+            target: parsed.target.clone(),
+            headers: parsed.headers.clone(),
+            raw_head: None,
+            h2_frames: false,
+            http_version: None,
+            body: wire.body.clone(),
+            frames: Vec::new(),
+            steps: Vec::new(),
+            sign: wire.sign.clone(),
+        };
+        let (signed, target) =
+            sign_request(sign, &signable, &parsed.headers, request_time, self.inner.limits(), declared_length)?;
+        if target != parsed.target {
+            return Err(SutError::Environment(
+                "`sign.tamper` rewrote the request target of a raw head. Sending it would mean \
+                 re-spelling the request line the case pinned, and sending the original would mean \
+                 measuring a request nobody meant to send"
+                    .to_owned(),
+            ));
+        }
+        // Everything up to and including the last CRLF that ends the final header line; the blank
+        // line is re-added after the appended headers so the head stays one message.
+        let body_start = raw.len().saturating_sub(2);
+        let mut bytes = raw.get(..body_start).unwrap_or_default().to_vec();
+        for (name, value) in &signed {
+            if parsed.headers.iter().any(|(have, _)| have.eq_ignore_ascii_case(name)) {
+                continue;
+            }
+            bytes.extend_from_slice(format!("{name}: {value}\r\n").as_bytes());
+        }
+        bytes.extend_from_slice(b"\r\n");
+        Ok(Head { bytes, declared_length })
+    }
+}
+
+/// The length the head declares, when it declares one.
+fn declared_content_length(headers: &[(String, String)]) -> Option<u64> {
+    headers
+        .iter()
+        .find(|(name, _)| name.eq_ignore_ascii_case("content-length"))
+        .and_then(|(_, value)| value.parse::<u64>().ok())
+}
+
+/// How the body writing ended.
+#[derive(Debug)]
+struct BodyProgress {
+    /// Payload bytes released before the response existed.
+    sent_at_response: u64,
+    /// Whether everything the framing declared was written.
+    fully_sent: bool,
+    /// Whether this client tore the connection down as part of the body.
+    torn_down: bool,
+    /// What the transport had to produce some way other than by measuring it.
+    notes: Vec<String>,
+}
+
+impl Sut for Conn {
+    fn describe(&self) -> String {
+        "rustfs-gateway served over a loopback TCP connection, over a fixture backend".to_owned()
+    }
+
+    fn prepare(&mut self, case_id: &str, setup: Option<&Value>) -> Result<Captures, SutError> {
+        // Dropped before the fixture is rebuilt: the listener holds a service assembled at the
+        // previous case's clock, and a case that ran against the wrong instant is a case that
+        // measured something nobody described.
+        self.connection = None;
+        self.listener = None;
+        self.inner.prepare(case_id, setup)
+    }
+
+    fn exchange(&mut self, plan: &ExchangePlan<'_>) -> Result<Observation, SutError> {
+        let (fixed, request_time, skew_ms) = clock_of(plan.clock)?;
+        let reuse = read_connection(plan.connection)?;
+        self.inner.set_fixture_now(fixed.unix_seconds);
+
+        let wire = self.inner.read_wire(&plan.request)?;
+        if wire.h2_frames {
+            return Err(SutError::Environment(
+                "`request.h2_frames` needs an HTTP/2 framing layer; this transport writes HTTP/1.1 \
+                 bytes by hand"
+                    .to_owned(),
+            ));
+        }
+        if wire.http_version.as_deref() == Some("h2") {
+            return Err(SutError::Environment(
+                "`request.http_version = \"h2\"` needs a real HTTP/2 framing layer".to_owned(),
+            ));
+        }
+        let head = self.head(&wire, &request_time)?;
+        let budget = budget_of(plan.timeout_ms);
+
+        let addr = self.listener(fixed.unix_seconds, skew_ms)?.addr();
+        // A connection that the previous exchange left closed is replaced rather than written to.
+        // `connection_after` has already recorded the state it was in, so nothing is hidden by
+        // opening another one; writing into a dead socket would turn a measured close into an
+        // environment error two exchanges later.
+        let fresh = !reuse
+            || self
+                .connection
+                .as_ref()
+                .is_none_or(|connection| connection.observe() != ConnectionState::Open);
+        if fresh {
+            self.connection = None;
+            let pacer = Arc::new(Pacer::new());
+            self.listener(fixed.unix_seconds, skew_ms)?.enqueue_pacer(&pacer);
+            self.pacer = pacer;
+            self.connection = Some(Connection::open(addr)?);
+        } else {
+            // Safe only here: the server cannot have signalled anything about a request whose first
+            // byte has not been written yet.
+            self.pacer.reset();
+        }
+        let pacer = Arc::clone(&self.pacer);
+        let connection = self
+            .connection
+            .as_mut()
+            .ok_or_else(|| SutError::Environment("no connection was opened".to_owned()))?;
+        connection.start_exchange();
+
+        let started = std::time::Instant::now();
+        connection.write(&head.bytes)?;
+        let progress = write_body(connection, &pacer, &wire, head.declared_length, budget)?;
+
+        let method = request_method(&wire, &head);
+        let read = connection.read_response_classified(&method, budget);
+        let ttfb_ms = elapsed_ms(started);
+        let observation = match read {
+            Ok(response) => {
+                let elapsed_ms = elapsed_ms(started);
+                let (outcome, termination, before_error) = match late_error_offset(response.status, &response.body) {
+                    None => (Outcome::Response, None, None),
+                    Some(offset) => (Outcome::StreamError, Some(StreamTermination::ErrorDocument), Some(offset)),
+                };
+                Observation {
+                    outcome,
+                    stream_termination: termination,
+                    status: Some(response.status),
+                    http_version: Some("http/1.1".to_owned()),
+                    headers: response.headers,
+                    trailers: Vec::new(),
+                    body: response.body,
+                    body_bytes_before_error: before_error,
+                    request_body_bytes_sent_at_response: Some(progress.sent_at_response),
+                    request_body_fully_sent: Some(progress.fully_sent),
+                    ttfb_ms: Some(ttfb_ms),
+                    elapsed_ms,
+                    connection_after: None,
+                    events: Vec::new(),
+                    notes: progress.notes,
+                }
+            }
+            Err(ReadFailure::TimedOut) => Observation {
+                outcome: Outcome::Hang,
+                stream_termination: None,
+                status: None,
+                http_version: None,
+                headers: Vec::new(),
+                trailers: Vec::new(),
+                body: Vec::new(),
+                body_bytes_before_error: None,
+                request_body_bytes_sent_at_response: Some(progress.sent_at_response),
+                request_body_fully_sent: Some(progress.fully_sent),
+                ttfb_ms: None,
+                elapsed_ms: elapsed_ms(started),
+                connection_after: None,
+                events: Vec::new(),
+                notes: progress.notes,
+            },
+            // The peer ended the stream, or reset it, before a head arrived. `connection_reset` is
+            // what the corpus spells that. When *this* client tore the connection down the note
+            // attached by `write_body` says so, because the outcome is then a fact about a socket
+            // nobody was going to answer on.
+            Err(failure) => Observation {
+                outcome: Outcome::ConnectionReset,
+                stream_termination: None,
+                status: None,
+                http_version: None,
+                headers: Vec::new(),
+                trailers: Vec::new(),
+                body: Vec::new(),
+                body_bytes_before_error: None,
+                request_body_bytes_sent_at_response: Some(progress.sent_at_response),
+                request_body_fully_sent: Some(progress.fully_sent),
+                ttfb_ms: None,
+                elapsed_ms: elapsed_ms(started),
+                connection_after: None,
+                events: Vec::new(),
+                notes: {
+                    let mut notes = progress.notes;
+                    if !progress.torn_down {
+                        notes.push(format!("the response could not be read: {failure}"));
+                    }
+                    notes
+                },
+            },
+        };
+        // Taken last, and from the socket. The response has already been read in full by now, so a
+        // server that was going to close has already sent FIN and one that is keeping the
+        // connection will sit there saying nothing — which is the cost of classifying `open`, and
+        // is deliberately outside the `elapsed_ms` a case's `terminate_within_ms` is judged
+        // against: instrumentation is not the exchange.
+        let connection_after = connection.observe();
+        if progress.torn_down {
+            self.connection = None;
+        }
+        Ok(Observation {
+            connection_after: Some(connection_after),
+            ..observation
+        })
+    }
+}
+
+/// The method that went on the wire, which decides whether the answer has a body.
+///
+/// Read back off the head bytes for a raw head rather than off the case, because a raw head is
+/// exactly the shape whose request line the case did not spell as `method`.
+fn request_method(wire: &Wire, head: &Head) -> String {
+    if wire.raw_head.is_none() {
+        return wire.method.clone();
+    }
+    parse_head(&head.bytes).map_or_else(|| wire.method.clone(), |parsed| parsed.method)
+}
+
+fn elapsed_ms(started: std::time::Instant) -> u64 {
+    started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64
+}
+
+/// The wait a wedged exchange is cut off at, which is never the path a passing case takes.
+fn budget_of(timeout_ms: Option<i64>) -> Duration {
+    timeout_ms
+        .filter(|value| *value > 0)
+        .map_or(DEFAULT_BUDGET, |value| Duration::from_millis(value.unsigned_abs()))
+        .min(MAX_BUDGET)
+}
+
+/// Writes the body at the pace the peer sets, and reports what got out before the answer did.
+///
+/// The loop is the whole argument of this transport. Before every frame it waits for the server to
+/// ask for body bytes it does not have; if the response exists instead, it stops writing. No frame
+/// is released on a timer, so what the client had written when the answer arrived is the same
+/// number on an idle machine and on a loaded one.
+fn write_body(
+    connection: &mut Connection,
+    pacer: &Arc<Pacer>,
+    wire: &Wire,
+    declared_length: u64,
+    budget: Duration,
+) -> Result<BodyProgress, SutError> {
+    let mut satisfied = 0_u64;
+    let mut notes = Vec::new();
+    let mut sent_at_response = None;
+    for (index, step) in wire.steps.iter().enumerate() {
+        match step {
+            ChunkStep::Data(bytes) => {
+                match pacer.await_demand(&mut satisfied, budget) {
+                    Demand::More => {}
+                    Demand::Answered => {
+                        // The measurement point. Everything after this is a client finishing a
+                        // request whose answer it already has, and none of it can change what had
+                        // been written when the answer existed.
+                        sent_at_response = Some(connection.body_written());
+                        catch_up(connection, wire, index);
+                        break;
+                    }
+                    Demand::Wedged => {
+                        return Err(SutError::Environment(format!(
+                            "the server neither asked for the next body frame nor answered within \
+                             {}ms. That is a wedged exchange, not a byte count: reporting the \
+                             frames this client happened to have written would be reporting the \
+                             timeout",
+                            budget.as_millis()
+                        )));
+                    }
+                }
+                connection.write_body(bytes)?;
+            }
+            ChunkStep::Control {
+                action,
+                delay_ms,
+                duration_ms,
+            } => {
+                if let Some(note) = control(connection, pacer, &mut satisfied, action, *delay_ms, *duration_ms, budget)? {
+                    notes.push(note);
+                }
+                if connection.torn_down() {
+                    break;
+                }
+            }
+        }
+    }
+    let sent_at_response = sent_at_response.unwrap_or_else(|| connection.body_written());
+    Ok(BodyProgress {
+        sent_at_response,
+        // What the *framing* declared, not what the chunk list happened to contain. A part that
+        // announces a megabyte and writes twenty-nine bytes before half-closing has not finished
+        // sending its body, and `c-chunked-0001` and `c-object-0013` both assert exactly that.
+        fully_sent: sent_at_response >= declared_length,
+        torn_down: connection.torn_down(),
+        notes,
+    })
+}
+
+/// Writes the data frames the case declared and the pacing had not released yet.
+///
+/// The pacing is an *instrument*: it exists so that "how much of the body had gone out when the
+/// answer arrived" is a fact about the server rather than about a kernel buffer, and that question
+/// is settled the moment the answer exists. Leaving the rest unwritten after that point would make
+/// this client permanently truncate every request the service refused early — which is not what any
+/// client does, and which would make the connection unusable for reasons the case never described.
+/// `c-object-0013` is the case that shows it: eleven bytes, refused on the head, and
+/// `connection_after = "open"` — which the service grants only on condition that the remainder is
+/// drained, and there is nothing to drain if the client never sent it.
+///
+/// Only the frames the *case* wrote, never up to a declared `Content-Length`: `c-mpu-0027`
+/// announces five gigabytes and means to send ten bytes. Errors are dropped, because a server that
+/// is already closing is the ordinary outcome here and is not a failure of the exchange.
+fn catch_up(connection: &mut Connection, wire: &Wire, from: usize) {
+    for step in wire.steps.iter().skip(from) {
+        match step {
+            ChunkStep::Data(bytes) => {
+                if connection.write_body(bytes).is_err() {
+                    return;
+                }
+            }
+            // A declared teardown is not performed here. It was scripted relative to a request in
+            // flight, and the request is over.
+            ChunkStep::Control { .. } => return,
+        }
+    }
+}
+
+/// Carries out one control chunk, returning a note when the act makes an assertion unfalsifiable.
+fn control(
+    connection: &mut Connection,
+    pacer: &Arc<Pacer>,
+    satisfied: &mut u64,
+    action: &str,
+    delay_ms: u64,
+    duration_ms: u64,
+    budget: Duration,
+) -> Result<Option<String>, SutError> {
+    match action {
+        // A stall is "hold the connection open and send nothing", and it is the one place a
+        // duration is the instruction rather than an approximation of one. It is still cut short
+        // the moment there is an answer to read, so a server that refuses on the head does not cost
+        // the case its own `terminate_within_ms`.
+        "stall" => {
+            let _ = pacer.stall_until_answered(Duration::from_millis(duration_ms).min(budget));
+            Ok(None)
+        }
+        // Both teardowns wait for the server to have taken what was already written, so that
+        // "close after the body" is not a race with the server's first read. That wait is on the
+        // peer; the `delay_ms` that follows is the case's own instruction about *when* to tear the
+        // connection down relative to the work it started, and there is no acknowledgement that
+        // could stand in for it.
+        "half_close" => {
+            let _ = pacer.await_handover(satisfied, budget);
+            sleep(delay_ms);
+            connection.half_close()?;
+            Ok(None)
+        }
+        "close" => {
+            let _ = pacer.await_handover(satisfied, budget);
+            sleep(delay_ms);
+            connection.close()?;
+            Ok(Some(
+                "this client closed the connection itself, so `kind = \"connection_reset\"` and \
+                 `connection_after = \"closed\"` on this exchange are facts about a socket nobody \
+                 was going to answer on, and cannot fail. The case's own comment says as much — \
+                 what it actually asserts is in its later exchanges"
+                    .to_owned(),
+            ))
+        }
+        other => Err(SutError::Environment(format!(
+            "a `{other}` control chunk is not carried out by this transport, and is refused rather \
+             than dropped: a case that scripts a connection-level act and is answered from a \
+             connection that never performed it is a false green"
+        ))),
+    }
+}
+
+fn sleep(millis: u64) {
+    if millis > 0 {
+        std::thread::sleep(Duration::from_millis(millis));
+    }
+}
+
+#[cfg(test)]
+mod tests;

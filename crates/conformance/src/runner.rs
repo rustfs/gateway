@@ -200,6 +200,17 @@ fn run_case(
             Ok(observed) => observed,
             Err(error) => return not_run(outcome, &error, notes),
         };
+        // A transport that had to produce part of the record some way other than by measuring it
+        // says so here, and the case carries the warning. A green line whose assertion could not
+        // have failed is the defect this suite keeps regrowing; it is not fixed by hiding the fact
+        // in a module comment nobody reads while the report says `passed`.
+        for note in &observed.notes {
+            outcome.diagnostics.push(Diagnostic::warn(
+                "harness/by-construction",
+                &format!("{}/expect", exchange.pointer),
+                format!("exchange {}: {note}", exchange.label()),
+            ));
+        }
         let Some(expectation) = exchange.expect else { continue };
         let judgement = expect::judge(expectation, &observed, &format!("{}/expect", exchange.pointer), goldens);
         for mut diagnostic in judgement.diagnostics {

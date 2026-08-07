@@ -247,16 +247,21 @@ pub const DECLARED: &[(&str, Disposition, &str)] = &[
     (
         "dataChunk.delay_ms",
         Disposition::Unhonoured,
-        "wall-clock pacing before a chunk is written. The in-process target hands frames to a body \
-         the service pulls from, and nothing here observes arrival timing; sleeping would make the \
-         `timing` assertions depend on the load of the build machine. What survives is the frame \
-         shape, so a server that stops pulling part way through is still distinguishable",
+        "wall-clock pacing before a chunk is written, and neither transport waits out the number. \
+         The in-process target observes no arrival timing at all. The socket target does pace — it \
+         releases a frame only once the server has asked for body bytes it does not have — but it \
+         paces on the peer rather than on the clock, because a case that declares a 300ms pause \
+         also declares `terminate_within_ms`, and spending the case's own budget on a sleep makes \
+         its verdict a function of the build machine's load. What the pause was there to buy, the \
+         rendezvous buys deterministically; the number itself buys nothing further",
     ),
     (
         "dataChunk.flush",
         Disposition::Unhonoured,
-        "asks for a flush boundary on a socket. The in-process target has no write buffer to flush; \
-         one frame per chunk is already the boundary the service sees",
+        "asks for a flush boundary. The in-process target has no write buffer to flush, and the \
+         socket target writes and flushes every chunk unconditionally — so `flush = true` is \
+         already what happens and `flush = false` would need a buffering client written for the \
+         sole purpose of ignoring the boundary the schema exists to express",
     ),
     (
         "expect.events[].headers",
@@ -272,17 +277,6 @@ pub const DECLARED: &[(&str, Disposition, &str)] = &[
          same reason as the headers above",
     ),
     // -- Unreachable behind a refusal -------------------------------------------------------------
-    (
-        "controlChunk.delay_ms",
-        Disposition::BehindRefusal("controlChunk.action"),
-        "a control chunk is refused by its `action`, which the schema makes mandatory, so the case \
-         is skipped before this is looked at",
-    ),
-    (
-        "controlChunk.duration_ms",
-        Disposition::BehindRefusal("controlChunk.action"),
-        "how long a `stall` or `stop_reading` holds; reached only through a control chunk, which is refused by its `action`",
-    ),
     (
         "connection.tls.enabled",
         Disposition::BehindRefusal("connection.tls"),

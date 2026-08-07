@@ -197,6 +197,18 @@ pub struct Observation {
     pub connection_after: Option<ConnectionState>,
     /// Frames, when this was an event stream.
     pub events: Vec<ObservedEvent>,
+    /// What about this record the transport could not measure and produced some other way.
+    ///
+    /// The runner turns each of these into a warning on the case, and that is the whole point:
+    /// this suite has repeatedly grown assertions that could not fail while reading exactly like
+    /// assertions that had been checked. Some facts really are true by construction — after a
+    /// client tears its own connection down, "no response arrived" and "the socket is closed" are
+    /// not findings about a server — and the honest handling is to report them *and say so on the
+    /// case*, rather than to let a green line stand for a measurement nobody made.
+    ///
+    /// Empty for anything the transport actually observed. A transport that filled this routinely
+    /// would be describing itself rather than the exchange.
+    pub notes: Vec<String>,
 }
 
 impl Observation {
@@ -218,6 +230,7 @@ impl Observation {
             elapsed_ms: 0,
             connection_after: None,
             events: Vec::new(),
+            notes: Vec::new(),
         }
     }
 

@@ -21,6 +21,7 @@
 //! NOT responsible for: any assertion (`crate::expect`) or verdict (`crate::runner`).
 //! Upstream: `crate::runner`, `crate::report`. Downstream: `src/bin/rustfs-gateway-conformance.rs`.
 
+use crate::conn::Conn;
 use crate::corpus::Corpus;
 use crate::inprocess::InProcess;
 use crate::keys;
@@ -99,27 +100,6 @@ pub fn main(args: &[String]) -> ExitCode {
         );
         return ExitCode::from(exit::ENVIRONMENT);
     }
-    // `--transport conn` is refused for the same reason as `--endpoint`, and it used to be worse:
-    // the flag parsed, the report printed `transport conn`, and every case ran in process. A run
-    // that names one assembly path in its header while measuring the other is the single worst
-    // thing this binary can do, and it was doing it silently.
-    //
-    // `crate::socket` now has the pieces — a listener on a kernel-chosen port, a raw client, and a
-    // socket-observed `connection_after` — but no `Sut` is wired to them yet, because two of the
-    // things a socket run must report cannot be reported honestly until they are built: a paced
-    // request body (without it `request_progress` measures the socket buffer rather than the
-    // server, and every early-refusal assertion silently inverts) and the close rule that separates
-    // `c-object-0013` from `c-sig-0001`, which is issue #20's open question. Refusing is the honest
-    // state until then.
-    if options.transport == Transport::Conn {
-        eprintln!(
-            "conformance: `--transport conn` has no target behind it yet. `crate::socket` provides \
-             the listener, the raw client and the socket observation, and no `Sut` is wired to \
-             them; running this flag against the in-process target would print `transport conn` \
-             over a run that never opened a socket. See issue #20."
-        );
-        return ExitCode::from(exit::ENVIRONMENT);
-    }
     let root = match resolve_root(&options) {
         Ok(root) => root,
         Err(message) => {
@@ -127,7 +107,18 @@ pub fn main(args: &[String]) -> ExitCode {
             return ExitCode::from(exit::ENVIRONMENT);
         }
     };
-    execute(&options, &mut InProcess::new(root))
+    // The flag now selects the target it names. It used to parse, print `transport conn` in the
+    // report header, and run every case in process — a run that names one assembly path while
+    // measuring the other, which is the single worst thing this binary can do. It was then refused
+    // outright, because a socket run could not report a paced request body or a socket-observed
+    // close. `crate::conn` supplies both: the pacing is a rendezvous with the server rather than a
+    // sleep, and `connection_after` is asked of the socket. The two runs are *not* interchangeable
+    // and are not meant to be — see `crate::conn` for what each can see — which is why the header
+    // names the transport and the baseline is per transport.
+    match options.transport {
+        Transport::Hyper => execute(&options, &mut InProcess::new(root)),
+        Transport::Conn => execute(&options, &mut Conn::new(root)),
+    }
 }
 
 /// The corpus directory this run reads, from `--root` or by discovery.
@@ -377,16 +368,17 @@ mod tests {
         assert!(Options::parse(&args(&["run", "--transport", "h3"])).is_err());
     }
 
-    /// Negative — `conn` parses, and `main` refuses to run it rather than measuring the in-process
-    /// target under its name. Parsing and running are two different questions and the flag being
-    /// spelled correctly is not permission to answer the second one with the wrong path.
+    /// Negative — the two transports are two different targets, and the report says which one ran.
+    ///
+    /// The defect this pins is the one `--transport conn` shipped with: the flag parsed, the header
+    /// printed `transport conn`, and every case ran in process. A description that does not move
+    /// when the transport does is a report that cannot be read.
     #[test]
-    fn a_conn_run_is_refused_rather_than_answered_in_process() {
-        let options = Options::parse(&args(&["run", "--transport", "conn"]))
-            .expect("parses")
-            .expect("not help");
-        assert_eq!(options.transport, Transport::Conn);
-        assert_eq!(main(&args(&["run", "--transport", "conn"])), ExitCode::from(exit::ENVIRONMENT));
+    fn each_transport_names_the_target_it_actually_ran() {
+        let in_process = InProcess::new(PathBuf::from(".")).describe();
+        let over_a_socket = Conn::new(PathBuf::from(".")).describe();
+        assert_ne!(in_process, over_a_socket);
+        assert!(over_a_socket.contains("connection"), "{over_a_socket}");
     }
 
     #[test]

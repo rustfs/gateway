@@ -180,6 +180,18 @@ impl InProcess {
             .map_err(|error| SutError::Environment(format!("the service could not be assembled: {error}")))
     }
 
+    /// The wire limits this target assembles its service with.
+    pub(crate) const fn limits(&self) -> &Limits {
+        &self.limits
+    }
+
+    /// Moves the fixture's clock, which is what a case's `[clock] fixed` pins.
+    pub(crate) fn set_fixture_now(&self, unix_seconds: i64) {
+        if let Ok(mut fixture) = self.state.lock() {
+            fixture.now = unix_seconds;
+        }
+    }
+
     /// Reads a `payload` block into bytes.
     fn payload(&self, payload: &Value) -> Result<Vec<u8>, SutError> {
         // Every source is read before any of them is chosen. Returning from the first branch that
@@ -248,7 +260,7 @@ fn decode_hex(text: &str) -> Option<Vec<u8>> {
 /// An absent `[clock]` is read as an empty table rather than skipped, so that every key of the
 /// block is looked at on every case. A read that only happens when some case happens to write the
 /// enclosing block is a read the honesty ledger cannot vouch for on a corpus that later drops it.
-fn clock_of(clock: Option<&Value>) -> Result<(time::Instant, time::Instant, i64), SutError> {
+pub(crate) fn clock_of(clock: Option<&Value>) -> Result<(time::Instant, time::Instant, i64), SutError> {
     let empty = Value::empty_table();
     let clock = clock.unwrap_or(&empty);
     if clock.read("clock.presign_expires_s").is_some() {
@@ -332,52 +344,132 @@ fn read_connection(connection: Option<&Value>) -> Result<(), SutError> {
     Ok(())
 }
 
+/// One step of a body, in the order the case wrote it.
+///
+/// A body is not always bytes: `conformance/case.schema.json` lets a chunk sequence carry a control
+/// action, and "close the connection here" is as much a part of what a case sends as the payload
+/// around it. Modelled as one sequence rather than as bytes plus a footnote, because the two are
+/// ordered with respect to each other and a transport that flattened them would lose the ordering
+/// that `c-mpu-0043` — bytes, then a half-close — exists to send.
+#[derive(Debug, Clone)]
+pub(crate) enum ChunkStep {
+    /// Payload bytes, written and flushed as one frame.
+    Data(Vec<u8>),
+    /// A connection-level act.
+    Control {
+        /// The `controlChunk.action` spelling.
+        action: String,
+        /// The pause the case asks for before the act.
+        delay_ms: u64,
+        /// How long a `stall` or `stop_reading` holds.
+        duration_ms: u64,
+    },
+}
+
 /// One request, read out of the case and ready to be signed.
+///
+/// Deliberately transport-neutral: it records everything a case wrote, including the shapes an
+/// in-process call cannot send, and each transport refuses what it cannot carry out **by name**.
+/// Reading and refusing used to be the same function, which meant the socket transport could not
+/// reuse the reader without also inheriting a refusal of the very cases it exists to run.
 #[derive(Debug)]
-struct Wire {
-    method: String,
-    target: String,
-    headers: Vec<(String, String)>,
+pub(crate) struct Wire {
+    pub(crate) method: String,
+    pub(crate) target: String,
+    pub(crate) headers: Vec<(String, String)>,
+    /// The head verbatim, when the case wrote one instead of a structured request line.
+    pub(crate) raw_head: Option<Vec<u8>>,
+    /// Whether the case scripted HTTP/2 frames, which no transport here can send.
+    pub(crate) h2_frames: bool,
+    /// The wire version the case asked for.
+    pub(crate) http_version: Option<String>,
     /// The whole body, which is what the signature and `Content-Length` are stated over.
-    body: Vec<u8>,
+    pub(crate) body: Vec<u8>,
     /// The same bytes, still in the pieces the case wrote them in.
     ///
     /// Kept apart from `body` because the pieces are what makes "the server stopped asking part
     /// way through" observable: a body handed over as one frame can only be all-or-nothing.
-    frames: Vec<Vec<u8>>,
-    sign: Option<Value>,
+    pub(crate) frames: Vec<Vec<u8>>,
+    /// The body as the case wrote it, control acts included.
+    pub(crate) steps: Vec<ChunkStep>,
+    pub(crate) sign: Option<Value>,
+}
+
+impl Wire {
+    /// The control actions this body carries, in order.
+    pub(crate) fn control_actions(&self) -> impl Iterator<Item = &str> {
+        self.steps.iter().filter_map(|step| match step {
+            ChunkStep::Control { action, .. } => Some(action.as_str()),
+            ChunkStep::Data(_) => None,
+        })
+    }
 }
 
 impl InProcess {
     /// Reads a `[request]` block, refusing every shape a socketless transport cannot send.
     fn read_request(&self, request: &Value) -> Result<Wire, SutError> {
-        // Written out rather than looped over a list of names: `crate::keys` allows one source
-        // location to claim one schema key, so that a loop cannot report coverage of keys nothing
-        // reads.
-        if request.read("requestSpec.raw_head_utf8").is_some() {
+        let wire = self.read_wire(request)?;
+        if wire.raw_head.is_some() {
             return Err(needs_a_socket("raw_head_utf8"));
         }
-        if request.read("requestSpec.raw_head_hex").is_some() {
-            return Err(needs_a_socket("raw_head_hex"));
-        }
-        if request.read("requestSpec.h2_frames").is_some() {
+        if wire.h2_frames {
             return Err(needs_a_socket("h2_frames"));
         }
-        if request.read("requestSpec.http_version").and_then(Value::as_str) == Some("h2") {
+        if wire.http_version.as_deref() == Some("h2") {
             return Err(SutError::Environment(
                 "`request.http_version = \"h2\"` needs a real HTTP/2 framing layer".to_owned(),
             ));
         }
+        // A control chunk is refused rather than dropped, because a case that half-closes the
+        // connection is asserting something about a socket and answering it from a complete body
+        // would be a false green.
+        if let Some(action) = wire.control_actions().next() {
+            return Err(SutError::Environment(format!(
+                "a `{action}` control chunk needs a transport that owns the connection; the \
+                 in-process target hands over a complete body"
+            )));
+        }
+        Ok(wire)
+    }
+
+    /// Reads a `[request]` block into everything a case wrote, refusing nothing.
+    pub(crate) fn read_wire(&self, request: &Value) -> Result<Wire, SutError> {
+        // Written out rather than looped over a list of names: `crate::keys` allows one source
+        // location to claim one schema key, so that a loop cannot report coverage of keys nothing
+        // reads.
+        let raw_head_utf8 = request
+            .read("requestSpec.raw_head_utf8")
+            .and_then(Value::as_str)
+            .map(|text| text.as_bytes().to_vec());
+        let raw_head_hex = request.read("requestSpec.raw_head_hex").and_then(Value::as_str);
+        let raw_head = match (raw_head_utf8, raw_head_hex) {
+            (Some(bytes), _) => Some(bytes),
+            (None, Some(text)) => {
+                Some(decode_hex(text).ok_or_else(|| SutError::Environment(format!("`{text}` is not valid hex")))?)
+            }
+            (None, None) => None,
+        };
+        let h2_frames = request.read("requestSpec.h2_frames").is_some();
+        let http_version = request
+            .read("requestSpec.http_version")
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned);
+        // A raw head carries its own request line, so the two fields the schema makes mandatory for
+        // a structured request are absent by construction and their absence is not an error.
         let method = request
             .read("requestSpec.method")
             .and_then(Value::as_str)
-            .ok_or_else(|| SutError::Environment("a request has no method".to_owned()))?
-            .to_owned();
+            .map(ToOwned::to_owned);
         let target = request
             .read("requestSpec.target")
             .and_then(Value::as_str)
-            .ok_or_else(|| SutError::Environment("a request has no target".to_owned()))?
-            .to_owned();
+            .map(ToOwned::to_owned);
+        let (method, target) = match (method, target, raw_head.is_some()) {
+            (Some(method), Some(target), _) => (method, target),
+            (_, _, true) => (String::new(), String::new()),
+            (None, _, false) => return Err(SutError::Environment("a request has no method".to_owned())),
+            (_, None, false) => return Err(SutError::Environment("a request has no target".to_owned())),
+        };
 
         let mut headers = Vec::new();
         if let Some(Value::Table(entries)) = request.read("requestSpec.headers") {
@@ -412,48 +504,71 @@ impl InProcess {
         // One read per line: `crate::keys` allows one source location to claim one schema key.
         let declared_body = request.read("requestSpec.body");
         let declared_chunks = request.read("requestSpec.chunks");
-        let frames = match (declared_body, declared_chunks) {
-            (Some(payload), _) => vec![self.payload(payload)?],
+        let steps = match (declared_body, declared_chunks) {
+            (Some(payload), _) => vec![ChunkStep::Data(self.payload(payload)?)],
             (None, Some(Value::Array(chunks))) => self.chunks(chunks)?,
             _ => Vec::new(),
         };
+        let frames: Vec<Vec<u8>> = steps
+            .iter()
+            .filter_map(|step| match step {
+                ChunkStep::Data(bytes) => Some(bytes.clone()),
+                ChunkStep::Control { .. } => None,
+            })
+            .collect();
         let body = frames.iter().flatten().copied().collect::<Vec<u8>>();
 
         Ok(Wire {
             method,
             target,
             headers,
+            raw_head,
+            h2_frames,
+            http_version,
             body,
             frames,
+            steps,
             sign: request.read("requestSpec.sign").cloned(),
         })
     }
 
-    /// Reads a chunk sequence into the frames it was written as.
+    /// Reads a chunk sequence into the steps it was written as.
     ///
-    /// `delay_ms` is dropped on purpose: it exists to make arrival timing observable, and nothing
-    /// in an in-process call observes wall-clock pacing. What survives is the *shape* — one frame
-    /// per chunk, and one per repetition — and that is the half a socketless transport can still
-    /// measure: a server that stops pulling at the third of fifty thousand frames is distinguishable
-    /// from one that drains them all. A control chunk is refused rather than dropped, because a case
-    /// that half-closes the connection is asserting something about a socket and answering it from a
-    /// complete body would be a false green.
-    fn chunks(&self, chunks: &[Value]) -> Result<Vec<Vec<u8>>, SutError> {
-        let mut frames = Vec::new();
+    /// `delay_ms` is not read here by either transport, and the reason has moved rather than gone
+    /// away: the in-process target observes no arrival timing at all, and the socket target paces on
+    /// the peer instead of on the clock — see `crate::socket`'s module documentation for why a sleep
+    /// would make a case's own `terminate_within_ms` a function of the build machine.
+    /// `crate::keys::DECLARED` carries the entry that says so.
+    ///
+    /// What survives here is the *shape* — one frame per chunk, and one per repetition — which is
+    /// the half a socketless transport can still measure: a server that stops pulling at the third
+    /// of fifty thousand frames is distinguishable from one that drains them all.
+    fn chunks(&self, chunks: &[Value]) -> Result<Vec<ChunkStep>, SutError> {
+        let mut steps = Vec::new();
         for chunk in chunks {
             if let Some(action) = chunk.read("controlChunk.action").and_then(Value::as_str) {
-                return Err(SutError::Environment(format!(
-                    "a `{action}` control chunk needs a transport that owns the connection; the \
-                     in-process target hands over a complete body"
-                )));
+                steps.push(ChunkStep::Control {
+                    action: action.to_owned(),
+                    delay_ms: chunk
+                        .read("controlChunk.delay_ms")
+                        .and_then(Value::as_integer)
+                        .unwrap_or(0)
+                        .unsigned_abs(),
+                    duration_ms: chunk
+                        .read("controlChunk.duration_ms")
+                        .and_then(Value::as_integer)
+                        .unwrap_or(0)
+                        .unsigned_abs(),
+                });
+                continue;
             }
             let repeat = usize::try_from(chunk.read("dataChunk.repeat").and_then(Value::as_integer).unwrap_or(1)).unwrap_or(1);
             let unit = self.chunk_bytes(chunk)?;
             for _ in 0..repeat {
-                frames.push(unit.clone());
+                steps.push(ChunkStep::Data(unit.clone()));
             }
         }
-        Ok(frames)
+        Ok(steps)
     }
 
     /// The bytes one data chunk carries.
@@ -493,7 +608,7 @@ fn needs_a_socket(field: &str) -> SutError {
 }
 
 /// Splits a request target into its path and its query, neither decoded.
-fn split_target(target: &str) -> (&str, &str) {
+pub(crate) fn split_target(target: &str) -> (&str, &str) {
     match target.split_once('?') {
         Some((path, query)) => (path, query),
         None => (target, ""),
@@ -704,7 +819,6 @@ impl Sut for InProcess {
         }
         let service = self.assemble(fixed.unix_seconds, skew_ms)?;
         let wire = self.read_request(&plan.request)?;
-        let (path, query) = split_target(&wire.target);
 
         let mut headers = wire.headers.clone();
         if !headers.iter().any(|(name, _)| name.eq_ignore_ascii_case("host")) {
@@ -721,7 +835,7 @@ impl Sut for InProcess {
         // out exactly as it had been signed and was answered `200`, so the case measured nothing.
         let (headers, target) = match &wire.sign {
             None => (headers, wire.target.clone()),
-            Some(sign) => sign_request(sign, &wire, path, query, &headers, &request_time, &self.limits)?,
+            Some(sign) => sign_request(sign, &wire, &headers, &request_time, &self.limits, wire.body.len() as u64)?,
         };
 
         let (body, progress) = ObservedBody::new(wire.frames.iter().map(|frame| bytes::Bytes::from(frame.clone())));
@@ -793,8 +907,21 @@ impl Sut for InProcess {
             request_body_fully_sent: Some(progress.is_exhausted()),
             ttfb_ms: Some(elapsed_ms),
             elapsed_ms,
+            // Always `Open`, and never derived from the service's own verdict.
+            //
+            // `open` is a genuine fact about this transport: there is no connection, and the
+            // service is a value that is still callable. `closed` never is. Deriving it from
+            // `connection_intent_of` was tried and removed: until f803525 the intent was correct
+            // and `render` dropped it, so nothing was ever closed — and a derived
+            // `connection_after` would have reported green through that entire period, which is
+            // the exact shape this suite has now produced seven times. A note admitting the
+            // derivation does not change what the green line means to whoever reads the report.
+            //
+            // A case that asserts `closed` therefore cannot pass here. `--transport conn` watches
+            // the socket and answers for itself.
             connection_after: Some(ConnectionState::Open),
             events: Vec::new(),
+            notes: Vec::new(),
         })
     }
 }
@@ -810,15 +937,19 @@ fn poisoned<T>(_: T) -> SutError {
 /// that handed back only the headers would sign a request, rewrite a component of it, and then send
 /// the untouched original: a negative case that way round is answered `200`, and its assertions are
 /// judged against a request nobody meant to send.
-fn sign_request(
+pub(crate) fn sign_request(
     sign: &Value,
     wire: &Wire,
-    path: &str,
-    query: &str,
     headers: &[(String, String)],
     request_time: &time::Instant,
     limits: &Limits,
+    wire_content_length: u64,
 ) -> Result<(Vec<(String, String)>, String), SutError> {
+    // Split here rather than at each call site: every caller was passing
+    // `split_target(&wire.target)` of the very `wire` it also passed, so the two arguments were a
+    // second spelling of one that was already present — and a second spelling is a place for the
+    // two to disagree.
+    let (path, query) = split_target(&wire.target);
     let mode = sign.read("signSpec.mode").and_then(Value::as_str).unwrap_or("sigv4_header");
     match mode {
         "anonymous" | "none" => return Ok((headers.to_vec(), wire.target.clone())),
@@ -927,8 +1058,11 @@ fn sign_request(
     let mut signing = SigningRequest::new(&method, path, query, &map, accepted.host().raw_for_signing(), payload, stamp);
     // Always declared, including for the empty body: the signed-header rules cross-check
     // `content-length` against the length the wire layer settled on, and omitting it makes a
-    // request that declares `content-length: 0` unsignable.
-    signing = signing.with_wire_content_length(wire.body.len() as u64);
+    // request that declares `content-length: 0` unsignable. The value is the caller's rather than
+    // `wire.body.len()`, because a case may *declare* a length it never intends to send —
+    // `c-mpu-0027` announces five gigabytes and writes ten bytes — and the signature has to cover
+    // the header that is going on the wire, not the payload that follows it.
+    signing = signing.with_wire_content_length(wire_content_length);
     let signed = signer
         .sign_headers(&signing)
         .map_err(|error| SutError::Environment(format!("the request could not be signed: {error}")))?;
@@ -991,14 +1125,26 @@ mod tests {
 
     /// Negative — a control chunk is refused, because answering it from a complete body would turn
     /// an abnormal-termination case into a false green.
+    ///
+    /// Asserted on `read_request`, which is where a request becomes something this target agrees to
+    /// send. `chunks` is the parser both transports share and now returns the control act rather
+    /// than rejecting it — the socket target has to see it. A test left pointing at the parser
+    /// would have gone on passing while measuring the wrong half.
     #[test]
     fn a_control_chunk_is_refused() {
         let target = InProcess::new(PathBuf::from("."));
-        let chunks = vec![Value::Table(vec![(
-            "action".to_owned(),
-            Value::String("half_close".to_owned()),
-        )])];
-        let error = target.chunks(&chunks).expect_err("must be refused");
+        let request = Value::Table(vec![
+            ("method".to_owned(), Value::String("PUT".to_owned())),
+            ("target".to_owned(), Value::String("/b/k".to_owned())),
+            (
+                "chunks".to_owned(),
+                Value::Array(vec![Value::Table(vec![(
+                    "action".to_owned(),
+                    Value::String("half_close".to_owned()),
+                )])]),
+            ),
+        ]);
+        let error = target.read_request(&request).expect_err("must be refused");
         assert!(format!("{error}").contains("half_close"), "{error}");
     }
 

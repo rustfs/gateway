@@ -56,6 +56,7 @@
 #![forbid(unsafe_code)]
 
 pub mod cli;
+pub mod conn;
 pub mod corpus;
 pub mod crc32;
 pub mod diagnostic;
