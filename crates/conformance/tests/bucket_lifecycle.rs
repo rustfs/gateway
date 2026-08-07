@@ -100,6 +100,10 @@ impl Harness {
             // The encryption read rides along for the same reason: the unconfigured 404 is the
             // observable proof that a recreated bucket inherited no default-encryption document.
             .register::<dto::GetBucketEncryption, _>(Arc::clone(&backend))
+            // And the object-lock read, where inheritance would be worst: a recreated bucket
+            // carrying the previous owner's COMPLIANCE default would apply WORM rules nobody
+            // consented to and nobody can lift.
+            .register::<dto::GetObjectLockConfiguration, _>(Arc::clone(&backend))
             .register::<dto::PutObject, _>(Arc::clone(&backend))
             .authenticator(SigV4Authenticator::new(credentials, RegionSet::new([region]).expect("non-empty")))
             .authorizer(allow_when(|request| !request.is_anonymous()))
@@ -368,16 +372,20 @@ fn n_deleting_a_bucket_that_was_never_created_is_a_not_found() {
 
 /// Negative — a deleted bucket takes its configuration documents with it.
 ///
-/// The CORS document, the tag set, the lifecycle document and the default-encryption document
+/// The CORS document, the tag set, the lifecycle document, the default-encryption document and
+/// the object-lock document all
 /// live inside the bucket's own state entry, so removing the bucket removes them by construction
 /// — and this test is what keeps that a fact rather than a coincidence of today's layout. The
 /// failure it guards against is inheritance: delete a bucket, create a new one under the same
 /// name, and find it answering the previous owner's CORS rules to browsers, the previous owner's
 /// tags to billing, expiring the new owner's data on the previous owner's schedule — or
 /// encrypting the new owner's objects to the previous owner's KMS key, which is inheritance of
-/// *access*, not just behaviour. A name is not a bucket.
+/// *access*, not just behaviour. The object-lock document is the sharpest of the five: a
+/// recreated bucket that inherited a COMPLIANCE default would apply WORM retention the new owner
+/// never asked for, and COMPLIANCE is by definition the mode nobody can lift. A name is not a
+/// bucket.
 #[test]
-fn n_a_deleted_buckets_cors_tags_lifecycle_and_encryption_do_not_survive_into_a_recreation() {
+fn n_a_deleted_buckets_cors_tags_lifecycle_encryption_and_lock_do_not_survive_into_a_recreation() {
     let mut fixture = Fixture::at(NOW);
     fixture.declare_bucket("conf-bkt-reborn", false);
     fixture.set_cors(
@@ -418,6 +426,19 @@ fn n_a_deleted_buckets_cors_tags_lifecycle_and_encryption_do_not_survive_into_a_
             }],
         },
     );
+    fixture.set_lock_configuration(
+        "conf-bkt-reborn",
+        dto::ObjectLockConfiguration {
+            object_lock_enabled: Some(dto::ObjectLockEnabled::ENABLED),
+            rule: Some(dto::ObjectLockRule {
+                default_retention: Some(dto::DefaultRetention {
+                    mode: Some(dto::Mode::COMPLIANCE),
+                    years: Some(7),
+                    days: None,
+                }),
+            }),
+        },
+    );
     let harness = Harness::over(fixture, "us-east-1");
 
     let deleted = harness.send("DELETE", "/conf-bkt-reborn", b"");
@@ -452,6 +473,17 @@ fn n_a_deleted_buckets_cors_tags_lifecycle_and_encryption_do_not_survive_into_a_
     assert!(
         !read.body.contains("previous-owner"),
         "the recreated bucket leaked the deleted bucket's KMS key id: {}",
+        read.body
+    );
+
+    // The object-lock half: the recreated bucket must be unlocked, answering the bucket-level
+    // 404 with no trace of the seven-year COMPLIANCE default the previous owner set.
+    let read = harness.send("GET", "/conf-bkt-reborn?object-lock", b"");
+    assert_eq!(read.status, 404, "{}", read.body);
+    read.assert_contains("ObjectLockConfigurationNotFoundError");
+    assert!(
+        !read.body.contains("COMPLIANCE"),
+        "the recreated bucket inherited the deleted bucket's WORM default: {}",
         read.body
     );
 }

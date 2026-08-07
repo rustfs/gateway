@@ -1,0 +1,44 @@
+[case]
+id = "c-lock-0020"
+schema_version = 1
+title = "A zero-day default retention is refused as InvalidArgument"
+rationale = """
+Zero days is a retention period that expires the instant it is applied, so a bucket configured with it looks protected in every listing and protects nothing at all. That is the failure mode this family exists to prevent, and it is worth a different code from the schema violations beside it: the document is well formed and the value is out of range."""
+polarity = "negative"
+operation = "PutObjectLockConfiguration"
+tags = ["object-lock", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-lock-0010"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DefaultRetention.html"
+summary = "Both period members document a minimum value of one."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "conf-lock"
+
+[request]
+method = "PUT"
+target = "/conf-lock?object-lock"
+headers = { "content-type" = "application/xml", "content-md5" = "0NOa7/tlRf6RPaRKoFPsEw==" }
+body = { utf8 = '<ObjectLockConfiguration><ObjectLockEnabled>Enabled</ObjectLockEnabled><Rule><DefaultRetention><Mode>GOVERNANCE</Mode><Days>0</Days></DefaultRetention></Rule></ObjectLockConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+code = "InvalidArgument"
+request_id_present = true
+
+[expect.headers_present]
+"content-type" = "application/xml"
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>InvalidArgument</Code><Message>the retention period must be at least one day or one year</Message><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''

@@ -1,0 +1,252 @@
+{
+  "ir_version": "1",
+  "operation": "PutObjectLegalHold",
+  "http": {
+            "method": "PUT",
+            "target": "Object",
+            "precedence": 540,
+            "predicates": [
+                            { "kind": "Method", "method": "PUT" },
+                            { "kind": "Target", "target": "Object" },
+                            { "kind": "QueryPresent", "key": "legal-hold" }
+                          ],
+            "success_status": 200,
+            "alt_success_statuses": [],
+            "path_shape": "/{Bucket}/{Key+}"
+          },
+  "auth": { "requirement": "Required", "action": "s3:PutObjectLegalHold", "presigned_allowed": true, "service": "s3" },
+  "payload": {
+               "request": { "kind": "XmlBody", "buffering": "Full", "max_bytes": 65536 },
+               "response": { "kind": "None", "buffering": "None", "max_bytes": null }
+             },
+  "checksum": {
+                "http_checksum_required": true,
+                "request_algorithms": ["CRC32", "CRC32C", "CRC64NVME", "SHA1", "SHA256"],
+                "response_algorithms": []
+              },
+  "input": {
+             "fields": [
+                         {
+                           "name": "Bucket",
+                           "wire_name": "Bucket",
+                           "required": true,
+                           "binding": { "kind": "UriLabel", "greedy": false },
+                           "type": { "kind": "BucketName" },
+                           "hot": true,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "Key",
+                           "wire_name": "Key",
+                           "required": true,
+                           "binding": { "kind": "UriLabel", "greedy": true },
+                           "type": { "kind": "ObjectKey" },
+                           "hot": true,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "LegalHold",
+                           "wire_name": null,
+                           "required": true,
+                           "binding": { "kind": "Payload" },
+                           "type": { "kind": "Structure", "shape": "ObjectLockLegalHold" },
+                           "hot": true,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "RequestPayer",
+                           "wire_name": "x-amz-request-payer",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "StringEnum", "values": ["requester"] },
+                           "hot": false,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "VersionId",
+                           "wire_name": "versionId",
+                           "required": false,
+                           "binding": { "kind": "Query" },
+                           "type": { "kind": "String" },
+                           "hot": true,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "ContentMD5",
+                           "wire_name": "content-md5",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "String" },
+                           "hot": false,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "ChecksumAlgorithm",
+                           "wire_name": "x-amz-sdk-checksum-algorithm",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": {
+                                     "kind": "StringEnum",
+                                     "values": [
+                                                 "CRC32",
+                                                 "CRC32C",
+                                                 "SHA1",
+                                                 "SHA256",
+                                                 "CRC64NVME",
+                                                 "SHA512",
+                                                 "MD5",
+                                                 "XXHASH64",
+                                                 "XXHASH3",
+                                                 "XXHASH128"
+                                               ]
+                                   },
+                           "hot": false,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "ExpectedBucketOwner",
+                           "wire_name": "x-amz-expected-bucket-owner",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "String" },
+                           "hot": false,
+                           "quirk_refs": []
+                         }
+                       ]
+           },
+  "output": {
+              "fields": [
+                          {
+                            "name": "RequestCharged",
+                            "wire_name": "x-amz-request-charged",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": { "kind": "StringEnum", "values": ["requester"] },
+                            "hot": false,
+                            "quirk_refs": []
+                          }
+                        ]
+            },
+  "shapes": {
+              "ObjectLockLegalHold": {
+                                       "kind": "Structure",
+                                       "fields": [
+                                                   {
+                                                     "name": "Status",
+                                                     "wire_name": "Status",
+                                                     "required": false,
+                                                     "binding": { "kind": "BodyXml" },
+                                                     "type": { "kind": "StringEnum", "values": ["ON", "OFF"] },
+                                                     "hot": true,
+                                                     "quirk_refs": []
+                                                   }
+                                                 ],
+                                       "xml": {
+                                                "element_order": ["Status"],
+                                                "empty_value_policy": { "Status": "omit" },
+                                                "attributes": []
+                                              }
+                                     }
+            },
+  "xml": {
+           "request_root": "LegalHold",
+           "request_root_aliases": [],
+           "response_root": null,
+           "xmlns": "emit",
+           "unwrapped_output": false,
+           "element_order": [],
+           "empty_value_policy": {},
+           "url_encoded_fields": [],
+           "attributes": [],
+           "body_literal": false
+         },
+  "errors": {
+              "not_configured": null,
+              "allows_error_after_200": false,
+              "codes": [
+                         "NoSuchBucket",
+                         "NoSuchKey",
+                         "AccessDenied",
+                         "MalformedXML",
+                         "InvalidRequest",
+                         "InvalidArgument",
+                         "BadDigest"
+                       ]
+            },
+  "derived_resources": [],
+  "head_mirrors": null,
+  "quirk_refs": ["q-lock-0005", "q-lock-0006", "q-lock-0007", "q-lock-0011", "q-lock-0015"],
+  "quirks": [
+              {
+                "id": "q-lock-0005",
+                "kind": "xml_root",
+                "target": "PutObjectLegalHold",
+                "summary": "The wire root of a legal-hold document is LegalHold, not the shape name ObjectLockLegalHold, in both the request and the response.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObjectLegalHold.html",
+                                "summary": "The documented request syntax roots the body at a LegalHold element, while the structure it carries is published as ObjectLockLegalHold."
+                              }
+                            ],
+                "cases": ["c-lock-0006"]
+              },
+              {
+                "id": "q-lock-0006",
+                "kind": "checksum_required",
+                "target": "PutObjectLockConfiguration",
+                "summary": "All three writes in this family demand an integrity claim on the body, so a request with neither Content-MD5 nor an x-amz-checksum header is refused with 400 before the document is parsed.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObjectLockConfiguration.html",
+                                "summary": "The request documents Content-MD5 as required for the operation, which the pinned model spells as a request checksum requirement shared by the retention and legal-hold writes."
+                              }
+                            ],
+                "cases": ["c-lock-0014"]
+              },
+              {
+                "id": "q-lock-0007",
+                "kind": "required_body",
+                "target": "PutObjectRetention",
+                "summary": "The payload member of all three writes is promoted to required, so an empty body is refused as 400 MalformedXML rather than read as a defaulted document — a silently-accepted empty body is how a legal hold gets set to a value nobody sent.",
+                "evidence": [
+                              {
+                                "kind": "s3s-pr",
+                                "ref": "https://github.com/s3s-project/s3s/pull/377",
+                                "summary": "Upstream accepted an empty body on the retention and legal-hold writes without an error, and the fix pins the empty-required-XML answer to 400 MalformedXML."
+                              }
+                            ],
+                "cases": ["c-lock-0015"]
+              },
+              {
+                "id": "q-lock-0011",
+                "kind": "closed_value_set",
+                "target": "ObjectLockLegalHold.Status",
+                "summary": "A legal-hold status outside the documented two-value set — ON, OFF, exactly in that spelling — is refused as MalformedXML; a lowercase on is out of the set, and an unrecognised status stored today is a hold nobody can lift or trust tomorrow.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ObjectLockLegalHold.html",
+                                "summary": "The Status member documents the closed value set ON and OFF."
+                              }
+                            ],
+                "cases": ["c-lock-0022", "c-lock-0007"]
+              },
+              {
+                "id": "q-lock-0015",
+                "kind": "bucket_state_rule",
+                "target": "PutObjectRetention",
+                "summary": "A retention or legal-hold write against a bucket that never enabled object lock is refused as 400 InvalidRequest: per-object lock state exists only inside a lock-enabled bucket, so accepting the write would store a protection promise no enforcement path will ever read.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/userguide/object-lock.html",
+                                "summary": "Object lock settings can be applied only to objects in buckets that have object lock enabled, which is the configuration state the 400 reports."
+                              }
+                            ],
+                "cases": ["c-lock-0025", "c-lock-0026"]
+              }
+            ],
+  "ext_points": []
+}

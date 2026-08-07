@@ -1,0 +1,50 @@
+[case]
+id = "c-lock-0030"
+schema_version = 1
+title = "A retention document rooted at the shape name is refused as the wrong root"
+rationale = """
+The published structure is called ObjectLockRetention and the wire root is Retention, so this body is what a client generated from the model rather than from the request syntax sends. Accepting it would make the root name meaningless and let the other five documents in this family be posted interchangeably; refusing it is what keeps the two names from being treated as one."""
+polarity = "negative"
+operation = "PutObjectRetention"
+tags = ["object-lock", "xml", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-lock-0004"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObjectRetention.html"
+summary = "The documented request syntax roots the body at Retention, while the structure it carries is published as ObjectLockRetention."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "conf-lock"
+object_lock = true
+
+[[setup.objects]]
+bucket = "conf-lock"
+key = "doc.txt"
+body = { utf8 = "payload" }
+
+[request]
+method = "PUT"
+target = "/conf-lock/doc.txt?retention"
+headers = { "content-type" = "application/xml", "content-md5" = "JhXeYivnrFhZ2iexEm4VFQ==" }
+body = { utf8 = '<ObjectLockRetention><Mode>GOVERNANCE</Mode><RetainUntilDate>2030-01-01T00:00:00.000Z</RetainUntilDate></ObjectLockRetention>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+code = "MalformedXML"
+request_id_present = true
+
+[expect.headers_present]
+"content-type" = "application/xml"
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>MalformedXML</Code><Message>the request body has the wrong root element</Message><Resource>Retention</Resource><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''

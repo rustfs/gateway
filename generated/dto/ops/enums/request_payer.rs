@@ -23,7 +23,7 @@
 
 use std::borrow::Cow;
 
-/// The `RequestPayer` string enumeration. Bound by: AbortMultipartUpload, CompleteMultipartUpload, CopyObject, CreateMultipartUpload, DeleteObject, DeleteObjects, GetObject, GetObjectAttributes, GetObjectTagging, HeadObject, ListMultipartUploads, ListObjectVersions, ListObjects, ListObjectsV2, ListParts, PutObject, PutObjectTagging, UploadPart, UploadPartCopy.
+/// The `RequestPayer` string enumeration. Bound by: AbortMultipartUpload, CompleteMultipartUpload, CopyObject, CreateMultipartUpload, DeleteObject, DeleteObjects, GetObject, GetObjectAttributes, GetObjectLegalHold, GetObjectRetention, GetObjectTagging, HeadObject, ListMultipartUploads, ListObjectVersions, ListObjects, ListObjectsV2, ListParts, PutObject, PutObjectLegalHold, PutObjectLockConfiguration, PutObjectRetention, PutObjectTagging, UploadPart, UploadPartCopy.
 ///
 /// An open set: compare against the associated constants, and build a value the pinned
 /// model does not declare with [`RequestPayer::custom`]. Adding a constant is a minor version

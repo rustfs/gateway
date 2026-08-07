@@ -1,0 +1,48 @@
+[case]
+id = "c-lock-0028"
+schema_version = 1
+title = "A retention read naming a version is refused rather than answered from the current one"
+rationale = """
+This target keeps one retention per key, because nothing in the case format declares per-version lock state and inventing some would be state no case wrote. Ignoring the parameter would report the current protection as the named version, which on a compliance surface is a confident wrong answer where a refusal is merely a gap. The 501 is the honest reading and the case pins it as such, not as the behaviour AWS has."""
+polarity = "negative"
+operation = "GetObjectRetention"
+tags = ["object-lock", "known-divergence"]
+timeout_ms = 10000
+quirks = ["q-lock-0002"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObjectRetention.html"
+summary = "The retention read documents versionId as selecting the version whose retention is reported."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "conf-lock"
+object_lock = true
+
+[[setup.objects]]
+bucket = "conf-lock"
+key = "doc.txt"
+body = { utf8 = "payload" }
+
+[request]
+method = "GET"
+target = "/conf-lock/doc.txt?retention&versionId=v1"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 501
+connection_after = "open"
+
+[expect.error]
+code = "NotImplemented"
+request_id_present = true
+
+[expect.headers_present]
+"content-type" = "application/xml"
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>NotImplemented</Code><Message>A header you provided implies functionality that is not implemented</Message><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''

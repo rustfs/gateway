@@ -19,6 +19,7 @@ CreateBucketInput 10
 CreateBucketOutput 1
 CreateMultipartUploadInput 31
 CreateMultipartUploadOutput 14
+DefaultRetention 3
 Delete 2
 DeleteBucketCorsInput 2
 DeleteBucketCorsOutput 0
@@ -53,7 +54,13 @@ GetObjectAttributesInput 11
 GetObjectAttributesOutput 9
 GetObjectAttributesParts 6
 GetObjectInput 22
+GetObjectLegalHoldInput 5
+GetObjectLegalHoldOutput 1
+GetObjectLockConfigurationInput 2
+GetObjectLockConfigurationOutput 1
 GetObjectOutput 43
+GetObjectRetentionInput 5
+GetObjectRetentionOutput 1
 GetObjectTaggingInput 5
 GetObjectTaggingOutput 2
 HeadBucketInput 2
@@ -82,6 +89,10 @@ NoncurrentVersionExpiration 2
 NoncurrentVersionTransition 3
 Object 9
 ObjectIdentifier 5
+ObjectLockConfiguration 2
+ObjectLockLegalHold 1
+ObjectLockRetention 2
+ObjectLockRule 1
 ObjectPart 12
 ObjectVersion 11
 Owner 2
@@ -95,7 +106,13 @@ PutBucketLifecycleConfigurationOutput 1
 PutBucketTaggingInput 5
 PutBucketTaggingOutput 0
 PutObjectInput 37
+PutObjectLegalHoldInput 8
+PutObjectLegalHoldOutput 1
+PutObjectLockConfigurationInput 7
+PutObjectLockConfigurationOutput 1
 PutObjectOutput 13
+PutObjectRetentionInput 9
+PutObjectRetentionOutput 1
 PutObjectTaggingInput 8
 PutObjectTaggingOutput 1
 RestoreStatus 2

@@ -1,0 +1,62 @@
+[case]
+id = "c-lock-0006"
+schema_version = 1
+title = "A legal-hold document is rooted at LegalHold, not at the shape name, in both directions"
+rationale = """
+The retention root mismatch again on the second object-level document: the wire root is LegalHold while the published structure is ObjectLockLegalHold. A hold that cannot be read back is a hold an operator cannot verify, and verifying a hold is the whole reason the read exists."""
+polarity = "positive"
+operation = "PutObjectLegalHold"
+tags = ["object-lock", "xml", "wire-bytes"]
+timeout_ms = 10000
+quirks = ["q-lock-0005"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObjectLegalHold.html"
+summary = "The documented request syntax roots the body at a LegalHold element."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ObjectLockLegalHold.html"
+summary = "The structure the LegalHold element carries is published under the name ObjectLockLegalHold."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "conf-lock"
+object_lock = true
+
+[[setup.objects]]
+bucket = "conf-lock"
+key = "doc.txt"
+body = { utf8 = "payload" }
+
+[[exchanges]]
+name = "put-hold-on"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-lock/doc.txt?legal-hold"
+headers = { "content-type" = "application/xml", "content-md5" = "oK1+ndJbG6HuGA87LDxznw==" }
+body = { utf8 = '<LegalHold><Status>ON</Status></LegalHold>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[[exchanges]]
+name = "read-back"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-lock/doc.txt?legal-hold"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.body]
+golden = "goldens/c-lock-0006.xml"
+not_contains_utf8 = ["<ObjectLockLegalHold>"]

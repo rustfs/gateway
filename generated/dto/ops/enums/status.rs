@@ -23,7 +23,7 @@
 
 use std::borrow::Cow;
 
-/// The `Status` string enumeration. Bound by: GetBucketLifecycleConfiguration, PutBucketLifecycleConfiguration.
+/// The `Status` string enumeration. Bound by: GetBucketLifecycleConfiguration, GetObjectLegalHold, PutBucketLifecycleConfiguration, PutObjectLegalHold.
 ///
 /// An open set: compare against the associated constants, and build a value the pinned
 /// model does not declare with [`Status::custom`]. Adding a constant is a minor version
@@ -36,9 +36,13 @@ impl Status {
     pub const ENABLED: Self = Self(Cow::Borrowed("Enabled"));
     /// `Disabled`
     pub const DISABLED: Self = Self(Cow::Borrowed("Disabled"));
+    /// `ON`
+    pub const ON: Self = Self(Cow::Borrowed("ON"));
+    /// `OFF`
+    pub const OFF: Self = Self(Cow::Borrowed("OFF"));
 
     /// Every value the pinned model declares, in model order.
-    pub const VALUES: &'static [&'static str] = &["Enabled", "Disabled"];
+    pub const VALUES: &'static [&'static str] = &["Enabled", "Disabled", "ON", "OFF"];
 
     /// Wraps a value this build has no constant for.
     #[must_use]

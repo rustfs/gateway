@@ -48,7 +48,7 @@ use crate::op::{Operation, is_standard_operation_name};
 use crate::registry::Registry;
 use crate::registry::opset::{MissingHandlers, OperationSet};
 use crate::registry::reject::RegistryError;
-use crate::route::{PROVISIONAL_SHADOWING, RouteEntry, RouteTable, ShadowingDecls, generated_entries};
+use crate::route::{PROVISIONAL_SHADOWING, RouteEntry, RouteTable, generated_entries};
 
 /// Why a router refused to be built.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -206,7 +206,7 @@ impl RouterBuilder {
         }
         let mut entries = generated_entries().map_err(RouterBuildError::from)?;
         entries.extend(self.entries);
-        let table = RouteTable::build(entries, &ShadowingDecls::new(PROVISIONAL_SHADOWING)).map_err(RouterBuildError::from)?;
+        let table = RouteTable::build(entries, &PROVISIONAL_SHADOWING).map_err(RouterBuildError::from)?;
         Ok(Router::new(table, self.registry)?)
     }
 }

@@ -122,7 +122,8 @@ use rustfs_gateway::{
     PRECONDITION_FAILED_MESSAGE, PreconditionRejection, Preconditions, REGION_MATCH_POLICY, RangeDecision, RangeSelectors,
     RegionLabel, RegionSet, Req, RequestKind, Resp, TagScope, TaggingRejection, Timestamp, collect, evaluate, evaluate_range,
     parse_conditional_etag, parse_tagging_header, permanent_redirect_for, resolve_copy_range, resolve_location_constraint,
-    validate_cors, validate_encryption, validate_lifecycle, validate_tag_set,
+    validate_cors, validate_encryption, validate_legal_hold, validate_lifecycle, validate_lock_configuration, validate_retention,
+    validate_tag_set,
 };
 
 /// The canonical user id every listing reports as the owner.
@@ -184,6 +185,17 @@ pub struct StoredObject {
     /// reach here — [`read_tagging_header`] and [`tag_pairs`] refuse them — so the sequence is a
     /// map in everything but lookup cost, and ten pairs is the ceiling AWS documents.
     pub tags: Vec<(String, String)>,
+    /// The retention document a retention write stored, exactly as validated — never invented,
+    /// and never *evaluated*: whether this fixture's deletes and overwrites honour it is
+    /// enforcement, which is deliberately not this fixture's. `None` is the observable state the
+    /// object-level `404 NoSuchObjectLockConfiguration` reports. Held on the object like the tag
+    /// set, because `[setup.objects]` declares no per-version lock state and inventing one would
+    /// be state no case wrote.
+    pub retention: Option<dto::ObjectLockRetention>,
+    /// The legal-hold document a hold write stored. `None` is "never set", which answers the
+    /// same object-level 404 as an unset retention — not a `200` carrying `OFF`, which a
+    /// compliance audit would read as a hold that exists.
+    pub legal_hold: Option<dto::ObjectLockLegalHold>,
     /// The storage class the writer named, or `STANDARD`.
     pub storage_class: String,
     /// The unquoted MD5 entity tag of `body`.
@@ -347,6 +359,14 @@ struct BucketState {
     /// it — a recreated bucket inheriting the previous owner's KMS key would encrypt the new
     /// owner's data to somebody else's key.
     encryption: Option<dto::ServerSideEncryptionConfiguration>,
+    /// The stored object-lock configuration, written by `PutObjectLockConfiguration` within the
+    /// case. `None` with `object_lock` false is the observable state
+    /// `ObjectLockConfigurationNotFoundError` reports; `None` with `object_lock` true answers
+    /// the Enabled-only document a creation-time declaration implies. It lives in `BucketState`
+    /// so that deleting the bucket deletes the document with it — a recreated bucket inheriting
+    /// the previous owner's WORM configuration would lock the new owner's data to somebody
+    /// else's compliance rules.
+    lock_configuration: Option<dto::ObjectLockConfiguration>,
 }
 
 /// A bucket's lifecycle document exactly as one write stored it.
@@ -450,10 +470,41 @@ impl Fixture {
         !holds_versions && !holds_uploads
     }
 
-    /// Whether a bucket was declared with object lock on.
+    /// Whether a bucket has object lock on, however it got there.
+    ///
+    /// Two roads reach the same state: `setup.buckets[].object_lock` declares it at creation, and
+    /// `PutObjectLockConfiguration` turns it on afterwards — which is what AWS documents that
+    /// write as doing. A reader that consulted only the declaration would report a bucket the
+    /// case just locked as unlocked, so both are folded here rather than at each call site.
     #[must_use]
     pub fn has_object_lock(&self, name: &str) -> bool {
-        self.buckets.get(name).is_some_and(|bucket| bucket.object_lock)
+        self.buckets
+            .get(name)
+            .is_some_and(|bucket| bucket.object_lock || bucket.lock_configuration.is_some())
+    }
+
+    /// Installs a bucket's object-lock document, replacing whatever was there.
+    /// `PutObjectLockConfiguration` only.
+    pub fn set_lock_configuration(&mut self, name: &str, configuration: dto::ObjectLockConfiguration) {
+        self.buckets.entry(name.to_owned()).or_default().lock_configuration = Some(configuration);
+    }
+
+    /// The document the lock read answers, or `None` for a bucket that never enabled object lock.
+    ///
+    /// A bucket declared `object_lock = true` at creation but never written to answers the
+    /// `Enabled`-only document, because that is exactly what its state is: locking on, no default
+    /// retention. Synthesising it here rather than at creation keeps `[setup]` a declaration of
+    /// state instead of a hidden `PutObjectLockConfiguration` nobody sent.
+    #[must_use]
+    fn lock_configuration(&self, name: &str) -> Option<dto::ObjectLockConfiguration> {
+        let bucket = self.buckets.get(name)?;
+        if let Some(stored) = bucket.lock_configuration.as_ref() {
+            return Some(stored.clone());
+        }
+        bucket.object_lock.then_some(dto::ObjectLockConfiguration {
+            object_lock_enabled: Some(dto::ObjectLockEnabled::ENABLED),
+            rule: None,
+        })
     }
 
     /// Installs a bucket's CORS document, replacing whatever was there. `PutBucketCors` only.
@@ -541,9 +592,13 @@ impl Fixture {
     /// Removes a bucket, for `setup.buckets[].absent` and for `DeleteBucket`.
     ///
     /// The whole `BucketState` entry goes, and the CORS document and tag set go with it because
-    /// they live inside it — the lifecycle document too: a bucket's configuration is a property of the bucket, not of the name,
+    /// they live inside it — the lifecycle, encryption and object-lock documents too: a bucket's
+    /// configuration is a property of the bucket, not of the name,
     /// so a later creation under the same name starts unconfigured rather than inheriting a
-    /// document nobody wrote to it. `Fixture::bucket_lifecycle` tests pin this.
+    /// document nobody wrote to it. `Fixture::bucket_lifecycle` tests pin this, and for the lock
+    /// document the stakes are the sharpest in the family: a recreated bucket that inherited a
+    /// COMPLIANCE default would apply the previous owner's WORM rules to the new owner's data,
+    /// with no way to lift them.
     pub fn remove_bucket(&mut self, name: &str) {
         self.buckets.remove(name);
         self.objects.retain(|(bucket, _), _| bucket != name);
@@ -1259,6 +1314,69 @@ fn no_such_encryption_configuration() -> HandlerError {
         ErrorCode::SERVER_SIDE_ENCRYPTION_CONFIGURATION_NOT_FOUND,
         "The server side encryption configuration was not found",
     )
+}
+
+/// `ObjectLockConfigurationNotFoundError`: the **bucket-level** unconfigured answer, for a
+/// bucket that never enabled object lock.
+fn object_lock_configuration_not_found() -> HandlerError {
+    HandlerError::new(
+        ErrorCode::OBJECT_LOCK_CONFIGURATION_NOT_FOUND,
+        "Object Lock configuration does not exist for this bucket",
+    )
+}
+
+/// `NoSuchObjectLockConfiguration`: the **object-level** unconfigured answer, for an object with
+/// no retention or no legal hold.
+///
+/// Deliberately a different code from the bucket read's, and deliberately not a `200` with an
+/// empty document: a compliance audit reads "no lock state" and "a lock state that permits
+/// everything" as opposite findings.
+fn no_such_lock_configuration() -> HandlerError {
+    HandlerError::new(
+        ErrorCode::NO_SUCH_OBJECT_LOCK_CONFIGURATION,
+        "The specified object does not have an ObjectLock configuration",
+    )
+}
+
+/// Refuses a lock-state write on a bucket that never enabled object lock (`q-lock-0015`).
+///
+/// `InvalidRequest` rather than a not-found: the bucket is there, and what is missing is the
+/// configuration the request presupposes. Accepting the write would store a protection promise
+/// no enforcement path reads — the client walks away believing its object is held.
+///
+/// # Errors
+///
+/// `InvalidRequest` when the bucket has no object lock, by either road.
+fn require_object_lock(fixture: &Fixture, bucket: &str) -> Result<(), HandlerError> {
+    if fixture.has_object_lock(bucket) {
+        return Ok(());
+    }
+    Err(HandlerError::new(
+        ErrorCode::INVALID_REQUEST,
+        "Bucket is missing Object Lock Configuration",
+    ))
+}
+
+/// Refuses `?versionId` on a lock-state request rather than answering the current version's
+/// document.
+///
+/// The tagging family's rule, on a surface where the cost of guessing is higher. This fixture
+/// keeps one retention and one hold per key, because `[setup.objects]` declares no per-version
+/// lock state and inventing some would be state no case wrote. Silently ignoring the parameter
+/// would report the *current* protection as the named version's, and a case asserting on that
+/// would go green against a wrong answer about whether data is locked.
+///
+/// # Errors
+///
+/// `NotImplemented` whenever the parameter is present, with a value or without.
+fn refuse_versioned_lock_state(version_id: Option<&str>) -> Result<(), HandlerError> {
+    if version_id.is_none() {
+        return Ok(());
+    }
+    Err(HandlerError::new(
+        ErrorCode::NOT_IMPLEMENTED,
+        "A header you provided implies functionality that is not implemented",
+    ))
 }
 
 fn no_such_key(key: &str) -> HandlerError {
@@ -2039,6 +2157,66 @@ impl Handler<dto::DeleteBucketEncryption> for Stub {
         request: Req<dto::DeleteBucketEncryption>,
     ) -> impl core::future::Future<Output = HandlerResult<dto::DeleteBucketEncryption>> + Send {
         let outcome = self.delete_bucket_encryption(request.input());
+        async move { outcome }
+    }
+}
+
+impl Handler<dto::GetObjectLockConfiguration> for Stub {
+    fn call(
+        &self,
+        request: Req<dto::GetObjectLockConfiguration>,
+    ) -> impl core::future::Future<Output = HandlerResult<dto::GetObjectLockConfiguration>> + Send {
+        let outcome = self.get_object_lock_configuration(request.input());
+        async move { outcome }
+    }
+}
+
+impl Handler<dto::PutObjectLockConfiguration> for Stub {
+    fn call(
+        &self,
+        request: Req<dto::PutObjectLockConfiguration>,
+    ) -> impl core::future::Future<Output = HandlerResult<dto::PutObjectLockConfiguration>> + Send {
+        let outcome = self.put_object_lock_configuration(request.input());
+        async move { outcome }
+    }
+}
+
+impl Handler<dto::GetObjectRetention> for Stub {
+    fn call(
+        &self,
+        request: Req<dto::GetObjectRetention>,
+    ) -> impl core::future::Future<Output = HandlerResult<dto::GetObjectRetention>> + Send {
+        let outcome = self.get_object_retention(request.input());
+        async move { outcome }
+    }
+}
+
+impl Handler<dto::PutObjectRetention> for Stub {
+    fn call(
+        &self,
+        request: Req<dto::PutObjectRetention>,
+    ) -> impl core::future::Future<Output = HandlerResult<dto::PutObjectRetention>> + Send {
+        let outcome = self.put_object_retention(request.input());
+        async move { outcome }
+    }
+}
+
+impl Handler<dto::GetObjectLegalHold> for Stub {
+    fn call(
+        &self,
+        request: Req<dto::GetObjectLegalHold>,
+    ) -> impl core::future::Future<Output = HandlerResult<dto::GetObjectLegalHold>> + Send {
+        let outcome = self.get_object_legal_hold(request.input());
+        async move { outcome }
+    }
+}
+
+impl Handler<dto::PutObjectLegalHold> for Stub {
+    fn call(
+        &self,
+        request: Req<dto::PutObjectLegalHold>,
+    ) -> impl core::future::Future<Output = HandlerResult<dto::PutObjectLegalHold>> + Send {
+        let outcome = self.put_object_legal_hold(request.input());
         async move { outcome }
     }
 }
@@ -2927,6 +3105,127 @@ impl Stub {
         require_bucket(&fixture, &input.bucket)?;
         fixture.clear_encryption(input.bucket.as_str());
         Ok(Resp::new(dto::DeleteBucketEncryptionOutput::default()))
+    }
+
+    /// The bucket's object-lock document, or the family's bucket-level 404.
+    ///
+    /// `ObjectLockConfigurationNotFoundError` and `NoSuchBucket` are different answers to
+    /// different questions, and the object reads below answer a *third* code for the same
+    /// unconfigured shape — three states a single not-found would flatten into one, and
+    /// compliance tooling branches on all three.
+    fn get_object_lock_configuration(
+        &self,
+        input: &dto::GetObjectLockConfigurationInput,
+    ) -> HandlerResult<dto::GetObjectLockConfiguration> {
+        let fixture = self.borrow()?;
+        require_bucket(&fixture, &input.bucket)?;
+        let stored = fixture
+            .lock_configuration(input.bucket.as_str())
+            .ok_or_else(object_lock_configuration_not_found)?;
+        Ok(Resp::new(dto::GetObjectLockConfigurationOutput {
+            object_lock_configuration: Some(stored),
+        }))
+    }
+
+    /// The whole lock document, replaced — and, per AWS, how object lock is switched on.
+    ///
+    /// The rules are `rustfs_gateway::validate_lock_configuration`'s, not this file's. What is
+    /// stored is exactly what was sent: the read-back is a byte-level golden, leniencies
+    /// included — an unknown element was already skipped by the decoder, and a configuration
+    /// with no rule is a legal document meaning "locked, no default retention".
+    ///
+    /// Nothing here enforces anything. Enabling object lock on this fixture changes what a
+    /// versioned delete answers (`has_object_lock`, which `DeleteObjects` already consults) and
+    /// nothing else; a default retention is stored and never applied to a write.
+    fn put_object_lock_configuration(
+        &self,
+        input: &dto::PutObjectLockConfigurationInput,
+    ) -> HandlerResult<dto::PutObjectLockConfiguration> {
+        let mut fixture = self.borrow()?;
+        require_bucket(&fixture, &input.bucket)?;
+        let configuration = &input.object_lock_configuration;
+        validate_lock_configuration(configuration)
+            .map_err(|rejection| HandlerError::new(rejection.code(), rejection.reason()))?;
+        fixture.set_lock_configuration(input.bucket.as_str(), configuration.clone());
+        Ok(Resp::new(dto::PutObjectLockConfigurationOutput::default()))
+    }
+
+    /// One object's retention document, or the object-level 404.
+    ///
+    /// `versionId` is refused rather than ignored, for `refuse_versioned_lock_state`'s reason:
+    /// this fixture keeps one retention per key, so answering a request that named an older
+    /// version would report the current document as that version's — a wrong answer where a
+    /// refusal is merely a gap, and on a compliance surface a wrong answer is the worse one.
+    fn get_object_retention(&self, input: &dto::GetObjectRetentionInput) -> HandlerResult<dto::GetObjectRetention> {
+        let fixture = self.borrow()?;
+        require_bucket(&fixture, &input.bucket)?;
+        refuse_versioned_lock_state(input.version_id.as_deref())?;
+        let object = fixture
+            .object(input.bucket.as_str(), input.key.as_str())
+            .ok_or_else(|| no_such_key(input.key.as_str()))?;
+        let retention = object.retention.clone().ok_or_else(no_such_lock_configuration)?;
+        Ok(Resp::new(dto::GetObjectRetentionOutput {
+            retention: Some(retention),
+        }))
+    }
+
+    /// The object's retention document, replaced.
+    ///
+    /// Three refusals before anything is stored, in this order: the bucket must exist, it must
+    /// have object lock on (`q-lock-0015` — a retention on an unlocked bucket is a promise no
+    /// enforcement path will ever read), and the document must satisfy the shared validator
+    /// against *this case's* clock (`q-lock-0013`). The bypass header is decoded by the
+    /// generated codec and deliberately not consulted here: what it authorises is enforcement,
+    /// and this fixture enforces nothing. The write is in place — protecting an object is not a
+    /// new representation of it — so no version is minted and the bytes, the entity tag and
+    /// `Last-Modified` are left exactly as they were.
+    fn put_object_retention(&self, input: &dto::PutObjectRetentionInput) -> HandlerResult<dto::PutObjectRetention> {
+        let mut fixture = self.borrow()?;
+        require_bucket(&fixture, &input.bucket)?;
+        require_object_lock(&fixture, input.bucket.as_str())?;
+        refuse_versioned_lock_state(input.version_id.as_deref())?;
+        let now = fixture.now;
+        validate_retention(&input.retention, now).map_err(|rejection| HandlerError::new(rejection.code(), rejection.reason()))?;
+        let object = fixture
+            .object_mut(input.bucket.as_str(), input.key.as_str())
+            .ok_or_else(|| no_such_key(input.key.as_str()))?;
+        object.retention = Some(input.retention.clone());
+        Ok(Resp::new(dto::PutObjectRetentionOutput::default()))
+    }
+
+    /// One object's legal-hold document, or the object-level 404.
+    ///
+    /// Never a `200` carrying `OFF` for an object that was never held: "no hold was ever placed"
+    /// and "a hold was placed and lifted" are different facts, and only the second is a document.
+    fn get_object_legal_hold(&self, input: &dto::GetObjectLegalHoldInput) -> HandlerResult<dto::GetObjectLegalHold> {
+        let fixture = self.borrow()?;
+        require_bucket(&fixture, &input.bucket)?;
+        refuse_versioned_lock_state(input.version_id.as_deref())?;
+        let object = fixture
+            .object(input.bucket.as_str(), input.key.as_str())
+            .ok_or_else(|| no_such_key(input.key.as_str()))?;
+        let legal_hold = object.legal_hold.clone().ok_or_else(no_such_lock_configuration)?;
+        Ok(Resp::new(dto::GetObjectLegalHoldOutput {
+            legal_hold: Some(legal_hold),
+        }))
+    }
+
+    /// The object's legal-hold document, replaced. `OFF` is stored, not erased.
+    ///
+    /// Lifting a hold leaves a document saying `OFF`, which is what makes the read answer `200`
+    /// afterwards rather than reverting to the never-held 404. The bucket must have object lock
+    /// on, for the retention write's reason.
+    fn put_object_legal_hold(&self, input: &dto::PutObjectLegalHoldInput) -> HandlerResult<dto::PutObjectLegalHold> {
+        let mut fixture = self.borrow()?;
+        require_bucket(&fixture, &input.bucket)?;
+        require_object_lock(&fixture, input.bucket.as_str())?;
+        refuse_versioned_lock_state(input.version_id.as_deref())?;
+        validate_legal_hold(&input.legal_hold).map_err(|rejection| HandlerError::new(rejection.code(), rejection.reason()))?;
+        let object = fixture
+            .object_mut(input.bucket.as_str(), input.key.as_str())
+            .ok_or_else(|| no_such_key(input.key.as_str()))?;
+        object.legal_hold = Some(input.legal_hold.clone());
+        Ok(Resp::new(dto::PutObjectLegalHoldOutput::default()))
     }
 
     /// Opens a multipart upload, and records the attributes only this request can state.

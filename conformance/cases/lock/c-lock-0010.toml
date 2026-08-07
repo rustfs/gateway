@@ -1,0 +1,56 @@
+[case]
+id = "c-lock-0010"
+schema_version = 1
+title = "An unknown element in a lock document is skipped, and does not reappear on the read"
+rationale = """
+A stored WORM document is re-parsed by every future release, and a decoder that refused what it did not recognise would turn a lock configuration into no configuration the day AWS adds a member — data silently unlocked, with nothing failing visibly. The element is skipped rather than kept: the read-back golden proves the document came out without it, so the leniency never becomes an invisible round trip of unvalidated bytes."""
+polarity = "positive"
+operation = "PutObjectLockConfiguration"
+tags = ["object-lock", "xml", "wire-bytes"]
+timeout_ms = 10000
+quirks = ["q-lock-0014"]
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/issues/613"
+summary = "AWS ignores unknown elements in request XML, and upstream had to relax its decoder to match."
+kind = "s3s-issue"
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/pull/617"
+summary = "The upstream change that makes unknown request elements a skip rather than an error."
+kind = "s3s-pr"
+
+[[setup.buckets]]
+name = "conf-lock"
+
+[[exchanges]]
+name = "put-with-unknown-element"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-lock?object-lock"
+headers = { "content-type" = "application/xml", "content-md5" = "3JcGZWcPK5yleqhyJMU+Qg==" }
+body = { utf8 = '<ObjectLockConfiguration><ObjectLockEnabled>Enabled</ObjectLockEnabled><FutureMember>x</FutureMember><Rule><DefaultRetention><Mode>GOVERNANCE</Mode><Days>1</Days></DefaultRetention></Rule></ObjectLockConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[[exchanges]]
+name = "read-back"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-lock?object-lock"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.body]
+golden = "goldens/c-lock-0010.xml"
+not_contains_utf8 = ["FutureMember"]

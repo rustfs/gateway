@@ -25,15 +25,17 @@
 
 pub use crate::ops::enums::{
     Acl, ArchiveStatus, ChecksumAlgorithm, ChecksumMode, ChecksumType, EncodingType, EncryptionType, LocationConstraint,
-    MetadataDirective, ObjectLockLegalHoldStatus, ObjectLockMode, ObjectOwnership, ReplicationStatus, RequestCharged,
-    RequestPayer, ServerSideEncryption, SseAlgorithm, Status, StorageClass, TaggingDirective, TransitionDefaultMinimumObjectSize,
+    MetadataDirective, Mode, ObjectLockEnabled, ObjectLockLegalHoldStatus, ObjectLockMode, ObjectOwnership, ReplicationStatus,
+    RequestCharged, RequestPayer, ServerSideEncryption, SseAlgorithm, Status, StorageClass, TaggingDirective,
+    TransitionDefaultMinimumObjectSize,
 };
 pub use crate::ops::shapes::{
     AbortIncompleteMultipartUpload, BlockedEncryptionTypes, Bucket, BucketLifecycleConfiguration, Checksum, CommonPrefix,
-    CompletedMultipartUpload, CompletedPart, CorsConfiguration, CorsRule, CreateBucketConfiguration, Delete, DeleteMarkerEntry,
-    DeletedObject, Error, GetObjectAttributesParts, Initiator, LifecycleExpiration, LifecycleRule, LifecycleRuleAndOperator,
-    LifecycleRuleFilter, MultipartUpload, NoncurrentVersionExpiration, NoncurrentVersionTransition, Object, ObjectIdentifier,
-    ObjectPart, ObjectVersion, Owner, Part, RestoreStatus, ServerSideEncryptionByDefault, ServerSideEncryptionConfiguration,
+    CompletedMultipartUpload, CompletedPart, CorsConfiguration, CorsRule, CreateBucketConfiguration, DefaultRetention, Delete,
+    DeleteMarkerEntry, DeletedObject, Error, GetObjectAttributesParts, Initiator, LifecycleExpiration, LifecycleRule,
+    LifecycleRuleAndOperator, LifecycleRuleFilter, MultipartUpload, NoncurrentVersionExpiration, NoncurrentVersionTransition,
+    Object, ObjectIdentifier, ObjectLockConfiguration, ObjectLockLegalHold, ObjectLockRetention, ObjectLockRule, ObjectPart,
+    ObjectVersion, Owner, Part, RestoreStatus, ServerSideEncryptionByDefault, ServerSideEncryptionConfiguration,
     ServerSideEncryptionRule, Tag, Tagging, Transition,
 };
 
@@ -110,6 +112,18 @@ pub use crate::ops::get_object_attributes::{
     GetObjectAttributes, Input as GetObjectAttributesInput, InputBuilder as GetObjectAttributesInputBuilder,
     Output as GetObjectAttributesOutput,
 };
+pub use crate::ops::get_object_legal_hold::{
+    GetObjectLegalHold, Input as GetObjectLegalHoldInput, InputBuilder as GetObjectLegalHoldInputBuilder,
+    Output as GetObjectLegalHoldOutput,
+};
+pub use crate::ops::get_object_lock_configuration::{
+    GetObjectLockConfiguration, Input as GetObjectLockConfigurationInput, InputBuilder as GetObjectLockConfigurationInputBuilder,
+    Output as GetObjectLockConfigurationOutput,
+};
+pub use crate::ops::get_object_retention::{
+    GetObjectRetention, Input as GetObjectRetentionInput, InputBuilder as GetObjectRetentionInputBuilder,
+    Output as GetObjectRetentionOutput,
+};
 pub use crate::ops::get_object_tagging::{
     GetObjectTagging, Input as GetObjectTaggingInput, InputBuilder as GetObjectTaggingInputBuilder,
     Output as GetObjectTaggingOutput,
@@ -157,6 +171,18 @@ pub use crate::ops::put_bucket_tagging::{
 };
 pub use crate::ops::put_object::{
     Input as PutObjectInput, InputBuilder as PutObjectInputBuilder, Output as PutObjectOutput, PutObject,
+};
+pub use crate::ops::put_object_legal_hold::{
+    Input as PutObjectLegalHoldInput, InputBuilder as PutObjectLegalHoldInputBuilder, Output as PutObjectLegalHoldOutput,
+    PutObjectLegalHold,
+};
+pub use crate::ops::put_object_lock_configuration::{
+    Input as PutObjectLockConfigurationInput, InputBuilder as PutObjectLockConfigurationInputBuilder,
+    Output as PutObjectLockConfigurationOutput, PutObjectLockConfiguration,
+};
+pub use crate::ops::put_object_retention::{
+    Input as PutObjectRetentionInput, InputBuilder as PutObjectRetentionInputBuilder, Output as PutObjectRetentionOutput,
+    PutObjectRetention,
 };
 pub use crate::ops::put_object_tagging::{
     Input as PutObjectTaggingInput, InputBuilder as PutObjectTaggingInputBuilder, Output as PutObjectTaggingOutput,

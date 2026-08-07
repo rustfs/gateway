@@ -1,0 +1,192 @@
+{
+  "ir_version": "1",
+  "operation": "GetObjectLockConfiguration",
+  "http": {
+            "method": "GET",
+            "target": "Bucket",
+            "precedence": 397,
+            "predicates": [
+                            { "kind": "Method", "method": "GET" },
+                            { "kind": "Target", "target": "Bucket" },
+                            { "kind": "QueryPresent", "key": "object-lock" }
+                          ],
+            "success_status": 200,
+            "alt_success_statuses": [],
+            "path_shape": "/{Bucket}"
+          },
+  "auth": {
+            "requirement": "Required",
+            "action": "s3:GetBucketObjectLockConfiguration",
+            "presigned_allowed": true,
+            "service": "s3"
+          },
+  "payload": {
+               "request": { "kind": "None", "buffering": "None", "max_bytes": null },
+               "response": { "kind": "XmlBody", "buffering": "Full", "max_bytes": 65536 }
+             },
+  "checksum": { "http_checksum_required": false, "request_algorithms": [], "response_algorithms": [] },
+  "input": {
+             "fields": [
+                         {
+                           "name": "Bucket",
+                           "wire_name": "Bucket",
+                           "required": true,
+                           "binding": { "kind": "UriLabel", "greedy": false },
+                           "type": { "kind": "BucketName" },
+                           "hot": true,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "ExpectedBucketOwner",
+                           "wire_name": "x-amz-expected-bucket-owner",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "String" },
+                           "hot": false,
+                           "quirk_refs": []
+                         }
+                       ]
+           },
+  "output": {
+              "fields": [
+                          {
+                            "name": "ObjectLockConfiguration",
+                            "wire_name": null,
+                            "required": false,
+                            "binding": { "kind": "Payload" },
+                            "type": { "kind": "Structure", "shape": "ObjectLockConfiguration" },
+                            "hot": true,
+                            "quirk_refs": []
+                          }
+                        ]
+            },
+  "shapes": {
+              "DefaultRetention": {
+                                    "kind": "Structure",
+                                    "fields": [
+                                                {
+                                                  "name": "Mode",
+                                                  "wire_name": "Mode",
+                                                  "required": false,
+                                                  "binding": { "kind": "BodyXml" },
+                                                  "type": {
+                                                            "kind": "StringEnum",
+                                                            "values": ["GOVERNANCE", "COMPLIANCE"]
+                                                          },
+                                                  "hot": true,
+                                                  "quirk_refs": []
+                                                },
+                                                {
+                                                  "name": "Days",
+                                                  "wire_name": "Days",
+                                                  "required": false,
+                                                  "binding": { "kind": "BodyXml" },
+                                                  "type": { "kind": "Integer" },
+                                                  "hot": true,
+                                                  "quirk_refs": []
+                                                },
+                                                {
+                                                  "name": "Years",
+                                                  "wire_name": "Years",
+                                                  "required": false,
+                                                  "binding": { "kind": "BodyXml" },
+                                                  "type": { "kind": "Integer" },
+                                                  "hot": true,
+                                                  "quirk_refs": []
+                                                }
+                                              ],
+                                    "xml": {
+                                             "element_order": ["Mode", "Days", "Years"],
+                                             "empty_value_policy": { "Mode": "omit", "Days": "omit", "Years": "omit" },
+                                             "attributes": []
+                                           }
+                                  },
+              "ObjectLockConfiguration": {
+                                           "kind": "Structure",
+                                           "fields": [
+                                                       {
+                                                         "name": "ObjectLockEnabled",
+                                                         "wire_name": "ObjectLockEnabled",
+                                                         "required": false,
+                                                         "binding": { "kind": "BodyXml" },
+                                                         "type": { "kind": "StringEnum", "values": ["Enabled"] },
+                                                         "hot": true,
+                                                         "quirk_refs": []
+                                                       },
+                                                       {
+                                                         "name": "Rule",
+                                                         "wire_name": "Rule",
+                                                         "required": false,
+                                                         "binding": { "kind": "BodyXml" },
+                                                         "type": { "kind": "Structure", "shape": "ObjectLockRule" },
+                                                         "hot": true,
+                                                         "quirk_refs": []
+                                                       }
+                                                     ],
+                                           "xml": {
+                                                    "element_order": ["ObjectLockEnabled", "Rule"],
+                                                    "empty_value_policy": {
+                                                                            "ObjectLockEnabled": "omit",
+                                                                            "Rule": "omit"
+                                                                          },
+                                                    "attributes": []
+                                                  }
+                                         },
+              "ObjectLockRule": {
+                                  "kind": "Structure",
+                                  "fields": [
+                                              {
+                                                "name": "DefaultRetention",
+                                                "wire_name": "DefaultRetention",
+                                                "required": false,
+                                                "binding": { "kind": "BodyXml" },
+                                                "type": { "kind": "Structure", "shape": "DefaultRetention" },
+                                                "hot": true,
+                                                "quirk_refs": []
+                                              }
+                                            ],
+                                  "xml": {
+                                           "element_order": ["DefaultRetention"],
+                                           "empty_value_policy": { "DefaultRetention": "omit" },
+                                           "attributes": []
+                                         }
+                                }
+            },
+  "xml": {
+           "request_root": null,
+           "request_root_aliases": [],
+           "response_root": null,
+           "xmlns": "emit",
+           "unwrapped_output": false,
+           "element_order": [],
+           "empty_value_policy": {},
+           "url_encoded_fields": [],
+           "attributes": [],
+           "body_literal": false
+         },
+  "errors": {
+              "not_configured": "ObjectLockConfigurationNotFoundError",
+              "allows_error_after_200": false,
+              "codes": ["NoSuchBucket", "AccessDenied", "ObjectLockConfigurationNotFoundError"]
+            },
+  "derived_resources": [],
+  "head_mirrors": null,
+  "quirk_refs": ["q-lock-0001"],
+  "quirks": [
+              {
+                "id": "q-lock-0001",
+                "kind": "not_configured_error",
+                "target": "GetObjectLockConfiguration",
+                "summary": "A bucket that never enabled object lock answers 404 with the bucket-level code ObjectLockConfigurationNotFoundError, not a generic not-found and not an empty 200.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/ErrorResponses.html",
+                                "summary": "The error code list documents ObjectLockConfigurationNotFoundError with HTTP status 404 for a bucket whose object lock configuration does not exist."
+                              }
+                            ],
+                "cases": ["c-lock-0011", "c-lock-0029"]
+              }
+            ],
+  "ext_points": []
+}

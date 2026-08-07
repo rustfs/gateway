@@ -1,0 +1,71 @@
+[case]
+id = "c-lock-0007"
+schema_version = 1
+title = "A lifted hold reads back as OFF, which is a document and not an absence"
+rationale = """
+A hold that was placed and lifted is a different fact from a hold that was never placed, and only the first is something an operator did. Collapsing the lifted state back to the unset 404 would erase the record that a hold ever existed; answering 200 with OFF keeps it. Both spellings of Status are exercised in one case so that neither can be accepted while the other is refused."""
+polarity = "positive"
+operation = "PutObjectLegalHold"
+tags = ["object-lock", "wire-bytes"]
+timeout_ms = 10000
+quirks = ["q-lock-0011"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ObjectLockLegalHold.html"
+summary = "The Status member documents ON and OFF as its two values, making OFF a stored state rather than an absent one."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "conf-lock"
+object_lock = true
+
+[[setup.objects]]
+bucket = "conf-lock"
+key = "doc.txt"
+body = { utf8 = "payload" }
+
+[[exchanges]]
+name = "hold-on"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-lock/doc.txt?legal-hold"
+headers = { "content-type" = "application/xml", "content-md5" = "oK1+ndJbG6HuGA87LDxznw==" }
+body = { utf8 = '<LegalHold><Status>ON</Status></LegalHold>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[[exchanges]]
+name = "hold-off"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-lock/doc.txt?legal-hold"
+headers = { "content-type" = "application/xml", "content-md5" = "An8G3mv4SfhAibzslQjGDw==" }
+body = { utf8 = '<LegalHold><Status>OFF</Status></LegalHold>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[[exchanges]]
+name = "read-back-off"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-lock/doc.txt?legal-hold"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.body]
+golden = "goldens/c-lock-0007.xml"

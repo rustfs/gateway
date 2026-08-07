@@ -115,9 +115,11 @@ must agree case for case; a case that could name a path would be a case that hid
   `xml`, `wire-bytes`, `etag`, `routing`, `vhost`, `conditional`, `preconditions`, `list`,
   `pagination`, `multipart`, `checksum`, `range`, `encoding`, `cors`, `encryption`, `lifecycle`, `region`, `security`, `dos`,
   `timing`, `connection`, `event-stream`, `tls`, `h2`, `error-shape`, `known-divergence`, `tagging`,
-  and `slow`. `slow` is reserved: it moves a case out of the pull-request gate and into the merge
-  queue. `region` marks a case whose subject is the deployment's region posture — the
-  location-constraint rules and the `x-amz-bucket-region` redirect contract.
+  `object-lock`, and `slow`. `slow` is reserved: it moves a case out of the pull-request gate and
+  into the merge queue. `region` marks a case whose subject is the deployment's region posture — the
+  location-constraint rules and the `x-amz-bucket-region` redirect contract. `object-lock` marks a
+  case about the WORM family's codec — the lock configuration, retention and legal-hold documents;
+  lock *enforcement* is later work and no case here asserts it.
 
 ## Cases and quirks reference each other
 

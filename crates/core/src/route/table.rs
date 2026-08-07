@@ -344,7 +344,7 @@ impl RouteTable {
 
     /// Every declaration must describe an overlap that exists, in the direction it claims.
     fn check_declarations(&self) -> Result<(), RouteBuildError> {
-        for decl in self.shadowing.all() {
+        for decl in self.shadowing.iter() {
             if decl.evidence.is_empty() {
                 return Err(RouteBuildError::UnsourcedShadowing {
                     winner: decl.winner,

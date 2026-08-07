@@ -51,7 +51,7 @@ fn routed(table: &RouteTable, request: &Req) -> Option<&'static str> {
 /// The generated table, built under the strict shadowing policy the crate ships with.
 fn generated_table() -> RouteTable {
     let entries = generated_entries().expect("the generated rows parse");
-    RouteTable::build(entries, &ShadowingDecls::new(rustfs_gateway_core::route::PROVISIONAL_SHADOWING))
+    RouteTable::build(entries, &rustfs_gateway_core::route::PROVISIONAL_SHADOWING)
         .expect("the generated table is well formed under the strict shadowing policy")
 }
 
@@ -147,7 +147,7 @@ fn acl_and_tagging_together_pick_a_band_and_explain_the_other() {
 #[test]
 fn the_generated_table_builds_and_routes() {
     let entries = generated_entries().expect("the generated rows parse");
-    let table = RouteTable::build(entries, &ShadowingDecls::new(rustfs_gateway_core::route::PROVISIONAL_SHADOWING))
+    let table = RouteTable::build(entries, &rustfs_gateway_core::route::PROVISIONAL_SHADOWING)
         .expect("the generated table is well formed under the strict shadowing policy");
     assert_eq!(routed(&table, &Req::new("PUT /bucket/key")), Some("PutObject"));
     assert_eq!(routed(&table, &Req::new("GET /bucket?location")), Some("GetBucketLocation"));
@@ -611,7 +611,6 @@ fn n_a_bucket_subresource_request_is_never_claimed_by_the_lifecycle_band() {
         "metadataJournalTable",
         "metrics",
         "notification",
-        "object-lock",
         "ownershipControls",
         "policy",
         "publicAccessBlock",
@@ -642,10 +641,12 @@ fn n_a_bucket_subresource_request_is_never_claimed_by_the_lifecycle_band() {
         assert_eq!(routed(&table, &Req::new(&line)), None, "{line} must not be a bucket deletion");
     }
     // The served subresources are the same rule with a different observable: the request reaches
-    // the subresource's own row, never the lifecycle one.
+    // the subresource's own row, never the lifecycle one. `?object-lock` moved from the deferred
+    // list above to this one when its pair landed at 397/398.
     for (line, expected) in [
         ("PUT /bucket?cors", "PutBucketCors"),
         ("PUT /bucket?tagging", "PutBucketTagging"),
+        ("PUT /bucket?object-lock", "PutObjectLockConfiguration"),
         ("DELETE /bucket?cors", "DeleteBucketCors"),
         ("DELETE /bucket?tagging", "DeleteBucketTagging"),
     ] {
@@ -953,6 +954,259 @@ fn n_the_bucket_bands_are_unchanged_by_the_encryption_band() {
         ("PUT /bucket?lifecycle", "PutBucketLifecycleConfiguration"),
         ("DELETE /bucket?lifecycle", "DeleteBucketLifecycle"),
         ("GET /bucket?uploads", "ListMultipartUploads"),
+    ] {
+        assert_eq!(routed(&table, &Req::new(line)), Some(expected), "{line}");
+    }
+}
+
+/// The `?object-lock` pair claims its two requests on the bucket target — and only two.
+///
+/// Positive half of the block below. Two methods, not three, is the family's shape: the pinned
+/// model defines no delete for a lock configuration, because object lock once enabled has no
+/// wire spelling for "off". The absent DELETE is asserted here rather than assumed, since a
+/// table that invented one would hand `DELETE /b?object-lock` to whatever claimed it.
+#[test]
+fn the_object_lock_subresource_routes_to_the_lock_pair() {
+    let table = generated_table();
+    for (line, expected) in [
+        ("GET /bucket?object-lock", "GetObjectLockConfiguration"),
+        ("PUT /bucket?object-lock", "PutObjectLockConfiguration"),
+    ] {
+        let hit = table
+            .resolve(&Req::new(line).parts())
+            .unwrap_or_else(|| panic!("{line} has a route"));
+        assert_eq!(hit.op_name, expected, "{line}");
+        assert!(
+            hit.precedence < 460,
+            "{line} must sit in the bucket subresource band ahead of the listings, got {}",
+            hit.precedence
+        );
+    }
+    // No delete row — and no `DeleteBucket` exclusion either: the model defines no delete for a
+    // lock configuration, so under DELETE the key is inert exactly like any key without an
+    // operation behind it, and the request keeps the meaning a bare `DELETE /{bucket}` has.
+    // (`DeleteBucket`'s `QueryAbsent` list names exactly the subresources with DELETE
+    // operations, deferred or served; `object-lock` is not one.)
+    assert_eq!(routed(&table, &Req::new("DELETE /bucket?object-lock")), Some("DeleteBucket"));
+}
+
+/// Negative — the lock-configuration read is never claimed by the bucket listing fallback.
+///
+/// `ListObjects` pins no query key, so before the row existed `GET /b?object-lock` was answered
+/// with a key listing — the `GetObjectLockConfiguration -> ListObjects` debt-register line this
+/// pair retires. The PUT half had no fallback to be claimed by, so for it the fault mode was
+/// "no route at all".
+#[test]
+fn n_the_lock_configuration_read_is_never_claimed_by_the_listing_fallback() {
+    let table = generated_table();
+    for (line, forbidden) in [
+        ("GET /bucket?object-lock", "ListObjects"),
+        ("GET /bucket?object-lock", "ListObjectsV2"),
+        ("GET /bucket?object-lock", "ListObjectVersions"),
+    ] {
+        assert_ne!(
+            routed(&table, &Req::new(line)),
+            Some(forbidden),
+            "{line}: a WORM configuration request answered with a key listing"
+        );
+    }
+}
+
+/// Negative — a request naming an earlier subresource beside `?object-lock` stays with the
+/// earlier band.
+///
+/// Four configuration bands now sit ahead of this pair (300, 310-330, 340-360, 370-390 and
+/// 391-393 before 397/398), so both methods have neighbours to lose to — including
+/// `?encryption`, the nearest one in the packed corner of the band.
+#[test]
+fn n_a_request_naming_an_earlier_subresource_and_object_lock_stays_with_the_earlier_row() {
+    let table = generated_table();
+    for (line, expected) in [
+        ("GET /bucket?location&object-lock", "GetBucketLocation"),
+        ("GET /bucket?cors&object-lock", "GetBucketCors"),
+        ("GET /bucket?tagging&object-lock", "GetBucketTagging"),
+        ("GET /bucket?lifecycle&object-lock", "GetBucketLifecycleConfiguration"),
+        ("GET /bucket?encryption&object-lock", "GetBucketEncryption"),
+        ("PUT /bucket?cors&object-lock", "PutBucketCors"),
+        ("PUT /bucket?tagging&object-lock", "PutBucketTagging"),
+        ("PUT /bucket?lifecycle&object-lock", "PutBucketLifecycleConfiguration"),
+        ("PUT /bucket?encryption&object-lock", "PutBucketEncryption"),
+    ] {
+        assert_eq!(routed(&table, &Req::new(line)), Some(expected), "{line}");
+    }
+}
+
+/// Negative — `?object-lock` beats the listings it overlaps.
+#[test]
+fn n_a_request_naming_object_lock_and_a_listing_stays_with_the_lock_row() {
+    let table = generated_table();
+    for line in [
+        "GET /bucket?object-lock&uploads",
+        "GET /bucket?object-lock&list-type=2",
+        "GET /bucket?object-lock&versions",
+    ] {
+        assert_eq!(routed(&table, &Req::new(line)), Some("GetObjectLockConfiguration"), "{line}");
+    }
+}
+
+/// Negative — each lock row is bound to one method, so the key alone does not reach it.
+#[test]
+fn n_an_object_lock_row_is_not_reachable_under_another_method() {
+    let table = generated_table();
+    for (line, forbidden) in [
+        ("PUT /bucket?object-lock", "GetObjectLockConfiguration"),
+        ("GET /bucket?object-lock", "PutObjectLockConfiguration"),
+        ("HEAD /bucket?object-lock", "GetObjectLockConfiguration"),
+        ("POST /bucket?object-lock", "PutObjectLockConfiguration"),
+        ("DELETE /bucket?object-lock", "GetObjectLockConfiguration"),
+    ] {
+        assert_ne!(routed(&table, &Req::new(line)), Some(forbidden), "{line}");
+    }
+}
+
+/// Negative — `?object-lock` on an object key is not a bucket subresource and must not reach
+/// the pair.
+///
+/// Both lock rows pin `Target(Bucket)`, so `GET /bucket/key?object-lock` is a plain object read
+/// carrying an inert query key, exactly as it is on AWS.
+#[test]
+fn n_the_object_lock_key_on_an_object_does_not_reach_the_bucket_pair() {
+    let table = generated_table();
+    for (line, expected) in [
+        ("GET /bucket/key?object-lock", "GetObject"),
+        ("PUT /bucket/key?object-lock", "PutObject"),
+    ] {
+        assert_eq!(routed(&table, &Req::new(line)), Some(expected), "{line}");
+    }
+}
+
+/// The `?retention` and `?legal-hold` rows claim their four requests on the object target.
+///
+/// Positive half of the block below, checked as a whole for the same reason the tagging band
+/// is: a table that gained the reads and forgot the writes would leave the retention and hold
+/// documents to be stored by `PutObject` — as the object's body.
+#[test]
+fn the_retention_and_legal_hold_subresources_route_to_their_rows() {
+    let table = generated_table();
+    for (line, expected) in [
+        ("GET /bucket/key?retention", "GetObjectRetention"),
+        ("PUT /bucket/key?retention", "PutObjectRetention"),
+        ("GET /bucket/key?legal-hold", "GetObjectLegalHold"),
+        ("PUT /bucket/key?legal-hold", "PutObjectLegalHold"),
+    ] {
+        let hit = table
+            .resolve(&Req::new(line).parts())
+            .unwrap_or_else(|| panic!("{line} has a route"));
+        assert_eq!(hit.op_name, expected, "{line}");
+        assert!(
+            hit.precedence > 460 && hit.precedence < 790,
+            "{line} must sit in the object subresource band, after multipart and before the copy row, got {}",
+            hit.precedence
+        );
+    }
+}
+
+/// Negative — the four lock-state requests are never claimed by the plain object band.
+///
+/// The reads were `GetObject`'s — a compliance document request answered with the object's
+/// bytes — and the writes were `PutObject`'s, which stored the document *as the object*: a
+/// caller protecting an object destroyed it, with a 200. These are the
+/// `GetObjectRetention -> GetObject`, `GetObjectLegalHold -> GetObject`,
+/// `PutObjectRetention -> PutObject` and `PutObjectLegalHold -> PutObject` debt-register lines
+/// this band retires.
+#[test]
+fn n_the_retention_and_legal_hold_requests_are_never_claimed_by_the_plain_object_band() {
+    let table = generated_table();
+    for (line, forbidden) in [
+        ("GET /bucket/key?retention", "GetObject"),
+        ("GET /bucket/key?legal-hold", "GetObject"),
+        ("PUT /bucket/key?retention", "PutObject"),
+        ("PUT /bucket/key?legal-hold", "PutObject"),
+    ] {
+        assert_ne!(routed(&table, &Req::new(line)), Some(forbidden), "{line}");
+    }
+}
+
+/// Negative — a copy-source header does not pull a retention or hold write into the copy row.
+///
+/// `CopyObject` is selected by the header alone, so without the band order a retention write
+/// carrying `x-amz-copy-source` would be served as a copy: destination overwritten from the
+/// source, the retention document discarded.
+#[test]
+fn n_a_copy_source_header_does_not_pull_a_lock_state_write_into_the_copy_row() {
+    let table = generated_table();
+    for (line, expected) in [
+        ("PUT /bucket/key?retention", "PutObjectRetention"),
+        ("PUT /bucket/key?legal-hold", "PutObjectLegalHold"),
+    ] {
+        let request = Req::new(line).header("x-amz-copy-source", "/src/key");
+        assert_eq!(routed(&table, &request), Some(expected), "{line} + x-amz-copy-source");
+    }
+}
+
+/// Negative — a request naming an upload beside a lock subresource stays with the multipart
+/// band, the same order the attributes and tagging rows settled.
+#[test]
+fn n_a_request_naming_an_upload_and_a_lock_subresource_stays_with_the_multipart_band() {
+    let table = generated_table();
+    for (line, expected) in [
+        ("GET /bucket/key?uploadId=u1&retention", "ListParts"),
+        ("GET /bucket/key?uploadId=u1&legal-hold", "ListParts"),
+        ("PUT /bucket/key?partNumber=1&uploadId=u1&retention", "UploadPart"),
+        ("PUT /bucket/key?partNumber=1&uploadId=u1&legal-hold", "UploadPart"),
+    ] {
+        assert_eq!(routed(&table, &Req::new(line)), Some(expected), "{line}");
+    }
+}
+
+/// Negative — inside the family and against its earlier neighbours, the band order decides.
+///
+/// `?retention` and `?legal-hold` together name both halves of the object-lock state; the
+/// retention row arrived first (510/520 before 530/540) in both methods. The attributes and
+/// tagging rows are earlier still.
+#[test]
+fn n_the_earlier_object_subresource_wins_beside_a_lock_subresource() {
+    let table = generated_table();
+    for (line, expected) in [
+        ("GET /bucket/key?retention&legal-hold", "GetObjectRetention"),
+        ("PUT /bucket/key?retention&legal-hold", "PutObjectRetention"),
+        ("GET /bucket/key?attributes&retention", "GetObjectAttributes"),
+        ("GET /bucket/key?tagging&retention", "GetObjectTagging"),
+        ("GET /bucket/key?tagging&legal-hold", "GetObjectTagging"),
+        ("PUT /bucket/key?tagging&retention", "PutObjectTagging"),
+        ("PUT /bucket/key?tagging&legal-hold", "PutObjectTagging"),
+    ] {
+        assert_eq!(routed(&table, &Req::new(line)), Some(expected), "{line}");
+    }
+}
+
+/// Negative — the lock-state keys on a bucket do not reach the object rows.
+///
+/// All four rows pin `Target(Object)`, so on a bucket the keys are inert: the GET falls to the
+/// listing fallback, exactly as an unknown query key does on AWS.
+#[test]
+fn n_the_lock_state_keys_on_a_bucket_do_not_reach_the_object_rows() {
+    let table = generated_table();
+    for (line, expected) in [
+        ("GET /bucket?retention", "ListObjects"),
+        ("GET /bucket?legal-hold", "ListObjects"),
+    ] {
+        assert_eq!(routed(&table, &Req::new(line)), Some(expected), "{line}");
+    }
+}
+
+/// Negative — the neighbouring bands still answer their own requests beside the new rows.
+#[test]
+fn n_the_object_band_is_unchanged_by_the_lock_state_rows() {
+    let table = generated_table();
+    for (line, expected) in [
+        ("GET /bucket/key", "GetObject"),
+        ("PUT /bucket/key", "PutObject"),
+        ("DELETE /bucket/key", "DeleteObject"),
+        ("GET /bucket/key?tagging", "GetObjectTagging"),
+        ("GET /bucket/key?attributes", "GetObjectAttributes"),
+        ("GET /bucket/key?uploadId=u1", "ListParts"),
+        ("GET /bucket?encryption", "GetBucketEncryption"),
     ] {
         assert_eq!(routed(&table, &Req::new(line)), Some(expected), "{line}");
     }

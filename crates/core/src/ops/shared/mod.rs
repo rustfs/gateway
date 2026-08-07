@@ -41,6 +41,7 @@ pub mod encryption;
 pub mod etag;
 pub mod lifecycle;
 pub mod location_constraint;
+pub mod object_lock;
 pub mod pagination;
 pub mod precondition;
 pub mod tagging;

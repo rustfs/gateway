@@ -1,0 +1,44 @@
+[case]
+id = "c-lock-0014"
+schema_version = 1
+title = "A lock write with neither Content-MD5 nor a checksum header is refused before parsing"
+rationale = """
+The integrity claim is what makes a truncated or corrupted lock document a failure rather than a stored configuration nobody meant to write, and on this family a corrupted document is a retention rule applied to real data. The refusal has to happen before the body is parsed, so a malformed document with no digest reports the missing digest rather than the malformed XML — otherwise a client fixes the wrong thing."""
+polarity = "negative"
+operation = "PutObjectLockConfiguration"
+tags = ["object-lock", "checksum"]
+timeout_ms = 10000
+quirks = ["q-lock-0006"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObjectLockConfiguration.html"
+summary = "The request documents Content-MD5 as required for this operation."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "conf-lock"
+
+[request]
+method = "PUT"
+target = "/conf-lock?object-lock"
+headers = { "content-type" = "application/xml" }
+body = { utf8 = '<ObjectLockConfiguration><ObjectLockEnabled>Enabled</ObjectLockEnabled></ObjectLockConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+code = "InvalidRequest"
+request_id_present = true
+
+[expect.headers_present]
+"content-type" = "application/xml"
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>InvalidRequest</Code><Message>this operation requires an integrity check on the request body: send Content-MD5 or an x-amz-checksum-* header</Message><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''

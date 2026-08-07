@@ -1,0 +1,347 @@
+{
+  "ir_version": "1",
+  "operation": "PutObjectLockConfiguration",
+  "http": {
+            "method": "PUT",
+            "target": "Bucket",
+            "precedence": 398,
+            "predicates": [
+                            { "kind": "Method", "method": "PUT" },
+                            { "kind": "Target", "target": "Bucket" },
+                            { "kind": "QueryPresent", "key": "object-lock" }
+                          ],
+            "success_status": 200,
+            "alt_success_statuses": [],
+            "path_shape": "/{Bucket}"
+          },
+  "auth": {
+            "requirement": "Required",
+            "action": "s3:PutBucketObjectLockConfiguration",
+            "presigned_allowed": true,
+            "service": "s3"
+          },
+  "payload": {
+               "request": { "kind": "XmlBody", "buffering": "Full", "max_bytes": 65536 },
+               "response": { "kind": "None", "buffering": "None", "max_bytes": null }
+             },
+  "checksum": {
+                "http_checksum_required": true,
+                "request_algorithms": ["CRC32", "CRC32C", "CRC64NVME", "SHA1", "SHA256"],
+                "response_algorithms": []
+              },
+  "input": {
+             "fields": [
+                         {
+                           "name": "Bucket",
+                           "wire_name": "Bucket",
+                           "required": true,
+                           "binding": { "kind": "UriLabel", "greedy": false },
+                           "type": { "kind": "BucketName" },
+                           "hot": true,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "ObjectLockConfiguration",
+                           "wire_name": null,
+                           "required": true,
+                           "binding": { "kind": "Payload" },
+                           "type": { "kind": "Structure", "shape": "ObjectLockConfiguration" },
+                           "hot": true,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "RequestPayer",
+                           "wire_name": "x-amz-request-payer",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "StringEnum", "values": ["requester"] },
+                           "hot": false,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "Token",
+                           "wire_name": "x-amz-bucket-object-lock-token",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "String" },
+                           "hot": false,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "ContentMD5",
+                           "wire_name": "content-md5",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "String" },
+                           "hot": false,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "ChecksumAlgorithm",
+                           "wire_name": "x-amz-sdk-checksum-algorithm",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": {
+                                     "kind": "StringEnum",
+                                     "values": [
+                                                 "CRC32",
+                                                 "CRC32C",
+                                                 "SHA1",
+                                                 "SHA256",
+                                                 "CRC64NVME",
+                                                 "SHA512",
+                                                 "MD5",
+                                                 "XXHASH64",
+                                                 "XXHASH3",
+                                                 "XXHASH128"
+                                               ]
+                                   },
+                           "hot": false,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "ExpectedBucketOwner",
+                           "wire_name": "x-amz-expected-bucket-owner",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "String" },
+                           "hot": false,
+                           "quirk_refs": []
+                         }
+                       ]
+           },
+  "output": {
+              "fields": [
+                          {
+                            "name": "RequestCharged",
+                            "wire_name": "x-amz-request-charged",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": { "kind": "StringEnum", "values": ["requester"] },
+                            "hot": false,
+                            "quirk_refs": []
+                          }
+                        ]
+            },
+  "shapes": {
+              "DefaultRetention": {
+                                    "kind": "Structure",
+                                    "fields": [
+                                                {
+                                                  "name": "Mode",
+                                                  "wire_name": "Mode",
+                                                  "required": false,
+                                                  "binding": { "kind": "BodyXml" },
+                                                  "type": {
+                                                            "kind": "StringEnum",
+                                                            "values": ["GOVERNANCE", "COMPLIANCE"]
+                                                          },
+                                                  "hot": true,
+                                                  "quirk_refs": []
+                                                },
+                                                {
+                                                  "name": "Days",
+                                                  "wire_name": "Days",
+                                                  "required": false,
+                                                  "binding": { "kind": "BodyXml" },
+                                                  "type": { "kind": "Integer" },
+                                                  "hot": true,
+                                                  "quirk_refs": []
+                                                },
+                                                {
+                                                  "name": "Years",
+                                                  "wire_name": "Years",
+                                                  "required": false,
+                                                  "binding": { "kind": "BodyXml" },
+                                                  "type": { "kind": "Integer" },
+                                                  "hot": true,
+                                                  "quirk_refs": []
+                                                }
+                                              ],
+                                    "xml": {
+                                             "element_order": ["Mode", "Days", "Years"],
+                                             "empty_value_policy": { "Mode": "omit", "Days": "omit", "Years": "omit" },
+                                             "attributes": []
+                                           }
+                                  },
+              "ObjectLockConfiguration": {
+                                           "kind": "Structure",
+                                           "fields": [
+                                                       {
+                                                         "name": "ObjectLockEnabled",
+                                                         "wire_name": "ObjectLockEnabled",
+                                                         "required": false,
+                                                         "binding": { "kind": "BodyXml" },
+                                                         "type": { "kind": "StringEnum", "values": ["Enabled"] },
+                                                         "hot": true,
+                                                         "quirk_refs": []
+                                                       },
+                                                       {
+                                                         "name": "Rule",
+                                                         "wire_name": "Rule",
+                                                         "required": false,
+                                                         "binding": { "kind": "BodyXml" },
+                                                         "type": { "kind": "Structure", "shape": "ObjectLockRule" },
+                                                         "hot": true,
+                                                         "quirk_refs": []
+                                                       }
+                                                     ],
+                                           "xml": {
+                                                    "element_order": ["ObjectLockEnabled", "Rule"],
+                                                    "empty_value_policy": {
+                                                                            "ObjectLockEnabled": "omit",
+                                                                            "Rule": "omit"
+                                                                          },
+                                                    "attributes": []
+                                                  }
+                                         },
+              "ObjectLockRule": {
+                                  "kind": "Structure",
+                                  "fields": [
+                                              {
+                                                "name": "DefaultRetention",
+                                                "wire_name": "DefaultRetention",
+                                                "required": false,
+                                                "binding": { "kind": "BodyXml" },
+                                                "type": { "kind": "Structure", "shape": "DefaultRetention" },
+                                                "hot": true,
+                                                "quirk_refs": []
+                                              }
+                                            ],
+                                  "xml": {
+                                           "element_order": ["DefaultRetention"],
+                                           "empty_value_policy": { "DefaultRetention": "omit" },
+                                           "attributes": []
+                                         }
+                                }
+            },
+  "xml": {
+           "request_root": null,
+           "request_root_aliases": [],
+           "response_root": null,
+           "xmlns": "emit",
+           "unwrapped_output": false,
+           "element_order": [],
+           "empty_value_policy": {},
+           "url_encoded_fields": [],
+           "attributes": [],
+           "body_literal": false
+         },
+  "errors": {
+              "not_configured": null,
+              "allows_error_after_200": false,
+              "codes": [
+                         "NoSuchBucket",
+                         "AccessDenied",
+                         "MalformedXML",
+                         "InvalidRequest",
+                         "InvalidArgument",
+                         "BadDigest"
+                       ]
+            },
+  "derived_resources": [],
+  "head_mirrors": null,
+  "quirk_refs": ["q-lock-0006", "q-lock-0007", "q-lock-0008", "q-lock-0009", "q-lock-0010", "q-lock-0014"],
+  "quirks": [
+              {
+                "id": "q-lock-0006",
+                "kind": "checksum_required",
+                "target": "PutObjectLockConfiguration",
+                "summary": "All three writes in this family demand an integrity claim on the body, so a request with neither Content-MD5 nor an x-amz-checksum header is refused with 400 before the document is parsed.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObjectLockConfiguration.html",
+                                "summary": "The request documents Content-MD5 as required for the operation, which the pinned model spells as a request checksum requirement shared by the retention and legal-hold writes."
+                              }
+                            ],
+                "cases": ["c-lock-0014"]
+              },
+              {
+                "id": "q-lock-0007",
+                "kind": "required_body",
+                "target": "PutObjectRetention",
+                "summary": "The payload member of all three writes is promoted to required, so an empty body is refused as 400 MalformedXML rather than read as a defaulted document — a silently-accepted empty body is how a legal hold gets set to a value nobody sent.",
+                "evidence": [
+                              {
+                                "kind": "s3s-pr",
+                                "ref": "https://github.com/s3s-project/s3s/pull/377",
+                                "summary": "Upstream accepted an empty body on the retention and legal-hold writes without an error, and the fix pins the empty-required-XML answer to 400 MalformedXML."
+                              }
+                            ],
+                "cases": ["c-lock-0015"]
+              },
+              {
+                "id": "q-lock-0008",
+                "kind": "closed_value_set",
+                "target": "DefaultRetention.Mode",
+                "summary": "A retention mode outside the documented two-value set — GOVERNANCE, COMPLIANCE, exactly in that spelling — is refused as MalformedXML: the values are case-sensitive, so a lowercase governance is out of the set, and a mode nothing can enforce is a lock that protects nothing.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ObjectLockRetention.html",
+                                "summary": "The Mode member documents the closed value set GOVERNANCE and COMPLIANCE, in upper case, for both the object retention document and the bucket default."
+                              },
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/ErrorResponses.html",
+                                "summary": "MalformedXML is documented as the answer for a request body that does not validate against the published schema, which is what an out-of-set enum value is."
+                              }
+                            ],
+                "cases": ["c-lock-0016", "c-lock-0017", "c-lock-0008"]
+              },
+              {
+                "id": "q-lock-0009",
+                "kind": "closed_value_set",
+                "target": "ObjectLockConfiguration.ObjectLockEnabled",
+                "summary": "ObjectLockEnabled has exactly one documented value, Enabled: AWS defines no Disabled spelling because object lock, once on, cannot be turned off, so any other value is refused as MalformedXML rather than read as an off switch.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ObjectLockConfiguration.html",
+                                "summary": "The ObjectLockEnabled member documents Enabled as its only valid value."
+                              }
+                            ],
+                "cases": ["c-lock-0018"]
+              },
+              {
+                "id": "q-lock-0010",
+                "kind": "value_constraint",
+                "target": "DefaultRetention",
+                "summary": "A DefaultRetention must carry a mode and exactly one period: Days and Years together are refused as MalformedXML, a mode with neither period likewise, and a period under one — Days 0, Years -1 — is refused as InvalidArgument.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObjectLockConfiguration.html",
+                                "summary": "The operation documents that DefaultRetention requires both a mode and a period, and that Days and Years cannot be specified at the same time."
+                              },
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DefaultRetention.html",
+                                "summary": "Both period members document a minimum value of one."
+                              }
+                            ],
+                "cases": ["c-lock-0019", "c-lock-0020", "c-lock-0021"]
+              },
+              {
+                "id": "q-lock-0014",
+                "kind": "lenient_unknown_elements",
+                "target": "PutObjectLockConfiguration",
+                "summary": "Unknown elements inside a lock document are skipped rather than refused, on all three writes: a stored WORM configuration is re-parsed by every future release, and a decoder that got stricter would downgrade the document to none — silently unlocking data — which is a worse failure than tolerating an element AWS added.",
+                "evidence": [
+                              {
+                                "kind": "s3s-issue",
+                                "ref": "https://github.com/s3s-project/s3s/issues/613",
+                                "summary": "AWS ignores unknown elements in request XML, and upstream had to relax its decoder to match after strict parsing broke real clients."
+                              },
+                              {
+                                "kind": "s3s-pr",
+                                "ref": "https://github.com/s3s-project/s3s/pull/617",
+                                "summary": "The upstream fix that makes unknown request elements a skip rather than an error, which is the behaviour this decoder generates by construction."
+                              }
+                            ],
+                "cases": ["c-lock-0010"]
+              }
+            ],
+  "ext_points": []
+}

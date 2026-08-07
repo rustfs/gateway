@@ -1,0 +1,44 @@
+[case]
+id = "c-lock-0021"
+schema_version = 1
+title = "A default retention with a mode and no period is refused"
+rationale = """
+A mode without a period says how new objects are protected and not for how long, which is not a policy an enforcement path can apply. Storing it would produce a configuration that reads as protective in an audit and cannot be acted on, and the empty Rule is a plausible client mistake rather than a hypothetical: it is what a builder leaves behind when the period setter is never called."""
+polarity = "negative"
+operation = "PutObjectLockConfiguration"
+tags = ["object-lock", "xml", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-lock-0010"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObjectLockConfiguration.html"
+summary = "The operation documents that DefaultRetention requires both a mode and a period."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "conf-lock"
+
+[request]
+method = "PUT"
+target = "/conf-lock?object-lock"
+headers = { "content-type" = "application/xml", "content-md5" = "1YYKb3cepm6vsJWURQSVVg==" }
+body = { utf8 = '<ObjectLockConfiguration><ObjectLockEnabled>Enabled</ObjectLockEnabled><Rule><DefaultRetention><Mode>GOVERNANCE</Mode></DefaultRetention></Rule></ObjectLockConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+code = "MalformedXML"
+request_id_present = true
+
+[expect.headers_present]
+"content-type" = "application/xml"
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>MalformedXML</Code><Message>DefaultRetention requires a Mode and either Days or Years</Message><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''

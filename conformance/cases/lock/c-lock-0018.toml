@@ -1,0 +1,44 @@
+[case]
+id = "c-lock-0018"
+schema_version = 1
+title = "ObjectLockEnabled has one value, so Disabled is refused rather than read as an off switch"
+rationale = """
+AWS defines no Disabled spelling because object lock cannot be turned off once it is on, and a gateway that accepted the word would offer clients a way to unlock a WORM bucket that AWS deliberately does not offer. Whether such a document then unlocked anything or merely stored a meaningless string, the caller walks away believing protection was removed or retained on evidence the protocol never gave."""
+polarity = "negative"
+operation = "PutObjectLockConfiguration"
+tags = ["object-lock", "xml", "security"]
+timeout_ms = 10000
+quirks = ["q-lock-0009"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ObjectLockConfiguration.html"
+summary = "The ObjectLockEnabled member documents Enabled as its only valid value."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "conf-lock"
+
+[request]
+method = "PUT"
+target = "/conf-lock?object-lock"
+headers = { "content-type" = "application/xml", "content-md5" = "Xj3HogV4hQT/ZWe/RSP2lA==" }
+body = { utf8 = '<ObjectLockConfiguration><ObjectLockEnabled>Disabled</ObjectLockEnabled></ObjectLockConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+code = "MalformedXML"
+request_id_present = true
+
+[expect.headers_present]
+"content-type" = "application/xml"
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>MalformedXML</Code><Message>ObjectLockEnabled must be Enabled</Message><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''

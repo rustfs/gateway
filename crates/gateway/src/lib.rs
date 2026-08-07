@@ -201,6 +201,18 @@ pub use rustfs_gateway_core::ops::shared::lifecycle::{
 // (`q-enc-0009`).
 pub use rustfs_gateway_core::ops::shared::encryption::{EncryptionRejection, validate_encryption};
 
+// The object-lock document contracts, exported for the same reason as the three above — with
+// the sharpest stakes in the table: what the lock, retention and legal-hold writes may store is
+// a WORM compliance answer, so the closed value sets, the Days/Years mutex and the future-only
+// RetainUntilDate must be one implementation every backend calls. `validate_retention` takes
+// the caller's clock rather than reading one, which is what makes the future-only rule
+// testable — and what the conformance fixture pins per case. Enforcement — refusing deletes and
+// overwrites of protected objects, the governance bypass — is deliberately not exported,
+// because it is deliberately not implemented here.
+pub use rustfs_gateway_core::ops::shared::object_lock::{
+    ObjectLockRejection, validate_legal_hold, validate_lock_configuration, validate_retention,
+};
+
 // The bucket lifecycle contracts, exported the day they are written rather than found
 // unreachable later. A backend answering CreateBucket needs `resolve` — the us-east-1
 // omission rule, the EU alias and the strict region match — and a backend answering any
