@@ -1,0 +1,51 @@
+# c-bkt-0015 — a region name nothing defines.
+#
+# Schema dimensions exercised: one refusal for every unknown value, with no topology oracle.
+
+[case]
+id = "c-bkt-0015"
+schema_version = 1
+title = "A constraint naming no region at all is refused with the same code as an unserved one"
+rationale = """
+An invented region and a real one this deployment does not serve are refused identically, and the sameness is the point: a distinct code for 'no such region' would let an unauthenticated survey of which regions a deployment knows about be read off the error codes. The refusal has to be a 400 rather than a 500 as well — the caller can fix this request, and a 5xx tells an SDK to retry a request that will never succeed."""
+polarity = "negative"
+operation = "CreateBucket"
+tags = ["region", "error-shape", "security"]
+timeout_ms = 10000
+quirks = ["q-bkt-0003"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_BucketLocationConstraint.html"
+summary = "The enumerated constraint values exclude us-east-1 and keep the historical EU alias."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/ErrorResponses.html"
+summary = "The error table maps an unusable location constraint to a 400 with its own code."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "conf-bkt-mars"
+absent = true
+
+[request]
+method = "PUT"
+target = "/conf-bkt-mars"
+headers = { "content-type" = "application/xml" }
+body = { utf8 = "<CreateBucketConfiguration><LocationConstraint>mars-north-1</LocationConstraint></CreateBucketConfiguration>" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+code = "InvalidLocationConstraint"
+request_id_present = true
+
+[expect.headers_present]
+"content-type" = "application/xml"
+
+[expect.timing]
+terminate_within_ms = 5000

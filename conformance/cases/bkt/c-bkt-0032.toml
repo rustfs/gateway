@@ -1,0 +1,47 @@
+# c-bkt-0032 — a configuration body past the operation's declared cap.
+#
+# Schema dimensions exercised: a bounded body, and a refusal that terminates rather than buffers.
+
+[case]
+id = "c-bkt-0032"
+schema_version = 1
+title = "A configuration body past the declared cap is refused rather than buffered"
+rationale = """
+The whole request document for a creation is one region name in one wrapper element, so the cap the \
+overlay declares is orders of magnitude above anything legitimate. What it buys is a bound: without \
+one, a caller can make the server hold whatever it chooses to send in memory before the first \
+decision about the request is made, and repeat it. The assertion is that the request ends — \
+quickly, with an answer, and with the connection still usable — rather than being read to its end \
+first."""
+polarity = "negative"
+operation = "CreateBucket"
+tags = ["dos", "xml"]
+timeout_ms = 10000
+quirks = ["q-bkt-0011"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CreateBucket.html"
+summary = "The creation body holds a single location constraint, so a body far past that size is not the document."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "conf-bkt-huge"
+absent = true
+
+[request]
+method = "PUT"
+target = "/conf-bkt-huge"
+headers = { "content-type" = "application/xml" }
+body = { size = 131072, fill = "20" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+request_id_present = true
+
+[expect.timing]
+terminate_within_ms = 5000

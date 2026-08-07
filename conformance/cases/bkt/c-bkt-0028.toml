@@ -1,0 +1,71 @@
+# c-bkt-0028 — a bucket subresource write must not be served as a creation.
+#
+# Schema dimensions exercised: multi-exchange, with the second exchange proving nothing was created.
+
+[case]
+id = "c-bkt-0028"
+schema_version = 1
+title = "A tagging write on a bucket is not served as a bucket creation"
+rationale = """
+A creation's selector is a PUT on a bucket path and nothing else, so every bucket subresource \
+write satisfies it unless the key's absence is pinned. Without that pin a request meaning 'set \
+this bucket's tags' would be answered 200 by the creation — the tag document silently discarded, \
+and a bucket created if the name was free. Now that the bucket tagging family is served, the \
+correct answer is PutBucketTagging's own: this write carries no integrity header, so the tagging \
+operation's checksum floor refuses it with a 400 — an error only that operation produces, which is \
+what proves the tagging row claimed the request. The second exchange is what shows the difference \
+between refusing and refusing-after-creating: whoever answered, no bucket may exist afterwards."""
+polarity = "negative"
+operation = "CreateBucket"
+tags = ["routing"]
+timeout_ms = 10000
+quirks = ["q-bkt-0001"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketTagging.html"
+summary = "A bucket tag-set write is its own operation, selected by a subresource on the same method and path as a creation."
+kind = "aws-doc"
+
+[connection]
+reuse = true
+
+[[setup.buckets]]
+name = "conf-bkt-tags"
+absent = true
+
+[[exchanges]]
+name = "not-a-creation"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-bkt-tags?tagging"
+headers = { "content-type" = "application/xml" }
+body = { utf8 = "<Tagging><TagSet></TagSet></Tagging>" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+# PutBucketTagging's integrity floor: the write carries no Content-MD5 or x-amz-checksum-*, and the
+# refusal is the tagging operation's own — a creation would have answered 200 with a Location.
+status = 400
+connection_after = "open"
+
+[exchanges.expect.error]
+code = "InvalidRequest"
+request_id_present = true
+
+[[exchanges]]
+name = "and-nothing-was-created"
+
+[exchanges.request]
+method = "HEAD"
+target = "/conf-bkt-tags"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 404
+connection_after = "open"
+
+[exchanges.expect.body]
+size = 0

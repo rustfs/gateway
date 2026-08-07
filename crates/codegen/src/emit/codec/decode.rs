@@ -234,18 +234,41 @@ fn one_field(ir: &OperationIr, field: &Field) -> Result<String, String> {
                 let reader = format!("read_{}", naming::module_name(shape));
                 let _ = writeln!(out, "        // {member} — the XML request body, rooted at `{root}`.");
                 out.push_str("        let raw_body = body.into_buffered()?;\n");
-                out.push_str("        let root = rustfs_gateway_xml::parse(raw_body.as_ref())\n");
-                out.push_str("            .map_err(|_| CodecError::malformed_xml(\"the request body is not the XML this operation accepts\"))?;\n");
+                // An optional payload means the request may carry no body at all (CreateBucket):
+                // zero bytes decode to the absent member, and anything else must still be the
+                // declared document — an empty body is the one spelling that skips the parser.
+                let (indent, close) = if field.required {
+                    ("        ", "")
+                } else {
+                    let _ = writeln!(out, "        if raw_body.as_ref().is_empty() {{");
+                    let _ = writeln!(out, "            {target} = None;");
+                    out.push_str("        } else {\n");
+                    ("            ", "        }\n")
+                };
+                let _ = writeln!(out, "{indent}let root = rustfs_gateway_xml::parse(raw_body.as_ref())");
+                let _ = writeln!(
+                    out,
+                    "{indent}    .map_err(|_| CodecError::malformed_xml(\"the request body is not the XML this operation accepts\"))?;"
+                );
                 let mut accepted = vec![root];
                 accepted.extend(aliases);
                 let names = accepted.iter().map(|n| format!("\"{n}\"")).collect::<Vec<_>>().join(", ");
-                let _ = writeln!(out, "        if ![{names}].contains(&root.name.as_str()) {{");
-                let _ = writeln!(
-                    out,
-                    "            return Err(CodecError::malformed_xml(\"the request body has the wrong root element\").about(\"{member}\"));"
-                );
-                out.push_str("        }\n");
-                out.push_str(&assign(8, &target, &wrap(field, &format!("{reader}(&root)?"))));
+                let _ = writeln!(out, "{indent}if ![{names}].contains(&root.name.as_str()) {{");
+                let refusal =
+                    format!("CodecError::malformed_xml(\"the request body has the wrong root element\").about(\"{member}\")");
+                let single = format!("{indent}    return Err({refusal});");
+                if single.len() <= MAX_WIDTH {
+                    let _ = writeln!(out, "{single}");
+                } else {
+                    // rustfmt's normal form for the over-long line: the argument on its own line.
+                    let _ = writeln!(out, "{indent}    return Err(");
+                    let _ = writeln!(out, "{indent}        {refusal}");
+                    let _ = writeln!(out, "{indent}    );");
+                }
+                let _ = writeln!(out, "{indent}}}");
+                let indent_len = indent.len();
+                out.push_str(&assign(indent_len, &target, &wrap(field, &format!("{reader}(&root)?"))));
+                out.push_str(close);
             }
             _ => {
                 return Err(expr::unsupported(op, member, "a payload binding carries a blob or an XML structure"));

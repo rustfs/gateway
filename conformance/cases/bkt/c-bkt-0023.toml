@@ -1,0 +1,45 @@
+# c-bkt-0023 — deleting a bucket that does not exist.
+#
+# Schema dimensions exercised: the 404 of the family, distinct from the 409 above.
+
+[case]
+id = "c-bkt-0023"
+schema_version = 1
+title = "Deleting a bucket that does not exist answers 404 rather than a success"
+rationale = """
+A deletion of something absent is tempting to answer as a success — the caller's goal is already \
+met — and S3 does not, because the caller cannot otherwise tell 'I deleted it' from 'somebody else \
+deleted it, or I spelled it wrong'. Scripts that tear down infrastructure branch on precisely that. \
+The code has to be NoSuchBucket rather than a bare 404 as well, so a client can distinguish a \
+missing bucket from a missing route."""
+polarity = "negative"
+operation = "DeleteBucket"
+tags = ["error-shape"]
+timeout_ms = 10000
+quirks = ["q-bkt-0008"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/ErrorResponses.html"
+summary = "A request naming a bucket that does not exist is answered with a 404 carrying the no-such-bucket code."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "conf-bkt-never"
+absent = true
+
+[request]
+method = "DELETE"
+target = "/conf-bkt-never"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 404
+connection_after = "open"
+
+[expect.error]
+code = "NoSuchBucket"
+request_id_present = true
+
+[expect.headers_present]
+"content-type" = "application/xml"

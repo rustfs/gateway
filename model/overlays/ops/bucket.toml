@@ -14,8 +14,159 @@
 
 # Family: bucket lifecycle and location. CreateBucket, DeleteBucket, HeadBucket,
 # GetBucketLocation.
+#
+# The three lifecycle members are `include`d together because their selectors are the bucket-level
+# twins of the object band's fallbacks: `PUT /{bucket}`, `DELETE /{bucket}` and `HEAD /{bucket}`
+# pin no positive query key at all. That shape is exactly why each carries a `query_absent` list —
+# without it, every deferred bucket subresource write (`PUT /b?acl`, `DELETE /b?policy`, ...)
+# would be claimed by the lifecycle row and served as a bucket creation or a bucket deletion,
+# which is the `PUT /b/k?acl`-overwrites-the-object defect at bucket scope.
+#
+# The lists name **every** bucket subresource key under the same method, served and deferred
+# alike. For a deferred key the pin is the guarantee: the request falls through to "no route",
+# which dispatch answers as 501 NotImplemented. For a served key (`cors` at 320/330, `tagging` at
+# 350/360) first-match already sends the request to the subresource's own earlier row, so the pin
+# changes nothing a client can see — what it buys is that the lifecycle rows are provably
+# *disjoint* from every subresource band rather than merely later, which keeps the shadowing
+# table free of a declaration per subresource per method, and keeps the meaning of a bare
+# `PUT /{bucket}` independent of which subresources this build happens to serve. Deferring or
+# implementing a subresource must never change what a request means.
 
-include = ["GetBucketLocation"]
+include = ["CreateBucket", "DeleteBucket", "GetBucketLocation", "HeadBucket"]
+
+# =============================================================================================
+# CreateBucket
+#
+# `PUT /{bucket}` with an optional `<CreateBucketConfiguration>` payload. Success is **200 with a
+# `Location: /{bucket}` header**, not a 201 — SDKs and s3-tests assert the 200 (q-bkt-0001,
+# q-bkt-0002). The us-east-1 rules live in the LocationConstraint quirks: the constraint must be
+# omitted for us-east-1 (q-bkt-0003), `EU` is the legacy spelling of eu-west-1 (q-bkt-0004), and
+# an empty element or empty text is "unspecified", never an error (q-bkt-0011). Duplicate creation
+# is region-dependent, and the two 409 codes name two different owners (q-bkt-0005, q-bkt-0006);
+# the model already declares both conflict errors, so only the additional codes are listed here.
+# =============================================================================================
+[op.CreateBucket]
+precedence = 710
+auth_action = "s3:CreateBucket"
+# The whole payload is one region string inside one wrapper element; 64 KiB is orders of magnitude
+# past anything AWS accepts and closes the XML-bomb surface an unbounded body would leave open.
+request_max_bytes = 65536
+error_codes = [
+  "InvalidLocationConstraint",
+  "MalformedXML",
+  "InvalidBucketName",
+  "AccessDenied",
+  "InvalidArgument",
+  "PermanentRedirect",
+]
+quirk_refs = [
+  "q-bkt-0001",
+  "q-bkt-0002",
+  "q-bkt-0003",
+  "q-bkt-0004",
+  "q-bkt-0005",
+  "q-bkt-0006",
+  "q-bkt-0011",
+]
+# Every bucket-level PUT subresource key, served or deferred, so a configuration write can never
+# be served as a bucket creation. Derived from the model's own @http query keys; kept sorted.
+query_absent = [
+  "abac",
+  "accelerate",
+  "acl",
+  "analytics",
+  "cors",
+  "encryption",
+  "intelligent-tiering",
+  "inventory",
+  "lifecycle",
+  "logging",
+  "metadataAnnotationTable",
+  "metadataInventoryTable",
+  "metadataJournalTable",
+  "metrics",
+  "notification",
+  "object-lock",
+  "ownershipControls",
+  "policy",
+  "publicAccessBlock",
+  "replication",
+  "requestPayment",
+  "tagging",
+  "versioning",
+  "website",
+]
+# The regional-ARN / S3 Express surface is out of scope for the gateway (see ops/excluded.toml);
+# the classic operation neither reads a bucket namespace nor reports a bucket ARN.
+input_drop = ["BucketNamespace"]
+output_drop = ["BucketArn"]
+input_hot = ["CreateBucketConfiguration", "ObjectLockEnabledForBucket"]
+output_hot = ["Location"]
+
+# =============================================================================================
+# DeleteBucket
+#
+# `DELETE /{bucket}`, no body either way: the model answers 204 and a 204 carries nothing
+# (q-bkt-0007). A bucket that still holds anything is a 409 BucketNotEmpty (q-bkt-0008), and a
+# bucket that does not exist is the plain 404.
+# =============================================================================================
+[op.DeleteBucket]
+precedence = 720
+auth_action = "s3:DeleteBucket"
+error_codes = ["NoSuchBucket", "BucketNotEmpty", "AccessDenied", "PermanentRedirect"]
+quirk_refs = ["q-bkt-0007", "q-bkt-0008"]
+# Every bucket-level DELETE subresource key, served or deferred, so removing a configuration can
+# never be served as removing the bucket. Same derivation as CreateBucket's list.
+query_absent = [
+  "analytics",
+  "cors",
+  "encryption",
+  "intelligent-tiering",
+  "inventory",
+  "lifecycle",
+  "metadataConfiguration",
+  "metadataTable",
+  "metrics",
+  "ownershipControls",
+  "policy",
+  "publicAccessBlock",
+  "replication",
+  "tagging",
+  "website",
+]
+input_hot = ["ExpectedBucketOwner"]
+
+# =============================================================================================
+# HeadBucket
+#
+# `HEAD /{bucket}`. Success and every error carry a zero-length body — that is RFC 9110 HEAD
+# semantics, and the error half is the one implementations get wrong (q-bkt-0009). The success
+# response must carry `x-amz-bucket-region`, and so must the 301 PermanentRedirect a path-style
+# request for a bucket in another region is answered with — without that header SDKs cannot
+# complete the redirect and simply fail (q-bkt-0010). `BucketRegion` is therefore required on the
+# output: a handler that cannot name the region cannot construct a success at all.
+# =============================================================================================
+[op.HeadBucket]
+precedence = 730
+auth_action = "s3:ListBucket"
+error_codes = ["NoSuchBucket", "AccessDenied", "PermanentRedirect"]
+quirk_refs = ["q-bkt-0009", "q-bkt-0010"]
+output_required = ["BucketRegion"]
+output_hot = ["BucketRegion"]
+# The access-point and S3 Express location surfaces are out of scope for the gateway; the classic
+# response is the region header and nothing else.
+output_drop = ["AccessPointAlias", "BucketArn", "BucketLocationName", "BucketLocationType"]
+
+# =============================================================================================
+# Nested shapes owned by this family
+# =============================================================================================
+
+# The optional request payload: one constraint, or nothing. The `Location`, `Bucket` and `Tags`
+# members are the directory-bucket / S3 Express creation surface, out of scope for the gateway
+# for the same reason the metadata-table operations are excluded.
+[shape.CreateBucketConfiguration]
+drop = ["Location", "Bucket", "Tags"]
+element_order = ["LocationConstraint"]
 
 # =============================================================================================
 # GetBucketLocation
@@ -40,10 +191,3 @@ name = "LocationConstraint"
 hot = true
 quirks = ["q-empty-0002", "q-region-0003"]
 
-[[deferred]]
-reason = "P5 bucket lifecycle operations; CreateBucket carries the location-constraint request body."
-operations = [
-  "CreateBucket",
-  "DeleteBucket",
-  "HeadBucket",
-]

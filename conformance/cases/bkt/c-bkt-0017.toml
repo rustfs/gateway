@@ -1,0 +1,46 @@
+# c-bkt-0017 — control characters in the location constraint.
+#
+# Schema dimensions exercised: a value that must never reach a header or a log line intact.
+
+[case]
+id = "c-bkt-0017"
+schema_version = 1
+title = "A location constraint carrying control characters is refused"
+rationale = """
+The region a creation names can come back out in a redirect header, so a value carrying a carriage return is a response-splitting attempt one echo away from working. It is refused here as an unknown region rather than sanitised, which is the stronger answer: a sanitiser has to be correct everywhere the value travels, and a refusal has to be correct once. The refused bytes are not echoed back in the error document either."""
+polarity = "negative"
+operation = "CreateBucket"
+tags = ["region", "security"]
+timeout_ms = 10000
+quirks = ["q-bkt-0003"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_BucketLocationConstraint.html"
+summary = "The enumerated constraint values exclude us-east-1 and keep the historical EU alias."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "conf-bkt-ctrl"
+absent = true
+
+[request]
+method = "PUT"
+target = "/conf-bkt-ctrl"
+headers = { "content-type" = "application/xml" }
+body = { utf8 = "<CreateBucketConfiguration><LocationConstraint>us-east-1\r\nx-amz-bucket-region: eu-west-1</LocationConstraint></CreateBucketConfiguration>" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+code = "InvalidLocationConstraint"
+request_id_present = true
+
+[expect.headers_present]
+"content-type" = "application/xml"
+
+[expect.timing]
+terminate_within_ms = 5000

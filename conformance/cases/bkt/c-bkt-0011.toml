@@ -1,0 +1,71 @@
+# c-bkt-0011 — create then head, on one connection.
+#
+# Schema dimensions exercised: multi-exchange form, connection reuse, and a second exchange reading
+# back the first one's effect.
+
+[case]
+id = "c-bkt-0011"
+schema_version = 1
+title = "A bucket created in one exchange is visible with its region in the next"
+rationale = """
+Each half of this is asserted alone elsewhere; what only the pair shows is that the creation had an \
+effect a later request can see. A server that answered 200 without recording anything passes every \
+single-exchange creation case in this directory and fails here — and that is exactly the failure \
+mode of a hand-written stub, where the status is easy to get right and the state is what a client \
+actually depends on. Both exchanges share one connection, so a creation that only held within a \
+request would be caught too."""
+polarity = "positive"
+operation = "CreateBucket"
+tags = ["region", "connection"]
+timeout_ms = 10000
+quirks = ["q-bkt-0001", "q-bkt-0010"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CreateBucket.html"
+summary = "A creation that answers success has created a bucket a later request can address."
+kind = "aws-doc"
+
+[connection]
+reuse = true
+
+[[setup.buckets]]
+name = "conf-bkt-roundtrip"
+absent = true
+
+[[exchanges]]
+name = "create"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-bkt-roundtrip"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.headers_present]
+"location" = "/conf-bkt-roundtrip"
+
+[exchanges.expect.body]
+size = 0
+
+[[exchanges]]
+name = "head-it-back"
+
+[exchanges.request]
+method = "HEAD"
+target = "/conf-bkt-roundtrip"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.headers_present]
+"x-amz-bucket-region" = "us-east-1"
+
+[exchanges.expect.body]
+size = 0

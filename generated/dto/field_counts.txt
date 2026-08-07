@@ -11,11 +11,16 @@ CopyObjectInput 43
 CopyObjectOutput 12
 CorsConfiguration 1
 CorsRule 6
+CreateBucketConfiguration 1
+CreateBucketInput 10
+CreateBucketOutput 1
 CreateMultipartUploadInput 31
 CreateMultipartUploadOutput 14
 Delete 2
 DeleteBucketCorsInput 2
 DeleteBucketCorsOutput 0
+DeleteBucketInput 2
+DeleteBucketOutput 0
 DeleteBucketTaggingInput 2
 DeleteBucketTaggingOutput 0
 DeleteMarkerEntry 5
@@ -40,6 +45,8 @@ GetObjectInput 22
 GetObjectOutput 43
 GetObjectTaggingInput 5
 GetObjectTaggingOutput 2
+HeadBucketInput 2
+HeadBucketOutput 1
 HeadObjectInput 21
 HeadObjectOutput 43
 Initiator 2

@@ -1,0 +1,59 @@
+# c-bkt-0025 — a HEAD for a bucket that does not exist.
+#
+# Schema dimensions exercised: the HEAD zero-body invariant on an error path.
+
+[case]
+id = "c-bkt-0025"
+schema_version = 1
+title = "A bucket head for a missing bucket answers 404 with no body at all"
+rationale = """
+This is the case the HEAD invariant is actually about. A framework that renders an error document \
+for every refusal renders one here too, and the response then carries bytes a HEAD may not have: \
+h2 clients report a protocol error instead of the 404, and HTTP/1.1 clients on a reused connection \
+read those bytes as the head of whatever comes next. It is a live patch in production S3 gateways \
+rather than a hypothetical, and it is only visible to a case that measures the body length of an \
+*error* response — every success-path assertion in this directory stays green while it is broken. \
+Content-Length is deliberately not asserted absent: RFC 9110 lets a HEAD report the length a GET \
+would have sent, and rewriting it to zero would tell a client the document is empty rather than \
+unsent."""
+polarity = "negative"
+operation = "HeadBucket"
+tags = ["wire-bytes", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-bkt-0009"]
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9110#section-9.3.2"
+summary = "A HEAD response must not carry content, and the rule does not exempt error statuses."
+kind = "rfc"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_HeadBucket.html"
+summary = "A bucket head answers with status and headers only, including when the bucket is not found."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "conf-bkt-nothere"
+absent = true
+
+[request]
+method = "HEAD"
+target = "/conf-bkt-nothere"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 404
+# An entity tag on a refusal is a refusal that resolved something; a bucket head has nothing to tag
+# even when it succeeds.
+headers_absent = ["etag", "x-amz-version-id"]
+connection_after = "open"
+
+# The identifier support asks for is in the head, which is where a HEAD can still carry it: the
+# `<RequestId>` element a GET would answer with is in the document that is deliberately not sent.
+[expect.headers_present]
+"x-amz-request-id" = "*"
+
+# Zero bytes, whatever the head says the length of the unsent document would be.
+[expect.body]
+size = 0

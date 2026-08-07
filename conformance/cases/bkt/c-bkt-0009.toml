@@ -1,0 +1,43 @@
+# c-bkt-0009 — a query key that names no subresource.
+#
+# Schema dimensions exercised: routing under an unrecognised query key.
+
+[case]
+id = "c-bkt-0009"
+schema_version = 1
+title = "A query key that names no subresource leaves a bucket head where it was"
+rationale = """
+The lifecycle rows pin the absence of every deferred bucket subresource key, which is what keeps a \
+configuration request from being served as a creation or a deletion. Writing that rule too widely \
+fails the other way: a row demanding the absence of every query key would refuse ordinary requests, \
+because SDKs, proxies and tracing layers all append keys of their own. This is the case that goes \
+red if the selector is ever tightened past the subresources it was written for."""
+polarity = "positive"
+operation = "HeadBucket"
+tags = ["routing"]
+timeout_ms = 10000
+quirks = ["q-bkt-0010"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_HeadBucket.html"
+summary = "A bucket head defines no query parameters, so a key it does not know takes no part in selecting it."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "conf-bkt-inert"
+
+[request]
+method = "HEAD"
+target = "/conf-bkt-inert?x-id=HeadBucket"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[expect.headers_present]
+"x-amz-bucket-region" = "us-east-1"
+
+[expect.body]
+size = 0

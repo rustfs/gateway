@@ -1,0 +1,51 @@
+# c-bkt-0020 — an external entity declaration in the configuration body.
+#
+# Schema dimensions exercised: XXE, asserted by refusal and by the absence of the fetched content.
+
+[case]
+id = "c-bkt-0020"
+schema_version = 1
+title = "A DOCTYPE declaration in the configuration body is refused rather than parsed"
+rationale = """
+An external entity declaration in a request document is the classic file-disclosure and \
+server-side-request primitive: a parser that resolves it reads a local file or opens a connection \
+the caller chose, and returns the result inside a response the caller reads. Refusing the DOCTYPE \
+outright is stronger than not expanding entities, because it does not depend on every future \
+parser configuration staying correct. The assertion checks both that the request is refused and \
+that nothing resembling a fetched value comes back."""
+polarity = "negative"
+operation = "CreateBucket"
+tags = ["xml", "security"]
+timeout_ms = 10000
+quirks = ["q-bkt-0011"]
+
+[[case.evidence]]
+url = "https://owasp.org/www-community/vulnerabilities/XML_External_Entity_(XXE)_Processing"
+summary = "An entity declaration in an accepted document lets the sender choose what the parser reads."
+kind = "other"
+
+[[setup.buckets]]
+name = "conf-bkt-xxe"
+absent = true
+
+[request]
+method = "PUT"
+target = "/conf-bkt-xxe"
+headers = { "content-type" = "application/xml" }
+body = { utf8 = """<!DOCTYPE CreateBucketConfiguration [<!ENTITY leak SYSTEM "file:///etc/hostname">]><CreateBucketConfiguration><LocationConstraint>&leak;</LocationConstraint></CreateBucketConfiguration>""" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+code = "MalformedXML"
+request_id_present = true
+
+[expect.timing]
+terminate_within_ms = 5000
+
+[expect.body]
+not_contains_utf8 = ["file:///etc/hostname", "leak"]

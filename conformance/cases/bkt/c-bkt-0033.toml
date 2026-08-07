@@ -1,0 +1,50 @@
+# c-bkt-0033 — the bucket-level GET is untouched by the lifecycle rows.
+#
+# Schema dimensions exercised: a neighbouring operation still answering, as the other direction of
+# the routing assertions above.
+
+[case]
+id = "c-bkt-0033"
+schema_version = 1
+title = "A bucket-level GET is still the key listing after the lifecycle rows were added"
+rationale = """
+The lifecycle rows pin no positive query key, so they are the rows most able to swallow a \
+neighbour if their method or target is ever loosened. This is the assertion in the other direction \
+from c-bkt-0028 and c-bkt-0029: the listing that shares the bucket path must still answer, with its \
+own document rather than a bucket head's empty body. A suite that only checked the new rows would \
+stay green through a change that made every bucket request a lifecycle one."""
+polarity = "negative"
+operation = "ListObjects"
+tags = ["routing"]
+timeout_ms = 10000
+quirks = ["q-bkt-0010"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjects.html"
+summary = "A GET on a bucket path with no subresource is the key listing, which is a different operation from the lifecycle three."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "conf-bkt-listing"
+
+[[setup.objects]]
+bucket = "conf-bkt-listing"
+key = "one"
+content_type = "text/plain"
+body = { utf8 = "x" }
+
+[request]
+method = "GET"
+target = "/conf-bkt-listing"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[expect.headers_present]
+"content-type" = "application/xml"
+
+[expect.body]
+contains_utf8 = ["<ListBucketResult", "<Key>one</Key>"]

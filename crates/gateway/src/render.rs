@@ -548,7 +548,10 @@ mod tests {
                 .with_detail(ErrorDetail::Key(std::borrow::Cow::Borrowed("k")))
                 .with_detail(ErrorDetail::BucketName(std::borrow::Cow::Borrowed("b")))
                 .with_detail(ErrorDetail::Condition(std::borrow::Cow::Borrowed("If-Match")))
-                .with_detail(ErrorDetail::RangeRequested(std::borrow::Cow::Borrowed("bytes=0-1"))),
+                .with_detail(ErrorDetail::RangeRequested(std::borrow::Cow::Borrowed("bytes=0-1")))
+                .with_detail(ErrorDetail::Region(
+                    rustfs_gateway_core::RegionLabel::new("eu-west-1").expect("a valid region"),
+                )),
         )
         .about_resource("Bucket");
         let body = document(&error, &trace());

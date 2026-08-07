@@ -1,0 +1,41 @@
+# c-bkt-0024 — the header set a successful deletion is allowed to carry.
+#
+# Schema dimensions exercised: headers_absent as the assertion, on a response with no body to check.
+
+[case]
+id = "c-bkt-0024"
+schema_version = 1
+title = "A successful deletion carries no entity headers of any kind"
+rationale = """
+c-bkt-0007 pins the status and the empty body; this pins what the head may not say about a body \
+that does not exist. A 204 announcing a Content-Type, an ETag or a non-zero Content-Length invites \
+a client or an intermediary to read bytes that were never sent, and on a keep-alive connection what \
+it reads is the next response. The two cases are separate because they fail separately: a renderer \
+can get the body right and the head wrong."""
+polarity = "negative"
+operation = "DeleteBucket"
+tags = ["wire-bytes"]
+timeout_ms = 10000
+quirks = ["q-bkt-0007"]
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9110#section-15.3.5"
+summary = "A 204 has no content, so headers describing content have nothing to describe."
+kind = "rfc"
+
+[[setup.buckets]]
+name = "conf-bkt-quiet"
+
+[request]
+method = "DELETE"
+target = "/conf-bkt-quiet"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 204
+headers_absent = ["content-type", "content-length", "etag", "x-amz-version-id"]
+connection_after = "open"
+
+[expect.body]
+size = 0

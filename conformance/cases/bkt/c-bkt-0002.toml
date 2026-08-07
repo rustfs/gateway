@@ -1,0 +1,51 @@
+# c-bkt-0002 — an empty CreateBucketConfiguration element.
+#
+# Schema dimensions exercised: an optional XML payload in its degenerate spelling, zero-length
+# success body.
+
+[case]
+id = "c-bkt-0002"
+schema_version = 1
+title = "An empty CreateBucketConfiguration element is accepted as an unconstrained creation"
+rationale = """
+SDKs and hand-rolled clients serialise an absent configuration as an empty element rather than as \
+no body at all, and a server that refuses the empty element refuses a request that means exactly \
+what the bodiless form means. The failure is invisible in review and total at run time: every \
+creation from that client fails with a 400 while the same client works against AWS."""
+polarity = "positive"
+operation = "CreateBucket"
+tags = ["xml", "region"]
+timeout_ms = 10000
+quirks = ["q-bkt-0011", "q-bkt-0001"]
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/issues/229"
+summary = "Clients send an empty XML element where they mean an absent field, and the two must decode alike."
+kind = "s3s-issue"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CreateBucket.html"
+summary = "The configuration element is optional, so a request carrying it empty asks for the default placement."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "conf-bkt-empty"
+absent = true
+
+[request]
+method = "PUT"
+target = "/conf-bkt-empty"
+headers = { "content-type" = "application/xml" }
+body = { utf8 = "<CreateBucketConfiguration></CreateBucketConfiguration>" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[expect.headers_present]
+"location" = "/conf-bkt-empty"
+
+[expect.body]
+size = 0

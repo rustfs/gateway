@@ -71,3 +71,181 @@ cases   = ["c-location-0001"]
   kind    = "capture"
   ref     = "captures/get-bucket-location-aws.http"
   summary = "Recorded AWS response used as the byte level reference for the unwrapped body."
+
+# --------------------------------------------------------------------------------------------
+# The bucket lifecycle family: CreateBucket, DeleteBucket, HeadBucket.
+# --------------------------------------------------------------------------------------------
+
+[[quirk]]
+id      = "q-bkt-0001"
+kind    = "status"
+target  = "CreateBucket"
+summary = "A successful bucket creation answers 200, never 201; SDKs and the upstream test suites assert the 200."
+cases   = ["c-bkt-0001", "c-bkt-0002", "c-bkt-0005", "c-bkt-0006", "c-bkt-0010", "c-bkt-0011", "c-bkt-0028"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CreateBucket.html"
+  summary = "The documented success response for a bucket creation is HTTP 200 with no created status."
+
+[[quirk]]
+id      = "q-bkt-0002"
+kind    = "header"
+target  = "CreateBucket.Location"
+summary = "The success response carries a Location header whose value is the path form of the new bucket."
+cases   = ["c-bkt-0001", "c-bkt-0010"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CreateBucket.html"
+  summary = "The response syntax lists a Location header naming the bucket that was created."
+
+[[quirk]]
+id      = "q-bkt-0003"
+kind    = "region"
+target  = "CreateBucket.LocationConstraint"
+summary = "us-east-1 is the null constraint and must be omitted; writing it explicitly is a 400 InvalidLocationConstraint."
+cases   = ["c-bkt-0012", "c-bkt-0013", "c-bkt-0015", "c-bkt-0016", "c-bkt-0017", "c-bkt-0030"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CreateBucket.html#API_CreateBucket_RequestBody"
+  summary = "The request-body documentation states that buckets in us-east-1 do not specify a location constraint."
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_BucketLocationConstraint.html"
+  summary = "us-east-1 is absent from the constraint value list, which is why writing it out is invalid."
+
+[[quirk]]
+id      = "q-bkt-0004"
+kind    = "legacy_alias"
+target  = "CreateBucket.LocationConstraint"
+summary = "EU is the historical spelling of eu-west-1 and must be accepted in a request constraint, normalised before comparison."
+cases   = ["c-bkt-0014"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_BucketLocationConstraint.html"
+  summary = "The enumerated constraint values keep the historical EU alias alongside the modern region names."
+
+[[quirk]]
+id      = "q-bkt-0005"
+kind    = "status"
+target  = "CreateBucket"
+summary = "Re-creating a bucket you already own is 200 in us-east-1 for historical reasons and 409 BucketAlreadyOwnedByYou everywhere else."
+cases   = ["c-bkt-0010"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/ErrorResponses.html"
+  summary = "The BucketAlreadyOwnedByYou entry states that all regions except us-east-1 answer it and us-east-1 resets the ACL and returns 200."
+
+[[quirk]]
+id      = "q-bkt-0006"
+kind    = "error_code"
+target  = "CreateBucket"
+summary = "A name held by another owner is BucketAlreadyExists and a name you hold yourself is BucketAlreadyOwnedByYou; the two 409s must stay distinct."
+cases   = ["c-bkt-0010"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/ErrorResponses.html"
+  summary = "The error table lists both conflict codes with different ownership conditions for the same request."
+
+[[quirk]]
+id      = "q-bkt-0007"
+kind    = "status"
+target  = "DeleteBucket"
+summary = "A successful bucket deletion is a 204 whose body is zero bytes; nothing may be rendered into it."
+cases   = ["c-bkt-0007", "c-bkt-0024", "c-bkt-0029"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucket.html"
+  summary = "The documented success response is HTTP 204 No Content with no response elements."
+
+  [[quirk.evidence]]
+  kind    = "rfc"
+  ref     = "https://www.rfc-editor.org/rfc/rfc9110#section-15.3.5"
+  summary = "A 204 response terminates at the end of its header section and cannot carry content."
+
+[[quirk]]
+id      = "q-bkt-0008"
+kind    = "error_code"
+target  = "DeleteBucket"
+summary = "Deleting a bucket that still holds objects or uploads is refused with 409 BucketNotEmpty rather than performed."
+cases   = ["c-bkt-0022", "c-bkt-0023"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucket.html"
+  summary = "The operation requires the bucket to be empty, and the error table maps BucketNotEmpty to 409."
+
+[[quirk]]
+id      = "q-bkt-0009"
+kind    = "body"
+target  = "HeadBucket"
+summary = "Every HeadBucket response has a zero-length body, including 403 and 404; an error document on a HEAD breaks h2 clients."
+cases   = ["c-bkt-0008", "c-bkt-0025", "c-bkt-0026"]
+
+  [[quirk.evidence]]
+  kind    = "rfc"
+  ref     = "https://www.rfc-editor.org/rfc/rfc9110#section-9.3.2"
+  summary = "A HEAD response must not carry content regardless of its status code, which covers the error paths."
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_HeadBucket.html"
+  summary = "The operation is documented as answering status and headers only, with no body on success or error."
+
+[[quirk]]
+id      = "q-bkt-0010"
+kind    = "header"
+target  = "HeadBucket.BucketRegion"
+summary = "x-amz-bucket-region is mandatory on a HeadBucket success and on the 301 PermanentRedirect; without it SDKs cannot complete the redirect and fail outright."
+cases   = ["c-bkt-0008", "c-bkt-0009", "c-bkt-0011", "c-bkt-0026", "c-bkt-0027", "c-bkt-0033"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_HeadBucket.html"
+  summary = "The response header list carries x-amz-bucket-region, which is what region discovery and redirect handling read."
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/ErrorResponses.html"
+  summary = "PermanentRedirect is the 301 a request reaching the wrong endpoint receives, and the region header is how the client learns the right one."
+
+[[quirk]]
+id      = "q-bkt-0011"
+kind    = "empty_value"
+target  = "CreateBucket.LocationConstraint"
+summary = "An empty constraint element or empty text is equivalent to omitting the constraint entirely, never an error."
+cases   = ["c-bkt-0002", "c-bkt-0003", "c-bkt-0004", "c-bkt-0018", "c-bkt-0019", "c-bkt-0020", "c-bkt-0021", "c-bkt-0032"]
+
+  [[quirk.evidence]]
+  kind    = "s3s-issue"
+  ref     = "https://github.com/s3s-project/s3s/issues/229"
+  summary = "Clients send empty XML elements where they mean an absent field, and the decoder must treat the two alike."
+
+  [[quirk.evidence]]
+  kind    = "s3s-pr"
+  ref     = "https://github.com/s3s-project/s3s/pull/244"
+  summary = "Upstream resolved the report by normalising empty elements to the absent field rather than refusing them."
+
+[[quirk]]
+id      = "q-bkt-0012"
+kind    = "error_code"
+target  = "CreateBucket.Bucket"
+summary = "A name that breaks the bucket naming rules is InvalidBucketName, not the generic InvalidArgument every other bad parameter answers."
+cases   = ["c-bkt-0031"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/ErrorResponses.html"
+  summary = "The error table gives an invalid bucket name its own code, which is what a client branching on the name rule reads."
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/bucketnamingrules.html"
+  summary = "The naming rules a creation is checked against are published, so a refusal naming them is actionable while a generic one is not."

@@ -1,0 +1,47 @@
+# c-bkt-0019 — a body rooted at the wrong element.
+#
+# Schema dimensions exercised: root-element checking, distinct from well-formedness.
+
+[case]
+id = "c-bkt-0019"
+schema_version = 1
+title = "A well-formed body rooted at the wrong element is refused"
+rationale = """
+The body parses, so a decoder that only checks well-formedness accepts it, finds no \
+LocationConstraint member inside it, and creates the bucket in the default region — turning a \
+request that named a region into a silent placement somewhere else. Checking the root is what \
+makes the difference between reading a document and reading whatever arrived, and it is also what \
+stops one operation's document from being accepted by another's decoder."""
+polarity = "negative"
+operation = "CreateBucket"
+tags = ["xml", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-bkt-0011"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CreateBucket.html"
+summary = "The request body for a creation is named, so a document under a different root is not that body."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "conf-bkt-wrongroot"
+absent = true
+
+[request]
+method = "PUT"
+target = "/conf-bkt-wrongroot"
+headers = { "content-type" = "application/xml" }
+body = { utf8 = "<LocationConstraint>us-west-2</LocationConstraint>" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+code = "MalformedXML"
+request_id_present = true
+
+[expect.timing]
+terminate_within_ms = 5000

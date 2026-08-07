@@ -1,0 +1,52 @@
+# c-bkt-0004 — an unknown element and a namespace declaration in the configuration body.
+#
+# Schema dimensions exercised: tolerance of what the decoder does not model, without tolerance of
+# what it does.
+
+[case]
+id = "c-bkt-0004"
+schema_version = 1
+title = "An unknown element and an xmlns in the configuration are ignored rather than refused"
+rationale = """
+AWS ignores elements it does not recognise in a request document, and every SDK that has ever added \
+a field ahead of a server release depends on that. A decoder that refuses the unknown element turns \
+a forward-compatible client into a broken one on the day the SDK ships. The namespace declaration \
+is the same rule in a different position: matching members by local name is what makes a prefixed \
+body and a bare one decode identically."""
+polarity = "positive"
+operation = "CreateBucket"
+tags = ["xml"]
+timeout_ms = 10000
+quirks = ["q-bkt-0011"]
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/issues/613"
+summary = "An unrecognised element in a request document must be skipped, not treated as a parse failure."
+kind = "s3s-issue"
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/pull/617"
+summary = "Upstream fixed the refusal by ignoring unknown elements, matching what AWS does with them."
+kind = "s3s-pr"
+
+[[setup.buckets]]
+name = "conf-bkt-extra"
+absent = true
+
+[request]
+method = "PUT"
+target = "/conf-bkt-extra"
+headers = { "content-type" = "application/xml" }
+body = { utf8 = """<CreateBucketConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><SomethingNewer>x</SomethingNewer></CreateBucketConfiguration>""" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[expect.headers_present]
+"location" = "/conf-bkt-extra"
+
+[expect.body]
+size = 0

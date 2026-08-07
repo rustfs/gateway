@@ -1,0 +1,47 @@
+# c-bkt-0014 — the EU alias where eu-west-1 is not served.
+#
+# Schema dimensions exercised: normalisation before matching. The accepting half of this pair is
+# in crates/conformance/tests/bucket_lifecycle.rs, against a deployment that serves eu-west-1.
+
+[case]
+id = "c-bkt-0014"
+schema_version = 1
+title = "The EU alias is normalised before the region is matched, not special-cased into acceptance"
+rationale = """
+EU is the historical spelling of eu-west-1 and has to be accepted where eu-west-1 is served. The tempting implementation is a special case that lets EU through wherever it appears, and this is the request that separates the two: on a us-east-1 endpoint the alias resolves to a region that is not served, so it must be refused exactly as the spelled-out name in c-bkt-0013 is. An implementation that waved the alias past would create buckets in a region it does not have."""
+polarity = "negative"
+operation = "CreateBucket"
+tags = ["region", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-bkt-0004"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_BucketLocationConstraint.html"
+summary = "The enumerated constraint values exclude us-east-1 and keep the historical EU alias."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "conf-bkt-alias"
+absent = true
+
+[request]
+method = "PUT"
+target = "/conf-bkt-alias"
+headers = { "content-type" = "application/xml" }
+body = { utf8 = "<CreateBucketConfiguration><LocationConstraint>EU</LocationConstraint></CreateBucketConfiguration>" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+code = "InvalidLocationConstraint"
+request_id_present = true
+
+[expect.headers_present]
+"content-type" = "application/xml"
+
+[expect.timing]
+terminate_within_ms = 5000

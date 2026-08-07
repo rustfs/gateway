@@ -1,0 +1,50 @@
+# c-bkt-0026 — a bucket head for a bucket in another region.
+#
+# Schema dimensions exercised: the mandatory header on a redirect, with the body length still zero.
+
+[case]
+id = "c-bkt-0026"
+schema_version = 1
+title = "A bucket head for a bucket in another region redirects and names that region"
+rationale = """
+The 301 is not the interesting part; the header is. An SDK completes this redirect by reading \
+x-amz-bucket-region, re-signing for that region and retrying, and a 301 without the header leaves \
+it with nowhere to go — the observable behaviour is a client that fails outright against a bucket \
+that exists and is reachable. Because this is a HEAD, the header is also the only place the region \
+can be stated: there is no body to put it in, which is exactly why the header is mandatory rather \
+than a convenience."""
+polarity = "negative"
+operation = "HeadBucket"
+tags = ["region", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-bkt-0010", "q-bkt-0009"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/ErrorResponses.html"
+summary = "A request reaching the wrong endpoint for a bucket is answered with a permanent redirect."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_HeadBucket.html"
+summary = "The region header is what a client reads to learn where the bucket it asked about actually is."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "conf-bkt-far"
+region = "eu-west-1"
+
+[request]
+method = "HEAD"
+target = "/conf-bkt-far"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 301
+connection_after = "open"
+
+[expect.headers_present]
+"x-amz-bucket-region" = "eu-west-1"
+
+[expect.body]
+size = 0

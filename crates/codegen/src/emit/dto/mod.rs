@@ -399,7 +399,10 @@ pub fn use_group(path: &str, names: &[String]) -> String {
         } else {
             format!("{current} {name},")
         };
-        if !current.is_empty() && candidate.len() > MAX_WIDTH {
+        // Measured, not assumed: rustfmt's `Mixed` import layout starts a new line when the
+        // filled line would *reach* `max_width`, not only when it would exceed it — an import
+        // line of exactly 130 columns is reformatted onto two. `>=` is that boundary.
+        if !current.is_empty() && candidate.len() >= MAX_WIDTH {
             lines.push(std::mem::take(&mut current));
             current = format!("    {name},");
         } else {

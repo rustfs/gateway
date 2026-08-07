@@ -23,7 +23,7 @@
 
 use std::borrow::Cow;
 
-/// The `LocationConstraint` string enumeration. Bound by: GetBucketLocation.
+/// The `LocationConstraint` string enumeration. Bound by: CreateBucket, GetBucketLocation.
 ///
 /// An open set: compare against the associated constants, and build a value the pinned
 /// model does not declare with [`LocationConstraint::custom`]. Adding a constant is a minor version

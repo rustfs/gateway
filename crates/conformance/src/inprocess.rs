@@ -145,7 +145,9 @@ impl InProcess {
             .register::<dto::AbortMultipartUpload, _>(Arc::clone(&backend))
             .register::<dto::CompleteMultipartUpload, _>(Arc::clone(&backend))
             .register::<dto::CopyObject, _>(Arc::clone(&backend))
+            .register::<dto::CreateBucket, _>(Arc::clone(&backend))
             .register::<dto::CreateMultipartUpload, _>(Arc::clone(&backend))
+            .register::<dto::DeleteBucket, _>(Arc::clone(&backend))
             .register::<dto::DeleteBucketCors, _>(Arc::clone(&backend))
             .register::<dto::DeleteBucketTagging, _>(Arc::clone(&backend))
             .register::<dto::DeleteObject, _>(Arc::clone(&backend))
@@ -154,6 +156,7 @@ impl InProcess {
             .register::<dto::GetBucketCors, _>(Arc::clone(&backend))
             .register::<dto::GetBucketLocation, _>(Arc::clone(&backend))
             .register::<dto::GetBucketTagging, _>(Arc::clone(&backend))
+            .register::<dto::HeadBucket, _>(Arc::clone(&backend))
             .register::<dto::GetObject, _>(Arc::clone(&backend))
             .register::<dto::GetObjectTagging, _>(Arc::clone(&backend))
             .register::<dto::HeadObject, _>(Arc::clone(&backend))
@@ -687,15 +690,14 @@ impl Sut for InProcess {
 
         for bucket in setup.read("setup.buckets").and_then(Value::as_array).unwrap_or_default() {
             let Some(name) = bucket.read("setup.buckets[].name").and_then(Value::as_str) else { continue };
-            if let Some(region) = bucket.read("setup.buckets[].region").and_then(Value::as_str)
-                && region != REGION
-            {
-                return Err(SutError::Environment(format!(
-                    "`setup.buckets[].region = \"{region}\"` places the bucket outside `{REGION}`, \
-                     which is the one region this fixture serves and the one every case signs for; \
-                     a redirect or a location mismatch is not modelled here"
-                )));
-            }
+            // A bucket placed outside `REGION` exists but is not served here: the lifecycle
+            // handlers answer requests for it with the 301 carrying `x-amz-bucket-region`, which
+            // is exactly what the redirect cases exist to observe. Recorded before the declaring
+            // insert so the two reads of the key stay one branch apart.
+            let foreign_region = bucket
+                .read("setup.buckets[].region")
+                .and_then(Value::as_str)
+                .filter(|region| *region != REGION);
             if bucket
                 .read("setup.buckets[].absent")
                 .and_then(Value::as_bool)
@@ -716,6 +718,9 @@ impl Sut for InProcess {
                 }
             };
             fixture.declare_bucket(name, versioned);
+            if let Some(region) = foreign_region {
+                fixture.set_bucket_region(name, region);
+            }
             // Object lock is what makes a version delete an authorisation decision rather than a
             // lookup; `fixture::Stub::delete_objects` is where it becomes observable.
             let locked = bucket

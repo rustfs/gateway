@@ -1,0 +1,46 @@
+# c-bkt-0001 — a bucket creation with no request body.
+#
+# Schema dimensions exercised: single-exchange form, required response header, zero-length success
+# body, status pinned against the one wrong answer everybody writes.
+
+[case]
+id = "c-bkt-0001"
+schema_version = 1
+title = "Creating a bucket with no request body answers 200 with a Location header"
+rationale = """
+The us-east-1 spelling of a bucket creation carries no body at all, and its success is a 200 with \
+a Location header — not the 201 that reads as the obvious answer for a resource that was just \
+created. Both halves break real clients: an SDK that asserts 200 treats a 201 as a protocol error \
+and retries the creation, and a client that reads Location to learn the bucket's path has nothing \
+to read when the header is missing. The body must be empty, because there is no response document \
+for this operation and a stray one would be parsed by nobody."""
+polarity = "positive"
+operation = "CreateBucket"
+tags = ["routing", "region"]
+timeout_ms = 10000
+quirks = ["q-bkt-0001", "q-bkt-0002"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CreateBucket.html"
+summary = "The documented success for a bucket creation is 200 with a Location header naming the new bucket."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "conf-bkt-new"
+absent = true
+
+[request]
+method = "PUT"
+target = "/conf-bkt-new"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[expect.headers_present]
+"location" = "/conf-bkt-new"
+
+[expect.body]
+size = 0

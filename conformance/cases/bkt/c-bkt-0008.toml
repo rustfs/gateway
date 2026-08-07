@@ -1,0 +1,49 @@
+# c-bkt-0008 — a successful HEAD on a bucket.
+#
+# Schema dimensions exercised: the mandatory response header, and the HEAD zero-body invariant on
+# the success path.
+
+[case]
+id = "c-bkt-0008"
+schema_version = 1
+title = "A bucket head answers 200 with the region header and a zero-length body"
+rationale = """
+The region header is how an SDK discovers where a bucket lives, and this is the request it sends to \
+find out. Without the header the discovery returns nothing usable and the client falls back to \
+guessing or to failing, so a 200 that omits it is worse than an error: it looks like an answer. The \
+zero-length body is the other half — a HEAD response carries no content whatever its status, and an \
+h2 client reports a protocol error rather than ignoring the frames."""
+polarity = "positive"
+operation = "HeadBucket"
+tags = ["region", "wire-bytes"]
+timeout_ms = 10000
+quirks = ["q-bkt-0009", "q-bkt-0010"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_HeadBucket.html"
+summary = "The response headers of a bucket head include the region the bucket resides in."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9110#section-9.3.2"
+summary = "A HEAD response must not carry content, whatever its status code says."
+kind = "rfc"
+
+[[setup.buckets]]
+name = "conf-bkt-here"
+
+[request]
+method = "HEAD"
+target = "/conf-bkt-here"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[expect.headers_present]
+"x-amz-bucket-region" = "us-east-1"
+
+[expect.body]
+size = 0

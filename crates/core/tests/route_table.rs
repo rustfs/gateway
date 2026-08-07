@@ -14,11 +14,13 @@
 
 //! The ordered table: what it routes, and everything it refuses to be built from.
 //!
-//! Responsible for: the route cases — thirteen positive, forty negative — including the one that
-//! falsifies a fake overlap check, and the three blocks that pin an operation the protocol defines
-//! and this build does not serve to its own row rather than to its neighbour's: `?attributes`, the
-//! three-method object `?tagging` band whose absence was a write and a delete of the object, and
-//! the bucket `?tagging` band whose GET was answered by `ListObjects` with a page of keys.
+//! Responsible for: the route cases — sixteen positive, forty-three negative — including the one
+//! that falsifies a fake overlap check, the three blocks that pin an operation the protocol
+//! defines and this build does not serve to its own row rather than to its neighbour's
+//! (`?attributes`, the three-method object `?tagging` band whose absence was a write and a delete
+//! of the object, and the bucket `?tagging` band whose GET was answered by `ListObjects` with a
+//! page of keys), and the bucket lifecycle band whose selectors pin every subresource key absent
+//! so a configuration request can never create or delete a bucket.
 //! NOT responsible for: parameter validation (`params_and_dispatch.rs`), the compiled form
 //! (`hot_path.rs`), the golden rendering (`golden.rs`).
 //! Upstream: `support`. Downstream: nothing.
@@ -377,11 +379,21 @@ fn n_a_bucket_tagging_request_with_a_second_query_key_keeps_the_band_order() {
 }
 
 /// Negative — the bucket rows are bound to their methods and their target. `HEAD /bucket?tagging`
-/// matches nothing, and the object-scope requests stay with the object rows.
+/// reaches no *tagging* operation, and the object-scope requests stay with the object rows.
+///
+/// The HEAD half changed meaning when the lifecycle band landed: with no HEAD bucket row the
+/// request matched nothing, and now `HeadBucket` — which pins no query key, because no bucket
+/// subresource defines a HEAD — answers it as a plain existence probe with an inert key, the same
+/// reading `GET /bucket?unknown` has always had from `ListObjects`. What must still never happen
+/// is a tagging row answering a method it does not define.
 #[test]
 fn n_a_bucket_tagging_row_is_not_reachable_under_another_method_or_target() {
     let table = generated_table();
-    assert_eq!(routed(&table, &Req::new("HEAD /bucket?tagging")), None, "HEAD names no tagging operation");
+    assert_eq!(
+        routed(&table, &Req::new("HEAD /bucket?tagging")),
+        Some("HeadBucket"),
+        "HEAD names no tagging operation, so the existence probe with an inert key answers"
+    );
     for (line, expected) in [
         ("GET /bucket/key?tagging", "GetObjectTagging"),
         ("PUT /bucket/key?tagging", "PutObjectTagging"),
@@ -546,6 +558,142 @@ fn n_the_bucket_bands_are_unchanged_by_the_cors_band() {
     ] {
         assert_eq!(routed(&table, &Req::new(line)), Some(expected), "{line}");
     }
+}
+
+/// The bucket lifecycle band claims its own three requests, one method each.
+///
+/// Positive half of the block below. `PUT /{bucket}`, `DELETE /{bucket}` and `HEAD /{bucket}` are
+/// the bucket-level twins of the object band's fallbacks: no positive query key, distinguished
+/// only by method and target. All three sit after the listing band and before the object band.
+#[test]
+fn the_bucket_lifecycle_rows_route_their_three_methods() {
+    let table = generated_table();
+    for (line, expected) in [
+        ("PUT /bucket", "CreateBucket"),
+        ("DELETE /bucket", "DeleteBucket"),
+        ("HEAD /bucket", "HeadBucket"),
+    ] {
+        let hit = table
+            .resolve(&Req::new(line).parts())
+            .unwrap_or_else(|| panic!("{line} has a route"));
+        assert_eq!(hit.op_name, expected, "{line}");
+        assert!(
+            (700..790).contains(&hit.precedence),
+            "{line} must sit in the bucket band after the listings, got {}",
+            hit.precedence
+        );
+    }
+}
+
+/// Negative — a bucket subresource request is never claimed by the lifecycle band.
+///
+/// This is the defect the `query_absent` lists exist for, and it is the destructive direction:
+/// with a bare `PUT /{bucket}` selector, `PUT /b?acl` would *create a bucket* and answer 200 for a
+/// request that wanted permissions written, and `DELETE /b?policy` would *delete the bucket* for a
+/// request that wanted a policy removed. The lists name every bucket subresource key under the
+/// method — served and deferred alike — so a deferred key falls through to no route at all, and a
+/// served one (`cors`, `tagging`) reaches its own row by first-match with the lifecycle row
+/// provably disjoint rather than merely later. Implementing a subresource must not change what a
+/// bare `PUT /{bucket}` means, and neither may deferring one.
+#[test]
+fn n_a_bucket_subresource_request_is_never_claimed_by_the_lifecycle_band() {
+    let table = generated_table();
+    let deferred_put = [
+        "abac",
+        "accelerate",
+        "acl",
+        "analytics",
+        "encryption",
+        "intelligent-tiering",
+        "inventory",
+        "lifecycle",
+        "logging",
+        "metadataAnnotationTable",
+        "metadataInventoryTable",
+        "metadataJournalTable",
+        "metrics",
+        "notification",
+        "object-lock",
+        "ownershipControls",
+        "policy",
+        "publicAccessBlock",
+        "replication",
+        "requestPayment",
+        "versioning",
+        "website",
+    ];
+    for key in deferred_put {
+        let line = format!("PUT /bucket?{key}");
+        assert_eq!(routed(&table, &Req::new(&line)), None, "{line} must not be a bucket creation");
+    }
+    let deferred_delete = [
+        "analytics",
+        "encryption",
+        "intelligent-tiering",
+        "inventory",
+        "lifecycle",
+        "metadataConfiguration",
+        "metadataTable",
+        "metrics",
+        "ownershipControls",
+        "policy",
+        "publicAccessBlock",
+        "replication",
+        "website",
+    ];
+    for key in deferred_delete {
+        let line = format!("DELETE /bucket?{key}");
+        assert_eq!(routed(&table, &Req::new(&line)), None, "{line} must not be a bucket deletion");
+    }
+    // The served subresources are the same rule with a different observable: the request reaches
+    // the subresource's own row, never the lifecycle one.
+    for (line, expected) in [
+        ("PUT /bucket?cors", "PutBucketCors"),
+        ("PUT /bucket?tagging", "PutBucketTagging"),
+        ("DELETE /bucket?cors", "DeleteBucketCors"),
+        ("DELETE /bucket?tagging", "DeleteBucketTagging"),
+    ] {
+        assert_eq!(routed(&table, &Req::new(line)), Some(expected), "{line}");
+    }
+}
+
+/// Negative — the lifecycle rows are bucket-scoped, so the object band keeps its three methods.
+#[test]
+fn n_the_object_band_is_unchanged_by_the_bucket_lifecycle_band() {
+    let table = generated_table();
+    for (line, expected) in [
+        ("PUT /bucket/key", "PutObject"),
+        ("DELETE /bucket/key", "DeleteObject"),
+        ("HEAD /bucket/key", "HeadObject"),
+    ] {
+        assert_eq!(routed(&table, &Req::new(line)), Some(expected), "{line}");
+    }
+}
+
+/// Negative — the lifecycle rows are method-bound: a bucket-level GET is still the listing, and a
+/// POST is still the batch delete, whatever rows sit beside them now.
+#[test]
+fn n_a_bucket_get_and_post_are_untouched_by_the_lifecycle_band() {
+    let table = generated_table();
+    assert_eq!(routed(&table, &Req::new("GET /bucket")), Some("ListObjects"));
+    assert_eq!(routed(&table, &Req::new("POST /bucket?delete")), Some("DeleteObjects"));
+}
+
+/// The SDK disambiguator stays inert on the new rows: `x-id` pins nothing anywhere else and must
+/// pin nothing here.
+#[test]
+fn an_x_id_parameter_does_not_disturb_the_lifecycle_band() {
+    let table = generated_table();
+    assert_eq!(routed(&table, &Req::new("PUT /bucket?x-id=CreateBucket")), Some("CreateBucket"));
+    assert_eq!(routed(&table, &Req::new("DELETE /bucket?x-id=DeleteBucket")), Some("DeleteBucket"));
+}
+
+/// Negative — a query key that is not a subresource does not eject a request from the lifecycle
+/// band: only the subresource keys are pinned absent.
+#[test]
+fn a_non_subresource_query_key_stays_in_the_lifecycle_band() {
+    let table = generated_table();
+    assert_eq!(routed(&table, &Req::new("HEAD /bucket?unrelated=1")), Some("HeadBucket"));
 }
 
 /// c-route-1001 — two subresources at one precedence, reachable together.
