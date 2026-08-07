@@ -145,7 +145,36 @@
             },
   "derived_resources": [],
   "head_mirrors": null,
-  "quirk_refs": [],
-  "quirks": [],
+  "quirk_refs": ["q-tag-wrapped-0088", "q-tag-object-unconfigured-0090"],
+  "quirks": [
+              {
+                "id": "q-tag-wrapped-0088",
+                "kind": "wire_form",
+                "target": "GetBucketTagging",
+                "summary": "The tag collection is wrapped — `<TagSet>` encloses `<Tag>` members — where the listing families flatten `Contents` and `Rule` directly into their parent, so an encoder that reuses the flattened shape here silently drops the enclosing element.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketTagging.html",
+                                "summary": "The documented response syntax shows Tag elements enclosed in a TagSet element under the Tagging root, not flattened into the root."
+                              }
+                            ],
+                "cases": ["c-tagging-0001", "c-tagging-0004", "c-tagging-0005", "c-tagging-0018"]
+              },
+              {
+                "id": "q-tag-object-unconfigured-0090",
+                "kind": "error_code",
+                "target": "GetObjectTagging",
+                "summary": "An object with no tags answers 200 with an empty TagSet — the opposite of the bucket read's 404 NoSuchTagSet — so the two reads of one subresource name follow two different unconfigured rules.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObjectTagging.html",
+                                "summary": "The documented response for an object without tags is a success carrying an empty TagSet, and the operation's error list carries no NoSuchTagSet."
+                              }
+                            ],
+                "cases": ["c-tagging-0004", "c-tagging-0007"]
+              }
+            ],
   "ext_points": []
 }

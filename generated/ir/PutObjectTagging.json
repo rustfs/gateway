@@ -200,7 +200,41 @@
             },
   "derived_resources": [],
   "head_mirrors": null,
-  "quirk_refs": [],
-  "quirks": [],
+  "quirk_refs": ["q-tag-md5-required-0092", "q-tag-limits-0094"],
+  "quirks": [
+              {
+                "id": "q-tag-md5-required-0092",
+                "kind": "checksum_headers",
+                "target": "PutBucketTagging",
+                "summary": "The tagging writes are in the httpChecksumRequired operation set: a PUT with neither Content-MD5 nor an x-amz-checksum-* header is refused with 400 InvalidRequest before the document is read.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketTagging.html",
+                                "summary": "The documented request syntax lists Content-MD5 as required for this operation."
+                              }
+                            ],
+                "cases": ["c-tagging-0008", "c-tagging-0009"]
+              },
+              {
+                "id": "q-tag-limits-0094",
+                "kind": "bounded_input",
+                "target": "PutBucketTagging",
+                "summary": "A tag set is bounded by scope — ten tags on an object, fifty on a bucket — and by shape: keys up to 128 characters, values up to 256, characters limited to letters, numbers, space and +-=._:/@, keys unique; every violation is a 400 InvalidTag.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/userguide/object-tagging.html",
+                                "summary": "The user guide bounds an object at ten tags with 128-character keys and 256-character values drawn from the documented character set."
+                              },
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/awsaccountbilling/latest/aboutv2/allocation-tag-restrictions.html",
+                                "summary": "The tag restriction page bounds a bucket at fifty tags with the same key and value ceilings."
+                              }
+                            ],
+                "cases": ["c-tagging-0011", "c-tagging-0012", "c-tagging-0013", "c-tagging-0014", "c-tagging-0015"]
+              }
+            ],
   "ext_points": []
 }

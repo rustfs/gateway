@@ -93,7 +93,27 @@
             },
   "derived_resources": [],
   "head_mirrors": null,
-  "quirk_refs": [],
-  "quirks": [],
+  "quirk_refs": ["q-tag-delete-idempotent-0091"],
+  "quirks": [
+              {
+                "id": "q-tag-delete-idempotent-0091",
+                "kind": "idempotent_delete",
+                "target": "DeleteBucketTagging",
+                "summary": "Removing a tag set answers an unconditional 204: untagging a bucket or an object that carries no tags is a success, so the delete is idempotent where the bucket-scope GET on the same state is a 404.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketTagging.html",
+                                "summary": "The documented success response is 204 No Content, with no error named for a bucket that has no tag set to delete."
+                              },
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteObjectTagging.html",
+                                "summary": "The object-scope delete documents the same unconditional 204 shape."
+                              }
+                            ],
+                "cases": ["c-tagging-0002", "c-tagging-0004", "c-tagging-0010"]
+              }
+            ],
   "ext_points": []
 }

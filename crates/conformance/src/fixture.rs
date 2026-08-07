@@ -120,7 +120,8 @@ use rustfs_gateway::{
     BucketName, ByteStream, ChecksumAlgorithm, ChecksumSpec, ConditionalOutcome, CopyRange, CopySourceRejection, CursorSpec,
     ETag, ErrorCode, ErrorDetail, Handler, HandlerError, HandlerResult, IfRange, ObjectKey, ObjectValidators,
     PRECONDITION_FAILED_MESSAGE, PreconditionRejection, Preconditions, RangeDecision, RangeSelectors, Req, RequestKind, Resp,
-    Timestamp, collect, evaluate, evaluate_range, parse_conditional_etag, resolve_copy_range, validate_cors,
+    TagScope, TaggingRejection, Timestamp, collect, evaluate, evaluate_range, parse_conditional_etag, parse_tagging_header,
+    resolve_copy_range, validate_cors, validate_tag_set,
 };
 
 /// The canonical user id every listing reports as the owner.
@@ -179,7 +180,7 @@ pub struct StoredObject {
     /// A `Vec` rather than a map, and ordered rather than sorted, because the tag set is what the
     /// writer sent: `x-amz-tagging: a=1&b=2` and a `<Tagging>` document both carry an order, and a
     /// stub that re-sorted them would be answering from a decision of its own. Duplicate keys never
-    /// reach here — [`parse_tagging_header`] and [`tag_pairs`] refuse them — so the sequence is a
+    /// reach here — [`read_tagging_header`] and [`tag_pairs`] refuse them — so the sequence is a
     /// map in everything but lookup cost, and ten pairs is the ceiling AWS documents.
     pub tags: Vec<(String, String)>,
     /// The storage class the writer named, or `STANDARD`.
@@ -301,11 +302,11 @@ pub struct VersionRef<'a> {
     pub is_latest: bool,
 }
 
-/// What `[[setup.buckets]]` declared about one bucket, plus the one document a case can install.
+/// What `[[setup.buckets]]` declared about one bucket, plus the state requests wrote onto it.
 ///
-/// No longer `Copy`: the CORS document is a fixture a `PutBucketCors` exchange writes rather than
-/// a flag `[setup]` declares, and it is held here because it is per-bucket state exactly as the
-/// versioning flag is.
+/// No longer `Copy`: the CORS document and the tag set are fixtures an exchange writes rather
+/// than flags `[setup]` declares, and they are held here because they are per-bucket state
+/// exactly as the versioning flag is.
 #[derive(Debug, Default, Clone)]
 struct BucketState {
     /// `versioning = "enabled"`.
@@ -316,6 +317,14 @@ struct BucketState {
     /// observable state `NoSuchCORSConfiguration` reports; there is no "empty document" state,
     /// because the decoder refuses a document with no rule.
     cors: Option<dto::CorsConfiguration>,
+    /// The bucket's tag set, in the order the request that wrote it listed the pairs.
+    ///
+    /// `None` is "never configured, or deleted" and `Some` is "a tagging write happened" — two
+    /// states a `Vec` alone cannot hold apart, and the read depends on the difference: an
+    /// unconfigured bucket answers `404 NoSuchTagSet` where an object without tags answers `200`.
+    /// No `[[setup.buckets]]` field feeds this; a case establishes it through `PutBucketTagging`,
+    /// so what the read answers is always something a request wrote.
+    tags: Option<Vec<(String, String)>>,
 }
 
 /// The state one case runs against.
@@ -377,6 +386,20 @@ impl Fixture {
     pub fn clear_cors(&mut self, name: &str) {
         if let Some(bucket) = self.buckets.get_mut(name) {
             bucket.cors = None;
+        }
+    }
+
+    /// The bucket's tag set: `None` until a tagging write configures one.
+    #[must_use]
+    pub fn bucket_tags(&self, name: &str) -> Option<&[(String, String)]> {
+        self.buckets.get(name).and_then(|bucket| bucket.tags.as_deref())
+    }
+
+    /// Replaces the bucket's tag set. `None` returns the bucket to "never configured", which is
+    /// what both the delete and an empty `<TagSet/>` mean — see `Stub::put_bucket_tagging`.
+    pub fn set_bucket_tags(&mut self, name: &str, tags: Option<Vec<(String, String)>>) {
+        if let Some(bucket) = self.buckets.get_mut(name) {
+            bucket.tags = tags;
         }
     }
 
@@ -1180,6 +1203,15 @@ fn storage_class_header(object: &StoredObject) -> Option<dto::StorageClass> {
     Some(dto::StorageClass::custom(object.storage_class.clone()))
 }
 
+/// The tag count an object read reports, which S3 omits when it would be zero.
+///
+/// `None` for an untagged object rather than `Some(0)`: readers use the header's *presence* to
+/// decide whether a `GetObjectTagging` round trip is worth making, so a zero would make every
+/// object look labelled. The ceiling makes the cast total — a stored set is at most fifty pairs.
+fn tag_count_header(object: &StoredObject) -> Option<i32> {
+    i32::try_from(object.tags.len()).ok().filter(|count| *count > 0)
+}
+
 /// The checksum contract an initiating request declared, if it declared one.
 ///
 /// An algorithm this suite cannot compute is refused rather than dropped: answering the upload
@@ -1429,80 +1461,33 @@ fn directive_of(value: Option<&str>, reason: &'static str) -> Result<MetadataFro
     }
 }
 
-/// AWS's own wording for an `x-amz-tagging` header that is not a tag set.
-///
-/// One constant rather than a message per failure, because AWS answers every malformed spelling of
-/// this header with the same sentence: a caller who could tell "no `=`" from "duplicate key" apart
-/// by the `<Message>` element would be learning the parser's shape rather than the rule.
-const MALFORMED_TAGGING_HEADER: &str = "The header 'x-amz-tagging' shall be encoded as UTF-8 then URLEncoded URL query \
-     parameters without tag name duplicates.";
-
-/// Reads the inline `x-amz-tagging` header — `a=1&b=2`, form-urlencoded — into ordered pairs.
+/// Reads the inline `x-amz-tagging` header through the exported tagging contract.
 ///
 /// This is the header `PutObject` and `CopyObject` carry, and it is **not** the `?tagging`
 /// subresource: the two travel together in `c-copy-0008`, where the copy writes the tag set through
-/// this header and the read-back comes back through `GetObjectTagging`. Nothing here is shared with
-/// the subresource's XML document beyond the pairs both produce.
-///
-/// Decoding is `application/x-www-form-urlencoded`, which is not the same alphabet as a path
-/// segment: `+` is a space, and `%` begins two hex digits. A truncated or non-hex escape is refused
-/// rather than passed through, because a tag whose key is `%zz` would be stored under a name no
-/// later request can spell.
+/// this header and the read-back comes back through `GetObjectTagging`. The parsing and the
+/// object-scope validation are both calls into [`rustfs_gateway::parse_tagging_header`] and
+/// [`rustfs_gateway::validate_tag_set`] rather than a second copy, for the reason the copy-range
+/// mirror was retired: a rule written twice is a rule two implementations hold differently, and
+/// this file's copy had already grown its own opinion about which code a duplicate key carries.
 ///
 /// # Errors
 ///
-/// `InvalidArgument` for a segment with no `=`, for a broken escape, and for a repeated key — the
-/// three shapes AWS names in one sentence.
-fn parse_tagging_header(header: Option<&str>) -> Result<Vec<(String, String)>, HandlerError> {
-    let Some(raw) = header else { return Ok(Vec::new()) };
-    let mut pairs: Vec<(String, String)> = Vec::new();
-    for segment in raw.split('&') {
-        if segment.is_empty() {
-            continue;
-        }
-        let (key, value) = segment
-            .split_once('=')
-            .ok_or_else(|| HandlerError::new(ErrorCode::INVALID_ARGUMENT, MALFORMED_TAGGING_HEADER))?;
-        let key = form_decode(key)?;
-        let value = form_decode(value)?;
-        require_tag_key(&key)?;
-        if pairs.iter().any(|(existing, _)| existing == &key) {
-            return Err(HandlerError::new(ErrorCode::INVALID_ARGUMENT, MALFORMED_TAGGING_HEADER));
-        }
-        pairs.push((key, value));
-    }
+/// Whatever the contract refuses: `InvalidArgument` in AWS's one sentence for every malformed
+/// spelling of the header, `InvalidTag` for an empty key, a ceiling violation, or an illegal
+/// character.
+fn read_tagging_header(header: Option<&str>) -> Result<Vec<(String, String)>, HandlerError> {
+    let pairs = parse_tagging_header(header).map_err(refused_tagging)?;
+    validate_tag_set(&pairs, TagScope::Object).map_err(refused_tagging)?;
     Ok(pairs)
 }
 
-/// One form-urlencoded field, decoded.
+/// The tagging contract's own refusal, rendered.
 ///
-/// # Errors
-///
-/// `InvalidArgument` when an escape is truncated, is not hex, or decodes to bytes that are not
-/// UTF-8. The header's own wording says "encoded as UTF-8 **then** URLEncoded", so a sequence that
-/// survives the second step and fails the first is exactly what it is describing.
-fn form_decode(text: &str) -> Result<String, HandlerError> {
-    let bytes = text.as_bytes();
-    let mut out: Vec<u8> = Vec::with_capacity(bytes.len());
-    let mut index = 0;
-    while index < bytes.len() {
-        match bytes.get(index) {
-            Some(b'+') => out.push(b' '),
-            Some(b'%') => {
-                let hex = text
-                    .get(index + 1..index + 3)
-                    .ok_or_else(|| HandlerError::new(ErrorCode::INVALID_ARGUMENT, MALFORMED_TAGGING_HEADER))?;
-                let byte = u8::from_str_radix(hex, 16)
-                    .map_err(|_| HandlerError::new(ErrorCode::INVALID_ARGUMENT, MALFORMED_TAGGING_HEADER))?;
-                out.push(byte);
-                index += 2;
-            }
-            Some(byte) => out.push(*byte),
-            None => break,
-        }
-        index += 1;
-    }
-    String::from_utf8(out).map_err(|_| HandlerError::new(ErrorCode::INVALID_ARGUMENT, MALFORMED_TAGGING_HEADER))
+/// The wording is the contract's constant, never assembled from the header: a tag key is
+/// caller-chosen text and has no business inside an error body.
+fn refused_tagging(rejection: TaggingRejection) -> HandlerError {
+    HandlerError::new(rejection.code().clone(), rejection.reason())
 }
 
 /// A tag key, as the type the model gives it.
@@ -1539,27 +1524,22 @@ fn tag_elements(tags: &[(String, String)]) -> Result<Vec<dto::Tag>, HandlerError
 
 /// The `<Tagging>` document of a tagging write, read into ordered pairs.
 ///
-/// The twin of [`parse_tagging_header`] over the XML spelling. It refuses the same duplicate keys
-/// with the same code the header does, because the two are one rule over one field group and a
-/// document that could carry `a` twice would leave the object's tag set depending on which of the
-/// two a later reader happened to take.
+/// The twin of [`read_tagging_header`] over the XML spelling, and deliberately the same validator:
+/// count ceiling, length ceilings, character set and the duplicate-key refusal are all
+/// [`rustfs_gateway::validate_tag_set`] under the scope the caller names, so the two channels
+/// cannot drift apart on any of them.
 ///
 /// # Errors
 ///
-/// `InvalidTag` for a repeated key. Everything structural — a wrong root, a missing `<Key>` — was
-/// already refused by the generated decoder before this ran.
-fn tag_pairs(document: &dto::Tagging) -> Result<Vec<(String, String)>, HandlerError> {
-    let mut pairs: Vec<(String, String)> = Vec::new();
-    for tag in &document.tag_set {
-        let key = tag.key.as_str().to_owned();
-        if pairs.iter().any(|(existing, _)| existing == &key) {
-            return Err(HandlerError::new(
-                ErrorCode::INVALID_TAG,
-                "There are duplicate keys in your request. Please check and try again.",
-            ));
-        }
-        pairs.push((key, tag.value.clone()));
-    }
+/// `InvalidTag` for every semantic violation. Everything structural — a wrong root, a missing
+/// `<Key>` — was already refused by the generated decoder before this ran.
+fn tag_pairs(document: &dto::Tagging, scope: TagScope) -> Result<Vec<(String, String)>, HandlerError> {
+    let pairs: Vec<(String, String)> = document
+        .tag_set
+        .iter()
+        .map(|tag| (tag.key.as_str().to_owned(), tag.value.clone()))
+        .collect();
+    validate_tag_set(&pairs, scope).map_err(refused_tagging)?;
     Ok(pairs)
 }
 
@@ -1719,6 +1699,36 @@ impl Handler<dto::DeleteObjectTagging> for Stub {
         request: Req<dto::DeleteObjectTagging>,
     ) -> impl core::future::Future<Output = HandlerResult<dto::DeleteObjectTagging>> + Send {
         let outcome = self.delete_object_tagging(request.input());
+        async move { outcome }
+    }
+}
+
+impl Handler<dto::GetBucketTagging> for Stub {
+    fn call(
+        &self,
+        request: Req<dto::GetBucketTagging>,
+    ) -> impl core::future::Future<Output = HandlerResult<dto::GetBucketTagging>> + Send {
+        let outcome = self.get_bucket_tagging(request.input());
+        async move { outcome }
+    }
+}
+
+impl Handler<dto::PutBucketTagging> for Stub {
+    fn call(
+        &self,
+        request: Req<dto::PutBucketTagging>,
+    ) -> impl core::future::Future<Output = HandlerResult<dto::PutBucketTagging>> + Send {
+        let outcome = self.put_bucket_tagging(request.input());
+        async move { outcome }
+    }
+}
+
+impl Handler<dto::DeleteBucketTagging> for Stub {
+    fn call(
+        &self,
+        request: Req<dto::DeleteBucketTagging>,
+    ) -> impl core::future::Future<Output = HandlerResult<dto::DeleteBucketTagging>> + Send {
+        let outcome = self.delete_bucket_tagging(request.input());
         async move { outcome }
     }
 }
@@ -1905,7 +1915,7 @@ async fn put_object(state: &Arc<Mutex<Fixture>>, input: dto::PutObjectInput) -> 
     // The inline tag set, which is a different thing from the `?tagging` subresource: this header
     // is how a single-request write labels the object it is writing. Parsed before the write so a
     // malformed header is a refusal rather than an object stored with no tags and a 200.
-    object.tags = parse_tagging_header(input.tagging.as_deref())?;
+    object.tags = read_tagging_header(input.tagging.as_deref())?;
     if let Some(class) = input.storage_class.as_ref() {
         object.storage_class = class.to_string();
     }
@@ -2012,6 +2022,7 @@ impl Stub {
                 expires: object.expires.clone().map(Into::into),
                 metadata: object.metadata.clone(),
                 storage_class: storage_class_header(object),
+                tag_count: tag_count_header(object),
                 body: Some(ByteStream::from_bytes(bytes::Bytes::from(body))),
                 ..dto::GetObjectOutput::default()
             },
@@ -2072,6 +2083,7 @@ impl Stub {
                 expires: object.expires.clone().map(Into::into),
                 metadata: object.metadata.clone(),
                 storage_class: storage_class_header(object),
+                tag_count: tag_count_header(object),
                 ..dto::HeadObjectOutput::default()
             },
             status,
@@ -2173,7 +2185,7 @@ impl Stub {
         };
         object.tags = match tagging_from {
             MetadataFrom::Source => source_tags,
-            MetadataFrom::Request => parse_tagging_header(input.tagging.as_deref())?,
+            MetadataFrom::Request => read_tagging_header(input.tagging.as_deref())?,
         };
         if let Some(class) = input.storage_class.as_ref() {
             object.storage_class = class.to_string();
@@ -2300,7 +2312,7 @@ impl Stub {
     /// a versioned bucket and changed the object's modification time on every bucket, and a case
     /// asserting either afterwards would be measuring this file rather than the protocol.
     fn put_object_tagging(&self, input: &dto::PutObjectTaggingInput) -> HandlerResult<dto::PutObjectTagging> {
-        let pairs = tag_pairs(&input.tagging)?;
+        let pairs = tag_pairs(&input.tagging, TagScope::Object)?;
         let mut fixture = self.borrow()?;
         require_bucket(&fixture, &input.bucket)?;
         refuse_versioned_tagging(input.version_id.as_deref())?;
@@ -2326,6 +2338,53 @@ impl Stub {
             .ok_or_else(|| no_such_key(input.key.as_str()))?;
         object.tags.clear();
         Ok(Resp::new(dto::DeleteObjectTaggingOutput::default()))
+    }
+
+    /// The tag set of one bucket, or the read's own 404.
+    ///
+    /// The unconfigured answer is the *opposite* of the object read's: a bucket that never had a
+    /// tag set — or whose set was deleted, or cleared by an empty document — answers
+    /// `404 NoSuchTagSet`, the code `GetBucketTagging`'s spec declares as its
+    /// `not_configured_error`. Answering a `200` with an empty set here would make "unlabelled"
+    /// and "labelled with nothing" indistinguishable, which is precisely the distinction the two
+    /// scopes draw differently.
+    fn get_bucket_tagging(&self, input: &dto::GetBucketTaggingInput) -> HandlerResult<dto::GetBucketTagging> {
+        let fixture = self.borrow()?;
+        require_bucket(&fixture, &input.bucket)?;
+        let tags = fixture
+            .bucket_tags(input.bucket.as_str())
+            .ok_or_else(|| HandlerError::new(ErrorCode::NO_SUCH_TAG_SET, "The TagSet does not exist"))?;
+        Ok(Resp::new(dto::GetBucketTaggingOutput {
+            tag_set: tag_elements(tags)?,
+        }))
+    }
+
+    /// The whole bucket tag set, replaced — under the bucket scope's ceilings.
+    ///
+    /// The same shared validator the object write goes through, with `TagScope::Bucket` naming
+    /// the one rule that differs: fifty tags rather than ten. An empty `<TagSet/>` never reaches
+    /// here — `TagSet` is a required member, so the generated decoder answers it with
+    /// `MalformedXML` (`c-tagging-0005`); the delete is the clearing path. The empty-to-`None`
+    /// collapse below is therefore a defensive spelling of "a configured set is never empty",
+    /// not a wire behaviour.
+    fn put_bucket_tagging(&self, input: &dto::PutBucketTaggingInput) -> HandlerResult<dto::PutBucketTagging> {
+        let pairs = tag_pairs(&input.tagging, TagScope::Bucket)?;
+        let mut fixture = self.borrow()?;
+        require_bucket(&fixture, &input.bucket)?;
+        fixture.set_bucket_tags(input.bucket.as_str(), (!pairs.is_empty()).then_some(pairs));
+        Ok(Resp::new(dto::PutBucketTaggingOutput::default()))
+    }
+
+    /// The bucket's tag set removed, unconditionally.
+    ///
+    /// The `204` does not depend on a set being there — untagging an unlabelled bucket is a
+    /// success — but the bucket itself still has to exist: the request names one, and a success
+    /// for a missing bucket would tell the caller its delete landed somewhere.
+    fn delete_bucket_tagging(&self, input: &dto::DeleteBucketTaggingInput) -> HandlerResult<dto::DeleteBucketTagging> {
+        let mut fixture = self.borrow()?;
+        require_bucket(&fixture, &input.bucket)?;
+        fixture.set_bucket_tags(input.bucket.as_str(), None);
+        Ok(Resp::new(dto::DeleteBucketTaggingOutput::default()))
     }
 
     fn delete_objects(&self, input: &dto::DeleteObjectsInput) -> HandlerResult<dto::DeleteObjects> {

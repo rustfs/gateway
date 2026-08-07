@@ -21,7 +21,10 @@
 //! the body's integrity check, which `rustfs-gateway-http` settles before a handler sees anything.
 //! Upstream: `rustfs-gateway-types`' generated dto. Downstream: `crate::registry`.
 //!
-//! Shares: nothing. It carries no precondition header — a tagging write is not conditional.
+//! Shares: tagging. The document this operation carries is validated under
+//! [`crate::ops::shared::tagging`]'s object-scope rules — the same validator the packed
+//! `x-amz-tagging` header goes through — and [`TAG_SCOPE`] is where this file says which scope
+//! applies. It carries no precondition header — a tagging write is not conditional.
 //!
 //! # Why the row exists before a backend does
 //!
@@ -39,7 +42,11 @@ use rustfs_gateway_sig::{OperationFloor, SigService};
 use rustfs_gateway_types::dto::{PutObjectTagging, PutObjectTaggingInput, PutObjectTaggingOutput};
 
 use crate::op::{AuthRequirement, HasOperation, Operation, OperationOrigin, ResourceShape, StandardOperation};
+use crate::ops::shared::tagging::TagScope;
 use crate::registry::OperationSpec;
+
+/// The scope whose rules govern this write: an object's, ten tags at the ceiling.
+pub static TAG_SCOPE: TagScope = TagScope::Object;
 
 /// What this operation requires of a request once routing has chosen it.
 ///

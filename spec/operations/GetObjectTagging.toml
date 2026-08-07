@@ -11,7 +11,7 @@ precedence = 480
 success_status = 200
 alt_success_statuses = []
 predicates = ["Method GET", "Target Object", "QueryPresent ?tagging"]
-quirks = []
+quirks = ["q-tag-wrapped-0088", "q-tag-object-unconfigured-0090"]
 
 [auth]
 requirement = "Required"

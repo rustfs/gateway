@@ -1,0 +1,76 @@
+# c-tagging-0013 — the key and value length ceilings, one character past each.
+#
+# Schema dimensions exercised: both length ceilings, at their exact boundary plus one.
+
+[case]
+id = "c-tagging-0013"
+schema_version = 1
+title = "A 129-character key and a 257-character value are each a 400 InvalidTag"
+rationale = """
+The ceilings are 128 characters for a key and 256 for a value, counted in characters rather than \
+bytes, and off-by-one is the natural failure: a validator written with > where >= belongs accepts \
+exactly the first illegal length and nothing longer. A tag stored past the ceiling round-trips \
+here but is refused by AWS tooling reading the same bucket, so the divergence surfaces far from \
+the write that caused it."""
+polarity = "negative"
+operation = "PutObjectTagging"
+tags = ["tagging", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-tag-limits-0094"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/object-tagging.html"
+summary = "Keys are bounded at 128 characters and values at 256."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = true
+
+[[setup.buckets]]
+name = "conf-tagging"
+
+[[setup.objects]]
+bucket = "conf-tagging"
+key = "long.txt"
+body = { utf8 = "long" }
+
+[[exchanges]]
+name = "a-129-character-key-is-refused"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-tagging/long.txt?tagging"
+headers = { "content-md5" = "y6TgDDwf9APW/TiA2tHyAA==" }
+body = { utf8 = '<Tagging><TagSet><Tag><Key>kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk</Key><Value>v</Value></Tag></TagSet></Tagging>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[exchanges.expect.error]
+code = "InvalidTag"
+request_id_present = true
+
+[[exchanges]]
+name = "a-257-character-value-is-refused"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-tagging/long.txt?tagging"
+headers = { "content-md5" = "ziu4ZnUHVzZpdEzcmwyWaA==" }
+body = { utf8 = '<Tagging><TagSet><Tag><Key>k</Key><Value>vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv</Value></Tag></TagSet></Tagging>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[exchanges.expect.error]
+code = "InvalidTag"
+request_id_present = true

@@ -11,7 +11,7 @@ precedence = 900
 success_status = 200
 alt_success_statuses = []
 predicates = ["Method GET", "Target Object"]
-quirks = ["q-response-0023", "q-storageclass-0024"]
+quirks = ["q-response-0023", "q-storageclass-0024", "q-tag-count-omit-0095"]
 
 [auth]
 requirement = "Required"

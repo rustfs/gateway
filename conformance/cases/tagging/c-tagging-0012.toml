@@ -1,0 +1,69 @@
+# c-tagging-0012 — a fifty-first bucket tag is one past that scope's ceiling.
+#
+# Schema dimensions exercised: the per-scope count ceiling at the bucket scope.
+
+[case]
+id = "c-tagging-0012"
+schema_version = 1
+title = "PutBucketTagging with fifty-one tags is a 400 InvalidTag"
+rationale = """
+The bucket ceiling is fifty — five times the object's, and the pair is exactly where a shared \
+validator with one hard-coded limit goes wrong in one direction or the other. Accepting \
+fifty-one produces a bucket whose cost-allocation export the billing pipeline truncates or \
+rejects; enforcing ten here would refuse legitimate bucket labelling. The follow-up read proves \
+the oversized document was not applied in part."""
+polarity = "negative"
+operation = "PutBucketTagging"
+tags = ["tagging", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-tag-limits-0094"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/awsaccountbilling/latest/aboutv2/allocation-tag-restrictions.html"
+summary = "A bucket is bounded at fifty tags."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = true
+
+[[setup.buckets]]
+name = "conf-tagging"
+
+[[exchanges]]
+name = "fifty-one-tags-are-refused"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-tagging?tagging"
+headers = { "content-md5" = "jo3fccpZbusvjd7kxeh3nQ==" }
+body = { utf8 = '<Tagging><TagSet><Tag><Key>k0</Key><Value>v</Value></Tag><Tag><Key>k1</Key><Value>v</Value></Tag><Tag><Key>k2</Key><Value>v</Value></Tag><Tag><Key>k3</Key><Value>v</Value></Tag><Tag><Key>k4</Key><Value>v</Value></Tag><Tag><Key>k5</Key><Value>v</Value></Tag><Tag><Key>k6</Key><Value>v</Value></Tag><Tag><Key>k7</Key><Value>v</Value></Tag><Tag><Key>k8</Key><Value>v</Value></Tag><Tag><Key>k9</Key><Value>v</Value></Tag><Tag><Key>k10</Key><Value>v</Value></Tag><Tag><Key>k11</Key><Value>v</Value></Tag><Tag><Key>k12</Key><Value>v</Value></Tag><Tag><Key>k13</Key><Value>v</Value></Tag><Tag><Key>k14</Key><Value>v</Value></Tag><Tag><Key>k15</Key><Value>v</Value></Tag><Tag><Key>k16</Key><Value>v</Value></Tag><Tag><Key>k17</Key><Value>v</Value></Tag><Tag><Key>k18</Key><Value>v</Value></Tag><Tag><Key>k19</Key><Value>v</Value></Tag><Tag><Key>k20</Key><Value>v</Value></Tag><Tag><Key>k21</Key><Value>v</Value></Tag><Tag><Key>k22</Key><Value>v</Value></Tag><Tag><Key>k23</Key><Value>v</Value></Tag><Tag><Key>k24</Key><Value>v</Value></Tag><Tag><Key>k25</Key><Value>v</Value></Tag><Tag><Key>k26</Key><Value>v</Value></Tag><Tag><Key>k27</Key><Value>v</Value></Tag><Tag><Key>k28</Key><Value>v</Value></Tag><Tag><Key>k29</Key><Value>v</Value></Tag><Tag><Key>k30</Key><Value>v</Value></Tag><Tag><Key>k31</Key><Value>v</Value></Tag><Tag><Key>k32</Key><Value>v</Value></Tag><Tag><Key>k33</Key><Value>v</Value></Tag><Tag><Key>k34</Key><Value>v</Value></Tag><Tag><Key>k35</Key><Value>v</Value></Tag><Tag><Key>k36</Key><Value>v</Value></Tag><Tag><Key>k37</Key><Value>v</Value></Tag><Tag><Key>k38</Key><Value>v</Value></Tag><Tag><Key>k39</Key><Value>v</Value></Tag><Tag><Key>k40</Key><Value>v</Value></Tag><Tag><Key>k41</Key><Value>v</Value></Tag><Tag><Key>k42</Key><Value>v</Value></Tag><Tag><Key>k43</Key><Value>v</Value></Tag><Tag><Key>k44</Key><Value>v</Value></Tag><Tag><Key>k45</Key><Value>v</Value></Tag><Tag><Key>k46</Key><Value>v</Value></Tag><Tag><Key>k47</Key><Value>v</Value></Tag><Tag><Key>k48</Key><Value>v</Value></Tag><Tag><Key>k49</Key><Value>v</Value></Tag><Tag><Key>k50</Key><Value>v</Value></Tag></TagSet></Tagging>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[exchanges.expect.error]
+code = "InvalidTag"
+request_id_present = true
+
+[[exchanges]]
+name = "none-of-them-were-applied"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-tagging?tagging"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 404
+connection_after = "open"
+
+[exchanges.expect.error]
+code = "NoSuchTagSet"
+request_id_present = true

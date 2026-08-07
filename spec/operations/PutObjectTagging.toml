@@ -11,7 +11,7 @@ precedence = 490
 success_status = 200
 alt_success_statuses = []
 predicates = ["Method PUT", "Target Object", "QueryPresent ?tagging"]
-quirks = []
+quirks = ["q-tag-md5-required-0092", "q-tag-limits-0094"]
 
 [auth]
 requirement = "Required"

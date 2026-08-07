@@ -53,6 +53,10 @@ pub use crate::ops::delete_bucket_cors::{
     DeleteBucketCors, Input as DeleteBucketCorsInput, InputBuilder as DeleteBucketCorsInputBuilder,
     Output as DeleteBucketCorsOutput,
 };
+pub use crate::ops::delete_bucket_tagging::{
+    DeleteBucketTagging, Input as DeleteBucketTaggingInput, InputBuilder as DeleteBucketTaggingInputBuilder,
+    Output as DeleteBucketTaggingOutput,
+};
 pub use crate::ops::delete_object::{
     DeleteObject, Input as DeleteObjectInput, InputBuilder as DeleteObjectInputBuilder, Output as DeleteObjectOutput,
 };
@@ -69,6 +73,10 @@ pub use crate::ops::get_bucket_cors::{
 pub use crate::ops::get_bucket_location::{
     GetBucketLocation, Input as GetBucketLocationInput, InputBuilder as GetBucketLocationInputBuilder,
     Output as GetBucketLocationOutput,
+};
+pub use crate::ops::get_bucket_tagging::{
+    GetBucketTagging, Input as GetBucketTaggingInput, InputBuilder as GetBucketTaggingInputBuilder,
+    Output as GetBucketTaggingOutput,
 };
 pub use crate::ops::get_object::{
     GetObject, Input as GetObjectInput, InputBuilder as GetObjectInputBuilder, Output as GetObjectOutput,
@@ -106,6 +114,10 @@ pub use crate::ops::list_parts::{
 };
 pub use crate::ops::put_bucket_cors::{
     Input as PutBucketCorsInput, InputBuilder as PutBucketCorsInputBuilder, Output as PutBucketCorsOutput, PutBucketCors,
+};
+pub use crate::ops::put_bucket_tagging::{
+    Input as PutBucketTaggingInput, InputBuilder as PutBucketTaggingInputBuilder, Output as PutBucketTaggingOutput,
+    PutBucketTagging,
 };
 pub use crate::ops::put_object::{
     Input as PutObjectInput, InputBuilder as PutObjectInputBuilder, Output as PutObjectOutput, PutObject,

@@ -15,8 +15,79 @@
 # Family: bucket subresource configuration.
 #
 # One Get/Put/Delete triple per subresource, every one of them sharing the "unconfigured
-# subresource answers a per-operation 404 code" rule. The CORS triple is the first of them to
-# land and lives in its own family file, `ops/cors.toml`; the rest stay deferred here.
+# subresource answers a per-operation 404 code" rule. The CORS triple landed first and lives in
+# its own family file, `ops/cors.toml`, at 310/320/330; the tagging triple is `include`d here as
+# the family's calibration sample, because it collects every generic trap of the configuration
+# operations in one place: the wrapped `<TagSet><Tag>` collection, the per-operation
+# `not_configured` 404, the `httpChecksumRequired` write, and the unconditional `204` delete.
+# The rest of the family stays deferred and should follow this triple's shape.
+#
+# The three rows land in the bucket subresource band, after `?location` at 300 and the `?cors`
+# band at 310-330: 340 (GET), 350 (PUT), 360 (DELETE) — 370-390 are spoken for by the lifecycle
+# family. Only the GET has same-method neighbours to order against: `?tagging` sits ahead of the
+# listings (600-700) for the same reason `?location` and `?cors` do, and behind both of those
+# only because a request naming two subresources needs *some* fixed answer and the band is
+# ordered by arrival. `PUT /b?tagging` and `DELETE /b?tagging` order only against their `?cors`
+# method twins, in the same arrival order.
+
+include = ["DeleteBucketTagging", "GetBucketTagging", "PutBucketTagging"]
+
+# =============================================================================================
+# GetBucketTagging
+#
+# The tag set of one bucket. The wire shape is the object read's — the output carries
+# `xmlName = "Tagging"` and a wrapped `TagSet` list — but the unconfigured answer is not:
+# a bucket that never had a tag set answers `404 NoSuchTagSet`, where the object read answers
+# `200` with an empty set. `not_configured` is the declaration a client's branch depends on;
+# a generic not-found here would read as "no such bucket".
+# =============================================================================================
+[op.GetBucketTagging]
+precedence = 340
+auth_action = "s3:GetBucketTagging"
+# Fifty pairs of a 128-character key and a 256-character value, each character up to four UTF-8
+# bytes, plus markup: an order of magnitude under 256 KiB, which still bounds the XML surface.
+response_max_bytes = 262144
+error_codes = ["NoSuchBucket", "NoSuchTagSet", "AccessDenied", "InvalidArgument"]
+not_configured = "NoSuchTagSet"
+element_order = ["TagSet"]
+url_encoded_fields = []
+output_hot = ["TagSet"]
+quirk_refs = ["q-tag-wrapped-0088", "q-tag-bucket-unconfigured-0089"]
+
+# =============================================================================================
+# PutBucketTagging
+#
+# Replaces the whole tag set; there is no partial update. `TagSet` is a required member, so
+# the empty document is refused by the decoder with `MalformedXML` — the delete is the
+# clearing path.
+# =============================================================================================
+[op.PutBucketTagging]
+precedence = 350
+auth_action = "s3:PutBucketTagging"
+# The pinned model carries `aws.protocols#httpChecksum` with `requestChecksumRequired` — the same
+# trait spelling PutObjectTagging and DeleteObjects have, which lowering does not read — so the
+# requirement is stated here rather than silently lost: a tagging write with neither Content-MD5
+# nor an x-amz-checksum-* header is refused before the handler runs.
+http_checksum_required = true
+# The request ceiling matches the response ceiling of the read: fifty maximal tags with markup.
+request_max_bytes = 262144
+error_codes = ["NoSuchBucket", "AccessDenied", "InvalidArgument", "MalformedXML", "InvalidTag"]
+url_encoded_fields = []
+input_hot = ["Tagging"]
+quirk_refs = ["q-tag-md5-required-0092", "q-tag-limits-0094"]
+
+# =============================================================================================
+# DeleteBucketTagging
+#
+# Removes the whole tag set. The model already answers 204, and the 204 is unconditional:
+# untagging a bucket that carries no tags is a success, exactly as the object delete is.
+# =============================================================================================
+[op.DeleteBucketTagging]
+precedence = 360
+auth_action = "s3:DeleteBucketTagging"
+error_codes = ["NoSuchBucket", "AccessDenied", "InvalidArgument"]
+url_encoded_fields = []
+quirk_refs = ["q-tag-delete-idempotent-0091"]
 
 [[deferred]]
 reason = "P5 bucket subresource configuration family; one Get/Put/Delete triple per subresource, all sharing the not_configured 404 rule."
@@ -29,7 +100,6 @@ operations = [
   "DeleteBucketMetricsConfiguration",
   "DeleteBucketOwnershipControls",
   "DeleteBucketReplication",
-  "DeleteBucketTagging",
   "DeleteBucketWebsite",
   "GetBucketAccelerateConfiguration",
   "GetBucketAcl",
@@ -44,7 +114,6 @@ operations = [
   "GetBucketOwnershipControls",
   "GetBucketReplication",
   "GetBucketRequestPayment",
-  "GetBucketTagging",
   "GetBucketVersioning",
   "GetBucketWebsite",
   "ListBucketAnalyticsConfigurations",
@@ -64,7 +133,6 @@ operations = [
   "PutBucketOwnershipControls",
   "PutBucketReplication",
   "PutBucketRequestPayment",
-  "PutBucketTagging",
   "PutBucketVersioning",
   "PutBucketWebsite",
 ]

@@ -522,6 +522,53 @@ fn the_generated_router_still_serves_the_listing_beside_the_cors_rows() {
     assert_eq!(dispatch.entry.op_name, "ListObjects");
 }
 
+/// Negative — an unhandled *bucket* tagging request is refused by name, in all three methods.
+///
+/// The bucket-scope twin of the object-band block above and the CORS block beside it, with a
+/// different wrong answer to exclude: before the rows existed the GET was claimed by
+/// `ListObjects` and answered with a page of keys, and the PUT and DELETE were unroutable. All
+/// three must now come back as the second `501`, naming the bucket operation the request asked
+/// for.
+#[test]
+fn n_an_unhandled_bucket_tagging_request_is_refused_rather_than_answered_by_a_listing() {
+    let mut registry = Registry::new();
+    registry.register(&LIST_OBJECTS).expect("a registrable spec");
+    let router = Router::from_generated(registry).expect("the generated table builds");
+
+    for (line, expected) in [
+        ("GET /bucket?tagging", "GetBucketTagging"),
+        ("PUT /bucket?tagging", "PutBucketTagging"),
+        ("DELETE /bucket?tagging", "DeleteBucketTagging"),
+    ] {
+        let error = router
+            .dispatch(&Req::new(line).parts())
+            .expect_err("this registry handles no bucket tagging operation");
+        assert_eq!(*error.code(), ErrorCode::NOT_IMPLEMENTED, "{line}");
+        assert_eq!(error.message(), NOT_REGISTERED_MESSAGE, "{line}");
+        assert_eq!(error.operation(), Some(expected), "{line} must name the operation it asked for");
+    }
+}
+
+/// The bucket-scope unconfigured answer is declared, not improvised: `GetBucketTagging`'s spec
+/// carries `NoSuchTagSet` as its `not_configured_error`, and the code's own status is the 404 a
+/// client branches on. The object read deliberately declares none — its empty answer is a `200`.
+#[test]
+fn the_bucket_tagging_read_declares_its_own_not_configured_code() {
+    use rustfs_gateway_core::op::Operation;
+    let code = rustfs_gateway_types::dto::GetBucketTagging::spec()
+        .not_configured_error
+        .clone()
+        .expect("the bucket subresource declares one");
+    assert_eq!(code, ErrorCode::NO_SUCH_TAG_SET);
+    assert_eq!(code.default_status(), StatusCode::NOT_FOUND);
+    assert!(
+        rustfs_gateway_types::dto::GetObjectTagging::spec()
+            .not_configured_error
+            .is_none(),
+        "the object read answers 200 with an empty set, never NoSuchTagSet"
+    );
+}
+
 /// A parameter check without a route never runs: the order of the three questions is fixed.
 #[test]
 fn a_request_that_does_not_route_never_reaches_parameter_validation() {

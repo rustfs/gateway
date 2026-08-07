@@ -18,19 +18,18 @@
 //! the plain object band's, and that the fixture answers them out of what the request that wrote the
 //! tags actually sent. The positive case is the pair of exchanges `c-copy-0008` asserts, replayed
 //! here through the same facade.
-//! NOT responsible for: the corpus verdict for that case. `c-copy-0008` runs against
-//! `crate::inprocess`, whose `ServiceBuilder` chain does not yet register the three tagging
-//! handlers — a change in a file this task may not touch — so the case stays red on a `501` from
-//! dispatch while everything below it is green here. See `crates/conformance/MAP.md`.
+//! NOT responsible for: the corpus verdict. `crate::inprocess` now registers the whole tagging
+//! family, so `c-copy-0008` and the `tagging/` domain run against the real assembly; what this
+//! file keeps is the finer-grained view — fixture state inspected directly between exchanges,
+//! which no corpus case can do. See `crates/conformance/MAP.md`.
 //! Upstream: the published API of `rustfs_gateway` and `rustfs_gateway_conformance::fixture`.
 //! Downstream: nothing.
 //!
 //! # Why this service is assembled by hand, and why it still signs
 //!
-//! `InProcess` is the transport the corpus runs on, and its `ServiceBuilder` chain is the one line
-//! this task may not add to. So the service is assembled here instead, over the same [`Stub`] and
-//! the same credentials — and every request is really signed, because every AWS operation ships
-//! with `AllowedSchemes::HEADER_ONLY` and an unsigned one is refused by the floor before routing.
+//! The service is assembled here over the same [`Stub`] and the same credentials the corpus
+//! transport uses — and every request is really signed, because every AWS operation ships with
+//! `AllowedSchemes::HEADER_ONLY` and an unsigned one is refused by the floor before routing.
 //! Nothing about the tagging band would be observable through a `403`.
 
 use std::sync::{Arc, Mutex};

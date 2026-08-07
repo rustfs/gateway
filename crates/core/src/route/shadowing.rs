@@ -218,6 +218,80 @@ pub static PROVISIONAL_SHADOWING: &[ShadowingDecl] = &[
                  the version discriminator.",
         evidence: &[VERSIONS_DOC, LIST_V1_DOC],
     },
+    // The bucket tagging band is the bucket-subresource shape again, one band behind `?cors`. The
+    // GET meets `?location` and `?cors` above it and every bucket listing below it; the PUT and
+    // DELETE meet only their `?cors` method twins, which is the bucket band's first cross-family
+    // pair outside the GET method.
+    ShadowingDecl {
+        winner: "GetBucketLocation",
+        shadowed: "GetBucketTagging",
+        reason: "?location and ?tagging name two subresources of one bucket, and a request sending \
+                 both asks two questions at once. AWS documents no such combination, so the answer \
+                 is fixed here rather than left to source order: 300 is tried before 340, and the \
+                 tagging reading is ignored rather than merged into the answer.",
+        evidence: &[LOCATION_DOC, GET_BUCKET_TAGGING_DOC],
+    },
+    ShadowingDecl {
+        winner: "GetBucketCors",
+        shadowed: "GetBucketTagging",
+        reason: "?cors and ?tagging name two configuration documents of one bucket, and a request \
+                 sending both keys reaches both rows. AWS documents no such combination, so the \
+                 band order decides: ?cors at 310 arrived first and is tried before ?tagging at \
+                 340; the tagging reading is ignored rather than merged into the answer.",
+        evidence: &[GET_BUCKET_CORS_DOC, GET_BUCKET_TAGGING_DOC],
+    },
+    ShadowingDecl {
+        winner: "PutBucketCors",
+        shadowed: "PutBucketTagging",
+        reason: "PUT /b?cors&tagging carries one body and names two documents to replace with it, \
+                 which cannot both be meant. The same arrival order as the GET pair decides (320 \
+                 before 350): the body is read as the CORS document it would have to be for the \
+                 winning row, and the tagging reading is ignored rather than applied to a document \
+                 of the wrong shape.",
+        evidence: &[PUT_BUCKET_CORS_DOC, PUT_BUCKET_TAGGING_DOC],
+    },
+    ShadowingDecl {
+        winner: "DeleteBucketCors",
+        shadowed: "DeleteBucketTagging",
+        reason: "DELETE /b?cors&tagging asks to remove two configurations at once, which AWS does \
+                 not document; one 204 cannot report two removals. The arrival order decides (330 \
+                 before 360) and only the CORS configuration is removed — consistent with the GET \
+                 and PUT pairs, so the whole cross-family decision is one rule in three methods.",
+        evidence: &[DELETE_BUCKET_CORS_DOC, DELETE_BUCKET_TAGGING_DOC],
+    },
+    ShadowingDecl {
+        winner: "GetBucketTagging",
+        shadowed: "ListMultipartUploads",
+        reason: "?tagging and ?uploads together name a subresource and a listing of the same \
+                 bucket. The subresource band (340) is tried before the upload listing (460), the \
+                 same order the ?location pair above settled.",
+        evidence: &[GET_BUCKET_TAGGING_DOC, UPLOADS_DOC],
+    },
+    ShadowingDecl {
+        winner: "GetBucketTagging",
+        shadowed: "ListObjectsV2",
+        reason: "A request carrying both ?tagging and ?list-type=2 asks for the bucket's labels \
+                 and for a page of its keys at once. The subresource is the narrower question and \
+                 is tried first (340 before 600); the listing is ignored.",
+        evidence: &[GET_BUCKET_TAGGING_DOC, LIST_V2_DOC],
+    },
+    ShadowingDecl {
+        winner: "GetBucketTagging",
+        shadowed: "ListObjectVersions",
+        reason: "Same shape as the pair above with the version listing in place of the key \
+                 listing: only a client sending ?tagging and ?versions together reaches it, and \
+                 the subresource band is tried first.",
+        evidence: &[GET_BUCKET_TAGGING_DOC, VERSIONS_DOC],
+    },
+    ShadowingDecl {
+        winner: "GetBucketTagging",
+        shadowed: "ListObjects",
+        reason: "ListObjects pins no query key, so every ?tagging request also satisfies it — and \
+                 before the row at 340 existed, that is exactly what happened: a request for the \
+                 bucket's labels was answered with a page of its keys. The subresource is the \
+                 specific reading and wins; the fallback stays last in the band.",
+        evidence: &[GET_BUCKET_TAGGING_DOC, LIST_V1_DOC],
+    },
     // The multipart family adds the second shape. `PUT /b/k?partNumber&uploadId` is every request
     // `PutObject` accepts, plus two query keys — a strict refinement of a plain object operation
     // rather than two subresources meeting by accident. The overlap is the design, and each row
@@ -547,6 +621,26 @@ const OBJECT_ATTRIBUTES_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest
 /// AWS's own reference for the tag-set read.
 const GET_OBJECT_TAGGING_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObjectTagging.html \
      — a tag-set read is a GET to the object key carrying the ?tagging subresource, and it answers with the tag set rather than with the object.";
+
+/// AWS's own reference for the bucket-scope tag-set read.
+const GET_BUCKET_TAGGING_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketTagging.html \
+     — a bucket tag-set read is a GET on the bucket carrying the ?tagging subresource, and it defines no other selector.";
+
+/// AWS's own reference for the bucket-scope tag-set replacement.
+const PUT_BUCKET_TAGGING_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketTagging.html \
+     — a bucket tag-set write is a PUT on the bucket carrying the ?tagging subresource, and its body is the tagging document.";
+
+/// AWS's own reference for the bucket-scope tag-set removal.
+const DELETE_BUCKET_TAGGING_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketTagging.html \
+     — a bucket tag-set removal is a DELETE on the bucket carrying the ?tagging subresource, and it leaves the bucket in place.";
+
+/// AWS's own reference for the CORS document write.
+const PUT_BUCKET_CORS_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketCors.html \
+     — a CORS configuration write is a PUT on the bucket carrying the ?cors subresource, and its body is the configuration document.";
+
+/// AWS's own reference for the CORS document removal.
+const DELETE_BUCKET_CORS_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketCors.html \
+     — a CORS configuration removal is a DELETE on the bucket carrying the ?cors subresource.";
 
 /// AWS's own reference for the tag-set replacement.
 const PUT_OBJECT_TAGGING_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObjectTagging.html \

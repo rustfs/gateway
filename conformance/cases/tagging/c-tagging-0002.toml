@@ -1,0 +1,94 @@
+# c-tagging-0002 — DeleteBucketTagging answers 204 and the set is really gone.
+#
+# Schema dimensions exercised: three-exchange lifecycle, empty 204, byte-exact error document.
+
+[case]
+id = "c-tagging-0002"
+schema_version = 1
+title = "Deleting a bucket tag set is a bare 204, after which the read answers NoSuchTagSet"
+rationale = """
+The delete and the read are a pair: tooling that removes a cost-allocation tag set verifies the \
+removal by reading it back, and it branches on the dedicated NoSuchTagSet code to distinguish \
+cleared from bucket-gone. An implementation that answers the delete with a 200, leaves the set \
+behind, or maps the follow-up read onto a generic 404 breaks one of the two halves; this case \
+holds both, including the exact bytes of the error document."""
+polarity = "positive"
+operation = "DeleteBucketTagging"
+tags = ["tagging", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-tag-delete-idempotent-0091", "q-tag-bucket-unconfigured-0089"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketTagging.html"
+summary = "The documented success is 204 No Content."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketTagging.html"
+summary = "A bucket without a tag set answers the dedicated NoSuchTagSet error."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = true
+
+[[setup.buckets]]
+name = "conf-tagging"
+
+[[exchanges]]
+name = "configure-the-set"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-tagging?tagging"
+headers = { "content-md5" = "yCOypLbxO60nLheN0kuUdQ==" }
+body = { utf8 = '<Tagging><TagSet><Tag><Key>owner</Key><Value>conformance</Value></Tag></TagSet></Tagging>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[[exchanges]]
+name = "delete-it"
+
+[exchanges.request]
+method = "DELETE"
+target = "/conf-tagging?tagging"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 204
+headers_absent = ["content-length", "content-type", "transfer-encoding"]
+connection_after = "open"
+
+[exchanges.expect.body]
+size = 0
+exact_utf8 = ""
+
+[[exchanges]]
+name = "the-read-finds-nothing"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-tagging?tagging"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 404
+connection_after = "open"
+
+[exchanges.expect.error]
+code = "NoSuchTagSet"
+request_id_present = true
+
+[exchanges.expect.body]
+redact = ["RequestId", "HostId"]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>NoSuchTagSet</Code><Message>The TagSet does not exist</Message><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''

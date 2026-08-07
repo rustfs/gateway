@@ -20,7 +20,8 @@
 //! `generated/codec/ops/delete_object_tagging.rs` from `generated/ir/DeleteObjectTagging.json`.
 //! Upstream: `rustfs-gateway-types`' generated dto. Downstream: `crate::registry`.
 //!
-//! Shares: nothing. It has no body in either direction.
+//! Shares: tagging. It has no body in either direction; what it clears is a set the shared
+//! contract validated on the way in, and [`TAG_SCOPE`] says under which scope's rules.
 //!
 //! # Why the row exists before a backend does
 //!
@@ -36,7 +37,11 @@ use rustfs_gateway_sig::{OperationFloor, SigService};
 use rustfs_gateway_types::dto::{DeleteObjectTagging, DeleteObjectTaggingInput, DeleteObjectTaggingOutput};
 
 use crate::op::{AuthRequirement, HasOperation, Operation, OperationOrigin, ResourceShape, StandardOperation};
+use crate::ops::shared::tagging::TagScope;
 use crate::registry::OperationSpec;
+
+/// The scope whose rules govern the set this operation clears: an object's.
+pub static TAG_SCOPE: TagScope = TagScope::Object;
 
 /// What this operation requires of a request once routing has chosen it.
 static SPEC: OperationSpec = OperationSpec {

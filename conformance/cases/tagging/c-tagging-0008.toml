@@ -1,0 +1,71 @@
+# c-tagging-0008 — a bucket tagging write with no integrity header is refused unread.
+#
+# Schema dimensions exercised: the httpChecksumRequired guard, refusal-then-verify pairing.
+
+[case]
+id = "c-tagging-0008"
+schema_version = 1
+title = "PutBucketTagging without Content-MD5 or a checksum header is a 400 InvalidRequest"
+rationale = """
+The tagging writes are in the checksum-required operation set because the document is small, \
+authoritative, and replaces everything: one flipped bit in transit relabels a bucket and nothing \
+downstream can tell. The refusal has to come before the document is applied — a server that \
+stores first and checks second has already lost the set it was protecting — so the case verifies \
+with a follow-up read that nothing was written."""
+polarity = "negative"
+operation = "PutBucketTagging"
+tags = ["tagging", "checksum", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-tag-md5-required-0092"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketTagging.html"
+summary = "Content-MD5 is documented as required for this operation."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = true
+
+[[setup.buckets]]
+name = "conf-tagging"
+
+[[exchanges]]
+name = "the-unprotected-write-is-refused"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-tagging?tagging"
+body = { utf8 = '<Tagging><TagSet><Tag><Key>a</Key><Value>1</Value></Tag></TagSet></Tagging>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[exchanges.expect.error]
+code = "InvalidRequest"
+request_id_present = true
+
+[exchanges.expect.body]
+contains_utf8 = ["Content-MD5"]
+
+[[exchanges]]
+name = "nothing-was-written"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-tagging?tagging"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 404
+connection_after = "open"
+
+[exchanges.expect.error]
+code = "NoSuchTagSet"
+request_id_present = true

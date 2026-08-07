@@ -38,7 +38,7 @@ error_codes = [
   "PreconditionFailed",
   "NotModified",
 ]
-quirk_refs = ["q-response-0023", "q-storageclass-0024"]
+quirk_refs = ["q-response-0023", "q-storageclass-0024", "q-tag-count-omit-0095"]
 input_hot = ["Range", "IfMatch", "IfNoneMatch", "IfModifiedSince", "IfUnmodifiedSince"]
 output_hot = ["Body", "ETag", "ContentLength", "ContentType", "LastModified"]
 
@@ -241,7 +241,7 @@ error_codes = [
   "PreconditionFailed",
   "ConditionalRequestConflict",
 ]
-quirk_refs = ["q-checksum-0006"]
+quirk_refs = ["q-checksum-0006", "q-tag-header-form-0093"]
 # The ten per-algorithm checksum headers collapse into one packed ChecksumSpec field; carrying
 # them separately would put ten Option<String> on the hot path and make "more than one checksum
 # header" a merge instead of an error. See q-checksum-0006.

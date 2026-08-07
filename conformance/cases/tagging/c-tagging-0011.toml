@@ -1,0 +1,75 @@
+# c-tagging-0011 — an eleventh object tag is one past the ceiling.
+#
+# Schema dimensions exercised: the per-scope count ceiling at the object scope.
+
+[case]
+id = "c-tagging-0011"
+schema_version = 1
+title = "PutObjectTagging with eleven tags is a 400 InvalidTag"
+rationale = """
+The object ceiling is ten, and it is a protocol limit rather than a storage one: IAM policy \
+conditions and lifecycle filters are written against a bounded set, and an implementation that \
+accepts eleven creates objects whose labels other AWS tooling refuses to process. The refusal \
+must be whole — a server that stores the first ten and drops the eleventh has invented a merge \
+semantics the operation does not have — so the case verifies nothing was applied."""
+polarity = "negative"
+operation = "PutObjectTagging"
+tags = ["tagging", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-tag-limits-0094"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/object-tagging.html"
+summary = "An object is bounded at ten tags."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = true
+
+[[setup.buckets]]
+name = "conf-tagging"
+
+[[setup.objects]]
+bucket = "conf-tagging"
+key = "eleven.txt"
+body = { utf8 = "eleven" }
+
+[[exchanges]]
+name = "eleven-tags-are-refused"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-tagging/eleven.txt?tagging"
+headers = { "content-md5" = "Ei0JUeii9NEQQ/GvSatyDQ==" }
+body = { utf8 = '<Tagging><TagSet><Tag><Key>k0</Key><Value>v</Value></Tag><Tag><Key>k1</Key><Value>v</Value></Tag><Tag><Key>k2</Key><Value>v</Value></Tag><Tag><Key>k3</Key><Value>v</Value></Tag><Tag><Key>k4</Key><Value>v</Value></Tag><Tag><Key>k5</Key><Value>v</Value></Tag><Tag><Key>k6</Key><Value>v</Value></Tag><Tag><Key>k7</Key><Value>v</Value></Tag><Tag><Key>k8</Key><Value>v</Value></Tag><Tag><Key>k9</Key><Value>v</Value></Tag><Tag><Key>k10</Key><Value>v</Value></Tag></TagSet></Tagging>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[exchanges.expect.error]
+code = "InvalidTag"
+request_id_present = true
+
+[[exchanges]]
+name = "none-of-them-were-applied"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-tagging/eleven.txt?tagging"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.body]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Tagging xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><TagSet></TagSet></Tagging>'''

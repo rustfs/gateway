@@ -1,0 +1,72 @@
+# c-tagging-0003 — the x-amz-tagging header is URL query-string encoded.
+#
+# Schema dimensions exercised: the header channel of the tag set, form decoding, read-back through
+# the subresource.
+
+[case]
+id = "c-tagging-0003"
+schema_version = 1
+title = "A PutObject inline tag set is form-decoded: a%20b=c%2Bd names key 'a b' and value 'c+d'"
+rationale = """
+The inline header is the only way a single-request writer labels an object, and its value is \
+form-urlencoded — %20 is a space, %2B is a plus, and a literal + is a space too. An implementation \
+that stores the header undecoded leaves tags under names like 'a%20b' that no policy condition \
+and no later request can spell, and the error is invisible until an IAM condition silently stops \
+matching. The read-back through GetObjectTagging is where the decoding becomes observable."""
+polarity = "positive"
+operation = "PutObject"
+tags = ["tagging", "encoding"]
+timeout_ms = 10000
+quirks = ["q-tag-header-form-0093"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObject.html"
+summary = "The header's documented form is URL query parameters, which implies percent-decoding on the way in."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObjectTagging.html"
+summary = "The subresource read returns the decoded tag set."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = true
+
+[[setup.buckets]]
+name = "conf-tagging"
+
+[[exchanges]]
+name = "write-with-the-inline-header"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-tagging/labelled.txt"
+headers = { "x-amz-tagging" = "a%20b=c%2Bd&plain=1", "content-type" = "text/plain" }
+body = { utf8 = "hello tags" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[[exchanges]]
+name = "read-back-decoded"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-tagging/labelled.txt?tagging"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.body]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Tagging xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><TagSet><Tag><Key>a b</Key><Value>c+d</Value></Tag><Tag><Key>plain</Key><Value>1</Value></Tag></TagSet></Tagging>'''
