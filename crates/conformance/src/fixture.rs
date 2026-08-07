@@ -3213,7 +3213,10 @@ impl Stub {
     /// replication configuration of a bucket that has none is a success, not a `404`. The
     /// bucket itself still has to exist — a success for a bucket that is not there would tell a
     /// caller its teardown landed on something.
-    fn delete_bucket_replication(&self, input: &dto::DeleteBucketReplicationInput) -> HandlerResult<dto::DeleteBucketReplication> {
+    fn delete_bucket_replication(
+        &self,
+        input: &dto::DeleteBucketReplicationInput,
+    ) -> HandlerResult<dto::DeleteBucketReplication> {
         let mut fixture = self.borrow()?;
         require_bucket(&fixture, &input.bucket)?;
         fixture.clear_replication(input.bucket.as_str());

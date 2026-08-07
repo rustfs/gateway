@@ -1349,7 +1349,6 @@ fn n_the_bucket_bands_are_unchanged_by_the_replication_band() {
     }
 }
 
-
 /// c-route-1001 — two subresources at one precedence, reachable together.
 #[test]
 fn two_subresources_at_one_precedence_are_a_conflict() {

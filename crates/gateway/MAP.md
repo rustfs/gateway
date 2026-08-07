@@ -48,6 +48,7 @@ everything a consumer needs so that nothing downstream depends on `-core`, `-sig
 | `tests/connection_teardown.rs` | That the connection verdict branches and reaches the response, that the two `403`s do not share one, and that nothing here claims to have observed a socket; 9 negative, 1 positive |
 | `tests/facade_probe.rs` | Every export the conformance runner's `REQUIRED_FACADE_EXPORTS` names, checked by naming it |
 | `tests/backend_reachability.rs` | Every argument of the range contract, built from a decoded request and never from a literal; 5 negative, 1 positive. Read this before adding a constructor a backend is meant to call |
+| `tests/replication_token.rs` | That `x-amz-bucket-object-lock-token` reaches a handler off a decoded `PutBucketReplication`, present **and** absent; 2 negative, 1 positive. It exists because a header parsed and then dropped answers 200 exactly like one that arrived, so the conformance case could not tell them apart |
 | `examples/minimal.rs` | The whole assembly in one file, asserting one answered request and one refused one |
 
 ## Known gaps, recorded rather than discovered
