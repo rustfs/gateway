@@ -347,29 +347,30 @@ const SEMICOLON: usize = 1;
 /// caller's template must not put one in front of it, or the continuation form would leave
 /// trailing whitespace on the line above.
 ///
-/// Two limits decide the layout and both have to hold: the bracketed expression fits
-/// `array_width`, and the finished line fits `max_width`. Checking only the first produces a line
-/// that is under seventy-eight characters of literal and over a hundred and thirty of line, which
-/// rustfmt then rewrites — and `cargo xtask spec verify` reports as drift the next time anybody
-/// formats the tree.
+/// Two limits decide the layout and both have to hold: the contents fit `array_width`, and the
+/// finished line fits `max_width`. Checking only the first produces a line that is under
+/// seventy-eight characters of literal and over a hundred and thirty of line, which rustfmt then
+/// rewrites — and `cargo xtask spec verify` reports as drift the next time anybody formats the
+/// tree.
 #[must_use]
 pub fn slice_literal(items: &[String], indent: usize, lead: &str) -> String {
     let single = format!("&[{}]", items.join(", "));
-    // `array_width` measures the bracketed expression; the borrow in front of it is a separate
-    // expression and does not count towards it. One character, and it decides the layout of every
-    // list that lands between seventy-eight and seventy-nine.
-    let bracketed = single.len().saturating_sub(1);
+    // `array_width` measures the array's *contents* — the delimiters that hold them and the borrow
+    // in front are both outside the budget, so all three characters of `&[]` come off. Measuring
+    // the brackets as well would explode every list eighty or eighty-one characters wide, which
+    // rustfmt keeps on one line, and `cargo fmt` would rewrite the tree that codegen just checked in.
+    let contents = single.len().saturating_sub("&[]".len());
     // The declaration in front, the literal, and the semicolon after it: that is the line rustfmt
     // measures, so it is the line measured here.
     let inline_line = lead.len() + single.len() + SEMICOLON;
-    if bracketed <= ARRAY_WIDTH && inline_line <= MAX_WIDTH {
+    if contents <= ARRAY_WIDTH && inline_line <= MAX_WIDTH {
         return format!(" {single}");
     }
     // Before expanding one item per line, rustfmt tries the whole literal on the next line at one
     // further indent. Skipping that step produces a vertical list rustfmt immediately collapses.
     let continued = indent + 4;
     let continued_line = continued + single.len() + SEMICOLON;
-    if bracketed <= ARRAY_WIDTH && continued_line <= MAX_WIDTH {
+    if contents <= ARRAY_WIDTH && continued_line <= MAX_WIDTH {
         return format!("\n{}{single}", " ".repeat(continued));
     }
     let pad = " ".repeat(continued);
