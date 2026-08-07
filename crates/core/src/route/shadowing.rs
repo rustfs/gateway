@@ -452,10 +452,11 @@ pub static PROVISIONAL_SHADOWING: &[ShadowingDecl] = &[
                  delete answers with.",
         evidence: &[DELETE_OBJECT_TAGGING_DOC, DELETE_OBJECT_DOC],
     },
-    // The `?cors` band is the bucket-subresource shape in one method: only the GET row overlaps
-    // anything, because PUT and DELETE on a bucket have no other row to meet. Four of the five
-    // pairs are the familiar both-keys-at-once accident; the fifth — against ListObjects — is the
-    // fallback relationship, and it is the pair the debt register recorded as
+    // The `?cors` band was the first bucket-subresource triple, and when it landed only its GET
+    // row overlapped anything — PUT and DELETE on a bucket had no other row to meet until the
+    // `?lifecycle` band below arrived (those pairs are declared with that band). Four of the five
+    // pairs here are the familiar both-keys-at-once accident; the fifth — against ListObjects —
+    // is the fallback relationship, and it is the pair the debt register recorded as
     // `GetBucketCors -> ListObjects` until this band landed.
     ShadowingDecl {
         winner: "GetBucketLocation",
@@ -498,6 +499,105 @@ pub static PROVISIONAL_SHADOWING: &[ShadowingDecl] = &[
                  document request was answered with a key listing. The subresource is the specific \
                  reading and wins (310 before 700); the fallback stays last in the band.",
         evidence: &[GET_BUCKET_CORS_DOC, LIST_V1_DOC],
+    },
+    // The `?lifecycle` band repeats the `?cors` shape two bands later, with one new wrinkle: it
+    // lands *beside* two other subresource triples, so its PUT and DELETE rows now have
+    // neighbours to meet — a request naming ?cors or ?tagging together with ?lifecycle overlaps
+    // in all three methods, not only in GET. Every pair is the both-keys-at-once accident except
+    // the last, against ListObjects, which is the fallback relationship the debt register
+    // recorded as `GetBucketLifecycleConfiguration -> ListObjects` until this band landed.
+    ShadowingDecl {
+        winner: "GetBucketLocation",
+        shadowed: "GetBucketLifecycleConfiguration",
+        reason: "A request carrying both ?location and ?lifecycle asks two subresource questions \
+                 at once. AWS documents no such combination, so the answer is fixed here rather \
+                 than left to source order: ?location at 300 is tried before ?lifecycle at 370, \
+                 and the lifecycle reading is ignored rather than merged into the answer.",
+        evidence: &[LOCATION_DOC, GET_BUCKET_LIFECYCLE_DOC],
+    },
+    ShadowingDecl {
+        winner: "GetBucketCors",
+        shadowed: "GetBucketLifecycleConfiguration",
+        reason: "Two configuration subresources named in one GET. Neither is the narrower \
+                 question, so the earlier band wins: ?cors at 310 is tried before ?lifecycle at \
+                 370, the same first-band-wins rule ?location settled against ?cors.",
+        evidence: &[GET_BUCKET_CORS_DOC, GET_BUCKET_LIFECYCLE_DOC],
+    },
+    ShadowingDecl {
+        winner: "GetBucketTagging",
+        shadowed: "GetBucketLifecycleConfiguration",
+        reason: "Two configuration subresources named in one GET, the same shape as the ?cors \
+                 pair above with the tagging band in its place. The earlier band wins: ?tagging \
+                 at 340 is tried before ?lifecycle at 370, and the lifecycle reading is ignored.",
+        evidence: &[GET_BUCKET_TAGGING_DOC, GET_BUCKET_LIFECYCLE_DOC],
+    },
+    ShadowingDecl {
+        winner: "GetBucketLifecycleConfiguration",
+        shadowed: "ListMultipartUploads",
+        reason: "?lifecycle and ?uploads together name a configuration document and a listing of \
+                 one bucket. The subresource band (370) is tried before the upload listing (460), \
+                 the same order the ?cors band settled against the same neighbour.",
+        evidence: &[GET_BUCKET_LIFECYCLE_DOC, UPLOADS_DOC],
+    },
+    ShadowingDecl {
+        winner: "GetBucketLifecycleConfiguration",
+        shadowed: "ListObjectsV2",
+        reason: "A request carrying ?lifecycle and ?list-type=2 asks for the lifecycle document \
+                 and a page of keys at once. The configuration subresource is the narrower \
+                 question and is tried first (370 before 600); the listing is ignored.",
+        evidence: &[GET_BUCKET_LIFECYCLE_DOC, LIST_V2_DOC],
+    },
+    ShadowingDecl {
+        winner: "GetBucketLifecycleConfiguration",
+        shadowed: "ListObjectVersions",
+        reason: "Same shape as the pair above with the version listing in place of the key page: \
+                 only a client sending ?lifecycle and ?versions together reaches it, and the \
+                 subresource band is tried first (370 before 610).",
+        evidence: &[GET_BUCKET_LIFECYCLE_DOC, VERSIONS_DOC],
+    },
+    ShadowingDecl {
+        winner: "GetBucketLifecycleConfiguration",
+        shadowed: "ListObjects",
+        reason: "ListObjects pins no query key, so every ?lifecycle request also satisfies it. \
+                 Until this row existed that was not a latent overlap but the served behaviour: a \
+                 lifecycle document request was answered with a key listing. The subresource is \
+                 the specific reading and wins (370 before 700); the fallback stays last in the \
+                 band.",
+        evidence: &[GET_BUCKET_LIFECYCLE_DOC, LIST_V1_DOC],
+    },
+    ShadowingDecl {
+        winner: "PutBucketCors",
+        shadowed: "PutBucketLifecycleConfiguration",
+        reason: "Two configuration writes named in one PUT: a request carrying ?cors and \
+                 ?lifecycle satisfies both selectors, and AWS documents no such combination. The \
+                 earlier band wins (320 before 380), so the body is read as a CORS document and \
+                 the lifecycle reading is ignored rather than double-written.",
+        evidence: &[PUT_BUCKET_CORS_DOC, PUT_BUCKET_LIFECYCLE_DOC],
+    },
+    ShadowingDecl {
+        winner: "PutBucketTagging",
+        shadowed: "PutBucketLifecycleConfiguration",
+        reason: "Two configuration writes named in one PUT, the tagging twin of the ?cors pair \
+                 above. The earlier band wins (350 before 380), so the body is read as a tagging \
+                 document and the lifecycle reading is ignored rather than double-written.",
+        evidence: &[PUT_BUCKET_TAGGING_DOC, PUT_BUCKET_LIFECYCLE_DOC],
+    },
+    ShadowingDecl {
+        winner: "DeleteBucketCors",
+        shadowed: "DeleteBucketLifecycle",
+        reason: "Two configuration deletes named in one DELETE. The earlier band wins (330 before \
+                 390), so only the CORS document is removed: a request that destroys two \
+                 configurations because it named two query keys would turn a typo into data loss.",
+        evidence: &[DELETE_BUCKET_CORS_DOC, DELETE_BUCKET_LIFECYCLE_DOC],
+    },
+    ShadowingDecl {
+        winner: "DeleteBucketTagging",
+        shadowed: "DeleteBucketLifecycle",
+        reason: "Two configuration deletes named in one DELETE, the tagging twin of the pair \
+                 above. The earlier band wins (360 before 390), so only the tag set is removed: \
+                 a request that destroys two configurations because it named two query keys \
+                 would turn a typo into data loss.",
+        evidence: &[DELETE_BUCKET_TAGGING_DOC, DELETE_BUCKET_LIFECYCLE_DOC],
     },
     // The copy family adds the third shape: one header's presence, and nothing else, separates two
     // operations that share a method and a path. Every row but the last is a refinement — the
@@ -565,6 +665,18 @@ const UPLOAD_PART_COPY_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/
 /// AWS's own reference for the CORS document read.
 const GET_BUCKET_CORS_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketCors.html \
      — GetBucketCors is selected by the ?cors subresource alone and answers with the stored configuration document.";
+
+/// AWS's own reference for the lifecycle document read.
+const GET_BUCKET_LIFECYCLE_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketLifecycleConfiguration.html \
+     — GetBucketLifecycleConfiguration is selected by the ?lifecycle subresource alone and answers with the stored configuration document.";
+
+/// AWS's own reference for the lifecycle document write.
+const PUT_BUCKET_LIFECYCLE_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketLifecycleConfiguration.html \
+     — PutBucketLifecycleConfiguration is selected by the ?lifecycle subresource on a bucket PUT and replaces the stored lifecycle document.";
+
+/// AWS's own reference for the lifecycle document delete.
+const DELETE_BUCKET_LIFECYCLE_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketLifecycle.html \
+     — DeleteBucketLifecycle is selected by the ?lifecycle subresource on a bucket DELETE and removes only the lifecycle document.";
 
 /// AWS's own reference for the operation selected by the `?location` subresource.
 const LOCATION_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketLocation.html \

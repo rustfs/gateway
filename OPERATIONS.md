@@ -33,7 +33,7 @@ such a row as though the key selected the operation is the opposite of what the 
 | `intelligent-tiering` | [CreateBucket](#createbucket) (absent), [DeleteBucket](#deletebucket) (absent) |
 | `inventory` | [CreateBucket](#createbucket) (absent), [DeleteBucket](#deletebucket) (absent) |
 | `key-marker` | [ListMultipartUploads](#listmultipartuploads), [ListObjectVersions](#listobjectversions) |
-| `lifecycle` | [CreateBucket](#createbucket) (absent), [DeleteBucket](#deletebucket) (absent) |
+| `lifecycle` | [CreateBucket](#createbucket) (absent), [DeleteBucket](#deletebucket) (absent), [DeleteBucketLifecycle](#deletebucketlifecycle), [GetBucketLifecycleConfiguration](#getbucketlifecycleconfiguration), [PutBucketLifecycleConfiguration](#putbucketlifecycleconfiguration) |
 | `list-type` | [ListObjectsV2](#listobjectsv2) |
 | `location` | [GetBucketLocation](#getbucketlocation) |
 | `logging` | [CreateBucket](#createbucket) (absent) |
@@ -130,7 +130,7 @@ such a row as though the key selected the operation is the opposite of what the 
 | `x-amz-copy-source-server-side-encryption-customer-key-md5` | [CopyObject](#copyobject), [UploadPartCopy](#uploadpartcopy) |
 | `x-amz-copy-source-version-id` | [CopyObject](#copyobject), [UploadPartCopy](#uploadpartcopy) |
 | `x-amz-delete-marker` | [DeleteObject](#deleteobject), [GetObject](#getobject), [GetObjectAttributes](#getobjectattributes), [HeadObject](#headobject) |
-| `x-amz-expected-bucket-owner` | [AbortMultipartUpload](#abortmultipartupload), [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [DeleteBucket](#deletebucket), [DeleteBucketCors](#deletebucketcors), [DeleteBucketTagging](#deletebuckettagging), [DeleteObject](#deleteobject), [DeleteObjectTagging](#deleteobjecttagging), [DeleteObjects](#deleteobjects), [GetBucketCors](#getbucketcors), [GetBucketLocation](#getbucketlocation), [GetBucketTagging](#getbuckettagging), [GetObject](#getobject), [GetObjectAttributes](#getobjectattributes), [GetObjectTagging](#getobjecttagging), [HeadBucket](#headbucket), [HeadObject](#headobject), [ListMultipartUploads](#listmultipartuploads), [ListObjectVersions](#listobjectversions), [ListObjects](#listobjects), [ListObjectsV2](#listobjectsv2), [ListParts](#listparts), [PutBucketCors](#putbucketcors), [PutBucketTagging](#putbuckettagging), [PutObject](#putobject), [PutObjectTagging](#putobjecttagging), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
+| `x-amz-expected-bucket-owner` | [AbortMultipartUpload](#abortmultipartupload), [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [DeleteBucket](#deletebucket), [DeleteBucketCors](#deletebucketcors), [DeleteBucketLifecycle](#deletebucketlifecycle), [DeleteBucketTagging](#deletebuckettagging), [DeleteObject](#deleteobject), [DeleteObjectTagging](#deleteobjecttagging), [DeleteObjects](#deleteobjects), [GetBucketCors](#getbucketcors), [GetBucketLifecycleConfiguration](#getbucketlifecycleconfiguration), [GetBucketLocation](#getbucketlocation), [GetBucketTagging](#getbuckettagging), [GetObject](#getobject), [GetObjectAttributes](#getobjectattributes), [GetObjectTagging](#getobjecttagging), [HeadBucket](#headbucket), [HeadObject](#headobject), [ListMultipartUploads](#listmultipartuploads), [ListObjectVersions](#listobjectversions), [ListObjects](#listobjects), [ListObjectsV2](#listobjectsv2), [ListParts](#listparts), [PutBucketCors](#putbucketcors), [PutBucketLifecycleConfiguration](#putbucketlifecycleconfiguration), [PutBucketTagging](#putbuckettagging), [PutObject](#putobject), [PutObjectTagging](#putobjecttagging), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
 | `x-amz-expiration` | [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject) |
 | `x-amz-grant-full-control` | [CopyObject](#copyobject), [CreateBucket](#createbucket), [CreateMultipartUpload](#createmultipartupload), [PutObject](#putobject) |
 | `x-amz-grant-read` | [CopyObject](#copyobject), [CreateBucket](#createbucket), [CreateMultipartUpload](#createmultipartupload), [PutObject](#putobject) |
@@ -158,7 +158,7 @@ such a row as though the key selected the operation is the opposite of what the 
 | `x-amz-request-charged` | [AbortMultipartUpload](#abortmultipartupload), [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [DeleteObject](#deleteobject), [DeleteObjects](#deleteobjects), [GetObject](#getobject), [GetObjectAttributes](#getobjectattributes), [HeadObject](#headobject), [ListMultipartUploads](#listmultipartuploads), [ListObjectVersions](#listobjectversions), [ListObjects](#listobjects), [ListObjectsV2](#listobjectsv2), [ListParts](#listparts), [PutObject](#putobject), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
 | `x-amz-request-payer` | [AbortMultipartUpload](#abortmultipartupload), [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [DeleteObject](#deleteobject), [DeleteObjects](#deleteobjects), [GetObject](#getobject), [GetObjectAttributes](#getobjectattributes), [GetObjectTagging](#getobjecttagging), [HeadObject](#headobject), [ListMultipartUploads](#listmultipartuploads), [ListObjectVersions](#listobjectversions), [ListObjects](#listobjects), [ListObjectsV2](#listobjectsv2), [ListParts](#listparts), [PutObject](#putobject), [PutObjectTagging](#putobjecttagging), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
 | `x-amz-restore` | [GetObject](#getobject), [HeadObject](#headobject) |
-| `x-amz-sdk-checksum-algorithm` | [DeleteObjects](#deleteobjects), [PutBucketCors](#putbucketcors), [PutBucketTagging](#putbuckettagging), [PutObject](#putobject), [PutObjectTagging](#putobjecttagging), [UploadPart](#uploadpart) |
+| `x-amz-sdk-checksum-algorithm` | [DeleteObjects](#deleteobjects), [PutBucketCors](#putbucketcors), [PutBucketLifecycleConfiguration](#putbucketlifecycleconfiguration), [PutBucketTagging](#putbuckettagging), [PutObject](#putobject), [PutObjectTagging](#putobjecttagging), [UploadPart](#uploadpart) |
 | `x-amz-server-side-encryption` | [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
 | `x-amz-server-side-encryption-aws-kms-key-id` | [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
 | `x-amz-server-side-encryption-bucket-key-enabled` | [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
@@ -171,6 +171,7 @@ such a row as though the key selected the operation is the opposite of what the 
 | `x-amz-tagging` | [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [PutObject](#putobject) |
 | `x-amz-tagging-count` | [GetObject](#getobject), [HeadObject](#headobject) |
 | `x-amz-tagging-directive` | [CopyObject](#copyobject) |
+| `x-amz-transition-default-minimum-object-size` | [GetBucketLifecycleConfiguration](#getbucketlifecycleconfiguration), [PutBucketLifecycleConfiguration](#putbucketlifecycleconfiguration) |
 | `x-amz-version-id` | [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [DeleteObject](#deleteobject), [DeleteObjectTagging](#deleteobjecttagging), [GetObject](#getobject), [GetObjectAttributes](#getobjectattributes), [GetObjectTagging](#getobjecttagging), [HeadObject](#headobject), [PutObject](#putobject), [PutObjectTagging](#putobjecttagging) |
 | `x-amz-website-redirect-location` | [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject) |
 | `x-amz-write-offset-bytes` | [PutObject](#putobject) |
@@ -179,8 +180,8 @@ such a row as though the key selected the operation is the opposite of what the 
 
 | Error code | Operations |
 | --- | --- |
-| `AccessDenied` | [AbortMultipartUpload](#abortmultipartupload), [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateBucket](#createbucket), [CreateMultipartUpload](#createmultipartupload), [DeleteBucket](#deletebucket), [DeleteBucketCors](#deletebucketcors), [DeleteBucketTagging](#deletebuckettagging), [DeleteObject](#deleteobject), [DeleteObjectTagging](#deleteobjecttagging), [DeleteObjects](#deleteobjects), [GetBucketCors](#getbucketcors), [GetBucketLocation](#getbucketlocation), [GetBucketTagging](#getbuckettagging), [GetObject](#getobject), [GetObjectAttributes](#getobjectattributes), [GetObjectTagging](#getobjecttagging), [HeadBucket](#headbucket), [HeadObject](#headobject), [ListBuckets](#listbuckets), [ListMultipartUploads](#listmultipartuploads), [ListObjectVersions](#listobjectversions), [ListObjects](#listobjects), [ListObjectsV2](#listobjectsv2), [ListParts](#listparts), [PutBucketCors](#putbucketcors), [PutBucketTagging](#putbuckettagging), [PutObject](#putobject), [PutObjectTagging](#putobjecttagging), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
-| `BadDigest` | [PutBucketCors](#putbucketcors), [PutObject](#putobject), [UploadPart](#uploadpart) |
+| `AccessDenied` | [AbortMultipartUpload](#abortmultipartupload), [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateBucket](#createbucket), [CreateMultipartUpload](#createmultipartupload), [DeleteBucket](#deletebucket), [DeleteBucketCors](#deletebucketcors), [DeleteBucketLifecycle](#deletebucketlifecycle), [DeleteBucketTagging](#deletebuckettagging), [DeleteObject](#deleteobject), [DeleteObjectTagging](#deleteobjecttagging), [DeleteObjects](#deleteobjects), [GetBucketCors](#getbucketcors), [GetBucketLifecycleConfiguration](#getbucketlifecycleconfiguration), [GetBucketLocation](#getbucketlocation), [GetBucketTagging](#getbuckettagging), [GetObject](#getobject), [GetObjectAttributes](#getobjectattributes), [GetObjectTagging](#getobjecttagging), [HeadBucket](#headbucket), [HeadObject](#headobject), [ListBuckets](#listbuckets), [ListMultipartUploads](#listmultipartuploads), [ListObjectVersions](#listobjectversions), [ListObjects](#listobjects), [ListObjectsV2](#listobjectsv2), [ListParts](#listparts), [PutBucketCors](#putbucketcors), [PutBucketLifecycleConfiguration](#putbucketlifecycleconfiguration), [PutBucketTagging](#putbuckettagging), [PutObject](#putobject), [PutObjectTagging](#putobjecttagging), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
+| `BadDigest` | [PutBucketCors](#putbucketcors), [PutBucketLifecycleConfiguration](#putbucketlifecycleconfiguration), [PutObject](#putobject), [UploadPart](#uploadpart) |
 | `BucketAlreadyExists` | [CreateBucket](#createbucket) |
 | `BucketAlreadyOwnedByYou` | [CreateBucket](#createbucket) |
 | `BucketNotEmpty` | [DeleteBucket](#deletebucket) |
@@ -189,7 +190,7 @@ such a row as though the key selected the operation is the opposite of what the 
 | `EntityTooLarge` | [CopyObject](#copyobject), [PutObject](#putobject), [UploadPart](#uploadpart) |
 | `EntityTooSmall` | [CompleteMultipartUpload](#completemultipartupload) |
 | `IncompleteBody` | [PutObject](#putobject), [UploadPart](#uploadpart) |
-| `InvalidArgument` | [AbortMultipartUpload](#abortmultipartupload), [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateBucket](#createbucket), [CreateMultipartUpload](#createmultipartupload), [DeleteBucketTagging](#deletebuckettagging), [DeleteObject](#deleteobject), [DeleteObjectTagging](#deleteobjecttagging), [DeleteObjects](#deleteobjects), [GetBucketTagging](#getbuckettagging), [GetObject](#getobject), [GetObjectAttributes](#getobjectattributes), [GetObjectTagging](#getobjecttagging), [ListMultipartUploads](#listmultipartuploads), [ListObjectVersions](#listobjectversions), [ListObjects](#listobjects), [ListObjectsV2](#listobjectsv2), [ListParts](#listparts), [PutBucketCors](#putbucketcors), [PutBucketTagging](#putbuckettagging), [PutObject](#putobject), [PutObjectTagging](#putobjecttagging), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
+| `InvalidArgument` | [AbortMultipartUpload](#abortmultipartupload), [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateBucket](#createbucket), [CreateMultipartUpload](#createmultipartupload), [DeleteBucketTagging](#deletebuckettagging), [DeleteObject](#deleteobject), [DeleteObjectTagging](#deleteobjecttagging), [DeleteObjects](#deleteobjects), [GetBucketTagging](#getbuckettagging), [GetObject](#getobject), [GetObjectAttributes](#getobjectattributes), [GetObjectTagging](#getobjecttagging), [ListMultipartUploads](#listmultipartuploads), [ListObjectVersions](#listobjectversions), [ListObjects](#listobjects), [ListObjectsV2](#listobjectsv2), [ListParts](#listparts), [PutBucketCors](#putbucketcors), [PutBucketLifecycleConfiguration](#putbucketlifecycleconfiguration), [PutBucketTagging](#putbuckettagging), [PutObject](#putobject), [PutObjectTagging](#putobjecttagging), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
 | `InvalidBucketName` | [CreateBucket](#createbucket) |
 | `InvalidDigest` | [PutObject](#putobject), [UploadPart](#uploadpart) |
 | `InvalidLocationConstraint` | [CreateBucket](#createbucket) |
@@ -197,16 +198,17 @@ such a row as though the key selected the operation is the opposite of what the 
 | `InvalidPart` | [CompleteMultipartUpload](#completemultipartupload) |
 | `InvalidPartOrder` | [CompleteMultipartUpload](#completemultipartupload) |
 | `InvalidRange` | [GetObject](#getobject), [UploadPartCopy](#uploadpartcopy) |
-| `InvalidRequest` | [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [DeleteObjects](#deleteobjects), [PutBucketCors](#putbucketcors), [PutObject](#putobject), [UploadPartCopy](#uploadpartcopy) |
+| `InvalidRequest` | [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [DeleteObjects](#deleteobjects), [PutBucketCors](#putbucketcors), [PutBucketLifecycleConfiguration](#putbucketlifecycleconfiguration), [PutObject](#putobject), [UploadPartCopy](#uploadpartcopy) |
 | `InvalidStorageClass` | [CreateMultipartUpload](#createmultipartupload) |
 | `InvalidTag` | [PutBucketTagging](#putbuckettagging), [PutObjectTagging](#putobjecttagging) |
 | `InvalidWriteOffset` | [PutObject](#putobject) |
-| `MalformedXML` | [CompleteMultipartUpload](#completemultipartupload), [CreateBucket](#createbucket), [DeleteObjects](#deleteobjects), [PutBucketCors](#putbucketcors), [PutBucketTagging](#putbuckettagging), [PutObjectTagging](#putobjecttagging) |
+| `MalformedXML` | [CompleteMultipartUpload](#completemultipartupload), [CreateBucket](#createbucket), [DeleteObjects](#deleteobjects), [PutBucketCors](#putbucketcors), [PutBucketLifecycleConfiguration](#putbucketlifecycleconfiguration), [PutBucketTagging](#putbuckettagging), [PutObjectTagging](#putobjecttagging) |
 | `MethodNotAllowed` | [CopyObject](#copyobject), [UploadPartCopy](#uploadpartcopy) |
 | `MissingContentLength` | [PutObject](#putobject), [UploadPart](#uploadpart) |
-| `NoSuchBucket` | [AbortMultipartUpload](#abortmultipartupload), [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [DeleteBucket](#deletebucket), [DeleteBucketCors](#deletebucketcors), [DeleteBucketTagging](#deletebuckettagging), [DeleteObject](#deleteobject), [DeleteObjectTagging](#deleteobjecttagging), [DeleteObjects](#deleteobjects), [GetBucketCors](#getbucketcors), [GetBucketLocation](#getbucketlocation), [GetBucketTagging](#getbuckettagging), [GetObject](#getobject), [GetObjectAttributes](#getobjectattributes), [GetObjectTagging](#getobjecttagging), [HeadBucket](#headbucket), [HeadObject](#headobject), [ListMultipartUploads](#listmultipartuploads), [ListObjectVersions](#listobjectversions), [ListObjects](#listobjects), [ListObjectsV2](#listobjectsv2), [ListParts](#listparts), [PutBucketCors](#putbucketcors), [PutBucketTagging](#putbuckettagging), [PutObject](#putobject), [PutObjectTagging](#putobjecttagging), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
+| `NoSuchBucket` | [AbortMultipartUpload](#abortmultipartupload), [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [DeleteBucket](#deletebucket), [DeleteBucketCors](#deletebucketcors), [DeleteBucketLifecycle](#deletebucketlifecycle), [DeleteBucketTagging](#deletebuckettagging), [DeleteObject](#deleteobject), [DeleteObjectTagging](#deleteobjecttagging), [DeleteObjects](#deleteobjects), [GetBucketCors](#getbucketcors), [GetBucketLifecycleConfiguration](#getbucketlifecycleconfiguration), [GetBucketLocation](#getbucketlocation), [GetBucketTagging](#getbuckettagging), [GetObject](#getobject), [GetObjectAttributes](#getobjectattributes), [GetObjectTagging](#getobjecttagging), [HeadBucket](#headbucket), [HeadObject](#headobject), [ListMultipartUploads](#listmultipartuploads), [ListObjectVersions](#listobjectversions), [ListObjects](#listobjects), [ListObjectsV2](#listobjectsv2), [ListParts](#listparts), [PutBucketCors](#putbucketcors), [PutBucketLifecycleConfiguration](#putbucketlifecycleconfiguration), [PutBucketTagging](#putbuckettagging), [PutObject](#putobject), [PutObjectTagging](#putobjecttagging), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
 | `NoSuchCORSConfiguration` | [GetBucketCors](#getbucketcors) |
 | `NoSuchKey` | [CopyObject](#copyobject), [DeleteObjectTagging](#deleteobjecttagging), [GetObject](#getobject), [GetObjectAttributes](#getobjectattributes), [GetObjectTagging](#getobjecttagging), [HeadObject](#headobject), [PutObjectTagging](#putobjecttagging), [UploadPartCopy](#uploadpartcopy) |
+| `NoSuchLifecycleConfiguration` | [GetBucketLifecycleConfiguration](#getbucketlifecycleconfiguration) |
 | `NoSuchTagSet` | [GetBucketTagging](#getbuckettagging) |
 | `NoSuchUpload` | [AbortMultipartUpload](#abortmultipartupload), [CompleteMultipartUpload](#completemultipartupload), [ListParts](#listparts), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
 | `NotFound` | [HeadBucket](#headbucket), [HeadObject](#headobject) |
@@ -228,11 +230,13 @@ such a row as though the key selected the operation is the opposite of what the 
 | [CreateMultipartUpload](#createmultipartupload) | POST | `/{Bucket}/{Key+}` | `uploads` | `x-amz-meta-` | 200 | `NoSuchBucket`, `AccessDenied`, `InvalidArgument`, `InvalidRequest`, `InvalidStorageClass` | `q-mpu-root-0029`, `q-mpu-metadata-0039` |
 | [DeleteBucket](#deletebucket) | DELETE | `/{Bucket}` | `analytics`, `cors`, `encryption`, `intelligent-tiering`, `inventory`, `lifecycle`, `metadataConfiguration`, `metadataTable`, `metrics`, `ownershipControls`, `policy`, `publicAccessBlock`, `replication`, `tagging`, `website` | — | 204 | `NoSuchBucket`, `BucketNotEmpty`, `AccessDenied`, `PermanentRedirect` | `q-bkt-0007`, `q-bkt-0008` |
 | [DeleteBucketCors](#deletebucketcors) | DELETE | `/{Bucket}` | `cors` | — | 204 | `NoSuchBucket`, `AccessDenied` | `q-cors-0006` |
+| [DeleteBucketLifecycle](#deletebucketlifecycle) | DELETE | `/{Bucket}` | `lifecycle` | — | 204 | `NoSuchBucket`, `AccessDenied` | `q-lc-0004` |
 | [DeleteBucketTagging](#deletebuckettagging) | DELETE | `/{Bucket}` | `tagging` | — | 204 | `NoSuchBucket`, `AccessDenied`, `InvalidArgument` | `q-tag-delete-idempotent-0091` |
 | [DeleteObject](#deleteobject) | DELETE | `/{Bucket}/{Key+}` | `versionId` | — | 204 | `NoSuchBucket`, `AccessDenied`, `InvalidArgument` | `q-delete-0026` |
 | [DeleteObjectTagging](#deleteobjecttagging) | DELETE | `/{Bucket}/{Key+}` | `tagging`, `versionId` | — | 204 | `NoSuchBucket`, `NoSuchKey`, `AccessDenied`, `InvalidArgument` | `q-tag-delete-idempotent-0091` |
 | [DeleteObjects](#deleteobjects) | POST | `/{Bucket}` | `delete` | — | 200 | `NoSuchBucket`, `AccessDenied`, `MalformedXML`, `InvalidRequest`, `InvalidArgument` | `q-checksum-0006`, `q-deletes-0027` |
 | [GetBucketCors](#getbucketcors) | GET | `/{Bucket}` | `cors` | — | 200 | `NoSuchBucket`, `AccessDenied`, `NoSuchCORSConfiguration` | `q-cors-0001`, `q-cors-0002` |
+| [GetBucketLifecycleConfiguration](#getbucketlifecycleconfiguration) | GET | `/{Bucket}` | `lifecycle` | — | 200 | `NoSuchBucket`, `AccessDenied`, `NoSuchLifecycleConfiguration` | `q-lc-0001`, `q-lc-0003` |
 | [GetBucketLocation](#getbucketlocation) | GET | `/{Bucket}` | `location` | — | 200 | `NoSuchBucket`, `AccessDenied`, `PermanentRedirect` | `q-unwrapped-0001` |
 | [GetBucketTagging](#getbuckettagging) | GET | `/{Bucket}` | `tagging` | — | 200 | `NoSuchBucket`, `NoSuchTagSet`, `AccessDenied`, `InvalidArgument` | `q-tag-wrapped-0088`, `q-tag-bucket-unconfigured-0089` |
 | [GetObject](#getobject) | GET | `/{Bucket}/{Key+}` | `partNumber`, `response-cache-control`, `response-content-disposition`, `response-content-encoding`, `response-content-language`, `response-content-type`, `response-expires`, `versionId` | `x-amz-meta-` | 200 | `NoSuchBucket`, `NoSuchKey`, `AccessDenied`, `InvalidObjectState`, `InvalidArgument`, `InvalidRange`, `PreconditionFailed`, `NotModified` | `q-response-0023`, `q-storageclass-0024`, `q-tag-count-omit-0095` |
@@ -247,6 +251,7 @@ such a row as though the key selected the operation is the opposite of what the 
 | [ListObjectsV2](#listobjectsv2) | GET | `/{Bucket}` | `continuation-token`, `delimiter`, `encoding-type`, `fetch-owner`, `list-type`, `max-keys`, `prefix`, `start-after` | — | 200 | `NoSuchBucket`, `AccessDenied`, `InvalidArgument`, `PermanentRedirect` | `q-root-0013`, `q-order-0014`, `q-encoding-0015` |
 | [ListParts](#listparts) | GET | `/{Bucket}/{Key+}` | `max-parts`, `part-number-marker`, `uploadId` | — | 200 | `NoSuchBucket`, `NoSuchUpload`, `AccessDenied`, `InvalidArgument` | `q-mpu-part-0031`, `q-mpu-upload-id-0037`, `q-mpu-marker-0040` |
 | [PutBucketCors](#putbucketcors) | PUT | `/{Bucket}` | `cors` | — | 200 | `NoSuchBucket`, `AccessDenied`, `MalformedXML`, `InvalidRequest`, `InvalidArgument`, `BadDigest` | `q-cors-0003`, `q-cors-0004`, `q-cors-0005`, `q-cors-0007`, `q-cors-0008` |
+| [PutBucketLifecycleConfiguration](#putbucketlifecycleconfiguration) | PUT | `/{Bucket}` | `lifecycle` | — | 200 | `NoSuchBucket`, `AccessDenied`, `MalformedXML`, `InvalidRequest`, `InvalidArgument`, `BadDigest` | `q-lc-0002`, `q-lc-0005`, `q-lc-0006`, `q-lc-0007`, `q-lc-0008`, `q-lc-0009`, `q-lc-0010`, `q-lc-0011`, `q-lc-0012`, `q-lc-0013`, `q-lc-0014` |
 | [PutBucketTagging](#putbuckettagging) | PUT | `/{Bucket}` | `tagging` | — | 200 | `NoSuchBucket`, `AccessDenied`, `InvalidArgument`, `MalformedXML`, `InvalidTag` | `q-tag-md5-required-0092`, `q-tag-limits-0094` |
 | [PutObject](#putobject) | PUT | `/{Bucket}/{Key+}` | — | `content-length`, `etag`, `x-amz-checksum-`, `x-amz-meta-` | 200 | `NoSuchBucket`, `AccessDenied`, `MissingContentLength`, `EntityTooLarge`, `IncompleteBody`, `InvalidDigest`, `BadDigest`, `XAmzContentChecksumMismatch`, `InvalidRequest`, `InvalidArgument`, `PreconditionFailed`, `ConditionalRequestConflict`, `EncryptionTypeMismatch`, `InvalidWriteOffset`, `TooManyParts` | `q-checksum-0006`, `q-tag-header-form-0093` |
 | [PutObjectTagging](#putobjecttagging) | PUT | `/{Bucket}/{Key+}` | `tagging`, `versionId` | — | 200 | `NoSuchBucket`, `NoSuchKey`, `AccessDenied`, `InvalidArgument`, `MalformedXML`, `InvalidTag` | `q-tag-md5-required-0092`, `q-tag-limits-0094` |
@@ -271,6 +276,9 @@ First match wins; lower precedence is tried first.
 | 340 | [GetBucketTagging](#getbuckettagging) | `Method GET` AND `Target Bucket` AND `QueryPresent ?tagging` |
 | 350 | [PutBucketTagging](#putbuckettagging) | `Method PUT` AND `Target Bucket` AND `QueryPresent ?tagging` |
 | 360 | [DeleteBucketTagging](#deletebuckettagging) | `Method DELETE` AND `Target Bucket` AND `QueryPresent ?tagging` |
+| 370 | [GetBucketLifecycleConfiguration](#getbucketlifecycleconfiguration) | `Method GET` AND `Target Bucket` AND `QueryPresent ?lifecycle` |
+| 380 | [PutBucketLifecycleConfiguration](#putbucketlifecycleconfiguration) | `Method PUT` AND `Target Bucket` AND `QueryPresent ?lifecycle` |
+| 390 | [DeleteBucketLifecycle](#deletebucketlifecycle) | `Method DELETE` AND `Target Bucket` AND `QueryPresent ?lifecycle` |
 | 400 | [UploadPartCopy](#uploadpartcopy) | `Method PUT` AND `Target Object` AND `QueryPresent ?partNumber` AND `QueryPresent ?uploadId` AND `HeaderPresent x-amz-copy-source` |
 | 410 | [UploadPart](#uploadpart) | `Method PUT` AND `Target Object` AND `QueryPresent ?partNumber` AND `QueryPresent ?uploadId` |
 | 420 | [CompleteMultipartUpload](#completemultipartupload) | `Method POST` AND `Target Object` AND `QueryPresent ?uploadId` |
@@ -660,6 +668,44 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 
 Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 
+### DeleteBucketLifecycle
+
+`DELETE /{Bucket}` &rarr; 204 · target Bucket · precedence 390 · auth Required (`s3:PutLifecycleConfiguration`, presigned allowed) · spec `spec/operations/DeleteBucketLifecycle.toml`
+
+**Route predicates**
+
+- `Method DELETE`
+- `Target Bucket`
+- `QueryPresent ?lifecycle`
+
+**Query keys**
+
+- routed on, present: `lifecycle`
+- routed on, exact value: —
+- routed on, absent: —
+- read as parameters: —
+
+**Headers**
+
+- request: `x-amz-expected-bucket-owner`
+- response: —
+- required: —
+
+**Body**
+
+- request: None (None)
+- response: None (None)
+
+**Error codes**
+
+`NoSuchBucket`, `AccessDenied`
+
+**Quirks**
+
+- `q-lc-0004` (idempotent_delete on `DeleteBucketLifecycle`) — The delete answers 204 with no body whether or not a configuration existed, so removing the lifecycle document of an unconfigured bucket is a success rather than a 404.
+
+Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
+
 ### DeleteBucketTagging
 
 `DELETE /{Bucket}` &rarr; 204 · target Bucket · precedence 360 · auth Required (`s3:DeleteBucketTagging`, presigned allowed) · spec `spec/operations/DeleteBucketTagging.toml`
@@ -873,6 +919,61 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 **Body shapes**
 
 - `CORSRule` (Structure) — `ID: String`, `AllowedHeaders: List<String>(flattened)`, `AllowedMethods: List<String>(flattened)`, `AllowedOrigins: List<String>(flattened)`, `ExposeHeaders: List<String>(flattened)`, `MaxAgeSeconds: Integer`
+
+### GetBucketLifecycleConfiguration
+
+`GET /{Bucket}` &rarr; 200 · target Bucket · precedence 370 · auth Required (`s3:GetLifecycleConfiguration`, presigned allowed) · spec `spec/operations/GetBucketLifecycleConfiguration.toml`
+
+**Route predicates**
+
+- `Method GET`
+- `Target Bucket`
+- `QueryPresent ?lifecycle`
+
+**Query keys**
+
+- routed on, present: `lifecycle`
+- routed on, exact value: —
+- routed on, absent: —
+- read as parameters: —
+
+**Headers**
+
+- request: `x-amz-expected-bucket-owner`
+- response: `x-amz-transition-default-minimum-object-size`
+- required: —
+
+**Body**
+
+- request: None (None)
+- response: XmlBody (Full, at most 1048576 bytes)
+- response root: `<LifecycleConfiguration>`, xmlns emit
+- element order: `Rules`
+
+**Error codes**
+
+`NoSuchBucket`, `AccessDenied`, `NoSuchLifecycleConfiguration`
+
+Unconfigured subresource returns `NoSuchLifecycleConfiguration`.
+
+**Quirks**
+
+- `q-lc-0001` (not_configured_error on `GetBucketLifecycleConfiguration`) — A bucket that never had a lifecycle document answers 404 with the operation-specific code NoSuchLifecycleConfiguration, not a generic not-found and not an empty 200.
+- `q-lc-0003` (flattened_list on `BucketLifecycleConfiguration.Rules`) — The rules repeat as sibling Rule elements directly under the LifecycleConfiguration root; a Rules wrapper element would make every SDK read zero rules.
+
+Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
+
+**Body shapes**
+
+- `AbortIncompleteMultipartUpload` (Structure) — `DaysAfterInitiation: Integer`
+- `LifecycleExpiration` (Structure) — `Date: Timestamp(Iso8601)`, `Days: Integer`, `ExpiredObjectDeleteMarker: Boolean`
+- `LifecycleRule` (Structure) — `Expiration: Structure(LifecycleExpiration)`, `ID: String`, `Prefix: String`, `Filter: Structure(LifecycleRuleFilter)`, `Status: StringEnum`, `Transitions: List<Structure(Transition)>(flattened)`, `NoncurrentVersionTransitions: List<Structure(NoncurrentVersionTransition)>(flattened)`, `NoncurrentVersionExpiration: Structure(NoncurrentVersionExpiration)`, `AbortIncompleteMultipartUpload: Structure(AbortIncompleteMultipartUpload)`
+- `LifecycleRuleAndOperator` (Structure) — `Prefix: String`, `Tags: List<Structure(Tag)>(flattened)`, `ObjectSizeGreaterThan: Long`, `ObjectSizeLessThan: Long`
+- `LifecycleRuleFilter` (Structure) — `Prefix: String`, `Tag: Structure(Tag)`, `ObjectSizeGreaterThan: Long`, `ObjectSizeLessThan: Long`, `And: Structure(LifecycleRuleAndOperator)`
+- `NoncurrentVersionExpiration` (Structure) — `NoncurrentDays: Integer`, `NewerNoncurrentVersions: Integer`
+- `NoncurrentVersionTransition` (Structure) — `NoncurrentDays: Integer`, `StorageClass: StringEnum`, `NewerNoncurrentVersions: Integer`
+- `Tag` (Structure) — `Key: ObjectKey`, `Value: String`
+- `Transition` (Structure) — `Date: Timestamp(Iso8601)`, `Days: Integer`, `StorageClass: StringEnum`
 
 ### GetBucketLocation
 
@@ -1568,6 +1669,72 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 - `CORSConfiguration` (Structure) — `CORSRules: List<Structure(CORSRule)>(flattened)`
 - `CORSRule` (Structure) — `ID: String`, `AllowedHeaders: List<String>(flattened)`, `AllowedMethods: List<String>(flattened)`, `AllowedOrigins: List<String>(flattened)`, `ExposeHeaders: List<String>(flattened)`, `MaxAgeSeconds: Integer`
 
+### PutBucketLifecycleConfiguration
+
+`PUT /{Bucket}` &rarr; 200 · target Bucket · precedence 380 · auth Required (`s3:PutLifecycleConfiguration`, presigned allowed) · spec `spec/operations/PutBucketLifecycleConfiguration.toml`
+
+**Route predicates**
+
+- `Method PUT`
+- `Target Bucket`
+- `QueryPresent ?lifecycle`
+
+**Query keys**
+
+- routed on, present: `lifecycle`
+- routed on, exact value: —
+- routed on, absent: —
+- read as parameters: —
+
+**Headers**
+
+- request: `x-amz-expected-bucket-owner`, `x-amz-sdk-checksum-algorithm`, `x-amz-transition-default-minimum-object-size`
+- response: `x-amz-transition-default-minimum-object-size`
+- required: —
+
+**Body**
+
+- request: XmlBody (Full, at most 1048576 bytes)
+- response: None (None)
+
+**Error codes**
+
+`NoSuchBucket`, `AccessDenied`, `MalformedXML`, `InvalidRequest`, `InvalidArgument`, `BadDigest`
+
+**Checksums**
+
+- required before the handler runs: true
+- request algorithms: `CRC32`, `CRC32C`, `CRC64NVME`, `SHA1`, `SHA256`
+
+**Quirks**
+
+- `q-lc-0002` (xml_root on `PutBucketLifecycleConfiguration`) — The request body's root element is LifecycleConfiguration while the model names the payload shape BucketLifecycleConfiguration; a decoder keyed on the shape name would refuse every document a real client sends.
+- `q-lc-0005` (checksum_required on `PutBucketLifecycleConfiguration`) — The write demands an integrity claim on the body, so a request with neither Content-MD5 nor an x-amz-checksum header is refused with 400 before the document is parsed.
+- `q-lc-0006` (lenient_unknown_elements on `PutBucketLifecycleConfiguration`) — Unknown elements inside the request document are skipped rather than refused, because a stored configuration parsed more strictly on the next release silently turns lifecycle rules off and the first symptom is objects that stop expiring.
+- `q-lc-0007` (exclusive_members on `LifecycleRuleFilter`) — A Filter carries at most one direct child; several conditions must nest inside one And element, and an And with fewer than two conditions is refused as MalformedXML.
+- `q-lc-0008` (legacy_form on `LifecycleRule.Prefix`) — A rule may still scope itself with the deprecated rule-level Prefix element instead of a Filter, because configurations stored under the pre-Filter API revision must keep parsing; a rule carrying neither is refused as MalformedXML.
+- `q-lc-0009` (value_constraint on `LifecycleExpiration.Date`) — A Date value in an Expiration or Transition action must name midnight UTC; any other time of day is refused with 400 InvalidArgument rather than rounded.
+- `q-lc-0010` (exclusive_members on `LifecycleExpiration`) — Days, Date and ExpiredObjectDeleteMarker are mutually exclusive within one Expiration action; a document naming two of them is refused as MalformedXML.
+- `q-lc-0011` (bounded_range on `BucketLifecycleConfiguration.Rules`) — A configuration carries at most 1,000 rules; the 1,001st is refused with 400 rather than truncated or stored.
+- `q-lc-0012` (value_constraint on `LifecycleRule.ID`) — A rule id is at most 255 characters and unique across the configuration; a longer or duplicated id is refused with 400 InvalidArgument.
+- `q-lc-0013` (value_constraint on `LifecycleExpiration.Days`) — An expiration measured in days must be a positive integer; zero and negative values are refused with 400 InvalidArgument.
+- `q-lc-0014` (lenient_enum on `LifecycleRule.Status`) — A Status outside the documented Enabled/Disabled pair is stored and echoed rather than refused, because a stored configuration must survive reparse by a stricter release; the fail-open cost of refusing is silently disabled lifecycle rules.
+
+Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
+
+**Body shapes**
+
+- `AbortIncompleteMultipartUpload` (Structure) — `DaysAfterInitiation: Integer`
+- `BucketLifecycleConfiguration` (Structure) — `Rules: List<Structure(LifecycleRule)>(flattened)`
+- `LifecycleExpiration` (Structure) — `Date: Timestamp(Iso8601)`, `Days: Integer`, `ExpiredObjectDeleteMarker: Boolean`
+- `LifecycleRule` (Structure) — `Expiration: Structure(LifecycleExpiration)`, `ID: String`, `Prefix: String`, `Filter: Structure(LifecycleRuleFilter)`, `Status: StringEnum`, `Transitions: List<Structure(Transition)>(flattened)`, `NoncurrentVersionTransitions: List<Structure(NoncurrentVersionTransition)>(flattened)`, `NoncurrentVersionExpiration: Structure(NoncurrentVersionExpiration)`, `AbortIncompleteMultipartUpload: Structure(AbortIncompleteMultipartUpload)`
+- `LifecycleRuleAndOperator` (Structure) — `Prefix: String`, `Tags: List<Structure(Tag)>(flattened)`, `ObjectSizeGreaterThan: Long`, `ObjectSizeLessThan: Long`
+- `LifecycleRuleFilter` (Structure) — `Prefix: String`, `Tag: Structure(Tag)`, `ObjectSizeGreaterThan: Long`, `ObjectSizeLessThan: Long`, `And: Structure(LifecycleRuleAndOperator)`
+- `NoncurrentVersionExpiration` (Structure) — `NoncurrentDays: Integer`, `NewerNoncurrentVersions: Integer`
+- `NoncurrentVersionTransition` (Structure) — `NoncurrentDays: Integer`, `StorageClass: StringEnum`, `NewerNoncurrentVersions: Integer`
+- `Tag` (Structure) — `Key: ObjectKey`, `Value: String`
+- `Transition` (Structure) — `Date: Timestamp(Iso8601)`, `Days: Integer`, `StorageClass: StringEnum`
+
 ### PutBucketTagging
 
 `PUT /{Bucket}` &rarr; 200 · target Bucket · precedence 350 · auth Required (`s3:PutBucketTagging`, presigned allowed) · spec `spec/operations/PutBucketTagging.toml`
@@ -1837,7 +2004,6 @@ in neither list, so this table is exhaustive by construction.
 | DeleteBucketEncryption | P5 bucket subresource configuration family; one Get/Put/Delete triple per subresource, all sharing the not_configured 404 rule. |
 | DeleteBucketIntelligentTieringConfiguration | P5 bucket subresource configuration family; one Get/Put/Delete triple per subresource, all sharing the not_configured 404 rule. |
 | DeleteBucketInventoryConfiguration | P5 bucket subresource configuration family; one Get/Put/Delete triple per subresource, all sharing the not_configured 404 rule. |
-| DeleteBucketLifecycle | P5 bucket subresource configuration family; one Get/Put/Delete triple per subresource, all sharing the not_configured 404 rule. |
 | DeleteBucketMetadataConfiguration | Out of scope for the gateway: S3 Tables and bucket metadata table configuration, a separate AWS surface with its own control plane. |
 | DeleteBucketMetadataTableConfiguration | Out of scope for the gateway: S3 Tables and bucket metadata table configuration, a separate AWS surface with its own control plane. |
 | DeleteBucketMetricsConfiguration | P5 bucket subresource configuration family; one Get/Put/Delete triple per subresource, all sharing the not_configured 404 rule. |
@@ -1854,7 +2020,6 @@ in neither list, so this table is exhaustive by construction.
 | GetBucketEncryption | P5 bucket subresource configuration family; one Get/Put/Delete triple per subresource, all sharing the not_configured 404 rule. |
 | GetBucketIntelligentTieringConfiguration | P5 bucket subresource configuration family; one Get/Put/Delete triple per subresource, all sharing the not_configured 404 rule. |
 | GetBucketInventoryConfiguration | P5 bucket subresource configuration family; one Get/Put/Delete triple per subresource, all sharing the not_configured 404 rule. |
-| GetBucketLifecycleConfiguration | P5 bucket subresource configuration family; one Get/Put/Delete triple per subresource, all sharing the not_configured 404 rule. |
 | GetBucketLogging | P5 bucket subresource configuration family; one Get/Put/Delete triple per subresource, all sharing the not_configured 404 rule. |
 | GetBucketMetadataConfiguration | Out of scope for the gateway: S3 Tables and bucket metadata table configuration, a separate AWS surface with its own control plane. |
 | GetBucketMetadataTableConfiguration | Out of scope for the gateway: S3 Tables and bucket metadata table configuration, a separate AWS surface with its own control plane. |
@@ -1887,7 +2052,6 @@ in neither list, so this table is exhaustive by construction.
 | PutBucketEncryption | P5 bucket subresource configuration family; one Get/Put/Delete triple per subresource, all sharing the not_configured 404 rule. |
 | PutBucketIntelligentTieringConfiguration | P5 bucket subresource configuration family; one Get/Put/Delete triple per subresource, all sharing the not_configured 404 rule. |
 | PutBucketInventoryConfiguration | P5 bucket subresource configuration family; one Get/Put/Delete triple per subresource, all sharing the not_configured 404 rule. |
-| PutBucketLifecycleConfiguration | P5 bucket subresource configuration family; one Get/Put/Delete triple per subresource, all sharing the not_configured 404 rule. |
 | PutBucketLogging | P5 bucket subresource configuration family; one Get/Put/Delete triple per subresource, all sharing the not_configured 404 rule. |
 | PutBucketMetricsConfiguration | P5 bucket subresource configuration family; one Get/Put/Delete triple per subresource, all sharing the not_configured 404 rule. |
 | PutBucketNotificationConfiguration | P5 bucket subresource configuration family; one Get/Put/Delete triple per subresource, all sharing the not_configured 404 rule. |

@@ -1,0 +1,48 @@
+[case]
+id = "c-lifecycle-0019"
+schema_version = 1
+title = "A Filter carrying two direct children is refused as MalformedXML"
+rationale = """
+Two sibling conditions in a bare Filter are two contradictory scopes with no defined combination — AND and OR are both plausible readings, and implementations that guessed have shipped both. The And element exists precisely so the client states which one it means, so the document is refused rather than interpreted."""
+polarity = "negative"
+operation = "PutBucketLifecycleConfiguration"
+tags = ["lifecycle", "xml", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-lc-0007"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_LifecycleRuleFilter.html"
+summary = "The filter's members are documented as mutually exclusive alternatives, with And as the one combining spelling."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "conf-lifecycle"
+
+[[exchanges]]
+name = "two-children"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-lifecycle?lifecycle"
+headers = { "content-type" = "application/xml", "content-md5" = "ZRuSk01g8RhDXObnJSx1DA==" }
+body = { utf8 = '<LifecycleConfiguration><Rule><Expiration><Days>30</Days></Expiration><ID>bad</ID><Filter><Prefix>logs/</Prefix><Tag><Key>env</Key><Value>prod</Value></Tag></Filter><Status>Enabled</Status></Rule></LifecycleConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[exchanges.expect.error]
+code = "MalformedXML"
+request_id_present = true
+
+[exchanges.expect.headers_present]
+"content-type" = "application/xml"
+
+[exchanges.expect.body]
+redact = ["RequestId", "HostId"]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>MalformedXML</Code><Message>A Filter must have exactly one of Prefix, Tag, ObjectSizeGreaterThan, ObjectSizeLessThan or And specified</Message><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''

@@ -1,0 +1,48 @@
+[case]
+id = "c-lifecycle-0025"
+schema_version = 1
+title = "A rule ID longer than 255 characters is refused as 400 InvalidArgument"
+rationale = """
+The id length cap is part of the wire contract other implementations enforce: a 256-character id stored here would be refused on replication to AWS, making the configuration silently non-portable. The cap is checked in characters at the documented bound, and the refusal names the bound so the client truncates rather than retries."""
+polarity = "negative"
+operation = "PutBucketLifecycleConfiguration"
+tags = ["lifecycle", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-lc-0012"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_LifecycleRule.html"
+summary = "The ID member documents a length cap of 255 characters."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "conf-lifecycle"
+
+[[exchanges]]
+name = "id-too-long"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-lifecycle?lifecycle"
+headers = { "content-type" = "application/xml", "content-md5" = "9B0uxjlFc7yAKpqasYe6gA==" }
+body = { utf8 = '<LifecycleConfiguration><Rule><Expiration><Days>30</Days></Expiration><ID>iiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiii</ID><Filter><Prefix>a/</Prefix></Filter><Status>Enabled</Status></Rule></LifecycleConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[exchanges.expect.error]
+code = "InvalidArgument"
+request_id_present = true
+
+[exchanges.expect.headers_present]
+"content-type" = "application/xml"
+
+[exchanges.expect.body]
+redact = ["RequestId", "HostId"]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>InvalidArgument</Code><Message>ID must be no more than 255 characters</Message><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''

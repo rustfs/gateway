@@ -1,0 +1,48 @@
+[case]
+id = "c-lifecycle-0024"
+schema_version = 1
+title = "Two rules carrying the same ID are refused as 400 InvalidArgument"
+rationale = """
+The rule id is how everything downstream refers to a rule: the x-amz-expiration response header names rule-id, operators disable rules by id, and audit trails record them. Two rules under one id make every one of those references ambiguous, so the configuration is refused at the write instead of poisoning every later lookup."""
+polarity = "negative"
+operation = "PutBucketLifecycleConfiguration"
+tags = ["lifecycle", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-lc-0012"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_LifecycleRule.html"
+summary = "The ID member is documented as a unique identifier for the rule."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "conf-lifecycle"
+
+[[exchanges]]
+name = "duplicate-ids"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-lifecycle?lifecycle"
+headers = { "content-type" = "application/xml", "content-md5" = "mCElaGjLlJXYI9NylPLhNA==" }
+body = { utf8 = '<LifecycleConfiguration><Rule><Expiration><Days>30</Days></Expiration><ID>same</ID><Filter><Prefix>a/</Prefix></Filter><Status>Enabled</Status></Rule><Rule><Expiration><Days>60</Days></Expiration><ID>same</ID><Filter><Prefix>b/</Prefix></Filter><Status>Enabled</Status></Rule></LifecycleConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[exchanges.expect.error]
+code = "InvalidArgument"
+request_id_present = true
+
+[exchanges.expect.headers_present]
+"content-type" = "application/xml"
+
+[exchanges.expect.body]
+redact = ["RequestId", "HostId"]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>InvalidArgument</Code><Message>Rule ID must be unique; found the same ID for more than one rule</Message><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''

@@ -122,7 +122,7 @@ use rustfs_gateway::{
     PRECONDITION_FAILED_MESSAGE, PreconditionRejection, Preconditions, REGION_MATCH_POLICY, RangeDecision, RangeSelectors,
     RegionLabel, RegionSet, Req, RequestKind, Resp, TagScope, TaggingRejection, Timestamp, collect, evaluate, evaluate_range,
     parse_conditional_etag, parse_tagging_header, permanent_redirect_for, resolve_copy_range, resolve_location_constraint,
-    validate_cors, validate_tag_set,
+    validate_cors, validate_lifecycle, validate_tag_set,
 };
 
 /// The canonical user id every listing reports as the owner.
@@ -334,6 +334,23 @@ struct BucketState {
     /// declares no account — so only the integration tests set it, through
     /// [`Fixture::declare_bucket_owned_by_other`].
     owned_by_other: bool,
+    /// The stored lifecycle configuration, written by `PutBucketLifecycleConfiguration` within
+    /// the case, together with the transition-minimum-object-size choice the write carried.
+    /// `None` is the observable state `NoSuchLifecycleConfiguration` reports; there is no "empty
+    /// document" state, because the decoder refuses a document with no rule. It lives in
+    /// `BucketState` so that deleting the bucket deletes the document with it.
+    lifecycle: Option<StoredLifecycle>,
+}
+
+/// A bucket's lifecycle document exactly as one write stored it.
+#[derive(Debug, Clone)]
+struct StoredLifecycle {
+    /// The document, rule order preserved: the read-back is a byte-level golden.
+    configuration: dto::BucketLifecycleConfiguration,
+    /// The `x-amz-transition-default-minimum-object-size` the write carried, echoed by the read.
+    /// `None` when the write did not name one: the fixture invents no default, because a value
+    /// the client never sent cannot be asserted byte for byte.
+    minimum_object_size: Option<dto::TransitionDefaultMinimumObjectSize>,
 }
 
 /// The region the in-process deployment serves, which is also the one every case signs for.
@@ -465,10 +482,39 @@ impl Fixture {
         }
     }
 
+    /// Installs a bucket's lifecycle document, replacing whatever was there.
+    /// `PutBucketLifecycleConfiguration` only.
+    pub fn set_lifecycle(
+        &mut self,
+        name: &str,
+        configuration: dto::BucketLifecycleConfiguration,
+        minimum_object_size: Option<dto::TransitionDefaultMinimumObjectSize>,
+    ) {
+        self.buckets.entry(name.to_owned()).or_default().lifecycle = Some(StoredLifecycle {
+            configuration,
+            minimum_object_size,
+        });
+    }
+
+    /// The stored lifecycle document with its transition-minimum choice, or `None` for a bucket
+    /// that never had one.
+    #[must_use]
+    fn lifecycle(&self, name: &str) -> Option<&StoredLifecycle> {
+        self.buckets.get(name).and_then(|bucket| bucket.lifecycle.as_ref())
+    }
+
+    /// Removes a bucket's lifecycle document. Idempotent on purpose: the delete answers `204`
+    /// whether or not a document was there, so this reports nothing.
+    pub fn clear_lifecycle(&mut self, name: &str) {
+        if let Some(bucket) = self.buckets.get_mut(name) {
+            bucket.lifecycle = None;
+        }
+    }
+
     /// Removes a bucket, for `setup.buckets[].absent` and for `DeleteBucket`.
     ///
     /// The whole `BucketState` entry goes, and the CORS document and tag set go with it because
-    /// they live inside it: a bucket's configuration is a property of the bucket, not of the name,
+    /// they live inside it — the lifecycle document too: a bucket's configuration is a property of the bucket, not of the name,
     /// so a later creation under the same name starts unconfigured rather than inheriting a
     /// document nobody wrote to it. `Fixture::bucket_lifecycle` tests pin this.
     pub fn remove_bucket(&mut self, name: &str) {
@@ -1171,6 +1217,12 @@ fn guard_read(
 /// `NoSuchCORSConfiguration`, in AWS's own wording for a bucket that never had a CORS document.
 fn no_such_cors_configuration() -> HandlerError {
     HandlerError::new(ErrorCode::NO_SUCH_CORS_CONFIGURATION, "The CORS configuration does not exist")
+}
+
+/// `NoSuchLifecycleConfiguration`, in AWS's own wording for a bucket that never had a lifecycle
+/// document.
+fn no_such_lifecycle_configuration() -> HandlerError {
+    HandlerError::new(ErrorCode::NO_SUCH_LIFECYCLE_CONFIGURATION, "The lifecycle configuration does not exist")
 }
 
 fn no_such_key(key: &str) -> HandlerError {
@@ -1891,6 +1943,36 @@ impl Handler<dto::DeleteBucket> for Stub {
 impl Handler<dto::HeadBucket> for Stub {
     fn call(&self, request: Req<dto::HeadBucket>) -> impl core::future::Future<Output = HandlerResult<dto::HeadBucket>> + Send {
         let outcome = self.head_bucket(request.input());
+        async move { outcome }
+    }
+}
+
+impl Handler<dto::GetBucketLifecycleConfiguration> for Stub {
+    fn call(
+        &self,
+        request: Req<dto::GetBucketLifecycleConfiguration>,
+    ) -> impl core::future::Future<Output = HandlerResult<dto::GetBucketLifecycleConfiguration>> + Send {
+        let outcome = self.get_bucket_lifecycle_configuration(request.input());
+        async move { outcome }
+    }
+}
+
+impl Handler<dto::PutBucketLifecycleConfiguration> for Stub {
+    fn call(
+        &self,
+        request: Req<dto::PutBucketLifecycleConfiguration>,
+    ) -> impl core::future::Future<Output = HandlerResult<dto::PutBucketLifecycleConfiguration>> + Send {
+        let outcome = self.put_bucket_lifecycle_configuration(request.input());
+        async move { outcome }
+    }
+}
+
+impl Handler<dto::DeleteBucketLifecycle> for Stub {
+    fn call(
+        &self,
+        request: Req<dto::DeleteBucketLifecycle>,
+    ) -> impl core::future::Future<Output = HandlerResult<dto::DeleteBucketLifecycle>> + Send {
+        let outcome = self.delete_bucket_lifecycle(request.input());
         async move { outcome }
     }
 }
@@ -2670,6 +2752,69 @@ impl Stub {
         Ok(Resp::new(dto::HeadBucketOutput {
             bucket_region: fixture.home_region.clone(),
         }))
+    }
+
+    /// The stored lifecycle document, or the family's defining 404.
+    ///
+    /// The bucket is resolved first, so a missing bucket is `NoSuchBucket` and only a bucket that
+    /// exists without a document is `NoSuchLifecycleConfiguration` — two different facts a client
+    /// tearing down configuration branches on. The transition-minimum header comes back only when
+    /// the write that stored the document carried it: the fixture invents no default.
+    fn get_bucket_lifecycle_configuration(
+        &self,
+        input: &dto::GetBucketLifecycleConfigurationInput,
+    ) -> HandlerResult<dto::GetBucketLifecycleConfiguration> {
+        let fixture = self.borrow()?;
+        require_bucket(&fixture, &input.bucket)?;
+        let stored = fixture
+            .lifecycle(input.bucket.as_str())
+            .ok_or_else(no_such_lifecycle_configuration)?;
+        Ok(Resp::new(dto::GetBucketLifecycleConfigurationOutput {
+            rules: stored.configuration.rules.clone(),
+            transition_default_minimum_object_size: stored.minimum_object_size.clone(),
+        }))
+    }
+
+    /// The whole document, replaced — after the one validation pass every backend shares.
+    ///
+    /// The rules are `rustfs_gateway::validate_lifecycle`'s, not this file's: the filter grammar,
+    /// the expiration mutex, the midnight rule and the caps live once in the shared contract, and
+    /// this fixture calls it rather than mirroring it. What is stored is exactly what was sent,
+    /// in the order it was sent — the read-back is a byte-level golden, and that includes the
+    /// leniencies: an unknown `Status` spelling is stored as sent, not corrected.
+    fn put_bucket_lifecycle_configuration(
+        &self,
+        input: &dto::PutBucketLifecycleConfigurationInput,
+    ) -> HandlerResult<dto::PutBucketLifecycleConfiguration> {
+        let mut fixture = self.borrow()?;
+        require_bucket(&fixture, &input.bucket)?;
+        // The generated decoder always hands a document; the guard covers a caller that builds
+        // the input by hand, and answers what an absent body deserves.
+        let Some(configuration) = input.lifecycle_configuration.as_ref() else {
+            return Err(HandlerError::new(ErrorCode::MALFORMED_XML, "the request carries no lifecycle document"));
+        };
+        validate_lifecycle(configuration).map_err(|rejection| HandlerError::new(rejection.code(), rejection.reason()))?;
+        fixture.set_lifecycle(
+            input.bucket.as_str(),
+            configuration.clone(),
+            input.transition_default_minimum_object_size.clone(),
+        );
+        Ok(Resp::new(dto::PutBucketLifecycleConfigurationOutput {
+            transition_default_minimum_object_size: input.transition_default_minimum_object_size.clone(),
+        }))
+    }
+
+    /// The document removed, the bucket left alone.
+    ///
+    /// The `204` is unconditional in the same sense `DeleteBucketCors`'s is: removing the
+    /// lifecycle configuration of a bucket that has none is a success, not a `404`. The bucket
+    /// itself still has to exist — a success for a bucket that is not there would tell a caller
+    /// its teardown landed on something.
+    fn delete_bucket_lifecycle(&self, input: &dto::DeleteBucketLifecycleInput) -> HandlerResult<dto::DeleteBucketLifecycle> {
+        let mut fixture = self.borrow()?;
+        require_bucket(&fixture, &input.bucket)?;
+        fixture.clear_lifecycle(input.bucket.as_str());
+        Ok(Resp::new(dto::DeleteBucketLifecycleOutput::default()))
     }
 
     /// Opens a multipart upload, and records the attributes only this request can state.

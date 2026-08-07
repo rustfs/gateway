@@ -1,0 +1,48 @@
+[case]
+id = "c-lifecycle-0023"
+schema_version = 1
+title = "An expiration naming both Days and Date is refused as MalformedXML"
+rationale = """
+Days, Date and ExpiredObjectDeleteMarker are three different answers to when a rule fires, and a document naming two of them has no defined winner: whichever one an implementation picked, the other is a retention policy silently discarded. The refusal is the only reading under which every implementation agrees on what the stored document means."""
+polarity = "negative"
+operation = "PutBucketLifecycleConfiguration"
+tags = ["lifecycle", "xml", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-lc-0010"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_LifecycleExpiration.html"
+summary = "ExpiredObjectDeleteMarker is documented as unusable together with Days or Date, making the three members alternatives."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "conf-lifecycle"
+
+[[exchanges]]
+name = "days-and-date"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-lifecycle?lifecycle"
+headers = { "content-type" = "application/xml", "content-md5" = "NVVxymgL13cpNee4qkb+Yg==" }
+body = { utf8 = '<LifecycleConfiguration><Rule><Expiration><Date>2030-01-01T00:00:00.000Z</Date><Days>30</Days></Expiration><ID>both</ID><Filter><Prefix>data/</Prefix></Filter><Status>Enabled</Status></Rule></LifecycleConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[exchanges.expect.error]
+code = "MalformedXML"
+request_id_present = true
+
+[exchanges.expect.headers_present]
+"content-type" = "application/xml"
+
+[exchanges.expect.body]
+redact = ["RequestId", "HostId"]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>MalformedXML</Code><Message>Days, Date and ExpiredObjectDeleteMarker are mutually exclusive within an Expiration</Message><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''

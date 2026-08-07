@@ -15,7 +15,6 @@ GetBucketAnalyticsConfiguration -> ListObjects
 GetBucketEncryption -> ListObjects
 GetBucketIntelligentTieringConfiguration -> ListObjects
 GetBucketInventoryConfiguration -> ListObjects
-GetBucketLifecycleConfiguration -> ListObjects
 GetBucketLogging -> ListObjects
 GetBucketMetadataConfiguration -> ListObjects
 GetBucketMetadataTableConfiguration -> ListObjects

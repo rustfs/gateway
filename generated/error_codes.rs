@@ -20,8 +20,8 @@
 // disagree with it. Data only: the including crate defines the row types.
 
 pub static ERROR_CODE_OPERATIONS: &[(&str, &[&str])] = &[
-    ("AccessDenied", &["AbortMultipartUpload", "CompleteMultipartUpload", "CopyObject", "CreateBucket", "CreateMultipartUpload", "DeleteBucket", "DeleteBucketCors", "DeleteBucketTagging", "DeleteObject", "DeleteObjectTagging", "DeleteObjects", "GetBucketCors", "GetBucketLocation", "GetBucketTagging", "GetObject", "GetObjectAttributes", "GetObjectTagging", "HeadBucket", "HeadObject", "ListBuckets", "ListMultipartUploads", "ListObjectVersions", "ListObjects", "ListObjectsV2", "ListParts", "PutBucketCors", "PutBucketTagging", "PutObject", "PutObjectTagging", "UploadPart", "UploadPartCopy"]),
-    ("BadDigest", &["PutBucketCors", "PutObject", "UploadPart"]),
+    ("AccessDenied", &["AbortMultipartUpload", "CompleteMultipartUpload", "CopyObject", "CreateBucket", "CreateMultipartUpload", "DeleteBucket", "DeleteBucketCors", "DeleteBucketLifecycle", "DeleteBucketTagging", "DeleteObject", "DeleteObjectTagging", "DeleteObjects", "GetBucketCors", "GetBucketLifecycleConfiguration", "GetBucketLocation", "GetBucketTagging", "GetObject", "GetObjectAttributes", "GetObjectTagging", "HeadBucket", "HeadObject", "ListBuckets", "ListMultipartUploads", "ListObjectVersions", "ListObjects", "ListObjectsV2", "ListParts", "PutBucketCors", "PutBucketLifecycleConfiguration", "PutBucketTagging", "PutObject", "PutObjectTagging", "UploadPart", "UploadPartCopy"]),
+    ("BadDigest", &["PutBucketCors", "PutBucketLifecycleConfiguration", "PutObject", "UploadPart"]),
     ("BucketAlreadyExists", &["CreateBucket"]),
     ("BucketAlreadyOwnedByYou", &["CreateBucket"]),
     ("BucketNotEmpty", &["DeleteBucket"]),
@@ -30,7 +30,7 @@ pub static ERROR_CODE_OPERATIONS: &[(&str, &[&str])] = &[
     ("EntityTooLarge", &["CopyObject", "PutObject", "UploadPart"]),
     ("EntityTooSmall", &["CompleteMultipartUpload"]),
     ("IncompleteBody", &["PutObject", "UploadPart"]),
-    ("InvalidArgument", &["AbortMultipartUpload", "CompleteMultipartUpload", "CopyObject", "CreateBucket", "CreateMultipartUpload", "DeleteBucketTagging", "DeleteObject", "DeleteObjectTagging", "DeleteObjects", "GetBucketTagging", "GetObject", "GetObjectAttributes", "GetObjectTagging", "ListMultipartUploads", "ListObjectVersions", "ListObjects", "ListObjectsV2", "ListParts", "PutBucketCors", "PutBucketTagging", "PutObject", "PutObjectTagging", "UploadPart", "UploadPartCopy"]),
+    ("InvalidArgument", &["AbortMultipartUpload", "CompleteMultipartUpload", "CopyObject", "CreateBucket", "CreateMultipartUpload", "DeleteBucketTagging", "DeleteObject", "DeleteObjectTagging", "DeleteObjects", "GetBucketTagging", "GetObject", "GetObjectAttributes", "GetObjectTagging", "ListMultipartUploads", "ListObjectVersions", "ListObjects", "ListObjectsV2", "ListParts", "PutBucketCors", "PutBucketLifecycleConfiguration", "PutBucketTagging", "PutObject", "PutObjectTagging", "UploadPart", "UploadPartCopy"]),
     ("InvalidBucketName", &["CreateBucket"]),
     ("InvalidDigest", &["PutObject", "UploadPart"]),
     ("InvalidLocationConstraint", &["CreateBucket"]),
@@ -38,16 +38,17 @@ pub static ERROR_CODE_OPERATIONS: &[(&str, &[&str])] = &[
     ("InvalidPart", &["CompleteMultipartUpload"]),
     ("InvalidPartOrder", &["CompleteMultipartUpload"]),
     ("InvalidRange", &["GetObject", "UploadPartCopy"]),
-    ("InvalidRequest", &["CompleteMultipartUpload", "CopyObject", "CreateMultipartUpload", "DeleteObjects", "PutBucketCors", "PutObject", "UploadPartCopy"]),
+    ("InvalidRequest", &["CompleteMultipartUpload", "CopyObject", "CreateMultipartUpload", "DeleteObjects", "PutBucketCors", "PutBucketLifecycleConfiguration", "PutObject", "UploadPartCopy"]),
     ("InvalidStorageClass", &["CreateMultipartUpload"]),
     ("InvalidTag", &["PutBucketTagging", "PutObjectTagging"]),
     ("InvalidWriteOffset", &["PutObject"]),
-    ("MalformedXML", &["CompleteMultipartUpload", "CreateBucket", "DeleteObjects", "PutBucketCors", "PutBucketTagging", "PutObjectTagging"]),
+    ("MalformedXML", &["CompleteMultipartUpload", "CreateBucket", "DeleteObjects", "PutBucketCors", "PutBucketLifecycleConfiguration", "PutBucketTagging", "PutObjectTagging"]),
     ("MethodNotAllowed", &["CopyObject", "UploadPartCopy"]),
     ("MissingContentLength", &["PutObject", "UploadPart"]),
-    ("NoSuchBucket", &["AbortMultipartUpload", "CompleteMultipartUpload", "CopyObject", "CreateMultipartUpload", "DeleteBucket", "DeleteBucketCors", "DeleteBucketTagging", "DeleteObject", "DeleteObjectTagging", "DeleteObjects", "GetBucketCors", "GetBucketLocation", "GetBucketTagging", "GetObject", "GetObjectAttributes", "GetObjectTagging", "HeadBucket", "HeadObject", "ListMultipartUploads", "ListObjectVersions", "ListObjects", "ListObjectsV2", "ListParts", "PutBucketCors", "PutBucketTagging", "PutObject", "PutObjectTagging", "UploadPart", "UploadPartCopy"]),
+    ("NoSuchBucket", &["AbortMultipartUpload", "CompleteMultipartUpload", "CopyObject", "CreateMultipartUpload", "DeleteBucket", "DeleteBucketCors", "DeleteBucketLifecycle", "DeleteBucketTagging", "DeleteObject", "DeleteObjectTagging", "DeleteObjects", "GetBucketCors", "GetBucketLifecycleConfiguration", "GetBucketLocation", "GetBucketTagging", "GetObject", "GetObjectAttributes", "GetObjectTagging", "HeadBucket", "HeadObject", "ListMultipartUploads", "ListObjectVersions", "ListObjects", "ListObjectsV2", "ListParts", "PutBucketCors", "PutBucketLifecycleConfiguration", "PutBucketTagging", "PutObject", "PutObjectTagging", "UploadPart", "UploadPartCopy"]),
     ("NoSuchCORSConfiguration", &["GetBucketCors"]),
     ("NoSuchKey", &["CopyObject", "DeleteObjectTagging", "GetObject", "GetObjectAttributes", "GetObjectTagging", "HeadObject", "PutObjectTagging", "UploadPartCopy"]),
+    ("NoSuchLifecycleConfiguration", &["GetBucketLifecycleConfiguration"]),
     ("NoSuchTagSet", &["GetBucketTagging"]),
     ("NoSuchUpload", &["AbortMultipartUpload", "CompleteMultipartUpload", "ListParts", "UploadPart", "UploadPartCopy"]),
     ("NotFound", &["HeadBucket", "HeadObject"]),
@@ -61,6 +62,7 @@ pub static ERROR_CODE_OPERATIONS: &[(&str, &[&str])] = &[
 
 pub static NOT_CONFIGURED_CODES: &[(&str, &str)] = &[
     ("GetBucketCors", "NoSuchCORSConfiguration"),
+    ("GetBucketLifecycleConfiguration", "NoSuchLifecycleConfiguration"),
     ("GetBucketTagging", "NoSuchTagSet"),
 ];
 

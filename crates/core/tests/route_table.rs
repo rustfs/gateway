@@ -606,7 +606,6 @@ fn n_a_bucket_subresource_request_is_never_claimed_by_the_lifecycle_band() {
         "encryption",
         "intelligent-tiering",
         "inventory",
-        "lifecycle",
         "logging",
         "metadataAnnotationTable",
         "metadataInventoryTable",
@@ -631,7 +630,6 @@ fn n_a_bucket_subresource_request_is_never_claimed_by_the_lifecycle_band() {
         "encryption",
         "intelligent-tiering",
         "inventory",
-        "lifecycle",
         "metadataConfiguration",
         "metadataTable",
         "metrics",
@@ -694,6 +692,136 @@ fn an_x_id_parameter_does_not_disturb_the_lifecycle_band() {
 fn a_non_subresource_query_key_stays_in_the_lifecycle_band() {
     let table = generated_table();
     assert_eq!(routed(&table, &Req::new("HEAD /bucket?unrelated=1")), Some("HeadBucket"));
+}
+
+/// The `?lifecycle` band claims its own three requests, one per method, on the bucket target.
+///
+/// Positive half of the block below, checked as a whole for the same reason the CORS band is:
+/// a table that gained the read and forgot the write would leave a lifecycle document to be
+/// stored by a neighbour, and a table that forgot the delete would leave `DELETE /b?lifecycle`
+/// unroutable.
+#[test]
+fn the_lifecycle_subresource_routes_to_the_lifecycle_operations() {
+    let table = generated_table();
+    for (line, expected) in [
+        ("GET /bucket?lifecycle", "GetBucketLifecycleConfiguration"),
+        ("PUT /bucket?lifecycle", "PutBucketLifecycleConfiguration"),
+        ("DELETE /bucket?lifecycle", "DeleteBucketLifecycle"),
+    ] {
+        let hit = table
+            .resolve(&Req::new(line).parts())
+            .unwrap_or_else(|| panic!("{line} has a route"));
+        assert_eq!(hit.op_name, expected, "{line}");
+        assert!(
+            hit.precedence < 460,
+            "{line} must sit in the bucket subresource band ahead of the listings, got {}",
+            hit.precedence
+        );
+    }
+}
+
+/// Negative — the lifecycle read is never claimed by the bucket listing fallback.
+///
+/// `ListObjects` pins no query key, so before the row existed `GET /b?lifecycle` was answered
+/// with a key listing — the `GetBucketLifecycleConfiguration -> ListObjects` debt-register line
+/// this band retires. The PUT and DELETE halves had no fallback to be claimed by, so for them
+/// the fault mode was "no route at all", asserted above.
+#[test]
+fn n_the_lifecycle_read_is_never_claimed_by_the_listing_fallback() {
+    let table = generated_table();
+    for (line, forbidden) in [
+        ("GET /bucket?lifecycle", "ListObjects"),
+        ("GET /bucket?lifecycle", "ListObjectsV2"),
+        ("GET /bucket?lifecycle", "ListObjectVersions"),
+    ] {
+        assert_ne!(
+            routed(&table, &Req::new(line)),
+            Some(forbidden),
+            "{line}: a lifecycle document request answered with a key listing"
+        );
+    }
+}
+
+/// Negative — a request naming an earlier subresource beside `?lifecycle` stays with the earlier
+/// band.
+///
+/// AWS documents no such combination, so the order is fixed by precedence (300 and 310 before
+/// 370) rather than left to source order — the same rule every other both-keys pair in the table
+/// follows. The `?cors` pair matters most: it is the first time two configuration subresource
+/// bands sit side by side, in every method.
+#[test]
+fn n_a_request_naming_an_earlier_subresource_and_lifecycle_stays_with_the_earlier_row() {
+    let table = generated_table();
+    for (line, expected) in [
+        ("GET /bucket?location&lifecycle", "GetBucketLocation"),
+        ("GET /bucket?cors&lifecycle", "GetBucketCors"),
+        ("PUT /bucket?cors&lifecycle", "PutBucketCors"),
+        ("DELETE /bucket?cors&lifecycle", "DeleteBucketCors"),
+    ] {
+        assert_eq!(routed(&table, &Req::new(line)), Some(expected), "{line}");
+    }
+}
+
+/// Negative — `?lifecycle` beats the listings it overlaps, in both directions of the band.
+#[test]
+fn n_a_request_naming_lifecycle_and_a_listing_stays_with_the_lifecycle_row() {
+    let table = generated_table();
+    for line in [
+        "GET /bucket?lifecycle&uploads",
+        "GET /bucket?lifecycle&list-type=2",
+        "GET /bucket?lifecycle&versions",
+    ] {
+        assert_eq!(routed(&table, &Req::new(line)), Some("GetBucketLifecycleConfiguration"), "{line}");
+    }
+}
+
+/// Negative — each lifecycle row is bound to one method, so the key alone does not reach it.
+#[test]
+fn n_a_lifecycle_row_is_not_reachable_under_another_method() {
+    let table = generated_table();
+    for (line, forbidden) in [
+        ("PUT /bucket?lifecycle", "GetBucketLifecycleConfiguration"),
+        ("DELETE /bucket?lifecycle", "PutBucketLifecycleConfiguration"),
+        ("GET /bucket?lifecycle", "DeleteBucketLifecycle"),
+        ("HEAD /bucket?lifecycle", "GetBucketLifecycleConfiguration"),
+        ("POST /bucket?lifecycle", "PutBucketLifecycleConfiguration"),
+    ] {
+        assert_ne!(routed(&table, &Req::new(line)), Some(forbidden), "{line}");
+    }
+}
+
+/// Negative — `?lifecycle` on an object key is not a bucket subresource and must not reach the
+/// band.
+///
+/// The three lifecycle rows pin `Target(Bucket)`, so `GET /bucket/key?lifecycle` is a plain
+/// object read carrying an inert query key, exactly as it is on AWS.
+#[test]
+fn n_the_lifecycle_key_on_an_object_does_not_reach_a_bucket_lifecycle_row() {
+    let table = generated_table();
+    for (line, expected) in [
+        ("GET /bucket/key?lifecycle", "GetObject"),
+        ("PUT /bucket/key?lifecycle", "PutObject"),
+        ("DELETE /bucket/key?lifecycle", "DeleteObject"),
+    ] {
+        assert_eq!(routed(&table, &Req::new(line)), Some(expected), "{line}");
+    }
+}
+
+/// Negative — the neighbouring bands still answer their own requests beside the new band.
+#[test]
+fn n_the_bucket_bands_are_unchanged_by_the_lifecycle_band() {
+    let table = generated_table();
+    for (line, expected) in [
+        ("GET /bucket", "ListObjects"),
+        ("GET /bucket?list-type=2", "ListObjectsV2"),
+        ("GET /bucket?location", "GetBucketLocation"),
+        ("GET /bucket?cors", "GetBucketCors"),
+        ("PUT /bucket?cors", "PutBucketCors"),
+        ("DELETE /bucket?cors", "DeleteBucketCors"),
+        ("GET /bucket?uploads", "ListMultipartUploads"),
+    ] {
+        assert_eq!(routed(&table, &Req::new(line)), Some(expected), "{line}");
+    }
 }
 
 /// c-route-1001 — two subresources at one precedence, reachable together.

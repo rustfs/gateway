@@ -1,0 +1,48 @@
+[case]
+id = "c-lifecycle-0021"
+schema_version = 1
+title = "A rule with neither a Filter nor a legacy Prefix is refused as MalformedXML"
+rationale = """
+A rule with no scope says nothing about which objects it applies to, and the two failure modes of guessing are both destructive: applies-to-nothing silently disables the retention the client wrote, applies-to-everything expires data the client never scoped. The document is refused so the client states its scope — an empty Filter is the explicit spelling for everything."""
+polarity = "negative"
+operation = "PutBucketLifecycleConfiguration"
+tags = ["lifecycle", "xml", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-lc-0008"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_LifecycleRule.html"
+summary = "Filter is documented as required exactly when the rule carries no Prefix element."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "conf-lifecycle"
+
+[[exchanges]]
+name = "no-scope"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-lifecycle?lifecycle"
+headers = { "content-type" = "application/xml", "content-md5" = "DIGqYU5Jt4GJIQxPxI7BOA==" }
+body = { utf8 = '<LifecycleConfiguration><Rule><Expiration><Days>30</Days></Expiration><ID>scopeless</ID><Status>Enabled</Status></Rule></LifecycleConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[exchanges.expect.error]
+code = "MalformedXML"
+request_id_present = true
+
+[exchanges.expect.headers_present]
+"content-type" = "application/xml"
+
+[exchanges.expect.body]
+redact = ["RequestId", "HostId"]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>MalformedXML</Code><Message>Each Rule must identify objects with a Filter or a Prefix</Message><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''

@@ -1,0 +1,48 @@
+[case]
+id = "c-lifecycle-0022"
+schema_version = 1
+title = "An expiration date that is not midnight UTC is refused as 400 InvalidArgument"
+rationale = """
+The midnight constraint is what makes a date-based rule deterministic: rounding an afternoon timestamp — up or down — moves the expiry across a day boundary, and the client cannot tell which day its data dies on. The document is refused rather than rounded, naming the constraint, so the fix happens in the client's serializer where the bug is."""
+polarity = "negative"
+operation = "PutBucketLifecycleConfiguration"
+tags = ["lifecycle", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-lc-0009"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_LifecycleExpiration.html"
+summary = "The Date member is ISO 8601 with the time component always midnight UTC."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "conf-lifecycle"
+
+[[exchanges]]
+name = "afternoon-date"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-lifecycle?lifecycle"
+headers = { "content-type" = "application/xml", "content-md5" = "BYPvc0qLtp+TiP+RwcELUg==" }
+body = { utf8 = '<LifecycleConfiguration><Rule><Expiration><Date>2030-01-01T12:34:56.000Z</Date></Expiration><ID>bad-date</ID><Filter><Prefix>data/</Prefix></Filter><Status>Enabled</Status></Rule></LifecycleConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[exchanges.expect.error]
+code = "InvalidArgument"
+request_id_present = true
+
+[exchanges.expect.headers_present]
+"content-type" = "application/xml"
+
+[exchanges.expect.body]
+redact = ["RequestId", "HostId"]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>InvalidArgument</Code><Message>Date must be at midnight GMT</Message><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''

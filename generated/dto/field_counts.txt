@@ -1,6 +1,8 @@
+AbortIncompleteMultipartUpload 1
 AbortMultipartUploadInput 6
 AbortMultipartUploadOutput 1
 Bucket 4
+BucketLifecycleConfiguration 1
 Checksum 11
 CommonPrefix 1
 CompleteMultipartUploadInput 14
@@ -20,6 +22,8 @@ Delete 2
 DeleteBucketCorsInput 2
 DeleteBucketCorsOutput 0
 DeleteBucketInput 2
+DeleteBucketLifecycleInput 2
+DeleteBucketLifecycleOutput 0
 DeleteBucketOutput 0
 DeleteBucketTaggingInput 2
 DeleteBucketTaggingOutput 0
@@ -34,6 +38,8 @@ DeletedObject 4
 Error 4
 GetBucketCorsInput 2
 GetBucketCorsOutput 1
+GetBucketLifecycleConfigurationInput 2
+GetBucketLifecycleConfigurationOutput 2
 GetBucketLocationInput 2
 GetBucketLocationOutput 1
 GetBucketTaggingInput 2
@@ -50,6 +56,10 @@ HeadBucketOutput 1
 HeadObjectInput 21
 HeadObjectOutput 43
 Initiator 2
+LifecycleExpiration 3
+LifecycleRule 9
+LifecycleRuleAndOperator 4
+LifecycleRuleFilter 5
 ListBucketsInput 4
 ListBucketsOutput 4
 ListMultipartUploadsInput 9
@@ -63,6 +73,8 @@ ListObjectsV2Output 13
 ListPartsInput 10
 ListPartsOutput 16
 MultipartUpload 8
+NoncurrentVersionExpiration 2
+NoncurrentVersionTransition 3
 Object 9
 ObjectIdentifier 5
 ObjectPart 12
@@ -71,6 +83,8 @@ Owner 2
 Part 14
 PutBucketCorsInput 5
 PutBucketCorsOutput 0
+PutBucketLifecycleConfigurationInput 5
+PutBucketLifecycleConfigurationOutput 1
 PutBucketTaggingInput 5
 PutBucketTaggingOutput 0
 PutObjectInput 37
@@ -80,6 +94,7 @@ PutObjectTaggingOutput 1
 RestoreStatus 2
 Tag 2
 Tagging 1
+Transition 3
 UploadPartCopyInput 19
 UploadPartCopyOutput 9
 UploadPartInput 14

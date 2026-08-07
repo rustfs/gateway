@@ -16,7 +16,8 @@
 #
 # One Get/Put/Delete triple per subresource, every one of them sharing the "unconfigured
 # subresource answers a per-operation 404 code" rule. The CORS triple landed first and lives in
-# its own family file, `ops/cors.toml`, at 310/320/330; the tagging triple is `include`d here as
+# its own family file, `ops/cors.toml`, at 310/320/330; the lifecycle triple followed it into
+# `ops/lifecycle.toml` at 370/380/390; the tagging triple is `include`d here as
 # the family's calibration sample, because it collects every generic trap of the configuration
 # operations in one place: the wrapped `<TagSet><Tag>` collection, the per-operation
 # `not_configured` 404, the `httpChecksumRequired` write, and the unconditional `204` delete.
@@ -96,7 +97,6 @@ operations = [
   "DeleteBucketEncryption",
   "DeleteBucketIntelligentTieringConfiguration",
   "DeleteBucketInventoryConfiguration",
-  "DeleteBucketLifecycle",
   "DeleteBucketMetricsConfiguration",
   "DeleteBucketOwnershipControls",
   "DeleteBucketReplication",
@@ -107,7 +107,6 @@ operations = [
   "GetBucketEncryption",
   "GetBucketIntelligentTieringConfiguration",
   "GetBucketInventoryConfiguration",
-  "GetBucketLifecycleConfiguration",
   "GetBucketLogging",
   "GetBucketMetricsConfiguration",
   "GetBucketNotificationConfiguration",
@@ -126,7 +125,6 @@ operations = [
   "PutBucketEncryption",
   "PutBucketIntelligentTieringConfiguration",
   "PutBucketInventoryConfiguration",
-  "PutBucketLifecycleConfiguration",
   "PutBucketLogging",
   "PutBucketMetricsConfiguration",
   "PutBucketNotificationConfiguration",

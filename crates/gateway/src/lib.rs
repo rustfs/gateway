@@ -183,6 +183,16 @@ pub use rustfs_gateway_core::ops::shared::tagging::{
     validate_tag_set,
 };
 
+// The lifecycle document contract, exported for the same reason as the CORS one above:
+// what `PutBucketLifecycleConfiguration` may store — the filter's one-child grammar, the
+// expiration mutex, the midnight rule, the thousand-rule cap, the id bounds — must be one
+// implementation every backend calls. The stakes are higher here than for CORS: the scanner that
+// reads this document deletes data, and validation deliberately stops at AWS's documented
+// refusals so that a stored document is never refused by a later release (`q-lc-0014`).
+pub use rustfs_gateway_core::ops::shared::lifecycle::{
+    LifecycleRejection, MAX_LIFECYCLE_ID_CHARS, MAX_LIFECYCLE_RULES, validate_lifecycle,
+};
+
 // The bucket lifecycle contracts, exported the day they are written rather than found
 // unreachable later. A backend answering CreateBucket needs `resolve` — the us-east-1
 // omission rule, the EU alias and the strict region match — and a backend answering any

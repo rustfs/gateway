@@ -1,0 +1,54 @@
+[case]
+id = "c-lifecycle-0005"
+schema_version = 1
+title = "ExpiredObjectDeleteMarker true survives the round trip with the boolean in lower case"
+rationale = """
+The delete-marker flag is the one expiration spelling that carries a boolean, and XML booleans are case-sensitive on the wire: a serializer that writes True renders a document other parsers refuse. The flag standing alone is also the only legal way to carry it — this case holds the accepted side of the exclusivity that c-lifecycle-0023 refuses."""
+polarity = "positive"
+operation = "GetBucketLifecycleConfiguration"
+tags = ["lifecycle", "xml", "wire-bytes"]
+timeout_ms = 10000
+quirks = ["q-lc-0010"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_LifecycleExpiration.html"
+summary = "ExpiredObjectDeleteMarker is a boolean member that stands alone in an expiration action."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "conf-lifecycle"
+
+[[exchanges]]
+name = "put-eodm"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-lifecycle?lifecycle"
+headers = { "content-type" = "application/xml", "content-md5" = "pvKLNdRt98IU/tQZfxorpg==" }
+body = { utf8 = '<LifecycleConfiguration><Rule><Expiration><ExpiredObjectDeleteMarker>true</ExpiredObjectDeleteMarker></Expiration><ID>markers</ID><Filter><Prefix>versioned/</Prefix></Filter><Status>Enabled</Status></Rule></LifecycleConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[[exchanges]]
+name = "read-back"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-lifecycle?lifecycle"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.headers_present]
+"content-type" = "application/xml"
+
+[exchanges.expect.body]
+golden = "goldens/c-lifecycle-0005.xml"

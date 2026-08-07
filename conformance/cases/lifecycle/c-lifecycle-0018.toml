@@ -1,0 +1,65 @@
+[case]
+id = "c-lifecycle-0018"
+schema_version = 1
+title = "Unknown elements, MinIO's DelMarkerExpiration included, are skipped and the stored document keeps known members"
+rationale = """
+The lenient read is a durability promise: a lifecycle document is stored configuration, re-parsed by every future release, and other implementations extend the rule vocabulary — MinIO's DelMarkerExpiration is a real element real clients send. A decoder that turned strict would refuse the stored document on the next read and the persistence path fails open, silently turning retention off. This case would go red if leniency were removed, which is exactly the change it exists to block; the read-back proves the unknowns are skipped rather than stored, which is this release's honest behaviour until a dialect mechanism exists."""
+polarity = "negative"
+operation = "PutBucketLifecycleConfiguration"
+tags = ["lifecycle", "xml"]
+timeout_ms = 10000
+quirks = ["q-lc-0006"]
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/issues/613"
+summary = "AWS ignores unknown elements in request XML and strict upstream parsing broke real clients."
+kind = "s3s-issue"
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/pull/617"
+summary = "The upstream relaxation that made unknown request elements a skip rather than a refusal."
+kind = "s3s-pr"
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/pull/611"
+summary = "MinIO's lifecycle dialect members forced upstream to fork its generated code, which is the pressure this decoder absorbs by skipping instead."
+kind = "s3s-pr"
+
+
+[[setup.buckets]]
+name = "conf-lifecycle"
+
+[[exchanges]]
+name = "put-with-unknowns"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-lifecycle?lifecycle"
+headers = { "content-type" = "application/xml", "content-md5" = "O5wiQZ4Ne2uNv+p3r2ZkxA==" }
+body = { utf8 = '<LifecycleConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Rule><Expiration><Days>7</Days></Expiration><ID>dialect</ID><Filter><Prefix>del/</Prefix></Filter><Status>Enabled</Status><DelMarkerExpiration><Days>7</Days></DelMarkerExpiration><FutureKnob>on</FutureKnob></Rule></LifecycleConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[[exchanges]]
+name = "read-back-known-members-only"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-lifecycle?lifecycle"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.headers_present]
+"content-type" = "application/xml"
+
+[exchanges.expect.body]
+golden = "goldens/c-lifecycle-0018.xml"
+not_contains_utf8 = ["DelMarkerExpiration", "FutureKnob"]
