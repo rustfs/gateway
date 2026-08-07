@@ -1,0 +1,60 @@
+[case]
+id = "c-cors-0003"
+schema_version = 1
+title = "Every list member of a rule round-trips as repeated singular elements, byte for byte"
+rationale = """
+One rule carrying three methods, two origins, two allowed headers and an expose header exercises all four flattened list members at once. Each is spelled as a repeated singular element — AllowedMethod, AllowedOrigin, AllowedHeader, ExposeHeader — and a codec that wrapped any one of them, or collapsed the repeats to the first value, would drop policy the operator wrote: a lost AllowedMethod turns a permitted request into a browser-side failure with no server-side symptom beyond one warn line."""
+polarity = "positive"
+operation = "PutBucketCors"
+tags = ["cors", "xml", "wire-bytes"]
+timeout_ms = 10000
+quirks = ["q-cors-0002", "q-cors-0003"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CORSRule.html"
+summary = "Each list member of a rule is documented as a singular element name repeating once per value."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketCors.html"
+summary = "The request syntax shows the rule's list members inline in the rule with no wrapper elements."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "conf-cors"
+
+[[exchanges]]
+name = "put-full-rule"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-cors?cors"
+headers = { "content-type" = "application/xml", "content-md5" = "TacodPy7vSOGI7D2MMDw+w==" }
+body = { utf8 = "<CORSConfiguration><CORSRule><AllowedHeader>x-requested-with</AllowedHeader><AllowedHeader>content-type</AllowedHeader><AllowedMethod>GET</AllowedMethod><AllowedMethod>PUT</AllowedMethod><AllowedMethod>DELETE</AllowedMethod><AllowedOrigin>https://a.example.com</AllowedOrigin><AllowedOrigin>https://b.example.com</AllowedOrigin><ExposeHeader>x-amz-request-id</ExposeHeader></CORSRule></CORSConfiguration>" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[[exchanges]]
+name = "read-back"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-cors?cors"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.headers_present]
+"content-type" = "application/xml"
+
+[exchanges.expect.body]
+golden = "goldens/c-cors-0003.xml"
+not_contains_utf8 = ["<AllowedMethods>", "<AllowedOrigins>", "<AllowedHeaders>", "<ExposeHeaders>"]

@@ -142,11 +142,18 @@ fn data_struct(
         out.push_str("///\n/// Not `Clone`: it owns a streaming body.\n");
     }
     out.push_str(&derives(clonable, has_secret));
-    let _ = writeln!(out, "pub struct {name} {{");
-    for field in fields {
-        out.push_str(&field_decl(field));
+    if fields.is_empty() {
+        // An operation whose output is `smithy.api#Unit` has no members at all, and rustfmt
+        // spells the empty struct `{}` on one line. Emitting anything else would make the first
+        // `cargo fmt` differ from a fresh codegen run, which is a `spec verify` failure.
+        let _ = writeln!(out, "pub struct {name} {{}}\n");
+    } else {
+        let _ = writeln!(out, "pub struct {name} {{");
+        for field in fields {
+            out.push_str(&field_decl(field));
+        }
+        out.push_str("}\n\n");
     }
-    out.push_str("}\n\n");
     out.push_str(&check_required_impl(name, baseline_name, fields));
     out.push('\n');
     if has_secret {

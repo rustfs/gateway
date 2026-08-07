@@ -1,0 +1,45 @@
+[case]
+id = "c-cors-0026"
+schema_version = 1
+title = "A rule ID longer than 255 characters is refused with 400 InvalidArgument"
+rationale = """
+The ID is the operator's handle on a rule and downstream tooling stores it in fixed-width fields sized to the documented cap. Accepting an oversized one creates a document AWS would refuse — a portability trap discovered only on migration — and an unbounded one is a storage amplifier inside an otherwise size-capped document."""
+polarity = "negative"
+operation = "PutBucketCors"
+tags = ["cors", "error-shape"]
+timeout_ms = 10000
+quirks = []
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CORSRule.html"
+summary = "The ID member is documented as at most 255 characters."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "conf-cors"
+
+[request]
+method = "PUT"
+target = "/conf-cors?cors"
+headers = { "content-type" = "application/xml", "content-md5" = "IfRL4IAaR42Hmds6HKjbQA==" }
+body = { utf8 = "<CORSConfiguration><CORSRule><ID>iiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiii</ID><AllowedMethod>GET</AllowedMethod><AllowedOrigin>https://example.com</AllowedOrigin></CORSRule></CORSConfiguration>" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+code = "InvalidArgument"
+request_id_present = true
+
+[expect.headers_present]
+"content-type" = "application/xml"
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>InvalidArgument</Code><Message>ID must be no more than 255 characters</Message><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''

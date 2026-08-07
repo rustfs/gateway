@@ -1,0 +1,75 @@
+[case]
+id = "c-cors-0019"
+schema_version = 1
+title = "The wildcard budget of the header lists: two in AllowedHeader is refused, any in ExposeHeader is refused"
+rationale = """
+The three list members have three different wildcard budgets — origins and allowed headers may carry one, expose headers none at all — and an implementation that validated them with one shared rule gets at least one of the three wrong. ExposeHeader is the sharp edge: it is echoed to browsers verbatim in Access-Control-Expose-Headers, where an asterisk means something entirely different (every header, credentials aside), so a stored wildcard silently widens what scripts may read."""
+polarity = "negative"
+operation = "PutBucketCors"
+tags = ["cors", "security", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-cors-0005"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CORSRule.html"
+summary = "AllowedHeaders documents a one-wildcard budget and ExposeHeaders documents none."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/ManageCorsUsing.html"
+summary = "The guide rules wildcards out of ExposeHeader values."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "conf-cors"
+
+[[exchanges]]
+name = "two-wildcards-in-allowed-header"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-cors?cors"
+headers = { "content-type" = "application/xml", "content-md5" = "llZoiY/3qqw4C1V/hXYI0w==" }
+body = { utf8 = "<CORSConfiguration><CORSRule><AllowedHeader>*-amz-*</AllowedHeader><AllowedMethod>GET</AllowedMethod><AllowedOrigin>https://example.com</AllowedOrigin></CORSRule></CORSConfiguration>" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[exchanges.expect.error]
+code = "InvalidRequest"
+request_id_present = true
+
+[exchanges.expect.body]
+redact = ["RequestId", "HostId"]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>InvalidRequest</Code><Message>AllowedHeader can not have more than one wildcard</Message><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''
+
+[[exchanges]]
+name = "wildcard-in-expose-header"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-cors?cors"
+headers = { "content-type" = "application/xml", "content-md5" = "0xhJSfYWNar4/tK+OyZSzQ==" }
+body = { utf8 = "<CORSConfiguration><CORSRule><AllowedMethod>GET</AllowedMethod><AllowedOrigin>https://example.com</AllowedOrigin><ExposeHeader>x-amz-*</ExposeHeader></CORSRule></CORSConfiguration>" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[exchanges.expect.error]
+code = "InvalidRequest"
+request_id_present = true
+
+[exchanges.expect.body]
+redact = ["RequestId", "HostId"]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>InvalidRequest</Code><Message>ExposeHeader does not support wildcards</Message><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''

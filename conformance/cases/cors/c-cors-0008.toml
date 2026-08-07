@@ -1,0 +1,37 @@
+[case]
+id = "c-cors-0008"
+schema_version = 1
+title = "An AllowedHeader with a trailing wildcard is accepted"
+rationale = """
+x-amz-* is the documented way to admit the whole family of AWS request headers without enumerating them, and SDK-generated preflights depend on it: an SDK adds x-amz headers freely, so a configuration that cannot say x-amz-* has to be rewritten every time the SDK adds one. Refusing the trailing wildcard breaks that maintenance story."""
+polarity = "positive"
+operation = "PutBucketCors"
+tags = ["cors"]
+timeout_ms = 10000
+quirks = ["q-cors-0005"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/ManageCorsUsing.html"
+summary = "The guide shows AllowedHeader values carrying one wildcard to match a prefix of headers."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CORSRule.html"
+summary = "AllowedHeaders documents that a value may contain at most one wildcard character."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "conf-cors"
+
+[request]
+method = "PUT"
+target = "/conf-cors?cors"
+headers = { "content-type" = "application/xml", "content-md5" = "ciB986Nh1eBYQcTTrSiCfA==" }
+body = { utf8 = "<CORSConfiguration><CORSRule><AllowedHeader>x-amz-*</AllowedHeader><AllowedMethod>PUT</AllowedMethod><AllowedOrigin>https://example.com</AllowedOrigin></CORSRule></CORSConfiguration>" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+connection_after = "open"

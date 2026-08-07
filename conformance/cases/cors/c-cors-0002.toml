@@ -1,0 +1,61 @@
+[case]
+id = "c-cors-0002"
+schema_version = 1
+title = "A stored two-rule document reads back as flattened CORSRule siblings under an xmlns-bearing root"
+rationale = """
+The read-back is where the flattened shape becomes observable: every SDK parses CORSRule as repeated children of the CORSConfiguration root, so a serializer that introduces a wrapper element returns a document in which every SDK finds zero rules — the configuration is silently invisible rather than wrong. The root's xmlns is pinned for the same reason: strict parsers refuse an unnamespaced root. Byte-level comparison is the only assertion that notices either."""
+polarity = "positive"
+operation = "GetBucketCors"
+tags = ["cors", "xml", "wire-bytes"]
+timeout_ms = 10000
+quirks = ["q-cors-0002"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketCors.html"
+summary = "The response syntax is a CORSConfiguration root whose CORSRule children repeat with no wrapper."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/issues/264"
+summary = "Upstream shipped response roots without the S3 xmlns and strict clients refused them."
+kind = "s3s-issue"
+
+
+[[setup.buckets]]
+name = "conf-cors"
+
+[[exchanges]]
+name = "put-two-rules"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-cors?cors"
+headers = { "content-type" = "application/xml", "content-md5" = "xK6xhRX2LEuA0S5ReATVhg==" }
+body = { utf8 = "<CORSConfiguration><CORSRule><AllowedMethod>GET</AllowedMethod><AllowedOrigin>https://example.com</AllowedOrigin></CORSRule><CORSRule><AllowedMethod>PUT</AllowedMethod><AllowedMethod>POST</AllowedMethod><AllowedOrigin>https://app.example.com</AllowedOrigin></CORSRule></CORSConfiguration>" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[[exchanges]]
+name = "read-back"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-cors?cors"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.headers_present]
+"content-type" = "application/xml"
+
+[exchanges.expect.body]
+golden = "goldens/c-cors-0002.xml"
+# A wrapper element around the rules is the classic mis-serialization; its absence is the case.
+not_contains_utf8 = ["<CORSRules>"]

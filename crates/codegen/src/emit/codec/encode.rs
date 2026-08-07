@@ -44,6 +44,12 @@ pub fn body(ir: &OperationIr) -> Result<String, String> {
     out.push_str("        let mut response = EncodedResponse::of(status);\n");
     out.push_str("        response.status = status_code(status)?;\n");
 
+    // An output with no members reads nothing off `output` — the delete family's `smithy.api#Unit`
+    // shape — so the parameter is consumed explicitly, the same convention `decode` uses for a
+    // request whose body no field reads. Generated code must compile warning-free.
+    if ir.output.is_empty() {
+        out.push_str("        let _ = output;\n");
+    }
     for field in &ir.output {
         out.push_str(&one_field(ir, field)?);
     }

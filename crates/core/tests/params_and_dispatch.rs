@@ -68,6 +68,14 @@ static DELETE_OBJECT: OperationSpec = OperationSpec {
     auth: Some(AuthRequirement::new("s3:DeleteObject", ResourceShape::Object)),
 };
 
+static LIST_OBJECTS: OperationSpec = OperationSpec {
+    name: "ListObjects",
+    success_status: 200,
+    required_params: &[],
+    not_configured_error: None,
+    auth: Some(AuthRequirement::new("s3:ListBucket", ResourceShape::Bucket)),
+};
+
 static GET_LIFECYCLE: OperationSpec = OperationSpec {
     name: "GetBucketLifecycleConfiguration",
     success_status: 200,
@@ -473,6 +481,45 @@ fn the_generated_router_still_serves_the_plain_object_band_beside_the_tagging_ro
         let dispatch = router.dispatch(&Req::new(line).parts()).expect("routed");
         assert_eq!(dispatch.entry.op_name, expected, "{line}");
     }
+}
+
+/// Negative — an unhandled CORS-configuration request is refused by name, in all three methods.
+///
+/// The registry below handles the listing fallback and nothing else, which is the shape of every
+/// deployment that has not implemented CORS configuration. Each of the three must come back as
+/// the second `501` naming the CORS operation the request asked for — the GET in particular must
+/// not fall through to `ListObjects`, which is exactly what it did while the operation was
+/// deferred (the `GetBucketCors -> ListObjects` debt-register line). Registration decides whether
+/// a request can be *served*; it must never decide what the request *means*.
+#[test]
+fn n_an_unhandled_cors_request_is_refused_rather_than_answered_by_the_listing() {
+    let mut registry = Registry::new();
+    registry.register(&LIST_OBJECTS).expect("a registrable spec");
+    let router = Router::from_generated(registry).expect("the generated table builds");
+
+    for (line, expected) in [
+        ("GET /bucket?cors", "GetBucketCors"),
+        ("PUT /bucket?cors", "PutBucketCors"),
+        ("DELETE /bucket?cors", "DeleteBucketCors"),
+    ] {
+        let error = router
+            .dispatch(&Req::new(line).parts())
+            .expect_err("this registry handles no CORS operation");
+        assert_eq!(*error.code(), ErrorCode::NOT_IMPLEMENTED, "{line}");
+        assert_eq!(error.message(), NOT_REGISTERED_MESSAGE, "{line}");
+        assert_eq!(error.operation(), Some(expected), "{line} must name the operation it asked for");
+    }
+}
+
+/// The registered fallback is still served, so the refusal above is not a blanket one.
+#[test]
+fn the_generated_router_still_serves_the_listing_beside_the_cors_rows() {
+    let mut registry = Registry::new();
+    registry.register(&LIST_OBJECTS).expect("a registrable spec");
+    let router = Router::from_generated(registry).expect("the generated table builds");
+
+    let dispatch = router.dispatch(&Req::new("GET /bucket").parts()).expect("routed");
+    assert_eq!(dispatch.entry.op_name, "ListObjects");
 }
 
 /// A parameter check without a route never runs: the order of the three questions is fixed.

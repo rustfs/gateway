@@ -1,0 +1,79 @@
+[case]
+id = "c-cors-0011"
+schema_version = 1
+title = "Delete answers 204 and the next read answers the family's own 404"
+rationale = """
+The teardown lifecycle in one case: a configured bucket, a 204 delete, and a read that now answers NoSuchCORSConfiguration. The delete's 204 must carry no body, and the follow-up read must answer the operation-specific code rather than a generic 404 or a 200 with an empty document — automation that tears down CORS branches on exactly this sequence to confirm the teardown took."""
+polarity = "positive"
+operation = "DeleteBucketCors"
+tags = ["cors", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-cors-0001", "q-cors-0006"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketCors.html"
+summary = "The delete answers 204 No Content on success."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketCors.html"
+summary = "A bucket without a CORS configuration answers the NoSuchCORSConfiguration error with status 404."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "conf-cors"
+
+[[exchanges]]
+name = "configure"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-cors?cors"
+headers = { "content-type" = "application/xml", "content-md5" = "TQGnXRmhRWe+y44O3yYpVw==" }
+body = { utf8 = "<CORSConfiguration><CORSRule><AllowedMethod>GET</AllowedMethod><AllowedOrigin>https://example.com</AllowedOrigin></CORSRule></CORSConfiguration>" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[[exchanges]]
+name = "tear-down"
+
+[exchanges.request]
+method = "DELETE"
+target = "/conf-cors?cors"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 204
+connection_after = "open"
+
+[[exchanges]]
+name = "read-after-delete"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-cors?cors"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 404
+connection_after = "open"
+
+[exchanges.expect.error]
+code = "NoSuchCORSConfiguration"
+request_id_present = true
+
+[exchanges.expect.headers_present]
+"content-type" = "application/xml"
+
+[exchanges.expect.body]
+redact = ["RequestId", "HostId"]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>NoSuchCORSConfiguration</Code><Message>The CORS configuration does not exist</Message><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''

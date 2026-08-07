@@ -120,7 +120,7 @@ use rustfs_gateway::{
     BucketName, ByteStream, ChecksumAlgorithm, ChecksumSpec, ConditionalOutcome, CopyRange, CopySourceRejection, CursorSpec,
     ETag, ErrorCode, ErrorDetail, Handler, HandlerError, HandlerResult, IfRange, ObjectKey, ObjectValidators,
     PRECONDITION_FAILED_MESSAGE, PreconditionRejection, Preconditions, RangeDecision, RangeSelectors, Req, RequestKind, Resp,
-    Timestamp, collect, evaluate, evaluate_range, parse_conditional_etag, resolve_copy_range,
+    Timestamp, collect, evaluate, evaluate_range, parse_conditional_etag, resolve_copy_range, validate_cors,
 };
 
 /// The canonical user id every listing reports as the owner.
@@ -301,13 +301,21 @@ pub struct VersionRef<'a> {
     pub is_latest: bool,
 }
 
-/// What `[[setup.buckets]]` declared about one bucket.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+/// What `[[setup.buckets]]` declared about one bucket, plus the one document a case can install.
+///
+/// No longer `Copy`: the CORS document is a fixture a `PutBucketCors` exchange writes rather than
+/// a flag `[setup]` declares, and it is held here because it is per-bucket state exactly as the
+/// versioning flag is.
+#[derive(Debug, Default, Clone)]
 struct BucketState {
     /// `versioning = "enabled"`.
     versioned: bool,
     /// `object_lock = true`.
     object_lock: bool,
+    /// The stored CORS configuration, written by `PutBucketCors` within the case. `None` is the
+    /// observable state `NoSuchCORSConfiguration` reports; there is no "empty document" state,
+    /// because the decoder refuses a document with no rule.
+    cors: Option<dto::CorsConfiguration>,
 }
 
 /// The state one case runs against.
@@ -351,6 +359,25 @@ impl Fixture {
     #[must_use]
     pub fn has_object_lock(&self, name: &str) -> bool {
         self.buckets.get(name).is_some_and(|bucket| bucket.object_lock)
+    }
+
+    /// Installs a bucket's CORS document, replacing whatever was there. `PutBucketCors` only.
+    pub fn set_cors(&mut self, name: &str, configuration: dto::CorsConfiguration) {
+        self.buckets.entry(name.to_owned()).or_default().cors = Some(configuration);
+    }
+
+    /// The stored CORS document, or `None` for a bucket that never had one.
+    #[must_use]
+    pub fn cors(&self, name: &str) -> Option<&dto::CorsConfiguration> {
+        self.buckets.get(name).and_then(|bucket| bucket.cors.as_ref())
+    }
+
+    /// Removes a bucket's CORS document. Idempotent on purpose: the delete answers `204` whether
+    /// or not a document was there, so this reports nothing.
+    pub fn clear_cors(&mut self, name: &str) {
+        if let Some(bucket) = self.buckets.get_mut(name) {
+            bucket.cors = None;
+        }
     }
 
     /// Removes a bucket, for `setup.buckets[].absent`.
@@ -1033,6 +1060,11 @@ fn guard_read(
 /// a client batching reads on one connection cannot tell two 404s apart without it. The key is the
 /// one the request named, so it is an echo to a caller already authenticated and authorised, and
 /// the writer escapes it: see `rustfs_gateway`'s renderer.
+/// `NoSuchCORSConfiguration`, in AWS's own wording for a bucket that never had a CORS document.
+fn no_such_cors_configuration() -> HandlerError {
+    HandlerError::new(ErrorCode::NO_SUCH_CORS_CONFIGURATION, "The CORS configuration does not exist")
+}
+
 fn no_such_key(key: &str) -> HandlerError {
     HandlerError::new(ErrorCode::NO_SUCH_KEY, "The specified key does not exist.")
         .with_detail(ErrorDetail::Key(key.to_owned().into()))
@@ -1711,6 +1743,36 @@ impl Handler<dto::GetBucketLocation> for Stub {
     }
 }
 
+impl Handler<dto::GetBucketCors> for Stub {
+    fn call(
+        &self,
+        request: Req<dto::GetBucketCors>,
+    ) -> impl core::future::Future<Output = HandlerResult<dto::GetBucketCors>> + Send {
+        let outcome = self.get_bucket_cors(request.input());
+        async move { outcome }
+    }
+}
+
+impl Handler<dto::PutBucketCors> for Stub {
+    fn call(
+        &self,
+        request: Req<dto::PutBucketCors>,
+    ) -> impl core::future::Future<Output = HandlerResult<dto::PutBucketCors>> + Send {
+        let outcome = self.put_bucket_cors(request.input());
+        async move { outcome }
+    }
+}
+
+impl Handler<dto::DeleteBucketCors> for Stub {
+    fn call(
+        &self,
+        request: Req<dto::DeleteBucketCors>,
+    ) -> impl core::future::Future<Output = HandlerResult<dto::DeleteBucketCors>> + Send {
+        let outcome = self.delete_bucket_cors(request.input());
+        async move { outcome }
+    }
+}
+
 impl Handler<dto::CreateMultipartUpload> for Stub {
     fn call(
         &self,
@@ -2314,6 +2376,50 @@ impl Stub {
         let fixture = self.borrow()?;
         require_bucket(&fixture, &input.bucket)?;
         Ok(Resp::new(dto::GetBucketLocationOutput::default()))
+    }
+
+    /// The stored CORS document, or the family's defining 404.
+    ///
+    /// The bucket is resolved first, so a missing bucket is `NoSuchBucket` and only a bucket that
+    /// exists without a document is `NoSuchCORSConfiguration` — two different facts a client
+    /// tearing down configuration branches on. There is no empty-document answer: the decoder
+    /// refuses a document with no rule on the way in, so "configured but empty" is unrepresentable.
+    fn get_bucket_cors(&self, input: &dto::GetBucketCorsInput) -> HandlerResult<dto::GetBucketCors> {
+        let fixture = self.borrow()?;
+        require_bucket(&fixture, &input.bucket)?;
+        let configuration = fixture.cors(input.bucket.as_str()).ok_or_else(no_such_cors_configuration)?;
+        Ok(Resp::new(dto::GetBucketCorsOutput {
+            cors_rules: configuration.cors_rules.clone(),
+        }))
+    }
+
+    /// The whole document, replaced — after the one validation pass every backend shares.
+    ///
+    /// The rules are `rustfs_gateway::validate_cors`'s, not this file's: the closed method set,
+    /// the wildcard budget and the hundred-rule cap live once in the shared contract, and this
+    /// fixture calls it rather than mirroring it — the copy-source mirror is the cautionary tale.
+    /// What is stored is exactly what was sent, in the order it was sent: the read-back is a
+    /// byte-level golden, and a stub that re-sorted rules would be answering from a decision of
+    /// its own.
+    fn put_bucket_cors(&self, input: &dto::PutBucketCorsInput) -> HandlerResult<dto::PutBucketCors> {
+        let mut fixture = self.borrow()?;
+        require_bucket(&fixture, &input.bucket)?;
+        validate_cors(&input.cors_configuration).map_err(|rejection| HandlerError::new(rejection.code(), rejection.reason()))?;
+        fixture.set_cors(input.bucket.as_str(), input.cors_configuration.clone());
+        Ok(Resp::new(dto::PutBucketCorsOutput::default()))
+    }
+
+    /// The document removed, the bucket left alone.
+    ///
+    /// The `204` is unconditional in the same sense `DeleteObject`'s is: removing the CORS
+    /// configuration of a bucket that has none is a success, not a `404`. The bucket itself still
+    /// has to exist — the request names one, and a success for a bucket that is not there would
+    /// tell a caller its teardown landed on something.
+    fn delete_bucket_cors(&self, input: &dto::DeleteBucketCorsInput) -> HandlerResult<dto::DeleteBucketCors> {
+        let mut fixture = self.borrow()?;
+        require_bucket(&fixture, &input.bucket)?;
+        fixture.clear_cors(input.bucket.as_str());
+        Ok(Resp::new(dto::DeleteBucketCorsOutput::default()))
     }
 
     /// Opens a multipart upload, and records the attributes only this request can state.

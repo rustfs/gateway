@@ -1,0 +1,45 @@
+[case]
+id = "c-cors-0014"
+schema_version = 1
+title = "A CORS write with no integrity claim at all is refused with 400 before the document is parsed"
+rationale = """
+The write demands Content-MD5 or an x-amz-checksum header, and the refusal must precede the parse: a configuration corrupted in transit that still parses would install a policy nobody wrote, and the browser-side symptoms would surface days later on someone else's screen. Refusing with 400 InvalidRequest and naming the missing header is what lets a caller fix the request; a 200 here means the integrity requirement was silently dropped from the operation's contract."""
+polarity = "negative"
+operation = "PutBucketCors"
+tags = ["cors", "checksum", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-cors-0008"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketCors.html"
+summary = "The request syntax documents Content-MD5 as required for this operation."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "conf-cors"
+
+[request]
+method = "PUT"
+target = "/conf-cors?cors"
+headers = { "content-type" = "application/xml" }
+body = { utf8 = "<CORSConfiguration><CORSRule><AllowedMethod>GET</AllowedMethod><AllowedOrigin>https://example.com</AllowedOrigin></CORSRule></CORSConfiguration>" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+code = "InvalidRequest"
+request_id_present = true
+
+[expect.headers_present]
+"content-type" = "application/xml"
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>InvalidRequest</Code><Message>this operation requires an integrity check on the request body: send Content-MD5 or an x-amz-checksum-* header</Message><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''

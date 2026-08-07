@@ -1,0 +1,41 @@
+[case]
+id = "c-cors-0001"
+schema_version = 1
+title = "A one-rule CORS document with Content-MD5 is stored and answers 200"
+rationale = """
+The smallest possible write is the family's front door: a browser-facing deployment cannot serve a single cross-origin request until this succeeds. A 501 here means the route row exists and no handler does; a MalformedXML means the flattened rule was read as a wrapper; either way the operator's first CORS deployment fails at step one, which is why the case pins the minimal accepted document rather than an elaborate one."""
+polarity = "positive"
+operation = "PutBucketCors"
+tags = ["cors", "xml"]
+timeout_ms = 10000
+quirks = []
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketCors.html"
+summary = "The operation stores the configuration document and answers 200 with no body."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/issues/144"
+summary = "Upstream never implemented the CORS subresource, so every gateway built on it answered these requests wrongly."
+kind = "s3s-issue"
+
+
+[[setup.buckets]]
+name = "conf-cors"
+
+[request]
+method = "PUT"
+target = "/conf-cors?cors"
+# The integrity header this operation requires; the value is md5 of the body below.
+headers = { "content-type" = "application/xml", "content-md5" = "TQGnXRmhRWe+y44O3yYpVw==" }
+body = { utf8 = "<CORSConfiguration><CORSRule><AllowedMethod>GET</AllowedMethod><AllowedOrigin>https://example.com</AllowedOrigin></CORSRule></CORSConfiguration>" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[expect.timing]
+terminate_within_ms = 5000

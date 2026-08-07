@@ -1,0 +1,325 @@
+{
+  "ir_version": "1",
+  "operation": "PutBucketCors",
+  "http": {
+            "method": "PUT",
+            "target": "Bucket",
+            "precedence": 320,
+            "predicates": [
+                            { "kind": "Method", "method": "PUT" },
+                            { "kind": "Target", "target": "Bucket" },
+                            { "kind": "QueryPresent", "key": "cors" }
+                          ],
+            "success_status": 200,
+            "alt_success_statuses": [],
+            "path_shape": "/{Bucket}"
+          },
+  "auth": { "requirement": "Required", "action": "s3:PutBucketCORS", "presigned_allowed": true, "service": "s3" },
+  "payload": {
+               "request": { "kind": "XmlBody", "buffering": "Full", "max_bytes": 65536 },
+               "response": { "kind": "None", "buffering": "None", "max_bytes": null }
+             },
+  "checksum": {
+                "http_checksum_required": true,
+                "request_algorithms": ["CRC32", "CRC32C", "CRC64NVME", "SHA1", "SHA256"],
+                "response_algorithms": []
+              },
+  "input": {
+             "fields": [
+                         {
+                           "name": "Bucket",
+                           "wire_name": "Bucket",
+                           "required": true,
+                           "binding": { "kind": "UriLabel", "greedy": false },
+                           "type": { "kind": "BucketName" },
+                           "hot": true,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "CORSConfiguration",
+                           "wire_name": null,
+                           "required": true,
+                           "binding": { "kind": "Payload" },
+                           "type": { "kind": "Structure", "shape": "CORSConfiguration" },
+                           "hot": true,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "ContentMD5",
+                           "wire_name": "content-md5",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "String" },
+                           "hot": false,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "ChecksumAlgorithm",
+                           "wire_name": "x-amz-sdk-checksum-algorithm",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": {
+                                     "kind": "StringEnum",
+                                     "values": [
+                                                 "CRC32",
+                                                 "CRC32C",
+                                                 "SHA1",
+                                                 "SHA256",
+                                                 "CRC64NVME",
+                                                 "SHA512",
+                                                 "MD5",
+                                                 "XXHASH64",
+                                                 "XXHASH3",
+                                                 "XXHASH128"
+                                               ]
+                                   },
+                           "hot": false,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "ExpectedBucketOwner",
+                           "wire_name": "x-amz-expected-bucket-owner",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "String" },
+                           "hot": false,
+                           "quirk_refs": []
+                         }
+                       ]
+           },
+  "output": { "fields": [] },
+  "shapes": {
+              "CORSConfiguration": {
+                                     "kind": "Structure",
+                                     "fields": [
+                                                 {
+                                                   "name": "CORSRules",
+                                                   "wire_name": "CORSRule",
+                                                   "required": true,
+                                                   "binding": { "kind": "BodyXml" },
+                                                   "type": {
+                                                             "kind": "List",
+                                                             "member": { "kind": "Structure", "shape": "CORSRule" },
+                                                             "flattened": true,
+                                                             "wrapper_name": null
+                                                           },
+                                                   "hot": true,
+                                                   "quirk_refs": []
+                                                 }
+                                               ],
+                                     "xml": {
+                                              "element_order": ["CORSRules"],
+                                              "empty_value_policy": { "CORSRules": "emit" },
+                                              "attributes": []
+                                            }
+                                   },
+              "CORSRule": {
+                            "kind": "Structure",
+                            "fields": [
+                                        {
+                                          "name": "ID",
+                                          "wire_name": "ID",
+                                          "required": false,
+                                          "binding": { "kind": "BodyXml" },
+                                          "type": { "kind": "String" },
+                                          "hot": false,
+                                          "quirk_refs": []
+                                        },
+                                        {
+                                          "name": "AllowedHeaders",
+                                          "wire_name": "AllowedHeader",
+                                          "required": false,
+                                          "binding": { "kind": "BodyXml" },
+                                          "type": {
+                                                    "kind": "List",
+                                                    "member": { "kind": "String" },
+                                                    "flattened": true,
+                                                    "wrapper_name": null
+                                                  },
+                                          "hot": false,
+                                          "quirk_refs": []
+                                        },
+                                        {
+                                          "name": "AllowedMethods",
+                                          "wire_name": "AllowedMethod",
+                                          "required": true,
+                                          "binding": { "kind": "BodyXml" },
+                                          "type": {
+                                                    "kind": "List",
+                                                    "member": { "kind": "String" },
+                                                    "flattened": true,
+                                                    "wrapper_name": null
+                                                  },
+                                          "hot": true,
+                                          "quirk_refs": []
+                                        },
+                                        {
+                                          "name": "AllowedOrigins",
+                                          "wire_name": "AllowedOrigin",
+                                          "required": true,
+                                          "binding": { "kind": "BodyXml" },
+                                          "type": {
+                                                    "kind": "List",
+                                                    "member": { "kind": "String" },
+                                                    "flattened": true,
+                                                    "wrapper_name": null
+                                                  },
+                                          "hot": true,
+                                          "quirk_refs": []
+                                        },
+                                        {
+                                          "name": "ExposeHeaders",
+                                          "wire_name": "ExposeHeader",
+                                          "required": false,
+                                          "binding": { "kind": "BodyXml" },
+                                          "type": {
+                                                    "kind": "List",
+                                                    "member": { "kind": "String" },
+                                                    "flattened": true,
+                                                    "wrapper_name": null
+                                                  },
+                                          "hot": false,
+                                          "quirk_refs": []
+                                        },
+                                        {
+                                          "name": "MaxAgeSeconds",
+                                          "wire_name": "MaxAgeSeconds",
+                                          "required": false,
+                                          "binding": { "kind": "BodyXml" },
+                                          "type": { "kind": "Integer" },
+                                          "hot": false,
+                                          "quirk_refs": []
+                                        }
+                                      ],
+                            "xml": {
+                                     "element_order": [
+                                                        "ID",
+                                                        "AllowedHeaders",
+                                                        "AllowedMethods",
+                                                        "AllowedOrigins",
+                                                        "ExposeHeaders",
+                                                        "MaxAgeSeconds"
+                                                      ],
+                                     "empty_value_policy": {
+                                                             "ID": "omit",
+                                                             "AllowedHeaders": "omit",
+                                                             "AllowedMethods": "emit",
+                                                             "AllowedOrigins": "emit",
+                                                             "ExposeHeaders": "omit",
+                                                             "MaxAgeSeconds": "omit"
+                                                           },
+                                     "attributes": []
+                                   }
+                          }
+            },
+  "xml": {
+           "request_root": null,
+           "request_root_aliases": [],
+           "response_root": null,
+           "xmlns": "emit",
+           "unwrapped_output": false,
+           "element_order": [],
+           "empty_value_policy": {},
+           "url_encoded_fields": [],
+           "attributes": [],
+           "body_literal": false
+         },
+  "errors": {
+              "not_configured": null,
+              "allows_error_after_200": false,
+              "codes": [
+                         "NoSuchBucket",
+                         "AccessDenied",
+                         "MalformedXML",
+                         "InvalidRequest",
+                         "InvalidArgument",
+                         "BadDigest"
+                       ]
+            },
+  "derived_resources": [],
+  "head_mirrors": null,
+  "quirk_refs": ["q-cors-0003", "q-cors-0004", "q-cors-0005", "q-cors-0007", "q-cors-0008"],
+  "quirks": [
+              {
+                "id": "q-cors-0003",
+                "kind": "flattened_list",
+                "target": "CORSRule",
+                "summary": "Inside one rule the four list members repeat as singular AllowedMethod, AllowedOrigin, AllowedHeader and ExposeHeader elements with no wrapper, so a round trip must preserve repeated siblings.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CORSRule.html",
+                                "summary": "Each list member of the rule is documented with a singular element name that repeats once per value, rather than a plural wrapper element."
+                              }
+                            ],
+                "cases": ["c-cors-0003", "c-cors-0005"]
+              },
+              {
+                "id": "q-cors-0004",
+                "kind": "closed_value_set",
+                "target": "CORSRule.AllowedMethods",
+                "summary": "AllowedMethod admits exactly GET, PUT, POST, DELETE and HEAD in upper case; any other spelling is refused with 400 InvalidRequest rather than stored and echoed.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CORSRule.html",
+                                "summary": "The AllowedMethods member documents the five accepted HTTP method names as its whole value set."
+                              },
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/userguide/ManageCorsUsing.html",
+                                "summary": "The CORS configuration guide states that an unsupported method in a rule makes the whole configuration invalid and names the supported five."
+                              }
+                            ],
+                "cases": ["c-cors-0016", "c-cors-0017"]
+              },
+              {
+                "id": "q-cors-0005",
+                "kind": "wildcard_syntax",
+                "target": "CORSRule.AllowedOrigins",
+                "summary": "An origin or allowed header may carry at most one asterisk wildcard, an expose header none at all; a second asterisk is refused with 400 rather than matched literally.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/userguide/ManageCorsUsing.html",
+                                "summary": "The guide permits one wildcard character in an AllowedOrigin or AllowedHeader value and rules wildcards out of ExposeHeader values."
+                              }
+                            ],
+                "cases": ["c-cors-0018", "c-cors-0019", "c-cors-0007"]
+              },
+              {
+                "id": "q-cors-0007",
+                "kind": "lenient_unknown_elements",
+                "target": "PutBucketCors",
+                "summary": "Unknown elements inside the request document are skipped rather than refused, because a stored configuration parsed more strictly on the next release silently turns off cross-origin access with only a browser-side symptom.",
+                "evidence": [
+                              {
+                                "kind": "s3s-issue",
+                                "ref": "https://github.com/s3s-project/s3s/issues/613",
+                                "summary": "AWS ignores unknown elements in request XML, and upstream had to relax its decoder to match after strict parsing broke real clients."
+                              },
+                              {
+                                "kind": "s3s-pr",
+                                "ref": "https://github.com/s3s-project/s3s/pull/617",
+                                "summary": "The upstream fix that makes unknown request elements a skip rather than an error, which is the behaviour this decoder generates by construction."
+                              }
+                            ],
+                "cases": ["c-cors-0022"]
+              },
+              {
+                "id": "q-cors-0008",
+                "kind": "checksum_required",
+                "target": "PutBucketCors",
+                "summary": "The write demands an integrity claim on the body, so a request with neither Content-MD5 nor an x-amz-checksum header is refused with 400 before the document is parsed.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketCors.html",
+                                "summary": "The request syntax documents Content-MD5 as required for this operation, which the model spells as a request checksum requirement."
+                              }
+                            ],
+                "cases": ["c-cors-0014"]
+              }
+            ],
+  "ext_points": []
+}

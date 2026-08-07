@@ -1,0 +1,54 @@
+[case]
+id = "c-cors-0004"
+schema_version = 1
+title = "ID and MaxAgeSeconds survive the round trip unchanged"
+rationale = """
+The two optional scalar members are the ones a lossy codec drops first, and each loss has a distinct cost: a dropped ID breaks the operator's ability to address a rule in later tooling, and a dropped or defaulted MaxAgeSeconds changes how long browsers cache a preflight answer — a behavioural change no server log will ever show. The read-back is compared byte for byte so a re-typed or re-formatted value fails too."""
+polarity = "positive"
+operation = "PutBucketCors"
+tags = ["cors", "xml"]
+timeout_ms = 10000
+quirks = ["q-cors-0002"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CORSRule.html"
+summary = "ID and MaxAgeSeconds are optional members of a rule, an identifier and a preflight cache lifetime."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "conf-cors"
+
+[[exchanges]]
+name = "put-id-and-max-age"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-cors?cors"
+headers = { "content-type" = "application/xml", "content-md5" = "DT2AScH50XYikmivFJ3d0g==" }
+body = { utf8 = "<CORSConfiguration><CORSRule><ID>static-assets</ID><AllowedMethod>GET</AllowedMethod><AllowedOrigin>https://example.com</AllowedOrigin><MaxAgeSeconds>3000</MaxAgeSeconds></CORSRule></CORSConfiguration>" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[[exchanges]]
+name = "read-back"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-cors?cors"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.headers_present]
+"content-type" = "application/xml"
+
+[exchanges.expect.body]
+golden = "goldens/c-cors-0004.xml"

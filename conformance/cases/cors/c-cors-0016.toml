@@ -1,0 +1,50 @@
+[case]
+id = "c-cors-0016"
+schema_version = 1
+title = "PATCH as an AllowedMethod is refused with 400 InvalidRequest"
+rationale = """
+The method vocabulary is closed, and PATCH is the value real clients actually try, because their applications use it. Storing it would be worse than refusing it: S3 never serves PATCH, so the stored rule promises browsers a request the data path will always refuse — a policy that cannot be honoured, discovered only as a browser-side failure. The refusal must be InvalidRequest, not MalformedXML: the document is well formed, its value is what is wrong."""
+polarity = "negative"
+operation = "PutBucketCors"
+tags = ["cors", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-cors-0004"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CORSRule.html"
+summary = "The AllowedMethods value set is closed over five named methods."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/ManageCorsUsing.html"
+summary = "The guide states an unsupported method makes the configuration invalid."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "conf-cors"
+
+[request]
+method = "PUT"
+target = "/conf-cors?cors"
+headers = { "content-type" = "application/xml", "content-md5" = "uyVCDFJKyd5KhW3/L3ojvw==" }
+body = { utf8 = "<CORSConfiguration><CORSRule><AllowedMethod>PATCH</AllowedMethod><AllowedOrigin>https://example.com</AllowedOrigin></CORSRule></CORSConfiguration>" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+code = "InvalidRequest"
+request_id_present = true
+
+[expect.headers_present]
+"content-type" = "application/xml"
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>InvalidRequest</Code><Message>Found unsupported HTTP method in CORS config. Only GET, PUT, POST, DELETE and HEAD are allowed</Message><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''
