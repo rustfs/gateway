@@ -119,9 +119,10 @@ use rustfs_gateway::dto;
 use rustfs_gateway::{
     BucketName, ByteStream, ChecksumAlgorithm, ChecksumSpec, ConditionalOutcome, CopyRange, CopySourceRejection, CursorSpec,
     ETag, ErrorCode, ErrorDetail, Handler, HandlerError, HandlerResult, IfRange, ObjectKey, ObjectValidators,
-    PRECONDITION_FAILED_MESSAGE, PreconditionRejection, Preconditions, RangeDecision, RangeSelectors, Req, RequestKind, Resp,
-    TagScope, TaggingRejection, Timestamp, collect, evaluate, evaluate_range, parse_conditional_etag, parse_tagging_header,
-    resolve_copy_range, validate_cors, validate_tag_set,
+    PRECONDITION_FAILED_MESSAGE, PreconditionRejection, Preconditions, REGION_MATCH_POLICY, RangeDecision, RangeSelectors,
+    RegionLabel, RegionSet, Req, RequestKind, Resp, TagScope, TaggingRejection, Timestamp, collect, evaluate, evaluate_range,
+    parse_conditional_etag, parse_tagging_header, permanent_redirect_for, resolve_copy_range, resolve_location_constraint,
+    validate_cors, validate_tag_set,
 };
 
 /// The canonical user id every listing reports as the owner.
@@ -306,7 +307,8 @@ pub struct VersionRef<'a> {
 ///
 /// No longer `Copy`: the CORS document and the tag set are fixtures an exchange writes rather
 /// than flags `[setup]` declares, and they are held here because they are per-bucket state
-/// exactly as the versioning flag is.
+/// exactly as the versioning flag is. A bucket deletion removes the whole entry, so the
+/// configuration documents die with the bucket rather than haunting a name that is later reused.
 #[derive(Debug, Default, Clone)]
 struct BucketState {
     /// `versioning = "enabled"`.
@@ -325,7 +327,17 @@ struct BucketState {
     /// No `[[setup.buckets]]` field feeds this; a case establishes it through `PutBucketTagging`,
     /// so what the read answers is always something a request wrote.
     tags: Option<Vec<(String, String)>>,
+    /// `region = "..."` when the case placed the bucket somewhere other than the fixture's home
+    /// region. `None` means the home region, so the common case declares nothing.
+    region: Option<String>,
+    /// The bucket exists but belongs to somebody else. Not expressible in `[setup]` — the schema
+    /// declares no account — so only the integration tests set it, through
+    /// [`Fixture::declare_bucket_owned_by_other`].
+    owned_by_other: bool,
 }
+
+/// The region the in-process deployment serves, which is also the one every case signs for.
+pub const HOME_REGION: &str = "us-east-1";
 
 /// The state one case runs against.
 #[derive(Debug, Default)]
@@ -337,6 +349,11 @@ pub struct Fixture {
     next_version: u32,
     /// The instant the case pinned, stamped onto everything this fixture mints.
     pub now: i64,
+    /// The deployment's own region: where an unconstrained creation lands, what a `HeadBucket`
+    /// success reports, and the yardstick a bucket's own `region` is measured against for the
+    /// 301. Defaults to [`HOME_REGION`]; the integration tests move it to exercise the non-us-east-1
+    /// half of the status matrix.
+    pub home_region: String,
 }
 
 impl Fixture {
@@ -345,6 +362,7 @@ impl Fixture {
     pub fn at(now: i64) -> Fixture {
         Fixture {
             now,
+            home_region: HOME_REGION.to_owned(),
             ..Fixture::default()
         }
     }
@@ -362,6 +380,50 @@ impl Fixture {
     /// Records `setup.buckets[].object_lock` for a bucket.
     pub fn set_object_lock(&mut self, name: &str, locked: bool) {
         self.buckets.entry(name.to_owned()).or_default().object_lock = locked;
+    }
+
+    /// Records `setup.buckets[].region` for a bucket that lives outside the home region.
+    ///
+    /// A request addressed to this deployment for such a bucket is the 301 case: the bucket
+    /// exists, but not here.
+    pub fn set_bucket_region(&mut self, name: &str, region: &str) {
+        self.buckets.entry(name.to_owned()).or_default().region = Some(region.to_owned());
+    }
+
+    /// The region a bucket was explicitly placed in, when it is not the home region's default.
+    #[must_use]
+    pub fn bucket_region(&self, name: &str) -> Option<&str> {
+        self.buckets.get(name).and_then(|bucket| bucket.region.as_deref())
+    }
+
+    /// Declares a bucket that exists under somebody else's account.
+    ///
+    /// `[setup]` cannot say this — the schema declares no account — so only the integration tests
+    /// reach it. It is what makes `BucketAlreadyExists` distinguishable from
+    /// `BucketAlreadyOwnedByYou` against this fixture.
+    pub fn declare_bucket_owned_by_other(&mut self, name: &str) {
+        self.buckets.entry(name.to_owned()).or_default().owned_by_other = true;
+    }
+
+    /// Whether a bucket belongs to somebody else.
+    #[must_use]
+    pub fn is_owned_by_other(&self, name: &str) -> bool {
+        self.buckets.get(name).is_some_and(|bucket| bucket.owned_by_other)
+    }
+
+    /// Whether a bucket holds nothing a deletion would destroy.
+    ///
+    /// Versions count even when a delete marker hides them — S3 refuses to delete a bucket whose
+    /// version history is non-empty — and so does an in-progress multipart upload, whose parts
+    /// are bytes the bucket is still holding.
+    #[must_use]
+    pub fn bucket_is_empty(&self, name: &str) -> bool {
+        let holds_versions = self
+            .objects
+            .iter()
+            .any(|((bucket, _), versions)| bucket == name && !versions.is_empty());
+        let holds_uploads = self.uploads.values().any(|upload| upload.bucket == name);
+        !holds_versions && !holds_uploads
     }
 
     /// Whether a bucket was declared with object lock on.
@@ -403,7 +465,12 @@ impl Fixture {
         }
     }
 
-    /// Removes a bucket, for `setup.buckets[].absent`.
+    /// Removes a bucket, for `setup.buckets[].absent` and for `DeleteBucket`.
+    ///
+    /// The whole `BucketState` entry goes, and the CORS document and tag set go with it because
+    /// they live inside it: a bucket's configuration is a property of the bucket, not of the name,
+    /// so a later creation under the same name starts unconfigured rather than inheriting a
+    /// document nobody wrote to it. `Fixture::bucket_lifecycle` tests pin this.
     pub fn remove_bucket(&mut self, name: &str) {
         self.buckets.remove(name);
         self.objects.retain(|(bucket, _), _| bucket != name);
@@ -780,6 +847,24 @@ fn entity_tag(etag: &str) -> Result<ETag, HandlerError> {
 /// The message is AWS's own wording rather than a description of the fixture, because a dozen
 /// cases pin the error document byte for byte: a message of this file's choosing would make every
 /// one of them differ in the `<Message>` element and hide whatever else was wrong.
+/// The 301 for a bucket the fixture holds in another region.
+///
+/// One function for every operation of the lifecycle family, built through the exported
+/// `permanent_redirect_for` so the `x-amz-bucket-region` header is structurally inseparable from
+/// the status — the header SDKs need to complete the redirect, and the one this family's cases
+/// pin in both places it must appear.
+fn redirect_if_elsewhere(fixture: &Fixture, bucket: &str) -> Result<(), HandlerError> {
+    let Some(region) = fixture.bucket_region(bucket) else {
+        return Ok(());
+    };
+    if region == fixture.home_region {
+        return Ok(());
+    }
+    let label = RegionLabel::new(region)
+        .map_err(|_| HandlerError::internal_error("a fixture bucket's region is not a valid region label"))?;
+    Err(permanent_redirect_for(bucket.to_owned(), label))
+}
+
 fn require_bucket(fixture: &Fixture, bucket: &BucketName) -> Result<(), HandlerError> {
     if fixture.has_bucket(bucket.as_str()) {
         return Ok(());
@@ -1783,6 +1868,33 @@ impl Handler<dto::DeleteBucketCors> for Stub {
     }
 }
 
+impl Handler<dto::CreateBucket> for Stub {
+    fn call(
+        &self,
+        request: Req<dto::CreateBucket>,
+    ) -> impl core::future::Future<Output = HandlerResult<dto::CreateBucket>> + Send {
+        let outcome = self.create_bucket(request.input());
+        async move { outcome }
+    }
+}
+
+impl Handler<dto::DeleteBucket> for Stub {
+    fn call(
+        &self,
+        request: Req<dto::DeleteBucket>,
+    ) -> impl core::future::Future<Output = HandlerResult<dto::DeleteBucket>> + Send {
+        let outcome = self.delete_bucket(request.input());
+        async move { outcome }
+    }
+}
+
+impl Handler<dto::HeadBucket> for Stub {
+    fn call(&self, request: Req<dto::HeadBucket>) -> impl core::future::Future<Output = HandlerResult<dto::HeadBucket>> + Send {
+        let outcome = self.head_bucket(request.input());
+        async move { outcome }
+    }
+}
+
 impl Handler<dto::CreateMultipartUpload> for Stub {
     fn call(
         &self,
@@ -2479,6 +2591,85 @@ impl Stub {
         require_bucket(&fixture, &input.bucket)?;
         fixture.clear_cors(input.bucket.as_str());
         Ok(Resp::new(dto::DeleteBucketCorsOutput::default()))
+    }
+
+    /// Creates a bucket, or answers the region-dependent duplicate matrix.
+    ///
+    /// The constraint is judged first — `resolve_location_constraint` is the exported contract,
+    /// carrying the us-east-1 omission rule, the `EU` alias and the strict match against the
+    /// deployment's one region — so a request that is wrong about the region never reaches the
+    /// ownership question. The three duplicate outcomes are S3's: another owner's name is
+    /// `BucketAlreadyExists`, your own bucket is `BucketAlreadyOwnedByYou` — except in us-east-1,
+    /// whose historical answer for your own bucket is a plain 200.
+    fn create_bucket(&self, input: &dto::CreateBucketInput) -> HandlerResult<dto::CreateBucket> {
+        let mut fixture = self.borrow()?;
+        let name = input.bucket.as_str().to_owned();
+        let constraint = input
+            .create_bucket_configuration
+            .as_ref()
+            .and_then(|configuration| configuration.location_constraint.as_ref())
+            .map(dto::LocationConstraint::as_str);
+        let home = fixture.home_region.clone();
+        let regions = RegionSet::new([home.as_str()])
+            .map_err(|_| HandlerError::internal_error("the fixture's home region is not a valid region name"))?;
+        // `REGION_MATCH_POLICY` rather than a policy chosen here: the posture belongs to the
+        // operation's declaration, and a backend that picked its own would be the second copy that
+        // stops matching the first.
+        resolve_location_constraint(constraint, &regions, REGION_MATCH_POLICY)?;
+        if fixture.has_bucket(&name) {
+            if fixture.is_owned_by_other(&name) {
+                return Err(HandlerError::new(
+                    ErrorCode::BUCKET_ALREADY_EXISTS,
+                    "The requested bucket name is not available. The bucket namespace is shared by all users of the \
+                     system. Please select a different name and try again.",
+                ));
+            }
+            let owned_in_home = fixture.bucket_region(&name).is_none_or(|region| region == home);
+            if !owned_in_home || home != "us-east-1" {
+                return Err(HandlerError::new(
+                    ErrorCode::BUCKET_ALREADY_OWNED_BY_YOU,
+                    "Your previous request to create the named bucket succeeded and you already own it.",
+                ));
+            }
+            // us-east-1's historical behaviour: re-creating your own bucket is a 200.
+        } else {
+            fixture.declare_bucket(&name, false);
+        }
+        Ok(Resp::new(dto::CreateBucketOutput {
+            location: Some(format!("/{name}")),
+        }))
+    }
+
+    /// Deletes a bucket that is here, empty, and yours.
+    fn delete_bucket(&self, input: &dto::DeleteBucketInput) -> HandlerResult<dto::DeleteBucket> {
+        let mut fixture = self.borrow()?;
+        let name = input.bucket.as_str().to_owned();
+        require_bucket(&fixture, &input.bucket)?;
+        redirect_if_elsewhere(&fixture, &name)?;
+        if !fixture.bucket_is_empty(&name) {
+            return Err(HandlerError::new(
+                ErrorCode::BUCKET_NOT_EMPTY,
+                "The bucket you tried to delete is not empty",
+            ));
+        }
+        fixture.remove_bucket(&name);
+        Ok(Resp::new(dto::DeleteBucketOutput::default()))
+    }
+
+    /// Answers whether the bucket exists here, and in which region.
+    ///
+    /// The success carries the region because the output type gives it no choice: `BucketRegion`
+    /// is a required member, so a 200 without `x-amz-bucket-region` is unconstructible. Every
+    /// error path is status-and-headers only — the zero-body half is the response layer's HEAD
+    /// invariant, which the corpus pins.
+    fn head_bucket(&self, input: &dto::HeadBucketInput) -> HandlerResult<dto::HeadBucket> {
+        let fixture = self.borrow()?;
+        require_bucket(&fixture, &input.bucket)?;
+        let name = input.bucket.as_str();
+        redirect_if_elsewhere(&fixture, name)?;
+        Ok(Resp::new(dto::HeadBucketOutput {
+            bucket_region: fixture.home_region.clone(),
+        }))
     }
 
     /// Opens a multipart upload, and records the attributes only this request can state.

@@ -1,0 +1,50 @@
+# c-bkt-0018 — a request body that is not well-formed XML.
+#
+# Schema dimensions exercised: the routing / parameter-validation split, asserted as a status.
+
+[case]
+id = "c-bkt-0018"
+schema_version = 1
+title = "A malformed configuration body is a 400 MalformedXML, never a 501"
+rationale = """
+Routing decides which operation a request names, and parameter validation decides whether the \
+request is usable. A body that does not parse is the second question, so the answer is 400 \
+MalformedXML — and answering 501 instead tells a client the operation is unsupported, which sends \
+it looking for another endpoint rather than fixing the body it sent. The distinction is invisible \
+in a suite that asserts 'not 200'."""
+polarity = "negative"
+operation = "CreateBucket"
+tags = ["xml", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-bkt-0011"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/ErrorResponses.html"
+summary = "A request document that cannot be parsed is answered with a 400 carrying the malformed-XML code."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "conf-bkt-broken"
+absent = true
+
+[request]
+method = "PUT"
+target = "/conf-bkt-broken"
+headers = { "content-type" = "application/xml" }
+body = { utf8 = "<CreateBucketConfiguration><LocationConstraint>us-west-2" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+code = "MalformedXML"
+request_id_present = true
+
+[expect.headers_present]
+"content-type" = "application/xml"
+
+[expect.timing]
+terminate_within_ms = 5000

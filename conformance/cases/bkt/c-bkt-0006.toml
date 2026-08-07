@@ -1,0 +1,44 @@
+# c-bkt-0006 — the object-lock header on a creation.
+#
+# Schema dimensions exercised: strict boolean header decoding.
+
+[case]
+id = "c-bkt-0006"
+schema_version = 1
+title = "The object-lock header on a creation is decoded as a strict boolean"
+rationale = """
+Object lock can only be turned on when the bucket is created; there is no later request that adds \
+it. A header dropped or misread here is therefore a compliance property the caller believes it has \
+and does not, correctable only by deleting the bucket and starting again. Strict boolean decoding \
+is what keeps a spelling the wire does not define from being read as either answer by accident."""
+polarity = "positive"
+operation = "CreateBucket"
+tags = ["routing"]
+timeout_ms = 10000
+quirks = ["q-bkt-0001"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CreateBucket.html"
+summary = "Object lock for a bucket is requested by a header on the creation and cannot be enabled afterwards."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "conf-bkt-lock"
+absent = true
+
+[request]
+method = "PUT"
+target = "/conf-bkt-lock"
+headers = { "x-amz-bucket-object-lock-enabled" = "true" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[expect.headers_present]
+"location" = "/conf-bkt-lock"
+
+[expect.body]
+size = 0

@@ -1,0 +1,47 @@
+# c-bkt-0030 — a creation signed for a region the deployment does not serve.
+#
+# Schema dimensions exercised: the signature scope's region check, which reads the same region set
+# the location constraint is matched against.
+
+[case]
+id = "c-bkt-0030"
+schema_version = 1
+title = "A creation signed for an unserved region is refused before the body is considered"
+rationale = """
+The region a request is signed for and the region a location constraint names are checked against \
+one configured set, and this is the case that says so from the signature side. Two sets would mean \
+a deployment that disagrees with itself: a bucket creatable for a region nobody can sign for, or a \
+signature accepted for a region no bucket can live in. The refusal has to come from the signature \
+stage rather than the body, because the credential scope is part of what was signed and cannot be \
+judged after the payload is trusted."""
+polarity = "negative"
+operation = "CreateBucket"
+tags = ["region", "sigv4", "signature"]
+timeout_ms = 10000
+quirks = ["q-bkt-0003"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/sig-v4-header-based-auth.html"
+summary = "The credential scope names the region a signature was computed for, and a server derives its key from its own."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "conf-bkt-scope"
+absent = true
+
+[request]
+method = "PUT"
+target = "/conf-bkt-scope"
+sign = { mode = "sigv4_header", service = "s3", region = "eu-west-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+code = "AuthorizationHeaderMalformed"
+request_id_present = true
+
+[expect.timing]
+terminate_within_ms = 5000

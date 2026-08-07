@@ -1,0 +1,51 @@
+# c-bkt-0013 — a valid region this deployment does not serve.
+#
+# Schema dimensions exercised: the region match, separated from the us-east-1 rule above.
+
+[case]
+id = "c-bkt-0013"
+schema_version = 1
+title = "A constraint naming a region the deployment does not serve is refused"
+rationale = """
+A constraint that names a real region the endpoint does not serve is the request a client sends when it has the wrong endpoint configured. Creating the bucket anyway would put it somewhere the client did not ask for while reporting success, and every later request that client makes — signed for the region it believes it used — would then fail on the signature scope instead of here, where the mistake is legible."""
+polarity = "negative"
+operation = "CreateBucket"
+tags = ["region", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-bkt-0003"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/ErrorResponses.html"
+summary = "The error table maps an unusable location constraint to a 400 with its own code."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_BucketLocationConstraint.html"
+summary = "The enumerated constraint values exclude us-east-1 and keep the historical EU alias."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "conf-bkt-elsewhere"
+absent = true
+
+[request]
+method = "PUT"
+target = "/conf-bkt-elsewhere"
+headers = { "content-type" = "application/xml" }
+body = { utf8 = "<CreateBucketConfiguration><LocationConstraint>eu-west-1</LocationConstraint></CreateBucketConfiguration>" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+code = "InvalidLocationConstraint"
+request_id_present = true
+
+[expect.headers_present]
+"content-type" = "application/xml"
+
+[expect.timing]
+terminate_within_ms = 5000

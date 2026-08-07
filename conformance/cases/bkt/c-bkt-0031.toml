@@ -1,0 +1,46 @@
+# c-bkt-0031 — a bucket name the naming rules refuse.
+#
+# Schema dimensions exercised: an error code of its own, distinct from the generic parameter one.
+
+[case]
+id = "c-bkt-0031"
+schema_version = 1
+title = "A creation naming an invalid bucket answers InvalidBucketName rather than InvalidArgument"
+rationale = """
+Bucket names are the one parameter a client routinely derives from user input, so the refusal has \
+to be specific enough to act on: a tool that maps a project name to a bucket name needs to know \
+that the name is the problem, not some other argument it also sent. AWS gives the rule its own \
+code for that reason, and a server answering the generic parameter code leaves every such client \
+unable to distinguish the two without parsing an English message."""
+polarity = "negative"
+operation = "CreateBucket"
+tags = ["error-shape"]
+timeout_ms = 10000
+quirks = ["q-bkt-0012"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/bucketnamingrules.html"
+summary = "Bucket names are lowercase, and an uppercase letter is outside the published naming rules."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/ErrorResponses.html"
+summary = "The error table gives an invalid bucket name a code of its own rather than the generic argument code."
+kind = "aws-doc"
+
+[request]
+method = "PUT"
+target = "/Conf-Bkt-Upper"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+code = "InvalidBucketName"
+request_id_present = true
+
+[expect.headers_present]
+"content-type" = "application/xml"

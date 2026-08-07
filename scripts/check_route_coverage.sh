@@ -163,6 +163,14 @@ def claims(predicates, method, target, keys):
         elif kind == "QueryEquals":
             if args[0] not in keys:
                 return False
+        elif kind == "QueryAbsent":
+            # Modelled rather than skipped, and it is the predicate that matters most here: the
+            # bucket lifecycle rows pin no positive key, so `PUT /{bucket}` would claim every
+            # deferred bucket subresource write if their keys were not declared absent. Treating
+            # this predicate as "does not match" would report the exposure closed for every
+            # subresource, including one added upstream tomorrow and left out of the list.
+            if args[0] in keys:
+                return False
         else:
             return False
     return True

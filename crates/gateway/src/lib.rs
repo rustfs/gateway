@@ -182,6 +182,28 @@ pub use rustfs_gateway_core::ops::shared::tagging::{
     MAX_BUCKET_TAGS, MAX_OBJECT_TAGS, MAX_TAG_KEY_CHARS, MAX_TAG_VALUE_CHARS, TagScope, TaggingRejection, parse_tagging_header,
     validate_tag_set,
 };
+
+// The bucket lifecycle contracts, exported the day they are written rather than found
+// unreachable later. A backend answering CreateBucket needs `resolve` — the us-east-1
+// omission rule, the EU alias and the strict region match — and a backend answering any
+// of the three needs `permanent_redirect`, because a 301 built by hand is a 301 that will
+// eventually be built without `x-amz-bucket-region`, which is the redirect SDKs cannot
+// complete. `RegionLabel` and `RedirectTarget` ride along or the constructors' argument
+// types are unnameable outside the workspace.
+pub use rustfs_gateway_core::ops::shared::bucket_region::{
+    PERMANENT_REDIRECT_MESSAGE, RegionHeaderDuty, TEMPORARY_REDIRECT_MESSAGE, permanent_redirect, permanent_redirect_for,
+    temporary_redirect,
+};
+pub use rustfs_gateway_core::ops::shared::location_constraint::{
+    EU_ALIAS, MAX_CONSTRAINT_LEN, RegionMatchPolicy, US_EAST_1, invalid_location_constraint,
+    normalize as normalize_location_constraint, resolve as resolve_location_constraint,
+};
+pub use rustfs_gateway_core::{InvalidWireLabel, RedirectTarget, RegionLabel};
+// The policy itself, not just its type. A backend that reaches for `RegionMatchPolicy::Strict`
+// directly has written the deployment's region posture down a second time, and the second copy is
+// the one that will not move when the first does — which is the whole failure mode `ops/shared/`
+// exists to prevent. This is the value `CreateBucket` declares, and it is what a backend reads.
+pub use rustfs_gateway_core::ops::create_bucket::REGION_MATCH_POLICY;
 pub use rustfs_gateway_http::{EffectiveHost, Limits, WireReject, WireRequest};
 pub use rustfs_gateway_sig::{Identity, OperationFloor, RegionSet, SecurityFloor, SigService, SkewWindow, Verdict};
 pub use rustfs_gateway_stream::{Body, ByteStream, Payload, TrailingHeaders};

@@ -34,9 +34,11 @@
 //! being listed is a member nobody knew about, and it is the one that will be broken by the next
 //! change to the shared rule.
 
+pub mod bucket_region;
 pub mod copy_source;
 pub mod cors;
 pub mod etag;
+pub mod location_constraint;
 pub mod pagination;
 pub mod precondition;
 pub mod tagging;

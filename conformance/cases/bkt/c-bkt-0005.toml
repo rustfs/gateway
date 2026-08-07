@@ -1,0 +1,52 @@
+# c-bkt-0005 — the canned ACL and the four grant headers on a creation.
+#
+# Schema dimensions exercised: header decoding whose semantics belong to another family.
+
+[case]
+id = "c-bkt-0005"
+schema_version = 1
+title = "The canned ACL and grant headers on a creation are decoded rather than refused"
+rationale = """
+A creation may carry x-amz-acl and the four x-amz-grant-* headers, and this family owns their \
+decoding while the ACL family owns what they mean. The failure this pins is the one that looks like \
+success: a decoder that does not know the headers answers 200 and creates a bucket whose \
+permissions are the default, so a caller who asked for explicit grants gets a bucket without them \
+and no signal that anything was dropped."""
+polarity = "positive"
+operation = "CreateBucket"
+tags = ["routing"]
+timeout_ms = 10000
+quirks = ["q-bkt-0001"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CreateBucket.html"
+summary = "The request header list for a creation includes the canned ACL and the four grant headers."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "conf-bkt-acl"
+absent = true
+
+[request]
+method = "PUT"
+target = "/conf-bkt-acl"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[request.headers]
+"x-amz-acl" = "private"
+"x-amz-grant-read" = "id=0123456789abcdef"
+"x-amz-grant-write" = "id=0123456789abcdef"
+"x-amz-grant-read-acp" = "id=0123456789abcdef"
+"x-amz-grant-write-acp" = "id=0123456789abcdef"
+"x-amz-grant-full-control" = "id=0123456789abcdef"
+
+[expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[expect.headers_present]
+"location" = "/conf-bkt-acl"
+
+[expect.body]
+size = 0

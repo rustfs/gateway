@@ -1,0 +1,379 @@
+{
+  "ir_version": "1",
+  "operation": "CreateBucket",
+  "http": {
+            "method": "PUT",
+            "target": "Bucket",
+            "precedence": 710,
+            "predicates": [
+                            { "kind": "Method", "method": "PUT" },
+                            { "kind": "Target", "target": "Bucket" },
+                            { "kind": "QueryAbsent", "key": "abac" },
+                            { "kind": "QueryAbsent", "key": "accelerate" },
+                            { "kind": "QueryAbsent", "key": "acl" },
+                            { "kind": "QueryAbsent", "key": "analytics" },
+                            { "kind": "QueryAbsent", "key": "cors" },
+                            { "kind": "QueryAbsent", "key": "encryption" },
+                            { "kind": "QueryAbsent", "key": "intelligent-tiering" },
+                            { "kind": "QueryAbsent", "key": "inventory" },
+                            { "kind": "QueryAbsent", "key": "lifecycle" },
+                            { "kind": "QueryAbsent", "key": "logging" },
+                            { "kind": "QueryAbsent", "key": "metadataAnnotationTable" },
+                            { "kind": "QueryAbsent", "key": "metadataInventoryTable" },
+                            { "kind": "QueryAbsent", "key": "metadataJournalTable" },
+                            { "kind": "QueryAbsent", "key": "metrics" },
+                            { "kind": "QueryAbsent", "key": "notification" },
+                            { "kind": "QueryAbsent", "key": "object-lock" },
+                            { "kind": "QueryAbsent", "key": "ownershipControls" },
+                            { "kind": "QueryAbsent", "key": "policy" },
+                            { "kind": "QueryAbsent", "key": "publicAccessBlock" },
+                            { "kind": "QueryAbsent", "key": "replication" },
+                            { "kind": "QueryAbsent", "key": "requestPayment" },
+                            { "kind": "QueryAbsent", "key": "tagging" },
+                            { "kind": "QueryAbsent", "key": "versioning" },
+                            { "kind": "QueryAbsent", "key": "website" }
+                          ],
+            "success_status": 200,
+            "alt_success_statuses": [],
+            "path_shape": "/{Bucket}"
+          },
+  "auth": { "requirement": "Required", "action": "s3:CreateBucket", "presigned_allowed": true, "service": "s3" },
+  "payload": {
+               "request": { "kind": "XmlBody", "buffering": "Full", "max_bytes": 65536 },
+               "response": { "kind": "None", "buffering": "None", "max_bytes": null }
+             },
+  "checksum": { "http_checksum_required": false, "request_algorithms": [], "response_algorithms": [] },
+  "input": {
+             "fields": [
+                         {
+                           "name": "ACL",
+                           "wire_name": "x-amz-acl",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": {
+                                     "kind": "StringEnum",
+                                     "values": ["private", "public-read", "public-read-write", "authenticated-read"]
+                                   },
+                           "hot": false,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "Bucket",
+                           "wire_name": "Bucket",
+                           "required": true,
+                           "binding": { "kind": "UriLabel", "greedy": false },
+                           "type": { "kind": "BucketName" },
+                           "hot": true,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "CreateBucketConfiguration",
+                           "wire_name": null,
+                           "required": false,
+                           "binding": { "kind": "Payload" },
+                           "type": { "kind": "Structure", "shape": "CreateBucketConfiguration" },
+                           "hot": true,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "GrantFullControl",
+                           "wire_name": "x-amz-grant-full-control",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "String" },
+                           "hot": false,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "GrantRead",
+                           "wire_name": "x-amz-grant-read",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "String" },
+                           "hot": false,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "GrantReadACP",
+                           "wire_name": "x-amz-grant-read-acp",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "String" },
+                           "hot": false,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "GrantWrite",
+                           "wire_name": "x-amz-grant-write",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "String" },
+                           "hot": false,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "GrantWriteACP",
+                           "wire_name": "x-amz-grant-write-acp",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "String" },
+                           "hot": false,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "ObjectLockEnabledForBucket",
+                           "wire_name": "x-amz-bucket-object-lock-enabled",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "Boolean" },
+                           "hot": true,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "ObjectOwnership",
+                           "wire_name": "x-amz-object-ownership",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": {
+                                     "kind": "StringEnum",
+                                     "values": ["BucketOwnerPreferred", "ObjectWriter", "BucketOwnerEnforced"]
+                                   },
+                           "hot": false,
+                           "quirk_refs": []
+                         }
+                       ]
+           },
+  "output": {
+              "fields": [
+                          {
+                            "name": "Location",
+                            "wire_name": "location",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": { "kind": "String" },
+                            "hot": true,
+                            "quirk_refs": []
+                          }
+                        ]
+            },
+  "shapes": {
+              "CreateBucketConfiguration": {
+                                             "kind": "Structure",
+                                             "fields": [
+                                                         {
+                                                           "name": "LocationConstraint",
+                                                           "wire_name": "LocationConstraint",
+                                                           "required": false,
+                                                           "binding": { "kind": "BodyXml" },
+                                                           "type": {
+                                                                     "kind": "StringEnum",
+                                                                     "values": [
+                                                                                 "af-south-1",
+                                                                                 "ap-east-1",
+                                                                                 "ap-east-2",
+                                                                                 "ap-northeast-1",
+                                                                                 "ap-northeast-2",
+                                                                                 "ap-northeast-3",
+                                                                                 "ap-south-1",
+                                                                                 "ap-south-2",
+                                                                                 "ap-southeast-1",
+                                                                                 "ap-southeast-2",
+                                                                                 "ap-southeast-3",
+                                                                                 "ap-southeast-4",
+                                                                                 "ap-southeast-5",
+                                                                                 "ap-southeast-6",
+                                                                                 "ap-southeast-7",
+                                                                                 "ca-central-1",
+                                                                                 "ca-west-1",
+                                                                                 "cn-north-1",
+                                                                                 "cn-northwest-1",
+                                                                                 "EU",
+                                                                                 "eu-central-1",
+                                                                                 "eu-central-2",
+                                                                                 "eu-north-1",
+                                                                                 "eu-south-1",
+                                                                                 "eu-south-2",
+                                                                                 "eu-west-1",
+                                                                                 "eu-west-2",
+                                                                                 "eu-west-3",
+                                                                                 "il-central-1",
+                                                                                 "me-central-1",
+                                                                                 "me-south-1",
+                                                                                 "mx-central-1",
+                                                                                 "sa-east-1",
+                                                                                 "us-east-2",
+                                                                                 "us-gov-east-1",
+                                                                                 "us-gov-west-1",
+                                                                                 "us-west-1",
+                                                                                 "us-west-2"
+                                                                               ]
+                                                                   },
+                                                           "hot": false,
+                                                           "quirk_refs": []
+                                                         }
+                                                       ],
+                                             "xml": {
+                                                      "element_order": ["LocationConstraint"],
+                                                      "empty_value_policy": { "LocationConstraint": "omit" },
+                                                      "attributes": []
+                                                    }
+                                           }
+            },
+  "xml": {
+           "request_root": null,
+           "request_root_aliases": [],
+           "response_root": null,
+           "xmlns": "emit",
+           "unwrapped_output": false,
+           "element_order": [],
+           "empty_value_policy": {},
+           "url_encoded_fields": [],
+           "attributes": [],
+           "body_literal": false
+         },
+  "errors": {
+              "not_configured": null,
+              "allows_error_after_200": false,
+              "codes": [
+                         "InvalidLocationConstraint",
+                         "MalformedXML",
+                         "InvalidBucketName",
+                         "AccessDenied",
+                         "InvalidArgument",
+                         "PermanentRedirect",
+                         "BucketAlreadyExists",
+                         "BucketAlreadyOwnedByYou"
+                       ]
+            },
+  "derived_resources": [],
+  "head_mirrors": null,
+  "quirk_refs": ["q-bkt-0001", "q-bkt-0002", "q-bkt-0003", "q-bkt-0004", "q-bkt-0005", "q-bkt-0006", "q-bkt-0011"],
+  "quirks": [
+              {
+                "id": "q-bkt-0001",
+                "kind": "status",
+                "target": "CreateBucket",
+                "summary": "A successful bucket creation answers 200, never 201; SDKs and the upstream test suites assert the 200.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CreateBucket.html",
+                                "summary": "The documented success response for a bucket creation is HTTP 200 with no created status."
+                              }
+                            ],
+                "cases": [
+                           "c-bkt-0001",
+                           "c-bkt-0002",
+                           "c-bkt-0005",
+                           "c-bkt-0006",
+                           "c-bkt-0010",
+                           "c-bkt-0011",
+                           "c-bkt-0028"
+                         ]
+              },
+              {
+                "id": "q-bkt-0002",
+                "kind": "header",
+                "target": "CreateBucket.Location",
+                "summary": "The success response carries a Location header whose value is the path form of the new bucket.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CreateBucket.html",
+                                "summary": "The response syntax lists a Location header naming the bucket that was created."
+                              }
+                            ],
+                "cases": ["c-bkt-0001", "c-bkt-0010"]
+              },
+              {
+                "id": "q-bkt-0003",
+                "kind": "region",
+                "target": "CreateBucket.LocationConstraint",
+                "summary": "us-east-1 is the null constraint and must be omitted; writing it explicitly is a 400 InvalidLocationConstraint.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CreateBucket.html#API_CreateBucket_RequestBody",
+                                "summary": "The request-body documentation states that buckets in us-east-1 do not specify a location constraint."
+                              },
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_BucketLocationConstraint.html",
+                                "summary": "us-east-1 is absent from the constraint value list, which is why writing it out is invalid."
+                              }
+                            ],
+                "cases": ["c-bkt-0012", "c-bkt-0013", "c-bkt-0015", "c-bkt-0016", "c-bkt-0017", "c-bkt-0030"]
+              },
+              {
+                "id": "q-bkt-0004",
+                "kind": "legacy_alias",
+                "target": "CreateBucket.LocationConstraint",
+                "summary": "EU is the historical spelling of eu-west-1 and must be accepted in a request constraint, normalised before comparison.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_BucketLocationConstraint.html",
+                                "summary": "The enumerated constraint values keep the historical EU alias alongside the modern region names."
+                              }
+                            ],
+                "cases": ["c-bkt-0014"]
+              },
+              {
+                "id": "q-bkt-0005",
+                "kind": "status",
+                "target": "CreateBucket",
+                "summary": "Re-creating a bucket you already own is 200 in us-east-1 for historical reasons and 409 BucketAlreadyOwnedByYou everywhere else.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/ErrorResponses.html",
+                                "summary": "The BucketAlreadyOwnedByYou entry states that all regions except us-east-1 answer it and us-east-1 resets the ACL and returns 200."
+                              }
+                            ],
+                "cases": ["c-bkt-0010"]
+              },
+              {
+                "id": "q-bkt-0006",
+                "kind": "error_code",
+                "target": "CreateBucket",
+                "summary": "A name held by another owner is BucketAlreadyExists and a name you hold yourself is BucketAlreadyOwnedByYou; the two 409s must stay distinct.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/ErrorResponses.html",
+                                "summary": "The error table lists both conflict codes with different ownership conditions for the same request."
+                              }
+                            ],
+                "cases": ["c-bkt-0010"]
+              },
+              {
+                "id": "q-bkt-0011",
+                "kind": "empty_value",
+                "target": "CreateBucket.LocationConstraint",
+                "summary": "An empty constraint element or empty text is equivalent to omitting the constraint entirely, never an error.",
+                "evidence": [
+                              {
+                                "kind": "s3s-issue",
+                                "ref": "https://github.com/s3s-project/s3s/issues/229",
+                                "summary": "Clients send empty XML elements where they mean an absent field, and the decoder must treat the two alike."
+                              },
+                              {
+                                "kind": "s3s-pr",
+                                "ref": "https://github.com/s3s-project/s3s/pull/244",
+                                "summary": "Upstream resolved the report by normalising empty elements to the absent field rather than refusing them."
+                              }
+                            ],
+                "cases": [
+                           "c-bkt-0002",
+                           "c-bkt-0003",
+                           "c-bkt-0004",
+                           "c-bkt-0018",
+                           "c-bkt-0019",
+                           "c-bkt-0020",
+                           "c-bkt-0021",
+                           "c-bkt-0032"
+                         ]
+              }
+            ],
+  "ext_points": []
+}

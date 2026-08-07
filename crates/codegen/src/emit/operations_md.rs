@@ -45,10 +45,16 @@ pub fn render(operations: &[OperationIr], deferred: &BTreeMap<String, String>) -
     );
 
     let _ = writeln!(out, "## Reverse index: query key to operations\n");
+    let _ = writeln!(
+        out,
+        "An operation marked **(absent)** is selected by a request that does **not** carry the key:\n\
+         `PUT /{{Bucket}}` is a bucket creation only while no subresource key is present. Following\n\
+         such a row as though the key selected the operation is the opposite of what the table says.\n"
+    );
     let _ = writeln!(out, "| Query key | Operations |");
     let _ = writeln!(out, "| --- | --- |");
-    for (key, ops) in invert(operations, |ir| ir.query_keys()) {
-        let _ = writeln!(out, "| `{key}` | {} |", links(&ops));
+    for (key, ops) in invert_query_keys(operations) {
+        let _ = writeln!(out, "| `{key}` | {} |", links_with_notes(&ops));
     }
 
     let _ = writeln!(out, "\n## Reverse index: header to operations\n");
@@ -283,6 +289,34 @@ where
     index
 }
 
+/// The query-key reverse index, with the absent-only rows marked.
+///
+/// A key an operation routes on by its *absence* belongs in the index — an agent holding a failing
+/// `PUT /b?acl` needs to find the row — but listing it the same way as a key that selects the
+/// operation inverts the fact. So the two are distinguished here rather than flattened by
+/// [`invert`], which the other two indexes still use because a header or an error code has no
+/// negative form.
+fn invert_query_keys(operations: &[OperationIr]) -> BTreeMap<String, Vec<(String, bool)>> {
+    let mut index: BTreeMap<String, Vec<(String, bool)>> = BTreeMap::new();
+    for ir in operations {
+        let (present, equals, absent) = query_classes(ir);
+        for key in ir.query_keys() {
+            // Absent only when nothing else in the operation reads the key: a key that is both a
+            // predicate and a parameter is not an absence.
+            let absent_only = absent.contains(&key)
+                && !present.contains(&key)
+                && !equals.iter().any(|spelling| spelling.starts_with(&format!("{key}=")))
+                && !query_parameters(ir).contains(&key);
+            index.entry(key).or_default().push((ir.operation.clone(), absent_only));
+        }
+    }
+    for ops in index.values_mut() {
+        ops.sort();
+        ops.dedup();
+    }
+    index
+}
+
 fn key_headers(ir: &OperationIr) -> Vec<String> {
     let mut names: Vec<String> = Vec::new();
     for p in &ir.http.predicates {
@@ -362,6 +396,17 @@ fn code_list(items: &[String]) -> String {
 fn links(ops: &[String]) -> String {
     ops.iter()
         .map(|o| format!("[{o}](#{})", anchor(o)))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// The same links, with the absent-only rows of the query index marked.
+fn links_with_notes(ops: &[(String, bool)]) -> String {
+    ops.iter()
+        .map(|(operation, absent_only)| {
+            let link = format!("[{operation}](#{})", anchor(operation));
+            if *absent_only { format!("{link} (absent)") } else { link }
+        })
         .collect::<Vec<_>>()
         .join(", ")
 }

@@ -1,0 +1,49 @@
+# c-bkt-0027 — a deletion for a bucket in another region.
+#
+# Schema dimensions exercised: the same redirect where a body does exist, so the document can be
+# pinned as well as the header.
+
+[case]
+id = "c-bkt-0027"
+schema_version = 1
+title = "A deletion for a bucket in another region redirects rather than reporting it missing"
+rationale = """
+The wrong answer here is a 404. A bucket that exists elsewhere is not a bucket that does not exist, \
+and telling a caller it is missing sends a teardown script on to create it again — in the wrong \
+region, under a name that is already taken. The redirect carries the region in the head, where an \
+SDK reads it, and in the document, where a human reading a log does; the deletion itself must not \
+have happened, which the status alone would not show."""
+polarity = "negative"
+operation = "DeleteBucket"
+tags = ["region", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-bkt-0010"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/ErrorResponses.html"
+summary = "The permanent redirect is the documented answer for a request addressed to the wrong endpoint for a bucket."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "conf-bkt-remote"
+region = "eu-west-1"
+
+[request]
+method = "DELETE"
+target = "/conf-bkt-remote"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 301
+connection_after = "open"
+
+[expect.error]
+code = "PermanentRedirect"
+request_id_present = true
+
+[expect.headers_present]
+"x-amz-bucket-region" = "eu-west-1"
+
+[expect.body]
+contains_utf8 = ["<Region>eu-west-1</Region>", "<BucketName>conf-bkt-remote</BucketName>"]

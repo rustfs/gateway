@@ -102,7 +102,10 @@ pub use crate::codec::{
 };
 pub use crate::dispatch::{Dispatch, Router, RouterBuildError};
 pub use crate::error::{DisallowedPreAuthCode, PRE_AUTH_STATUSES, PreAuthError};
-pub use crate::fault::{ELEMENT_ORDER, ErrorDetail, ErrorHeader, PRECONDITION_FAILED_MESSAGE, RANGE_NOT_SATISFIABLE_MESSAGE};
+pub use crate::fault::{
+    ELEMENT_ORDER, ErrorDetail, ErrorHeader, InvalidWireLabel, PRECONDITION_FAILED_MESSAGE, RANGE_NOT_SATISFIABLE_MESSAGE,
+    RedirectTarget, RegionLabel,
+};
 pub use crate::handler::{Answer, BoxFuture, CommitOutcome, CommitWork, Handler, HandlerError, HandlerResult, Req, Resp};
 pub use crate::op::{
     AuthRequirement, HasOperation, Operation, OperationOrigin, ResourceShape, StandardOperation, is_standard_operation_name,

@@ -1,0 +1,46 @@
+# c-bkt-0007 — deleting an empty bucket.
+#
+# Schema dimensions exercised: a 204 and the header set it is allowed to carry.
+
+[case]
+id = "c-bkt-0007"
+schema_version = 1
+title = "Deleting an empty bucket answers 204 with no body"
+rationale = """
+A 204 is defined to end at its header section, and an HTTP/1.1 client that reads a body after one \
+desynchronises the connection: the bytes are taken as the head of the next response on a keep-alive \
+connection, so the damage lands on a request that has nothing to do with the deletion. The \
+Content-Type assertion is the other half — a 204 that announces a media type is a 204 some \
+intermediary will try to read a body for."""
+polarity = "positive"
+operation = "DeleteBucket"
+tags = ["wire-bytes"]
+timeout_ms = 10000
+quirks = ["q-bkt-0007"]
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9110#section-15.3.5"
+summary = "A 204 response terminates at the end of the header section and cannot carry content."
+kind = "rfc"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucket.html"
+summary = "The documented success for a bucket deletion is 204 with no response elements."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "conf-bkt-gone"
+
+[request]
+method = "DELETE"
+target = "/conf-bkt-gone"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 204
+headers_absent = ["content-type", "etag"]
+connection_after = "open"
+
+[expect.body]
+size = 0

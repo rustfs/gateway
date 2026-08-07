@@ -71,6 +71,93 @@ pub const RANGE_NOT_SATISFIABLE_MESSAGE: &str = "The requested range is not sati
 /// The message AWS answers a failed precondition with. Wire format, for [`RANGE_NOT_SATISFIABLE_MESSAGE`]'s reason.
 pub const PRECONDITION_FAILED_MESSAGE: &str = "At least one of the pre-conditions you specified did not hold";
 
+/// A region name a refusal may state, validated at construction.
+///
+/// Exists so that [`ErrorHeader::BucketRegion`] carries a value whose byte set is decided here
+/// rather than by the caller: a region is lowercase ASCII letters, digits and hyphens, bounded, so
+/// nothing that could split a header can reach the rendering. The value is backend knowledge — the
+/// region the bucket actually lives in — never an echo of caller input.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct RegionLabel(Box<str>);
+
+impl RegionLabel {
+    /// The longest region name this type accepts. Generous against AWS's own names.
+    pub const MAX_LEN: usize = 64;
+
+    /// Validates a region name.
+    ///
+    /// # Errors
+    ///
+    /// [`InvalidWireLabel`] when the name is empty, longer than [`Self::MAX_LEN`], or carries any
+    /// byte outside lowercase ASCII letters, digits and `-`.
+    pub fn new(text: &str) -> Result<Self, InvalidWireLabel> {
+        let ok = !text.is_empty()
+            && text.len() <= Self::MAX_LEN
+            && text
+                .bytes()
+                .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-');
+        if !ok {
+            return Err(InvalidWireLabel);
+        }
+        Ok(Self(Box::from(text)))
+    }
+
+    /// The validated name.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// The endpoint a redirect points at, validated at construction.
+///
+/// Carried by [`ErrorHeader::RedirectLocation`], the `Location` header of a `307
+/// TemporaryRedirect`. Backend knowledge — where the bucket is served — with the byte set closed
+/// here for the same reason as [`RegionLabel`]: ASCII graphic only, so a header split cannot be
+/// spelled.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct RedirectTarget(Box<str>);
+
+impl RedirectTarget {
+    /// The longest target this type accepts.
+    pub const MAX_LEN: usize = 512;
+
+    /// Validates a redirect target.
+    ///
+    /// # Errors
+    ///
+    /// [`InvalidWireLabel`] when the target is empty, longer than [`Self::MAX_LEN`], or carries
+    /// any byte that is not ASCII graphic.
+    pub fn new(text: &str) -> Result<Self, InvalidWireLabel> {
+        let ok = !text.is_empty() && text.len() <= Self::MAX_LEN && text.bytes().all(|byte| byte.is_ascii_graphic());
+        if !ok {
+            return Err(InvalidWireLabel);
+        }
+        Ok(Self(Box::from(text)))
+    }
+
+    /// The validated target.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// A value refused by [`RegionLabel::new`] or [`RedirectTarget::new`].
+///
+/// Carries nothing on purpose: echoing the refused bytes back would hand the caller of a
+/// diagnostic path the very bytes the validation exists to keep out of a header.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct InvalidWireLabel;
+
+impl std::fmt::Display for InvalidWireLabel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("not a value this wire label admits")
+    }
+}
+
+impl std::error::Error for InvalidWireLabel {}
+
 /// A fact a backend may add to the head of its own refusal.
 ///
 /// A closed set, and every variant names a fact rather than a header: the wire spelling is this
@@ -83,7 +170,7 @@ pub const PRECONDITION_FAILED_MESSAGE: &str = "At least one of the pre-condition
 /// status a handler can produce? Can the framework not compute it, because only the backend knows
 /// the fact? And is the value expressible as a typed field rather than as a string the caller could
 /// influence? A header that fails the third question does not belong here in any form.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum ErrorHeader {
     /// `Content-Range: bytes */<complete_length>` — the unsatisfied form.
     ///
@@ -101,6 +188,24 @@ pub enum ErrorHeader {
         /// How long the client should wait, in whole seconds.
         seconds: u32,
     },
+    /// `x-amz-bucket-region: <region>` — where the bucket actually lives.
+    ///
+    /// Mandatory on the `301 PermanentRedirect` a path-style request for a bucket in another
+    /// region receives: it is the only way an SDK learns the right endpoint, and without it the
+    /// client fails outright instead of retrying. Only the backend knows the bucket's region.
+    BucketRegion {
+        /// The region of the bucket the request named.
+        region: RegionLabel,
+    },
+    /// `Location: <endpoint>` — where a `307 TemporaryRedirect` sends the client.
+    ///
+    /// The shape of the redirect AWS answers during a new bucket's DNS propagation window. The
+    /// trigger is the backend's knowledge of bucket placement; this variant only fixes what the
+    /// response looks like when a backend has that knowledge.
+    RedirectLocation {
+        /// The endpoint the client should retry against.
+        target: RedirectTarget,
+    },
 }
 
 impl ErrorHeader {
@@ -110,13 +215,16 @@ impl ErrorHeader {
         match self {
             Self::UnsatisfiedRange { .. } => HeaderName::from_static("content-range"),
             Self::RetryAfter { .. } => HeaderName::from_static("retry-after"),
+            Self::BucketRegion { .. } => HeaderName::from_static("x-amz-bucket-region"),
+            Self::RedirectLocation { .. } => HeaderName::from_static("location"),
         }
     }
 
     /// The header value, rendered.
     ///
-    /// Every byte of the result comes from this function's own literals and from the decimal
-    /// rendering of an integer, so the result is ASCII graphic characters and spaces only. That is
+    /// Every byte of the result comes from this function's own literals, from the decimal
+    /// rendering of an integer, or from a value a constructor in this module validated to ASCII
+    /// graphic characters — so the result is ASCII graphic characters and spaces only. That is
     /// the property that makes header injection unreachable through this type, and it is asserted
     /// rather than asserted-in-a-comment: see `every_rendered_value_is_a_usable_header_value`.
     #[must_use]
@@ -124,6 +232,8 @@ impl ErrorHeader {
         match self {
             Self::UnsatisfiedRange { complete_length } => format!("bytes */{complete_length}"),
             Self::RetryAfter { seconds } => seconds.to_string(),
+            Self::BucketRegion { region } => region.as_str().to_owned(),
+            Self::RedirectLocation { target } => target.as_str().to_owned(),
         }
     }
 }
@@ -135,7 +245,14 @@ impl ErrorHeader {
 /// element sequence of a document byte for byte, so reordering this array is a wire change.
 /// [`ErrorDetail::position`] is the index into it, and the two are kept in agreement by a test
 /// rather than by discipline.
-pub const ELEMENT_ORDER: [&str; 5] = ["Key", "BucketName", "Condition", "RangeRequested", "ActualObjectSize"];
+pub const ELEMENT_ORDER: [&str; 6] = [
+    "Key",
+    "BucketName",
+    "Condition",
+    "RangeRequested",
+    "ActualObjectSize",
+    "Region",
+];
 
 /// An element an `<Error>` document may carry beyond `Code` and `Message`.
 ///
@@ -158,6 +275,12 @@ pub enum ErrorDetail {
     RangeRequested(Cow<'static, str>),
     /// `<ActualObjectSize>` — the current length of the object, in bytes.
     ActualObjectSize(u64),
+    /// `<Region>` — the region the redirected request should have been sent to.
+    ///
+    /// The document twin of [`ErrorHeader::BucketRegion`]: a `301 PermanentRedirect` carries the
+    /// region in its head because a `HEAD` has no body to carry it in, and may also state it here
+    /// for the clients that read the document.
+    Region(RegionLabel),
 }
 
 impl ErrorDetail {
@@ -170,6 +293,7 @@ impl ErrorDetail {
             Self::Condition(_) => "Condition",
             Self::RangeRequested(_) => "RangeRequested",
             Self::ActualObjectSize(_) => "ActualObjectSize",
+            Self::Region(_) => "Region",
         }
     }
 
@@ -182,6 +306,7 @@ impl ErrorDetail {
             Self::Condition(_) => 2,
             Self::RangeRequested(_) => 3,
             Self::ActualObjectSize(_) => 4,
+            Self::Region(_) => 5,
         }
     }
 
@@ -193,6 +318,7 @@ impl ErrorDetail {
                 Cow::Borrowed(text.as_ref())
             }
             Self::ActualObjectSize(size) => Cow::Owned(size.to_string()),
+            Self::Region(region) => Cow::Borrowed(region.as_str()),
         }
     }
 }
@@ -211,10 +337,19 @@ mod tests {
         let all = vec![
             ErrorHeader::UnsatisfiedRange { complete_length: 10 },
             ErrorHeader::RetryAfter { seconds: 3 },
+            ErrorHeader::BucketRegion {
+                region: RegionLabel::new("eu-west-1").expect("a valid region"),
+            },
+            ErrorHeader::RedirectLocation {
+                target: RedirectTarget::new("https://b.s3.eu-west-1.example.com").expect("a valid target"),
+            },
         ];
         for header in &all {
             match header {
-                ErrorHeader::UnsatisfiedRange { .. } | ErrorHeader::RetryAfter { .. } => {}
+                ErrorHeader::UnsatisfiedRange { .. }
+                | ErrorHeader::RetryAfter { .. }
+                | ErrorHeader::BucketRegion { .. }
+                | ErrorHeader::RedirectLocation { .. } => {}
             }
         }
         all
@@ -228,6 +363,7 @@ mod tests {
             ErrorDetail::Condition(Cow::Borrowed("If-Match")),
             ErrorDetail::RangeRequested(Cow::Borrowed("bytes=20-30")),
             ErrorDetail::ActualObjectSize(10),
+            ErrorDetail::Region(RegionLabel::new("eu-west-1").expect("a valid region")),
         ];
         for detail in &all {
             match detail {
@@ -235,7 +371,8 @@ mod tests {
                 | ErrorDetail::BucketName(_)
                 | ErrorDetail::Condition(_)
                 | ErrorDetail::RangeRequested(_)
-                | ErrorDetail::ActualObjectSize(_) => {}
+                | ErrorDetail::ActualObjectSize(_)
+                | ErrorDetail::Region(_) => {}
             }
         }
         all
@@ -341,6 +478,31 @@ mod tests {
         assert_eq!(ErrorDetail::Condition(Cow::Borrowed("")).element(), "Condition");
         assert_eq!(ErrorDetail::Key(Cow::Borrowed("")).element(), "Key");
         assert_eq!(ErrorDetail::BucketName(Cow::Borrowed("")).element(), "BucketName");
+        let region = RegionLabel::new("us-west-2").expect("a valid region");
+        assert_eq!(ErrorDetail::Region(region).element(), "Region");
+    }
+
+    /// Negative — the two validated labels refuse every byte that could reach a header as a split
+    /// or reach a document as markup noise: uppercase, spaces, CR, LF, and the empty string.
+    #[test]
+    fn a_wire_label_refuses_what_a_header_cannot_carry() {
+        for hostile in ["", "EU", "us east 1", "us-east-1\r\nx-amz-request-id: forged", "üs-east-1"] {
+            assert!(RegionLabel::new(hostile).is_err(), "{hostile:?} must be refused");
+        }
+        assert!(RegionLabel::new(&"a".repeat(RegionLabel::MAX_LEN + 1)).is_err());
+        for hostile in ["", "https://x\r\nLocation: y", "with space"] {
+            assert!(RedirectTarget::new(hostile).is_err(), "{hostile:?} must be refused");
+        }
+        assert!(RedirectTarget::new(&"a".repeat(RedirectTarget::MAX_LEN + 1)).is_err());
+    }
+
+    /// Positive — the labels accept the values the family actually produces.
+    #[test]
+    fn a_wire_label_accepts_the_values_the_family_produces() {
+        assert_eq!(RegionLabel::new("us-east-1").expect("valid").as_str(), "us-east-1");
+        assert_eq!(RegionLabel::new("eu-west-1").expect("valid").as_str(), "eu-west-1");
+        let target = RedirectTarget::new("https://b.s3.eu-west-1.example.com").expect("valid");
+        assert_eq!(target.as_str(), "https://b.s3.eu-west-1.example.com");
     }
 
     /// Positive — a numeric element renders as a bare decimal, with no separators and no unit.

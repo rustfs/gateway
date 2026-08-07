@@ -215,8 +215,14 @@ fn split_labels(path: &str, target: TargetKind) -> Result<(Option<BucketName>, O
 fn bucket_of(raw: &str) -> Result<BucketName, CodecError> {
     // A bucket label is never percent-encoded on the wire: the naming rules admit only characters
     // that need no escaping, so a `%` here is a spelling no client produces.
-    BucketName::new(raw)
-        .map_err(|_| CodecError::invalid_argument("the bucket name in the request path is not usable").about("Bucket"))
+    //
+    // `InvalidBucketName`, not the generic `InvalidArgument`: AWS answers a name that breaks the
+    // bucket naming rules with its own code on every operation, and an SDK branching on it —
+    // `CreateBucket` is the one that has to — cannot tell a bad name from any other bad parameter
+    // when both arrive as `InvalidArgument`.
+    BucketName::new(raw).map_err(|_| {
+        CodecError::new(rustfs_gateway_types::ErrorCode::INVALID_BUCKET_NAME, "The specified bucket is not valid").about("Bucket")
+    })
 }
 
 /// Percent-decodes one query component, borrowing when there is nothing to decode.

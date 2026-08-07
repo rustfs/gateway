@@ -1,0 +1,47 @@
+# c-bkt-0003 — an empty LocationConstraint element inside the configuration.
+#
+# Schema dimensions exercised: empty-element normalisation one level deeper than c-bkt-0002.
+
+[case]
+id = "c-bkt-0003"
+schema_version = 1
+title = "An empty LocationConstraint element means unspecified rather than an empty region"
+rationale = """
+The element is present and its text is empty, which is the shape a serialiser produces for a field \
+whose value it does not have. Read literally it asks for a bucket in a region whose name is the \
+empty string, and a server that reads it that way answers 400 for a creation AWS accepts. The \
+distinction matters one layer up too: an empty region compared byte for byte against the \
+deployment's region never matches, so the failure looks like a region-mismatch bug rather than a \
+parsing one."""
+polarity = "positive"
+operation = "CreateBucket"
+tags = ["xml", "region"]
+timeout_ms = 10000
+quirks = ["q-bkt-0011"]
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/pull/244"
+summary = "Upstream settled that an empty element normalises to the absent field instead of an empty value."
+kind = "s3s-pr"
+
+[[setup.buckets]]
+name = "conf-bkt-blank"
+absent = true
+
+[request]
+method = "PUT"
+target = "/conf-bkt-blank"
+headers = { "content-type" = "application/xml" }
+body = { utf8 = "<CreateBucketConfiguration><LocationConstraint></LocationConstraint></CreateBucketConfiguration>" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[expect.headers_present]
+"location" = "/conf-bkt-blank"
+
+[expect.body]
+size = 0

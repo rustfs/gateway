@@ -11,27 +11,53 @@ table and the per-operation sections follow.
 
 ## Reverse index: query key to operations
 
+An operation marked **(absent)** is selected by a request that does **not** carry the key:
+`PUT /{Bucket}` is a bucket creation only while no subresource key is present. Following
+such a row as though the key selected the operation is the opposite of what the table says.
+
 | Query key | Operations |
 | --- | --- |
+| `abac` | [CreateBucket](#createbucket) (absent) |
+| `accelerate` | [CreateBucket](#createbucket) (absent) |
+| `acl` | [CreateBucket](#createbucket) (absent) |
+| `analytics` | [CreateBucket](#createbucket) (absent), [DeleteBucket](#deletebucket) (absent) |
 | `attributes` | [GetObjectAttributes](#getobjectattributes) |
 | `bucket-region` | [ListBuckets](#listbuckets) |
 | `continuation-token` | [ListBuckets](#listbuckets), [ListObjectsV2](#listobjectsv2) |
-| `cors` | [DeleteBucketCors](#deletebucketcors), [GetBucketCors](#getbucketcors), [PutBucketCors](#putbucketcors) |
+| `cors` | [CreateBucket](#createbucket) (absent), [DeleteBucket](#deletebucket) (absent), [DeleteBucketCors](#deletebucketcors), [GetBucketCors](#getbucketcors), [PutBucketCors](#putbucketcors) |
 | `delete` | [DeleteObjects](#deleteobjects) |
 | `delimiter` | [ListMultipartUploads](#listmultipartuploads), [ListObjectVersions](#listobjectversions), [ListObjects](#listobjects), [ListObjectsV2](#listobjectsv2) |
 | `encoding-type` | [ListMultipartUploads](#listmultipartuploads), [ListObjectVersions](#listobjectversions), [ListObjects](#listobjects), [ListObjectsV2](#listobjectsv2) |
+| `encryption` | [CreateBucket](#createbucket) (absent), [DeleteBucket](#deletebucket) (absent) |
 | `fetch-owner` | [ListObjectsV2](#listobjectsv2) |
+| `intelligent-tiering` | [CreateBucket](#createbucket) (absent), [DeleteBucket](#deletebucket) (absent) |
+| `inventory` | [CreateBucket](#createbucket) (absent), [DeleteBucket](#deletebucket) (absent) |
 | `key-marker` | [ListMultipartUploads](#listmultipartuploads), [ListObjectVersions](#listobjectversions) |
+| `lifecycle` | [CreateBucket](#createbucket) (absent), [DeleteBucket](#deletebucket) (absent) |
 | `list-type` | [ListObjectsV2](#listobjectsv2) |
 | `location` | [GetBucketLocation](#getbucketlocation) |
+| `logging` | [CreateBucket](#createbucket) (absent) |
 | `marker` | [ListObjects](#listobjects) |
 | `max-buckets` | [ListBuckets](#listbuckets) |
 | `max-keys` | [ListObjectVersions](#listobjectversions), [ListObjects](#listobjects), [ListObjectsV2](#listobjectsv2) |
 | `max-parts` | [ListParts](#listparts) |
 | `max-uploads` | [ListMultipartUploads](#listmultipartuploads) |
+| `metadataAnnotationTable` | [CreateBucket](#createbucket) (absent) |
+| `metadataConfiguration` | [DeleteBucket](#deletebucket) (absent) |
+| `metadataInventoryTable` | [CreateBucket](#createbucket) (absent) |
+| `metadataJournalTable` | [CreateBucket](#createbucket) (absent) |
+| `metadataTable` | [DeleteBucket](#deletebucket) (absent) |
+| `metrics` | [CreateBucket](#createbucket) (absent), [DeleteBucket](#deletebucket) (absent) |
+| `notification` | [CreateBucket](#createbucket) (absent) |
+| `object-lock` | [CreateBucket](#createbucket) (absent) |
+| `ownershipControls` | [CreateBucket](#createbucket) (absent), [DeleteBucket](#deletebucket) (absent) |
 | `part-number-marker` | [ListParts](#listparts) |
 | `partNumber` | [GetObject](#getobject), [HeadObject](#headobject), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
+| `policy` | [CreateBucket](#createbucket) (absent), [DeleteBucket](#deletebucket) (absent) |
 | `prefix` | [ListBuckets](#listbuckets), [ListMultipartUploads](#listmultipartuploads), [ListObjectVersions](#listobjectversions), [ListObjects](#listobjects), [ListObjectsV2](#listobjectsv2) |
+| `publicAccessBlock` | [CreateBucket](#createbucket) (absent), [DeleteBucket](#deletebucket) (absent) |
+| `replication` | [CreateBucket](#createbucket) (absent), [DeleteBucket](#deletebucket) (absent) |
+| `requestPayment` | [CreateBucket](#createbucket) (absent) |
 | `response-cache-control` | [GetObject](#getobject), [HeadObject](#headobject) |
 | `response-content-disposition` | [GetObject](#getobject), [HeadObject](#headobject) |
 | `response-content-encoding` | [GetObject](#getobject), [HeadObject](#headobject) |
@@ -39,13 +65,15 @@ table and the per-operation sections follow.
 | `response-content-type` | [GetObject](#getobject), [HeadObject](#headobject) |
 | `response-expires` | [GetObject](#getobject), [HeadObject](#headobject) |
 | `start-after` | [ListObjectsV2](#listobjectsv2) |
-| `tagging` | [DeleteBucketTagging](#deletebuckettagging), [DeleteObjectTagging](#deleteobjecttagging), [GetBucketTagging](#getbuckettagging), [GetObjectTagging](#getobjecttagging), [PutBucketTagging](#putbuckettagging), [PutObjectTagging](#putobjecttagging) |
+| `tagging` | [CreateBucket](#createbucket) (absent), [DeleteBucket](#deletebucket) (absent), [DeleteBucketTagging](#deletebuckettagging), [DeleteObjectTagging](#deleteobjecttagging), [GetBucketTagging](#getbuckettagging), [GetObjectTagging](#getobjecttagging), [PutBucketTagging](#putbuckettagging), [PutObjectTagging](#putobjecttagging) |
 | `upload-id-marker` | [ListMultipartUploads](#listmultipartuploads) |
 | `uploadId` | [AbortMultipartUpload](#abortmultipartupload), [CompleteMultipartUpload](#completemultipartupload), [ListParts](#listparts), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
 | `uploads` | [CreateMultipartUpload](#createmultipartupload), [ListMultipartUploads](#listmultipartuploads) |
 | `version-id-marker` | [ListObjectVersions](#listobjectversions) |
 | `versionId` | [DeleteObject](#deleteobject), [DeleteObjectTagging](#deleteobjecttagging), [GetObject](#getobject), [GetObjectAttributes](#getobjectattributes), [GetObjectTagging](#getobjecttagging), [HeadObject](#headobject), [PutObjectTagging](#putobjecttagging) |
+| `versioning` | [CreateBucket](#createbucket) (absent) |
 | `versions` | [ListObjectVersions](#listobjectversions) |
+| `website` | [CreateBucket](#createbucket) (absent), [DeleteBucket](#deletebucket) (absent) |
 
 ## Reverse index: header to operations
 
@@ -68,11 +96,14 @@ table and the per-operation sections follow.
 | `if-range` | [GetObject](#getobject) |
 | `if-unmodified-since` | [GetObject](#getobject), [HeadObject](#headobject) |
 | `last-modified` | [GetObject](#getobject), [GetObjectAttributes](#getobjectattributes), [HeadObject](#headobject) |
+| `location` | [CreateBucket](#createbucket) |
 | `range` | [GetObject](#getobject), [HeadObject](#headobject) |
 | `x-amz-abort-date` | [CreateMultipartUpload](#createmultipartupload), [ListParts](#listparts) |
 | `x-amz-abort-rule-id` | [CreateMultipartUpload](#createmultipartupload), [ListParts](#listparts) |
-| `x-amz-acl` | [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [PutObject](#putobject) |
+| `x-amz-acl` | [CopyObject](#copyobject), [CreateBucket](#createbucket), [CreateMultipartUpload](#createmultipartupload), [PutObject](#putobject) |
 | `x-amz-archive-status` | [HeadObject](#headobject) |
+| `x-amz-bucket-object-lock-enabled` | [CreateBucket](#createbucket) |
+| `x-amz-bucket-region` | [HeadBucket](#headbucket) |
 | `x-amz-bypass-governance-retention` | [DeleteObject](#deleteobject), [DeleteObjects](#deleteobjects) |
 | `x-amz-checksum-` | [CompleteMultipartUpload](#completemultipartupload), [PutObject](#putobject), [UploadPart](#uploadpart) |
 | `x-amz-checksum-algorithm` | [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload) |
@@ -99,12 +130,13 @@ table and the per-operation sections follow.
 | `x-amz-copy-source-server-side-encryption-customer-key-md5` | [CopyObject](#copyobject), [UploadPartCopy](#uploadpartcopy) |
 | `x-amz-copy-source-version-id` | [CopyObject](#copyobject), [UploadPartCopy](#uploadpartcopy) |
 | `x-amz-delete-marker` | [DeleteObject](#deleteobject), [GetObject](#getobject), [GetObjectAttributes](#getobjectattributes), [HeadObject](#headobject) |
-| `x-amz-expected-bucket-owner` | [AbortMultipartUpload](#abortmultipartupload), [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [DeleteBucketCors](#deletebucketcors), [DeleteBucketTagging](#deletebuckettagging), [DeleteObject](#deleteobject), [DeleteObjectTagging](#deleteobjecttagging), [DeleteObjects](#deleteobjects), [GetBucketCors](#getbucketcors), [GetBucketLocation](#getbucketlocation), [GetBucketTagging](#getbuckettagging), [GetObject](#getobject), [GetObjectAttributes](#getobjectattributes), [GetObjectTagging](#getobjecttagging), [HeadObject](#headobject), [ListMultipartUploads](#listmultipartuploads), [ListObjectVersions](#listobjectversions), [ListObjects](#listobjects), [ListObjectsV2](#listobjectsv2), [ListParts](#listparts), [PutBucketCors](#putbucketcors), [PutBucketTagging](#putbuckettagging), [PutObject](#putobject), [PutObjectTagging](#putobjecttagging), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
+| `x-amz-expected-bucket-owner` | [AbortMultipartUpload](#abortmultipartupload), [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [DeleteBucket](#deletebucket), [DeleteBucketCors](#deletebucketcors), [DeleteBucketTagging](#deletebuckettagging), [DeleteObject](#deleteobject), [DeleteObjectTagging](#deleteobjecttagging), [DeleteObjects](#deleteobjects), [GetBucketCors](#getbucketcors), [GetBucketLocation](#getbucketlocation), [GetBucketTagging](#getbuckettagging), [GetObject](#getobject), [GetObjectAttributes](#getobjectattributes), [GetObjectTagging](#getobjecttagging), [HeadBucket](#headbucket), [HeadObject](#headobject), [ListMultipartUploads](#listmultipartuploads), [ListObjectVersions](#listobjectversions), [ListObjects](#listobjects), [ListObjectsV2](#listobjectsv2), [ListParts](#listparts), [PutBucketCors](#putbucketcors), [PutBucketTagging](#putbuckettagging), [PutObject](#putobject), [PutObjectTagging](#putobjecttagging), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
 | `x-amz-expiration` | [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject) |
-| `x-amz-grant-full-control` | [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [PutObject](#putobject) |
-| `x-amz-grant-read` | [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [PutObject](#putobject) |
-| `x-amz-grant-read-acp` | [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [PutObject](#putobject) |
-| `x-amz-grant-write-acp` | [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [PutObject](#putobject) |
+| `x-amz-grant-full-control` | [CopyObject](#copyobject), [CreateBucket](#createbucket), [CreateMultipartUpload](#createmultipartupload), [PutObject](#putobject) |
+| `x-amz-grant-read` | [CopyObject](#copyobject), [CreateBucket](#createbucket), [CreateMultipartUpload](#createmultipartupload), [PutObject](#putobject) |
+| `x-amz-grant-read-acp` | [CopyObject](#copyobject), [CreateBucket](#createbucket), [CreateMultipartUpload](#createmultipartupload), [PutObject](#putobject) |
+| `x-amz-grant-write` | [CreateBucket](#createbucket) |
+| `x-amz-grant-write-acp` | [CopyObject](#copyobject), [CreateBucket](#createbucket), [CreateMultipartUpload](#createmultipartupload), [PutObject](#putobject) |
 | `x-amz-if-match-initiated-time` | [AbortMultipartUpload](#abortmultipartupload) |
 | `x-amz-if-match-last-modified-time` | [DeleteObject](#deleteobject) |
 | `x-amz-if-match-size` | [DeleteObject](#deleteobject) |
@@ -119,6 +151,7 @@ table and the per-operation sections follow.
 | `x-amz-object-lock-legal-hold` | [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject) |
 | `x-amz-object-lock-mode` | [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject) |
 | `x-amz-object-lock-retain-until-date` | [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject) |
+| `x-amz-object-ownership` | [CreateBucket](#createbucket) |
 | `x-amz-object-size` | [PutObject](#putobject) |
 | `x-amz-part-number-marker` | [GetObjectAttributes](#getobjectattributes) |
 | `x-amz-replication-status` | [GetObject](#getobject), [HeadObject](#headobject) |
@@ -146,15 +179,20 @@ table and the per-operation sections follow.
 
 | Error code | Operations |
 | --- | --- |
-| `AccessDenied` | [AbortMultipartUpload](#abortmultipartupload), [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [DeleteBucketCors](#deletebucketcors), [DeleteBucketTagging](#deletebuckettagging), [DeleteObject](#deleteobject), [DeleteObjectTagging](#deleteobjecttagging), [DeleteObjects](#deleteobjects), [GetBucketCors](#getbucketcors), [GetBucketLocation](#getbucketlocation), [GetBucketTagging](#getbuckettagging), [GetObject](#getobject), [GetObjectAttributes](#getobjectattributes), [GetObjectTagging](#getobjecttagging), [HeadObject](#headobject), [ListBuckets](#listbuckets), [ListMultipartUploads](#listmultipartuploads), [ListObjectVersions](#listobjectversions), [ListObjects](#listobjects), [ListObjectsV2](#listobjectsv2), [ListParts](#listparts), [PutBucketCors](#putbucketcors), [PutBucketTagging](#putbuckettagging), [PutObject](#putobject), [PutObjectTagging](#putobjecttagging), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
+| `AccessDenied` | [AbortMultipartUpload](#abortmultipartupload), [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateBucket](#createbucket), [CreateMultipartUpload](#createmultipartupload), [DeleteBucket](#deletebucket), [DeleteBucketCors](#deletebucketcors), [DeleteBucketTagging](#deletebuckettagging), [DeleteObject](#deleteobject), [DeleteObjectTagging](#deleteobjecttagging), [DeleteObjects](#deleteobjects), [GetBucketCors](#getbucketcors), [GetBucketLocation](#getbucketlocation), [GetBucketTagging](#getbuckettagging), [GetObject](#getobject), [GetObjectAttributes](#getobjectattributes), [GetObjectTagging](#getobjecttagging), [HeadBucket](#headbucket), [HeadObject](#headobject), [ListBuckets](#listbuckets), [ListMultipartUploads](#listmultipartuploads), [ListObjectVersions](#listobjectversions), [ListObjects](#listobjects), [ListObjectsV2](#listobjectsv2), [ListParts](#listparts), [PutBucketCors](#putbucketcors), [PutBucketTagging](#putbuckettagging), [PutObject](#putobject), [PutObjectTagging](#putobjecttagging), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
 | `BadDigest` | [PutBucketCors](#putbucketcors), [PutObject](#putobject), [UploadPart](#uploadpart) |
+| `BucketAlreadyExists` | [CreateBucket](#createbucket) |
+| `BucketAlreadyOwnedByYou` | [CreateBucket](#createbucket) |
+| `BucketNotEmpty` | [DeleteBucket](#deletebucket) |
 | `ConditionalRequestConflict` | [CompleteMultipartUpload](#completemultipartupload), [PutObject](#putobject) |
 | `EncryptionTypeMismatch` | [PutObject](#putobject) |
 | `EntityTooLarge` | [CopyObject](#copyobject), [PutObject](#putobject), [UploadPart](#uploadpart) |
 | `EntityTooSmall` | [CompleteMultipartUpload](#completemultipartupload) |
 | `IncompleteBody` | [PutObject](#putobject), [UploadPart](#uploadpart) |
-| `InvalidArgument` | [AbortMultipartUpload](#abortmultipartupload), [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [DeleteBucketTagging](#deletebuckettagging), [DeleteObject](#deleteobject), [DeleteObjectTagging](#deleteobjecttagging), [DeleteObjects](#deleteobjects), [GetBucketTagging](#getbuckettagging), [GetObject](#getobject), [GetObjectAttributes](#getobjectattributes), [GetObjectTagging](#getobjecttagging), [ListMultipartUploads](#listmultipartuploads), [ListObjectVersions](#listobjectversions), [ListObjects](#listobjects), [ListObjectsV2](#listobjectsv2), [ListParts](#listparts), [PutBucketCors](#putbucketcors), [PutBucketTagging](#putbuckettagging), [PutObject](#putobject), [PutObjectTagging](#putobjecttagging), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
+| `InvalidArgument` | [AbortMultipartUpload](#abortmultipartupload), [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateBucket](#createbucket), [CreateMultipartUpload](#createmultipartupload), [DeleteBucketTagging](#deletebuckettagging), [DeleteObject](#deleteobject), [DeleteObjectTagging](#deleteobjecttagging), [DeleteObjects](#deleteobjects), [GetBucketTagging](#getbuckettagging), [GetObject](#getobject), [GetObjectAttributes](#getobjectattributes), [GetObjectTagging](#getobjecttagging), [ListMultipartUploads](#listmultipartuploads), [ListObjectVersions](#listobjectversions), [ListObjects](#listobjects), [ListObjectsV2](#listobjectsv2), [ListParts](#listparts), [PutBucketCors](#putbucketcors), [PutBucketTagging](#putbuckettagging), [PutObject](#putobject), [PutObjectTagging](#putobjecttagging), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
+| `InvalidBucketName` | [CreateBucket](#createbucket) |
 | `InvalidDigest` | [PutObject](#putobject), [UploadPart](#uploadpart) |
+| `InvalidLocationConstraint` | [CreateBucket](#createbucket) |
 | `InvalidObjectState` | [GetObject](#getobject) |
 | `InvalidPart` | [CompleteMultipartUpload](#completemultipartupload) |
 | `InvalidPartOrder` | [CompleteMultipartUpload](#completemultipartupload) |
@@ -163,18 +201,18 @@ table and the per-operation sections follow.
 | `InvalidStorageClass` | [CreateMultipartUpload](#createmultipartupload) |
 | `InvalidTag` | [PutBucketTagging](#putbuckettagging), [PutObjectTagging](#putobjecttagging) |
 | `InvalidWriteOffset` | [PutObject](#putobject) |
-| `MalformedXML` | [CompleteMultipartUpload](#completemultipartupload), [DeleteObjects](#deleteobjects), [PutBucketCors](#putbucketcors), [PutBucketTagging](#putbuckettagging), [PutObjectTagging](#putobjecttagging) |
+| `MalformedXML` | [CompleteMultipartUpload](#completemultipartupload), [CreateBucket](#createbucket), [DeleteObjects](#deleteobjects), [PutBucketCors](#putbucketcors), [PutBucketTagging](#putbuckettagging), [PutObjectTagging](#putobjecttagging) |
 | `MethodNotAllowed` | [CopyObject](#copyobject), [UploadPartCopy](#uploadpartcopy) |
 | `MissingContentLength` | [PutObject](#putobject), [UploadPart](#uploadpart) |
-| `NoSuchBucket` | [AbortMultipartUpload](#abortmultipartupload), [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [DeleteBucketCors](#deletebucketcors), [DeleteBucketTagging](#deletebuckettagging), [DeleteObject](#deleteobject), [DeleteObjectTagging](#deleteobjecttagging), [DeleteObjects](#deleteobjects), [GetBucketCors](#getbucketcors), [GetBucketLocation](#getbucketlocation), [GetBucketTagging](#getbuckettagging), [GetObject](#getobject), [GetObjectAttributes](#getobjectattributes), [GetObjectTagging](#getobjecttagging), [HeadObject](#headobject), [ListMultipartUploads](#listmultipartuploads), [ListObjectVersions](#listobjectversions), [ListObjects](#listobjects), [ListObjectsV2](#listobjectsv2), [ListParts](#listparts), [PutBucketCors](#putbucketcors), [PutBucketTagging](#putbuckettagging), [PutObject](#putobject), [PutObjectTagging](#putobjecttagging), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
+| `NoSuchBucket` | [AbortMultipartUpload](#abortmultipartupload), [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [DeleteBucket](#deletebucket), [DeleteBucketCors](#deletebucketcors), [DeleteBucketTagging](#deletebuckettagging), [DeleteObject](#deleteobject), [DeleteObjectTagging](#deleteobjecttagging), [DeleteObjects](#deleteobjects), [GetBucketCors](#getbucketcors), [GetBucketLocation](#getbucketlocation), [GetBucketTagging](#getbuckettagging), [GetObject](#getobject), [GetObjectAttributes](#getobjectattributes), [GetObjectTagging](#getobjecttagging), [HeadBucket](#headbucket), [HeadObject](#headobject), [ListMultipartUploads](#listmultipartuploads), [ListObjectVersions](#listobjectversions), [ListObjects](#listobjects), [ListObjectsV2](#listobjectsv2), [ListParts](#listparts), [PutBucketCors](#putbucketcors), [PutBucketTagging](#putbuckettagging), [PutObject](#putobject), [PutObjectTagging](#putobjecttagging), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
 | `NoSuchCORSConfiguration` | [GetBucketCors](#getbucketcors) |
 | `NoSuchKey` | [CopyObject](#copyobject), [DeleteObjectTagging](#deleteobjecttagging), [GetObject](#getobject), [GetObjectAttributes](#getobjectattributes), [GetObjectTagging](#getobjecttagging), [HeadObject](#headobject), [PutObjectTagging](#putobjecttagging), [UploadPartCopy](#uploadpartcopy) |
 | `NoSuchTagSet` | [GetBucketTagging](#getbuckettagging) |
 | `NoSuchUpload` | [AbortMultipartUpload](#abortmultipartupload), [CompleteMultipartUpload](#completemultipartupload), [ListParts](#listparts), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
-| `NotFound` | [HeadObject](#headobject) |
+| `NotFound` | [HeadBucket](#headbucket), [HeadObject](#headobject) |
 | `NotModified` | [GetObject](#getobject), [HeadObject](#headobject) |
 | `ObjectNotInActiveTierError` | [CopyObject](#copyobject) |
-| `PermanentRedirect` | [GetBucketLocation](#getbucketlocation), [ListMultipartUploads](#listmultipartuploads), [ListObjectVersions](#listobjectversions), [ListObjects](#listobjects), [ListObjectsV2](#listobjectsv2) |
+| `PermanentRedirect` | [CreateBucket](#createbucket), [DeleteBucket](#deletebucket), [GetBucketLocation](#getbucketlocation), [HeadBucket](#headbucket), [ListMultipartUploads](#listmultipartuploads), [ListObjectVersions](#listobjectversions), [ListObjects](#listobjects), [ListObjectsV2](#listobjectsv2) |
 | `PreconditionFailed` | [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject), [UploadPartCopy](#uploadpartcopy) |
 | `TooManyParts` | [PutObject](#putobject) |
 | `XAmzContentChecksumMismatch` | [PutObject](#putobject), [UploadPart](#uploadpart) |
@@ -186,7 +224,9 @@ table and the per-operation sections follow.
 | [AbortMultipartUpload](#abortmultipartupload) | DELETE | `/{Bucket}/{Key+}` | `uploadId` | — | 204 | `NoSuchBucket`, `NoSuchUpload`, `AccessDenied`, `InvalidArgument` | `q-mpu-abort-0035`, `q-mpu-upload-id-0037` |
 | [CompleteMultipartUpload](#completemultipartupload) | POST | `/{Bucket}/{Key+}` | `uploadId` | `x-amz-checksum-` | 200 | `NoSuchBucket`, `NoSuchUpload`, `AccessDenied`, `InvalidPart`, `InvalidPartOrder`, `EntityTooSmall`, `MalformedXML`, `InvalidArgument`, `InvalidRequest`, `PreconditionFailed`, `ConditionalRequestConflict` | `q-mpu-etag-0028`, `q-mpu-request-root-0030`, `q-mpu-late-error-0033`, `q-mpu-trailer-0034`, `q-mpu-upload-id-0037`, `q-mpu-limits-0038`, `q-mpu-metadata-0039` |
 | [CopyObject](#copyobject) | PUT | `/{Bucket}/{Key+}` | — | `x-amz-copy-source`, `x-amz-meta-` | 200 | `NoSuchBucket`, `NoSuchKey`, `AccessDenied`, `InvalidRequest`, `InvalidArgument`, `PreconditionFailed`, `MethodNotAllowed`, `EntityTooLarge`, `ObjectNotInActiveTierError` | `q-copy-source-split-0077`, `q-copy-source-arn-0078`, `q-copy-directive-0079`, `q-copy-self-0080`, `q-copy-error-after-200-0082`, `q-copy-source-version-0083` |
+| [CreateBucket](#createbucket) | PUT | `/{Bucket}` | `abac`, `accelerate`, `acl`, `analytics`, `cors`, `encryption`, `intelligent-tiering`, `inventory`, `lifecycle`, `logging`, `metadataAnnotationTable`, `metadataInventoryTable`, `metadataJournalTable`, `metrics`, `notification`, `object-lock`, `ownershipControls`, `policy`, `publicAccessBlock`, `replication`, `requestPayment`, `tagging`, `versioning`, `website` | — | 200 | `InvalidLocationConstraint`, `MalformedXML`, `InvalidBucketName`, `AccessDenied`, `InvalidArgument`, `PermanentRedirect`, `BucketAlreadyExists`, `BucketAlreadyOwnedByYou` | `q-bkt-0001`, `q-bkt-0002`, `q-bkt-0003`, `q-bkt-0004`, `q-bkt-0005`, `q-bkt-0006`, `q-bkt-0011` |
 | [CreateMultipartUpload](#createmultipartupload) | POST | `/{Bucket}/{Key+}` | `uploads` | `x-amz-meta-` | 200 | `NoSuchBucket`, `AccessDenied`, `InvalidArgument`, `InvalidRequest`, `InvalidStorageClass` | `q-mpu-root-0029`, `q-mpu-metadata-0039` |
+| [DeleteBucket](#deletebucket) | DELETE | `/{Bucket}` | `analytics`, `cors`, `encryption`, `intelligent-tiering`, `inventory`, `lifecycle`, `metadataConfiguration`, `metadataTable`, `metrics`, `ownershipControls`, `policy`, `publicAccessBlock`, `replication`, `tagging`, `website` | — | 204 | `NoSuchBucket`, `BucketNotEmpty`, `AccessDenied`, `PermanentRedirect` | `q-bkt-0007`, `q-bkt-0008` |
 | [DeleteBucketCors](#deletebucketcors) | DELETE | `/{Bucket}` | `cors` | — | 204 | `NoSuchBucket`, `AccessDenied` | `q-cors-0006` |
 | [DeleteBucketTagging](#deletebuckettagging) | DELETE | `/{Bucket}` | `tagging` | — | 204 | `NoSuchBucket`, `AccessDenied`, `InvalidArgument` | `q-tag-delete-idempotent-0091` |
 | [DeleteObject](#deleteobject) | DELETE | `/{Bucket}/{Key+}` | `versionId` | — | 204 | `NoSuchBucket`, `AccessDenied`, `InvalidArgument` | `q-delete-0026` |
@@ -198,6 +238,7 @@ table and the per-operation sections follow.
 | [GetObject](#getobject) | GET | `/{Bucket}/{Key+}` | `partNumber`, `response-cache-control`, `response-content-disposition`, `response-content-encoding`, `response-content-language`, `response-content-type`, `response-expires`, `versionId` | `x-amz-meta-` | 200 | `NoSuchBucket`, `NoSuchKey`, `AccessDenied`, `InvalidObjectState`, `InvalidArgument`, `InvalidRange`, `PreconditionFailed`, `NotModified` | `q-response-0023`, `q-storageclass-0024`, `q-tag-count-omit-0095` |
 | [GetObjectAttributes](#getobjectattributes) | GET | `/{Bucket}/{Key+}` | `attributes`, `versionId` | `x-amz-object-attributes` | 200 | `NoSuchBucket`, `NoSuchKey`, `AccessDenied`, `InvalidArgument` | `q-mpu-attributes-etag-0036`, `q-attributes-root-0087` |
 | [GetObjectTagging](#getobjecttagging) | GET | `/{Bucket}/{Key+}` | `tagging`, `versionId` | — | 200 | `NoSuchBucket`, `NoSuchKey`, `AccessDenied`, `InvalidArgument` | `q-tag-wrapped-0088`, `q-tag-object-unconfigured-0090` |
+| [HeadBucket](#headbucket) | HEAD | `/{Bucket}` | — | `x-amz-bucket-region` | 200 | `NoSuchBucket`, `AccessDenied`, `PermanentRedirect`, `NotFound` | `q-bkt-0009`, `q-bkt-0010` |
 | [HeadObject](#headobject) | HEAD | `/{Bucket}/{Key+}` | `partNumber`, `response-cache-control`, `response-content-disposition`, `response-content-encoding`, `response-content-language`, `response-content-type`, `response-expires`, `versionId` | `x-amz-meta-` | 200 | `NoSuchBucket`, `NoSuchKey`, `AccessDenied`, `NotFound`, `PreconditionFailed`, `NotModified` | `q-storageclass-0024`, `q-head-0025` |
 | [ListBuckets](#listbuckets) | GET | `/` | `bucket-region`, `continuation-token`, `max-buckets`, `prefix` | — | 200 | `AccessDenied` | `q-token-0021`, `q-wrapped-0062`, `q-order-0066`, `q-buckets-0071` |
 | [ListMultipartUploads](#listmultipartuploads) | GET | `/{Bucket}` | `delimiter`, `encoding-type`, `key-marker`, `max-uploads`, `prefix`, `upload-id-marker`, `uploads` | — | 200 | `NoSuchBucket`, `AccessDenied`, `InvalidArgument`, `PermanentRedirect` | `q-encoding-0015`, `q-mpu-upload-0032`, `q-mpu-marker-0040` |
@@ -245,6 +286,9 @@ First match wins; lower precedence is tried first.
 | 610 | [ListObjectVersions](#listobjectversions) | `Method GET` AND `Target Bucket` AND `QueryPresent ?versions` |
 | 650 | [DeleteObjects](#deleteobjects) | `Method POST` AND `Target Bucket` AND `QueryPresent ?delete` |
 | 700 | [ListObjects](#listobjects) | `Method GET` AND `Target Bucket` |
+| 710 | [CreateBucket](#createbucket) | `Method PUT` AND `Target Bucket` AND `QueryAbsent ?abac` AND `QueryAbsent ?accelerate` AND `QueryAbsent ?acl` AND `QueryAbsent ?analytics` AND `QueryAbsent ?cors` AND `QueryAbsent ?encryption` AND `QueryAbsent ?intelligent-tiering` AND `QueryAbsent ?inventory` AND `QueryAbsent ?lifecycle` AND `QueryAbsent ?logging` AND `QueryAbsent ?metadataAnnotationTable` AND `QueryAbsent ?metadataInventoryTable` AND `QueryAbsent ?metadataJournalTable` AND `QueryAbsent ?metrics` AND `QueryAbsent ?notification` AND `QueryAbsent ?object-lock` AND `QueryAbsent ?ownershipControls` AND `QueryAbsent ?policy` AND `QueryAbsent ?publicAccessBlock` AND `QueryAbsent ?replication` AND `QueryAbsent ?requestPayment` AND `QueryAbsent ?tagging` AND `QueryAbsent ?versioning` AND `QueryAbsent ?website` |
+| 720 | [DeleteBucket](#deletebucket) | `Method DELETE` AND `Target Bucket` AND `QueryAbsent ?analytics` AND `QueryAbsent ?cors` AND `QueryAbsent ?encryption` AND `QueryAbsent ?intelligent-tiering` AND `QueryAbsent ?inventory` AND `QueryAbsent ?lifecycle` AND `QueryAbsent ?metadataConfiguration` AND `QueryAbsent ?metadataTable` AND `QueryAbsent ?metrics` AND `QueryAbsent ?ownershipControls` AND `QueryAbsent ?policy` AND `QueryAbsent ?publicAccessBlock` AND `QueryAbsent ?replication` AND `QueryAbsent ?tagging` AND `QueryAbsent ?website` |
+| 730 | [HeadBucket](#headbucket) | `Method HEAD` AND `Target Bucket` |
 | 790 | [CopyObject](#copyobject) | `Method PUT` AND `Target Object` AND `HeaderPresent x-amz-copy-source` |
 | 800 | [PutObject](#putobject) | `Method PUT` AND `Target Object` |
 | 900 | [GetObject](#getobject) | `Method GET` AND `Target Object` |
@@ -407,6 +451,77 @@ An `Error` body can follow an already-flushed `200`.
 
 Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 
+### CreateBucket
+
+`PUT /{Bucket}` &rarr; 200 · target Bucket · precedence 710 · auth Required (`s3:CreateBucket`, presigned allowed) · spec `spec/operations/CreateBucket.toml`
+
+**Route predicates**
+
+- `Method PUT`
+- `Target Bucket`
+- `QueryAbsent ?abac`
+- `QueryAbsent ?accelerate`
+- `QueryAbsent ?acl`
+- `QueryAbsent ?analytics`
+- `QueryAbsent ?cors`
+- `QueryAbsent ?encryption`
+- `QueryAbsent ?intelligent-tiering`
+- `QueryAbsent ?inventory`
+- `QueryAbsent ?lifecycle`
+- `QueryAbsent ?logging`
+- `QueryAbsent ?metadataAnnotationTable`
+- `QueryAbsent ?metadataInventoryTable`
+- `QueryAbsent ?metadataJournalTable`
+- `QueryAbsent ?metrics`
+- `QueryAbsent ?notification`
+- `QueryAbsent ?object-lock`
+- `QueryAbsent ?ownershipControls`
+- `QueryAbsent ?policy`
+- `QueryAbsent ?publicAccessBlock`
+- `QueryAbsent ?replication`
+- `QueryAbsent ?requestPayment`
+- `QueryAbsent ?tagging`
+- `QueryAbsent ?versioning`
+- `QueryAbsent ?website`
+
+**Query keys**
+
+- routed on, present: —
+- routed on, exact value: —
+- routed on, absent: `abac`, `accelerate`, `acl`, `analytics`, `cors`, `encryption`, `intelligent-tiering`, `inventory`, `lifecycle`, `logging`, `metadataAnnotationTable`, `metadataInventoryTable`, `metadataJournalTable`, `metrics`, `notification`, `object-lock`, `ownershipControls`, `policy`, `publicAccessBlock`, `replication`, `requestPayment`, `tagging`, `versioning`, `website`
+- read as parameters: —
+
+**Headers**
+
+- request: `x-amz-acl`, `x-amz-bucket-object-lock-enabled`, `x-amz-grant-full-control`, `x-amz-grant-read`, `x-amz-grant-read-acp`, `x-amz-grant-write`, `x-amz-grant-write-acp`, `x-amz-object-ownership`
+- response: `location`
+- required: —
+
+**Body**
+
+- request: XmlBody (Full, at most 65536 bytes)
+- response: None (None)
+
+**Error codes**
+
+`InvalidLocationConstraint`, `MalformedXML`, `InvalidBucketName`, `AccessDenied`, `InvalidArgument`, `PermanentRedirect`, `BucketAlreadyExists`, `BucketAlreadyOwnedByYou`
+
+**Quirks**
+
+- `q-bkt-0001` (status on `CreateBucket`) — A successful bucket creation answers 200, never 201; SDKs and the upstream test suites assert the 200.
+- `q-bkt-0002` (header on `CreateBucket.Location`) — The success response carries a Location header whose value is the path form of the new bucket.
+- `q-bkt-0003` (region on `CreateBucket.LocationConstraint`) — us-east-1 is the null constraint and must be omitted; writing it explicitly is a 400 InvalidLocationConstraint.
+- `q-bkt-0004` (legacy_alias on `CreateBucket.LocationConstraint`) — EU is the historical spelling of eu-west-1 and must be accepted in a request constraint, normalised before comparison.
+- `q-bkt-0005` (status on `CreateBucket`) — Re-creating a bucket you already own is 200 in us-east-1 for historical reasons and 409 BucketAlreadyOwnedByYou everywhere else.
+- `q-bkt-0006` (error_code on `CreateBucket`) — A name held by another owner is BucketAlreadyExists and a name you hold yourself is BucketAlreadyOwnedByYou; the two 409s must stay distinct.
+- `q-bkt-0011` (empty_value on `CreateBucket.LocationConstraint`) — An empty constraint element or empty text is equivalent to omitting the constraint entirely, never an error.
+
+Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
+
+**Body shapes**
+
+- `CreateBucketConfiguration` (Structure) — `LocationConstraint: StringEnum`
+
 ### CreateMultipartUpload
 
 `POST /{Bucket}/{Key+}` &rarr; 200 · target Object · precedence 450 · auth Required (`s3:PutObject`, presigned allowed) · spec `spec/operations/CreateMultipartUpload.toml`
@@ -451,6 +566,59 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 - `q-mpu-root-0029` (wire_root_name on `CreateMultipartUpload`) — The response root element is the initiate spelling rather than the operation or shape name, so a generator that derived the root from either would produce a document no client parses.
 - `q-mpu-upload-id-0037` (capability_token on `UploadPart.UploadId`) — An upload id is a server-minted capability, not a name the caller chose: it is resolved against the bucket and key of the request before anything is written, an unknown id answers the not-found code, and one belonging to another resource is refused rather than honoured.
 - `q-mpu-metadata-0039` (deferred_metadata on `CreateMultipartUpload`) — User metadata, content type, storage class and the encryption settings are carried on the initiating request alone and take effect on the assembled object; a part upload carries none of them, so losing them at initiation loses them permanently.
+
+Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
+
+### DeleteBucket
+
+`DELETE /{Bucket}` &rarr; 204 · target Bucket · precedence 720 · auth Required (`s3:DeleteBucket`, presigned allowed) · spec `spec/operations/DeleteBucket.toml`
+
+**Route predicates**
+
+- `Method DELETE`
+- `Target Bucket`
+- `QueryAbsent ?analytics`
+- `QueryAbsent ?cors`
+- `QueryAbsent ?encryption`
+- `QueryAbsent ?intelligent-tiering`
+- `QueryAbsent ?inventory`
+- `QueryAbsent ?lifecycle`
+- `QueryAbsent ?metadataConfiguration`
+- `QueryAbsent ?metadataTable`
+- `QueryAbsent ?metrics`
+- `QueryAbsent ?ownershipControls`
+- `QueryAbsent ?policy`
+- `QueryAbsent ?publicAccessBlock`
+- `QueryAbsent ?replication`
+- `QueryAbsent ?tagging`
+- `QueryAbsent ?website`
+
+**Query keys**
+
+- routed on, present: —
+- routed on, exact value: —
+- routed on, absent: `analytics`, `cors`, `encryption`, `intelligent-tiering`, `inventory`, `lifecycle`, `metadataConfiguration`, `metadataTable`, `metrics`, `ownershipControls`, `policy`, `publicAccessBlock`, `replication`, `tagging`, `website`
+- read as parameters: —
+
+**Headers**
+
+- request: `x-amz-expected-bucket-owner`
+- response: —
+- required: —
+
+**Body**
+
+- request: None (None)
+- response: None (None)
+
+**Error codes**
+
+`NoSuchBucket`, `BucketNotEmpty`, `AccessDenied`, `PermanentRedirect`
+
+**Quirks**
+
+- `q-bkt-0007` (status on `DeleteBucket`) — A successful bucket deletion is a 204 whose body is zero bytes; nothing may be rendered into it.
+- `q-bkt-0008` (error_code on `DeleteBucket`) — Deleting a bucket that still holds objects or uploads is refused with 409 BucketNotEmpty rather than performed.
 
 Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 
@@ -933,6 +1101,44 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 **Body shapes**
 
 - `Tag` (Structure) — `Key: ObjectKey`, `Value: String`
+
+### HeadBucket
+
+`HEAD /{Bucket}` &rarr; 200 · target Bucket · precedence 730 · auth Required (`s3:ListBucket`, presigned allowed) · spec `spec/operations/HeadBucket.toml`
+
+**Route predicates**
+
+- `Method HEAD`
+- `Target Bucket`
+
+**Query keys**
+
+- routed on, present: —
+- routed on, exact value: —
+- routed on, absent: —
+- read as parameters: —
+
+**Headers**
+
+- request: `x-amz-expected-bucket-owner`
+- response: `x-amz-bucket-region`
+- required: —
+
+**Body**
+
+- request: None (None)
+- response: None (None)
+
+**Error codes**
+
+`NoSuchBucket`, `AccessDenied`, `PermanentRedirect`, `NotFound`
+
+**Quirks**
+
+- `q-bkt-0009` (body on `HeadBucket`) — Every HeadBucket response has a zero-length body, including 403 and 404; an error document on a HEAD breaks h2 clients.
+- `q-bkt-0010` (header on `HeadBucket.BucketRegion`) — x-amz-bucket-region is mandatory on a HeadBucket success and on the 301 PermanentRedirect; without it SDKs cannot complete the redirect and fail outright.
+
+Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 
 ### HeadObject
 
@@ -1624,11 +1830,9 @@ in neither list, so this table is exhaustive by construction.
 
 | Operation | Reason |
 | --- | --- |
-| CreateBucket | P5 bucket lifecycle operations; CreateBucket carries the location-constraint request body. |
 | CreateBucketMetadataConfiguration | Out of scope for the gateway: S3 Tables and bucket metadata table configuration, a separate AWS surface with its own control plane. |
 | CreateBucketMetadataTableConfiguration | Out of scope for the gateway: S3 Tables and bucket metadata table configuration, a separate AWS surface with its own control plane. |
 | CreateSession | Out of scope for the gateway: S3 Express One Zone session credentials. |
-| DeleteBucket | P5 bucket lifecycle operations; CreateBucket carries the location-constraint request body. |
 | DeleteBucketAnalyticsConfiguration | P5 bucket subresource configuration family; one Get/Put/Delete triple per subresource, all sharing the not_configured 404 rule. |
 | DeleteBucketEncryption | P5 bucket subresource configuration family; one Get/Put/Delete triple per subresource, all sharing the not_configured 404 rule. |
 | DeleteBucketIntelligentTieringConfiguration | P5 bucket subresource configuration family; one Get/Put/Delete triple per subresource, all sharing the not_configured 404 rule. |
@@ -1670,7 +1874,6 @@ in neither list, so this table is exhaustive by construction.
 | GetObjectRetention | P5 object tagging, ACL and object-lock family; grant parsing is a shared cluster of its own. |
 | GetObjectTorrent | P5 advanced object family; each member carries a body shape or a framing the data plane does not have. |
 | GetPublicAccessBlock | P5 bucket policy and public-access family; every one of these is an authorization surface and reviewed as a group. |
-| HeadBucket | P5 bucket lifecycle operations; CreateBucket carries the location-constraint request body. |
 | ListBucketAnalyticsConfigurations | P5 bucket subresource configuration family; one Get/Put/Delete triple per subresource, all sharing the not_configured 404 rule. |
 | ListBucketIntelligentTieringConfigurations | P5 bucket subresource configuration family; one Get/Put/Delete triple per subresource, all sharing the not_configured 404 rule. |
 | ListBucketInventoryConfigurations | P5 bucket subresource configuration family; one Get/Put/Delete triple per subresource, all sharing the not_configured 404 rule. |

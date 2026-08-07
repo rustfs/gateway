@@ -1,0 +1,45 @@
+# c-bkt-0010 — re-creating your own bucket in us-east-1.
+#
+# Schema dimensions exercised: the region-dependent half of the duplicate-creation matrix. The
+# other half — 409 BucketAlreadyOwnedByYou outside us-east-1 — is in
+# crates/conformance/tests/bucket_lifecycle.rs, because this transport serves one region.
+
+[case]
+id = "c-bkt-0010"
+schema_version = 1
+title = "Re-creating your own bucket in us-east-1 answers 200 rather than a conflict"
+rationale = """
+us-east-1 answers a duplicate creation of your own bucket with a plain 200, and every other region \
+answers a 409. Clients written against us-east-1 therefore treat creation as idempotent and do not \
+handle the conflict at all, so a server that answers 409 here breaks their start-up path — while \
+one that answers 200 everywhere hides a real name collision from clients that do handle it. The \
+status is a fact about the region, not a choice a backend gets to make."""
+polarity = "negative"
+operation = "CreateBucket"
+tags = ["region", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-bkt-0005", "q-bkt-0006", "q-bkt-0001", "q-bkt-0002"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/ErrorResponses.html"
+summary = "The conflict code for your own bucket is documented as applying to every region except us-east-1."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "conf-bkt-again"
+
+[request]
+method = "PUT"
+target = "/conf-bkt-again"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[expect.headers_present]
+"location" = "/conf-bkt-again"
+
+[expect.body]
+size = 0

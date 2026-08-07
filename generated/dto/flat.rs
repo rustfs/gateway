@@ -25,13 +25,13 @@
 
 pub use crate::ops::enums::{
     Acl, ArchiveStatus, ChecksumAlgorithm, ChecksumMode, ChecksumType, EncodingType, LocationConstraint, MetadataDirective,
-    ObjectLockLegalHoldStatus, ObjectLockMode, ReplicationStatus, RequestCharged, RequestPayer, ServerSideEncryption,
-    StorageClass, TaggingDirective,
+    ObjectLockLegalHoldStatus, ObjectLockMode, ObjectOwnership, ReplicationStatus, RequestCharged, RequestPayer,
+    ServerSideEncryption, StorageClass, TaggingDirective,
 };
 pub use crate::ops::shapes::{
-    Bucket, Checksum, CommonPrefix, CompletedMultipartUpload, CompletedPart, CorsConfiguration, CorsRule, Delete,
-    DeleteMarkerEntry, DeletedObject, Error, GetObjectAttributesParts, Initiator, MultipartUpload, Object, ObjectIdentifier,
-    ObjectPart, ObjectVersion, Owner, Part, RestoreStatus, Tag, Tagging,
+    Bucket, Checksum, CommonPrefix, CompletedMultipartUpload, CompletedPart, CorsConfiguration, CorsRule,
+    CreateBucketConfiguration, Delete, DeleteMarkerEntry, DeletedObject, Error, GetObjectAttributesParts, Initiator,
+    MultipartUpload, Object, ObjectIdentifier, ObjectPart, ObjectVersion, Owner, Part, RestoreStatus, Tag, Tagging,
 };
 
 pub use crate::ops::abort_multipart_upload::{
@@ -45,9 +45,15 @@ pub use crate::ops::complete_multipart_upload::{
 pub use crate::ops::copy_object::{
     CopyObject, Input as CopyObjectInput, InputBuilder as CopyObjectInputBuilder, Output as CopyObjectOutput,
 };
+pub use crate::ops::create_bucket::{
+    CreateBucket, Input as CreateBucketInput, InputBuilder as CreateBucketInputBuilder, Output as CreateBucketOutput,
+};
 pub use crate::ops::create_multipart_upload::{
     CreateMultipartUpload, Input as CreateMultipartUploadInput, InputBuilder as CreateMultipartUploadInputBuilder,
     Output as CreateMultipartUploadOutput,
+};
+pub use crate::ops::delete_bucket::{
+    DeleteBucket, Input as DeleteBucketInput, InputBuilder as DeleteBucketInputBuilder, Output as DeleteBucketOutput,
 };
 pub use crate::ops::delete_bucket_cors::{
     DeleteBucketCors, Input as DeleteBucketCorsInput, InputBuilder as DeleteBucketCorsInputBuilder,
@@ -88,6 +94,9 @@ pub use crate::ops::get_object_attributes::{
 pub use crate::ops::get_object_tagging::{
     GetObjectTagging, Input as GetObjectTaggingInput, InputBuilder as GetObjectTaggingInputBuilder,
     Output as GetObjectTaggingOutput,
+};
+pub use crate::ops::head_bucket::{
+    HeadBucket, Input as HeadBucketInput, InputBuilder as HeadBucketInputBuilder, Output as HeadBucketOutput,
 };
 pub use crate::ops::head_object::{
     HeadObject, Input as HeadObjectInput, InputBuilder as HeadObjectInputBuilder, Output as HeadObjectOutput,

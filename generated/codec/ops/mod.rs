@@ -24,7 +24,9 @@
 mod abort_multipart_upload;
 mod complete_multipart_upload;
 mod copy_object;
+mod create_bucket;
 mod create_multipart_upload;
+mod delete_bucket;
 mod delete_bucket_cors;
 mod delete_bucket_tagging;
 mod delete_object;
@@ -36,6 +38,7 @@ mod get_bucket_tagging;
 mod get_object;
 mod get_object_attributes;
 mod get_object_tagging;
+mod head_bucket;
 mod head_object;
 mod list_buckets;
 mod list_multipart_uploads;

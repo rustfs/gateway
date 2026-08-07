@@ -1,0 +1,66 @@
+# c-bkt-0029 — a bucket subresource removal must not be served as a deletion.
+#
+# Schema dimensions exercised: multi-exchange, with the second exchange proving the bucket survived.
+
+[case]
+id = "c-bkt-0029"
+schema_version = 1
+title = "A policy removal on a bucket is not served as a bucket deletion"
+rationale = """
+This is the destructive twin of c-bkt-0028 and the worse of the two. A deletion's selector is a \
+DELETE on a bucket path, so without the subresource keys pinned absent, a request meaning 'remove \
+this bucket's policy' removes the bucket — answered 204, which is also what a successful policy \
+removal answers, so the caller cannot tell from the status that anything unusual happened. The \
+second exchange is the assertion: the bucket has to still be there."""
+polarity = "negative"
+operation = "DeleteBucket"
+tags = ["routing"]
+timeout_ms = 10000
+quirks = ["q-bkt-0007"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketPolicy.html"
+summary = "Removing a bucket policy is its own operation on the same method and path as a bucket deletion."
+kind = "aws-doc"
+
+[connection]
+reuse = true
+
+[[setup.buckets]]
+name = "conf-bkt-policy"
+
+[[exchanges]]
+name = "not-a-deletion"
+
+[exchanges.request]
+method = "DELETE"
+target = "/conf-bkt-policy?policy"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 501
+connection_after = "open"
+
+[exchanges.expect.error]
+code = "NotImplemented"
+request_id_present = true
+
+[[exchanges]]
+name = "and-the-bucket-survived"
+
+[exchanges.request]
+method = "HEAD"
+target = "/conf-bkt-policy"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.headers_present]
+"x-amz-bucket-region" = "us-east-1"
+
+[exchanges.expect.body]
+size = 0

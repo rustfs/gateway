@@ -569,6 +569,56 @@ fn the_bucket_tagging_read_declares_its_own_not_configured_code() {
     );
 }
 
+/// Negative — an unhandled bucket lifecycle request is refused by name, in all three methods.
+///
+/// The registry below handles the object band and nothing else. Each bucket-level request must
+/// come back as the second `501` naming the lifecycle operation it asked for — routing is settled
+/// by the protocol before registration is consulted, and a backend that has not implemented the
+/// family must not change what `PUT /bucket` means.
+#[test]
+fn n_an_unhandled_bucket_lifecycle_request_is_refused_by_name() {
+    let mut registry = Registry::new();
+    registry.register(&GET_OBJECT).expect("a registrable spec");
+    registry.register(&DELETE_OBJECT).expect("a registrable spec");
+    let router = Router::from_generated(registry).expect("the generated table builds");
+
+    for (line, expected) in [
+        ("PUT /bucket", "CreateBucket"),
+        ("DELETE /bucket", "DeleteBucket"),
+        ("HEAD /bucket", "HeadBucket"),
+    ] {
+        let error = router
+            .dispatch(&Req::new(line).parts())
+            .expect_err("this registry handles no bucket lifecycle operation");
+        assert_eq!(*error.code(), ErrorCode::NOT_IMPLEMENTED, "{line}");
+        assert_eq!(error.message(), NOT_REGISTERED_MESSAGE, "{line}");
+        assert_eq!(error.operation(), Some(expected), "{line} must name the operation it asked for");
+    }
+}
+
+/// Negative — a deferred bucket subresource write has no route, so it is the first `501`, never a
+/// lifecycle operation's answer. This is the dispatch-level half of the `query_absent` guarantee:
+/// `PUT /b?acl` must not create a bucket and `DELETE /b?policy` must not delete one, whether or
+/// not the lifecycle family is registered. The served subresources (`cors`, `tagging`) are the
+/// same rule with a different observable and are asserted with their own rows in
+/// `route_table.rs`.
+#[test]
+fn n_a_bucket_subresource_write_is_a_route_miss_not_a_lifecycle_operation() {
+    let mut registry = Registry::new();
+    registry.register(&GET_OBJECT).expect("a registrable spec");
+    let router = Router::from_generated(registry).expect("the generated table builds");
+    for line in [
+        "PUT /bucket?acl",
+        "DELETE /bucket?policy",
+        "PUT /bucket?versioning",
+        "DELETE /bucket?website",
+    ] {
+        let error = router.dispatch(&Req::new(line).parts()).expect_err("no route");
+        assert_eq!(error.message(), NO_ROUTE_MESSAGE, "{line}");
+        assert_eq!(error.operation(), None, "{line} names no operation because none claimed it");
+    }
+}
+
 /// A parameter check without a route never runs: the order of the three questions is fixed.
 #[test]
 fn a_request_that_does_not_route_never_reaches_parameter_validation() {

@@ -1,0 +1,74 @@
+# c-bkt-0022 — deleting a bucket that still holds an object.
+#
+# Schema dimensions exercised: multi-exchange, with the second exchange proving the refusal was
+# also a non-event.
+
+[case]
+id = "c-bkt-0022"
+schema_version = 1
+title = "Deleting a bucket that still holds an object is refused and deletes nothing"
+rationale = """
+A bucket deletion is not recursive, and a server that made it recursive would destroy an unbounded \
+amount of data in response to a four-byte request — the most expensive single mistake available in \
+this API. The refusal is a 409 rather than a 400 because the request is well formed and the state \
+is what is wrong, which is the distinction a client uses to decide whether retrying after emptying \
+the bucket is worth attempting. The second exchange is the half that matters: a 409 answered after \
+the bucket was already gone would still look correct."""
+polarity = "negative"
+operation = "DeleteBucket"
+tags = ["error-shape"]
+timeout_ms = 10000
+quirks = ["q-bkt-0008"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucket.html"
+summary = "A bucket must be empty before it can be deleted, and a non-empty one is refused with a conflict."
+kind = "aws-doc"
+
+[connection]
+reuse = true
+
+[[setup.buckets]]
+name = "conf-bkt-full"
+
+[[setup.objects]]
+bucket = "conf-bkt-full"
+key = "kept"
+content_type = "text/plain"
+body = { utf8 = "still here" }
+
+[[exchanges]]
+name = "refused-deletion"
+
+[exchanges.request]
+method = "DELETE"
+target = "/conf-bkt-full"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 409
+connection_after = "open"
+
+[exchanges.expect.error]
+code = "BucketNotEmpty"
+request_id_present = true
+
+[[exchanges]]
+name = "the-bucket-is-still-there"
+
+[exchanges.request]
+method = "HEAD"
+target = "/conf-bkt-full"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.headers_present]
+"x-amz-bucket-region" = "us-east-1"
+
+[exchanges.expect.body]
+size = 0

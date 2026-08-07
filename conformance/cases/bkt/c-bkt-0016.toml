@@ -1,0 +1,47 @@
+# c-bkt-0016 — an oversized location constraint.
+#
+# Schema dimensions exercised: a bounded refusal, with the response-time budget as the assertion
+# that the bound was applied rather than the value walked.
+
+[case]
+id = "c-bkt-0016"
+schema_version = 1
+title = "An oversized location constraint is refused at the bound rather than compared"
+rationale = """
+The constraint is a region name and region names are short, so a kilobyte of text in that element is either a broken client or an attempt to make the server do work proportional to what an unauthenticated-shaped request can send. Refusing at the ceiling costs one length check; comparing first costs whatever the caller chose to send, once per region in the set. The timing bound is what tells the two implementations apart, because both answer 400."""
+polarity = "negative"
+operation = "CreateBucket"
+tags = ["region", "dos"]
+timeout_ms = 10000
+quirks = ["q-bkt-0003"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_BucketLocationConstraint.html"
+summary = "The enumerated constraint values exclude us-east-1 and keep the historical EU alias."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "conf-bkt-long"
+absent = true
+
+[request]
+method = "PUT"
+target = "/conf-bkt-long"
+headers = { "content-type" = "application/xml" }
+body = { utf8 = "<CreateBucketConfiguration><LocationConstraint>aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa</LocationConstraint></CreateBucketConfiguration>" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+code = "InvalidLocationConstraint"
+request_id_present = true
+
+[expect.headers_present]
+"content-type" = "application/xml"
+
+[expect.timing]
+terminate_within_ms = 5000
