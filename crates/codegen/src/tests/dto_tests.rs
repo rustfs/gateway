@@ -26,7 +26,7 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use crate::emit::dto::naming;
+use crate::emit::dto::{self, naming};
 use crate::{CodegenInput, CodegenOutput, generate};
 
 fn root() -> PathBuf {
@@ -410,38 +410,123 @@ fn c_dto_n020_every_generated_rust_file_carries_the_licence_header() {
     }
 }
 
+/// Runs the repository's rustfmt over `source`, or `None` on a machine that has none.
+///
+/// The working directory is the workspace root, so the run picks up `rustfmt.toml` — a run without
+/// it measures against a `max_width` of a hundred and would disagree with the emitter everywhere.
+fn rustfmt(source: &str) -> Option<std::process::Output> {
+    use std::io::Write as _;
+    use std::process::{Command, Stdio};
+
+    let mut child = Command::new("rustfmt")
+        .args(["--emit", "stdout", "--edition", "2024", "--quiet"])
+        .current_dir(root())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        // rustfmt ships with every rustup toolchain; a machine without it still gets every other
+        // guard rather than a red suite it cannot fix.
+        .ok()?;
+    if let Some(stdin) = child.stdin.as_mut() {
+        stdin.write_all(source.as_bytes()).expect("rustfmt accepts the text");
+    }
+    Some(child.wait_with_output().expect("rustfmt finishes"))
+}
+
 #[test]
 fn c_dto_n027_the_generated_text_is_what_rustfmt_would_produce() {
     // `cargo fmt` follows the `#[path]` modules into `generated/`, so an emitter that disagrees
     // with rustfmt turns `cargo fmt` into a `cargo xtask spec verify` failure. The emitter matches
     // rustfmt by construction (`slice_literal`, `use_group`); this test is what notices when a
     // toolchain bump moves the goalposts.
-    use std::io::Write as _;
-    use std::process::{Command, Stdio};
-
     for (name, body) in rust_bodies() {
-        let mut child = match Command::new("rustfmt")
-            .args(["--emit", "stdout", "--edition", "2024", "--quiet"])
-            .current_dir(root())
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .spawn()
-        {
-            Ok(child) => child,
-            // rustfmt ships with every rustup toolchain; a machine without it still gets every
-            // other guard rather than a red suite it cannot fix.
-            Err(_) => return,
-        };
-        if let Some(stdin) = child.stdin.as_mut() {
-            stdin.write_all(body.as_bytes()).expect("rustfmt accepts the generated text");
-        }
-        let output = child.wait_with_output().expect("rustfmt finishes");
+        let Some(output) = rustfmt(&body) else { return };
         let formatted = String::from_utf8_lossy(&output.stdout).to_string();
         assert!(output.status.success(), "rustfmt rejected {name}");
         assert_eq!(
             formatted.trim_end(),
             body.trim_end(),
             "{name} is not in rustfmt's normal form; adjust the emitter, never the checked-in file"
+        );
+    }
+}
+
+/// The lead a generated hot-member list sits behind: four of indent, the declaration, and the `= `
+/// the literal follows.
+///
+/// Fifty-one characters, which is what puts the two boundaries below where they are: `max_width`
+/// stops the inline form at a literal of seventy-nine, and `array_width` stops the one-line form at
+/// a literal of eighty-two.
+const HOT_LIST_LEAD: &str = "    pub const HOT_INPUT: &'static [&'static str] = ";
+
+/// Two items whose `&["a", "bb…"]` rendering is exactly `width` characters wide.
+///
+/// Ten of those characters are structure — `&[`, the first item, the `, ` between them, the second
+/// item's quotes, and `]` — and the remainder is the second item's payload.
+fn items_rendering_to_width(width: usize) -> Vec<String> {
+    let items = vec!["\"a\"".to_owned(), format!("\"{}\"", "b".repeat(width - 10))];
+    assert_eq!(
+        format!("&[{}]", items.join(", ")).len(),
+        width,
+        "the fixture does not render to the width it claims"
+    );
+    items
+}
+
+#[test]
+fn c_dto_n027_a_slice_literal_turns_over_where_rustfmt_turns_over() {
+    // `array_width` is a budget on the array's contents, so a literal is eighty-one characters wide
+    // before it overruns the seventy-eight rustfmt allows. Charging the brackets to that budget as
+    // well explodes the eighty and eighty-one cases, which rustfmt keeps on one line — a two-column
+    // window no generated list happens to land in today, and that the whole-tree guard above
+    // therefore never exercises. These four widths are the corners of the decision.
+    let indent = 4;
+    let render = |width: usize| dto::slice_literal(&items_rendering_to_width(width), indent, HOT_LIST_LEAD);
+    let single = |width: usize| format!("&[{}]", items_rendering_to_width(width).join(", "));
+
+    // Seventy-eight: lead, literal and semicolon come to exactly `max_width`, so it stays inline.
+    assert_eq!(
+        render(78),
+        format!(" {}", single(78)),
+        "a literal whose line still fits `max_width` left it"
+    );
+    // Seventy-nine: one over `max_width`, and the contents are still well inside `array_width`, so
+    // the whole literal moves down a line rather than breaking apart.
+    assert_eq!(
+        render(79),
+        format!("\n        {}", single(79)),
+        "a literal one character over the line broke apart"
+    );
+    // Eighty-one: contents of seventy-eight, the last width `array_width` admits. This is the case
+    // the old `&`-only subtraction got wrong.
+    assert_eq!(
+        render(81),
+        format!("\n        {}", single(81)),
+        "a literal at exactly `array_width` broke apart"
+    );
+    // Eighty-two: contents of seventy-nine, one over `array_width`, so one item per line.
+    let items = items_rendering_to_width(82);
+    let exploded = format!(" &[\n        {},\n        {},\n    ]", items[0], items[1]);
+    assert_eq!(render(82), exploded, "a literal past `array_width` stayed on one line");
+}
+
+#[test]
+fn c_dto_n027_the_slice_literal_boundaries_are_rustfmt_s_own() {
+    // The layouts pinned above are only worth as much as their agreement with the tool. Asking
+    // rustfmt directly is what catches a toolchain that moves `array_width`, or a transcription
+    // that pinned the wrong corner in the first place.
+    for width in [78, 79, 81, 82] {
+        let literal = dto::slice_literal(&items_rendering_to_width(width), 4, HOT_LIST_LEAD);
+        // The lead is what `slice_literal` measures, so it carries the `= `'s trailing space; the
+        // literal then brings its own separator. Reassembling means dropping one of the two, which
+        // is exactly what the emitter's templates do at the real call sites.
+        let source = format!("impl X {{\n{}{literal};\n}}\n", HOT_LIST_LEAD.trim_end());
+        let Some(output) = rustfmt(&source) else { return };
+        assert!(output.status.success(), "rustfmt rejected the {width}-character fixture");
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout).trim_end(),
+            source.trim_end(),
+            "the {width}-character literal is not laid out the way rustfmt lays it out"
         );
     }
 }
