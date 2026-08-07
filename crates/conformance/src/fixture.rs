@@ -64,13 +64,18 @@
 //! called from both, because the two published advisories on this family were a part copy that
 //! authorized the upload it wrote to and never the object it read from.
 //!
-//! Those functions mirror `crates/core/src/ops/shared/copy_source.rs` rather than calling it: the
-//! facade exports the service, the dto and the handler traits, and exports none of the copy-source
-//! contract, so no backend outside this workspace can reach the rules it is held to. The mirror is
-//! faithful **including where it and the corpus disagree**, and each disagreement is recorded on
-//! the function that carries it. A stub that answered what a case wanted rather than what the
-//! implementation says would report a green for a gap that is still open, which is the one thing a
-//! conformance backend must never do.
+//! Those three still mirror `crates/core/src/ops/shared/copy_source.rs` rather than calling it,
+//! and that is now a debt rather than a necessity: the facade *does* export `CopySource`,
+//! `authorize_source` and `classify_self_copy`, so the mirror is a second copy of a rule that has
+//! one owner. The copy **range** no longer is — [`resolve_copy_span`] is a call to the contract's
+//! `resolve_copy_range`, and the arithmetic and the opinion this file used to hold beside it are
+//! gone. The two had drifted apart in exactly the way the shared directory exists to prevent: this
+//! file trimmed an overlong span and the contract's doc comment said it refused one.
+//!
+//! Where a mirror is still here, it is faithful **including where it and the corpus disagree**, and
+//! each disagreement is recorded on the function that carries it. A stub that answered what a case
+//! wanted rather than what the implementation says would report a green for a gap that is still
+//! open, which is the one thing a conformance backend must never do.
 //!
 //! # The multipart half, and the one thing an upload id is not
 //!
@@ -112,10 +117,10 @@ use std::sync::{Arc, Mutex};
 
 use rustfs_gateway::dto;
 use rustfs_gateway::{
-    BucketName, ByteStream, ChecksumAlgorithm, ChecksumSpec, ConditionalOutcome, ETag, ErrorCode, ErrorDetail, Handler,
-    HandlerError, HandlerResult, IfRange, ObjectKey, ObjectValidators, PRECONDITION_FAILED_MESSAGE, PreconditionRejection,
-    Preconditions, RangeDecision, RangeSelectors, Req, RequestKind, Resp, Timestamp, collect, evaluate, evaluate_range,
-    parse_conditional_etag,
+    BucketName, ByteStream, ChecksumAlgorithm, ChecksumSpec, ConditionalOutcome, CopyRange, CopySourceRejection, CursorSpec,
+    ETag, ErrorCode, ErrorDetail, Handler, HandlerError, HandlerResult, IfRange, ObjectKey, ObjectValidators,
+    PRECONDITION_FAILED_MESSAGE, PreconditionRejection, Preconditions, RangeDecision, RangeSelectors, Req, RequestKind, Resp,
+    Timestamp, collect, evaluate, evaluate_range, parse_conditional_etag, resolve_copy_range,
 };
 
 /// The canonical user id every listing reports as the owner.
@@ -130,13 +135,15 @@ pub const OWNER_DISPLAY_NAME: &str = "conformance";
 /// The version id of a key in a bucket that was never versioned. S3's own spelling.
 pub const UNVERSIONED: &str = "null";
 
-/// The longest continuation token this stub will even look at.
+/// The cursor contract every listing in this fixture reads a client-supplied position through.
 ///
-/// A cursor is a hex-encoded position plus a nine-character suffix, and the longest position is a
-/// maximum-length object key — 1024 bytes, so 2057 characters. Anything past that is a token this
-/// service could not have minted, and saying so before decoding it is what keeps `c-list-0030`
-/// from being answered by the amount of work it asked for.
-const MAX_TOKEN_BYTES: usize = 2304;
+/// [`CursorSpec::accept`] is the exported rule — the ceiling ([`rustfs_gateway::MAX_CURSOR_BYTES`])
+/// and the refusal of a byte that cannot be written back into a response document — and it is a
+/// call rather than a second copy for the reason `c-list-0030` exists: a ceiling written twice is a
+/// ceiling two implementations can hold at two different values, and this file had it at 2304 while
+/// the contract held 2048. Refusing at the ceiling rather than after decoding is the whole point of
+/// the case, and the contract is where that ordering is stated.
+const CONTINUATION_CURSOR: CursorSpec = CursorSpec::opaque("continuation-token");
 
 /// The smallest a non-final part of a multipart upload may be: 5 MiB, AWS's published floor.
 ///
@@ -547,10 +554,13 @@ fn mint_token(marker: &str) -> String {
 }
 
 /// Reads a token back, or `None` for anything this stub did not mint.
+///
+/// The ceiling is applied first and it is the contract's, not this file's: a cursor over
+/// [`rustfs_gateway::MAX_CURSOR_BYTES`] is refused *before* the hex body is decoded, so the work the
+/// ceiling exists to prevent is never done. `c-list-0030` is the case that separates the two
+/// orderings, by bounding the response time.
 fn read_token(token: &str) -> Option<String> {
-    if token.len() > MAX_TOKEN_BYTES {
-        return None;
-    }
+    let token = CONTINUATION_CURSOR.accept(token).ok()?;
     let (body, checksum) = token.rsplit_once('-')?;
     let marker = String::from_utf8(decode_hex(body)?).ok()?;
     if crate::sha256::hex_digest(marker.as_bytes()).get(..8)? != checksum {
@@ -1131,14 +1141,13 @@ fn checksum_of(checksum: &UploadChecksum, bytes: &[u8]) -> Result<ChecksumSpec, 
 /// # Why this parser is written again here
 ///
 /// `crates/core/src/ops/shared/copy_source.rs` is this gateway's copy-source contract — the split
-/// rule, the two ARN grammars, the self-copy classification and the stricter range rule — and it is
-/// deliberately mirrored below rather than called. It cannot be called: the facade exports the
-/// service and the dto, and `CopySource`, `authorize_source`, `classify_self_copy` and
-/// `resolve_copy_range` are none of them, so a backend outside the workspace has no way to reach
-/// the contract it is being held to. That is itself a finding, and the mirror is what makes it
-/// visible: every rule duplicated here is a rule the *next* backend will also duplicate, and a rule
-/// two implementations hold separately is a rule they can hold differently — which is the shape of
-/// the two advisories the shared module was written to prevent.
+/// rule, the two ARN grammars, the self-copy classification and the stricter range rule — and the
+/// parser below is still a hand-written mirror of the first two. It no longer has to be: the facade
+/// re-exports `CopySource`, `authorize_source` and `classify_self_copy`, so this mirror is a second
+/// copy of a rule that has an owner, and a rule two implementations hold separately is a rule they
+/// can hold differently. That is the shape of the two advisories the shared module was written to
+/// prevent, and replacing this parser with the contract's is the outstanding half of the job the
+/// range rule has already had done to it — see [`resolve_copy_span`].
 ///
 /// The mirror is faithful, including where the shared module and the corpus disagree. Those
 /// disagreements are recorded on the functions that carry them; none of them is smoothed over here,
@@ -1379,86 +1388,32 @@ fn read_copy_source(fixture: &Fixture, source: &CopySource) -> Result<(StoredObj
     Ok((object.clone(), Some(requested.to_owned())))
 }
 
-/// The span of a source object a part copy will read: first byte and last byte, both inclusive.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct CopySpan {
-    start: usize,
-    end_inclusive: usize,
+/// Resolves `x-amz-copy-source-range` against the source's length, through the exported contract.
+///
+/// This used to be a hand-written mirror of `resolve_copy_range`, complete with its own arithmetic
+/// and its own opinion about what an overlong span means — and the mirror and the contract had
+/// drifted apart on both counts. It is a call now: [`rustfs_gateway::resolve_copy_range`] is
+/// re-exported by the facade, so the rule a copy range is held to is the same rule for this backend
+/// and for every backend outside the workspace, and a change to it cannot reach one of them without
+/// the other.
+///
+/// What is left here is the two conversions the contract deliberately does not do: `usize` to `u64`
+/// on the way in, and a rejection to a [`HandlerError`] on the way out.
+///
+/// # Errors
+///
+/// Whatever the contract refuses: a multi-range value, a value the byte-range grammar does not
+/// admit, and any span the source cannot satisfy in full — all of them `InvalidArgument`.
+fn resolve_copy_span(header: Option<&str>, source_len: usize) -> Result<Option<CopyRange>, HandlerError> {
+    resolve_copy_range(header, source_len as u64).map_err(refused_copy_source)
 }
 
-impl CopySpan {
-    /// The number of bytes the span carries: `end - start + 1`.
-    ///
-    /// Both positions are inclusive. Dropping the plus one copies a part one byte short, the upload
-    /// completes, and the corruption surfaces on a read months later rather than on the write that
-    /// caused it.
-    const fn len(self) -> usize {
-        self.end_inclusive.saturating_sub(self.start).saturating_add(1)
-    }
-}
-
-/// Resolves `x-amz-copy-source-range` against the source's length.
+/// The contract's own refusal, rendered.
 ///
-/// Mirrors `resolve_copy_range` in `crates/core/src/ops/shared/copy_source.rs`, including two
-/// places where that function and the corpus disagree. Both are left as they are:
-///
-/// * **A span past the end answers `InvalidRange` (416), and `c-copy-0036` asserts
-///   `InvalidArgument` (400).** AWS answers the copy-source range with `InvalidArgument` — the
-///   header names a length the client committed to, not a window of a representation being served
-///   — so the case is right and the shared module is wrong. Answering `InvalidArgument` here would
-///   turn that case green while every backend using the shared module stayed red.
-/// * **The doc comment on the shared function says an overlong span is "not clamped, it is
-///   refused", and the code clamps it.** `ByteRange::resolve` answers `bytes=0-100` over ten bytes
-///   with `0-9`, so only a span whose *start* is past the end is refused. No case sees it, because
-///   `c-copy-0036` starts past the end; a part one byte short with a 200 attached is exactly the
-///   failure that function's own doc comment describes.
-///
-/// A `None` header copies the whole source, including a source of zero bytes, which resolves to
-/// `None` rather than to an empty span.
-fn resolve_copy_span(header: Option<&str>, source_len: usize) -> Result<Option<CopySpan>, HandlerError> {
-    let Some(header) = header else {
-        return Ok(None);
-    };
-    // A read answers a multi-range request with the whole representation; there is no such fallback
-    // for a copy, and taking the first span would be a guess that produces a part of the wrong
-    // length with a success attached.
-    if header.contains(',') {
-        return Err(bad_copy_source("x-amz-copy-source-range accepts one byte span"));
-    }
-    let Some(spec) = header.trim().strip_prefix("bytes=") else {
-        // An unparseable `Range` is ignored on a read; on a copy it would silently copy the whole
-        // source under a header that asked for part of it.
-        return Err(bad_copy_source("x-amz-copy-source-range is not a byte range"));
-    };
-    let outside = || HandlerError::new(ErrorCode::INVALID_RANGE, "x-amz-copy-source-range lies outside the source object");
-    let Some(last_byte) = source_len.checked_sub(1) else {
-        return Err(outside());
-    };
-    let (first, last) = spec
-        .split_once('-')
-        .ok_or_else(|| bad_copy_source("x-amz-copy-source-range is not a byte range"))?;
-    let parse = |text: &str| -> Result<Option<usize>, HandlerError> {
-        if text.is_empty() {
-            return Ok(None);
-        }
-        text.parse::<usize>()
-            .map(Some)
-            .map_err(|_| bad_copy_source("x-amz-copy-source-range is not a byte range"))
-    };
-    match (parse(first)?, parse(last)?) {
-        // `bytes=a-b` and `bytes=a-`: refused when the start is past the end, clamped otherwise.
-        (Some(start), end) if start <= last_byte => Ok(Some(CopySpan {
-            start,
-            end_inclusive: end.unwrap_or(last_byte).min(last_byte),
-        })),
-        (Some(_), _) => Err(outside()),
-        // `bytes=-n`: the last n bytes. A zero-length suffix names nothing.
-        (None, Some(length)) if length > 0 => Ok(Some(CopySpan {
-            start: source_len.saturating_sub(length),
-            end_inclusive: last_byte,
-        })),
-        (None, _) => Err(outside()),
-    }
+/// The wording is the contract's constant, never assembled from the header: this one carries a
+/// bucket name the caller may have no right to learn the existence of.
+fn refused_copy_source(rejection: CopySourceRejection) -> HandlerError {
+    HandlerError::new(rejection.code().clone(), rejection.reason())
 }
 
 impl Handler<dto::GetObject> for Stub {
@@ -1972,11 +1927,11 @@ impl Stub {
         // legal copy, and upstream aborted the process on it.
         let bytes = match resolve_copy_span(input.copy_source_range.as_deref(), found.body.len())? {
             None => found.body.clone(),
-            Some(span) => found
-                .body
-                .get(span.start..span.start.saturating_add(span.len()))
-                .unwrap_or_default()
-                .to_vec(),
+            Some(span) => {
+                let start = usize::try_from(span.start).unwrap_or(usize::MAX);
+                let len = usize::try_from(span.len()).unwrap_or(usize::MAX);
+                found.body.get(start..start.saturating_add(len)).unwrap_or_default().to_vec()
+            }
         };
         let now = fixture.now;
         let etag = fixture.put_part(&input.upload_id, input.part_number, bytes);
@@ -2950,6 +2905,60 @@ mod tests {
         assert!(answer.output().is_none());
     }
 
+    /// Negative — a copy's two condition sets are evaluated against their own object, and neither
+    /// tag satisfies the other side's guard.
+    ///
+    /// This is the rule `c-cond-0027` is about and the rule that case cannot reach: its first
+    /// exchange copies the source onto the destination, and from then on the two objects carry the
+    /// *same* entity tag, so the tag it goes on to call "the source tag" is by then also the
+    /// destination's and satisfies the destination guard honestly. The rule is asserted here
+    /// instead, against two objects that stay different, one side varied at a time.
+    ///
+    /// The failure it guards against is one shared evaluator reading the wrong object's validators.
+    /// Both directions matter: the wrong one lets a copy through that the client guarded against,
+    /// and the other refuses one the client's guard permitted.
+    #[test]
+    fn each_side_of_a_copy_is_judged_against_its_own_object() {
+        // md5("hello") and md5("original") — two objects that do not share an entity tag.
+        const SOURCE_TAG: &str = "\"5d41402abc4b2a76b9719d911017c592\"";
+        const TARGET_TAG: &str = "\"919c8b643b7133116b02fc0d9bb7df3f\"";
+
+        let stub = || {
+            let mut fixture = Fixture::at(0);
+            fixture.declare_bucket("conf-bucket", false);
+            fixture.put_object("conf-bucket", "source", StoredObject::new(b"hello".to_vec(), None, 0));
+            fixture.put_object("conf-bucket", "target", StoredObject::new(b"original".to_vec(), None, 0));
+            Stub::new(Arc::new(Mutex::new(fixture)))
+        };
+        let request = |source_if_match: &str, if_match: &str| dto::CopyObjectInput {
+            copy_source_if_match: Some(source_if_match.to_owned()),
+            if_match: Some(if_match.to_owned()),
+            ..copy("/conf-bucket/source", "target")
+        };
+
+        // Each condition against its own object: both hold, so the copy proceeds.
+        assert!(stub().copy_object(&request(SOURCE_TAG, TARGET_TAG)).is_ok());
+
+        // The source's tag offered to the destination guard. The destination is still `original`,
+        // so the guard is false and the copy is refused before anything is written.
+        let error = stub()
+            .copy_object(&request(SOURCE_TAG, SOURCE_TAG))
+            .expect_err("the destination condition is false");
+        assert_eq!(*error.code(), ErrorCode::PRECONDITION_FAILED);
+
+        // The destination's tag offered to the source guard, which is the direction that reads
+        // another object's validators to satisfy a condition on the one being copied.
+        let error = stub()
+            .copy_object(&request(TARGET_TAG, TARGET_TAG))
+            .expect_err("the source condition is false");
+        assert_eq!(*error.code(), ErrorCode::PRECONDITION_FAILED);
+        assert_eq!(
+            elements(&error),
+            vec![("Condition", "x-amz-copy-source-if-match".to_owned())],
+            "the refusal names the header that carried the failed condition, not its destination twin"
+        );
+    }
+
     /// Positive — one conditional header arrived, so the `412` can say which one failed.
     ///
     /// Both spellings are asserted: the destination set is the canonical mixed case a client reads
@@ -3275,7 +3284,8 @@ mod tests {
         assert_eq!(read_token(&format!("{token}X")), None);
         assert_eq!(read_token("../../etc/passwd"), None);
         assert_eq!(read_token("\u{ff}\u{fe}\u{0}\u{1}"), None);
-        assert_eq!(read_token(&"A".repeat(MAX_TOKEN_BYTES + 1)), None);
+        // The ceiling is the contract's, and one byte over it is refused before anything decodes.
+        assert_eq!(read_token(&"A".repeat(rustfs_gateway::MAX_CURSOR_BYTES + 1)), None);
         // The first page of an empty prefix resumes from the empty marker, which must survive too.
         assert_eq!(read_token(&mint_token("")).as_deref(), Some(""));
     }
@@ -3381,31 +3391,33 @@ mod tests {
     /// mean for a read.
     #[test]
     fn a_copied_span_is_end_minus_start_plus_one() {
-        assert_eq!(resolve_copy_span(Some("bytes=0-9"), 10).expect("resolves").map(CopySpan::len), Some(10));
-        assert_eq!(resolve_copy_span(Some("bytes=-5"), 10).expect("resolves").map(CopySpan::len), Some(5));
-        assert_eq!(resolve_copy_span(Some("bytes=3-"), 10).expect("resolves").map(CopySpan::len), Some(7));
+        assert_eq!(resolve_copy_span(Some("bytes=0-9"), 10).expect("resolves").map(|s| s.len()), Some(10));
+        assert_eq!(resolve_copy_span(Some("bytes=-5"), 10).expect("resolves").map(|s| s.len()), Some(5));
+        assert_eq!(resolve_copy_span(Some("bytes=3-"), 10).expect("resolves").map(|s| s.len()), Some(7));
         // No header copies the whole source, and a zero-byte source is not an arithmetic edge.
         assert_eq!(resolve_copy_span(None, 0).expect("resolves"), None);
     }
 
-    /// Negative — and the record of where this mirror and the corpus disagree.
+    /// Negative — the rule a copy range keeps and a read range does not, now asserted through the
+    /// exported contract rather than beside it.
     ///
-    /// A start past the end answers `InvalidRange`, which is what
-    /// `crates/core/src/ops/shared/copy_source.rs` answers and what `c-copy-0036` says is wrong.
-    /// The overlong end is clamped, which is what that module's code does and the opposite of what
-    /// its own doc comment claims. Both are pinned here so that fixing either is a change to this
-    /// test rather than a silent drift.
+    /// Every one of these is `InvalidArgument`: the header names a length the client committed the
+    /// part to, so a span the source cannot satisfy is a bad argument and not a window that could
+    /// not be served. The overlong end is the one this backend used to clamp — a part ninety-one
+    /// bytes short with a `200` attached, which is the failure `c-copy-0036` exists for.
     #[test]
-    fn a_span_outside_the_source_is_refused_and_an_overlong_end_is_clamped() {
-        assert!(resolve_copy_span(Some("bytes=100-200"), 10).is_err());
-        assert!(resolve_copy_span(Some("bytes=0-1,5-6"), 10).is_err());
-        assert!(resolve_copy_span(Some("bytes=0-0"), 0).is_err());
-        assert_eq!(
-            resolve_copy_span(Some("bytes=0-100"), 10)
-                .expect("clamped")
-                .map(CopySpan::len),
-            Some(10)
-        );
+    fn a_span_the_source_cannot_satisfy_in_full_is_refused_rather_than_trimmed() {
+        for (header, source_len) in [
+            ("bytes=100-200", 10),
+            ("bytes=0-100", 10),
+            ("bytes=-100", 10),
+            ("bytes=0-1,5-6", 10),
+            ("bytes=0-0", 0),
+            ("bytes=nonsense", 10),
+        ] {
+            let error = resolve_copy_span(Some(header), source_len).expect_err("refused");
+            assert_eq!(error.code(), &ErrorCode::INVALID_ARGUMENT, "{header}");
+        }
     }
 
     /// An ownership assertion the fixtures never declared is refused, not assumed to hold. This is

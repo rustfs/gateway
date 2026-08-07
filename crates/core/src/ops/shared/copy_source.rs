@@ -19,7 +19,8 @@
 //!
 //! Responsible for: the three grammars the header admits, the order its version suffix is split
 //! off in, the second authorization stage the header creates, the self-copy question, and the
-//! stricter range rule a copied span is held to.
+//! stricter range rule a copied span is held to — including the one place that rule parts company
+//! with `rustfs-gateway-types`' own resolution, see [`resolve_copy_range`].
 //! NOT responsible for: reading the header off the request (the generated decoder), evaluating the
 //! four copy-source conditions ([`super::precondition`] does that against the source's validators),
 //! comparing an entity tag ([`super::etag`]), deciding whether the caller may read the source (an
@@ -51,7 +52,7 @@
 //! bytes, at the last `?`, and each half is decoded afterwards — `q-copy-source-split-0077`.
 
 use percent_encoding::percent_decode_str;
-use rustfs_gateway_types::{BucketName, ErrorCode, ObjectKey, RangeOutcome, RangeParse};
+use rustfs_gateway_types::{BucketName, ByteRange, ErrorCode, ObjectKey, RangeParse};
 
 /// Which of the three grammars a copy-source value was written in.
 ///
@@ -398,14 +399,23 @@ impl CopyRange {
 
 /// Resolves `x-amz-copy-source-range` against the source's length.
 ///
-/// Two rules separate this from an ordinary read range, and both are refusals where a read would
-/// have answered:
+/// Three rules separate this from an ordinary read range, and every one of them is a refusal where
+/// a read would have answered:
 ///
 /// - a span running past the end of the source is **not** clamped, it is refused. A read that asks
 ///   for more than exists is answered with what exists; a copy that silently copies fewer bytes
-///   than the client asked for produces a part nobody notices is short.
+///   than the client asked for produces a part nobody notices is short. That is why the parse is
+///   matched on directly instead of going through [`RangeParse::resolve`], which trims `bytes=0-100`
+///   over a ten-byte source to `0-9` the way RFC 9110 §14.2 asks a *read* to.
 /// - more than one span is refused. A read answers a multi-range request with the whole object;
 ///   there is no such fallback for a copy, and picking the first span would be a guess.
+/// - a value that is not a byte range at all is refused. RFC 9110 §14.2 has a recipient ignore an
+///   unreadable `Range` and serve the whole representation; doing that here copies the entire
+///   source under a header that asked for part of it, with a success attached.
+///
+/// The refusal is `InvalidArgument`, which is what AWS answers for this header: a `416` belongs to a
+/// *read* whose window could not be served, and nothing is being served here. The span is a length
+/// the client committed the part to, so one the source cannot honour is a bad argument.
 ///
 /// A `None` header copies the whole source, including a source of zero bytes, which resolves to
 /// `None` rather than to an empty span — the copy of nothing is a legal copy and must not be an
@@ -413,8 +423,8 @@ impl CopyRange {
 ///
 /// # Errors
 ///
-/// Returns a [`CopySourceRejection`] with `InvalidArgument` for a multi-range value and with
-/// `InvalidRange` for a span outside the source.
+/// Returns a [`CopySourceRejection`] with `InvalidArgument` for a multi-range value, for a value
+/// the byte-range grammar does not admit, and for any span the source cannot satisfy in full.
 pub fn resolve_copy_range(header: Option<&str>, source_len: u64) -> Result<Option<CopyRange>, CopySourceRejection> {
     let Some(header) = header else {
         return Ok(None);
@@ -425,14 +435,40 @@ pub fn resolve_copy_range(header: Option<&str>, source_len: u64) -> Result<Optio
             "x-amz-copy-source-range accepts one byte span",
         ));
     }
-    match RangeParse::parse(header).resolve(source_len) {
-        RangeOutcome::Full => Ok(None),
-        RangeOutcome::Satisfied { start, end_inclusive } => Ok(Some(CopyRange { start, end_inclusive })),
-        RangeOutcome::Unsatisfiable { .. } => Err(CopySourceRejection::new(
-            ErrorCode::INVALID_RANGE,
-            "x-amz-copy-source-range lies outside the source object",
-        )),
-    }
+    let RangeParse::One(range) = RangeParse::parse(header) else {
+        return Err(CopySourceRejection::new(
+            ErrorCode::INVALID_ARGUMENT,
+            "x-amz-copy-source-range is not a byte range",
+        ));
+    };
+    // A source of zero bytes has no byte a span could name, so every span is outside it. Answered
+    // before the arithmetic rather than saturated through it: `last_byte` is what every arm below
+    // compares against, and there is no honest value for it here.
+    let Some(last_byte) = source_len.checked_sub(1) else {
+        return Err(outside_the_source());
+    };
+    let (start, end_inclusive) = match range {
+        // The end is compared as the client wrote it; `last.min(last_byte)` here would be the clamp
+        // this function exists to refuse.
+        ByteRange::FromTo { first, last } if first <= last_byte && last <= last_byte => (first, last),
+        // `bytes=first-` names the end of the source rather than an offset, so it is never short of
+        // what was asked for and never clamped.
+        ByteRange::From { first } if first <= last_byte => (first, last_byte),
+        // A suffix longer than the source is the same clamp in the other spelling: a read answers
+        // `bytes=-100` over ten bytes with all ten, and a copy that did would report success for
+        // ninety bytes it never wrote.
+        ByteRange::Suffix { length } if length > 0 && length <= source_len => (source_len - length, last_byte),
+        _ => return Err(outside_the_source()),
+    };
+    Ok(Some(CopyRange { start, end_inclusive }))
+}
+
+/// The one refusal every span the source cannot satisfy in full shares.
+///
+/// A constant, like every other reason in this module: a message that named the offsets would echo
+/// the caller's own header back into an error document.
+fn outside_the_source() -> CopySourceRejection {
+    CopySourceRejection::new(ErrorCode::INVALID_ARGUMENT, "x-amz-copy-source-range lies outside the source object")
 }
 
 /// Splits the version suffix off the raw header value, before anything is decoded.
@@ -708,14 +744,38 @@ mod tests {
         assert_eq!(resolve_copy_range(None, 0), Ok(None));
         assert_eq!(
             resolve_copy_range(Some("bytes=0-0"), 0).expect_err("refused").code(),
-            &ErrorCode::INVALID_RANGE
+            &ErrorCode::INVALID_ARGUMENT
         );
     }
 
+    /// The rule this function's own doc comment states and a read range does not: a span the source
+    /// cannot satisfy in full is refused, never trimmed. `ByteRange::resolve` answers `bytes=0-100`
+    /// over ten bytes with `0-9` and `bytes=-100` with all ten — each a part ninety-odd bytes short
+    /// of the length the client committed the upload to, with a `200` to go with it.
     #[test]
-    fn a_span_past_the_end_is_refused_rather_than_clamped() {
-        let err = resolve_copy_range(Some("bytes=100-200"), 10).expect_err("refused");
-        assert_eq!(err.code(), &ErrorCode::INVALID_RANGE);
+    fn a_span_the_source_cannot_satisfy_in_full_is_refused_rather_than_clamped() {
+        for header in ["bytes=100-200", "bytes=0-100", "bytes=9-10", "bytes=0-10", "bytes=-100"] {
+            let err = resolve_copy_range(Some(header), 10).expect_err("refused");
+            assert_eq!(err.code(), &ErrorCode::INVALID_ARGUMENT, "{header}");
+        }
+        // The boundaries themselves are not refusals: the last byte of a ten-byte source is nine,
+        // and a suffix exactly as long as the source is the whole source rather than an overrun.
+        let whole = Ok(Some(CopyRange {
+            start: 0,
+            end_inclusive: 9,
+        }));
+        assert_eq!(resolve_copy_range(Some("bytes=0-9"), 10), whole);
+        assert_eq!(resolve_copy_range(Some("bytes=-10"), 10), whole);
+    }
+
+    /// A read ignores a `Range` it cannot parse and serves the whole representation. Doing that on
+    /// a copy would write the entire source under a header that asked for part of it.
+    #[test]
+    fn a_value_that_is_not_a_byte_range_is_refused_rather_than_ignored() {
+        for header in ["items=0-1", "bytes=", "bytes=abc", "bytes=5-1", "nonsense"] {
+            let err = resolve_copy_range(Some(header), 10).expect_err("refused");
+            assert_eq!(err.code(), &ErrorCode::INVALID_ARGUMENT, "{header}");
+        }
     }
 
     #[test]

@@ -268,8 +268,11 @@ fn a_body_size_and_a_digest_are_both_checked() {
     assert_eq!(rules(&judgement), vec!["expect/body.sha256", "expect/body.size"]);
 }
 
+/// Negative — and the reason `not_contains_utf8` is the one body assertion redaction is not applied
+/// to. A leaked credential appearing inside the very element a case redacts is the case this exists
+/// for; normalising it away first would report the leak as absent.
 #[test]
-fn contains_and_not_contains_look_at_the_unredacted_body() {
+fn redaction_does_not_excuse_forbidden_bytes_inside_the_redacted_element() {
     let mut observed = ok_response();
     observed.body = b"<Error><Code>X</Code><StringToSign>AWS4-HMAC-SHA256 Credential</StringToSign></Error>".to_vec();
     let expect = expectation(
@@ -277,6 +280,37 @@ fn contains_and_not_contains_look_at_the_unredacted_body() {
     );
     let judgement = judge(&expect, &observed, "/expect", &no_goldens());
     assert_eq!(rules(&judgement), vec!["expect/body.not_contains_utf8"]);
+}
+
+/// A case cannot write an opaque value it did not mint, so the only way to assert *where* one sits
+/// is to name the placeholder. That needs `contains_utf8` judged against the redacted body.
+#[test]
+fn contains_can_name_a_server_minted_value_by_its_placeholder() {
+    let mut observed = ok_response();
+    observed.body = b"<List><IsTruncated>true</IsTruncated><Next>612f312e747874-b3c2d2e1</Next></List>".to_vec();
+    let expect = expectation(
+        "kind = \"response\"\nstatus = 200\n[body]\nredact = [\"Next\"]\ncontains_utf8 = [\"<Next>__REDACTED__</Next>\"]\n",
+    );
+    let judgement = judge(&expect, &observed, "/expect", &no_goldens());
+    assert!(rules(&judgement).is_empty(), "{:?}", rules(&judgement));
+}
+
+/// Negative — the same expectation against an element that is present and blank. Redaction must not
+/// fill it, or "present and not empty" collapses into "present", and a cursor element with nothing
+/// in it is the dead end the assertion exists to catch.
+#[test]
+fn an_empty_element_does_not_satisfy_a_redacted_placeholder() {
+    let mut observed = ok_response();
+    observed.body = b"<List><IsTruncated>true</IsTruncated><Next></Next></List>".to_vec();
+    let expect = expectation(
+        "kind = \"response\"\nstatus = 200\n[body]\nredact = [\"Next\"]\ncontains_utf8 = [\"<Next>__REDACTED__</Next>\"]\nnot_contains_utf8 = [\"<Next></Next>\"]\n",
+    );
+    let judgement = judge(&expect, &observed, "/expect", &no_goldens());
+    assert_eq!(
+        rules(&judgement),
+        vec!["expect/body.contains_utf8", "expect/body.not_contains_utf8"],
+        "both halves of the assertion have to fire, or one of them was never really asserting"
+    );
 }
 
 #[test]

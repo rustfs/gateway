@@ -76,15 +76,12 @@ signs each request with `rustfs_gateway::sig::Signer`, drives `S3Service::call_b
 response head — in wire order — to the expectation engine. `sut::Unwired` is retained only as the
 "no target" record and as the runner's own test double.
 
-The baseline on disk is older than the current run:
+The baseline on disk is regenerated in the same change that moves the numbers:
 
 ```text
-conformance/baseline.json   195 cases: 166 passed, 24 failed, 5 skipped
-current                     195 cases: 170 passed, 20 failed, 5 skipped
+conformance/baseline.json   195 cases: 172 passed, 18 failed, 5 skipped
+current                     195 cases: 172 passed, 18 failed, 5 skipped
 ```
-
-The four are `c-range-0010`, `c-range-0018`, `c-object-0013` and `c-range-0015`, all improvements,
-so the run still exits `0`.
 
 Regenerate it with `baseline > conformance/baseline.json` in the same change that moves the
 numbers, or the tolerance meant for the old failures starts hiding new ones.
@@ -149,15 +146,24 @@ expected to be red, and the baseline exists to freeze how red rather than to exc
    `GetObject` and is answered wrongly rather than refused. `c-etag-0001` is the case that sees it.
    `CopyObject` and `UploadPartCopy` were in this list and no longer are: both are registered by
    `inprocess` and answered by `fixture`.
-8. **The copy-source contract is not reachable through the facade.**
-   `crates/core/src/ops/shared/copy_source.rs` holds the split rule, the two ARN grammars, the
-   source-authorization type state, the self-copy classification and the copy range rule, and the
-   facade exports none of it. `fixture` therefore *mirrors* the module rather than calling it — see
-   its module documentation — and so will every other backend. Two divergences inside that module
-   are pinned by `fixture`'s own tests rather than smoothed over:
-   `resolve_copy_range` answers a span outside the source with `InvalidRange` (416) where AWS and
-   `c-copy-0036` say `InvalidArgument` (400), and its doc comment says an overlong span is "not
-   clamped, it is refused" while `ByteRange::resolve` clamps the end.
+8. **The copy-source contract is reachable now; `fixture` still mirrors half of it.** The facade
+   re-exports `CopySource`, `authorize_source`, `classify_self_copy` and `resolve_copy_range`, so
+   the reachability half of this finding is closed. What is left is that `fixture`'s
+   `parse_copy_source` / `parse_source_path` / `parse_source_arn` are still a *hand-written copy* of
+   the split rule and the two ARN grammars, and every backend that copies them can hold them
+   differently — which is what both advisories on this family were.
+
+   The copy **range** is no longer among them, and the state it was in is the argument for finishing
+   the job. `fixture::resolve_copy_span` is a call to `resolve_copy_range` now; the arithmetic it
+   replaced had drifted from the contract in one direction and the contract had drifted from its own
+   doc comment in the other. Both are fixed rather than pinned: an overlong span is **refused, never
+   trimmed** — `ByteRange::resolve` would answer `bytes=0-100` over a ten-byte source with `0-9` and
+   `bytes=-100` with all ten, which is a part the client committed a length to and did not get — and
+   the refusal is `InvalidArgument` (400), which is what AWS answers and what `c-copy-0036` asserts.
+   A `416` belongs to a read whose window could not be served, and a copy is not serving one. An
+   unparseable value is refused too, for the same reason a read ignores one and a copy must not:
+   ignoring it copies the whole source under a header that asked for part of it. `c-copy-0036`
+   passes and `c-copy-0013`, `c-copy-0014`, `c-copy-0037` and `c-range-0006` are unaffected.
 9. **`c-copy-0038` and `c-copy-0026`/`c-copy-0034` ask for two different answers to one request.**
    The framework gap this finding used to record is closed: `Resp::commit` exists, and
    `fixture::copy_object` uses it — the source is named, resolved, gated and condition-checked, both
@@ -182,7 +188,11 @@ expected to be red, and the baseline exists to freeze how red rather than to exc
 10. **Object tagging has no operation at all.** `GetObjectTagging` and `PutObjectTagging` are absent
    from the model, so `x-amz-tagging` and `x-amz-tagging-directive` can be sent and never read
    back. `c-copy-0008` copies with `TaggingDirective: REPLACE` and its read-back reaches
-   `GetObject`, which is the case that sees it.
+   `GetObject`, which is the case that sees it — the copy exchange passes, and
+   `GET /conf-copy/dst/0008?tagging` comes back with the object's bytes rather than a tag set. The
+   fall-through is the second finding on this file's list (see the deferred-route entry in
+   `crates/core/MAP.md`, tracked as issue 16); the missing operation is `model/**` and `generated/**`,
+   which no backend and no runner edit can reach.
 11. ~~**`evaluate_range` is exported but not callable.**~~ **Closed, with one ordering remainder.**
    Both inputs a backend could not supply now reach it: `Range` binds to `RangeSpec`, which keeps
    the header bytes beside the parse, and `if-range` is declared on `GetObject` and read through
@@ -212,6 +222,14 @@ expected to be red, and the baseline exists to freeze how red rather than to exc
    which is the shape the date bindings would need. The two-`Range`-headers half of this is closed:
    `Range` is no longer in `SINGLE_VALUED_HEADERS`, so a repeated one is ignored and the whole
    representation served, and `c-range-0017` passes.
+
+   Confirmed against a run: `if-modified-since: not-a-date` answers `400 InvalidArgument`,
+   `<Message>the request carries a value this member cannot hold</Message>`,
+   `<Resource>IfModifiedSince</Resource>`. Nothing a backend or this runner can change reaches it —
+   the refusal is `crates/core/src/codec/value.rs` called from `generated/codec/ops/get_object.rs`,
+   and which binding function codegen emits comes from `spec/` and `model/overlays/`. Worth noting
+   beside the code: `<Resource>` echoes the IR member name, so the response also tells a client the
+   server's internal spelling of a field it never sent.
 13. ~~**A completion naming no part is `MalformedXML` before any handler runs.**~~ **Closed.** The
    fabricated `required` on `CompletedMultipartUpload.Parts` is gone from the overlay, so an empty
    part list reaches the handler and the fixture's `InvalidPart` is the answer. `c-mpu-0019` and
@@ -272,6 +290,62 @@ expected to be red, and the baseline exists to freeze how red rather than to exc
    `NoSuchKey`. Satisfying the case needs a *completed* multipart object in `[setup]`, which
    schema version 1 cannot express. Neither side is edited here: the case is the contract and the
    schema is frozen, so this is a maintainer decision like finding 16.
+19. ~~**`expect.body.redact` was applied to the byte-exact assertions only.**~~ **Closed, and it
+   was an instrument bug rather than an implementation one.** `contains_utf8` and
+   `not_contains_utf8` were judged against the raw bytes, so
+   `contains_utf8 = ["<NextContinuationToken>__REDACTED__</NextContinuationToken>"]` — the only
+   spelling by which a case can assert *where* a server-minted value sits — could not be satisfied
+   by any response. `c-list-0042` was red for it while the fixture had been writing a correct
+   cursor all along. `contains_utf8` now runs against the redacted body, with the needle redacted
+   too. Two rules keep the fix from weakening anything:
+   * `not_contains_utf8` deliberately keeps reading the raw bytes. A prohibition is about what went
+     on the wire, and redacting first would excuse a leaked credential for appearing inside exactly
+     the element the case chose to redact.
+   * `xml::redact` no longer fills an empty element. `<X></X>` stays `<X></X>`, so "present and not
+     empty" — the whole of `c-list-0042`'s title — is still sayable, and a blank opaque value
+     fails both halves of the assertion instead of satisfying the first.
+20. **`c-cond-0013` needs a race the in-process transport cannot stage.** Two pipelined conditional
+   creates; the loser must be told `409 ConditionalRequestConflict` ("retry") rather than `412`
+   ("your condition was false"). The case's own rationale says pipelining is what reaches the race,
+   and `connection.pipeline` is parsed and handed to the target while nothing honours it — the
+   runner drives exchange two only after exchange one's response has been read, and the fixture
+   serialises behind one mutex besides. By the time the loser is evaluated the object is simply
+   there, so `412` is the honest answer and `fixture::conflict` stays unreachable. Closing it needs
+   a socket transport that really pipelines *and* a store with a window between evaluating a
+   condition and committing under it. Neither is approximated: a fixture that answered `409` because
+   the key had been created during this run rather than by `[setup]` would be reading the setup file
+   instead of the request.
+21. **`c-cond-0027` contradicts itself, and the rule it is about holds.** Its first exchange copies
+   `sides/source` onto `sides/target` and asserts `200`; a copy preserves the entity tag, so from
+   then on the two objects carry the *same* tag. The second exchange then offers that tag to the
+   destination's `if-match` and expects `412` — but the destination really does carry it by then, so
+   `200` is correct for any implementation, and no ordering of the two evaluators changes that. The
+   rule the case exists for is separately asserted by
+   `fixture::each_side_of_a_copy_is_judged_against_its_own_object`, against two objects that stay
+   different, one side varied at a time, in both directions. Maintainer decision of the same kind as
+   findings 9, 16 and 18; neither side is edited here.
+22. **`c-list-0030` is refused at the wire's query budget instead of at the cursor ceiling.** The
+   4 KiB token puts the query string at 4127 bytes, over `Limits::max_query_bytes` (4096), so
+   `crates/http` refuses it before any operation is reached — with `MaxMessageLengthExceeded` where
+   the case and AWS say `InvalidArgument`, and with `<Message>limit-exceeded</Message>`, which is
+   `WireReject`'s internal reason string reaching a client. The refusal is correct in *kind* — it
+   happens at the limit, which is what the case's bounded response time is really measuring — and
+   wrong in code. Both the code mapping (`reject.rs`) and the budget are `crates/http`'s. Raising
+   the budget in `inprocess` would turn the case green by configuring the harness around a gap, so
+   it is not done. The half that was in reach is done: `fixture::read_token` had its own ceiling at
+   2304 bytes beside the contract's `MAX_CURSOR_BYTES` at 2048, and now calls `CursorSpec::accept`
+   — one ceiling, applied before the token is decoded, for this backend and every other.
+23. **`c-object-0011` needs a retained version `[setup]` cannot declare, and its completeness
+   invariant already holds.** The key that cannot be deleted *does* appear in `<Error>`, with
+   `<Key>`, `<VersionId>`, `<Code>` and `<Message>` in the pinned order — which is what the case's
+   title asserts. The remaining delta is the code: `NoSuchVersion` where the case says
+   `AccessDenied`. The case reaches for `object_lock = true` on the bucket, and two things are in
+   the way. `inprocess::prepare` drops the flag on the floor, so the precondition never reaches the
+   backend at all — worth fixing on its own terms, since a declared precondition a backend ignores
+   is a case measuring nothing. And even honoured, bucket-level object lock does not say that
+   version `held` exists and is under retention; schema version 1 has no vocabulary for that, so
+   this fixture cannot tell "the version is held" from "there is no such version" and answers the
+   one its store actually knows. Same shape as findings 16 and 18.
 
 19. **Two cases are red for `connection_after` and nothing else.** `c-sig-0001` and `c-object-0015`
    now agree with the corpus on the status, the code, the document and both `request_progress`

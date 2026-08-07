@@ -148,6 +148,18 @@ pub fn first_element_text(body: &str, name: &str) -> Option<String> {
 /// The element's presence and position survive, so a byte comparison still asserts them. Applied
 /// to both sides of a comparison, which makes it idempotent on an expectation that already holds
 /// the placeholder.
+///
+/// # An element with no text is left with no text
+///
+/// `<X></X>` stays `<X></X>`. It is text that is replaced, and an empty element has none — writing
+/// the placeholder into one would *manufacture* a value the server never sent, and the whole point
+/// of redacting is to stop a server-minted value from being compared, not to invent one.
+///
+/// The distinction is load-bearing rather than pedantic. "Present and not empty" is the only useful
+/// assertion about an opaque value: a cursor element that is there and blank is the same failure as
+/// no cursor at all, wearing a valid document. A case says it by asking for
+/// `<X>__REDACTED__</X>` and refusing `<X></X>`, and it can only say it if filling the empty form
+/// is not something this function does. `c-list-0042` is that case.
 #[must_use]
 pub fn redact(body: &str, names: &[&str]) -> String {
     let mut out = body.to_owned();
@@ -161,7 +173,9 @@ pub fn redact(body: &str, names: &[&str]) -> String {
             let Some(end_offset) = out[start..].find(&close) else { break };
             let end = start + end_offset;
             next.push_str(&out[cursor..start]);
-            next.push_str(REDACTED);
+            if end_offset > 0 {
+                next.push_str(REDACTED);
+            }
             cursor = end;
         }
         next.push_str(&out[cursor..]);
@@ -308,5 +322,26 @@ mod tests {
     fn redaction_replaces_every_occurrence() {
         let body = "<a><Id>one</Id><Id>two</Id></a>";
         assert_eq!(redact(body, &["Id"]), "<a><Id>__REDACTED__</Id><Id>__REDACTED__</Id></a>");
+    }
+
+    /// Negative — an element with nothing in it is left with nothing in it. Filling it would let a
+    /// server that wrote a blank opaque value satisfy a case asserting that the value is there, and
+    /// a blank cursor is the same dead end as no cursor at all.
+    #[test]
+    fn redaction_does_not_manufacture_text_for_an_empty_element() {
+        assert_eq!(redact("<a><Id></Id></a>", &["Id"]), "<a><Id></Id></a>");
+        assert_eq!(
+            redact("<a><Id></Id><Id>two</Id></a>", &["Id"]),
+            "<a><Id></Id><Id>__REDACTED__</Id></a>",
+            "the empty one is untouched and the one with a value is still redacted"
+        );
+    }
+
+    /// Negative — a self-closing element has no text either, and no closing tag for the scan to
+    /// find, so it comes back exactly as it arrived rather than being rewritten into the paired
+    /// form. The wire form is what `expect.body.xml.empty_elements` asserts.
+    #[test]
+    fn redaction_leaves_a_self_closing_element_alone() {
+        assert_eq!(redact("<a><Id/></a>", &["Id"]), "<a><Id/></a>");
     }
 }

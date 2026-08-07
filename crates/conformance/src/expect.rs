@@ -22,6 +22,8 @@
 //! or deciding what a failure means for the run (`crate::report`).
 //! Upstream: `crate::observation`, `crate::xml`, `crate::sha256`. Downstream: `crate::runner`.
 
+use std::borrow::Cow;
+
 use crate::diagnostic::Diagnostic;
 use crate::interpolate::Captures;
 use crate::observation::Observation;
@@ -400,8 +402,26 @@ fn check_body(expect: &Value, observed: &Observation, pointer: &str, goldens: &d
             format!("expected a {expected}-byte body, observed {} bytes", observed.body.len()),
         ));
     }
+    // `redact` is what the schema says it is — the named text is replaced "in both the observed
+    // body and the expectation before comparison" — and `contains_utf8` is a comparison. Judging it
+    // against the raw bytes is what made `<NextContinuationToken>__REDACTED__</NextContinuationToken>`,
+    // the only spelling by which a case can assert *where* a server-minted value sits, impossible to
+    // satisfy against any real response. `c-list-0042` is the case that could not pass.
+    //
+    // Both sides go through it: a no-op on a needle that already holds the placeholder, and — see
+    // `xml::redact` — never a fill for `<X></X>`, so "present and not empty" stays sayable.
+    let searched: Cow<'_, str> = if redactions.is_empty() {
+        Cow::Borrowed(raw_text.as_str())
+    } else {
+        Cow::Owned(xml::redact(&raw_text, &redactions))
+    };
     for needle in body.string_array("contains_utf8").unwrap_or_default() {
-        if !raw_text.contains(needle) {
+        let expected = if redactions.is_empty() {
+            Cow::Borrowed(needle)
+        } else {
+            Cow::Owned(xml::redact(needle, &redactions))
+        };
+        if !searched.contains(expected.as_ref()) {
             out.push(Diagnostic::deny(
                 "expect/body.contains_utf8",
                 &at,
@@ -409,6 +429,11 @@ fn check_body(expect: &Value, observed: &Observation, pointer: &str, goldens: &d
             ));
         }
     }
+    // `not_contains_utf8` deliberately does **not** get the same treatment: it reads the bytes as
+    // they arrived. A prohibition is about what actually went on the wire, and redacting first would
+    // excuse the forbidden bytes for appearing inside exactly the element the case chose to redact —
+    // which is where a leaked string-to-sign or credential would appear. `redaction_does_not_excuse`
+    // below is the test that keeps the asymmetry deliberate.
     for needle in body.string_array("not_contains_utf8").unwrap_or_default() {
         if let Some(offset) = raw_text.find(needle) {
             out.push(Diagnostic::deny(
