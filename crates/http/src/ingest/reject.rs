@@ -187,13 +187,44 @@ impl ChunkReject {
         false
     }
 
-    /// Whether the connection must be closed after the response.
+    /// Whether this refusal ends the connection whatever the caller does.
     ///
-    /// Always `true`: once the framing is in dispute, the bytes still in the socket have no
-    /// owner, and a signature failure means the peer is not who the connection assumed.
+    /// Not a constant. The rule is RFC 9112 §9.3 — *a server MUST read the entire request message
+    /// body or close the connection after sending its response* — and the fact that makes it
+    /// branch here is that **`aws-chunked` is not the connection's framing.** It is a content
+    /// encoding carried inside a body whose extent RFC 9112 §6.3 already fixed from
+    /// `Content-Length`; [`crate::validate_decoded_length`] refuses a framed body that has no wire
+    /// length at all. So a chunk-level syntax error leaves the *connection* perfectly
+    /// resynchronisable: the remaining wire octets are counted, and a caller that drains them may
+    /// keep the connection.
+    ///
+    /// `true` — the connection ends — for four families, each for its own reason:
+    ///
+    /// | Family | Why the connection cannot survive |
+    /// | --- | --- |
+    /// | [`Self::TruncatedStream`] | the peer stopped sending; RFC 9112 §6.3 makes an incomplete request message one the server answers and then closes, and there is nothing left to drain in any case |
+    /// | [`Self::SignatureChainBroken`] | the peer is not established as who it claimed, and draining is work this server would be doing for an unauthenticated caller. **Policy, not RFC**: §9.3 only forces the close once the decision not to drain is made |
+    /// | [`Self::ChunkSizeTooLarge`], [`Self::TooManyChunks`], [`Self::OverheadRatioExceeded`], [`Self::DecodedLengthOverflow`] | refused *for* the resource they were about to spend, so draining performs the transfer the refusal exists to avoid. **Policy**, with the same §9.3 consequence |
+    /// | [`ModeConfusion::WireLengthMissing`] | no wire length, so the remainder has no known extent — RFC 9112 §6.3, the same reason a framing verdict closes |
+    ///
+    /// Everything else — a malformed size line, leading zeros, a bad terminator, an unexpected
+    /// extension, a zero-sized non-terminal chunk, an over-long meta line, a short body, the other
+    /// mode confusions — is a syntax verdict inside an intact wire body, and answers `false`.
+    ///
+    /// `false` is not "the connection survives": it is "the connection survives if and only if the
+    /// remainder is drained", exactly as in [`crate::WireReject::must_close_connection`].
     #[must_use]
     pub fn must_close_connection(&self) -> bool {
-        true
+        matches!(
+            self,
+            Self::TruncatedStream
+                | Self::SignatureChainBroken { .. }
+                | Self::ChunkSizeTooLarge { .. }
+                | Self::TooManyChunks { .. }
+                | Self::OverheadRatioExceeded { .. }
+                | Self::DecodedLengthOverflow { .. }
+                | Self::ModeConfusion(ModeConfusion::WireLengthMissing)
+        )
     }
 
     /// A short, stable label for logs, metrics and tests.

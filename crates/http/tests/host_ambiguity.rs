@@ -314,7 +314,7 @@ fn every_host_rejection_names_itself_and_quotes_no_byte_of_the_request() {
 }
 
 #[test]
-fn every_host_rejection_is_four_hundred_and_closes_the_connection() {
+fn every_host_rejection_is_four_hundred_and_keeps_the_connection() {
     for error in [
         HostError::Missing,
         HostError::Duplicate,
@@ -323,8 +323,12 @@ fn every_host_rejection_is_four_hundred_and_closes_the_connection() {
     ] {
         let reject = WireReject::Host(error);
         assert_eq!(reject.to_status(), StatusCode::BAD_REQUEST, "{error:?}");
-        assert!(reject.must_close_connection(), "{error:?}");
-        assert!(!reject.may_read_body(), "{error:?}");
+        // A host verdict is a statement about the head. The body's framing is untouched and its
+        // extent is known, so RFC 9112 §9.3's first branch applies: drain it and the connection
+        // survives. This used to assert the opposite, and could not have failed either way —
+        // both methods returned a constant.
+        assert!(!reject.must_close_connection(), "{error:?}");
+        assert!(reject.may_read_body(), "{error:?}");
     }
 }
 

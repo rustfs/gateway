@@ -20,7 +20,7 @@
 //! NOT responsible for: the signature chain (`ingest_verify`) or the framing decision
 //! (`ingest_framing`).
 //!
-//! 5 positive / 26 negative.
+//! 5 positive / 27 negative.
 
 mod support;
 
@@ -329,7 +329,7 @@ fn bytes_after_the_terminal_chunk_are_refused() {
 }
 
 /// Negative: every refusal is a 400 except the signature one, which is a 403 — and no refusal is
-/// ever committable or keeps the connection.
+/// ever committable.
 #[test]
 fn the_status_mapping_separates_framing_from_authentication() {
     assert_eq!(ChunkReject::TruncatedStream.to_status(), http::StatusCode::BAD_REQUEST);
@@ -343,7 +343,50 @@ fn the_status_mapping_separates_framing_from_authentication() {
         ChunkReject::SignatureChainBroken { chunk_index: 0 },
     ] {
         assert!(!reject.may_commit());
-        assert!(reject.must_close_connection());
+    }
+}
+
+/// Negative: the connection verdict branches, and on the axis it claims to.
+///
+/// This assertion could not fail until `must_close_connection` stopped returning a constant. The
+/// rule it pins is RFC 9112 §9.3 applied to what `aws-chunked` actually is: a content encoding
+/// inside a wire body whose extent `Content-Length` already fixed. A chunk-syntax verdict
+/// therefore leaves a countable remainder and the connection can be resynchronised; a truncation,
+/// a signature failure and the resource ceilings do not.
+///
+/// The pairs matter more than the individual answers. `LeadingZeros` and `MalformedChunkSize` are
+/// the same shape of syntax error as `ChunkSizeTooLarge` and differ from it only in whether the
+/// refusal was about a resource, so a table that collapsed them would be visible here.
+#[test]
+fn the_connection_verdict_branches_on_the_wire_bodys_extent() {
+    for closes in [
+        ChunkReject::TruncatedStream,
+        ChunkReject::SignatureChainBroken { chunk_index: 0 },
+        ChunkReject::ChunkSizeTooLarge {
+            declared: 1 << 30,
+            max: 4096,
+        },
+        ChunkReject::TooManyChunks { max: 4 },
+        ChunkReject::OverheadRatioExceeded {
+            overhead: 900,
+            decoded: 10,
+        },
+        ChunkReject::DecodedLengthOverflow { declared: 4 },
+        ChunkReject::ModeConfusion(rustfs_gateway_http::ModeConfusion::WireLengthMissing),
+    ] {
+        assert!(closes.must_close_connection(), "{closes:?}");
+    }
+    for keeps in [
+        ChunkReject::LeadingZeros,
+        ChunkReject::MalformedChunkSize,
+        ChunkReject::BadLineTerminator,
+        ChunkReject::UnexpectedExtension,
+        ChunkReject::ZeroSizedNonTerminalChunk,
+        ChunkReject::ChunkMetaTooLong,
+        ChunkReject::DecodedLengthUnderflow { declared: 8, actual: 4 },
+        ChunkReject::ModeConfusion(rustfs_gateway_http::ModeConfusion::DecodedLengthMissing),
+    ] {
+        assert!(!keeps.must_close_connection(), "{keeps:?}");
     }
 }
 

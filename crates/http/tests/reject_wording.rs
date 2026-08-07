@@ -21,7 +21,7 @@
 //! `header_and_query.rs` and `host_ambiguity.rs` cover that.
 //! Upstream: `rustfs-gateway-http`. Downstream: nothing.
 //!
-//! 3 positive / 13 negative. The negative half is the point: every one of them names a string, a
+//! 3 positive / 14 negative. The negative half is the point: every one of them names a string, a
 //! character class or a code that must **not** appear, because the defect this file exists for
 //! shipped a response body that was correct in every respect a positive assertion checks — it had
 //! a code, a status, and a non-empty `<Message>`.
@@ -234,9 +234,58 @@ fn no_ceiling_mints_a_code() {
 fn no_refusal_is_an_authentication_outcome() {
     for reject in every_reject() {
         assert_eq!(reject.to_status(), http::StatusCode::BAD_REQUEST, "{reject:?}");
-        assert!(!reject.may_read_body(), "{reject:?}");
-        assert!(reject.must_close_connection(), "{reject:?}");
     }
+}
+
+/// Negative — the connection verdict is the exact negation of the drain verdict, for every
+/// refusal this layer can produce.
+///
+/// RFC 9112 §9.3 is one sentence — read the whole body or close — so these are one decision with
+/// two spellings, and the invariant worth pinning is that they cannot drift. Two independent
+/// `match` arms would eventually disagree on one variant and nothing would notice.
+#[test]
+fn the_connection_verdict_is_the_negation_of_the_drain_verdict() {
+    for reject in every_reject() {
+        assert_eq!(reject.must_close_connection(), !reject.may_read_body(), "{reject:?}");
+    }
+}
+
+/// Negative — the verdict actually branches, and along the line its documentation draws.
+///
+/// Until this change both methods were constants, so every assertion that read either one passed
+/// for every input and measured nothing. This is the assertion that fails if the constant returns:
+/// a framing verdict and a head verdict must not answer the same way, because the framing verdict
+/// is the one that leaves a body of unknown extent behind.
+#[test]
+fn a_framing_verdict_closes_and_a_head_verdict_does_not() {
+    for closes in every_reject().into_iter().filter(is_framing_or_body_size) {
+        assert!(closes.must_close_connection(), "{closes:?}");
+        assert!(!closes.may_read_body(), "{closes:?}");
+    }
+    for keeps in every_reject().into_iter().filter(|reject| !is_framing_or_body_size(reject)) {
+        assert!(!keeps.must_close_connection(), "{keeps:?}");
+        assert!(keeps.may_read_body(), "{keeps:?}");
+    }
+    // Both sides are non-empty, so neither loop above is vacuous.
+    assert!(every_reject().iter().any(is_framing_or_body_size));
+    assert!(every_reject().iter().any(|reject| !is_framing_or_body_size(reject)));
+}
+
+/// The two families that may not be drained, spelled out here rather than read off the method
+/// under test — a predicate that called `may_read_body` would assert that the code does what it
+/// does.
+fn is_framing_or_body_size(reject: &WireReject) -> bool {
+    matches!(
+        reject,
+        WireReject::ContentLengthTransferEncodingConflict
+            | WireReject::TransferEncodingMalformed
+            | WireReject::TransferEncodingOnHttp2
+            | WireReject::DuplicateContentLength
+            | WireReject::MalformedContentLength
+            | WireReject::MalformedChunkFraming
+            | WireReject::LimitExceeded(LimitKind::ChunkSizeLine)
+            | WireReject::LimitExceeded(LimitKind::BodyBytes)
+    )
 }
 
 // ---------------------------------------------------------------------------------------------

@@ -81,9 +81,21 @@ Four properties live here. Everything else in the crate exists to serve them.
 - **A trailing root dot is stripped in the normalised host, kept in the raw one.** Routing must
   treat `b.example.com.` and `b.example.com` as one bucket; signing must not.
 - **Every rejection is decidable from the head.** No rule needs a body byte, so no limit check can
-  become a reason to buffer or drain — `WireReject::may_read_body` is unconditionally `false`.
-  `ChunkReject` is the deliberate counterpart: it is decidable only from the body, it can be a
-  `403`, and it is therefore a separate type rather than a `WireReject` variant.
+  become a reason to buffer. `ChunkReject` is the deliberate counterpart: it is decidable only from
+  the body, it can be a `403`, and it is therefore a separate type rather than a `WireReject`
+  variant.
+- **`may_read_body` and `must_close_connection` are one decision with two spellings, and they
+  branch.** Both used to return a constant, so every assertion that read either passed for every
+  input. The rule is RFC 9112 §9.3 — *a server MUST read the entire request message body or close
+  the connection after sending its response* — so the only question a refusal answers is whether
+  its body may be drained, and `must_close_connection` is the exact negation. The two families that
+  may not be drained are the framing verdicts (RFC 9112 §6.1 and §6.3: the body's extent is
+  undecidable) and `LimitKind::BodyBytes` (policy: draining a body refused *for its size* performs
+  the transfer the refusal avoids). `ChunkReject` branches on the same rule applied to what
+  `aws-chunked` is — a content encoding inside a wire body whose extent `Content-Length` already
+  fixed — so a chunk-syntax verdict keeps the connection and a truncation, a signature failure or a
+  resource ceiling does not. `MAX_LINGER_DRAIN_BYTES` bounds the drain and is a judgement, not a
+  citation; RFC 9112 §9.6 describes the lingering read and puts no number on it.
 - **The decoder never derives a signing key, and never will.** The four-step chain lives once, in
   `rustfs-gateway-sig`. `SigningKeyCache` takes a closure and caches the result, so this crate
   holds derived key material but implements no derivation — a security primitive written twice is

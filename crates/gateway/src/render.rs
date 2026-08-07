@@ -66,6 +66,7 @@ use rustfs_gateway_stream::Body;
 use rustfs_gateway_types::{ErrorCode, ErrorContext, status_of};
 use rustfs_gateway_xml::{DECLARATION, XmlWriter};
 
+use crate::close::ConnectionIntent;
 use crate::ext::Denial;
 use crate::trace::RequestTrace;
 
@@ -88,6 +89,7 @@ pub struct S3Error {
     status: StatusCode,
     message: std::borrow::Cow<'static, str>,
     resource: Option<String>,
+    connection: ConnectionIntent,
     extras: Option<Box<Extras>>,
 }
 
@@ -106,8 +108,43 @@ impl S3Error {
             status,
             message: message.into(),
             resource: None,
+            // The permissive default is deliberate: closing is the exception that has to be
+            // argued for, and `crate::close` is where every argument for one is written down.
+            connection: ConnectionIntent::MayKeepAlive,
             extras: None,
         }
+    }
+
+    /// Records what this refusal does to the connection it arrived on.
+    ///
+    /// The intent is never derived here. It comes from [`crate::close`], which is the one place
+    /// the RFC 9112 §9.3 rule and its three judgement calls are stated; a `match` on a code in
+    /// this file would be a second, silently diverging copy of that table.
+    #[must_use]
+    pub fn closing(mut self, connection: ConnectionIntent) -> Self {
+        self.connection = self.connection.and(connection);
+        self
+    }
+
+    /// What this refusal does to the connection.
+    ///
+    /// A transport that keeps a connection this returns [`ConnectionIntent::Close`] for has left
+    /// undrained request octets in the stream, and the next bytes it parses as a request line are
+    /// the tail of a body it decided not to read — RFC 9112 §9.3's request-smuggling shape.
+    ///
+    /// [`render`] carries the same value into the response's extensions, where
+    /// [`connection_intent_of`] reads it; `crate::adapt` turns it into `Connection: close` for the
+    /// hyper and tower paths. The header is an *announcement* — a peer learns from it, a transport
+    /// must not, and a harness must never report it as an observation of the socket.
+    #[must_use]
+    pub const fn connection_intent(&self) -> ConnectionIntent {
+        self.connection
+    }
+
+    /// Whether the connection must end after this refusal.
+    #[must_use]
+    pub const fn must_close_connection(&self) -> bool {
+        self.connection.must_close()
     }
 
     /// A refusal whose status the stage decided rather than the code table.
@@ -172,7 +209,31 @@ impl From<WireReject> for S3Error {
         // `as_str()`, which delegated here — it was removed because a habit-reached name that
         // happens to be right is not a guarantee, and a reviewer who sees `label()` on this line
         // can tell it is wrong, which is the property worth having.
-        Self::new(reject.error_code(), reject.message()).with_status(reject.to_status())
+        Self::new(reject.error_code(), reject.message())
+            .with_status(reject.to_status())
+            // The flag the acceptance layer has always carried, finally read. Before this line it
+            // was computed and dropped on the floor here, which is issue #20's second finding.
+            .closing(crate::close::after_wire_reject(&reject))
+    }
+}
+
+impl From<rustfs_gateway_http::ChunkReject> for S3Error {
+    fn from(reject: rustfs_gateway_http::ChunkReject) -> Self {
+        // `ChunkReject` carries no client-facing sentence of its own — it is an operator's label —
+        // so the message is the one this crate writes for the code, and the label stays in the log.
+        let message: &'static str = match reject.error_code() {
+            code if code == ErrorCode::SIGNATURE_DOES_NOT_MATCH => "the request was not authenticated",
+            code if code == ErrorCode::INCOMPLETE_BODY => {
+                "You did not provide the number of bytes specified by the Content-Length HTTP header."
+            }
+            code if code == ErrorCode::INVALID_CHUNK_SIZE => {
+                "The chunk size of the request body is not one this service accepts."
+            }
+            _ => "The chunked encoding of the request body is not one this service can read.",
+        };
+        Self::new(reject.error_code(), message)
+            .with_status(reject.to_status())
+            .closing(crate::close::after_chunk_reject(&reject))
     }
 }
 
@@ -187,7 +248,11 @@ impl From<AuthError> for S3Error {
     fn from(error: AuthError) -> Self {
         // The code strings are `AuthError`'s own, because SDK credential-refresh logic branches on
         // them; the status comes from the shared table so that one code has one status everywhere.
-        Self::new(ErrorCode::custom(error.code()), error.message())
+        //
+        // The third leg issue #20 asks for: an authentication failure is neither a `WireReject` nor
+        // a `ChunkReject`, so neither flag could ever have reached `c-sig-0001`. The reasoning for
+        // the verdict is `crate::close::after_auth_failure`, and it is a policy row, not an RFC one.
+        Self::new(ErrorCode::custom(error.code()), error.message()).closing(crate::close::after_auth_failure(&error))
     }
 }
 
@@ -195,7 +260,11 @@ impl From<Denial> for S3Error {
     fn from(denial: Denial) -> Self {
         // One sentence for every denial. A message that named the failing condition would let an
         // authenticated caller map the policy one request at a time.
-        Self::new(denial.code().clone(), "the request is not allowed")
+        //
+        // The connection survives: the caller is known, so none of the reasoning that closes on an
+        // authentication failure applies. `c-copy-0019` asserts exactly this, and it is the case
+        // that stops "every 403 closes" from being written here.
+        Self::new(denial.code().clone(), "the request is not allowed").closing(crate::close::after_denial())
     }
 }
 
@@ -298,7 +367,34 @@ pub fn render(error: &S3Error, trace: &RequestTrace) -> Response<Body> {
         headers.insert(CONTENT_LENGTH, value);
     }
     trace.apply(headers);
+    // The connection verdict travels in the response's extensions, not in its headers.
+    //
+    // `Connection` is hop-by-hop: it describes the connection, and this crate does not have one —
+    // its own documentation says so, and `crate::adapt` is where a hop actually exists. Writing the
+    // header here made this function a *second* writer of it, behind whatever transport was already
+    // writing its own, and a response reached the wire carrying `Connection: close` **and**
+    // `Connection: keep-alive`. Two contradictory hop-by-hop headers is the shape
+    // `WireReject::DuplicateContentLength` refuses on the way in; emitting one on the way out is
+    // not a fix for a missing header.
+    //
+    // Extensions never reach the wire, so this cannot become an announcement by accident. A
+    // transport reads it — `crate::adapt` does, and `Response::extensions` is how anything else
+    // can — and only a transport turns it into a header and a closed socket.
+    response.extensions_mut().insert(error.connection);
     response
+}
+
+/// The connection verdict a rendered refusal is carrying, if it is carrying one.
+///
+/// The read half of what [`render`] writes into the response's extensions. A transport calls this
+/// and acts on it; nothing else should, and in particular a harness that reported a connection as
+/// closed because this said `Close` would be reporting an intention as an observation — the defect
+/// <https://github.com/rustfs/gateway/issues/20> was opened about.
+///
+/// `None` for a response no refusal produced, which is every successful answer.
+#[must_use]
+pub fn connection_intent_of<B>(response: &Response<B>) -> Option<ConnectionIntent> {
+    response.extensions().get::<ConnectionIntent>().copied()
 }
 
 /// The XML declaration every rendered document opens with, re-exported for a consumer that

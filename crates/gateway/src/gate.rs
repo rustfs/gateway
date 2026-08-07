@@ -151,7 +151,12 @@ where
     ///
     /// [`S3Error`] carrying `InvalidRequest` for the operation's cap, `EntityTooLarge` for the
     /// assembly's ceiling, and `IncompleteBody` for a body that did not arrive as it was framed.
-    pub(crate) async fn read(self, _proof: &Authenticated<'_>, ceilings: BodyCeilings) -> Result<Bytes, S3Error> {
+    pub(crate) async fn read(
+        self,
+        _proof: &Authenticated<'_>,
+        ceilings: BodyCeilings,
+        ingest: Option<crate::chunked::ChunkIngest>,
+    ) -> Result<Bytes, S3Error> {
         let Some(body) = self.body else {
             return Ok(Bytes::new());
         };
@@ -188,7 +193,15 @@ where
             }
             collected.put(data);
         }
-        Ok(collected.freeze())
+        let wire_bytes = collected.freeze();
+        // The decode runs here and nowhere earlier. Both ceilings above have already been applied
+        // to the *wire* bytes — the ones the peer wrote and this process is holding — and only what
+        // survived them is handed to the chunk parser. `crate::chunked` states why that is the
+        // right side of the decode to count on.
+        match ingest {
+            Some(ingest) => ingest.run(wire_bytes).await,
+            None => Ok(wire_bytes),
+        }
     }
 }
 
@@ -215,8 +228,15 @@ const fn declared_body_cap(operation: &str) -> Option<u64> {
 pub(crate) const MAX_DELETE_OBJECTS_BODY_BYTES: u64 = 2 * 1024 * 1024;
 
 /// The refusal for a body larger than the operation's own bound.
+///
+/// Closes the connection: the frames behind the one that crossed the line are never pulled, so the
+/// peer's remaining octets are undrained, and RFC 9112 §9.3 gives a server that does not read the
+/// whole body no second option. Draining them instead would be performing the transfer this
+/// refusal exists to avoid — `crate::close::after_body_ceiling` is where that judgement is
+/// written down. `c-object-0015` is the case.
 fn past_declared_cap() -> S3Error {
     S3Error::new(ErrorCode::INVALID_REQUEST, "the request body is larger than this operation permits")
+        .closing(crate::close::after_body_ceiling())
 }
 
 /// The refusal for a body larger than this assembly will hold.
@@ -226,13 +246,18 @@ fn past_buffered_ceiling() -> S3Error {
         "the declared request body is larger than this service will hold",
     )
     .with_status(StatusCode::PAYLOAD_TOO_LARGE)
+    .closing(crate::close::after_body_ceiling())
 }
 
 /// The refusal for a body that stopped early or ran on: both mean the body that arrived is not the
 /// body that was announced, and saying which ceiling was hit tells a caller how to retry with a
 /// body that is not refused.
 fn incomplete() -> S3Error {
+    // Closes, for the reason `ChunkReject::TruncatedStream` does: the transport reported the body
+    // did not arrive as framed, so there is no well-defined remainder to drain and no
+    // synchronisation point to resume from. RFC 9112 §6.3 and §9.3.
     S3Error::new(ErrorCode::INCOMPLETE_BODY, "the request body did not arrive as it was framed")
+        .closing(crate::close::ConnectionIntent::Close)
 }
 
 #[cfg(test)]
@@ -289,7 +314,7 @@ mod tests {
             declared: None,
         };
         let error = SealedBody::seal(Some(body), Some(1 << 30))
-            .read(&proof, ceilings)
+            .read(&proof, ceilings, None)
             .await
             .expect_err("over the ceiling");
         assert_eq!(error.status(), StatusCode::PAYLOAD_TOO_LARGE);
@@ -308,7 +333,7 @@ mod tests {
             declared: None,
         };
         let error = SealedBody::seal(Some(body), None)
-            .read(&proof, ceilings)
+            .read(&proof, ceilings, None)
             .await
             .expect_err("over the ceiling");
         assert_eq!(error.code(), &ErrorCode::ENTITY_TOO_LARGE);
@@ -328,7 +353,7 @@ mod tests {
             declared: Some(128),
         };
         let error = SealedBody::seal(Some(body), None)
-            .read(&proof, ceilings)
+            .read(&proof, ceilings, None)
             .await
             .expect_err("past the operation's cap");
         assert_eq!(error.code(), &ErrorCode::INVALID_REQUEST);
@@ -349,7 +374,7 @@ mod tests {
             declared: Some(128),
         };
         let error = SealedBody::seal(Some(body), Some(4096))
-            .read(&proof, ceilings)
+            .read(&proof, ceilings, None)
             .await
             .expect_err("past the operation's cap");
         assert_eq!(error.code(), &ErrorCode::INVALID_REQUEST);
@@ -361,7 +386,7 @@ mod tests {
     async fn an_absent_body_reads_as_empty() {
         let proof = Authenticated::granted_for_test();
         let sealed: SealedBody<crate::probe::ObservedBody> = SealedBody::seal(None, None);
-        assert!(sealed.read(&proof, roomy()).await.expect("no body").is_empty());
+        assert!(sealed.read(&proof, roomy(), None).await.expect("no body").is_empty());
     }
 
     /// Positive — a body inside both ceilings arrives whole, in frame order.
@@ -370,7 +395,7 @@ mod tests {
         let proof = Authenticated::granted_for_test();
         let (body, read) = crate::probe::ObservedBody::new([Bytes::from_static(b"first-"), Bytes::from_static(b"second")]);
         let bytes = SealedBody::seal(Some(body), Some(12))
-            .read(&proof, roomy())
+            .read(&proof, roomy(), None)
             .await
             .expect("inside every ceiling");
         assert_eq!(bytes, Bytes::from_static(b"first-second"));

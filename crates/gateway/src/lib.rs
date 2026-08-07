@@ -71,7 +71,9 @@
 mod adapt;
 mod assembly;
 mod builder;
+mod chunked;
 mod clock;
+pub mod close;
 pub mod commit;
 mod dispatch;
 mod ext;
@@ -91,13 +93,14 @@ pub use crate::adapt::ServiceFuture;
 pub use crate::assembly::{AssemblyError, RuleRef};
 pub use crate::builder::{DEFAULT_MAX_BUFFERED_BODY_BYTES, ServiceBuilder};
 pub use crate::clock::{Clock, FixedClock, system_clock};
+pub use crate::close::ConnectionIntent;
 pub use crate::ext::{
-    Authentication, Authenticator, Authorizer, AuthzRequest, CredentialProvider, Credentials, CredentialsError, Denial, Governor,
-    GovernorRequest, HostQuery, HostResolver, Lease, NoObserver, Observer, PathStyleOnly, RequestEvent, ResolvedHost,
-    SigV4Authenticator, StaticCredentials, Unavailable, Unlimited,
+    Authentication, Authenticator, Authorizer, AuthzRequest, ChunkSink, ChunkVerification, CredentialProvider, Credentials,
+    CredentialsError, Denial, Governor, GovernorRequest, HostQuery, HostResolver, Lease, NoObserver, Observer, PathStyleOnly,
+    RequestEvent, ResolvedHost, SigV4Authenticator, StaticCredentials, Unavailable, Unlimited,
 };
 pub use crate::probe::{BodyProgress, ObservedBody};
-pub use crate::render::{S3Error, declaration, document, document_body, render};
+pub use crate::render::{S3Error, connection_intent_of, declaration, document, document_body, render};
 pub use crate::service::S3Service;
 pub use crate::trace::{
     FixedTrace, HOST_ID_HEADER, HostId, MintedTraces, REQUEST_ID_HEADER, RequestId, RequestTrace, TraceSource,

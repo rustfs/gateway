@@ -25,6 +25,8 @@ everything a consumer needs so that nothing downstream depends on `-core`, `-sig
 | `src/trace.rs` | `RequestId`, `HostId`, `RequestTrace`, `TraceSource`, `MintedTraces`, `FixedTrace`; one identifier per request, minted server-side | A response is missing `x-amz-request-id`, a case needs a pinned identifier, or you are asking why a source cannot echo one the caller sent |
 | `src/wire.rs` | `WireResponse`: a drained response with its **header order preserved** | You are asserting on a response, above all in the conformance runner |
 | `src/clock.rs` | `Clock`, `FixedClock`; one reading per request | A case needs a fixed timestamp, or you are tempted to read the clock twice |
+| `src/close.rs` | `ConnectionIntent` and the per-stage table that produces one: which refusals end the connection, which rows are RFC 9112 §9.3/§6.1/§6.3 and which are this service's judgement | A refusal closed a connection it should not have, or you are adding a stage that can refuse and have to say what it does to the connection |
+| `src/chunked.rs` | `ChunkIngest`: whether the `aws-chunked` parser runs for a request, the material it runs with, and the pass itself | A framed upload stored the wrong bytes, or you are asking which side of the decode the ceilings count |
 | `src/transport.rs` | `Transport` — which assembly path a run used | You are adding a path, or a runner has to name one |
 | `src/sig.rs` | The signature vocabulary re-exported through the facade, including `sig::Signer` (the client-side `SigV4Signer`) | You need to name a `Verdict`, a `SecurityFloor` or an `AuthError`, or a test harness has to sign a request |
 | `src/ext/mod.rs` | The extension-point roster, and the table of which have defaults and what each default costs | You are choosing what to install, or adding an extension point |
@@ -43,6 +45,7 @@ everything a consumer needs so that nothing downstream depends on `-core`, `-sig
 | `tests/assembly.rs` | What `build()` refuses; 11 negative, 3 positive |
 | `tests/pipeline.rs` | What a request does, the request identifier included, the RFC 9110 body rules on both paths, the commit seam, and the four measurements that say a refusal happened before the payload was asked for; 29 negative, 7 positive |
 | `tests/refusal_order_guards.rs` | Source guards on the body gate: the proof keeps one real constructor, the read still demands it, the pipeline seals above the verifier and reads below it, and nothing else in the crate drains a request body; 5 negative, each paired with a proof it can fire |
+| `tests/connection_teardown.rs` | That the connection verdict branches and reaches the response, that the two `403`s do not share one, and that nothing here claims to have observed a socket; 9 negative, 1 positive |
 | `tests/facade_probe.rs` | Every export the conformance runner's `REQUIRED_FACADE_EXPORTS` names, checked by naming it |
 | `tests/backend_reachability.rs` | Every argument of the range contract, built from a decoded request and never from a literal; 5 negative, 1 positive. Read this before adding a constructor a backend is meant to call |
 | `examples/minimal.rs` | The whole assembly in one file, asserting one answered request and one refused one |
@@ -65,35 +68,31 @@ everything a consumer needs so that nothing downstream depends on `-core`, `-sig
   operation with a bounded body cannot be added without stating its bound. It is here because a
   table with one honest entry beats an assembly that enforces nothing, and `crates/core/src/op.rs`
   was outside the change that needed the enforcement.
-- **`WireReject::must_close_connection` and `ChunkReject::must_close_connection` are declared and
-  nothing reads them.** No response this crate writes carries `Connection: close`, so a refusal that
-  leaves a request body undrained keeps the connection in a state where the next request on it
-  begins in the middle of the last one's payload. Two conformance cases (`c-sig-0001`,
-  `c-object-0015`) assert `connection_after = "closed"` and are red for exactly that one assertion;
-  `c-object-0013` asserts `open` for a refusal that also leaves the body unread, so the rule is not
-  "any unread body closes" and the discriminator needs a maintainer's decision before it is written.
-
-  Three things found while building the socket observation in `crates/conformance/src/socket.rs`,
-  recorded here because they change what "wire the flag" would mean:
-  1. **Both methods return a constant `true`.** Neither has a variant that answers `false`, so
-     "read the flag" is not a branch — every `WireReject` and every `ChunkReject` closes. That is
-     consistent with what each type is (a framing or limit verdict leaves bytes of unknown
-     ownership), but it means the flag cannot be the thing that separates `c-object-0013` from the
-     other two.
-  2. **`c-sig-0001` is out of reach of both flags.** It is a signature failure — an `AuthError`,
-     neither a `WireReject` nor a `ChunkReject` — so wiring both flags cannot make it close. A
-     third leg is needed, and `ChunkReject::must_close_connection`'s own documentation states the
-     reason for it: a signature failure means the peer is not who the connection assumed.
-  3. **Nothing downstream can see the flag even if it read it.** `render.rs` converts
-     `WireReject -> S3Error` through `error_code`/`message`/`to_status` and drops
-     `must_close_connection`; `service.rs` calls that conversion and keeps nothing else. So the
-     refusal's own verdict never reaches a layer that owns a socket. Carrying it out needs a change
-     in `render.rs` or `service.rs`, not only in whatever serves the connection.
-
-  Size does not separate the cases either: `c-sig-0001`'s body is 24 bytes and `c-object-0013`'s is
-  11, so a lingering-drain budget that keeps one connection open keeps the other open too.
-- **`aws-chunked` framing is not decoded here.** A streaming `x-amz-content-sha256` value is
-  refused rather than mis-framed.
+- **The connection verdict is a declared table, and three of its rows are judgement calls.**
+  `src/close.rs` holds it. The rule it applies is RFC 9112 §9.3 — *a server MUST read the entire
+  request message body or close the connection after sending its response* — so this service never
+  chooses to close; it chooses whether it will drain, and the close follows. Both
+  `must_close_connection` flags now branch (they returned a constant `true`, so every assertion that
+  read one passed for every input), `render.rs` carries the verdict onto the response as
+  `Connection: close` and publishes it as `S3Error::connection_intent`, and an authentication
+  failure is the third leg `c-sig-0001` needed — it is an `AuthError`, so neither flag could ever
+  have reached it. What is **not** RFC-derived, and is marked as such at each site: "an
+  unauthenticated peer's body is not drained", "a body refused for its size is not drained", and
+  the 64 KiB drain budget in `rustfs_gateway_http::MAX_LINGER_DRAIN_BYTES`. `c-mpu-0045` is a
+  documented disagreement rather than an encoded row; see the module docs.
+- **Nothing in this crate closes a socket, and nothing in it claims to.** The verdict is a value on
+  the response. Whether the connection actually ends is the transport's, and `c-sig-0001`,
+  `c-object-0015` and `c-chunked-0001` stay red or skipped until a transport reads it — the
+  in-process target reports `connection_after = "open"` unconditionally, and that file is
+  `crates/conformance`'s.
+- **`aws-chunked` framing is decoded here now, for one mode.** `src/chunked.rs` runs
+  `rustfs_gateway_http::IngestPipeline` inside the body read, after the verifier, so a
+  `STREAMING-AWS4-HMAC-SHA256-PAYLOAD` body is decoded rather than stored with its own framing in
+  it — which is what happened before, silently and with a `200`. Both ceilings count **wire** bytes,
+  before decoding; the reasoning is in that module. Trailered modes answer `501`, because
+  `IngestPipeline::commit_allowed` stays `false` until the trailer is verified and that is P3-04's.
+  Signed chunk verification needs `k_signing`, which no `Verdict` carries, so it travels beside the
+  verdict through `ext::ChunkSink` — additive, and an existing `Authenticator` simply never fills it.
 - **The header map is cloned once per request**, because `WireRequest` publishes no way back to it
   and `SecurityFloor` is defined over the raw map.
 - **The conformance runner does not pin the request identifier yet.** `FixedTrace` and

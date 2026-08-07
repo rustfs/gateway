@@ -76,6 +76,106 @@ impl core::fmt::Display for Unavailable {
 
 impl std::error::Error for Unavailable {}
 
+/// The material a `STREAMING-AWS4-HMAC-SHA256-PAYLOAD` body's per-chunk signatures are checked
+/// against.
+///
+/// # Why this exists at all
+///
+/// The `aws-chunked` chunk chain is seeded by the *request* signature and verified with the *same*
+/// `k_signing` the request signature was computed from. Neither value survives
+/// [`Verdict`]: `Verdict::Authenticated` carries an identity, a scheme and a zero-sized
+/// [`SignatureMatch`], which is exactly the right shape for "who is this" and exactly the wrong
+/// shape for "keep verifying". `Verdict` is `rustfs-gateway-sig`'s and `#[non_exhaustive]`, so it
+/// cannot grow a variant from here.
+///
+/// So the material travels beside the verdict, through a sink the pipeline owns and the
+/// authenticator may fill. That keeps the change additive — an existing [`Authenticator`]
+/// implementation compiles untouched and simply never fills it — and keeps the ordering honest:
+/// the sink is read *after* the verdict has been checked, so a body cannot be verified against
+/// material published by a request that was then rejected.
+///
+/// No `Debug`, no `Clone`: it holds a signing key.
+pub struct ChunkVerification {
+    key: rustfs_gateway_sig::SigningKey,
+    scope_line: String,
+    amz_date: String,
+}
+
+impl ChunkVerification {
+    /// Publishes the derived key and the scope the chunk chain is dated with.
+    #[must_use]
+    pub fn new(key: rustfs_gateway_sig::SigningKey, scope_line: String, amz_date: String) -> Self {
+        Self {
+            key,
+            scope_line,
+            amz_date,
+        }
+    }
+
+    /// The derived `k_signing`, as the fixed-width value the chunk signer takes.
+    ///
+    /// `None` when the key is not the 32 bytes SigV4 produces, which is a defect in whatever built
+    /// it rather than a property of the request — the caller refuses instead of padding.
+    #[must_use]
+    pub fn chunk_signing_key(&self) -> Option<rustfs_gateway_http::ChunkSigningKey> {
+        let bytes: [u8; 32] = self.key.expose().try_into().ok()?;
+        Some(rustfs_gateway_http::ChunkSigningKey::from_derived(bytes))
+    }
+
+    /// The credential scope line, `<date>/<region>/<service>/aws4_request`.
+    #[must_use]
+    pub fn scope_line(&self) -> &str {
+        &self.scope_line
+    }
+
+    /// The `x-amz-date` the string-to-sign is dated with.
+    #[must_use]
+    pub fn amz_date(&self) -> &str {
+        &self.amz_date
+    }
+}
+
+/// Where an [`Authenticator`] leaves a [`ChunkVerification`] for the body reader to collect.
+///
+/// Write-once: a second publication would mean two answers to "what key verifies this body", and
+/// the reader has no way to choose between them. [`ChunkSink::publish`] silently keeps the first,
+/// because the alternative — a panic on a path an extension point controls — turns an
+/// implementation bug into an availability bug.
+#[derive(Default)]
+pub struct ChunkSink {
+    slot: std::sync::OnceLock<ChunkVerification>,
+}
+
+impl ChunkSink {
+    /// An empty sink.
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            slot: std::sync::OnceLock::new(),
+        }
+    }
+
+    /// Publishes the material, if nothing has been published yet.
+    pub fn publish(&self, material: ChunkVerification) {
+        let _ = self.slot.set(material);
+    }
+
+    /// What was published, if anything.
+    #[must_use]
+    pub fn get(&self) -> Option<&ChunkVerification> {
+        self.slot.get()
+    }
+}
+
+impl core::fmt::Debug for ChunkSink {
+    /// Reports only whether it is filled. The contents are a signing key.
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("ChunkSink")
+            .field("published", &self.slot.get().is_some())
+            .finish()
+    }
+}
+
 /// One request the security floor has admitted, with everything an authenticator needs to
 /// reconstruct what was signed.
 ///
@@ -90,6 +190,7 @@ pub struct Authentication<'a> {
     host: &'a RawHost,
     payload: &'a PayloadMode,
     declared_content_length: Option<u64>,
+    chunks: Option<&'a ChunkSink>,
 }
 
 impl<'a> Authentication<'a> {
@@ -110,7 +211,28 @@ impl<'a> Authentication<'a> {
             host,
             payload,
             declared_content_length,
+            chunks: None,
         }
+    }
+
+    /// Attaches the sink an authenticator may publish chunk-verification material into.
+    ///
+    /// A builder method rather than a seventh constructor parameter, so that adding it did not
+    /// break every caller of [`Authentication::new`].
+    #[must_use]
+    pub const fn with_chunk_sink(mut self, chunks: &'a ChunkSink) -> Self {
+        self.chunks = Some(chunks);
+        self
+    }
+
+    /// The sink, when the pipeline offered one.
+    ///
+    /// `None` means the caller has no use for chunk material — a request whose payload mode is not
+    /// framed, or a consumer that assembled an [`Authentication`] itself. An implementation must
+    /// treat it as "not asked for" and not as "publish it somewhere else".
+    #[must_use]
+    pub const fn chunk_sink(&self) -> Option<&'a ChunkSink> {
+        self.chunks
     }
 
     /// The admitted request. Holding one is proof the floor has run.
@@ -285,6 +407,20 @@ impl SigV4Authenticator {
         } else {
             AuthScheme::sigv4_header(identity_axis, sealed.expected_service())
         };
+
+        // Published only here: after the comparison produced a `SignatureMatch` and after the
+        // access key was found. A key made available on the failing path would be one an
+        // unauthenticated caller had caused to be derived, and the body reader has no way to know
+        // which path it came from — the sink carries no provenance, so the ordering has to.
+        //
+        // Published only when the mode actually frames the body. `has_chunk_signatures()` reads
+        // `x-amz-content-sha256` and nothing else, which is the one sanctioned input to that
+        // question; `Content-Encoding: aws-chunked` is metadata and is not consulted anywhere.
+        if request.payload().has_chunk_signatures()
+            && let Some(sink) = request.chunk_sink()
+        {
+            sink.publish(ChunkVerification::new(key, presented.scope().scope_string(), date.as_str().to_owned()));
+        }
         Ok(Some(Verdict::authenticated(credentials.identity().clone(), scheme, proof)))
     }
 }

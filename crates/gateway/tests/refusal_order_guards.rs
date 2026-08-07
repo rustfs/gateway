@@ -98,9 +98,18 @@ fn the_constructor_guard_can_fire() {
 /// everywhere and mean nothing.
 #[test]
 fn the_body_read_still_demands_the_proof() {
+    let source = gate();
+    let signature = source
+        .split_once("pub(crate) async fn read(")
+        .and_then(|(_, rest)| rest.split_once(')'))
+        .map(|(parameters, _)| parameters)
+        .expect("`SealedBody::read` must exist");
+    // Matched on the parameter list rather than on a whole line, so that adding a parameter — the
+    // chunk ingest did — reformats the signature across several lines without silently disarming
+    // the guard. The guard is about the proof being taken, not about where rustfmt put it.
     assert!(
-        gate().contains("pub(crate) async fn read(self, _proof: &Authenticated<'_>"),
-        "`SealedBody::read` must keep the proof in its signature"
+        signature.contains("_proof: &Authenticated<'_>"),
+        "`SealedBody::read` must keep the proof in its signature: {signature:?}"
     );
 }
 

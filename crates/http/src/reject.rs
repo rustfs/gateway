@@ -35,6 +35,12 @@
 //! framing verdict, and [`WireReject::may_read_body`] is `false` for all of them so no caller
 //! drains a body it has just declared uninterpretable.
 //!
+//! **A head verdict does not.** It used to: both methods returned a constant, so every refusal in
+//! this layer answered "close" and the flag carried no information. The rule that replaced the
+//! constant is RFC 9112 §9.3 — read the whole body or close — which makes "may this be drained"
+//! the only decision and the connection verdict its consequence. See [`WireReject::may_read_body`]
+//! for the two families that may not be drained and why.
+//!
 //! # Two strings, and only one of them may leave the process
 //!
 //! [`WireReject::message`] is what a client reads. [`WireReject::label`] is what an operator
@@ -202,25 +208,62 @@ impl WireReject {
         }
     }
 
-    /// Whether the body may still be read after this refusal.
+    /// Whether the unconsumed request body may still be drained after this refusal.
     ///
-    /// Always `false`. It is a method rather than a constant so the reason travels with the type:
-    /// draining a body to keep a connection alive is exactly what an attacker wants when the
-    /// request was refused *for* its size, and when the request was refused for its framing there
-    /// is no agreed definition of how much body there is to drain.
+    /// This method and [`Self::must_close_connection`] are one decision, not two. RFC 9112 §9.3
+    /// states the whole rule:
+    ///
+    /// > A server MUST read the entire request message body or close the connection after sending
+    /// > its response; otherwise, the remaining data on a persistent connection would be
+    /// > misinterpreted as the next request.
+    ///
+    /// So the only question a refusal answers is *may this body be drained*; the connection
+    /// verdict follows from the answer rather than being chosen beside it. That is why
+    /// `must_close_connection` is the negation of this method and cannot drift from it.
+    ///
+    /// `false` — the body must not be drained, so the connection ends — for two families:
+    ///
+    /// * **The framing verdicts.** RFC 9112 §6.1 names the close for the
+    ///   `Content-Length`/`Transfer-Encoding` pair, and §6.3 is the reason it generalises: when the
+    ///   head does not determine a message body length, "how much is there to drain" has no
+    ///   answer, so draining is not an operation this server can perform at all.
+    /// * **[`LimitKind::BodyBytes`].** Here the framing *is* intact and the remainder is
+    ///   well-defined. The server declines anyway, because reading a body it refused *for its size*
+    ///   performs exactly the transfer the refusal exists to avoid. The declining is this service's
+    ///   policy; the close that follows it is the RFC's.
+    ///
+    /// `true` for every other verdict — a bad host, a repeated header, a query string that will not
+    /// split, a head-shaped ceiling. The head is malformed and the framing is not: the body's
+    /// extent is known and already bounded by [`crate::Limits`], so a caller that drains it may
+    /// keep the connection. Draining is still not unconditional; see
+    /// [`MAX_LINGER_DRAIN_BYTES`].
     #[must_use]
     pub fn may_read_body(&self) -> bool {
-        false
+        !matches!(
+            self,
+            Self::ContentLengthTransferEncodingConflict
+                | Self::TransferEncodingMalformed
+                | Self::TransferEncodingOnHttp2
+                | Self::DuplicateContentLength
+                | Self::MalformedContentLength
+                | Self::MalformedChunkFraming
+                | Self::LimitExceeded(LimitKind::ChunkSizeLine)
+                | Self::LimitExceeded(LimitKind::BodyBytes)
+        )
     }
 
-    /// Whether the connection must be closed after the response.
+    /// Whether this refusal ends the connection whatever the caller does.
     ///
-    /// Required by RFC 9112 §6.1 for the framing conflicts, and applied to the rest because a
-    /// peer that sent one ambiguous head on a reused connection has already put bytes of unknown
-    /// ownership into the stream.
+    /// The exact negation of [`Self::may_read_body`], for the RFC 9112 §9.3 reason written there.
+    ///
+    /// `false` is **not** "the connection survives". It is "the connection survives *if and only
+    /// if* the remainder is drained": a caller that declines to drain — because the remainder is
+    /// past [`MAX_LINGER_DRAIN_BYTES`], because the peer stopped sending, or because a stage above
+    /// this one refused for a reason of its own — must still close. This method answers only what
+    /// the refusal itself forces.
     #[must_use]
     pub fn must_close_connection(&self) -> bool {
-        true
+        !self.may_read_body()
     }
 
     /// A short, stable label for logs, metrics and tests. **Never for a client.**
@@ -254,6 +297,21 @@ impl WireReject {
         }
     }
 }
+
+/// How much of an abandoned request body a caller may drain before it closes instead.
+///
+/// RFC 9112 §9.6 describes the tear-down this bounds: a server that means to close reads on for a
+/// while first, so that its response is not erased by a TCP reset. §9.3 is why it reads at all —
+/// a connection that is to be *kept* has no choice but to reach the end of the body. Neither
+/// section puts a number on it, and a server that drains without one has handed an unauthenticated
+/// peer a way to make it read for as long as the peer keeps writing.
+///
+/// **This number is a judgement, not a citation.** 64 KiB is one socket buffer's worth: large
+/// enough that every refusal whose body a client had already written in a single flush is drained
+/// and its connection survives, small enough that draining is never a transfer. `nginx`'s
+/// `lingering_close_max_size` and Apache's lingering-close budget exist for the same reason and
+/// are the same order of magnitude.
+pub const MAX_LINGER_DRAIN_BYTES: u64 = 64 * 1024;
 
 /// Every framing verdict, in one sentence.
 ///

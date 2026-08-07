@@ -49,6 +49,25 @@ use crate::service::S3Service;
 /// The future both adapters return.
 pub type ServiceFuture = Pin<Box<dyn Future<Output = Result<Response<Body>, Infallible>> + Send>>;
 
+/// Turns the refusal's connection verdict into the hop-by-hop header that carries it.
+///
+/// **This is the only place in the crate that writes `Connection`,** and it is here because this is
+/// the only place a connection exists. `crate::render` publishes the verdict into the response's
+/// extensions, which never reach the wire; a transport reads it and announces it.
+///
+/// RFC 9112 §9.6 is why announcing it matters: a peer that is told stops pipelining, and a peer
+/// that is not discovers the close as a failed write on a request it has already sent. It is still
+/// only an announcement — hyper closes the connection because it reads this header, and a
+/// transport that wrote the header without closing would be lying to its peer in exactly the way
+/// the socket observation in `crates/conformance` exists to catch.
+fn announce_connection_verdict(response: &mut Response<Body>) {
+    if crate::render::connection_intent_of(response).is_some_and(crate::close::ConnectionIntent::must_close) {
+        response
+            .headers_mut()
+            .insert(http::header::CONNECTION, http::HeaderValue::from_static("close"));
+    }
+}
+
 impl<B> tower::Service<Request<B>> for S3Service
 where
     B: http_body::Body + Send + 'static,
@@ -67,7 +86,11 @@ where
 
     fn call(&mut self, request: Request<B>) -> Self::Future {
         let service = self.clone();
-        Box::pin(async move { Ok(service.call(request).await) })
+        Box::pin(async move {
+            let mut response = service.call(request).await;
+            announce_connection_verdict(&mut response);
+            Ok(response)
+        })
     }
 }
 
@@ -85,7 +108,11 @@ where
 
     fn call(&self, request: Request<B>) -> Self::Future {
         let service = self.clone();
-        Box::pin(async move { Ok(service.call(request).await) })
+        Box::pin(async move {
+            let mut response = service.call(request).await;
+            announce_connection_verdict(&mut response);
+            Ok(response)
+        })
     }
 }
 

@@ -274,6 +274,10 @@ impl S3Service {
         let query = RawQuery::new(wire.query().as_str());
         let view = WireView::new(&headers, query);
         let presence = detect_credentials(&view);
+        let chunk_sink = crate::ext::ChunkSink::new();
+        // Kept out of the `match` so the read at the bottom can consult it: for an anonymous or
+        // custom admission there is no payload mode and therefore no framed body to decode.
+        let mut framing_mode: Option<PayloadMode> = None;
         let verdict = match self.inner.floor.admit(view, op.floor(), now) {
             Ok(Admission::Anonymous(evidence)) => Verdict::anonymous(evidence),
             Ok(Admission::Sealed(sealed)) => {
@@ -281,6 +285,7 @@ impl S3Service {
                     Ok(payload) => payload,
                     Err(error) => return outcome.refuse(error),
                 };
+                framing_mode = Some(payload.clone());
                 let question = Authentication::new(
                     &sealed,
                     wire.method(),
@@ -288,7 +293,11 @@ impl S3Service {
                     wire.host().raw_for_signing(),
                     &payload,
                     declared_length,
-                );
+                )
+                // Offered before the verdict and read long after it. An `aws-chunked` body's chunk
+                // chain is verified with the same key and seed the request signature was, and
+                // neither survives `Verdict` — see `crate::ext::ChunkVerification`.
+                .with_chunk_sink(&chunk_sink);
                 match self.inner.authenticator.authenticate(&question).await {
                     Ok(verdict) => verdict,
                     Err(_) => {
@@ -363,9 +372,36 @@ impl S3Service {
             return outcome.refuse(S3Error::from(error));
         }
 
-        // The bytes, at last, and only now. Two ceilings, both enforced as the body arrives.
+        // Whether the `aws-chunked` parser runs, decided from `x-amz-content-sha256` and from
+        // nothing else, and decided here — after the verifier, because a signed chunk chain is
+        // seeded by the request signature, and before the read, because every check it performs is
+        // one the head already answers.
+        let ingest = match framing_mode.as_ref() {
+            Some(payload) => {
+                let seed = crate::chunked::presented_signature_hex(&headers, wire.query().as_str());
+                match crate::chunked::ChunkIngest::prepare(
+                    payload,
+                    &headers,
+                    wire.framing(),
+                    &chunk_sink,
+                    seed.as_deref(),
+                    // The documented defaults. `Limits` carries no `ChunkLimits` today, so there
+                    // is no assembly-level knob to read; the defaults are the ones
+                    // `rustfs_gateway_http::ChunkLimits` argues for, and a deployment that needs
+                    // to move them needs a builder field first.
+                    rustfs_gateway_http::ChunkLimits::default(),
+                ) {
+                    Ok(ingest) => ingest,
+                    Err(error) => return outcome.refuse(error),
+                }
+            }
+            None => None,
+        };
+
+        // The bytes, at last, and only now. Two ceilings, both enforced as the body arrives, and
+        // both counted on the wire bytes rather than the decoded ones.
         let ceilings = BodyCeilings::of(operation, self.inner.max_buffered_body_bytes);
-        let body = match sealed.read(&authenticated, ceilings).await {
+        let body = match sealed.read(&authenticated, ceilings, ingest).await {
             Ok(body) => body,
             Err(error) => return outcome.refuse(error),
         };
@@ -445,9 +481,14 @@ impl<'a> Outcome<'a> {
 /// What `x-amz-content-sha256` said about the body.
 ///
 /// An absent header is [`PayloadMode::Empty`], whose canonical token is the digest of the empty
-/// payload — what SDKs sign for a body-less request. `aws-chunked` framing is not decoded by this
-/// assembly, so a streaming value that declares trailers is refused by `PayloadMode::parse` rather
-/// than being admitted and then mis-framed.
+/// payload — what SDKs sign for a body-less request.
+///
+/// The trailer set is read from `x-amz-trailer` and handed to `PayloadMode::parse` together with
+/// the digest value, because the two are only valid in specific combinations and a mode that could
+/// be half-built could be observed half-built. It used to be [`TrailerSet::None`] unconditionally,
+/// which refused every trailered upload here as an unreadable header — the wrong stage and the
+/// wrong sentence for a request that is well-formed and merely asks for something this assembly
+/// has not finished. `crate::chunked` is where that refusal now happens, as a `501`.
 fn payload_mode(headers: &http::HeaderMap) -> Result<PayloadMode, S3Error> {
     let Some(value) = headers.get("x-amz-content-sha256") else {
         return Ok(PayloadMode::Empty);
@@ -458,12 +499,37 @@ fn payload_mode(headers: &http::HeaderMap) -> Result<PayloadMode, S3Error> {
             "the x-amz-content-sha256 header is not a readable value",
         ));
     };
-    PayloadMode::parse(text, TrailerSet::None).map_err(|_| {
+    PayloadMode::parse(text, declared_trailers(headers)?).map_err(|_| {
         S3Error::new(
             ErrorCode::INVALID_REQUEST,
             "the x-amz-content-sha256 header is not a value this service accepts",
         )
     })
+}
+
+/// The trailer set `x-amz-trailer` declared.
+///
+/// Every name is validated by `rustfs_gateway_sig::TrailerName`, and the set by
+/// `DeclaredTrailers::new`, which refuses an empty declaration, too many names and duplicates. None
+/// of those checks is repeated here: this function splits a list and nothing else, so there is one
+/// place a trailer name is judged.
+///
+/// `signed` is `false`. `x-amz-trailer-signature` is a value that appears *after* the terminal
+/// chunk rather than a name a client declares in this header, so nothing readable from the head can
+/// set it; the signed-trailer form is refused downstream along with every other trailered mode.
+fn declared_trailers(headers: &http::HeaderMap) -> Result<TrailerSet, S3Error> {
+    let Some(value) = headers.get("x-amz-trailer") else {
+        return Ok(TrailerSet::None);
+    };
+    let malformed = || S3Error::new(ErrorCode::INVALID_REQUEST, "the x-amz-trailer header is not one this service can read");
+    let text = value.to_str().map_err(|_| malformed())?;
+    let mut names = Vec::new();
+    for name in text.split(',').map(str::trim).filter(|name| !name.is_empty()) {
+        names.push(rustfs_gateway_sig::TrailerName::new(name).map_err(|_| malformed())?);
+    }
+    rustfs_gateway_sig::DeclaredTrailers::new(names, false)
+        .map(TrailerSet::Declared)
+        .map_err(|_| malformed())
 }
 
 /// Turns an encoder's output into the response that goes on the wire.

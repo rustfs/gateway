@@ -51,7 +51,7 @@ mod governor;
 mod host;
 mod observer;
 
-pub use self::authenticator::{Authentication, Authenticator, SigV4Authenticator, Unavailable};
+pub use self::authenticator::{Authentication, Authenticator, ChunkSink, ChunkVerification, SigV4Authenticator, Unavailable};
 pub use self::authorizer::{Authorizer, AuthzRequest, Denial, allow_when};
 pub use self::credentials::{CredentialProvider, Credentials, CredentialsError, StaticCredentials};
 pub use self::governor::{Governor, GovernorRequest, Lease, Unlimited};
