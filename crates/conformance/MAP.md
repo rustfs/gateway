@@ -57,6 +57,7 @@ reach its target must not be recordable as a run whose assertions failed.
 | `src/bin/rustfs-gateway-conformance.rs` | The product binary. Contains no decisions | Never |
 | `tests/corpus.rs` | The gate: the whole corpus loads, validates, and concludes — through the public API only | It goes red |
 | `tests/wired.rs` | The other gate: a target is wired and cases really executed, not skipped | It goes red |
+| `tests/tagging.rs` | 1 positive / 14 negative — the `?tagging` band end to end over its own hand-assembled service, because `inprocess.rs` does not register the three handlers yet | You changed the tagging half of `fixture.rs`, or you just added those three registrations |
 
 ## Where a verdict comes from
 
@@ -102,6 +103,22 @@ expected to be red, and the baseline exists to freeze how red rather than to exc
 
 ### What the red is made of, in descending order
 
+0. **The three `?tagging` handlers exist and are not registered, so `c-copy-0008` is red on a
+   `501`.** `fixture.rs` implements `GetObjectTagging`, `PutObjectTagging` and
+   `DeleteObjectTagging`, the routes and the codecs are generated, and `tests/tagging.rs` drives all
+   of it green over a service it assembles itself. What is missing is three lines in
+   `inprocess.rs::assemble`'s `ServiceBuilder` chain:
+
+   ```rust
+   .register::<dto::DeleteObjectTagging, _>(Arc::clone(&backend))
+   .register::<dto::GetObjectTagging, _>(Arc::clone(&backend))
+   .register::<dto::PutObjectTagging, _>(Arc::clone(&backend))
+   ```
+
+   They were not added because `inprocess.rs` was outside the file scope of the change that added
+   the rest. Until they land, exchange #2 of `c-copy-0008` answers `NOT_REGISTERED_MESSAGE` — which
+   is the correct intermediate state, and a long way from what it answered before the rows existed:
+   `GET /b/k?tagging` was `GetObject` returning the object's bytes.
 1. **`encoding-type` is decoded, echoed, and never applied.** `spec/operations/ListObjects.toml`,
    `ListObjectsV2.toml`, `ListObjectVersions.toml` and `ListMultipartUploads.toml` each declare
    `url_encoded_fields`, and no generated codec reads it — nor does anything call

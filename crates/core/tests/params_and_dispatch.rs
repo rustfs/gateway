@@ -432,6 +432,49 @@ fn the_generated_router_still_serves_the_plain_object_read() {
     assert_eq!(dispatch.entry.op_name, "GetObject");
 }
 
+/// Negative — an unhandled tagging request is refused by name, in all three methods.
+///
+/// The registry below handles the plain object band and nothing else, which is the shape of every
+/// deployment that has not implemented tagging. Each of the three must come back as the second
+/// `501` naming the tagging operation the request asked for — not as a `GetObject` body, not as a
+/// `PutObject` write, and not as a `DeleteObject` that answers `204` for a request that meant to
+/// remove a label. Registration decides whether a request can be *served*; it must never decide
+/// what the request *means*.
+#[test]
+fn n_an_unhandled_tagging_request_is_refused_rather_than_answered_by_the_object_band() {
+    let mut registry = Registry::new();
+    registry.register(&GET_OBJECT).expect("a registrable spec");
+    registry.register(&DELETE_OBJECT).expect("a registrable spec");
+    let router = Router::from_generated(registry).expect("the generated table builds");
+
+    for (line, expected) in [
+        ("GET /bucket/key?tagging", "GetObjectTagging"),
+        ("PUT /bucket/key?tagging", "PutObjectTagging"),
+        ("DELETE /bucket/key?tagging", "DeleteObjectTagging"),
+    ] {
+        let error = router
+            .dispatch(&Req::new(line).parts())
+            .expect_err("this registry handles no tagging operation");
+        assert_eq!(*error.code(), ErrorCode::NOT_IMPLEMENTED, "{line}");
+        assert_eq!(error.message(), NOT_REGISTERED_MESSAGE, "{line}");
+        assert_eq!(error.operation(), Some(expected), "{line} must name the operation it asked for");
+    }
+}
+
+/// The two registered neighbours are still served, so the refusal above is not a blanket one.
+#[test]
+fn the_generated_router_still_serves_the_plain_object_band_beside_the_tagging_rows() {
+    let mut registry = Registry::new();
+    registry.register(&GET_OBJECT).expect("a registrable spec");
+    registry.register(&DELETE_OBJECT).expect("a registrable spec");
+    let router = Router::from_generated(registry).expect("the generated table builds");
+
+    for (line, expected) in [("GET /bucket/key", "GetObject"), ("DELETE /bucket/key", "DeleteObject")] {
+        let dispatch = router.dispatch(&Req::new(line).parts()).expect("routed");
+        assert_eq!(dispatch.entry.op_name, expected, "{line}");
+    }
+}
+
 /// A parameter check without a route never runs: the order of the three questions is fixed.
 #[test]
 fn a_request_that_does_not_route_never_reaches_parameter_validation() {

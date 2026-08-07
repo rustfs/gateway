@@ -15,6 +15,8 @@ Delete 2
 DeleteMarkerEntry 5
 DeleteObjectInput 10
 DeleteObjectOutput 3
+DeleteObjectTaggingInput 4
+DeleteObjectTaggingOutput 1
 DeleteObjectsInput 7
 DeleteObjectsOutput 3
 DeletedObject 4
@@ -26,6 +28,8 @@ GetObjectAttributesOutput 9
 GetObjectAttributesParts 6
 GetObjectInput 22
 GetObjectOutput 43
+GetObjectTaggingInput 5
+GetObjectTaggingOutput 2
 HeadObjectInput 21
 HeadObjectOutput 43
 Initiator 2
@@ -50,7 +54,11 @@ Owner 2
 Part 14
 PutObjectInput 37
 PutObjectOutput 13
+PutObjectTaggingInput 8
+PutObjectTaggingOutput 1
 RestoreStatus 2
+Tag 2
+Tagging 1
 UploadPartCopyInput 19
 UploadPartCopyOutput 9
 UploadPartInput 14

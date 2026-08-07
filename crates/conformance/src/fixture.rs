@@ -174,6 +174,14 @@ pub struct StoredObject {
     pub expires: Option<String>,
     /// User metadata.
     pub metadata: BTreeMap<String, String>,
+    /// The tag set, in the order the request that wrote it listed the pairs.
+    ///
+    /// A `Vec` rather than a map, and ordered rather than sorted, because the tag set is what the
+    /// writer sent: `x-amz-tagging: a=1&b=2` and a `<Tagging>` document both carry an order, and a
+    /// stub that re-sorted them would be answering from a decision of its own. Duplicate keys never
+    /// reach here — [`parse_tagging_header`] and [`tag_pairs`] refuse them — so the sequence is a
+    /// map in everything but lookup cost, and ten pairs is the ceiling AWS documents.
+    pub tags: Vec<(String, String)>,
     /// The storage class the writer named, or `STANDARD`.
     pub storage_class: String,
     /// The unquoted MD5 entity tag of `body`.
@@ -471,6 +479,20 @@ impl Fixture {
             .get(&(bucket.to_owned(), key.to_owned()))
             .and_then(|versions| versions.last())
             .and_then(|version| version.object.as_ref())
+    }
+
+    /// The same object, writable — the newest version of that key, if it is an object.
+    ///
+    /// The tagging operations are the only writers that change an object *in place*: every other
+    /// write in this fixture goes through [`Fixture::put_object`], which appends a version. A tag
+    /// set is not a representation, so relabelling an object must not mint a version for it — the
+    /// version id a tagging write reports is the one the object already had.
+    #[must_use]
+    pub fn object_mut(&mut self, bucket: &str, key: &str) -> Option<&mut StoredObject> {
+        self.objects
+            .get_mut(&(bucket.to_owned(), key.to_owned()))
+            .and_then(|versions| versions.last_mut())
+            .and_then(|version| version.object.as_mut())
     }
 
     /// One named version of one key, or `None` for an id this fixture never minted.
@@ -1375,6 +1397,164 @@ fn directive_of(value: Option<&str>, reason: &'static str) -> Result<MetadataFro
     }
 }
 
+/// AWS's own wording for an `x-amz-tagging` header that is not a tag set.
+///
+/// One constant rather than a message per failure, because AWS answers every malformed spelling of
+/// this header with the same sentence: a caller who could tell "no `=`" from "duplicate key" apart
+/// by the `<Message>` element would be learning the parser's shape rather than the rule.
+const MALFORMED_TAGGING_HEADER: &str = "The header 'x-amz-tagging' shall be encoded as UTF-8 then URLEncoded URL query \
+     parameters without tag name duplicates.";
+
+/// Reads the inline `x-amz-tagging` header — `a=1&b=2`, form-urlencoded — into ordered pairs.
+///
+/// This is the header `PutObject` and `CopyObject` carry, and it is **not** the `?tagging`
+/// subresource: the two travel together in `c-copy-0008`, where the copy writes the tag set through
+/// this header and the read-back comes back through `GetObjectTagging`. Nothing here is shared with
+/// the subresource's XML document beyond the pairs both produce.
+///
+/// Decoding is `application/x-www-form-urlencoded`, which is not the same alphabet as a path
+/// segment: `+` is a space, and `%` begins two hex digits. A truncated or non-hex escape is refused
+/// rather than passed through, because a tag whose key is `%zz` would be stored under a name no
+/// later request can spell.
+///
+/// # Errors
+///
+/// `InvalidArgument` for a segment with no `=`, for a broken escape, and for a repeated key — the
+/// three shapes AWS names in one sentence.
+fn parse_tagging_header(header: Option<&str>) -> Result<Vec<(String, String)>, HandlerError> {
+    let Some(raw) = header else { return Ok(Vec::new()) };
+    let mut pairs: Vec<(String, String)> = Vec::new();
+    for segment in raw.split('&') {
+        if segment.is_empty() {
+            continue;
+        }
+        let (key, value) = segment
+            .split_once('=')
+            .ok_or_else(|| HandlerError::new(ErrorCode::INVALID_ARGUMENT, MALFORMED_TAGGING_HEADER))?;
+        let key = form_decode(key)?;
+        let value = form_decode(value)?;
+        require_tag_key(&key)?;
+        if pairs.iter().any(|(existing, _)| existing == &key) {
+            return Err(HandlerError::new(ErrorCode::INVALID_ARGUMENT, MALFORMED_TAGGING_HEADER));
+        }
+        pairs.push((key, value));
+    }
+    Ok(pairs)
+}
+
+/// One form-urlencoded field, decoded.
+///
+/// # Errors
+///
+/// `InvalidArgument` when an escape is truncated, is not hex, or decodes to bytes that are not
+/// UTF-8. The header's own wording says "encoded as UTF-8 **then** URLEncoded", so a sequence that
+/// survives the second step and fails the first is exactly what it is describing.
+fn form_decode(text: &str) -> Result<String, HandlerError> {
+    let bytes = text.as_bytes();
+    let mut out: Vec<u8> = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        match bytes.get(index) {
+            Some(b'+') => out.push(b' '),
+            Some(b'%') => {
+                let hex = text
+                    .get(index + 1..index + 3)
+                    .ok_or_else(|| HandlerError::new(ErrorCode::INVALID_ARGUMENT, MALFORMED_TAGGING_HEADER))?;
+                let byte = u8::from_str_radix(hex, 16)
+                    .map_err(|_| HandlerError::new(ErrorCode::INVALID_ARGUMENT, MALFORMED_TAGGING_HEADER))?;
+                out.push(byte);
+                index += 2;
+            }
+            Some(byte) => out.push(*byte),
+            None => break,
+        }
+        index += 1;
+    }
+    String::from_utf8(out).map_err(|_| HandlerError::new(ErrorCode::INVALID_ARGUMENT, MALFORMED_TAGGING_HEADER))
+}
+
+/// A tag key, as the type the model gives it.
+///
+/// The pinned model types `Tag.Key` as `ObjectKey`, so an empty key — which is what `x-amz-tagging:
+/// =1` decodes to — has no representation at all. Refusing it on the way in is what keeps the read
+/// path total: every pair in a [`StoredObject`] came through here, so rendering one back can only
+/// fail on a value this fixture never stored.
+///
+/// # Errors
+///
+/// `InvalidTag`, in AWS's own wording, for a key the type will not hold.
+fn require_tag_key(key: &str) -> Result<ObjectKey, HandlerError> {
+    ObjectKey::new(key).map_err(|_| HandlerError::new(ErrorCode::INVALID_TAG, "The TagKey you have provided is invalid"))
+}
+
+/// The stored pairs, rendered as the `<TagSet>` a tagging read answers with.
+///
+/// # Errors
+///
+/// `InvalidTag` for a key the model's type cannot hold. Unreachable for anything this fixture
+/// stored — both writers go through [`require_tag_key`] — and propagated rather than unwrapped
+/// because "unreachable" is a claim about two other functions, not about this one.
+fn tag_elements(tags: &[(String, String)]) -> Result<Vec<dto::Tag>, HandlerError> {
+    tags.iter()
+        .map(|(key, value)| {
+            Ok(dto::Tag {
+                key: require_tag_key(key)?,
+                value: value.clone(),
+            })
+        })
+        .collect()
+}
+
+/// The `<Tagging>` document of a tagging write, read into ordered pairs.
+///
+/// The twin of [`parse_tagging_header`] over the XML spelling. It refuses the same duplicate keys
+/// with the same code the header does, because the two are one rule over one field group and a
+/// document that could carry `a` twice would leave the object's tag set depending on which of the
+/// two a later reader happened to take.
+///
+/// # Errors
+///
+/// `InvalidTag` for a repeated key. Everything structural — a wrong root, a missing `<Key>` — was
+/// already refused by the generated decoder before this ran.
+fn tag_pairs(document: &dto::Tagging) -> Result<Vec<(String, String)>, HandlerError> {
+    let mut pairs: Vec<(String, String)> = Vec::new();
+    for tag in &document.tag_set {
+        let key = tag.key.as_str().to_owned();
+        if pairs.iter().any(|(existing, _)| existing == &key) {
+            return Err(HandlerError::new(
+                ErrorCode::INVALID_TAG,
+                "There are duplicate keys in your request. Please check and try again.",
+            ));
+        }
+        pairs.push((key, tag.value.clone()));
+    }
+    Ok(pairs)
+}
+
+/// Refuses `?versionId` on a tagging request rather than answering the current version's tag set.
+///
+/// This fixture keeps one tag set per key, on its newest version, because no case declares a tag
+/// set per version — `[setup.objects]` has no field for one, and inventing per-version labels is
+/// exactly the kind of state a conformance stub must not hold. So the honest answer to a request
+/// that names a version is that this backend does not serve it. Silently ignoring the parameter
+/// would report the *current* labels as the named version's, and a case asserting on that would go
+/// green against a wrong answer.
+///
+/// # Errors
+///
+/// `NotImplemented` whenever the parameter is present, with a value or without. The message is
+/// AWS's own constant for the code — it says "header" where this one is a query key, and it is
+/// still the sentence AWS sends, so it is reproduced rather than improved on.
+fn refuse_versioned_tagging(version_id: Option<&str>) -> Result<(), HandlerError> {
+    if version_id.is_none() {
+        return Ok(());
+    }
+    Err(HandlerError::new(
+        ErrorCode::NOT_IMPLEMENTED,
+        "A header you provided implies functionality that is not implemented",
+    ))
+}
+
 /// The source object a copy will read, and the version id to report for it.
 ///
 /// Every refusal here is the *source's*: a copy that reports on the destination answers a missing
@@ -1477,6 +1657,36 @@ impl Handler<dto::DeleteObject> for Stub {
         request: Req<dto::DeleteObject>,
     ) -> impl core::future::Future<Output = HandlerResult<dto::DeleteObject>> + Send {
         let outcome = self.delete_object(request.input());
+        async move { outcome }
+    }
+}
+
+impl Handler<dto::GetObjectTagging> for Stub {
+    fn call(
+        &self,
+        request: Req<dto::GetObjectTagging>,
+    ) -> impl core::future::Future<Output = HandlerResult<dto::GetObjectTagging>> + Send {
+        let outcome = self.get_object_tagging(request.input());
+        async move { outcome }
+    }
+}
+
+impl Handler<dto::PutObjectTagging> for Stub {
+    fn call(
+        &self,
+        request: Req<dto::PutObjectTagging>,
+    ) -> impl core::future::Future<Output = HandlerResult<dto::PutObjectTagging>> + Send {
+        let outcome = self.put_object_tagging(request.input());
+        async move { outcome }
+    }
+}
+
+impl Handler<dto::DeleteObjectTagging> for Stub {
+    fn call(
+        &self,
+        request: Req<dto::DeleteObjectTagging>,
+    ) -> impl core::future::Future<Output = HandlerResult<dto::DeleteObjectTagging>> + Send {
+        let outcome = self.delete_object_tagging(request.input());
         async move { outcome }
     }
 }
@@ -1630,6 +1840,10 @@ async fn put_object(state: &Arc<Mutex<Fixture>>, input: dto::PutObjectInput) -> 
     object.content_language = input.content_language.clone();
     object.expires = input.expires.as_ref().map(|value| value.as_str().to_owned());
     object.metadata = input.metadata.clone();
+    // The inline tag set, which is a different thing from the `?tagging` subresource: this header
+    // is how a single-request write labels the object it is writing. Parsed before the write so a
+    // malformed header is a refusal rather than an object stored with no tags and a 200.
+    object.tags = parse_tagging_header(input.tagging.as_deref())?;
     if let Some(class) = input.storage_class.as_ref() {
         object.storage_class = class.to_string();
     }
@@ -1870,6 +2084,13 @@ impl Stub {
         let existing = fixture.object(input.bucket.as_str(), input.key.as_str()).cloned();
         guard_write(existing.as_ref(), input.if_match.as_deref(), input.if_none_match.as_deref(), now)?;
 
+        // Taken before `found` is consumed below, and applied after: the two directives are
+        // independent, so a copy may replace the metadata and inherit the tags, or the reverse.
+        // Folding them into one branch is the defect `c-copy-0008` exists to catch — the tagging
+        // half is the one most often left out, and when it is the destination silently inherits the
+        // source's labels, which is a lifecycle and access-policy decision rather than a cosmetic
+        // one.
+        let source_tags = found.tags.clone();
         let mut object = match metadata_from {
             // COPY is not a merge: every `x-amz-meta-*` and object attribute on the request is
             // discarded rather than layered over the source's.
@@ -1887,6 +2108,10 @@ impl Stub {
                 rebuilt.metadata = input.metadata.clone();
                 rebuilt
             }
+        };
+        object.tags = match tagging_from {
+            MetadataFrom::Source => source_tags,
+            MetadataFrom::Request => parse_tagging_header(input.tagging.as_deref())?,
         };
         if let Some(class) = input.storage_class.as_ref() {
             object.storage_class = class.to_string();
@@ -1981,6 +2206,64 @@ impl Stub {
             version_id: marker,
             ..dto::DeleteObjectOutput::default()
         }))
+    }
+
+    /// The tag set of one object, out of what the writer sent — never invented.
+    ///
+    /// An object with no tags answers `200` with an empty `<TagSet/>`, which is not the same shape
+    /// as the bucket-level read: `NoSuchTagSet` has no object-level twin, and answering `404` here
+    /// would make "this object has no labels" indistinguishable from "this key is not there".
+    ///
+    /// `versionId` is refused rather than ignored. This fixture stores the tag set on the newest
+    /// version of a key, so answering a request that named an older one would report the current
+    /// labels as that version's — a wrong answer, where a refusal is merely a gap.
+    fn get_object_tagging(&self, input: &dto::GetObjectTaggingInput) -> HandlerResult<dto::GetObjectTagging> {
+        let fixture = self.borrow()?;
+        require_bucket(&fixture, &input.bucket)?;
+        refuse_versioned_tagging(input.version_id.as_deref())?;
+        let object = fixture
+            .object(input.bucket.as_str(), input.key.as_str())
+            .ok_or_else(|| no_such_key(input.key.as_str()))?;
+        Ok(Resp::new(dto::GetObjectTaggingOutput {
+            tag_set: tag_elements(&object.tags)?,
+            ..dto::GetObjectTaggingOutput::default()
+        }))
+    }
+
+    /// The whole tag set, replaced. There is no partial update, so an empty document clears it.
+    ///
+    /// The write is in place: relabelling an object is not a new representation of it, so no version
+    /// is minted and the bytes, the entity tag and `Last-Modified` are all left exactly as they
+    /// were. A stub that went through [`Fixture::put_object`] here would have appended a version on
+    /// a versioned bucket and changed the object's modification time on every bucket, and a case
+    /// asserting either afterwards would be measuring this file rather than the protocol.
+    fn put_object_tagging(&self, input: &dto::PutObjectTaggingInput) -> HandlerResult<dto::PutObjectTagging> {
+        let pairs = tag_pairs(&input.tagging)?;
+        let mut fixture = self.borrow()?;
+        require_bucket(&fixture, &input.bucket)?;
+        refuse_versioned_tagging(input.version_id.as_deref())?;
+        let object = fixture
+            .object_mut(input.bucket.as_str(), input.key.as_str())
+            .ok_or_else(|| no_such_key(input.key.as_str()))?;
+        object.tags = pairs;
+        Ok(Resp::new(dto::PutObjectTaggingOutput::default()))
+    }
+
+    /// The tag set removed, the object left where it is.
+    ///
+    /// The `204` is unconditional in the same sense `DeleteObject`'s is: clearing the tags of an
+    /// object that carries none is a success. The key, however, still has to exist — the request
+    /// names an object, and answering a success for one that is not there would tell a caller its
+    /// untag landed on something.
+    fn delete_object_tagging(&self, input: &dto::DeleteObjectTaggingInput) -> HandlerResult<dto::DeleteObjectTagging> {
+        let mut fixture = self.borrow()?;
+        require_bucket(&fixture, &input.bucket)?;
+        refuse_versioned_tagging(input.version_id.as_deref())?;
+        let object = fixture
+            .object_mut(input.bucket.as_str(), input.key.as_str())
+            .ok_or_else(|| no_such_key(input.key.as_str()))?;
+        object.tags.clear();
+        Ok(Resp::new(dto::DeleteObjectTaggingOutput::default()))
     }
 
     fn delete_objects(&self, input: &dto::DeleteObjectsInput) -> HandlerResult<dto::DeleteObjects> {

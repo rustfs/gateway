@@ -1,0 +1,151 @@
+{
+  "ir_version": "1",
+  "operation": "GetObjectTagging",
+  "http": {
+            "method": "GET",
+            "target": "Object",
+            "precedence": 480,
+            "predicates": [
+                            { "kind": "Method", "method": "GET" },
+                            { "kind": "Target", "target": "Object" },
+                            { "kind": "QueryPresent", "key": "tagging" }
+                          ],
+            "success_status": 200,
+            "alt_success_statuses": [],
+            "path_shape": "/{Bucket}/{Key+}"
+          },
+  "auth": { "requirement": "Required", "action": "s3:GetObjectTagging", "presigned_allowed": true, "service": "s3" },
+  "payload": {
+               "request": { "kind": "None", "buffering": "None", "max_bytes": null },
+               "response": { "kind": "XmlBody", "buffering": "Full", "max_bytes": 65536 }
+             },
+  "checksum": { "http_checksum_required": false, "request_algorithms": [], "response_algorithms": [] },
+  "input": {
+             "fields": [
+                         {
+                           "name": "Bucket",
+                           "wire_name": "Bucket",
+                           "required": true,
+                           "binding": { "kind": "UriLabel", "greedy": false },
+                           "type": { "kind": "BucketName" },
+                           "hot": true,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "Key",
+                           "wire_name": "Key",
+                           "required": true,
+                           "binding": { "kind": "UriLabel", "greedy": true },
+                           "type": { "kind": "ObjectKey" },
+                           "hot": true,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "VersionId",
+                           "wire_name": "versionId",
+                           "required": false,
+                           "binding": { "kind": "Query" },
+                           "type": { "kind": "String" },
+                           "hot": true,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "ExpectedBucketOwner",
+                           "wire_name": "x-amz-expected-bucket-owner",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "String" },
+                           "hot": false,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "RequestPayer",
+                           "wire_name": "x-amz-request-payer",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "StringEnum", "values": ["requester"] },
+                           "hot": false,
+                           "quirk_refs": []
+                         }
+                       ]
+           },
+  "output": {
+              "fields": [
+                          {
+                            "name": "VersionId",
+                            "wire_name": "x-amz-version-id",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": { "kind": "String" },
+                            "hot": false,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "TagSet",
+                            "wire_name": "TagSet",
+                            "required": true,
+                            "binding": { "kind": "BodyXml" },
+                            "type": {
+                                      "kind": "List",
+                                      "member": { "kind": "Structure", "shape": "Tag" },
+                                      "flattened": false,
+                                      "wrapper_name": "Tag"
+                                    },
+                            "hot": true,
+                            "quirk_refs": []
+                          }
+                        ]
+            },
+  "shapes": {
+              "Tag": {
+                       "kind": "Structure",
+                       "fields": [
+                                   {
+                                     "name": "Key",
+                                     "wire_name": "Key",
+                                     "required": true,
+                                     "binding": { "kind": "BodyXml" },
+                                     "type": { "kind": "ObjectKey" },
+                                     "hot": true,
+                                     "quirk_refs": []
+                                   },
+                                   {
+                                     "name": "Value",
+                                     "wire_name": "Value",
+                                     "required": true,
+                                     "binding": { "kind": "BodyXml" },
+                                     "type": { "kind": "String" },
+                                     "hot": true,
+                                     "quirk_refs": []
+                                   }
+                                 ],
+                       "xml": {
+                                "element_order": ["Key", "Value"],
+                                "empty_value_policy": { "Key": "emit", "Value": "emit" },
+                                "attributes": []
+                              }
+                     }
+            },
+  "xml": {
+           "request_root": null,
+           "request_root_aliases": [],
+           "response_root": "Tagging",
+           "xmlns": "emit",
+           "unwrapped_output": false,
+           "element_order": ["TagSet"],
+           "empty_value_policy": { "TagSet": "emit" },
+           "url_encoded_fields": [],
+           "attributes": [],
+           "body_literal": false
+         },
+  "errors": {
+              "not_configured": null,
+              "allows_error_after_200": false,
+              "codes": ["NoSuchBucket", "NoSuchKey", "AccessDenied", "InvalidArgument"]
+            },
+  "derived_resources": [],
+  "head_mirrors": null,
+  "quirk_refs": [],
+  "quirks": [],
+  "ext_points": []
+}

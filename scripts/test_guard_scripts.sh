@@ -43,6 +43,20 @@ fail_msg() {
 # for a reason having nothing to do with what it checks.
 SANDBOX=""
 
+# One build directory, shared with whoever ran this. A guard that declares
+# REQUIRES-BUILD compiles the workspace, and a sandbox with its own target/ compiles it
+# from nothing — three times over, once as the positive control and once per negative
+# case. That took this suite from under a minute to past ten, which is the same
+# budget failure the sandbox reuse above was written to avoid, arriving by a different
+# road.
+#
+# Sharing is sound because a sandbox differs from the tree only in the one file a case
+# mutates: every dependency is already built, and cargo rebuilds the workspace crates
+# alone. It is not a correctness shortcut — the guards still read the sandbox, and
+# CARGO_TARGET_DIR changes where objects land, not what is compiled.
+GUARD_TARGET_DIR="${CARGO_TARGET_DIR:-${REPO_ROOT}/target}/guard-self-test"
+export CARGO_TARGET_DIR="$GUARD_TARGET_DIR"
+
 make_sandbox() {
     if [[ -n "$SANDBOX" ]]; then
         (

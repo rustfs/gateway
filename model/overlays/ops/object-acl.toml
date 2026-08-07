@@ -14,21 +14,126 @@
 
 # Family: object tagging, ACL and object lock.
 #
-# Nothing is generated yet. Grant parsing and canonicalization is a shared cluster of its own,
-# and the retention and legal-hold subresources share its request shape.
+# Grant parsing and canonicalization is a shared cluster of its own, and the retention and
+# legal-hold subresources share its request shape — so the ACL and lock members stay deferred.
+#
+# The three `?tagging` members are `include`d, and the reason is routing, not readiness. A deferred
+# operation contributes no row to `generated/routes.rs`, and the route table is first-match: with no
+# `?tagging` row the three requests are claimed by the plain object band, which is not a mis-route
+# but three distinct data faults —
+#
+#   * `GET /b/k?tagging`    is answered by `GetObject` with the **object's bytes**;
+#   * `PUT /b/k?tagging`    is answered by `PutObject`, which **stores the tagging document as the
+#                           object**, destroying whatever was there;
+#   * `DELETE /b/k?tagging` is answered by `DeleteObject`, which **deletes the object** the caller
+#                           only wanted to untag.
+#
+# Deferring an operation must not change what a request *means*, only whether it can be served, so
+# the three selectors land here now. They are derived from each operation's `@http` trait
+# (`QueryPresent("tagging")`); precedence is the only thing this overlay decides. See issue #16.
+
+include = ["DeleteObjectTagging", "GetObjectTagging", "PutObjectTagging"]
+
+# =============================================================================================
+# The `?tagging` band: 480 (GET), 490 (PUT), 500 (DELETE)
+#
+# The band sits **after** the multipart band (400-460) and **before** the object band, whose first
+# row is CopyObject at 790. Both edges are decisions:
+#
+#   * after multipart, because a request naming both an upload and the tagging subresource is
+#     undocumented and the multipart reading is the one already settled by the attributes row at
+#     470 (`ListParts` before `GetObjectAttributes`); the same order is kept here rather than
+#     inverted for one family;
+#   * before CopyObject, because `PUT /b/k?tagging` carrying `x-amz-copy-source` would otherwise be
+#     served as a copy — the tagging document in the body discarded and the destination object
+#     overwritten from the source. The subresource is the narrower reading and claims it.
+#
+# The three rows do not overlap each other: they differ in method, which the overlap lattice treats
+# as an independent dimension.
+# =============================================================================================
+
+# =============================================================================================
+# GetObjectTagging
+#
+# The tag set of one object. The output shape carries `xmlName = "Tagging"`, so the response root
+# is derived rather than stated, and `TagSet` is an unflattened list whose member is named `Tag` —
+# both facts come from the model, neither is repeated here.
+# =============================================================================================
+[op.GetObjectTagging]
+precedence = 480
+auth_action = "s3:GetObjectTagging"
+# A tag set is at most ten pairs of a bounded key and a bounded value. The same generous ceiling
+# GetBucketLocation and GetObjectAttributes use bounds this XML surface with room to spare.
+response_max_bytes = 65536
+error_codes = ["NoSuchBucket", "NoSuchKey", "AccessDenied", "InvalidArgument"]
+element_order = ["TagSet"]
+url_encoded_fields = []
+input_hot = ["Key", "VersionId"]
+output_hot = ["TagSet"]
+
+# =============================================================================================
+# PutObjectTagging
+#
+# Replaces the whole tag set; there is no partial update. The request body is the `Tagging`
+# structure as the payload, so the request root is the model's `xmlName` and needs no overlay.
+# =============================================================================================
+[op.PutObjectTagging]
+precedence = 490
+auth_action = "s3:PutObjectTagging"
+# The pinned model carries `aws.protocols#httpChecksum` with `requestChecksumRequired`, which is a
+# different trait from the `smithy.api#httpChecksumRequired` lowering reads, so the requirement is
+# stated here rather than silently lost: a tagging write with neither Content-MD5 nor an
+# x-amz-checksum-* header is refused before the handler runs, exactly as DeleteObjects is.
+http_checksum_required = true
+# Ten tags, a 128-character key and a 256-character value each: four kilobytes of payload plus
+# markup. 64 KiB is already an order of magnitude past anything AWS accepts, and it closes the
+# XML-bomb surface an unbounded body would leave open.
+request_max_bytes = 65536
+error_codes = ["NoSuchBucket", "NoSuchKey", "AccessDenied", "InvalidArgument", "MalformedXML", "InvalidTag"]
+url_encoded_fields = []
+input_hot = ["Key", "Tagging", "VersionId"]
+output_hot = ["VersionId"]
+
+# =============================================================================================
+# DeleteObjectTagging
+#
+# Removes the whole tag set. The model already answers 204, and — like DeleteObject — the 204 is
+# unconditional: untagging an object that carries no tags is a success.
+# =============================================================================================
+[op.DeleteObjectTagging]
+precedence = 500
+auth_action = "s3:DeleteObjectTagging"
+error_codes = ["NoSuchBucket", "NoSuchKey", "AccessDenied", "InvalidArgument"]
+url_encoded_fields = []
+input_hot = ["Key", "VersionId"]
+output_hot = ["VersionId"]
+
+# =============================================================================================
+# Nested shapes owned by this family
+# =============================================================================================
+
+# The payload of a tagging write and the body of a tagging read are the same structure.
+[shape.Tagging]
+required = ["TagSet"]
+hot = ["TagSet"]
+element_order = ["TagSet"]
+
+# One pair. Both members are required by the model; the order here is the order AWS writes them in,
+# which is also the model's declaration order.
+[shape.Tag]
+required = ["Key", "Value"]
+hot = ["Key", "Value"]
+element_order = ["Key", "Value"]
 
 [[deferred]]
 reason = "P5 object tagging, ACL and object-lock family; grant parsing is a shared cluster of its own."
 operations = [
-  "DeleteObjectTagging",
   "GetObjectAcl",
   "GetObjectLegalHold",
   "GetObjectLockConfiguration",
   "GetObjectRetention",
-  "GetObjectTagging",
   "PutObjectAcl",
   "PutObjectLegalHold",
   "PutObjectLockConfiguration",
   "PutObjectRetention",
-  "PutObjectTagging",
 ]

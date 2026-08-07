@@ -8,7 +8,6 @@
 # Regenerate: GATEWAY_WRITE_ROUTE_ALLOWANCES=1 scripts/check_route_coverage.sh
 CreateSession -> ListObjects
 DeleteObjectAnnotation -> DeleteObject
-DeleteObjectTagging -> DeleteObject
 GetBucketAbac -> ListObjects
 GetBucketAccelerateConfiguration -> ListObjects
 GetBucketAcl -> ListObjects
@@ -36,7 +35,6 @@ GetObjectAnnotation -> GetObject
 GetObjectLegalHold -> GetObject
 GetObjectLockConfiguration -> ListObjects
 GetObjectRetention -> GetObject
-GetObjectTagging -> GetObject
 GetObjectTorrent -> GetObject
 GetPublicAccessBlock -> ListObjects
 ListBucketAnalyticsConfigurations -> ListObjects
@@ -49,6 +47,5 @@ PutObjectAcl -> PutObject
 PutObjectAnnotation -> PutObject
 PutObjectLegalHold -> PutObject
 PutObjectRetention -> PutObject
-PutObjectTagging -> PutObject
 RenameObject -> PutObject
 UpdateObjectEncryption -> PutObject

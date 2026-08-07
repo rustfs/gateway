@@ -31,7 +31,7 @@ pub use crate::ops::enums::{
 pub use crate::ops::shapes::{
     Bucket, Checksum, CommonPrefix, CompletedMultipartUpload, CompletedPart, Delete, DeleteMarkerEntry, DeletedObject, Error,
     GetObjectAttributesParts, Initiator, MultipartUpload, Object, ObjectIdentifier, ObjectPart, ObjectVersion, Owner, Part,
-    RestoreStatus,
+    RestoreStatus, Tag, Tagging,
 };
 
 pub use crate::ops::abort_multipart_upload::{
@@ -52,6 +52,10 @@ pub use crate::ops::create_multipart_upload::{
 pub use crate::ops::delete_object::{
     DeleteObject, Input as DeleteObjectInput, InputBuilder as DeleteObjectInputBuilder, Output as DeleteObjectOutput,
 };
+pub use crate::ops::delete_object_tagging::{
+    DeleteObjectTagging, Input as DeleteObjectTaggingInput, InputBuilder as DeleteObjectTaggingInputBuilder,
+    Output as DeleteObjectTaggingOutput,
+};
 pub use crate::ops::delete_objects::{
     DeleteObjects, Input as DeleteObjectsInput, InputBuilder as DeleteObjectsInputBuilder, Output as DeleteObjectsOutput,
 };
@@ -65,6 +69,10 @@ pub use crate::ops::get_object::{
 pub use crate::ops::get_object_attributes::{
     GetObjectAttributes, Input as GetObjectAttributesInput, InputBuilder as GetObjectAttributesInputBuilder,
     Output as GetObjectAttributesOutput,
+};
+pub use crate::ops::get_object_tagging::{
+    GetObjectTagging, Input as GetObjectTaggingInput, InputBuilder as GetObjectTaggingInputBuilder,
+    Output as GetObjectTaggingOutput,
 };
 pub use crate::ops::head_object::{
     HeadObject, Input as HeadObjectInput, InputBuilder as HeadObjectInputBuilder, Output as HeadObjectOutput,
@@ -91,6 +99,10 @@ pub use crate::ops::list_parts::{
 };
 pub use crate::ops::put_object::{
     Input as PutObjectInput, InputBuilder as PutObjectInputBuilder, Output as PutObjectOutput, PutObject,
+};
+pub use crate::ops::put_object_tagging::{
+    Input as PutObjectTaggingInput, InputBuilder as PutObjectTaggingInputBuilder, Output as PutObjectTaggingOutput,
+    PutObjectTagging,
 };
 pub use crate::ops::upload_part::{
     Input as UploadPartInput, InputBuilder as UploadPartInputBuilder, Output as UploadPartOutput, UploadPart,

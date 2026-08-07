@@ -14,9 +14,10 @@
 
 //! The ordered table: what it routes, and everything it refuses to be built from.
 //!
-//! Responsible for: the route cases — eleven positive, thirty negative — including the one that
-//! falsifies a fake overlap check, and the pair that pins an operation the protocol defines and
-//! this build does not serve to its own row rather than to its neighbour's.
+//! Responsible for: the route cases — twelve positive, thirty-six negative — including the one that
+//! falsifies a fake overlap check, and the two blocks that pin an operation the protocol defines and
+//! this build does not serve to its own row rather than to its neighbour's: `?attributes`, and the
+//! three-method `?tagging` band whose absence was a write and a delete of the object.
 //! NOT responsible for: parameter validation (`params_and_dispatch.rs`), the compiled form
 //! (`hot_path.rs`), the golden rendering (`golden.rs`).
 //! Upstream: `support`. Downstream: nothing.
@@ -238,6 +239,119 @@ fn the_attributes_key_under_another_method_does_not_reach_the_attributes_row() {
             Some("GetObjectAttributes"),
             "{line} must not route to a GET-only operation"
         );
+    }
+}
+
+/// The `?tagging` band claims its own three requests, and each one is a different method.
+///
+/// Positive half of the block below. The band is checked as a whole rather than one row per test,
+/// because the property is that *all three* methods leave the plain object band — a table that
+/// gained the read and forgot the write would still be the destructive half of issue #16.
+#[test]
+fn the_tagging_subresource_routes_to_the_tagging_operations() {
+    let table = generated_table();
+    for (line, expected) in [
+        ("GET /bucket/key?tagging", "GetObjectTagging"),
+        ("PUT /bucket/key?tagging", "PutObjectTagging"),
+        ("DELETE /bucket/key?tagging", "DeleteObjectTagging"),
+    ] {
+        let hit = table
+            .resolve(&Req::new(line).parts())
+            .unwrap_or_else(|| panic!("{line} has a route"));
+        assert_eq!(hit.op_name, expected, "{line}");
+        assert!(hit.precedence < 790, "{line} must sit ahead of the object band, got {}", hit.precedence);
+    }
+}
+
+/// Negative — none of the three is claimed by the plain object band.
+///
+/// Each substitution is a distinct fault and all three are named here rather than folded into one
+/// assertion: the read hands back the object's bytes, the write stores the tagging document *as*
+/// the object, and the delete removes the object the caller only wanted to untag.
+#[test]
+fn n_the_tagging_requests_are_never_claimed_by_the_plain_object_band() {
+    let table = generated_table();
+    for (line, forbidden, harm) in [
+        (
+            "GET /bucket/key?tagging",
+            "GetObject",
+            "the object's bytes answer a question about its labels",
+        ),
+        ("PUT /bucket/key?tagging", "PutObject", "the tagging document is stored as the object"),
+        ("DELETE /bucket/key?tagging", "DeleteObject", "the object is deleted instead of untagged"),
+    ] {
+        assert_ne!(routed(&table, &Req::new(line)), Some(forbidden), "{line}: {harm}");
+    }
+}
+
+/// Negative — a tagging write carrying a copy source is a tagging write, not a copy.
+///
+/// `CopyObject` sits at 790 and its whole discriminator is the header, so the two meet on this
+/// request. The other order would overwrite the destination from the source and discard the
+/// document the request carried.
+#[test]
+fn n_a_copy_source_header_does_not_pull_a_tagging_write_into_the_copy_row() {
+    let table = generated_table();
+    let request = Req::new("PUT /bucket/key?tagging").header("x-amz-copy-source", "/other/key");
+    assert_eq!(routed(&table, &request), Some("PutObjectTagging"));
+}
+
+/// Negative — the multipart band is still tried first, in all three methods.
+///
+/// The same order the attributes row settled at 470. A request naming both an upload and the
+/// tagging subresource is undocumented, and answering it from the tagging row would apply a label
+/// operation to an in-progress upload.
+#[test]
+fn n_a_request_naming_an_upload_and_tagging_stays_with_the_multipart_band() {
+    let table = generated_table();
+    for (line, expected) in [
+        ("GET /bucket/key?uploadId=u&tagging", "ListParts"),
+        ("PUT /bucket/key?uploadId=u&partNumber=1&tagging", "UploadPart"),
+        ("DELETE /bucket/key?uploadId=u&tagging", "AbortMultipartUpload"),
+    ] {
+        assert_eq!(routed(&table, &Req::new(line)), Some(expected), "{line}");
+    }
+}
+
+/// Negative — `?tagging` on a bucket is the bucket's tag set, which is still deferred, so it must
+/// not reach any of the three object rows.
+#[test]
+fn n_the_tagging_key_on_a_bucket_does_not_reach_an_object_tagging_row() {
+    let table = generated_table();
+    for line in ["GET /bucket?tagging", "PUT /bucket?tagging", "DELETE /bucket?tagging"] {
+        let hit = routed(&table, &Req::new(line));
+        assert!(
+            !matches!(hit, Some("GetObjectTagging" | "PutObjectTagging" | "DeleteObjectTagging")),
+            "{line} routed to {hit:?}, which is an object-scoped operation"
+        );
+    }
+}
+
+/// Negative — each tagging row is bound to one method, so the key alone does not reach it.
+#[test]
+fn n_a_tagging_row_is_not_reachable_under_another_method() {
+    let table = generated_table();
+    for (line, forbidden) in [
+        ("PUT /bucket/key?tagging", "GetObjectTagging"),
+        ("DELETE /bucket/key?tagging", "PutObjectTagging"),
+        ("GET /bucket/key?tagging", "DeleteObjectTagging"),
+        ("HEAD /bucket/key?tagging", "GetObjectTagging"),
+    ] {
+        assert_ne!(routed(&table, &Req::new(line)), Some(forbidden), "{line}");
+    }
+}
+
+/// Negative — the plain object band is untouched by the three rows put ahead of it.
+#[test]
+fn n_the_plain_object_band_is_unchanged_by_the_tagging_band() {
+    let table = generated_table();
+    for (line, expected) in [
+        ("GET /bucket/key", "GetObject"),
+        ("PUT /bucket/key", "PutObject"),
+        ("DELETE /bucket/key", "DeleteObject"),
+        ("GET /bucket/key?versionId=v", "GetObject"),
+    ] {
+        assert_eq!(routed(&table, &Req::new(line)), Some(expected), "{line}");
     }
 }
 

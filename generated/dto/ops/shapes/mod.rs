@@ -42,6 +42,8 @@ mod object_version;
 mod owner;
 mod part;
 mod restore_status;
+mod tag;
+mod tagging;
 
 pub use self::bucket::Bucket;
 pub use self::checksum::Checksum;
@@ -62,3 +64,5 @@ pub use self::object_version::ObjectVersion;
 pub use self::owner::Owner;
 pub use self::part::Part;
 pub use self::restore_status::RestoreStatus;
+pub use self::tag::Tag;
+pub use self::tagging::Tagging;
