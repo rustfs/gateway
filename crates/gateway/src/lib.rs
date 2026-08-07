@@ -193,6 +193,14 @@ pub use rustfs_gateway_core::ops::shared::lifecycle::{
     LifecycleRejection, MAX_LIFECYCLE_ID_CHARS, MAX_LIFECYCLE_RULES, validate_lifecycle,
 };
 
+// The default-encryption document contract, exported for the same reason as the two above: what
+// `PutBucketEncryption` may store — the closed SSEAlgorithm set and the KMS-key-id/algorithm
+// agreement — must be one implementation every backend calls. The rejection reasons are
+// constant on purpose: `KMSMasterKeyID` is a sensitive member, and a backend that composed its
+// own refusal from the document's bytes would copy a key identifier into an error body
+// (`q-enc-0009`).
+pub use rustfs_gateway_core::ops::shared::encryption::{EncryptionRejection, validate_encryption};
+
 // The bucket lifecycle contracts, exported the day they are written rather than found
 // unreachable later. A backend answering CreateBucket needs `resolve` — the us-east-1
 // omission rule, the EU alias and the strict region match — and a backend answering any

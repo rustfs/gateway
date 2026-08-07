@@ -1,0 +1,31 @@
+[case]
+id = "c-encryption-0022"
+schema_version = 1
+title = "Deleting the encryption of a bucket that does not exist is NoSuchBucket, not an idempotent 204"
+rationale = """
+The idempotent 204 covers a missing document, never a missing bucket: a delete that reports success against a bucket that is not there tells a teardown script its cleanup landed on something, and the script moves on believing a configuration was removed somewhere. The boundary between the two answers is the bucket lookup, and this case pins which side of it the idempotency lives on."""
+polarity = "negative"
+operation = "DeleteBucketEncryption"
+tags = ["encryption", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-enc-0003"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketEncryption.html"
+summary = "The operation addresses a named bucket and lists NoSuchBucket among its errors; the 204 is documented for the configuration, not the bucket."
+kind = "aws-doc"
+
+
+[request]
+method = "DELETE"
+target = "/conf-enc-absent?encryption"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 404
+connection_after = "open"
+
+[expect.error]
+code = "NoSuchBucket"
+request_id_present = true

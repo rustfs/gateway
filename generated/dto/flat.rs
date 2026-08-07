@@ -24,16 +24,17 @@
 //! Upstream: `crate::ops`. Downstream: every consumer mid-migration.
 
 pub use crate::ops::enums::{
-    Acl, ArchiveStatus, ChecksumAlgorithm, ChecksumMode, ChecksumType, EncodingType, LocationConstraint, MetadataDirective,
-    ObjectLockLegalHoldStatus, ObjectLockMode, ObjectOwnership, ReplicationStatus, RequestCharged, RequestPayer,
-    ServerSideEncryption, Status, StorageClass, TaggingDirective, TransitionDefaultMinimumObjectSize,
+    Acl, ArchiveStatus, ChecksumAlgorithm, ChecksumMode, ChecksumType, EncodingType, EncryptionType, LocationConstraint,
+    MetadataDirective, ObjectLockLegalHoldStatus, ObjectLockMode, ObjectOwnership, ReplicationStatus, RequestCharged,
+    RequestPayer, ServerSideEncryption, SseAlgorithm, Status, StorageClass, TaggingDirective, TransitionDefaultMinimumObjectSize,
 };
 pub use crate::ops::shapes::{
-    AbortIncompleteMultipartUpload, Bucket, BucketLifecycleConfiguration, Checksum, CommonPrefix, CompletedMultipartUpload,
-    CompletedPart, CorsConfiguration, CorsRule, CreateBucketConfiguration, Delete, DeleteMarkerEntry, DeletedObject, Error,
-    GetObjectAttributesParts, Initiator, LifecycleExpiration, LifecycleRule, LifecycleRuleAndOperator, LifecycleRuleFilter,
-    MultipartUpload, NoncurrentVersionExpiration, NoncurrentVersionTransition, Object, ObjectIdentifier, ObjectPart,
-    ObjectVersion, Owner, Part, RestoreStatus, Tag, Tagging, Transition,
+    AbortIncompleteMultipartUpload, BlockedEncryptionTypes, Bucket, BucketLifecycleConfiguration, Checksum, CommonPrefix,
+    CompletedMultipartUpload, CompletedPart, CorsConfiguration, CorsRule, CreateBucketConfiguration, Delete, DeleteMarkerEntry,
+    DeletedObject, Error, GetObjectAttributesParts, Initiator, LifecycleExpiration, LifecycleRule, LifecycleRuleAndOperator,
+    LifecycleRuleFilter, MultipartUpload, NoncurrentVersionExpiration, NoncurrentVersionTransition, Object, ObjectIdentifier,
+    ObjectPart, ObjectVersion, Owner, Part, RestoreStatus, ServerSideEncryptionByDefault, ServerSideEncryptionConfiguration,
+    ServerSideEncryptionRule, Tag, Tagging, Transition,
 };
 
 pub use crate::ops::abort_multipart_upload::{
@@ -61,6 +62,10 @@ pub use crate::ops::delete_bucket_cors::{
     DeleteBucketCors, Input as DeleteBucketCorsInput, InputBuilder as DeleteBucketCorsInputBuilder,
     Output as DeleteBucketCorsOutput,
 };
+pub use crate::ops::delete_bucket_encryption::{
+    DeleteBucketEncryption, Input as DeleteBucketEncryptionInput, InputBuilder as DeleteBucketEncryptionInputBuilder,
+    Output as DeleteBucketEncryptionOutput,
+};
 pub use crate::ops::delete_bucket_lifecycle::{
     DeleteBucketLifecycle, Input as DeleteBucketLifecycleInput, InputBuilder as DeleteBucketLifecycleInputBuilder,
     Output as DeleteBucketLifecycleOutput,
@@ -81,6 +86,10 @@ pub use crate::ops::delete_objects::{
 };
 pub use crate::ops::get_bucket_cors::{
     GetBucketCors, Input as GetBucketCorsInput, InputBuilder as GetBucketCorsInputBuilder, Output as GetBucketCorsOutput,
+};
+pub use crate::ops::get_bucket_encryption::{
+    GetBucketEncryption, Input as GetBucketEncryptionInput, InputBuilder as GetBucketEncryptionInputBuilder,
+    Output as GetBucketEncryptionOutput,
 };
 pub use crate::ops::get_bucket_lifecycle_configuration::{
     GetBucketLifecycleConfiguration, Input as GetBucketLifecycleConfigurationInput,
@@ -133,6 +142,10 @@ pub use crate::ops::list_parts::{
 };
 pub use crate::ops::put_bucket_cors::{
     Input as PutBucketCorsInput, InputBuilder as PutBucketCorsInputBuilder, Output as PutBucketCorsOutput, PutBucketCors,
+};
+pub use crate::ops::put_bucket_encryption::{
+    Input as PutBucketEncryptionInput, InputBuilder as PutBucketEncryptionInputBuilder, Output as PutBucketEncryptionOutput,
+    PutBucketEncryption,
 };
 pub use crate::ops::put_bucket_lifecycle_configuration::{
     Input as PutBucketLifecycleConfigurationInput, InputBuilder as PutBucketLifecycleConfigurationInputBuilder,

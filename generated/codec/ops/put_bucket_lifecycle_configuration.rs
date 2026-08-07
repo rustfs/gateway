@@ -152,6 +152,8 @@ fn read_lifecycle_rule(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::Lifecy
     }
     if let Some(raw) = node.child_text("Status") {
         shape.status = dto::Status::custom(raw.to_owned());
+    } else {
+        return Err(CodecError::malformed_xml("the body omits a member the schema requires").about("Status"));
     }
     for item in node.children_named("Transition") {
         shape.transitions.push(read_transition(item)?);
@@ -255,9 +257,13 @@ fn read_tag(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::Tag, CodecError> 
     let mut shape = dto::Tag { ..Default::default() };
     if let Some(raw) = node.child_text("Key") {
         shape.key = value::object_key(raw, "Key")?;
+    } else {
+        return Err(CodecError::malformed_xml("the body omits a member the schema requires").about("Key"));
     }
     if let Some(raw) = node.child_text("Value") {
         shape.value = raw.to_owned();
+    } else {
+        return Err(CodecError::malformed_xml("the body omits a member the schema requires").about("Value"));
     }
     value::exit(shape.check_required())?;
     Ok(shape)

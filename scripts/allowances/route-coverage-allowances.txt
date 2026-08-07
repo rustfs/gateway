@@ -12,7 +12,6 @@ GetBucketAbac -> ListObjects
 GetBucketAccelerateConfiguration -> ListObjects
 GetBucketAcl -> ListObjects
 GetBucketAnalyticsConfiguration -> ListObjects
-GetBucketEncryption -> ListObjects
 GetBucketIntelligentTieringConfiguration -> ListObjects
 GetBucketInventoryConfiguration -> ListObjects
 GetBucketLogging -> ListObjects

@@ -42,6 +42,7 @@
 //! reading one file, and `crates/core/tests/purity_guard.rs` checks it over the source.
 
 mod compiled;
+mod evidence;
 mod explain;
 mod generated;
 mod lattice;

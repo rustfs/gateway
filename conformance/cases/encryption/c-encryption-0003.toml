@@ -1,0 +1,52 @@
+[case]
+id = "c-encryption-0003"
+schema_version = 1
+title = "An aws:kms document with KMSMasterKeyID and BucketKeyEnabled round-trips byte for byte"
+rationale = """
+The KMS shape exercises every optional member at once: the key id, which the read is documented to echo — that echo is read behaviour, not a leak, and this case is the pin that keeps the distinction honest — and the bucket-key boolean, whose true must come back as the lowercase wire spelling. A backend that drops the key id on the read leaves the client unable to audit which key its bucket encrypts to; one that flips or omits the boolean silently changes the customer's KMS bill."""
+polarity = "positive"
+operation = "GetBucketEncryption"
+tags = ["encryption", "xml", "wire-bytes"]
+timeout_ms = 10000
+quirks = ["q-enc-0009"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketEncryption.html"
+summary = "The sample response shows the configured KMS key identifier echoed inside the returned document."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "conf-encryption"
+
+[[exchanges]]
+name = "put-kms"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-encryption?encryption"
+headers = { "content-type" = "application/xml", "content-md5" = "DAapRbQkt/2Lo2IZ2zGiKA==" }
+body = { utf8 = '<ServerSideEncryptionConfiguration><Rule><ApplyServerSideEncryptionByDefault><SSEAlgorithm>aws:kms</SSEAlgorithm><KMSMasterKeyID>arn:aws:kms:us-east-1:111122223333:key/1234abcd-12ab-34cd-56ef-1234567890ab</KMSMasterKeyID></ApplyServerSideEncryptionByDefault><BucketKeyEnabled>true</BucketKeyEnabled></Rule></ServerSideEncryptionConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[[exchanges]]
+name = "read-back"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-encryption?encryption"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.body]
+golden = "goldens/c-encryption-0003.xml"
+contains_utf8 = ["<KMSMasterKeyID>arn:aws:kms:us-east-1:111122223333:key/1234abcd-12ab-34cd-56ef-1234567890ab</KMSMasterKeyID>", "<BucketKeyEnabled>true</BucketKeyEnabled>"]

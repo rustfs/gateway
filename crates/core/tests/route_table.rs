@@ -603,7 +603,6 @@ fn n_a_bucket_subresource_request_is_never_claimed_by_the_lifecycle_band() {
         "accelerate",
         "acl",
         "analytics",
-        "encryption",
         "intelligent-tiering",
         "inventory",
         "logging",
@@ -627,7 +626,6 @@ fn n_a_bucket_subresource_request_is_never_claimed_by_the_lifecycle_band() {
     }
     let deferred_delete = [
         "analytics",
-        "encryption",
         "intelligent-tiering",
         "inventory",
         "metadataConfiguration",
@@ -818,6 +816,142 @@ fn n_the_bucket_bands_are_unchanged_by_the_lifecycle_band() {
         ("GET /bucket?cors", "GetBucketCors"),
         ("PUT /bucket?cors", "PutBucketCors"),
         ("DELETE /bucket?cors", "DeleteBucketCors"),
+        ("GET /bucket?uploads", "ListMultipartUploads"),
+    ] {
+        assert_eq!(routed(&table, &Req::new(line)), Some(expected), "{line}");
+    }
+}
+
+/// The `?encryption` band claims its own three requests, one per method, on the bucket target.
+///
+/// Positive half of the block below, checked as a whole for the same reason the lifecycle band
+/// is: a table that gained the read and forgot the write would leave an encryption document to
+/// be stored by a neighbour, and a table that forgot the delete would leave
+/// `DELETE /b?encryption` unroutable.
+#[test]
+fn the_encryption_subresource_routes_to_the_encryption_operations() {
+    let table = generated_table();
+    for (line, expected) in [
+        ("GET /bucket?encryption", "GetBucketEncryption"),
+        ("PUT /bucket?encryption", "PutBucketEncryption"),
+        ("DELETE /bucket?encryption", "DeleteBucketEncryption"),
+    ] {
+        let hit = table
+            .resolve(&Req::new(line).parts())
+            .unwrap_or_else(|| panic!("{line} has a route"));
+        assert_eq!(hit.op_name, expected, "{line}");
+        assert!(
+            hit.precedence < 460,
+            "{line} must sit in the bucket subresource band ahead of the listings, got {}",
+            hit.precedence
+        );
+    }
+}
+
+/// Negative — the encryption read is never claimed by the bucket listing fallback.
+///
+/// `ListObjects` pins no query key, so before the row existed `GET /b?encryption` was answered
+/// with a key listing — the `GetBucketEncryption -> ListObjects` debt-register line this band
+/// retires. The PUT and DELETE halves had no fallback to be claimed by, so for them the fault
+/// mode was "no route at all", asserted above.
+#[test]
+fn n_the_encryption_read_is_never_claimed_by_the_listing_fallback() {
+    let table = generated_table();
+    for (line, forbidden) in [
+        ("GET /bucket?encryption", "ListObjects"),
+        ("GET /bucket?encryption", "ListObjectsV2"),
+        ("GET /bucket?encryption", "ListObjectVersions"),
+    ] {
+        assert_ne!(
+            routed(&table, &Req::new(line)),
+            Some(forbidden),
+            "{line}: an encryption document request answered with a key listing"
+        );
+    }
+}
+
+/// Negative — a request naming an earlier subresource beside `?encryption` stays with the
+/// earlier band.
+///
+/// AWS documents no such combination, so the order is fixed by precedence (300, 310, 340 and 370
+/// before 391) rather than left to source order — the same rule every other both-keys pair in
+/// the table follows. Three configuration bands now sit ahead of this one, so every method has
+/// neighbours to lose to.
+#[test]
+fn n_a_request_naming_an_earlier_subresource_and_encryption_stays_with_the_earlier_row() {
+    let table = generated_table();
+    for (line, expected) in [
+        ("GET /bucket?location&encryption", "GetBucketLocation"),
+        ("GET /bucket?cors&encryption", "GetBucketCors"),
+        ("GET /bucket?tagging&encryption", "GetBucketTagging"),
+        ("GET /bucket?lifecycle&encryption", "GetBucketLifecycleConfiguration"),
+        ("PUT /bucket?cors&encryption", "PutBucketCors"),
+        ("PUT /bucket?tagging&encryption", "PutBucketTagging"),
+        ("PUT /bucket?lifecycle&encryption", "PutBucketLifecycleConfiguration"),
+        ("DELETE /bucket?cors&encryption", "DeleteBucketCors"),
+        ("DELETE /bucket?tagging&encryption", "DeleteBucketTagging"),
+        ("DELETE /bucket?lifecycle&encryption", "DeleteBucketLifecycle"),
+    ] {
+        assert_eq!(routed(&table, &Req::new(line)), Some(expected), "{line}");
+    }
+}
+
+/// Negative — `?encryption` beats the listings it overlaps, in both directions of the band.
+#[test]
+fn n_a_request_naming_encryption_and_a_listing_stays_with_the_encryption_row() {
+    let table = generated_table();
+    for line in [
+        "GET /bucket?encryption&uploads",
+        "GET /bucket?encryption&list-type=2",
+        "GET /bucket?encryption&versions",
+    ] {
+        assert_eq!(routed(&table, &Req::new(line)), Some("GetBucketEncryption"), "{line}");
+    }
+}
+
+/// Negative — each encryption row is bound to one method, so the key alone does not reach it.
+#[test]
+fn n_an_encryption_row_is_not_reachable_under_another_method() {
+    let table = generated_table();
+    for (line, forbidden) in [
+        ("PUT /bucket?encryption", "GetBucketEncryption"),
+        ("DELETE /bucket?encryption", "PutBucketEncryption"),
+        ("GET /bucket?encryption", "DeleteBucketEncryption"),
+        ("HEAD /bucket?encryption", "GetBucketEncryption"),
+        ("POST /bucket?encryption", "PutBucketEncryption"),
+    ] {
+        assert_ne!(routed(&table, &Req::new(line)), Some(forbidden), "{line}");
+    }
+}
+
+/// Negative — `?encryption` on an object key is not a bucket subresource and must not reach the
+/// band.
+///
+/// The three encryption rows pin `Target(Bucket)`, so `GET /bucket/key?encryption` is a plain
+/// object read carrying an inert query key, exactly as it is on AWS.
+#[test]
+fn n_the_encryption_key_on_an_object_does_not_reach_a_bucket_encryption_row() {
+    let table = generated_table();
+    for (line, expected) in [
+        ("GET /bucket/key?encryption", "GetObject"),
+        ("PUT /bucket/key?encryption", "PutObject"),
+        ("DELETE /bucket/key?encryption", "DeleteObject"),
+    ] {
+        assert_eq!(routed(&table, &Req::new(line)), Some(expected), "{line}");
+    }
+}
+
+/// Negative — the neighbouring bands still answer their own requests beside the new band.
+#[test]
+fn n_the_bucket_bands_are_unchanged_by_the_encryption_band() {
+    let table = generated_table();
+    for (line, expected) in [
+        ("GET /bucket", "ListObjects"),
+        ("GET /bucket?list-type=2", "ListObjectsV2"),
+        ("GET /bucket?location", "GetBucketLocation"),
+        ("GET /bucket?lifecycle", "GetBucketLifecycleConfiguration"),
+        ("PUT /bucket?lifecycle", "PutBucketLifecycleConfiguration"),
+        ("DELETE /bucket?lifecycle", "DeleteBucketLifecycle"),
         ("GET /bucket?uploads", "ListMultipartUploads"),
     ] {
         assert_eq!(routed(&table, &Req::new(line)), Some(expected), "{line}");

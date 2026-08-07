@@ -1,0 +1,32 @@
+[case]
+id = "c-encryption-0007"
+schema_version = 1
+title = "An x-amz-checksum-sha256 header satisfies the integrity requirement without Content-MD5"
+rationale = """
+The integrity requirement names two spellings — Content-MD5 or an x-amz-checksum algorithm header — and modern SDKs send the second by default, some having dropped MD5 entirely. A gateway that only honoured the MD5 spelling would refuse every write from a current SDK while its own refusal message tells the caller the checksum header it just sent is acceptable. This case pins the accepting half of the requirement that c-encryption-0014 refuses from the empty side."""
+polarity = "positive"
+operation = "PutBucketEncryption"
+tags = ["encryption", "checksum"]
+timeout_ms = 10000
+quirks = ["q-enc-0004"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketEncryption.html"
+summary = "The operation documents the request checksum requirement, which an x-amz-checksum algorithm header satisfies in place of Content-MD5."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "conf-encryption"
+
+[request]
+method = "PUT"
+target = "/conf-encryption?encryption"
+headers = { "content-type" = "application/xml", "x-amz-checksum-sha256" = "y1XR10FExfn1Cz4iokmvDd1HeIyWR0sMNBdw8eLShBk=" }
+body = { utf8 = '<ServerSideEncryptionConfiguration><Rule><ApplyServerSideEncryptionByDefault><SSEAlgorithm>AES256</SSEAlgorithm></ApplyServerSideEncryptionByDefault></Rule></ServerSideEncryptionConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+connection_after = "open"

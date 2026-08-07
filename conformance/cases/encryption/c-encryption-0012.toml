@@ -1,0 +1,48 @@
+[case]
+id = "c-encryption-0012"
+schema_version = 1
+title = "An unconfigured bucket answers the encryption read with the family's 404, never an empty 200"
+rationale = """
+Clients branch on the code, not the number: NoSuchBucket means the bucket is gone, ServerSideEncryptionConfigurationNotFoundError means the bucket is fine and no default encryption is configured. Worse than the wrong code is a 200 with an empty document, which compliance tooling reads as a configuration that exists and encrypts nothing — an audit that should have flagged the bucket passes it instead. The body is pinned byte for byte so a renderer that swaps the code for the message, or truncates the longest code in the error table, fails here."""
+polarity = "negative"
+operation = "GetBucketEncryption"
+tags = ["encryption", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-enc-0001"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/ErrorResponses.html"
+summary = "The error code list documents ServerSideEncryptionConfigurationNotFoundError with HTTP status 404."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/pull/515"
+summary = "Upstream had to backfill missing error codes because clients branch on the specific code string."
+kind = "s3s-pr"
+
+
+[[setup.buckets]]
+name = "conf-encryption"
+
+[request]
+method = "GET"
+target = "/conf-encryption?encryption"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 404
+connection_after = "open"
+
+[expect.error]
+code = "ServerSideEncryptionConfigurationNotFoundError"
+request_id_present = true
+
+[expect.headers_present]
+"content-type" = "application/xml"
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>ServerSideEncryptionConfigurationNotFoundError</Code><Message>The server side encryption configuration was not found</Message><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''

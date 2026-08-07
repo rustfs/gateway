@@ -1,0 +1,51 @@
+[case]
+id = "c-encryption-0017"
+schema_version = 1
+title = "A KMSMasterKeyID beside AES256 is refused with InvalidArgument, and the refusal never echoes the key id"
+rationale = """
+AWS documents the key id as allowed if and only if the algorithm is aws:kms or aws:kms:dsse; beside AES256 it is a contradiction — a key named for an algorithm that uses none — and storing it would leave the client believing a KMS key guards data that SSE-S3 encrypts. The second assertion is the family's hygiene rule: the key id is a sensitive member, and the refusal message must be a constant that names the rule, never a reflection that copies the key identifier into an error body and every log line that captures one."""
+polarity = "negative"
+operation = "PutBucketEncryption"
+tags = ["encryption", "error-shape", "security"]
+timeout_ms = 10000
+quirks = ["q-enc-0005", "q-enc-0009"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ServerSideEncryptionByDefault.html"
+summary = "The KMSMasterKeyID member is documented as allowed if and only if SSEAlgorithm is aws:kms or aws:kms:dsse."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/pull/319"
+summary = "Upstream's secret-handling fixes record how easily key material reaches unintended surfaces when carried as a plain string."
+kind = "s3s-pr"
+
+
+[[setup.buckets]]
+name = "conf-encryption"
+
+[request]
+method = "PUT"
+target = "/conf-encryption?encryption"
+headers = { "content-type" = "application/xml", "content-md5" = "63ByQemdsIvSsxsRE/N/oA==" }
+body = { utf8 = '<ServerSideEncryptionConfiguration><Rule><ApplyServerSideEncryptionByDefault><SSEAlgorithm>AES256</SSEAlgorithm><KMSMasterKeyID>arn:aws:kms:us-east-1:111122223333:key/1234abcd-12ab-34cd-56ef-1234567890ab</KMSMasterKeyID></ApplyServerSideEncryptionByDefault></Rule></ServerSideEncryptionConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+code = "InvalidArgument"
+request_id_present = true
+
+[expect.headers_present]
+"content-type" = "application/xml"
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>InvalidArgument</Code><Message>KMSMasterKeyID can only be used when SSEAlgorithm is aws:kms or aws:kms:dsse</Message><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''
+not_contains_utf8 = ["arn:aws:kms", "1234abcd"]

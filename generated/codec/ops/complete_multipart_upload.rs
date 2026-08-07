@@ -246,6 +246,8 @@ fn read_completed_part(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::Comple
     }
     if let Some(raw) = node.child_text("PartNumber") {
         shape.part_number = value::integer(raw, "PartNumber")?;
+    } else {
+        return Err(CodecError::malformed_xml("the body omits a member the schema requires").about("PartNumber"));
     }
     value::exit(shape.check_required())?;
     Ok(shape)

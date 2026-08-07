@@ -24,6 +24,7 @@
 //! Upstream: `cargo xtask codegen`. Downstream: the generated dto and its codecs.
 
 mod abort_incomplete_multipart_upload;
+mod blocked_encryption_types;
 mod bucket;
 mod bucket_lifecycle_configuration;
 mod checksum;
@@ -53,11 +54,15 @@ mod object_version;
 mod owner;
 mod part;
 mod restore_status;
+mod server_side_encryption_by_default;
+mod server_side_encryption_configuration;
+mod server_side_encryption_rule;
 mod tag;
 mod tagging;
 mod transition;
 
 pub use self::abort_incomplete_multipart_upload::AbortIncompleteMultipartUpload;
+pub use self::blocked_encryption_types::BlockedEncryptionTypes;
 pub use self::bucket::Bucket;
 pub use self::bucket_lifecycle_configuration::BucketLifecycleConfiguration;
 pub use self::checksum::Checksum;
@@ -87,6 +92,9 @@ pub use self::object_version::ObjectVersion;
 pub use self::owner::Owner;
 pub use self::part::Part;
 pub use self::restore_status::RestoreStatus;
+pub use self::server_side_encryption_by_default::ServerSideEncryptionByDefault;
+pub use self::server_side_encryption_configuration::ServerSideEncryptionConfiguration;
+pub use self::server_side_encryption_rule::ServerSideEncryptionRule;
 pub use self::tag::Tag;
 pub use self::tagging::Tagging;
 pub use self::transition::Transition;

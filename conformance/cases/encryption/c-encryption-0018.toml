@@ -1,0 +1,47 @@
+[case]
+id = "c-encryption-0018"
+schema_version = 1
+title = "An SSEAlgorithm outside the documented set is refused as MalformedXML on the write"
+rationale = """
+This is where the family departs from lifecycle's write-side leniency, deliberately: a lifecycle Status nobody recognises disables one rule, but a default-encryption algorithm nothing can apply is a stored promise no encryption path can keep — the client that wrote AES512 walks away believing its data is protected, and the failure surfaces only at whatever future moment something tries to encrypt with it. The write refuses the out-of-set value as a schema violation; the constant message names the whole legal set so the caller can fix the request without a second round trip."""
+polarity = "negative"
+operation = "PutBucketEncryption"
+tags = ["encryption", "xml", "error-shape", "security"]
+timeout_ms = 10000
+quirks = ["q-enc-0007"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ServerSideEncryptionByDefault.html"
+summary = "The SSEAlgorithm member documents the closed value set AES256, aws:fsx, aws:kms and aws:kms:dsse."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/ErrorResponses.html"
+summary = "MalformedXML is documented as the answer for a body that does not validate against the published schema."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "conf-encryption"
+
+[request]
+method = "PUT"
+target = "/conf-encryption?encryption"
+headers = { "content-type" = "application/xml", "content-md5" = "u8IgYzvB/hPOo6nXY6cb1Q==" }
+body = { utf8 = '<ServerSideEncryptionConfiguration><Rule><ApplyServerSideEncryptionByDefault><SSEAlgorithm>AES512</SSEAlgorithm></ApplyServerSideEncryptionByDefault></Rule></ServerSideEncryptionConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+code = "MalformedXML"
+request_id_present = true
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>MalformedXML</Code><Message>SSEAlgorithm must be one of AES256, aws:fsx, aws:kms or aws:kms:dsse</Message><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''

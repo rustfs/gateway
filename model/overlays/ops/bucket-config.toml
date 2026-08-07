@@ -94,7 +94,6 @@ quirk_refs = ["q-tag-delete-idempotent-0091"]
 reason = "P5 bucket subresource configuration family; one Get/Put/Delete triple per subresource, all sharing the not_configured 404 rule."
 operations = [
   "DeleteBucketAnalyticsConfiguration",
-  "DeleteBucketEncryption",
   "DeleteBucketIntelligentTieringConfiguration",
   "DeleteBucketInventoryConfiguration",
   "DeleteBucketMetricsConfiguration",
@@ -104,7 +103,6 @@ operations = [
   "GetBucketAccelerateConfiguration",
   "GetBucketAcl",
   "GetBucketAnalyticsConfiguration",
-  "GetBucketEncryption",
   "GetBucketIntelligentTieringConfiguration",
   "GetBucketInventoryConfiguration",
   "GetBucketLogging",
@@ -122,7 +120,6 @@ operations = [
   "PutBucketAccelerateConfiguration",
   "PutBucketAcl",
   "PutBucketAnalyticsConfiguration",
-  "PutBucketEncryption",
   "PutBucketIntelligentTieringConfiguration",
   "PutBucketInventoryConfiguration",
   "PutBucketLogging",

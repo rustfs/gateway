@@ -1,0 +1,32 @@
+[case]
+id = "c-encryption-0004"
+schema_version = 1
+title = "The dual-layer aws:kms:dsse algorithm is inside the documented set and accepted"
+rationale = """
+The value set of SSEAlgorithm is closed on the write path, so each member of the set needs an accepting pin or the refusal check has no boundary: a validator that hard-coded the two classic spellings would refuse the dual-layer algorithm AWS added later, and a client configuring DSSE-KMS would read the 400 as the gateway being broken rather than the set being stale. This case and its aws:fsx sibling hold the closed set open exactly as wide as the model says."""
+polarity = "positive"
+operation = "PutBucketEncryption"
+tags = ["encryption", "xml"]
+timeout_ms = 10000
+quirks = ["q-enc-0007"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ServerSideEncryptionByDefault.html"
+summary = "The SSEAlgorithm member documents aws:kms:dsse as one of its four valid values."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "conf-encryption"
+
+[request]
+method = "PUT"
+target = "/conf-encryption?encryption"
+headers = { "content-type" = "application/xml", "content-md5" = "07MLA+PvCu1/G8ITrMJhfQ==" }
+body = { utf8 = '<ServerSideEncryptionConfiguration><Rule><ApplyServerSideEncryptionByDefault><SSEAlgorithm>aws:kms:dsse</SSEAlgorithm></ApplyServerSideEncryptionByDefault></Rule></ServerSideEncryptionConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+connection_after = "open"

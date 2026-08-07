@@ -1,0 +1,148 @@
+// Copyright 2026 RustFS Team
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+//! The AWS references every shadowing declaration cites, one constant per operation.
+//!
+//! Responsible for: the evidence URL constants of [`super::shadowing`]'s declaration table —
+//! each one AWS's own page for the operation, with a one-sentence self-written summary of what
+//! the page establishes about its selector. Split out of `shadowing.rs` when the declaration
+//! table outgrew the 800-line file ceiling: the table is the reviewed content, and these are its
+//! footnotes.
+//! NOT responsible for: any declaration, policy or check — `shadowing.rs` owns those — and no
+//! upstream prose: every summary here is written by this project.
+//! Upstream: nothing. Downstream: `super::shadowing`, the only reader.
+
+/// AWS's own reference for the server-side object copy.
+pub(super) const COPY_OBJECT_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CopyObject.html \
+     — a copy is a PUT to the destination key whose source is named by a header, and which carries no request body.";
+
+/// AWS's own reference for the part copy.
+pub(super) const UPLOAD_PART_COPY_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UploadPartCopy.html \
+     — a part copy is a part upload whose bytes come from a source object named by a header rather than from the body.";
+
+/// AWS's own reference for the CORS document read.
+pub(super) const GET_BUCKET_CORS_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketCors.html \
+     — GetBucketCors is selected by the ?cors subresource alone and answers with the stored configuration document.";
+
+/// AWS's own reference for the lifecycle document read.
+pub(super) const GET_BUCKET_LIFECYCLE_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketLifecycleConfiguration.html \
+     — GetBucketLifecycleConfiguration is selected by the ?lifecycle subresource alone and answers with the stored configuration document.";
+
+/// AWS's own reference for the lifecycle document write.
+pub(super) const PUT_BUCKET_LIFECYCLE_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketLifecycleConfiguration.html \
+     — PutBucketLifecycleConfiguration is selected by the ?lifecycle subresource on a bucket PUT and replaces the stored lifecycle document.";
+
+/// AWS's own reference for the lifecycle document delete.
+pub(super) const DELETE_BUCKET_LIFECYCLE_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketLifecycle.html \
+     — DeleteBucketLifecycle is selected by the ?lifecycle subresource on a bucket DELETE and removes only the lifecycle document.";
+
+/// AWS's own reference for the encryption document read.
+pub(super) const GET_BUCKET_ENCRYPTION_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketEncryption.html \
+     — GetBucketEncryption is selected by the ?encryption subresource alone and answers with the stored configuration document.";
+
+/// AWS's own reference for the encryption document write.
+pub(super) const PUT_BUCKET_ENCRYPTION_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketEncryption.html \
+     — PutBucketEncryption is selected by the ?encryption subresource on a bucket PUT and replaces the stored encryption document.";
+
+/// AWS's own reference for the encryption document delete.
+pub(super) const DELETE_BUCKET_ENCRYPTION_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketEncryption.html \
+     — DeleteBucketEncryption is selected by the ?encryption subresource on a bucket DELETE and removes only the encryption document.";
+
+/// AWS's own reference for the operation selected by the `?location` subresource.
+pub(super) const LOCATION_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketLocation.html \
+     — GetBucketLocation is selected by the ?location subresource alone and takes no other query input.";
+
+/// AWS's own reference for the version listing.
+pub(super) const VERSIONS_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectVersions.html \
+     — ListObjectVersions is selected by the ?versions subresource and ignores query keys it does not define.";
+
+/// AWS's own reference for the first key listing.
+pub(super) const LIST_V1_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjects.html \
+     — ListObjects is what a GET on a bucket means when no other subresource claimed it, so it pins no query key.";
+
+/// AWS's own reference for the second key listing.
+pub(super) const LIST_V2_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectsV2.html \
+     — ListObjectsV2 is selected by list-type=2 and treats unrecognised query keys as inert.";
+
+/// AWS's own reference for the in-progress upload listing.
+pub(super) const UPLOADS_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListMultipartUploads.html \
+     — ListMultipartUploads is selected by the ?uploads subresource and defines no other selector.";
+
+/// AWS's own reference for the part upload.
+pub(super) const UPLOAD_PART_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UploadPart.html \
+     — a part upload is a PUT to the object key carrying the part number and the upload id as query parameters.";
+
+/// AWS's own reference for the plain object write.
+pub(super) const PUT_OBJECT_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObject.html \
+     — a plain object write is the same method and path with neither of those parameters.";
+
+/// AWS's own reference for the completion of an upload.
+pub(super) const COMPLETE_MPU_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CompleteMultipartUpload.html \
+     — completion is a POST to the object key carrying the upload id.";
+
+/// AWS's own reference for the initiation of an upload.
+pub(super) const CREATE_MPU_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CreateMultipartUpload.html \
+     — initiation is a POST to the object key carrying the ?uploads subresource and no upload id.";
+
+/// AWS's own reference for discarding an upload.
+pub(super) const ABORT_MPU_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_AbortMultipartUpload.html \
+     — an abort is a DELETE to the object key carrying the upload id as a query parameter.";
+
+/// AWS's own reference for the plain object delete.
+pub(super) const DELETE_OBJECT_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteObject.html \
+     — an object delete is the same method and path with no upload id.";
+
+/// AWS's own reference for the part listing.
+pub(super) const LIST_PARTS_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListParts.html \
+     — a part listing is a GET to the object key carrying the upload id as a query parameter.";
+
+/// AWS's own reference for the attributes read.
+pub(super) const OBJECT_ATTRIBUTES_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObjectAttributes.html \
+     — an attributes read is a GET to the object key carrying the ?attributes subresource, and it answers with metadata rather than with the object.";
+
+/// AWS's own reference for the tag-set read.
+pub(super) const GET_OBJECT_TAGGING_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObjectTagging.html \
+     — a tag-set read is a GET to the object key carrying the ?tagging subresource, and it answers with the tag set rather than with the object.";
+
+/// AWS's own reference for the bucket-scope tag-set read.
+pub(super) const GET_BUCKET_TAGGING_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketTagging.html \
+     — a bucket tag-set read is a GET on the bucket carrying the ?tagging subresource, and it defines no other selector.";
+
+/// AWS's own reference for the bucket-scope tag-set replacement.
+pub(super) const PUT_BUCKET_TAGGING_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketTagging.html \
+     — a bucket tag-set write is a PUT on the bucket carrying the ?tagging subresource, and its body is the tagging document.";
+
+/// AWS's own reference for the bucket-scope tag-set removal.
+pub(super) const DELETE_BUCKET_TAGGING_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketTagging.html \
+     — a bucket tag-set removal is a DELETE on the bucket carrying the ?tagging subresource, and it leaves the bucket in place.";
+
+/// AWS's own reference for the CORS document write.
+pub(super) const PUT_BUCKET_CORS_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketCors.html \
+     — a CORS configuration write is a PUT on the bucket carrying the ?cors subresource, and its body is the configuration document.";
+
+/// AWS's own reference for the CORS document removal.
+pub(super) const DELETE_BUCKET_CORS_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketCors.html \
+     — a CORS configuration removal is a DELETE on the bucket carrying the ?cors subresource.";
+
+/// AWS's own reference for the tag-set replacement.
+pub(super) const PUT_OBJECT_TAGGING_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObjectTagging.html \
+     — a tag-set write is a PUT to the object key carrying the ?tagging subresource, and its body is a tagging document rather than object data.";
+
+/// AWS's own reference for the tag-set removal.
+pub(super) const DELETE_OBJECT_TAGGING_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteObjectTagging.html \
+     — a tag-set removal is a DELETE to the object key carrying the ?tagging subresource, and it leaves the object in place.";
+
+/// AWS's own reference for the plain object read.
+pub(super) const GET_OBJECT_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObject.html \
+     — an object read is the same method and path with no upload id.";

@@ -277,16 +277,22 @@ fn one_field(ir: &OperationIr, field: &Field) -> Result<String, String> {
                 accepted.extend(aliases);
                 let names = accepted.iter().map(|n| format!("\"{n}\"")).collect::<Vec<_>>().join(", ");
                 let _ = writeln!(out, "{indent}if ![{names}].contains(&root.name.as_str()) {{");
-                let refusal =
-                    format!("CodecError::malformed_xml(\"the request body has the wrong root element\").about(\"{member}\")");
+                let base = "CodecError::malformed_xml(\"the request body has the wrong root element\")";
+                let refusal = format!("{base}.about(\"{member}\")");
                 let single = format!("{indent}    return Err({refusal});");
                 if single.len() <= MAX_WIDTH {
                     let _ = writeln!(out, "{single}");
-                } else {
+                } else if indent.len().saturating_add(8).saturating_add(refusal.len()) <= MAX_WIDTH {
                     // rustfmt's normal form for the over-long line: the argument on its own line.
                     let _ = writeln!(out, "{indent}    return Err(");
                     let _ = writeln!(out, "{indent}        {refusal}");
                     let _ = writeln!(out, "{indent}    );");
+                } else {
+                    // A shape name long enough that even the argument line overflows: rustfmt then
+                    // breaks the method chain instead — the third form, learned from
+                    // `ServerSideEncryptionConfiguration`.
+                    let _ = writeln!(out, "{indent}    return Err({base}");
+                    let _ = writeln!(out, "{indent}        .about(\"{member}\"));");
                 }
                 let _ = writeln!(out, "{indent}}}");
                 let indent_len = indent.len();
@@ -453,7 +459,7 @@ pub fn shape_reader(operation: &str, name: &str, shape: &Shape, quirks: &[Quirk]
                 let reader = format!("read_{}", naming::module_name(inner_name));
                 let _ = writeln!(out, "    if let Some(child) = node.child(\"{wire}\") {{");
                 out.push_str(&assign(8, &target, &wrap(field, &format!("{reader}(child)?"))));
-                out.push_str("    }\n");
+                out.push_str(&required_member_refusal(field, member));
             }
             other => {
                 let conversion = expr::from_wire(
@@ -466,10 +472,31 @@ pub fn shape_reader(operation: &str, name: &str, shape: &Shape, quirks: &[Quirk]
                 )?;
                 let _ = writeln!(out, "    if let Some(raw) = node.child_text(\"{wire}\") {{");
                 out.push_str(&assign(8, &target, &wrap(field, &conversion)));
-                out.push_str("    }\n");
+                out.push_str(&required_member_refusal(field, member));
             }
         }
     }
     out.push_str("    value::exit(shape.check_required())?;\n    Ok(shape)\n}\n");
     Ok(out)
+}
+
+/// Closes a shape member's `if let`, refusing when the member is required and absent.
+///
+/// Only the model's own `required` reaches here — the same rule the required-list refusal above
+/// states. Without the `else`, a missing required member sailed past its binding still holding
+/// the placeholder default, and the decoder's exit check turned a client's malformed document
+/// into this side's `500 InternalError`; the omission of a required element is a schema
+/// violation and answers `MalformedXML` like every other one.
+fn required_member_refusal(field: &Field, member: &str) -> String {
+    if !field.required {
+        return "    }\n".to_owned();
+    }
+    let mut out = String::new();
+    out.push_str("    } else {\n");
+    let _ = writeln!(
+        out,
+        "        return Err(CodecError::malformed_xml(\"the body omits a member the schema requires\").about(\"{member}\"));"
+    );
+    out.push_str("    }\n");
+    out
 }

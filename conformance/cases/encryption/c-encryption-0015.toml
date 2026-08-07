@@ -1,0 +1,36 @@
+[case]
+id = "c-encryption-0015"
+schema_version = 1
+title = "An empty ServerSideEncryptionConfiguration with no Rule is refused as MalformedXML"
+rationale = """
+Rules is a required member, so the empty document is not a legal spelling of anything — in particular it is not a spelling of "clear the configuration", which is DeleteBucketEncryption's job. Accepting it would create a stored third state between configured and unconfigured that the read has no honest answer for: a 200 with an empty document that every SDK parses as zero rules, and that the unconfigured 404 can no longer distinguish itself from."""
+polarity = "negative"
+operation = "PutBucketEncryption"
+tags = ["encryption", "xml", "error-shape"]
+timeout_ms = 10000
+quirks = []
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ServerSideEncryptionConfiguration.html"
+summary = "The configuration's Rules member is documented as required."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "conf-encryption"
+
+[request]
+method = "PUT"
+target = "/conf-encryption?encryption"
+headers = { "content-type" = "application/xml", "content-md5" = "E8w172JdK+yTjeUgOZnhRQ==" }
+body = { utf8 = '<ServerSideEncryptionConfiguration></ServerSideEncryptionConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+code = "MalformedXML"
+request_id_present = true

@@ -1,0 +1,34 @@
+[case]
+id = "c-encryption-0021"
+schema_version = 1
+title = "Reading the encryption of a bucket that does not exist is NoSuchBucket, not the family's 404"
+rationale = """
+Two different 404s, two different client reactions: NoSuchBucket sends the caller to create or re-address the bucket, ServerSideEncryptionConfigurationNotFoundError tells it the bucket is fine and unconfigured. A gateway that answered the family's code for a missing bucket would tell an auditor that a nonexistent bucket exists and is unencrypted — the bucket must be resolved before the subresource is."""
+polarity = "negative"
+operation = "GetBucketEncryption"
+tags = ["encryption", "error-shape"]
+timeout_ms = 10000
+quirks = []
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketEncryption.html"
+summary = "The operation addresses a named bucket, whose absence is the generic NoSuchBucket answer rather than the encryption-specific 404."
+kind = "aws-doc"
+
+
+[request]
+method = "GET"
+target = "/conf-enc-absent?encryption"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 404
+connection_after = "open"
+
+[expect.error]
+code = "NoSuchBucket"
+request_id_present = true
+
+[expect.body]
+not_contains_utf8 = ["ServerSideEncryptionConfigurationNotFoundError"]
