@@ -171,6 +171,17 @@ pub use rustfs_gateway_core::ops::shared::copy_source::{
 pub use rustfs_gateway_core::ops::shared::cors::{
     CORS_ALLOWED_METHODS, CorsRejection, MAX_CORS_ID_CHARS, MAX_CORS_RULES, validate_cors,
 };
+
+// The tagging contract. The tag set has two request channels — the `<Tagging>` document of the
+// `?tagging` subresource and the packed `x-amz-tagging` header on PutObject, CopyObject and
+// CreateMultipartUpload — and the count, length, character-set and duplicate-key rules must be
+// one rule for both. The XML channel's syntax is the generated decoder's; everything semantic,
+// and the whole of the header channel, is here, because a backend parses that header itself and
+// an unexported parser is one every backend rewrites.
+pub use rustfs_gateway_core::ops::shared::tagging::{
+    MAX_BUCKET_TAGS, MAX_OBJECT_TAGS, MAX_TAG_KEY_CHARS, MAX_TAG_VALUE_CHARS, TagScope, TaggingRejection, parse_tagging_header,
+    validate_tag_set,
+};
 pub use rustfs_gateway_http::{EffectiveHost, Limits, WireReject, WireRequest};
 pub use rustfs_gateway_sig::{Identity, OperationFloor, RegionSet, SecurityFloor, SigService, SkewWindow, Verdict};
 pub use rustfs_gateway_stream::{Body, ByteStream, Payload, TrailingHeaders};

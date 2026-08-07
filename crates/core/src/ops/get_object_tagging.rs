@@ -20,7 +20,9 @@
 //! `generated/codec/ops/get_object_tagging.rs` from `generated/ir/GetObjectTagging.json`.
 //! Upstream: `rustfs-gateway-types`' generated dto. Downstream: `crate::registry`.
 //!
-//! Shares: nothing. The tag set is a payload shape of its own, not a projection of object metadata.
+//! Shares: tagging. The value this operation reads back is whatever a tagging write validated
+//! under [`crate::ops::shared::tagging`]'s object-scope rules, and [`TAG_SCOPE`] is where this
+//! file says which scope that is.
 //!
 //! # Why the row exists before a backend does
 //!
@@ -38,7 +40,15 @@ use rustfs_gateway_sig::{OperationFloor, SigService};
 use rustfs_gateway_types::dto::{GetObjectTagging, GetObjectTaggingInput, GetObjectTaggingOutput};
 
 use crate::op::{AuthRequirement, HasOperation, Operation, OperationOrigin, ResourceShape, StandardOperation};
+use crate::ops::shared::tagging::TagScope;
 use crate::registry::OperationSpec;
+
+/// The scope whose rules govern this tag set: an object's, ten tags at the ceiling.
+///
+/// Declared here rather than assumed at the call site, so the shared contract's member list and
+/// the operation agree in a form a guard can check — the same declarative shape the listing
+/// operations use for their cursors.
+pub static TAG_SCOPE: TagScope = TagScope::Object;
 
 /// What this operation requires of a request once routing has chosen it.
 ///

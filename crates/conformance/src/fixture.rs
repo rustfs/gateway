@@ -120,7 +120,8 @@ use rustfs_gateway::{
     BucketName, ByteStream, ChecksumAlgorithm, ChecksumSpec, ConditionalOutcome, CopyRange, CopySourceRejection, CursorSpec,
     ETag, ErrorCode, ErrorDetail, Handler, HandlerError, HandlerResult, IfRange, ObjectKey, ObjectValidators,
     PRECONDITION_FAILED_MESSAGE, PreconditionRejection, Preconditions, RangeDecision, RangeSelectors, Req, RequestKind, Resp,
-    Timestamp, collect, evaluate, evaluate_range, parse_conditional_etag, resolve_copy_range, validate_cors,
+    TagScope, TaggingRejection, Timestamp, collect, evaluate, evaluate_range, parse_conditional_etag, parse_tagging_header,
+    resolve_copy_range, validate_cors, validate_tag_set,
 };
 
 /// The canonical user id every listing reports as the owner.
@@ -179,7 +180,7 @@ pub struct StoredObject {
     /// A `Vec` rather than a map, and ordered rather than sorted, because the tag set is what the
     /// writer sent: `x-amz-tagging: a=1&b=2` and a `<Tagging>` document both carry an order, and a
     /// stub that re-sorted them would be answering from a decision of its own. Duplicate keys never
-    /// reach here — [`parse_tagging_header`] and [`tag_pairs`] refuse them — so the sequence is a
+    /// reach here — [`read_tagging_header`] and [`tag_pairs`] refuse them — so the sequence is a
     /// map in everything but lookup cost, and ten pairs is the ceiling AWS documents.
     pub tags: Vec<(String, String)>,
     /// The storage class the writer named, or `STANDARD`.
@@ -1429,80 +1430,33 @@ fn directive_of(value: Option<&str>, reason: &'static str) -> Result<MetadataFro
     }
 }
 
-/// AWS's own wording for an `x-amz-tagging` header that is not a tag set.
-///
-/// One constant rather than a message per failure, because AWS answers every malformed spelling of
-/// this header with the same sentence: a caller who could tell "no `=`" from "duplicate key" apart
-/// by the `<Message>` element would be learning the parser's shape rather than the rule.
-const MALFORMED_TAGGING_HEADER: &str = "The header 'x-amz-tagging' shall be encoded as UTF-8 then URLEncoded URL query \
-     parameters without tag name duplicates.";
-
-/// Reads the inline `x-amz-tagging` header — `a=1&b=2`, form-urlencoded — into ordered pairs.
+/// Reads the inline `x-amz-tagging` header through the exported tagging contract.
 ///
 /// This is the header `PutObject` and `CopyObject` carry, and it is **not** the `?tagging`
 /// subresource: the two travel together in `c-copy-0008`, where the copy writes the tag set through
-/// this header and the read-back comes back through `GetObjectTagging`. Nothing here is shared with
-/// the subresource's XML document beyond the pairs both produce.
-///
-/// Decoding is `application/x-www-form-urlencoded`, which is not the same alphabet as a path
-/// segment: `+` is a space, and `%` begins two hex digits. A truncated or non-hex escape is refused
-/// rather than passed through, because a tag whose key is `%zz` would be stored under a name no
-/// later request can spell.
+/// this header and the read-back comes back through `GetObjectTagging`. The parsing and the
+/// object-scope validation are both calls into [`rustfs_gateway::parse_tagging_header`] and
+/// [`rustfs_gateway::validate_tag_set`] rather than a second copy, for the reason the copy-range
+/// mirror was retired: a rule written twice is a rule two implementations hold differently, and
+/// this file's copy had already grown its own opinion about which code a duplicate key carries.
 ///
 /// # Errors
 ///
-/// `InvalidArgument` for a segment with no `=`, for a broken escape, and for a repeated key — the
-/// three shapes AWS names in one sentence.
-fn parse_tagging_header(header: Option<&str>) -> Result<Vec<(String, String)>, HandlerError> {
-    let Some(raw) = header else { return Ok(Vec::new()) };
-    let mut pairs: Vec<(String, String)> = Vec::new();
-    for segment in raw.split('&') {
-        if segment.is_empty() {
-            continue;
-        }
-        let (key, value) = segment
-            .split_once('=')
-            .ok_or_else(|| HandlerError::new(ErrorCode::INVALID_ARGUMENT, MALFORMED_TAGGING_HEADER))?;
-        let key = form_decode(key)?;
-        let value = form_decode(value)?;
-        require_tag_key(&key)?;
-        if pairs.iter().any(|(existing, _)| existing == &key) {
-            return Err(HandlerError::new(ErrorCode::INVALID_ARGUMENT, MALFORMED_TAGGING_HEADER));
-        }
-        pairs.push((key, value));
-    }
+/// Whatever the contract refuses: `InvalidArgument` in AWS's one sentence for every malformed
+/// spelling of the header, `InvalidTag` for an empty key, a ceiling violation, or an illegal
+/// character.
+fn read_tagging_header(header: Option<&str>) -> Result<Vec<(String, String)>, HandlerError> {
+    let pairs = parse_tagging_header(header).map_err(refused_tagging)?;
+    validate_tag_set(&pairs, TagScope::Object).map_err(refused_tagging)?;
     Ok(pairs)
 }
 
-/// One form-urlencoded field, decoded.
+/// The tagging contract's own refusal, rendered.
 ///
-/// # Errors
-///
-/// `InvalidArgument` when an escape is truncated, is not hex, or decodes to bytes that are not
-/// UTF-8. The header's own wording says "encoded as UTF-8 **then** URLEncoded", so a sequence that
-/// survives the second step and fails the first is exactly what it is describing.
-fn form_decode(text: &str) -> Result<String, HandlerError> {
-    let bytes = text.as_bytes();
-    let mut out: Vec<u8> = Vec::with_capacity(bytes.len());
-    let mut index = 0;
-    while index < bytes.len() {
-        match bytes.get(index) {
-            Some(b'+') => out.push(b' '),
-            Some(b'%') => {
-                let hex = text
-                    .get(index + 1..index + 3)
-                    .ok_or_else(|| HandlerError::new(ErrorCode::INVALID_ARGUMENT, MALFORMED_TAGGING_HEADER))?;
-                let byte = u8::from_str_radix(hex, 16)
-                    .map_err(|_| HandlerError::new(ErrorCode::INVALID_ARGUMENT, MALFORMED_TAGGING_HEADER))?;
-                out.push(byte);
-                index += 2;
-            }
-            Some(byte) => out.push(*byte),
-            None => break,
-        }
-        index += 1;
-    }
-    String::from_utf8(out).map_err(|_| HandlerError::new(ErrorCode::INVALID_ARGUMENT, MALFORMED_TAGGING_HEADER))
+/// The wording is the contract's constant, never assembled from the header: a tag key is
+/// caller-chosen text and has no business inside an error body.
+fn refused_tagging(rejection: TaggingRejection) -> HandlerError {
+    HandlerError::new(rejection.code().clone(), rejection.reason())
 }
 
 /// A tag key, as the type the model gives it.
@@ -1539,27 +1493,22 @@ fn tag_elements(tags: &[(String, String)]) -> Result<Vec<dto::Tag>, HandlerError
 
 /// The `<Tagging>` document of a tagging write, read into ordered pairs.
 ///
-/// The twin of [`parse_tagging_header`] over the XML spelling. It refuses the same duplicate keys
-/// with the same code the header does, because the two are one rule over one field group and a
-/// document that could carry `a` twice would leave the object's tag set depending on which of the
-/// two a later reader happened to take.
+/// The twin of [`read_tagging_header`] over the XML spelling, and deliberately the same validator:
+/// count ceiling, length ceilings, character set and the duplicate-key refusal are all
+/// [`rustfs_gateway::validate_tag_set`] under the scope the caller names, so the two channels
+/// cannot drift apart on any of them.
 ///
 /// # Errors
 ///
-/// `InvalidTag` for a repeated key. Everything structural — a wrong root, a missing `<Key>` — was
-/// already refused by the generated decoder before this ran.
-fn tag_pairs(document: &dto::Tagging) -> Result<Vec<(String, String)>, HandlerError> {
-    let mut pairs: Vec<(String, String)> = Vec::new();
-    for tag in &document.tag_set {
-        let key = tag.key.as_str().to_owned();
-        if pairs.iter().any(|(existing, _)| existing == &key) {
-            return Err(HandlerError::new(
-                ErrorCode::INVALID_TAG,
-                "There are duplicate keys in your request. Please check and try again.",
-            ));
-        }
-        pairs.push((key, tag.value.clone()));
-    }
+/// `InvalidTag` for every semantic violation. Everything structural — a wrong root, a missing
+/// `<Key>` — was already refused by the generated decoder before this ran.
+fn tag_pairs(document: &dto::Tagging, scope: TagScope) -> Result<Vec<(String, String)>, HandlerError> {
+    let pairs: Vec<(String, String)> = document
+        .tag_set
+        .iter()
+        .map(|tag| (tag.key.as_str().to_owned(), tag.value.clone()))
+        .collect();
+    validate_tag_set(&pairs, scope).map_err(refused_tagging)?;
     Ok(pairs)
 }
 
@@ -1905,7 +1854,7 @@ async fn put_object(state: &Arc<Mutex<Fixture>>, input: dto::PutObjectInput) -> 
     // The inline tag set, which is a different thing from the `?tagging` subresource: this header
     // is how a single-request write labels the object it is writing. Parsed before the write so a
     // malformed header is a refusal rather than an object stored with no tags and a 200.
-    object.tags = parse_tagging_header(input.tagging.as_deref())?;
+    object.tags = read_tagging_header(input.tagging.as_deref())?;
     if let Some(class) = input.storage_class.as_ref() {
         object.storage_class = class.to_string();
     }
@@ -2173,7 +2122,7 @@ impl Stub {
         };
         object.tags = match tagging_from {
             MetadataFrom::Source => source_tags,
-            MetadataFrom::Request => parse_tagging_header(input.tagging.as_deref())?,
+            MetadataFrom::Request => read_tagging_header(input.tagging.as_deref())?,
         };
         if let Some(class) = input.storage_class.as_ref() {
             object.storage_class = class.to_string();
@@ -2300,7 +2249,7 @@ impl Stub {
     /// a versioned bucket and changed the object's modification time on every bucket, and a case
     /// asserting either afterwards would be measuring this file rather than the protocol.
     fn put_object_tagging(&self, input: &dto::PutObjectTaggingInput) -> HandlerResult<dto::PutObjectTagging> {
-        let pairs = tag_pairs(&input.tagging)?;
+        let pairs = tag_pairs(&input.tagging, TagScope::Object)?;
         let mut fixture = self.borrow()?;
         require_bucket(&fixture, &input.bucket)?;
         refuse_versioned_tagging(input.version_id.as_deref())?;

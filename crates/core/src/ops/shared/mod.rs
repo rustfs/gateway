@@ -39,3 +39,4 @@ pub mod cors;
 pub mod etag;
 pub mod pagination;
 pub mod precondition;
+pub mod tagging;
