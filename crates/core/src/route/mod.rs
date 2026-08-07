@@ -51,6 +51,8 @@ mod selector;
 mod shadowing;
 mod shadowing_bucket;
 mod shadowing_bucket_acl;
+mod shadowing_bucket_config;
+mod shadowing_bucket_config_write;
 mod shadowing_object;
 mod shape;
 mod table;

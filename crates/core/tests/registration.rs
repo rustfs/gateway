@@ -641,7 +641,7 @@ fn require_reports_the_missing_operations_on_one_line() {
         text,
         "backend is missing handlers for: AbortMultipartUpload, CompleteMultipartUpload, CopyObject, \
          CreateBucket, CreateMultipartUpload, DeleteBucket, DeleteBucketCors, DeleteBucketEncryption, DeleteBucketLifecycle, \
-         DeleteBucketReplication, ... and 41 more (51 of 52)"
+         DeleteBucketPolicy, ... and 61 more (71 of 72)"
     );
     assert_eq!(
         missing.missing(),
@@ -655,18 +655,29 @@ fn require_reports_the_missing_operations_on_one_line() {
             "DeleteBucketCors",
             "DeleteBucketEncryption",
             "DeleteBucketLifecycle",
+            "DeleteBucketPolicy",
             "DeleteBucketReplication",
             "DeleteBucketTagging",
+            "DeleteBucketWebsite",
             "DeleteObject",
             "DeleteObjectTagging",
             "DeleteObjects",
+            "DeletePublicAccessBlock",
+            "GetBucketAccelerateConfiguration",
             "GetBucketAcl",
             "GetBucketCors",
             "GetBucketEncryption",
             "GetBucketLifecycleConfiguration",
             "GetBucketLocation",
+            "GetBucketLogging",
+            "GetBucketNotificationConfiguration",
+            "GetBucketPolicy",
+            "GetBucketPolicyStatus",
             "GetBucketReplication",
+            "GetBucketRequestPayment",
             "GetBucketTagging",
+            "GetBucketVersioning",
+            "GetBucketWebsite",
             "GetObject",
             "GetObjectAcl",
             "GetObjectAttributes",
@@ -674,6 +685,7 @@ fn require_reports_the_missing_operations_on_one_line() {
             "GetObjectLockConfiguration",
             "GetObjectRetention",
             "GetObjectTagging",
+            "GetPublicAccessBlock",
             "HeadBucket",
             "HeadObject",
             "ListBuckets",
@@ -682,24 +694,32 @@ fn require_reports_the_missing_operations_on_one_line() {
             "ListObjects",
             "ListObjectsV2",
             "ListParts",
+            "PutBucketAccelerateConfiguration",
             "PutBucketAcl",
             "PutBucketCors",
             "PutBucketEncryption",
             "PutBucketLifecycleConfiguration",
+            "PutBucketLogging",
+            "PutBucketNotificationConfiguration",
+            "PutBucketPolicy",
             "PutBucketReplication",
+            "PutBucketRequestPayment",
             "PutBucketTagging",
+            "PutBucketVersioning",
+            "PutBucketWebsite",
             "PutObjectAcl",
             "PutObjectLegalHold",
             "PutObjectLockConfiguration",
             "PutObjectRetention",
             "PutObjectTagging",
+            "PutPublicAccessBlock",
             "RestoreObject",
             "SelectObjectContent",
             "UploadPart",
             "UploadPartCopy"
         ]
     );
-    assert_eq!(missing.required(), 52);
+    assert_eq!(missing.required(), 72);
 }
 
 /// Negative — a long list is truncated and still says how much is missing in total.

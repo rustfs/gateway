@@ -1,0 +1,428 @@
+{
+  "ir_version": "1",
+  "operation": "PutBucketWebsite",
+  "http": {
+            "method": "PUT",
+            "target": "Bucket",
+            "precedence": 241,
+            "predicates": [
+                            { "kind": "Method", "method": "PUT" },
+                            { "kind": "Target", "target": "Bucket" },
+                            { "kind": "QueryPresent", "key": "website" }
+                          ],
+            "success_status": 200,
+            "alt_success_statuses": [],
+            "path_shape": "/{Bucket}"
+          },
+  "auth": { "requirement": "Required", "action": "s3:PutBucketWebsite", "presigned_allowed": true, "service": "s3" },
+  "payload": {
+               "request": { "kind": "XmlBody", "buffering": "Full", "max_bytes": 65536 },
+               "response": { "kind": "None", "buffering": "None", "max_bytes": null }
+             },
+  "checksum": {
+                "http_checksum_required": true,
+                "request_algorithms": ["CRC32", "CRC32C", "CRC64NVME", "SHA1", "SHA256"],
+                "response_algorithms": []
+              },
+  "input": {
+             "fields": [
+                         {
+                           "name": "Bucket",
+                           "wire_name": "Bucket",
+                           "required": true,
+                           "binding": { "kind": "UriLabel", "greedy": false },
+                           "type": { "kind": "BucketName" },
+                           "hot": true,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "ContentMD5",
+                           "wire_name": "content-md5",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "String" },
+                           "hot": false,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "ChecksumAlgorithm",
+                           "wire_name": "x-amz-sdk-checksum-algorithm",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": {
+                                     "kind": "StringEnum",
+                                     "values": [
+                                                 "CRC32",
+                                                 "CRC32C",
+                                                 "SHA1",
+                                                 "SHA256",
+                                                 "CRC64NVME",
+                                                 "SHA512",
+                                                 "MD5",
+                                                 "XXHASH64",
+                                                 "XXHASH3",
+                                                 "XXHASH128"
+                                               ]
+                                   },
+                           "hot": false,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "WebsiteConfiguration",
+                           "wire_name": null,
+                           "required": true,
+                           "binding": { "kind": "Payload" },
+                           "type": { "kind": "Structure", "shape": "WebsiteConfiguration" },
+                           "hot": true,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "ExpectedBucketOwner",
+                           "wire_name": "x-amz-expected-bucket-owner",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "String" },
+                           "hot": false,
+                           "quirk_refs": []
+                         }
+                       ]
+           },
+  "output": { "fields": [] },
+  "shapes": {
+              "Condition": {
+                             "kind": "Structure",
+                             "fields": [
+                                         {
+                                           "name": "HttpErrorCodeReturnedEquals",
+                                           "wire_name": "HttpErrorCodeReturnedEquals",
+                                           "required": false,
+                                           "binding": { "kind": "BodyXml" },
+                                           "type": { "kind": "String" },
+                                           "hot": false,
+                                           "quirk_refs": []
+                                         },
+                                         {
+                                           "name": "KeyPrefixEquals",
+                                           "wire_name": "KeyPrefixEquals",
+                                           "required": false,
+                                           "binding": { "kind": "BodyXml" },
+                                           "type": { "kind": "String" },
+                                           "hot": false,
+                                           "quirk_refs": []
+                                         }
+                                       ],
+                             "xml": {
+                                      "element_order": ["HttpErrorCodeReturnedEquals", "KeyPrefixEquals"],
+                                      "empty_value_policy": {
+                                                              "HttpErrorCodeReturnedEquals": "omit",
+                                                              "KeyPrefixEquals": "omit"
+                                                            },
+                                      "attributes": []
+                                    }
+                           },
+              "ErrorDocument": {
+                                 "kind": "Structure",
+                                 "fields": [
+                                             {
+                                               "name": "Key",
+                                               "wire_name": "Key",
+                                               "required": true,
+                                               "binding": { "kind": "BodyXml" },
+                                               "type": { "kind": "ObjectKey" },
+                                               "hot": false,
+                                               "quirk_refs": []
+                                             }
+                                           ],
+                                 "xml": {
+                                          "element_order": ["Key"],
+                                          "empty_value_policy": { "Key": "emit" },
+                                          "attributes": []
+                                        }
+                               },
+              "IndexDocument": {
+                                 "kind": "Structure",
+                                 "fields": [
+                                             {
+                                               "name": "Suffix",
+                                               "wire_name": "Suffix",
+                                               "required": true,
+                                               "binding": { "kind": "BodyXml" },
+                                               "type": { "kind": "String" },
+                                               "hot": false,
+                                               "quirk_refs": []
+                                             }
+                                           ],
+                                 "xml": {
+                                          "element_order": ["Suffix"],
+                                          "empty_value_policy": { "Suffix": "emit" },
+                                          "attributes": []
+                                        }
+                               },
+              "Redirect": {
+                            "kind": "Structure",
+                            "fields": [
+                                        {
+                                          "name": "HostName",
+                                          "wire_name": "HostName",
+                                          "required": false,
+                                          "binding": { "kind": "BodyXml" },
+                                          "type": { "kind": "String" },
+                                          "hot": false,
+                                          "quirk_refs": []
+                                        },
+                                        {
+                                          "name": "HttpRedirectCode",
+                                          "wire_name": "HttpRedirectCode",
+                                          "required": false,
+                                          "binding": { "kind": "BodyXml" },
+                                          "type": { "kind": "String" },
+                                          "hot": false,
+                                          "quirk_refs": []
+                                        },
+                                        {
+                                          "name": "Protocol",
+                                          "wire_name": "Protocol",
+                                          "required": false,
+                                          "binding": { "kind": "BodyXml" },
+                                          "type": { "kind": "StringEnum", "values": ["http", "https"] },
+                                          "hot": false,
+                                          "quirk_refs": []
+                                        },
+                                        {
+                                          "name": "ReplaceKeyPrefixWith",
+                                          "wire_name": "ReplaceKeyPrefixWith",
+                                          "required": false,
+                                          "binding": { "kind": "BodyXml" },
+                                          "type": { "kind": "String" },
+                                          "hot": false,
+                                          "quirk_refs": []
+                                        },
+                                        {
+                                          "name": "ReplaceKeyWith",
+                                          "wire_name": "ReplaceKeyWith",
+                                          "required": false,
+                                          "binding": { "kind": "BodyXml" },
+                                          "type": { "kind": "String" },
+                                          "hot": false,
+                                          "quirk_refs": []
+                                        }
+                                      ],
+                            "xml": {
+                                     "element_order": [
+                                                        "HostName",
+                                                        "HttpRedirectCode",
+                                                        "Protocol",
+                                                        "ReplaceKeyPrefixWith",
+                                                        "ReplaceKeyWith"
+                                                      ],
+                                     "empty_value_policy": {
+                                                             "HostName": "omit",
+                                                             "HttpRedirectCode": "omit",
+                                                             "Protocol": "omit",
+                                                             "ReplaceKeyPrefixWith": "omit",
+                                                             "ReplaceKeyWith": "omit"
+                                                           },
+                                     "attributes": []
+                                   }
+                          },
+              "RedirectAllRequestsTo": {
+                                         "kind": "Structure",
+                                         "fields": [
+                                                     {
+                                                       "name": "HostName",
+                                                       "wire_name": "HostName",
+                                                       "required": true,
+                                                       "binding": { "kind": "BodyXml" },
+                                                       "type": { "kind": "String" },
+                                                       "hot": false,
+                                                       "quirk_refs": []
+                                                     },
+                                                     {
+                                                       "name": "Protocol",
+                                                       "wire_name": "Protocol",
+                                                       "required": false,
+                                                       "binding": { "kind": "BodyXml" },
+                                                       "type": { "kind": "StringEnum", "values": ["http", "https"] },
+                                                       "hot": false,
+                                                       "quirk_refs": []
+                                                     }
+                                                   ],
+                                         "xml": {
+                                                  "element_order": ["HostName", "Protocol"],
+                                                  "empty_value_policy": { "HostName": "emit", "Protocol": "omit" },
+                                                  "attributes": []
+                                                }
+                                       },
+              "RoutingRule": {
+                               "kind": "Structure",
+                               "fields": [
+                                           {
+                                             "name": "Condition",
+                                             "wire_name": "Condition",
+                                             "required": false,
+                                             "binding": { "kind": "BodyXml" },
+                                             "type": { "kind": "Structure", "shape": "Condition" },
+                                             "hot": false,
+                                             "quirk_refs": []
+                                           },
+                                           {
+                                             "name": "Redirect",
+                                             "wire_name": "Redirect",
+                                             "required": true,
+                                             "binding": { "kind": "BodyXml" },
+                                             "type": { "kind": "Structure", "shape": "Redirect" },
+                                             "hot": false,
+                                             "quirk_refs": []
+                                           }
+                                         ],
+                               "xml": {
+                                        "element_order": ["Condition", "Redirect"],
+                                        "empty_value_policy": { "Condition": "omit", "Redirect": "emit" },
+                                        "attributes": []
+                                      }
+                             },
+              "WebsiteConfiguration": {
+                                        "kind": "Structure",
+                                        "fields": [
+                                                    {
+                                                      "name": "ErrorDocument",
+                                                      "wire_name": "ErrorDocument",
+                                                      "required": false,
+                                                      "binding": { "kind": "BodyXml" },
+                                                      "type": { "kind": "Structure", "shape": "ErrorDocument" },
+                                                      "hot": false,
+                                                      "quirk_refs": []
+                                                    },
+                                                    {
+                                                      "name": "IndexDocument",
+                                                      "wire_name": "IndexDocument",
+                                                      "required": false,
+                                                      "binding": { "kind": "BodyXml" },
+                                                      "type": { "kind": "Structure", "shape": "IndexDocument" },
+                                                      "hot": false,
+                                                      "quirk_refs": []
+                                                    },
+                                                    {
+                                                      "name": "RedirectAllRequestsTo",
+                                                      "wire_name": "RedirectAllRequestsTo",
+                                                      "required": false,
+                                                      "binding": { "kind": "BodyXml" },
+                                                      "type": { "kind": "Structure", "shape": "RedirectAllRequestsTo" },
+                                                      "hot": false,
+                                                      "quirk_refs": []
+                                                    },
+                                                    {
+                                                      "name": "RoutingRules",
+                                                      "wire_name": "RoutingRules",
+                                                      "required": false,
+                                                      "binding": { "kind": "BodyXml" },
+                                                      "type": {
+                                                                "kind": "List",
+                                                                "member": {
+                                                                            "kind": "Structure",
+                                                                            "shape": "RoutingRule"
+                                                                          },
+                                                                "flattened": false,
+                                                                "wrapper_name": "RoutingRule"
+                                                              },
+                                                      "hot": true,
+                                                      "quirk_refs": []
+                                                    }
+                                                  ],
+                                        "xml": {
+                                                 "element_order": [
+                                                                    "RedirectAllRequestsTo",
+                                                                    "IndexDocument",
+                                                                    "ErrorDocument",
+                                                                    "RoutingRules"
+                                                                  ],
+                                                 "empty_value_policy": {
+                                                                         "ErrorDocument": "omit",
+                                                                         "IndexDocument": "omit",
+                                                                         "RedirectAllRequestsTo": "omit",
+                                                                         "RoutingRules": "omit"
+                                                                       },
+                                                 "attributes": []
+                                               }
+                                      }
+            },
+  "xml": {
+           "request_root": null,
+           "request_root_aliases": [],
+           "response_root": null,
+           "xmlns": "emit",
+           "unwrapped_output": false,
+           "element_order": [],
+           "empty_value_policy": {},
+           "url_encoded_fields": [],
+           "attributes": [],
+           "body_literal": false
+         },
+  "errors": {
+              "not_configured": null,
+              "allows_error_after_200": false,
+              "codes": ["NoSuchBucket", "AccessDenied", "MalformedXML", "InvalidArgument", "BadDigest"]
+            },
+  "derived_resources": [],
+  "head_mirrors": null,
+  "quirk_refs": ["q-web-0002", "q-web-0003", "q-web-0004", "q-web-0006"],
+  "quirks": [
+              {
+                "id": "q-web-0002",
+                "kind": "element_name",
+                "target": "WebsiteConfiguration.RoutingRules",
+                "summary": "The routing rules are wrapped: the list sits inside a RoutingRules element with one RoutingRule per entry, where every list in the notification family is flattened, and a flattened rendering here is a document SDKs read as having no rules.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketWebsite.html",
+                                "summary": "The documented request syntax nests each RoutingRule inside a single RoutingRules element rather than repeating rules directly under the configuration root."
+                              }
+                            ],
+                "cases": ["c-bucketconfig-0013", "c-bucketconfig-0012"]
+              },
+              {
+                "id": "q-web-0003",
+                "kind": "exclusive_members",
+                "target": "WebsiteConfiguration",
+                "summary": "RedirectAllRequestsTo and the IndexDocument/ErrorDocument/RoutingRules group are alternatives: a document carrying both describes two different sites and there is no reading of it that serves anything predictable.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketWebsite.html",
+                                "summary": "The request reference presents the whole-site redirect and the document-serving members as two mutually exclusive ways to describe a website configuration."
+                              }
+                            ],
+                "cases": ["c-bucketconfig-0049", "c-bucketconfig-0014"]
+              },
+              {
+                "id": "q-web-0004",
+                "kind": "required_body",
+                "target": "RoutingRule.Redirect",
+                "summary": "A routing rule must carry a Redirect: a rule that says what to match and not what to do is refused by the decoder as MalformedXML, because the member is required in the pinned model.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketWebsite.html",
+                                "summary": "The request reference declares the redirect element of a routing rule as required while its condition is optional."
+                              }
+                            ],
+                "cases": ["c-bucketconfig-0050"]
+              },
+              {
+                "id": "q-web-0006",
+                "kind": "checksum_required",
+                "target": "PutBucketWebsite",
+                "summary": "The website write demands an integrity claim on the body, so a request with neither Content-MD5 nor an x-amz-checksum header is refused with 400 before the document is parsed.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketWebsite.html",
+                                "summary": "The request documents Content-MD5 as the base64 digest of the configuration, which the pinned model spells as a request checksum requirement the lowering does not read."
+                              }
+                            ],
+                "cases": ["c-bucketconfig-0036", "c-bucketconfig-0012"]
+              }
+            ],
+  "ext_points": []
+}

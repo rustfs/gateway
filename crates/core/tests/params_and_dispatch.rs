@@ -841,17 +841,38 @@ fn n_an_unhandled_bucket_lifecycle_request_is_refused_by_name() {
 /// lifecycle operation's answer. This is the dispatch-level half of the `query_absent` guarantee:
 /// `DELETE /b?policy` must not delete a bucket and `PUT /b?versioning` must not create one,
 /// whether or not the lifecycle family is registered. The served subresources (`cors`, `tagging`,
-/// and now `acl`) are the same rule with a different observable — a `501` naming their own
-/// operation — and are asserted with their own rows in `route_table.rs`.
+/// `acl`, and the nine configuration-band keys) are the same rule with a different observable —
+/// a `501` naming their own operation — and are asserted below and in `route_table.rs`.
 #[test]
 fn n_a_bucket_subresource_write_is_a_route_miss_not_a_lifecycle_operation() {
     let mut registry = Registry::new();
     registry.register(&GET_OBJECT).expect("a registrable spec");
     let router = Router::from_generated(registry).expect("the generated table builds");
-    for line in ["DELETE /bucket?policy", "PUT /bucket?versioning", "DELETE /bucket?website"] {
+    for line in [
+        "PUT /bucket?abac",
+        "DELETE /bucket?ownershipControls",
+        "PUT /bucket?inventory",
+        "DELETE /bucket?analytics",
+    ] {
         let error = router.dispatch(&Req::new(line).parts()).expect_err("no route");
         assert_eq!(error.message(), NO_ROUTE_MESSAGE, "{line}");
         assert_eq!(error.operation(), None, "{line} names no operation because none claimed it");
+    }
+    // The other direction, for the four keys that moved out of the list above when the
+    // bucket-configuration band landed: a served subresource write is a 501 that *names its own
+    // operation*, never a lifecycle answer and never a route miss. Without this half, deleting the
+    // rows would turn these back into the first branch and the test would still pass.
+    for (line, expected) in [
+        ("PUT /bucket?versioning", "PutBucketVersioning"),
+        ("DELETE /bucket?policy", "DeleteBucketPolicy"),
+        ("DELETE /bucket?website", "DeleteBucketWebsite"),
+        ("PUT /bucket?publicAccessBlock", "PutPublicAccessBlock"),
+    ] {
+        let error = router
+            .dispatch(&Req::new(line).parts())
+            .expect_err("no handler is registered");
+        assert_eq!(error.message(), NOT_REGISTERED_MESSAGE, "{line}");
+        assert_eq!(error.operation(), Some(expected), "{line} must name the operation it asked for");
     }
 }
 

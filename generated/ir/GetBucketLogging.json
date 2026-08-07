@@ -1,0 +1,373 @@
+{
+  "ir_version": "1",
+  "operation": "GetBucketLogging",
+  "http": {
+            "method": "GET",
+            "target": "Bucket",
+            "precedence": 205,
+            "predicates": [
+                            { "kind": "Method", "method": "GET" },
+                            { "kind": "Target", "target": "Bucket" },
+                            { "kind": "QueryPresent", "key": "logging" }
+                          ],
+            "success_status": 200,
+            "alt_success_statuses": [],
+            "path_shape": "/{Bucket}"
+          },
+  "auth": { "requirement": "Required", "action": "s3:GetBucketLogging", "presigned_allowed": true, "service": "s3" },
+  "payload": {
+               "request": { "kind": "None", "buffering": "None", "max_bytes": null },
+               "response": { "kind": "XmlBody", "buffering": "Full", "max_bytes": 65536 }
+             },
+  "checksum": { "http_checksum_required": false, "request_algorithms": [], "response_algorithms": [] },
+  "input": {
+             "fields": [
+                         {
+                           "name": "Bucket",
+                           "wire_name": "Bucket",
+                           "required": true,
+                           "binding": { "kind": "UriLabel", "greedy": false },
+                           "type": { "kind": "BucketName" },
+                           "hot": true,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "ExpectedBucketOwner",
+                           "wire_name": "x-amz-expected-bucket-owner",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "String" },
+                           "hot": false,
+                           "quirk_refs": []
+                         }
+                       ]
+           },
+  "output": {
+              "fields": [
+                          {
+                            "name": "LoggingEnabled",
+                            "wire_name": "LoggingEnabled",
+                            "required": false,
+                            "binding": { "kind": "BodyXml" },
+                            "type": { "kind": "Structure", "shape": "LoggingEnabled" },
+                            "hot": true,
+                            "quirk_refs": []
+                          }
+                        ]
+            },
+  "shapes": {
+              "Grantee": {
+                           "kind": "Structure",
+                           "fields": [
+                                       {
+                                         "name": "DisplayName",
+                                         "wire_name": "DisplayName",
+                                         "required": false,
+                                         "binding": { "kind": "BodyXml" },
+                                         "type": { "kind": "String" },
+                                         "hot": false,
+                                         "quirk_refs": []
+                                       },
+                                       {
+                                         "name": "EmailAddress",
+                                         "wire_name": "EmailAddress",
+                                         "required": false,
+                                         "binding": { "kind": "BodyXml" },
+                                         "type": { "kind": "String" },
+                                         "hot": false,
+                                         "quirk_refs": []
+                                       },
+                                       {
+                                         "name": "ID",
+                                         "wire_name": "ID",
+                                         "required": false,
+                                         "binding": { "kind": "BodyXml" },
+                                         "type": { "kind": "String" },
+                                         "hot": false,
+                                         "quirk_refs": []
+                                       },
+                                       {
+                                         "name": "URI",
+                                         "wire_name": "URI",
+                                         "required": false,
+                                         "binding": { "kind": "BodyXml" },
+                                         "type": { "kind": "String" },
+                                         "hot": false,
+                                         "quirk_refs": []
+                                       },
+                                       {
+                                         "name": "Type",
+                                         "wire_name": "xsi:type",
+                                         "required": false,
+                                         "binding": { "kind": "BodyXml" },
+                                         "type": {
+                                                   "kind": "StringEnum",
+                                                   "values": ["CanonicalUser", "AmazonCustomerByEmail", "Group"]
+                                                 },
+                                         "hot": false,
+                                         "quirk_refs": ["q-acl-0003", "q-acl-0004"]
+                                       }
+                                     ],
+                           "xml": {
+                                    "element_order": ["ID", "DisplayName", "EmailAddress", "URI"],
+                                    "empty_value_policy": {
+                                                            "DisplayName": "omit",
+                                                            "EmailAddress": "omit",
+                                                            "ID": "omit",
+                                                            "URI": "omit",
+                                                            "Type": "omit"
+                                                          },
+                                    "attributes": [
+                                                    {
+                                                      "element": "Grantee",
+                                                      "name": "xmlns:xsi",
+                                                      "source": {
+                                                                  "kind": "Constant",
+                                                                  "value": "http://www.w3.org/2001/XMLSchema-instance"
+                                                                }
+                                                    },
+                                                    {
+                                                      "element": "Grantee",
+                                                      "name": "xsi:type",
+                                                      "source": { "kind": "Field", "field": "Type" }
+                                                    }
+                                                  ]
+                                  }
+                         },
+              "LoggingEnabled": {
+                                  "kind": "Structure",
+                                  "fields": [
+                                              {
+                                                "name": "TargetBucket",
+                                                "wire_name": "TargetBucket",
+                                                "required": true,
+                                                "binding": { "kind": "BodyXml" },
+                                                "type": { "kind": "String" },
+                                                "hot": false,
+                                                "quirk_refs": []
+                                              },
+                                              {
+                                                "name": "TargetGrants",
+                                                "wire_name": "TargetGrants",
+                                                "required": false,
+                                                "binding": { "kind": "BodyXml" },
+                                                "type": {
+                                                          "kind": "List",
+                                                          "member": { "kind": "Structure", "shape": "TargetGrant" },
+                                                          "flattened": false,
+                                                          "wrapper_name": "Grant"
+                                                        },
+                                                "hot": false,
+                                                "quirk_refs": []
+                                              },
+                                              {
+                                                "name": "TargetPrefix",
+                                                "wire_name": "TargetPrefix",
+                                                "required": true,
+                                                "binding": { "kind": "BodyXml" },
+                                                "type": { "kind": "String" },
+                                                "hot": false,
+                                                "quirk_refs": []
+                                              },
+                                              {
+                                                "name": "TargetObjectKeyFormat",
+                                                "wire_name": "TargetObjectKeyFormat",
+                                                "required": false,
+                                                "binding": { "kind": "BodyXml" },
+                                                "type": { "kind": "Structure", "shape": "TargetObjectKeyFormat" },
+                                                "hot": false,
+                                                "quirk_refs": []
+                                              }
+                                            ],
+                                  "xml": {
+                                           "element_order": [
+                                                              "TargetBucket",
+                                                              "TargetPrefix",
+                                                              "TargetGrants",
+                                                              "TargetObjectKeyFormat"
+                                                            ],
+                                           "empty_value_policy": {
+                                                                   "TargetBucket": "emit",
+                                                                   "TargetGrants": "omit",
+                                                                   "TargetPrefix": "emit",
+                                                                   "TargetObjectKeyFormat": "omit"
+                                                                 },
+                                           "attributes": []
+                                         }
+                                },
+              "PartitionedPrefix": {
+                                     "kind": "Structure",
+                                     "fields": [
+                                                 {
+                                                   "name": "PartitionDateSource",
+                                                   "wire_name": "PartitionDateSource",
+                                                   "required": false,
+                                                   "binding": { "kind": "BodyXml" },
+                                                   "type": {
+                                                             "kind": "StringEnum",
+                                                             "values": ["EventTime", "DeliveryTime"]
+                                                           },
+                                                   "hot": false,
+                                                   "quirk_refs": []
+                                                 }
+                                               ],
+                                     "xml": {
+                                              "element_order": ["PartitionDateSource"],
+                                              "empty_value_policy": { "PartitionDateSource": "omit" },
+                                              "attributes": []
+                                            }
+                                   },
+              "SimplePrefix": {
+                                "kind": "Structure",
+                                "fields": [],
+                                "xml": { "element_order": [], "empty_value_policy": {}, "attributes": [] }
+                              },
+              "TargetGrant": {
+                               "kind": "Structure",
+                               "fields": [
+                                           {
+                                             "name": "Grantee",
+                                             "wire_name": "Grantee",
+                                             "required": false,
+                                             "binding": { "kind": "BodyXml" },
+                                             "type": { "kind": "Structure", "shape": "Grantee" },
+                                             "hot": false,
+                                             "quirk_refs": []
+                                           },
+                                           {
+                                             "name": "Permission",
+                                             "wire_name": "Permission",
+                                             "required": false,
+                                             "binding": { "kind": "BodyXml" },
+                                             "type": {
+                                                       "kind": "StringEnum",
+                                                       "values": ["FULL_CONTROL", "READ", "WRITE"]
+                                                     },
+                                             "hot": false,
+                                             "quirk_refs": []
+                                           }
+                                         ],
+                               "xml": {
+                                        "element_order": ["Grantee", "Permission"],
+                                        "empty_value_policy": { "Grantee": "omit", "Permission": "omit" },
+                                        "attributes": []
+                                      }
+                             },
+              "TargetObjectKeyFormat": {
+                                         "kind": "Structure",
+                                         "fields": [
+                                                     {
+                                                       "name": "SimplePrefix",
+                                                       "wire_name": "SimplePrefix",
+                                                       "required": false,
+                                                       "binding": { "kind": "BodyXml" },
+                                                       "type": { "kind": "Structure", "shape": "SimplePrefix" },
+                                                       "hot": false,
+                                                       "quirk_refs": []
+                                                     },
+                                                     {
+                                                       "name": "PartitionedPrefix",
+                                                       "wire_name": "PartitionedPrefix",
+                                                       "required": false,
+                                                       "binding": { "kind": "BodyXml" },
+                                                       "type": { "kind": "Structure", "shape": "PartitionedPrefix" },
+                                                       "hot": false,
+                                                       "quirk_refs": []
+                                                     }
+                                                   ],
+                                         "xml": {
+                                                  "element_order": ["SimplePrefix", "PartitionedPrefix"],
+                                                  "empty_value_policy": {
+                                                                          "SimplePrefix": "omit",
+                                                                          "PartitionedPrefix": "omit"
+                                                                        },
+                                                  "attributes": []
+                                                }
+                                       }
+            },
+  "xml": {
+           "request_root": null,
+           "request_root_aliases": [],
+           "response_root": "BucketLoggingStatus",
+           "xmlns": "emit",
+           "unwrapped_output": false,
+           "element_order": ["LoggingEnabled"],
+           "empty_value_policy": { "LoggingEnabled": "omit" },
+           "url_encoded_fields": [],
+           "attributes": [],
+           "body_literal": false
+         },
+  "errors": { "not_configured": null, "allows_error_after_200": false, "codes": ["NoSuchBucket", "AccessDenied"] },
+  "derived_resources": [],
+  "head_mirrors": null,
+  "quirk_refs": ["q-log-0001", "q-log-0003"],
+  "quirks": [
+              {
+                "id": "q-log-0001",
+                "kind": "not_configured_error",
+                "target": "GetBucketLogging",
+                "summary": "A bucket that is not logging answers 200 with an empty BucketLoggingStatus element rather than a 404, so the absence of a LoggingEnabled child is the whole answer.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketLogging.html",
+                                "summary": "The operation documents no not-found error for a bucket with no logging configuration and describes the logging element as absent when logging is off."
+                              }
+                            ],
+                "cases": ["c-bucketconfig-0026", "c-bucketconfig-0009"]
+              },
+              {
+                "id": "q-acl-0003",
+                "kind": "xml_attribute",
+                "target": "Grantee.Type",
+                "summary": "The grantee discriminator is an XML attribute of <Grantee> and not a child element, which makes it the one member of the supported surface that cannot be written by the ordinary element emitter; the frozen IR reserves xml.attributes for it and the generated encoder writes it from there rather than from a branch in the codec.",
+                "evidence": [
+                              {
+                                "kind": "s3s-pr",
+                                "ref": "https://github.com/s3s-project/s3s/pull/299",
+                                "summary": "Upstream had to add XML attribute support to its serializer before ACL responses could carry the discriminator at all."
+                              },
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_Grantee.html",
+                                "summary": "The Grantee reference documents Type as an attribute of the containing element rather than as a member element."
+                              }
+                            ],
+                "cases": ["c-acl-0001", "c-acl-0002", "c-acl-0003", "c-acl-0004"]
+              },
+              {
+                "id": "q-log-0003",
+                "kind": "element_name",
+                "target": "LoggingEnabled.TargetGrants",
+                "summary": "The grant list is wrapped in a TargetGrants element whose entries are spelled Grant rather than TargetGrant, so a reader looking for the member name on the wire will not find it.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketLogging.html",
+                                "summary": "The documented request syntax shows Grant elements nested inside a TargetGrants wrapper, which is the wrapped shape rather than the flattened one the notification family uses."
+                              }
+                            ],
+                "cases": ["c-bucketconfig-0009", "c-bucketconfig-0008"]
+              },
+              {
+                "id": "q-acl-0004",
+                "kind": "aws_deviation",
+                "target": "Grantee.Type",
+                "summary": "On the way in the discriminator is derived from whichever of ID, URI or EmailAddress the grantee carries, because the XML reader this project ships exposes no attributes at all; for every document AWS accepts the two agree, and a document whose attribute contradicts its members is read by its members.",
+                "evidence": [
+                              {
+                                "kind": "s3s-issue",
+                                "ref": "https://github.com/s3s-project/s3s/issues/297",
+                                "summary": "The same missing capability upstream hit from the writing side; here it is the reading side that has no attribute access."
+                              },
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_Grantee.html",
+                                "summary": "Each documented Type value pairs with exactly one identifying member, which is what makes the member a sound discriminator."
+                              }
+                            ],
+                "cases": ["c-acl-0005", "c-acl-0021", "c-acl-0022"]
+              }
+            ],
+  "ext_points": []
+}

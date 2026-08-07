@@ -1,0 +1,96 @@
+# Copyright 2026 RustFS Team
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Quirks of the static-website configuration.
+#
+# One [[quirk]] per behaviour the pinned Smithy model does not state, or states in a trait the
+# lowering would otherwise lose. `summary` and every `evidence.summary` are written by this
+# project; upstream issue and documentation prose stays under its author's copyright and is never
+# pasted here.
+#
+# The website endpoint's runtime quirks — index-document resolution, error-document mapping, the
+# redirect codes a routing rule produces — are deliberately absent: they belong to a protocol face
+# beside the REST API that this workspace does not serve.
+
+[[quirk]]
+id      = "q-web-0001"
+kind    = "not_configured_error"
+target  = "GetBucketWebsite"
+summary = "A bucket with no website document answers 404 with the subresource-specific code NoSuchWebsiteConfiguration, which is neither the policy code nor the public-access code nor an empty 200."
+cases   = ["c-bucketconfig-0028", "c-bucketconfig-0013"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketWebsite.html"
+  summary = "The operation documents NoSuchWebsiteConfiguration as the error for a bucket whose website configuration does not exist."
+
+[[quirk]]
+id      = "q-web-0002"
+kind    = "element_name"
+target  = "WebsiteConfiguration.RoutingRules"
+summary = "The routing rules are wrapped: the list sits inside a RoutingRules element with one RoutingRule per entry, where every list in the notification family is flattened, and a flattened rendering here is a document SDKs read as having no rules."
+cases   = ["c-bucketconfig-0013", "c-bucketconfig-0012"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketWebsite.html"
+  summary = "The documented request syntax nests each RoutingRule inside a single RoutingRules element rather than repeating rules directly under the configuration root."
+
+[[quirk]]
+id      = "q-web-0003"
+kind    = "exclusive_members"
+target  = "WebsiteConfiguration"
+summary = "RedirectAllRequestsTo and the IndexDocument/ErrorDocument/RoutingRules group are alternatives: a document carrying both describes two different sites and there is no reading of it that serves anything predictable."
+cases   = ["c-bucketconfig-0049", "c-bucketconfig-0014"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketWebsite.html"
+  summary = "The request reference presents the whole-site redirect and the document-serving members as two mutually exclusive ways to describe a website configuration."
+
+[[quirk]]
+id      = "q-web-0004"
+kind    = "required_body"
+target  = "RoutingRule.Redirect"
+summary = "A routing rule must carry a Redirect: a rule that says what to match and not what to do is refused by the decoder as MalformedXML, because the member is required in the pinned model."
+cases   = ["c-bucketconfig-0050"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketWebsite.html"
+  summary = "The request reference declares the redirect element of a routing rule as required while its condition is optional."
+
+[[quirk]]
+id      = "q-web-0005"
+kind    = "idempotent_delete"
+target  = "DeleteBucketWebsite"
+summary = "The delete answers 204 whether or not a website document existed, even though the read of the same unconfigured bucket answers 404, so a retry after a lost response is a success rather than a failure."
+cases   = ["c-bucketconfig-0032", "c-bucketconfig-0015"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketWebsite.html"
+  summary = "The operation documents a 204 No Content success and lists no not-found error for a missing configuration, unlike the read beside it."
+
+[[quirk]]
+id      = "q-web-0006"
+kind    = "checksum_required"
+target  = "PutBucketWebsite"
+summary = "The website write demands an integrity claim on the body, so a request with neither Content-MD5 nor an x-amz-checksum header is refused with 400 before the document is parsed."
+cases   = ["c-bucketconfig-0036", "c-bucketconfig-0012"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketWebsite.html"
+  summary = "The request documents Content-MD5 as the base64 digest of the configuration, which the pinned model spells as a request checksum requirement the lowering does not read."

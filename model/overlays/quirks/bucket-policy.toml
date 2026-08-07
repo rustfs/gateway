@@ -1,0 +1,174 @@
+# Copyright 2026 RustFS Team
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Quirks of the bucket policy and public-access family.
+#
+# One [[quirk]] per behaviour the pinned Smithy model does not state, or states in a trait the
+# lowering would otherwise lose. `summary` and every `evidence.summary` are written by this
+# project; upstream issue and documentation prose stays under its author's copyright and is never
+# pasted here.
+#
+# There is no quirk here for policy evaluation, and there never will be: the gateway does not
+# contain an evaluator. What a statement grants is the authorizer's, and the fence is recorded in
+# `model/overlays/ops/bucket-policy.toml` and in `ops/shared/bucket_policy.rs` rather than as a
+# behaviour with evidence.
+
+[[quirk]]
+id      = "q-pol-0001"
+kind    = "media_type"
+target  = "GetBucketPolicy.Policy"
+summary = "The bucket policy body is JSON on both the read and the write, the only success body in the S3 surface that is not XML, and the read answers Content-Type application/json with the stored document byte for byte."
+cases   = ["c-bucketconfig-0017", "c-bucketconfig-0016"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketPolicy.html"
+  summary = "The documented response syntax for the policy read is a bare JSON policy document rather than an XML element tree."
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketPolicy.html"
+  summary = "The documented request syntax for the policy write is a bare JSON policy document sent as the whole body."
+
+[[quirk]]
+id      = "q-pol-0002"
+kind    = "error_body"
+target  = "GetBucketPolicy"
+summary = "The error body of the policy read stays XML even though its success body is JSON, so a client that switched parsers on the success content type would be reading the wrong format on every failure."
+cases   = ["c-bucketconfig-0029"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/ErrorResponses.html"
+  summary = "The error-response reference describes one XML Error document for the whole REST API and names no JSON alternative for any operation."
+
+[[quirk]]
+id      = "q-pol-0003"
+kind    = "not_configured_error"
+target  = "GetBucketPolicy"
+summary = "A bucket with no policy answers 404 NoSuchBucketPolicy, the code specific to this subresource, rather than an empty JSON document or a generic not-found."
+cases   = ["c-bucketconfig-0029", "c-bucketconfig-0017"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketPolicy.html"
+  summary = "The operation documents NoSuchBucketPolicy as the error for a bucket whose policy does not exist."
+
+[[quirk]]
+id      = "q-pol-0004"
+kind    = "idempotent_delete"
+target  = "DeleteBucketPolicy"
+summary = "The delete answers 204 whether or not a policy existed, so removing the policy of an unconfigured bucket is a success rather than the 404 the read of the same bucket answers."
+cases   = ["c-bucketconfig-0033", "c-bucketconfig-0018"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketPolicy.html"
+  summary = "The operation documents a 204 No Content success and lists no not-found error for a missing policy."
+
+[[quirk]]
+id      = "q-pol-0005"
+kind    = "not_configured_error"
+target  = "GetBucketPolicyStatus"
+summary = "The policy-status read answers the policy read's own 404 code, NoSuchBucketPolicy, because a bucket with no policy has no status to report and the missing thing is the same document."
+cases   = ["c-bucketconfig-0030", "c-bucketconfig-0019"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketPolicyStatus.html"
+  summary = "The operation describes the status as a reading of the bucket policy, and the error list it shares with the policy read carries no status-specific not-found code."
+
+[[quirk]]
+id      = "q-pol-0006"
+kind    = "checksum_required"
+target  = "PutBucketPolicy"
+summary = "The policy write demands an integrity claim on the body, so a request with neither Content-MD5 nor an x-amz-checksum header is refused with 400 before an access-control document is read at all."
+cases   = ["c-bucketconfig-0039", "c-bucketconfig-0016"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketPolicy.html"
+  summary = "The request documents Content-MD5 as the base64 digest of the policy, which the pinned model spells as a request checksum requirement the lowering does not read."
+
+[[quirk]]
+id      = "q-pol-0007"
+kind    = "bounded_input"
+target  = "PutBucketPolicy"
+summary = "A policy is capped at 20 KB and at a nesting depth this parser will follow, both checked before anything interprets the document, and the depth check counts in a loop rather than recursing so that the limit is a refusal instead of a stack overflow."
+cases   = ["c-bucketconfig-0052", "c-bucketconfig-0053"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/bucket-policies.html"
+  summary = "The bucket-policy guide states a 20 KB size limit for a bucket policy document."
+
+[[quirk]]
+id      = "q-pol-0008"
+kind    = "value_constraint"
+target  = "PutBucketPolicy"
+summary = "The framework checks that a policy is UTF-8, is syntactically JSON and is an object, and evaluates none of its meaning; the refusal is MalformedPolicy with a constant message that never repeats the document, because a policy names principals and account identifiers."
+cases   = ["c-bucketconfig-0051", "c-bucketconfig-0054"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketPolicy.html"
+  summary = "The operation documents MalformedPolicy as the error for a policy document the service cannot use, without distinguishing the reason in the code."
+
+[[quirk]]
+id      = "q-pab-0001"
+kind    = "not_configured_error"
+target  = "GetPublicAccessBlock"
+summary = "A bucket with no public-access block answers 404 NoSuchPublicAccessBlockConfiguration, the third distinct not-configured literal in this band and interchangeable with neither of the other two."
+cases   = ["c-bucketconfig-0031", "c-bucketconfig-0021"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetPublicAccessBlock.html"
+  summary = "The operation documents NoSuchPublicAccessBlockConfiguration as the error for a bucket whose public-access block does not exist."
+
+[[quirk]]
+id      = "q-pab-0002"
+kind    = "checksum_required"
+target  = "PutPublicAccessBlock"
+summary = "The public-access write demands an integrity claim on the body, so a request with neither Content-MD5 nor an x-amz-checksum header is refused with 400 before the switches are read."
+cases   = ["c-bucketconfig-0040", "c-bucketconfig-0020"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutPublicAccessBlock.html"
+  summary = "The request documents Content-MD5 as the base64 digest of the configuration, which the pinned model spells as a request checksum requirement the lowering does not read."
+
+[[quirk]]
+id      = "q-pab-0003"
+kind    = "idempotent_delete"
+target  = "DeletePublicAccessBlock"
+summary = "The delete answers 204 whether or not a public-access block existed, so removing one from an unconfigured bucket is a success rather than the 404 the read of the same bucket answers."
+cases   = ["c-bucketconfig-0034", "c-bucketconfig-0022"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeletePublicAccessBlock.html"
+  summary = "The operation documents a 204 No Content success and lists no not-found error for a missing configuration."
+
+[[quirk]]
+id      = "q-pab-0004"
+kind    = "default_value"
+target  = "PublicAccessBlockConfiguration"
+summary = "All four switches are optional and an omitted one is false, so a document naming two of them turns the other two off rather than leaving them undefined, and the read renders every one of them in lower case."
+cases   = ["c-bucketconfig-0021", "c-bucketconfig-0055"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutPublicAccessBlock.html"
+  summary = "The request reference declares all four settings as optional booleans, and the read reference beside it shows them rendered in lower case."

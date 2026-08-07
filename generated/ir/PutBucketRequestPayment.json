@@ -1,0 +1,171 @@
+{
+  "ir_version": "1",
+  "operation": "PutBucketRequestPayment",
+  "http": {
+            "method": "PUT",
+            "target": "Bucket",
+            "precedence": 231,
+            "predicates": [
+                            { "kind": "Method", "method": "PUT" },
+                            { "kind": "Target", "target": "Bucket" },
+                            { "kind": "QueryPresent", "key": "requestPayment" }
+                          ],
+            "success_status": 200,
+            "alt_success_statuses": [],
+            "path_shape": "/{Bucket}"
+          },
+  "auth": {
+            "requirement": "Required",
+            "action": "s3:PutBucketRequestPayment",
+            "presigned_allowed": true,
+            "service": "s3"
+          },
+  "payload": {
+               "request": { "kind": "XmlBody", "buffering": "Full", "max_bytes": 4096 },
+               "response": { "kind": "None", "buffering": "None", "max_bytes": null }
+             },
+  "checksum": {
+                "http_checksum_required": true,
+                "request_algorithms": ["CRC32", "CRC32C", "CRC64NVME", "SHA1", "SHA256"],
+                "response_algorithms": []
+              },
+  "input": {
+             "fields": [
+                         {
+                           "name": "Bucket",
+                           "wire_name": "Bucket",
+                           "required": true,
+                           "binding": { "kind": "UriLabel", "greedy": false },
+                           "type": { "kind": "BucketName" },
+                           "hot": true,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "ContentMD5",
+                           "wire_name": "content-md5",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "String" },
+                           "hot": false,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "ChecksumAlgorithm",
+                           "wire_name": "x-amz-sdk-checksum-algorithm",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": {
+                                     "kind": "StringEnum",
+                                     "values": [
+                                                 "CRC32",
+                                                 "CRC32C",
+                                                 "SHA1",
+                                                 "SHA256",
+                                                 "CRC64NVME",
+                                                 "SHA512",
+                                                 "MD5",
+                                                 "XXHASH64",
+                                                 "XXHASH3",
+                                                 "XXHASH128"
+                                               ]
+                                   },
+                           "hot": false,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "RequestPaymentConfiguration",
+                           "wire_name": null,
+                           "required": true,
+                           "binding": { "kind": "Payload" },
+                           "type": { "kind": "Structure", "shape": "RequestPaymentConfiguration" },
+                           "hot": true,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "ExpectedBucketOwner",
+                           "wire_name": "x-amz-expected-bucket-owner",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "String" },
+                           "hot": false,
+                           "quirk_refs": []
+                         }
+                       ]
+           },
+  "output": { "fields": [] },
+  "shapes": {
+              "RequestPaymentConfiguration": {
+                                               "kind": "Structure",
+                                               "fields": [
+                                                           {
+                                                             "name": "Payer",
+                                                             "wire_name": "Payer",
+                                                             "required": true,
+                                                             "binding": { "kind": "BodyXml" },
+                                                             "type": {
+                                                                       "kind": "StringEnum",
+                                                                       "values": ["Requester", "BucketOwner"]
+                                                                     },
+                                                             "hot": false,
+                                                             "quirk_refs": []
+                                                           }
+                                                         ],
+                                               "xml": {
+                                                        "element_order": ["Payer"],
+                                                        "empty_value_policy": { "Payer": "emit" },
+                                                        "attributes": []
+                                                      }
+                                             }
+            },
+  "xml": {
+           "request_root": null,
+           "request_root_aliases": [],
+           "response_root": null,
+           "xmlns": "emit",
+           "unwrapped_output": false,
+           "element_order": [],
+           "empty_value_policy": {},
+           "url_encoded_fields": [],
+           "attributes": [],
+           "body_literal": false
+         },
+  "errors": {
+              "not_configured": null,
+              "allows_error_after_200": false,
+              "codes": ["NoSuchBucket", "AccessDenied", "MalformedXML", "InvalidArgument", "BadDigest"]
+            },
+  "derived_resources": [],
+  "head_mirrors": null,
+  "quirk_refs": ["q-rqp-0002", "q-rqp-0003"],
+  "quirks": [
+              {
+                "id": "q-rqp-0002",
+                "kind": "closed_value_set",
+                "target": "RequestPaymentConfiguration.Payer",
+                "summary": "The payer is Requester or BucketOwner and nothing else, and the member is required, so an unknown value has no reading of the document to fall back to.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketRequestPayment.html",
+                                "summary": "The request reference declares the payer element as required with exactly two valid values."
+                              }
+                            ],
+                "cases": ["c-bucketconfig-0006", "c-bucketconfig-0045"]
+              },
+              {
+                "id": "q-rqp-0003",
+                "kind": "checksum_required",
+                "target": "PutBucketRequestPayment",
+                "summary": "The request-payment write demands an integrity claim on the body, so a request with neither Content-MD5 nor an x-amz-checksum header is refused with 400 before the document is parsed.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketRequestPayment.html",
+                                "summary": "The request documents Content-MD5 as the base64 digest of the configuration, which the pinned model spells as a request checksum requirement the lowering does not read."
+                              }
+                            ],
+                "cases": ["c-bucketconfig-0038", "c-bucketconfig-0006"]
+              }
+            ],
+  "ext_points": []
+}

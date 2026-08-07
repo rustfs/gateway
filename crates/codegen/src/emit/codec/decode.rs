@@ -60,7 +60,7 @@ use std::fmt::Write as _;
 
 use rustfs_gateway_model::ir::{Binding, Field, OperationIr, Quirk, Shape, Type};
 
-use super::{attribute_name, bounds, carried_as_attribute, expr, forms, tolerance};
+use super::{attribute_name, bounds, carried_as_attribute, expr, forms, media, tolerance};
 use crate::emit::dto::naming;
 
 /// The default code for a required member the request did not carry.
@@ -333,8 +333,28 @@ fn one_field(ir: &OperationIr, field: &Field, open_document: bool) -> Result<Str
                 out.push_str(&assign(indent_len, &target, &wrap(field, &format!("{reader}(&root)?"))));
                 out.push_str(close);
             }
+            // A text payload is the body verbatim, once it is text at all. The decoder's whole
+            // contribution is the UTF-8 refusal — whether the document *says* anything valid is
+            // the operation's own question, asked after decoding, with the code that operation
+            // owes. A bucket policy is the only member here today, and `MalformedPolicy` is not
+            // a code any decoder can name.
+            Type::String | Type::OpaqueString => {
+                let media = media::required(field, &ir.quirks, op)?;
+                let _ = writeln!(out, "        // {member} — the buffered request body, `{media}`.");
+                out.push_str("        let raw_body = body.into_buffered()?;\n");
+                let read = format!("value::text_payload(raw_body.as_ref(), \"{member}\")?");
+                let read = match field.ty {
+                    Type::OpaqueString => format!("value::opaque(&{read})"),
+                    _ => read,
+                };
+                out.push_str(&assign(8, &target, &wrap(field, &read)));
+            }
             _ => {
-                return Err(expr::unsupported(op, member, "a payload binding carries a blob or an XML structure"));
+                return Err(expr::unsupported(
+                    op,
+                    member,
+                    "a payload binding carries a blob, a text document or an XML structure",
+                ));
             }
         },
         Binding::BodyXml => {

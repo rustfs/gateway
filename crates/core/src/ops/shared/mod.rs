@@ -35,7 +35,11 @@
 //! change to the shared rule.
 
 pub mod acl;
+pub mod bucket_config;
+pub mod bucket_notification;
+pub mod bucket_policy;
 pub mod bucket_region;
+pub mod bucket_website;
 pub mod copy_source;
 pub mod cors;
 pub mod encryption;

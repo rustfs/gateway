@@ -1,0 +1,109 @@
+# Copyright 2026 RustFS Team
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Family: the static-website configuration. GetBucketWebsite, PutBucketWebsite,
+# DeleteBucketWebsite.
+#
+# Configuration codec only, and the fence here is wider than in any sibling family: the website
+# **endpoint** is a second protocol face beside the REST API. Serving the index document,
+# answering with the error document, turning a routing rule into a 301 or a 302 and honouring
+# `x-amz-website-redirect-location` on an object are all its half, and none of them is a route row
+# here. This family settles what the document may say and stops.
+#
+# Two facts distinguish it inside the 200-249 band.
+#
+# `<RoutingRules>` is **wrapped**: the list sits inside an element of its own, one `<RoutingRule>`
+# per entry. Every list in the notification family two files over is flattened. Rendering either
+# of them the other way produces a document that parses and that every SDK reads as empty, which
+# is the failure mode a byte-exact golden exists to catch.
+#
+# The read's unconfigured answer is a **404 with this subresource's own code**,
+# `NoSuchWebsiteConfiguration` — while the *delete* of the same unconfigured bucket is a 204. The
+# asymmetry is deliberate: a read has something to say about "there is nothing here" and a delete
+# does not.
+#
+# The routing reason is the band's: `GET /{Bucket}?website` was claimed by `ListObjects` and
+# answered with a page of keys — one of the nine debt-register lines this family retires — while
+# the write and the delete were unroutable.
+
+include = ["DeleteBucketWebsite", "GetBucketWebsite", "PutBucketWebsite"]
+
+# =============================================================================================
+# GetBucketWebsite — 240
+# =============================================================================================
+[op.GetBucketWebsite]
+precedence = 240
+auth_action = "s3:GetBucketWebsite"
+# AWS documents no byte cap for the document itself but caps the routing rules at fifty, each
+# carrying at most a host name, a key prefix and a replacement. 64 KiB is an order of magnitude
+# past a maximal document and bounds the XML surface, which is the same ceiling the CORS family
+# uses for the same reason.
+response_max_bytes = 65536
+not_configured = "NoSuchWebsiteConfiguration"
+error_codes = ["NoSuchBucket", "AccessDenied", "NoSuchWebsiteConfiguration"]
+url_encoded_fields = []
+input_hot = []
+output_hot = ["RoutingRules"]
+quirk_refs = ["q-web-0001", "q-web-0002"]
+
+# =============================================================================================
+# PutBucketWebsite — 241
+#
+# Replaces the whole document. `<RedirectAllRequestsTo>` and the document-serving members are
+# mutually exclusive; that refusal, and the one-rewrite-per-`<Redirect>` rule, live in
+# `ops/shared/bucket_website.rs`. A `<RoutingRule>` with no `<Redirect>` never reaches them: the
+# member is required in the model, so the decoder answers MalformedXML first.
+# =============================================================================================
+[op.PutBucketWebsite]
+precedence = 241
+auth_action = "s3:PutBucketWebsite"
+# The pinned model carries `content-md5` and `aws.protocols#httpChecksum` with
+# `requestChecksumRequired`, a different trait spelling from the one lowering reads, so the
+# requirement is stated here rather than silently lost.
+http_checksum_required = true
+request_max_bytes = 65536
+error_codes = ["NoSuchBucket", "AccessDenied", "MalformedXML", "InvalidArgument", "BadDigest"]
+url_encoded_fields = []
+input_hot = ["WebsiteConfiguration"]
+output_hot = []
+quirk_refs = ["q-web-0002", "q-web-0003", "q-web-0004", "q-web-0006"]
+
+# =============================================================================================
+# DeleteBucketWebsite — 242
+#
+# 204, unconditionally, even though the read of the same unconfigured bucket is a 404.
+# =============================================================================================
+[op.DeleteBucketWebsite]
+precedence = 242
+auth_action = "s3:DeleteBucketWebsite"
+error_codes = ["NoSuchBucket", "AccessDenied"]
+url_encoded_fields = []
+input_hot = []
+output_hot = []
+quirk_refs = ["q-web-0005"]
+
+# =============================================================================================
+# Nested shapes owned by this family
+# =============================================================================================
+
+# The documented element order, which is also the exclusion's shape: the first member is one
+# alternative and the remaining three are the other.
+[shape.WebsiteConfiguration]
+element_order = ["RedirectAllRequestsTo", "IndexDocument", "ErrorDocument", "RoutingRules"]
+hot = ["RoutingRules"]
+
+# `<Condition>` then `<Redirect>`; the redirect is required by the model, so a rule that says what
+# to match and not what to do is refused by the decoder.
+[shape.RoutingRule]
+element_order = ["Condition", "Redirect"]

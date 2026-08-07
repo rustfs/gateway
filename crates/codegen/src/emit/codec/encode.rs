@@ -35,7 +35,7 @@ use std::fmt::Write as _;
 
 use rustfs_gateway_model::ir::{AttributeSource, Binding, ETagRender, EmptyValue, Field, OmitWhen, OperationIr, Shape, Type};
 
-use super::{attribute_name, carried_as_attribute, expr, url};
+use super::{attribute_name, carried_as_attribute, expr, media, url};
 use crate::emit::dto::naming;
 
 /// Renders the body of one operation's `encode`.
@@ -160,8 +160,30 @@ fn one_field(ir: &OperationIr, field: &Field) -> Result<String, String> {
                 out.push_str("            response.set_header(\"content-type\", \"application/xml\");\n");
                 out.push_str("        }\n");
             }
+            // A text payload is the body verbatim, with the content type the IR declares. The
+            // only one today is a bucket policy, whose body is JSON while its *errors* stay XML
+            // — so the header is written here, on the success path, and nowhere else.
+            Type::String | Type::OpaqueString => {
+                let media = media::required(field, &ir.quirks, op)?;
+                let _ = writeln!(out, "        // {member} — the complete response body, `{media}`.");
+                if field.required {
+                    let _ = writeln!(out, "        {{");
+                    let _ = writeln!(out, "            let v = &{source};");
+                } else {
+                    let _ = writeln!(out, "        if let Some(v) = {source}.as_ref() {{");
+                }
+                let rendered = expr::to_wire(&field.ty, member, op)?;
+                let _ = writeln!(out, "            let rendered = {rendered};");
+                out.push_str("            response.body = ResponseBody::Complete(rendered.as_bytes().to_vec());\n");
+                let _ = writeln!(out, "            response.set_header(\"content-type\", \"{media}\");");
+                out.push_str("        }\n");
+            }
             _ => {
-                return Err(expr::unsupported(op, member, "a payload binding carries a blob or an XML structure"));
+                return Err(expr::unsupported(
+                    op,
+                    member,
+                    "a payload binding carries a blob, a text document or an XML structure",
+                ));
             }
         },
         Binding::StatusCode => {
@@ -482,6 +504,11 @@ pub fn shape_writer(ir: &OperationIr, name: &str, shape: &Shape) -> Result<Strin
     }
     let _ = writeln!(out, "/// Writes one `{name}` element's children, in the wire order the IR records.");
     out.push_str(&shape_writer_signature(&naming::module_name(name), &type_name, plan.encodes_shape(name)));
+    // The mirror of the empty-shape arm in `decode::shape_reader`: a structure with no members
+    // writes no children, so both parameters are consumed explicitly rather than renamed.
+    if shape.fields.is_empty() {
+        out.push_str("    let _ = writer;\n    let _ = value;\n");
+    }
     for member in order {
         let Some(field) = shape.fields.iter().find(|f| f.name == member) else {
             continue;

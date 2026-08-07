@@ -1,0 +1,145 @@
+# Copyright 2026 RustFS Team
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Quirks of the three one-switch bucket configurations: ?versioning, ?accelerate, ?requestPayment.
+#
+# One [[quirk]] per behaviour the pinned Smithy model does not state, or states in a trait the
+# lowering would otherwise lose. `summary` and every `evidence.summary` are written by this
+# project; upstream issue and documentation prose stays under its author's copyright and is never
+# pasted here.
+
+[[quirk]]
+id      = "q-ver-0001"
+kind    = "not_configured_error"
+target  = "GetBucketVersioning"
+summary = "A bucket that was never versioned answers 200 with an empty VersioningConfiguration element and no Status child at all, which is a different state from Suspended and is not a 404."
+cases   = ["c-bucketconfig-0023", "c-bucketconfig-0002"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketVersioning.html"
+  summary = "The operation documents that a bucket whose versioning was never configured returns an empty configuration element rather than a status value or an error."
+
+[[quirk]]
+id      = "q-ver-0002"
+kind    = "lenient_unknown_elements"
+target  = "PutBucketVersioning"
+summary = "An element the decoder does not know is skipped and the rest of the document is stored, because a versioning document that stopped parsing would be degraded to no configuration and turn version retention off without any visible failure."
+cases   = ["c-bucketconfig-0046"]
+
+  [[quirk.evidence]]
+  kind    = "s3s-issue"
+  ref     = "https://github.com/s3s-project/s3s/issues/613"
+  summary = "Upstream established that S3 accepts request documents carrying elements it does not define rather than refusing them, and a stricter parser broke clients that sent them."
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/Versioning.html"
+  summary = "The versioning guide describes suspension as retaining existing versions, which is what makes a silently unconfigured document a data-retention change rather than a feature toggle."
+
+[[quirk]]
+id      = "q-ver-0003"
+kind    = "checksum_required"
+target  = "PutBucketVersioning"
+summary = "The versioning write demands an integrity claim on the body, so a request with neither Content-MD5 nor an x-amz-checksum header is refused with 400 before the document is parsed."
+cases   = ["c-bucketconfig-0035", "c-bucketconfig-0001"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketVersioning.html"
+  summary = "The request documents Content-MD5 as the base64 digest of the configuration, which the pinned model spells as a request checksum requirement the lowering does not read."
+
+[[quirk]]
+id      = "q-ver-0004"
+kind    = "element_name"
+target  = "VersioningConfiguration.MFADelete"
+summary = "The member the model calls MFADelete is spelled MfaDelete on the wire, and the pinned model gives the read and the write the same spelling, so no alternate-name rule is needed for it here."
+cases   = ["c-bucketconfig-0003"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketVersioning.html"
+  summary = "The documented request syntax spells the multi-factor delete element MfaDelete, and the read reference beside it spells the same element the same way."
+
+[[quirk]]
+id      = "q-acc-0001"
+kind    = "not_configured_error"
+target  = "GetBucketAccelerateConfiguration"
+summary = "A bucket with no acceleration document answers 200 with an empty AccelerateConfiguration element, not a 404, so a client reads acceleration as off rather than as an error."
+cases   = ["c-bucketconfig-0025", "c-bucketconfig-0005"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketAccelerateConfiguration.html"
+  summary = "The operation documents no not-found error for an unconfigured bucket and describes the status element as absent when acceleration was never enabled."
+
+[[quirk]]
+id      = "q-acc-0002"
+kind    = "closed_value_set"
+target  = "AccelerateConfiguration.Status"
+summary = "The acceleration status is Enabled or Suspended and nothing else; the element is the whole document, so a value outside the pair leaves nothing meaningful to store."
+cases   = ["c-bucketconfig-0004", "c-bucketconfig-0044"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketAccelerateConfiguration.html"
+  summary = "The request reference declares the status element with exactly two valid values and documents no third."
+
+[[quirk]]
+id      = "q-acc-0003"
+kind    = "checksum_required"
+target  = "PutBucketAccelerateConfiguration"
+summary = "The acceleration write is one of two writes in this band that carry no integrity requirement, so a body with neither Content-MD5 nor an x-amz-checksum header is accepted."
+cases   = ["c-bucketconfig-0041"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketAccelerateConfiguration.html"
+  summary = "The request reference lists no Content-MD5 header, unlike the versioning, logging, request-payment, website, policy and public-access writes beside it."
+
+[[quirk]]
+id      = "q-rqp-0001"
+kind    = "not_configured_error"
+target  = "GetBucketRequestPayment"
+summary = "A bucket that was never switched to requester-pays answers 200 with the default payer BucketOwner rather than an empty document or a 404, because every bucket has a payer."
+cases   = ["c-bucketconfig-0027", "c-bucketconfig-0007"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketRequestPayment.html"
+  summary = "The operation documents the payer as always present in the response and names the bucket owner as the value before any request-payment configuration is written."
+
+[[quirk]]
+id      = "q-rqp-0002"
+kind    = "closed_value_set"
+target  = "RequestPaymentConfiguration.Payer"
+summary = "The payer is Requester or BucketOwner and nothing else, and the member is required, so an unknown value has no reading of the document to fall back to."
+cases   = ["c-bucketconfig-0006", "c-bucketconfig-0045"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketRequestPayment.html"
+  summary = "The request reference declares the payer element as required with exactly two valid values."
+
+[[quirk]]
+id      = "q-rqp-0003"
+kind    = "checksum_required"
+target  = "PutBucketRequestPayment"
+summary = "The request-payment write demands an integrity claim on the body, so a request with neither Content-MD5 nor an x-amz-checksum header is refused with 400 before the document is parsed."
+cases   = ["c-bucketconfig-0038", "c-bucketconfig-0006"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketRequestPayment.html"
+  summary = "The request documents Content-MD5 as the base64 digest of the configuration, which the pinned model spells as a request checksum requirement the lowering does not read."

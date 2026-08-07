@@ -598,27 +598,20 @@ fn the_bucket_lifecycle_rows_route_their_three_methods() {
 #[test]
 fn n_a_bucket_subresource_request_is_never_claimed_by_the_lifecycle_band() {
     let table = generated_table();
-    // `acl` is deliberately absent: it stopped being deferred when the ACL family landed, and
-    // `PUT /bucket?acl` now reaches `PutBucketAcl`. That it is still not a bucket creation is
-    // asserted by `the_bucket_acl_subresource_routes_to_the_acl_operations` below.
+    // `acl` and the nine configuration-band keys are deliberately absent: they stopped being
+    // deferred when those two families landed, so they belong in the served list below, where
+    // the assertion is the stronger one. `PUT /bucket?acl` is asserted separately by
+    // `the_bucket_acl_subresource_routes_to_the_acl_operations`.
     let deferred_put = [
         "abac",
-        "accelerate",
         "analytics",
         "intelligent-tiering",
         "inventory",
-        "logging",
         "metadataAnnotationTable",
         "metadataInventoryTable",
         "metadataJournalTable",
         "metrics",
-        "notification",
         "ownershipControls",
-        "policy",
-        "publicAccessBlock",
-        "requestPayment",
-        "versioning",
-        "website",
     ];
     for key in deferred_put {
         let line = format!("PUT /bucket?{key}");
@@ -632,9 +625,6 @@ fn n_a_bucket_subresource_request_is_never_claimed_by_the_lifecycle_band() {
         "metadataTable",
         "metrics",
         "ownershipControls",
-        "policy",
-        "publicAccessBlock",
-        "website",
     ];
     for key in deferred_delete {
         let line = format!("DELETE /bucket?{key}");
@@ -642,13 +632,28 @@ fn n_a_bucket_subresource_request_is_never_claimed_by_the_lifecycle_band() {
     }
     // The served subresources are the same rule with a different observable: the request reaches
     // the subresource's own row, never the lifecycle one. `?object-lock` moved from the deferred
-    // list above to this one when its pair landed at 397/398.
+    // list above to this one when its pair landed at 397/398, `?acl` moved with the ACL band at
+    // 250/260, and the eleven bucket-configuration keys moved with the 200-249 band — the
+    // assertion each of them carries is the stronger one, because "reaches its own operation"
+    // implies "is not a bucket creation" and not the reverse.
     for (line, expected) in [
         ("PUT /bucket?cors", "PutBucketCors"),
         ("PUT /bucket?tagging", "PutBucketTagging"),
         ("PUT /bucket?object-lock", "PutObjectLockConfiguration"),
+        ("PUT /bucket?acl", "PutBucketAcl"),
+        ("PUT /bucket?accelerate", "PutBucketAccelerateConfiguration"),
+        ("PUT /bucket?logging", "PutBucketLogging"),
+        ("PUT /bucket?notification", "PutBucketNotificationConfiguration"),
+        ("PUT /bucket?policy", "PutBucketPolicy"),
+        ("PUT /bucket?publicAccessBlock", "PutPublicAccessBlock"),
+        ("PUT /bucket?requestPayment", "PutBucketRequestPayment"),
+        ("PUT /bucket?versioning", "PutBucketVersioning"),
+        ("PUT /bucket?website", "PutBucketWebsite"),
         ("DELETE /bucket?cors", "DeleteBucketCors"),
         ("DELETE /bucket?tagging", "DeleteBucketTagging"),
+        ("DELETE /bucket?policy", "DeleteBucketPolicy"),
+        ("DELETE /bucket?publicAccessBlock", "DeletePublicAccessBlock"),
+        ("DELETE /bucket?website", "DeleteBucketWebsite"),
     ] {
         assert_eq!(routed(&table, &Req::new(line)), Some(expected), "{line}");
     }

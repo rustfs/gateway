@@ -12,21 +12,206 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Family: bucket policy and public access.
+# Family: bucket policy and public access. The policy triple, the policy-status read, and the
+# public-access-block triple.
 #
-# Nothing is generated yet. Every member is an authorization surface, so the family is reviewed
-# as a group rather than one operation at a time.
+# Codec only, and here the fence is the whole point: **nothing in this family evaluates a policy**.
+# Whether a statement grants what it claims, whether a principal exists, whether the caller may
+# hand out the access described, and whether the result counts as "public" all belong to the
+# authorizer. `GetBucketPolicyStatus` transports a boolean somebody else computed. What the gateway
+# contributes is that the document the authorizer reads is the document the client wrote, byte for
+# byte — which is why the read echoes the stored bytes rather than a re-serialisation of a parse.
+#
+# Two things make this family unlike its eight siblings in the 200-249 band.
+#
+# The first is that the policy body is **JSON**, the only success body in the S3 surface that is
+# not XML. Error bodies stay XML, including the 404 for a bucket with no policy. That is a
+# `media_type` quirk on the payload member (`q-pol-0001`), resolved by
+# `crates/codegen/src/emit/codec/media.rs` — before it existed the codec emitter had no form for a
+# string payload at all and failed the run rather than emitting something that compiles and is
+# wrong, which is how the gap was found.
+#
+# The second is that these are authorization surfaces, so the write path refuses more than the
+# fail-open configurations do. Not much more: size, JSON syntax and nesting depth, checked by
+# `ops/shared/bucket_policy.rs`. But a policy that will not parse on the next read is a bucket
+# whose access control cannot be loaded, and that is worth refusing at the door.
+#
+# The routing reason is the band's: a deferred operation contributes no route row, so
+# `GET /{Bucket}?policy`, `?policyStatus` and `?publicAccessBlock` were all claimed by
+# `ListObjects` and answered with a page of keys — three of the nine debt-register lines this
+# family retires — while their writes and deletes were unroutable.
 
-[[deferred]]
-reason = "P5 bucket policy and public-access family; every one of these is an authorization surface and reviewed as a group."
-operations = [
+include = [
   "DeleteBucketPolicy",
   "DeletePublicAccessBlock",
-  "GetBucketAbac",
   "GetBucketPolicy",
   "GetBucketPolicyStatus",
   "GetPublicAccessBlock",
-  "PutBucketAbac",
   "PutBucketPolicy",
   "PutPublicAccessBlock",
+]
+
+# =============================================================================================
+# GetBucketPolicy
+#
+# The stored policy, answered as JSON with `Content-Type: application/json`. A bucket with no
+# policy answers 404 `NoSuchBucketPolicy` — its own code, not the website one and not the
+# public-access one, and not an empty 200.
+# =============================================================================================
+[op.GetBucketPolicy]
+precedence = 215
+auth_action = "s3:GetBucketPolicy"
+# The documented bucket-policy ceiling is 20 KB, so the read is bounded by the same number the
+# write is. Anything larger than that was never accepted by the write.
+response_max_bytes = 20480
+not_configured = "NoSuchBucketPolicy"
+error_codes = ["NoSuchBucket", "AccessDenied", "NoSuchBucketPolicy"]
+url_encoded_fields = []
+input_hot = []
+output_hot = ["Policy"]
+quirk_refs = ["q-pol-0001", "q-pol-0002", "q-pol-0003"]
+
+# The payload member is the whole body and it is not XML. The quirk is what tells the codec
+# emitter which content type to write and which to accept; without it the emitter refuses to
+# generate the operation rather than defaulting to `text/plain`.
+[[op.GetBucketPolicy.field]]
+side = "output"
+name = "Policy"
+quirks = ["q-pol-0001"]
+
+# =============================================================================================
+# PutBucketPolicy
+#
+# Replaces the whole policy. The body is JSON; the framework checks that it is JSON, that it is
+# an object, that it is within the size ceiling and that it does not nest past the depth a parser
+# will follow — and evaluates none of it.
+# =============================================================================================
+[op.PutBucketPolicy]
+precedence = 216
+auth_action = "s3:PutBucketPolicy"
+# The pinned model carries a `content-md5` member and `aws.protocols#httpChecksum` with
+# `requestChecksumRequired`, which is a different trait from the `smithy.api#httpChecksumRequired`
+# lowering reads, so the requirement is stated here rather than silently lost. A policy write with
+# neither Content-MD5 nor an x-amz-checksum-* header is refused before the body is read — which
+# matters more here than in the sibling families, because the body is an access-control document.
+http_checksum_required = true
+# The documented 20 KB bucket-policy ceiling. `ops/shared/bucket_policy.rs` checks the same number
+# against the decoded text; this one bounds the buffer before anything is decoded at all.
+request_max_bytes = 20480
+error_codes = ["NoSuchBucket", "AccessDenied", "MalformedPolicy", "InvalidPolicyDocument", "BadDigest"]
+url_encoded_fields = []
+input_hot = ["Policy"]
+output_hot = []
+quirk_refs = ["q-pol-0001", "q-pol-0006", "q-pol-0007", "q-pol-0008"]
+
+[[op.PutBucketPolicy.field]]
+side = "input"
+name = "Policy"
+quirks = ["q-pol-0001"]
+
+# =============================================================================================
+# DeleteBucketPolicy
+#
+# Removes the policy. 204, unconditionally: deleting the policy of a bucket that has none is a
+# success, not a 404.
+# =============================================================================================
+[op.DeleteBucketPolicy]
+precedence = 217
+auth_action = "s3:DeleteBucketPolicy"
+error_codes = ["NoSuchBucket", "AccessDenied"]
+url_encoded_fields = []
+input_hot = []
+output_hot = []
+quirk_refs = ["q-pol-0004"]
+
+# =============================================================================================
+# GetBucketPolicyStatus
+#
+# `<PolicyStatus><IsPublic>` with the boolean in lower case. The unconfigured answer is the
+# policy read's 404 with the policy read's code, because it is the same missing document.
+# =============================================================================================
+[op.GetBucketPolicyStatus]
+precedence = 220
+auth_action = "s3:GetBucketPolicyStatus"
+# One boolean inside one wrapper. 4 KiB is orders of magnitude past it and closes the XML surface.
+response_max_bytes = 4096
+not_configured = "NoSuchBucketPolicy"
+error_codes = ["NoSuchBucket", "AccessDenied", "NoSuchBucketPolicy"]
+url_encoded_fields = []
+input_hot = []
+output_hot = ["PolicyStatus"]
+quirk_refs = ["q-pol-0005"]
+
+# =============================================================================================
+# GetPublicAccessBlock
+#
+# The four switches. A bucket with none answers 404 `NoSuchPublicAccessBlockConfiguration` — the
+# family's third distinct not-configured literal, and not interchangeable with the other two.
+# =============================================================================================
+[op.GetPublicAccessBlock]
+precedence = 225
+auth_action = "s3:GetBucketPublicAccessBlock"
+# Four booleans inside one wrapper.
+response_max_bytes = 4096
+not_configured = "NoSuchPublicAccessBlockConfiguration"
+error_codes = ["NoSuchBucket", "AccessDenied", "NoSuchPublicAccessBlockConfiguration"]
+url_encoded_fields = []
+input_hot = []
+output_hot = ["PublicAccessBlockConfiguration"]
+quirk_refs = ["q-pab-0001", "q-pab-0004"]
+
+# =============================================================================================
+# PutPublicAccessBlock
+#
+# Replaces all four switches. None of them is required and an omitted one is false, so the empty
+# document is a legitimate "all four off" rather than an error.
+# =============================================================================================
+[op.PutPublicAccessBlock]
+precedence = 226
+auth_action = "s3:PutBucketPublicAccessBlock"
+# The same `aws.protocols#httpChecksum` requirement the policy write carries, stated for the same
+# reason: lowering does not read that trait spelling.
+http_checksum_required = true
+request_max_bytes = 4096
+error_codes = ["NoSuchBucket", "AccessDenied", "MalformedXML", "InvalidArgument", "BadDigest"]
+url_encoded_fields = []
+input_hot = ["PublicAccessBlockConfiguration"]
+output_hot = []
+quirk_refs = ["q-pab-0002", "q-pab-0004"]
+
+# =============================================================================================
+# DeletePublicAccessBlock
+#
+# Removes the four switches. 204, unconditionally. The permission is the write's: the pinned
+# model documents `s3:PutBucketPublicAccessBlock` for the delete and no delete-specific action
+# exists.
+# =============================================================================================
+[op.DeletePublicAccessBlock]
+precedence = 227
+auth_action = "s3:PutBucketPublicAccessBlock"
+error_codes = ["NoSuchBucket", "AccessDenied"]
+url_encoded_fields = []
+input_hot = []
+output_hot = []
+quirk_refs = ["q-pab-0003"]
+
+# =============================================================================================
+# Nested shapes owned by this family
+# =============================================================================================
+
+# The four switches, none of them required. An omitted member is false, which is what makes the
+# empty document meaningful rather than malformed — there is no member whose absence leaves the
+# configuration undefined.
+[shape.PublicAccessBlockConfiguration]
+element_order = ["BlockPublicAcls", "IgnorePublicAcls", "BlockPublicPolicy", "RestrictPublicBuckets"]
+
+# One boolean, and it is required: a policy status with no verdict in it is not an answer.
+[shape.PolicyStatus]
+element_order = ["IsPublic"]
+
+[[deferred]]
+reason = "The ?abac attribute-based access-control pair is a RustFS extension outside the AWS surface this family codifies; it needs its own evidence and its own review."
+operations = [
+  "GetBucketAbac",
+  "PutBucketAbac",
 ]

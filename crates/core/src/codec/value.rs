@@ -31,7 +31,7 @@ use std::borrow::Cow;
 use std::collections::BTreeMap;
 
 use rustfs_gateway_types::{
-    BucketName, ChecksumSpec, ETag, EtagRender, ObjectKey, OpaqueString, RangeSpec, Timestamp, TimestampFormat,
+    BucketName, ChecksumSpec, ETag, ErrorCode, EtagRender, ObjectKey, OpaqueString, RangeSpec, Timestamp, TimestampFormat,
     is_xml_representable,
 };
 
@@ -344,6 +344,30 @@ pub fn url_encoded_key(value: &ObjectKey, encoding: UrlEncoding) -> Cow<'_, str>
         return percent_encoded(value.as_str());
     }
     Cow::Borrowed(value.as_str())
+}
+
+/// Reads a payload that is a text document rather than XML, refusing bytes that are not text.
+///
+/// The one member with this shape today is a bucket policy, whose body is JSON. What this does is
+/// the whole of the decoder's contribution to it: the bytes are text or they are not, and a
+/// decoder has no way to name a code more specific than that. Whether the text is *valid* JSON,
+/// how deep it nests and how large it may be are the operation's questions, asked after decoding
+/// by `ops::shared::bucket_policy` with the code AWS answers — `MalformedPolicy`, which no
+/// generated decoder can reach.
+///
+/// The refusal never repeats the body. A policy document names principals, account ids and
+/// resource ARNs, so an error that echoed the offending bytes would publish them to whoever can
+/// provoke it — the message is a constant and the member name is a compile-time constant from the
+/// IR.
+///
+/// # Errors
+///
+/// [`CodecError`] — `400 MalformedPolicy` — when the bytes are not UTF-8.
+pub fn text_payload(value: &[u8], member: &'static str) -> Result<String, CodecError> {
+    match core::str::from_utf8(value) {
+        Ok(text) => Ok(text.to_owned()),
+        Err(_) => Err(CodecError::new(ErrorCode::MALFORMED_POLICY, "the request body is not UTF-8 text").about(member)),
+    }
 }
 
 /// Wraps a value that is round-tripped byte for byte and never parsed.

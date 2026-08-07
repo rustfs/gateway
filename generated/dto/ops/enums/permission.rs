@@ -23,7 +23,7 @@
 
 use std::borrow::Cow;
 
-/// The `Permission` string enumeration. Bound by: GetBucketAcl, GetObjectAcl, PutBucketAcl, PutObjectAcl, RestoreObject.
+/// The `Permission` string enumeration. Bound by: GetBucketAcl, GetBucketLogging, GetObjectAcl, PutBucketAcl, PutBucketLogging, PutObjectAcl, RestoreObject.
 ///
 /// An open set: compare against the associated constants, and build a value the pinned
 /// model does not declare with [`Permission::custom`]. Adding a constant is a minor version
