@@ -192,6 +192,38 @@ No exceptions. If you believe you have found one, stop and ask on the issue.
 - No dependency on `inventory` or `linkme` (see `P0-07` ADR-0003). Registration must be explicit and
   greppable.
 
+**Measurement**
+
+This repository has now produced the same defect **seven times**: a check that cannot fail, which
+reads exactly like a check that passed. Every one was found by accident. They are listed because
+the list is the argument — no single instance looks like a pattern.
+
+| # | What it was | What it meant |
+|---|---|---|
+| 1 | `inprocess` hard-coded `Outcome::Response` and `body_bytes_before_error: None` | every `stream_error` assertion went unevaluated, and `kind = "response"` was unfalsifiable — a 200 carrying an `<Error>` satisfied it |
+| 2 | `request_progress` was a constant | "the body was not read" was always true |
+| 3 | `sign_request` returned only headers | `c-sig-0001`'s query tampering was discarded; the case asserted against an **untampered** request |
+| 4 | containment was judged on the unredacted body | no case looking for `__REDACTED__` could ever match |
+| 5 | `setup.buckets.object_lock` was parsed and dropped | a declared precondition the backend never saw |
+| 6 | `Transport::Conn` was an enum variant with no implementation | the report printed `transport conn` over a run that never opened a socket |
+| 7 | `WireReject::must_close_connection` returned `true` with no branch, and `render` dropped it | two contract tests whose assertions could not have failed either way |
+
+The rules that follow from it:
+
+- **Never report an intention as an observation.** A response carrying `Connection: close` is not a
+  closed socket. A service's own verdict is not a measurement of what the wire did. A note admitting
+  the substitution does not change what a green line means to whoever reads the report.
+- **A guard whose input is missing must fail, not skip.** `[[ -f x ]] || exit 0` is right when the
+  input is a directory that may not exist yet and wrong when the input always exists.
+- **Every new assertion owes a mutation.** Break the implementation on purpose and confirm the
+  assertion goes red. If it does not, the assertion is decoration. Say in the PR which ones you
+  mutated.
+- **A one-directional control proves nothing.** An observer stuck on one answer satisfies every test
+  that expects that answer. Prove both directions — a server that announces close and stays open
+  **and** one that announces keep-alive and closes.
+- **When a capability is missing, skip with the reason.** Failing for the wrong reason reads exactly
+  like failing for the right one, and passing for the wrong reason is worse.
+
 **Process**
 
 - Never delete a test, weaken an assertion, or add `#[ignore]` to make CI green.
@@ -339,6 +371,8 @@ the answer only exists after expansion. Four rules:
 - [ ] The four-command gate passed (fmt, clippy, test, `cargo xtask verify`)
 - [ ] New or changed public API has rustdoc
 - [ ] Negative test cases outnumber positive ones
+- [ ] Every new assertion was mutated — the implementation was broken on purpose and the assertion
+      went red. The PR description names which ones
 - [ ] No Protected File touched; if one was, the PR description contains `BREAKING` and a migration path
 - [ ] No `unsafe` introduced
 - [ ] No `inventory` / `linkme` introduced
@@ -363,6 +397,8 @@ the answer only exists after expansion. Four rules:
 | Compare signatures with `==` | Constant-time comparison, and do not give the type `PartialEq` at all |
 | Need a new crate-level rule → start a scoped `AGENTS.md` | Add it here, unless that crate already has 5 or more rules of its own |
 | Gate got slower → accept it | Make it faster in the same PR; the gate budget is 10 minutes total |
+| Harness cannot observe something → report the server's own intention instead | Report what was observed, or skip with the reason. A note admitting the substitution does not change what the green line means |
+| A new assertion passes → assume it works | Break the implementation and confirm it goes red. Seven checks in this repository could not have failed |
 | `cargo xtask verify --crate X` takes minutes → wait it out | Open an issue; the ≤30s loop is a contract, not a hope |
 
 <!-- P0-10 appends: Expert Roles & Trigger Table -->
