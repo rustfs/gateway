@@ -60,9 +60,13 @@ make_sandbox() {
     # call write to the pipe before the fallback produces a spurious "tar: Write error"
     # that would mask a real one. A list file is understood by both.
     #
-    # The pinned model JSON is excluded: it is 3.2 MB, and no guard reads it.
+    # The pinned model JSON used to be excluded here as 3.2 MB no guard read.
+    # check_route_coverage.sh reads it, and the exclusion made that guard skip
+    # its own self-test while reporting success — so the sandbox now carries the
+    # whole tree. One sandbox is built per run and reset between cases, so the
+    # 3.2 MB is paid once.
     list="$(mktemp "${TMPDIR:-/tmp}/gateway-guard-files.XXXXXX")"
-    (cd "$REPO_ROOT" && git ls-files | grep -v '^model/.*\.json$') >"$list"
+    (cd "$REPO_ROOT" && git ls-files) >"$list"
     (cd "$REPO_ROOT" && tar -cf - -T "$list") | (cd "$dir" && tar -xf -)
     rm -f "$list"
     (
@@ -458,6 +462,29 @@ mut_unexported_shared_item() {
 }
 expect_fail check_shared_reachable.sh \
     'a new public item in shared/ that the facade does not re-export' mut_unexported_shared_item
+
+# -----------------------------------------------------------------------------
+# The route-coverage register has to move in both directions or it stops being a
+# measurement. Growing it silently is how `PUT /b/k?acl` came to write the ACL
+# document over the object; shrinking it silently is how a closed exposure keeps
+# being counted, and a count that only ever says 46 is a count nobody reads.
+#
+# Both controls therefore mutate the register rather than the tree, because the
+# register is the artefact the guard exists to keep honest.
+# -----------------------------------------------------------------------------
+
+mut_forgotten_exposure() {
+    grep -v 'PutObjectAcl' scripts/allowances/route-coverage-allowances.txt >/tmp/rc-allow.$$
+    mv /tmp/rc-allow.$$ scripts/allowances/route-coverage-allowances.txt
+}
+expect_fail check_route_coverage.sh \
+    'a swallowed operation missing from the register' mut_forgotten_exposure
+
+mut_stale_exposure() {
+    printf 'NoSuchOperation -> NoSuchNeighbour\n' >>scripts/allowances/route-coverage-allowances.txt
+}
+expect_fail check_route_coverage.sh \
+    'a register entry for an exposure that no longer exists' mut_stale_exposure
 
 printf '\n%s case(s), %s failure(s)\n' "$cases" "$failures"
 [[ "$failures" -eq 0 ]]

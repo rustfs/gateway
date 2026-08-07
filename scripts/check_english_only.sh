@@ -35,7 +35,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="${GATEWAY_CHECK_ROOT:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
-ALLOWANCE_FILE="${SCRIPT_DIR}/allowances/english-only-allowances.txt"
+ALLOWANCE_FILE="${ROOT_DIR}/scripts/allowances/english-only-allowances.txt"
 cd "$ROOT_DIR"
 
 status=0

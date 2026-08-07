@@ -46,7 +46,7 @@ cd "$ROOT_DIR"
 
 SHARED_DIR="crates/core/src/ops/shared"
 FACADE="crates/gateway/src/lib.rs"
-ALLOWANCES="${SCRIPT_DIR}/allowances/shared-reachable-allowances.txt"
+ALLOWANCES="${ROOT_DIR}/scripts/allowances/shared-reachable-allowances.txt"
 
 [[ -d "$SHARED_DIR" && -f "$FACADE" ]] || exit 0
 

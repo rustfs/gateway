@@ -1,0 +1,54 @@
+# Protocol-known operations whose own selector is claimed by another
+# operation's route row. Each line is a request that is answered by the
+# wrong operation, with that operation's data. See issue #16.
+#
+# This is a debt register, not an approval list. A line that disappears is
+# progress; a line that appears is a new exposure.
+#
+# Regenerate: GATEWAY_WRITE_ROUTE_ALLOWANCES=1 scripts/check_route_coverage.sh
+CreateSession -> ListObjects
+DeleteObjectAnnotation -> DeleteObject
+DeleteObjectTagging -> DeleteObject
+GetBucketAbac -> ListObjects
+GetBucketAccelerateConfiguration -> ListObjects
+GetBucketAcl -> ListObjects
+GetBucketAnalyticsConfiguration -> ListObjects
+GetBucketCors -> ListObjects
+GetBucketEncryption -> ListObjects
+GetBucketIntelligentTieringConfiguration -> ListObjects
+GetBucketInventoryConfiguration -> ListObjects
+GetBucketLifecycleConfiguration -> ListObjects
+GetBucketLogging -> ListObjects
+GetBucketMetadataConfiguration -> ListObjects
+GetBucketMetadataTableConfiguration -> ListObjects
+GetBucketMetricsConfiguration -> ListObjects
+GetBucketNotificationConfiguration -> ListObjects
+GetBucketOwnershipControls -> ListObjects
+GetBucketPolicy -> ListObjects
+GetBucketPolicyStatus -> ListObjects
+GetBucketReplication -> ListObjects
+GetBucketRequestPayment -> ListObjects
+GetBucketTagging -> ListObjects
+GetBucketVersioning -> ListObjects
+GetBucketWebsite -> ListObjects
+GetObjectAcl -> GetObject
+GetObjectAnnotation -> GetObject
+GetObjectLegalHold -> GetObject
+GetObjectLockConfiguration -> ListObjects
+GetObjectRetention -> GetObject
+GetObjectTagging -> GetObject
+GetObjectTorrent -> GetObject
+GetPublicAccessBlock -> ListObjects
+ListBucketAnalyticsConfigurations -> ListObjects
+ListBucketIntelligentTieringConfigurations -> ListObjects
+ListBucketInventoryConfigurations -> ListObjects
+ListBucketMetricsConfigurations -> ListObjects
+ListDirectoryBuckets -> ListBuckets
+ListObjectAnnotations -> GetObject
+PutObjectAcl -> PutObject
+PutObjectAnnotation -> PutObject
+PutObjectLegalHold -> PutObject
+PutObjectRetention -> PutObject
+PutObjectTagging -> PutObject
+RenameObject -> PutObject
+UpdateObjectEncryption -> PutObject

@@ -53,7 +53,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="${GATEWAY_CHECK_ROOT:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
 DEPS_AWK="${SCRIPT_DIR}/lib/cargo_deps.awk"
-ALLOWANCE_FILE="${SCRIPT_DIR}/allowances/ring-boundary-allowances.txt"
+ALLOWANCE_FILE="${ROOT_DIR}/scripts/allowances/ring-boundary-allowances.txt"
 
 # The one crate allowed to carry an s3s compat edge, and the feature gating it.
 COMPAT_CRATE="rustfs-gateway-types"
