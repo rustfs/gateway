@@ -660,7 +660,7 @@
             },
   "derived_resources": [],
   "head_mirrors": null,
-  "quirk_refs": ["q-response-0023", "q-storageclass-0024"],
+  "quirk_refs": ["q-response-0023", "q-storageclass-0024", "q-tag-count-omit-0095"],
   "quirks": [
               {
                 "id": "q-etag-0004",
@@ -822,6 +822,20 @@
                               }
                             ],
                 "cases": ["c-cond-0019", "c-cond-0028"]
+              },
+              {
+                "id": "q-tag-count-omit-0095",
+                "kind": "omit_when",
+                "target": "GetObject",
+                "summary": "The x-amz-tagging-count response header carries the object's tag count as an integer and is omitted entirely when the count would be zero — presence is the signal readers branch on, so a literal 0 is a wrong answer.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObject.html",
+                                "summary": "The response syntax documents the header as the number of tags, present on tagged objects."
+                              }
+                            ],
+                "cases": ["c-tagging-0019", "c-tagging-0020"]
               }
             ],
   "ext_points": []

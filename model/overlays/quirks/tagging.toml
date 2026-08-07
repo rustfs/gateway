@@ -94,6 +94,18 @@ cases   = ["c-tagging-0003", "c-tagging-0016", "c-tagging-0017"]
   summary = "The header's documented value form is URL query parameters, with the example tag set spelled key=value pairs joined by ampersands."
 
 [[quirk]]
+id      = "q-tag-count-omit-0095"
+kind    = "omit_when"
+target  = "GetObject"
+summary = "The x-amz-tagging-count response header carries the object's tag count as an integer and is omitted entirely when the count would be zero — presence is the signal readers branch on, so a literal 0 is a wrong answer."
+cases   = ["c-tagging-0019", "c-tagging-0020"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObject.html"
+  summary = "The response syntax documents the header as the number of tags, present on tagged objects."
+
+[[quirk]]
 id      = "q-tag-limits-0094"
 kind    = "bounded_input"
 target  = "PutBucketTagging"

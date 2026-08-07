@@ -1203,6 +1203,15 @@ fn storage_class_header(object: &StoredObject) -> Option<dto::StorageClass> {
     Some(dto::StorageClass::custom(object.storage_class.clone()))
 }
 
+/// The tag count an object read reports, which S3 omits when it would be zero.
+///
+/// `None` for an untagged object rather than `Some(0)`: readers use the header's *presence* to
+/// decide whether a `GetObjectTagging` round trip is worth making, so a zero would make every
+/// object look labelled. The ceiling makes the cast total — a stored set is at most fifty pairs.
+fn tag_count_header(object: &StoredObject) -> Option<i32> {
+    i32::try_from(object.tags.len()).ok().filter(|count| *count > 0)
+}
+
 /// The checksum contract an initiating request declared, if it declared one.
 ///
 /// An algorithm this suite cannot compute is refused rather than dropped: answering the upload
@@ -2013,6 +2022,7 @@ impl Stub {
                 expires: object.expires.clone().map(Into::into),
                 metadata: object.metadata.clone(),
                 storage_class: storage_class_header(object),
+                tag_count: tag_count_header(object),
                 body: Some(ByteStream::from_bytes(bytes::Bytes::from(body))),
                 ..dto::GetObjectOutput::default()
             },
@@ -2073,6 +2083,7 @@ impl Stub {
                 expires: object.expires.clone().map(Into::into),
                 metadata: object.metadata.clone(),
                 storage_class: storage_class_header(object),
+                tag_count: tag_count_header(object),
                 ..dto::HeadObjectOutput::default()
             },
             status,
