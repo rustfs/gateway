@@ -1,0 +1,36 @@
+[case]
+id = "c-encryption-0020"
+schema_version = 1
+title = "A body that is not XML at all is refused as MalformedXML, never a 500 and never a 501"
+rationale = """
+The floor under every other refusal in this domain: garbage bytes with a correct integrity header must come back as the client's mistake, a 400 with MalformedXML, on a connection still healthy enough to carry the corrected retry. A 500 here teaches retry loops to hammer the endpoint; a 501 misreports a parse failure as a missing feature. Either way the caller's next action is wrong."""
+polarity = "negative"
+operation = "PutBucketEncryption"
+tags = ["encryption", "xml", "error-shape"]
+timeout_ms = 10000
+quirks = []
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/ErrorResponses.html"
+summary = "MalformedXML is documented as the answer for a request body the service could not parse as the expected XML."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "conf-encryption"
+
+[request]
+method = "PUT"
+target = "/conf-encryption?encryption"
+headers = { "content-type" = "application/xml", "content-md5" = "lYCq2x6eUOKaYoAbue1bkw==" }
+body = { utf8 = 'this is not xml' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+code = "MalformedXML"
+request_id_present = true

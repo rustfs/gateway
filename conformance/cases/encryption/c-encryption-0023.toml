@@ -1,0 +1,33 @@
+[case]
+id = "c-encryption-0023"
+schema_version = 1
+title = "Writing an encryption document to a bucket that does not exist is NoSuchBucket, not a 200"
+rationale = """
+The write side of the missing-bucket boundary: a well-formed document with a correct integrity header, addressed to a bucket that is not there. A gateway that stored it anyway would create configuration for a name — and the bucket later created under that name would inherit a security policy its owner never wrote, which is the same inheritance defect the recreation tests guard, arrived at from the other direction."""
+polarity = "negative"
+operation = "PutBucketEncryption"
+tags = ["encryption", "error-shape"]
+timeout_ms = 10000
+quirks = []
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketEncryption.html"
+summary = "The operation addresses a named bucket and lists NoSuchBucket among its errors."
+kind = "aws-doc"
+
+
+[request]
+method = "PUT"
+target = "/conf-enc-absent?encryption"
+headers = { "content-type" = "application/xml", "content-md5" = "6vzSAkrj6gUU1ZdQlOJRWQ==" }
+body = { utf8 = '<ServerSideEncryptionConfiguration><Rule><ApplyServerSideEncryptionByDefault><SSEAlgorithm>AES256</SSEAlgorithm></ApplyServerSideEncryptionByDefault></Rule></ServerSideEncryptionConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 404
+connection_after = "open"
+
+[expect.error]
+code = "NoSuchBucket"
+request_id_present = true

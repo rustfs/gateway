@@ -1,0 +1,57 @@
+[case]
+id = "c-encryption-0009"
+schema_version = 1
+title = "An unknown element inside a Rule is skipped on the write and absent from the read"
+rationale = """
+AWS ignores unknown elements in request XML, and this family inherits the leniency for the same reason lifecycle did: the stored document is re-parsed by every future release, and a decoder that refuses what it does not recognise would silently turn default encryption off the day AWS adds a member — the fail-open persistence path downgrades an unparseable document to no document. The element is skipped, not stored: the read-back golden proves the document came out without it, so the leniency never becomes an invisible round-trip of unvalidated bytes."""
+polarity = "positive"
+operation = "PutBucketEncryption"
+tags = ["encryption", "xml", "wire-bytes"]
+timeout_ms = 10000
+quirks = ["q-enc-0006"]
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/issues/613"
+summary = "AWS ignores unknown elements in request XML, and upstream had to relax its decoder to match."
+kind = "s3s-issue"
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/pull/617"
+summary = "The upstream change that makes unknown request elements a skip rather than an error."
+kind = "s3s-pr"
+
+
+[[setup.buckets]]
+name = "conf-encryption"
+
+[[exchanges]]
+name = "put-with-unknown-element"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-encryption?encryption"
+headers = { "content-type" = "application/xml", "content-md5" = "oYoW2pKq/76P+Ym1QGr4CA==" }
+body = { utf8 = '<ServerSideEncryptionConfiguration><Rule><ApplyServerSideEncryptionByDefault><SSEAlgorithm>AES256</SSEAlgorithm></ApplyServerSideEncryptionByDefault><FutureKnob>enabled</FutureKnob></Rule></ServerSideEncryptionConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[[exchanges]]
+name = "read-back"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-encryption?encryption"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.body]
+golden = "goldens/c-encryption-0009.xml"
+not_contains_utf8 = ["FutureKnob"]

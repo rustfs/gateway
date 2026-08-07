@@ -97,6 +97,9 @@ impl Harness {
             // The lifecycle read rides along for the recreation test below: the unconfigured 404
             // is the observable proof that a recreated bucket inherited no lifecycle document.
             .register::<dto::GetBucketLifecycleConfiguration, _>(Arc::clone(&backend))
+            // The encryption read rides along for the same reason: the unconfigured 404 is the
+            // observable proof that a recreated bucket inherited no default-encryption document.
+            .register::<dto::GetBucketEncryption, _>(Arc::clone(&backend))
             .register::<dto::PutObject, _>(Arc::clone(&backend))
             .authenticator(SigV4Authenticator::new(credentials, RegionSet::new([region]).expect("non-empty")))
             .authorizer(allow_when(|request| !request.is_anonymous()))
@@ -365,15 +368,16 @@ fn n_deleting_a_bucket_that_was_never_created_is_a_not_found() {
 
 /// Negative — a deleted bucket takes its configuration documents with it.
 ///
-/// The CORS document, the tag set and the lifecycle document live inside the bucket's own state
-/// entry, so removing the bucket removes them by construction — and this test is what keeps that
-/// a fact rather than a coincidence of today's layout. The failure it guards against is
-/// inheritance: delete a bucket, create a new one under the same name, and find it answering the
-/// previous owner's CORS rules to browsers, the previous owner's tags to billing, and — worst of
-/// the three — expiring the new owner's data on the previous owner's schedule. A name is not a
-/// bucket.
+/// The CORS document, the tag set, the lifecycle document and the default-encryption document
+/// live inside the bucket's own state entry, so removing the bucket removes them by construction
+/// — and this test is what keeps that a fact rather than a coincidence of today's layout. The
+/// failure it guards against is inheritance: delete a bucket, create a new one under the same
+/// name, and find it answering the previous owner's CORS rules to browsers, the previous owner's
+/// tags to billing, expiring the new owner's data on the previous owner's schedule — or
+/// encrypting the new owner's objects to the previous owner's KMS key, which is inheritance of
+/// *access*, not just behaviour. A name is not a bucket.
 #[test]
-fn n_a_deleted_buckets_cors_tags_and_lifecycle_do_not_survive_into_a_recreation() {
+fn n_a_deleted_buckets_cors_tags_lifecycle_and_encryption_do_not_survive_into_a_recreation() {
     let mut fixture = Fixture::at(NOW);
     fixture.declare_bucket("conf-bkt-reborn", false);
     fixture.set_cors(
@@ -402,6 +406,18 @@ fn n_a_deleted_buckets_cors_tags_and_lifecycle_do_not_survive_into_a_recreation(
         },
         None,
     );
+    fixture.set_encryption(
+        "conf-bkt-reborn",
+        dto::ServerSideEncryptionConfiguration {
+            rules: vec![dto::ServerSideEncryptionRule {
+                apply_server_side_encryption_by_default: Some(dto::ServerSideEncryptionByDefault {
+                    sse_algorithm: dto::SseAlgorithm::AWS_KMS,
+                    kms_master_key_id: Some("arn:aws:kms:us-east-1:111122223333:key/previous-owner".to_owned()),
+                }),
+                ..dto::ServerSideEncryptionRule::default()
+            }],
+        },
+    );
     let harness = Harness::over(fixture, "us-east-1");
 
     let deleted = harness.send("DELETE", "/conf-bkt-reborn", b"");
@@ -427,4 +443,15 @@ fn n_a_deleted_buckets_cors_tags_and_lifecycle_do_not_survive_into_a_recreation(
     let read = harness.send("GET", "/conf-bkt-reborn?lifecycle", b"");
     assert_eq!(read.status, 404, "{}", read.body);
     read.assert_contains("NoSuchLifecycleConfiguration");
+
+    // The encryption half likewise: the recreated bucket must answer this family's unconfigured
+    // 404, and the previous owner's KMS key id must be nowhere in the response.
+    let read = harness.send("GET", "/conf-bkt-reborn?encryption", b"");
+    assert_eq!(read.status, 404, "{}", read.body);
+    read.assert_contains("ServerSideEncryptionConfigurationNotFoundError");
+    assert!(
+        !read.body.contains("previous-owner"),
+        "the recreated bucket leaked the deleted bucket's KMS key id: {}",
+        read.body
+    );
 }

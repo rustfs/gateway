@@ -164,6 +164,8 @@ fn read_object_identifier(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::Obj
     let mut shape = dto::ObjectIdentifier { ..Default::default() };
     if let Some(raw) = node.child_text("Key") {
         shape.key = value::object_key(raw, "Key")?;
+    } else {
+        return Err(CodecError::malformed_xml("the body omits a member the schema requires").about("Key"));
     }
     if let Some(raw) = node.child_text("VersionId") {
         shape.version_id = Some(raw.to_owned());

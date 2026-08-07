@@ -122,7 +122,7 @@ use rustfs_gateway::{
     PRECONDITION_FAILED_MESSAGE, PreconditionRejection, Preconditions, REGION_MATCH_POLICY, RangeDecision, RangeSelectors,
     RegionLabel, RegionSet, Req, RequestKind, Resp, TagScope, TaggingRejection, Timestamp, collect, evaluate, evaluate_range,
     parse_conditional_etag, parse_tagging_header, permanent_redirect_for, resolve_copy_range, resolve_location_constraint,
-    validate_cors, validate_lifecycle, validate_tag_set,
+    validate_cors, validate_encryption, validate_lifecycle, validate_tag_set,
 };
 
 /// The canonical user id every listing reports as the owner.
@@ -340,6 +340,13 @@ struct BucketState {
     /// document" state, because the decoder refuses a document with no rule. It lives in
     /// `BucketState` so that deleting the bucket deletes the document with it.
     lifecycle: Option<StoredLifecycle>,
+    /// The stored default-encryption configuration, written by `PutBucketEncryption` within the
+    /// case. `None` is the observable state `ServerSideEncryptionConfigurationNotFoundError`
+    /// reports; there is no "empty document" state, because the decoder refuses a document with
+    /// no rule. It lives in `BucketState` so that deleting the bucket deletes the document with
+    /// it — a recreated bucket inheriting the previous owner's KMS key would encrypt the new
+    /// owner's data to somebody else's key.
+    encryption: Option<dto::ServerSideEncryptionConfiguration>,
 }
 
 /// A bucket's lifecycle document exactly as one write stored it.
@@ -508,6 +515,26 @@ impl Fixture {
     pub fn clear_lifecycle(&mut self, name: &str) {
         if let Some(bucket) = self.buckets.get_mut(name) {
             bucket.lifecycle = None;
+        }
+    }
+
+    /// Installs a bucket's default-encryption document, replacing whatever was there.
+    /// `PutBucketEncryption` only.
+    pub fn set_encryption(&mut self, name: &str, configuration: dto::ServerSideEncryptionConfiguration) {
+        self.buckets.entry(name.to_owned()).or_default().encryption = Some(configuration);
+    }
+
+    /// The stored default-encryption document, or `None` for a bucket that never had one.
+    #[must_use]
+    fn encryption(&self, name: &str) -> Option<&dto::ServerSideEncryptionConfiguration> {
+        self.buckets.get(name).and_then(|bucket| bucket.encryption.as_ref())
+    }
+
+    /// Removes a bucket's default-encryption document. Idempotent on purpose: the delete answers
+    /// `204` whether or not a document was there, so this reports nothing.
+    pub fn clear_encryption(&mut self, name: &str) {
+        if let Some(bucket) = self.buckets.get_mut(name) {
+            bucket.encryption = None;
         }
     }
 
@@ -1223,6 +1250,15 @@ fn no_such_cors_configuration() -> HandlerError {
 /// document.
 fn no_such_lifecycle_configuration() -> HandlerError {
     HandlerError::new(ErrorCode::NO_SUCH_LIFECYCLE_CONFIGURATION, "The lifecycle configuration does not exist")
+}
+
+/// `ServerSideEncryptionConfigurationNotFoundError`, in AWS's own wording for a bucket that
+/// never had a default-encryption document.
+fn no_such_encryption_configuration() -> HandlerError {
+    HandlerError::new(
+        ErrorCode::SERVER_SIDE_ENCRYPTION_CONFIGURATION_NOT_FOUND,
+        "The server side encryption configuration was not found",
+    )
 }
 
 fn no_such_key(key: &str) -> HandlerError {
@@ -1973,6 +2009,36 @@ impl Handler<dto::DeleteBucketLifecycle> for Stub {
         request: Req<dto::DeleteBucketLifecycle>,
     ) -> impl core::future::Future<Output = HandlerResult<dto::DeleteBucketLifecycle>> + Send {
         let outcome = self.delete_bucket_lifecycle(request.input());
+        async move { outcome }
+    }
+}
+
+impl Handler<dto::GetBucketEncryption> for Stub {
+    fn call(
+        &self,
+        request: Req<dto::GetBucketEncryption>,
+    ) -> impl core::future::Future<Output = HandlerResult<dto::GetBucketEncryption>> + Send {
+        let outcome = self.get_bucket_encryption(request.input());
+        async move { outcome }
+    }
+}
+
+impl Handler<dto::PutBucketEncryption> for Stub {
+    fn call(
+        &self,
+        request: Req<dto::PutBucketEncryption>,
+    ) -> impl core::future::Future<Output = HandlerResult<dto::PutBucketEncryption>> + Send {
+        let outcome = self.put_bucket_encryption(request.input());
+        async move { outcome }
+    }
+}
+
+impl Handler<dto::DeleteBucketEncryption> for Stub {
+    fn call(
+        &self,
+        request: Req<dto::DeleteBucketEncryption>,
+    ) -> impl core::future::Future<Output = HandlerResult<dto::DeleteBucketEncryption>> + Send {
+        let outcome = self.delete_bucket_encryption(request.input());
         async move { outcome }
     }
 }
@@ -2815,6 +2881,52 @@ impl Stub {
         require_bucket(&fixture, &input.bucket)?;
         fixture.clear_lifecycle(input.bucket.as_str());
         Ok(Resp::new(dto::DeleteBucketLifecycleOutput::default()))
+    }
+
+    /// The stored default-encryption document, or the family's defining 404.
+    ///
+    /// The bucket is resolved first, so a missing bucket is `NoSuchBucket` and only a bucket
+    /// that exists without a document is `ServerSideEncryptionConfigurationNotFoundError` — two
+    /// different facts a client tearing down configuration branches on.
+    fn get_bucket_encryption(&self, input: &dto::GetBucketEncryptionInput) -> HandlerResult<dto::GetBucketEncryption> {
+        let fixture = self.borrow()?;
+        require_bucket(&fixture, &input.bucket)?;
+        let stored = fixture
+            .encryption(input.bucket.as_str())
+            .ok_or_else(no_such_encryption_configuration)?;
+        Ok(Resp::new(dto::GetBucketEncryptionOutput {
+            server_side_encryption_configuration: Some(stored.clone()),
+        }))
+    }
+
+    /// The whole document, replaced — after the one validation pass every backend shares.
+    ///
+    /// The rules are `rustfs_gateway::validate_encryption`'s, not this file's: the closed
+    /// `SSEAlgorithm` set and the KMS-key-id/algorithm agreement live once in the shared
+    /// contract, and this fixture calls it rather than mirroring it. What is stored is exactly
+    /// what was sent, in the order it was sent — the read-back is a byte-level golden, and that
+    /// includes the leniencies: an unknown element was already skipped by the decoder, and a
+    /// multi-rule document is stored whole.
+    fn put_bucket_encryption(&self, input: &dto::PutBucketEncryptionInput) -> HandlerResult<dto::PutBucketEncryption> {
+        let mut fixture = self.borrow()?;
+        require_bucket(&fixture, &input.bucket)?;
+        let configuration = &input.server_side_encryption_configuration;
+        validate_encryption(configuration).map_err(|rejection| HandlerError::new(rejection.code(), rejection.reason()))?;
+        fixture.set_encryption(input.bucket.as_str(), configuration.clone());
+        Ok(Resp::new(dto::PutBucketEncryptionOutput::default()))
+    }
+
+    /// The document removed, the bucket left alone.
+    ///
+    /// The `204` is unconditional in the same sense `DeleteBucketLifecycle`'s is: removing the
+    /// encryption configuration of a bucket that has none is a success, not a `404`. The bucket
+    /// itself still has to exist — a success for a bucket that is not there would tell a caller
+    /// its teardown landed on something.
+    fn delete_bucket_encryption(&self, input: &dto::DeleteBucketEncryptionInput) -> HandlerResult<dto::DeleteBucketEncryption> {
+        let mut fixture = self.borrow()?;
+        require_bucket(&fixture, &input.bucket)?;
+        fixture.clear_encryption(input.bucket.as_str());
+        Ok(Resp::new(dto::DeleteBucketEncryptionOutput::default()))
     }
 
     /// Opens a multipart upload, and records the attributes only this request can state.

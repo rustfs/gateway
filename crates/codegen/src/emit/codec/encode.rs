@@ -120,8 +120,42 @@ fn one_field(ir: &OperationIr, field: &Field) -> Result<String, String> {
                 let _ = writeln!(out, "        if let Some(bytes) = {source} {{");
                 out.push_str("            response.body = ResponseBody::Complete(bytes.to_vec());\n        }\n");
             }
+            // The payload structure *is* the document: its shape name (or the declared response
+            // root) is the root element, and its writer renders the children — the mirror of the
+            // structure-payload arm `decode` already has for the request side.
+            Type::Structure(shape) => {
+                let root = match ir.xml.response_root.as_deref().filter(|name| !name.is_empty()) {
+                    Some(overridden) => overridden.to_owned(),
+                    None => shape.clone(),
+                };
+                let xmlns = match ir.xml.xmlns {
+                    rustfs_gateway_model::ir::Xmlns::Emit => "Some(rustfs_gateway_xml::S3_XMLNS)",
+                    rustfs_gateway_model::ir::Xmlns::Suppress => "None",
+                };
+                let writer_fn = format!("write_{}", naming::module_name(shape));
+                let argument = shape_writer_argument(&url::plan(ir)?, shape);
+                if !argument.is_empty() {
+                    // Nothing url-encodes inside a payload document today; the plan is consulted so
+                    // the day something does, this fails loudly instead of emitting an unencoded body.
+                    return Err(expr::unsupported(op, member, "a payload structure whose members url-encode"));
+                }
+                let _ = writeln!(out, "        // {member} — the XML response body, rooted at `{root}`.");
+                if field.required {
+                    let _ = writeln!(out, "        {{");
+                    let _ = writeln!(out, "            let v = &{source};");
+                } else {
+                    let _ = writeln!(out, "        if let Some(v) = {source}.as_ref() {{");
+                }
+                out.push_str("            let mut writer = rustfs_gateway_xml::XmlWriter::document();\n");
+                let _ = writeln!(out, "            writer.open(\"{root}\", {xmlns});");
+                let _ = writeln!(out, "            {writer_fn}(&mut writer, v)?;");
+                out.push_str("            writer.close();\n");
+                out.push_str("            response.body = ResponseBody::Complete(writer.finish().into_bytes());\n");
+                out.push_str("            response.set_header(\"content-type\", \"application/xml\");\n");
+                out.push_str("        }\n");
+            }
             _ => {
-                return Err(expr::unsupported(op, member, "a payload binding carries a blob on the response side"));
+                return Err(expr::unsupported(op, member, "a payload binding carries a blob or an XML structure"));
             }
         },
         Binding::StatusCode => {

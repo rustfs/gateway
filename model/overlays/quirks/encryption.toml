@@ -1,0 +1,154 @@
+# Copyright 2026 RustFS Team
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Quirks of the bucket default-encryption configuration family.
+#
+# One [[quirk]] per behaviour the pinned Smithy model does not state, or states in a trait the
+# lowering would otherwise lose. `summary` and every `evidence.summary` are written by this
+# project; upstream issue and documentation prose stays under its author's copyright and is never
+# pasted here.
+#
+# The runtime SSE quirks — the TLS gate on customer-provided keys, key/key-MD5 agreement, the
+# multipart header-consistency rule — are deliberately absent: they belong to the operations that
+# carry SSE headers, and are registered by task P6-06 with those operations. Nothing in this
+# family reads a key; the closest it comes is a KMS key *id*, and the one hygiene rule that
+# follows from that is q-enc-0009.
+
+[[quirk]]
+id      = "q-enc-0001"
+kind    = "not_configured_error"
+target  = "GetBucketEncryption"
+summary = "A bucket that never had an encryption document answers 404 with the operation-specific code ServerSideEncryptionConfigurationNotFoundError, not a generic not-found and not an empty 200."
+cases   = ["c-encryption-0012", "c-encryption-0006"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/ErrorResponses.html"
+  summary = "The error code list documents ServerSideEncryptionConfigurationNotFoundError with HTTP status 404 for a bucket whose server-side encryption configuration was not found."
+
+[[quirk]]
+id      = "q-enc-0002"
+kind    = "flattened_list"
+target  = "ServerSideEncryptionConfiguration.Rules"
+summary = "The rules repeat as sibling Rule elements directly under the ServerSideEncryptionConfiguration root; a Rules wrapper element would make every SDK read zero rules."
+cases   = ["c-encryption-0002", "c-encryption-0010"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketEncryption.html"
+  summary = "The documented response syntax shows Rule elements as direct children of the ServerSideEncryptionConfiguration root with no intermediate wrapper."
+
+  [[quirk.evidence]]
+  kind    = "s3s-issue"
+  ref     = "https://github.com/s3s-project/s3s/issues/264"
+  summary = "Upstream shipped response roots without the S3 xmlns and strict clients refused them, which is why the root and its namespace are pinned byte for byte."
+
+[[quirk]]
+id      = "q-enc-0003"
+kind    = "idempotent_delete"
+target  = "DeleteBucketEncryption"
+summary = "The delete answers 204 with no body whether or not a configuration existed, so removing the encryption document of an unconfigured bucket is a success rather than a 404."
+cases   = ["c-encryption-0013", "c-encryption-0006"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketEncryption.html"
+  summary = "The operation documents a 204 No Content success and lists no not-found error for a missing configuration."
+
+[[quirk]]
+id      = "q-enc-0004"
+kind    = "checksum_required"
+target  = "PutBucketEncryption"
+summary = "The write demands an integrity claim on the body, so a request with neither Content-MD5 nor an x-amz-checksum header is refused with 400 before the document is parsed."
+cases   = ["c-encryption-0014", "c-encryption-0007"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketEncryption.html"
+  summary = "The request documents Content-MD5 as the base64 digest of the configuration, which the pinned model spells as a request checksum requirement."
+
+[[quirk]]
+id      = "q-enc-0005"
+kind    = "value_constraint"
+target  = "ServerSideEncryptionByDefault.KMSMasterKeyID"
+summary = "A KMSMasterKeyID is allowed if and only if SSEAlgorithm is aws:kms or aws:kms:dsse; a document naming a key id beside AES256 or aws:fsx is refused with 400 InvalidArgument."
+cases   = ["c-encryption-0017", "c-encryption-0024"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ServerSideEncryptionByDefault.html"
+  summary = "The KMSMasterKeyID member is documented as allowed if and only if SSEAlgorithm is set to aws:kms or aws:kms:dsse."
+
+[[quirk]]
+id      = "q-enc-0006"
+kind    = "lenient_unknown_elements"
+target  = "PutBucketEncryption"
+summary = "Unknown elements inside the request document are skipped rather than refused, because a stored configuration parsed more strictly on the next release silently turns default encryption off and nothing visible fails until objects land unencrypted."
+cases   = ["c-encryption-0009"]
+
+  [[quirk.evidence]]
+  kind    = "s3s-issue"
+  ref     = "https://github.com/s3s-project/s3s/issues/613"
+  summary = "AWS ignores unknown elements in request XML, and upstream had to relax its decoder to match after strict parsing broke real clients."
+
+  [[quirk.evidence]]
+  kind    = "s3s-pr"
+  ref     = "https://github.com/s3s-project/s3s/pull/617"
+  summary = "The upstream fix that makes unknown request elements a skip rather than an error, which is the behaviour this decoder generates by construction."
+
+[[quirk]]
+id      = "q-enc-0007"
+kind    = "closed_value_set"
+target  = "ServerSideEncryptionByDefault.SSEAlgorithm"
+summary = "A write naming an SSEAlgorithm outside the documented set — AES256, aws:fsx, aws:kms, aws:kms:dsse — is refused as MalformedXML: a default-encryption algorithm nothing can apply is a configuration that silently protects nothing."
+cases   = ["c-encryption-0018", "c-encryption-0004", "c-encryption-0005"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ServerSideEncryptionByDefault.html"
+  summary = "The SSEAlgorithm member documents the closed value set AES256, aws:fsx, aws:kms and aws:kms:dsse, and is the required member of the default-encryption action."
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/ErrorResponses.html"
+  summary = "MalformedXML is documented as the answer for a request body that does not validate against the published schema, which is what an out-of-set enum value is."
+
+[[quirk]]
+id      = "q-enc-0008"
+kind    = "unbounded_list"
+target  = "ServerSideEncryptionConfiguration.Rules"
+summary = "Neither the pinned model nor the API reference bounds the rule list or names a single-rule requirement, so a multi-rule document is stored and echoed as sent rather than refused — which rule an object write applies is the encryption path's question, not the codec's."
+cases   = ["c-encryption-0010"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketEncryption.html"
+  summary = "The response documents Rule as an array of ServerSideEncryptionRule with repeated elements and states no count limit."
+
+[[quirk]]
+id      = "q-enc-0009"
+kind    = "secret_hygiene"
+target  = "ServerSideEncryptionByDefault.KMSMasterKeyID"
+summary = "The model marks the KMS key id sensitive: the stored document echoes it on the read — that is the documented GET response — but a refusal message never carries it, so a rejected write cannot leak a key id into an error body or a log line."
+cases   = ["c-encryption-0017", "c-encryption-0003"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketEncryption.html"
+  summary = "The sample response shows the configured KMS key identifier echoed inside the returned document, which pins the echo as read behaviour rather than error behaviour."
+
+  [[quirk.evidence]]
+  kind    = "s3s-pr"
+  ref     = "https://github.com/s3s-project/s3s/pull/319"
+  summary = "Upstream's secret-handling fixes are the record of how easily key material reaches unintended surfaces once it is carried as a plain string."

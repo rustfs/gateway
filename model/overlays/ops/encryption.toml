@@ -1,0 +1,125 @@
+# Copyright 2026 RustFS Team
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Family: bucket default-encryption configuration. GetBucketEncryption, PutBucketEncryption,
+# DeleteBucketEncryption.
+#
+# Configuration codec only. Nothing here encrypts a byte: whether an object write is actually
+# encrypted with the configured default, how object-level SSE headers override it, the TLS gate
+# on customer-provided keys and every other runtime half of SSE is task P6-06's, and the
+# gateway's whole contribution here is that the document the encryption path reads is the
+# document the client wrote. That is also why the semantic validation in
+# `ops/shared/encryption.rs` refuses only what AWS documents as refusals — a default-encryption
+# document parsed more strictly by the next release than by the one that stored it silently
+# turns default encryption off, and nothing visible fails until objects land in plaintext.
+#
+# The routing reason is the lifecycle band's one more time: a deferred operation contributes no
+# route row, so `GET /{Bucket}?encryption` was claimed by `ListObjects` — an encryption document
+# request answered with a key listing (the `GetBucketEncryption -> ListObjects` debt-register
+# line this family retires) — while the PUT and DELETE halves were unroutable.
+
+include = ["DeleteBucketEncryption", "GetBucketEncryption", "PutBucketEncryption"]
+
+# =============================================================================================
+# The `?encryption` band: 391 (GET), 392 (PUT), 393 (DELETE)
+#
+# The tens-aligned bucket-subresource slots between `?location` (300) and the multipart band
+# (400) are spoken for — `?cors` at 310-330, `?tagging` at 340-360, `?lifecycle` at 370-390 —
+# so this band packs into the gap the lifecycle band left. It cannot go after the listings: the
+# table is first-match, `ListObjects` at 700 pins no query key, and a GET row behind it would
+# hand every `GET /{Bucket}?encryption` back to the key listing this family exists to stop.
+# The GET row overlaps `?location` (300), the three earlier subresource GETs and the four
+# listings (460/600/610/700); the PUT and DELETE rows overlap only their subresource method
+# twins. Every pair is declared in `route/shadowing.rs`. The bucket CRUD rows at 710/720 stay
+# disjoint by their own `QueryAbsent` lists, which already name `encryption`.
+# =============================================================================================
+
+# =============================================================================================
+# GetBucketEncryption
+#
+# The stored default-encryption document, answered as `<ServerSideEncryptionConfiguration>` with
+# the rules flattened: `<Rule>` elements repeat directly under the root with no wrapper. The
+# response root comes from the model's own payload shape name; only the error surface and the
+# byte ceiling are stated here.
+# =============================================================================================
+[op.GetBucketEncryption]
+precedence = 391
+auth_action = "s3:GetEncryptionConfiguration"
+# AWS documents no byte cap for this document. The largest legitimate one — a handful of rules,
+# each carrying at most a 2 KiB KMS key ARN — is an order of magnitude under the 64 KiB ceiling
+# the CORS family already uses, so the same ceiling bounds it, and the write below.
+response_max_bytes = 65536
+# The unconfigured read is the family's defining error: a bucket that never had an encryption
+# document answers the operation-specific 404 with the longest code in the error table, not a
+# generic not-found and not an empty 200.
+not_configured = "ServerSideEncryptionConfigurationNotFoundError"
+error_codes = ["NoSuchBucket", "AccessDenied", "ServerSideEncryptionConfigurationNotFoundError"]
+url_encoded_fields = []
+input_hot = []
+output_hot = ["ServerSideEncryptionConfiguration"]
+quirk_refs = ["q-enc-0001", "q-enc-0002"]
+
+# =============================================================================================
+# PutBucketEncryption
+#
+# Replaces the whole document; there is no partial update. The request root comes from the
+# payload member's own `xmlName` — `ServerSideEncryptionConfiguration`, wire and model in
+# agreement for once — so no root override is needed.
+# =============================================================================================
+[op.PutBucketEncryption]
+precedence = 392
+auth_action = "s3:PutEncryptionConfiguration"
+# The pinned model carries `aws.protocols#httpChecksum` with `requestChecksumRequired`, which is
+# a different trait from the `smithy.api#httpChecksumRequired` lowering reads, so the requirement
+# is stated here rather than silently lost — exactly as PutBucketCors and the lifecycle write
+# state it. An encryption write with neither Content-MD5 nor an x-amz-checksum-* header is
+# refused before it is parsed.
+http_checksum_required = true
+# The 64 KiB ceiling again, from the read side.
+request_max_bytes = 65536
+error_codes = ["NoSuchBucket", "AccessDenied", "MalformedXML", "InvalidRequest", "InvalidArgument", "BadDigest"]
+url_encoded_fields = []
+input_hot = ["ServerSideEncryptionConfiguration"]
+output_hot = []
+quirk_refs = ["q-enc-0004", "q-enc-0005", "q-enc-0006", "q-enc-0007", "q-enc-0008", "q-enc-0009"]
+
+# =============================================================================================
+# DeleteBucketEncryption
+#
+# Removes the document. The model already answers 204, and the 204 is unconditional: deleting
+# the encryption configuration of a bucket that has none is a success, exactly as
+# DeleteBucketCors's is. The permission is the write's, `s3:PutEncryptionConfiguration` — AWS
+# documents no delete-specific action for this family.
+# =============================================================================================
+[op.DeleteBucketEncryption]
+precedence = 393
+auth_action = "s3:PutEncryptionConfiguration"
+error_codes = ["NoSuchBucket", "AccessDenied"]
+url_encoded_fields = []
+input_hot = []
+output_hot = []
+quirk_refs = ["q-enc-0003"]
+
+# =============================================================================================
+# Nested shapes owned by this family
+# =============================================================================================
+
+# The payload of an encryption write and the body of an encryption read are the same structure.
+# The model requires Rules, so `<ServerSideEncryptionConfiguration/>` with no rule is refused as
+# MalformedXML rather than read as "clear the configuration" — DeleteBucketEncryption is the
+# spelling for that.
+[shape.ServerSideEncryptionConfiguration]
+required = ["Rules"]
+hot = ["Rules"]
+element_order = ["Rules"]

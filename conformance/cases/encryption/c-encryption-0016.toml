@@ -1,0 +1,36 @@
+[case]
+id = "c-encryption-0016"
+schema_version = 1
+title = "A document under the wrong root element is refused as MalformedXML"
+rationale = """
+EncryptionConfiguration is a real element name in the S3 grammar — it lives inside replication rules — which makes it exactly the wrong root a hand-rolled client plausibly sends here. The decoder must refuse it by name rather than sniff its children: a root-agnostic parser that found a Rule inside would store a document the client addressed to a different subresource, and the 200 would teach the client the wrong grammar permanently."""
+polarity = "negative"
+operation = "PutBucketEncryption"
+tags = ["encryption", "xml", "error-shape"]
+timeout_ms = 10000
+quirks = []
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketEncryption.html"
+summary = "The documented request syntax opens with a ServerSideEncryptionConfiguration root element and no alternative spelling."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "conf-encryption"
+
+[request]
+method = "PUT"
+target = "/conf-encryption?encryption"
+headers = { "content-type" = "application/xml", "content-md5" = "Mh3j9hgSOKJo/cR062O7Cg==" }
+body = { utf8 = '<EncryptionConfiguration><Rule><ApplyServerSideEncryptionByDefault><SSEAlgorithm>AES256</SSEAlgorithm></ApplyServerSideEncryptionByDefault></Rule></EncryptionConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+code = "MalformedXML"
+request_id_present = true

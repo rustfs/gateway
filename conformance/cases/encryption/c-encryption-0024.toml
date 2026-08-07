@@ -1,0 +1,39 @@
+[case]
+id = "c-encryption-0024"
+schema_version = 1
+title = "A KMSMasterKeyID beside aws:fsx is refused with InvalidArgument: in the set, but not a KMS algorithm"
+rationale = """
+The boundary member of the key-id rule: aws:fsx is a documented algorithm — c-encryption-0005 accepts it alone — but the key id is documented as allowed if and only if the algorithm is aws:kms or aws:kms:dsse, so a validator that tested 'is the algorithm valid' instead of 'is the algorithm a KMS one' passes exactly this document. The pair of cases keeps the two predicates from collapsing into each other."""
+polarity = "negative"
+operation = "PutBucketEncryption"
+tags = ["encryption", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-enc-0005"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ServerSideEncryptionByDefault.html"
+summary = "The KMSMasterKeyID member is documented as allowed if and only if SSEAlgorithm is aws:kms or aws:kms:dsse, which excludes the also-valid aws:fsx."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "conf-encryption"
+
+[request]
+method = "PUT"
+target = "/conf-encryption?encryption"
+headers = { "content-type" = "application/xml", "content-md5" = "+gdSfBjVNqmJDNKYlEoAjQ==" }
+body = { utf8 = '<ServerSideEncryptionConfiguration><Rule><ApplyServerSideEncryptionByDefault><SSEAlgorithm>aws:fsx</SSEAlgorithm><KMSMasterKeyID>arn:aws:kms:us-east-1:111122223333:key/1234abcd-12ab-34cd-56ef-1234567890ab</KMSMasterKeyID></ApplyServerSideEncryptionByDefault></Rule></ServerSideEncryptionConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+code = "InvalidArgument"
+request_id_present = true
+
+[expect.body]
+not_contains_utf8 = ["arn:aws:kms", "1234abcd"]

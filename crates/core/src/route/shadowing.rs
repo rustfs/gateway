@@ -28,6 +28,11 @@
 //! today, in the same four fields the overlay will use, with the loader left to P4-06. It is one
 //! declaration; the type, not the storage, is what the rest of the crate depends on.
 
+// The URL constants every declaration cites, split into their own module when the table outgrew
+// the 800-line file ceiling. The glob is deliberate: the module holds nothing but those
+// constants, and naming thirty of them here would be a second copy of its export list.
+use super::evidence::*;
+
 /// One reviewed decision: this operation wins over that one, and here is why.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ShadowingDecl {
@@ -599,6 +604,133 @@ pub static PROVISIONAL_SHADOWING: &[ShadowingDecl] = &[
                  would turn a typo into data loss.",
         evidence: &[DELETE_BUCKET_TAGGING_DOC, DELETE_BUCKET_LIFECYCLE_DOC],
     },
+    // The `?encryption` band repeats the `?lifecycle` shape one band later, packed at 391-393
+    // because the tens-aligned subresource slots before the multipart band are spoken for. Three
+    // subresource triples now sit ahead of it, so all three of its rows have same-method
+    // neighbours to order against — nine both-keys-at-once pairs — plus `?location` and the four
+    // listings on the GET side. The last pair, against ListObjects, is the fallback relationship
+    // the debt register recorded as `GetBucketEncryption -> ListObjects` until this band landed.
+    ShadowingDecl {
+        winner: "GetBucketLocation",
+        shadowed: "GetBucketEncryption",
+        reason: "A request carrying both ?location and ?encryption asks two subresource questions \
+                 at once. AWS documents no such combination, so the answer is fixed here rather \
+                 than left to source order: ?location at 300 is tried before ?encryption at 391, \
+                 and the encryption reading is ignored rather than merged into the answer.",
+        evidence: &[LOCATION_DOC, GET_BUCKET_ENCRYPTION_DOC],
+    },
+    ShadowingDecl {
+        winner: "GetBucketCors",
+        shadowed: "GetBucketEncryption",
+        reason: "Two configuration subresources named in one GET. Neither is the narrower \
+                 question, so the earlier band wins: ?cors at 310 is tried before ?encryption at \
+                 391, the same first-band-wins rule ?location settled against ?cors.",
+        evidence: &[GET_BUCKET_CORS_DOC, GET_BUCKET_ENCRYPTION_DOC],
+    },
+    ShadowingDecl {
+        winner: "GetBucketTagging",
+        shadowed: "GetBucketEncryption",
+        reason: "Two configuration subresources named in one GET, the same shape as the ?cors \
+                 pair above with the tagging band in its place. The earlier band wins: ?tagging \
+                 at 340 is tried before ?encryption at 391, and the encryption reading is \
+                 ignored.",
+        evidence: &[GET_BUCKET_TAGGING_DOC, GET_BUCKET_ENCRYPTION_DOC],
+    },
+    ShadowingDecl {
+        winner: "GetBucketLifecycleConfiguration",
+        shadowed: "GetBucketEncryption",
+        reason: "Two configuration subresources named in one GET, the third same-method \
+                 neighbour. The earlier band wins: ?lifecycle at 370 is tried before ?encryption \
+                 at 391, in the arrival order every subresource pair in the table follows.",
+        evidence: &[GET_BUCKET_LIFECYCLE_DOC, GET_BUCKET_ENCRYPTION_DOC],
+    },
+    ShadowingDecl {
+        winner: "GetBucketEncryption",
+        shadowed: "ListMultipartUploads",
+        reason: "?encryption and ?uploads together name a configuration document and a listing of \
+                 one bucket. The subresource band (391) is tried before the upload listing (460), \
+                 the same order the ?cors and ?lifecycle bands settled against the same \
+                 neighbour.",
+        evidence: &[GET_BUCKET_ENCRYPTION_DOC, UPLOADS_DOC],
+    },
+    ShadowingDecl {
+        winner: "GetBucketEncryption",
+        shadowed: "ListObjectsV2",
+        reason: "A request carrying ?encryption and ?list-type=2 asks for the encryption document \
+                 and a page of keys at once. The configuration subresource is the narrower \
+                 question and is tried first (391 before 600); the listing is ignored.",
+        evidence: &[GET_BUCKET_ENCRYPTION_DOC, LIST_V2_DOC],
+    },
+    ShadowingDecl {
+        winner: "GetBucketEncryption",
+        shadowed: "ListObjectVersions",
+        reason: "Same shape as the pair above with the version listing in place of the key page: \
+                 only a client sending ?encryption and ?versions together reaches it, and the \
+                 subresource band is tried first (391 before 610).",
+        evidence: &[GET_BUCKET_ENCRYPTION_DOC, VERSIONS_DOC],
+    },
+    ShadowingDecl {
+        winner: "GetBucketEncryption",
+        shadowed: "ListObjects",
+        reason: "ListObjects pins no query key, so every ?encryption request also satisfies it. \
+                 Until this row existed that was not a latent overlap but the served behaviour: \
+                 an encryption document request was answered with a key listing. The subresource \
+                 is the specific reading and wins (391 before 700); the fallback stays last in \
+                 the band.",
+        evidence: &[GET_BUCKET_ENCRYPTION_DOC, LIST_V1_DOC],
+    },
+    ShadowingDecl {
+        winner: "PutBucketCors",
+        shadowed: "PutBucketEncryption",
+        reason: "Two configuration writes named in one PUT: a request carrying ?cors and \
+                 ?encryption satisfies both selectors, and AWS documents no such combination. The \
+                 earlier band wins (320 before 392), so the body is read as a CORS document and \
+                 the encryption reading is ignored rather than double-written.",
+        evidence: &[PUT_BUCKET_CORS_DOC, PUT_BUCKET_ENCRYPTION_DOC],
+    },
+    ShadowingDecl {
+        winner: "PutBucketTagging",
+        shadowed: "PutBucketEncryption",
+        reason: "Two configuration writes named in one PUT, the tagging twin of the ?cors pair \
+                 above. The earlier band wins (350 before 392), so the body is read as a tagging \
+                 document and the encryption reading is ignored rather than double-written.",
+        evidence: &[PUT_BUCKET_TAGGING_DOC, PUT_BUCKET_ENCRYPTION_DOC],
+    },
+    ShadowingDecl {
+        winner: "PutBucketLifecycleConfiguration",
+        shadowed: "PutBucketEncryption",
+        reason: "Two configuration writes named in one PUT, the lifecycle twin of the two pairs \
+                 above. The earlier band wins (380 before 392), so the body is read as a \
+                 lifecycle document and the encryption reading is ignored rather than \
+                 double-written.",
+        evidence: &[PUT_BUCKET_LIFECYCLE_DOC, PUT_BUCKET_ENCRYPTION_DOC],
+    },
+    ShadowingDecl {
+        winner: "DeleteBucketCors",
+        shadowed: "DeleteBucketEncryption",
+        reason: "Two configuration deletes named in one DELETE. The earlier band wins (330 \
+                 before 393), so only the CORS document is removed: a request that destroys two \
+                 configurations because it named two query keys would turn a typo into data \
+                 loss.",
+        evidence: &[DELETE_BUCKET_CORS_DOC, DELETE_BUCKET_ENCRYPTION_DOC],
+    },
+    ShadowingDecl {
+        winner: "DeleteBucketTagging",
+        shadowed: "DeleteBucketEncryption",
+        reason: "Two configuration deletes named in one DELETE, the tagging twin of the pair \
+                 above. The earlier band wins (360 before 393), so only the tag set is removed \
+                 and the encryption document stays: turning a typo into the silent loss of a \
+                 security configuration is the worst spelling of the data-loss rule.",
+        evidence: &[DELETE_BUCKET_TAGGING_DOC, DELETE_BUCKET_ENCRYPTION_DOC],
+    },
+    ShadowingDecl {
+        winner: "DeleteBucketLifecycle",
+        shadowed: "DeleteBucketEncryption",
+        reason: "Two configuration deletes named in one DELETE, the lifecycle twin of the two \
+                 pairs above. The earlier band wins (390 before 393), so only the lifecycle \
+                 document is removed and the bucket keeps its default encryption.",
+        evidence: &[DELETE_BUCKET_LIFECYCLE_DOC, DELETE_BUCKET_ENCRYPTION_DOC],
+    },
     // The copy family adds the third shape: one header's presence, and nothing else, separates two
     // operations that share a method and a path. Every row but the last is a refinement — the
     // winner's selector is the loser's plus `x-amz-copy-source` — so the overlap is the design
@@ -653,115 +785,3 @@ pub static PROVISIONAL_SHADOWING: &[ShadowingDecl] = &[
         evidence: &[UPLOAD_PART_DOC, COPY_OBJECT_DOC],
     },
 ];
-
-/// AWS's own reference for the server-side object copy.
-const COPY_OBJECT_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CopyObject.html \
-     — a copy is a PUT to the destination key whose source is named by a header, and which carries no request body.";
-
-/// AWS's own reference for the part copy.
-const UPLOAD_PART_COPY_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UploadPartCopy.html \
-     — a part copy is a part upload whose bytes come from a source object named by a header rather than from the body.";
-
-/// AWS's own reference for the CORS document read.
-const GET_BUCKET_CORS_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketCors.html \
-     — GetBucketCors is selected by the ?cors subresource alone and answers with the stored configuration document.";
-
-/// AWS's own reference for the lifecycle document read.
-const GET_BUCKET_LIFECYCLE_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketLifecycleConfiguration.html \
-     — GetBucketLifecycleConfiguration is selected by the ?lifecycle subresource alone and answers with the stored configuration document.";
-
-/// AWS's own reference for the lifecycle document write.
-const PUT_BUCKET_LIFECYCLE_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketLifecycleConfiguration.html \
-     — PutBucketLifecycleConfiguration is selected by the ?lifecycle subresource on a bucket PUT and replaces the stored lifecycle document.";
-
-/// AWS's own reference for the lifecycle document delete.
-const DELETE_BUCKET_LIFECYCLE_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketLifecycle.html \
-     — DeleteBucketLifecycle is selected by the ?lifecycle subresource on a bucket DELETE and removes only the lifecycle document.";
-
-/// AWS's own reference for the operation selected by the `?location` subresource.
-const LOCATION_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketLocation.html \
-     — GetBucketLocation is selected by the ?location subresource alone and takes no other query input.";
-
-/// AWS's own reference for the version listing.
-const VERSIONS_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectVersions.html \
-     — ListObjectVersions is selected by the ?versions subresource and ignores query keys it does not define.";
-
-/// AWS's own reference for the first key listing.
-const LIST_V1_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjects.html \
-     — ListObjects is what a GET on a bucket means when no other subresource claimed it, so it pins no query key.";
-
-/// AWS's own reference for the second key listing.
-const LIST_V2_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectsV2.html \
-     — ListObjectsV2 is selected by list-type=2 and treats unrecognised query keys as inert.";
-
-/// AWS's own reference for the in-progress upload listing.
-const UPLOADS_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListMultipartUploads.html \
-     — ListMultipartUploads is selected by the ?uploads subresource and defines no other selector.";
-
-/// AWS's own reference for the part upload.
-const UPLOAD_PART_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UploadPart.html \
-     — a part upload is a PUT to the object key carrying the part number and the upload id as query parameters.";
-
-/// AWS's own reference for the plain object write.
-const PUT_OBJECT_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObject.html \
-     — a plain object write is the same method and path with neither of those parameters.";
-
-/// AWS's own reference for the completion of an upload.
-const COMPLETE_MPU_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CompleteMultipartUpload.html \
-     — completion is a POST to the object key carrying the upload id.";
-
-/// AWS's own reference for the initiation of an upload.
-const CREATE_MPU_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CreateMultipartUpload.html \
-     — initiation is a POST to the object key carrying the ?uploads subresource and no upload id.";
-
-/// AWS's own reference for discarding an upload.
-const ABORT_MPU_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_AbortMultipartUpload.html \
-     — an abort is a DELETE to the object key carrying the upload id as a query parameter.";
-
-/// AWS's own reference for the plain object delete.
-const DELETE_OBJECT_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteObject.html \
-     — an object delete is the same method and path with no upload id.";
-
-/// AWS's own reference for the part listing.
-const LIST_PARTS_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListParts.html \
-     — a part listing is a GET to the object key carrying the upload id as a query parameter.";
-
-/// AWS's own reference for the attributes read.
-const OBJECT_ATTRIBUTES_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObjectAttributes.html \
-     — an attributes read is a GET to the object key carrying the ?attributes subresource, and it answers with metadata rather than with the object.";
-
-/// AWS's own reference for the tag-set read.
-const GET_OBJECT_TAGGING_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObjectTagging.html \
-     — a tag-set read is a GET to the object key carrying the ?tagging subresource, and it answers with the tag set rather than with the object.";
-
-/// AWS's own reference for the bucket-scope tag-set read.
-const GET_BUCKET_TAGGING_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketTagging.html \
-     — a bucket tag-set read is a GET on the bucket carrying the ?tagging subresource, and it defines no other selector.";
-
-/// AWS's own reference for the bucket-scope tag-set replacement.
-const PUT_BUCKET_TAGGING_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketTagging.html \
-     — a bucket tag-set write is a PUT on the bucket carrying the ?tagging subresource, and its body is the tagging document.";
-
-/// AWS's own reference for the bucket-scope tag-set removal.
-const DELETE_BUCKET_TAGGING_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketTagging.html \
-     — a bucket tag-set removal is a DELETE on the bucket carrying the ?tagging subresource, and it leaves the bucket in place.";
-
-/// AWS's own reference for the CORS document write.
-const PUT_BUCKET_CORS_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketCors.html \
-     — a CORS configuration write is a PUT on the bucket carrying the ?cors subresource, and its body is the configuration document.";
-
-/// AWS's own reference for the CORS document removal.
-const DELETE_BUCKET_CORS_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketCors.html \
-     — a CORS configuration removal is a DELETE on the bucket carrying the ?cors subresource.";
-
-/// AWS's own reference for the tag-set replacement.
-const PUT_OBJECT_TAGGING_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObjectTagging.html \
-     — a tag-set write is a PUT to the object key carrying the ?tagging subresource, and its body is a tagging document rather than object data.";
-
-/// AWS's own reference for the tag-set removal.
-const DELETE_OBJECT_TAGGING_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteObjectTagging.html \
-     — a tag-set removal is a DELETE to the object key carrying the ?tagging subresource, and it leaves the object in place.";
-
-/// AWS's own reference for the plain object read.
-const GET_OBJECT_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObject.html \
-     — an object read is the same method and path with no upload id.";
