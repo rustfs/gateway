@@ -52,20 +52,20 @@ impl OperationCodec for dto::GetObject {
             let raw = raw.as_ref();
             input.if_match = Some(value::etag_form(raw, "IfMatch")?.to_owned());
         }
-        // IfModifiedSince — header `if-modified-since`, repeated field lines joined.
+        // IfModifiedSince — header `if-modified-since`, read tolerantly: a value that is not a date is ignored.
         if let Some(raw) = request.header("if-modified-since") {
             let raw = raw.as_ref();
-            input.if_modified_since = Some(value::timestamp(raw, TimestampFormat::HttpDate, "IfModifiedSince")?);
+            input.if_modified_since = value::date_condition(raw, TimestampFormat::HttpDate).honoured();
         }
         // IfNoneMatch — header `if-none-match`, repeated field lines joined.
         if let Some(raw) = request.header("if-none-match") {
             let raw = raw.as_ref();
             input.if_none_match = Some(value::etag_form(raw, "IfNoneMatch")?.to_owned());
         }
-        // IfUnmodifiedSince — header `if-unmodified-since`, repeated field lines joined.
+        // IfUnmodifiedSince — header `if-unmodified-since`, read tolerantly: a value that is not a date is ignored.
         if let Some(raw) = request.header("if-unmodified-since") {
             let raw = raw.as_ref();
-            input.if_unmodified_since = Some(value::timestamp(raw, TimestampFormat::HttpDate, "IfUnmodifiedSince")?);
+            input.if_unmodified_since = value::date_condition(raw, TimestampFormat::HttpDate).honoured();
         }
         // Key — URI label, decoded once by `MetaView::of`.
         input.key = request.require_key()?;

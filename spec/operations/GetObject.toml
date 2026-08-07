@@ -74,7 +74,7 @@ binding = "Header"
 type = "Timestamp(HttpDate)"
 required = false
 hot = true
-quirks = []
+quirks = ["q-cond-0050"]
 
 [[input]]
 name = "IfNoneMatch"
@@ -92,7 +92,7 @@ binding = "Header"
 type = "Timestamp(HttpDate)"
 required = false
 hot = true
-quirks = []
+quirks = ["q-cond-0050"]
 
 [[input]]
 name = "Key"

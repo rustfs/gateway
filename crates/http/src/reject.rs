@@ -34,6 +34,24 @@
 //! close for the `Content-Length`/`Transfer-Encoding` pair; this module extends it to every
 //! framing verdict, and [`WireReject::may_read_body`] is `false` for all of them so no caller
 //! drains a body it has just declared uninterpretable.
+//!
+//! # Two strings, and only one of them may leave the process
+//!
+//! [`WireReject::message`] is what a client reads. [`WireReject::label`] is what an operator
+//! reads. They are separate methods because they were once the same one, and the renderer picked
+//! the wrong one: `<Message>limit-exceeded</Message>` went out to callers for every ceiling this
+//! layer enforces.
+//!
+//! That is a defect in two directions at once. `limit-exceeded` is an *internal identifier* — it
+//! is chosen for grepping this repository, it changes when a variant is renamed, and a client that
+//! parses it has taken a dependency on a refactor. And it says nothing: a caller reading it learns
+//! neither what to change nor that anything was over a ceiling at all.
+//!
+//! So the invariant, asserted by `tests/reject_wording.rs`: **no string reachable from
+//! [`WireReject::label`] is reachable from [`WireReject::message`], and no message contains an
+//! identifier from this crate's source.** The labels are lowercase-with-hyphens by construction
+//! and the messages are sentences, which is what makes the disjointness checkable rather than
+//! merely intended.
 
 use http::{HeaderName, StatusCode};
 use rustfs_gateway_types::ErrorCode;
@@ -107,13 +125,40 @@ impl WireReject {
 
     /// The S3 error code for this refusal.
     ///
-    /// Deliberately coarse. A code that named the exact rule would let a peer enumerate this
-    /// layer's checks one request at a time, and no client branches on that detail; the specific
-    /// variant belongs in the operator's log, not in the response.
+    /// Coarse, but not uniform. The unit is **what the client has to change**, which is coarser
+    /// than the variant and finer than "something was refused":
+    ///
+    /// | Refusal | Code | What the caller does next |
+    /// | --- | --- | --- |
+    /// | [`LimitKind::BodyBytes`] | `EntityTooLarge` | split the upload into parts |
+    /// | [`LimitKind::ChunkSizeLine`] | `InvalidRequest` | fix the `aws-chunked` framing |
+    /// | [`LimitKind::HostBytes`] | `InvalidRequest` | send a `Host` that is a host |
+    /// | every other [`LimitKind`] | `MaxMessageLengthExceeded` | send a smaller request |
+    /// | a framing verdict | `InvalidRequest` | fix the framing |
+    /// | a header verdict | `InvalidRequest` | fix the header |
+    /// | a query verdict | `InvalidArgument` | fix the query string |
+    /// | [`Self::MalformedRequestTarget`] | `InvalidURI` | fix the request target |
+    ///
+    /// Two ceilings that were previously folded into `MaxMessageLengthExceeded` are not size
+    /// complaints at all and have moved out. A chunk-size line past its ceiling is the same
+    /// verdict as [`Self::MalformedChunkFraming`] reached by a different route — no length of line
+    /// is one this parser would have accepted, so telling the caller to shrink the request sends
+    /// it to fix the wrong thing. An effective host past 263 bytes is not a long host, it is not a
+    /// host; it belongs with the rest of [`HostError`].
+    ///
+    /// What deliberately does **not** happen is a code per ceiling. AWS publishes none, so
+    /// inventing `QueryStringTooLong` would put a code on the wire that no S3 client has a branch
+    /// for, and it would hand a peer a way to enumerate this layer's checks one request at a time.
+    /// The distinction between "your query value is wrong" and "your request is too big" is real
+    /// and the client does get it — but it comes from the operation's own ceiling answering
+    /// `InvalidArgument` first, which is what the derivation in [`crate::Limits`] exists to
+    /// guarantee, not from subdividing this table.
     #[must_use]
     pub fn error_code(&self) -> ErrorCode {
         match self {
             Self::LimitExceeded(LimitKind::BodyBytes) => ErrorCode::ENTITY_TOO_LARGE,
+            Self::LimitExceeded(LimitKind::ChunkSizeLine) => ErrorCode::INVALID_REQUEST,
+            Self::LimitExceeded(LimitKind::HostBytes) => ErrorCode::INVALID_REQUEST,
             Self::LimitExceeded(_) => ErrorCode::MAX_MESSAGE_LENGTH_EXCEEDED,
             Self::MalformedRequestTarget => ErrorCode::INVALID_URI,
             Self::DuplicateSingleValuedQuery(_) | Self::AmbiguousQueryParameterName | Self::MalformedQuery => {
@@ -121,6 +166,39 @@ impl WireReject {
             }
             Self::MalformedMetadata(_) => ErrorCode::INVALID_ARGUMENT,
             _ => ErrorCode::INVALID_REQUEST,
+        }
+    }
+
+    /// The sentence a client reads in `<Message>`.
+    ///
+    /// One message per row of the [`Self::error_code`] table, never one per variant. That is the
+    /// same reason the codes are grouped: fifteen distinguishable sentences would restore, in
+    /// prose, exactly the enumeration surface the coarse code set exists to close. The operator
+    /// keeps the precise variant through [`Self::label`], which never leaves this process.
+    ///
+    /// Where AWS publishes a message for the code — `EntityTooLarge`,
+    /// `MaxMessageLengthExceeded`, `InvalidURI` — that message is used verbatim, because an
+    /// operator matching this gateway's responses against S3's own has to be able to diff them.
+    /// The rest are written here, in the same register: a complete sentence about the request,
+    /// naming no ceiling, no header count, and no identifier from this source tree.
+    #[must_use]
+    pub fn message(&self) -> &'static str {
+        match self {
+            Self::LimitExceeded(LimitKind::BodyBytes) => "Your proposed upload exceeds the maximum allowed size.",
+            Self::LimitExceeded(LimitKind::ChunkSizeLine) | Self::MalformedChunkFraming => CHUNK_FRAMING_MESSAGE,
+            Self::LimitExceeded(LimitKind::HostBytes) | Self::Host(_) => HOST_MESSAGE,
+            Self::LimitExceeded(_) => "Your request was too big.",
+            Self::ContentLengthTransferEncodingConflict
+            | Self::TransferEncodingMalformed
+            | Self::TransferEncodingOnHttp2
+            | Self::DuplicateContentLength
+            | Self::MalformedContentLength => FRAMING_MESSAGE,
+            Self::DuplicateSingleValuedHeader(_) | Self::NonUtf8SignificantHeader(_) | Self::MalformedHeaderValue(_) => {
+                HEADER_MESSAGE
+            }
+            Self::MalformedMetadata(_) => METADATA_MESSAGE,
+            Self::DuplicateSingleValuedQuery(_) | Self::AmbiguousQueryParameterName | Self::MalformedQuery => QUERY_MESSAGE,
+            Self::MalformedRequestTarget => "Couldn't parse the specified URI.",
         }
     }
 
@@ -145,9 +223,14 @@ impl WireReject {
         true
     }
 
-    /// A short, stable label for logs, metrics and tests.
+    /// A short, stable label for logs, metrics and tests. **Never for a client.**
+    ///
+    /// Every value here is an internal identifier: it is the variant name in kebab case, it moves
+    /// when the variant is renamed, and it names the individual check that fired. All three are
+    /// exactly what makes it useful in a dashboard and disqualifying in a response body. See the
+    /// module documentation for the day this string was the response body.
     #[must_use]
-    pub fn as_str(&self) -> &'static str {
+    pub fn label(&self) -> &'static str {
         match self {
             Self::ContentLengthTransferEncodingConflict => "content-length-transfer-encoding-conflict",
             Self::TransferEncodingMalformed => "transfer-encoding-malformed",
@@ -163,11 +246,39 @@ impl WireReject {
             Self::MalformedMetadata(_) => "malformed-metadata",
             Self::MalformedRequestTarget => "malformed-request-target",
             Self::MalformedQuery => "malformed-query",
-            Self::Host(_) => "host",
-            Self::LimitExceeded(_) => "limit-exceeded",
+            // `host` on its own was the label until the disjointness guard caught it: it is an
+            // ordinary English word, so every message that mentions a host contained it. A metric
+            // label that collides with prose is a label that cannot be checked against prose.
+            Self::Host(_) => "host-undetermined",
+            Self::LimitExceeded(kind) => kind.as_str(),
         }
     }
 }
+
+/// Every framing verdict, in one sentence.
+///
+/// One sentence for seven checks. Naming which of them fired would tell a caller how to probe the
+/// remaining six, and there is nothing in the difference a well-behaved client can act on: the fix
+/// for all of them is to declare the body's length once and unambiguously.
+const FRAMING_MESSAGE: &str = "The request does not declare the length of its body unambiguously.";
+
+/// The `aws-chunked` framing verdicts, which are about the body's own framing rather than the
+/// head's declaration of it.
+const CHUNK_FRAMING_MESSAGE: &str = "The chunked encoding of the request body is not one this service can read.";
+
+/// Every header verdict: repeated where it may not be, unreadable as text, or carrying a control
+/// character.
+const HEADER_MESSAGE: &str = "A request header is not one this service can accept.";
+
+/// The user-metadata verdicts, kept apart from [`HEADER_MESSAGE`] because the caller's fix is a
+/// different one: the header is theirs to choose, and it is the value that is wrong.
+const METADATA_MESSAGE: &str = "The user metadata on this request is not valid.";
+
+/// Every query-string verdict.
+const QUERY_MESSAGE: &str = "The query string is not one this service can read as a set of parameters.";
+
+/// The host verdicts: absent, duplicated, contradicted by the request target, or not a host at all.
+const HOST_MESSAGE: &str = "The request does not name exactly one host.";
 
 impl From<HostError> for WireReject {
     fn from(error: HostError) -> Self {

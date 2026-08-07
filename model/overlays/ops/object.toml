@@ -115,6 +115,25 @@ side = "input"
 name = "IfNoneMatch"
 quirks = ["q-etag-form-0074"]
 
+# The two date conditions are read tolerantly, which is the opposite of the two entity-tag
+# conditions above and is not an inconsistency. RFC 9110 §13.1.3 and §13.1.4 say in as many words
+# that a modification-date condition whose value is not a valid HTTP-date is **ignored**; there is
+# no such sentence for If-Match, whose grammar an unterminated tag simply fails.
+#
+# The asymmetry is worth stating because it is the reason a decoder cannot own this rule. Refusing
+# the malformed date needs one `?`; ignoring it needs a value with a variant for "arrived and could
+# not be read", because otherwise the stored `None` means both that and "no header", which is the
+# `if-range` defect the Range binding was rewritten to remove.
+[[op.GetObject.field]]
+side = "input"
+name = "IfModifiedSince"
+quirks = ["q-cond-0050"]
+
+[[op.GetObject.field]]
+side = "input"
+name = "IfUnmodifiedSince"
+quirks = ["q-cond-0050"]
+
 # If-Range is in RFC 9110 and in no version of the pinned S3 model, so it is synthesized here or it
 # does not exist at all — which is what it was until now: `evaluate_range` took an `IfRange` no
 # request could produce, so `q-range-0058` was a rule the contract stated and no backend could
@@ -187,6 +206,20 @@ quirks = ["q-etag-form-0074"]
 side = "input"
 name = "IfNoneMatch"
 quirks = ["q-etag-form-0074"]
+
+# `head_mirrors` derives the *response* header set from GetObject and nothing about the request,
+# so the two date conditions are restated here. A HEAD that refused a malformed date while the GET
+# beside it served the object would be the worst of both: the same header, two answers, decided by
+# the method.
+[[op.HeadObject.field]]
+side = "input"
+name = "IfModifiedSince"
+quirks = ["q-cond-0050"]
+
+[[op.HeadObject.field]]
+side = "input"
+name = "IfUnmodifiedSince"
+quirks = ["q-cond-0050"]
 
 # =============================================================================================
 # PutObject

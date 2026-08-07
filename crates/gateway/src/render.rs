@@ -166,7 +166,13 @@ impl From<WireReject> for S3Error {
     fn from(reject: WireReject) -> Self {
         // The status comes from the reject, not from the code table: `LimitExceeded` maps to
         // several statuses depending on which ceiling was hit, and only the reject knows which.
-        Self::new(reject.error_code(), reject.as_str()).with_status(reject.to_status())
+        // `message()`, never `label()`. This is the one place a refusal becomes bytes a client
+        // reads, and the two strings exist precisely because they have different audiences: the
+        // label is an operator's identifier and belongs in a log. There used to be a third name,
+        // `as_str()`, which delegated here — it was removed because a habit-reached name that
+        // happens to be right is not a guarantee, and a reviewer who sees `label()` on this line
+        // can tell it is wrong, which is the property worth having.
+        Self::new(reject.error_code(), reject.message()).with_status(reject.to_status())
     }
 }
 

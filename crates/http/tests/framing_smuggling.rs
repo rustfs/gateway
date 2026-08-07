@@ -245,10 +245,12 @@ fn c_wire_0063_an_over_large_declared_body_is_400_entity_too_large_and_never_dra
     assert!(reject.must_close_connection());
 }
 
+/// The operator's label names the exact check; see `tests/reject_wording.rs` for the other half of
+/// the rule, which is that this string never reaches a client.
 #[test]
 fn a_transfer_encoding_rejection_names_the_header_it_is_about() {
     let reject = reject_of(&[("transfer-encoding", "chunked, gzip")]);
-    assert_eq!(reject.as_str(), "transfer-encoding-malformed");
+    assert_eq!(reject.label(), "transfer-encoding-malformed");
 }
 
 #[test]

@@ -20,12 +20,40 @@
 //! half-open connection caps, and so on). Those need a driver and a clock; they are P3-05's, and
 //! this struct is the place they will be added.
 //! Upstream: nothing. Downstream: `framing`, `query_view`, `wire`, `reject`.
+//!
+//! # A wire ceiling is not a protocol rule, and it must not be able to answer as one
+//!
+//! Two different ceilings can refuse one oversized value, and they are owned by different layers
+//! and mean different things:
+//!
+//! * **here** — a *resource* ceiling. It exists so that an unauthenticated peer cannot make this
+//!   process allocate without bound, and its only honest answer is "your request was too big".
+//! * **in the operation** — a *protocol* ceiling. `ContinuationToken` longer than the longest
+//!   cursor this service mints is not a large request, it is a value that cannot be one this
+//!   service issued, and its answer is `InvalidArgument` naming the parameter.
+//!
+//! The defect this module was carrying is that the first one fired first. A 4 KiB continuation
+//! token put the query string 31 bytes over a 4 KiB budget, so every such request was answered
+//! "too big" and the protocol ceiling — which had the answer the client could act on — never ran
+//! at all (`c-list-0030`). A resource ceiling placed below a protocol ceiling does not add a
+//! defence; it replaces a specific refusal with a vague one.
+//!
+//! So the numbers below are **derived, not chosen**: each is the largest value the S3 protocol can
+//! legitimately describe at that position, summed. That is the only rule that keeps the ordering
+//! right by construction — a budget derived from what the protocol can *say* is necessarily above
+//! every ceiling that exists to say something about it, while a budget picked for being "big
+//! enough" drifts underneath one the moment a protocol ceiling moves.
+//!
+//! The resource ceiling does not disappear: a one-mebibyte cursor is still refused here, and still
+//! answered "too big", because at that size the size really is the complaint.
 
 /// Which ceiling a request crossed.
 ///
-/// The variant is carried on the rejection so an operator can raise the right limit; it is never
-/// reflected to the client, because "your request was 4 bytes over the header budget" is a
-/// probing oracle for the budget itself.
+/// The variant is carried on the rejection so an operator can raise the right limit. **No part of
+/// it is reflected to the client** — not the name, not the number, not the distance the request
+/// was over — because "your request was 4 bytes over the header budget" is a probing oracle for
+/// the budget itself. What the client is told is the error code
+/// [`crate::WireReject::error_code`] groups the kind into, and nothing finer.
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LimitKind {
@@ -95,10 +123,82 @@ pub struct Limits {
     pub max_body_bytes: u64,
 }
 
+/// The longest object key S3 accepts, in bytes.
+///
+/// A key is bytes, not characters, and this is the number AWS documents. It appears in the two
+/// derivations below because a key reaches the wire in two positions: in the path, and — as
+/// `prefix`, `marker`, `start-after` and their siblings — in the query.
+const MAX_KEY_BYTES: usize = 1024;
+
+/// The longest bucket name S3 accepts, in bytes.
+const MAX_BUCKET_BYTES: usize = 63;
+
+/// What percent-encoding does to a length, at worst: every byte becomes `%XX`.
+///
+/// Not an estimate. A key may hold any byte, and a client that encodes conservatively encodes all
+/// of them, so a 1024-byte key is a 3072-byte query value and a budget derived from the
+/// unencoded length refuses a request AWS accepts.
+const PERCENT_EXPANSION: usize = 3;
+
+/// The longest opaque cursor this service mints, in bytes, before percent-encoding.
+///
+/// **The same number as `rustfs_gateway_core::codec::value::MAX_TOKEN_LEN`**, which is the
+/// protocol ceiling the listing codecs refuse a cursor at. It is written again here because this
+/// crate sits *below* `rustfs-gateway-core` in the ring order and cannot import it — the edge runs
+/// the other way, and reversing it to share a constant would be a dependency cycle bought for one
+/// integer.
+///
+/// The two are pinned together by a guard test in `crates/core/tests/limit_layering.rs`, which can
+/// see both crates and asserts what actually matters: that the budget derived here leaves room for
+/// a cursor past the protocol ceiling, so the protocol ceiling is the one that answers.
+const MAX_SERVER_MINTED_CURSOR_BYTES: usize = 2048;
+
+/// The presigned SigV4 parameter block, in bytes.
+///
+/// `X-Amz-Algorithm`, `X-Amz-Credential`, `X-Amz-Date`, `X-Amz-Expires`, `X-Amz-SignedHeaders` and
+/// `X-Amz-Signature` are a few hundred bytes between them; the number is what it is because
+/// `X-Amz-Security-Token` carries an STS session token, which is opaque, percent-encoded, and the
+/// one query value in the surface whose length this service does not get to choose.
+const MAX_PRESIGNED_QUERY_BYTES: usize = 4096;
+
+/// Every remaining query parameter, in bytes.
+///
+/// `list-type`, `max-keys`, `delimiter`, `encoding-type`, `fetch-owner`, `versionId`, `uploadId`,
+/// `partNumber`, the `response-*` overrides and the subresource selector. All short, all bounded,
+/// and a round allowance for the lot of them rather than a row each.
+const MAX_QUERY_SCALARS_BYTES: usize = 1024;
+
+/// The longest request path this gateway can be asked for: `/<bucket>/<key>`, percent-encoded.
+const MAX_PATH_BYTES: usize = 1 + MAX_BUCKET_BYTES + 1 + PERCENT_EXPANSION * MAX_KEY_BYTES;
+
 impl Limits {
     /// The hard ceiling on [`Limits::max_query_bytes`], imposed by the `u16` offsets the query
     /// index stores. A configured value above this is clamped rather than honoured.
     pub const QUERY_BYTES_CEILING: usize = u16::MAX as usize;
+
+    /// The default query budget, summed from the longest query string S3 can legitimately
+    /// describe.
+    ///
+    /// One listing request may carry, all at once: a `prefix` and one member of the marker family,
+    /// each an object key at its ceiling and percent-encoded; a server-minted cursor, likewise
+    /// encoded; the presigned SigV4 block; and the short scalars. Nothing here is headroom "just
+    /// in case" — remove any one term and there is a request AWS answers and this gateway does
+    /// not.
+    ///
+    /// See the module documentation for why the sum, rather than a chosen round number, is what
+    /// keeps this ceiling above every protocol ceiling instead of underneath one.
+    pub const DEFAULT_MAX_QUERY_BYTES: usize = 2 * PERCENT_EXPANSION * MAX_KEY_BYTES
+        + PERCENT_EXPANSION * MAX_SERVER_MINTED_CURSOR_BYTES
+        + MAX_PRESIGNED_QUERY_BYTES
+        + MAX_QUERY_SCALARS_BYTES;
+
+    /// The default request-target budget: the longest path, the `?`, and the longest query.
+    ///
+    /// Derived from [`Limits::DEFAULT_MAX_QUERY_BYTES`] rather than sitting beside it, because a
+    /// target budget below the query budget makes the query budget unreachable — the same
+    /// shadowing defect one layer up, with the same symptom: the ceiling that has the useful
+    /// answer never fires.
+    pub const DEFAULT_MAX_URI_BYTES: usize = MAX_PATH_BYTES + 1 + Self::DEFAULT_MAX_QUERY_BYTES;
 
     /// The effective query-byte ceiling, never above [`Limits::QUERY_BYTES_CEILING`].
     #[must_use]
@@ -112,8 +212,8 @@ impl Default for Limits {
         Self {
             max_header_count: 128,
             max_header_bytes: 16 * 1024,
-            max_uri_bytes: 8 * 1024,
-            max_query_bytes: 4 * 1024,
+            max_uri_bytes: Self::DEFAULT_MAX_URI_BYTES,
+            max_query_bytes: Self::DEFAULT_MAX_QUERY_BYTES,
             max_query_params: 64,
             max_host_bytes: crate::host::MAX_HOST_BYTES,
             max_body_bytes: 5 * 1024 * 1024 * 1024,

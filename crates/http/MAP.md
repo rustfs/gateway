@@ -36,13 +36,13 @@ Four properties live here. Everything else in the crate exists to serve them.
 | `src/header_view.rs` | `HeaderView`, `SignedHeaderList`, canonical-header writing, the repeat and non-UTF-8 policies | You read a header, or build a canonical request |
 | `src/query_view.rs` | `QueryIndex` / `QueryView`: offsets, arrival order, repeat policy | You read a query parameter, or route on one |
 | `src/metadata.rs` | `x-amz-meta-*` key and value rules, including validation *after* RFC 2047 decoding | You touch user metadata |
-| `src/limits.rs` | `Limits`, `LimitKind`, `ChunkLimits` (per-chunk data ceiling, metadata ceiling, chunk count, overhead ratio) | You are adding a ceiling; P3-05 owns the timeouts |
+| `src/limits.rs` | `Limits`, `LimitKind`, `ChunkLimits` (per-chunk data ceiling, metadata ceiling, chunk count, overhead ratio), and the **derivation** of the query and target budgets from the longest values S3 can legitimately describe | You are adding a ceiling, or a ceiling here is answering a question an operation should have answered; P3-05 owns the timeouts |
 | `src/ingest/mod.rs` | `PayloadFramingSource`, `ChunkFraming`, `DecodedLength`, `validate_decoded_length` — whether the parser runs, and whether the two declared lengths agree | You touch the framing decision or the head cross-checks |
 | `src/ingest/decoder.rs` | `ChunkDecoder`: chunk-size lines, the one permitted extension, CRLF rules, every header-decidable ceiling. Emits `(start, len)` events; moves no payload | You are adding a framing rule |
 | `src/ingest/signer.rs` | `SigningKeyCache` (one derivation per scope), `ChunkSigner` (one HMAC per chunk, stack string-to-sign, constant-time compare), `ChunkSigningKey`, `ChunkSeed`, `ChunkScope`, `ScopeId` | You touch the chunk signature chain |
 | `src/ingest/pipeline.rs` | `IngestPipeline`, `IngestPolicy`: the window, the single pass, verify-before-deliver, `decoded_bytes`, `commit_allowed`, `reject` | You are changing how an upload is read |
 | `src/ingest/reject.rs` | `ChunkReject`, `ModeConfusion`, and the 400/403 split | You are adding a refusal |
-| `src/reject.rs` | `WireReject`, status and error-code mapping, `may_read_body`, `must_close_connection` | You are adding a rejection, or writing the response |
+| `src/reject.rs` | `WireReject`, status and error-code mapping, the two strings a refusal has (`message` for the client, `label` for the operator) and why they must stay disjoint, `may_read_body`, `must_close_connection` | You are adding a rejection, or writing the response |
 | `src/text.rs` | `AsciiBuf` and the byte predicates; no protocol meaning | Rarely |
 | `tests/host_ambiguity.rs` | 7 positive / 18 negative — every row of the host decision table | You changed `host.rs`; `crates/sig/tests/effective_host.rs` covers the same function from the signature side and must be run too |
 | `tests/framing_smuggling.rs` | 4 positive / 19 negative — W-1..W-6 and the body ceiling | You changed `framing.rs` |
@@ -53,6 +53,7 @@ Four properties live here. Everything else in the crate exists to serve them.
 | `tests/ingest_verify.rs` | 3 positive / 17 negative — the signature chain, "zero bytes delivered from a failing chunk", trailer hand-off | You changed `ingest/signer.rs` or the delivery policy |
 | `tests/ingest_perf_gates.rs` | 7 positive / 10 negative — the HMAC budget, the single-pass equality, compaction bounds, the zero-adapting-copy assertion | You changed the pipeline's buffering or the key cache |
 | `tests/support/ingest.rs` | Wire-shaped fixtures: a scripted socket, an independently written chunk signer | You need a new malformed body shape |
+| `tests/reject_wording.rs` | 3 positive / 13 negative — what a refusal may say to a client: no internal label reachable through a message, no number in one, the code grouping, and the derivation that keeps this crate's budgets above the operations' ceilings | You changed `reject.rs` or a default in `limits.rs` |
 | `tests/boundary_guards.rs` | Source guards: no raw-request accessor, no lossy UTF-8, lint denials, file shape | You added a public method or a file |
 
 ## Shape decisions worth not re-litigating
@@ -110,7 +111,7 @@ way, which is why the host determination lives here and not there.
 ## Verify
 
 ```bash
-cargo test -p rustfs-gateway-http                                  # 174 tests, 122 negative / 52 positive
+cargo test -p rustfs-gateway-http                                  # 191 tests, 135 negative / 56 positive
 cargo test -p rustfs-gateway-sig                                   # the signature side of the same host function
 cargo clippy -p rustfs-gateway-http -p rustfs-gateway-sig --all-targets -- -D warnings
 cargo fmt --all --check
@@ -119,10 +120,36 @@ bash scripts/check_layer_dependencies.sh
 bash scripts/check_ring_boundaries.sh
 ```
 
+- **A refusal has two strings and they are not interchangeable.** `WireReject::message` is the
+  sentence a client reads; `WireReject::label` is the identifier an operator reads. They were one
+  method, and the response renderer picked it, so `<Message>limit-exceeded</Message>` went out to
+  callers. `as_str` still exists and now returns the message, because that is the name the renderer
+  reaches for — the guard against the leak returning is that `tests/reject_wording.rs` asserts the
+  two sets are disjoint, not that one call site is careful.
+- **A ceiling here is a resource ceiling, and it sits above every ceiling an operation owns.** The
+  query and target budgets are *summed* from the longest values S3 can legitimately describe rather
+  than picked. A budget picked for being "big enough" ends up under an operation's own ceiling —
+  which is what `c-list-0030` was — and then the vague refusal wins and the specific one never
+  runs. `crates/core/tests/limit_layering.rs` asserts the inequality from the one place that can
+  see both numbers.
+
 ## Open for maintainer review
 
 - `EntityTooLarge` maps to `400` in `rustfs-gateway-types`' status table, but an over-large declared body
   is answered `413` here. The divergence is deliberate; if the table is the contract, it moves.
+- **`max_query_bytes` rose from 4096 to 16896 and `max_uri_bytes` from 8192 to 20034**, both now
+  derived rather than configured. Every term of the sum is defensible on its own and the total is
+  observable, so the arithmetic is what wants a maintainer's eye — in particular the 4 KiB
+  allowance for a presigned SigV4 block, which is a judgement about how large an STS session token
+  gets and is the one term this workspace cannot bound itself.
+- **`WireReject::as_str` is a compatibility name.** `crates/gateway`'s `From<WireReject> for
+  S3Error` calls it, and that file was out of scope for the change that fixed the leak, so
+  `as_str` now delegates to `message`. The renderer should call `message` directly and `as_str`
+  should go; that is a one-line edit in a file this change could not touch.
+- **`LimitKind::ChunkSizeLine` and `LimitKind::HostBytes` moved off `MaxMessageLengthExceeded`**, to
+  `InvalidRequest` in both cases. Neither is a size complaint — no length of chunk-size line is one
+  the parser would accept, and a host past 263 bytes is not a host — but both are observable codes
+  and a client branching on the old one sees a change.
 - Only `chunked` alone is accepted as a transfer coding. `gzip, chunked` is legal HTTP and is
   refused; no S3 client is known to send it.
 - `SignedHeaderList::parse` requires `host` to be signed. SigV4 requires it, but a presigned flow

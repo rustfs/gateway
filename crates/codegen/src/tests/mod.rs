@@ -24,5 +24,6 @@ mod codegen_tests;
 mod dto_tests;
 mod forms_tests;
 mod golden_tests;
+mod tolerance_tests;
 mod url_tests;
 mod xml_list_tests;

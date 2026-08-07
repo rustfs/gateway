@@ -60,7 +60,7 @@ use std::fmt::Write as _;
 
 use rustfs_gateway_model::ir::{Binding, Field, OperationIr, Quirk, Shape, Type};
 
-use super::{bounds, expr, forms};
+use super::{bounds, expr, forms, tolerance};
 use crate::emit::dto::naming;
 
 /// The default code for a required member the request did not carry.
@@ -148,18 +148,39 @@ fn one_field(ir: &OperationIr, field: &Field) -> Result<String, String> {
             out.push_str(&assign(8, &target, &format!("request.{accessor}()?")));
         }
         Binding::Header => {
-            let conversion = expr::from_wire(
-                &field.ty,
-                member,
-                op,
-                false,
-                bounds::of(field, &ir.quirks, op)?,
-                forms::of(field, &ir.quirks, op)?,
-            )?;
-            let _ = writeln!(out, "        // {member} — header `{wire}`, repeated field lines joined.");
+            // A tolerated binding produces the stored `Option` itself, so it is emitted instead of
+            // the conversion and never passed through `wrap`. That is the shape, not an
+            // optimisation: the value it yields already distinguishes "arrived and unreadable"
+            // from "did not arrive", and wrapping it in a second `Some` would put the two back
+            // together — the `if-range` defect, one layer up.
+            let tolerated = tolerance::of(field, &ir.quirks, op)?;
+            let assignment = match tolerated {
+                Some(reading) => reading
+                    .call(&field.ty)
+                    .ok_or_else(|| expr::unsupported(op, member, "this tolerance has no reading for the member's type"))?,
+                None => wrap(
+                    field,
+                    &expr::from_wire(
+                        &field.ty,
+                        member,
+                        op,
+                        false,
+                        bounds::of(field, &ir.quirks, op)?,
+                        forms::of(field, &ir.quirks, op)?,
+                    )?,
+                ),
+            };
+            if tolerated.is_some() {
+                let _ = writeln!(
+                    out,
+                    "        // {member} — header `{wire}`, read tolerantly: a value that is not a date is ignored."
+                );
+            } else {
+                let _ = writeln!(out, "        // {member} — header `{wire}`, repeated field lines joined.");
+            }
             let _ = writeln!(out, "        if let Some(raw) = request.header(\"{wire}\") {{");
             let _ = writeln!(out, "            let raw = raw.as_ref();");
-            out.push_str(&assign(12, &target, &wrap(field, &conversion)));
+            out.push_str(&assign(12, &target, &assignment));
             out.push_str(&otherwise(field, &target)?);
         }
         Binding::Query => {

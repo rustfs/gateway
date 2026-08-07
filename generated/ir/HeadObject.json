@@ -43,7 +43,7 @@
                            "binding": { "kind": "Header" },
                            "type": { "kind": "Timestamp", "format": "HttpDate" },
                            "hot": false,
-                           "quirk_refs": []
+                           "quirk_refs": ["q-cond-0050"]
                          },
                          {
                            "name": "IfNoneMatch",
@@ -61,7 +61,7 @@
                            "binding": { "kind": "Header" },
                            "type": { "kind": "Timestamp", "format": "HttpDate" },
                            "hot": false,
-                           "quirk_refs": []
+                           "quirk_refs": ["q-cond-0050"]
                          },
                          {
                            "name": "Key",
@@ -747,6 +747,25 @@
                               }
                             ],
                 "cases": ["c-object-0002", "c-object-0008"]
+              },
+              {
+                "id": "q-cond-0050",
+                "kind": "header_tolerance",
+                "target": "GetObject.IfModifiedSince",
+                "summary": "A date condition whose value is not a valid HTTP-date, or which points into the server's own future, is ignored rather than rejected or answered with a stale 304; the rule covers both date conditions and both read operations, so one header never gets two answers depending on the method.",
+                "evidence": [
+                              {
+                                "kind": "rfc",
+                                "ref": "https://www.rfc-editor.org/rfc/rfc9110#section-13.1.3",
+                                "summary": "A recipient ignores a modification-date condition it cannot parse, and an origin server does not answer not-modified for a date it has not yet reached."
+                              },
+                              {
+                                "kind": "rfc",
+                                "ref": "https://www.rfc-editor.org/rfc/rfc9110#section-13.1.4",
+                                "summary": "The same instruction to ignore an unreadable date value is stated again for the unmodified-since condition, which is why both are read tolerantly here."
+                              }
+                            ],
+                "cases": ["c-cond-0008", "c-cond-0009", "c-cond-0010", "c-cond-0020", "c-cond-0021"]
               },
               {
                 "id": "q-etag-form-0074",
