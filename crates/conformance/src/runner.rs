@@ -28,6 +28,7 @@ use crate::corpus::{Case, Corpus};
 use crate::diagnostic::{Diagnostic, Severity};
 use crate::expect::{self, GoldenSource};
 use crate::interpolate::{self, Captures};
+use crate::keys;
 use crate::lint;
 use crate::report::{CaseOutcome, Phase, Report, Verdict};
 use crate::sut::{ExchangePlan, Profile, Sut, SutError, Transport};
@@ -76,6 +77,7 @@ impl GoldenSource for CorpusGoldens<'_> {
 pub fn prepare_corpus(root: &std::path::Path) -> Result<Corpus, crate::corpus::CorpusError> {
     let mut corpus = Corpus::load(root)?;
     lint::lint(&mut corpus);
+    keys::note_unhonoured(&mut corpus);
     Ok(corpus)
 }
 
@@ -154,13 +156,23 @@ fn run_case(
 
     outcome.phase = Phase::Execute;
     let document = case.document.as_ref().unwrap_or(&Value::Bool(false));
-    let mut captures: Captures = match sut.prepare(&case.id, document.get("setup")) {
+    let mut captures: Captures = match sut.prepare(&case.id, document.read("setup")) {
         Ok(captures) => captures,
         Err(error) => return not_run(outcome, &error, notes),
     };
 
-    let timeout_ms = document.path("case/timeout_ms").and_then(Value::as_integer);
+    let timeout_ms = case
+        .meta()
+        .and_then(|meta| meta.read("caseMeta.timeout_ms"))
+        .and_then(Value::as_integer);
+    let started = std::time::Instant::now();
     for exchange in case.exchanges() {
+        // The pause a multi-exchange case asks for between two requests. Honoured by actually
+        // waiting: a declared pause that the runner skipped would put the second request on the
+        // wire at a moment the case did not describe.
+        if let Some(delay_ms) = exchange.delay_ms.filter(|delay| *delay > 0) {
+            std::thread::sleep(std::time::Duration::from_millis(delay_ms.unsigned_abs()));
+        }
         let Some(request) = exchange.request else { continue };
         let request = match interpolate_value(request, &captures) {
             Ok(request) => request,
@@ -178,8 +190,8 @@ fn run_case(
             case_id: &case.id,
             index: exchange.index,
             request,
-            clock: document.get("clock"),
-            connection: document.get("connection"),
+            clock: document.read("clock"),
+            connection: document.read("connection"),
             timeout_ms,
             transport: options.transport,
             profile: options.profile,
@@ -200,6 +212,19 @@ fn run_case(
         outcome
             .diagnostics
             .push(Diagnostic::warn("runner/cleanup", "", error.to_string()));
+    }
+    // `case.timeout_ms` is a whole-case budget, and the schema says exceeding it is a case failure
+    // of kind `hang` rather than an environment error. Enforced here rather than in a transport,
+    // because a transport that has itself hung is not in a position to report it.
+    if let Some(limit) = timeout_ms {
+        let elapsed = i64::try_from(started.elapsed().as_millis()).unwrap_or(i64::MAX);
+        if elapsed > limit {
+            outcome.diagnostics.push(Diagnostic::deny(
+                "runner/timeout",
+                "/case/timeout_ms",
+                format!("the case took {elapsed}ms and declares a {limit}ms budget"),
+            ));
+        }
     }
 
     outcome.verdict = if outcome.diagnostics.iter().any(|d| d.severity == Severity::Deny) {
@@ -235,12 +260,13 @@ fn skeleton(case: &Case) -> CaseOutcome {
     let evidence = case
         .document
         .as_ref()
-        .and_then(|document| document.path("case/evidence"))
+        .and_then(|document| document.read("case"))
+        .and_then(|meta| meta.read("caseMeta.evidence"))
         .and_then(Value::as_array)
         .map(|items| {
             items
                 .iter()
-                .filter_map(|item| item.get("url"))
+                .filter_map(|item| item.read("evidence.url"))
                 .filter_map(Value::as_str)
                 .map(ToOwned::to_owned)
                 .collect()
@@ -250,7 +276,7 @@ fn skeleton(case: &Case) -> CaseOutcome {
         id: case.id.clone(),
         domain: case.domain.clone(),
         relative: case.relative.clone(),
-        title: case.meta_str("title").map(ToOwned::to_owned),
+        title: case.title().map(ToOwned::to_owned),
         verdict: Verdict::Skipped,
         phase: Phase::Load,
         skip_reason: None,
@@ -260,10 +286,29 @@ fn skeleton(case: &Case) -> CaseOutcome {
     }
 }
 
+/// The wire version every assembly path this runner drives speaks.
+///
+/// Both `--transport hyper` and `--transport conn` hand a parsed `http::Request` to the service;
+/// neither has an HTTP/2 framing layer. Stated as a constant so that the gate below is checked
+/// against a fact of this runner rather than against a hope.
+const RUN_HTTP_VERSION: &str = "http/1.1";
+
+/// Whether this run reaches the target over TLS. There is no socket, so it does not.
+const RUN_OVER_TLS: bool = false;
+
+/// Whether a `case.applies_to.tls` gate excludes a run with this TLS state.
+fn tls_gate_excludes(gate: &str, over_tls: bool) -> bool {
+    match gate {
+        "required" => !over_tls,
+        "forbidden" => over_tls,
+        _ => false,
+    }
+}
+
 /// Applicability gates the case declares. A gated-out case is skipped with the gate named.
 fn inapplicable(case: &Case, options: &RunOptions) -> Option<String> {
-    let applies = case.document.as_ref()?.path("case/applies_to")?;
-    if let Some(profiles) = applies.string_array("profiles")
+    let applies = case.meta()?.read("caseMeta.applies_to")?;
+    if let Some(profiles) = applies.read_strings("caseMeta.applies_to.profiles")
         && !profiles.is_empty()
         && !profiles.contains(&options.profile.as_str())
     {
@@ -271,6 +316,23 @@ fn inapplicable(case: &Case, options: &RunOptions) -> Option<String> {
             "case.applies_to.profiles is [{}] and this run claims `{}`",
             profiles.join(", "),
             options.profile.as_str()
+        ));
+    }
+    if let Some(versions) = applies.read_strings("caseMeta.applies_to.http_versions")
+        && !versions.is_empty()
+        && !versions.contains(&RUN_HTTP_VERSION)
+    {
+        return Some(format!(
+            "case.applies_to.http_versions is [{}] and this run speaks `{RUN_HTTP_VERSION}`",
+            versions.join(", ")
+        ));
+    }
+    if let Some(gate) = applies.read("caseMeta.applies_to.tls").and_then(Value::as_str)
+        && tls_gate_excludes(gate, RUN_OVER_TLS)
+    {
+        return Some(format!(
+            "case.applies_to.tls is `{gate}` and this run is {}",
+            if RUN_OVER_TLS { "over TLS" } else { "in cleartext" }
         ));
     }
     None

@@ -88,7 +88,7 @@ pub fn judge(expect: &Value, observed: &Observation, pointer: &str, goldens: &dy
 }
 
 fn check_kind(expect: &Value, observed: &Observation, pointer: &str, out: &mut Vec<Diagnostic>) {
-    if let Some(kind) = expect.get("kind").and_then(Value::as_str)
+    if let Some(kind) = expect.read("expect.kind").and_then(Value::as_str)
         && kind != observed.outcome.as_kind()
     {
         out.push(Diagnostic::deny(
@@ -97,7 +97,7 @@ fn check_kind(expect: &Value, observed: &Observation, pointer: &str, out: &mut V
             format!("expected the exchange to end as `{kind}`, it ended as `{}`", observed.outcome.as_kind()),
         ));
     }
-    if let Some(expected) = expect.get("stream_termination").and_then(Value::as_str) {
+    if let Some(expected) = expect.read("expect.stream_termination").and_then(Value::as_str) {
         let actual = observed.stream_termination.map(|value| value.as_str());
         if actual != Some(expected) {
             out.push(Diagnostic::deny(
@@ -107,7 +107,7 @@ fn check_kind(expect: &Value, observed: &Observation, pointer: &str, out: &mut V
             ));
         }
     }
-    if let Some(expected) = expect.get("http_version").and_then(Value::as_str)
+    if let Some(expected) = expect.read("expect.http_version").and_then(Value::as_str)
         && observed.http_version.as_deref() != Some(expected)
     {
         out.push(Diagnostic::deny(
@@ -122,7 +122,7 @@ fn check_kind(expect: &Value, observed: &Observation, pointer: &str, out: &mut V
 }
 
 fn check_status(expect: &Value, observed: &Observation, pointer: &str, out: &mut Vec<Diagnostic>) {
-    let Some(expected) = expect.get("status").and_then(Value::as_integer) else { return };
+    let Some(expected) = expect.read("expect.status").and_then(Value::as_integer) else { return };
     match observed.status {
         Some(actual) if i64::from(actual) == expected => {}
         Some(actual) => out.push(Diagnostic::deny(
@@ -139,9 +139,9 @@ fn check_status(expect: &Value, observed: &Observation, pointer: &str, out: &mut
 }
 
 fn check_error(expect: &Value, observed: &Observation, pointer: &str, out: &mut Vec<Diagnostic>) {
-    let Some(error) = expect.get("error") else { return };
+    let Some(error) = expect.read("expect.error") else { return };
     let body = observed.body_text();
-    if let Some(expected) = error.get("code").and_then(Value::as_str) {
+    if let Some(expected) = error.read("expect.error.code").and_then(Value::as_str) {
         match xml::first_element_text(&body, "Code") {
             Some(actual) if actual == expected => {}
             Some(actual) => out.push(Diagnostic::deny(
@@ -156,7 +156,7 @@ fn check_error(expect: &Value, observed: &Observation, pointer: &str, out: &mut 
             )),
         }
     }
-    if let Some(expected) = error.get("resource").and_then(Value::as_str) {
+    if let Some(expected) = error.read("expect.error.resource").and_then(Value::as_str) {
         let actual = xml::first_element_text(&body, "Resource");
         if actual.as_deref() != Some(expected) {
             out.push(Diagnostic::deny(
@@ -166,16 +166,25 @@ fn check_error(expect: &Value, observed: &Observation, pointer: &str, out: &mut 
             ));
         }
     }
-    for (field, element) in [("message_present", "Message"), ("request_id_present", "RequestId")] {
-        let Some(required) = error.get(field).and_then(Value::as_bool) else { continue };
-        let present = xml::first_element_text(&body, element).is_some_and(|text| !text.trim().is_empty());
-        if present != required {
-            out.push(Diagnostic::deny(
-                &format!("expect/error.{field}"),
-                &format!("{pointer}/error/{field}"),
-                format!("expected <{element}> to be {}, it was {}", presence(required), presence(present)),
-            ));
-        }
+    // Written out rather than looped over a list of field names: `crate::keys` allows one source
+    // location to claim one schema key, precisely so that a loop over a name list cannot be used to
+    // report coverage of keys nothing reads.
+    let message = error.read("expect.error.message_present").and_then(Value::as_bool);
+    let request_id = error.read("expect.error.request_id_present").and_then(Value::as_bool);
+    check_presence(message, &body, "Message", "message_present", pointer, out);
+    check_presence(request_id, &body, "RequestId", "request_id_present", pointer, out);
+}
+
+/// One `<Element> is present and non-empty` assertion.
+fn check_presence(required: Option<bool>, body: &str, element: &str, field: &str, pointer: &str, out: &mut Vec<Diagnostic>) {
+    let Some(required) = required else { return };
+    let present = xml::first_element_text(body, element).is_some_and(|text| !text.trim().is_empty());
+    if present != required {
+        out.push(Diagnostic::deny(
+            &format!("expect/error.{field}"),
+            &format!("{pointer}/error/{field}"),
+            format!("expected <{element}> to be {}, it was {}", presence(required), presence(present)),
+        ));
     }
 }
 
@@ -185,7 +194,7 @@ fn presence(present: bool) -> &'static str {
 
 fn check_headers(expect: &Value, observed: &Observation, pointer: &str, out: &mut Vec<Diagnostic>) {
     let byte_exact = expect
-        .get("header_name_bytes_exact")
+        .read("expect.header_name_bytes_exact")
         .and_then(Value::as_bool)
         .unwrap_or(false);
     let name_eq = |left: &str, right: &str| {
@@ -196,7 +205,7 @@ fn check_headers(expect: &Value, observed: &Observation, pointer: &str, out: &mu
         }
     };
 
-    if let Some(Value::Table(required)) = expect.get("headers_present") {
+    if let Some(Value::Table(required)) = expect.read("expect.headers_present") {
         for (name, wanted) in required {
             let observed_values: Vec<&str> = observed
                 .headers
@@ -228,7 +237,7 @@ fn check_headers(expect: &Value, observed: &Observation, pointer: &str, out: &mu
         }
     }
 
-    if let Some(Value::Array(forbidden)) = expect.get("headers_absent") {
+    if let Some(Value::Array(forbidden)) = expect.read("expect.headers_absent") {
         for name in forbidden.iter().filter_map(Value::as_str) {
             if let Some((key, value)) = observed.headers.iter().find(|(key, _)| name_eq(key, name)) {
                 out.push(Diagnostic::deny(
@@ -240,7 +249,7 @@ fn check_headers(expect: &Value, observed: &Observation, pointer: &str, out: &mu
         }
     }
 
-    if let Some(Value::Table(exact)) = expect.get("headers_exact") {
+    if let Some(Value::Table(exact)) = expect.read("expect.headers_exact") {
         for (name, _) in observed
             .headers
             .iter()
@@ -278,7 +287,7 @@ fn check_headers(expect: &Value, observed: &Observation, pointer: &str, out: &mu
         }
     }
 
-    if let Some(Value::Array(order)) = expect.get("header_order") {
+    if let Some(Value::Array(order)) = expect.read("expect.header_order") {
         let wanted: Vec<&str> = order.iter().filter_map(Value::as_str).collect();
         let positions: Vec<Option<usize>> = wanted
             .iter()
@@ -308,7 +317,7 @@ fn check_headers(expect: &Value, observed: &Observation, pointer: &str, out: &mu
 }
 
 fn check_trailers(expect: &Value, observed: &Observation, pointer: &str, out: &mut Vec<Diagnostic>) {
-    if let Some(Value::Table(required)) = expect.get("trailers_present") {
+    if let Some(Value::Table(required)) = expect.read("expect.trailers_present") {
         for (name, wanted) in required {
             let values: Vec<&str> = observed
                 .trailers
@@ -332,7 +341,7 @@ fn check_trailers(expect: &Value, observed: &Observation, pointer: &str, out: &m
             }
         }
     }
-    if let Some(Value::Array(forbidden)) = expect.get("trailers_absent") {
+    if let Some(Value::Array(forbidden)) = expect.read("expect.trailers_absent") {
         for name in forbidden.iter().filter_map(Value::as_str) {
             if observed.trailers.iter().any(|(key, _)| key.eq_ignore_ascii_case(name)) {
                 out.push(Diagnostic::deny(
@@ -354,21 +363,21 @@ fn expected_values(value: &Value) -> Vec<&str> {
 }
 
 fn check_body(expect: &Value, observed: &Observation, pointer: &str, goldens: &dyn GoldenSource, out: &mut Vec<Diagnostic>) {
-    let Some(body) = expect.get("body") else { return };
+    let Some(body) = expect.read("expect.body") else { return };
     let at = format!("{pointer}/body");
     let raw_text = observed.body_text();
-    let redactions: Vec<&str> = body.string_array("redact").unwrap_or_default();
+    let redactions: Vec<&str> = body.read_strings("bodyExpectation.redact").unwrap_or_default();
 
-    if let Some(expected) = body.get("exact_utf8").and_then(Value::as_str) {
+    if let Some(expected) = body.read("bodyExpectation.exact_utf8").and_then(Value::as_str) {
         compare_exact(expected.as_bytes(), &observed.body, &redactions, &at, "exact_utf8", out);
     }
-    if let Some(expected) = body.get("exact_hex").and_then(Value::as_str) {
+    if let Some(expected) = body.read("bodyExpectation.exact_hex").and_then(Value::as_str) {
         match decode_hex(expected) {
             Some(bytes) => compare_exact(&bytes, &observed.body, &redactions, &at, "exact_hex", out),
             None => out.push(Diagnostic::deny("expect/body.exact_hex", &at, "the expectation is not valid hex")),
         }
     }
-    if let Some(relative) = body.get("golden").and_then(Value::as_str) {
+    if let Some(relative) = body.read("bodyExpectation.golden").and_then(Value::as_str) {
         match goldens.read_golden(relative) {
             // One trailing newline is stripped because editors and CI add it; every other byte is
             // significant.
@@ -383,7 +392,7 @@ fn check_body(expect: &Value, observed: &Observation, pointer: &str, goldens: &d
             )),
         }
     }
-    if let Some(expected) = body.get("sha256").and_then(Value::as_str) {
+    if let Some(expected) = body.read("bodyExpectation.sha256").and_then(Value::as_str) {
         let actual = sha256::hex_digest(&observed.body);
         if actual != expected {
             out.push(Diagnostic::deny(
@@ -393,7 +402,7 @@ fn check_body(expect: &Value, observed: &Observation, pointer: &str, goldens: &d
             ));
         }
     }
-    if let Some(expected) = body.get("size").and_then(Value::as_integer)
+    if let Some(expected) = body.read("bodyExpectation.size").and_then(Value::as_integer)
         && observed.body.len() as i64 != expected
     {
         out.push(Diagnostic::deny(
@@ -415,7 +424,7 @@ fn check_body(expect: &Value, observed: &Observation, pointer: &str, goldens: &d
     } else {
         Cow::Owned(xml::redact(&raw_text, &redactions))
     };
-    for needle in body.string_array("contains_utf8").unwrap_or_default() {
+    for needle in body.read_strings("bodyExpectation.contains_utf8").unwrap_or_default() {
         let expected = if redactions.is_empty() {
             Cow::Borrowed(needle)
         } else {
@@ -434,7 +443,7 @@ fn check_body(expect: &Value, observed: &Observation, pointer: &str, goldens: &d
     // excuse the forbidden bytes for appearing inside exactly the element the case chose to redact —
     // which is where a leaked string-to-sign or credential would appear. `redaction_does_not_excuse`
     // below is the test that keeps the asymmetry deliberate.
-    for needle in body.string_array("not_contains_utf8").unwrap_or_default() {
+    for needle in body.read_strings("bodyExpectation.not_contains_utf8").unwrap_or_default() {
         if let Some(offset) = raw_text.find(needle) {
             out.push(Diagnostic::deny(
                 "expect/body.not_contains_utf8",
@@ -447,9 +456,9 @@ fn check_body(expect: &Value, observed: &Observation, pointer: &str, goldens: &d
 }
 
 fn check_body_xml(body: &Value, text: &str, at: &str, out: &mut Vec<Diagnostic>) {
-    let Some(spec) = body.get("xml") else { return };
+    let Some(spec) = body.read("bodyExpectation.xml") else { return };
     let root = xml::root_tag(text);
-    if let Some(expected) = spec.get("root").and_then(Value::as_str) {
+    if let Some(expected) = spec.read("bodyExpectation.xml.root").and_then(Value::as_str) {
         let actual = root.as_ref().map(|tag| tag.name.as_str());
         if actual != Some(expected) {
             out.push(Diagnostic::deny(
@@ -459,7 +468,7 @@ fn check_body_xml(body: &Value, text: &str, at: &str, out: &mut Vec<Diagnostic>)
             ));
         }
     }
-    if let Some(expected) = spec.get("xmlns").and_then(Value::as_str) {
+    if let Some(expected) = spec.read("bodyExpectation.xml.xmlns").and_then(Value::as_str) {
         let actual = root.as_ref().and_then(|tag| tag.attribute("xmlns"));
         if actual.as_deref() != Some(expected) {
             out.push(Diagnostic::deny(
@@ -469,7 +478,7 @@ fn check_body_xml(body: &Value, text: &str, at: &str, out: &mut Vec<Diagnostic>)
             ));
         }
     }
-    if let Some(expected) = spec.get("declaration").and_then(Value::as_bool)
+    if let Some(expected) = spec.read("bodyExpectation.xml.declaration").and_then(Value::as_bool)
         && xml::has_declaration(text) != expected
     {
         out.push(Diagnostic::deny(
@@ -478,7 +487,7 @@ fn check_body_xml(body: &Value, text: &str, at: &str, out: &mut Vec<Diagnostic>)
             format!("expected the XML declaration to be {}", if expected { "present" } else { "absent" }),
         ));
     }
-    if let Some(order) = spec.string_array("element_order")
+    if let Some(order) = spec.read_strings("bodyExpectation.xml.element_order")
         && !order.is_empty()
     {
         let observed_names = xml::root_child_names(text);
@@ -496,7 +505,7 @@ fn check_body_xml(body: &Value, text: &str, at: &str, out: &mut Vec<Diagnostic>)
             }
         }
     }
-    if let Some(expected) = spec.get("empty_elements").and_then(Value::as_str) {
+    if let Some(expected) = spec.read("bodyExpectation.xml.empty_elements").and_then(Value::as_str) {
         let styles = xml::empty_element_styles(text);
         for (name, style) in &styles {
             let actual = match style {
@@ -585,7 +594,7 @@ fn decode_hex(text: &str) -> Option<Vec<u8>> {
 }
 
 fn check_counters(expect: &Value, observed: &Observation, pointer: &str, out: &mut Vec<Diagnostic>) {
-    if let Some(expected) = expect.get("body_bytes_before_error").and_then(Value::as_integer) {
+    if let Some(expected) = expect.read("expect.body_bytes_before_error").and_then(Value::as_integer) {
         match observed.body_bytes_before_error {
             Some(actual) if actual as i64 == expected => {}
             Some(actual) => out.push(Diagnostic::deny(
@@ -600,8 +609,11 @@ fn check_counters(expect: &Value, observed: &Observation, pointer: &str, out: &m
             )),
         }
     }
-    let Some(progress) = expect.get("request_progress") else { return };
-    if let Some(expected) = progress.get("body_bytes_sent_at_response").and_then(Value::as_integer) {
+    let Some(progress) = expect.read("expect.request_progress") else { return };
+    if let Some(expected) = progress
+        .read("expect.request_progress.body_bytes_sent_at_response")
+        .and_then(Value::as_integer)
+    {
         match observed.request_body_bytes_sent_at_response {
             Some(actual) if actual as i64 == expected => {}
             Some(actual) => out.push(Diagnostic::deny(
@@ -619,7 +631,10 @@ fn check_counters(expect: &Value, observed: &Observation, pointer: &str, out: &m
             )),
         }
     }
-    if let Some(expected) = progress.get("body_fully_sent").and_then(Value::as_bool) {
+    if let Some(expected) = progress
+        .read("expect.request_progress.body_fully_sent")
+        .and_then(Value::as_bool)
+    {
         match observed.request_body_fully_sent {
             Some(actual) if actual == expected => {}
             Some(actual) => out.push(Diagnostic::deny(
@@ -637,9 +652,9 @@ fn check_counters(expect: &Value, observed: &Observation, pointer: &str, out: &m
 }
 
 fn check_timing(expect: &Value, observed: &Observation, pointer: &str, out: &mut Vec<Diagnostic>) {
-    let Some(timing) = expect.get("timing") else { return };
+    let Some(timing) = expect.read("expect.timing") else { return };
     let at = format!("{pointer}/timing");
-    if let Some(limit) = timing.get("terminate_within_ms").and_then(Value::as_integer)
+    if let Some(limit) = timing.read("expect.timing.terminate_within_ms").and_then(Value::as_integer)
         && observed.elapsed_ms as i64 > limit
     {
         out.push(Diagnostic::deny(
@@ -652,7 +667,7 @@ fn check_timing(expect: &Value, observed: &Observation, pointer: &str, out: &mut
             ),
         ));
     }
-    if let Some(floor) = timing.get("no_response_before_ms").and_then(Value::as_integer)
+    if let Some(floor) = timing.read("expect.timing.no_response_before_ms").and_then(Value::as_integer)
         && let Some(ttfb) = observed.ttfb_ms
         && (ttfb as i64) < floor
     {
@@ -662,32 +677,44 @@ fn check_timing(expect: &Value, observed: &Observation, pointer: &str, out: &mut
             format!("the head arrived after {ttfb}ms, the case requires at least {floor}ms"),
         ));
     }
-    for (field, rule) in [
-        ("ttfb_max_ms", "expect/timing.ttfb_max_ms"),
-        ("ttfb_min_ms", "expect/timing.ttfb_min_ms"),
-    ] {
-        let Some(bound) = timing.get(field).and_then(Value::as_integer) else { continue };
-        let Some(ttfb) = observed.ttfb_ms else {
-            out.push(Diagnostic::deny(rule, &at, "the transport did not record time to first byte".to_owned()));
-            continue;
-        };
-        let violated = if field == "ttfb_max_ms" {
-            ttfb as i64 > bound
-        } else {
-            (ttfb as i64) < bound
-        };
-        if violated {
-            out.push(Diagnostic::deny(
-                rule,
-                &at,
-                format!("time to first byte was {ttfb}ms, bound is {bound}ms"),
-            ));
-        }
+    // Two bounds, two reads, two lines: one source location may claim one schema key, so that a
+    // loop over a list of field names cannot stand in for reading them.
+    let ceiling = timing.read("expect.timing.ttfb_max_ms").and_then(Value::as_integer);
+    let floor = timing.read("expect.timing.ttfb_min_ms").and_then(Value::as_integer);
+    check_ttfb(ceiling, observed.ttfb_ms, Bound::Ceiling, &at, out);
+    check_ttfb(floor, observed.ttfb_ms, Bound::Floor, &at, out);
+}
+
+/// Which end of the time-to-first-byte range a bound is.
+#[derive(Debug, Clone, Copy)]
+enum Bound {
+    /// `ttfb_max_ms`.
+    Ceiling,
+    /// `ttfb_min_ms`.
+    Floor,
+}
+
+fn check_ttfb(bound: Option<i64>, ttfb_ms: Option<u64>, end: Bound, at: &str, out: &mut Vec<Diagnostic>) {
+    let Some(bound) = bound else { return };
+    let rule = match end {
+        Bound::Ceiling => "expect/timing.ttfb_max_ms",
+        Bound::Floor => "expect/timing.ttfb_min_ms",
+    };
+    let Some(ttfb) = ttfb_ms else {
+        out.push(Diagnostic::deny(rule, at, "the transport did not record time to first byte".to_owned()));
+        return;
+    };
+    let violated = match end {
+        Bound::Ceiling => ttfb as i64 > bound,
+        Bound::Floor => (ttfb as i64) < bound,
+    };
+    if violated {
+        out.push(Diagnostic::deny(rule, at, format!("time to first byte was {ttfb}ms, bound is {bound}ms")));
     }
 }
 
 fn check_connection(expect: &Value, observed: &Observation, pointer: &str, out: &mut Vec<Diagnostic>) {
-    let Some(expected) = expect.get("connection_after").and_then(Value::as_str) else { return };
+    let Some(expected) = expect.read("expect.connection_after").and_then(Value::as_str) else { return };
     let actual = observed.connection_after.map(crate::observation::ConnectionState::as_str);
     if actual != Some(expected) {
         out.push(Diagnostic::deny(
@@ -702,13 +729,16 @@ fn check_connection(expect: &Value, observed: &Observation, pointer: &str, out: 
 }
 
 fn check_events(expect: &Value, observed: &Observation, pointer: &str, out: &mut Vec<Diagnostic>) {
-    let Some(Value::Array(events)) = expect.get("events") else { return };
+    let Some(Value::Array(events)) = expect.read("expect.events") else { return };
     for (index, spec) in events.iter().enumerate() {
         let at = format!("{pointer}/events/{index}");
-        let Some(event_type) = spec.get("type").and_then(Value::as_str) else { continue };
+        let Some(event_type) = spec.read("expect.events[].type").and_then(Value::as_str) else { continue };
         let count = observed.events.iter().filter(|event| event.event_type == event_type).count() as i64;
-        let minimum = spec.get("min_count").and_then(Value::as_integer).unwrap_or(1);
-        let maximum = spec.get("max_count").and_then(Value::as_integer);
+        let minimum = spec
+            .read("expect.events[].min_count")
+            .and_then(Value::as_integer)
+            .unwrap_or(1);
+        let maximum = spec.read("expect.events[].max_count").and_then(Value::as_integer);
         if count < minimum {
             out.push(Diagnostic::deny(
                 "expect/events.min_count",
@@ -728,11 +758,11 @@ fn check_events(expect: &Value, observed: &Observation, pointer: &str, out: &mut
 
 fn collect_captures(expect: &Value, observed: &Observation, pointer: &str, out: &mut Vec<Diagnostic>) -> Captures {
     let mut captures = Captures::new();
-    let Some(Value::Table(entries)) = expect.get("capture") else { return captures };
+    let Some(Value::Table(entries)) = expect.read("expect.capture") else { return captures };
     let body = observed.body_text();
     for (name, source) in entries {
         let at = format!("{pointer}/capture/{name}");
-        if let Some(element) = source.get("xml_text").and_then(Value::as_str) {
+        if let Some(element) = source.read("expect.capture.*.xml_text").and_then(Value::as_str) {
             match xml::first_element_text(&body, element) {
                 Some(text) => {
                     captures.insert(name.clone(), text);
@@ -743,7 +773,7 @@ fn collect_captures(expect: &Value, observed: &Observation, pointer: &str, out: 
                     format!("cannot capture `{name}`: the body has no <{element}> element"),
                 )),
             }
-        } else if let Some(header) = source.get("header").and_then(Value::as_str) {
+        } else if let Some(header) = source.read("expect.capture.*.header").and_then(Value::as_str) {
             match observed.header(header) {
                 Some(value) => {
                     captures.insert(name.clone(), value.to_owned());

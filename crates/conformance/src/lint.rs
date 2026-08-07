@@ -107,7 +107,7 @@ pub fn polarity_balance(corpus: &Corpus) -> (usize, usize) {
     let mut positive = 0;
     let mut negative = 0;
     for case in corpus.cases() {
-        match case.meta_str("polarity") {
+        match case.polarity() {
             Some("positive") => positive += 1,
             Some("negative") => negative += 1,
             _ => {}
@@ -121,7 +121,8 @@ fn collect_goldens(case: &Case) -> Vec<String> {
     for exchange in case.exchanges() {
         if let Some(relative) = exchange
             .expect
-            .and_then(|expect| expect.path("body/golden"))
+            .and_then(|expect| expect.read("expect.body"))
+            .and_then(|body| body.read("bodyExpectation.golden"))
             .and_then(Value::as_str)
         {
             out.push(relative.to_owned());
@@ -132,7 +133,8 @@ fn collect_goldens(case: &Case) -> Vec<String> {
 
 fn check_identity(case: &Case, out: &mut Vec<Diagnostic>) {
     let Some(document) = case.document.as_ref() else { return };
-    let Some(id) = document.path("case/id").and_then(Value::as_str) else { return };
+    let Some(meta) = document.read("case") else { return };
+    let Some(id) = meta.read("caseMeta.id").and_then(Value::as_str) else { return };
     let stem = case
         .path
         .file_stem()
@@ -158,7 +160,7 @@ fn check_identity(case: &Case, out: &mut Vec<Diagnostic>) {
             format!("the file lives in `{}/` but its identifier names the domain `{domain}`", case.domain),
         ));
     }
-    match document.path("case/schema_version").and_then(Value::as_integer) {
+    match meta.read("caseMeta.schema_version").and_then(Value::as_integer) {
         Some(version) if version == SCHEMA_VERSION => {}
         Some(version) => out.push(Diagnostic::deny(
             "lint/schema-version",
@@ -199,7 +201,7 @@ fn check_interpolation(case: &Case, out: &mut Vec<Diagnostic>) {
     let Some(document) = case.document.as_ref() else { return };
     let mut available: BTreeSet<String> = BTreeSet::new();
     let mut declared: BTreeSet<String> = BTreeSet::new();
-    if let Some(setup) = document.get("setup") {
+    if let Some(setup) = document.read("setup") {
         for name in setup_captures(setup) {
             available.insert(name.clone());
             declared.insert(name);
@@ -236,7 +238,7 @@ fn check_interpolation(case: &Case, out: &mut Vec<Diagnostic>) {
                 }
             }
         }
-        if let Some(Value::Table(entries)) = exchange.expect.and_then(|expect| expect.get("capture")) {
+        if let Some(Value::Table(entries)) = exchange.expect.and_then(|expect| expect.read("expect.capture")) {
             for (name, _) in entries {
                 available.insert(name.clone());
                 declared.insert(name.clone());
@@ -260,8 +262,8 @@ fn check_redaction_of_known_values(case: &Case, used: &BTreeSet<String>, out: &m
     }
     for exchange in case.exchanges() {
         let Some(expect) = exchange.expect else { continue };
-        let Some(body) = expect.get("body") else { continue };
-        for element in body.string_array("redact").unwrap_or_default() {
+        let Some(body) = expect.read("expect.body") else { continue };
+        for element in body.read_strings("bodyExpectation.redact").unwrap_or_default() {
             // `ContinuationToken` echoes back the token the request sent, and that token came from
             // a capture, so its value is known and could be asserted.
             if element.ends_with("ContinuationToken") && !element.starts_with("Next") {
@@ -281,14 +283,20 @@ fn check_redaction_of_known_values(case: &Case, used: &BTreeSet<String>, out: &m
 
 fn setup_captures(setup: &Value) -> Vec<String> {
     let mut out = Vec::new();
-    if let Some(Value::Array(uploads)) = setup.get("multipart_uploads") {
+    if let Some(Value::Array(uploads)) = setup.read("setup.multipart_uploads") {
         for upload in uploads {
-            if let Some(name) = upload.get("capture_upload_id_as").and_then(Value::as_str) {
+            if let Some(name) = upload
+                .read("setup.multipart_uploads[].capture_upload_id_as")
+                .and_then(Value::as_str)
+            {
                 out.push(name.to_owned());
             }
-            if let Some(Value::Array(parts)) = upload.get("parts") {
+            if let Some(Value::Array(parts)) = upload.read("setup.multipart_uploads[].parts") {
                 for part in parts {
-                    if let Some(name) = part.get("capture_etag_as").and_then(Value::as_str) {
+                    if let Some(name) = part
+                        .read("setup.multipart_uploads[].parts[].capture_etag_as")
+                        .and_then(Value::as_str)
+                    {
                         out.push(name.to_owned());
                     }
                 }
@@ -333,17 +341,21 @@ fn check_tags(case: &Case, out: &mut Vec<Diagnostic>) {
 fn check_assertion_strength(case: &Case, out: &mut Vec<Diagnostic>) {
     for exchange in case.exchanges() {
         let Some(expect) = exchange.expect else { continue };
+        // Written out rather than looped over a list of names: one source location may claim one
+        // schema key, because a loop over a name list is exactly how `crate::keys` would be made
+        // to report full coverage while reading nothing. The array is built eagerly so that
+        // short-circuiting cannot hide a key from the ledger either.
         let asserts_more_than_status = [
-            "body",
-            "headers_present",
-            "headers_exact",
-            "headers_absent",
-            "error",
-            "events",
+            expect.read("expect.body").is_some(),
+            expect.read("expect.headers_present").is_some(),
+            expect.read("expect.headers_exact").is_some(),
+            expect.read("expect.headers_absent").is_some(),
+            expect.read("expect.error").is_some(),
+            expect.read("expect.events").is_some(),
         ]
         .iter()
-        .any(|field| expect.get(field).is_some());
-        if expect.get("status").is_some() && !asserts_more_than_status {
+        .any(|found| *found);
+        if expect.read("expect.status").is_some() && !asserts_more_than_status {
             out.push(Diagnostic::warn(
                 "lint/status-only",
                 &format!("{}/expect", exchange.pointer),
@@ -354,14 +366,18 @@ fn check_assertion_strength(case: &Case, out: &mut Vec<Diagnostic>) {
         }
         // A body containing a server-generated instant cannot be compared byte for byte unless the
         // clock the target observes is pinned.
-        let pins_bytes = expect
-            .get("body")
-            .is_some_and(|body| body.get("exact_utf8").is_some() || body.get("golden").is_some());
-        let embeds_instant = expect
-            .path("body/exact_utf8")
+        let body = expect.read("expect.body");
+        let exact = body.and_then(|body| body.read("bodyExpectation.exact_utf8"));
+        let pins_bytes = exact.is_some() || body.and_then(|body| body.read("bodyExpectation.golden")).is_some();
+        let embeds_instant = exact
             .and_then(Value::as_str)
             .is_some_and(|text| text.contains("<LastModified>") || text.contains("<Expires>"));
-        let clock_pinned = case.document.as_ref().and_then(|doc| doc.path("clock/fixed")).is_some();
+        let clock_pinned = case
+            .document
+            .as_ref()
+            .and_then(|doc| doc.read("clock"))
+            .and_then(|clock| clock.read("clock.fixed"))
+            .is_some();
         if pins_bytes && embeds_instant && !clock_pinned {
             out.push(Diagnostic::warn(
                 "lint/timestamp-without-clock",
@@ -376,11 +392,11 @@ fn check_assertion_strength(case: &Case, out: &mut Vec<Diagnostic>) {
 fn check_hand_computed_values(case: &Case, out: &mut Vec<Diagnostic>) {
     for exchange in case.exchanges() {
         let Some(request) = exchange.request else { continue };
-        let Some(Value::Table(headers)) = request.get("headers") else { continue };
+        let Some(Value::Table(headers)) = request.read("requestSpec.headers") else { continue };
         for (name, _) in headers {
             let lowered = name.to_ascii_lowercase();
             let is_digest = COMPUTED_HEADERS.contains(&lowered.as_str())
-                || (lowered.starts_with("x-amz-checksum-") && request.get("body").is_some());
+                || (lowered.starts_with("x-amz-checksum-") && request.read("requestSpec.body").is_some());
             if is_digest {
                 out.push(Diagnostic::warn(
                     "lint/hand-computed-digest",
@@ -436,7 +452,10 @@ mod tests {
     fn every_case_declares_a_rationale_and_evidence() {
         let corpus = linted();
         for case in corpus.cases() {
-            assert!(case.meta_str("rationale").is_some(), "{} has no rationale", case.relative);
+            // `get`, not `read`: `caseMeta.rationale` is declared inert in `crate::keys`, and a
+            // test recording it would contradict that declaration.
+            let rationale = case.document.as_ref().and_then(|doc| doc.path("case/rationale"));
+            assert!(rationale.is_some(), "{} has no rationale", case.relative);
             let evidence = case
                 .document
                 .as_ref()

@@ -77,15 +77,26 @@ jobs:
       - name: Model integrity
         run: python3 model/tools/verify.py
       # Architecture guards. A guard that does not run in CI is decoration.
+      #
+      # A guard that declares REQUIRES-BUILD compiles the workspace, so it runs in
+      # the test job instead — this job has no cargo cache and exists to be fast.
+      # The split is read from the guards themselves rather than listed here, so a
+      # guard that starts needing a build cannot silently make this job slow, and
+      # the two loops cannot drift apart.
       - name: Repository guards
         run: |
+          ran=0
           for guard in scripts/check_*.sh; do
+            if grep -q '^# REQUIRES-BUILD$' "$guard"; then
+              echo "deferred to the test job: $guard"
+              continue
+            fi
             echo "::group::$guard"
             bash "$guard"
             echo "::endgroup::"
+            ran=$((ran + 1))
           done
-      - name: Guard self-test
-        run: bash scripts/test_guard_scripts.sh
+          echo "ran $ran guard(s)"
       # Generated artefacts are a pure function of (model, overlays). If regenerating moves a
       # byte, the checked-in output and the generator disagree, and every review that read the
       # output was reading something the generator no longer produces.
@@ -109,3 +120,19 @@ jobs:
       - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - run: cargo test --workspace
+      # The guards that need a compiled workspace, and the self-test that runs every
+      # guard as its positive control. Both are here rather than in `static` because
+      # they build; the cache this job already warms is the whole reason.
+      - name: Repository guards that need a build
+        run: |
+          ran=0
+          for guard in scripts/check_*.sh; do
+            grep -q '^# REQUIRES-BUILD$' "$guard" || continue
+            echo "::group::$guard"
+            bash "$guard"
+            echo "::endgroup::"
+            ran=$((ran + 1))
+          done
+          echo "ran $ran guard(s)"
+      - name: Guard self-test
+        run: bash scripts/test_guard_scripts.sh

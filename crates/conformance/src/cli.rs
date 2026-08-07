@@ -23,6 +23,7 @@
 
 use crate::corpus::Corpus;
 use crate::inprocess::InProcess;
+use crate::keys;
 use crate::report::{Baseline, Report, Verdict};
 use crate::runner::{self, RunOptions};
 use crate::sut::{Profile, Sut, Transport};
@@ -52,6 +53,8 @@ commands:
   validate                  load the corpus and check it against the frozen schema and the
                             conventions, without touching a target
   baseline                  print a baseline document for the current results
+  audit-keys                run the corpus, then check that every key the frozen schema declares
+                            is one this harness actually reads
 
 options:
   --filter <glob>           select cases whose path or id matches (`etag/`, `*mpu*`, `c-sig-0001`)
@@ -157,6 +160,17 @@ pub fn execute(options: &Options, sut: &mut dyn Sut) -> ExitCode {
         print!("{}", Baseline::render(&report));
         return ExitCode::from(exit::SUCCESS);
     }
+    // Taken after the run, never before: the ledger is filled by the harness reading cases, so an
+    // audit of a corpus that has not been executed would report that nothing is read.
+    if options.command == Command::AuditKeys {
+        let (findings, rendered) = keys::report(&corpus);
+        print!("{rendered}");
+        return ExitCode::from(if findings.is_empty() {
+            exit::SUCCESS
+        } else {
+            exit::REGRESSION
+        });
+    }
 
     print!("{}", report.render_text(baseline.as_ref()));
     if let Some(path) = &options.json
@@ -208,6 +222,8 @@ pub enum Command {
     Validate,
     /// Print a baseline document.
     Baseline,
+    /// Check the harness against the frozen schema's list of declarations.
+    AuditKeys,
 }
 
 /// A parsed command line.
@@ -264,6 +280,7 @@ impl Options {
             "run" => Command::Run,
             "validate" => Command::Validate,
             "baseline" => Command::Baseline,
+            "audit-keys" => Command::AuditKeys,
             "-h" | "--help" => return Ok(None),
             other => return Err(format!("unknown command `{other}`")),
         };

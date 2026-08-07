@@ -65,6 +65,7 @@ pub mod fixture;
 pub mod inprocess;
 pub mod interpolate;
 pub mod json;
+pub mod keys;
 pub mod lint;
 pub mod md5;
 pub mod observation;

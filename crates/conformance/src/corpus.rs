@@ -24,6 +24,7 @@
 //! `crate::runner`.
 
 use crate::diagnostic::Diagnostic;
+use crate::keys::Inventory;
 use crate::schema::Schema;
 use crate::toml;
 use crate::value::Value;
@@ -65,29 +66,37 @@ pub struct Case {
 }
 
 impl Case {
-    /// Reads a string field from the `case` table.
+    /// The `[case]` table, when the file parsed.
     #[must_use]
-    pub fn meta_str(&self, field: &str) -> Option<&str> {
-        self.document.as_ref()?.path("case")?.get(field)?.as_str()
+    pub fn meta(&self) -> Option<&Value> {
+        self.document.as_ref()?.read("case")
+    }
+
+    /// The title, for the report line.
+    #[must_use]
+    pub fn title(&self) -> Option<&str> {
+        self.meta()?.read("caseMeta.title")?.as_str()
+    }
+
+    /// The polarity, which the corpus-wide balance requirement counts.
+    #[must_use]
+    pub fn polarity(&self) -> Option<&str> {
+        self.meta()?.read("caseMeta.polarity")?.as_str()
     }
 
     /// The quirk identifiers this case declares.
     #[must_use]
     pub fn quirks(&self) -> Vec<&str> {
-        self.document
-            .as_ref()
-            .and_then(|doc| doc.path("case"))
-            .and_then(|meta| meta.string_array("quirks"))
+        self.meta()
+            .and_then(|meta| meta.read_strings("caseMeta.quirks"))
             .unwrap_or_default()
     }
 
     /// The tags this case declares.
     #[must_use]
     pub fn tags(&self) -> Vec<&str> {
-        self.document
-            .as_ref()
-            .and_then(|doc| doc.path("case"))
-            .and_then(|meta| meta.string_array("tags"))
+        self.meta()
+            .and_then(|meta| meta.read_strings("caseMeta.tags"))
             .unwrap_or_default()
     }
 
@@ -104,17 +113,17 @@ impl Case {
     #[must_use]
     pub fn exchanges(&self) -> Vec<Exchange<'_>> {
         let Some(document) = self.document.as_ref() else { return Vec::new() };
-        if let Some(Value::Array(items)) = document.get("exchanges") {
+        if let Some(Value::Array(items)) = document.read("exchanges") {
             return items
                 .iter()
                 .enumerate()
                 .map(|(index, item)| Exchange {
                     index,
-                    name: item.get("name").and_then(Value::as_str),
+                    name: item.read("exchange.name").and_then(Value::as_str),
                     pointer: format!("/exchanges/{index}"),
-                    request: item.get("request"),
-                    expect: item.get("expect"),
-                    delay_ms: item.get("delay_ms").and_then(Value::as_integer),
+                    request: item.read("exchange.request"),
+                    expect: item.read("exchange.expect"),
+                    delay_ms: item.read("exchange.delay_ms").and_then(Value::as_integer),
                 })
                 .collect();
         }
@@ -122,8 +131,8 @@ impl Case {
             index: 0,
             name: None,
             pointer: String::new(),
-            request: document.get("request"),
-            expect: document.get("expect"),
+            request: document.read("request"),
+            expect: document.read("expect"),
             delay_ms: None,
         }]
     }
@@ -162,6 +171,7 @@ impl Exchange<'_> {
 pub struct Corpus {
     root: PathBuf,
     cases: Vec<Case>,
+    inventory: Inventory,
 }
 
 impl Corpus {
@@ -223,6 +233,9 @@ impl Corpus {
         let schema = Schema::compile(&schema_text).map_err(|error| CorpusError {
             message: format!("{}: {error}", schema_path.display()),
         })?;
+        let inventory = Inventory::compile(&schema_text).map_err(|message| CorpusError {
+            message: format!("{}: {message}", schema_path.display()),
+        })?;
         let cases_dir = root.join("cases");
         let mut files = Vec::new();
         collect_case_files(&cases_dir, &mut files)?;
@@ -231,7 +244,14 @@ impl Corpus {
         Ok(Corpus {
             root: root.to_path_buf(),
             cases,
+            inventory,
         })
+    }
+
+    /// Every key the frozen schema declares, and where a case may write each one.
+    #[must_use]
+    pub fn inventory(&self) -> &Inventory {
+        &self.inventory
     }
 
     /// Loads the corpus from the discovered root.
@@ -338,7 +358,12 @@ fn load_case(root: &Path, path: &Path, schema: &Schema) -> Case {
             };
         }
     };
-    let id = document.path("case/id").and_then(Value::as_str).unwrap_or(&stem).to_owned();
+    let id = document
+        .read("case")
+        .and_then(|meta| meta.read("caseMeta.id"))
+        .and_then(Value::as_str)
+        .unwrap_or(&stem)
+        .to_owned();
     for violation in schema.validate(&document) {
         diagnostics.push(Diagnostic::from_violation(&violation));
     }

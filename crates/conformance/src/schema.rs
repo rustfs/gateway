@@ -408,6 +408,16 @@ impl Schema {
         }
     }
 
+    /// Whether `instance` satisfies one sub-schema of this document.
+    ///
+    /// Exposed for `crate::keys`, which walks the schema alongside a case to decide which `oneOf`
+    /// branch a value belongs to — a data chunk and a control chunk both declare `delay_ms`, and
+    /// attributing it to the wrong branch would report a key the case never wrote.
+    #[must_use]
+    pub fn accepts(&self, schema: &Value, instance: &Value) -> bool {
+        self.satisfies(schema, instance)
+    }
+
     fn satisfies(&self, schema: &Value, instance: &Value) -> bool {
         let mut out = Vec::new();
         self.check(schema, instance, "", &mut out);

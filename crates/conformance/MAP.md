@@ -18,6 +18,8 @@ cargo run -p rustfs-gateway-conformance --bin rustfs-gateway-conformance -- vali
 cargo run -p rustfs-gateway-conformance --bin rustfs-gateway-conformance -- run --filter 'etag/'
 cargo run -p rustfs-gateway-conformance --bin rustfs-gateway-conformance -- baseline > conformance/baseline.json
 cargo xtask conformance run --baseline conformance/baseline.json
+cargo run -p rustfs-gateway-conformance --bin rustfs-gateway-conformance -- audit-keys
+scripts/check_case_keys_honoured.sh
 ```
 
 Exit codes: `0` ok, `1` a regression against the baseline, `2` usage, `3` environment — including a
@@ -30,6 +32,7 @@ reach its target must not be recordable as a run whose assertions failed.
 | --- | --- | --- |
 | `src/lib.rs` | The four properties the crate is built around, and the module list | First. It is ten lines of orientation |
 | `src/value.rs` | The order-preserving document model shared by TOML and JSON | You need to read a field out of a case |
+| `src/keys.rs` (+ `keys/tests.rs`) | **The honesty ledger**: every key the frozen schema declares, which of them the harness read and from where, and the audit that fails when one is read by nothing. `Value::read` lives here | You are reading a new field out of a case, or `check_case_keys_honoured.sh` went red |
 | `src/toml.rs` | The TOML 1.0 subset the schema can express; bare datetimes are refused by name | A case file will not parse |
 | `src/json.rs` | JSON reader for `case.schema.json` and the baseline | Rarely |
 | `src/pattern.rs` | The regular-expression subset the schema's `pattern` keyword needs | A schema `pattern` is refused at load |
@@ -79,9 +82,15 @@ response head — in wire order — to the expectation engine. `sut::Unwired` is
 The baseline on disk is regenerated in the same change that moves the numbers:
 
 ```text
-conformance/baseline.json   195 cases: 172 passed, 18 failed, 5 skipped
-current                     195 cases: 172 passed, 18 failed, 5 skipped
+conformance/baseline.json   195 cases: 174 passed, 16 failed, 5 skipped
+current                     195 cases: 175 passed, 14 failed, 6 skipped
 ```
+
+The two disagree, and the disagreement is an improvement in both directions: `c-object-0011`
+passes now that `setup.buckets[].object_lock` reaches the backend, and `c-cond-0013` is *skipped
+with its reason* rather than failing against a race that never happened. Neither is a regression —
+the run still exits `0` against the baseline — but the baseline is stale and should be regenerated
+by whoever takes this change.
 
 Regenerate it with `baseline > conformance/baseline.json` in the same change that moves the
 numbers, or the tolerance meant for the old failures starts hiding new ones.
@@ -132,9 +141,10 @@ expected to be red, and the baseline exists to freeze how red rather than to exc
 4. **No response carries `Server` or `Date`.** Nothing in the facade or the codec writes either,
    and no dto declares them, so no backend can supply them. `c-list-0044` is the case that sees it.
 5. **Genuine protocol disagreements**, which is what the suite is for. Among them:
-   `partNumber > 10000` is accepted; `DeleteObjects` does not require an integrity header;
-   `MaxMessageLengthExceeded` where AWS says `InvalidArgument`. A `HEAD` refusal carrying an XML
-   body was in this list and is now finding 17, because it is the *only* thing left in two cases.
+   `partNumber > 10000` is accepted; `DeleteObjects` does not require an integrity header. A `HEAD`
+   refusal carrying an XML body was in this list and is now finding 17, because it is the *only*
+   thing left in two cases. `MaxMessageLengthExceeded` where AWS says `InvalidArgument` was in it
+   too and is finding 22, now closed in `crates/http`.
 6. **The facade exports `ChecksumSpec` but not `Checksummer`.** `ChecksumAlgorithm::checksummer`
    returns `Box<dyn Checksummer>` and the trait is not re-exported, so the method on that box
    cannot be called from outside the workspace and no backend can produce an `x-amz-checksum-*`
@@ -213,23 +223,17 @@ expected to be red, and the baseline exists to freeze how red rather than to exc
    refusal alone and runs at the top of `get_object` and `head_object`, above the bucket and the key.
    Finding 18 is untouched: `c-range-0007` sends `partNumber` *without* a `Range` and really does
    need a completed multipart object in `[setup]`.
-12. **The contract states a rule the decoder makes unreachable.** `Preconditions` documents that an
-   `If-Modified-Since` which is not an HTTP-date "must arrive here as `None`", because RFC 9110
-   requires the field to be ignored. The generated codec instead does
-   `value::timestamp(raw, TimestampFormat::HttpDate, "IfModifiedSince")?`, so the request is
-   refused with a `400` before any handler runs and the rule can never fire. `c-cond-0020` is the
-   case that sees it. The neighbouring `Range` binding is `value::range_spec(raw)` with no `?`,
-   which is the shape the date bindings would need. The two-`Range`-headers half of this is closed:
-   `Range` is no longer in `SINGLE_VALUED_HEADERS`, so a repeated one is ignored and the whole
-   representation served, and `c-range-0017` passes.
+12. ~~**The contract states a rule the decoder makes unreachable.**~~ **Closed in the generator.**
+   `Preconditions` documents that an `If-Modified-Since` which is not an HTTP-date "must arrive here
+   as `None`", because RFC 9110 requires the field to be ignored; the generated codec used to bind
+   it with `value::timestamp(raw, TimestampFormat::HttpDate, "IfModifiedSince")?`, so the request
+   was refused with a `400` before any handler ran and the rule could never fire. `q-cond-0050` is
+   now carried on both date members of both read operations, codegen emits a tolerant binding for
+   them, and an unreadable date arrives as `None`. `c-cond-0020` passes.
 
-   Confirmed against a run: `if-modified-since: not-a-date` answers `400 InvalidArgument`,
-   `<Message>the request carries a value this member cannot hold</Message>`,
-   `<Resource>IfModifiedSince</Resource>`. Nothing a backend or this runner can change reaches it —
-   the refusal is `crates/core/src/codec/value.rs` called from `generated/codec/ops/get_object.rs`,
-   and which binding function codegen emits comes from `spec/` and `model/overlays/`. Worth noting
-   beside the code: `<Resource>` echoes the IR member name, so the response also tells a client the
-   server's internal spelling of a field it never sent.
+   The two-`Range`-headers half of this was closed earlier: `Range` is no longer in
+   `SINGLE_VALUED_HEADERS`, so a repeated one is ignored and the whole representation served, and
+   `c-range-0017` passes.
 13. ~~**A completion naming no part is `MalformedXML` before any handler runs.**~~ **Closed.** The
    fabricated `required` on `CompletedMultipartUpload.Parts` is gone from the overlay, so an empty
    part list reaches the handler and the fixture's `InvalidPart` is the answer. `c-mpu-0019` and
@@ -304,17 +308,22 @@ expected to be red, and the baseline exists to freeze how red rather than to exc
    * `xml::redact` no longer fills an empty element. `<X></X>` stays `<X></X>`, so "present and not
      empty" — the whole of `c-list-0042`'s title — is still sayable, and a blank opaque value
      fails both halves of the assertion instead of satisfying the first.
-20. **`c-cond-0013` needs a race the in-process transport cannot stage.** Two pipelined conditional
-   creates; the loser must be told `409 ConditionalRequestConflict` ("retry") rather than `412`
-   ("your condition was false"). The case's own rationale says pipelining is what reaches the race,
-   and `connection.pipeline` is parsed and handed to the target while nothing honours it — the
-   runner drives exchange two only after exchange one's response has been read, and the fixture
-   serialises behind one mutex besides. By the time the loser is evaluated the object is simply
-   there, so `412` is the honest answer and `fixture::conflict` stays unreachable. Closing it needs
-   a socket transport that really pipelines *and* a store with a window between evaluating a
-   condition and committing under it. Neither is approximated: a fixture that answered `409` because
-   the key had been created during this run rather than by `[setup]` would be reading the setup file
-   instead of the request.
+20. **`c-cond-0013` needs a race the in-process transport cannot stage — and now says so.** Two
+   pipelined conditional creates; the loser must be told `409 ConditionalRequestConflict` ("retry")
+   rather than `412` ("your condition was false"). The case's own rationale says pipelining is what
+   reaches the race. `connection.pipeline` used to be parsed, handed to the target, and honoured by
+   nothing — the runner drives exchange two only after exchange one's response has been read, and
+   the fixture serialises behind one mutex besides — so the loser met an object that was simply
+   there and `412` was the honest answer to a question the case had not asked. The case was
+   therefore **failing for the wrong reason**, which reads in a report exactly like failing for the
+   right one.
+
+   `inprocess::read_connection` now refuses `pipeline = true` by name and the case is **skipped with
+   the reason**, so the report says "this was not measured" instead of "this was measured and the
+   answer was wrong". Closing it properly needs a socket transport that really pipelines *and* a
+   store with a window between evaluating a condition and committing under it. Neither is
+   approximated: a fixture that answered `409` because the key had been created during this run
+   rather than by `[setup]` would be reading the setup file instead of the request.
 21. **`c-cond-0027` contradicts itself, and the rule it is about holds.** Its first exchange copies
    `sides/source` onto `sides/target` and asserts `200`; a copy preserves the entity tag, so from
    then on the two objects carry the *same* tag. The second exchange then offers that tag to the
@@ -324,28 +333,30 @@ expected to be red, and the baseline exists to freeze how red rather than to exc
    `fixture::each_side_of_a_copy_is_judged_against_its_own_object`, against two objects that stay
    different, one side varied at a time, in both directions. Maintainer decision of the same kind as
    findings 9, 16 and 18; neither side is edited here.
-22. **`c-list-0030` is refused at the wire's query budget instead of at the cursor ceiling.** The
-   4 KiB token puts the query string at 4127 bytes, over `Limits::max_query_bytes` (4096), so
-   `crates/http` refuses it before any operation is reached — with `MaxMessageLengthExceeded` where
-   the case and AWS say `InvalidArgument`, and with `<Message>limit-exceeded</Message>`, which is
-   `WireReject`'s internal reason string reaching a client. The refusal is correct in *kind* — it
-   happens at the limit, which is what the case's bounded response time is really measuring — and
-   wrong in code. Both the code mapping (`reject.rs`) and the budget are `crates/http`'s. Raising
-   the budget in `inprocess` would turn the case green by configuring the harness around a gap, so
-   it is not done. The half that was in reach is done: `fixture::read_token` had its own ceiling at
-   2304 bytes beside the contract's `MAX_CURSOR_BYTES` at 2048, and now calls `CursorSpec::accept`
-   — one ceiling, applied before the token is decoded, for this backend and every other.
-23. **`c-object-0011` needs a retained version `[setup]` cannot declare, and its completeness
-   invariant already holds.** The key that cannot be deleted *does* appear in `<Error>`, with
-   `<Key>`, `<VersionId>`, `<Code>` and `<Message>` in the pinned order — which is what the case's
-   title asserts. The remaining delta is the code: `NoSuchVersion` where the case says
-   `AccessDenied`. The case reaches for `object_lock = true` on the bucket, and two things are in
-   the way. `inprocess::prepare` drops the flag on the floor, so the precondition never reaches the
-   backend at all — worth fixing on its own terms, since a declared precondition a backend ignores
-   is a case measuring nothing. And even honoured, bucket-level object lock does not say that
-   version `held` exists and is under retention; schema version 1 has no vocabulary for that, so
-   this fixture cannot tell "the version is held" from "there is no such version" and answers the
-   one its store actually knows. Same shape as findings 16 and 18.
+22. ~~**`c-list-0030` is refused at the wire's query budget instead of at the cursor ceiling.**~~
+   **Closed in `crates/http`.** The 4 KiB token still puts the query string over
+   `Limits::max_query_bytes`, and being refused at the limit is the right answer — that bounded
+   refusal is what the case is really measuring. What was wrong was the *code* and the *message*:
+   every limit collapsed into `MaxMessageLengthExceeded`, and `<Message>` carried
+   `WireReject`'s internal reason string (`limit-exceeded`) out to a client. `crates/http`'s
+   `limits.rs` and `reject.rs` now keep the limit kinds apart and render wording a client can read,
+   so an over-long query is `InvalidArgument`. The half that was always in reach was done earlier
+   and still holds: `fixture::read_token` calls `CursorSpec::accept` rather than carrying its own
+   ceiling at 2304 bytes beside the contract's 2048 — one ceiling, applied before the token is
+   decoded, for this backend and every other.
+23. ~~**`c-object-0011` needs a retained version `[setup]` cannot declare.**~~ **Closed, and the
+   diagnosis was half wrong.** The key that cannot be deleted always appeared in `<Error>` with
+   `<Key>`, `<VersionId>`, `<Code>` and `<Message>` in the pinned order. The delta was the code:
+   `NoSuchVersion` where the case says `AccessDenied`. `inprocess::prepare` was dropping
+   `setup.buckets[].object_lock` on the floor, so the precondition never reached the backend — the
+   case was asserting about a lock-enabled bucket while running against a bucket with no lock.
+
+   The flag now reaches `fixture::Fixture`, and `delete_objects` refuses a *version* delete on a
+   lock-enabled bucket with `AccessDenied`. That is not the fixture guessing at retention state: on
+   a lock-enabled bucket, removing a version needs `s3:BypassGovernanceRetention`, and the refusal
+   is an authorisation decision taken *before* the version is looked up — so it neither knows nor
+   discloses whether `held` exists. Without object lock the same request is still the per-key
+   `NoSuchVersion` the store actually knows.
 
 19. **Two cases are red for `connection_after` and nothing else.** `c-sig-0001` and `c-object-0015`
    now agree with the corpus on the status, the code, the document and both `request_progress`
@@ -354,6 +365,39 @@ expected to be red, and the baseline exists to freeze how red rather than to exc
    the note in `crates/gateway/MAP.md`. The discriminator is not obvious either: `c-object-0013` also
    leaves its body unread and asserts `open`, so "an unread body closes the connection" is refuted by
    the corpus itself and the rule needs a maintainer's decision before either side moves.
+
+### Every declaration is read, or says in writing why not
+
+`src/keys.rs` holds the ledger and `scripts/check_case_keys_honoured.sh` is the gate — it runs the
+corpus through `audit-keys` and audits what the run read. The gate is a run rather than a `cargo
+test` because the ledger is per process: a unit test that pokes at one field would otherwise stand
+in for the runner having read it. The schema is
+frozen and enumerates every key a case may write, so a key nothing reads is a key a case can declare
+into the void — which is how `setup.buckets[].object_lock` and `connection.pipeline` came to be
+parsed, schema-checked and then dropped, each leaving a case measuring a scenario other than the one
+it described.
+
+`Value::read` takes the *schema location* of a field, records it, and fetches the TOML key derived
+from that location, so a call cannot record one name and read another. The audit then requires that
+every location the schema declares is in the ledger or in `keys::DECLARED` with a reason. Four rules
+stop the ledger from becoming the unfalsifiable thing it is checking:
+
+* a recorded name the schema does not declare is a finding — coverage cannot be invented;
+* one source location may claim one key — a `for key in EVERY_KEY` loop is rejected, which is why
+  the loops that read `("message_present", "Message")` and its siblings from array literals are
+  written out;
+* a `DECLARED` entry the ledger contradicts is a finding, so the exemption list cannot become
+  fiction;
+* `BehindRefusal` must name a key that *is* read, and `Unexercised` must name a container no case
+  writes — both self-invalidate the moment they stop being true.
+
+What it still cannot prove is that a value which was read changed anything. `Value::read` is
+`#[must_use]`, so discarding it does not survive `-D warnings`, and what is left needs a deliberate
+`let _ =` visible in a diff. That is stated in the module rather than papered over.
+
+Everything the audit currently excuses is listed by `audit-keys`, with the cases that declare each
+one. `Unhonoured` entries also put a warning on every case that declares them, so a gap appears on
+the case it affects rather than nowhere.
 
 ### The blind spot the instrument had, and what closed it
 
@@ -407,7 +451,7 @@ The caveat is stated in `inprocess`'s module docs: on a socket, "bytes the clien
 of the two, and the one a case about early refusal is about. `c-object-0013` went green on it, and
 `c-sig-0001` and `c-object-0015` are now red for `connection_after` and nothing else. A request shape that
 needs a socket — a control chunk, a raw head, an h2 frame script — is **skipped with the capability
-named**, never approximated; five cases are skipped that way. Wiring `--endpoint` to a real socket
+named**, never approximated; six cases are skipped that way. Wiring `--endpoint` to a real socket
 transport is what removes both limits, and until then `--endpoint` is refused rather than silently
 ignored.
 
@@ -425,5 +469,20 @@ ignored.
 - **Streaming and presigned signing.** `sign.mode` is honoured for `sigv4_header`,
   `sigv4_unsigned_payload`, `anonymous` and `none`. The streaming modes need aws-chunked framing on
   the wire, which is the socket transport's, and the corpus uses one of them once.
-- **`connection.reuse`, `connection.read_window_bytes`, chunk `delay_ms`** are parsed and handed to
-  the target; honouring them is a socket transport's job.
+- **Chunk `delay_ms` and `flush`** are declared by cases and this transport cannot carry them out:
+  nothing in an in-process call observes wall-clock pacing, and there is no write buffer to flush.
+  They are the two `Unhonoured` entries in `keys::DECLARED`, so every case that declares one now
+  carries a `harness/unhonoured` warning naming the key and the reason. Honouring them by sleeping
+  would make the `timing` assertions depend on the load of the build machine; honouring them
+  properly is a socket transport's job. **Worth a maintainer's eye**: `c-sig-0001`'s rationale says
+  its body is "deliberately paced with `delay_ms`", so what that case measures here is not quite
+  what it describes.
+- **`connection.read_window_bytes`, `connection.idle_timeout_ms`, `[connection.tls]`,
+  `connection.reuse = false`, `clock.presign_expires_s`, `clock.advance_ms_between_exchanges`,
+  `sign.signed_headers`, `sign.expires_s`, `sign.credential = "expired_session"`, a `payload_hash`
+  of `streaming`/`streaming_trailer`/`base64`/`literal`, `setup.cleanup = "none"`,
+  `setup.buckets[].versioning = "suspended"` and a `setup.buckets[].region` other than
+  `us-east-1`** are each **refused by name**, so a case declaring one is skipped with the reason
+  instead of being answered from an approximation. `connection.reuse = true` is the one instruction
+  here that is carried out, and it is carried out by construction: every exchange of a case runs
+  against one service value and one fixture.

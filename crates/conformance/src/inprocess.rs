@@ -173,20 +173,28 @@ impl InProcess {
 
     /// Reads a `payload` block into bytes.
     fn payload(&self, payload: &Value) -> Result<Vec<u8>, SutError> {
-        if let Some(text) = payload.get("utf8").and_then(Value::as_str) {
+        // Every source is read before any of them is chosen. Returning from the first branch that
+        // matched would leave the later fields unread on a corpus that happens not to use them, and
+        // `crate::keys` would then be unable to tell "this harness reads `file`" from "no case
+        // wrote `file` this time" — which is the whole distinction it exists to make.
+        let utf8 = payload.read("payload.utf8").and_then(Value::as_str);
+        let hex = payload.read("payload.hex").and_then(Value::as_str);
+        let file = payload.read("payload.file").and_then(Value::as_str);
+        let size = payload.read("payload.size").and_then(Value::as_integer);
+        let fill = payload.read("payload.fill").and_then(Value::as_str);
+        if let Some(text) = utf8 {
             return Ok(text.as_bytes().to_vec());
         }
-        if let Some(text) = payload.get("hex").and_then(Value::as_str) {
+        if let Some(text) = hex {
             return decode_hex(text).ok_or_else(|| SutError::Environment(format!("`{text}` is not valid hex")));
         }
-        if let Some(relative) = payload.get("file").and_then(Value::as_str) {
+        if let Some(relative) = file {
             let path = self.root.join(relative);
             return std::fs::read(&path)
                 .map_err(|error| SutError::Environment(format!("cannot read {}: {error}", path.display())));
         }
-        if let Some(size) = payload.get("size").and_then(Value::as_integer) {
+        if let Some(size) = size {
             let size = usize::try_from(size).unwrap_or(0);
-            let fill = payload.get("fill").and_then(Value::as_str);
             return Ok(generate(size, fill));
         }
         Err(SutError::Environment("a payload names no source".to_owned()))
@@ -227,20 +235,92 @@ fn decode_hex(text: &str) -> Option<Vec<u8>> {
 }
 
 /// The clock a case declared, or the pinned default.
+///
+/// An absent `[clock]` is read as an empty table rather than skipped, so that every key of the
+/// block is looked at on every case. A read that only happens when some case happens to write the
+/// enclosing block is a read the honesty ledger cannot vouch for on a corpus that later drops it.
 fn clock_of(clock: Option<&Value>) -> Result<(time::Instant, time::Instant, i64), SutError> {
-    let read = |key: &str| -> Result<Option<time::Instant>, SutError> {
-        match clock.and_then(|clock| clock.get(key)).and_then(Value::as_str) {
-            None => Ok(None),
-            Some(text) => time::parse_rfc3339(text).map(Some).map_err(SutError::Environment),
-        }
+    let empty = Value::empty_table();
+    let clock = clock.unwrap_or(&empty);
+    if clock.read("clock.presign_expires_s").is_some() {
+        return Err(SutError::Environment(
+            "`clock.presign_expires_s` pins the lifetime of a presigned URL, and a presigned mode \
+             needs the query-string signing a socket transport owns; the in-process target signs \
+             the header form only"
+                .to_owned(),
+        ));
+    }
+    if clock.read("clock.advance_ms_between_exchanges").is_some() {
+        return Err(SutError::Environment(
+            "`clock.advance_ms_between_exchanges` asks for the clock the target observes to move \
+             between exchanges; this target pins one instant for the whole case, and answering \
+             from a clock that did not move would decide an expiry case on the wrong instant"
+                .to_owned(),
+        ));
+    }
+    let fixed = match clock.read("clock.fixed").and_then(Value::as_str) {
+        Some(text) => time::parse_rfc3339(text).map_err(SutError::Environment)?,
+        None => time::parse_rfc3339(time::DEFAULT_FIXED).map_err(SutError::Environment)?,
     };
-    let fixed = read("fixed")?.map_or_else(|| time::parse_rfc3339(time::DEFAULT_FIXED).map_err(SutError::Environment), Ok)?;
-    let request_time = read("request_time")?.unwrap_or_else(|| fixed.clone());
-    let skew_ms = clock
-        .and_then(|clock| clock.get("skew_ms"))
-        .and_then(Value::as_integer)
-        .unwrap_or(0);
+    let request_time = match clock.read("clock.request_time").and_then(Value::as_str) {
+        Some(text) => time::parse_rfc3339(text).map_err(SutError::Environment)?,
+        None => fixed.clone(),
+    };
+    let skew_ms = clock.read("clock.skew_ms").and_then(Value::as_integer).unwrap_or(0);
     Ok((fixed, request_time, skew_ms))
+}
+
+/// Reads `[connection]`, refusing every instruction that needs a socket to mean anything.
+///
+/// `reuse = true` is the one instruction this target can carry out, and it carries it out by
+/// construction: every exchange of a case runs against the same fixture state, which is what
+/// "one connection for the whole case" buys a case here. `reuse = false` asks for the opposite and
+/// is refused rather than quietly given the same treatment.
+fn read_connection(connection: Option<&Value>) -> Result<(), SutError> {
+    let empty = Value::empty_table();
+    let connection = connection.unwrap_or(&empty);
+    if connection.read("connection.pipeline").and_then(Value::as_bool) == Some(true) {
+        return Err(SutError::Environment(
+            "`connection.pipeline = true` asks for the next request to be written before the \
+             previous response is read. There is no connection here: the in-process target performs \
+             one `S3Service::call` at a time and the runner reads each response before it builds \
+             the next request, so the two writes cannot race. A case whose assertion turns on the \
+             race — one winner, and a distinct code telling the loser to retry — would be judged \
+             against a strictly ordered pair, where the loser's answer is an ordinary precondition \
+             failure. Pipelining needs a transport that owns the socket"
+                .to_owned(),
+        ));
+    }
+    if connection.read("connection.tls").is_some() {
+        return Err(SutError::Environment(
+            "`[connection.tls]` needs a socket to negotiate on; the in-process target hands a \
+             parsed `http::Request` to the service and never speaks TLS"
+                .to_owned(),
+        ));
+    }
+    if connection.read("connection.read_window_bytes").is_some() {
+        return Err(SutError::Environment(
+            "`connection.read_window_bytes` induces backpressure by leaving response bytes unread; \
+             the in-process target collects the whole body and has no flow-control window"
+                .to_owned(),
+        ));
+    }
+    if connection.read("connection.idle_timeout_ms").is_some() {
+        return Err(SutError::Environment(
+            "`connection.idle_timeout_ms` times out an idle connection, and there is no connection \
+             here to leave idle"
+                .to_owned(),
+        ));
+    }
+    if connection.read("connection.reuse").and_then(Value::as_bool) == Some(false) {
+        return Err(SutError::Environment(
+            "`connection.reuse = false` asks for a fresh connection per exchange. There is no \
+             connection, and the fixture state a case established is deliberately kept for all of \
+             its exchanges, so this target cannot distinguish a fresh connection from a reused one"
+                .to_owned(),
+        ));
+    }
+    Ok(())
 }
 
 /// One request, read out of the case and ready to be signed.
@@ -262,33 +342,36 @@ struct Wire {
 impl InProcess {
     /// Reads a `[request]` block, refusing every shape a socketless transport cannot send.
     fn read_request(&self, request: &Value) -> Result<Wire, SutError> {
-        for unsupported in ["raw_head_utf8", "raw_head_hex", "h2_frames"] {
-            if request.get(unsupported).is_some() {
-                return Err(SutError::Environment(format!(
-                    "`request.{unsupported}` needs a transport that writes bytes on a socket; the \
-                     in-process target hands a parsed `http::Request` to the service and cannot \
-                     express a malformed head"
-                )));
-            }
+        // Written out rather than looped over a list of names: `crate::keys` allows one source
+        // location to claim one schema key, so that a loop cannot report coverage of keys nothing
+        // reads.
+        if request.read("requestSpec.raw_head_utf8").is_some() {
+            return Err(needs_a_socket("raw_head_utf8"));
         }
-        if request.get("http_version").and_then(Value::as_str) == Some("h2") {
+        if request.read("requestSpec.raw_head_hex").is_some() {
+            return Err(needs_a_socket("raw_head_hex"));
+        }
+        if request.read("requestSpec.h2_frames").is_some() {
+            return Err(needs_a_socket("h2_frames"));
+        }
+        if request.read("requestSpec.http_version").and_then(Value::as_str) == Some("h2") {
             return Err(SutError::Environment(
                 "`request.http_version = \"h2\"` needs a real HTTP/2 framing layer".to_owned(),
             ));
         }
         let method = request
-            .get("method")
+            .read("requestSpec.method")
             .and_then(Value::as_str)
             .ok_or_else(|| SutError::Environment("a request has no method".to_owned()))?
             .to_owned();
         let target = request
-            .get("target")
+            .read("requestSpec.target")
             .and_then(Value::as_str)
             .ok_or_else(|| SutError::Environment("a request has no target".to_owned()))?
             .to_owned();
 
         let mut headers = Vec::new();
-        if let Some(Value::Table(entries)) = request.get("headers") {
+        if let Some(Value::Table(entries)) = request.read("requestSpec.headers") {
             for (name, value) in entries {
                 match value {
                     Value::String(text) => headers.push((name.clone(), text.clone())),
@@ -301,7 +384,7 @@ impl InProcess {
                 }
             }
         }
-        if let Some(Value::Array(rows)) = request.get("raw_headers") {
+        if let Some(Value::Array(rows)) = request.read("requestSpec.raw_headers") {
             for row in rows {
                 let pair: Vec<&str> = row.as_array().unwrap_or_default().iter().filter_map(Value::as_str).collect();
                 if let (Some(name), Some(value)) = (pair.first(), pair.get(1)) {
@@ -310,7 +393,17 @@ impl InProcess {
             }
         }
 
-        let frames = match (request.get("body"), request.get("chunks")) {
+        // `host` overrides `Host` / `:authority`, so it replaces whatever the header list said
+        // rather than adding a second one. Applied after both header forms for that reason.
+        if let Some(host) = request.read("requestSpec.host").and_then(Value::as_str) {
+            headers.retain(|(name, _)| !name.eq_ignore_ascii_case("host"));
+            headers.push(("host".to_owned(), host.to_owned()));
+        }
+
+        // One read per line: `crate::keys` allows one source location to claim one schema key.
+        let declared_body = request.read("requestSpec.body");
+        let declared_chunks = request.read("requestSpec.chunks");
+        let frames = match (declared_body, declared_chunks) {
             (Some(payload), _) => vec![self.payload(payload)?],
             (None, Some(Value::Array(chunks))) => self.chunks(chunks)?,
             _ => Vec::new(),
@@ -323,7 +416,7 @@ impl InProcess {
             headers,
             body,
             frames,
-            sign: request.get("sign").cloned(),
+            sign: request.read("requestSpec.sign").cloned(),
         })
     }
 
@@ -339,32 +432,55 @@ impl InProcess {
     fn chunks(&self, chunks: &[Value]) -> Result<Vec<Vec<u8>>, SutError> {
         let mut frames = Vec::new();
         for chunk in chunks {
-            if let Some(action) = chunk.get("action").and_then(Value::as_str) {
+            if let Some(action) = chunk.read("controlChunk.action").and_then(Value::as_str) {
                 return Err(SutError::Environment(format!(
                     "a `{action}` control chunk needs a transport that owns the connection; the \
                      in-process target hands over a complete body"
                 )));
             }
-            let repeat = usize::try_from(chunk.get("repeat").and_then(Value::as_integer).unwrap_or(1)).unwrap_or(1);
-            let unit = if chunk.get("raw_utf8").is_some() || chunk.get("raw_hex").is_some() {
-                let renamed = Value::Table(
-                    chunk
-                        .as_table()
-                        .unwrap_or_default()
-                        .iter()
-                        .map(|(key, value)| (key.trim_start_matches("raw_").to_owned(), value.clone()))
-                        .collect(),
-                );
-                self.payload(&renamed)?
-            } else {
-                self.payload(chunk)?
-            };
+            let repeat = usize::try_from(chunk.read("dataChunk.repeat").and_then(Value::as_integer).unwrap_or(1)).unwrap_or(1);
+            let unit = self.chunk_bytes(chunk)?;
             for _ in 0..repeat {
                 frames.push(unit.clone());
             }
         }
         Ok(frames)
     }
+
+    /// The bytes one data chunk carries.
+    ///
+    /// A data chunk's `utf8` is its own schema declaration, distinct from a payload's, so the
+    /// fields are read one by one here instead of handing the table to [`InProcess::payload`] with
+    /// the `raw_` prefixes stripped off. The two forms produce the same bytes in process, because
+    /// the framing that `raw_*` exists to bypass is framing a socket transport would add.
+    fn chunk_bytes(&self, chunk: &Value) -> Result<Vec<u8>, SutError> {
+        // Read before chosen, for the reason given in `InProcess::payload`.
+        let utf8 = chunk.read("dataChunk.utf8").and_then(Value::as_str);
+        let raw_utf8 = chunk.read("dataChunk.raw_utf8").and_then(Value::as_str);
+        let hex = chunk.read("dataChunk.hex").and_then(Value::as_str);
+        let raw_hex = chunk.read("dataChunk.raw_hex").and_then(Value::as_str);
+        let file = chunk.read("dataChunk.file").and_then(Value::as_str);
+        if let Some(text) = utf8.or(raw_utf8) {
+            return Ok(text.as_bytes().to_vec());
+        }
+        if let Some(text) = hex.or(raw_hex) {
+            return decode_hex(text).ok_or_else(|| SutError::Environment(format!("`{text}` is not valid hex")));
+        }
+        if let Some(relative) = file {
+            let path = self.root.join(relative);
+            return std::fs::read(&path)
+                .map_err(|error| SutError::Environment(format!("cannot read {}: {error}", path.display())));
+        }
+        Err(SutError::Environment("a chunk names no source".to_owned()))
+    }
+}
+
+/// The refusal every request shape that needs a socket shares.
+fn needs_a_socket(field: &str) -> SutError {
+    SutError::Environment(format!(
+        "`request.{field}` needs a transport that writes bytes on a socket; the in-process target \
+         hands a parsed `http::Request` to the service and cannot express a malformed head"
+    ))
 }
 
 /// Splits a request target into its path and its query, neither decoded.
@@ -389,7 +505,7 @@ fn assemble_request<B>(method: &str, target: &str, headers: &[(String, String)],
 /// Reads `sign.tamper` into the signer's own description.
 fn read_tamper(spec: &Value) -> Result<Tamper, SutError> {
     let component = spec
-        .get("component")
+        .read("signSpec.tamper.component")
         .and_then(Value::as_str)
         .ok_or_else(|| SutError::Environment("a tamper names no component".to_owned()))?;
     let component = match component {
@@ -407,13 +523,13 @@ fn read_tamper(spec: &Value) -> Result<Tamper, SutError> {
         other => return Err(SutError::Environment(format!("unknown tamper component `{other}`"))),
     };
     let mut tamper = Tamper::new(component);
-    if let Some(target) = spec.get("target").and_then(Value::as_str) {
+    if let Some(target) = spec.read("signSpec.tamper.target").and_then(Value::as_str) {
         tamper = tamper.with_target(target);
     }
-    if let Some(value) = spec.get("new_value").and_then(Value::as_str) {
+    if let Some(value) = spec.read("signSpec.tamper.new_value").and_then(Value::as_str) {
         tamper = tamper.with_new_value(value);
     }
-    if let Some(index) = spec.get("flip_byte_at").and_then(Value::as_integer) {
+    if let Some(index) = spec.read("signSpec.tamper.flip_byte_at").and_then(Value::as_integer) {
         tamper = tamper.flip_byte_at(usize::try_from(index).unwrap_or(0));
     }
     Ok(tamper)
@@ -431,42 +547,89 @@ impl Sut for InProcess {
                 .map_err(SutError::Environment)?
                 .unix_seconds,
         );
-        let Some(setup) = setup else {
-            *self.state.lock().map_err(poisoned)? = fixture;
-            return Ok(captures);
-        };
+        let empty = Value::empty_table();
+        let setup = setup.unwrap_or(&empty);
 
-        for bucket in setup.get("buckets").and_then(Value::as_array).unwrap_or_default() {
-            let Some(name) = bucket.get("name").and_then(Value::as_str) else { continue };
-            if bucket.get("absent").and_then(Value::as_bool).unwrap_or(false) {
+        if let Some(cleanup) = setup.read("setup.cleanup").and_then(Value::as_str)
+            && cleanup != "auto"
+        {
+            return Err(SutError::Environment(format!(
+                "`setup.cleanup = \"{cleanup}\"` asks for what this case established to survive it; \
+                 this target rebuilds the fixture from `[setup]` before every case, so nothing \
+                 would be carried over and a case relying on it would run against state it never \
+                 declared"
+            )));
+        }
+
+        for bucket in setup.read("setup.buckets").and_then(Value::as_array).unwrap_or_default() {
+            let Some(name) = bucket.read("setup.buckets[].name").and_then(Value::as_str) else { continue };
+            if let Some(region) = bucket.read("setup.buckets[].region").and_then(Value::as_str)
+                && region != REGION
+            {
+                return Err(SutError::Environment(format!(
+                    "`setup.buckets[].region = \"{region}\"` places the bucket outside `{REGION}`, \
+                     which is the one region this fixture serves and the one every case signs for; \
+                     a redirect or a location mismatch is not modelled here"
+                )));
+            }
+            if bucket
+                .read("setup.buckets[].absent")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+            {
                 fixture.remove_bucket(name);
                 continue;
             }
-            let versioned = bucket.get("versioning").and_then(Value::as_str) == Some("enabled");
+            let versioned = match bucket.read("setup.buckets[].versioning").and_then(Value::as_str) {
+                None | Some("disabled") => false,
+                Some("enabled") => true,
+                Some(other) => {
+                    return Err(SutError::Environment(format!(
+                        "`setup.buckets[].versioning = \"{other}\"` is not modelled: the fixture has \
+                         versioning on or off, and a suspended bucket — which keeps its history but \
+                         writes `null` — is a third state whose listings differ from both"
+                    )));
+                }
+            };
             fixture.declare_bucket(name, versioned);
+            // Object lock is what makes a version delete an authorisation decision rather than a
+            // lookup; `fixture::Stub::delete_objects` is where it becomes observable.
+            let locked = bucket
+                .read("setup.buckets[].object_lock")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            fixture.set_object_lock(name, locked);
         }
 
-        for object in setup.get("objects").and_then(Value::as_array).unwrap_or_default() {
-            let (Some(bucket), Some(key)) =
-                (object.get("bucket").and_then(Value::as_str), object.get("key").and_then(Value::as_str))
-            else {
+        for object in setup.read("setup.objects").and_then(Value::as_array).unwrap_or_default() {
+            let (Some(bucket), Some(key)) = (
+                object.read("setup.objects[].bucket").and_then(Value::as_str),
+                object.read("setup.objects[].key").and_then(Value::as_str),
+            ) else {
                 continue;
             };
-            if object.get("absent").and_then(Value::as_bool).unwrap_or(false) {
+            if object
+                .read("setup.objects[].absent")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+            {
                 fixture.remove_object(bucket, key);
                 continue;
             }
-            let body = match object.get("body") {
+            let body = match object.read("setup.objects[].body") {
                 Some(payload) => self.payload(payload)?,
                 None => Vec::new(),
             };
             let now = fixture.now;
-            let mut stored =
-                StoredObject::new(body, object.get("content_type").and_then(Value::as_str).map(ToOwned::to_owned), now);
-            if let Some(class) = object.get("storage_class").and_then(Value::as_str) {
+            let content_type = object
+                .read("setup.objects[].content_type")
+                .and_then(Value::as_str)
+                .map(ToOwned::to_owned);
+            let mut stored = StoredObject::new(body, content_type, now);
+            if let Some(class) = object.read("setup.objects[].storage_class").and_then(Value::as_str) {
                 stored.storage_class = class.to_owned();
             }
-            if let Some(Value::Table(entries)) = object.get("metadata") {
+            if let Some(Value::Table(entries)) = object.read("setup.objects[].metadata") {
                 stored.metadata = entries
                     .iter()
                     .filter_map(|(name, value)| value.as_str().map(|text| (name.clone(), text.to_owned())))
@@ -475,24 +638,44 @@ impl Sut for InProcess {
             fixture.put_object(bucket, key, stored);
         }
 
-        for upload in setup.get("multipart_uploads").and_then(Value::as_array).unwrap_or_default() {
-            let (Some(bucket), Some(key)) =
-                (upload.get("bucket").and_then(Value::as_str), upload.get("key").and_then(Value::as_str))
-            else {
+        for upload in setup
+            .read("setup.multipart_uploads")
+            .and_then(Value::as_array)
+            .unwrap_or_default()
+        {
+            let (Some(bucket), Some(key)) = (
+                upload.read("setup.multipart_uploads[].bucket").and_then(Value::as_str),
+                upload.read("setup.multipart_uploads[].key").and_then(Value::as_str),
+            ) else {
                 continue;
             };
             let id = fixture.create_upload(bucket, key);
-            if let Some(name) = upload.get("capture_upload_id_as").and_then(Value::as_str) {
+            if let Some(name) = upload
+                .read("setup.multipart_uploads[].capture_upload_id_as")
+                .and_then(Value::as_str)
+            {
                 captures.insert(name.to_owned(), id.clone());
             }
-            for part in upload.get("parts").and_then(Value::as_array).unwrap_or_default() {
-                let Some(number) = part.get("part_number").and_then(Value::as_integer) else { continue };
-                let body = match part.get("body") {
+            for part in upload
+                .read("setup.multipart_uploads[].parts")
+                .and_then(Value::as_array)
+                .unwrap_or_default()
+            {
+                let Some(number) = part
+                    .read("setup.multipart_uploads[].parts[].part_number")
+                    .and_then(Value::as_integer)
+                else {
+                    continue;
+                };
+                let body = match part.read("setup.multipart_uploads[].parts[].body") {
                     Some(payload) => self.payload(payload)?,
                     None => Vec::new(),
                 };
                 let etag = fixture.put_part(&id, i32::try_from(number).unwrap_or(0), body);
-                if let Some(name) = part.get("capture_etag_as").and_then(Value::as_str) {
+                if let Some(name) = part
+                    .read("setup.multipart_uploads[].parts[].capture_etag_as")
+                    .and_then(Value::as_str)
+                {
                     // Captured quoted, because that is the form a case interpolates into an XML
                     // `<ETag>` element and into an `If-Match` header alike.
                     captures.insert(name.to_owned(), format!("\"{etag}\""));
@@ -506,6 +689,7 @@ impl Sut for InProcess {
 
     fn exchange(&mut self, plan: &ExchangePlan<'_>) -> Result<Observation, SutError> {
         let (fixed, request_time, skew_ms) = clock_of(plan.clock)?;
+        read_connection(plan.connection)?;
         if let Ok(mut fixture) = self.state.lock() {
             fixture.now = fixed.unix_seconds;
         }
@@ -626,7 +810,7 @@ fn sign_request(
     request_time: &time::Instant,
     limits: &Limits,
 ) -> Result<(Vec<(String, String)>, String), SutError> {
-    let mode = sign.get("mode").and_then(Value::as_str).unwrap_or("sigv4_header");
+    let mode = sign.read("signSpec.mode").and_then(Value::as_str).unwrap_or("sigv4_header");
     match mode {
         "anonymous" | "none" => return Ok((headers.to_vec(), wire.target.clone())),
         "sigv4_header" | "sigv4_unsigned_payload" => {}
@@ -637,6 +821,22 @@ fn sign_request(
                  chunk framing a socket transport owns"
             )));
         }
+    }
+    if sign.read("signSpec.signed_headers").is_some() {
+        return Err(SutError::Environment(
+            "`sign.signed_headers` under-signs deliberately by pinning the SignedHeaders list; the \
+             facade's signer derives that list from the headers it is given and exposes no way to \
+             override it, so the request would go out fully signed and the case would assert \
+             against a signature nobody meant to send"
+                .to_owned(),
+        ));
+    }
+    if sign.read("signSpec.expires_s").is_some() {
+        return Err(SutError::Environment(
+            "`sign.expires_s` is the lifetime of a presigned URL, and presigned modes are refused \
+             above"
+                .to_owned(),
+        ));
     }
 
     // The host has to reach the canonical request in the byte-exact form the acceptance layer
@@ -662,24 +862,52 @@ fn sign_request(
         map.append(name, value);
     }
 
-    let credential = sign.get("credential").and_then(Value::as_str).unwrap_or("valid");
+    let credential = sign.read("signSpec.credential").and_then(Value::as_str).unwrap_or("valid");
     let (access_key, secret) = match credential {
         "unknown_access_key" => (UNKNOWN_ACCESS_KEY, VALID_SECRET),
         "wrong_secret" => (VALID_ACCESS_KEY, WRONG_SECRET),
-        "expired_session" => (VALID_ACCESS_KEY, VALID_SECRET),
+        // An expired session token is a distinct identity, not the valid one under another name.
+        // Signing it with the fixture's own credentials answered `200` and the case then asserted
+        // against a request that was never expired.
+        "expired_session" => {
+            return Err(SutError::Environment(
+                "`sign.credential = \"expired_session\"` needs a session token the provider has \
+                 seen and expired; `StaticCredentials` holds one long-lived identity and no \
+                 session state, so this target cannot present an expired one"
+                    .to_owned(),
+            ));
+        }
         _ => (VALID_ACCESS_KEY, VALID_SECRET),
     };
     let credentials = SigningCredentials::new(access_key, secret)
         .map_err(|error| SutError::Environment(format!("the signing credentials are not valid: {error}")))?;
     let stamp = AmzDate::parse(&request_time.amz_stamp)
         .map_err(|error| SutError::Environment(format!("`{}` is not a SigV4 stamp: {error}", request_time.amz_stamp)))?;
-    let region = sign.get("region").and_then(Value::as_str).unwrap_or(REGION);
-    let scope = SigningScope::new(stamp.day(), region, SigService::S3)
+    let region = sign.read("signSpec.region").and_then(Value::as_str).unwrap_or(REGION);
+    let service = match sign.read("signSpec.service").and_then(Value::as_str) {
+        None | Some("s3") => SigService::S3,
+        Some("sts") => SigService::Sts,
+        Some(other) => {
+            return Err(SutError::Environment(format!(
+                "`sign.service = \"{other}\"` is not a service this scope can name"
+            )));
+        }
+    };
+    let scope = SigningScope::new(stamp.day(), region, service)
         .map_err(|error| SutError::Environment(format!("the credential scope is not well formed: {error}")))?;
 
-    let payload = match (mode, sign.get("payload_hash").and_then(Value::as_str)) {
+    // Every spelling is decided here. A `payload_hash` this target cannot produce is refused rather
+    // than falling through to the computed digest: a case that asked for a streaming or a literal
+    // hash and was silently given the correct one asserts nothing about the hash it named.
+    let payload = match (mode, sign.read("signSpec.payload_hash").and_then(Value::as_str)) {
         ("sigv4_unsigned_payload", _) | (_, Some("unsigned")) => PayloadMode::Unsigned,
         (_, Some("empty")) => PayloadMode::Empty,
+        (_, Some(other @ ("streaming" | "streaming_trailer" | "base64" | "literal"))) => {
+            return Err(SutError::Environment(format!(
+                "`sign.payload_hash = \"{other}\"` needs the aws-chunked framing a socket transport \
+                 owns, or a literal the header signer has no way to substitute"
+            )));
+        }
         _ if wire.body.is_empty() => PayloadMode::Empty,
         _ => PayloadMode::ExactSha256(crate::sha256::digest(&wire.body)),
     };
@@ -695,7 +923,7 @@ fn sign_request(
     let signed = signer
         .sign_headers(&signing)
         .map_err(|error| SutError::Environment(format!("the request could not be signed: {error}")))?;
-    let signed = match sign.get("tamper") {
+    let signed = match sign.read("signSpec.tamper") {
         None => signed,
         Some(spec) => signed
             .tampered(&read_tamper(spec)?)

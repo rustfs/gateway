@@ -486,5 +486,54 @@ mut_stale_exposure() {
 expect_fail check_route_coverage.sh \
     'a register entry for an exposure that no longer exists' mut_stale_exposure
 
+# -----------------------------------------------------------------------------
+# A conformance case may only declare what the harness reads. Twice already a
+# case declared a precondition — `setup.buckets[].object_lock`,
+# `connection.pipeline` — that was parsed, schema-checked and then dropped, so
+# the case measured a scenario other than the one it described and reported
+# green. The guard runs the corpus and audits which schema keys the harness
+# actually read.
+#
+# The controls mutate the SCHEMA in the sandbox rather than the harness,
+# because check_case_keys_honoured.sh audits the sandbox's corpus using the
+# binary built next to this script: a harness mutation would need a cold
+# compile of the whole workspace inside the sandbox, and this suite has a
+# ten-minute budget.
+#
+# The first control is the defect itself: a key the frozen schema allows and
+# nothing reads. The second is the guard's other end — an entry in DECLARED
+# that no longer names a field, which is how an exemption list rots into a
+# list of excuses for fields that stopped existing.
+# -----------------------------------------------------------------------------
+
+mut_unread_schema_key() {
+    python3 - <<'PYEOF'
+import json, pathlib
+path = pathlib.Path("conformance/case.schema.json")
+schema = json.loads(path.read_text())
+schema["$defs"]["expect"]["properties"]["nothing_reads_this"] = {
+    "type": "boolean",
+    "description": "A declaration no code looks at. The guard must say so.",
+}
+path.write_text(json.dumps(schema, indent=2))
+PYEOF
+}
+expect_fail check_case_keys_honoured.sh \
+    'a schema key the harness never reads' mut_unread_schema_key
+
+mut_declaration_for_a_dropped_field() {
+    python3 - <<'PYEOF'
+import json, pathlib
+path = pathlib.Path("conformance/case.schema.json")
+schema = json.loads(path.read_text())
+# `evidence.kind` is carried in keys::DECLARED as inert. Removing the field
+# leaves the entry naming something the schema no longer declares.
+del schema["$defs"]["evidence"]["properties"]["kind"]
+path.write_text(json.dumps(schema, indent=2))
+PYEOF
+}
+expect_fail check_case_keys_honoured.sh \
+    'a DECLARED entry naming a field the schema dropped' mut_declaration_for_a_dropped_field
+
 printf '\n%s case(s), %s failure(s)\n' "$cases" "$failures"
 [[ "$failures" -eq 0 ]]

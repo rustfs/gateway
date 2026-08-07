@@ -293,10 +293,19 @@ pub struct VersionRef<'a> {
     pub is_latest: bool,
 }
 
+/// What `[[setup.buckets]]` declared about one bucket.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+struct BucketState {
+    /// `versioning = "enabled"`.
+    versioned: bool,
+    /// `object_lock = true`.
+    object_lock: bool,
+}
+
 /// The state one case runs against.
 #[derive(Debug, Default)]
 pub struct Fixture {
-    buckets: BTreeMap<String, bool>,
+    buckets: BTreeMap<String, BucketState>,
     objects: BTreeMap<(String, String), Vec<StoredVersion>>,
     uploads: BTreeMap<String, StoredUpload>,
     next_upload: u32,
@@ -317,8 +326,23 @@ impl Fixture {
 
     /// Declares a bucket. `versioned` decides whether a later write appends a version or replaces
     /// the only one there is.
+    ///
+    /// Object lock is set separately by [`Fixture::set_object_lock`] so that the two declarations
+    /// stay independent: `object_lock` without `versioning` is a shape a case may write, and
+    /// folding them into one argument would let one silently imply the other.
     pub fn declare_bucket(&mut self, name: &str, versioned: bool) {
-        self.buckets.insert(name.to_owned(), versioned);
+        self.buckets.entry(name.to_owned()).or_default().versioned = versioned;
+    }
+
+    /// Records `setup.buckets[].object_lock` for a bucket.
+    pub fn set_object_lock(&mut self, name: &str, locked: bool) {
+        self.buckets.entry(name.to_owned()).or_default().object_lock = locked;
+    }
+
+    /// Whether a bucket was declared with object lock on.
+    #[must_use]
+    pub fn has_object_lock(&self, name: &str) -> bool {
+        self.buckets.get(name).is_some_and(|bucket| bucket.object_lock)
     }
 
     /// Removes a bucket, for `setup.buckets[].absent`.
@@ -381,7 +405,7 @@ impl Fixture {
     /// Whether a bucket was declared with versioning enabled.
     #[must_use]
     pub fn is_versioned(&self, name: &str) -> bool {
-        self.buckets.get(name).copied().unwrap_or(false)
+        self.buckets.get(name).is_some_and(|bucket| bucket.versioned)
     }
 
     /// The id the next version of a key in `bucket` is given.
@@ -1965,16 +1989,26 @@ impl Stub {
         let quiet = input.delete.quiet.unwrap_or(false);
         let mut deleted = Vec::new();
         let mut errors = Vec::new();
+        let locked = fixture.has_object_lock(input.bucket.as_str());
         for identifier in &input.delete.objects {
-            // The fixture keeps no version history, so a request naming a version cannot be
-            // satisfied — and reporting that per key rather than failing the whole request is the
-            // shape this operation is being measured for.
+            // Deleting a *version* is where `setup.buckets[].object_lock` becomes observable. On a
+            // lock-enabled bucket removing a version needs `s3:BypassGovernanceRetention`, and the
+            // refusal is an authorisation decision taken before the version is looked up — so the
+            // answer is `AccessDenied` and it does not disclose whether the version exists. Without
+            // object lock the fixture keeps no version history, so the same request is a per-key
+            // `NoSuchVersion`. Reporting either per key rather than failing the whole request is
+            // the shape this operation is being measured for.
             if let Some(version) = identifier.version_id.as_ref() {
+                let (code, message) = if locked {
+                    ("AccessDenied", "Access Denied")
+                } else {
+                    ("NoSuchVersion", "The specified version does not exist.")
+                };
                 errors.push(dto::Error {
                     key: Some(identifier.key.clone()),
                     version_id: Some(version.clone()),
-                    code: Some("NoSuchVersion".to_owned()),
-                    message: Some("The specified version does not exist.".to_owned()),
+                    code: Some(code.to_owned()),
+                    message: Some(message.to_owned()),
                 });
                 continue;
             }
