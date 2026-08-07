@@ -1,0 +1,111 @@
+# Copyright 2026 RustFS Team
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Quirks of the tagging family: the wrapped collection, the two opposite unconfigured answers,
+# the unconditional delete, the required integrity header, the packed header channel, and the
+# per-scope limits.
+
+[[quirk]]
+id      = "q-tag-wrapped-0088"
+kind    = "wire_form"
+target  = "GetBucketTagging"
+summary = "The tag collection is wrapped — `<TagSet>` encloses `<Tag>` members — where the listing families flatten `Contents` and `Rule` directly into their parent, so an encoder that reuses the flattened shape here silently drops the enclosing element."
+cases   = ["c-tagging-0001", "c-tagging-0004", "c-tagging-0018"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketTagging.html"
+  summary = "The documented response syntax shows Tag elements enclosed in a TagSet element under the Tagging root, not flattened into the root."
+
+[[quirk]]
+id      = "q-tag-bucket-unconfigured-0089"
+kind    = "error_code"
+target  = "GetBucketTagging"
+summary = "A bucket that never had a tag set answers 404 with the dedicated code NoSuchTagSet — not a generic not-found and not a 200 with an empty set — so a client can distinguish an unlabelled bucket from a missing one."
+cases   = ["c-tagging-0002", "c-tagging-0005", "c-tagging-0006"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketTagging.html"
+  summary = "The operation's error list names NoSuchTagSet as the answer when there is no tag set on the bucket."
+
+[[quirk]]
+id      = "q-tag-object-unconfigured-0090"
+kind    = "error_code"
+target  = "GetObjectTagging"
+summary = "An object with no tags answers 200 with an empty TagSet — the opposite of the bucket read's 404 NoSuchTagSet — so the two reads of one subresource name follow two different unconfigured rules."
+cases   = ["c-tagging-0004", "c-tagging-0007"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObjectTagging.html"
+  summary = "The documented response for an object without tags is a success carrying an empty TagSet, and the operation's error list carries no NoSuchTagSet."
+
+[[quirk]]
+id      = "q-tag-delete-idempotent-0091"
+kind    = "idempotent_delete"
+target  = "DeleteBucketTagging"
+summary = "Removing a tag set answers an unconditional 204: untagging a bucket or an object that carries no tags is a success, so the delete is idempotent where the bucket-scope GET on the same state is a 404."
+cases   = ["c-tagging-0002", "c-tagging-0004", "c-tagging-0010"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketTagging.html"
+  summary = "The documented success response is 204 No Content, with no error named for a bucket that has no tag set to delete."
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteObjectTagging.html"
+  summary = "The object-scope delete documents the same unconditional 204 shape."
+
+[[quirk]]
+id      = "q-tag-md5-required-0092"
+kind    = "checksum_headers"
+target  = "PutBucketTagging"
+summary = "The tagging writes are in the httpChecksumRequired operation set: a PUT with neither Content-MD5 nor an x-amz-checksum-* header is refused with 400 InvalidRequest before the document is read."
+cases   = ["c-tagging-0008", "c-tagging-0009"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketTagging.html"
+  summary = "The documented request syntax lists Content-MD5 as required for this operation."
+
+[[quirk]]
+id      = "q-tag-header-form-0093"
+kind    = "wire_form"
+target  = "PutObject"
+summary = "The x-amz-tagging header on PutObject and CopyObject carries the tag set as URL query-string pairs, UTF-8 then URL-encoded, so `a%20b=c%2Bd` names the key `a b` and the value `c+d`, and a malformed spelling is a 400 before anything is stored."
+cases   = ["c-tagging-0003", "c-tagging-0016", "c-tagging-0017"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObject.html"
+  summary = "The header's documented value form is URL query parameters, with the example tag set spelled key=value pairs joined by ampersands."
+
+[[quirk]]
+id      = "q-tag-limits-0094"
+kind    = "bounded_input"
+target  = "PutBucketTagging"
+summary = "A tag set is bounded by scope — ten tags on an object, fifty on a bucket — and by shape: keys up to 128 characters, values up to 256, characters limited to letters, numbers, space and +-=._:/@, keys unique; every violation is a 400 InvalidTag."
+cases   = ["c-tagging-0011", "c-tagging-0012", "c-tagging-0013", "c-tagging-0014", "c-tagging-0015"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/object-tagging.html"
+  summary = "The user guide bounds an object at ten tags with 128-character keys and 256-character values drawn from the documented character set."
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/awsaccountbilling/latest/aboutv2/allocation-tag-restrictions.html"
+  summary = "The tag restriction page bounds a bucket at fifty tags with the same key and value ceilings."

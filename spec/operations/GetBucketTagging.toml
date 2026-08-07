@@ -3,19 +3,19 @@
 # in OPERATIONS.md.
 
 [operation]
-name = "GetObjectTagging"
+name = "GetBucketTagging"
 method = "GET"
-target = "Object"
-path_shape = "/{Bucket}/{Key+}"
-precedence = 480
+target = "Bucket"
+path_shape = "/{Bucket}"
+precedence = 340
 success_status = 200
 alt_success_statuses = []
-predicates = ["Method GET", "Target Object", "QueryPresent ?tagging"]
-quirks = ["q-tag-wrapped-0088", "q-tag-object-unconfigured-0090"]
+predicates = ["Method GET", "Target Bucket", "QueryPresent ?tagging"]
+quirks = ["q-tag-wrapped-0088", "q-tag-bucket-unconfigured-0089"]
 
 [auth]
 requirement = "Required"
-action = "s3:GetObjectTagging"
+action = "s3:GetBucketTagging"
 presigned_allowed = true
 service = "s3"
 
@@ -27,7 +27,7 @@ buffering = "None"
 [payload.response]
 kind = "XmlBody"
 buffering = "Full"
-max_bytes = 65536
+max_bytes = 262144
 
 [checksum]
 http_checksum_required = false
@@ -48,9 +48,9 @@ url_encoded_fields = []
 TagSet = "emit"
 
 [errors]
-not_configured = ""
+not_configured = "NoSuchTagSet"
 allows_error_after_200 = false
-codes = ["NoSuchBucket", "NoSuchKey", "AccessDenied", "InvalidArgument"]
+codes = ["NoSuchBucket", "NoSuchTagSet", "AccessDenied", "InvalidArgument"]
 
 [[input]]
 name = "Bucket"
@@ -62,45 +62,8 @@ hot = true
 quirks = []
 
 [[input]]
-name = "Key"
-wire_name = "Key"
-binding = "UriLabel(greedy)"
-type = "ObjectKey"
-required = true
-hot = true
-quirks = []
-
-[[input]]
-name = "VersionId"
-wire_name = "versionId"
-binding = "Query"
-type = "String"
-required = false
-hot = true
-quirks = []
-
-[[input]]
 name = "ExpectedBucketOwner"
 wire_name = "x-amz-expected-bucket-owner"
-binding = "Header"
-type = "String"
-required = false
-hot = false
-quirks = []
-
-[[input]]
-name = "RequestPayer"
-wire_name = "x-amz-request-payer"
-binding = "Header"
-type = "StringEnum"
-required = false
-hot = false
-values = ["requester"]
-quirks = []
-
-[[output]]
-name = "VersionId"
-wire_name = "x-amz-version-id"
 binding = "Header"
 type = "String"
 required = false

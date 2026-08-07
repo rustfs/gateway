@@ -13,7 +13,8 @@
 // limitations under the License.
 
 //! Shares: tagging
-//! Members: DeleteObjectTagging, GetObjectTagging, PutObjectTagging
+//! Members: DeleteBucketTagging, DeleteObjectTagging, GetBucketTagging, GetObjectTagging,
+//!          PutBucketTagging, PutObjectTagging
 //!
 //! Responsible for: what a tag set is allowed to be, in one place for its two request channels —
 //! the `<Tagging>` document of the `?tagging` subresource and the packed `x-amz-tagging` header

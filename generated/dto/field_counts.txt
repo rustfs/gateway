@@ -16,6 +16,8 @@ CreateMultipartUploadOutput 14
 Delete 2
 DeleteBucketCorsInput 2
 DeleteBucketCorsOutput 0
+DeleteBucketTaggingInput 2
+DeleteBucketTaggingOutput 0
 DeleteMarkerEntry 5
 DeleteObjectInput 10
 DeleteObjectOutput 3
@@ -29,6 +31,8 @@ GetBucketCorsInput 2
 GetBucketCorsOutput 1
 GetBucketLocationInput 2
 GetBucketLocationOutput 1
+GetBucketTaggingInput 2
+GetBucketTaggingOutput 1
 GetObjectAttributesInput 11
 GetObjectAttributesOutput 9
 GetObjectAttributesParts 6
@@ -60,6 +64,8 @@ Owner 2
 Part 14
 PutBucketCorsInput 5
 PutBucketCorsOutput 0
+PutBucketTaggingInput 5
+PutBucketTaggingOutput 0
 PutObjectInput 37
 PutObjectOutput 13
 PutObjectTaggingInput 8

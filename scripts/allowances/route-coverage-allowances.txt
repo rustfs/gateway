@@ -26,7 +26,6 @@ GetBucketPolicy -> ListObjects
 GetBucketPolicyStatus -> ListObjects
 GetBucketReplication -> ListObjects
 GetBucketRequestPayment -> ListObjects
-GetBucketTagging -> ListObjects
 GetBucketVersioning -> ListObjects
 GetBucketWebsite -> ListObjects
 GetObjectAcl -> GetObject

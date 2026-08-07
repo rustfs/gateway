@@ -20,14 +20,14 @@
 // disagree with it. Data only: the including crate defines the row types.
 
 pub static ERROR_CODE_OPERATIONS: &[(&str, &[&str])] = &[
-    ("AccessDenied", &["AbortMultipartUpload", "CompleteMultipartUpload", "CopyObject", "CreateMultipartUpload", "DeleteBucketCors", "DeleteObject", "DeleteObjectTagging", "DeleteObjects", "GetBucketCors", "GetBucketLocation", "GetObject", "GetObjectAttributes", "GetObjectTagging", "HeadObject", "ListBuckets", "ListMultipartUploads", "ListObjectVersions", "ListObjects", "ListObjectsV2", "ListParts", "PutBucketCors", "PutObject", "PutObjectTagging", "UploadPart", "UploadPartCopy"]),
+    ("AccessDenied", &["AbortMultipartUpload", "CompleteMultipartUpload", "CopyObject", "CreateMultipartUpload", "DeleteBucketCors", "DeleteBucketTagging", "DeleteObject", "DeleteObjectTagging", "DeleteObjects", "GetBucketCors", "GetBucketLocation", "GetBucketTagging", "GetObject", "GetObjectAttributes", "GetObjectTagging", "HeadObject", "ListBuckets", "ListMultipartUploads", "ListObjectVersions", "ListObjects", "ListObjectsV2", "ListParts", "PutBucketCors", "PutBucketTagging", "PutObject", "PutObjectTagging", "UploadPart", "UploadPartCopy"]),
     ("BadDigest", &["PutBucketCors", "PutObject", "UploadPart"]),
     ("ConditionalRequestConflict", &["CompleteMultipartUpload", "PutObject"]),
     ("EncryptionTypeMismatch", &["PutObject"]),
     ("EntityTooLarge", &["CopyObject", "PutObject", "UploadPart"]),
     ("EntityTooSmall", &["CompleteMultipartUpload"]),
     ("IncompleteBody", &["PutObject", "UploadPart"]),
-    ("InvalidArgument", &["AbortMultipartUpload", "CompleteMultipartUpload", "CopyObject", "CreateMultipartUpload", "DeleteObject", "DeleteObjectTagging", "DeleteObjects", "GetObject", "GetObjectAttributes", "GetObjectTagging", "ListMultipartUploads", "ListObjectVersions", "ListObjects", "ListObjectsV2", "ListParts", "PutBucketCors", "PutObject", "PutObjectTagging", "UploadPart", "UploadPartCopy"]),
+    ("InvalidArgument", &["AbortMultipartUpload", "CompleteMultipartUpload", "CopyObject", "CreateMultipartUpload", "DeleteBucketTagging", "DeleteObject", "DeleteObjectTagging", "DeleteObjects", "GetBucketTagging", "GetObject", "GetObjectAttributes", "GetObjectTagging", "ListMultipartUploads", "ListObjectVersions", "ListObjects", "ListObjectsV2", "ListParts", "PutBucketCors", "PutBucketTagging", "PutObject", "PutObjectTagging", "UploadPart", "UploadPartCopy"]),
     ("InvalidDigest", &["PutObject", "UploadPart"]),
     ("InvalidObjectState", &["GetObject"]),
     ("InvalidPart", &["CompleteMultipartUpload"]),
@@ -35,14 +35,15 @@ pub static ERROR_CODE_OPERATIONS: &[(&str, &[&str])] = &[
     ("InvalidRange", &["GetObject", "UploadPartCopy"]),
     ("InvalidRequest", &["CompleteMultipartUpload", "CopyObject", "CreateMultipartUpload", "DeleteObjects", "PutBucketCors", "PutObject", "UploadPartCopy"]),
     ("InvalidStorageClass", &["CreateMultipartUpload"]),
-    ("InvalidTag", &["PutObjectTagging"]),
+    ("InvalidTag", &["PutBucketTagging", "PutObjectTagging"]),
     ("InvalidWriteOffset", &["PutObject"]),
-    ("MalformedXML", &["CompleteMultipartUpload", "DeleteObjects", "PutBucketCors", "PutObjectTagging"]),
+    ("MalformedXML", &["CompleteMultipartUpload", "DeleteObjects", "PutBucketCors", "PutBucketTagging", "PutObjectTagging"]),
     ("MethodNotAllowed", &["CopyObject", "UploadPartCopy"]),
     ("MissingContentLength", &["PutObject", "UploadPart"]),
-    ("NoSuchBucket", &["AbortMultipartUpload", "CompleteMultipartUpload", "CopyObject", "CreateMultipartUpload", "DeleteBucketCors", "DeleteObject", "DeleteObjectTagging", "DeleteObjects", "GetBucketCors", "GetBucketLocation", "GetObject", "GetObjectAttributes", "GetObjectTagging", "HeadObject", "ListMultipartUploads", "ListObjectVersions", "ListObjects", "ListObjectsV2", "ListParts", "PutBucketCors", "PutObject", "PutObjectTagging", "UploadPart", "UploadPartCopy"]),
+    ("NoSuchBucket", &["AbortMultipartUpload", "CompleteMultipartUpload", "CopyObject", "CreateMultipartUpload", "DeleteBucketCors", "DeleteBucketTagging", "DeleteObject", "DeleteObjectTagging", "DeleteObjects", "GetBucketCors", "GetBucketLocation", "GetBucketTagging", "GetObject", "GetObjectAttributes", "GetObjectTagging", "HeadObject", "ListMultipartUploads", "ListObjectVersions", "ListObjects", "ListObjectsV2", "ListParts", "PutBucketCors", "PutBucketTagging", "PutObject", "PutObjectTagging", "UploadPart", "UploadPartCopy"]),
     ("NoSuchCORSConfiguration", &["GetBucketCors"]),
     ("NoSuchKey", &["CopyObject", "DeleteObjectTagging", "GetObject", "GetObjectAttributes", "GetObjectTagging", "HeadObject", "PutObjectTagging", "UploadPartCopy"]),
+    ("NoSuchTagSet", &["GetBucketTagging"]),
     ("NoSuchUpload", &["AbortMultipartUpload", "CompleteMultipartUpload", "ListParts", "UploadPart", "UploadPartCopy"]),
     ("NotFound", &["HeadObject"]),
     ("NotModified", &["GetObject", "HeadObject"]),
@@ -55,6 +56,7 @@ pub static ERROR_CODE_OPERATIONS: &[(&str, &[&str])] = &[
 
 pub static NOT_CONFIGURED_CODES: &[(&str, &str)] = &[
     ("GetBucketCors", "NoSuchCORSConfiguration"),
+    ("GetBucketTagging", "NoSuchTagSet"),
 ];
 
 pub static ERROR_AFTER_200: &[&str] = &[

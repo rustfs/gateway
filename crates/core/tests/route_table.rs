@@ -14,10 +14,11 @@
 
 //! The ordered table: what it routes, and everything it refuses to be built from.
 //!
-//! Responsible for: the route cases — twelve positive, thirty-six negative — including the one that
-//! falsifies a fake overlap check, and the two blocks that pin an operation the protocol defines and
-//! this build does not serve to its own row rather than to its neighbour's: `?attributes`, and the
-//! three-method `?tagging` band whose absence was a write and a delete of the object.
+//! Responsible for: the route cases — thirteen positive, forty negative — including the one that
+//! falsifies a fake overlap check, and the three blocks that pin an operation the protocol defines
+//! and this build does not serve to its own row rather than to its neighbour's: `?attributes`, the
+//! three-method object `?tagging` band whose absence was a write and a delete of the object, and
+//! the bucket `?tagging` band whose GET was answered by `ListObjects` with a page of keys.
 //! NOT responsible for: parameter validation (`params_and_dispatch.rs`), the compiled form
 //! (`hot_path.rs`), the golden rendering (`golden.rs`).
 //! Upstream: `support`. Downstream: nothing.
@@ -313,8 +314,9 @@ fn n_a_request_naming_an_upload_and_tagging_stays_with_the_multipart_band() {
     }
 }
 
-/// Negative — `?tagging` on a bucket is the bucket's tag set, which is still deferred, so it must
-/// not reach any of the three object rows.
+/// Negative — `?tagging` on a bucket is the bucket's tag set, which has rows of its own, so it
+/// must not reach any of the three object rows: the two scopes follow different unconfigured
+/// rules, and crossing them would answer a bucket question with an object rule.
 #[test]
 fn n_the_tagging_key_on_a_bucket_does_not_reach_an_object_tagging_row() {
     let table = generated_table();
@@ -324,6 +326,82 @@ fn n_the_tagging_key_on_a_bucket_does_not_reach_an_object_tagging_row() {
             !matches!(hit, Some("GetObjectTagging" | "PutObjectTagging" | "DeleteObjectTagging")),
             "{line} routed to {hit:?}, which is an object-scoped operation"
         );
+    }
+}
+
+/// The bucket `?tagging` band claims its own three requests, one per method.
+///
+/// The positive half of the bucket-scope block, checked as a whole for the same reason the object
+/// band is: the property is that *all three* methods reach their own rows rather than the bucket
+/// band's fallbacks.
+#[test]
+fn the_bucket_tagging_subresource_routes_to_the_bucket_tagging_operations() {
+    let table = generated_table();
+    for (line, expected) in [
+        ("GET /bucket?tagging", "GetBucketTagging"),
+        ("PUT /bucket?tagging", "PutBucketTagging"),
+        ("DELETE /bucket?tagging", "DeleteBucketTagging"),
+    ] {
+        let hit = table
+            .resolve(&Req::new(line).parts())
+            .unwrap_or_else(|| panic!("{line} has a route"));
+        assert_eq!(hit.op_name, expected, "{line}");
+        assert!(hit.precedence < 600, "{line} must sit ahead of the listing band, got {}", hit.precedence);
+    }
+}
+
+/// Negative — the bucket tagging read is never claimed by a listing. Before the row at 310
+/// existed, `GET /bucket?tagging` was answered by `ListObjects` with a page of keys — a wrong
+/// answer wearing a `200`, the bucket-scope twin of the object band's disclosure.
+#[test]
+fn n_a_bucket_tagging_read_is_not_claimed_by_a_listing() {
+    let table = generated_table();
+    for forbidden in ["ListObjects", "ListObjectsV2", "ListObjectVersions", "ListMultipartUploads"] {
+        assert_ne!(routed(&table, &Req::new("GET /bucket?tagging")), Some(forbidden));
+    }
+}
+
+/// Negative — a request sending `?tagging` beside another bucket query still has one fixed
+/// answer: `?location` wins above the band, and the listings lose below it.
+#[test]
+fn n_a_bucket_tagging_request_with_a_second_query_key_keeps_the_band_order() {
+    let table = generated_table();
+    for (line, expected) in [
+        ("GET /bucket?location&tagging", "GetBucketLocation"),
+        ("GET /bucket?tagging&list-type=2", "GetBucketTagging"),
+        ("GET /bucket?tagging&versions", "GetBucketTagging"),
+        ("GET /bucket?tagging&uploads", "GetBucketTagging"),
+    ] {
+        assert_eq!(routed(&table, &Req::new(line)), Some(expected), "{line}");
+    }
+}
+
+/// Negative — the bucket rows are bound to their methods and their target. `HEAD /bucket?tagging`
+/// matches nothing, and the object-scope requests stay with the object rows.
+#[test]
+fn n_a_bucket_tagging_row_is_not_reachable_under_another_method_or_target() {
+    let table = generated_table();
+    assert_eq!(routed(&table, &Req::new("HEAD /bucket?tagging")), None, "HEAD names no tagging operation");
+    for (line, expected) in [
+        ("GET /bucket/key?tagging", "GetObjectTagging"),
+        ("PUT /bucket/key?tagging", "PutObjectTagging"),
+        ("DELETE /bucket/key?tagging", "DeleteObjectTagging"),
+    ] {
+        assert_eq!(routed(&table, &Req::new(line)), Some(expected), "{line} is object-scoped");
+    }
+}
+
+/// Negative — the bucket band's neighbours are untouched by the three rows put beside them.
+#[test]
+fn n_the_bucket_band_is_unchanged_beside_the_bucket_tagging_rows() {
+    let table = generated_table();
+    for (line, expected) in [
+        ("GET /bucket?location", "GetBucketLocation"),
+        ("GET /bucket", "ListObjects"),
+        ("GET /bucket?list-type=2", "ListObjectsV2"),
+        ("POST /bucket?delete", "DeleteObjects"),
+    ] {
+        assert_eq!(routed(&table, &Req::new(line)), Some(expected), "{line}");
     }
 }
 

@@ -558,7 +558,7 @@
             },
   "derived_resources": [],
   "head_mirrors": null,
-  "quirk_refs": ["q-checksum-0006"],
+  "quirk_refs": ["q-checksum-0006", "q-tag-header-form-0093"],
   "quirks": [
               {
                 "id": "q-etag-0004",
@@ -729,6 +729,20 @@
                               }
                             ],
                 "cases": ["c-cond-0019", "c-cond-0028"]
+              },
+              {
+                "id": "q-tag-header-form-0093",
+                "kind": "wire_form",
+                "target": "PutObject",
+                "summary": "The x-amz-tagging header on PutObject and CopyObject carries the tag set as URL query-string pairs, UTF-8 then URL-encoded, so `a%20b=c%2Bd` names the key `a b` and the value `c+d`, and a malformed spelling is a 400 before anything is stored.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObject.html",
+                                "summary": "The header's documented value form is URL query parameters, with the example tag set spelled key=value pairs joined by ampersands."
+                              }
+                            ],
+                "cases": ["c-tagging-0003", "c-tagging-0016", "c-tagging-0017"]
               }
             ],
   "ext_points": []

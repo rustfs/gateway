@@ -3,19 +3,19 @@
 # in OPERATIONS.md.
 
 [operation]
-name = "DeleteObjectTagging"
+name = "DeleteBucketTagging"
 method = "DELETE"
-target = "Object"
-path_shape = "/{Bucket}/{Key+}"
-precedence = 500
+target = "Bucket"
+path_shape = "/{Bucket}"
+precedence = 360
 success_status = 204
 alt_success_statuses = []
-predicates = ["Method DELETE", "Target Object", "QueryPresent ?tagging"]
+predicates = ["Method DELETE", "Target Bucket", "QueryPresent ?tagging"]
 quirks = ["q-tag-delete-idempotent-0091"]
 
 [auth]
 requirement = "Required"
-action = "s3:DeleteObjectTagging"
+action = "s3:DeleteBucketTagging"
 presigned_allowed = true
 service = "s3"
 
@@ -47,7 +47,7 @@ url_encoded_fields = []
 [errors]
 not_configured = ""
 allows_error_after_200 = false
-codes = ["NoSuchBucket", "NoSuchKey", "AccessDenied", "InvalidArgument"]
+codes = ["NoSuchBucket", "AccessDenied", "InvalidArgument"]
 
 [[input]]
 name = "Bucket"
@@ -59,37 +59,10 @@ hot = true
 quirks = []
 
 [[input]]
-name = "Key"
-wire_name = "Key"
-binding = "UriLabel(greedy)"
-type = "ObjectKey"
-required = true
-hot = true
-quirks = []
-
-[[input]]
-name = "VersionId"
-wire_name = "versionId"
-binding = "Query"
-type = "String"
-required = false
-hot = true
-quirks = []
-
-[[input]]
 name = "ExpectedBucketOwner"
 wire_name = "x-amz-expected-bucket-owner"
 binding = "Header"
 type = "String"
 required = false
 hot = false
-quirks = []
-
-[[output]]
-name = "VersionId"
-wire_name = "x-amz-version-id"
-binding = "Header"
-type = "String"
-required = false
-hot = true
 quirks = []

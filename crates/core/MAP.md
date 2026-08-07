@@ -34,8 +34,9 @@ the one file that awaits, and it runs after the floor has admitted the request.
 | `src/codec/tests.rs` | 34 tests over the object family: what the generated codecs do to bytes, including the bounded scalars and the required integrity check | You changed an emitter or a conversion |
 | `src/ops/*.rs` | One AWS operation per file: spec, floor, `impl Operation`, `impl HasOperation` | You are adding an operation — copy the nearest one |
 | `src/ops/get_object_attributes.rs` | The attributes read. Present with no backend behind it anywhere in this workspace, on purpose: without its row `?attributes` is claimed by `GetObject` and answered with the object's bytes | You are asking why an operation nobody handles has a module |
-| `src/ops/get_object_tagging.rs`, `src/ops/put_object_tagging.rs`, `src/ops/delete_object_tagging.rs` | The `?tagging` band, 480/490/500. Here for the same reason as the attributes read and with worse consequences: without their rows the write stored the tagging document **as** the object and the delete removed **the object** | You are asking why three operations no backend in this workspace handles have modules |
+| `src/ops/get_object_tagging.rs`, `src/ops/put_object_tagging.rs`, `src/ops/delete_object_tagging.rs` | The object `?tagging` band, 480/490/500. Here for the same reason as the attributes read and with worse consequences: without their rows the write stored the tagging document **as** the object and the delete removed **the object** | You are asking why three operations no backend in this workspace handles have modules |
 | `src/ops/get_bucket_cors.rs`, `src/ops/put_bucket_cors.rs`, `src/ops/delete_bucket_cors.rs` | The `?cors` band, 310/320/330 — configuration codec only; preflight is a separately designed pre-auth stage. The GET row retires the `GetBucketCors -> ListObjects` debt-register line; the unconfigured read is the operation-specific `NoSuchCORSConfiguration` 404 | You are adding a bucket subresource triple — this is the template, `not_configured_error` included |
+| `src/ops/get_bucket_tagging.rs`, `src/ops/put_bucket_tagging.rs`, `src/ops/delete_bucket_tagging.rs` | The bucket `?tagging` band, 340/350/360, behind the `?cors` band. `GetBucketTagging` declares `NoSuchTagSet` as its `not_configured_error` — the opposite of the object read's 200-with-empty-set — and both scopes validate through `shared/tagging.rs` | You are adding the next bucket subresource triple — copy either this or the CORS one |
 | `src/ops/shared/cors.rs` | The CORS document's semantic rules — closed method set, wildcard budgets, the 100-rule cap, `ID`/`MaxAgeSeconds` bounds — as `validate_cors` and `CorsRejection`, exported through the facade so every backend refuses the same documents with the same codes | A CORS document was accepted or refused wrongly, or you are the preflight task looking for what a stored document is guaranteed to satisfy |
 | `src/ops/shared/copy_source.rs` | `x-amz-copy-source`: the three grammars, the split-before-decode order, the source-authorization type state, the self-copy classification and the stricter copy-range rule | You are touching anything a copy reads from, or asking why the source's bucket cannot be read without a proof |
 | `src/ops/shared/etag.rs` | Which RFC 9110 comparison each conditional entity-tag header uses, and how its value is read | An entity-tag condition matched when it should not have, or the other way round |
@@ -51,8 +52,8 @@ the one file that awaits, and it runs after the floor has admitted the request.
 | `src/registry/builder.rs` | `RouterBuilder`: `handle`, `route`, `require`, `build`, and `BuildError` | You are assembling a service |
 | `src/error.rs` | `PreAuthError` and the closed pre-authentication status set | You are raising an error before authn |
 | `src/dispatch.rs` | `Router`: route, then registration, then parameters — three failures, not one | You are wiring the pipeline |
-| `tests/route_table.rs` | 13 positive / 42 negative — every routing and build-refusal case, plus the attributes row and the three-method `?tagging` and `?cors` bands that keep an unimplemented operation off its neighbour's route | You changed `table.rs` or `lattice.rs` |
-| `tests/params_and_dispatch.rs` | 7 positive / 17 negative — the 400-not-501 rule, the error properties, and the routed-but-unhandled `501` over the generated table for `?attributes`, the `?tagging` methods and the `?cors` band | You changed `registry.rs` or `error.rs` |
+| `tests/route_table.rs` | 14 positive / 46 negative — every routing and build-refusal case, plus the attributes row and the `?cors` band and both `?tagging` bands (object and bucket) that keep an unimplemented operation off its neighbour's route | You changed `table.rs` or `lattice.rs` |
+| `tests/params_and_dispatch.rs` | 8 positive / 18 negative — the 400-not-501 rule, the error properties, the routed-but-unhandled `501` over the generated table for `?attributes`, the `?cors` band and all six `?tagging` requests, and the declared `NoSuchTagSet` unconfigured answer | You changed `registry.rs` or `error.rs` |
 | `tests/hot_path.rs` | 7 positive / 10 negative — cost, the key ceiling, and the differential generator | You changed `compiled.rs` or `mask.rs` |
 | `tests/golden.rs` + `tests/golden/route-table.txt` | The whole table as text, so a routing change shows up in a diff | Codegen changed |
 | `tests/registration.rs` | 7 positive / 17 negative — the registration rules, erasure, `require`, the 501 | You changed anything under `registry/` |
@@ -136,15 +137,16 @@ the one file that awaits, and it runs after the floor has admitted the request.
   as written. Cases are the contract and are not edited from the implementation side, so this is a
   maintainer decision of the same kind as `c-mpu-0018` and `c-etag-0001`.
 
-- **A deferred operation contributes no route row, so forty-three of the model's operations are
+- **A deferred operation contributes no route row, so forty-two of the model's operations are
   still answered by a neighbour instead of being refused.** `GetObjectAttributes` was the reported
-  case and the three `?tagging` operations are the second instalment; the class is not closed. The
-  overlay declares the protocol-known operation set as `include ∪ deferred` — 22 + 90 = the 112
+  case, the three object `?tagging` operations the second instalment, and `GetBucketTagging`
+  (previously answered by `ListObjects` with a page of keys) the third; the class is not closed.
+  The overlay declares the protocol-known operation set as `include ∪ deferred` — 25 + 87 = the 112
   operations the pinned model defines — and codegen already refuses an operation that is in neither
-  list. What it does *not* do is emit a selector for a deferred one, so the route table knows 22
+  list. What it does *not* do is emit a selector for a deferred one, so the route table knows 25
   shapes and the first-match order gives the rest away. Measured against `generated/routes.rs` by
   replaying each deferred operation's own `@http` selector through the table: `ListObjects` claims
-  29 (`?acl`, `?policy`, `?versioning`, `?encryption`, every bucket subresource read), `GetObject`
+  28 (`?acl`, `?policy`, `?versioning`, `?encryption`, every bucket subresource read), `GetObject`
   claims 6 (`?acl`, `?legal-hold`, `?retention`, `?torrent`), `PutObject` claims 6 (`?acl`,
   `?retention`, `?legal-hold`, `RenameObject`), `DeleteObject` 1, `ListBuckets` 1; 47 are correctly
   refused because their method or target matches nothing. The register is

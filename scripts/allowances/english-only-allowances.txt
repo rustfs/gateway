@@ -1,0 +1,9 @@
+# Paths exempt from scripts/check_english_only.sh, one per line, each with its reason.
+#
+# The exemption is for non-ASCII *test data*, never for prose: a file listed here still keeps
+# every comment, string message and identifier in English.
+
+# Asserts that a Unicode tag key or value is legal and that the 128/256 ceilings count
+# characters rather than bytes — which needs a multi-byte letter as data, and CJK is the
+# three-byte case AWS's own tagging examples exercise.
+crates/core/tests/tagging_contract.rs

@@ -1,23 +1,23 @@
 {
   "ir_version": "1",
-  "operation": "GetObjectTagging",
+  "operation": "GetBucketTagging",
   "http": {
             "method": "GET",
-            "target": "Object",
-            "precedence": 480,
+            "target": "Bucket",
+            "precedence": 340,
             "predicates": [
                             { "kind": "Method", "method": "GET" },
-                            { "kind": "Target", "target": "Object" },
+                            { "kind": "Target", "target": "Bucket" },
                             { "kind": "QueryPresent", "key": "tagging" }
                           ],
             "success_status": 200,
             "alt_success_statuses": [],
-            "path_shape": "/{Bucket}/{Key+}"
+            "path_shape": "/{Bucket}"
           },
-  "auth": { "requirement": "Required", "action": "s3:GetObjectTagging", "presigned_allowed": true, "service": "s3" },
+  "auth": { "requirement": "Required", "action": "s3:GetBucketTagging", "presigned_allowed": true, "service": "s3" },
   "payload": {
                "request": { "kind": "None", "buffering": "None", "max_bytes": null },
-               "response": { "kind": "XmlBody", "buffering": "Full", "max_bytes": 65536 }
+               "response": { "kind": "XmlBody", "buffering": "Full", "max_bytes": 262144 }
              },
   "checksum": { "http_checksum_required": false, "request_algorithms": [], "response_algorithms": [] },
   "input": {
@@ -32,24 +32,6 @@
                            "quirk_refs": []
                          },
                          {
-                           "name": "Key",
-                           "wire_name": "Key",
-                           "required": true,
-                           "binding": { "kind": "UriLabel", "greedy": true },
-                           "type": { "kind": "ObjectKey" },
-                           "hot": true,
-                           "quirk_refs": []
-                         },
-                         {
-                           "name": "VersionId",
-                           "wire_name": "versionId",
-                           "required": false,
-                           "binding": { "kind": "Query" },
-                           "type": { "kind": "String" },
-                           "hot": true,
-                           "quirk_refs": []
-                         },
-                         {
                            "name": "ExpectedBucketOwner",
                            "wire_name": "x-amz-expected-bucket-owner",
                            "required": false,
@@ -57,29 +39,11 @@
                            "type": { "kind": "String" },
                            "hot": false,
                            "quirk_refs": []
-                         },
-                         {
-                           "name": "RequestPayer",
-                           "wire_name": "x-amz-request-payer",
-                           "required": false,
-                           "binding": { "kind": "Header" },
-                           "type": { "kind": "StringEnum", "values": ["requester"] },
-                           "hot": false,
-                           "quirk_refs": []
                          }
                        ]
            },
   "output": {
               "fields": [
-                          {
-                            "name": "VersionId",
-                            "wire_name": "x-amz-version-id",
-                            "required": false,
-                            "binding": { "kind": "Header" },
-                            "type": { "kind": "String" },
-                            "hot": false,
-                            "quirk_refs": []
-                          },
                           {
                             "name": "TagSet",
                             "wire_name": "TagSet",
@@ -139,13 +103,13 @@
            "body_literal": false
          },
   "errors": {
-              "not_configured": null,
+              "not_configured": "NoSuchTagSet",
               "allows_error_after_200": false,
-              "codes": ["NoSuchBucket", "NoSuchKey", "AccessDenied", "InvalidArgument"]
+              "codes": ["NoSuchBucket", "NoSuchTagSet", "AccessDenied", "InvalidArgument"]
             },
   "derived_resources": [],
   "head_mirrors": null,
-  "quirk_refs": ["q-tag-wrapped-0088", "q-tag-object-unconfigured-0090"],
+  "quirk_refs": ["q-tag-wrapped-0088", "q-tag-bucket-unconfigured-0089"],
   "quirks": [
               {
                 "id": "q-tag-wrapped-0088",
@@ -162,18 +126,18 @@
                 "cases": ["c-tagging-0001", "c-tagging-0004", "c-tagging-0018"]
               },
               {
-                "id": "q-tag-object-unconfigured-0090",
+                "id": "q-tag-bucket-unconfigured-0089",
                 "kind": "error_code",
-                "target": "GetObjectTagging",
-                "summary": "An object with no tags answers 200 with an empty TagSet — the opposite of the bucket read's 404 NoSuchTagSet — so the two reads of one subresource name follow two different unconfigured rules.",
+                "target": "GetBucketTagging",
+                "summary": "A bucket that never had a tag set answers 404 with the dedicated code NoSuchTagSet — not a generic not-found and not a 200 with an empty set — so a client can distinguish an unlabelled bucket from a missing one.",
                 "evidence": [
                               {
                                 "kind": "aws-doc",
-                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObjectTagging.html",
-                                "summary": "The documented response for an object without tags is a success carrying an empty TagSet, and the operation's error list carries no NoSuchTagSet."
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketTagging.html",
+                                "summary": "The operation's error list names NoSuchTagSet as the answer when there is no tag set on the bucket."
                               }
                             ],
-                "cases": ["c-tagging-0004", "c-tagging-0007"]
+                "cases": ["c-tagging-0002", "c-tagging-0005", "c-tagging-0006"]
               }
             ],
   "ext_points": []

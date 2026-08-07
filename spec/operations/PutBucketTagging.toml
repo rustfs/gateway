@@ -3,26 +3,26 @@
 # in OPERATIONS.md.
 
 [operation]
-name = "PutObjectTagging"
+name = "PutBucketTagging"
 method = "PUT"
-target = "Object"
-path_shape = "/{Bucket}/{Key+}"
-precedence = 490
+target = "Bucket"
+path_shape = "/{Bucket}"
+precedence = 350
 success_status = 200
 alt_success_statuses = []
-predicates = ["Method PUT", "Target Object", "QueryPresent ?tagging"]
+predicates = ["Method PUT", "Target Bucket", "QueryPresent ?tagging"]
 quirks = ["q-tag-md5-required-0092", "q-tag-limits-0094"]
 
 [auth]
 requirement = "Required"
-action = "s3:PutObjectTagging"
+action = "s3:PutBucketTagging"
 presigned_allowed = true
 service = "s3"
 
 [payload.request]
 kind = "XmlBody"
 buffering = "Full"
-max_bytes = 65536
+max_bytes = 262144
 
 [payload.response]
 kind = "None"
@@ -47,7 +47,7 @@ url_encoded_fields = []
 [errors]
 not_configured = ""
 allows_error_after_200 = false
-codes = ["NoSuchBucket", "NoSuchKey", "AccessDenied", "InvalidArgument", "MalformedXML", "InvalidTag"]
+codes = ["NoSuchBucket", "AccessDenied", "InvalidArgument", "MalformedXML", "InvalidTag"]
 
 [[input]]
 name = "Bucket"
@@ -55,24 +55,6 @@ wire_name = "Bucket"
 binding = "UriLabel"
 type = "BucketName"
 required = true
-hot = true
-quirks = []
-
-[[input]]
-name = "Key"
-wire_name = "Key"
-binding = "UriLabel(greedy)"
-type = "ObjectKey"
-required = true
-hot = true
-quirks = []
-
-[[input]]
-name = "VersionId"
-wire_name = "versionId"
-binding = "Query"
-type = "String"
-required = false
 hot = true
 quirks = []
 
@@ -111,25 +93,6 @@ binding = "Header"
 type = "String"
 required = false
 hot = false
-quirks = []
-
-[[input]]
-name = "RequestPayer"
-wire_name = "x-amz-request-payer"
-binding = "Header"
-type = "StringEnum"
-required = false
-hot = false
-values = ["requester"]
-quirks = []
-
-[[output]]
-name = "VersionId"
-wire_name = "x-amz-version-id"
-binding = "Header"
-type = "String"
-required = false
-hot = true
 quirks = []
 
 [shape.Tag]

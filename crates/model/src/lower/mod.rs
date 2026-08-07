@@ -167,9 +167,9 @@ fn lower_one(model: &Model, overlay: &Overlay, name: &str) -> Result<OperationIr
     });
 
     // `smithy.api#Unit` is Smithy's "no input/output at all" marker, not a shape the model
-    // declares — DeleteBucketCors is the first included operation whose output is spelled this
-    // way. Reading it as `None` gives such an operation an empty field list, which is what the
-    // marker means, rather than an "unknown shape" failure.
+    // declares — DeleteBucketCors and DeleteBucketTagging are the included operations whose output
+    // is spelled this way. Reading it as `None` gives such an operation an empty field list, which
+    // is what the marker means, rather than an "unknown shape" failure.
     let input_shape = op
         .get("input")
         .and_then(target_of)

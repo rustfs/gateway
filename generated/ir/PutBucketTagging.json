@@ -1,22 +1,22 @@
 {
   "ir_version": "1",
-  "operation": "PutObjectTagging",
+  "operation": "PutBucketTagging",
   "http": {
             "method": "PUT",
-            "target": "Object",
-            "precedence": 490,
+            "target": "Bucket",
+            "precedence": 350,
             "predicates": [
                             { "kind": "Method", "method": "PUT" },
-                            { "kind": "Target", "target": "Object" },
+                            { "kind": "Target", "target": "Bucket" },
                             { "kind": "QueryPresent", "key": "tagging" }
                           ],
             "success_status": 200,
             "alt_success_statuses": [],
-            "path_shape": "/{Bucket}/{Key+}"
+            "path_shape": "/{Bucket}"
           },
-  "auth": { "requirement": "Required", "action": "s3:PutObjectTagging", "presigned_allowed": true, "service": "s3" },
+  "auth": { "requirement": "Required", "action": "s3:PutBucketTagging", "presigned_allowed": true, "service": "s3" },
   "payload": {
-               "request": { "kind": "XmlBody", "buffering": "Full", "max_bytes": 65536 },
+               "request": { "kind": "XmlBody", "buffering": "Full", "max_bytes": 262144 },
                "response": { "kind": "None", "buffering": "None", "max_bytes": null }
              },
   "checksum": {
@@ -32,24 +32,6 @@
                            "required": true,
                            "binding": { "kind": "UriLabel", "greedy": false },
                            "type": { "kind": "BucketName" },
-                           "hot": true,
-                           "quirk_refs": []
-                         },
-                         {
-                           "name": "Key",
-                           "wire_name": "Key",
-                           "required": true,
-                           "binding": { "kind": "UriLabel", "greedy": true },
-                           "type": { "kind": "ObjectKey" },
-                           "hot": true,
-                           "quirk_refs": []
-                         },
-                         {
-                           "name": "VersionId",
-                           "wire_name": "versionId",
-                           "required": false,
-                           "binding": { "kind": "Query" },
-                           "type": { "kind": "String" },
                            "hot": true,
                            "quirk_refs": []
                          },
@@ -102,31 +84,10 @@
                            "type": { "kind": "String" },
                            "hot": false,
                            "quirk_refs": []
-                         },
-                         {
-                           "name": "RequestPayer",
-                           "wire_name": "x-amz-request-payer",
-                           "required": false,
-                           "binding": { "kind": "Header" },
-                           "type": { "kind": "StringEnum", "values": ["requester"] },
-                           "hot": false,
-                           "quirk_refs": []
                          }
                        ]
            },
-  "output": {
-              "fields": [
-                          {
-                            "name": "VersionId",
-                            "wire_name": "x-amz-version-id",
-                            "required": false,
-                            "binding": { "kind": "Header" },
-                            "type": { "kind": "String" },
-                            "hot": true,
-                            "quirk_refs": []
-                          }
-                        ]
-            },
+  "output": { "fields": [] },
   "shapes": {
               "Tag": {
                        "kind": "Structure",
@@ -196,7 +157,7 @@
   "errors": {
               "not_configured": null,
               "allows_error_after_200": false,
-              "codes": ["NoSuchBucket", "NoSuchKey", "AccessDenied", "InvalidArgument", "MalformedXML", "InvalidTag"]
+              "codes": ["NoSuchBucket", "AccessDenied", "InvalidArgument", "MalformedXML", "InvalidTag"]
             },
   "derived_resources": [],
   "head_mirrors": null,
