@@ -38,6 +38,7 @@ pub mod bucket_region;
 pub mod copy_source;
 pub mod cors;
 pub mod etag;
+pub mod lifecycle;
 pub mod location_constraint;
 pub mod pagination;
 pub mod precondition;

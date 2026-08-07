@@ -1,0 +1,51 @@
+[case]
+id = "c-lifecycle-0026"
+schema_version = 1
+title = "A document with a thousand and one rules is refused with 400 in bounded time"
+rationale = """
+The refusing side of the rule cap, and a bounded-resource assertion at once: the document must be refused after counting, not stored truncated — a silently dropped thousand-first rule is a retention policy the client believes exists — and the refusal must arrive in bounded time on a body this large, because the cap is also what makes rule-count a closed resource."""
+polarity = "negative"
+operation = "PutBucketLifecycleConfiguration"
+tags = ["lifecycle", "dos", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-lc-0011"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/intro-lifecycle-rules.html"
+summary = "The lifecycle rules guide caps a configuration at 1,000 rules per bucket."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "conf-lifecycle"
+
+[[exchanges]]
+name = "thousand-and-one"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-lifecycle?lifecycle"
+headers = { "content-type" = "application/xml", "content-md5" = "nxZx+B6QiQHC/0tZG/iDDw==" }
+body = { file = "fixtures/lifecycle/thousand-and-one-rules.xml" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[exchanges.expect.timing]
+terminate_within_ms = 5000
+
+[exchanges.expect.error]
+code = "InvalidRequest"
+request_id_present = true
+
+[exchanges.expect.headers_present]
+"content-type" = "application/xml"
+
+[exchanges.expect.body]
+redact = ["RequestId", "HostId"]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>InvalidRequest</Code><Message>The lifecycle configuration allows a maximum of 1000 Rules</Message><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''

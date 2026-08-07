@@ -165,6 +165,11 @@ fn data_struct(
     out
 }
 
+/// rustfmt's `max_width` for this repository, mirrored here as the codec emitters mirror it: a
+/// generated signature past it would make `cargo xtask spec verify` fail the moment somebody
+/// formatted the tree.
+const MAX_WIDTH: usize = 130;
+
 /// Renders the input builder. ADR-0004 P7: recommended, never the only path.
 fn builder(fields: &[Field], registry: &Registry) -> String {
     let mut out = String::new();
@@ -192,11 +197,19 @@ fn builder(fields: &[Field], registry: &Registry) -> String {
         } else {
             (inner.clone(), format!("self.input.{name} = Some(value);"))
         };
+        // rustfmt's normal form: the signature stays on one line until it would cross
+        // `max_width`, then every parameter gets its own line. The emitter mirrors the rule
+        // rather than approximating it, because the goldens compare byte for byte.
+        let one_line = format!("    pub fn {name}(mut self, value: {argument}) -> Self {{");
+        let signature = if one_line.len() <= MAX_WIDTH {
+            one_line
+        } else {
+            format!("    pub fn {name}(\n        mut self,\n        value: {argument},\n    ) -> Self {{")
+        };
         let _ = write!(
             out,
             "    /// Sets `{}`.\n    \
-             #[must_use]\n    \
-             pub fn {name}(mut self, value: {argument}) -> Self {{\n        {assignment}\n        self\n    }}\n\n",
+             #[must_use]\n{signature}\n        {assignment}\n        self\n    }}\n\n",
             field.name
         );
     }

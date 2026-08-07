@@ -1,0 +1,76 @@
+[case]
+id = "c-lifecycle-0016"
+schema_version = 1
+title = "An empty body and a rule-less document are both 400 MalformedXML, never an installed empty policy"
+rationale = """
+Clearing a lifecycle configuration is spelled DeleteBucketLifecycle; a write with nothing in it must not become a second spelling. An empty body decodes to no document at all — the backend refuses it by name — and LifecycleConfiguration with no Rule fails the model's required-member floor; both must answer MalformedXML rather than store an empty policy that a later read faithfully returns as configured-but-inert."""
+polarity = "negative"
+operation = "PutBucketLifecycleConfiguration"
+tags = ["lifecycle", "xml", "error-shape"]
+timeout_ms = 10000
+quirks = []
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketLifecycleConfiguration.html"
+summary = "The request syntax requires at least one Rule inside the configuration document."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "conf-lifecycle"
+
+[[exchanges]]
+name = "empty-body"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-lifecycle?lifecycle"
+headers = { "content-type" = "application/xml", "content-md5" = "1B2M2Y8AsgTpgAmY7PhCfg==" }
+body = { utf8 = '' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[exchanges.expect.error]
+code = "MalformedXML"
+request_id_present = true
+
+[exchanges.expect.headers_present]
+"content-type" = "application/xml"
+
+[exchanges.expect.body]
+redact = ["RequestId", "HostId"]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>MalformedXML</Code><Message>the request carries no lifecycle document</Message><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''
+
+[[exchanges]]
+name = "no-rules"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-lifecycle?lifecycle"
+headers = { "content-type" = "application/xml", "content-md5" = "j9VfG/p/L54O4f1X84gDLQ==" }
+body = { utf8 = '<LifecycleConfiguration/>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[exchanges.expect.error]
+code = "MalformedXML"
+request_id_present = true
+
+[exchanges.expect.headers_present]
+"content-type" = "application/xml"
+
+[exchanges.expect.body]
+redact = ["RequestId", "HostId"]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>MalformedXML</Code><Message>the body carries no entry for a member that requires one</Message><Resource>Rules</Resource><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''

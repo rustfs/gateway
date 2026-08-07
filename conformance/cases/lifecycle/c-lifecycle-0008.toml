@@ -1,0 +1,55 @@
+[case]
+id = "c-lifecycle-0008"
+schema_version = 1
+title = "A rule scoped by the deprecated rule-level Prefix is still accepted and preserved"
+rationale = """
+Configurations written under the pre-Filter API revision carry Prefix directly on the rule, and they are still on disk in every long-lived deployment. A decoder that refuses the legacy spelling refuses stored data, and the persistence path fails open — the configuration downgrades to none and lifecycle rules stop firing with no error anyone sees. The round trip must also keep the member at rule level rather than migrating it into a Filter, because the stored bytes are the contract."""
+polarity = "positive"
+operation = "PutBucketLifecycleConfiguration"
+tags = ["lifecycle", "xml", "wire-bytes"]
+timeout_ms = 10000
+quirks = ["q-lc-0008"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_LifecycleRule.html"
+summary = "The rule-level Prefix member is documented as deprecated but still present in the wire contract."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "conf-lifecycle"
+
+[[exchanges]]
+name = "put-legacy-prefix"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-lifecycle?lifecycle"
+headers = { "content-type" = "application/xml", "content-md5" = "8G6dbsSxd540cjlgGSivmw==" }
+body = { utf8 = '<LifecycleConfiguration><Rule><Expiration><Days>30</Days></Expiration><ID>legacy</ID><Prefix>old/</Prefix><Status>Enabled</Status></Rule></LifecycleConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[[exchanges]]
+name = "read-back"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-lifecycle?lifecycle"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.headers_present]
+"content-type" = "application/xml"
+
+[exchanges.expect.body]
+golden = "goldens/c-lifecycle-0008.xml"
+not_contains_utf8 = ["<Filter>"]

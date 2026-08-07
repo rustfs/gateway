@@ -1,0 +1,59 @@
+[case]
+id = "c-lifecycle-0007"
+schema_version = 1
+title = "A filter combining a prefix, two tags and a size floor inside one And round-trips byte for byte"
+rationale = """
+The And element is the only legal spelling for a multi-condition filter, and its children include a flattened Tag list — the same two shapes that break independently break together here. A round trip that reorders the conditions or wraps the tags produces a filter that matches a different set of objects than the one the client scoped."""
+polarity = "positive"
+operation = "GetBucketLifecycleConfiguration"
+tags = ["lifecycle", "xml", "wire-bytes"]
+timeout_ms = 10000
+quirks = ["q-lc-0007"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_LifecycleRuleFilter.html"
+summary = "The And member is the documented spelling for combining more than one filter condition."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/intro-lifecycle-rules.html"
+summary = "The lifecycle rules guide requires multiple filter conditions to be wrapped in a single And element."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "conf-lifecycle"
+
+[[exchanges]]
+name = "put-and-filter"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-lifecycle?lifecycle"
+headers = { "content-type" = "application/xml", "content-md5" = "OWnGbmdsjZ1D2D2HhaD/yA==" }
+body = { utf8 = '<LifecycleConfiguration><Rule><Expiration><Days>30</Days></Expiration><ID>and-filter</ID><Filter><And><Prefix>logs/</Prefix><Tag><Key>env</Key><Value>prod</Value></Tag><Tag><Key>team</Key><Value>storage</Value></Tag><ObjectSizeGreaterThan>1024</ObjectSizeGreaterThan></And></Filter><Status>Enabled</Status></Rule></LifecycleConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[[exchanges]]
+name = "read-back"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-lifecycle?lifecycle"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.headers_present]
+"content-type" = "application/xml"
+
+[exchanges.expect.body]
+golden = "goldens/c-lifecycle-0007.xml"

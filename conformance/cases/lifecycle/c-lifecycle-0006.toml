@@ -1,0 +1,59 @@
+[case]
+id = "c-lifecycle-0006"
+schema_version = 1
+title = "A rule carrying transitions, noncurrent-version actions and an abort action round-trips byte for byte"
+rationale = """
+This is the densest legal rule: repeated Transition siblings, a NoncurrentVersionTransition with all three members, a NoncurrentVersionExpiration and an AbortIncompleteMultipartUpload. Losing any nested member on the round trip silently changes what the scanner does to old versions and stale uploads, and the flattened Transition list is exactly where a wrapper-inserting serializer would hide every transition at once."""
+polarity = "positive"
+operation = "GetBucketLifecycleConfiguration"
+tags = ["lifecycle", "xml", "wire-bytes"]
+timeout_ms = 10000
+quirks = ["q-lc-0003"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_LifecycleRule.html"
+summary = "A rule may carry expiration, transition, noncurrent-version and abort-incomplete-multipart actions side by side."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_Transition.html"
+summary = "Transition names the storage class an object moves to after the given days or date."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "conf-lifecycle"
+
+[[exchanges]]
+name = "put-full-rule"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-lifecycle?lifecycle"
+headers = { "content-type" = "application/xml", "content-md5" = "S3GcrtZBj4WjPOmNGrFd4w==" }
+body = { utf8 = '<LifecycleConfiguration><Rule><Expiration><Days>3650</Days></Expiration><ID>tiered</ID><Filter><Prefix>archive/</Prefix></Filter><Status>Enabled</Status><Transition><Days>30</Days><StorageClass>GLACIER</StorageClass></Transition><Transition><Days>90</Days><StorageClass>DEEP_ARCHIVE</StorageClass></Transition><NoncurrentVersionTransition><NoncurrentDays>30</NoncurrentDays><StorageClass>GLACIER_IR</StorageClass><NewerNoncurrentVersions>3</NewerNoncurrentVersions></NoncurrentVersionTransition><NoncurrentVersionExpiration><NoncurrentDays>365</NoncurrentDays><NewerNoncurrentVersions>5</NewerNoncurrentVersions></NoncurrentVersionExpiration><AbortIncompleteMultipartUpload><DaysAfterInitiation>7</DaysAfterInitiation></AbortIncompleteMultipartUpload></Rule></LifecycleConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[[exchanges]]
+name = "read-back"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-lifecycle?lifecycle"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.headers_present]
+"content-type" = "application/xml"
+
+[exchanges.expect.body]
+golden = "goldens/c-lifecycle-0006.xml"

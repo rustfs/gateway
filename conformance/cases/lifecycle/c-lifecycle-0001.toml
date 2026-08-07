@@ -1,0 +1,35 @@
+[case]
+id = "c-lifecycle-0001"
+schema_version = 1
+title = "A minimal document under the LifecycleConfiguration wire root is accepted with 200"
+rationale = """
+The wire root and the model's shape name disagree for this family: clients send LifecycleConfiguration while the payload shape is BucketLifecycleConfiguration. A decoder generated naively from the shape name refuses every document a real SDK produces, which turns every lifecycle rollout into a hard failure at the first PUT. This case holds the accepting side of that root decision; c-lifecycle-0017 holds the refusing side."""
+polarity = "positive"
+operation = "PutBucketLifecycleConfiguration"
+tags = ["lifecycle", "xml"]
+timeout_ms = 10000
+quirks = ["q-lc-0002"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketLifecycleConfiguration.html"
+summary = "The documented request syntax opens with a LifecycleConfiguration root element."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "conf-lifecycle"
+
+[[exchanges]]
+name = "put-minimal"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-lifecycle?lifecycle"
+headers = { "content-type" = "application/xml", "content-md5" = "ATR8BU7QlQFzvolRzIZUiA==" }
+body = { utf8 = '<LifecycleConfiguration><Rule><ID>expire-logs</ID><Filter><Prefix>logs/</Prefix></Filter><Status>Enabled</Status></Rule></LifecycleConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"

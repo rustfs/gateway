@@ -511,6 +511,35 @@ fn n_an_unhandled_cors_request_is_refused_rather_than_answered_by_the_listing() 
     }
 }
 
+/// Negative — an unhandled lifecycle-configuration request is refused by name, in all three
+/// methods.
+///
+/// Same shape as the CORS block above: the registry handles the listing fallback and nothing
+/// else, which is the shape of every deployment that has not implemented lifecycle
+/// configuration. Each of the three must come back as the second `501` naming the lifecycle
+/// operation the request asked for — the GET in particular must not fall through to
+/// `ListObjects`, which is exactly what it did while the operation was deferred (the
+/// `GetBucketLifecycleConfiguration -> ListObjects` debt-register line).
+#[test]
+fn n_an_unhandled_lifecycle_request_is_refused_rather_than_answered_by_the_listing() {
+    let mut registry = Registry::new();
+    registry.register(&LIST_OBJECTS).expect("a registrable spec");
+    let router = Router::from_generated(registry).expect("the generated table builds");
+
+    for (line, expected) in [
+        ("GET /bucket?lifecycle", "GetBucketLifecycleConfiguration"),
+        ("PUT /bucket?lifecycle", "PutBucketLifecycleConfiguration"),
+        ("DELETE /bucket?lifecycle", "DeleteBucketLifecycle"),
+    ] {
+        let error = router
+            .dispatch(&Req::new(line).parts())
+            .expect_err("this registry handles no lifecycle operation");
+        assert_eq!(*error.code(), ErrorCode::NOT_IMPLEMENTED, "{line}");
+        assert_eq!(error.message(), NOT_REGISTERED_MESSAGE, "{line}");
+        assert_eq!(error.operation(), Some(expected), "{line} must name the operation it asked for");
+    }
+}
+
 /// The registered fallback is still served, so the refusal above is not a blanket one.
 #[test]
 fn the_generated_router_still_serves_the_listing_beside_the_cors_rows() {

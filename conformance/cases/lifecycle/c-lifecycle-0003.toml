@@ -1,0 +1,54 @@
+[case]
+id = "c-lifecycle-0003"
+schema_version = 1
+title = "An expiration measured in days survives the round trip byte for byte"
+rationale = """
+Days is the member the scanner reads to decide when data is destroyed, so the round trip has to preserve the number exactly — a document that comes back reordered or renumbered is a different retention policy wearing the same id. The byte-level golden also pins the member order inside a rule, which is what keeps two implementations of this family from producing two spellings of one configuration."""
+polarity = "positive"
+operation = "GetBucketLifecycleConfiguration"
+tags = ["lifecycle", "xml", "wire-bytes"]
+timeout_ms = 10000
+quirks = ["q-lc-0003"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_LifecycleExpiration.html"
+summary = "The Days member expresses the object's lifetime as a whole number of days."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "conf-lifecycle"
+
+[[exchanges]]
+name = "put-days"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-lifecycle?lifecycle"
+headers = { "content-type" = "application/xml", "content-md5" = "xBFFmE7YAS89cbx32H9Qvg==" }
+body = { utf8 = '<LifecycleConfiguration><Rule><Expiration><Days>30</Days></Expiration><ID>logs</ID><Filter><Prefix>logs/</Prefix></Filter><Status>Enabled</Status></Rule></LifecycleConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[[exchanges]]
+name = "read-back"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-lifecycle?lifecycle"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.headers_present]
+"content-type" = "application/xml"
+
+[exchanges.expect.body]
+golden = "goldens/c-lifecycle-0003.xml"

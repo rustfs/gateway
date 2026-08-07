@@ -1,0 +1,838 @@
+{
+  "ir_version": "1",
+  "operation": "PutBucketLifecycleConfiguration",
+  "http": {
+            "method": "PUT",
+            "target": "Bucket",
+            "precedence": 380,
+            "predicates": [
+                            { "kind": "Method", "method": "PUT" },
+                            { "kind": "Target", "target": "Bucket" },
+                            { "kind": "QueryPresent", "key": "lifecycle" }
+                          ],
+            "success_status": 200,
+            "alt_success_statuses": [],
+            "path_shape": "/{Bucket}"
+          },
+  "auth": {
+            "requirement": "Required",
+            "action": "s3:PutLifecycleConfiguration",
+            "presigned_allowed": true,
+            "service": "s3"
+          },
+  "payload": {
+               "request": { "kind": "XmlBody", "buffering": "Full", "max_bytes": 1048576 },
+               "response": { "kind": "None", "buffering": "None", "max_bytes": null }
+             },
+  "checksum": {
+                "http_checksum_required": true,
+                "request_algorithms": ["CRC32", "CRC32C", "CRC64NVME", "SHA1", "SHA256"],
+                "response_algorithms": []
+              },
+  "input": {
+             "fields": [
+                         {
+                           "name": "Bucket",
+                           "wire_name": "Bucket",
+                           "required": true,
+                           "binding": { "kind": "UriLabel", "greedy": false },
+                           "type": { "kind": "BucketName" },
+                           "hot": true,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "ChecksumAlgorithm",
+                           "wire_name": "x-amz-sdk-checksum-algorithm",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": {
+                                     "kind": "StringEnum",
+                                     "values": [
+                                                 "CRC32",
+                                                 "CRC32C",
+                                                 "SHA1",
+                                                 "SHA256",
+                                                 "CRC64NVME",
+                                                 "SHA512",
+                                                 "MD5",
+                                                 "XXHASH64",
+                                                 "XXHASH3",
+                                                 "XXHASH128"
+                                               ]
+                                   },
+                           "hot": false,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "LifecycleConfiguration",
+                           "wire_name": null,
+                           "required": false,
+                           "binding": { "kind": "Payload" },
+                           "type": { "kind": "Structure", "shape": "BucketLifecycleConfiguration" },
+                           "hot": true,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "ExpectedBucketOwner",
+                           "wire_name": "x-amz-expected-bucket-owner",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "String" },
+                           "hot": false,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "TransitionDefaultMinimumObjectSize",
+                           "wire_name": "x-amz-transition-default-minimum-object-size",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": {
+                                     "kind": "StringEnum",
+                                     "values": ["varies_by_storage_class", "all_storage_classes_128K"]
+                                   },
+                           "hot": false,
+                           "quirk_refs": []
+                         }
+                       ]
+           },
+  "output": {
+              "fields": [
+                          {
+                            "name": "TransitionDefaultMinimumObjectSize",
+                            "wire_name": "x-amz-transition-default-minimum-object-size",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": {
+                                      "kind": "StringEnum",
+                                      "values": ["varies_by_storage_class", "all_storage_classes_128K"]
+                                    },
+                            "hot": false,
+                            "quirk_refs": []
+                          }
+                        ]
+            },
+  "shapes": {
+              "AbortIncompleteMultipartUpload": {
+                                                  "kind": "Structure",
+                                                  "fields": [
+                                                              {
+                                                                "name": "DaysAfterInitiation",
+                                                                "wire_name": "DaysAfterInitiation",
+                                                                "required": false,
+                                                                "binding": { "kind": "BodyXml" },
+                                                                "type": { "kind": "Integer" },
+                                                                "hot": false,
+                                                                "quirk_refs": []
+                                                              }
+                                                            ],
+                                                  "xml": {
+                                                           "element_order": ["DaysAfterInitiation"],
+                                                           "empty_value_policy": { "DaysAfterInitiation": "omit" },
+                                                           "attributes": []
+                                                         }
+                                                },
+              "BucketLifecycleConfiguration": {
+                                                "kind": "Structure",
+                                                "fields": [
+                                                            {
+                                                              "name": "Rules",
+                                                              "wire_name": "Rule",
+                                                              "required": true,
+                                                              "binding": { "kind": "BodyXml" },
+                                                              "type": {
+                                                                        "kind": "List",
+                                                                        "member": {
+                                                                                    "kind": "Structure",
+                                                                                    "shape": "LifecycleRule"
+                                                                                  },
+                                                                        "flattened": true,
+                                                                        "wrapper_name": null
+                                                                      },
+                                                              "hot": false,
+                                                              "quirk_refs": []
+                                                            }
+                                                          ],
+                                                "xml": {
+                                                         "element_order": ["Rules"],
+                                                         "empty_value_policy": { "Rules": "emit" },
+                                                         "attributes": []
+                                                       }
+                                              },
+              "LifecycleExpiration": {
+                                       "kind": "Structure",
+                                       "fields": [
+                                                   {
+                                                     "name": "Date",
+                                                     "wire_name": "Date",
+                                                     "required": false,
+                                                     "binding": { "kind": "BodyXml" },
+                                                     "type": { "kind": "Timestamp", "format": "Iso8601" },
+                                                     "hot": false,
+                                                     "quirk_refs": []
+                                                   },
+                                                   {
+                                                     "name": "Days",
+                                                     "wire_name": "Days",
+                                                     "required": false,
+                                                     "binding": { "kind": "BodyXml" },
+                                                     "type": { "kind": "Integer" },
+                                                     "hot": false,
+                                                     "quirk_refs": []
+                                                   },
+                                                   {
+                                                     "name": "ExpiredObjectDeleteMarker",
+                                                     "wire_name": "ExpiredObjectDeleteMarker",
+                                                     "required": false,
+                                                     "binding": { "kind": "BodyXml" },
+                                                     "type": { "kind": "Boolean" },
+                                                     "hot": false,
+                                                     "quirk_refs": []
+                                                   }
+                                                 ],
+                                       "xml": {
+                                                "element_order": ["Date", "Days", "ExpiredObjectDeleteMarker"],
+                                                "empty_value_policy": {
+                                                                        "Date": "omit",
+                                                                        "Days": "omit",
+                                                                        "ExpiredObjectDeleteMarker": "omit"
+                                                                      },
+                                                "attributes": []
+                                              }
+                                     },
+              "LifecycleRule": {
+                                 "kind": "Structure",
+                                 "fields": [
+                                             {
+                                               "name": "Expiration",
+                                               "wire_name": "Expiration",
+                                               "required": false,
+                                               "binding": { "kind": "BodyXml" },
+                                               "type": { "kind": "Structure", "shape": "LifecycleExpiration" },
+                                               "hot": false,
+                                               "quirk_refs": []
+                                             },
+                                             {
+                                               "name": "ID",
+                                               "wire_name": "ID",
+                                               "required": false,
+                                               "binding": { "kind": "BodyXml" },
+                                               "type": { "kind": "String" },
+                                               "hot": false,
+                                               "quirk_refs": []
+                                             },
+                                             {
+                                               "name": "Prefix",
+                                               "wire_name": "Prefix",
+                                               "required": false,
+                                               "binding": { "kind": "BodyXml" },
+                                               "type": { "kind": "String" },
+                                               "hot": false,
+                                               "quirk_refs": []
+                                             },
+                                             {
+                                               "name": "Filter",
+                                               "wire_name": "Filter",
+                                               "required": false,
+                                               "binding": { "kind": "BodyXml" },
+                                               "type": { "kind": "Structure", "shape": "LifecycleRuleFilter" },
+                                               "hot": false,
+                                               "quirk_refs": []
+                                             },
+                                             {
+                                               "name": "Status",
+                                               "wire_name": "Status",
+                                               "required": true,
+                                               "binding": { "kind": "BodyXml" },
+                                               "type": { "kind": "StringEnum", "values": ["Enabled", "Disabled"] },
+                                               "hot": false,
+                                               "quirk_refs": []
+                                             },
+                                             {
+                                               "name": "Transitions",
+                                               "wire_name": "Transition",
+                                               "required": false,
+                                               "binding": { "kind": "BodyXml" },
+                                               "type": {
+                                                         "kind": "List",
+                                                         "member": { "kind": "Structure", "shape": "Transition" },
+                                                         "flattened": true,
+                                                         "wrapper_name": null
+                                                       },
+                                               "hot": false,
+                                               "quirk_refs": []
+                                             },
+                                             {
+                                               "name": "NoncurrentVersionTransitions",
+                                               "wire_name": "NoncurrentVersionTransition",
+                                               "required": false,
+                                               "binding": { "kind": "BodyXml" },
+                                               "type": {
+                                                         "kind": "List",
+                                                         "member": {
+                                                                     "kind": "Structure",
+                                                                     "shape": "NoncurrentVersionTransition"
+                                                                   },
+                                                         "flattened": true,
+                                                         "wrapper_name": null
+                                                       },
+                                               "hot": false,
+                                               "quirk_refs": []
+                                             },
+                                             {
+                                               "name": "NoncurrentVersionExpiration",
+                                               "wire_name": "NoncurrentVersionExpiration",
+                                               "required": false,
+                                               "binding": { "kind": "BodyXml" },
+                                               "type": { "kind": "Structure", "shape": "NoncurrentVersionExpiration" },
+                                               "hot": false,
+                                               "quirk_refs": []
+                                             },
+                                             {
+                                               "name": "AbortIncompleteMultipartUpload",
+                                               "wire_name": "AbortIncompleteMultipartUpload",
+                                               "required": false,
+                                               "binding": { "kind": "BodyXml" },
+                                               "type": {
+                                                         "kind": "Structure",
+                                                         "shape": "AbortIncompleteMultipartUpload"
+                                                       },
+                                               "hot": false,
+                                               "quirk_refs": []
+                                             }
+                                           ],
+                                 "xml": {
+                                          "element_order": [
+                                                             "Expiration",
+                                                             "ID",
+                                                             "Prefix",
+                                                             "Filter",
+                                                             "Status",
+                                                             "Transitions",
+                                                             "NoncurrentVersionTransitions",
+                                                             "NoncurrentVersionExpiration",
+                                                             "AbortIncompleteMultipartUpload"
+                                                           ],
+                                          "empty_value_policy": {
+                                                                  "Expiration": "omit",
+                                                                  "ID": "omit",
+                                                                  "Prefix": "omit",
+                                                                  "Filter": "omit",
+                                                                  "Status": "emit",
+                                                                  "Transitions": "omit",
+                                                                  "NoncurrentVersionTransitions": "omit",
+                                                                  "NoncurrentVersionExpiration": "omit",
+                                                                  "AbortIncompleteMultipartUpload": "omit"
+                                                                },
+                                          "attributes": []
+                                        }
+                               },
+              "LifecycleRuleAndOperator": {
+                                            "kind": "Structure",
+                                            "fields": [
+                                                        {
+                                                          "name": "Prefix",
+                                                          "wire_name": "Prefix",
+                                                          "required": false,
+                                                          "binding": { "kind": "BodyXml" },
+                                                          "type": { "kind": "String" },
+                                                          "hot": false,
+                                                          "quirk_refs": []
+                                                        },
+                                                        {
+                                                          "name": "Tags",
+                                                          "wire_name": "Tag",
+                                                          "required": false,
+                                                          "binding": { "kind": "BodyXml" },
+                                                          "type": {
+                                                                    "kind": "List",
+                                                                    "member": { "kind": "Structure", "shape": "Tag" },
+                                                                    "flattened": true,
+                                                                    "wrapper_name": null
+                                                                  },
+                                                          "hot": false,
+                                                          "quirk_refs": []
+                                                        },
+                                                        {
+                                                          "name": "ObjectSizeGreaterThan",
+                                                          "wire_name": "ObjectSizeGreaterThan",
+                                                          "required": false,
+                                                          "binding": { "kind": "BodyXml" },
+                                                          "type": { "kind": "Long" },
+                                                          "hot": false,
+                                                          "quirk_refs": []
+                                                        },
+                                                        {
+                                                          "name": "ObjectSizeLessThan",
+                                                          "wire_name": "ObjectSizeLessThan",
+                                                          "required": false,
+                                                          "binding": { "kind": "BodyXml" },
+                                                          "type": { "kind": "Long" },
+                                                          "hot": false,
+                                                          "quirk_refs": []
+                                                        }
+                                                      ],
+                                            "xml": {
+                                                     "element_order": [
+                                                                        "Prefix",
+                                                                        "Tags",
+                                                                        "ObjectSizeGreaterThan",
+                                                                        "ObjectSizeLessThan"
+                                                                      ],
+                                                     "empty_value_policy": {
+                                                                             "Prefix": "omit",
+                                                                             "Tags": "omit",
+                                                                             "ObjectSizeGreaterThan": "omit",
+                                                                             "ObjectSizeLessThan": "omit"
+                                                                           },
+                                                     "attributes": []
+                                                   }
+                                          },
+              "LifecycleRuleFilter": {
+                                       "kind": "Structure",
+                                       "fields": [
+                                                   {
+                                                     "name": "Prefix",
+                                                     "wire_name": "Prefix",
+                                                     "required": false,
+                                                     "binding": { "kind": "BodyXml" },
+                                                     "type": { "kind": "String" },
+                                                     "hot": false,
+                                                     "quirk_refs": []
+                                                   },
+                                                   {
+                                                     "name": "Tag",
+                                                     "wire_name": "Tag",
+                                                     "required": false,
+                                                     "binding": { "kind": "BodyXml" },
+                                                     "type": { "kind": "Structure", "shape": "Tag" },
+                                                     "hot": false,
+                                                     "quirk_refs": []
+                                                   },
+                                                   {
+                                                     "name": "ObjectSizeGreaterThan",
+                                                     "wire_name": "ObjectSizeGreaterThan",
+                                                     "required": false,
+                                                     "binding": { "kind": "BodyXml" },
+                                                     "type": { "kind": "Long" },
+                                                     "hot": false,
+                                                     "quirk_refs": []
+                                                   },
+                                                   {
+                                                     "name": "ObjectSizeLessThan",
+                                                     "wire_name": "ObjectSizeLessThan",
+                                                     "required": false,
+                                                     "binding": { "kind": "BodyXml" },
+                                                     "type": { "kind": "Long" },
+                                                     "hot": false,
+                                                     "quirk_refs": []
+                                                   },
+                                                   {
+                                                     "name": "And",
+                                                     "wire_name": "And",
+                                                     "required": false,
+                                                     "binding": { "kind": "BodyXml" },
+                                                     "type": {
+                                                               "kind": "Structure",
+                                                               "shape": "LifecycleRuleAndOperator"
+                                                             },
+                                                     "hot": false,
+                                                     "quirk_refs": []
+                                                   }
+                                                 ],
+                                       "xml": {
+                                                "element_order": [
+                                                                   "Prefix",
+                                                                   "Tag",
+                                                                   "ObjectSizeGreaterThan",
+                                                                   "ObjectSizeLessThan",
+                                                                   "And"
+                                                                 ],
+                                                "empty_value_policy": {
+                                                                        "Prefix": "omit",
+                                                                        "Tag": "omit",
+                                                                        "ObjectSizeGreaterThan": "omit",
+                                                                        "ObjectSizeLessThan": "omit",
+                                                                        "And": "omit"
+                                                                      },
+                                                "attributes": []
+                                              }
+                                     },
+              "NoncurrentVersionExpiration": {
+                                               "kind": "Structure",
+                                               "fields": [
+                                                           {
+                                                             "name": "NoncurrentDays",
+                                                             "wire_name": "NoncurrentDays",
+                                                             "required": false,
+                                                             "binding": { "kind": "BodyXml" },
+                                                             "type": { "kind": "Integer" },
+                                                             "hot": false,
+                                                             "quirk_refs": []
+                                                           },
+                                                           {
+                                                             "name": "NewerNoncurrentVersions",
+                                                             "wire_name": "NewerNoncurrentVersions",
+                                                             "required": false,
+                                                             "binding": { "kind": "BodyXml" },
+                                                             "type": { "kind": "Integer" },
+                                                             "hot": false,
+                                                             "quirk_refs": []
+                                                           }
+                                                         ],
+                                               "xml": {
+                                                        "element_order": ["NoncurrentDays", "NewerNoncurrentVersions"],
+                                                        "empty_value_policy": {
+                                                                                "NoncurrentDays": "omit",
+                                                                                "NewerNoncurrentVersions": "omit"
+                                                                              },
+                                                        "attributes": []
+                                                      }
+                                             },
+              "NoncurrentVersionTransition": {
+                                               "kind": "Structure",
+                                               "fields": [
+                                                           {
+                                                             "name": "NoncurrentDays",
+                                                             "wire_name": "NoncurrentDays",
+                                                             "required": false,
+                                                             "binding": { "kind": "BodyXml" },
+                                                             "type": { "kind": "Integer" },
+                                                             "hot": false,
+                                                             "quirk_refs": []
+                                                           },
+                                                           {
+                                                             "name": "StorageClass",
+                                                             "wire_name": "StorageClass",
+                                                             "required": false,
+                                                             "binding": { "kind": "BodyXml" },
+                                                             "type": {
+                                                                       "kind": "StringEnum",
+                                                                       "values": [
+                                                                                   "GLACIER",
+                                                                                   "STANDARD_IA",
+                                                                                   "ONEZONE_IA",
+                                                                                   "INTELLIGENT_TIERING",
+                                                                                   "DEEP_ARCHIVE",
+                                                                                   "GLACIER_IR"
+                                                                                 ]
+                                                                     },
+                                                             "hot": false,
+                                                             "quirk_refs": []
+                                                           },
+                                                           {
+                                                             "name": "NewerNoncurrentVersions",
+                                                             "wire_name": "NewerNoncurrentVersions",
+                                                             "required": false,
+                                                             "binding": { "kind": "BodyXml" },
+                                                             "type": { "kind": "Integer" },
+                                                             "hot": false,
+                                                             "quirk_refs": []
+                                                           }
+                                                         ],
+                                               "xml": {
+                                                        "element_order": [
+                                                                           "NoncurrentDays",
+                                                                           "StorageClass",
+                                                                           "NewerNoncurrentVersions"
+                                                                         ],
+                                                        "empty_value_policy": {
+                                                                                "NoncurrentDays": "omit",
+                                                                                "StorageClass": "omit",
+                                                                                "NewerNoncurrentVersions": "omit"
+                                                                              },
+                                                        "attributes": []
+                                                      }
+                                             },
+              "Tag": {
+                       "kind": "Structure",
+                       "fields": [
+                                   {
+                                     "name": "Key",
+                                     "wire_name": "Key",
+                                     "required": true,
+                                     "binding": { "kind": "BodyXml" },
+                                     "type": { "kind": "ObjectKey" },
+                                     "hot": true,
+                                     "quirk_refs": []
+                                   },
+                                   {
+                                     "name": "Value",
+                                     "wire_name": "Value",
+                                     "required": true,
+                                     "binding": { "kind": "BodyXml" },
+                                     "type": { "kind": "String" },
+                                     "hot": true,
+                                     "quirk_refs": []
+                                   }
+                                 ],
+                       "xml": {
+                                "element_order": ["Key", "Value"],
+                                "empty_value_policy": { "Key": "emit", "Value": "emit" },
+                                "attributes": []
+                              }
+                     },
+              "Transition": {
+                              "kind": "Structure",
+                              "fields": [
+                                          {
+                                            "name": "Date",
+                                            "wire_name": "Date",
+                                            "required": false,
+                                            "binding": { "kind": "BodyXml" },
+                                            "type": { "kind": "Timestamp", "format": "Iso8601" },
+                                            "hot": false,
+                                            "quirk_refs": []
+                                          },
+                                          {
+                                            "name": "Days",
+                                            "wire_name": "Days",
+                                            "required": false,
+                                            "binding": { "kind": "BodyXml" },
+                                            "type": { "kind": "Integer" },
+                                            "hot": false,
+                                            "quirk_refs": []
+                                          },
+                                          {
+                                            "name": "StorageClass",
+                                            "wire_name": "StorageClass",
+                                            "required": false,
+                                            "binding": { "kind": "BodyXml" },
+                                            "type": {
+                                                      "kind": "StringEnum",
+                                                      "values": [
+                                                                  "GLACIER",
+                                                                  "STANDARD_IA",
+                                                                  "ONEZONE_IA",
+                                                                  "INTELLIGENT_TIERING",
+                                                                  "DEEP_ARCHIVE",
+                                                                  "GLACIER_IR"
+                                                                ]
+                                                    },
+                                            "hot": false,
+                                            "quirk_refs": []
+                                          }
+                                        ],
+                              "xml": {
+                                       "element_order": ["Date", "Days", "StorageClass"],
+                                       "empty_value_policy": { "Date": "omit", "Days": "omit", "StorageClass": "omit" },
+                                       "attributes": []
+                                     }
+                            }
+            },
+  "xml": {
+           "request_root": "LifecycleConfiguration",
+           "request_root_aliases": [],
+           "response_root": null,
+           "xmlns": "emit",
+           "unwrapped_output": false,
+           "element_order": [],
+           "empty_value_policy": {},
+           "url_encoded_fields": [],
+           "attributes": [],
+           "body_literal": false
+         },
+  "errors": {
+              "not_configured": null,
+              "allows_error_after_200": false,
+              "codes": [
+                         "NoSuchBucket",
+                         "AccessDenied",
+                         "MalformedXML",
+                         "InvalidRequest",
+                         "InvalidArgument",
+                         "BadDigest"
+                       ]
+            },
+  "derived_resources": [],
+  "head_mirrors": null,
+  "quirk_refs": [
+                  "q-lc-0002",
+                  "q-lc-0005",
+                  "q-lc-0006",
+                  "q-lc-0007",
+                  "q-lc-0008",
+                  "q-lc-0009",
+                  "q-lc-0010",
+                  "q-lc-0011",
+                  "q-lc-0012",
+                  "q-lc-0013",
+                  "q-lc-0014"
+                ],
+  "quirks": [
+              {
+                "id": "q-lc-0002",
+                "kind": "xml_root",
+                "target": "PutBucketLifecycleConfiguration",
+                "summary": "The request body's root element is LifecycleConfiguration while the model names the payload shape BucketLifecycleConfiguration; a decoder keyed on the shape name would refuse every document a real client sends.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketLifecycleConfiguration.html",
+                                "summary": "The documented request syntax opens with a LifecycleConfiguration root element even though the payload member's shape is named BucketLifecycleConfiguration."
+                              }
+                            ],
+                "cases": ["c-lifecycle-0001", "c-lifecycle-0017"]
+              },
+              {
+                "id": "q-lc-0005",
+                "kind": "checksum_required",
+                "target": "PutBucketLifecycleConfiguration",
+                "summary": "The write demands an integrity claim on the body, so a request with neither Content-MD5 nor an x-amz-checksum header is refused with 400 before the document is parsed.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketLifecycleConfiguration.html",
+                                "summary": "The request documents Content-MD5 as required for this operation, which the model spells as a request checksum requirement."
+                              }
+                            ],
+                "cases": ["c-lifecycle-0015"]
+              },
+              {
+                "id": "q-lc-0006",
+                "kind": "lenient_unknown_elements",
+                "target": "PutBucketLifecycleConfiguration",
+                "summary": "Unknown elements inside the request document are skipped rather than refused, because a stored configuration parsed more strictly on the next release silently turns lifecycle rules off and the first symptom is objects that stop expiring.",
+                "evidence": [
+                              {
+                                "kind": "s3s-issue",
+                                "ref": "https://github.com/s3s-project/s3s/issues/613",
+                                "summary": "AWS ignores unknown elements in request XML, and upstream had to relax its decoder to match after strict parsing broke real clients."
+                              },
+                              {
+                                "kind": "s3s-pr",
+                                "ref": "https://github.com/s3s-project/s3s/pull/617",
+                                "summary": "The upstream fix that makes unknown request elements a skip rather than an error, which is the behaviour this decoder generates by construction."
+                              }
+                            ],
+                "cases": ["c-lifecycle-0018"]
+              },
+              {
+                "id": "q-lc-0007",
+                "kind": "exclusive_members",
+                "target": "LifecycleRuleFilter",
+                "summary": "A Filter carries at most one direct child; several conditions must nest inside one And element, and an And with fewer than two conditions is refused as MalformedXML.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_LifecycleRuleFilter.html",
+                                "summary": "The filter's members are documented as mutually exclusive alternatives, with the And member as the one spelling for combining more than one condition."
+                              },
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/userguide/intro-lifecycle-rules.html",
+                                "summary": "The lifecycle rules guide requires multiple filter conditions to be wrapped in a single And element."
+                              }
+                            ],
+                "cases": ["c-lifecycle-0019", "c-lifecycle-0020", "c-lifecycle-0007"]
+              },
+              {
+                "id": "q-lc-0008",
+                "kind": "legacy_form",
+                "target": "LifecycleRule.Prefix",
+                "summary": "A rule may still scope itself with the deprecated rule-level Prefix element instead of a Filter, because configurations stored under the pre-Filter API revision must keep parsing; a rule carrying neither is refused as MalformedXML.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_LifecycleRule.html",
+                                "summary": "The rule's Prefix member is documented as deprecated but still accepted, and Filter is documented as required exactly when the rule carries no Prefix."
+                              }
+                            ],
+                "cases": ["c-lifecycle-0008", "c-lifecycle-0021"]
+              },
+              {
+                "id": "q-lc-0009",
+                "kind": "value_constraint",
+                "target": "LifecycleExpiration.Date",
+                "summary": "A Date value in an Expiration or Transition action must name midnight UTC; any other time of day is refused with 400 InvalidArgument rather than rounded.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_LifecycleExpiration.html",
+                                "summary": "The Date member is documented as ISO 8601 with the time component always midnight UTC."
+                              },
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_Transition.html",
+                                "summary": "The transition's Date member carries the same always-midnight-UTC constraint as the expiration's."
+                              }
+                            ],
+                "cases": ["c-lifecycle-0022", "c-lifecycle-0004"]
+              },
+              {
+                "id": "q-lc-0010",
+                "kind": "exclusive_members",
+                "target": "LifecycleExpiration",
+                "summary": "Days, Date and ExpiredObjectDeleteMarker are mutually exclusive within one Expiration action; a document naming two of them is refused as MalformedXML.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_LifecycleExpiration.html",
+                                "summary": "The ExpiredObjectDeleteMarker member is documented as unusable together with Days or Date, which makes the three members alternatives rather than companions."
+                              }
+                            ],
+                "cases": ["c-lifecycle-0023", "c-lifecycle-0005"]
+              },
+              {
+                "id": "q-lc-0011",
+                "kind": "bounded_range",
+                "target": "BucketLifecycleConfiguration.Rules",
+                "summary": "A configuration carries at most 1,000 rules; the 1,001st is refused with 400 rather than truncated or stored.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/userguide/intro-lifecycle-rules.html",
+                                "summary": "The lifecycle rules guide caps a configuration at 1,000 rules per bucket."
+                              }
+                            ],
+                "cases": ["c-lifecycle-0026", "c-lifecycle-0012"]
+              },
+              {
+                "id": "q-lc-0012",
+                "kind": "value_constraint",
+                "target": "LifecycleRule.ID",
+                "summary": "A rule id is at most 255 characters and unique across the configuration; a longer or duplicated id is refused with 400 InvalidArgument.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_LifecycleRule.html",
+                                "summary": "The ID member is documented as a unique identifier for the rule with a length cap of 255 characters."
+                              }
+                            ],
+                "cases": ["c-lifecycle-0024", "c-lifecycle-0025"]
+              },
+              {
+                "id": "q-lc-0013",
+                "kind": "value_constraint",
+                "target": "LifecycleExpiration.Days",
+                "summary": "An expiration measured in days must be a positive integer; zero and negative values are refused with 400 InvalidArgument.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_LifecycleExpiration.html",
+                                "summary": "The Days member is documented as a non-zero positive integer."
+                              }
+                            ],
+                "cases": ["c-lifecycle-0027"]
+              },
+              {
+                "id": "q-lc-0014",
+                "kind": "lenient_enum",
+                "target": "LifecycleRule.Status",
+                "summary": "A Status outside the documented Enabled/Disabled pair is stored and echoed rather than refused, because a stored configuration must survive reparse by a stricter release; the fail-open cost of refusing is silently disabled lifecycle rules.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_LifecycleRule.html",
+                                "summary": "The Status member documents Enabled and Disabled as its value set, and this project's decision to pass rather than refuse out-of-set spellings is recorded here."
+                              },
+                              {
+                                "kind": "s3s-issue",
+                                "ref": "https://github.com/s3s-project/s3s/issues/428",
+                                "summary": "Upstream's lifecycle configuration types could not round-trip stored documents, which is the failure mode a strict enum decode reintroduces."
+                              }
+                            ],
+                "cases": ["c-lifecycle-0028"]
+              }
+            ],
+  "ext_points": []
+}

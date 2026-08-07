@@ -1,0 +1,30 @@
+[case]
+id = "c-lifecycle-0014"
+schema_version = 1
+title = "Deleting the lifecycle of a bucket that never had one is 204, not NoSuchLifecycleConfiguration"
+rationale = """
+The delete is idempotent on purpose: teardown scripts remove configuration without reading it first, and a 404 here would make already-gone indistinguishable from wrong-bucket, so operators would wrap every delete in a retry-and-ignore. The 204 must also carry no body — a success document on a bodiless status is a framing error some clients hang on."""
+polarity = "negative"
+operation = "DeleteBucketLifecycle"
+tags = ["lifecycle", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-lc-0004"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketLifecycle.html"
+summary = "The operation documents a 204 No Content success and lists no not-found error for a missing configuration."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "conf-lifecycle"
+
+[request]
+method = "DELETE"
+target = "/conf-lifecycle?lifecycle"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 204
+connection_after = "open"

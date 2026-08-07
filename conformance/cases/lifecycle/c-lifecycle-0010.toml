@@ -1,0 +1,58 @@
+[case]
+id = "c-lifecycle-0010"
+schema_version = 1
+title = "The transition-default-minimum-object-size header is honoured on the write and echoed by the read"
+rationale = """
+The header is part of the model's contract for this family: the write may name which minimum-object-size regime the transitions run under, the write's response confirms it, and the read reports it. Dropping it on either leg silently changes which small objects a transition moves, and the client that set it has no way to notice."""
+polarity = "positive"
+operation = "PutBucketLifecycleConfiguration"
+tags = ["lifecycle"]
+timeout_ms = 10000
+quirks = []
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketLifecycleConfiguration.html"
+summary = "The operation documents x-amz-transition-default-minimum-object-size on both the request and the response."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "conf-lifecycle"
+
+[[exchanges]]
+name = "put-with-minimum"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-lifecycle?lifecycle"
+headers = { "content-type" = "application/xml", "content-md5" = "bc2STdn8DgUeEFxlytIkhw==", "x-amz-transition-default-minimum-object-size" = "all_storage_classes_128K" }
+body = { utf8 = '<LifecycleConfiguration><Rule><Expiration><Days>30</Days></Expiration><ID>sized</ID><Filter><Prefix>big/</Prefix></Filter><Status>Enabled</Status></Rule></LifecycleConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.headers_present]
+"x-amz-transition-default-minimum-object-size" = "all_storage_classes_128K"
+
+[[exchanges]]
+name = "read-back"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-lifecycle?lifecycle"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.headers_present]
+"content-type" = "application/xml"
+"x-amz-transition-default-minimum-object-size" = "all_storage_classes_128K"
+
+[exchanges.expect.body]
+golden = "goldens/c-lifecycle-0010.xml"

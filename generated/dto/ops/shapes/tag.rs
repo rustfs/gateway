@@ -21,7 +21,7 @@
 //! NOT responsible for: how it is written to the wire.
 //! Upstream: `cargo xtask codegen`. Downstream: `crate::ops::shapes`.
 
-/// The `Tag` body shape. Reached from: GetBucketTagging, GetObjectTagging, PutBucketTagging, PutObjectTagging.
+/// The `Tag` body shape. Reached from: GetBucketLifecycleConfiguration, GetBucketTagging, GetObjectTagging, PutBucketLifecycleConfiguration, PutBucketTagging, PutObjectTagging.
 ///
 /// Public fields plus `Default`, and never `#[non_exhaustive]` — ADR-0004 P1. Do not
 /// destructure it exhaustively (P3). A required member is a bare type and an optional one is

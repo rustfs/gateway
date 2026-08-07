@@ -1,0 +1,76 @@
+[case]
+id = "c-lifecycle-0011"
+schema_version = 1
+title = "Deleting a configured bucket's lifecycle answers 204, and the next read answers the family's 404"
+rationale = """
+Teardown is a sequence, and both halves carry meaning: the delete's unconditional 204 says the document is gone, and the read's NoSuchLifecycleConfiguration says the bucket is fine and simply unconfigured. A delete that answered 200 with a body, or a follow-up read that answered an empty 200, would each tell automation the configuration still exists in some form."""
+polarity = "positive"
+operation = "DeleteBucketLifecycle"
+tags = ["lifecycle", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-lc-0001", "q-lc-0004"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketLifecycle.html"
+summary = "The delete documents a 204 No Content success."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketLifecycleConfiguration.html"
+summary = "The read documents NoSuchLifecycleConfiguration with status 404 for an unconfigured bucket."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "conf-lifecycle"
+
+[[exchanges]]
+name = "put-first"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-lifecycle?lifecycle"
+headers = { "content-type" = "application/xml", "content-md5" = "ATR8BU7QlQFzvolRzIZUiA==" }
+body = { utf8 = '<LifecycleConfiguration><Rule><ID>expire-logs</ID><Filter><Prefix>logs/</Prefix></Filter><Status>Enabled</Status></Rule></LifecycleConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[[exchanges]]
+name = "delete"
+
+[exchanges.request]
+method = "DELETE"
+target = "/conf-lifecycle?lifecycle"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 204
+connection_after = "open"
+
+[[exchanges]]
+name = "read-after-delete"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-lifecycle?lifecycle"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 404
+connection_after = "open"
+
+[exchanges.expect.error]
+code = "NoSuchLifecycleConfiguration"
+request_id_present = true
+
+[exchanges.expect.body]
+redact = ["RequestId", "HostId"]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>NoSuchLifecycleConfiguration</Code><Message>The lifecycle configuration does not exist</Message><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''

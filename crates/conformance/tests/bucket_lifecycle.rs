@@ -94,6 +94,9 @@ impl Harness {
             .register::<dto::CreateBucket, _>(Arc::clone(&backend))
             .register::<dto::DeleteBucket, _>(Arc::clone(&backend))
             .register::<dto::HeadBucket, _>(Arc::clone(&backend))
+            // The lifecycle read rides along for the recreation test below: the unconfigured 404
+            // is the observable proof that a recreated bucket inherited no lifecycle document.
+            .register::<dto::GetBucketLifecycleConfiguration, _>(Arc::clone(&backend))
             .register::<dto::PutObject, _>(Arc::clone(&backend))
             .authenticator(SigV4Authenticator::new(credentials, RegionSet::new([region]).expect("non-empty")))
             .authorizer(allow_when(|request| !request.is_anonymous()))
@@ -362,13 +365,15 @@ fn n_deleting_a_bucket_that_was_never_created_is_a_not_found() {
 
 /// Negative — a deleted bucket takes its configuration documents with it.
 ///
-/// The CORS document and the tag set live inside the bucket's own state entry, so removing the
-/// bucket removes them by construction — and this test is what keeps that a fact rather than a
-/// coincidence of today's layout. The failure it guards against is inheritance: delete a bucket,
-/// create a new one under the same name, and find it answering the previous owner's CORS rules to
-/// browsers and the previous owner's tags to billing. A name is not a bucket.
+/// The CORS document, the tag set and the lifecycle document live inside the bucket's own state
+/// entry, so removing the bucket removes them by construction — and this test is what keeps that
+/// a fact rather than a coincidence of today's layout. The failure it guards against is
+/// inheritance: delete a bucket, create a new one under the same name, and find it answering the
+/// previous owner's CORS rules to browsers, the previous owner's tags to billing, and — worst of
+/// the three — expiring the new owner's data on the previous owner's schedule. A name is not a
+/// bucket.
 #[test]
-fn n_a_deleted_buckets_cors_and_tags_do_not_survive_into_a_recreation() {
+fn n_a_deleted_buckets_cors_tags_and_lifecycle_do_not_survive_into_a_recreation() {
     let mut fixture = Fixture::at(NOW);
     fixture.declare_bucket("conf-bkt-reborn", false);
     fixture.set_cors(
@@ -382,6 +387,21 @@ fn n_a_deleted_buckets_cors_and_tags_do_not_survive_into_a_recreation() {
         },
     );
     fixture.set_bucket_tags("conf-bkt-reborn", Some(vec![("team".to_owned(), "storage".to_owned())]));
+    fixture.set_lifecycle(
+        "conf-bkt-reborn",
+        dto::BucketLifecycleConfiguration {
+            rules: vec![dto::LifecycleRule {
+                prefix: Some("logs/".to_owned()),
+                status: dto::Status::ENABLED,
+                expiration: Some(dto::LifecycleExpiration {
+                    days: Some(30),
+                    ..dto::LifecycleExpiration::default()
+                }),
+                ..dto::LifecycleRule::default()
+            }],
+        },
+        None,
+    );
     let harness = Harness::over(fixture, "us-east-1");
 
     let deleted = harness.send("DELETE", "/conf-bkt-reborn", b"");
@@ -399,4 +419,12 @@ fn n_a_deleted_buckets_cors_and_tags_do_not_survive_into_a_recreation() {
         state.bucket_tags("conf-bkt-reborn").is_none(),
         "the recreated bucket inherited the deleted bucket's tag set"
     );
+    drop(state);
+
+    // The lifecycle half is asserted through the wire rather than through an accessor: the
+    // recreated bucket must answer the family's unconfigured 404, which is the exact symptom a
+    // client would see if inheritance ever crept in.
+    let read = harness.send("GET", "/conf-bkt-reborn?lifecycle", b"");
+    assert_eq!(read.status, 404, "{}", read.body);
+    read.assert_contains("NoSuchLifecycleConfiguration");
 }

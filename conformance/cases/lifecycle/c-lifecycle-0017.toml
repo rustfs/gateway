@@ -1,0 +1,48 @@
+[case]
+id = "c-lifecycle-0017"
+schema_version = 1
+title = "A document rooted at the model's shape name BucketLifecycleConfiguration is refused as MalformedXML"
+rationale = """
+The refusing side of the wire-root decision: the shape name leaks into generated code easily, and an implementation that accepted it would happily store documents no other S3 implementation or SDK will ever produce or read back. Naming the expected root in the refusal is what turns a mystifying 400 into a one-line client fix."""
+polarity = "negative"
+operation = "PutBucketLifecycleConfiguration"
+tags = ["lifecycle", "xml", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-lc-0002"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketLifecycleConfiguration.html"
+summary = "The documented request root is LifecycleConfiguration, not the payload shape's name."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "conf-lifecycle"
+
+[[exchanges]]
+name = "shape-name-root"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-lifecycle?lifecycle"
+headers = { "content-type" = "application/xml", "content-md5" = "XuN94Rp/lLtsH8Ky0bsjDA==" }
+body = { utf8 = '<BucketLifecycleConfiguration><Rule><ID>expire-logs</ID><Filter><Prefix>logs/</Prefix></Filter><Status>Enabled</Status></Rule></BucketLifecycleConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[exchanges.expect.error]
+code = "MalformedXML"
+request_id_present = true
+
+[exchanges.expect.headers_present]
+"content-type" = "application/xml"
+
+[exchanges.expect.body]
+redact = ["RequestId", "HostId"]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>MalformedXML</Code><Message>the request body has the wrong root element</Message><Resource>LifecycleConfiguration</Resource><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''

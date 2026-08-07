@@ -48,8 +48,10 @@ mod replication_status;
 mod request_charged;
 mod request_payer;
 mod server_side_encryption;
+mod status;
 mod storage_class;
 mod tagging_directive;
+mod transition_default_minimum_object_size;
 
 pub use self::acl::Acl;
 pub use self::archive_status::ArchiveStatus;
@@ -66,5 +68,7 @@ pub use self::replication_status::ReplicationStatus;
 pub use self::request_charged::RequestCharged;
 pub use self::request_payer::RequestPayer;
 pub use self::server_side_encryption::ServerSideEncryption;
+pub use self::status::Status;
 pub use self::storage_class::StorageClass;
 pub use self::tagging_directive::TaggingDirective;
+pub use self::transition_default_minimum_object_size::TransitionDefaultMinimumObjectSize;

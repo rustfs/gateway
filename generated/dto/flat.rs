@@ -26,12 +26,14 @@
 pub use crate::ops::enums::{
     Acl, ArchiveStatus, ChecksumAlgorithm, ChecksumMode, ChecksumType, EncodingType, LocationConstraint, MetadataDirective,
     ObjectLockLegalHoldStatus, ObjectLockMode, ObjectOwnership, ReplicationStatus, RequestCharged, RequestPayer,
-    ServerSideEncryption, StorageClass, TaggingDirective,
+    ServerSideEncryption, Status, StorageClass, TaggingDirective, TransitionDefaultMinimumObjectSize,
 };
 pub use crate::ops::shapes::{
-    Bucket, Checksum, CommonPrefix, CompletedMultipartUpload, CompletedPart, CorsConfiguration, CorsRule,
-    CreateBucketConfiguration, Delete, DeleteMarkerEntry, DeletedObject, Error, GetObjectAttributesParts, Initiator,
-    MultipartUpload, Object, ObjectIdentifier, ObjectPart, ObjectVersion, Owner, Part, RestoreStatus, Tag, Tagging,
+    AbortIncompleteMultipartUpload, Bucket, BucketLifecycleConfiguration, Checksum, CommonPrefix, CompletedMultipartUpload,
+    CompletedPart, CorsConfiguration, CorsRule, CreateBucketConfiguration, Delete, DeleteMarkerEntry, DeletedObject, Error,
+    GetObjectAttributesParts, Initiator, LifecycleExpiration, LifecycleRule, LifecycleRuleAndOperator, LifecycleRuleFilter,
+    MultipartUpload, NoncurrentVersionExpiration, NoncurrentVersionTransition, Object, ObjectIdentifier, ObjectPart,
+    ObjectVersion, Owner, Part, RestoreStatus, Tag, Tagging, Transition,
 };
 
 pub use crate::ops::abort_multipart_upload::{
@@ -59,6 +61,10 @@ pub use crate::ops::delete_bucket_cors::{
     DeleteBucketCors, Input as DeleteBucketCorsInput, InputBuilder as DeleteBucketCorsInputBuilder,
     Output as DeleteBucketCorsOutput,
 };
+pub use crate::ops::delete_bucket_lifecycle::{
+    DeleteBucketLifecycle, Input as DeleteBucketLifecycleInput, InputBuilder as DeleteBucketLifecycleInputBuilder,
+    Output as DeleteBucketLifecycleOutput,
+};
 pub use crate::ops::delete_bucket_tagging::{
     DeleteBucketTagging, Input as DeleteBucketTaggingInput, InputBuilder as DeleteBucketTaggingInputBuilder,
     Output as DeleteBucketTaggingOutput,
@@ -75,6 +81,10 @@ pub use crate::ops::delete_objects::{
 };
 pub use crate::ops::get_bucket_cors::{
     GetBucketCors, Input as GetBucketCorsInput, InputBuilder as GetBucketCorsInputBuilder, Output as GetBucketCorsOutput,
+};
+pub use crate::ops::get_bucket_lifecycle_configuration::{
+    GetBucketLifecycleConfiguration, Input as GetBucketLifecycleConfigurationInput,
+    InputBuilder as GetBucketLifecycleConfigurationInputBuilder, Output as GetBucketLifecycleConfigurationOutput,
 };
 pub use crate::ops::get_bucket_location::{
     GetBucketLocation, Input as GetBucketLocationInput, InputBuilder as GetBucketLocationInputBuilder,
@@ -123,6 +133,10 @@ pub use crate::ops::list_parts::{
 };
 pub use crate::ops::put_bucket_cors::{
     Input as PutBucketCorsInput, InputBuilder as PutBucketCorsInputBuilder, Output as PutBucketCorsOutput, PutBucketCors,
+};
+pub use crate::ops::put_bucket_lifecycle_configuration::{
+    Input as PutBucketLifecycleConfigurationInput, InputBuilder as PutBucketLifecycleConfigurationInputBuilder,
+    Output as PutBucketLifecycleConfigurationOutput, PutBucketLifecycleConfiguration,
 };
 pub use crate::ops::put_bucket_tagging::{
     Input as PutBucketTaggingInput, InputBuilder as PutBucketTaggingInputBuilder, Output as PutBucketTaggingOutput,

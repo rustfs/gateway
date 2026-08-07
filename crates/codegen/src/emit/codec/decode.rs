@@ -100,6 +100,29 @@ fn assign(indent: usize, target: &str, expression: &str) -> String {
     format!("{pad}{target} =\n{continuation}{expression};\n")
 }
 
+/// rustfmt's default `chain_width`: sixty per cent of `max_width`, the budget a method chain has
+/// before every link goes onto its own line.
+const CHAIN_WIDTH: usize = MAX_WIDTH * 6 / 10;
+
+/// One `target.push(expression)` inside a list loop, laid out the way rustfmt would lay it out.
+///
+/// The target is a field access on `shape` or `input`, so the statement is a two-link chain, and
+/// rustfmt's rule for chains is `chain_width`, not `max_width`: the links past the receiver must
+/// fit the chain budget or each goes onto its own line. A lifecycle rule's
+/// `noncurrent_version_transitions` list is what made the budget observable.
+fn push_stmt(indent: usize, target: &str, expression: &str) -> String {
+    let pad = " ".repeat(indent);
+    let single = format!("{pad}{target}.push({expression});\n");
+    let receiver_len = target.split('.').next().map_or(0, str::len);
+    let chain_len = target.len().saturating_sub(receiver_len) + ".push()".len() + expression.len();
+    if single.len().saturating_sub(1) <= MAX_WIDTH && chain_len <= CHAIN_WIDTH {
+        return single;
+    }
+    let continuation = " ".repeat(indent.saturating_add(4));
+    let (receiver, links) = target.split_once('.').unwrap_or((target, ""));
+    format!("{pad}{receiver}\n{continuation}.{links}\n{continuation}.push({expression});\n")
+}
+
 /// Renders the body of one operation's `decode`.
 pub fn body(ir: &OperationIr) -> Result<String, String> {
     let mut out = String::new();
@@ -355,11 +378,21 @@ pub fn shape_reader(operation: &str, name: &str, shape: &Shape, quirks: &[Quirk]
         "/// Reads one `{name}` element. Members are matched by local name, so a namespace-prefixed\n\
          /// body and a bare one decode identically."
     );
-    let _ = writeln!(
-        out,
+    // rustfmt's normal form: the signature stays on one line until it would cross `max_width`,
+    // then the parameter gets its own line. A lifecycle shape name is what first crossed it.
+    let single = format!(
         "fn read_{}(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::{type_name}, CodecError> {{",
         naming::module_name(name)
     );
+    if single.len() <= MAX_WIDTH {
+        let _ = writeln!(out, "{single}");
+    } else {
+        let _ = writeln!(
+            out,
+            "fn read_{}(\n    node: &rustfs_gateway_xml::XmlNode,\n) -> Result<dto::{type_name}, CodecError> {{",
+            naming::module_name(name)
+        );
+    }
     let _ = writeln!(out, "    let mut shape = dto::{type_name} {{ ..Default::default() }};");
 
     for field in &shape.fields {
@@ -383,7 +416,7 @@ pub fn shape_reader(operation: &str, name: &str, shape: &Shape, quirks: &[Quirk]
                 let source = list_source(*flattened, wrapper_name.as_deref(), &wire);
                 let _ = writeln!(out, "    for item in {source} {{");
                 let _ = writeln!(out, "        let raw = item.text.as_str();");
-                let _ = writeln!(out, "        {target}.push({conversion});");
+                out.push_str(&push_stmt(8, &target, &conversion));
                 out.push_str("    }\n");
             }
             Type::List {
@@ -401,7 +434,7 @@ pub fn shape_reader(operation: &str, name: &str, shape: &Shape, quirks: &[Quirk]
                 let reader = format!("read_{}", naming::module_name(inner_name));
                 let source = list_source(*flattened, wrapper_name.as_deref(), &wire);
                 let _ = writeln!(out, "    for item in {source} {{");
-                let _ = writeln!(out, "        {target}.push({reader}(item)?);");
+                out.push_str(&push_stmt(8, &target, &format!("{reader}(item)?")));
                 out.push_str("    }\n");
                 // Only the model's own `required` reaches here, and only `MalformedXML` can come
                 // out of it. See the module documentation: an overlay that makes a list required in

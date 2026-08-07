@@ -1,0 +1,48 @@
+[case]
+id = "c-lifecycle-0027"
+schema_version = 1
+title = "An expiration of zero days is refused as 400 InvalidArgument"
+rationale = """
+Zero is the value a client sends by accident — an unset integer field serialized anyway — and it is also the most destructive possible retention policy: everything the rule matches becomes expired immediately. The documented bound is a non-zero positive integer, so the accident is refused at the write instead of being executed by the scanner."""
+polarity = "negative"
+operation = "PutBucketLifecycleConfiguration"
+tags = ["lifecycle", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-lc-0013"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_LifecycleExpiration.html"
+summary = "The Days member is documented as a non-zero positive integer."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "conf-lifecycle"
+
+[[exchanges]]
+name = "zero-days"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-lifecycle?lifecycle"
+headers = { "content-type" = "application/xml", "content-md5" = "N4ObDMNmE4JzQczJUnfHZg==" }
+body = { utf8 = '<LifecycleConfiguration><Rule><Expiration><Days>0</Days></Expiration><ID>zero</ID><Filter><Prefix>a/</Prefix></Filter><Status>Enabled</Status></Rule></LifecycleConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[exchanges.expect.error]
+code = "InvalidArgument"
+request_id_present = true
+
+[exchanges.expect.headers_present]
+"content-type" = "application/xml"
+
+[exchanges.expect.body]
+redact = ["RequestId", "HostId"]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>InvalidArgument</Code><Message>Days in the Expiration action must be a positive integer</Message><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''

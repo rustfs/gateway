@@ -1,0 +1,38 @@
+[case]
+id = "c-lifecycle-0012"
+schema_version = 1
+title = "A document at the thousand-rule cap is accepted"
+rationale = """
+One thousand is the documented ceiling, and a cap is only trustworthy if both of its sides are pinned: this case holds the inclusive side while c-lifecycle-0026 holds the refusing side. An off-by-one that refused the thousandth rule would reject configurations AWS accepts, precisely on the oldest and largest buckets being migrated."""
+polarity = "positive"
+operation = "PutBucketLifecycleConfiguration"
+tags = ["lifecycle"]
+timeout_ms = 10000
+quirks = ["q-lc-0011"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/intro-lifecycle-rules.html"
+summary = "The lifecycle rules guide caps a configuration at 1,000 rules per bucket."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "conf-lifecycle"
+
+[[exchanges]]
+name = "put-thousand"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-lifecycle?lifecycle"
+headers = { "content-type" = "application/xml", "content-md5" = "HV9QarGipx8L7D0c+WNPXA==" }
+body = { file = "fixtures/lifecycle/one-thousand-rules.xml" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.timing]
+terminate_within_ms = 5000
