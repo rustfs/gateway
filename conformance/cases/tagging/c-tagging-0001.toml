@@ -1,0 +1,75 @@
+# c-tagging-0001 — the bucket tag set round-trips, and the collection is wrapped.
+#
+# Schema dimensions exercised: multi-exchange state, byte-exact success body, wrapped collection.
+
+[case]
+id = "c-tagging-0001"
+schema_version = 1
+title = "PutBucketTagging stores the set and GetBucketTagging reads it back wrapped"
+rationale = """
+Cost allocation and lifecycle tooling read this document mechanically: a parser pointed at \
+<Tagging> expects the Tag elements inside an enclosing <TagSet>, because that is the wrapped shape \
+AWS documents — the opposite of the flattened Contents and Rule collections either side of it. An \
+implementation that reuses the flattened encoder here emits Tag directly under the root; every \
+strict SDK parser then reads an empty tag set, silently, and billing reports lose their \
+dimensions. Only a byte-exact comparison notices, which is what this case is."""
+polarity = "positive"
+operation = "GetBucketTagging"
+tags = ["tagging", "xml", "wire-bytes"]
+timeout_ms = 10000
+quirks = ["q-tag-wrapped-0088"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketTagging.html"
+summary = "The documented request root is Tagging with the Tag elements enclosed in a TagSet element."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketTagging.html"
+summary = "The documented response carries the same wrapped shape back."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = true
+
+[[setup.buckets]]
+name = "conf-tagging"
+
+[[exchanges]]
+name = "write-the-set"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-tagging?tagging"
+headers = { "content-md5" = "Fakx13psqzGw9jOqpnh20g==" }
+body = { utf8 = '<Tagging><TagSet><Tag><Key>project</Key><Value>gateway</Value></Tag><Tag><Key>team</Key><Value>storage</Value></Tag><Tag><Key>stage</Key><Value>p5</Value></Tag></TagSet></Tagging>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[[exchanges]]
+name = "read-it-back-wrapped"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-tagging?tagging"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.headers_present]
+"content-type" = "application/xml"
+
+[exchanges.expect.body]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Tagging xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><TagSet><Tag><Key>project</Key><Value>gateway</Value></Tag><Tag><Key>team</Key><Value>storage</Value></Tag><Tag><Key>stage</Key><Value>p5</Value></Tag></TagSet></Tagging>'''

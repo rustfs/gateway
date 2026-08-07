@@ -63,6 +63,7 @@ pub const TAG_VOCABULARY: &[&str] = &[
     "h2",
     "error-shape",
     "known-divergence",
+    "tagging",
     "slow",
 ];
 

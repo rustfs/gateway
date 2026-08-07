@@ -1,0 +1,45 @@
+# c-tagging-0010 — deleting a tag set that is not there is still a 204.
+#
+# Schema dimensions exercised: idempotent delete on the unconfigured boundary, byte-empty 204.
+
+[case]
+id = "c-tagging-0010"
+schema_version = 1
+title = "DeleteBucketTagging on an unconfigured bucket answers the same empty 204"
+rationale = """
+Deletes are the retried operation: a reconciliation loop that clears tag sets will send the same \
+delete twice, and the second attempt lands on a bucket that no longer has one. Answering \
+NoSuchTagSet there forces every caller to special-case a status that means the outcome it asked \
+for — the same trap DeleteObject avoids on a missing key. The asymmetry with the GET on identical \
+state is deliberate protocol shape, and this case pins the delete half of it."""
+polarity = "negative"
+operation = "DeleteBucketTagging"
+tags = ["tagging", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-tag-delete-idempotent-0091"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketTagging.html"
+summary = "No error is documented for deleting a tag set that does not exist; the success is unconditional."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-tagging"
+
+[request]
+method = "DELETE"
+target = "/conf-tagging?tagging"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 204
+headers_absent = ["content-length", "content-type", "transfer-encoding"]
+connection_after = "open"
+
+[expect.body]
+size = 0
+exact_utf8 = ""

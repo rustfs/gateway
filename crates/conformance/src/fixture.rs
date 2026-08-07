@@ -302,11 +302,11 @@ pub struct VersionRef<'a> {
     pub is_latest: bool,
 }
 
-/// What `[[setup.buckets]]` declared about one bucket, plus the one document a case can install.
+/// What `[[setup.buckets]]` declared about one bucket, plus the state requests wrote onto it.
 ///
-/// No longer `Copy`: the CORS document is a fixture a `PutBucketCors` exchange writes rather than
-/// a flag `[setup]` declares, and it is held here because it is per-bucket state exactly as the
-/// versioning flag is.
+/// No longer `Copy`: the CORS document and the tag set are fixtures an exchange writes rather
+/// than flags `[setup]` declares, and they are held here because they are per-bucket state
+/// exactly as the versioning flag is.
 #[derive(Debug, Default, Clone)]
 struct BucketState {
     /// `versioning = "enabled"`.
@@ -317,6 +317,14 @@ struct BucketState {
     /// observable state `NoSuchCORSConfiguration` reports; there is no "empty document" state,
     /// because the decoder refuses a document with no rule.
     cors: Option<dto::CorsConfiguration>,
+    /// The bucket's tag set, in the order the request that wrote it listed the pairs.
+    ///
+    /// `None` is "never configured, or deleted" and `Some` is "a tagging write happened" — two
+    /// states a `Vec` alone cannot hold apart, and the read depends on the difference: an
+    /// unconfigured bucket answers `404 NoSuchTagSet` where an object without tags answers `200`.
+    /// No `[[setup.buckets]]` field feeds this; a case establishes it through `PutBucketTagging`,
+    /// so what the read answers is always something a request wrote.
+    tags: Option<Vec<(String, String)>>,
 }
 
 /// The state one case runs against.
@@ -378,6 +386,20 @@ impl Fixture {
     pub fn clear_cors(&mut self, name: &str) {
         if let Some(bucket) = self.buckets.get_mut(name) {
             bucket.cors = None;
+        }
+    }
+
+    /// The bucket's tag set: `None` until a tagging write configures one.
+    #[must_use]
+    pub fn bucket_tags(&self, name: &str) -> Option<&[(String, String)]> {
+        self.buckets.get(name).and_then(|bucket| bucket.tags.as_deref())
+    }
+
+    /// Replaces the bucket's tag set. `None` returns the bucket to "never configured", which is
+    /// what both the delete and an empty `<TagSet/>` mean — see `Stub::put_bucket_tagging`.
+    pub fn set_bucket_tags(&mut self, name: &str, tags: Option<Vec<(String, String)>>) {
+        if let Some(bucket) = self.buckets.get_mut(name) {
+            bucket.tags = tags;
         }
     }
 
@@ -1672,6 +1694,36 @@ impl Handler<dto::DeleteObjectTagging> for Stub {
     }
 }
 
+impl Handler<dto::GetBucketTagging> for Stub {
+    fn call(
+        &self,
+        request: Req<dto::GetBucketTagging>,
+    ) -> impl core::future::Future<Output = HandlerResult<dto::GetBucketTagging>> + Send {
+        let outcome = self.get_bucket_tagging(request.input());
+        async move { outcome }
+    }
+}
+
+impl Handler<dto::PutBucketTagging> for Stub {
+    fn call(
+        &self,
+        request: Req<dto::PutBucketTagging>,
+    ) -> impl core::future::Future<Output = HandlerResult<dto::PutBucketTagging>> + Send {
+        let outcome = self.put_bucket_tagging(request.input());
+        async move { outcome }
+    }
+}
+
+impl Handler<dto::DeleteBucketTagging> for Stub {
+    fn call(
+        &self,
+        request: Req<dto::DeleteBucketTagging>,
+    ) -> impl core::future::Future<Output = HandlerResult<dto::DeleteBucketTagging>> + Send {
+        let outcome = self.delete_bucket_tagging(request.input());
+        async move { outcome }
+    }
+}
+
 impl Handler<dto::DeleteObjects> for Stub {
     fn call(
         &self,
@@ -2275,6 +2327,53 @@ impl Stub {
             .ok_or_else(|| no_such_key(input.key.as_str()))?;
         object.tags.clear();
         Ok(Resp::new(dto::DeleteObjectTaggingOutput::default()))
+    }
+
+    /// The tag set of one bucket, or the read's own 404.
+    ///
+    /// The unconfigured answer is the *opposite* of the object read's: a bucket that never had a
+    /// tag set — or whose set was deleted, or cleared by an empty document — answers
+    /// `404 NoSuchTagSet`, the code `GetBucketTagging`'s spec declares as its
+    /// `not_configured_error`. Answering a `200` with an empty set here would make "unlabelled"
+    /// and "labelled with nothing" indistinguishable, which is precisely the distinction the two
+    /// scopes draw differently.
+    fn get_bucket_tagging(&self, input: &dto::GetBucketTaggingInput) -> HandlerResult<dto::GetBucketTagging> {
+        let fixture = self.borrow()?;
+        require_bucket(&fixture, &input.bucket)?;
+        let tags = fixture
+            .bucket_tags(input.bucket.as_str())
+            .ok_or_else(|| HandlerError::new(ErrorCode::NO_SUCH_TAG_SET, "The TagSet does not exist"))?;
+        Ok(Resp::new(dto::GetBucketTaggingOutput {
+            tag_set: tag_elements(tags)?,
+        }))
+    }
+
+    /// The whole bucket tag set, replaced — under the bucket scope's ceilings.
+    ///
+    /// The same shared validator the object write goes through, with `TagScope::Bucket` naming
+    /// the one rule that differs: fifty tags rather than ten. An empty `<TagSet/>` never reaches
+    /// here — `TagSet` is a required member, so the generated decoder answers it with
+    /// `MalformedXML` (`c-tagging-0005`); the delete is the clearing path. The empty-to-`None`
+    /// collapse below is therefore a defensive spelling of "a configured set is never empty",
+    /// not a wire behaviour.
+    fn put_bucket_tagging(&self, input: &dto::PutBucketTaggingInput) -> HandlerResult<dto::PutBucketTagging> {
+        let pairs = tag_pairs(&input.tagging, TagScope::Bucket)?;
+        let mut fixture = self.borrow()?;
+        require_bucket(&fixture, &input.bucket)?;
+        fixture.set_bucket_tags(input.bucket.as_str(), (!pairs.is_empty()).then_some(pairs));
+        Ok(Resp::new(dto::PutBucketTaggingOutput::default()))
+    }
+
+    /// The bucket's tag set removed, unconditionally.
+    ///
+    /// The `204` does not depend on a set being there — untagging an unlabelled bucket is a
+    /// success — but the bucket itself still has to exist: the request names one, and a success
+    /// for a missing bucket would tell the caller its delete landed somewhere.
+    fn delete_bucket_tagging(&self, input: &dto::DeleteBucketTaggingInput) -> HandlerResult<dto::DeleteBucketTagging> {
+        let mut fixture = self.borrow()?;
+        require_bucket(&fixture, &input.bucket)?;
+        fixture.set_bucket_tags(input.bucket.as_str(), None);
+        Ok(Resp::new(dto::DeleteBucketTaggingOutput::default()))
     }
 
     fn delete_objects(&self, input: &dto::DeleteObjectsInput) -> HandlerResult<dto::DeleteObjects> {

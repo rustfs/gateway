@@ -1,0 +1,77 @@
+# c-tagging-0015 — a character outside the documented set is refused, in either half.
+#
+# Schema dimensions exercised: the tag character set, on the key and on the value.
+
+[case]
+id = "c-tagging-0015"
+schema_version = 1
+title = "A tag key or value carrying a character outside the documented set is a 400 InvalidTag"
+rationale = """
+The allowed set is letters, numbers, space and + - = . _ : / @, and the restriction is \
+load-bearing rather than cosmetic: a tag is re-rendered into the packed x-amz-tagging header \
+form, into XML, and into IAM policy conditions, and a character like * or ~ that one of those \
+surfaces treats specially produces a label that means different things on different paths. \
+Refusing at the write is the only place the inconsistency can be prevented rather than \
+discovered."""
+polarity = "negative"
+operation = "PutObjectTagging"
+tags = ["tagging", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-tag-limits-0094"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/object-tagging.html"
+summary = "The user guide lists the allowed characters positively; everything else is outside the tag shape."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = true
+
+[[setup.buckets]]
+name = "conf-tagging"
+
+[[setup.objects]]
+bucket = "conf-tagging"
+key = "charset.txt"
+body = { utf8 = "charset" }
+
+[[exchanges]]
+name = "an-illegal-key-character-is-refused"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-tagging/charset.txt?tagging"
+headers = { "content-md5" = "fHdCTgK3w0nomAG2nhcewQ==" }
+body = { utf8 = '<Tagging><TagSet><Tag><Key>bad*key</Key><Value>v</Value></Tag></TagSet></Tagging>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[exchanges.expect.error]
+code = "InvalidTag"
+request_id_present = true
+
+[[exchanges]]
+name = "an-illegal-value-character-is-refused"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-tagging/charset.txt?tagging"
+headers = { "content-md5" = "6QcnzN2CR+nCQQx09Yk4ig==" }
+body = { utf8 = '<Tagging><TagSet><Tag><Key>k</Key><Value>bad~value</Value></Tag></TagSet></Tagging>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[exchanges.expect.error]
+code = "InvalidTag"
+request_id_present = true

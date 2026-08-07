@@ -1,0 +1,76 @@
+# c-tagging-0009 — the object twin of the integrity requirement.
+#
+# Schema dimensions exercised: the httpChecksumRequired guard at the object scope.
+
+[case]
+id = "c-tagging-0009"
+schema_version = 1
+title = "PutObjectTagging without Content-MD5 or a checksum header is a 400 InvalidRequest"
+rationale = """
+Both scopes of the tagging write carry the requirement, and an implementation that enforces it on \
+one and not the other invites the corruption on whichever path skipped it. The follow-up read \
+proves the refused document was never applied — the object still answers its empty set, which at \
+this scope is a 200 rather than a 404."""
+polarity = "negative"
+operation = "PutObjectTagging"
+tags = ["tagging", "checksum", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-tag-md5-required-0092", "q-tag-object-unconfigured-0090"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObjectTagging.html"
+summary = "The object-scope write documents the same required Content-MD5."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = true
+
+[[setup.buckets]]
+name = "conf-tagging"
+
+[[setup.objects]]
+bucket = "conf-tagging"
+key = "guarded.txt"
+body = { utf8 = "guarded" }
+
+[[exchanges]]
+name = "the-unprotected-write-is-refused"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-tagging/guarded.txt?tagging"
+body = { utf8 = '<Tagging><TagSet><Tag><Key>a</Key><Value>1</Value></Tag></TagSet></Tagging>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[exchanges.expect.error]
+code = "InvalidRequest"
+request_id_present = true
+
+[exchanges.expect.body]
+contains_utf8 = ["Content-MD5"]
+
+[[exchanges]]
+name = "nothing-was-written"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-tagging/guarded.txt?tagging"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.body]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Tagging xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><TagSet></TagSet></Tagging>'''

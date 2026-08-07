@@ -159,7 +159,7 @@
                                 "summary": "The documented response syntax shows Tag elements enclosed in a TagSet element under the Tagging root, not flattened into the root."
                               }
                             ],
-                "cases": ["c-tagging-0001", "c-tagging-0004", "c-tagging-0018"]
+                "cases": ["c-tagging-0001", "c-tagging-0004", "c-tagging-0005", "c-tagging-0018"]
               },
               {
                 "id": "q-tag-object-unconfigured-0090",

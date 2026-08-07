@@ -123,7 +123,7 @@
                                 "summary": "The documented response syntax shows Tag elements enclosed in a TagSet element under the Tagging root, not flattened into the root."
                               }
                             ],
-                "cases": ["c-tagging-0001", "c-tagging-0004", "c-tagging-0018"]
+                "cases": ["c-tagging-0001", "c-tagging-0004", "c-tagging-0005", "c-tagging-0018"]
               },
               {
                 "id": "q-tag-bucket-unconfigured-0089",
@@ -137,7 +137,7 @@
                                 "summary": "The operation's error list names NoSuchTagSet as the answer when there is no tag set on the bucket."
                               }
                             ],
-                "cases": ["c-tagging-0002", "c-tagging-0005", "c-tagging-0006"]
+                "cases": ["c-tagging-0002", "c-tagging-0006", "c-tagging-0012"]
               }
             ],
   "ext_points": []

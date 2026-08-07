@@ -1,0 +1,120 @@
+# c-tagging-0004 — the object tag set's whole life: write, read, delete, empty read.
+#
+# Schema dimensions exercised: four-exchange lifecycle, wrapped body, empty 204, the object
+# scope's 200-with-empty-set unconfigured answer.
+
+[case]
+id = "c-tagging-0004"
+schema_version = 1
+title = "PutObjectTagging round-trips, DeleteObjectTagging answers 204, and the empty read is a 200"
+rationale = """
+The object scope's unconfigured rule is the opposite of the bucket scope's, and the place \
+implementations cross the two is the read after a delete: an object whose tags were removed \
+answers 200 with an empty TagSet, never NoSuchTagSet. A client that polls tags after clearing \
+them — replication convergence checks do exactly this — treats a 404 here as the object itself \
+having vanished. The case walks the whole lifecycle so the empty read is reached the way a real \
+client reaches it."""
+polarity = "positive"
+operation = "PutObjectTagging"
+tags = ["tagging", "xml", "wire-bytes"]
+timeout_ms = 10000
+quirks = ["q-tag-wrapped-0088", "q-tag-object-unconfigured-0090", "q-tag-delete-idempotent-0091"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObjectTagging.html"
+summary = "The documented request is the same wrapped Tagging document the bucket write carries."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObjectTagging.html"
+summary = "An object with no tags answers a success with an empty TagSet."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteObjectTagging.html"
+summary = "Removing an object's tag set answers 204."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = true
+
+[[setup.buckets]]
+name = "conf-tagging"
+
+[[setup.objects]]
+bucket = "conf-tagging"
+key = "lifecycle.txt"
+content_type = "text/plain"
+body = { utf8 = "object body" }
+
+[[exchanges]]
+name = "write"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-tagging/lifecycle.txt?tagging"
+headers = { "content-md5" = "QTsTDAb4c0VADLNy4ipavA==" }
+body = { utf8 = '<Tagging><TagSet><Tag><Key>colour</Key><Value>green</Value></Tag></TagSet></Tagging>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[[exchanges]]
+name = "read"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-tagging/lifecycle.txt?tagging"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.body]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Tagging xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><TagSet><Tag><Key>colour</Key><Value>green</Value></Tag></TagSet></Tagging>'''
+
+[[exchanges]]
+name = "delete"
+
+[exchanges.request]
+method = "DELETE"
+target = "/conf-tagging/lifecycle.txt?tagging"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 204
+headers_absent = ["content-length", "content-type", "transfer-encoding"]
+connection_after = "open"
+
+[exchanges.expect.body]
+size = 0
+exact_utf8 = ""
+
+[[exchanges]]
+name = "the-empty-read-is-a-200"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-tagging/lifecycle.txt?tagging"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.body]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Tagging xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><TagSet></TagSet></Tagging>'''

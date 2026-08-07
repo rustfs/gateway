@@ -1,0 +1,70 @@
+# c-tagging-0018 — the wrong root is a malformed document, not a lenient parse.
+#
+# Schema dimensions exercised: request-XML root enforcement on the bucket write.
+
+[case]
+id = "c-tagging-0018"
+schema_version = 1
+title = "PutBucketTagging with a body rooted at TagSet is a 400 MalformedXML"
+rationale = """
+The wrapped shape cuts both ways: a client that flattens the document — sending TagSet as the \
+root instead of inside Tagging — has written the shape a flattened-collection encoder produces, \
+and a lenient parser that accepts it trains a generation of clients the strict services then \
+refuse. Request XML is tolerant of unknown elements and namespaces, but the root is the one \
+part of the grammar that identifies the document, and a wrong root is MalformedXML before any \
+tag is read."""
+polarity = "negative"
+operation = "PutBucketTagging"
+tags = ["tagging", "xml", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-tag-wrapped-0088"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketTagging.html"
+summary = "The documented request root is Tagging; a document rooted elsewhere is not this operation's request."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = true
+
+[[setup.buckets]]
+name = "conf-tagging"
+
+[[exchanges]]
+name = "the-wrong-root-is-refused"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-tagging?tagging"
+headers = { "content-md5" = "57/rIrSZ0GUeMuLMIXm+wQ==" }
+body = { utf8 = '<TagSet><Tag><Key>a</Key><Value>1</Value></Tag></TagSet>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[exchanges.expect.error]
+code = "MalformedXML"
+request_id_present = true
+
+[[exchanges]]
+name = "nothing-was-written"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-tagging?tagging"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 404
+connection_after = "open"
+
+[exchanges.expect.error]
+code = "NoSuchTagSet"
+request_id_present = true

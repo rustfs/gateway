@@ -1,0 +1,50 @@
+# c-tagging-0017 — a repeated key in the inline header is the header's own refusal.
+#
+# Schema dimensions exercised: duplicate detection on the header channel, AWS's one sentence.
+
+[case]
+id = "c-tagging-0017"
+schema_version = 1
+title = "PutObject with x-amz-tagging repeating a key is a 400 InvalidArgument"
+rationale = """
+Query strings tolerate repeated keys, so a parser built on a generic form decoder happily \
+produces a multimap and stores whichever value survives — the ambiguity c-tagging-0014 pins on \
+the XML channel, arriving through the other door. The header's refusal carries a different code \
+from the document's: AWS answers the packed header's malformed spellings with InvalidArgument \
+and its single documented sentence, and a client retrying on the distinction deserves to see \
+it."""
+polarity = "negative"
+operation = "PutObject"
+tags = ["tagging", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-tag-header-form-0093"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObject.html"
+summary = "The header form is URL query parameters without tag name duplicates."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-tagging"
+
+[request]
+method = "PUT"
+target = "/conf-tagging/dup-header.txt"
+headers = { "x-amz-tagging" = "dup=1&dup=2" }
+body = { utf8 = "duplicate" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+code = "InvalidArgument"
+request_id_present = true
+
+[expect.body]
+contains_utf8 = ["duplicates"]

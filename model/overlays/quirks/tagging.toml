@@ -21,7 +21,7 @@ id      = "q-tag-wrapped-0088"
 kind    = "wire_form"
 target  = "GetBucketTagging"
 summary = "The tag collection is wrapped — `<TagSet>` encloses `<Tag>` members — where the listing families flatten `Contents` and `Rule` directly into their parent, so an encoder that reuses the flattened shape here silently drops the enclosing element."
-cases   = ["c-tagging-0001", "c-tagging-0004", "c-tagging-0018"]
+cases   = ["c-tagging-0001", "c-tagging-0004", "c-tagging-0005", "c-tagging-0018"]
 
   [[quirk.evidence]]
   kind    = "aws-doc"
@@ -33,7 +33,7 @@ id      = "q-tag-bucket-unconfigured-0089"
 kind    = "error_code"
 target  = "GetBucketTagging"
 summary = "A bucket that never had a tag set answers 404 with the dedicated code NoSuchTagSet — not a generic not-found and not a 200 with an empty set — so a client can distinguish an unlabelled bucket from a missing one."
-cases   = ["c-tagging-0002", "c-tagging-0005", "c-tagging-0006"]
+cases   = ["c-tagging-0002", "c-tagging-0006", "c-tagging-0012"]
 
   [[quirk.evidence]]
   kind    = "aws-doc"

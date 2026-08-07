@@ -1,0 +1,54 @@
+# c-tagging-0007 — the untagged object read is a 200 with an empty set, not a 404.
+#
+# Schema dimensions exercised: single-exchange form, byte-exact empty-collection body.
+
+[case]
+id = "c-tagging-0007"
+schema_version = 1
+title = "GetObjectTagging on an object that was never tagged answers 200 with an empty TagSet"
+rationale = """
+This is the bucket rule's mirror image, and implementations that share one code path between the \
+two scopes always break one of them. An object with no tags answers a success carrying an empty \
+wrapped TagSet: a 404 here would tell a replication convergence check that the object itself is \
+missing, and NoSuchTagSet has no object-scope meaning at all. The empty collection's exact \
+rendering matters too — an SDK parser expects the enclosing element to be present and empty."""
+polarity = "negative"
+operation = "GetObjectTagging"
+tags = ["tagging", "xml", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-tag-object-unconfigured-0090", "q-tag-wrapped-0088"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObjectTagging.html"
+summary = "The response for an untagged object is a success with an empty TagSet, and NoSuchTagSet is not in this operation's error list."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-tagging"
+
+[[setup.objects]]
+bucket = "conf-tagging"
+key = "untagged.txt"
+content_type = "text/plain"
+body = { utf8 = "no labels" }
+
+[request]
+method = "GET"
+target = "/conf-tagging/untagged.txt?tagging"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[expect.headers_present]
+"content-type" = "application/xml"
+
+[expect.body]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Tagging xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><TagSet></TagSet></Tagging>'''

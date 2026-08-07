@@ -1,0 +1,69 @@
+# c-tagging-0014 — a repeated key in the document is refused whole.
+#
+# Schema dimensions exercised: duplicate-key refusal on the XML channel, refusal-then-verify.
+
+[case]
+id = "c-tagging-0014"
+schema_version = 1
+title = "PutBucketTagging with two tags under one key is a 400 InvalidTag"
+rationale = """
+A set with a repeated key has no single meaning: whichever of the two values a later reader \
+takes, half the writers meant the other one. Implementations that store the document as sent \
+defer the ambiguity to every consumer; implementations that keep the last occurrence silently \
+drop a value the writer sent. The only answer that preserves the operation's replace-everything \
+semantics is refusing the document whole, which the follow-up read confirms."""
+polarity = "negative"
+operation = "PutBucketTagging"
+tags = ["tagging", "xml", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-tag-limits-0094"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketTagging.html"
+summary = "InvalidTag is the documented refusal for a tag that fails validation, and unique keys are part of the tag shape."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = true
+
+[[setup.buckets]]
+name = "conf-tagging"
+
+[[exchanges]]
+name = "the-duplicate-is-refused"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-tagging?tagging"
+headers = { "content-md5" = "Yep4rpUIyDWz/dXS+/Km0g==" }
+body = { utf8 = '<Tagging><TagSet><Tag><Key>dup</Key><Value>1</Value></Tag><Tag><Key>dup</Key><Value>2</Value></Tag></TagSet></Tagging>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[exchanges.expect.error]
+code = "InvalidTag"
+request_id_present = true
+
+[[exchanges]]
+name = "neither-value-was-stored"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-tagging?tagging"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 404
+connection_after = "open"
+
+[exchanges.expect.error]
+code = "NoSuchTagSet"
+request_id_present = true

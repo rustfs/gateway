@@ -1,0 +1,69 @@
+# c-tagging-0016 — half a pair in the inline header refuses the whole write.
+#
+# Schema dimensions exercised: the header channel's grammar, write-suppression on refusal.
+
+[case]
+id = "c-tagging-0016"
+schema_version = 1
+title = "PutObject with x-amz-tagging carrying a segment without '=' is a 400 and stores nothing"
+rationale = """
+The header is query-string shaped, and a segment with no '=' is not a tag with an implied empty \
+value — AWS refuses the whole spelling with one sentence. The sharper half of the assertion is \
+that the object itself must not be created: the tag set travels on the write, so an \
+implementation that stores the body and drops the malformed labels has performed half a request, \
+and the caller holds an object whose labels silently differ from what it sent."""
+polarity = "negative"
+operation = "PutObject"
+tags = ["tagging", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-tag-header-form-0093"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObject.html"
+summary = "The header's documented form is URL query parameters, which a bare segment does not spell."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = true
+
+[[setup.buckets]]
+name = "conf-tagging"
+
+[[exchanges]]
+name = "the-malformed-header-is-refused"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-tagging/half-pair.txt"
+headers = { "x-amz-tagging" = "keyonly" }
+body = { utf8 = "half pair" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[exchanges.expect.error]
+code = "InvalidArgument"
+request_id_present = true
+
+[[exchanges]]
+name = "the-object-was-not-created"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-tagging/half-pair.txt"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 404
+connection_after = "open"
+
+[exchanges.expect.error]
+code = "NoSuchKey"
+request_id_present = true

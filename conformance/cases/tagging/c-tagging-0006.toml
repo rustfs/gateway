@@ -1,0 +1,54 @@
+# c-tagging-0006 — the unconfigured bucket read is a dedicated 404, byte for byte.
+#
+# Schema dimensions exercised: single-exchange form, byte-exact error document with redaction.
+
+[case]
+id = "c-tagging-0006"
+schema_version = 1
+title = "GetBucketTagging on a bucket that never had a tag set answers 404 NoSuchTagSet"
+rationale = """
+Clients branch on the code, not the status: NoSuchTagSet on a 404 means the bucket exists and is \
+unlabelled, while NoSuchBucket on the same status means stop and create the bucket. Cost \
+reporting tools probe every bucket's tag set and treat NoSuchTagSet as an ordinary empty answer; \
+an implementation that returns a 200 with an empty document instead makes unlabelled and \
+labelled-with-nothing indistinguishable, and one that returns a generic 404 sends the operator \
+hunting for a bucket that is right there."""
+polarity = "negative"
+operation = "GetBucketTagging"
+tags = ["tagging", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-tag-bucket-unconfigured-0089"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketTagging.html"
+summary = "NoSuchTagSet is the documented answer when there is no tag set on the bucket."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-tagging"
+
+[request]
+method = "GET"
+target = "/conf-tagging?tagging"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 404
+connection_after = "open"
+
+[expect.error]
+code = "NoSuchTagSet"
+request_id_present = true
+
+[expect.headers_present]
+"content-type" = "application/xml"
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>NoSuchTagSet</Code><Message>The TagSet does not exist</Message><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''
