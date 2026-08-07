@@ -29,7 +29,7 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
 use bytes::Bytes;
-use rustfs_gateway::{S3Service, ServiceBuilder};
+use rustfs_gateway::{BodyProgress, ObservedBody, S3Service, ServiceBuilder};
 use support::{Backend, CountingBody, Failing, Ping, Recorder, RefuseEverything, exchange, ping_route, plain, wired};
 
 /// Negative — a request that names no operation is answered with the `501` that tells an operator
@@ -517,4 +517,158 @@ async fn a_committed_response_that_succeeds_carries_the_encoders_document() {
     let body = String::from_utf8(response.body().to_vec()).expect("utf-8");
     assert!(body.ends_with("<Ping>committed</Ping>"), "{body}");
     assert!(!body.contains("<Error>"), "{body}");
+}
+
+// ── the body is not read until the signature has been judged ────────────────────────────────────
+
+/// A body large enough that reading it would be the expensive half of the exchange, plus the handle
+/// that says whether anything asked for it.
+fn watched_body(bytes: usize) -> (ObservedBody, std::sync::Arc<BodyProgress>) {
+    // Sixty-four frames rather than one: a body handed over whole can only be all-or-nothing, and
+    // "the server stopped part way through" is the reading these assertions are about.
+    let frame = Bytes::from(vec![b'p'; bytes / 64]);
+    ObservedBody::new(core::iter::repeat_n(frame, 64))
+}
+
+/// Negative — **the c-sig-0001 property.** A request whose signature the floor refuses is answered
+/// without one byte of its payload being asked for.
+///
+/// The counter is the whole test. "The refusal happens before the read" is unfalsifiable by reading
+/// the pipeline — an edit that swapped the two stages would leave every other assertion in this file
+/// green — so the evidence has to be a number the body itself reports. Zero bytes read and a body
+/// that was never exhausted is the same evidence `expect.request_progress` asks a real server for.
+#[tokio::test]
+async fn an_unsigned_request_to_an_aws_operation_never_has_its_body_read() {
+    let (body, progress) = watched_body(1 << 20);
+    let request = http::Request::builder()
+        .method(http::Method::GET)
+        .uri("/")
+        .header("host", "s3.example.com")
+        .header("content-length", (1_u64 << 20).to_string())
+        .body(body)
+        .expect("a valid request");
+
+    let response = support::service().call(request).await;
+    assert_eq!(response.status(), http::StatusCode::FORBIDDEN);
+    assert_eq!(progress.bytes_read(), 0, "the payload was read before the request was refused");
+    assert!(!progress.is_exhausted(), "the payload was drained before the request was refused");
+}
+
+/// Negative — the same property against a signature that is well formed and wrong, which is the
+/// exact shape `c-sig-0001` sends: the request parses, reaches the verifier, and is refused
+/// `SignatureDoesNotMatch`. An implementation could plausibly refuse an *absent* signature early and
+/// still read the body before checking a present one, so the two cases are not one case.
+#[tokio::test]
+async fn a_mismatched_signature_is_refused_before_the_body_is_read() {
+    let service = wired()
+        .clock(rustfs_gateway::FixedClock::at_unix_seconds(1_767_323_045))
+        .register::<Ping, _>(Arc::new(Backend))
+        .route(ping_route())
+        .build()
+        .expect("a complete assembly");
+
+    let (body, progress) = watched_body(1 << 20);
+    let request = http::Request::builder()
+        .method(http::Method::POST)
+        .uri("/")
+        .header("host", "s3.example.com")
+        .header("content-length", (1_u64 << 20).to_string())
+        .header("x-amz-date", "20260102T030405Z")
+        .header("x-amz-content-sha256", "UNSIGNED-PAYLOAD")
+        .header(
+            "authorization",
+            "AWS4-HMAC-SHA256 Credential=AKIDEXAMPLE/20260102/us-east-1/s3/aws4_request, \
+             SignedHeaders=host;x-amz-content-sha256;x-amz-date, \
+             Signature=0000000000000000000000000000000000000000000000000000000000000000",
+        )
+        .body(body)
+        .expect("a valid request");
+
+    let response = service.call(request).await;
+    let collected = rustfs_gateway::collect(response).await.expect("an in-memory body");
+    let document = String::from_utf8(collected.body().to_vec()).expect("utf-8");
+    assert_eq!(collected.status(), http::StatusCode::FORBIDDEN);
+    assert!(document.contains("<Code>SignatureDoesNotMatch</Code>"), "{document}");
+    assert_eq!(progress.bytes_read(), 0, "the payload was read before the signature was judged");
+    assert!(!progress.is_exhausted());
+}
+
+/// Negative — two different `x-amz-checksum-*` headers are two integrity claims, and the
+/// contradiction is answered from the head alone. Nothing in the payload could settle which claim
+/// the caller meant, so reading it first buys nothing and costs the transfer.
+#[tokio::test]
+async fn two_different_checksum_headers_are_refused_before_the_body_is_read() {
+    let service = wired()
+        .register::<Ping, _>(Arc::new(Backend))
+        .route(ping_route())
+        .build()
+        .expect("a complete assembly");
+
+    let (body, progress) = watched_body(1 << 20);
+    let request = http::Request::builder()
+        .method(http::Method::POST)
+        .uri("/")
+        .header("host", "s3.example.com")
+        .header("content-length", (1_u64 << 20).to_string())
+        .header("x-amz-checksum-crc32", "AAAAAA==")
+        .header("x-amz-checksum-sha1", "2jmj7l5rSw0yVb/vlWAYkK/YBwk=")
+        .body(body)
+        .expect("a valid request");
+
+    let response = service.call(request).await;
+    let collected = rustfs_gateway::collect(response).await.expect("an in-memory body");
+    let document = String::from_utf8(collected.body().to_vec()).expect("utf-8");
+    assert_eq!(collected.status(), http::StatusCode::BAD_REQUEST);
+    assert!(document.contains("<Code>InvalidRequest</Code>"), "{document}");
+    assert_eq!(progress.bytes_read(), 0, "the payload was read before the contradiction was noticed");
+}
+
+/// Negative — one checksum header repeated with the *same* algorithm is not a contradiction, so the
+/// guard above must not fire on it. A rule that refused every repeated header would refuse traffic a
+/// proxy legitimately produces, and the case for refusing two claims does not extend to one claim
+/// spelled twice.
+#[tokio::test]
+async fn one_checksum_algorithm_sent_twice_is_not_a_contradiction() {
+    let service = wired()
+        .register::<Ping, _>(Arc::new(Backend))
+        .route(ping_route())
+        .build()
+        .expect("a complete assembly");
+
+    let request = http::Request::builder()
+        .method(http::Method::POST)
+        .uri("/")
+        .header("host", "s3.example.com")
+        .header("x-amz-checksum-crc32", "AAAAAA==")
+        .body(Bytes::new())
+        .expect("a valid request");
+
+    let (status, _body) = exchange(&service, request).await;
+    assert_ne!(status, http::StatusCode::BAD_REQUEST);
+}
+
+/// Positive — a request nothing objects to has its body read to the end and reaches the handler.
+/// Without this, every assertion above would also be satisfied by a service that never reads a body
+/// at all.
+#[tokio::test]
+async fn an_accepted_request_has_its_body_read_to_the_end() {
+    let service = wired()
+        .register::<Ping, _>(Arc::new(Backend))
+        .route(ping_route())
+        .build()
+        .expect("a complete assembly");
+
+    let (body, progress) = watched_body(4096);
+    let request = http::Request::builder()
+        .method(http::Method::POST)
+        .uri("/")
+        .header("host", "s3.example.com")
+        .header("content-length", "4096")
+        .body(body)
+        .expect("a valid request");
+
+    let response = service.call(request).await;
+    assert_eq!(response.status(), http::StatusCode::OK);
+    assert_eq!(progress.bytes_read(), 4096);
+    assert!(progress.is_exhausted());
 }

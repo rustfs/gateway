@@ -774,6 +774,34 @@ fn validators_of(object: Option<&StoredObject>) -> Result<ObjectValidators, Hand
     }
 }
 
+/// The one range refusal that is a fact about the request head and not about the object.
+///
+/// `Range` and `partNumber` together are a contradiction in the request itself: the two select
+/// overlapping spans by different mechanisms, and no object needs to exist for that to be true. It
+/// therefore has to be answered before the key is resolved. Answering `NoSuchKey` first — which is
+/// what this fixture did while the check lived inside [`resolve_range`], below the lookup — reports
+/// a storage fact to a caller whose request was never going to be served whatever storage held, and
+/// tells it to go looking for the wrong bug.
+///
+/// The rule itself is not restated here. [`evaluate_range`] owns it, and only its refusal is read:
+/// for a request carrying at most one selector the contract answers with a decision about bytes,
+/// which is a decision this function is deliberately too early to make.
+///
+/// # Errors
+///
+/// The contract's own [`PreconditionRejection`], rendered by [`refused`].
+fn refuse_conflicting_selectors(range: Option<&str>, part_number: Option<i32>) -> Result<(), HandlerError> {
+    let selectors = RangeSelectors {
+        range,
+        part_number: part_number.map(|number| u32::try_from(number).unwrap_or(0)),
+        if_range: None,
+    };
+    match evaluate_range(&selectors, &ObjectValidators::default(), 0) {
+        Ok(_) => Ok(()),
+        Err(rejection) => Err(refused(rejection)),
+    }
+}
+
 /// A conditional request the contract refused as malformed rather than unsatisfied.
 ///
 /// The wording is the contract's own constant. It is never built from request bytes — a message
@@ -1670,6 +1698,9 @@ async fn upload_part(state: &Arc<Mutex<Fixture>>, input: dto::UploadPartInput) -
 
 impl Stub {
     fn get_object(&self, input: &dto::GetObjectInput) -> HandlerResult<dto::GetObject> {
+        // Before the bucket, before the key, before anything is borrowed: a request that names two
+        // ways of selecting bytes is refused on its own terms.
+        refuse_conflicting_selectors(input.range.as_ref().map(|range| range.as_str()), input.part_number)?;
         let fixture = self.borrow()?;
         require_bucket(&fixture, &input.bucket)?;
         let found = fixture.object(input.bucket.as_str(), input.key.as_str());
@@ -1734,6 +1765,9 @@ impl Stub {
     }
 
     fn head_object(&self, input: &dto::HeadObjectInput) -> HandlerResult<dto::HeadObject> {
+        // The same order as `get_object`'s, and for the same reason. A `HEAD` that disagreed with a
+        // `GET` about which refusal comes first would be the harder half of the bug to find.
+        refuse_conflicting_selectors(input.range.as_ref().map(|range| range.as_str()), input.part_number)?;
         let fixture = self.borrow()?;
         require_bucket(&fixture, &input.bucket)?;
         let found = fixture.object(input.bucket.as_str(), input.key.as_str());

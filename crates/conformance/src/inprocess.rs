@@ -29,11 +29,18 @@
 //!
 //! * **`connection_after`** — the service is a value, not a peer. A completed exchange leaves it
 //!   reusable, which is reported as `open`. A case asserting `closed`, `reset` or `half_closed`
-//!   cannot be judged by this transport and will be red for that reason alone.
-//! * **`request_progress`** — the whole body is handed over before the call begins, so
-//!   `body_bytes_sent_at_response` is the whole body and `body_fully_sent` is true. A case
-//!   asserting that the server refused *before* reading the payload is measuring something only a
-//!   socket can measure; it will be red here even against a server that gets it right.
+//!   cannot be judged by this transport and will be red for that reason alone. The tempting
+//!   shortcut — report `closed` when the response carries `Connection: close` — is deliberately not
+//!   taken: that header is the server's *intention*, and reporting an intention as an observation is
+//!   the same class of defect as the unconditional `Outcome::Response` this module used to report.
+//! * **`request_progress`** — measured, with one caveat, and no longer assumed. The body is handed
+//!   over as a [`rustfs_gateway::ObservedBody`] that counts what the service pulls out of it, so
+//!   `body_bytes_sent_at_response` is the number of payload bytes the server had asked for when the
+//!   response existed and `body_fully_sent` is whether it read on to the end. On a socket those are
+//!   two different numbers — a client can be a receive window ahead of the server — and what is
+//!   reported here is the server-side one, which is the tighter of the two and the one a case about
+//!   early refusal is asking about. This used to be reported as "the whole body, fully sent"
+//!   unconditionally, which made every such assertion unfailable.
 //! * **`timing`** — `elapsed_ms` and `ttfb_ms` are real but meaningless: an in-memory call takes
 //!   microseconds, so an upper bound always holds and a lower bound never does.
 //!
@@ -77,8 +84,8 @@ use rustfs_gateway::sig::{
     AmzDate, PayloadMode, SigService, SigV4Signer, SigningCredentials, SigningRequest, SigningScope, Tamper, TamperComponent,
 };
 use rustfs_gateway::{
-    Credentials, FixedClock, Limits, RegionSet, S3Service, ServiceBuilder, SigV4Authenticator, StaticCredentials, WireRequest,
-    allow_when, collect, dto,
+    Credentials, FixedClock, Limits, ObservedBody, RegionSet, S3Service, ServiceBuilder, SigV4Authenticator, StaticCredentials,
+    WireRequest, allow_when, collect, dto,
 };
 
 use crate::exec::block_on;
@@ -242,7 +249,13 @@ struct Wire {
     method: String,
     target: String,
     headers: Vec<(String, String)>,
+    /// The whole body, which is what the signature and `Content-Length` are stated over.
     body: Vec<u8>,
+    /// The same bytes, still in the pieces the case wrote them in.
+    ///
+    /// Kept apart from `body` because the pieces are what makes "the server stopped asking part
+    /// way through" observable: a body handed over as one frame can only be all-or-nothing.
+    frames: Vec<Vec<u8>>,
     sign: Option<Value>,
 }
 
@@ -297,29 +310,34 @@ impl InProcess {
             }
         }
 
-        let body = match (request.get("body"), request.get("chunks")) {
-            (Some(payload), _) => self.payload(payload)?,
+        let frames = match (request.get("body"), request.get("chunks")) {
+            (Some(payload), _) => vec![self.payload(payload)?],
             (None, Some(Value::Array(chunks))) => self.chunks(chunks)?,
             _ => Vec::new(),
         };
+        let body = frames.iter().flatten().copied().collect::<Vec<u8>>();
 
         Ok(Wire {
             method,
             target,
             headers,
             body,
+            frames,
             sign: request.get("sign").cloned(),
         })
     }
 
-    /// Flattens a chunk sequence into one body.
+    /// Reads a chunk sequence into the frames it was written as.
     ///
     /// `delay_ms` is dropped on purpose: it exists to make arrival timing observable, and nothing
-    /// in an in-process call observes it. A control chunk is refused rather than dropped, because
-    /// a case that half-closes the connection is asserting something about a socket and answering
-    /// it from a complete body would be a false green.
-    fn chunks(&self, chunks: &[Value]) -> Result<Vec<u8>, SutError> {
-        let mut body = Vec::new();
+    /// in an in-process call observes wall-clock pacing. What survives is the *shape* — one frame
+    /// per chunk, and one per repetition — and that is the half a socketless transport can still
+    /// measure: a server that stops pulling at the third of fifty thousand frames is distinguishable
+    /// from one that drains them all. A control chunk is refused rather than dropped, because a case
+    /// that half-closes the connection is asserting something about a socket and answering it from a
+    /// complete body would be a false green.
+    fn chunks(&self, chunks: &[Value]) -> Result<Vec<Vec<u8>>, SutError> {
+        let mut frames = Vec::new();
         for chunk in chunks {
             if let Some(action) = chunk.get("action").and_then(Value::as_str) {
                 return Err(SutError::Environment(format!(
@@ -342,10 +360,10 @@ impl InProcess {
                 self.payload(chunk)?
             };
             for _ in 0..repeat {
-                body.extend_from_slice(&unit);
+                frames.push(unit.clone());
             }
         }
-        Ok(body)
+        Ok(frames)
     }
 }
 
@@ -358,18 +376,13 @@ fn split_target(target: &str) -> (&str, &str) {
 }
 
 /// Builds the `http::Request` the service is called with.
-fn assemble_request(
-    method: &str,
-    target: &str,
-    headers: &[(String, String)],
-    body: Vec<u8>,
-) -> Result<http::Request<bytes::Bytes>, SutError> {
+fn assemble_request<B>(method: &str, target: &str, headers: &[(String, String)], body: B) -> Result<http::Request<B>, SutError> {
     let mut builder = http::Request::builder().method(method).uri(target);
     for (name, value) in headers {
         builder = builder.header(name.as_str(), value.as_str());
     }
     builder
-        .body(bytes::Bytes::from(body))
+        .body(body)
         .map_err(|error| SutError::Environment(format!("the request could not be built: {error}")))
 }
 
@@ -508,14 +521,20 @@ impl Sut for InProcess {
             headers.push(("content-length".to_owned(), wire.body.len().to_string()));
         }
 
-        let headers = match &wire.sign {
-            None => headers,
+        // A tamper may rewrite the path or the query, and those live in the target rather than in a
+        // header. Signing therefore hands back both halves: the head to send, and the target to send
+        // it to. Keeping the case's original target here is how `sign.tamper.component =
+        // "canonical_query"` used to be signed, rewritten, and then thrown away — the request went
+        // out exactly as it had been signed and was answered `200`, so the case measured nothing.
+        let (headers, target) = match &wire.sign {
+            None => (headers, wire.target.clone()),
             Some(sign) => sign_request(sign, &wire, path, query, &headers, &request_time, &self.limits)?,
         };
 
-        let request = assemble_request(&wire.method, &wire.target, &headers, wire.body.clone())?;
+        let (body, progress) = ObservedBody::new(wire.frames.iter().map(|frame| bytes::Bytes::from(frame.clone())));
+        let request = assemble_request(&wire.method, &target, &headers, body)?;
         let started = std::time::Instant::now();
-        let response = block_on(service.call_bytes(request));
+        let response = block_on(service.call(request));
         // The head is kept before the body is drained, so that a body which fails halfway can still
         // be reported *as a response that failed halfway* rather than as an environment problem. A
         // drain that consumed the head first would leave the transport with nothing to report but
@@ -574,8 +593,11 @@ impl Sut for InProcess {
             trailers: render(trailers),
             body,
             body_bytes_before_error: before_error,
-            request_body_bytes_sent_at_response: Some(wire.body.len() as u64),
-            request_body_fully_sent: Some(true),
+            // Measured, not assumed. `progress` counts what the service pulled out of the body, and
+            // the head above was taken before the body was drained, so what is read here is the
+            // state at the moment the response existed.
+            request_body_bytes_sent_at_response: Some(progress.bytes_read()),
+            request_body_fully_sent: Some(progress.is_exhausted()),
             ttfb_ms: Some(elapsed_ms),
             elapsed_ms,
             connection_after: Some(ConnectionState::Open),
@@ -588,7 +610,13 @@ fn poisoned<T>(_: T) -> SutError {
     SutError::Environment("the fixture state was left poisoned by an earlier case".to_owned())
 }
 
-/// Signs the request the way `sign.mode` asks for, returning the header list to send.
+/// Signs the request the way `sign.mode` asks for.
+///
+/// Returns the header list **and the request target**, because two of the eleven tamper components
+/// — `canonical_path` and `canonical_query` — live in the target rather than in a header. A signer
+/// that handed back only the headers would sign a request, rewrite a component of it, and then send
+/// the untouched original: a negative case that way round is answered `200`, and its assertions are
+/// judged against a request nobody meant to send.
 fn sign_request(
     sign: &Value,
     wire: &Wire,
@@ -597,10 +625,10 @@ fn sign_request(
     headers: &[(String, String)],
     request_time: &time::Instant,
     limits: &Limits,
-) -> Result<Vec<(String, String)>, SutError> {
+) -> Result<(Vec<(String, String)>, String), SutError> {
     let mode = sign.get("mode").and_then(Value::as_str).unwrap_or("sigv4_header");
     match mode {
-        "anonymous" | "none" => return Ok(headers.to_vec()),
+        "anonymous" | "none" => return Ok((headers.to_vec(), wire.target.clone())),
         "sigv4_header" | "sigv4_unsigned_payload" => {}
         other => {
             return Err(SutError::Environment(format!(
@@ -620,7 +648,7 @@ fn sign_request(
         .iter()
         .find(|(name, _)| name.eq_ignore_ascii_case("host"))
         .map_or(HOST, |(_, value)| value.as_str());
-    let probe = assemble_request("GET", "/", &[("host".to_owned(), host.to_owned())], Vec::new())?;
+    let probe = assemble_request("GET", "/", &[("host".to_owned(), host.to_owned())], bytes::Bytes::new())?;
     let accepted = WireRequest::accept(probe, limits)
         .map_err(|error| SutError::Environment(format!("`{host}` is not an acceptable host: {error:?}")))?;
 
@@ -674,11 +702,27 @@ fn sign_request(
             .map_err(|error| SutError::Environment(format!("the request could not be tampered with: {error}")))?,
     };
 
-    Ok(signed
+    let headers = signed
         .headers()
         .iter()
         .map(|(name, value)| (name.as_str().to_owned(), value.to_str().unwrap_or_default().to_owned()))
-        .collect())
+        .collect();
+    Ok((headers, rebuild_target(signed.path(), signed.query())))
+}
+
+/// Reassembles a request target out of the path and query the signer holds.
+///
+/// An empty query means no `?` at all: `/b/k?` and `/b/k` are two different request targets and
+/// only one of them is what the case wrote.
+fn rebuild_target(path: &str, query: &str) -> String {
+    if query.is_empty() {
+        return path.to_owned();
+    }
+    let mut target = String::with_capacity(path.len().saturating_add(query.len()).saturating_add(1));
+    target.push_str(path);
+    target.push('?');
+    target.push_str(query);
+    target
 }
 
 #[cfg(test)]

@@ -13,6 +13,8 @@ everything a consumer needs so that nothing downstream depends on `-core`, `-sig
 | `src/lib.rs` | Module mounting and the whole re-export list; the assembly example in rustdoc | You need to know what the facade publishes, or something downstream cannot name a type |
 | `src/builder.rs` | `ServiceBuilder`: registration, extension points, and the assembly-time refusals | You are adding a builder knob, or `build()` refused and you want to know which check fired |
 | `src/service.rs` | `S3Service` and the ordered pipeline (mint identifiers and read the clock → accept → resolve → route → govern → read body → admit → authenticate → decode → authorize → dispatch → encode → stamp the framework headers) | A request reached the wrong stage, or you are moving a stage — the module docs say which positions are load-bearing |
+| `src/gate.rs` | `Authenticated`, `SealedBody`, `BodyCeilings`: the proof a stage must hold before it may read a request body, the one bounded read, and the two ceilings it is subject to | You are moving a stage relative to the body read, adding a per-operation body cap, or asking why the read is not just a `collect()` |
+| `src/probe.rs` | `ObservedBody`/`BodyProgress`: a request body that reports how much of itself the service asked for | You need `expect.request_progress` to be a measurement, or you are writing a test about when a refusal happened |
 | `src/dispatch.rs` | Codec-aware erasure of one `(operation, backend)` pair, and the per-operation table | A request routes but cannot be decoded, or you are wondering why the body is offered as a stream first |
 | `src/adapt.rs` | The `tower::Service` and `hyper::service::Service` implementations | You are wiring the service into a server, or wondering why `Error = Infallible` |
 | `src/assembly.rs` | `AssemblyError` and the `asm-*` `RuleRef` every refusal carries | You are adding an assembly-time rule; it needs a rule reference |
@@ -39,7 +41,8 @@ everything a consumer needs so that nothing downstream depends on `-core`, `-sig
 | --- | --- |
 | `tests/support/mod.rs` | The shared fixtures: an anonymously-reachable vendor operation, its `HEAD`/content twins covering every response shape (content, refusal, `304`, commit-then-answer, commit-then-fail), backends, a body that counts what was read |
 | `tests/assembly.rs` | What `build()` refuses; 11 negative, 3 positive |
-| `tests/pipeline.rs` | What a request does, the request identifier included, the RFC 9110 body rules on both paths, and the commit seam; 25 negative, 6 positive |
+| `tests/pipeline.rs` | What a request does, the request identifier included, the RFC 9110 body rules on both paths, the commit seam, and the four measurements that say a refusal happened before the payload was asked for; 29 negative, 7 positive |
+| `tests/refusal_order_guards.rs` | Source guards on the body gate: the proof keeps one real constructor, the read still demands it, the pipeline seals above the verifier and reads below it, and nothing else in the crate drains a request body; 5 negative, each paired with a proof it can fire |
 | `tests/facade_probe.rs` | Every export the conformance runner's `REQUIRED_FACADE_EXPORTS` names, checked by naming it |
 | `tests/backend_reachability.rs` | Every argument of the range contract, built from a decoded request and never from a literal; 5 negative, 1 positive. Read this before adding a constructor a backend is meant to call |
 | `examples/minimal.rs` | The whole assembly in one file, asserting one answered request and one refused one |
@@ -53,7 +56,22 @@ everything a consumer needs so that nothing downstream depends on `-core`, `-sig
   gained its own codec erasure after this crate's was written; folding one into the other is a
   follow-up, not a behaviour change.
 - **The request body is buffered.** Capped by `DEFAULT_MAX_BUFFERED_BODY_BYTES` (64 MiB); the
-  streaming ingest path is not wired through the facade.
+  streaming ingest path is not wired through the facade. The ceiling is now applied *inside* the
+  frame loop rather than to the collected result, so the refusal arrives at the frame that crosses
+  the line and the rest is never buffered — but the bytes up to that point still are.
+- **The per-operation body cap lives in the wrong crate.** `gate::declared_body_cap` is a two-line
+  table in this crate with one entry (`DeleteObjects`, 2 MiB, from the documented thousand-entry
+  limit). It belongs on `rustfs_gateway_core::Operation`, beside `spec()` and `floor()`, so that an
+  operation with a bounded body cannot be added without stating its bound. It is here because a
+  table with one honest entry beats an assembly that enforces nothing, and `crates/core/src/op.rs`
+  was outside the change that needed the enforcement.
+- **`WireReject::must_close_connection` and `ChunkReject::must_close_connection` are declared and
+  nothing reads them.** No response this crate writes carries `Connection: close`, so a refusal that
+  leaves a request body undrained keeps the connection in a state where the next request on it
+  begins in the middle of the last one's payload. Two conformance cases (`c-sig-0001`,
+  `c-object-0015`) assert `connection_after = "closed"` and are red for exactly that one assertion;
+  `c-object-0013` asserts `open` for a refusal that also leaves the body unread, so the rule is not
+  "any unread body closes" and the discriminator needs a maintainer's decision before it is written.
 - **`aws-chunked` framing is not decoded here.** A streaming `x-amz-content-sha256` value is
   refused rather than mis-framed.
 - **The header map is cloned once per request**, because `WireRequest` publishes no way back to it

@@ -80,10 +80,11 @@ The baseline on disk is older than the current run:
 
 ```text
 conformance/baseline.json   195 cases: 166 passed, 24 failed, 5 skipped
-current                     195 cases: 168 passed, 22 failed, 5 skipped
+current                     195 cases: 170 passed, 20 failed, 5 skipped
 ```
 
-The two are `c-range-0010` and `c-range-0018`, both improvements, so the run still exits `0`.
+The four are `c-range-0010`, `c-range-0018`, `c-object-0013` and `c-range-0015`, all improvements,
+so the run still exits `0`.
 
 Regenerate it with `baseline > conformance/baseline.json` in the same change that moves the
 numbers, or the tolerance meant for the old failures starts hiding new ones.
@@ -192,11 +193,16 @@ expected to be red, and the baseline exists to freeze how red rather than to exc
 
    `HeadObject` declares no `If-Range` binding, so a `HEAD` and a `GET` of the same object still
    disagree about a stale validator. That is the model's, not a backend's, and `head_object` passes
-   `None` rather than inventing one. `c-range-0015` also stays red, but for an ordering reason and
-   no longer a reachability one: the `Range`-and-`partNumber` refusal is a request-shape error that
-   the contract raises, while this fixture resolves the key first and answers `NoSuchKey` because the
-   case's `[setup]` declares an upload rather than an object — the same missing setup vocabulary as
-   finding 18.
+   `None` rather than inventing one. **`c-range-0015` is closed, and it was an ordering problem
+   rather than the vocabulary one it looked like.** The diagnosis on the previous pass — that the
+   case's `[setup]` declares an upload rather than an object, as in finding 18 — described why the
+   *wrong* answer was `NoSuchKey` specifically, not why there was a wrong answer at all. `Range` and
+   `partNumber` together is a contradiction in the request head; no object needs to exist for it to
+   be one, so the refusal is owed before the key is resolved and the setup vocabulary never enters
+   into it. `fixture::refuse_conflicting_selectors` calls the contract's own `evaluate_range` for its
+   refusal alone and runs at the top of `get_object` and `head_object`, above the bucket and the key.
+   Finding 18 is untouched: `c-range-0007` sends `partNumber` *without* a `Range` and really does
+   need a completed multipart object in `[setup]`.
 12. **The contract states a rule the decoder makes unreachable.** `Preconditions` documents that an
    `If-Modified-Since` which is not an HTTP-date "must arrive here as `None`", because RFC 9110
    requires the field to be ignored. The generated codec instead does
@@ -267,6 +273,14 @@ expected to be red, and the baseline exists to freeze how red rather than to exc
    schema version 1 cannot express. Neither side is edited here: the case is the contract and the
    schema is frozen, so this is a maintainer decision like finding 16.
 
+19. **Two cases are red for `connection_after` and nothing else.** `c-sig-0001` and `c-object-0015`
+   now agree with the corpus on the status, the code, the document and both `request_progress`
+   counters; what is left is whether the connection was closed afterwards, which needs a socket. It
+   is *not* answered from a `Connection: close` header, and the framework does not write one — see
+   the note in `crates/gateway/MAP.md`. The discriminator is not obvious either: `c-object-0013` also
+   leaves its body unread and asserts `open`, so "an unread body closes the connection" is refuted by
+   the corpus itself and the rule needs a maintainer's decision before either side moves.
+
 ### The blind spot the instrument had, and what closed it
 
 `inprocess` used to report `Outcome::Response` and `body_bytes_before_error: None` **unconditionally**.
@@ -286,6 +300,14 @@ transport will decide them identically:
 * A body that could not be drained is `stream_error` / `abrupt_close`, and no longer an
   *environment* failure that skipped the case. A skipped case asserts nothing.
 
+A third blind spot of the same family is closed, in the transport rather than in the observation.
+`sign.tamper` rewrites one canonical component **after** a correct signature exists, and two of its
+eleven components — `canonical_path` and `canonical_query` — live in the request target rather than
+in a header. `sign_request` handed back only the header list, so a target-side tamper was computed
+and then thrown away: `c-sig-0001` signed correctly, rewrote `x-id`, sent the *untouched* request,
+and was answered `200`. Every assertion in that case was being judged against a request nobody meant
+to send. `sign_request` now returns the target beside the headers.
+
 No corpus case exercises the first path yet, and that is finding 9 and finding 15 rather than a gap
 here: the only two operators that commit a head have no failure the corpus lets them discover after
 committing. The byte count on the second path is still unrecorded — `collect` discards what it had
@@ -298,10 +320,18 @@ request.
 
 ### What this target cannot measure, and never pretends to
 
-There is no socket, so three assertion families have no honest answer. `inprocess`'s module
-documentation states each one once; in summary: `connection_after` is always reported `open`,
-`request_progress` always reports the whole body as sent, and `timing` bounds are met trivially.
-`stream_termination = "reset"` and `"trailer_error"` are likewise unreachable. A request shape that
+There is no socket, so two assertion families have no honest answer. `inprocess`'s module
+documentation states each one once; in summary: `connection_after` is always reported `open`, and
+`timing` bounds are met trivially. `stream_termination = "reset"` and `"trailer_error"` are likewise
+unreachable.
+
+`request_progress` **has left this list.** The body is handed to the service as a
+`rustfs_gateway::ObservedBody` that counts what the service pulls out of it, one frame per chunk and
+per repetition, so `body_bytes_sent_at_response` and `body_fully_sent` are read off the exchange.
+The caveat is stated in `inprocess`'s module docs: on a socket, "bytes the client had written" and
+"bytes the server had asked for" are two numbers, and this reports the server-side one — the tighter
+of the two, and the one a case about early refusal is about. `c-object-0013` went green on it, and
+`c-sig-0001` and `c-object-0015` are now red for `connection_after` and nothing else. A request shape that
 needs a socket — a control chunk, a raw head, an h2 frame script — is **skipped with the capability
 named**, never approximated; five cases are skipped that way. Wiring `--endpoint` to a real socket
 transport is what removes both limits, and until then `--endpoint` is refused rather than silently

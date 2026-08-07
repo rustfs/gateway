@@ -75,7 +75,9 @@ mod clock;
 pub mod commit;
 mod dispatch;
 mod ext;
+mod gate;
 mod invariants;
+mod probe;
 mod render;
 mod service;
 mod stamp;
@@ -94,6 +96,7 @@ pub use crate::ext::{
     GovernorRequest, HostQuery, HostResolver, Lease, NoObserver, Observer, PathStyleOnly, RequestEvent, ResolvedHost,
     SigV4Authenticator, StaticCredentials, Unavailable, Unlimited,
 };
+pub use crate::probe::{BodyProgress, ObservedBody};
 pub use crate::render::{S3Error, declaration, document, document_body, render};
 pub use crate::service::S3Service;
 pub use crate::trace::{

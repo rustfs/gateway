@@ -424,6 +424,24 @@ pub fn checksum_spec(
     Ok(found)
 }
 
+/// Refuses a request whose head carries two different checksum algorithms, before its body.
+///
+/// The same rule as [`checksum_spec`], reached from a caller that has a request head and no
+/// operation input yet — the assembled pipeline applies it once, above the body read, so a
+/// contradictory upload costs the response and not the transfer. It is the identical function
+/// call, not a second copy of the decision: adding an algorithm or changing what counts as a
+/// contradiction happens in [`checksum_spec`] and both callers move together.
+///
+/// It is stated over the head alone on purpose. Two integrity claims cannot be settled by any
+/// number of body bytes, so no amount of reading turns this request into a well-formed one.
+///
+/// # Errors
+///
+/// [`CodecError::invalid_request`] when two different algorithms are claimed at once.
+pub fn refuse_contradictory_checksums(request: &MetaView<'_>) -> Result<(), CodecError> {
+    checksum_spec(request, CHECKSUM_PREFIX, "ChecksumAlgorithm").map(|_| ())
+}
+
 /// The header prefix every per-algorithm request checksum is spelled with.
 const CHECKSUM_PREFIX: &str = "x-amz-checksum-";
 

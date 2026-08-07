@@ -29,18 +29,28 @@
 //!   resolve host  what the path addresses, and which endpoint family
 //!   route         which operation — decided before anything is authenticated
 //!   govern        the deployment's chance to refuse: routed, so it has a bucket; before the body
-//!   read body     bounded by the assembly's buffered ceiling
 //!   admit         the seven unconditional rules, outside every replaceable verifier
 //!   authenticate  who the caller is, from a request the floor has already cleared
-//!   decode        the request head and body into the operation's input
 //!   authorize     whether that caller may do this — identity known, operation known
+//!   contradict    the head-decidable contradictions, refused while the body is still outside
+//!   read body     bounded by the assembly's ceiling and by the operation's own cap
+//!   decode        the request head and body into the operation's input
 //!   dispatch      the backend
 //!   encode        the answer, plus the RFC 9110 body invariants
 //! ```
 //!
-//! Two positions would be defects if moved. **Govern before the body** is the difference between
-//! refusing a gibibyte upload and paying for it first. **Authorize after decode** is what gives the
-//! authorizer the bucket and key the path actually named, rather than a second parse of the path.
+//! Three positions would be defects if moved. **Govern before the body** is the difference between
+//! refusing a gibibyte upload and paying for it first. **Authorize before dispatch** is what gives
+//! the authorizer the bucket and key the path actually named, rather than a second parse of the
+//! path. **Read the body last** is the one that used to be wrong: the body was collected between
+//! `govern` and `admit`, so a request with a bad signature and a large payload had its payload read
+//! in full before the signature was looked at, and an unauthenticated caller could make this
+//! service buffer whatever it liked by sending a request it was always going to be refused.
+//!
+//! That order is no longer a property of this function. `crate::gate::SealedBody::read` takes an
+//! `&crate::gate::Authenticated`, and the only constructor of one is fallible on a
+//! [`rustfs_gateway_sig::Verdict`] — so the read below cannot be moved above the verifier without
+//! failing to compile, which is what axiom A3 asks of an ordering contract.
 //!
 //! # Why the clock is read once
 //!
@@ -76,6 +86,7 @@ use crate::ext::{
     Authentication, Authenticator, Authorizer, AuthzRequest, Governor, GovernorRequest, HostQuery, HostResolver, Observer,
     RequestEvent,
 };
+use crate::gate::{Authenticated, BodyCeilings, SealedBody};
 use crate::render::{S3Error, render};
 use crate::trace::{RequestTrace, TraceSource};
 
@@ -255,10 +266,10 @@ impl S3Service {
             return outcome.refuse(S3Error::new(ErrorCode::SLOW_DOWN, "the service is not accepting this request right now"));
         }
 
-        let body = match read_body(pending, declared_length, self.inner.max_buffered_body_bytes).await {
-            Ok(body) => body,
-            Err(error) => return outcome.refuse(error),
-        };
+        // Sealed here and read at the bottom. Between the two lies every stage that can refuse
+        // this request for a reason decidable from its head, and none of them can reach the bytes:
+        // `SealedBody::read` needs an `Authenticated`, which does not exist yet.
+        let sealed = SealedBody::seal(pending, declared_length);
 
         let query = RawQuery::new(wire.query().as_str());
         let view = WireView::new(&headers, query);
@@ -309,6 +320,16 @@ impl S3Service {
         if let Some(error) = verdict.rejection() {
             return outcome.refuse(S3Error::from(error));
         }
+        // The proof, minted from the verdict that has just been checked. The `else` arm is
+        // unreachable — `rejection()` was `None` one line ago — and is refused rather than
+        // unwrapped, because "the signature was fine, take my word for it" is exactly the sentence
+        // this type exists to make unspellable.
+        let Some(authenticated) = Authenticated::of(&verdict) else {
+            return outcome.refuse(S3Error::new(
+                ErrorCode::INTERNAL_ERROR,
+                "the request could not be shown to have been authenticated",
+            ));
+        };
         outcome.identity = verdict.identity().cloned();
 
         let Some(requirement) = op.auth() else {
@@ -332,6 +353,22 @@ impl S3Service {
         {
             return outcome.refuse(S3Error::from(denial));
         }
+
+        // Head-decidable and body-free: two different `x-amz-checksum-*` headers are two integrity
+        // claims, and no body byte can settle which one the caller meant. `checksum_spec` is the
+        // one place that rule lives — the generated decoders call the same function — and this is
+        // the earliest position from which it can be applied to every operation at once, which is
+        // what keeps a rejected upload from costing the whole transfer.
+        if let Err(error) = rustfs_gateway_core::codec::value::refuse_contradictory_checksums(&meta) {
+            return outcome.refuse(S3Error::from(error));
+        }
+
+        // The bytes, at last, and only now. Two ceilings, both enforced as the body arrives.
+        let ceilings = BodyCeilings::of(operation, self.inner.max_buffered_body_bytes);
+        let body = match sealed.read(&authenticated, ceilings).await {
+            Ok(body) => body,
+            Err(error) => return outcome.refuse(error),
+        };
 
         let invocation = match op.invoke(&meta, body) {
             Ok(invocation) => invocation,
@@ -429,42 +466,6 @@ fn payload_mode(headers: &http::HeaderMap) -> Result<PayloadMode, S3Error> {
     })
 }
 
-/// Reads the request body, bounded twice: once by what it announced, once by what it delivers.
-///
-/// The announced check comes first so that a body claiming more than the ceiling is refused
-/// without being read at all, and the delivered check is what catches a body that announced
-/// nothing.
-async fn read_body<B>(body: Option<B>, declared_length: Option<u64>, ceiling: u64) -> Result<Bytes, S3Error>
-where
-    B: http_body::Body + Send + 'static,
-    B::Data: Send,
-    B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
-{
-    use http_body_util::BodyExt;
-
-    let Some(body) = body else {
-        return Ok(Bytes::new());
-    };
-    if declared_length.is_some_and(|length| length > ceiling) {
-        return Err(S3Error::new(
-            ErrorCode::ENTITY_TOO_LARGE,
-            "the declared request body is larger than this service will hold",
-        )
-        .with_status(StatusCode::PAYLOAD_TOO_LARGE));
-    }
-    let limit = usize::try_from(ceiling).unwrap_or(usize::MAX);
-    match http_body_util::Limited::new(body, limit).collect().await {
-        Ok(collected) => Ok(collected.to_bytes()),
-        // One code for "it stopped early" and "it went on too long": both mean the body that
-        // arrived is not the body that was announced, and distinguishing them tells a caller which
-        // ceiling it hit.
-        Err(_) => Err(S3Error::new(
-            ErrorCode::INCOMPLETE_BODY,
-            "the request body did not arrive as it was framed",
-        )),
-    }
-}
-
 /// Turns an encoder's output into the response that goes on the wire.
 fn into_response(encoded: EncodedResponse) -> Response<Body> {
     let body = match encoded.body {
@@ -490,27 +491,6 @@ mod tests {
         assert_eq!(core::mem::size_of::<S3Service>(), core::mem::size_of::<usize>());
     }
 
-    /// Negative — a body that announces more than the ceiling is refused before it is read, so the
-    /// refusal costs nothing.
-    #[tokio::test]
-    async fn an_oversized_declared_body_is_refused_without_being_read() {
-        let body = http_body_util::Full::new(Bytes::from_static(b"x"));
-        let error = read_body(Some(body), Some(1 << 30), 1024)
-            .await
-            .expect_err("over the ceiling");
-        assert_eq!(error.status(), StatusCode::PAYLOAD_TOO_LARGE);
-        assert_eq!(error.code(), &ErrorCode::ENTITY_TOO_LARGE);
-    }
-
-    /// Negative — a body that announces nothing and then exceeds the ceiling is still refused; a
-    /// limit that only fires on a declared length is one a client removes by not declaring it.
-    #[tokio::test]
-    async fn an_undeclared_oversized_body_is_still_refused() {
-        let body = http_body_util::Full::new(Bytes::from(vec![0_u8; 4096]));
-        let error = read_body(Some(body), None, 1024).await.expect_err("over the ceiling");
-        assert_eq!(error.code(), &ErrorCode::INCOMPLETE_BODY);
-    }
-
     /// Negative — an absent `x-amz-content-sha256` is the empty payload, not "unsigned". Treating
     /// it as unsigned would let a client drop the header to remove the body from the signature.
     #[test]
@@ -528,12 +508,5 @@ mod tests {
             http::HeaderValue::from_static("STREAMING-AWS4-HMAC-SHA256-PAYLOAD-TRAILER"),
         );
         assert!(payload_mode(&headers).is_err());
-    }
-
-    /// Positive — an absent body reads as empty rather than as an error.
-    #[tokio::test]
-    async fn an_absent_body_reads_as_empty() {
-        let body: Option<http_body_util::Full<Bytes>> = None;
-        assert!(read_body(body, None, 1024).await.expect("no body").is_empty());
     }
 }
