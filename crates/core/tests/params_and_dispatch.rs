@@ -580,6 +580,124 @@ fn the_generated_router_still_serves_the_listing_beside_the_cors_rows() {
     assert_eq!(dispatch.entry.op_name, "ListObjects");
 }
 
+/// The encryption read declares its own unconfigured code, and its two siblings declare none.
+///
+/// The declaration is what a backend outside this workspace reads to learn which 404 an
+/// unconfigured bucket owes; the conformance fixture answers the code from its own constant, so
+/// without this test the spec field could be deleted and every encryption case would still pass —
+/// a value declared and never observed, which is the defect the Measurement rules exist for.
+///
+/// Both directions are asserted deliberately. A spec field stuck on `Some(..)` would satisfy the
+/// first assertion alone, and the write and the delete are exactly the operations that must carry
+/// `None`: neither reads a configuration, and a 404 from either would mean "no such bucket" to a
+/// client that branches on the code.
+#[test]
+fn the_encryption_read_declares_its_own_not_configured_code() {
+    use rustfs_gateway_core::op::Operation;
+    let code = rustfs_gateway_types::dto::GetBucketEncryption::spec()
+        .not_configured_error
+        .clone()
+        .expect("the bucket subresource read declares one");
+    assert_eq!(code, ErrorCode::SERVER_SIDE_ENCRYPTION_CONFIGURATION_NOT_FOUND);
+    assert_eq!(code.default_status(), StatusCode::NOT_FOUND);
+    assert_eq!(
+        code.as_str(),
+        "ServerSideEncryptionConfigurationNotFoundError",
+        "the literal ends in Error, which is the spelling clients branch on"
+    );
+    for (name, declared) in [
+        (
+            "PutBucketEncryption",
+            rustfs_gateway_types::dto::PutBucketEncryption::spec()
+                .not_configured_error
+                .is_none(),
+        ),
+        (
+            "DeleteBucketEncryption",
+            rustfs_gateway_types::dto::DeleteBucketEncryption::spec()
+                .not_configured_error
+                .is_none(),
+        ),
+    ] {
+        assert!(declared, "{name} reads no configuration and must declare no unconfigured code");
+    }
+}
+
+/// The lifecycle read declares its own unconfigured code, and its two siblings declare none.
+///
+/// Same claim as the encryption block above, for the family beside it: `an_unconfigured_
+/// subresource_has_its_own_code` asserts the code against `GET_LIFECYCLE`, a spec this test file
+/// writes itself, so it holds the fixture rather than the operation. Nothing else reads
+/// `GetBucketLifecycleConfiguration`'s own declaration.
+///
+/// The delete is spelled `DeleteBucketLifecycle`, without the `Configuration` suffix its two
+/// siblings carry — the asymmetry is AWS's, and naming it here is why the `None` direction cannot
+/// be satisfied by asserting the wrong operation.
+#[test]
+fn the_lifecycle_read_declares_its_own_not_configured_code() {
+    use rustfs_gateway_core::op::Operation;
+    let code = rustfs_gateway_types::dto::GetBucketLifecycleConfiguration::spec()
+        .not_configured_error
+        .clone()
+        .expect("the bucket subresource read declares one");
+    assert_eq!(code, ErrorCode::NO_SUCH_LIFECYCLE_CONFIGURATION);
+    assert_eq!(code.default_status(), StatusCode::NOT_FOUND);
+    assert_eq!(code.as_str(), "NoSuchLifecycleConfiguration", "the spelling clients branch on");
+    for (name, declared) in [
+        (
+            "PutBucketLifecycleConfiguration",
+            rustfs_gateway_types::dto::PutBucketLifecycleConfiguration::spec()
+                .not_configured_error
+                .is_none(),
+        ),
+        (
+            "DeleteBucketLifecycle",
+            rustfs_gateway_types::dto::DeleteBucketLifecycle::spec()
+                .not_configured_error
+                .is_none(),
+        ),
+    ] {
+        assert!(declared, "{name} reads no configuration and must declare no unconfigured code");
+    }
+}
+
+/// The CORS read declares its own unconfigured code, and its two siblings declare none.
+///
+/// The third of the three bucket-configuration triples, asserted for the same reason: the 404 a
+/// conformance case observes comes from the fixture, so only this test holds the field a backend
+/// outside the workspace reads.
+///
+/// The literal is asserted because `CORS` is upper-case in the middle of an otherwise camel-cased
+/// code. A client matching `NoSuchCorsConfiguration` gets no match, so the casing is part of the
+/// contract and not a spelling detail.
+#[test]
+fn the_cors_read_declares_its_own_not_configured_code() {
+    use rustfs_gateway_core::op::Operation;
+    let code = rustfs_gateway_types::dto::GetBucketCors::spec()
+        .not_configured_error
+        .clone()
+        .expect("the bucket subresource read declares one");
+    assert_eq!(code, ErrorCode::NO_SUCH_CORS_CONFIGURATION);
+    assert_eq!(code.default_status(), StatusCode::NOT_FOUND);
+    assert_eq!(code.as_str(), "NoSuchCORSConfiguration", "the acronym stays upper-case");
+    for (name, declared) in [
+        (
+            "PutBucketCors",
+            rustfs_gateway_types::dto::PutBucketCors::spec()
+                .not_configured_error
+                .is_none(),
+        ),
+        (
+            "DeleteBucketCors",
+            rustfs_gateway_types::dto::DeleteBucketCors::spec()
+                .not_configured_error
+                .is_none(),
+        ),
+    ] {
+        assert!(declared, "{name} reads no configuration and must declare no unconfigured code");
+    }
+}
+
 /// Negative — an unhandled *bucket* tagging request is refused by name, in all three methods.
 ///
 /// The bucket-scope twin of the object-band block above and the CORS block beside it, with a
