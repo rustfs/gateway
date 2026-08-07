@@ -43,6 +43,10 @@ use support::{
 /// server-side routing. `x-id` is written by the SDKs on every request.
 const IGNORED_QUERY_KEYS: &[&str] = &["x-id"];
 
+/// Smithy's marker for "this operation has no input/output structure". It is a prelude shape the
+/// service model never declares, so it is read as the absence of a shape rather than looked up.
+const UNIT_SHAPE: &str = "smithy.api#Unit";
+
 /// The result of one codegen run's lowering phase.
 #[derive(Debug)]
 pub struct Lowered {
@@ -162,8 +166,20 @@ fn lower_one(model: &Model, overlay: &Overlay, name: &str) -> Result<OperationIr
             .unwrap_or(200)
     });
 
-    let input_shape = op.get("input").and_then(target_of).map(str::to_owned);
-    let output_shape = op.get("output").and_then(target_of).map(str::to_owned);
+    // `smithy.api#Unit` is Smithy's "no input/output at all" marker, not a shape the model
+    // declares — DeleteBucketCors is the first included operation whose output is spelled this
+    // way. Reading it as `None` gives such an operation an empty field list, which is what the
+    // marker means, rather than an "unknown shape" failure.
+    let input_shape = op
+        .get("input")
+        .and_then(target_of)
+        .filter(|id| *id != UNIT_SHAPE)
+        .map(str::to_owned);
+    let output_shape = op
+        .get("output")
+        .and_then(target_of)
+        .filter(|id| *id != UNIT_SHAPE)
+        .map(str::to_owned);
 
     let mut ctx = Ctx {
         model,

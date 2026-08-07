@@ -1,0 +1,59 @@
+[case]
+id = "c-cors-0005"
+schema_version = 1
+title = "All five members of the closed method set are accepted in one rule"
+rationale = """
+GET, PUT, POST, DELETE and HEAD are the whole legal vocabulary of AllowedMethod. Accepting all five together is the positive half of the closed set: an implementation that validated against the wrong list — say, the HTTP method registry — would either refuse HEAD or accept PATCH, and this case with its refusing twins (c-cors-0016, c-cors-0017) pins the boundary from both sides. The read-back proves the five survive storage in order."""
+polarity = "positive"
+operation = "PutBucketCors"
+tags = ["cors", "xml"]
+timeout_ms = 10000
+quirks = ["q-cors-0003", "q-cors-0004"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CORSRule.html"
+summary = "The documented value set of AllowedMethods is exactly the five method names."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/ManageCorsUsing.html"
+summary = "The configuration guide names the same five supported methods for a rule."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "conf-cors"
+
+[[exchanges]]
+name = "put-five-methods"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-cors?cors"
+headers = { "content-type" = "application/xml", "content-md5" = "hf72EKaHtlWj+S22nwKUDw==" }
+body = { utf8 = "<CORSConfiguration><CORSRule><AllowedMethod>GET</AllowedMethod><AllowedMethod>PUT</AllowedMethod><AllowedMethod>POST</AllowedMethod><AllowedMethod>DELETE</AllowedMethod><AllowedMethod>HEAD</AllowedMethod><AllowedOrigin>https://example.com</AllowedOrigin></CORSRule></CORSConfiguration>" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[[exchanges]]
+name = "read-back"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-cors?cors"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.headers_present]
+"content-type" = "application/xml"
+
+[exchanges.expect.body]
+golden = "goldens/c-cors-0005.xml"

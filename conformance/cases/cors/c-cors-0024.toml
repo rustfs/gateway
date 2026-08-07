@@ -1,0 +1,70 @@
+[case]
+id = "c-cors-0024"
+schema_version = 1
+title = "A rule-less document and a wrong root element are both 400 MalformedXML"
+rationale = """
+Two boundary documents with two different temptations. The empty CORSConfiguration invites reading it as clear-the-configuration, but that spelling is DeleteBucketCors; accepting both makes one intent reachable two ways, and later divergence between them is guaranteed. The Tagging root is a document meant for a different subresource — accepting it would mean the router's careful separation of ?cors from ?tagging is undone by a decoder that does not check what it was given."""
+polarity = "negative"
+operation = "PutBucketCors"
+tags = ["cors", "xml", "error-shape"]
+timeout_ms = 10000
+quirks = []
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketCors.html"
+summary = "The request root is CORSConfiguration and at least one rule is part of the documented syntax."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "conf-cors"
+
+[[exchanges]]
+name = "no-rules-at-all"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-cors?cors"
+headers = { "content-type" = "application/xml", "content-md5" = "X2DwA3ZNuD6gUGkUJg8PDg==" }
+body = { utf8 = "<CORSConfiguration/>" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[exchanges.expect.error]
+code = "MalformedXML"
+request_id_present = true
+
+[exchanges.expect.body]
+redact = ["RequestId", "HostId"]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>MalformedXML</Code><Message>the body carries no entry for a member that requires one</Message><Resource>CORSRules</Resource><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''
+
+[[exchanges]]
+name = "wrong-root"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-cors?cors"
+headers = { "content-type" = "application/xml", "content-md5" = "ygxpoiUw4ExsUsHRCTjifw==" }
+body = { utf8 = "<Tagging><TagSet><Tag><Key>a</Key><Value>1</Value></Tag></TagSet></Tagging>" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[exchanges.expect.error]
+code = "MalformedXML"
+request_id_present = true
+
+[exchanges.expect.body]
+redact = ["RequestId", "HostId"]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>MalformedXML</Code><Message>the request body has the wrong root element</Message><Resource>CORSConfiguration</Resource><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''

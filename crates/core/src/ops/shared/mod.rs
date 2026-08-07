@@ -35,6 +35,7 @@
 //! change to the shared rule.
 
 pub mod copy_source;
+pub mod cors;
 pub mod etag;
 pub mod pagination;
 pub mod precondition;

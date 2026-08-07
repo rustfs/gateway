@@ -355,6 +355,121 @@ fn n_the_plain_object_band_is_unchanged_by_the_tagging_band() {
     }
 }
 
+/// The `?cors` band claims its own three requests, one per method, on the bucket target.
+///
+/// Positive half of the block below. Checked as a whole for the same reason the tagging band is:
+/// the property is that all three methods leave the fallback rows at once — a table that gained
+/// the read and forgot the write would still store a CORS document as a listing answer's
+/// neighbour, and a table that forgot the delete would leave `DELETE /b?cors` unroutable.
+#[test]
+fn the_cors_subresource_routes_to_the_cors_operations() {
+    let table = generated_table();
+    for (line, expected) in [
+        ("GET /bucket?cors", "GetBucketCors"),
+        ("PUT /bucket?cors", "PutBucketCors"),
+        ("DELETE /bucket?cors", "DeleteBucketCors"),
+    ] {
+        let hit = table
+            .resolve(&Req::new(line).parts())
+            .unwrap_or_else(|| panic!("{line} has a route"));
+        assert_eq!(hit.op_name, expected, "{line}");
+        assert!(
+            hit.precedence < 460,
+            "{line} must sit in the bucket subresource band ahead of the listings, got {}",
+            hit.precedence
+        );
+    }
+}
+
+/// Negative — the CORS read is never claimed by the bucket listing fallback.
+///
+/// `ListObjects` pins no query key, so before the row existed `GET /b?cors` was answered with a
+/// key listing — the debt-register line this band retires. The PUT and DELETE halves have no
+/// fallback to be claimed by, so for them the fault mode was "no route at all", asserted above.
+#[test]
+fn n_the_cors_read_is_never_claimed_by_the_listing_fallback() {
+    let table = generated_table();
+    for (line, forbidden) in [
+        ("GET /bucket?cors", "ListObjects"),
+        ("GET /bucket?cors", "ListObjectsV2"),
+        ("GET /bucket?cors", "ListObjectVersions"),
+    ] {
+        assert_ne!(
+            routed(&table, &Req::new(line)),
+            Some(forbidden),
+            "{line}: a CORS document request answered with a key listing"
+        );
+    }
+}
+
+/// Negative — a request sending `?location` and `?cors` together stays with the earlier band.
+///
+/// AWS documents no such combination, so the order is fixed by precedence (300 before 310) rather
+/// than left to source order — the same rule every other both-keys pair in the table follows.
+#[test]
+fn n_a_request_naming_location_and_cors_stays_with_the_location_row() {
+    let table = generated_table();
+    assert_eq!(routed(&table, &Req::new("GET /bucket?location&cors")), Some("GetBucketLocation"));
+}
+
+/// Negative — `?cors` beats the listings it overlaps, in both directions of the band.
+#[test]
+fn n_a_request_naming_cors_and_a_listing_stays_with_the_cors_row() {
+    let table = generated_table();
+    for line in [
+        "GET /bucket?cors&uploads",
+        "GET /bucket?cors&list-type=2",
+        "GET /bucket?cors&versions",
+    ] {
+        assert_eq!(routed(&table, &Req::new(line)), Some("GetBucketCors"), "{line}");
+    }
+}
+
+/// Negative — each CORS row is bound to one method, so the key alone does not reach it.
+#[test]
+fn n_a_cors_row_is_not_reachable_under_another_method() {
+    let table = generated_table();
+    for (line, forbidden) in [
+        ("PUT /bucket?cors", "GetBucketCors"),
+        ("DELETE /bucket?cors", "PutBucketCors"),
+        ("GET /bucket?cors", "DeleteBucketCors"),
+        ("HEAD /bucket?cors", "GetBucketCors"),
+        ("POST /bucket?cors", "PutBucketCors"),
+    ] {
+        assert_ne!(routed(&table, &Req::new(line)), Some(forbidden), "{line}");
+    }
+}
+
+/// Negative — `?cors` on an object key is not a bucket subresource and must not reach the band.
+///
+/// The three CORS rows pin `Target(Bucket)`, so `GET /bucket/key?cors` is a plain object read
+/// carrying an inert query key, exactly as it is on AWS.
+#[test]
+fn n_the_cors_key_on_an_object_does_not_reach_a_bucket_cors_row() {
+    let table = generated_table();
+    for (line, expected) in [
+        ("GET /bucket/key?cors", "GetObject"),
+        ("PUT /bucket/key?cors", "PutObject"),
+        ("DELETE /bucket/key?cors", "DeleteObject"),
+    ] {
+        assert_eq!(routed(&table, &Req::new(line)), Some(expected), "{line}");
+    }
+}
+
+/// Negative — the listing fallbacks still answer their own requests beside the new band.
+#[test]
+fn n_the_bucket_bands_are_unchanged_by_the_cors_band() {
+    let table = generated_table();
+    for (line, expected) in [
+        ("GET /bucket", "ListObjects"),
+        ("GET /bucket?list-type=2", "ListObjectsV2"),
+        ("GET /bucket?location", "GetBucketLocation"),
+        ("GET /bucket?uploads", "ListMultipartUploads"),
+    ] {
+        assert_eq!(routed(&table, &Req::new(line)), Some(expected), "{line}");
+    }
+}
+
 /// c-route-1001 — two subresources at one precedence, reachable together.
 #[test]
 fn two_subresources_at_one_precedence_are_a_conflict() {

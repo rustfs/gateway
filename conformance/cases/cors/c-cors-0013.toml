@@ -1,0 +1,33 @@
+[case]
+id = "c-cors-0013"
+schema_version = 1
+title = "Deleting CORS from a bucket that never had it still answers 204"
+rationale = """
+The delete is idempotent: teardown automation runs it without reading first, and a 404 here would make every such run report a failure for a state that is exactly what the caller wanted. The 204 must also be indistinguishable from the configured-bucket 204 — a body or a different status on the empty path would leak whether a configuration existed to a caller that only holds delete permission."""
+polarity = "negative"
+operation = "DeleteBucketCors"
+tags = ["cors"]
+timeout_ms = 10000
+quirks = ["q-cors-0006"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketCors.html"
+summary = "The operation documents 204 as its success and defines no not-found error for a missing configuration."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "conf-cors"
+
+[request]
+method = "DELETE"
+target = "/conf-cors?cors"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 204
+connection_after = "open"
+
+[expect.timing]
+terminate_within_ms = 5000

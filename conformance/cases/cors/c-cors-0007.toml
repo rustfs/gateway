@@ -1,0 +1,32 @@
+[case]
+id = "c-cors-0007"
+schema_version = 1
+title = "An origin with one interior wildcard is accepted"
+rationale = """
+One asterisk may appear inside an origin — https://*.example.com is the documented way to admit every subdomain. A validator that only accepted the bare asterisk would refuse the subdomain form, and operators would fall back to the fully open origin instead, which is strictly worse for them. This is the acceptance boundary whose refusal twin is c-cors-0018."""
+polarity = "positive"
+operation = "PutBucketCors"
+tags = ["cors"]
+timeout_ms = 10000
+quirks = ["q-cors-0005"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/ManageCorsUsing.html"
+summary = "The guide permits one wildcard character inside an AllowedOrigin value, with the subdomain form as its example."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "conf-cors"
+
+[request]
+method = "PUT"
+target = "/conf-cors?cors"
+headers = { "content-type" = "application/xml", "content-md5" = "Wdmv/UN7dhcpsJ85Olv8Kw==" }
+body = { utf8 = "<CORSConfiguration><CORSRule><AllowedMethod>GET</AllowedMethod><AllowedOrigin>https://*.example.com</AllowedOrigin></CORSRule></CORSConfiguration>" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+connection_after = "open"

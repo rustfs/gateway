@@ -29,9 +29,9 @@ pub use crate::ops::enums::{
     StorageClass, TaggingDirective,
 };
 pub use crate::ops::shapes::{
-    Bucket, Checksum, CommonPrefix, CompletedMultipartUpload, CompletedPart, Delete, DeleteMarkerEntry, DeletedObject, Error,
-    GetObjectAttributesParts, Initiator, MultipartUpload, Object, ObjectIdentifier, ObjectPart, ObjectVersion, Owner, Part,
-    RestoreStatus, Tag, Tagging,
+    Bucket, Checksum, CommonPrefix, CompletedMultipartUpload, CompletedPart, CorsConfiguration, CorsRule, Delete,
+    DeleteMarkerEntry, DeletedObject, Error, GetObjectAttributesParts, Initiator, MultipartUpload, Object, ObjectIdentifier,
+    ObjectPart, ObjectVersion, Owner, Part, RestoreStatus, Tag, Tagging,
 };
 
 pub use crate::ops::abort_multipart_upload::{
@@ -49,6 +49,10 @@ pub use crate::ops::create_multipart_upload::{
     CreateMultipartUpload, Input as CreateMultipartUploadInput, InputBuilder as CreateMultipartUploadInputBuilder,
     Output as CreateMultipartUploadOutput,
 };
+pub use crate::ops::delete_bucket_cors::{
+    DeleteBucketCors, Input as DeleteBucketCorsInput, InputBuilder as DeleteBucketCorsInputBuilder,
+    Output as DeleteBucketCorsOutput,
+};
 pub use crate::ops::delete_object::{
     DeleteObject, Input as DeleteObjectInput, InputBuilder as DeleteObjectInputBuilder, Output as DeleteObjectOutput,
 };
@@ -58,6 +62,9 @@ pub use crate::ops::delete_object_tagging::{
 };
 pub use crate::ops::delete_objects::{
     DeleteObjects, Input as DeleteObjectsInput, InputBuilder as DeleteObjectsInputBuilder, Output as DeleteObjectsOutput,
+};
+pub use crate::ops::get_bucket_cors::{
+    GetBucketCors, Input as GetBucketCorsInput, InputBuilder as GetBucketCorsInputBuilder, Output as GetBucketCorsOutput,
 };
 pub use crate::ops::get_bucket_location::{
     GetBucketLocation, Input as GetBucketLocationInput, InputBuilder as GetBucketLocationInputBuilder,
@@ -96,6 +103,9 @@ pub use crate::ops::list_objects_v2::{
 };
 pub use crate::ops::list_parts::{
     Input as ListPartsInput, InputBuilder as ListPartsInputBuilder, ListParts, Output as ListPartsOutput,
+};
+pub use crate::ops::put_bucket_cors::{
+    Input as PutBucketCorsInput, InputBuilder as PutBucketCorsInputBuilder, Output as PutBucketCorsOutput, PutBucketCors,
 };
 pub use crate::ops::put_object::{
     Input as PutObjectInput, InputBuilder as PutObjectInputBuilder, Output as PutObjectOutput, PutObject,

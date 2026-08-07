@@ -1,0 +1,32 @@
+[case]
+id = "c-cors-0006"
+schema_version = 1
+title = "A bare asterisk AllowedOrigin is accepted"
+rationale = """
+The wildcard origin is the most common CORS configuration in existence — public assets are served with it — and it is also the value a naive origin-syntax validator refuses, because a bare asterisk is not a URL. Refusing it would make the majority configuration undeployable."""
+polarity = "positive"
+operation = "PutBucketCors"
+tags = ["cors"]
+timeout_ms = 10000
+quirks = ["q-cors-0005"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/ManageCorsUsing.html"
+summary = "The guide's first example rule uses the bare asterisk origin to permit every origin."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "conf-cors"
+
+[request]
+method = "PUT"
+target = "/conf-cors?cors"
+headers = { "content-type" = "application/xml", "content-md5" = "HGv5UBbjdmR736tPepqsSQ==" }
+body = { utf8 = "<CORSConfiguration><CORSRule><AllowedMethod>GET</AllowedMethod><AllowedOrigin>*</AllowedOrigin></CORSRule></CORSConfiguration>" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+connection_after = "open"

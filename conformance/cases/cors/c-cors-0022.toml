@@ -1,0 +1,60 @@
+[case]
+id = "c-cors-0022"
+schema_version = 1
+title = "Unknown elements and a namespaced root are skipped, and the stored document keeps only the known members"
+rationale = """
+The lenient read is a durability promise, not a convenience: a CORS document is stored configuration, re-parsed by every future release, and AWS itself writes members this implementation has not modelled yet. A decoder that turned strict would refuse the stored document on the next read and cross-origin access would silently shut off — a failure visible only in end users' browser consoles. This case would go red if leniency were removed, which is exactly the change it exists to block. The read-back proves the unknowns are skipped rather than stored."""
+polarity = "negative"
+operation = "PutBucketCors"
+tags = ["cors", "xml"]
+timeout_ms = 10000
+quirks = ["q-cors-0007"]
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/issues/613"
+summary = "AWS ignores unknown elements in request XML and strict upstream parsing broke real clients."
+kind = "s3s-issue"
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/pull/617"
+summary = "The upstream relaxation that made unknown request elements a skip rather than a refusal."
+kind = "s3s-pr"
+
+
+[[setup.buckets]]
+name = "conf-cors"
+
+[[exchanges]]
+name = "put-with-unknowns"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-cors?cors"
+headers = { "content-type" = "application/xml", "content-md5" = "WXboqBnWtHmOPrCF65FdYA==" }
+body = { utf8 = '<CORSConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><CORSRule><AllowedMethod>GET</AllowedMethod><AllowedOrigin>https://example.com</AllowedOrigin><FutureKnob>on</FutureKnob></CORSRule><AnalyticsHint>ignored</AnalyticsHint></CORSConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[[exchanges]]
+name = "read-back-known-members-only"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-cors?cors"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.headers_present]
+"content-type" = "application/xml"
+
+[exchanges.expect.body]
+golden = "goldens/c-cors-0022.xml"
+not_contains_utf8 = ["FutureKnob", "AnalyticsHint"]

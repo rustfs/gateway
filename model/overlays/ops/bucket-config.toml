@@ -14,14 +14,14 @@
 
 # Family: bucket subresource configuration.
 #
-# Nothing is generated yet. One Get/Put/Delete triple per subresource, every one of them sharing
-# the "unconfigured subresource answers a per-operation 404 code" rule.
+# One Get/Put/Delete triple per subresource, every one of them sharing the "unconfigured
+# subresource answers a per-operation 404 code" rule. The CORS triple is the first of them to
+# land and lives in its own family file, `ops/cors.toml`; the rest stay deferred here.
 
 [[deferred]]
 reason = "P5 bucket subresource configuration family; one Get/Put/Delete triple per subresource, all sharing the not_configured 404 rule."
 operations = [
   "DeleteBucketAnalyticsConfiguration",
-  "DeleteBucketCors",
   "DeleteBucketEncryption",
   "DeleteBucketIntelligentTieringConfiguration",
   "DeleteBucketInventoryConfiguration",
@@ -34,7 +34,6 @@ operations = [
   "GetBucketAccelerateConfiguration",
   "GetBucketAcl",
   "GetBucketAnalyticsConfiguration",
-  "GetBucketCors",
   "GetBucketEncryption",
   "GetBucketIntelligentTieringConfiguration",
   "GetBucketInventoryConfiguration",
@@ -55,7 +54,6 @@ operations = [
   "PutBucketAccelerateConfiguration",
   "PutBucketAcl",
   "PutBucketAnalyticsConfiguration",
-  "PutBucketCors",
   "PutBucketEncryption",
   "PutBucketIntelligentTieringConfiguration",
   "PutBucketInventoryConfiguration",

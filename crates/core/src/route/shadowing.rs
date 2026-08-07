@@ -378,6 +378,53 @@ pub static PROVISIONAL_SHADOWING: &[ShadowingDecl] = &[
                  delete answers with.",
         evidence: &[DELETE_OBJECT_TAGGING_DOC, DELETE_OBJECT_DOC],
     },
+    // The `?cors` band is the bucket-subresource shape in one method: only the GET row overlaps
+    // anything, because PUT and DELETE on a bucket have no other row to meet. Four of the five
+    // pairs are the familiar both-keys-at-once accident; the fifth — against ListObjects — is the
+    // fallback relationship, and it is the pair the debt register recorded as
+    // `GetBucketCors -> ListObjects` until this band landed.
+    ShadowingDecl {
+        winner: "GetBucketLocation",
+        shadowed: "GetBucketCors",
+        reason: "A request carrying both ?location and ?cors asks two subresource questions at \
+                 once. AWS documents no such combination, so the answer is fixed here rather than \
+                 left to source order: ?location at 300 is tried before ?cors at 310, and the CORS \
+                 reading is ignored rather than merged into the answer.",
+        evidence: &[LOCATION_DOC, GET_BUCKET_CORS_DOC],
+    },
+    ShadowingDecl {
+        winner: "GetBucketCors",
+        shadowed: "ListMultipartUploads",
+        reason: "?cors and ?uploads together name a configuration document and a listing of one \
+                 bucket. The subresource band (310) is tried before the upload listing (460), the \
+                 same order ?location settled against the same neighbour.",
+        evidence: &[GET_BUCKET_CORS_DOC, UPLOADS_DOC],
+    },
+    ShadowingDecl {
+        winner: "GetBucketCors",
+        shadowed: "ListObjectsV2",
+        reason: "A request carrying ?cors and ?list-type=2 asks for the CORS document and a page \
+                 of keys at once. The configuration subresource is the narrower question and is \
+                 tried first (310 before 600); the listing is ignored.",
+        evidence: &[GET_BUCKET_CORS_DOC, LIST_V2_DOC],
+    },
+    ShadowingDecl {
+        winner: "GetBucketCors",
+        shadowed: "ListObjectVersions",
+        reason: "Same shape as the pair above with the version listing in place of the key page: \
+                 only a client sending ?cors and ?versions together reaches it, and the \
+                 subresource band is tried first (310 before 610).",
+        evidence: &[GET_BUCKET_CORS_DOC, VERSIONS_DOC],
+    },
+    ShadowingDecl {
+        winner: "GetBucketCors",
+        shadowed: "ListObjects",
+        reason: "ListObjects pins no query key, so every ?cors request also satisfies it. Until \
+                 this row existed that was not a latent overlap but the served behaviour: a CORS \
+                 document request was answered with a key listing. The subresource is the specific \
+                 reading and wins (310 before 700); the fallback stays last in the band.",
+        evidence: &[GET_BUCKET_CORS_DOC, LIST_V1_DOC],
+    },
     // The copy family adds the third shape: one header's presence, and nothing else, separates two
     // operations that share a method and a path. Every row but the last is a refinement — the
     // winner's selector is the loser's plus `x-amz-copy-source` — so the overlap is the design
@@ -440,6 +487,10 @@ const COPY_OBJECT_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/A
 /// AWS's own reference for the part copy.
 const UPLOAD_PART_COPY_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UploadPartCopy.html \
      — a part copy is a part upload whose bytes come from a source object named by a header rather than from the body.";
+
+/// AWS's own reference for the CORS document read.
+const GET_BUCKET_CORS_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketCors.html \
+     — GetBucketCors is selected by the ?cors subresource alone and answers with the stored configuration document.";
 
 /// AWS's own reference for the operation selected by the `?location` subresource.
 const LOCATION_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketLocation.html \

@@ -162,6 +162,15 @@ pub use rustfs_gateway_core::ops::shared::copy_source::{
     CopyRange, CopySource, CopySourceForm, CopySourceRejection, ResolvedCopySource, SelfCopy, SourceAccess, SourceAuthorized,
     SourceResource, authorize_source, classify_self_copy, resolve_copy_range,
 };
+// The CORS document contract. A backend stores what `PutBucketCors` hands it and the preflight
+// runtime later answers browsers out of that store, so the rules for what may be stored — the
+// closed method set, the wildcard budget, the hundred-rule cap — must be one implementation
+// every backend calls, not a description every backend re-derives. The conformance fixture is
+// the first caller; a backend that skipped validation would store a document whose rules the
+// matcher can never satisfy, and the only symptom would be browser-side.
+pub use rustfs_gateway_core::ops::shared::cors::{
+    CORS_ALLOWED_METHODS, CorsRejection, MAX_CORS_ID_CHARS, MAX_CORS_RULES, validate_cors,
+};
 pub use rustfs_gateway_http::{EffectiveHost, Limits, WireReject, WireRequest};
 pub use rustfs_gateway_sig::{Identity, OperationFloor, RegionSet, SecurityFloor, SigService, SkewWindow, Verdict};
 pub use rustfs_gateway_stream::{Body, ByteStream, Payload, TrailingHeaders};

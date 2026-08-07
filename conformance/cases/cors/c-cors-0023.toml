@@ -1,0 +1,48 @@
+[case]
+id = "c-cors-0023"
+schema_version = 1
+title = "The hundred-and-first rule is refused with 400, in bounded time"
+rationale = """
+The cap's refusing side. Without it a configuration grows until some other limit fails first — usually the response size of the read-back, which then breaks a different operation than the one at fault. The bounded response time is asserted because the wrong implementation of a cap is one that parses and validates all the rules first and counts them last."""
+polarity = "negative"
+operation = "PutBucketCors"
+tags = ["cors", "dos", "error-shape"]
+timeout_ms = 10000
+quirks = []
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketCors.html"
+summary = "The operation documents one hundred rules as the most a configuration may hold."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "conf-cors"
+
+[request]
+method = "PUT"
+target = "/conf-cors?cors"
+headers = { "content-type" = "application/xml", "content-md5" = "pLvtmRui7XWycVFz4q9PXg==" }
+body = { file = "fixtures/cors/hundred-and-one-rules.xml" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+code = "InvalidRequest"
+request_id_present = true
+
+[expect.timing]
+terminate_within_ms = 5000
+
+[expect.headers_present]
+"content-type" = "application/xml"
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>InvalidRequest</Code><Message>The CORS configuration allows a maximum of 100 CORSRules</Message><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''

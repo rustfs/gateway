@@ -1,0 +1,45 @@
+[case]
+id = "c-cors-0017"
+schema_version = 1
+title = "A lower-case method spelling is refused, not case-folded"
+rationale = """
+HTTP method names are case-sensitive and AWS stores the upper-case spellings only. Folding get to GET at the door would store a document whose bytes differ from what the caller sent and read back, breaking round-trip comparison; storing get unfolded would create a rule the preflight matcher never satisfies. Refusal is the only answer that keeps the stored document trustworthy."""
+polarity = "negative"
+operation = "PutBucketCors"
+tags = ["cors", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-cors-0004"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CORSRule.html"
+summary = "The documented method values are upper case, and the set is exact rather than case-insensitive."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "conf-cors"
+
+[request]
+method = "PUT"
+target = "/conf-cors?cors"
+headers = { "content-type" = "application/xml", "content-md5" = "l48S39jVeNvdfWZoAI4oWg==" }
+body = { utf8 = "<CORSConfiguration><CORSRule><AllowedMethod>get</AllowedMethod><AllowedOrigin>https://example.com</AllowedOrigin></CORSRule></CORSConfiguration>" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+code = "InvalidRequest"
+request_id_present = true
+
+[expect.headers_present]
+"content-type" = "application/xml"
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>InvalidRequest</Code><Message>Found unsupported HTTP method in CORS config. Only GET, PUT, POST, DELETE and HEAD are allowed</Message><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''

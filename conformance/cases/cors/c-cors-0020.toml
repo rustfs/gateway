@@ -1,0 +1,70 @@
+[case]
+id = "c-cors-0020"
+schema_version = 1
+title = "A rule missing AllowedMethod, or missing AllowedOrigin, is 400 MalformedXML"
+rationale = """
+Both members are required per rule, and because the wire shape is flattened there is no wrapper element whose absence a decoder could refuse — an empty list and an absent member are the same parse. The refusal therefore has to be semantic, and it has to happen at write time: a stored rule with no method or no origin matches nothing, so the operator's policy silently does not exist, which is the least debuggable failure this family has."""
+polarity = "negative"
+operation = "PutBucketCors"
+tags = ["cors", "xml", "error-shape"]
+timeout_ms = 10000
+quirks = []
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CORSRule.html"
+summary = "AllowedMethods and AllowedOrigins are the two required members of a rule."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "conf-cors"
+
+[[exchanges]]
+name = "no-allowed-method"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-cors?cors"
+headers = { "content-type" = "application/xml", "content-md5" = "vKBP1ycU1N/jmEcfR2RLDQ==" }
+body = { utf8 = "<CORSConfiguration><CORSRule><AllowedOrigin>https://example.com</AllowedOrigin></CORSRule></CORSConfiguration>" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[exchanges.expect.error]
+code = "MalformedXML"
+request_id_present = true
+
+[exchanges.expect.body]
+redact = ["RequestId", "HostId"]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>MalformedXML</Code><Message>Each CORSRule must identify at least one AllowedMethod</Message><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''
+
+[[exchanges]]
+name = "no-allowed-origin"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-cors?cors"
+headers = { "content-type" = "application/xml", "content-md5" = "0NEZVB4Csppoapl0577emQ==" }
+body = { utf8 = "<CORSConfiguration><CORSRule><AllowedMethod>GET</AllowedMethod></CORSRule></CORSConfiguration>" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[exchanges.expect.error]
+code = "MalformedXML"
+request_id_present = true
+
+[exchanges.expect.body]
+redact = ["RequestId", "HostId"]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>MalformedXML</Code><Message>Each CORSRule must identify at least one AllowedOrigin</Message><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''

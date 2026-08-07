@@ -1,0 +1,48 @@
+[case]
+id = "c-cors-0012"
+schema_version = 1
+title = "Reading CORS from a bucket that never had it answers 404 NoSuchCORSConfiguration, not a generic 404 and not an empty 200"
+rationale = """
+Several conditions answer 404 on this path and clients branch on the code, not the number: NoSuchBucket means the bucket is gone, NoSuchCORSConfiguration means the bucket is fine and cross-origin access is simply not configured. Worse than the wrong code is a 200 with an empty document, which tooling reads as a configuration that exists and allows nothing. The body is pinned byte for byte so a renderer that swaps the code for the message, or adds a namespace to the error root, fails here."""
+polarity = "negative"
+operation = "GetBucketCors"
+tags = ["cors", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-cors-0001"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketCors.html"
+summary = "The error table lists NoSuchCORSConfiguration with status 404 for an unconfigured bucket."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/pull/515"
+summary = "Upstream had to backfill missing error codes because clients branch on the specific code string."
+kind = "s3s-pr"
+
+
+[[setup.buckets]]
+name = "conf-cors"
+
+[request]
+method = "GET"
+target = "/conf-cors?cors"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 404
+connection_after = "open"
+
+[expect.error]
+code = "NoSuchCORSConfiguration"
+request_id_present = true
+
+[expect.headers_present]
+"content-type" = "application/xml"
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>NoSuchCORSConfiguration</Code><Message>The CORS configuration does not exist</Message><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''
