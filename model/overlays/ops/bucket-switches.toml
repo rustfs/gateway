@@ -57,6 +57,11 @@ include = [
 [op.GetBucketAccelerateConfiguration]
 precedence = 200
 auth_action = "s3:GetAccelerateConfiguration"
+# The response element order. It belongs to the *operation* and not to the shape: this read's
+# output members are operation-level, so the shape is only ever a request payload — it gets a
+# reader, a reader does not consult element order, and a `[shape]` declaration here would be a
+# statement no test could falsify.
+element_order = ["Status"]
 # One enumeration inside one wrapper.
 response_max_bytes = 4096
 error_codes = ["NoSuchBucket", "AccessDenied"]
@@ -92,6 +97,11 @@ quirk_refs = ["q-acc-0002", "q-acc-0003"]
 [op.GetBucketRequestPayment]
 precedence = 230
 auth_action = "s3:GetBucketRequestPayment"
+# The response element order. It belongs to the *operation* and not to the shape: this read's
+# output members are operation-level, so the shape is only ever a request payload — it gets a
+# reader, a reader does not consult element order, and a `[shape]` declaration here would be a
+# statement no test could falsify.
+element_order = ["Payer"]
 response_max_bytes = 4096
 error_codes = ["NoSuchBucket", "AccessDenied"]
 url_encoded_fields = []
@@ -126,6 +136,11 @@ quirk_refs = ["q-rqp-0002", "q-rqp-0003"]
 [op.GetBucketVersioning]
 precedence = 235
 auth_action = "s3:GetBucketVersioning"
+# The response element order. It belongs to the *operation* and not to the shape: this read's
+# output members are operation-level, so the shape is only ever a request payload — it gets a
+# reader, a reader does not consult element order, and a `[shape]` declaration here would be a
+# statement no test could falsify.
+element_order = ["Status", "MFADelete"]
 response_max_bytes = 4096
 error_codes = ["NoSuchBucket", "AccessDenied"]
 url_encoded_fields = []
@@ -156,17 +171,10 @@ quirk_refs = ["q-ver-0002", "q-ver-0003", "q-ver-0004"]
 # Nested shapes owned by this family
 # =============================================================================================
 
-# `<Status>` first, then `<MfaDelete>`, on both directions. The member is `MFADelete` in the model
-# and `MfaDelete` on the wire — and the pinned model gives the read and the write the *same*
-# `xmlName`, so no alternate-name rule is needed for it (`q-ver-0004`).
-[shape.VersioningConfiguration]
-element_order = ["Status", "MFADelete"]
-
-# One member, and it is the whole document.
-[shape.AccelerateConfiguration]
-element_order = ["Status"]
-
-# `Payer` is required by the model: a request-payment document that names no payer is refused by
-# the decoder as MalformedXML before the closed-set check in `ops/shared/bucket_config.rs` runs.
-[shape.RequestPaymentConfiguration]
-element_order = ["Payer"]
+# `MFADelete` is the model's member name and `MfaDelete` is its wire spelling — and the pinned
+# model gives the read and the write the *same* `xmlName`, so no alternate-name rule is needed
+# for it (`q-ver-0004`). `Payer` is required by the model, so a request-payment document naming
+# no payer is refused by the decoder as MalformedXML before the closed-set check in
+# `ops/shared/bucket_config.rs` runs. Neither fact needs a `[shape]` block: the wire names come
+# from the model, and the response order of all three reads is stated on the reads above, where
+# reversing it changes a byte-exact golden.

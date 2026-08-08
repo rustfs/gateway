@@ -55,6 +55,16 @@ include = ["GetBucketNotificationConfiguration", "PutBucketNotificationConfigura
 [op.GetBucketNotificationConfiguration]
 precedence = 210
 auth_action = "s3:GetBucketNotification"
+# The response element order. It belongs to the *operation* and not to the shape: this read's
+# output members are operation-level, so the shape is only ever a request payload — it gets a
+# reader, a reader does not consult element order, and a `[shape]` declaration here would be a
+# statement no test could falsify.
+element_order = [
+  "TopicConfigurations",
+  "QueueConfigurations",
+  "LambdaFunctionConfigurations",
+  "EventBridgeConfiguration",
+]
 # A hundred configurations, each with an ARN, an id, an event list and a two-rule key filter.
 # 256 KiB is well past a maximal document and bounds the XML surface.
 response_max_bytes = 262144
@@ -85,13 +95,7 @@ quirk_refs = ["q-ntf-0002", "q-ntf-0003", "q-ntf-0004", "q-ntf-0005"]
 # Nested shapes owned by this family
 # =============================================================================================
 
-# The documented order of the four members. Nothing is required: the empty document is legal and
-# means "deliver nothing".
+# Nothing in this document is required: the empty one is legal and means "deliver nothing".
+# The response order is stated on the read above, where it is observed.
 [shape.NotificationConfiguration]
-element_order = [
-  "TopicConfigurations",
-  "QueueConfigurations",
-  "LambdaFunctionConfigurations",
-  "EventBridgeConfiguration",
-]
 hot = ["TopicConfigurations", "QueueConfigurations", "LambdaFunctionConfigurations"]

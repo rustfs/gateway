@@ -45,6 +45,11 @@ include = ["GetBucketLogging", "PutBucketLogging"]
 [op.GetBucketLogging]
 precedence = 205
 auth_action = "s3:GetBucketLogging"
+# The response element order. It belongs to the *operation* and not to the shape: this read's
+# output members are operation-level, so the shape is only ever a request payload — it gets a
+# reader, a reader does not consult element order, and a `[shape]` declaration here would be a
+# statement no test could falsify.
+element_order = ["LoggingEnabled"]
 # A target bucket, a prefix, a key format and a hundred grants. 64 KiB is well past a maximal
 # document and bounds the XML surface.
 response_max_bytes = 65536
@@ -75,9 +80,8 @@ quirk_refs = ["q-log-0002", "q-log-0003", "q-log-0004"]
 # Nested shapes owned by this family
 # =============================================================================================
 
-# One optional member, and its absence is the documented "stop logging".
-[shape.BucketLoggingStatus]
-element_order = ["LoggingEnabled"]
+# `BucketLoggingStatus` has one optional member and its absence is the documented "stop
+# logging"; the response order is stated on the read above, where it is observed.
 
 # The documented element order. `TargetBucket` and `TargetPrefix` are required by the model, so a
 # `<LoggingEnabled>` missing either is refused by the decoder before

@@ -234,38 +234,6 @@ fn n_a_name_held_by_another_owner_is_a_different_conflict() {
     let mut fixture = Fixture::at(NOW);
     fixture.declare_bucket("conf-bkt-theirs", false);
     fixture.declare_bucket_owned_by_other("conf-bkt-theirs");
-    fixture.set_policy(
-        "conf-bkt-reborn",
-        r#"{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"AWS":"arn:aws:iam::999988887777:root"},"Action":"s3:GetObject","Resource":"arn:aws:s3:::conf-bkt-reborn/previous-owner-secret"}]}"#.to_owned(),
-        true,
-    );
-    fixture.set_website(
-        "conf-bkt-reborn",
-        dto::WebsiteConfiguration {
-            index_document: Some(dto::IndexDocument {
-                suffix: "previous-owner-index.html".to_owned(),
-            }),
-            ..dto::WebsiteConfiguration::default()
-        },
-    );
-    fixture.set_versioning(
-        "conf-bkt-reborn",
-        dto::VersioningConfiguration {
-            status: Some(dto::Status::SUSPENDED),
-            ..dto::VersioningConfiguration::default()
-        },
-    );
-    fixture.set_logging(
-        "conf-bkt-reborn",
-        dto::BucketLoggingStatus {
-            logging_enabled: Some(dto::LoggingEnabled {
-                target_bucket: "previous-owner-log-target".to_owned(),
-                target_prefix: "previous-owner/".to_owned(),
-                ..dto::LoggingEnabled::default()
-            }),
-        },
-    );
-
     let harness = Harness::over(fixture, "us-east-1");
     let answer = harness.send("PUT", "/conf-bkt-theirs", b"");
     assert_eq!(answer.status, 409, "{}", answer.body);
@@ -531,6 +499,38 @@ fn n_a_deleted_buckets_seven_documents_and_its_acl_do_not_survive_a_recreation()
             }],
         },
     );
+    fixture.set_policy(
+        "conf-bkt-reborn",
+        r#"{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"AWS":"arn:aws:iam::999988887777:root"},"Action":"s3:GetObject","Resource":"arn:aws:s3:::conf-bkt-reborn/previous-owner-secret"}]}"#.to_owned(),
+        true,
+    );
+    fixture.set_website(
+        "conf-bkt-reborn",
+        dto::WebsiteConfiguration {
+            index_document: Some(dto::IndexDocument {
+                suffix: "previous-owner-index.html".to_owned(),
+            }),
+            ..dto::WebsiteConfiguration::default()
+        },
+    );
+    fixture.set_versioning(
+        "conf-bkt-reborn",
+        dto::VersioningConfiguration {
+            status: Some(dto::Status::SUSPENDED),
+            ..dto::VersioningConfiguration::default()
+        },
+    );
+    fixture.set_logging(
+        "conf-bkt-reborn",
+        dto::BucketLoggingStatus {
+            logging_enabled: Some(dto::LoggingEnabled {
+                target_bucket: "previous-owner-log-target".to_owned(),
+                target_prefix: "previous-owner/".to_owned(),
+                ..dto::LoggingEnabled::default()
+            }),
+        },
+    );
+
     let harness = Harness::over(fixture, "us-east-1");
 
     let deleted = harness.send("DELETE", "/conf-bkt-reborn", b"");

@@ -331,9 +331,9 @@
                                                   ],
                                         "xml": {
                                                  "element_order": [
-                                                                    "RedirectAllRequestsTo",
-                                                                    "IndexDocument",
                                                                     "ErrorDocument",
+                                                                    "IndexDocument",
+                                                                    "RedirectAllRequestsTo",
                                                                     "RoutingRules"
                                                                   ],
                                                  "empty_value_policy": {

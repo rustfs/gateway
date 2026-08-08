@@ -106,7 +106,7 @@ quirks = []
 
 [shape.VersioningConfiguration]
 kind = "Structure"
-element_order = ["Status", "MFADelete"]
+element_order = ["MFADelete", "Status"]
 
 [shape.VersioningConfiguration.empty_value]
 MFADelete = "omit"

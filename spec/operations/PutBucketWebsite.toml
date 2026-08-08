@@ -265,7 +265,7 @@ quirks = []
 
 [shape.WebsiteConfiguration]
 kind = "Structure"
-element_order = ["RedirectAllRequestsTo", "IndexDocument", "ErrorDocument", "RoutingRules"]
+element_order = ["ErrorDocument", "IndexDocument", "RedirectAllRequestsTo", "RoutingRules"]
 
 [shape.WebsiteConfiguration.empty_value]
 ErrorDocument = "omit"
