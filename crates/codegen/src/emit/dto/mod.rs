@@ -335,7 +335,7 @@ pub fn name_list(names: &[String], indent: usize, lead: &str) -> String {
 const ARRAY_WIDTH: usize = 78;
 
 /// rustfmt's `max_width` for this repository.
-const MAX_WIDTH: usize = 130;
+pub(super) const MAX_WIDTH: usize = 130;
 
 /// The terminator that follows a constant's literal and counts towards the line.
 const SEMICOLON: usize = 1;

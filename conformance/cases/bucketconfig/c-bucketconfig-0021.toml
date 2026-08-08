@@ -1,0 +1,56 @@
+[case]
+id = "c-bucketconfig-0021"
+schema_version = 1
+title = "All four public-access switches read back in lower case, in the documented order"
+rationale = """
+Byte comparison pins two things a structural assertion would miss: the element order, and that the booleans are rendered true and false rather than True and False. A client that string-compares the document — which is what a compliance check does — sees the difference."""
+polarity = "positive"
+operation = "GetPublicAccessBlock"
+tags = ["bucketconfig", "xml", "wire-bytes", "security"]
+timeout_ms = 10000
+quirks = ["q-pab-0001", "q-pab-0004"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetPublicAccessBlock.html"
+summary = "The read reference documents NoSuchPublicAccessBlockConfiguration for a bucket with no block."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutPublicAccessBlock.html"
+summary = "The write reference declares all four settings as optional booleans and documents the Content-MD5 header."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "conf-bucketconfig"
+[[exchanges]]
+name = "write"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-bucketconfig?publicAccessBlock"
+headers = { "content-md5" = "njdlwnEoAxGSpOozjhzsJQ==", "content-type" = "application/xml" }
+body = { utf8 = '<PublicAccessBlockConfiguration><BlockPublicAcls>true</BlockPublicAcls><IgnorePublicAcls>true</IgnorePublicAcls><BlockPublicPolicy>true</BlockPublicPolicy><RestrictPublicBuckets>true</RestrictPublicBuckets></PublicAccessBlockConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[[exchanges]]
+name = "read-back"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-bucketconfig?publicAccessBlock"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.body]
+golden = "goldens/c-bucketconfig-0021.xml"
+

@@ -1,0 +1,97 @@
+{
+  "ir_version": "1",
+  "operation": "GetBucketRequestPayment",
+  "http": {
+            "method": "GET",
+            "target": "Bucket",
+            "precedence": 230,
+            "predicates": [
+                            { "kind": "Method", "method": "GET" },
+                            { "kind": "Target", "target": "Bucket" },
+                            { "kind": "QueryPresent", "key": "requestPayment" }
+                          ],
+            "success_status": 200,
+            "alt_success_statuses": [],
+            "path_shape": "/{Bucket}"
+          },
+  "auth": {
+            "requirement": "Required",
+            "action": "s3:GetBucketRequestPayment",
+            "presigned_allowed": true,
+            "service": "s3"
+          },
+  "payload": {
+               "request": { "kind": "None", "buffering": "None", "max_bytes": null },
+               "response": { "kind": "XmlBody", "buffering": "Full", "max_bytes": 4096 }
+             },
+  "checksum": { "http_checksum_required": false, "request_algorithms": [], "response_algorithms": [] },
+  "input": {
+             "fields": [
+                         {
+                           "name": "Bucket",
+                           "wire_name": "Bucket",
+                           "required": true,
+                           "binding": { "kind": "UriLabel", "greedy": false },
+                           "type": { "kind": "BucketName" },
+                           "hot": true,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "ExpectedBucketOwner",
+                           "wire_name": "x-amz-expected-bucket-owner",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "String" },
+                           "hot": false,
+                           "quirk_refs": []
+                         }
+                       ]
+           },
+  "output": {
+              "fields": [
+                          {
+                            "name": "Payer",
+                            "wire_name": "Payer",
+                            "required": false,
+                            "binding": { "kind": "BodyXml" },
+                            "type": { "kind": "StringEnum", "values": ["Requester", "BucketOwner"] },
+                            "hot": false,
+                            "quirk_refs": []
+                          }
+                        ]
+            },
+  "shapes": {},
+  "xml": {
+           "request_root": null,
+           "request_root_aliases": [],
+           "response_root": "RequestPaymentConfiguration",
+           "xmlns": "emit",
+           "unwrapped_output": false,
+           "element_order": ["Payer"],
+           "empty_value_policy": { "Payer": "omit" },
+           "url_encoded_fields": [],
+           "attributes": [],
+           "body_literal": false
+         },
+  "errors": { "not_configured": null, "allows_error_after_200": false, "codes": ["NoSuchBucket", "AccessDenied"] },
+  "derived_resources": [],
+  "head_mirrors": null,
+  "quirk_refs": ["q-rqp-0001"],
+  "quirks": [
+              {
+                "id": "q-rqp-0001",
+                "kind": "not_configured_error",
+                "target": "GetBucketRequestPayment",
+                "summary": "A bucket that was never switched to requester-pays answers 200 with the default payer BucketOwner rather than an empty document or a 404, because every bucket has a payer.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketRequestPayment.html",
+                                "summary": "The operation documents the payer as always present in the response and names the bucket owner as the value before any request-payment configuration is written."
+                              }
+                            ],
+                "cases": ["c-bucketconfig-0027", "c-bucketconfig-0007"]
+              }
+            ],
+  "ext_points": []
+}

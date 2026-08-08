@@ -1,0 +1,35 @@
+[case]
+id = "c-bucketconfig-0050"
+schema_version = 1
+title = "A routing rule with no Redirect is refused"
+rationale = """
+A rule that says what to match and not what to do is not a rule. The member is required in the pinned model, so this is the decoder's refusal rather than the shared validator's, and the case pins that the decoder actually makes it."""
+polarity = "negative"
+operation = "PutBucketWebsite"
+tags = ["bucketconfig", "xml", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-web-0004"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketWebsite.html"
+summary = "The write reference documents the wrapped routing rules, the redirect exclusion and the Content-MD5 header."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "conf-bucketconfig"
+[request]
+method = "PUT"
+target = "/conf-bucketconfig?website"
+headers = { "content-md5" = "qy21DuHi6ZsdBgMyTZBJAQ==", "content-type" = "application/xml" }
+body = { utf8 = '<WebsiteConfiguration><IndexDocument><Suffix>index.html</Suffix></IndexDocument><RoutingRules><RoutingRule><Condition><KeyPrefixEquals>a/</KeyPrefixEquals></Condition></RoutingRule></RoutingRules></WebsiteConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+code = "MalformedXML"
+request_id_present = true

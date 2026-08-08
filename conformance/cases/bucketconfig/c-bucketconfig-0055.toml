@@ -1,0 +1,56 @@
+[case]
+id = "c-bucketconfig-0055"
+schema_version = 1
+title = "A public-access block naming two switches reads back all four, the others false"
+rationale = """
+An omitted switch is off, not undefined, so a document naming two of them turns the other two off. The golden is what makes that observable: a gateway that echoed only the members it was sent would return a document a compliance check reads as two settings missing rather than two settings false."""
+polarity = "negative"
+operation = "GetPublicAccessBlock"
+tags = ["bucketconfig", "xml", "wire-bytes", "security"]
+timeout_ms = 10000
+quirks = ["q-pab-0004"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutPublicAccessBlock.html"
+summary = "The write reference declares all four settings as optional booleans and documents the Content-MD5 header."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetPublicAccessBlock.html"
+summary = "The read reference documents NoSuchPublicAccessBlockConfiguration for a bucket with no block."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "conf-bucketconfig"
+[[exchanges]]
+name = "write"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-bucketconfig?publicAccessBlock"
+headers = { "content-md5" = "nt5C6CRTe2LcE3eM9mtRew==", "content-type" = "application/xml" }
+body = { utf8 = '<PublicAccessBlockConfiguration><BlockPublicAcls>true</BlockPublicAcls><BlockPublicPolicy>true</BlockPublicPolicy></PublicAccessBlockConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[[exchanges]]
+name = "read-back"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-bucketconfig?publicAccessBlock"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.body]
+golden = "goldens/c-bucketconfig-0055.xml"
+

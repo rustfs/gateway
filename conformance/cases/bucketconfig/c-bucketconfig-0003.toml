@@ -1,0 +1,56 @@
+[case]
+id = "c-bucketconfig-0003"
+schema_version = 1
+title = "MfaDelete is spelled the same way on the write and on the read"
+rationale = """
+The member the model calls MFADelete is MfaDelete on the wire, and this pins that the two directions agree. It is worth a case because they need not have: several S3 members are spelled one way in a request and another in a response, and a gateway that applied such a rule here would round-trip a document the client cannot read back."""
+polarity = "positive"
+operation = "PutBucketVersioning"
+tags = ["bucketconfig", "xml", "wire-bytes"]
+timeout_ms = 10000
+quirks = ["q-ver-0004"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketVersioning.html"
+summary = "The write reference documents the configuration document, its two status values and its Content-MD5 header."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketVersioning.html"
+summary = "The read reference shows the versioning state as an element that is absent until versioning is configured."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "conf-bucketconfig"
+[[exchanges]]
+name = "write"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-bucketconfig?versioning"
+headers = { "content-md5" = "0WNnnpeLLX5q+WR6BTXy2w==", "content-type" = "application/xml" }
+body = { utf8 = '<VersioningConfiguration><Status>Enabled</Status><MfaDelete>Disabled</MfaDelete></VersioningConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[[exchanges]]
+name = "read-back"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-bucketconfig?versioning"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.body]
+golden = "goldens/c-bucketconfig-0003.xml"
+

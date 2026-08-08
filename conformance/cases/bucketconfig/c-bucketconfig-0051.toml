@@ -1,0 +1,35 @@
+[case]
+id = "c-bucketconfig-0051"
+schema_version = 1
+title = "A policy body that is not JSON is refused as MalformedPolicy"
+rationale = """
+A body that will not parse now will not parse on any later read either, so accepting it stores a bucket whose access control cannot be loaded. The refusal names no offset and quotes no bytes: a policy names principals and account identifiers, and an error that said where the syntax broke would let a caller who cannot read the policy back reconstruct it one probe at a time."""
+polarity = "negative"
+operation = "PutBucketPolicy"
+tags = ["bucketconfig", "error-shape", "security"]
+timeout_ms = 10000
+quirks = ["q-pol-0008"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketPolicy.html"
+summary = "The write reference documents a JSON policy body, the Content-MD5 header and MalformedPolicy as the refusal."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "conf-bucketconfig"
+[request]
+method = "PUT"
+target = "/conf-bucketconfig?policy"
+headers = { "content-md5" = "1eBodMfgNj9U3jWHRTm8PQ==", "content-type" = "application/json" }
+body = { utf8 = '{"Version":"2012-10-17",,}' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+code = "MalformedPolicy"
+request_id_present = true

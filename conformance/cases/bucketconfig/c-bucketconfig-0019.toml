@@ -1,0 +1,51 @@
+[case]
+id = "c-bucketconfig-0019"
+schema_version = 1
+title = "A bucket with a policy answers a policy status with a lower-case boolean"
+rationale = """
+The status document is XML even though the policy itself is JSON, and the boolean is rendered lower case, which is the XML spelling rather than a choice. The verdict here is the fixture's declaration, not a computation: this workspace contains no policy evaluator, and a case that asserted one would be asserting a guess."""
+polarity = "positive"
+operation = "GetBucketPolicyStatus"
+tags = ["bucketconfig", "xml", "wire-bytes", "security"]
+timeout_ms = 10000
+quirks = ["q-pol-0005"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketPolicyStatus.html"
+summary = "The status reference documents the PolicyStatus document with a single lower-case boolean."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "conf-bucketconfig"
+[[exchanges]]
+name = "write"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-bucketconfig?policy"
+headers = { "content-md5" = "KQxrePq5VLbu0TlAegiUEQ==", "content-type" = "application/json" }
+body = { utf8 = '{"Version":"2012-10-17","Statement":[{"Sid":"one","Effect":"Allow","Principal":{"AWS":"arn:aws:iam::111122223333:root"},"Action":"s3:GetObject","Resource":"arn:aws:s3:::conf-bucketconfig/*"}]}' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[[exchanges]]
+name = "read-back"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-bucketconfig?policyStatus"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.body]
+golden = "goldens/c-bucketconfig-0019.xml"
+

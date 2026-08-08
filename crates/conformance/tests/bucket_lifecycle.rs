@@ -110,6 +110,16 @@ impl Harness {
             // And the ACL read, the one with no 404 to lean on: it answers 200 either way, so
             // the proof of non-inheritance has to be the document it answers with.
             .register::<dto::GetBucketAcl, _>(Arc::clone(&backend))
+            // The bucket-configuration band contributes four reads, chosen because they answer
+            // the two *different* unconfigured shapes: `?policy` and `?website` answer a 404, so
+            // inheritance shows up as a 200; `?versioning` and `?logging` answer a 200 with an
+            // empty document, so inheritance shows up inside a body that is a success either way.
+            // A test that only watched the 404 kinds would not notice a recreated bucket still
+            // logging to the previous owner's target.
+            .register::<dto::GetBucketPolicy, _>(Arc::clone(&backend))
+            .register::<dto::GetBucketWebsite, _>(Arc::clone(&backend))
+            .register::<dto::GetBucketVersioning, _>(Arc::clone(&backend))
+            .register::<dto::GetBucketLogging, _>(Arc::clone(&backend))
             .register::<dto::PutObject, _>(Arc::clone(&backend))
             .authenticator(SigV4Authenticator::new(credentials, RegionSet::new([region]).expect("non-empty")))
             .authorizer(allow_when(|request| !request.is_anonymous()))
@@ -379,7 +389,8 @@ fn n_deleting_a_bucket_that_was_never_created_is_a_not_found() {
 /// Negative — a deleted bucket takes its configuration documents with it.
 ///
 /// The CORS document, the tag set, the lifecycle document, the default-encryption document, the
-/// replication document, the object-lock document and the access control policy all
+/// replication document, the object-lock document, the access control policy and the whole
+/// 200-249 configuration band all
 /// live inside the bucket's own state entry, so removing the bucket removes them by construction
 /// — and this test is what keeps that a fact rather than a coincidence of today's layout. The
 /// failure it guards against is inheritance: delete a bucket, create a new one under the same
@@ -388,15 +399,22 @@ fn n_deleting_a_bucket_that_was_never_created_is_a_not_found() {
 /// encrypting the new owner's objects to the previous owner's KMS key, which is inheritance of
 /// *access*, not just behaviour — or shipping the new owner's objects to the previous
 /// owner's destination bucket under the previous owner's IAM role, which is inheritance of
-/// *exfiltration*. The object-lock document is the sharpest of the seven: a
+/// *exfiltration*. The object-lock document is the sharpest of the eight: a
 /// recreated bucket that inherited a COMPLIANCE default would apply WORM retention the new owner
-/// never asked for, and COMPLIANCE is by definition the mode nobody can lift. The access control
-/// policy is the quietest: an inherited grant to the previous owner's account, or to AllUsers,
-/// looks exactly like a grant the new owner meant to make, and unlike the other six it answers a
-/// `200` either way — there is no unconfigured 404 to notice, which is why the assertion below
-/// reads the document rather than the status. A name is not a bucket.
+/// never asked for, and COMPLIANCE is by definition the mode nobody can lift. A name is not a
+/// bucket.
+///
+/// Three of the eight answer no 404 at all, and they are the quiet ones. The access control
+/// policy answers a `200` either way: an inherited grant to the previous owner's account, or to
+/// AllUsers, looks exactly like a grant the new owner meant to make. The configuration band's
+/// versioning and logging reads answer a **200 with an empty document** for the same reason, so
+/// inheritance hides inside a response that is a success whichever way it goes, and only the
+/// content separates them — an inherited logging destination keeps writing the new owner's
+/// access log into the previous owner's bucket, which is a disclosure nobody sees happen. The
+/// band's policy and website reads are the loud kind, a 404 turning into a 200 with a document.
+/// All of them are asserted below, because a test that only watched the 404s would miss half.
 #[test]
-fn n_a_deleted_buckets_cors_tags_lifecycle_encryption_replication_lock_and_acl_do_not_survive_a_recreation() {
+fn n_a_deleted_buckets_seven_documents_and_its_acl_do_not_survive_a_recreation() {
     let mut fixture = Fixture::at(NOW);
     fixture.declare_bucket("conf-bkt-reborn", false);
     fixture.set_cors(
@@ -481,6 +499,38 @@ fn n_a_deleted_buckets_cors_tags_lifecycle_encryption_replication_lock_and_acl_d
             }],
         },
     );
+    fixture.set_policy(
+        "conf-bkt-reborn",
+        r#"{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"AWS":"arn:aws:iam::999988887777:root"},"Action":"s3:GetObject","Resource":"arn:aws:s3:::conf-bkt-reborn/previous-owner-secret"}]}"#.to_owned(),
+        true,
+    );
+    fixture.set_website(
+        "conf-bkt-reborn",
+        dto::WebsiteConfiguration {
+            index_document: Some(dto::IndexDocument {
+                suffix: "previous-owner-index.html".to_owned(),
+            }),
+            ..dto::WebsiteConfiguration::default()
+        },
+    );
+    fixture.set_versioning(
+        "conf-bkt-reborn",
+        dto::VersioningConfiguration {
+            status: Some(dto::Status::SUSPENDED),
+            ..dto::VersioningConfiguration::default()
+        },
+    );
+    fixture.set_logging(
+        "conf-bkt-reborn",
+        dto::BucketLoggingStatus {
+            logging_enabled: Some(dto::LoggingEnabled {
+                target_bucket: "previous-owner-log-target".to_owned(),
+                target_prefix: "previous-owner/".to_owned(),
+                ..dto::LoggingEnabled::default()
+            }),
+        },
+    );
+
     let harness = Harness::over(fixture, "us-east-1");
 
     let deleted = harness.send("DELETE", "/conf-bkt-reborn", b"");
@@ -559,4 +609,38 @@ fn n_a_deleted_buckets_cors_tags_lifecycle_encryption_replication_lock_and_acl_d
         read.body
     );
     read.assert_contains("FULL_CONTROL");
+
+    // The configuration band's loud half: two reads whose unconfigured answer is a 404, so a
+    // recreated bucket that inherited either would answer 200 with the previous owner's document.
+    // The policy is the worst of the whole test — it names a principal in another account.
+    for (target, code) in [("?policy", "NoSuchBucketPolicy"), ("?website", "NoSuchWebsiteConfiguration")] {
+        let read = harness.send("GET", &format!("/conf-bkt-reborn{target}"), b"");
+        assert_eq!(read.status, 404, "{target}: {}", read.body);
+        read.assert_contains(code);
+        assert!(
+            !read.body.contains("previous-owner") && !read.body.contains("999988887777"),
+            "the recreated bucket leaked the deleted bucket's {target} document: {}",
+            read.body
+        );
+    }
+
+    // The quiet half, and the reason this test is not just a list of 404s. Both of these answer
+    // 200 whether or not anything was inherited, so the status proves nothing and only the body
+    // does: an empty document is the never-configured state, and anything the previous owner
+    // wrote would be sitting inside a response that looks entirely successful.
+    let read = harness.send("GET", "/conf-bkt-reborn?versioning", b"");
+    assert_eq!(read.status, 200, "{}", read.body);
+    assert!(
+        !read.body.contains("Suspended") && !read.body.contains("<Status>"),
+        "the recreated bucket inherited the deleted bucket's versioning state: {}",
+        read.body
+    );
+
+    let read = harness.send("GET", "/conf-bkt-reborn?logging", b"");
+    assert_eq!(read.status, 200, "{}", read.body);
+    assert!(
+        !read.body.contains("previous-owner") && !read.body.contains("<LoggingEnabled>"),
+        "the recreated bucket is still logging to the deleted bucket's target: {}",
+        read.body
+    );
 }

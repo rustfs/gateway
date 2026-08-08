@@ -86,10 +86,19 @@ if [[ -z "$dto_names" ]]; then
     exit 0
 fi
 
-pattern="$(printf '%s' "$dto_names" | paste -sd'|' -)"
-# `::Input` / `::Output` in qualified position, or any of the names above.
-qualified='::(Input|Output)'
-pattern="(${pattern}|${qualified})"
+names="$(printf '%s' "$dto_names" | paste -sd'|' -)"
+# A bare name counts only where an identifier starts. The model contains a shape
+# named `Name`, and unanchored it makes the guard read
+# `BuildError::RouteClaimsStandardName {` as that shape and report a dto where
+# there is none. A false report is not a harmless one: its remedy is an allowance
+# line, so an over-matching guard spends its own authority teaching people to
+# silence it.
+#
+# The boundary belongs to the bare names alone. `::Input` / `::Output` carry their
+# own in the `::`, and requiring another one in front would demand a non-identifier
+# character before the path separator — which `dto::Input` does not have, and which
+# would quietly stop the guard seeing the two names it most needs to.
+pattern="((^|[^A-Za-z0-9_])(${names})|::(Input|Output))"
 
 while IFS= read -r file; do
     [[ -n "$file" ]] || continue

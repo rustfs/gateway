@@ -113,7 +113,7 @@ must agree case for case; a case that could name a path would be a case that hid
   requests. Anything a case asserts must appear in `request` or `exchanges`.
 - **Tag vocabulary.** `streaming`, `chunked`, `trailer`, `signature`, `sigv4`, `sigv2`, `presigned`,
   `xml`, `wire-bytes`, `etag`, `routing`, `vhost`, `conditional`, `preconditions`, `list`,
-  `pagination`, `multipart`, `checksum`, `range`, `encoding`, `cors`, `encryption`, `lifecycle`, `replication`, `region`, `security`, `dos`,
+  `pagination`, `multipart`, `checksum`, `range`, `encoding`, `cors`, `encryption`, `lifecycle`, `replication`, `bucketconfig`, `region`, `security`, `dos`,
   `timing`, `connection`, `event-stream`, `tls`, `h2`, `error-shape`, `known-divergence`, `tagging`,
   `object-lock`, `restore`, `select`, `acl`, and `slow`. `slow` is reserved: it moves a case out of
   the pull-request gate and

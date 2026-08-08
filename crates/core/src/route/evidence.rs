@@ -206,3 +206,82 @@ pub(super) const RESTORE_OBJECT_DOC: &str = "https://docs.aws.amazon.com/AmazonS
 /// AWS's own reference for the select query.
 pub(super) const SELECT_OBJECT_CONTENT_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_SelectObjectContent.html \
      — a select is a POST to the object key carrying ?select together with select-type=2, and it answers with a framed event stream rather than a document.";
+/// AWS's own reference for the `GetBucketAccelerateConfiguration` operation.
+pub(super) const GET_BUCKET_ACCELERATE_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketAccelerateConfiguration.html \
+     — GetBucketAccelerateConfiguration is selected by the ?accelerate subresource alone and answers with the stored configuration document.";
+
+/// AWS's own reference for the `PutBucketAccelerateConfiguration` operation.
+pub(super) const PUT_BUCKET_ACCELERATE_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketAccelerateConfiguration.html \
+     — PutBucketAccelerateConfiguration is selected by the ?accelerate subresource on a bucket PUT and replaces the stored acceleration document.";
+
+/// AWS's own reference for the `GetBucketLogging` operation.
+pub(super) const GET_BUCKET_LOGGING_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketLogging.html \
+     — GetBucketLogging is selected by the ?logging subresource alone and answers with the stored logging document.";
+
+/// AWS's own reference for the `PutBucketLogging` operation.
+pub(super) const PUT_BUCKET_LOGGING_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketLogging.html \
+     — PutBucketLogging is selected by the ?logging subresource on a bucket PUT and replaces the stored logging document.";
+
+/// AWS's own reference for the `GetBucketNotificationConfiguration` operation.
+pub(super) const GET_BUCKET_NOTIFICATION_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketNotificationConfiguration.html \
+     — GetBucketNotificationConfiguration is selected by the ?notification subresource alone and answers with the stored notification document.";
+
+/// AWS's own reference for the `PutBucketNotificationConfiguration` operation.
+pub(super) const PUT_BUCKET_NOTIFICATION_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketNotificationConfiguration.html \
+     — PutBucketNotificationConfiguration is selected by the ?notification subresource on a bucket PUT and replaces the stored notification document.";
+
+/// AWS's own reference for the `GetBucketPolicy` operation.
+pub(super) const GET_BUCKET_POLICY_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketPolicy.html \
+     — GetBucketPolicy is selected by the ?policy subresource alone and answers with the stored policy document as JSON.";
+
+/// AWS's own reference for the `PutBucketPolicy` operation.
+pub(super) const PUT_BUCKET_POLICY_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketPolicy.html \
+     — PutBucketPolicy is selected by the ?policy subresource on a bucket PUT and replaces the stored policy document.";
+
+/// AWS's own reference for the `DeleteBucketPolicy` operation.
+pub(super) const DELETE_BUCKET_POLICY_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketPolicy.html \
+     — DeleteBucketPolicy is selected by the ?policy subresource on a bucket DELETE and removes only the policy document.";
+
+/// AWS's own reference for the `GetBucketPolicyStatus` operation.
+pub(super) const GET_BUCKET_POLICY_STATUS_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketPolicyStatus.html \
+     — GetBucketPolicyStatus is selected by the ?policyStatus subresource, which is a different key from ?policy and answers a different document.";
+
+/// AWS's own reference for the `GetPublicAccessBlock` operation.
+pub(super) const GET_PUBLIC_ACCESS_BLOCK_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetPublicAccessBlock.html \
+     — GetPublicAccessBlock is selected by the ?publicAccessBlock subresource alone and answers with the four stored switches.";
+
+/// AWS's own reference for the `PutPublicAccessBlock` operation.
+pub(super) const PUT_PUBLIC_ACCESS_BLOCK_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutPublicAccessBlock.html \
+     — PutPublicAccessBlock is selected by the ?publicAccessBlock subresource on a bucket PUT and replaces the four stored switches.";
+
+/// AWS's own reference for the `DeletePublicAccessBlock` operation.
+pub(super) const DELETE_PUBLIC_ACCESS_BLOCK_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeletePublicAccessBlock.html \
+     — DeletePublicAccessBlock is selected by the ?publicAccessBlock subresource on a bucket DELETE and removes only those switches.";
+
+/// AWS's own reference for the `GetBucketRequestPayment` operation.
+pub(super) const GET_BUCKET_REQUEST_PAYMENT_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketRequestPayment.html \
+     — GetBucketRequestPayment is selected by the ?requestPayment subresource alone and answers with the stored payer.";
+
+/// AWS's own reference for the `PutBucketRequestPayment` operation.
+pub(super) const PUT_BUCKET_REQUEST_PAYMENT_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketRequestPayment.html \
+     — PutBucketRequestPayment is selected by the ?requestPayment subresource on a bucket PUT and replaces the stored payer.";
+
+/// AWS's own reference for the `GetBucketVersioning` operation.
+pub(super) const GET_BUCKET_VERSIONING_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketVersioning.html \
+     — GetBucketVersioning is selected by the ?versioning subresource alone and answers with the stored versioning state.";
+
+/// AWS's own reference for the `PutBucketVersioning` operation.
+pub(super) const PUT_BUCKET_VERSIONING_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketVersioning.html \
+     — PutBucketVersioning is selected by the ?versioning subresource on a bucket PUT and replaces the stored versioning state.";
+
+/// AWS's own reference for the `GetBucketWebsite` operation.
+pub(super) const GET_BUCKET_WEBSITE_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketWebsite.html \
+     — GetBucketWebsite is selected by the ?website subresource alone and answers with the stored website document.";
+
+/// AWS's own reference for the `PutBucketWebsite` operation.
+pub(super) const PUT_BUCKET_WEBSITE_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketWebsite.html \
+     — PutBucketWebsite is selected by the ?website subresource on a bucket PUT and replaces the stored website document.";
+
+/// AWS's own reference for the `DeleteBucketWebsite` operation.
+pub(super) const DELETE_BUCKET_WEBSITE_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketWebsite.html \
+     — DeleteBucketWebsite is selected by the ?website subresource on a bucket DELETE and removes only the website document.";

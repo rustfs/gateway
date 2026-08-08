@@ -1,0 +1,32 @@
+[case]
+id = "c-bucketconfig-0023"
+schema_version = 1
+title = "A never-versioned bucket answers 200 with an empty document and no Status element"
+rationale = """
+The most consequential unconfigured answer in the family. Never-versioned, suspended and no-such-bucket are three different facts, and the empty document is the only one of the three a client can act on by enabling versioning. A 404 here reads as a missing bucket; a Suspended status claims a version history that does not exist. Byte comparison is what refuses both substitutions, including the near-miss of an empty Status element."""
+polarity = "negative"
+operation = "GetBucketVersioning"
+tags = ["bucketconfig", "xml", "wire-bytes", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-ver-0001"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketVersioning.html"
+summary = "The read reference shows the versioning state as an element that is absent until versioning is configured."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "conf-bucketconfig"
+[request]
+method = "GET"
+target = "/conf-bucketconfig?versioning"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[expect.body]
+golden = "goldens/c-bucketconfig-0023.xml"

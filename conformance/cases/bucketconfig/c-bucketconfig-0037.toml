@@ -1,0 +1,35 @@
+[case]
+id = "c-bucketconfig-0037"
+schema_version = 1
+title = "A logging write with neither Content-MD5 nor a checksum header is refused"
+rationale = """
+One of the six writes in this band that carry the model's request checksum requirement. The refusal happens before the body is parsed, which is the point: an unverifiable configuration document must not be read, let alone stored. The accepting halves are the positive cases, and the two writes that are exempt are c-bucketconfig-0041 and c-bucketconfig-0042 — without those, a gateway that demanded an integrity claim everywhere would pass every case here."""
+polarity = "negative"
+operation = "PutBucketLogging"
+tags = ["bucketconfig", "checksum", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-log-0004"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketLogging.html"
+summary = "The write reference documents the logging document, its wrapped grant list and its Content-MD5 header."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "conf-bucketconfig"
+[request]
+method = "PUT"
+target = "/conf-bucketconfig?logging"
+headers = { "content-type" = "application/xml" }
+body = { utf8 = '<BucketLoggingStatus><LoggingEnabled><TargetBucket>conf-log-target</TargetBucket><TargetPrefix>access/</TargetPrefix></LoggingEnabled></BucketLoggingStatus>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+code = "InvalidRequest"
+request_id_present = true

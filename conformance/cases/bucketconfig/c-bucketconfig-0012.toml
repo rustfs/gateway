@@ -1,0 +1,31 @@
+[case]
+id = "c-bucketconfig-0012"
+schema_version = 1
+title = "A website document with index, error and routing rules is accepted with Content-MD5"
+rationale = """
+The document-serving half of the website configuration, which is the alternative to a whole-site redirect. The refusal without the integrity header is c-bucketconfig-0036 and the illegal combination of the two halves is c-bucketconfig-0049."""
+polarity = "positive"
+operation = "PutBucketWebsite"
+tags = ["bucketconfig", "xml", "checksum"]
+timeout_ms = 10000
+quirks = ["q-web-0002", "q-web-0006"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketWebsite.html"
+summary = "The write reference documents the wrapped routing rules, the redirect exclusion and the Content-MD5 header."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "conf-bucketconfig"
+[request]
+method = "PUT"
+target = "/conf-bucketconfig?website"
+headers = { "content-md5" = "9qOvg44x092Bkn0ZW2RFjg==", "content-type" = "application/xml" }
+body = { utf8 = '<WebsiteConfiguration><IndexDocument><Suffix>index.html</Suffix></IndexDocument><ErrorDocument><Key>error.html</Key></ErrorDocument><RoutingRules><RoutingRule><Condition><KeyPrefixEquals>docs/</KeyPrefixEquals></Condition><Redirect><ReplaceKeyPrefixWith>documents/</ReplaceKeyPrefixWith></Redirect></RoutingRule></RoutingRules></WebsiteConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+connection_after = "open"

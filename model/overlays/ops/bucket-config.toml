@@ -21,7 +21,10 @@
 # the family's calibration sample, because it collects every generic trap of the configuration
 # operations in one place: the wrapped `<TagSet><Tag>` collection, the per-operation
 # `not_configured` 404, the `httpChecksumRequired` write, and the unconditional `204` delete.
-# The rest of the family stays deferred and should follow this triple's shape.
+# The nine configurations of the 200-249 band followed, in `ops/bucket-switches.toml`,
+# `ops/bucket-logging.toml`, `ops/bucket-notification.toml`, `ops/bucket-website.toml` and
+# `ops/bucket-policy.toml`. What is left deferred below is deliberately *not* more of the same
+# shape: see the reason on the block.
 #
 # The three rows land in the bucket subresource band, after `?location` at 300 and the `?cors`
 # band at 310-330: 340 (GET), 350 (PUT), 360 (DELETE) — 370-390 are spoken for by the lifecycle
@@ -91,38 +94,25 @@ url_encoded_fields = []
 quirk_refs = ["q-tag-delete-idempotent-0091"]
 
 [[deferred]]
-reason = "P5 bucket subresource configuration family; one Get/Put/Delete triple per subresource, all sharing the not_configured 404 rule."
+reason = "Two groups, deferred for two different reasons, and neither is one of the nine configurations the 200-249 band covers. OwnershipControls belongs with the ACL family that landed at 250/260 and did not take it: BucketOwnerEnforced is the ownership value that disables ACLs outright, so the switch and the grant grammar answer each other and are reviewed together. The analytics, inventory, metrics and intelligent-tiering sets are the only bucket subresources that are keyed — each carries an id, so each has a list operation beside its triple and a selector that pins a query key both with and without a value, which is a routing shape no band in the table has yet."
 operations = [
   "DeleteBucketAnalyticsConfiguration",
   "DeleteBucketIntelligentTieringConfiguration",
   "DeleteBucketInventoryConfiguration",
   "DeleteBucketMetricsConfiguration",
   "DeleteBucketOwnershipControls",
-  "DeleteBucketWebsite",
-  "GetBucketAccelerateConfiguration",
   "GetBucketAnalyticsConfiguration",
   "GetBucketIntelligentTieringConfiguration",
   "GetBucketInventoryConfiguration",
-  "GetBucketLogging",
   "GetBucketMetricsConfiguration",
-  "GetBucketNotificationConfiguration",
   "GetBucketOwnershipControls",
-  "GetBucketRequestPayment",
-  "GetBucketVersioning",
-  "GetBucketWebsite",
   "ListBucketAnalyticsConfigurations",
   "ListBucketIntelligentTieringConfigurations",
   "ListBucketInventoryConfigurations",
   "ListBucketMetricsConfigurations",
-  "PutBucketAccelerateConfiguration",
   "PutBucketAnalyticsConfiguration",
   "PutBucketIntelligentTieringConfiguration",
   "PutBucketInventoryConfiguration",
-  "PutBucketLogging",
   "PutBucketMetricsConfiguration",
-  "PutBucketNotificationConfiguration",
   "PutBucketOwnershipControls",
-  "PutBucketRequestPayment",
-  "PutBucketVersioning",
-  "PutBucketWebsite",
 ]

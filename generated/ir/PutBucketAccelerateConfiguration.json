@@ -1,0 +1,162 @@
+{
+  "ir_version": "1",
+  "operation": "PutBucketAccelerateConfiguration",
+  "http": {
+            "method": "PUT",
+            "target": "Bucket",
+            "precedence": 201,
+            "predicates": [
+                            { "kind": "Method", "method": "PUT" },
+                            { "kind": "Target", "target": "Bucket" },
+                            { "kind": "QueryPresent", "key": "accelerate" }
+                          ],
+            "success_status": 200,
+            "alt_success_statuses": [],
+            "path_shape": "/{Bucket}"
+          },
+  "auth": {
+            "requirement": "Required",
+            "action": "s3:PutAccelerateConfiguration",
+            "presigned_allowed": true,
+            "service": "s3"
+          },
+  "payload": {
+               "request": { "kind": "XmlBody", "buffering": "Full", "max_bytes": 4096 },
+               "response": { "kind": "None", "buffering": "None", "max_bytes": null }
+             },
+  "checksum": {
+                "http_checksum_required": false,
+                "request_algorithms": ["CRC32", "CRC32C", "CRC64NVME", "SHA1", "SHA256"],
+                "response_algorithms": []
+              },
+  "input": {
+             "fields": [
+                         {
+                           "name": "Bucket",
+                           "wire_name": "Bucket",
+                           "required": true,
+                           "binding": { "kind": "UriLabel", "greedy": false },
+                           "type": { "kind": "BucketName" },
+                           "hot": true,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "AccelerateConfiguration",
+                           "wire_name": null,
+                           "required": true,
+                           "binding": { "kind": "Payload" },
+                           "type": { "kind": "Structure", "shape": "AccelerateConfiguration" },
+                           "hot": true,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "ExpectedBucketOwner",
+                           "wire_name": "x-amz-expected-bucket-owner",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "String" },
+                           "hot": false,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "ChecksumAlgorithm",
+                           "wire_name": "x-amz-sdk-checksum-algorithm",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": {
+                                     "kind": "StringEnum",
+                                     "values": [
+                                                 "CRC32",
+                                                 "CRC32C",
+                                                 "SHA1",
+                                                 "SHA256",
+                                                 "CRC64NVME",
+                                                 "SHA512",
+                                                 "MD5",
+                                                 "XXHASH64",
+                                                 "XXHASH3",
+                                                 "XXHASH128"
+                                               ]
+                                   },
+                           "hot": false,
+                           "quirk_refs": []
+                         }
+                       ]
+           },
+  "output": { "fields": [] },
+  "shapes": {
+              "AccelerateConfiguration": {
+                                           "kind": "Structure",
+                                           "fields": [
+                                                       {
+                                                         "name": "Status",
+                                                         "wire_name": "Status",
+                                                         "required": false,
+                                                         "binding": { "kind": "BodyXml" },
+                                                         "type": {
+                                                                   "kind": "StringEnum",
+                                                                   "values": ["Enabled", "Suspended"]
+                                                                 },
+                                                         "hot": false,
+                                                         "quirk_refs": []
+                                                       }
+                                                     ],
+                                           "xml": {
+                                                    "element_order": ["Status"],
+                                                    "empty_value_policy": { "Status": "omit" },
+                                                    "attributes": []
+                                                  }
+                                         }
+            },
+  "xml": {
+           "request_root": null,
+           "request_root_aliases": [],
+           "response_root": null,
+           "xmlns": "emit",
+           "unwrapped_output": false,
+           "element_order": [],
+           "empty_value_policy": {},
+           "url_encoded_fields": [],
+           "attributes": [],
+           "body_literal": false
+         },
+  "errors": {
+              "not_configured": null,
+              "allows_error_after_200": false,
+              "codes": ["NoSuchBucket", "AccessDenied", "MalformedXML", "InvalidArgument"]
+            },
+  "derived_resources": [],
+  "head_mirrors": null,
+  "quirk_refs": ["q-acc-0002", "q-acc-0003"],
+  "quirks": [
+              {
+                "id": "q-acc-0002",
+                "kind": "closed_value_set",
+                "target": "AccelerateConfiguration.Status",
+                "summary": "The acceleration status is Enabled or Suspended and nothing else; the element is the whole document, so a value outside the pair leaves nothing meaningful to store.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketAccelerateConfiguration.html",
+                                "summary": "The request reference declares the status element with exactly two valid values and documents no third."
+                              }
+                            ],
+                "cases": ["c-bucketconfig-0004", "c-bucketconfig-0044"]
+              },
+              {
+                "id": "q-acc-0003",
+                "kind": "checksum_required",
+                "target": "PutBucketAccelerateConfiguration",
+                "summary": "The acceleration write is one of two writes in this band that carry no integrity requirement, so a body with neither Content-MD5 nor an x-amz-checksum header is accepted.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketAccelerateConfiguration.html",
+                                "summary": "The request reference lists no Content-MD5 header, unlike the versioning, logging, request-payment, website, policy and public-access writes beside it."
+                              }
+                            ],
+                "cases": ["c-bucketconfig-0041"]
+              }
+            ],
+  "ext_points": []
+}

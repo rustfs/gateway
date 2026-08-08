@@ -1,0 +1,29 @@
+[case]
+id = "c-bucketconfig-0034"
+schema_version = 1
+title = "Deleting a public-access block that was never configured answers 204"
+rationale = """
+The third idempotent delete. All three answer 204 while two of the three matching reads answer 404, and a handler that shared one branch between read and delete would get exactly one of the two wrong."""
+polarity = "negative"
+operation = "DeletePublicAccessBlock"
+tags = ["bucketconfig", "error-shape", "security"]
+timeout_ms = 10000
+quirks = ["q-pab-0003"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeletePublicAccessBlock.html"
+summary = "The delete reference documents a 204 success and lists no not-found error."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "conf-bucketconfig"
+[request]
+method = "DELETE"
+target = "/conf-bucketconfig?publicAccessBlock"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 204
+connection_after = "open"

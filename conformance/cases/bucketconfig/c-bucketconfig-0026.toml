@@ -1,0 +1,32 @@
+[case]
+id = "c-bucketconfig-0026"
+schema_version = 1
+title = "A bucket that is not logging answers 200 with an empty document"
+rationale = """
+The absence of the LoggingEnabled child is the answer. Compare c-bucketconfig-0009, which is the same root with the child present: the two goldens differ only by that element, which is exactly the difference a client reads."""
+polarity = "negative"
+operation = "GetBucketLogging"
+tags = ["bucketconfig", "xml", "wire-bytes", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-log-0001"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketLogging.html"
+summary = "The read reference shows the logging element as absent when a bucket is not logging."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "conf-bucketconfig"
+[request]
+method = "GET"
+target = "/conf-bucketconfig?logging"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[expect.body]
+golden = "goldens/c-bucketconfig-0026.xml"

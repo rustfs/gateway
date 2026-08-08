@@ -1,0 +1,38 @@
+[case]
+id = "c-bucketconfig-0029"
+schema_version = 1
+title = "A bucket with no policy answers 404 NoSuchBucketPolicy in an XML error body"
+rationale = """
+Two assertions in one, and the second is the one that is easy to get wrong: the success body of this operation is JSON, and its error body is not. A gateway that rendered the failure in the success format would hand every client a body its error parser cannot read, on the one path where the client most needs to know why."""
+polarity = "negative"
+operation = "GetBucketPolicy"
+tags = ["bucketconfig", "error-shape", "security"]
+timeout_ms = 10000
+quirks = ["q-pol-0002", "q-pol-0003"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketPolicy.html"
+summary = "The read reference documents a JSON policy document as the response body and NoSuchBucketPolicy as the unconfigured error."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/ErrorResponses.html"
+summary = "The error-response reference describes one XML Error document for the whole REST API and names no JSON alternative."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "conf-bucketconfig"
+[request]
+method = "GET"
+target = "/conf-bucketconfig?policy"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 404
+connection_after = "open"
+
+[expect.error]
+code = "NoSuchBucketPolicy"
+request_id_present = true

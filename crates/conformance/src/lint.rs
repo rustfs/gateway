@@ -57,6 +57,7 @@ pub const TAG_VOCABULARY: &[&str] = &[
     "encryption",
     "lifecycle",
     "replication",
+    "bucketconfig",
     "region",
     "security",
     "dos",

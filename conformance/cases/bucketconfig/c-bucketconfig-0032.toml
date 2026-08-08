@@ -1,0 +1,29 @@
+[case]
+id = "c-bucketconfig-0032"
+schema_version = 1
+title = "Deleting a website document that was never configured answers 204"
+rationale = """
+The asymmetry that matters: the read of this same bucket is a 404 and the delete is a success. A 404 here would make a retry after a lost response indistinguishable from a teardown that landed on the wrong bucket, which is what NoSuchBucket is for."""
+polarity = "negative"
+operation = "DeleteBucketWebsite"
+tags = ["bucketconfig", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-web-0005"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketWebsite.html"
+summary = "The delete reference documents a 204 success and lists no not-found error."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "conf-bucketconfig"
+[request]
+method = "DELETE"
+target = "/conf-bucketconfig?website"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 204
+connection_after = "open"

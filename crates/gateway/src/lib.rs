@@ -271,6 +271,37 @@ pub use rustfs_gateway_core::ops::shared::acl::{
     canonicalize_policy, parse_canned, parse_grant_header, resolve_grantee_type, resolve_input,
 };
 
+// The bucket-configuration band's four contracts, exported for the same reason as the families
+// above. The stakes are lowest here and the leniency is widest: RustFS parses these documents
+// fail-open, so a backend that re-derived a stricter rule would not refuse a write — it would
+// switch a feature off on the next re-parse, and for `?versioning` that means version retention.
+// What is refused is the short list AWS documents as a refusal, once, here.
+pub use rustfs_gateway_core::ops::shared::bucket_config::{
+    BucketConfigRejection, mfa_delete_states, payers, switch_statuses, validate_accelerate, validate_logging,
+    validate_request_payment, validate_versioning,
+};
+
+// The notification document contract. Its leniency is the load-bearing part: AWS adds event
+// types continuously, so a backend that refused a name it did not know would reject
+// configurations AWS accepts until it was rebuilt.
+pub use rustfs_gateway_core::ops::shared::bucket_notification::{NotificationRejection, validate_notification};
+
+// The bucket policy contract — and the fence around it. What is exported is the size ceiling, the
+// depth ceiling and the syntax check; what is deliberately **not** exported, because it is
+// deliberately not implemented, is any evaluation of what a policy grants. The rejection reasons
+// are constant with no offset and no excerpt: a policy names principals and account identifiers,
+// and an error that said where the syntax broke would let a caller who cannot read the policy
+// back reconstruct it one probe at a time.
+pub use rustfs_gateway_core::ops::shared::bucket_policy::{
+    MAX_POLICY_BYTES, MAX_POLICY_DEPTH, PolicyRejection, validate_policy, validate_public_access_block,
+};
+
+// The website document contract: the exclusion between a whole-site redirect and a
+// document-serving site, and the one-rewrite-per-redirect rule. Serving anything from the
+// document is a second protocol face this workspace does not implement, so nothing about the
+// runtime is exported — there is nothing to export.
+pub use rustfs_gateway_core::ops::shared::bucket_website::{WebsiteRejection, validate_website};
+
 // The bucket lifecycle contracts, exported the day they are written rather than found
 // unreachable later. A backend answering CreateBucket needs `resolve` — the us-east-1
 // omission rule, the EU alias and the strict region match — and a backend answering any

@@ -23,7 +23,7 @@
 
 use std::borrow::Cow;
 
-/// The `Type` string enumeration. Bound by: GetBucketAcl, GetObjectAcl, PutBucketAcl, PutObjectAcl, RestoreObject, SelectObjectContent.
+/// The `Type` string enumeration. Bound by: GetBucketAcl, GetBucketLogging, GetObjectAcl, PutBucketAcl, PutBucketLogging, PutObjectAcl, RestoreObject, SelectObjectContent.
 ///
 /// An open set: compare against the associated constants, and build a value the pinned
 /// model does not declare with [`Type::custom`]. Adding a constant is a minor version

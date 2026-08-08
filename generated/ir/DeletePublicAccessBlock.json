@@ -1,0 +1,85 @@
+{
+  "ir_version": "1",
+  "operation": "DeletePublicAccessBlock",
+  "http": {
+            "method": "DELETE",
+            "target": "Bucket",
+            "precedence": 227,
+            "predicates": [
+                            { "kind": "Method", "method": "DELETE" },
+                            { "kind": "Target", "target": "Bucket" },
+                            { "kind": "QueryPresent", "key": "publicAccessBlock" }
+                          ],
+            "success_status": 204,
+            "alt_success_statuses": [],
+            "path_shape": "/{Bucket}"
+          },
+  "auth": {
+            "requirement": "Required",
+            "action": "s3:PutBucketPublicAccessBlock",
+            "presigned_allowed": true,
+            "service": "s3"
+          },
+  "payload": {
+               "request": { "kind": "None", "buffering": "None", "max_bytes": null },
+               "response": { "kind": "None", "buffering": "None", "max_bytes": null }
+             },
+  "checksum": { "http_checksum_required": false, "request_algorithms": [], "response_algorithms": [] },
+  "input": {
+             "fields": [
+                         {
+                           "name": "Bucket",
+                           "wire_name": "Bucket",
+                           "required": true,
+                           "binding": { "kind": "UriLabel", "greedy": false },
+                           "type": { "kind": "BucketName" },
+                           "hot": true,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "ExpectedBucketOwner",
+                           "wire_name": "x-amz-expected-bucket-owner",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "String" },
+                           "hot": false,
+                           "quirk_refs": []
+                         }
+                       ]
+           },
+  "output": { "fields": [] },
+  "shapes": {},
+  "xml": {
+           "request_root": null,
+           "request_root_aliases": [],
+           "response_root": null,
+           "xmlns": "emit",
+           "unwrapped_output": false,
+           "element_order": [],
+           "empty_value_policy": {},
+           "url_encoded_fields": [],
+           "attributes": [],
+           "body_literal": false
+         },
+  "errors": { "not_configured": null, "allows_error_after_200": false, "codes": ["NoSuchBucket", "AccessDenied"] },
+  "derived_resources": [],
+  "head_mirrors": null,
+  "quirk_refs": ["q-pab-0003"],
+  "quirks": [
+              {
+                "id": "q-pab-0003",
+                "kind": "idempotent_delete",
+                "target": "DeletePublicAccessBlock",
+                "summary": "The delete answers 204 whether or not a public-access block existed, so removing one from an unconfigured bucket is a success rather than the 404 the read of the same bucket answers.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeletePublicAccessBlock.html",
+                                "summary": "The operation documents a 204 No Content success and lists no not-found error for a missing configuration."
+                              }
+                            ],
+                "cases": ["c-bucketconfig-0034", "c-bucketconfig-0022"]
+              }
+            ],
+  "ext_points": []
+}

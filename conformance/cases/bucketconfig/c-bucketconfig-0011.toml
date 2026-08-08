@@ -1,0 +1,56 @@
+[case]
+id = "c-bucketconfig-0011"
+schema_version = 1
+title = "A notification document reads back with every list flattened and every historical element name"
+rationale = """
+This is the case the whole family's wire shape rests on. The three destination configurations and the event names repeat as bare siblings; the function configuration is spelled CloudFunctionConfiguration, its ARN CloudFunction, the queue ARN Queue, the topic ARN Topic and the key filter S3Key. A rendering that wrapped any list, or that used the member names instead, parses as valid XML and is read by every SDK as a bucket with no notifications at all."""
+polarity = "positive"
+operation = "GetBucketNotificationConfiguration"
+tags = ["bucketconfig", "xml", "wire-bytes"]
+timeout_ms = 10000
+quirks = ["q-ntf-0001", "q-ntf-0002", "q-ntf-0004"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketNotificationConfiguration.html"
+summary = "The read reference shows an empty configuration element for a bucket with no notifications."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketNotificationConfiguration.html"
+summary = "The write reference shows the three destination lists and the event list as flattened siblings, and lists no Content-MD5 header."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "conf-bucketconfig"
+[[exchanges]]
+name = "write"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-bucketconfig?notification"
+headers = { "content-type" = "application/xml" }
+body = { utf8 = '<NotificationConfiguration><TopicConfiguration><Id>topic-one</Id><Topic>arn:aws:sns:us-east-1:111122223333:events</Topic><Event>s3:ObjectCreated:*</Event><Event>s3:ObjectRemoved:*</Event></TopicConfiguration><QueueConfiguration><Id>queue-one</Id><Queue>arn:aws:sqs:us-east-1:111122223333:events</Queue><Event>s3:ObjectCreated:Put</Event><Filter><S3Key><FilterRule><Name>prefix</Name><Value>images/</Value></FilterRule><FilterRule><Name>suffix</Name><Value>.jpg</Value></FilterRule></S3Key></Filter></QueueConfiguration><CloudFunctionConfiguration><Id>fn-one</Id><CloudFunction>arn:aws:lambda:us-east-1:111122223333:function:thumbnail</CloudFunction><Event>s3:ObjectCreated:Post</Event></CloudFunctionConfiguration></NotificationConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[[exchanges]]
+name = "read-back"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-bucketconfig?notification"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.body]
+golden = "goldens/c-bucketconfig-0011.xml"
+

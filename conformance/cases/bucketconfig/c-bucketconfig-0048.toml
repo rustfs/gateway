@@ -1,0 +1,36 @@
+[case]
+id = "c-bucketconfig-0048"
+schema_version = 1
+title = "A notification event name this build does not know is accepted"
+rationale = """
+AWS adds event types continuously, and a gateway that refused an unknown name would reject configurations AWS accepts until it was rebuilt. The name is stored as sent; whether the delivery engine can match it is the engine's question and not the codec's."""
+polarity = "negative"
+operation = "PutBucketNotificationConfiguration"
+tags = ["bucketconfig", "xml"]
+timeout_ms = 10000
+quirks = ["q-ntf-0005"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/notification-how-to-event-types-and-destinations.html"
+summary = "The event-type list has grown repeatedly since the operation was introduced, so a closed set is a promise that expires."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketNotificationConfiguration.html"
+summary = "The write reference shows the three destination lists and the event list as flattened siblings, and lists no Content-MD5 header."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "conf-bucketconfig"
+[request]
+method = "PUT"
+target = "/conf-bucketconfig?notification"
+headers = { "content-type" = "application/xml" }
+body = { utf8 = '<NotificationConfiguration><TopicConfiguration><Id>t</Id><Topic>arn:aws:sns:us-east-1:111122223333:events</Topic><Event>s3:SomethingAWSAddedLater:*</Event></TopicConfiguration></NotificationConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+connection_after = "open"

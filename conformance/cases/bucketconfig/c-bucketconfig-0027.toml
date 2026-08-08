@@ -1,0 +1,32 @@
+[case]
+id = "c-bucketconfig-0027"
+schema_version = 1
+title = "A bucket that was never switched answers 200 with the default payer"
+rationale = """
+The band's third shape of unconfigured answer, and the only one that is a value rather than an absence: every bucket has a payer, so there is no empty document to return. An implementation that answered an empty RequestPaymentConfiguration would leave a client unable to tell who pays."""
+polarity = "negative"
+operation = "GetBucketRequestPayment"
+tags = ["bucketconfig", "xml", "wire-bytes", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-rqp-0001"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketRequestPayment.html"
+summary = "The read reference shows the payer element as always present, defaulting to the bucket owner."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "conf-bucketconfig"
+[request]
+method = "GET"
+target = "/conf-bucketconfig?requestPayment"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[expect.body]
+golden = "goldens/c-bucketconfig-0027.xml"

@@ -16,7 +16,7 @@
 //!
 //! Responsible for: [`ShadowingDecl`] (winner, shadowed, reason, evidence), the collection type
 //! the table consults, [`ShadowingPolicy`] — how much of the overlap surface must be declared —
-//! and the pairing of the table's two halves (`shadowing_bucket.rs`, `shadowing_object.rs`) into
+//! and the pairing of the table's five files into
 //! the one ordered sequence consumers read.
 //! NOT responsible for: computing overlap (`lattice`), or the same-precedence case, which is never
 //! a declaration and always a build failure (`table`).
@@ -146,14 +146,22 @@ impl ShadowingDecls {
 /// ordered sequence, and a declaration added to the wrong half is a review comment rather than a
 /// behaviour change.
 ///
-/// The bucket half is now two files rather than one. The `?acl` band sits ahead of every other
-/// bucket subresource, so it wins a pair against each of them and against each listing, and those
-/// seventeen declarations pushed `shadowing_bucket.rs` over the ceiling on their own.
-/// `shadowing_bucket_acl.rs` is the second bucket group: the same seam, the same declaration
-/// type, one more group in the list — not a second way of grouping. The next band that overflows
-/// gets a group of its own the same way, which is why the field is a list and no longer a pair.
+/// The bucket half is four files now, and each split had the same cause. The `?acl` band sits
+/// ahead of every other bucket subresource, so it wins a pair against each of them and against
+/// each listing, and those seventeen declarations pushed `shadowing_bucket.rs` over the ceiling on
+/// their own. The `?accelerate`-to-`?website` configuration band at 200-249 is the same arithmetic
+/// an order of magnitude up: nine `GET` rows arriving in front of twelve is a hundred and
+/// forty-four pairs before the band is compared with itself, and two hundred and forty-six in all,
+/// so it needed two groups rather than one — `shadowing_bucket_config.rs` for the reads and
+/// `shadowing_bucket_config_write.rs` for the writes and deletes.
+///
+/// None of them is a second way of grouping: same seam, same declaration type, one more element in
+/// the list. That is why the field is a list and no longer a pair, and why the next band that
+/// overflows costs a file and nothing else.
 pub const PROVISIONAL_SHADOWING: ShadowingDecls = ShadowingDecls::over(&[
     super::shadowing_bucket::DECLS,
     super::shadowing_bucket_acl::DECLS,
+    super::shadowing_bucket_config::DECLS,
+    super::shadowing_bucket_config_write::DECLS,
     super::shadowing_object::DECLS,
 ]);

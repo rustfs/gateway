@@ -841,17 +841,38 @@ fn n_an_unhandled_bucket_lifecycle_request_is_refused_by_name() {
 /// lifecycle operation's answer. This is the dispatch-level half of the `query_absent` guarantee:
 /// `DELETE /b?policy` must not delete a bucket and `PUT /b?versioning` must not create one,
 /// whether or not the lifecycle family is registered. The served subresources (`cors`, `tagging`,
-/// and now `acl`) are the same rule with a different observable — a `501` naming their own
-/// operation — and are asserted with their own rows in `route_table.rs`.
+/// `acl`, and the nine configuration-band keys) are the same rule with a different observable —
+/// a `501` naming their own operation — and are asserted below and in `route_table.rs`.
 #[test]
 fn n_a_bucket_subresource_write_is_a_route_miss_not_a_lifecycle_operation() {
     let mut registry = Registry::new();
     registry.register(&GET_OBJECT).expect("a registrable spec");
     let router = Router::from_generated(registry).expect("the generated table builds");
-    for line in ["DELETE /bucket?policy", "PUT /bucket?versioning", "DELETE /bucket?website"] {
+    for line in [
+        "PUT /bucket?abac",
+        "DELETE /bucket?ownershipControls",
+        "PUT /bucket?inventory",
+        "DELETE /bucket?analytics",
+    ] {
         let error = router.dispatch(&Req::new(line).parts()).expect_err("no route");
         assert_eq!(error.message(), NO_ROUTE_MESSAGE, "{line}");
         assert_eq!(error.operation(), None, "{line} names no operation because none claimed it");
+    }
+    // The other direction, for the four keys that moved out of the list above when the
+    // bucket-configuration band landed: a served subresource write is a 501 that *names its own
+    // operation*, never a lifecycle answer and never a route miss. Without this half, deleting the
+    // rows would turn these back into the first branch and the test would still pass.
+    for (line, expected) in [
+        ("PUT /bucket?versioning", "PutBucketVersioning"),
+        ("DELETE /bucket?policy", "DeleteBucketPolicy"),
+        ("DELETE /bucket?website", "DeleteBucketWebsite"),
+        ("PUT /bucket?publicAccessBlock", "PutPublicAccessBlock"),
+    ] {
+        let error = router
+            .dispatch(&Req::new(line).parts())
+            .expect_err("no handler is registered");
+        assert_eq!(error.message(), NOT_REGISTERED_MESSAGE, "{line}");
+        assert_eq!(error.operation(), Some(expected), "{line} must name the operation it asked for");
     }
 }
 
@@ -966,6 +987,172 @@ fn neither_restore_nor_select_declares_an_unconfigured_code() {
             .is_some(),
         "the retention read declares one, so the two assertions above are not vacuous"
     );
+}
+
+/// Negative — every read in the 200-249 configuration band is refused by name rather than
+/// answered by the key listing.
+///
+/// The registry below handles `ListObjects` and nothing else, which is the shape of a deployment
+/// that has not implemented any of this family. Each of the nine must come back as the second
+/// `501` naming the operation the request asked for. While these were deferred, every one of them
+/// fell through to `ListObjects` and was answered with a page of keys — nine lines of the
+/// route-coverage debt register — and a page of keys is a *success*, so nothing the client could
+/// see said the question had not been answered.
+#[test]
+fn n_an_unhandled_bucket_configuration_read_is_refused_rather_than_answered_by_the_listing() {
+    let mut registry = Registry::new();
+    registry.register(&LIST_OBJECTS).expect("a registrable spec");
+    let router = Router::from_generated(registry).expect("the generated table builds");
+
+    for (line, expected) in [
+        ("GET /bucket?accelerate", "GetBucketAccelerateConfiguration"),
+        ("GET /bucket?logging", "GetBucketLogging"),
+        ("GET /bucket?notification", "GetBucketNotificationConfiguration"),
+        ("GET /bucket?policy", "GetBucketPolicy"),
+        ("GET /bucket?policyStatus", "GetBucketPolicyStatus"),
+        ("GET /bucket?publicAccessBlock", "GetPublicAccessBlock"),
+        ("GET /bucket?requestPayment", "GetBucketRequestPayment"),
+        ("GET /bucket?versioning", "GetBucketVersioning"),
+        ("GET /bucket?website", "GetBucketWebsite"),
+    ] {
+        let error = router
+            .dispatch(&Req::new(line).parts())
+            .expect_err("this registry handles no bucket configuration operation");
+        assert_eq!(*error.code(), ErrorCode::NOT_IMPLEMENTED, "{line}");
+        assert_eq!(error.message(), NOT_REGISTERED_MESSAGE, "{line}");
+        assert_eq!(error.operation(), Some(expected), "{line} must name the operation it asked for");
+    }
+}
+
+/// The band's nine unconfigured answers are declared, not improvised — and the declaration is
+/// what an external backend reads.
+///
+/// This test exists because the equivalent claim in the replication family could be **deleted
+/// outright** and the whole workspace stayed green: the conformance 404 comes from the fixture's
+/// own constant, so `not_configured_error` was decoration. It is asserted here in both
+/// directions, because a field stuck on `Some(..)` satisfies only the first half and a field
+/// stuck on `None` satisfies only the second:
+///
+/// * three reads declare a code, and no two of them declare the same one;
+/// * six reads declare **none**, because their unconfigured answer is a `200` — five an empty
+///   document and one a default value — and a `404` there is a bug a client sees as a missing
+///   bucket;
+/// * every write and delete declares none, because neither has an unconfigured answer at all.
+#[test]
+fn the_configuration_band_declares_three_distinct_not_configured_codes_and_six_absences() {
+    use rustfs_gateway_core::op::Operation;
+    use rustfs_gateway_types::dto;
+
+    for (name, code, expected) in [
+        (
+            "GetBucketWebsite",
+            dto::GetBucketWebsite::spec().not_configured_error.clone(),
+            ErrorCode::NO_SUCH_WEBSITE_CONFIGURATION,
+        ),
+        (
+            "GetBucketPolicy",
+            dto::GetBucketPolicy::spec().not_configured_error.clone(),
+            ErrorCode::NO_SUCH_BUCKET_POLICY,
+        ),
+        (
+            "GetBucketPolicyStatus",
+            dto::GetBucketPolicyStatus::spec().not_configured_error.clone(),
+            ErrorCode::NO_SUCH_BUCKET_POLICY,
+        ),
+        (
+            "GetPublicAccessBlock",
+            dto::GetPublicAccessBlock::spec().not_configured_error.clone(),
+            ErrorCode::NO_SUCH_PUBLIC_ACCESS_BLOCK_CONFIGURATION,
+        ),
+    ] {
+        let declared = code.unwrap_or_else(|| panic!("{name} answers a 404 when unconfigured and must declare which"));
+        assert_eq!(declared, expected, "{name}");
+        assert_eq!(declared.default_status(), StatusCode::NOT_FOUND, "{name}");
+    }
+
+    // The website and public-access literals are distinct from each other and from the policy
+    // one. `GetBucketPolicyStatus` shares the policy read's code on purpose — it is the same
+    // missing document — and that sharing is asserted above rather than left to coincidence.
+    assert_ne!(ErrorCode::NO_SUCH_WEBSITE_CONFIGURATION, ErrorCode::NO_SUCH_BUCKET_POLICY);
+    assert_ne!(ErrorCode::NO_SUCH_PUBLIC_ACCESS_BLOCK_CONFIGURATION, ErrorCode::NO_SUCH_BUCKET_POLICY);
+    assert_ne!(
+        ErrorCode::NO_SUCH_WEBSITE_CONFIGURATION,
+        ErrorCode::NO_SUCH_PUBLIC_ACCESS_BLOCK_CONFIGURATION
+    );
+
+    // The six reads whose unconfigured answer is a 200. A code here would turn "acceleration is
+    // off" into "this bucket is missing something", which is what a client's error branch reads.
+    for (name, code) in [
+        (
+            "GetBucketAccelerateConfiguration",
+            dto::GetBucketAccelerateConfiguration::spec().not_configured_error.clone(),
+        ),
+        ("GetBucketLogging", dto::GetBucketLogging::spec().not_configured_error.clone()),
+        (
+            "GetBucketNotificationConfiguration",
+            dto::GetBucketNotificationConfiguration::spec().not_configured_error.clone(),
+        ),
+        (
+            "GetBucketRequestPayment",
+            dto::GetBucketRequestPayment::spec().not_configured_error.clone(),
+        ),
+        ("GetBucketVersioning", dto::GetBucketVersioning::spec().not_configured_error.clone()),
+        // The writes and deletes, which have no unconfigured answer of any kind.
+        ("PutBucketVersioning", dto::PutBucketVersioning::spec().not_configured_error.clone()),
+        ("PutBucketWebsite", dto::PutBucketWebsite::spec().not_configured_error.clone()),
+        ("DeleteBucketWebsite", dto::DeleteBucketWebsite::spec().not_configured_error.clone()),
+        ("PutBucketPolicy", dto::PutBucketPolicy::spec().not_configured_error.clone()),
+        ("DeleteBucketPolicy", dto::DeleteBucketPolicy::spec().not_configured_error.clone()),
+        ("PutPublicAccessBlock", dto::PutPublicAccessBlock::spec().not_configured_error.clone()),
+        (
+            "DeletePublicAccessBlock",
+            dto::DeletePublicAccessBlock::spec().not_configured_error.clone(),
+        ),
+        (
+            "PutBucketAccelerateConfiguration",
+            dto::PutBucketAccelerateConfiguration::spec().not_configured_error.clone(),
+        ),
+        ("PutBucketLogging", dto::PutBucketLogging::spec().not_configured_error.clone()),
+        (
+            "PutBucketNotificationConfiguration",
+            dto::PutBucketNotificationConfiguration::spec().not_configured_error.clone(),
+        ),
+        (
+            "PutBucketRequestPayment",
+            dto::PutBucketRequestPayment::spec().not_configured_error.clone(),
+        ),
+    ] {
+        assert!(code.is_none(), "{name} must declare no unconfigured code, it declared {code:?}");
+    }
+}
+
+/// The band's success statuses are declared, and the three deletes are the only 204s in it.
+///
+/// Worth its own assertion because the family mixes them: eight writes answer 200 while the three
+/// deletes answer 204, and a delete that answered 200 with no body is a response some clients
+/// treat as a truncated document.
+#[test]
+fn the_configuration_band_answers_204_for_its_three_deletes_and_200_for_everything_else() {
+    use rustfs_gateway_core::op::Operation;
+    use rustfs_gateway_types::dto;
+
+    for (name, status) in [
+        ("DeleteBucketWebsite", dto::DeleteBucketWebsite::spec().success_status),
+        ("DeleteBucketPolicy", dto::DeleteBucketPolicy::spec().success_status),
+        ("DeletePublicAccessBlock", dto::DeletePublicAccessBlock::spec().success_status),
+    ] {
+        assert_eq!(status, 204, "{name}");
+    }
+    for (name, status) in [
+        ("PutBucketVersioning", dto::PutBucketVersioning::spec().success_status),
+        ("PutBucketWebsite", dto::PutBucketWebsite::spec().success_status),
+        ("PutBucketPolicy", dto::PutBucketPolicy::spec().success_status),
+        ("PutPublicAccessBlock", dto::PutPublicAccessBlock::spec().success_status),
+        ("GetBucketPolicy", dto::GetBucketPolicy::spec().success_status),
+        ("GetBucketVersioning", dto::GetBucketVersioning::spec().success_status),
+    ] {
+        assert_eq!(status, 200, "{name}");
+    }
 }
 
 /// A parameter check without a route never runs: the order of the three questions is fixed.
