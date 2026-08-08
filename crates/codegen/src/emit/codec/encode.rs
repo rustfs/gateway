@@ -571,26 +571,45 @@ fn shape_child(ir: &OperationIr, plan: &url::Plan, field: &Field, source: &str, 
             let _ = writeln!(out, "        writer.close();");
             let _ = writeln!(out, "    }}");
         }
-        Type::List { member: inner, .. } => match inner.as_ref() {
-            Type::Structure(inner_name) => {
-                let writer_fn = format!("write_{}", naming::module_name(inner_name));
-                let argument = shape_writer_argument(plan, inner_name);
-                let open = open_structure(ir, inner_name, wire, "item", "writer")?;
-                let _ = writeln!(out, "    for item in &{source} {{");
-                let _ = writeln!(out, "        {open}");
-                let _ = writeln!(out, "        {writer_fn}(writer, item{argument})?;");
-                let _ = writeln!(out, "        writer.close();");
-                let _ = writeln!(out, "    }}");
+        // A list *inside a shape* obeys the same wrapped/flattened rule as one at the operation
+        // level, and it has to read it from the same place: `list_elements` is where that rule
+        // lives, and the reader in `super::decode` already consulted it here while this arm did
+        // not. The disagreement was invisible for as long as every nested list happened to be
+        // flattened — the first wrapped one, `LoggingEnabled.TargetGrants`, came back as repeated
+        // `<TargetGrants>` elements with the `<Grant>` entry missing entirely, a document the
+        // decoder beside it would refuse.
+        Type::List {
+            member: inner,
+            flattened,
+            wrapper_name,
+        } => {
+            let names = super::list_elements(*flattened, wrapper_name.as_deref(), wire);
+            if let Some(wrapper) = &names.wrapper {
+                let _ = writeln!(out, "    writer.open(\"{wrapper}\", None);");
             }
-            // A list of scalars repeats the element with its text; the element name is the
-            // member's wire name, which is what `flattened` means for a scalar list.
-            scalar => {
-                let rendered = expr::to_wire(scalar, &field.name, &ir.operation)?;
-                let _ = writeln!(out, "    for v in &{source} {{");
-                let _ = writeln!(out, "        writer.element(\"{wire}\", {rendered});");
-                let _ = writeln!(out, "    }}");
+            match inner.as_ref() {
+                Type::Structure(inner_name) => {
+                    let writer_fn = format!("write_{}", naming::module_name(inner_name));
+                    let argument = shape_writer_argument(plan, inner_name);
+                    let open = open_structure(ir, inner_name, &names.entry, "item", "writer")?;
+                    let _ = writeln!(out, "    for item in &{source} {{");
+                    let _ = writeln!(out, "        {open}");
+                    let _ = writeln!(out, "        {writer_fn}(writer, item{argument})?;");
+                    let _ = writeln!(out, "        writer.close();");
+                    let _ = writeln!(out, "    }}");
+                }
+                // A list of scalars repeats the element with its text.
+                scalar => {
+                    let rendered = expr::to_wire(scalar, &field.name, &ir.operation)?;
+                    let _ = writeln!(out, "    for v in &{source} {{");
+                    let _ = writeln!(out, "        writer.element(\"{}\", {rendered});", names.entry);
+                    let _ = writeln!(out, "    }}");
+                }
             }
-        },
+            if names.wrapper.is_some() {
+                let _ = writeln!(out, "    writer.close();");
+            }
+        }
         _ => {}
     }
     Ok(out)

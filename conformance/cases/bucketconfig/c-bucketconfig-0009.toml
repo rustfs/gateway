@@ -3,7 +3,7 @@ id = "c-bucketconfig-0009"
 schema_version = 1
 title = "A logging destination reads back inside a LoggingEnabled element"
 rationale = """
-The presence of the LoggingEnabled child is the whole difference between logging and not logging, and c-bucketconfig-0026 is the same root without it. Byte comparison also pins the element order, which the read reference fixes as target bucket before prefix."""
+The presence of the LoggingEnabled child is the whole difference between logging and not logging, and c-bucketconfig-0026 is the same root without it. Byte comparison also pins the element order, which the read reference fixes as target bucket before prefix, and the empty <TargetGrants> wrapper a document with no grants carries — the wrapper is written whether or not the list has entries, which is the same rule the operation-level lists follow and the reason a wrapped list is distinguishable from an absent one at all. c-bucketconfig-0058 is the same document with a grant in it."""
 polarity = "positive"
 operation = "GetBucketLogging"
 tags = ["bucketconfig", "xml", "wire-bytes"]

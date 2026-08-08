@@ -1,2 +1,2 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<BucketLoggingStatus xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><LoggingEnabled><TargetBucket>conf-log-target</TargetBucket><TargetPrefix>access/</TargetPrefix></LoggingEnabled></BucketLoggingStatus>
+<BucketLoggingStatus xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><LoggingEnabled><TargetBucket>conf-log-target</TargetBucket><TargetPrefix>access/</TargetPrefix><TargetGrants></TargetGrants></LoggingEnabled></BucketLoggingStatus>

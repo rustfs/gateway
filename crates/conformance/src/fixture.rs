@@ -122,7 +122,7 @@ use rustfs_gateway::{
     IfRange, ObjectKey, ObjectValidators, PRECONDITION_FAILED_MESSAGE, PreconditionRejection, Preconditions, REGION_MATCH_POLICY,
     RangeDecision, RangeSelectors, RegionLabel, RegionSet, Req, RequestKind, Resp, RestoreState, RestoreStatus, TagScope,
     TaggingRejection, Timestamp, collect, evaluate, evaluate_range, format_restore_status, parse_conditional_etag,
-    parse_tagging_header, permanent_redirect_for, resolve_copy_range, resolve_input as resolve_acl_input,
+    parse_tagging_header, permanent_redirect_for, resolve_copy_range, resolve_grantee_type, resolve_input as resolve_acl_input,
     resolve_location_constraint, validate_accelerate, validate_cors, validate_encryption, validate_legal_hold,
     validate_lifecycle, validate_lock_configuration, validate_logging, validate_notification, validate_policy,
     validate_public_access_block, validate_replication, validate_request_payment, validate_restore, validate_retention,
@@ -4126,12 +4126,28 @@ impl Stub {
 
     /// The logging destination, replaced — and an empty document is how logging is turned off,
     /// because the model declares no delete for this subresource.
+    ///
+    /// `<TargetGrants>` reaches the ACL family's `Grantee` through this document, which makes this
+    /// the second producer of that element in the tree and puts it under the same rule: the
+    /// `xsi:type` discriminator is an XML **attribute**, this project's reader exposes none, so a
+    /// decoded grantee arrives with `Type` unset and a read that echoed it verbatim would answer a
+    /// `<Grantee>` no SDK can classify. The type is derived from the identifying member the
+    /// grantee does carry, by the ACL family's own `resolve_grantee_type` and not by a second
+    /// derivation of this family's invention (`q-acl-0004`).
     fn put_bucket_logging(&self, input: &dto::PutBucketLoggingInput) -> HandlerResult<dto::PutBucketLogging> {
         let mut fixture = self.borrow()?;
         require_bucket(&fixture, &input.bucket)?;
-        let configuration = &input.bucket_logging_status;
-        validate_logging(configuration).map_err(|rejection| HandlerError::new(rejection.code(), rejection.reason()))?;
-        fixture.set_logging(input.bucket.as_str(), configuration.clone());
+        let mut configuration = input.bucket_logging_status.clone();
+        validate_logging(&configuration).map_err(|rejection| HandlerError::new(rejection.code(), rejection.reason()))?;
+        if let Some(enabled) = configuration.logging_enabled.as_mut() {
+            for grant in &mut enabled.target_grants {
+                if let Some(grantee) = grant.grantee.as_mut() {
+                    let kind = resolve_grantee_type(grantee).map_err(refused_acl)?;
+                    grantee.r#type = Some(kind.as_dto());
+                }
+            }
+        }
+        fixture.set_logging(input.bucket.as_str(), configuration);
         Ok(Resp::new(dto::PutBucketLoggingOutput::default()))
     }
 
