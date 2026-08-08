@@ -1,0 +1,36 @@
+[case]
+id = "c-acl-0017"
+schema_version = 1
+title = "An x-amz-checksum header alone satisfies the integrity requirement, with no Content-MD5"
+rationale = """
+The other direction of c-acl-0015, and the one that says what the requirement actually is. A gateway that read the trait as "Content-MD5 is mandatory" would refuse every request from a modern SDK, which sends a checksum header and no MD5 at all — and it would satisfy c-acl-0015 while doing it. What the operation requires is an integrity claim of some kind, and the pair is the only way to tell that rule from the narrower one."""
+polarity = "positive"
+operation = "PutBucketAcl"
+tags = ["acl", "checksum"]
+timeout_ms = 10000
+quirks = ["q-acl-0009"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketAcl.html"
+summary = "The operation documents Content-MD5 alongside the x-amz-checksum family, either of which carries the integrity claim."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/checking-object-integrity.html"
+summary = "AWS documents the checksum headers as the newer alternative to Content-MD5 for request integrity."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "conf-acl"
+
+[request]
+method = "PUT"
+target = "/conf-acl?acl"
+headers = { "content-type" = "application/xml", "x-amz-checksum-crc32" = "S/xdEA==" }
+body = { utf8 = '<AccessControlPolicy><Owner><ID>3f6e2b1c4a8d90e7b5c31f2a6d80e4c97b1a3d5f8e206c4b7a9d1e3f5c7b9a0d</ID><DisplayName>conformance</DisplayName></Owner><AccessControlList><Grant><Grantee><ID>3f6e2b1c4a8d90e7b5c31f2a6d80e4c97b1a3d5f8e206c4b7a9d1e3f5c7b9a0d</ID></Grantee><Permission>FULL_CONTROL</Permission></Grant></AccessControlList></AccessControlPolicy>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+connection_after = "open"

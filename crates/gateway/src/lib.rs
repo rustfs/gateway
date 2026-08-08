@@ -257,6 +257,20 @@ pub use rustfs_gateway_core::ops::shared::event_stream::{
     progress_document, stats_document,
 };
 
+// The ACL contract, exported for the same reason as the five above, plus one this family has to
+// itself: an ACL arrives on **two** wire channels — the `<AccessControlPolicy>` body and the
+// `x-amz-acl` / `x-amz-grant-*` headers — and a backend that parsed the grant-header grammar for
+// itself would end up with two parsers for one grammar. The two would then disagree about what a
+// client asked for while both answered 200, which on an authorization input is the failure mode
+// worth an export on its own. `resolve_grantee_type` is exported beside them because the
+// `<Grantee>` discriminator is an XML attribute this project's reader cannot see (`q-acl-0004`),
+// so every backend has to derive it the same way or a read answers a document no SDK can parse.
+pub use rustfs_gateway_core::ops::shared::acl::{
+    ALL_USERS_GROUP, AUTHENTICATED_USERS_GROUP, AclHeaders, AclInput, AclRejection, AclTarget, BUCKET_CANNED_ACLS, GranteeType,
+    LOG_DELIVERY_GROUP, MAX_GRANT_HEADER_BYTES, MAX_GRANTEES_PER_HEADER, OBJECT_CANNED_ACLS, PERMISSIONS, XSI_NAMESPACE,
+    canonicalize_policy, parse_canned, parse_grant_header, resolve_grantee_type, resolve_input,
+};
+
 // The bucket lifecycle contracts, exported the day they are written rather than found
 // unreachable later. A backend answering CreateBucket needs `resolve` — the us-east-1
 // omission rule, the EU alias and the strict region match — and a backend answering any

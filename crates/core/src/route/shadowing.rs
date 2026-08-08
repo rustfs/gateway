@@ -72,41 +72,32 @@ pub enum ShadowingPolicy {
 
 /// The declarations a table is checked against.
 ///
-/// Two slices rather than one, because the in-tree table is written in two files and a
-/// compile-time concatenation of them would need either an indexing loop or a placeholder
-/// element that is never a real declaration. Callers never see the seam: [`ShadowingDecls::iter`]
-/// reads them end to end in source order, which is the only order anything here depends on.
+/// A slice of groups rather than one flat slice, because the in-tree table is written in several
+/// files and a compile-time concatenation of them would need either an indexing loop or a
+/// placeholder element that is never a real declaration. Callers never see the seams:
+/// [`ShadowingDecls::iter`] reads every group end to end in source order, which is the only order
+/// anything here depends on.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct ShadowingDecls {
-    first: &'static [ShadowingDecl],
-    second: &'static [ShadowingDecl],
+    groups: &'static [&'static [ShadowingDecl]],
     policy: ShadowingPolicy,
 }
 
 impl ShadowingDecls {
     /// An empty set: every cross-precedence overlap will be reported as undeclared.
     pub const NONE: Self = Self {
-        first: &[],
-        second: &[],
+        groups: &[],
         policy: ShadowingPolicy::EveryOverlap,
     };
 
-    /// Wraps a static declaration list.
+    /// Wraps the groups a table's declarations are written in, read one after the other.
+    ///
+    /// One group is the ordinary case for a caller outside this module — `over(&[DECLS])` — and
+    /// the in-tree table passes one group per file.
     #[must_use]
-    pub const fn new(decls: &'static [ShadowingDecl]) -> Self {
+    pub const fn over(groups: &'static [&'static [ShadowingDecl]]) -> Self {
         Self {
-            first: decls,
-            second: &[],
-            policy: ShadowingPolicy::EveryOverlap,
-        }
-    }
-
-    /// Wraps two lists read one after the other, which is how the in-tree table is stored.
-    #[must_use]
-    pub const fn joined(first: &'static [ShadowingDecl], second: &'static [ShadowingDecl]) -> Self {
-        Self {
-            first,
-            second,
+            groups,
             policy: ShadowingPolicy::EveryOverlap,
         }
     }
@@ -124,9 +115,9 @@ impl ShadowingDecls {
         self.policy
     }
 
-    /// Every declaration, in source order, both halves.
+    /// Every declaration, in source order, every group.
     pub fn iter(&self) -> impl Iterator<Item = &'static ShadowingDecl> {
-        self.first.iter().chain(self.second.iter())
+        self.groups.iter().copied().flat_map(<[ShadowingDecl]>::iter)
     }
 
     /// The declaration covering this ordered pair, if there is one.
@@ -146,13 +137,23 @@ impl ShadowingDecls {
 /// therefore overlaps every other bucket-level `GET` in the table. It is last in the band for
 /// exactly that reason, and the rows below are what "last" is allowed to mean.
 ///
-/// # Why the table lives in two files
+/// # Why the table lives in several files
 ///
 /// The declarations outgrew the 800-line file ceiling, and the split follows the one seam the
-/// table already has: which target the overlapping selectors address. Bucket-target pairs live
-/// in `shadowing_bucket.rs`, object-target pairs in `shadowing_object.rs`, and
-/// [`ShadowingDecls::joined`] reads the two end to end — so every consumer still sees one
+/// table already has: which target the overlapping selectors address. Bucket-target pairs live in
+/// `shadowing_bucket.rs`, object-target pairs in `shadowing_object.rs`, and
+/// [`ShadowingDecls::over`] reads the groups end to end — so every consumer still sees one
 /// ordered sequence, and a declaration added to the wrong half is a review comment rather than a
 /// behaviour change.
-pub const PROVISIONAL_SHADOWING: ShadowingDecls =
-    ShadowingDecls::joined(super::shadowing_bucket::DECLS, super::shadowing_object::DECLS);
+///
+/// The bucket half is now two files rather than one. The `?acl` band sits ahead of every other
+/// bucket subresource, so it wins a pair against each of them and against each listing, and those
+/// seventeen declarations pushed `shadowing_bucket.rs` over the ceiling on their own.
+/// `shadowing_bucket_acl.rs` is the second bucket group: the same seam, the same declaration
+/// type, one more group in the list — not a second way of grouping. The next band that overflows
+/// gets a group of its own the same way, which is why the field is a list and no longer a pair.
+pub const PROVISIONAL_SHADOWING: ShadowingDecls = ShadowingDecls::over(&[
+    super::shadowing_bucket::DECLS,
+    super::shadowing_bucket_acl::DECLS,
+    super::shadowing_object::DECLS,
+]);

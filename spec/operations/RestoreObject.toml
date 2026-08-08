@@ -346,18 +346,30 @@ type = "StringEnum"
 required = false
 hot = false
 values = ["FULL_CONTROL", "WRITE", "WRITE_ACP", "READ", "READ_ACP"]
-quirks = []
+quirks = ["q-acl-0012"]
 
 [shape.Grantee]
 kind = "Structure"
-element_order = ["DisplayName", "EmailAddress", "ID", "URI", "Type"]
+element_order = ["ID", "DisplayName", "EmailAddress", "URI"]
 
 [shape.Grantee.empty_value]
 DisplayName = "omit"
 EmailAddress = "omit"
 ID = "omit"
 URI = "omit"
-Type = "emit"
+Type = "omit"
+
+[[shape.Grantee.attribute]]
+element = "Grantee"
+name = "xmlns:xsi"
+source = "constant"
+value = "http://www.w3.org/2001/XMLSchema-instance"
+
+[[shape.Grantee.attribute]]
+element = "Grantee"
+name = "xsi:type"
+source = "field"
+field = "Type"
 
 [[shape.Grantee.field]]
 name = "DisplayName"
@@ -400,10 +412,10 @@ name = "Type"
 wire_name = "xsi:type"
 binding = "BodyXml"
 type = "StringEnum"
-required = true
+required = false
 hot = false
 values = ["CanonicalUser", "AmazonCustomerByEmail", "Group"]
-quirks = []
+quirks = ["q-acl-0003", "q-acl-0004"]
 
 [shape.InputSerialization]
 kind = "Structure"

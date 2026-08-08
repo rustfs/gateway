@@ -1,0 +1,49 @@
+[case]
+id = "c-acl-0007"
+schema_version = 1
+title = "One grant header naming two grantees of two kinds becomes two grants"
+rationale = """
+The header channel is the other half of this family, and its grammar has to produce exactly the grants the body spelling would. Two pairs in one header, of two different kinds, is the smallest input that catches both a parser that stops at the first pair and one that assigns every pair the same grantee kind — the second is invisible to a case with one pair, and the first is invisible to a case that only checks the status."""
+polarity = "positive"
+operation = "PutBucketAcl"
+tags = ["acl", "wire-bytes"]
+timeout_ms = 10000
+quirks = ["q-acl-0011"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketAcl.html"
+summary = "The request headers section gives the grantee list as comma-separated pairs of a key and a quoted value."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "conf-acl"
+
+[[exchanges]]
+name = "grant-by-header"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-acl?acl"
+headers = { "content-md5" = "1B2M2Y8AsgTpgAmY7PhCfg==", "x-amz-grant-read" = 'id="9c11ab5a4d8e37f0b2c6d19e4a730f85c2b6d4a1e93f70c58b2d6a4e1c93f705", uri="http://acs.amazonaws.com/groups/global/AllUsers"' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[[exchanges]]
+name = "read-back"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-acl?acl"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.body]
+golden = "goldens/c-acl-0007.xml"

@@ -12,11 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Family: object tagging and ACL.
+# Family: object tagging.
 #
-# Grant parsing and canonicalization is a shared cluster of its own, so the ACL members stay
-# deferred. The object-lock and retention family, which once sat beside them in this file's
-# deferred list, now lives in `object-lock.toml` with rows of its own.
+# The file's name is the history: the two object ACL members were deferred here while grant
+# parsing was still a shared cluster with nothing in it. They now live in `acl.toml` with the two
+# bucket members, because the contract they share is a family's rather than this file's — and the
+# object-lock and retention family, which once sat beside them in this file's deferred list, left
+# for `object-lock.toml` the same way. What remains here is the `?tagging` triple and the two
+# shapes it owns.
 #
 # The three `?tagging` members are `include`d, and the reason is routing, not readiness. A deferred
 # operation contributes no row to `generated/routes.rs`, and the route table is first-match: with no
@@ -129,9 +132,3 @@ required = ["Key", "Value"]
 hot = ["Key", "Value"]
 element_order = ["Key", "Value"]
 
-[[deferred]]
-reason = "P5 object ACL family; grant parsing is a shared cluster of its own."
-operations = [
-  "GetObjectAcl",
-  "PutObjectAcl",
-]

@@ -97,6 +97,16 @@ static COPY_OBJECT: OperationSpec = OperationSpec {
     auth: Some(AuthRequirement::new("s3:PutObject", ResourceShape::Object)),
 };
 
+/// The plain object write, registered by the ACL block below so that a request reaching it
+/// instead of its subresource row is a wrong answer rather than a second `501`.
+static PUT_OBJECT: OperationSpec = OperationSpec {
+    name: "PutObject",
+    success_status: 200,
+    required_params: &[],
+    not_configured_error: None,
+    auth: Some(AuthRequirement::new("s3:PutObject", ResourceShape::Object)),
+};
+
 /// Deliberately unregistrable, and kept for the test that says so.
 ///
 /// `MissingContentLength` is a good S3 code and a bad pre-authentication one: it maps to `411`,
@@ -829,21 +839,16 @@ fn n_an_unhandled_bucket_lifecycle_request_is_refused_by_name() {
 
 /// Negative — a deferred bucket subresource write has no route, so it is the first `501`, never a
 /// lifecycle operation's answer. This is the dispatch-level half of the `query_absent` guarantee:
-/// `PUT /b?acl` must not create a bucket and `DELETE /b?policy` must not delete one, whether or
-/// not the lifecycle family is registered. The served subresources (`cors`, `tagging`) are the
-/// same rule with a different observable and are asserted with their own rows in
-/// `route_table.rs`.
+/// `DELETE /b?policy` must not delete a bucket and `PUT /b?versioning` must not create one,
+/// whether or not the lifecycle family is registered. The served subresources (`cors`, `tagging`,
+/// and now `acl`) are the same rule with a different observable — a `501` naming their own
+/// operation — and are asserted with their own rows in `route_table.rs`.
 #[test]
 fn n_a_bucket_subresource_write_is_a_route_miss_not_a_lifecycle_operation() {
     let mut registry = Registry::new();
     registry.register(&GET_OBJECT).expect("a registrable spec");
     let router = Router::from_generated(registry).expect("the generated table builds");
-    for line in [
-        "PUT /bucket?acl",
-        "DELETE /bucket?policy",
-        "PUT /bucket?versioning",
-        "DELETE /bucket?website",
-    ] {
+    for line in ["DELETE /bucket?policy", "PUT /bucket?versioning", "DELETE /bucket?website"] {
         let error = router.dispatch(&Req::new(line).parts()).expect_err("no route");
         assert_eq!(error.message(), NO_ROUTE_MESSAGE, "{line}");
         assert_eq!(error.operation(), None, "{line} names no operation because none claimed it");
@@ -973,4 +978,141 @@ fn a_request_that_does_not_route_never_reaches_parameter_validation() {
         .expect_err("no route");
     assert_eq!(error.message(), NO_ROUTE_MESSAGE);
     assert_ne!(*error.code(), ErrorCode::INVALID_ARGUMENT);
+}
+
+/// Negative — an unhandled ACL request is refused by name, on both targets and both methods.
+///
+/// Three of the four had a *wrong answer* rather than no answer while they were deferred, and
+/// the registry here is the shape that produced it: a deployment that handles the listing, the
+/// object read and the object write and nothing else. `GET /b?acl` fell through to `ListObjects`,
+/// `GET /b/k?acl` to `GetObject` and `PUT /b/k?acl` to `PutObject` — the three debt-register
+/// lines this family retires — so each must now come back as the second `501` naming the ACL
+/// operation the request asked for.
+#[test]
+fn n_an_unhandled_acl_request_is_refused_rather_than_answered_by_its_neighbour() {
+    let mut registry = Registry::new();
+    registry.register(&LIST_OBJECTS).expect("a registrable spec");
+    registry.register(&GET_OBJECT).expect("a registrable spec");
+    registry.register(&PUT_OBJECT).expect("a registrable spec");
+    let router = Router::from_generated(registry).expect("the generated table builds");
+
+    for (line, expected) in [
+        ("GET /bucket?acl", "GetBucketAcl"),
+        ("PUT /bucket?acl", "PutBucketAcl"),
+        ("GET /bucket/key?acl", "GetObjectAcl"),
+        ("PUT /bucket/key?acl", "PutObjectAcl"),
+    ] {
+        let error = router
+            .dispatch(&Req::new(line).parts())
+            .expect_err("this registry handles no ACL operation");
+        assert_eq!(*error.code(), ErrorCode::NOT_IMPLEMENTED, "{line}");
+        assert_eq!(error.message(), NOT_REGISTERED_MESSAGE, "{line}");
+        assert_eq!(error.operation(), Some(expected), "{line} must name the operation it asked for");
+    }
+
+    // And the neighbours are still served, so the refusals above are not a blanket one — a
+    // router that had stopped dispatching anything would satisfy the loop alone.
+    for (line, expected) in [
+        ("GET /bucket", "ListObjects"),
+        ("GET /bucket/key", "GetObject"),
+        ("PUT /bucket/key", "PutObject"),
+    ] {
+        let dispatch = router
+            .dispatch(&Req::new(line).parts())
+            .unwrap_or_else(|_| panic!("{line} routed"));
+        assert_eq!(dispatch.entry.op_name, expected, "{line}");
+    }
+}
+
+/// All four ACL operations declare **no** unconfigured error, which is what makes this family
+/// different from every other subresource in the table.
+///
+/// The declaration is what a backend outside this workspace reads to learn which 404 an
+/// unconfigured resource owes, and here the answer is "none, because there is no such state".
+/// Asserted against the neighbours rather than alone: a spec field stuck on `None` would satisfy
+/// the ACL half by itself, so the two reads that *do* declare one are checked in the same test.
+#[test]
+fn the_acl_reads_declare_no_unconfigured_code_where_their_neighbours_do() {
+    use rustfs_gateway_core::op::Operation;
+    for (name, code) in [
+        (
+            "GetBucketAcl",
+            rustfs_gateway_types::dto::GetBucketAcl::spec().not_configured_error.clone(),
+        ),
+        (
+            "PutBucketAcl",
+            rustfs_gateway_types::dto::PutBucketAcl::spec().not_configured_error.clone(),
+        ),
+        (
+            "GetObjectAcl",
+            rustfs_gateway_types::dto::GetObjectAcl::spec().not_configured_error.clone(),
+        ),
+        (
+            "PutObjectAcl",
+            rustfs_gateway_types::dto::PutObjectAcl::spec().not_configured_error.clone(),
+        ),
+    ] {
+        assert!(
+            code.is_none(),
+            "{name}: an ACL always exists, so there is no unconfigured answer to declare"
+        );
+    }
+    // The control: the two subresource reads either side of the object ACL row in the table do
+    // declare one, so "every read declares None" is not what this is measuring.
+    assert_eq!(
+        rustfs_gateway_types::dto::GetObjectRetention::spec()
+            .not_configured_error
+            .clone()
+            .expect("the retention read declares one"),
+        ErrorCode::NO_SUCH_OBJECT_LOCK_CONFIGURATION
+    );
+    assert_eq!(
+        rustfs_gateway_types::dto::GetBucketTagging::spec()
+            .not_configured_error
+            .clone()
+            .expect("the bucket tagging read declares one"),
+        ErrorCode::NO_SUCH_TAG_SET
+    );
+}
+
+/// The four ACL operations declare the authorisation actions and resource shapes AWS documents.
+///
+/// A backend reads these to build its policy check, and a bucket action asked about an object
+/// resource — or an object action about a bucket — is a policy evaluated against the wrong ARN,
+/// which is a check that passes for the wrong reason.
+#[test]
+fn the_acl_operations_declare_their_own_actions_and_resource_shapes() {
+    use rustfs_gateway_core::op::Operation;
+    for (name, spec, action, shape) in [
+        (
+            "GetBucketAcl",
+            rustfs_gateway_types::dto::GetBucketAcl::spec(),
+            "s3:GetBucketAcl",
+            ResourceShape::Bucket,
+        ),
+        (
+            "PutBucketAcl",
+            rustfs_gateway_types::dto::PutBucketAcl::spec(),
+            "s3:PutBucketAcl",
+            ResourceShape::Bucket,
+        ),
+        (
+            "GetObjectAcl",
+            rustfs_gateway_types::dto::GetObjectAcl::spec(),
+            "s3:GetObjectAcl",
+            ResourceShape::Object,
+        ),
+        (
+            "PutObjectAcl",
+            rustfs_gateway_types::dto::PutObjectAcl::spec(),
+            "s3:PutObjectAcl",
+            ResourceShape::Object,
+        ),
+    ] {
+        let auth = spec.auth.as_ref().unwrap_or_else(|| panic!("{name} declares an action"));
+        assert_eq!(auth.action, action, "{name}");
+        assert_eq!(auth.resource, shape, "{name}");
+        assert_eq!(spec.success_status, 200, "{name}");
+        assert!(spec.required_params.is_empty(), "{name}: ?acl is a discriminator, not a parameter");
+    }
 }

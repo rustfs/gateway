@@ -71,6 +71,22 @@ pub(super) const PUT_BUCKET_REPLICATION_DOC: &str = "https://docs.aws.amazon.com
 pub(super) const DELETE_BUCKET_REPLICATION_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketReplication.html \
      — DeleteBucketReplication is selected by the ?replication subresource on a bucket DELETE and removes only the replication document.";
 
+/// AWS's own reference for the bucket access-control read.
+pub(super) const GET_BUCKET_ACL_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketAcl.html \
+     — GetBucketAcl is selected by the ?acl subresource on a bucket GET and answers with the access control policy document.";
+
+/// AWS's own reference for the bucket access-control write.
+pub(super) const PUT_BUCKET_ACL_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketAcl.html \
+     — PutBucketAcl is selected by the ?acl subresource on a bucket PUT and replaces the access control policy, from the body or from the ACL headers.";
+
+/// AWS's own reference for the object access-control read.
+pub(super) const GET_OBJECT_ACL_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObjectAcl.html \
+     — an ACL read is a GET to the object key carrying the ?acl subresource, and it answers with the access control policy rather than with the object.";
+
+/// AWS's own reference for the object access-control write.
+pub(super) const PUT_OBJECT_ACL_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObjectAcl.html \
+     — an ACL write is a PUT to the object key carrying the ?acl subresource, and its body is an AccessControlPolicy rather than object data.";
+
 /// AWS's own reference for the operation selected by the `?location` subresource.
 pub(super) const LOCATION_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketLocation.html \
      — GetBucketLocation is selected by the ?location subresource alone and takes no other query input.";

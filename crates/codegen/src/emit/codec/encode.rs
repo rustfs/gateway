@@ -33,9 +33,9 @@
 
 use std::fmt::Write as _;
 
-use rustfs_gateway_model::ir::{Binding, ETagRender, EmptyValue, Field, OmitWhen, OperationIr, Shape, Type};
+use rustfs_gateway_model::ir::{AttributeSource, Binding, ETagRender, EmptyValue, Field, OmitWhen, OperationIr, Shape, Type};
 
-use super::{expr, url};
+use super::{attribute_name, carried_as_attribute, expr, url};
 use crate::emit::dto::naming;
 
 /// Renders the body of one operation's `encode`.
@@ -138,6 +138,12 @@ fn one_field(ir: &OperationIr, field: &Field) -> Result<String, String> {
                     // Nothing url-encodes inside a payload document today; the plan is consulted so
                     // the day something does, this fails loudly instead of emitting an unencoded body.
                     return Err(expr::unsupported(op, member, "a payload structure whose members url-encode"));
+                }
+                // Same reasoning for XML attributes: the root is opened with the S3 namespace and
+                // nothing else, so a payload shape that declared attributes would lose them
+                // silently. No shape does; the day one does, this says so.
+                if ir.shapes.get(shape).is_some_and(|s| !s.xml.attributes.is_empty()) {
+                    return Err(expr::unsupported(op, member, "a payload structure whose element carries XML attributes"));
                 }
                 let _ = writeln!(out, "        // {member} — the XML response body, rooted at `{root}`.");
                 if field.required {
@@ -297,11 +303,12 @@ fn body_member(ir: &OperationIr, plan: &url::Plan, field: &Field, source: &str, 
             let writer_fn = format!("write_{}", naming::module_name(inner_name));
             let argument = shape_writer_argument(plan, inner_name);
             let names = super::list_elements(*flattened, wrapper_name.as_deref(), &wire);
+            let open = open_structure(ir, inner_name, &names.entry, "item", "&mut writer")?;
             if let Some(wrapper) = &names.wrapper {
                 let _ = writeln!(out, "{pad}writer.open(\"{wrapper}\", None);");
             }
             let _ = writeln!(out, "{pad}for item in &{source} {{");
-            let _ = writeln!(out, "{pad}    writer.open(\"{}\", None);", names.entry);
+            let _ = writeln!(out, "{pad}    {open}");
             let _ = writeln!(out, "{pad}    {writer_fn}(&mut writer, item{argument})?;");
             let _ = writeln!(out, "{pad}    writer.close();");
             let _ = writeln!(out, "{pad}}}");
@@ -316,13 +323,14 @@ fn body_member(ir: &OperationIr, plan: &url::Plan, field: &Field, source: &str, 
         Type::Structure(inner_name) => {
             let writer_fn = format!("write_{}", naming::module_name(inner_name));
             let argument = shape_writer_argument(plan, inner_name);
+            let open = open_structure(ir, inner_name, &wire, "v", "&mut writer")?;
             if field.required {
                 let _ = writeln!(out, "{pad}{{");
                 let _ = writeln!(out, "{pad}    let v = &{source};");
             } else {
                 let _ = writeln!(out, "{pad}if let Some(v) = {source}.as_ref() {{");
             }
-            let _ = writeln!(out, "{pad}    writer.open(\"{wire}\", None);");
+            let _ = writeln!(out, "{pad}    {open}");
             let _ = writeln!(out, "{pad}    {writer_fn}(&mut writer, v{argument})?;");
             let _ = writeln!(out, "{pad}    writer.close();");
             let _ = writeln!(out, "{pad}}}");
@@ -343,6 +351,69 @@ fn body_member(ir: &OperationIr, plan: &url::Plan, field: &Field, source: &str, 
         }
     }
     Ok(out)
+}
+
+/// The statement that opens the element one nested structure occupies.
+///
+/// `writer.open(…)` for the ordinary shape, and the shape's own `open_…` helper for a shape the
+/// IR gives XML attributes. Resolved in one place because four call sites open a structure's
+/// element, and a site that kept the plain form would drop the attributes on that one path only
+/// — a document correct in three positions and wrong in the fourth.
+/// `borrowed` is how the writer is spelled as a *function argument* at the call site: `writer`
+/// inside a shape writer, which already holds a `&mut`, and `&mut writer` in the operation body,
+/// which owns one.
+fn open_structure(ir: &OperationIr, shape: &str, wire: &str, value: &str, borrowed: &str) -> Result<String, String> {
+    let plain = format!("writer.open(\"{wire}\", None);");
+    let Some(target) = ir.shapes.get(shape) else {
+        return Ok(plain);
+    };
+    if target.xml.attributes.is_empty() {
+        return Ok(plain);
+    }
+    for attribute in &target.xml.attributes {
+        if attribute.element != wire {
+            return Err(format!(
+                "codec {}: shape `{shape}` declares attribute `{}` on element `{}`, but it is written into `{wire}`",
+                ir.operation, attribute.name, attribute.element
+            ));
+        }
+    }
+    Ok(format!("open_{}({borrowed}, {value});", naming::module_name(shape)))
+}
+
+/// Renders the `open_…` helper for a shape whose element carries XML attributes.
+///
+/// Returns nothing for a shape that has none, which is every shape but one today.
+fn shape_opener(name: &str, shape: &Shape) -> String {
+    if shape.xml.attributes.is_empty() {
+        return String::new();
+    }
+    let module = naming::module_name(name);
+    let type_name = naming::type_name(name);
+    let element = shape.xml.attributes.first().map(|a| a.element.clone()).unwrap_or_default();
+    let mut out = String::new();
+    let _ = writeln!(out, "/// Opens the `{element}` element with the XML attributes the IR records on it.");
+    let _ = writeln!(
+        out,
+        "fn open_{module}(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::{type_name}) {{"
+    );
+    let _ = writeln!(out, "    let mut attributes: Vec<(&str, &str)> = Vec::new();");
+    for attribute in &shape.xml.attributes {
+        match &attribute.source {
+            AttributeSource::Constant(literal) => {
+                let _ = writeln!(out, "    attributes.push((\"{}\", \"{literal}\"));", attribute.name);
+            }
+            AttributeSource::Field(member) => {
+                let field = naming::field_name(member);
+                let _ = writeln!(out, "    if let Some(v) = value.{field}.as_ref() {{");
+                let _ = writeln!(out, "        attributes.push((\"{}\", v.as_str()));", attribute.name);
+                let _ = writeln!(out, "    }}");
+            }
+        }
+    }
+    let _ = writeln!(out, "    writer.open_with(\"{element}\", &attributes);");
+    out.push_str("}\n");
+    out
 }
 
 /// The wire expression for one member, encoded or not.
@@ -405,13 +476,27 @@ pub fn shape_writer(ir: &OperationIr, name: &str, shape: &Shape) -> Result<Strin
         shape.xml.element_order.clone()
     };
 
-    let mut out = String::new();
+    let mut out = shape_opener(name, shape);
+    if !out.is_empty() {
+        out.push('\n');
+    }
     let _ = writeln!(out, "/// Writes one `{name}` element's children, in the wire order the IR records.");
     out.push_str(&shape_writer_signature(&naming::module_name(name), &type_name, plan.encodes_shape(name)));
     for member in order {
         let Some(field) = shape.fields.iter().find(|f| f.name == member) else {
             continue;
         };
+        // The attribute went into the opening tag; writing it again as a child element is the
+        // `<xsi:type>` spelling no SDK reads.
+        if carried_as_attribute(shape, &field.name) {
+            let _ = writeln!(
+                out,
+                "    // {} — written as the `{}` attribute of the opening tag.",
+                field.name,
+                attribute_name(shape, &field.name)
+            );
+            continue;
+        }
         let source = format!("value.{}", naming::field_name(&field.name));
         let wire = field.wire_name.clone().unwrap_or_else(|| field.name.clone());
         let policy = empty_policy(&shape.xml.empty_value_policy, &field.name, field.required);
@@ -447,13 +532,14 @@ fn shape_child(ir: &OperationIr, plan: &url::Plan, field: &Field, source: &str, 
         Type::Structure(inner) => {
             let writer_fn = format!("write_{}", naming::module_name(inner));
             let argument = shape_writer_argument(plan, inner);
+            let open = open_structure(ir, inner, wire, "v", "writer")?;
             if field.required {
                 let _ = writeln!(out, "    {{");
                 let _ = writeln!(out, "        let v = &{source};");
             } else {
                 let _ = writeln!(out, "    if let Some(v) = {source}.as_ref() {{");
             }
-            let _ = writeln!(out, "        writer.open(\"{wire}\", None);");
+            let _ = writeln!(out, "        {open}");
             let _ = writeln!(out, "        {writer_fn}(writer, v{argument})?;");
             let _ = writeln!(out, "        writer.close();");
             let _ = writeln!(out, "    }}");
@@ -462,8 +548,9 @@ fn shape_child(ir: &OperationIr, plan: &url::Plan, field: &Field, source: &str, 
             Type::Structure(inner_name) => {
                 let writer_fn = format!("write_{}", naming::module_name(inner_name));
                 let argument = shape_writer_argument(plan, inner_name);
+                let open = open_structure(ir, inner_name, wire, "item", "writer")?;
                 let _ = writeln!(out, "    for item in &{source} {{");
-                let _ = writeln!(out, "        writer.open(\"{wire}\", None);");
+                let _ = writeln!(out, "        {open}");
                 let _ = writeln!(out, "        {writer_fn}(writer, item{argument})?;");
                 let _ = writeln!(out, "        writer.close();");
                 let _ = writeln!(out, "    }}");

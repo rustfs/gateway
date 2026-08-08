@@ -107,6 +107,9 @@ impl Harness {
             // The replication read too: the unconfigured 404 is the observable proof that a
             // recreated bucket inherited no replication document.
             .register::<dto::GetBucketReplication, _>(Arc::clone(&backend))
+            // And the ACL read, the one with no 404 to lean on: it answers 200 either way, so
+            // the proof of non-inheritance has to be the document it answers with.
+            .register::<dto::GetBucketAcl, _>(Arc::clone(&backend))
             .register::<dto::PutObject, _>(Arc::clone(&backend))
             .authenticator(SigV4Authenticator::new(credentials, RegionSet::new([region]).expect("non-empty")))
             .authorizer(allow_when(|request| !request.is_anonymous()))
@@ -375,8 +378,8 @@ fn n_deleting_a_bucket_that_was_never_created_is_a_not_found() {
 
 /// Negative — a deleted bucket takes its configuration documents with it.
 ///
-/// The CORS document, the tag set, the lifecycle document, the default-encryption document and
-/// the replication document and the object-lock document all
+/// The CORS document, the tag set, the lifecycle document, the default-encryption document, the
+/// replication document, the object-lock document and the access control policy all
 /// live inside the bucket's own state entry, so removing the bucket removes them by construction
 /// — and this test is what keeps that a fact rather than a coincidence of today's layout. The
 /// failure it guards against is inheritance: delete a bucket, create a new one under the same
@@ -385,12 +388,15 @@ fn n_deleting_a_bucket_that_was_never_created_is_a_not_found() {
 /// encrypting the new owner's objects to the previous owner's KMS key, which is inheritance of
 /// *access*, not just behaviour — or shipping the new owner's objects to the previous
 /// owner's destination bucket under the previous owner's IAM role, which is inheritance of
-/// *exfiltration*. The object-lock document is the sharpest of the six: a
+/// *exfiltration*. The object-lock document is the sharpest of the seven: a
 /// recreated bucket that inherited a COMPLIANCE default would apply WORM retention the new owner
-/// never asked for, and COMPLIANCE is by definition the mode nobody can lift. A name is not a
-/// bucket.
+/// never asked for, and COMPLIANCE is by definition the mode nobody can lift. The access control
+/// policy is the quietest: an inherited grant to the previous owner's account, or to AllUsers,
+/// looks exactly like a grant the new owner meant to make, and unlike the other six it answers a
+/// `200` either way — there is no unconfigured 404 to notice, which is why the assertion below
+/// reads the document rather than the status. A name is not a bucket.
 #[test]
-fn n_a_deleted_buckets_cors_tags_lifecycle_encryption_replication_and_lock_do_not_survive_into_a_recreation() {
+fn n_a_deleted_buckets_cors_tags_lifecycle_encryption_replication_lock_and_acl_do_not_survive_a_recreation() {
     let mut fixture = Fixture::at(NOW);
     fixture.declare_bucket("conf-bkt-reborn", false);
     fixture.set_cors(
@@ -458,6 +464,23 @@ fn n_a_deleted_buckets_cors_tags_lifecycle_encryption_replication_and_lock_do_no
             }],
         },
     );
+    fixture.set_bucket_acl(
+        "conf-bkt-reborn",
+        dto::AccessControlPolicy {
+            owner: Some(dto::Owner {
+                id: Some("previous-owner-canonical-id".to_owned()),
+                display_name: Some("previous-owner".to_owned()),
+            }),
+            grants: vec![dto::Grant {
+                grantee: Some(dto::Grantee {
+                    uri: Some("http://acs.amazonaws.com/groups/global/AllUsers".to_owned()),
+                    r#type: Some(dto::Type::GROUP),
+                    ..dto::Grantee::default()
+                }),
+                permission: Some(dto::Permission::READ),
+            }],
+        },
+    );
     let harness = Harness::over(fixture, "us-east-1");
 
     let deleted = harness.send("DELETE", "/conf-bkt-reborn", b"");
@@ -518,4 +541,22 @@ fn n_a_deleted_buckets_cors_tags_lifecycle_encryption_replication_and_lock_do_no
         "the recreated bucket leaked the deleted bucket's replication configuration: {}",
         read.body
     );
+
+    // The access control half has no 404 to check, which is precisely why it needs its own
+    // assertion: the read answers 200 whatever happened, so inheritance here is invisible to a
+    // status. What must be gone is the previous owner's public grant and its identity, and what
+    // must be there instead is the default policy a bucket is created with.
+    let read = harness.send("GET", "/conf-bkt-reborn?acl", b"");
+    assert_eq!(read.status, 200, "{}", read.body);
+    assert!(
+        !read.body.contains("AllUsers"),
+        "the recreated bucket inherited the deleted bucket's public grant: {}",
+        read.body
+    );
+    assert!(
+        !read.body.contains("previous-owner"),
+        "the recreated bucket named the deleted bucket's owner: {}",
+        read.body
+    );
+    read.assert_contains("FULL_CONTROL");
 }

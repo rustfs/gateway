@@ -1,6 +1,7 @@
 AbortIncompleteMultipartUpload 1
 AbortMultipartUploadInput 6
 AbortMultipartUploadOutput 1
+AccessControlPolicy 2
 AccessControlTranslation 1
 BlockedEncryptionTypes 1
 Bucket 4
@@ -50,6 +51,8 @@ Encryption 3
 EncryptionConfiguration 1
 Error 4
 ExistingObjectReplication 1
+GetBucketAclInput 2
+GetBucketAclOutput 2
 GetBucketCorsInput 2
 GetBucketCorsOutput 1
 GetBucketEncryptionInput 2
@@ -62,6 +65,8 @@ GetBucketReplicationInput 2
 GetBucketReplicationOutput 1
 GetBucketTaggingInput 2
 GetBucketTaggingOutput 1
+GetObjectAclInput 5
+GetObjectAclOutput 3
 GetObjectAttributesInput 11
 GetObjectAttributesOutput 9
 GetObjectAttributesParts 6
@@ -120,6 +125,8 @@ OutputSerialization 2
 Owner 2
 ParquetInput 0
 Part 14
+PutBucketAclInput 11
+PutBucketAclOutput 0
 PutBucketCorsInput 5
 PutBucketCorsOutput 0
 PutBucketEncryptionInput 5
@@ -130,6 +137,8 @@ PutBucketReplicationInput 6
 PutBucketReplicationOutput 0
 PutBucketTaggingInput 5
 PutBucketTaggingOutput 0
+PutObjectAclInput 14
+PutObjectAclOutput 1
 PutObjectInput 37
 PutObjectLegalHoldInput 8
 PutObjectLegalHoldOutput 1

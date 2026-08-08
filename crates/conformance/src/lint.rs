@@ -71,6 +71,7 @@ pub const TAG_VOCABULARY: &[&str] = &[
     "object-lock",
     "restore",
     "select",
+    "acl",
     "slow",
 ];
 

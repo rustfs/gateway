@@ -479,4 +479,110 @@ pub(super) const DECLS: &[ShadowingDecl] = &[
                  <Type>SELECT</Type> with SelectParameters, and never as both query keys at once.",
         evidence: &[RESTORE_OBJECT_DOC, SELECT_OBJECT_CONTENT_DOC],
     },
+    // The `?acl` object rows: 550 (GET) and 560 (PUT). The GET sits behind every earlier object
+    // subresource and ahead of `GetObject`; the PUT sits behind the multipart and document
+    // writes and ahead of `CopyObject` and `PutObject`. The second edge is the one this family
+    // exists for — see the `PutObjectAcl -> PutObject` pair at the end.
+    ShadowingDecl {
+        winner: "ListParts",
+        shadowed: "GetObjectAcl",
+        reason: "GET /b/k?uploadId&acl asks for the parts of an upload and for an object's \
+                 access control policy at once. The multipart band (440) is tried before the \
+                 ACL row (550), the same order the attributes and tagging rows already keep.",
+        evidence: &[LIST_PARTS_DOC, GET_OBJECT_ACL_DOC],
+    },
+    ShadowingDecl {
+        winner: "GetObjectAttributes",
+        shadowed: "GetObjectAcl",
+        reason: "?attributes and ?acl name two metadata reads of one key. The earlier band wins \
+                 (470 before 550) and the attributes document is answered.",
+        evidence: &[OBJECT_ATTRIBUTES_DOC, GET_OBJECT_ACL_DOC],
+    },
+    ShadowingDecl {
+        winner: "GetObjectTagging",
+        shadowed: "GetObjectAcl",
+        reason: "?tagging and ?acl name two subresources of one key, and the earlier band wins \
+                 (480 before 550): the tag set is answered and the ACL reading is ignored.",
+        evidence: &[GET_OBJECT_TAGGING_DOC, GET_OBJECT_ACL_DOC],
+    },
+    ShadowingDecl {
+        winner: "GetObjectRetention",
+        shadowed: "GetObjectAcl",
+        reason: "The retention twin of the pair above: two subresource reads of one key, and \
+                 510 is tried before 550.",
+        evidence: &[GET_OBJECT_RETENTION_DOC, GET_OBJECT_ACL_DOC],
+    },
+    ShadowingDecl {
+        winner: "GetObjectLegalHold",
+        shadowed: "GetObjectAcl",
+        reason: "The legal-hold twin of the two pairs above: 530 before 550, and the hold status \
+                 is answered rather than the access control policy.",
+        evidence: &[GET_OBJECT_LEGAL_HOLD_DOC, GET_OBJECT_ACL_DOC],
+    },
+    ShadowingDecl {
+        winner: "GetObjectAcl",
+        shadowed: "GetObject",
+        reason: "An ACL read is a GET to the object key plus ?acl, and GetObject accepts every \
+                 such request. GetObjectAcl is tried first (550 before 900). The other order is \
+                 the GetObjectAcl -> GetObject line the debt register carried: a caller asking \
+                 who may read an object is handed the object's bytes instead.",
+        evidence: &[GET_OBJECT_ACL_DOC, GET_OBJECT_DOC],
+    },
+    ShadowingDecl {
+        winner: "UploadPartCopy",
+        shadowed: "PutObjectAcl",
+        reason: "PUT /b/k?partNumber&uploadId&acl with x-amz-copy-source is a part copy that \
+                 also names the ACL subresource. The multipart band (400) is tried before the \
+                 ACL row (560), the same order the tagging and retention writes already keep.",
+        evidence: &[UPLOAD_PART_COPY_DOC, PUT_OBJECT_ACL_DOC],
+    },
+    ShadowingDecl {
+        winner: "UploadPart",
+        shadowed: "PutObjectAcl",
+        reason: "A part upload that also names ?acl frames its body as a part and as an access \
+                 control policy at once. The multipart band (410) is tried before the ACL row \
+                 (560), so the body is read as the part it is framed as.",
+        evidence: &[UPLOAD_PART_DOC, PUT_OBJECT_ACL_DOC],
+    },
+    ShadowingDecl {
+        winner: "PutObjectTagging",
+        shadowed: "PutObjectAcl",
+        reason: "PUT /b/k?tagging&acl carries one body and names two documents. The earlier band \
+                 wins (490 before 560), so the body is read as a tagging document.",
+        evidence: &[PUT_OBJECT_TAGGING_DOC, PUT_OBJECT_ACL_DOC],
+    },
+    ShadowingDecl {
+        winner: "PutObjectRetention",
+        shadowed: "PutObjectAcl",
+        reason: "The retention twin of the pair above: one body, two documents named, and 520 is \
+                 tried before 560.",
+        evidence: &[PUT_OBJECT_RETENTION_DOC, PUT_OBJECT_ACL_DOC],
+    },
+    ShadowingDecl {
+        winner: "PutObjectLegalHold",
+        shadowed: "PutObjectAcl",
+        reason: "The legal-hold twin of the two pairs above: 540 before 560, and the body is \
+                 read as a <LegalHold> document.",
+        evidence: &[PUT_OBJECT_LEGAL_HOLD_DOC, PUT_OBJECT_ACL_DOC],
+    },
+    ShadowingDecl {
+        winner: "PutObjectAcl",
+        shadowed: "CopyObject",
+        reason: "A PUT carrying x-amz-copy-source and ?acl satisfies both, and neither selector \
+                 refines the other. The ACL row is tried first (560 before 790): the other order \
+                 would overwrite the destination object from the source and discard the access \
+                 control policy the request actually carried.",
+        evidence: &[PUT_OBJECT_ACL_DOC, COPY_OBJECT_DOC],
+    },
+    ShadowingDecl {
+        winner: "PutObjectAcl",
+        shadowed: "PutObject",
+        reason: "An ACL write is a PUT to the object key plus ?acl, and PutObject accepts every \
+                 such request. PutObjectAcl is tried first (560 before 800). The other order is \
+                 the PutObjectAcl -> PutObject line the debt register carried, and it is not a \
+                 mis-route but a data loss: the <AccessControlPolicy> document is stored as the \
+                 object, destroying the bytes the caller only wanted to change the permissions \
+                 of, and answering 200 for it.",
+        evidence: &[PUT_OBJECT_ACL_DOC, PUT_OBJECT_DOC],
+    },
 ];

@@ -205,11 +205,7 @@ fn read_grantee(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::Grantee, Code
     if let Some(raw) = node.child_text("URI") {
         shape.uri = Some(raw.to_owned());
     }
-    if let Some(raw) = node.child_text("xsi:type") {
-        shape.r#type = dto::Type::custom(raw.to_owned());
-    } else {
-        return Err(CodecError::malformed_xml("the body omits a member the schema requires").about("Type"));
-    }
+    // Type — carried by the `xsi:type` attribute, which the reader does not expose.
     value::exit(shape.check_required())?;
     Ok(shape)
 }

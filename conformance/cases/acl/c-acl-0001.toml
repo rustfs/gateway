@@ -1,0 +1,40 @@
+[case]
+id = "c-acl-0001"
+schema_version = 1
+title = "A bucket nobody configured answers its owner's FULL_CONTROL with the xsi:type attribute"
+rationale = """
+This is the document every S3 client parses first, and the one that broke upstream: without the xsi:type attribute and the xmlns:xsi declaration on the Grantee element, the Java SDK cannot decide which union member it is holding and fails the whole response. The attribute cannot be asserted by a parsed-structure check, because a serializer that wrote <xsi:type> as a child element would satisfy one and answer bytes no SDK reads — so this is pinned byte for byte."""
+polarity = "positive"
+operation = "GetBucketAcl"
+tags = ["acl", "xml", "wire-bytes"]
+timeout_ms = 10000
+quirks = ["q-acl-0001", "q-acl-0002", "q-acl-0003"]
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/issues/297"
+summary = "Upstream answered ACL documents whose Grantee carried no xsi:type, and the Java SDK refused to parse them."
+kind = "s3s-issue"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketAcl.html"
+summary = "The documented response nests Grant elements inside AccessControlList and writes the discriminator as an attribute of Grantee."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "conf-acl"
+
+[request]
+method = "GET"
+target = "/conf-acl?acl"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[expect.headers_present]
+"content-type" = "application/xml"
+
+[expect.body]
+golden = "goldens/c-acl-0001.xml"

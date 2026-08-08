@@ -1,0 +1,50 @@
+[case]
+id = "c-acl-0002"
+schema_version = 1
+title = "A grant to the AllUsers group round-trips as xsi:type Group carrying a URI"
+rationale = """
+The Group member is the one that makes a bucket public, so a read that reported it as a CanonicalUser would tell an auditor an anonymous grant belongs to a named account. The URI is the whole identity here — there is no ID and no DisplayName — and the discriminator has to agree with it in both directions, which is why the document is written and read back rather than only read."""
+polarity = "positive"
+operation = "PutBucketAcl"
+tags = ["acl", "xml", "wire-bytes"]
+timeout_ms = 10000
+quirks = ["q-acl-0002", "q-acl-0003"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_Grantee.html"
+summary = "The Group form of a grantee is documented as carrying a URI and no canonical id."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "conf-acl"
+
+[[exchanges]]
+name = "grant-all-users-read"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-acl?acl"
+headers = { "content-type" = "application/xml", "content-md5" = "EX3o9O1uOSmm93mYj28bkQ==" }
+body = { utf8 = '<AccessControlPolicy><Owner><ID>3f6e2b1c4a8d90e7b5c31f2a6d80e4c97b1a3d5f8e206c4b7a9d1e3f5c7b9a0d</ID><DisplayName>conformance</DisplayName></Owner><AccessControlList><Grant><Grantee xsi:type="Group"><URI>http://acs.amazonaws.com/groups/global/AllUsers</URI></Grantee><Permission>READ</Permission></Grant><Grant><Grantee xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:type="CanonicalUser"><ID>3f6e2b1c4a8d90e7b5c31f2a6d80e4c97b1a3d5f8e206c4b7a9d1e3f5c7b9a0d</ID><DisplayName>conformance</DisplayName></Grantee><Permission>FULL_CONTROL</Permission></Grant></AccessControlList></AccessControlPolicy>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[[exchanges]]
+name = "read-back"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-acl?acl"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.body]
+golden = "goldens/c-acl-0002.xml"

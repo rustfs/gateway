@@ -117,12 +117,13 @@ use std::sync::{Arc, Mutex};
 
 use rustfs_gateway::dto;
 use rustfs_gateway::{
-    BucketName, ByteStream, ChecksumAlgorithm, ChecksumSpec, ConditionalOutcome, CopyRange, CopySourceRejection, CursorSpec,
-    ETag, ErrorCode, ErrorDetail, Handler, HandlerError, HandlerResult, IfRange, ObjectKey, ObjectValidators,
-    PRECONDITION_FAILED_MESSAGE, PreconditionRejection, Preconditions, REGION_MATCH_POLICY, RangeDecision, RangeSelectors,
-    RegionLabel, RegionSet, Req, RequestKind, Resp, RestoreState, RestoreStatus, TagScope, TaggingRejection, Timestamp, collect,
-    evaluate, evaluate_range, format_restore_status, parse_conditional_etag, parse_tagging_header, permanent_redirect_for,
-    resolve_copy_range, resolve_location_constraint, validate_cors, validate_encryption, validate_legal_hold, validate_lifecycle,
+    AclHeaders, AclInput, AclRejection, AclTarget, BucketName, ByteStream, ChecksumAlgorithm, ChecksumSpec, ConditionalOutcome,
+    CopyRange, CopySourceRejection, CursorSpec, ETag, ErrorCode, ErrorDetail, GranteeType, Handler, HandlerError, HandlerResult,
+    IfRange, ObjectKey, ObjectValidators, PRECONDITION_FAILED_MESSAGE, PreconditionRejection, Preconditions, REGION_MATCH_POLICY,
+    RangeDecision, RangeSelectors, RegionLabel, RegionSet, Req, RequestKind, Resp, RestoreState, RestoreStatus, TagScope,
+    TaggingRejection, Timestamp, collect, evaluate, evaluate_range, format_restore_status, parse_conditional_etag,
+    parse_tagging_header, permanent_redirect_for, resolve_copy_range, resolve_input as resolve_acl_input,
+    resolve_location_constraint, validate_cors, validate_encryption, validate_legal_hold, validate_lifecycle,
     validate_lock_configuration, validate_replication, validate_restore, validate_retention, validate_select, validate_tag_set,
 };
 
@@ -177,6 +178,16 @@ pub struct StoredObject {
     pub expires: Option<String>,
     /// User metadata.
     pub metadata: BTreeMap<String, String>,
+    /// The access control policy a `PutObjectAcl` stored, canonicalised: every grantee already
+    /// carries the `xsi:type` a read will write back as an attribute.
+    ///
+    /// `None` is not an observable state — every object has an ACL from the moment it exists —
+    /// so the read answers the owner's `FULL_CONTROL` for it rather than a `404`, which is what
+    /// makes this family the only object subresource with no unconfigured error. Held on the
+    /// object beside the tag set, and for the same reason: `[setup.objects]` declares no
+    /// per-version ACL, so what a read answers is always either the default or something a
+    /// request wrote.
+    pub acl: Option<dto::AccessControlPolicy>,
     /// The tag set, in the order the request that wrote it listed the pairs.
     ///
     /// A `Vec` rather than a map, and ordered rather than sorted, because the tag set is what the
@@ -382,6 +393,16 @@ struct BucketState {
     /// the previous owner's WORM configuration would lock the new owner's data to somebody
     /// else's compliance rules.
     lock_configuration: Option<dto::ObjectLockConfiguration>,
+    /// The stored access control policy, written by `PutBucketAcl` within the case and already
+    /// canonicalised.
+    ///
+    /// `None` is **not** an observable state here, unlike every other document in this
+    /// structure: a bucket always has an ACL, so `None` reads back as the owner's
+    /// `FULL_CONTROL` rather than as a `404`. It still lives in `BucketState` so that deleting
+    /// the bucket deletes the policy with it — a recreated bucket inheriting the previous
+    /// owner's grants would hand the new owner's data to whoever the last one shared it with,
+    /// and unlike an inherited lifecycle or encryption document that one is silent.
+    acl: Option<dto::AccessControlPolicy>,
 }
 
 /// A bucket's lifecycle document exactly as one write stored it.
@@ -640,16 +661,33 @@ impl Fixture {
         }
     }
 
+    /// Installs a bucket's access control policy, replacing whatever was there.
+    /// `PutBucketAcl` only.
+    pub fn set_bucket_acl(&mut self, name: &str, policy: dto::AccessControlPolicy) {
+        self.buckets.entry(name.to_owned()).or_default().acl = Some(policy);
+    }
+
+    /// The stored bucket policy, or `None` for a bucket nobody ever wrote one to.
+    ///
+    /// `None` is answered as the default owner grant by the read rather than as a `404`: an ACL
+    /// is the one bucket subresource that always exists.
+    #[must_use]
+    fn bucket_acl(&self, name: &str) -> Option<&dto::AccessControlPolicy> {
+        self.buckets.get(name).and_then(|bucket| bucket.acl.as_ref())
+    }
+
     /// Removes a bucket, for `setup.buckets[].absent` and for `DeleteBucket`.
     ///
     /// The whole `BucketState` entry goes, and the CORS document and tag set go with it because
-    /// they live inside it — the lifecycle, encryption and object-lock documents too: a bucket's
-    /// configuration is a property of the bucket, not of the name,
-    /// so a later creation under the same name starts unconfigured rather than inheriting a
-    /// document nobody wrote to it. `Fixture::bucket_lifecycle` tests pin this, and for the lock
-    /// document the stakes are the sharpest in the family: a recreated bucket that inherited a
-    /// COMPLIANCE default would apply the previous owner's WORM rules to the new owner's data,
-    /// with no way to lift them.
+    /// they live inside it — the lifecycle, encryption, replication, object-lock and access
+    /// control documents too: a bucket's configuration is a property of the bucket, not of the
+    /// name, so a later creation under the same name starts unconfigured rather than inheriting a
+    /// document nobody wrote to it. `Fixture::bucket_lifecycle` tests pin this, and two of them
+    /// carry the sharpest stakes in the family: a recreated bucket that inherited a COMPLIANCE
+    /// default would apply the previous owner's WORM rules to the new owner's data with no way to
+    /// lift them, and one that inherited an ACL would keep handing the new owner's data to
+    /// whoever the previous owner had shared it with — silently, because an inherited grant looks
+    /// exactly like an intended one.
     pub fn remove_bucket(&mut self, name: &str) {
         self.buckets.remove(name);
         self.objects.retain(|(bucket, _), _| bucket != name);
@@ -801,6 +839,20 @@ impl Fixture {
         self.objects
             .get(&(bucket.to_owned(), key.to_owned()))?
             .iter()
+            .find(|version| version.version_id == version_id)
+    }
+
+    /// One named version of one key, writable.
+    ///
+    /// The twin of [`Fixture::version`] for the one family that writes into a version the caller
+    /// named rather than into the newest one: `PutObjectAcl` takes a `versionId`, and an ACL
+    /// written onto the wrong version is a permission change nobody asked for on an object
+    /// nobody named.
+    #[must_use]
+    pub fn version_mut(&mut self, bucket: &str, key: &str, version_id: &str) -> Option<&mut StoredVersion> {
+        self.objects
+            .get_mut(&(bucket.to_owned(), key.to_owned()))?
+            .iter_mut()
             .find(|version| version.version_id == version_id)
     }
 
@@ -1442,6 +1494,14 @@ fn no_such_key(key: &str) -> HandlerError {
         .with_detail(ErrorDetail::Key(key.to_owned().into()))
 }
 
+/// AWS's own wording for a version id that names nothing.
+///
+/// The message never repeats the id: a caller who can tell a mistyped id from one that belongs to
+/// somebody else's object apart by the `<Message>` element has been told the id is genuine.
+fn no_such_version() -> HandlerError {
+    HandlerError::new(ErrorCode::NO_SUCH_VERSION, "The specified version does not exist.")
+}
+
 /// A resolved range: the window to send, and the `Content-Range` value that describes it.
 #[derive(Debug)]
 struct Slice {
@@ -1977,6 +2037,84 @@ fn refuse_versioned_tagging(version_id: Option<&str>) -> Result<(), HandlerError
     ))
 }
 
+/// The access control policy a bucket or an object that nobody configured answers with.
+///
+/// Every resource has one from the moment it exists, and this is it: the owner, and the owner's
+/// `FULL_CONTROL`. Built rather than stored, because a fixture that had to write the default in
+/// before a read could see it would make "the default" a property of the setup rather than of
+/// the resource — and `c-acl-0028` asks precisely what a bucket nobody ever called
+/// `PutBucketAcl` on answers.
+fn default_acl() -> dto::AccessControlPolicy {
+    dto::AccessControlPolicy {
+        owner: Some(fixture_owner()),
+        grants: vec![dto::Grant {
+            grantee: Some(dto::Grantee {
+                id: Some(OWNER_ID.to_owned()),
+                display_name: Some(OWNER_DISPLAY_NAME.to_owned()),
+                r#type: Some(GranteeType::CanonicalUser.as_dto()),
+                ..dto::Grantee::default()
+            }),
+            permission: Some(dto::Permission::FULL_CONTROL),
+        }],
+    }
+}
+
+/// The owner every listing and every ACL in this fixture reports.
+fn fixture_owner() -> dto::Owner {
+    dto::Owner {
+        id: Some(OWNER_ID.to_owned()),
+        display_name: Some(OWNER_DISPLAY_NAME.to_owned()),
+    }
+}
+
+/// The ACL headers of a request, lifted off the decoded input for the shared contract.
+///
+/// One function rather than two copies, because the bucket write and the object write carry the
+/// same six headers and the exclusivity rule is decided from all of them at once: a version that
+/// looked at `x-amz-acl` alone would let every grant header through beside a body.
+fn acl_headers<'a>(
+    canned: Option<&'a dto::Acl>,
+    full_control: Option<&'a String>,
+    read: Option<&'a String>,
+    write: Option<&'a String>,
+    read_acp: Option<&'a String>,
+    write_acp: Option<&'a String>,
+) -> AclHeaders<'a> {
+    AclHeaders {
+        canned: canned.map(dto::Acl::as_str),
+        full_control: full_control.map(String::as_str),
+        read: read.map(String::as_str),
+        write: write.map(String::as_str),
+        read_acp: read_acp.map(String::as_str),
+        write_acp: write_acp.map(String::as_str),
+    }
+}
+
+/// The shared ACL contract's own refusal, rendered.
+fn refused_acl(rejection: AclRejection) -> HandlerError {
+    HandlerError::new(rejection.code(), rejection.reason())
+}
+
+/// The policy one resolved ACL write stores.
+///
+/// The body channel stores the document it carried. The header channel stores the grants the
+/// explicit headers named, under this fixture's owner — and a canned ACL is *not* expanded into
+/// grants: expansion depends on the bucket owner, the object owner and, for `log-delivery-write`,
+/// a predefined group, and the shared contract deliberately validates canned values rather than
+/// inventing an expansion. What is stored for a canned-only write is therefore the default
+/// policy, and the case that asserts a canned write succeeds asserts the `200` and not a
+/// read-back this fixture would have made up.
+fn policy_of(resolved: AclInput) -> dto::AccessControlPolicy {
+    match resolved {
+        AclInput::Document(document) => document,
+        AclInput::Headers { canned: _, grants } if grants.is_empty() => default_acl(),
+        AclInput::Headers { canned: _, grants } => dto::AccessControlPolicy {
+            owner: Some(fixture_owner()),
+            grants,
+        },
+    }
+}
+
 /// The source object a copy will read, and the version id to report for it.
 ///
 /// Every refusal here is the *source's*: a copy that reports on the destination answers a missing
@@ -2109,6 +2247,46 @@ impl Handler<dto::DeleteObjectTagging> for Stub {
         request: Req<dto::DeleteObjectTagging>,
     ) -> impl core::future::Future<Output = HandlerResult<dto::DeleteObjectTagging>> + Send {
         let outcome = self.delete_object_tagging(request.input());
+        async move { outcome }
+    }
+}
+
+impl Handler<dto::GetBucketAcl> for Stub {
+    fn call(
+        &self,
+        request: Req<dto::GetBucketAcl>,
+    ) -> impl core::future::Future<Output = HandlerResult<dto::GetBucketAcl>> + Send {
+        let outcome = self.get_bucket_acl(request.input());
+        async move { outcome }
+    }
+}
+
+impl Handler<dto::PutBucketAcl> for Stub {
+    fn call(
+        &self,
+        request: Req<dto::PutBucketAcl>,
+    ) -> impl core::future::Future<Output = HandlerResult<dto::PutBucketAcl>> + Send {
+        let outcome = self.put_bucket_acl(request.input());
+        async move { outcome }
+    }
+}
+
+impl Handler<dto::GetObjectAcl> for Stub {
+    fn call(
+        &self,
+        request: Req<dto::GetObjectAcl>,
+    ) -> impl core::future::Future<Output = HandlerResult<dto::GetObjectAcl>> + Send {
+        let outcome = self.get_object_acl(request.input());
+        async move { outcome }
+    }
+}
+
+impl Handler<dto::PutObjectAcl> for Stub {
+    fn call(
+        &self,
+        request: Req<dto::PutObjectAcl>,
+    ) -> impl core::future::Future<Output = HandlerResult<dto::PutObjectAcl>> + Send {
+        let outcome = self.put_object_acl(request.input());
         async move { outcome }
     }
 }
@@ -2953,6 +3131,108 @@ impl Stub {
             .ok_or_else(|| no_such_key(input.key.as_str()))?;
         object.tags.clear();
         Ok(Resp::new(dto::DeleteObjectTaggingOutput::default()))
+    }
+
+    /// The bucket's access control policy — always a `200`, never a `404`.
+    ///
+    /// This is the family's defining difference from every other bucket subresource read in this
+    /// file: `?cors`, `?lifecycle`, `?encryption`, `?replication` and `?object-lock` each answer
+    /// an operation-specific not-found for a bucket that was never configured, and this one
+    /// answers the owner's `FULL_CONTROL`, because an ACL is not something a bucket can be
+    /// without. The bucket itself still has to exist.
+    fn get_bucket_acl(&self, input: &dto::GetBucketAclInput) -> HandlerResult<dto::GetBucketAcl> {
+        let fixture = self.borrow()?;
+        require_bucket(&fixture, &input.bucket)?;
+        let stored = fixture.bucket_acl(input.bucket.as_str()).cloned().unwrap_or_else(default_acl);
+        Ok(Resp::new(dto::GetBucketAclOutput {
+            owner: stored.owner,
+            grants: stored.grants,
+        }))
+    }
+
+    /// The whole policy, replaced — after the one channel decision every backend shares.
+    ///
+    /// `rustfs_gateway::resolve_input` is called rather than mirrored: which of the two channels
+    /// the request used, whether it used both or neither, whether the canned value is one a
+    /// bucket accepts and whether each grant header parses are all its questions, and a second
+    /// copy of any of them here would be the drift the shared contract exists to prevent. What
+    /// comes back is already canonicalised, so what is stored carries the `xsi:type` the read
+    /// writes back as an attribute.
+    fn put_bucket_acl(&self, input: &dto::PutBucketAclInput) -> HandlerResult<dto::PutBucketAcl> {
+        let headers = acl_headers(
+            input.acl.as_ref(),
+            input.grant_full_control.as_ref(),
+            input.grant_read.as_ref(),
+            input.grant_write.as_ref(),
+            input.grant_read_acp.as_ref(),
+            input.grant_write_acp.as_ref(),
+        );
+        let resolved = resolve_acl_input(headers, input.access_control_policy.clone(), AclTarget::Bucket).map_err(refused_acl)?;
+        let mut fixture = self.borrow()?;
+        require_bucket(&fixture, &input.bucket)?;
+        fixture.set_bucket_acl(input.bucket.as_str(), policy_of(resolved));
+        Ok(Resp::new(dto::PutBucketAclOutput::default()))
+    }
+
+    /// One object version's policy, defaulting the same way the bucket read does.
+    ///
+    /// `versionId` is honoured rather than refused, which is where this family parts company with
+    /// the tagging and lock-state reads next door: an ACL is held on the version, so the named
+    /// one can be answered exactly. An id this fixture never minted is `NoSuchVersion`, and a
+    /// version that is a delete marker has no object and therefore no policy.
+    fn get_object_acl(&self, input: &dto::GetObjectAclInput) -> HandlerResult<dto::GetObjectAcl> {
+        let fixture = self.borrow()?;
+        require_bucket(&fixture, &input.bucket)?;
+        let object = match input.version_id.as_deref() {
+            None => fixture
+                .object(input.bucket.as_str(), input.key.as_str())
+                .ok_or_else(|| no_such_key(input.key.as_str()))?,
+            Some(version_id) => fixture
+                .version(input.bucket.as_str(), input.key.as_str(), version_id)
+                .ok_or_else(no_such_version)?
+                .object
+                .as_ref()
+                .ok_or_else(|| no_such_key(input.key.as_str()))?,
+        };
+        let stored = object.acl.clone().unwrap_or_else(default_acl);
+        Ok(Resp::new(dto::GetObjectAclOutput {
+            owner: stored.owner,
+            grants: stored.grants,
+            ..dto::GetObjectAclOutput::default()
+        }))
+    }
+
+    /// One object version's policy, replaced.
+    ///
+    /// The write is in place, for the tagging family's reason: a permission change is not a new
+    /// representation of the object, so no version is minted and the bytes, the entity tag and
+    /// `Last-Modified` are left exactly as they were.
+    fn put_object_acl(&self, input: &dto::PutObjectAclInput) -> HandlerResult<dto::PutObjectAcl> {
+        let headers = acl_headers(
+            input.acl.as_ref(),
+            input.grant_full_control.as_ref(),
+            input.grant_read.as_ref(),
+            input.grant_write.as_ref(),
+            input.grant_read_acp.as_ref(),
+            input.grant_write_acp.as_ref(),
+        );
+        let resolved = resolve_acl_input(headers, input.access_control_policy.clone(), AclTarget::Object).map_err(refused_acl)?;
+        let policy = policy_of(resolved);
+        let mut fixture = self.borrow()?;
+        require_bucket(&fixture, &input.bucket)?;
+        let object = match input.version_id.clone() {
+            None => fixture
+                .object_mut(input.bucket.as_str(), input.key.as_str())
+                .ok_or_else(|| no_such_key(input.key.as_str()))?,
+            Some(version_id) => fixture
+                .version_mut(input.bucket.as_str(), input.key.as_str(), &version_id)
+                .ok_or_else(no_such_version)?
+                .object
+                .as_mut()
+                .ok_or_else(|| no_such_key(input.key.as_str()))?,
+        };
+        object.acl = Some(policy);
+        Ok(Resp::new(dto::PutObjectAclOutput::default()))
     }
 
     /// The tag set of one bucket, or the read's own 404.

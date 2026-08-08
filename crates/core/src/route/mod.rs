@@ -50,6 +50,7 @@ mod mask;
 mod selector;
 mod shadowing;
 mod shadowing_bucket;
+mod shadowing_bucket_acl;
 mod shadowing_object;
 mod shape;
 mod table;
