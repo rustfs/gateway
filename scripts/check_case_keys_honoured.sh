@@ -89,4 +89,8 @@ if [[ "$status" -ne 0 ]]; then
 fi
 
 printf 'check_case_keys_honoured: ok\n'
-printf '%s\n' "$output" | head -1
+# Not `| head -1`: under `pipefail` the reader closes the pipe as soon as it has
+# its line, and a `printf` that has not finished writing dies of SIGPIPE. Being
+# the last command, its status becomes the guard's, so a passing audit exits 1 —
+# and which side wins the race depends on machine load, so it passes locally.
+printf '%s\n' "${output%%$'\n'*}"
