@@ -120,10 +120,10 @@ use rustfs_gateway::{
     BucketName, ByteStream, ChecksumAlgorithm, ChecksumSpec, ConditionalOutcome, CopyRange, CopySourceRejection, CursorSpec,
     ETag, ErrorCode, ErrorDetail, Handler, HandlerError, HandlerResult, IfRange, ObjectKey, ObjectValidators,
     PRECONDITION_FAILED_MESSAGE, PreconditionRejection, Preconditions, REGION_MATCH_POLICY, RangeDecision, RangeSelectors,
-    RegionLabel, RegionSet, Req, RequestKind, Resp, TagScope, TaggingRejection, Timestamp, collect, evaluate, evaluate_range,
-    parse_conditional_etag, parse_tagging_header, permanent_redirect_for, resolve_copy_range, resolve_location_constraint,
-    validate_cors, validate_encryption, validate_legal_hold, validate_lifecycle, validate_lock_configuration,
-    validate_replication, validate_retention, validate_tag_set,
+    RegionLabel, RegionSet, Req, RequestKind, Resp, RestoreState, RestoreStatus, TagScope, TaggingRejection, Timestamp, collect,
+    evaluate, evaluate_range, format_restore_status, parse_conditional_etag, parse_tagging_header, permanent_redirect_for,
+    resolve_copy_range, resolve_location_constraint, validate_cors, validate_encryption, validate_legal_hold, validate_lifecycle,
+    validate_lock_configuration, validate_replication, validate_restore, validate_retention, validate_select, validate_tag_set,
 };
 
 /// The canonical user id every listing reports as the owner.
@@ -196,6 +196,14 @@ pub struct StoredObject {
     /// same object-level 404 as an unset retention — not a `200` carrying `OFF`, which a
     /// compliance audit would read as a hold that exists.
     pub legal_hold: Option<dto::ObjectLockLegalHold>,
+    /// The state of an archive retrieval on this copy, or `None` when none was ever asked for.
+    ///
+    /// `None` is what makes `x-amz-restore` absent, which is a fact a client reads: an object
+    /// with no header was never retrieved, and one carrying `ongoing-request="false"` is back.
+    /// Held on the object beside the tag set and the lock documents, for the same reason — the
+    /// case format declares no per-version restore state, and inventing one would be state no
+    /// case wrote.
+    pub restore: Option<RestoreStatus>,
     /// The storage class the writer named, or `STANDARD`.
     pub storage_class: String,
     /// The unquoted MD5 entity tag of `body`.
@@ -416,6 +424,22 @@ impl Fixture {
             home_region: HOME_REGION.to_owned(),
             ..Fixture::default()
         }
+    }
+
+    /// When a copy retrieved *now* would lapse, as the RFC 1123 string `x-amz-restore` carries.
+    ///
+    /// One day past the case's own clock rather than a hard-coded date, so the value a case
+    /// asserts byte for byte is a function of the instant that case pinned. `Days` from the
+    /// request is deliberately not consulted: the request asks for a lifetime and this stub does
+    /// not model one, and reading the number without honouring it would be the more misleading of
+    /// the two. The fallback is the clock itself, reachable only from an instant `Timestamp`
+    /// refuses to render, which no case's `[clock]` can produce.
+    #[must_use]
+    pub fn restore_expiry(&self) -> String {
+        const ONE_DAY_SECONDS: i64 = 24 * 60 * 60;
+        Timestamp::from_secs(self.now.saturating_add(ONE_DAY_SECONDS))
+            .render(rustfs_gateway::TimestampFormat::HttpDate)
+            .unwrap_or_else(|_| String::new())
     }
 
     /// Declares a bucket. `versioned` decides whether a later write appends a version or replaces
@@ -1528,6 +1552,67 @@ fn storage_class_header(object: &StoredObject) -> Option<dto::StorageClass> {
     Some(dto::StorageClass::custom(object.storage_class.clone()))
 }
 
+/// What a select is told, once its request has been read and found well formed.
+///
+/// A constant, and deliberately explicit about which half is missing: "not implemented" on its
+/// own would read as "this operation is unavailable", when the request half of it works and only
+/// the framed answer does not exist yet.
+pub const SELECT_RESPONSE_NOT_IMPLEMENTED: &str =
+    "The select request was accepted and validated, but this backend cannot yet write an event-stream response";
+
+/// Refuses `?versionId` on a restore rather than retrieving the current version instead.
+///
+/// The lock family's rule, for the same reason: this fixture keeps one restore state per key,
+/// because the case format declares no per-version one. Silently ignoring the parameter would
+/// report the current copy's retrieval as the named version's, and a case asserting on that would
+/// go green against a wrong answer about which bytes are readable.
+///
+/// # Errors
+///
+/// `NotImplemented` whenever the parameter is present, with a value or without.
+fn refuse_versioned_restore(version_id: Option<&str>) -> Result<(), HandlerError> {
+    if version_id.is_none() {
+        return Ok(());
+    }
+    Err(HandlerError::new(
+        ErrorCode::NOT_IMPLEMENTED,
+        "A header you provided implies functionality that is not implemented",
+    ))
+}
+
+/// The `x-amz-restore-output-path` a select-on-restore reports, built from where it asked for the
+/// answer to be written.
+///
+/// `None` when the location names no bucket, which the validator has already refused — so this is
+/// total rather than defensive, and it is written with `?` so that a future shape with an optional
+/// bucket cannot turn into a panic here.
+fn output_path_of(location: &dto::OutputLocation) -> Option<String> {
+    let s3 = location.s3.as_ref()?;
+    Some(format!("{}/{}", s3.bucket_name.as_str(), s3.prefix))
+}
+
+/// The storage classes an object has to be retrieved from before it can be read.
+///
+/// Two, and not three: `GLACIER_IR` is an instant-retrieval class, so an object in it is readable
+/// without a restore and a restore of it is the `InvalidObjectState` refusal.
+const ARCHIVE_STORAGE_CLASSES: &[&str] = &["GLACIER", "DEEP_ARCHIVE"];
+
+/// Whether this copy has to be retrieved before it can be read.
+fn is_archived(object: &StoredObject) -> bool {
+    ARCHIVE_STORAGE_CLASSES.contains(&object.storage_class.as_str())
+}
+
+/// The `x-amz-restore` value a read reports, or `None` when no retrieval was ever asked for.
+///
+/// Rendered by [`format_restore_status`] rather than by a `format!` here, which is the whole
+/// point of that function existing: this header has internal structure — two quoted values, a
+/// comma, exactly one space — and a second renderer is how the two spellings drift. An object
+/// nobody restored carries no header at all, which is a different observation from a header
+/// saying the retrieval finished.
+fn restore_header(object: &StoredObject) -> Option<String> {
+    object.restore.as_ref().map(format_restore_status)
+}
+
 /// The tag count an object read reports, which S3 omits when it would be zero.
 ///
 /// `None` for an untagged object rather than `Some(0)`: readers use the header's *presence* to
@@ -2285,6 +2370,26 @@ impl Handler<dto::PutObjectLegalHold> for Stub {
     }
 }
 
+impl Handler<dto::RestoreObject> for Stub {
+    fn call(
+        &self,
+        request: Req<dto::RestoreObject>,
+    ) -> impl core::future::Future<Output = HandlerResult<dto::RestoreObject>> + Send {
+        let outcome = self.restore_object(request.input());
+        async move { outcome }
+    }
+}
+
+impl Handler<dto::SelectObjectContent> for Stub {
+    fn call(
+        &self,
+        request: Req<dto::SelectObjectContent>,
+    ) -> impl core::future::Future<Output = HandlerResult<dto::SelectObjectContent>> + Send {
+        let outcome = self.select_object_content(request.input());
+        async move { outcome }
+    }
+}
+
 impl Handler<dto::CreateMultipartUpload> for Stub {
     fn call(
         &self,
@@ -2524,6 +2629,10 @@ impl Stub {
                 expires: object.expires.clone().map(Into::into),
                 metadata: object.metadata.clone(),
                 storage_class: storage_class_header(object),
+                // `x-amz-restore` when a retrieval was asked for, and no header at all when none
+                // was: the absence is the observation that this copy was never archived or never
+                // retrieved (q-restore-0002).
+                restore: restore_header(object),
                 tag_count: tag_count_header(object),
                 body: Some(ByteStream::from_bytes(bytes::Bytes::from(body))),
                 ..dto::GetObjectOutput::default()
@@ -2585,6 +2694,10 @@ impl Stub {
                 expires: object.expires.clone().map(Into::into),
                 metadata: object.metadata.clone(),
                 storage_class: storage_class_header(object),
+                // `x-amz-restore` when a retrieval was asked for, and no header at all when none
+                // was: the absence is the observation that this copy was never archived or never
+                // retrieved (q-restore-0002).
+                restore: restore_header(object),
                 tag_count: tag_count_header(object),
                 ..dto::HeadObjectOutput::default()
             },
@@ -3342,6 +3455,100 @@ impl Stub {
             .ok_or_else(|| no_such_key(input.key.as_str()))?;
         object.legal_hold = Some(input.legal_hold.clone());
         Ok(Resp::new(dto::PutObjectLegalHoldOutput::default()))
+    }
+
+    /// An archive retrieval, in the one of four states the object is actually in.
+    ///
+    /// The order is fixed and the reasons differ: the document is validated first, because a
+    /// request this side cannot read is a `400` whatever the object's class is; then the object
+    /// has to exist; then the storage class decides whether a retrieval is even a question.
+    ///
+    /// **What is a fixture policy and what is not.** The status — `202`, `200`, `409`, `403` —
+    /// is [`RestoreState`]'s, from the framework, and this method's only job is to say which
+    /// state the copy is in. How long a retrieval takes is the fixture's, and it takes either no
+    /// time or forever: an `Expedited` retrieval is back by the time the response is written, and
+    /// every other tier is still running. That is a dial the corpus turns, not a claim about S3,
+    /// where every tier takes minutes to hours — and it is written down here rather than left for
+    /// a reader of a case to infer, because a case that asserts `200` is asserting the framework's
+    /// mapping and not this stub's timing.
+    fn restore_object(&self, input: &dto::RestoreObjectInput) -> HandlerResult<dto::RestoreObject> {
+        let mut fixture = self.borrow()?;
+        // The payload is a *required* member, so an empty body was already refused as
+        // `MalformedXML` by the generated decoder and never reaches here (q-restore-0006).
+        let document = &input.restore_request;
+        validate_restore(document).map_err(|rejection| HandlerError::new(rejection.code(), rejection.reason()))?;
+        require_bucket(&fixture, &input.bucket)?;
+        refuse_versioned_restore(input.version_id.as_deref())?;
+        let expedited = document.glacier_job_parameters.as_ref().map(|parameters| &parameters.tier)
+            == Some(&dto::Tier::EXPEDITED)
+            || document.tier.as_ref() == Some(&dto::Tier::EXPEDITED);
+        let expiry = fixture.restore_expiry();
+        let object = fixture
+            .object_mut(input.bucket.as_str(), input.key.as_str())
+            .ok_or_else(|| no_such_key(input.key.as_str()))?;
+
+        let state = if !is_archived(object) {
+            RestoreState::NotArchived
+        } else {
+            match &object.restore {
+                None => RestoreState::Initiated,
+                Some(status) if status.ongoing => RestoreState::InProgress,
+                Some(_) => RestoreState::AlreadyRestored,
+            }
+        };
+        if state == RestoreState::Initiated {
+            object.restore = Some(if expedited {
+                RestoreStatus::restored(expiry)
+            } else {
+                RestoreStatus::ongoing()
+            });
+        }
+        // The two refusals answer their own codes, and the two successes answer their own
+        // statuses. Both halves come out of the framework's mapping: nothing here writes a number.
+        if let Some(code) = state.error() {
+            let reason = state.reason().unwrap_or("The restore request could not be served");
+            return Err(HandlerError::new(code, reason));
+        }
+        let status = state.status().unwrap_or(202);
+        Ok(Resp::with_status(
+            dto::RestoreObjectOutput {
+                // Present exactly when the request named one, which is what a select-on-restore
+                // asks for and an ordinary retrieval does not.
+                restore_output_path: document.output_location.as_ref().and_then(output_path_of),
+                ..dto::RestoreObjectOutput::default()
+            },
+            status,
+        ))
+    }
+
+    /// A select query, decoded and validated in full, and then refused.
+    ///
+    /// The refusal is the honest answer and the case corpus asserts it as one. A select's
+    /// response is a sequence of self-framed messages, which is a shape this crate's `Resp` does
+    /// not have; the framing itself is implemented and exported, and the plumbing that would put
+    /// it on a socket is not. So a well-formed query reaches this point and is told `501` — never
+    /// a bare `200`, which is what an unimplemented response half looks like when it is faked and
+    /// is indistinguishable to a client from a query that matched no rows.
+    ///
+    /// Everything before the refusal is real, and that is the part under test: the body was
+    /// parsed out of a document rooted at `SelectObjectContentRequest`, every member reached the
+    /// input, and [`validate_select`] refused the ones AWS documents as impossible — which is why
+    /// a malformed query answers its own `400` here rather than this `501`.
+    fn select_object_content(&self, input: &dto::SelectObjectContentInput) -> HandlerResult<dto::SelectObjectContent> {
+        let fixture = self.borrow()?;
+        require_bucket(&fixture, &input.bucket)?;
+        validate_select(
+            &input.expression,
+            &input.expression_type,
+            &input.input_serialization,
+            &input.output_serialization,
+            input.scan_range.as_ref(),
+        )
+        .map_err(|rejection| HandlerError::new(rejection.code(), rejection.reason()))?;
+        if fixture.object(input.bucket.as_str(), input.key.as_str()).is_none() {
+            return Err(no_such_key(input.key.as_str()));
+        }
+        Err(HandlerError::new(ErrorCode::NOT_IMPLEMENTED, SELECT_RESPONSE_NOT_IMPLEMENTED))
     }
 
     /// Opens a multipart upload, and records the attributes only this request can state.

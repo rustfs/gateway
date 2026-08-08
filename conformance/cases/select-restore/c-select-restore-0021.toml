@@ -1,0 +1,43 @@
+[case]
+id = "c-select-restore-0021"
+schema_version = 1
+title = "A select naming version 1 reaches no route"
+rationale = """
+The other half of the predicate: the value is compared, not merely required to be present. A row that only pinned the key's presence would decode a version-1 request with the version-2 grammar and answer as though it had understood it."""
+polarity = "negative"
+operation = "SelectObjectContent"
+tags = ["select", "routing"]
+timeout_ms = 10000
+quirks = ["q-select-0001"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_SelectObjectContent.html"
+summary = "The operation is addressed with select together with select-type set to 2."
+kind = "aws-doc"
+[[setup.buckets]]
+name = "conf-select"
+
+[[setup.objects]]
+bucket = "conf-select"
+key = "rows.csv"
+body = { utf8 = "a,b\n1,2\n" }
+
+[request]
+method = "POST"
+target = "/conf-select/rows.csv?select&select-type=1"
+headers = { "content-type" = "application/xml" }
+body = { utf8 = '<SelectObjectContentRequest><Expression>SELECT * FROM S3Object</Expression><ExpressionType>SQL</ExpressionType><InputSerialization><CSV><FileHeaderInfo>USE</FileHeaderInfo><FieldDelimiter>,</FieldDelimiter><QuoteCharacter>"</QuoteCharacter></CSV><CompressionType>NONE</CompressionType></InputSerialization><OutputSerialization><CSV><RecordDelimiter>\n</RecordDelimiter></CSV></OutputSerialization></SelectObjectContentRequest>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 501
+connection_after = "open"
+
+[expect.error]
+code = "NotImplemented"
+request_id_present = true
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+contains_utf8 = ["This request does not name any S3 operation"]

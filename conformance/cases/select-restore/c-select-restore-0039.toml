@@ -1,0 +1,56 @@
+[case]
+id = "c-select-restore-0039"
+schema_version = 1
+title = "A select-on-restore with a bad expression type is refused exactly as a plain select is"
+rationale = """
+The nested SelectParameters carries the same four members a SelectObjectContentRequest does, so the two paths have to refuse the same documents with the same code — a restore that accepted a dialect the select operation rejects would be a second, laxer entry to the same query engine. The mutation pass found this uncovered on the wire: deleting the nested validation entirely left every case green, because only the shared module's own unit tests reached it."""
+polarity = "negative"
+operation = "RestoreObject"
+tags = ["restore", "select", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-restore-0004"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_SelectParameters.html"
+summary = "The structure a select restore carries publishes the same expression type, expression and serialization members the select operation does."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_SelectObjectContent.html"
+summary = "The operation publishes InvalidExpressionType for a request naming anything other than SQL."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "conf-restore"
+
+[[setup.objects]]
+bucket = "conf-restore"
+key = "cold.txt"
+body = { utf8 = "archived payload" }
+storage_class = "GLACIER"
+
+[request]
+method = "POST"
+target = "/conf-restore/cold.txt?restore"
+headers = { "content-type" = "application/xml" }
+body = { utf8 = '<RestoreRequest><Type>SELECT</Type><SelectParameters><InputSerialization><CSV></CSV></InputSerialization><ExpressionType>PARTIQL</ExpressionType><Expression>SELECT * FROM S3Object</Expression><OutputSerialization><CSV></CSV></OutputSerialization></SelectParameters><OutputLocation><S3><BucketName>conf-results</BucketName><Prefix>out/</Prefix></S3></OutputLocation></RestoreRequest>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+code = "InvalidExpressionType"
+request_id_present = true
+
+[expect.headers_present]
+"content-type" = "application/xml"
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+not_contains_utf8 = ["S3Object"]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>InvalidExpressionType</Code><Message>ExpressionType must be SQL</Message><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''

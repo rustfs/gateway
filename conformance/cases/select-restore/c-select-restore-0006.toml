@@ -1,0 +1,93 @@
+[case]
+id = "c-select-restore-0006"
+schema_version = 1
+title = "All three documented retrieval tiers are accepted"
+rationale = """
+The accepting direction of the closed tier set. Without it a validator that refused every tier would satisfy the out-of-set case on its own, and the refusal would be indistinguishable from a family that does not support tiers at all. Three keys rather than three requests to one, so no exchange is answered from the state a previous one left."""
+polarity = "positive"
+operation = "RestoreObject"
+tags = ["restore"]
+timeout_ms = 10000
+quirks = ["q-restore-0005"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GlacierJobParameters.html"
+summary = "The Tier member documents Standard, Bulk and Expedited as its value set."
+kind = "aws-doc"
+[[setup.buckets]]
+name = "conf-restore"
+
+[[setup.objects]]
+bucket = "conf-restore"
+key = "cold-0.txt"
+body = { utf8 = "archived payload" }
+storage_class = "GLACIER"
+
+[[setup.objects]]
+bucket = "conf-restore"
+key = "cold-1.txt"
+body = { utf8 = "archived payload" }
+storage_class = "GLACIER"
+
+[[setup.objects]]
+bucket = "conf-restore"
+key = "cold-2.txt"
+body = { utf8 = "archived payload" }
+storage_class = "DEEP_ARCHIVE"
+
+[connection]
+reuse = true
+
+[[exchanges]]
+name = "tier-expedited"
+
+[exchanges.request]
+method = "POST"
+target = "/conf-restore/cold-0.txt?restore"
+headers = { "content-type" = "application/xml" }
+body = { utf8 = '<RestoreRequest><Days>2</Days><GlacierJobParameters><Tier>Expedited</Tier></GlacierJobParameters></RestoreRequest>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 202
+connection_after = "open"
+
+[exchanges.expect.body]
+size = 0
+
+[[exchanges]]
+name = "tier-standard"
+
+[exchanges.request]
+method = "POST"
+target = "/conf-restore/cold-1.txt?restore"
+headers = { "content-type" = "application/xml" }
+body = { utf8 = '<RestoreRequest><Days>2</Days><GlacierJobParameters><Tier>Standard</Tier></GlacierJobParameters></RestoreRequest>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 202
+connection_after = "open"
+
+[exchanges.expect.body]
+size = 0
+
+[[exchanges]]
+name = "tier-bulk"
+
+[exchanges.request]
+method = "POST"
+target = "/conf-restore/cold-2.txt?restore"
+headers = { "content-type" = "application/xml" }
+body = { utf8 = '<RestoreRequest><Days>2</Days><GlacierJobParameters><Tier>Bulk</Tier></GlacierJobParameters></RestoreRequest>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 202
+connection_after = "open"
+
+[exchanges.expect.body]
+size = 0

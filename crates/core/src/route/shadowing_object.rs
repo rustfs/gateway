@@ -425,4 +425,58 @@ pub(super) const DECLS: &[ShadowingDecl] = &[
                  body — destroying the object a court told somebody to keep, with a 200.",
         evidence: &[PUT_OBJECT_LEGAL_HOLD_DOC, PUT_OBJECT_DOC],
     },
+    // The `?restore` and `?select` rows are the first object subresources in the POST method,
+    // which is why they overlap nothing outside the multipart band: PutObject, GetObject,
+    // DeleteObject and CopyObject all pin a different method, so their selectors and these two
+    // never meet. What they do meet is the two multipart POSTs — a completion and an initiation
+    // are also `POST /{Bucket}/{Key+}` — and each other. Five pairs, and none of them is a
+    // refinement: every one is settled by the band.
+    ShadowingDecl {
+        winner: "CompleteMultipartUpload",
+        shadowed: "RestoreObject",
+        reason: "A POST to an object key carrying both ?uploadId and ?restore asks to finish an \
+                 upload and to retrieve an archived copy of the same key at once. AWS documents \
+                 no such combination, so the multipart band (420) is tried before the restore row \
+                 (570) — the order every other object subresource band settled at. The other way \
+                 round the completion would be dropped and its parts left dangling, with a 202 \
+                 that says a retrieval was started instead.",
+        evidence: &[COMPLETE_MPU_DOC, RESTORE_OBJECT_DOC],
+    },
+    ShadowingDecl {
+        winner: "CreateMultipartUpload",
+        shadowed: "RestoreObject",
+        reason: "The same pair one multipart operation over: ?uploads beside ?restore names an \
+                 initiation and a retrieval at once, and the multipart band (450) is tried before \
+                 the restore row (570).",
+        evidence: &[CREATE_MPU_DOC, RESTORE_OBJECT_DOC],
+    },
+    ShadowingDecl {
+        winner: "CompleteMultipartUpload",
+        shadowed: "SelectObjectContent",
+        reason: "?uploadId beside ?select&select-type=2 reaches both rows: a completion carries a \
+                 CompleteMultipartUpload document and a select carries a \
+                 SelectObjectContentRequest, and one body cannot be both. The multipart band (420) \
+                 is tried before the select row (580), so the body is read as the document the \
+                 winning row's decoder expects rather than parsed twice.",
+        evidence: &[COMPLETE_MPU_DOC, SELECT_OBJECT_CONTENT_DOC],
+    },
+    ShadowingDecl {
+        winner: "CreateMultipartUpload",
+        shadowed: "SelectObjectContent",
+        reason: "?uploads beside ?select&select-type=2 names an initiation and a query at once, \
+                 and the multipart band (450) is tried before the select row (580).",
+        evidence: &[CREATE_MPU_DOC, SELECT_OBJECT_CONTENT_DOC],
+    },
+    ShadowingDecl {
+        winner: "RestoreObject",
+        shadowed: "SelectObjectContent",
+        reason: "?restore and ?select&select-type=2 are two subresources of one object and \
+                 neither selector refines the other — the select row pins one query key more, but \
+                 a different one — so the band decides: restore at 570 is tried before select at \
+                 580. The order is arbitrary in the sense that AWS documents neither, and fixed \
+                 here so that it is not decided by source order instead. The two are not variants \
+                 of one request: the select-on-restore form is spelled inside a RestoreRequest, as \
+                 <Type>SELECT</Type> with SelectParameters, and never as both query keys at once.",
+        evidence: &[RESTORE_OBJECT_DOC, SELECT_OBJECT_CONTENT_DOC],
+    },
 ];

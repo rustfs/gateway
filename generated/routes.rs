@@ -463,6 +463,33 @@ pub static ROUTES: &[RouteRow] = &[
         ],
     },
     RouteRow {
+        operation: "RestoreObject",
+        precedence: 570,
+        method: "POST",
+        target: "Object",
+        path_shape: "/{Bucket}/{Key+}",
+        success_status: 202,
+        predicates: &[
+            RoutePredicate::Method("POST"),
+            RoutePredicate::Target("Object"),
+            RoutePredicate::QueryPresent("restore"),
+        ],
+    },
+    RouteRow {
+        operation: "SelectObjectContent",
+        precedence: 580,
+        method: "POST",
+        target: "Object",
+        path_shape: "/{Bucket}/{Key+}",
+        success_status: 200,
+        predicates: &[
+            RoutePredicate::Method("POST"),
+            RoutePredicate::Target("Object"),
+            RoutePredicate::QueryPresent("select"),
+            RoutePredicate::QueryEquals("select-type", "2"),
+        ],
+    },
+    RouteRow {
         operation: "ListObjectsV2",
         precedence: 600,
         method: "GET",

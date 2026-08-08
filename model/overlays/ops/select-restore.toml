@@ -1,0 +1,151 @@
+# Copyright 2026 RustFS Team
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Family: archive retrieval and select. RestoreObject (`POST /b/k?restore`) and
+# SelectObjectContent (`POST /b/k?select&select-type=2`) — the two object operations that do not
+# fit the request-then-one-answer model, and the reason they travel together.
+#
+# What lands here is the request half of both, complete, plus the routing that stops either from
+# being answered by a neighbour, plus the frame encoder a select response is made of. What does
+# not land is the select **response**: an event stream is a third shape of `Resp<O>`, alongside
+# the settled answer and the committed one, and adding it changes the response type of this
+# crate, of the facade, and of every assembly above them. The task issue puts that decision with
+# the response-model owner rather than with this family, so it is fenced here in the overlay
+# (`q-select-0009`), in `crates/core/src/ops/select_object_content.rs`, and in
+# `crates/core/src/ops/shared/event_stream.rs`. Nothing in this tree emits a stream, and no
+# conformance case asserts one — a half-wired stream that answered structurally plausible frames
+# would be worse than the honest gap, because it would read as working.
+#
+# The routing reason is not the object-lock family's data loss, and is stated as what it is.
+# `POST /{Bucket}/{Key+}` was a shape the table knew only as the multipart band, so both requests
+# reached **no row at all** and were refused with the "no route" 501 — the message that tells an
+# SDK the endpoint is probably not S3 — rather than the "not registered" 501 that tells it the
+# operation is unavailable here. Neither request was being answered with another operation's
+# data, so no debt-register line retires with this family.
+
+include = ["RestoreObject", "SelectObjectContent"]
+
+# =============================================================================================
+# RestoreObject
+#
+# The tens-aligned object-subresource slots run 470-540 and are full: attributes at 470,
+# ?tagging at 480-500, ?retention and ?legal-hold at 510-540. The next tens-aligned slot is 550,
+# which the object ACL pair has reserved, so this pair packs at 570/580 — behind the multipart
+# band (400-460), which keeps a POST naming an upload with the upload it names.
+#
+# The status declaration is the interesting part. The model's `http` trait says 200 and AWS
+# documents 202 for the common case, so `success_status` is overridden to 202 and the 200 an
+# already-restored copy answers is declared as the alternative. Both numbers are in the success
+# family and a client polls on the difference, which is why the choice is data here and in
+# `RestoreObject::ALT_SUCCESS_STATUSES` rather than a number a handler picks (q-restore-0001).
+# =============================================================================================
+[op.RestoreObject]
+precedence = 570
+auth_action = "s3:RestoreObject"
+success_status = 202
+alt_success_statuses = [200]
+# A RestoreRequest is a handful of scalars, one glacier-tier element and an optional output
+# location; the 64 KiB ceiling every configuration write in this table uses bounds it with orders
+# of magnitude to spare, and bounds the nested S3Location's grant list with it.
+request_max_bytes = 65536
+error_codes = [
+  "NoSuchBucket",
+  "NoSuchKey",
+  "AccessDenied",
+  "MalformedXML",
+  "InvalidRequest",
+  "InvalidArgument",
+  "RestoreAlreadyInProgress",
+  "InvalidObjectState",
+  "ObjectAlreadyInActiveTierError",
+]
+url_encoded_fields = []
+input_hot = ["Key", "RestoreRequest", "VersionId"]
+output_hot = ["RestoreOutputPath"]
+input_required = ["RestoreRequest"]
+quirk_refs = [
+  "q-restore-0001",
+  "q-restore-0002",
+  "q-restore-0003",
+  "q-restore-0004",
+  "q-restore-0005",
+  "q-restore-0006",
+  "q-restore-0007",
+  "q-restore-0008",
+]
+
+# =============================================================================================
+# SelectObjectContent
+#
+# The one operation in the supported surface whose XML request members sit at operation level
+# rather than inside an `httpPayload` structure: the body root is `SelectObjectContentRequest`,
+# which is the input shape itself. The lowering derives that root from the shape name, and the
+# decoder emitter grew the symmetric case of the response side's `xml_body` to read it
+# (q-select-0008).
+#
+# `Payload` — the output's event stream — is dropped, because there is no response shape that
+# could carry it and a generated encoder for a union of frames would compile and be wrong. The
+# operation therefore encodes a bare 200 with no body, which is what an unimplemented response
+# half looks like when it is admitted rather than faked (q-select-0009).
+# =============================================================================================
+[op.SelectObjectContent]
+precedence = 580
+auth_action = "s3:GetObject"
+# The expression is the large member and it has AWS's own ceiling: 256 KiB. The document around
+# it is a handful of serialization settings, so 320 KiB bounds the whole body while leaving the
+# expression its full documented length plus the envelope (q-select-0002).
+request_max_bytes = 327680
+output_drop = ["Payload"]
+error_codes = [
+  "NoSuchBucket",
+  "NoSuchKey",
+  "AccessDenied",
+  "MalformedXML",
+  "InvalidRequest",
+  "InvalidArgument",
+  "InvalidExpressionType",
+  "ExpressionTooLong",
+  "InvalidTextEncoding",
+  "InvalidCompressionFormat",
+  "ObjectSerializationConflict",
+  "UnsupportedFunction",
+  "ParseUnexpectedToken",
+  "CSVParsingError",
+  "JSONParsingError",
+  "InvalidColumnIndex",
+  "InvalidDataType",
+  "OverMaxRecordSize",
+]
+url_encoded_fields = []
+input_hot = ["Key", "Expression", "ExpressionType", "InputSerialization", "OutputSerialization"]
+output_hot = []
+quirk_refs = [
+  "q-select-0001",
+  "q-select-0002",
+  "q-select-0003",
+  "q-select-0004",
+  "q-select-0005",
+  "q-select-0006",
+  "q-select-0007",
+  "q-select-0008",
+  "q-select-0009",
+]
+
+# The customer-supplied encryption key travels in a header on this operation exactly as it does
+# on the object read, and carries the same rule: it is never echoed, never logged, and never
+# named in a refusal.
+[[op.SelectObjectContent.field]]
+side = "input"
+name = "SSECustomerKey"
+quirks = ["q-sse-0010"]

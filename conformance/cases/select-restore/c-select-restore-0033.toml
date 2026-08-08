@@ -1,0 +1,39 @@
+[case]
+id = "c-select-restore-0033"
+schema_version = 1
+title = "A select with an empty body is MalformedXML"
+rationale = """
+Four of the six members are required by the model, so there is no document at all to default to. The refusal comes from the parser rather than from the validator, which is what keeps it a 400 about the body and not a 400 about a member."""
+polarity = "negative"
+operation = "SelectObjectContent"
+tags = ["select", "xml"]
+timeout_ms = 10000
+quirks = ["q-select-0008"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_SelectObjectContent.html"
+summary = "The documented request syntax carries an expression and both serializations, none of which has a default."
+kind = "aws-doc"
+[[setup.buckets]]
+name = "conf-select"
+
+[[setup.objects]]
+bucket = "conf-select"
+key = "rows.csv"
+body = { utf8 = "a,b\n1,2\n" }
+
+[request]
+method = "POST"
+target = "/conf-select/rows.csv?select&select-type=2"
+headers = { "content-type" = "application/xml" }
+body = { utf8 = '' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+code = "MalformedXML"
+request_id_present = true

@@ -1,0 +1,49 @@
+[case]
+id = "c-select-restore-0016"
+schema_version = 1
+title = "A retrieval tier outside the documented three is refused"
+rationale = """
+A tier nothing can schedule is a retrieval that silently never starts, and the caller has no signal at all — the 202 says it began. The set is closed and case-sensitive, which is what makes a plausible-looking spelling the interesting input."""
+polarity = "negative"
+operation = "RestoreObject"
+tags = ["restore", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-restore-0005"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GlacierJobParameters.html"
+summary = "The Tier member documents Standard, Bulk and Expedited as its only values."
+kind = "aws-doc"
+[[setup.buckets]]
+name = "conf-restore"
+
+[[setup.objects]]
+bucket = "conf-restore"
+key = "cold.txt"
+body = { utf8 = "archived payload" }
+storage_class = "GLACIER"
+
+[request]
+method = "POST"
+target = "/conf-restore/cold.txt?restore"
+headers = { "content-type" = "application/xml" }
+body = { utf8 = '<RestoreRequest><Days>1</Days><GlacierJobParameters><Tier>Instant</Tier></GlacierJobParameters></RestoreRequest>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+code = "InvalidArgument"
+request_id_present = true
+
+[expect.headers_present]
+"content-type" = "application/xml"
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>InvalidArgument</Code><Message>Tier must be one of Expedited, Standard or Bulk</Message><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''

@@ -1,0 +1,45 @@
+[case]
+id = "c-select-restore-0008"
+schema_version = 1
+title = "A scan range with both bounds is decoded and reaches the handler"
+rationale = """
+The accepting direction of the ScanRange grammar, and of the request codec as a whole: the answer is the deferral of the framed response, which can only be reached after the whole document — expression, both serializations, the compression and the window — has been parsed and validated. A decoder that lost the scan range would answer this identically, so the refusing cases beside it are what pin the member; this one pins that a legal window is not refused."""
+polarity = "positive"
+operation = "SelectObjectContent"
+tags = ["select", "xml"]
+timeout_ms = 10000
+quirks = ["q-select-0005"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ScanRange.html"
+summary = "The structure documents Start and End as the byte window a query is restricted to."
+kind = "aws-doc"
+[[setup.buckets]]
+name = "conf-select"
+
+[[setup.objects]]
+bucket = "conf-select"
+key = "rows.csv"
+body = { utf8 = "a,b\n1,2\n" }
+
+[request]
+method = "POST"
+target = "/conf-select/rows.csv?select&select-type=2"
+headers = { "content-type" = "application/xml" }
+body = { utf8 = '<SelectObjectContentRequest><Expression>SELECT * FROM S3Object</Expression><ExpressionType>SQL</ExpressionType><InputSerialization><CSV><FileHeaderInfo>USE</FileHeaderInfo><FieldDelimiter>,</FieldDelimiter><QuoteCharacter>"</QuoteCharacter></CSV><CompressionType>NONE</CompressionType></InputSerialization><OutputSerialization><CSV><RecordDelimiter>\n</RecordDelimiter></CSV></OutputSerialization><ScanRange><Start>0</Start><End>100</End></ScanRange></SelectObjectContentRequest>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 501
+connection_after = "open"
+
+[expect.error]
+code = "NotImplemented"
+request_id_present = true
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>NotImplemented</Code><Message>The select request was accepted and validated, but this backend cannot yet write an event-stream response</Message><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''

@@ -138,7 +138,5 @@ element_order = [
 reason = "P5 advanced object family; each member carries a body shape or a framing the data plane does not have."
 operations = [
   "GetObjectTorrent",
-  "RestoreObject",
-  "SelectObjectContent",
   "UpdateObjectEncryption",
 ]

@@ -23,7 +23,7 @@
 
 use std::borrow::Cow;
 
-/// The `StorageClass` string enumeration. Bound by: CopyObject, CreateMultipartUpload, GetBucketLifecycleConfiguration, GetBucketReplication, GetObject, GetObjectAttributes, HeadObject, ListMultipartUploads, ListObjectVersions, ListObjects, ListObjectsV2, ListParts, PutBucketLifecycleConfiguration, PutBucketReplication, PutObject.
+/// The `StorageClass` string enumeration. Bound by: CopyObject, CreateMultipartUpload, GetBucketLifecycleConfiguration, GetBucketReplication, GetObject, GetObjectAttributes, HeadObject, ListMultipartUploads, ListObjectVersions, ListObjects, ListObjectsV2, ListParts, PutBucketLifecycleConfiguration, PutBucketReplication, PutObject, RestoreObject.
 ///
 /// An open set: compare against the associated constants, and build a value the pinned
 /// model does not declare with [`StorageClass::custom`]. Adding a constant is a minor version

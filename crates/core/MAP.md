@@ -22,7 +22,7 @@ the one file that awaits, and it runs after the floor has admitted the request.
 | `src/route/shape.rs` | `RequestShape`: the concrete request a conflict is reported with | Rarely |
 | `src/route/table.rs` | `RouteTable::build` and its refusals, first-match `resolve`, the golden rendering | You changed a table or hit a build error |
 | `src/route/shadowing.rs` | `ShadowingDecl`, `ShadowingPolicy`, and the compile-time join of the table's two halves into `PROVISIONAL_SHADOWING` | The build asks you for a declaration |
-| `src/route/shadowing_bucket.rs`, `src/route/shadowing_object.rs` | The declarations themselves, split along the one seam the table has — which target the overlapping selectors address — when it outgrew the 800-line ceiling. Eighty bucket pairs, forty object ones | You are adding a declaration: pick the half by the target, and the join needs no edit |
+| `src/route/shadowing_bucket.rs`, `src/route/shadowing_object.rs` | The declarations themselves, split along the one seam the table has — which target the overlapping selectors address — when it outgrew the 800-line ceiling. Eighty bucket pairs, forty-five object ones | You are adding a declaration: pick the half by the target, and the join needs no edit |
 | `src/route/evidence.rs` | The AWS reference URL constants the shadowing declarations cite, split out when the table outgrew the file ceiling | You are adding a declaration for an operation with no constant yet |
 | `src/route/mask.rs` | Routing query keys → one bit each, derived from the table itself | You hit the 64-key ceiling |
 | `src/route/compiled.rs` | `CompiledRouter`: `method × target` buckets, mask rules, the empty-mask shortcut | You are changing lookup performance |
@@ -50,6 +50,10 @@ the one file that awaits, and it runs after the floor has admitted the request.
 | `src/ops/shared/encryption.rs` | The default-encryption document's semantic rules — the closed `SSEAlgorithm` set and the KMS-key-id/algorithm agreement — as `validate_encryption` and `EncryptionRejection`, with constant reasons that never repeat the sensitive key id | An encryption document was accepted or refused wrongly, or a refusal message is suspected of echoing a key id |
 | `src/ops/get_bucket_replication.rs`, `src/ops/put_bucket_replication.rs`, `src/ops/delete_bucket_replication.rs` | The `?replication` band, 394/395/396 — configuration codec only; rule evaluation, cross-site transfer and the `x-amz-replication-status` header (P5-01) are the engine's. The GET row retires the `GetBucketReplication -> ListObjects` debt-register line; the unconfigured read is `ReplicationConfigurationNotFoundError`, one of the few codes whose literal ends in `Error`; the write passes `x-amz-bucket-object-lock-token` through unread | You are adding the sixth subresource triple, or you need the band that packs directly behind `?encryption` |
 | `src/ops/shared/replication.rs` | The replication document's semantic rules — the V1/V2 schema exclusivity (`classify_rule`, `RuleShape`), the filter's one-child grammar and `<And>` floor, the 1000-rule cap, `ID` bounds and uniqueness — as `validate_replication` and `ReplicationRejection`. The leniencies matter more than the refusals: this is the one configuration RustFS parses **fail-closed**, so a stricter decoder makes buckets unusable rather than switching a feature off | A replication document was accepted or refused wrongly, or you are deciding whether a new check belongs in the validator or in a documented leniency |
+| `src/ops/restore_object.rs`, `src/ops/select_object_content.rs` | The object `?restore` and `?select` rows, 570/580 — the two POSTs on an object key that the table knew only as the multipart band, so before these rows both requests reached **no route** and were refused with the "the vhost domain is probably unconfigured" 501, which an SDK reads as "not an S3 endpoint". `RestoreObject` declares `success_status = 202` and `ALT_SUCCESS_STATUSES = &[200]`, the only place the poll-loop distinction is written down; `SelectObjectContent` is request-codec only, and its response is fenced (see below) | You are adding an object subresource in the POST method, or asking where the 202/200 difference is decided |
+| `src/ops/shared/restore.rs` | The retrieval contract: `RestoreState`'s four outcomes and their statuses (202 / 200 / 409 / 403), the `RestoreRequest` grammar — the Days form against the SELECT form and the members that may not cross — the closed `Tier` set, and `RestoreStatus` with `format_restore_status` / `parse_restore_status`, the one renderer and the one parser of the structured `x-amz-restore` header. Nothing here performs, times or expires a retrieval | A restore answered the wrong status, or `x-amz-restore` came out spelled differently in two places |
+| `src/ops/shared/select.rs` | What a query may say about the data: the one-of-three `InputSerialization`, the one-of-two `OutputSerialization`, the `ScanRange` grammar, the closed `ExpressionType` and `CompressionType` sets, and the 256 KiB expression ceiling — shared by `SelectObjectContent` and by the `SelectParameters` a select-on-restore nests, so the two are refused identically. The expression itself is never parsed and never appears in a refusal | A select was accepted or refused wrongly, or a refusal is suspected of echoing user SQL |
+| `src/ops/shared/event_stream.rs` | The `application/vnd.amazon.event-stream` framing: one message's prelude, its two CRC-32s over two different ranges, the header block, and `EventSequence`, which refuses an out-of-order message and refuses to be dropped without a terminator. **Nothing in this workspace sends a frame** — a stream is a third shape of `Resp<O>` and adding it is the response model owner's decision — so this is the framing without the plumbing, deliberately | You are wiring a select response, or asking why an encoder exists with no caller |
 | `src/ops/shared/bucket_region.rs` | Where `x-amz-bucket-region` must appear, and the two redirects that carry it: the 301 for a bucket in another region and the 307 shape whose trigger this crate does not own | A redirect is missing the header an SDK needs to complete it |
 | `src/ops/shared/location_constraint.rs` | `LocationConstraint` parsing: the `EU` alias, the empty-element rule, the us-east-1 omission rule, and the strict match against the one `RegionSet` the signature scope also reads. `RegionMatchPolicy` is the configuration item | A creation was accepted or refused for the wrong region |
 | `src/ops/shared/copy_source.rs` | `x-amz-copy-source`: the three grammars, the split-before-decode order, the source-authorization type state, the self-copy classification and the stricter copy-range rule | You are touching anything a copy reads from, or asking why the source's bucket cannot be read without a proof |
@@ -66,8 +70,8 @@ the one file that awaits, and it runs after the floor has admitted the request.
 | `src/registry/builder.rs` | `RouterBuilder`: `handle`, `route`, `require`, `build`, and `BuildError` | You are assembling a service |
 | `src/error.rs` | `PreAuthError` and the closed pre-authentication status set | You are raising an error before authn |
 | `src/dispatch.rs` | `Router`: route, then registration, then parameters — three failures, not one | You are wiring the pipeline |
-| `tests/route_table.rs` | 22 positive / 78 negative — every routing and build-refusal case, plus the attributes row, the `?cors`, `?lifecycle`, `?encryption`, `?replication` and both `?tagging` bands (object and bucket), the `?object-lock` pair and the `?retention` / `?legal-hold` rows, and the bucket lifecycle band whose `QueryAbsent` predicates are checked one subresource key at a time | You changed `table.rs` or `lattice.rs` |
-| `tests/params_and_dispatch.rs` | 10 positive / 25 negative — the 400-not-501 rule, the error properties, the routed-but-unhandled `501` over the generated table for `?attributes`, the `?cors`, `?lifecycle`, `?encryption`, `?replication` and `?object-lock` bands, all six `?tagging` requests, the four `?retention` / `?legal-hold` requests and all three bucket lifecycle methods, the declared `NoSuchTagSet` unconfigured answer, the replication read's own and the object-lock family's two distinct ones, and the deferred bucket subresource request that must reach no route at all | You changed `registry.rs` or `error.rs` |
+| `tests/route_table.rs` | 23 positive / 84 negative — every routing and build-refusal case, plus the attributes row, the `?cors`, `?lifecycle`, `?encryption`, `?replication` and both `?tagging` bands (object and bucket), the `?object-lock` pair and the `?retention` / `?legal-hold` rows, and the bucket lifecycle band whose `QueryAbsent` predicates are checked one subresource key at a time | You changed `table.rs` or `lattice.rs` |
+| `tests/params_and_dispatch.rs` | 12 positive / 26 negative — the 400-not-501 rule, the error properties, the routed-but-unhandled `501` over the generated table for `?attributes`, the `?cors`, `?lifecycle`, `?encryption`, `?replication` and `?object-lock` bands, all six `?tagging` requests, the four `?retention` / `?legal-hold` requests and all three bucket lifecycle methods, the declared `NoSuchTagSet` unconfigured answer, the replication read's own and the object-lock family's two distinct ones, and the deferred bucket subresource request that must reach no route at all | You changed `registry.rs` or `error.rs` |
 | `tests/hot_path.rs` | 7 positive / 10 negative — cost, the key ceiling, and the differential generator | You changed `compiled.rs` or `mask.rs` |
 | `tests/golden.rs` + `tests/golden/route-table.txt` | The whole table as text, so a routing change shows up in a diff | Codegen changed |
 | `tests/registration.rs` | 7 positive / 17 negative — the registration rules, erasure, `require`, the 501 | You changed anything under `registry/` |
@@ -132,6 +136,34 @@ the one file that awaits, and it runs after the floor has admitted the request.
   Sixty-four short sorted keys is six comparisons and no build script.
 
 ## Open for maintainer review
+
+- **`SelectObjectContent` has no response, and the missing piece is a type rather than an
+  omission.** `Resp<O>` is a status plus an `Answer<O>` with two variants — settled and committed
+  — and a select's answer is a third: a status line sent before the first record exists, then a
+  sequence of self-framed messages, with failures expressed *inside* the stream while the status
+  line already says `200`. Adding that variant changes `Resp`, `EncodedResponse`, the facade's
+  response type and every assembly above them at once, which is a contract decision this family
+  is not entitled to take alone; the task issue (rustfs/backlog#1730 §3) says so in as many words
+  and asks for a sub-issue instead. What landed is therefore the request half in full, the route
+  rows, and `ops/shared/event_stream.rs` — the framing, byte for byte, both CRC-32s included, and
+  the sequence guard that refuses an unterminated stream. What did not land is the plumbing that
+  would put those bytes on a socket. `crates/conformance/src/fixture.rs` answers a well-formed
+  select `501` with a message naming which half is missing, and `c-select-restore-0035` asserts
+  it: a bare `200` with no body would be indistinguishable to a client from a query that matched
+  no rows, which is the failure this repository's Measurement rules exist to stop shipping
+  quietly. The next step is one variant on `Answer<O>` and a `ResponseBody` that can carry a
+  frame sink; everything below it is written.
+- **`OperationSpec` has no `alt_success_statuses`, so `RestoreObject`'s second success status is
+  declared on the operation instead.** The overlay field exists, reaches the IR and is emitted
+  into `spec/operations/*.toml`, and nothing reads it — it was a declared-and-never-observed
+  field before this family used it. Rather than add a field to `OperationSpec` (118 struct-literal
+  sites, every one of which would have to be edited), the alternative is
+  `RestoreObject::ALT_SUCCESS_STATUSES`, a plain `pub const` in the operation module, checked
+  against `RestoreState::status` in both directions by `tests/params_and_dispatch.rs`. That keeps
+  the pair falsifiable but leaves two spellings of the same fact — the overlay's and the
+  operation module's — with no gate comparing them. The right shape is a field on `OperationSpec`
+  populated from the IR, which is a change to the registry's public API and belongs with whoever
+  owns it.
 
 - **The commit seam is wired end to end and nothing in this repository exercises it against the
   corpus.** `Resp::commit` and the facade's `commit` module answer `c-mpu-0001`, `c-mpu-0038`,
@@ -363,7 +395,7 @@ the one file that awaits, and it runs after the floor has admitted the request.
 ## Verify
 
 ```bash
-cargo test -p rustfs-gateway-core                                  # 250 tests
+cargo test -p rustfs-gateway-core                                  # 277 tests
 cargo clippy -p rustfs-gateway-core --all-targets -- -D warnings
 cargo fmt --all --check
 bash scripts/check_license_headers.sh

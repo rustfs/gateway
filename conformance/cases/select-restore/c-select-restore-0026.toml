@@ -1,0 +1,48 @@
+[case]
+id = "c-select-restore-0026"
+schema_version = 1
+title = "Two output serializations at once are an ObjectSerializationConflict"
+rationale = """
+The same rule on the answer's shape. A caller that asked for both has not said how to read what comes back, and a server that chose one would send records the client's parser refuses — which surfaces as corrupt data rather than as an error."""
+polarity = "negative"
+operation = "SelectObjectContent"
+tags = ["select", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-select-0004"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_OutputSerialization.html"
+summary = "The structure documents CSV and JSON as alternative descriptions of how records are returned."
+kind = "aws-doc"
+[[setup.buckets]]
+name = "conf-select"
+
+[[setup.objects]]
+bucket = "conf-select"
+key = "rows.csv"
+body = { utf8 = "a,b\n1,2\n" }
+
+[request]
+method = "POST"
+target = "/conf-select/rows.csv?select&select-type=2"
+headers = { "content-type" = "application/xml" }
+body = { utf8 = '<SelectObjectContentRequest><Expression>SELECT * FROM S3Object</Expression><ExpressionType>SQL</ExpressionType><InputSerialization><CSV><FileHeaderInfo>USE</FileHeaderInfo><FieldDelimiter>,</FieldDelimiter><QuoteCharacter>"</QuoteCharacter></CSV><CompressionType>NONE</CompressionType></InputSerialization><OutputSerialization><CSV></CSV><JSON></JSON></OutputSerialization></SelectObjectContentRequest>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+code = "ObjectSerializationConflict"
+request_id_present = true
+
+[expect.headers_present]
+"content-type" = "application/xml"
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>ObjectSerializationConflict</Code><Message>OutputSerialization must name exactly one of CSV or JSON</Message><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''

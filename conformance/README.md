@@ -115,11 +115,17 @@ must agree case for case; a case that could name a path would be a case that hid
   `xml`, `wire-bytes`, `etag`, `routing`, `vhost`, `conditional`, `preconditions`, `list`,
   `pagination`, `multipart`, `checksum`, `range`, `encoding`, `cors`, `encryption`, `lifecycle`, `replication`, `region`, `security`, `dos`,
   `timing`, `connection`, `event-stream`, `tls`, `h2`, `error-shape`, `known-divergence`, `tagging`,
-  `object-lock`, and `slow`. `slow` is reserved: it moves a case out of the pull-request gate and
+  `object-lock`, `restore`, `select`, and `slow`. `slow` is reserved: it moves a case out of the
+  pull-request gate and
   into the merge queue. `region` marks a case whose subject is the deployment's region posture — the
   location-constraint rules and the `x-amz-bucket-region` redirect contract. `object-lock` marks a
   case about the WORM family's codec — the lock configuration, retention and legal-hold documents;
-  lock *enforcement* is later work and no case here asserts it.
+  lock *enforcement* is later work and no case here asserts it. `restore` marks a case about
+  archive retrieval — the four-state status mapping, the `RestoreRequest` document and the
+  structured `x-amz-restore` header; how long a retrieval takes is the backend's and no case here
+  asserts it. `select` marks a case about the select request codec; the framed response is not
+  wired, so no case asserts an event stream and the deferral itself is what `event-stream` marks
+  where it appears beside `select`.
 
 ## Cases and quirks reference each other
 

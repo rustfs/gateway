@@ -1,0 +1,48 @@
+[case]
+id = "c-select-restore-0030"
+schema_version = 1
+title = "An expression type outside the one-value set is InvalidExpressionType"
+rationale = """
+SQL is the only documented value and the operation publishes a code for anything else, so a caller sending a dialect this service does not run learns which member is wrong rather than being told the document is malformed. The spelling is case-sensitive, which is what makes the lowercase form the interesting input."""
+polarity = "negative"
+operation = "SelectObjectContent"
+tags = ["select", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-select-0006"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_SelectObjectContent.html"
+summary = "The operation documents SQL as the only expression type and publishes InvalidExpressionType."
+kind = "aws-doc"
+[[setup.buckets]]
+name = "conf-select"
+
+[[setup.objects]]
+bucket = "conf-select"
+key = "rows.csv"
+body = { utf8 = "a,b\n1,2\n" }
+
+[request]
+method = "POST"
+target = "/conf-select/rows.csv?select&select-type=2"
+headers = { "content-type" = "application/xml" }
+body = { utf8 = '<SelectObjectContentRequest><Expression>SELECT * FROM S3Object</Expression><ExpressionType>sql</ExpressionType><InputSerialization><CSV><FileHeaderInfo>USE</FileHeaderInfo><FieldDelimiter>,</FieldDelimiter><QuoteCharacter>"</QuoteCharacter></CSV><CompressionType>NONE</CompressionType></InputSerialization><OutputSerialization><CSV><RecordDelimiter>\n</RecordDelimiter></CSV></OutputSerialization></SelectObjectContentRequest>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+code = "InvalidExpressionType"
+request_id_present = true
+
+[expect.headers_present]
+"content-type" = "application/xml"
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>InvalidExpressionType</Code><Message>ExpressionType must be SQL</Message><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''

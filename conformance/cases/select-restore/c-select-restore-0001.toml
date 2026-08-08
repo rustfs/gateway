@@ -1,0 +1,40 @@
+[case]
+id = "c-select-restore-0001"
+schema_version = 1
+title = "A first retrieval of an archived object is 202 Accepted"
+rationale = """
+The status is the whole answer here: a restore returns no document, so 202 against 200 is the only thing a client can read, and it is what tells a poll loop to come back later. A backend that answered 200 would report the copy as already readable and every poll would stop on the first request."""
+polarity = "positive"
+operation = "RestoreObject"
+tags = ["restore", "routing"]
+timeout_ms = 10000
+quirks = ["q-restore-0001"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_RestoreObject.html"
+summary = "The operation documents 202 Accepted for a retrieval that is being initiated."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "conf-restore"
+
+[[setup.objects]]
+bucket = "conf-restore"
+key = "cold.txt"
+body = { utf8 = "archived payload" }
+storage_class = "GLACIER"
+
+[request]
+method = "POST"
+target = "/conf-restore/cold.txt?restore"
+headers = { "content-type" = "application/xml" }
+body = { utf8 = '<RestoreRequest><Days>1</Days></RestoreRequest>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 202
+connection_after = "open"
+
+[expect.body]
+size = 0

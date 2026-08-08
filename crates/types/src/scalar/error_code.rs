@@ -174,6 +174,28 @@ error_codes! {
     MALFORMED_POLICY = "MalformedPolicy" => BAD_REQUEST;
     MALFORMED_POST_REQUEST = "MalformedPOSTRequest" => BAD_REQUEST;
     MALFORMED_XML = "MalformedXML" => BAD_REQUEST;
+    // ── SelectObjectContent's own codes ───────────────────────────────────────────────────────
+    //
+    // Twelve codes that belong to one operation, listed here rather than left to the fallback for
+    // a reason the fallback cannot serve: a code with no row is *rendered*, so an implementation
+    // that answered `CSVParsingError` without a row would answer the fallback status and read as
+    // correct. Every one is a 400 — the request described data the server could not read the way
+    // the request said it was written — and none is a 5xx: the object is fine, the description of
+    // it is not. When this crate raises them is a separate question and the answer is "never":
+    // parsing an expression and reading a record are the storage side's, and these rows exist so
+    // that side can express what it found.
+    CSV_PARSING_ERROR = "CSVParsingError" => BAD_REQUEST;
+    EXPRESSION_TOO_LONG = "ExpressionTooLong" => BAD_REQUEST;
+    INVALID_COLUMN_INDEX = "InvalidColumnIndex" => BAD_REQUEST;
+    INVALID_COMPRESSION_FORMAT = "InvalidCompressionFormat" => BAD_REQUEST;
+    INVALID_DATA_TYPE = "InvalidDataType" => BAD_REQUEST;
+    INVALID_EXPRESSION_TYPE = "InvalidExpressionType" => BAD_REQUEST;
+    INVALID_TEXT_ENCODING = "InvalidTextEncoding" => BAD_REQUEST;
+    JSON_PARSING_ERROR = "JSONParsingError" => BAD_REQUEST;
+    OBJECT_SERIALIZATION_CONFLICT = "ObjectSerializationConflict" => BAD_REQUEST;
+    OVER_MAX_RECORD_SIZE = "OverMaxRecordSize" => BAD_REQUEST;
+    PARSE_UNEXPECTED_TOKEN = "ParseUnexpectedToken" => BAD_REQUEST;
+    UNSUPPORTED_FUNCTION = "UnsupportedFunction" => BAD_REQUEST;
     MAX_MESSAGE_LENGTH_EXCEEDED = "MaxMessageLengthExceeded" => BAD_REQUEST;
     MAX_POST_PRE_DATA_LENGTH_EXCEEDED = "MaxPostPreDataLengthExceededError" => BAD_REQUEST;
     METADATA_TOO_LARGE = "MetadataTooLarge" => BAD_REQUEST;
@@ -245,6 +267,9 @@ error_codes! {
     CONDITIONAL_REQUEST_CONFLICT = "ConditionalRequestConflict" => CONFLICT;
     INVALID_BUCKET_STATE = "InvalidBucketState" => CONFLICT;
     OPERATION_ABORTED = "OperationAborted" => CONFLICT;
+    /// A second restore for an object whose retrieval has not finished. A 409 and not a 202: the
+    /// request was not accepted, and a client that read one would stop polling.
+    RESTORE_ALREADY_IN_PROGRESS = "RestoreAlreadyInProgress" => CONFLICT;
     /// A `PUT` with no `Content-Length`. A 411, not a 400: the client must add the header, not fix
     /// its parameters.
     MISSING_CONTENT_LENGTH = "MissingContentLength" => LENGTH_REQUIRED;

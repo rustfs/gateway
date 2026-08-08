@@ -1,0 +1,48 @@
+[case]
+id = "c-select-restore-0031"
+schema_version = 1
+title = "A compression this side cannot name is InvalidCompressionFormat"
+rationale = """
+A compression nothing can decompress is a stream nobody can read, and the failure would otherwise surface halfway through the answer — after the status line has already said 200 — instead of before it. The operation publishes its own code for the case."""
+polarity = "negative"
+operation = "SelectObjectContent"
+tags = ["select", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-select-0006"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_SelectObjectContent.html"
+summary = "The operation publishes InvalidCompressionFormat, and the input structure documents NONE, GZIP and BZIP2."
+kind = "aws-doc"
+[[setup.buckets]]
+name = "conf-select"
+
+[[setup.objects]]
+bucket = "conf-select"
+key = "rows.csv"
+body = { utf8 = "a,b\n1,2\n" }
+
+[request]
+method = "POST"
+target = "/conf-select/rows.csv?select&select-type=2"
+headers = { "content-type" = "application/xml" }
+body = { utf8 = '<SelectObjectContentRequest><Expression>SELECT * FROM S3Object</Expression><ExpressionType>SQL</ExpressionType><InputSerialization><CSV><FileHeaderInfo>USE</FileHeaderInfo><FieldDelimiter>,</FieldDelimiter><QuoteCharacter>"</QuoteCharacter></CSV><CompressionType>ZSTD</CompressionType></InputSerialization><OutputSerialization><CSV><RecordDelimiter>\n</RecordDelimiter></CSV></OutputSerialization></SelectObjectContentRequest>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+code = "InvalidCompressionFormat"
+request_id_present = true
+
+[expect.headers_present]
+"content-type" = "application/xml"
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>InvalidCompressionFormat</Code><Message>CompressionType must be one of NONE, GZIP or BZIP2</Message><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''

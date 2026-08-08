@@ -72,15 +72,41 @@ const DEFAULT_MISSING_CODE: &str = "InvalidArgument";
 /// an enclosing element. Which name is which comes from [`super::list_elements`] rather than from
 /// here, so the reader and the writer cannot disagree about it — they did, and the disagreement
 /// was invisible because both spellings compile.
-fn list_source(flattened: bool, wrapper_name: Option<&str>, wire: &str) -> String {
+///
+/// Returned as the links of a method chain rather than as one string, because rustfmt breaks a
+/// chain that is too long link by link and this emitter has to produce what rustfmt would.
+fn list_source(flattened: bool, wrapper_name: Option<&str>, wire: &str) -> Vec<String> {
     let names = super::list_elements(flattened, wrapper_name, wire);
     match &names.wrapper {
-        None => format!("node.children_named(\"{}\")", names.entry),
-        Some(wrapper) => format!(
-            "node.child(\"{wrapper}\").into_iter().flat_map(|w| w.children_named(\"{}\"))",
-            names.entry
-        ),
+        None => vec![format!("children_named(\"{}\")", names.entry)],
+        Some(wrapper) => vec![
+            format!("child(\"{wrapper}\")"),
+            "into_iter()".to_owned(),
+            format!("flat_map(|w| w.children_named(\"{}\"))", names.entry),
+        ],
     }
+}
+
+/// The `for item in <chain> {` header, laid out the way rustfmt would lay it out.
+///
+/// rustfmt keeps a chain on one line while the links after the receiver fit `chain_width` and the
+/// whole line fits `max_width`; past either it puts every link on its own line and the opening
+/// brace on a line of its own. The wrapped `AccessControlList` list inside a restore's
+/// `OutputLocation` is what first crossed it.
+fn for_header(indent: usize, receiver: &str, links: &[String]) -> String {
+    let pad = " ".repeat(indent);
+    let chain: String = links.iter().map(|link| format!(".{link}")).collect();
+    let single = format!("{pad}for item in {receiver}{chain} {{\n");
+    if single.len().saturating_sub(1) <= MAX_WIDTH && chain.len() <= CHAIN_WIDTH {
+        return single;
+    }
+    let continuation = " ".repeat(indent.saturating_add(4));
+    let mut out = format!("{pad}for item in {receiver}\n");
+    for link in links {
+        out.push_str(&format!("{continuation}.{link}\n"));
+    }
+    out.push_str(&format!("{pad}{{\n"));
+    out
 }
 
 /// rustfmt's `max_width` for this repository.
@@ -140,8 +166,13 @@ pub fn body(ir: &OperationIr) -> Result<String, String> {
         out.push_str("        value::require_integrity(request)?;\n");
     }
 
-    for field in &ir.input {
-        out.push_str(&one_field(ir, field)?);
+    // Where the XML document is opened, for an operation whose body members sit at operation
+    // level rather than inside a payload structure. It is opened at the *first* such member and
+    // not before, so a head binding declared ahead of it is still read ahead of it: an operation
+    // that refuses on its head must not have buffered a body first.
+    let first_body_member = ir.input.iter().position(|field| field.binding == Binding::BodyXml);
+    for (index, field) in ir.input.iter().enumerate() {
+        out.push_str(&one_field(ir, field, first_body_member == Some(index))?);
     }
     if !ir.input.iter().any(uses_body) {
         out.push_str("        let _ = body;\n");
@@ -155,7 +186,10 @@ fn uses_body(field: &Field) -> bool {
 }
 
 /// Renders the lines that read one input field.
-fn one_field(ir: &OperationIr, field: &Field) -> Result<String, String> {
+///
+/// `open_document` is true for the first operation-level [`Binding::BodyXml`] member, which is
+/// the one that parses the request body into the `root` node its siblings then read from.
+fn one_field(ir: &OperationIr, field: &Field, open_document: bool) -> Result<String, String> {
     let op = &ir.operation;
     let member = &field.name;
     let target = format!("input.{}", naming::field_name(member));
@@ -304,11 +338,10 @@ fn one_field(ir: &OperationIr, field: &Field) -> Result<String, String> {
             }
         },
         Binding::BodyXml => {
-            return Err(expr::unsupported(
-                op,
-                member,
-                "an operation-level XML member is reached through its payload structure",
-            ));
+            if open_document {
+                out.push_str(&open_request_document(ir)?);
+            }
+            out.push_str(&xml_member(op, field, &target, &ir.quirks, "root", 8)?);
         }
         Binding::StatusCode => {
             return Err(expr::unsupported(op, member, "a status code is a response member"));
@@ -371,6 +404,138 @@ fn wrap(field: &Field, inner: &str) -> String {
     if bare { inner.to_owned() } else { format!("Some({inner})") }
 }
 
+/// Opens the request document for an operation whose XML members sit at operation level.
+///
+/// The symmetric case of [`super::encode`]'s `xml_body`: a response has always been able to put
+/// its body members directly under a root, and until `SelectObjectContent` no *request* in the
+/// supported surface did. The alternative shape — one `httpPayload` structure holding the whole
+/// document — is handled at the member itself, in [`one_field`], and reaches a different reader.
+///
+/// The root is parsed once and bound to `root`; every operation-level member then reads out of it
+/// with exactly the lines a nested member of a shape reads with, because both go through
+/// [`xml_member`]. No `.about(..)` rides the wrong-root refusal here: at operation level there is
+/// no single member the root belongs to, and naming an arbitrary one of them would put a member
+/// into an error that is about the document.
+fn open_request_document(ir: &OperationIr) -> Result<String, String> {
+    let root = ir
+        .xml
+        .request_root
+        .as_deref()
+        .filter(|name| !name.is_empty())
+        .ok_or_else(|| format!("codec {}: the operation has body members and no request root", ir.operation))?;
+    let mut aliases: Vec<String> = vec![root.to_owned()];
+    aliases.extend(ir.xml.request_root_aliases.clone());
+    let names = aliases
+        .iter()
+        .map(|name| format!("\"{name}\""))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let mut out = String::new();
+    let _ = writeln!(out, "        // The XML request body, rooted at `{root}`.");
+    out.push_str("        let raw_body = body.into_buffered()?;\n");
+    out.push_str("        let root = rustfs_gateway_xml::parse(raw_body.as_ref())\n");
+    out.push_str(
+        "            .map_err(|_| CodecError::malformed_xml(\"the request body is not the XML this operation accepts\"))?;\n",
+    );
+    let _ = writeln!(out, "        if ![{names}].contains(&root.name.as_str()) {{");
+    out.push_str("            return Err(CodecError::malformed_xml(\"the request body has the wrong root element\"));\n");
+    out.push_str("        }\n");
+    Ok(out)
+}
+
+/// Renders the lines that read one XML member out of `node`, wherever that member lives.
+///
+/// One copy, two callers: [`shape_reader`] reads a nested shape's members out of `node` at indent
+/// four, and [`one_field`] reads an operation-level member out of `root` at indent eight. They
+/// were two copies for exactly as long as only one of them existed; a second copy is how the
+/// required-member refusal and the flattened-list rule would come to disagree.
+fn xml_member(
+    operation: &str,
+    field: &Field,
+    target: &str,
+    quirks: &[Quirk],
+    node: &str,
+    indent: usize,
+) -> Result<String, String> {
+    let member = &field.name;
+    let wire = field.wire_name.clone().unwrap_or_else(|| member.clone());
+    let pad = " ".repeat(indent);
+    let inner = indent.saturating_add(4);
+    let mut out = String::new();
+    match &field.ty {
+        Type::List {
+            member: entry,
+            flattened,
+            wrapper_name,
+        } if !matches!(entry.as_ref(), Type::Structure(_)) => {
+            let conversion = expr::from_wire(
+                entry,
+                member,
+                operation,
+                true,
+                bounds::of(field, quirks, operation)?,
+                forms::of(field, quirks, operation)?,
+            )?;
+            let links = list_source(*flattened, wrapper_name.as_deref(), &wire);
+            out.push_str(&for_header(indent, node, &links));
+            let _ = writeln!(out, "{}let raw = item.text.as_str();", " ".repeat(inner));
+            out.push_str(&push_stmt(inner, target, &conversion));
+            let _ = writeln!(out, "{pad}}}");
+        }
+        Type::List {
+            member: entry,
+            flattened,
+            wrapper_name,
+        } => {
+            let Type::Structure(entry_name) = entry.as_ref() else {
+                return Err(expr::unsupported(
+                    operation,
+                    member,
+                    "a request body list carries structures in the supported surface",
+                ));
+            };
+            let reader = format!("read_{}", naming::module_name(entry_name));
+            let links = list_source(*flattened, wrapper_name.as_deref(), &wire);
+            out.push_str(&for_header(indent, node, &links));
+            out.push_str(&push_stmt(inner, target, &format!("{reader}(item)?")));
+            let _ = writeln!(out, "{pad}}}");
+            // Only the model's own `required` reaches here, and only `MalformedXML` can come
+            // out of it. See the module documentation: an overlay that makes a list required in
+            // order to reach an error code is taking the operation's answer, not stating a
+            // wire fact.
+            if field.required {
+                let _ = writeln!(out, "{pad}if {target}.is_empty() {{");
+                let _ = writeln!(
+                    out,
+                    "{}return Err(CodecError::malformed_xml(\"the body carries no entry for a member that requires one\").about(\"{member}\"));",
+                    " ".repeat(inner)
+                );
+                let _ = writeln!(out, "{pad}}}");
+            }
+        }
+        Type::Structure(entry_name) => {
+            let reader = format!("read_{}", naming::module_name(entry_name));
+            let _ = writeln!(out, "{pad}if let Some(child) = {node}.child(\"{wire}\") {{");
+            out.push_str(&assign(inner, target, &wrap(field, &format!("{reader}(child)?"))));
+            out.push_str(&required_member_refusal(field, member, indent));
+        }
+        other => {
+            let conversion = expr::from_wire(
+                other,
+                member,
+                operation,
+                true,
+                bounds::of(field, quirks, operation)?,
+                forms::of(field, quirks, operation)?,
+            )?;
+            let _ = writeln!(out, "{pad}if let Some(raw) = {node}.child_text(\"{wire}\") {{");
+            out.push_str(&assign(inner, target, &wrap(field, &conversion)));
+            out.push_str(&required_member_refusal(field, member, indent));
+        }
+    }
+    Ok(out)
+}
+
 /// Renders the reader for one nested request shape.
 ///
 /// Takes the operation's resolved quirks because a bounded integer is bounded wherever it is read:
@@ -384,10 +549,21 @@ pub fn shape_reader(operation: &str, name: &str, shape: &Shape, quirks: &[Quirk]
         "/// Reads one `{name}` element. Members are matched by local name, so a namespace-prefixed\n\
          /// body and a bare one decode identically."
     );
+    // A shape the model declares with no members at all — `ParquetInput` is the one, and it is
+    // how a Select request says "Parquet" and nothing further. Its reader reads nothing, so both
+    // the node and the mutability would be unused, and this workspace builds with warnings denied.
+    let empty = shape.fields.is_empty();
+    let node = if empty { "_node" } else { "node" };
+    let construct = if empty {
+        // `..Default::default()` over a struct with no fields is `clippy::needless_update`.
+        format!("let shape = dto::{type_name} {{}};")
+    } else {
+        format!("let mut shape = dto::{type_name} {{ ..Default::default() }};")
+    };
     // rustfmt's normal form: the signature stays on one line until it would cross `max_width`,
     // then the parameter gets its own line. A lifecycle shape name is what first crossed it.
     let single = format!(
-        "fn read_{}(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::{type_name}, CodecError> {{",
+        "fn read_{}({node}: &rustfs_gateway_xml::XmlNode) -> Result<dto::{type_name}, CodecError> {{",
         naming::module_name(name)
     );
     if single.len() <= MAX_WIDTH {
@@ -395,86 +571,15 @@ pub fn shape_reader(operation: &str, name: &str, shape: &Shape, quirks: &[Quirk]
     } else {
         let _ = writeln!(
             out,
-            "fn read_{}(\n    node: &rustfs_gateway_xml::XmlNode,\n) -> Result<dto::{type_name}, CodecError> {{",
+            "fn read_{}(\n    {node}: &rustfs_gateway_xml::XmlNode,\n) -> Result<dto::{type_name}, CodecError> {{",
             naming::module_name(name)
         );
     }
-    let _ = writeln!(out, "    let mut shape = dto::{type_name} {{ ..Default::default() }};");
+    let _ = writeln!(out, "    {construct}");
 
     for field in &shape.fields {
-        let member = &field.name;
-        let target = format!("shape.{}", naming::field_name(member));
-        let wire = field.wire_name.clone().unwrap_or_else(|| member.clone());
-        match &field.ty {
-            Type::List {
-                member: inner,
-                flattened,
-                wrapper_name,
-            } if !matches!(inner.as_ref(), Type::Structure(_)) => {
-                let conversion = expr::from_wire(
-                    inner,
-                    member,
-                    operation,
-                    true,
-                    bounds::of(field, quirks, operation)?,
-                    forms::of(field, quirks, operation)?,
-                )?;
-                let source = list_source(*flattened, wrapper_name.as_deref(), &wire);
-                let _ = writeln!(out, "    for item in {source} {{");
-                let _ = writeln!(out, "        let raw = item.text.as_str();");
-                out.push_str(&push_stmt(8, &target, &conversion));
-                out.push_str("    }\n");
-            }
-            Type::List {
-                member: inner,
-                flattened,
-                wrapper_name,
-            } => {
-                let Type::Structure(inner_name) = inner.as_ref() else {
-                    return Err(expr::unsupported(
-                        operation,
-                        member,
-                        "a request body list carries structures in the supported surface",
-                    ));
-                };
-                let reader = format!("read_{}", naming::module_name(inner_name));
-                let source = list_source(*flattened, wrapper_name.as_deref(), &wire);
-                let _ = writeln!(out, "    for item in {source} {{");
-                out.push_str(&push_stmt(8, &target, &format!("{reader}(item)?")));
-                out.push_str("    }\n");
-                // Only the model's own `required` reaches here, and only `MalformedXML` can come
-                // out of it. See the module documentation: an overlay that makes a list required in
-                // order to reach an error code is taking the operation's answer, not stating a
-                // wire fact.
-                if field.required {
-                    let _ = writeln!(out, "    if {target}.is_empty() {{");
-                    let _ = writeln!(
-                        out,
-                        "        return Err(CodecError::malformed_xml(\"the body carries no entry for a member that requires one\").about(\"{member}\"));"
-                    );
-                    out.push_str("    }\n");
-                }
-            }
-            Type::Structure(inner_name) => {
-                let reader = format!("read_{}", naming::module_name(inner_name));
-                let _ = writeln!(out, "    if let Some(child) = node.child(\"{wire}\") {{");
-                out.push_str(&assign(8, &target, &wrap(field, &format!("{reader}(child)?"))));
-                out.push_str(&required_member_refusal(field, member));
-            }
-            other => {
-                let conversion = expr::from_wire(
-                    other,
-                    member,
-                    operation,
-                    true,
-                    bounds::of(field, quirks, operation)?,
-                    forms::of(field, quirks, operation)?,
-                )?;
-                let _ = writeln!(out, "    if let Some(raw) = node.child_text(\"{wire}\") {{");
-                out.push_str(&assign(8, &target, &wrap(field, &conversion)));
-                out.push_str(&required_member_refusal(field, member));
-            }
-        }
+        let target = format!("shape.{}", naming::field_name(&field.name));
+        out.push_str(&xml_member(operation, field, &target, quirks, "node", 4)?);
     }
     out.push_str("    value::exit(shape.check_required())?;\n    Ok(shape)\n}\n");
     Ok(out)
@@ -487,16 +592,25 @@ pub fn shape_reader(operation: &str, name: &str, shape: &Shape, quirks: &[Quirk]
 /// the placeholder default, and the decoder's exit check turned a client's malformed document
 /// into this side's `500 InternalError`; the omission of a required element is a schema
 /// violation and answers `MalformedXML` like every other one.
-fn required_member_refusal(field: &Field, member: &str) -> String {
+fn required_member_refusal(field: &Field, member: &str, indent: usize) -> String {
+    let pad = " ".repeat(indent);
     if !field.required {
-        return "    }\n".to_owned();
+        return format!("{pad}}}\n");
     }
     let mut out = String::new();
-    out.push_str("    } else {\n");
-    let _ = writeln!(
-        out,
-        "        return Err(CodecError::malformed_xml(\"the body omits a member the schema requires\").about(\"{member}\"));"
-    );
-    out.push_str("    }\n");
+    let _ = writeln!(out, "{pad}}} else {{");
+    let inner = " ".repeat(indent.saturating_add(4));
+    let refusal = format!("CodecError::malformed_xml(\"the body omits a member the schema requires\").about(\"{member}\")");
+    let single = format!("{inner}return Err({refusal});");
+    if single.len() <= MAX_WIDTH {
+        let _ = writeln!(out, "{single}");
+    } else {
+        // rustfmt's normal form once the statement crosses `max_width`: the argument gets its own
+        // line. Reached only at the deeper indent an operation-level member is written at.
+        let _ = writeln!(out, "{inner}return Err(");
+        let _ = writeln!(out, "{inner}    {refusal}");
+        let _ = writeln!(out, "{inner});");
+    }
+    let _ = writeln!(out, "{pad}}}");
     out
 }

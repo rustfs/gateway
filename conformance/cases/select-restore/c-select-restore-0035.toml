@@ -1,0 +1,51 @@
+[case]
+id = "c-select-restore-0035"
+schema_version = 1
+title = "A well-formed select is told the framed response is not implemented, not answered 200"
+rationale = """
+The deferral, asserted as a fact rather than left as a comment. A select's answer is a sequence of self-framed messages, which is a response shape this framework's Resp does not have; the framing is implemented and proved by unit tests, and the plumbing that would put it on a socket is not. The alternative — a bare 200 with no body — is indistinguishable to a client from a query that matched no rows, which is the failure this case exists to make impossible to ship quietly."""
+polarity = "negative"
+operation = "SelectObjectContent"
+tags = ["select", "event-stream", "known-divergence"]
+timeout_ms = 10000
+quirks = ["q-select-0009"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/RESTSelectObjectAppendix.html"
+summary = "The response is a sequence of self-framed messages, each a prelude with its own CRC, a header block, a payload and a message CRC."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/issues/350"
+summary = "Upstream shipped responses that ended without completing, which hangs a client — the failure a partly wired stream produces and a refusal does not."
+kind = "s3s-issue"
+[[setup.buckets]]
+name = "conf-select"
+
+[[setup.objects]]
+bucket = "conf-select"
+key = "rows.csv"
+body = { utf8 = "a,b\n1,2\n" }
+
+[request]
+method = "POST"
+target = "/conf-select/rows.csv?select&select-type=2"
+headers = { "content-type" = "application/xml" }
+body = { utf8 = '<SelectObjectContentRequest><Expression>SELECT * FROM S3Object</Expression><ExpressionType>SQL</ExpressionType><InputSerialization><CSV><FileHeaderInfo>USE</FileHeaderInfo><FieldDelimiter>,</FieldDelimiter><QuoteCharacter>"</QuoteCharacter></CSV><CompressionType>NONE</CompressionType></InputSerialization><OutputSerialization><CSV><RecordDelimiter>\n</RecordDelimiter></CSV></OutputSerialization></SelectObjectContentRequest>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 501
+connection_after = "open"
+headers_absent = ["x-amz-content-type"]
+
+[expect.error]
+code = "NotImplemented"
+request_id_present = true
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>NotImplemented</Code><Message>The select request was accepted and validated, but this backend cannot yet write an event-stream response</Message><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''

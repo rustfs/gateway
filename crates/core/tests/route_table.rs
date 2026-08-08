@@ -1349,6 +1349,148 @@ fn n_the_bucket_bands_are_unchanged_by_the_replication_band() {
     }
 }
 
+/// The `?restore` and `?select` rows claim the two POSTs the object target had no row for.
+///
+/// Positive half of the block below. Both are `POST /{Bucket}/{Key+}`, a shape the table only
+/// knew as the multipart band, so before these rows the two requests reached **no route at all**
+/// and were answered `501` with the "the vhost domain is probably unconfigured" message — the
+/// answer an SDK reads as "this endpoint does not implement S3", not as "this operation is not
+/// available here".
+#[test]
+fn the_restore_and_select_subresources_route_to_their_rows() {
+    let table = generated_table();
+    for (line, expected) in [
+        ("POST /bucket/key?restore", "RestoreObject"),
+        ("POST /bucket/key?select&select-type=2", "SelectObjectContent"),
+    ] {
+        let hit = table
+            .resolve(&Req::new(line).parts())
+            .unwrap_or_else(|| panic!("{line} has a route"));
+        assert_eq!(hit.op_name, expected, "{line}");
+        assert!(
+            hit.precedence > 540 && hit.precedence < 650,
+            "{line} must sit after the lock band and ahead of the plain object rows, got {}",
+            hit.precedence
+        );
+    }
+}
+
+/// Negative — `select-type` is part of the predicate, not decoration.
+///
+/// AWS spells the operation `?select&select-type=2`, and the `2` is the version of the request
+/// grammar. A table that pinned only `?select` would hand `?select&select-type=1` — a document
+/// this decoder has never validated — to `SelectObjectContent`. There is no row for it, so the
+/// request must reach nothing at all rather than the version-2 operation.
+#[test]
+fn n_a_select_request_without_select_type_two_does_not_reach_the_select_row() {
+    let table = generated_table();
+    for line in [
+        "POST /bucket/key?select",
+        "POST /bucket/key?select&select-type=1",
+        "POST /bucket/key?select&select-type=3",
+        "POST /bucket/key?select&select-type=",
+        "POST /bucket/key?select&select-type=02",
+        "POST /bucket/key?select-type=2",
+    ] {
+        assert_ne!(
+            routed(&table, &Req::new(line)),
+            Some("SelectObjectContent"),
+            "{line} must not be read as a version-2 select"
+        );
+    }
+}
+
+/// Negative — neither row is answered by a plain object operation in any method.
+///
+/// The control runs in both directions: the same two subresource keys are checked on `GET` and
+/// `PUT`, where the rows pin `Method(POST)` and the keys are inert, so the assertion below
+/// cannot be satisfied by a table that simply refuses everything.
+#[test]
+fn n_the_restore_and_select_keys_are_not_answered_by_the_object_band_on_post() {
+    let table = generated_table();
+    for line in ["POST /bucket/key?restore", "POST /bucket/key?select&select-type=2"] {
+        let hit = routed(&table, &Req::new(line));
+        assert_ne!(hit, Some("PutObject"), "{line}");
+        assert_ne!(hit, Some("GetObject"), "{line}");
+        assert_ne!(hit, Some("CopyObject"), "{line}");
+    }
+    for (line, expected) in [
+        ("GET /bucket/key?restore", "GetObject"),
+        ("PUT /bucket/key?restore", "PutObject"),
+        ("GET /bucket/key?select&select-type=2", "GetObject"),
+        ("PUT /bucket/key?select&select-type=2", "PutObject"),
+    ] {
+        assert_eq!(routed(&table, &Req::new(line)), Some(expected), "{line}");
+    }
+}
+
+/// Negative — a POST naming an upload beside `?restore` or `?select` stays with the multipart
+/// band.
+///
+/// This is the pair with teeth. `CompleteMultipartUpload` is `POST /{Bucket}/{Key+}?uploadId`,
+/// so a completion that also carried `?restore` reaches both rows; the multipart band is tried
+/// first (420/450 before 570/580), which keeps a completion a completion.
+#[test]
+fn n_a_post_naming_an_upload_and_a_restore_or_select_stays_with_the_multipart_band() {
+    let table = generated_table();
+    for (line, expected) in [
+        ("POST /bucket/key?uploadId=u1&restore", "CompleteMultipartUpload"),
+        ("POST /bucket/key?uploads&restore", "CreateMultipartUpload"),
+        ("POST /bucket/key?uploadId=u1&select&select-type=2", "CompleteMultipartUpload"),
+        ("POST /bucket/key?uploads&select&select-type=2", "CreateMultipartUpload"),
+    ] {
+        assert_eq!(routed(&table, &Req::new(line)), Some(expected), "{line}");
+    }
+}
+
+/// Negative — inside the family the band order decides, and it is recorded rather than inherited
+/// from source order.
+///
+/// Neither selector refines the other — `?restore` and `?select&select-type=2` are different
+/// keys — so a request carrying both is settled by precedence alone: the restore row is at 570.
+#[test]
+fn n_the_restore_row_wins_over_the_select_row_when_a_request_carries_both() {
+    let table = generated_table();
+    let line = "POST /bucket/key?restore&select&select-type=2";
+    assert_eq!(routed(&table, &Req::new(line)), Some("RestoreObject"), "{line}");
+}
+
+/// Negative — both keys on a bucket target are inert.
+///
+/// Both rows pin `Target(Object)`. On a bucket, `POST /bucket?restore` reaches no row (the only
+/// bucket POST is `?delete`), and the GET falls to the listing fallback exactly as an unknown
+/// query key does on AWS.
+#[test]
+fn n_the_restore_and_select_keys_on_a_bucket_do_not_reach_the_object_rows() {
+    let table = generated_table();
+    for line in ["POST /bucket?restore", "POST /bucket?select&select-type=2"] {
+        assert_eq!(routed(&table, &Req::new(line)), None, "{line}");
+    }
+    for (line, expected) in [
+        ("GET /bucket?restore", "ListObjects"),
+        ("GET /bucket?select&select-type=2", "ListObjects"),
+    ] {
+        assert_eq!(routed(&table, &Req::new(line)), Some(expected), "{line}");
+    }
+}
+
+/// Negative — the neighbouring bands still answer their own requests beside the two new rows.
+#[test]
+fn n_the_object_band_is_unchanged_by_the_restore_and_select_rows() {
+    let table = generated_table();
+    for (line, expected) in [
+        ("GET /bucket/key", "GetObject"),
+        ("PUT /bucket/key", "PutObject"),
+        ("DELETE /bucket/key", "DeleteObject"),
+        ("POST /bucket/key?uploads", "CreateMultipartUpload"),
+        ("POST /bucket/key?uploadId=u1", "CompleteMultipartUpload"),
+        ("POST /bucket?delete", "DeleteObjects"),
+        ("GET /bucket/key?retention", "GetObjectRetention"),
+    ] {
+        assert_eq!(routed(&table, &Req::new(line)), Some(expected), "{line}");
+    }
+}
+
 /// c-route-1001 — two subresources at one precedence, reachable together.
 #[test]
 fn two_subresources_at_one_precedence_are_a_conflict() {

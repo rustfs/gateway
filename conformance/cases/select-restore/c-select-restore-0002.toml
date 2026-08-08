@@ -1,0 +1,63 @@
+[case]
+id = "c-select-restore-0002"
+schema_version = 1
+title = "A repeat retrieval of a copy that is already back is 200 OK, not 202"
+rationale = """
+Both answers are successes and a client polls on the difference, which is what makes this the pair that has to be asserted together: a mapping stuck on 202 satisfies the first exchange and a mapping stuck on 200 satisfies the second, and only the two in one case catch either. The tier is Expedited because that is the dial this fixture uses to make the retrieval finish within the case; how long a real retrieval takes is the backend's and nothing here asserts it."""
+polarity = "positive"
+operation = "RestoreObject"
+tags = ["restore"]
+timeout_ms = 10000
+quirks = ["q-restore-0001"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_RestoreObject.html"
+summary = "The operation documents 200 OK when the object copy was already restored and 202 when one is initiated."
+kind = "aws-doc"
+[[setup.buckets]]
+name = "conf-restore"
+
+[[setup.objects]]
+bucket = "conf-restore"
+key = "cold.txt"
+body = { utf8 = "archived payload" }
+storage_class = "GLACIER"
+
+[connection]
+reuse = true
+
+[[exchanges]]
+name = "initiate"
+
+[exchanges.request]
+method = "POST"
+target = "/conf-restore/cold.txt?restore"
+headers = { "content-type" = "application/xml" }
+body = { utf8 = '<RestoreRequest><Days>1</Days><GlacierJobParameters><Tier>Expedited</Tier></GlacierJobParameters></RestoreRequest>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 202
+connection_after = "open"
+
+[exchanges.expect.body]
+size = 0
+
+[[exchanges]]
+name = "repeat"
+
+[exchanges.request]
+method = "POST"
+target = "/conf-restore/cold.txt?restore"
+headers = { "content-type" = "application/xml" }
+body = { utf8 = '<RestoreRequest><Days>1</Days><GlacierJobParameters><Tier>Expedited</Tier></GlacierJobParameters></RestoreRequest>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.body]
+size = 0

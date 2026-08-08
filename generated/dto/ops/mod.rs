@@ -68,5 +68,7 @@ pub mod put_object_legal_hold;
 pub mod put_object_lock_configuration;
 pub mod put_object_retention;
 pub mod put_object_tagging;
+pub mod restore_object;
+pub mod select_object_content;
 pub mod upload_part;
 pub mod upload_part_copy;

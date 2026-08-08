@@ -1,0 +1,61 @@
+[case]
+id = "c-select-restore-0004"
+schema_version = 1
+title = "A running retrieval reports x-amz-restore ongoing-request true, byte for byte"
+rationale = """
+The header is structured rather than a word, and every byte of the grammar is load-bearing because an SDK parses it: the name, the equals sign and both quotes. A value spelled true without them parses as nothing, and the read that carries it looks otherwise identical."""
+polarity = "positive"
+operation = "HeadObject"
+tags = ["restore", "wire-bytes"]
+timeout_ms = 10000
+quirks = ["q-restore-0002"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_HeadObject.html#API_HeadObject_ResponseSyntax"
+summary = "The head response documents x-amz-restore as an ongoing-request flag whose value is quoted."
+kind = "aws-doc"
+[[setup.buckets]]
+name = "conf-restore"
+
+[[setup.objects]]
+bucket = "conf-restore"
+key = "cold.txt"
+body = { utf8 = "archived payload" }
+storage_class = "GLACIER"
+
+[connection]
+reuse = true
+
+[[exchanges]]
+name = "initiate"
+
+[exchanges.request]
+method = "POST"
+target = "/conf-restore/cold.txt?restore"
+headers = { "content-type" = "application/xml" }
+body = { utf8 = '<RestoreRequest><Days>1</Days><GlacierJobParameters><Tier>Standard</Tier></GlacierJobParameters></RestoreRequest>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 202
+connection_after = "open"
+
+[exchanges.expect.body]
+size = 0
+
+[[exchanges]]
+name = "head-while-running"
+
+[exchanges.request]
+method = "HEAD"
+target = "/conf-restore/cold.txt"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.headers_present]
+"x-amz-restore" = 'ongoing-request="true"'
