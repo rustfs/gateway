@@ -731,5 +731,64 @@ PYEOF
 expect_fail check_cors_credentials_exclusive.sh \
     'the credentials constant renamed, leaving the guard with nothing to check' mut_credentials_constant_renamed
 
+# -----------------------------------------------------------------------------
+# check_no_minio_source.sh
+#
+# The clean-room provenance guard. Rule 1 (AGPL licence text) is exemptable through
+# scripts/allowances/clean-room-allowances.txt, so it gets two cases: one for a file
+# that is not on the list, and one proving the list is read as a list of paths rather
+# than as a licence to say anything anywhere. Rules 2, 3 and 4 have no exemption.
+#
+# The licence text and the provenance sentence are written with byte escapes, the same
+# device the Chinese cases above use and for the same reason: spelling them literally
+# would make the guard flag this file, and allowing this file would then let real AGPL
+# text and a real port comment sit here unnoticed forever. `\x41` is `A` and `\x6f` is
+# `o`, so the strings reach the sandbox intact and are absent from this source.
+# -----------------------------------------------------------------------------
+
+mut_agpl_licence_text() {
+    printf '\n// Licensed under the GNU \x41FFERO GENERAL PUBLIC LICENSE Version 3\n' \
+        >>crates/core/src/dialect/overlay.rs
+}
+expect_fail check_no_minio_source.sh \
+    'AGPL licence text in a source file' mut_agpl_licence_text
+
+mut_agpl_in_unlisted_prose() {
+    printf 'This component is offered under \x41GPL-3.0.\n' >crates/core/PROVENANCE.md
+}
+expect_fail check_no_minio_source.sh \
+    'a file naming the AGPL that the allowance list does not carry' mut_agpl_in_unlisted_prose
+
+mut_port_provenance_comment() {
+    printf '\n// The ordering above was p\x6frted from the minio server bucket handler.\n' \
+        >>crates/core/src/dialect/mod.rs
+}
+expect_fail check_no_minio_source.sh \
+    'a comment giving the contents a MinIO-server origin' mut_port_provenance_comment
+
+mut_vendored_server_tree() {
+    mkdir -p vendor/github.com/minio/minio/cmd
+    printf 'package cmd\n' >vendor/github.com/minio/minio/cmd/api-router.go
+}
+expect_fail check_no_minio_source.sh \
+    'a vendored MinIO server tree' mut_vendored_server_tree
+
+mut_minio_submodule() {
+    printf '[submodule "minio"]\n\tpath = third_party/minio\n\turl = https://github.com/minio/minio.git\n' \
+        >.gitmodules
+}
+expect_fail check_no_minio_source.sh \
+    'the MinIO server declared as a git submodule' mut_minio_submodule
+
+mut_clean_room_allowance_widened() {
+    # The allowance list turned into a blanket permission. The guard reads it as a list of
+    # paths, so a glob is not a path and the offending file is still reported -- which is the
+    # behaviour under test: widening the list must not silence rule 1 for everything.
+    printf '*\n' >scripts/allowances/clean-room-allowances.txt
+    printf 'Offered under the \x41ffero General Public License.\n' >crates/core/PROVENANCE.md
+}
+expect_fail check_no_minio_source.sh \
+    'an allowance list widened to a glob, which is not a path' mut_clean_room_allowance_widened
+
 printf '\n%s case(s), %s failure(s)\n' "$cases" "$failures"
 [[ "$failures" -eq 0 ]]

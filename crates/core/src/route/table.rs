@@ -295,7 +295,7 @@ impl RouteTable {
         let table = Self {
             entries: entries.into_boxed_slice(),
             constraints: constraints.into_boxed_slice(),
-            shadowing: *shadowing,
+            shadowing: shadowing.clone(),
         };
         // Declarations first: a declaration that has rotted is a more specific diagnostic than the
         // undeclared overlap it fails to cover, and reporting the vaguer one first sends the

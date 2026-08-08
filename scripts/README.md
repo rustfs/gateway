@@ -58,6 +58,7 @@ fixed now so that the same check does not get written twice under two names.
 | `check_no_dto_non_exhaustive.sh` | No generated dto struct carries `#[non_exhaustive]`; it forbids `..Default::default()` (E0639), which is the very syntax that keeps a new field minor (ADR-0004 P1) | P1-06 |
 | `check_no_exhaustive_destructuring.sh` | No hand-written code destructures a dto without a trailing `..`; that is the one pattern a new field breaks (ADR-0004 P3) | P1-06 |
 | `check_resolver_pure.sh` | `HostResolver::resolve` is synchronous and awaits nothing, no implementation holds a store handle, `HostQuery` declares exactly `host`/`path`/`method`, and no resolver code names a forwarded header. The resolver answers before authentication, so all four are amplification and enumeration properties rather than tidiness | P6-04 |
+| `check_no_minio_source.sh` | Clean-room provenance: no AGPL licence text outside `scripts/allowances/clean-room-allowances.txt`, no comment claiming a port from MinIO or Garage, no vendored server tree or Go source, no `minio/minio` submodule or dependency. Rules 2-4 are not exemptable | P6-08 |
 | `test_guard_scripts.sh` | Not a guard: runs every guard on the tree and asserts each one fails on an injected violation | P0 |
 
 ### Registered, not yet implemented (TODO)
@@ -77,6 +78,5 @@ fixed now so that the same check does not get written twice under two names.
 | `check_governor_position.sh` | `Governor::try_acquire` is called after routing and before the body is read | P3 |
 | `check_config_load_once.sh` | The policy/config snapshot is taken exactly once per request | P3 |
 | `check_no_header_unwrap.sh` | Header parsing never `unwrap`s | P3 |
-| `check_no_minio_source.sh` | Clean-room: no reference to MinIO server sources (AGPL-3.0 and archived) | P6-08 |
 | `check_no_duplicate_fuzz_targets.sh` | Fuzz targets are not duplicated between P2-07 and P8-07 | P8-07 |
 | `check_agents_no_dup.sh` | Scoped `AGENTS.md` files do not restate root rules | Deferred until layered `AGENTS.md` files exist |

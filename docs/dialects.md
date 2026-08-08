@@ -1,0 +1,183 @@
+# Dialects
+
+A **dialect** is what a deployment adds to this gateway that AWS does not define: an admin API, an
+STS surface, a vendor query key, a compatibility leniency. This document says what a dialect may
+change, what it may never change, and the licence boundary that governs reproducing another
+implementation's behaviour.
+
+The mechanism lives in `crates/core/src/dialect/`. The worked example is
+`crates/core/examples/dialect_overlay.rs`; every refusal below has a test in
+`crates/core/tests/dialect.rs`.
+
+## A dialect is an assembly unit, not a cargo feature
+
+The arrangement this replaces is a cargo feature switching between two generated code trees. It
+costs three things: the generated output doubles, two dialects cannot be enabled at once, and a
+deployment that wants its own has to fork the framework.
+
+A `Dialect` is a value instead. A deployment assembles as many as it needs and installs each one:
+
+```rust
+let router = RouterBuilder::new()
+    .dialect(&acme)
+    .dialect(&my_own)
+    .handle_without_codec::<AcmeOperation, _>(backend)
+    .build()?;
+```
+
+A conflict between two dialects — the same operation name, two rows at one precedence, an
+undeclared overlap — is a start-up failure naming both sources, rather than whichever registration
+the linker happened to see last.
+
+## Three orthogonal dimensions
+
+Compatibility with another implementation is not one thing. It is three, and they have different
+mechanisms, different blast radii and different rules.
+
+| # | Dimension | Mechanism | May | May not |
+|---|---|---|---|---|
+| 1 | **Extra operations** | `Dialect::operations`, this document | add a **new** `vendor:Name` operation with its own route row, spec, floor and handler | take an AWS operation name in any case; stand in front of a standard row without a declaration; change a standard operation's row, spec or authentication requirement |
+| 2 | **Extension fields on existing types** | `ExtField` codec vtable | add a child element to an existing parent shape | change an existing field's type, order or name; add a field to a security-relevant type |
+| 3 | **Parsing leniency** | runtime `CodecPolicy` | relax request-XML strictness — unknown elements, bare-literal bodies | relax anything about a security-relevant configuration, a signature, or an authorisation decision |
+
+**Only dimension 1 exists today.** Dimensions 2 and 3 depend on the `ExtField` feasibility spike
+and its ADR (task `P1-08`), which has not landed: `docs/adr/` has no ExtField ADR, so there is no
+accepted conclusion to implement. Implementing the vtable against a guess is exactly the thing the
+spike exists to prevent, so this document records the split and the boundary now, and the rows for
+2 and 3 are the contract their implementation has to satisfy rather than a description of code that
+exists.
+
+The reason the split matters even while two thirds of it is pending: dimension 1 is the one that
+touches routing and authorisation, which is where a mistake is a security incident rather than a
+compatibility gap. Keeping it separate is what lets it land first.
+
+## What a dialect operation must state
+
+Six facts, each of them checked, and every one of them refused when it is missing or when the two
+places it is written disagree.
+
+| Fact | Where the code says it | Where the overlay says it |
+|---|---|---|
+| Name | `Operation::NAME` | `OverlayRow::name` |
+| Precedence | `DialectRoute::precedence` | `OverlayRow::precedence` |
+| Selector | `DialectRoute::selector` | `OverlayRow::selector`, rendered |
+| Action and resource | `OperationSpec::auth` | `OverlayRow::action`, `OverlayRow::resource` |
+| Success status | `OperationSpec::success_status` | `OverlayRow::success_status` |
+| Anonymous reachability | `OperationFloor::allows_anonymous` | `OverlayRow::anonymous` |
+
+Plus evidence: `OverlayRow::evidence` is a non-empty list of URLs, and the sentence explaining each
+one is written by whoever added the row. Never paste another project's prose — behavioural facts are
+not copyrightable, the sentences describing them are (ADR-0001).
+
+### Where the overlay lives
+
+In the crate that owns the dialect, in one file, as `static` Rust data. `grep` for the vendor prefix
+finds the entire surface a deployment added.
+
+It is deliberately **not** under `model/overlays/`. That tree is the hand-written exception source
+for the *pinned AWS model*: every entry names an operation or a shape the model defines, and codegen
+fails on a name it does not have. A dialect operation is by definition not in the model.
+
+It is deliberately **not** TOML. Every string the route table holds is `&'static` — the operation
+name, the query keys inside a predicate, the spec's name — so a document parsed at start-up would
+have to leak every string it read before it could reach the table. And ring 1 has no TOML reader:
+the two in this workspace belong to build-time and test-time crates the protocol kernel must not
+depend on, and a third reader on the start-up path would exist to check at run time what the
+compiler already checks.
+
+What a data format would have bought is that the record can disagree with the behaviour. That is
+kept: the overlay is a second statement of the same six facts, and `DialectBuilder::build` refuses
+the dialect when the two disagree. It is the same arrangement as `ShadowingDecl`, which is also
+hand-written data checked against the table it describes.
+
+## Registration refusals
+
+All of these are start-up failures with a readable reason. The first four are
+`crates/core/src/registry/reject.rs`'s and apply to every registration, dialect or not; the rest are
+the dialect boundary's.
+
+| Rule | Refused | Why |
+|---|---|---|
+| Un-namespaced name | `MyOp` | "Is this operation AWS's?" must be answerable from the name alone — the route table, the posture report and the audit log all do it |
+| AWS name | `GetObject` | A dialect standing in front of an operation every client already calls |
+| AWS name in another case | `getobject` | Two registry entries a human reads as one |
+| No `AuthRequirement` | `auth: None` | The structural form of rustfs/rustfs#4845: a custom route that never reached the authorisation check because nothing said what permission it needed |
+| Malformed action | `notanaction` | An action that is not `service:Action` cannot be matched by a policy |
+| Duplicate name | two registrations | "The last registration wins" is how a plugin loaded later replaces a handler nobody expected it to touch |
+| Wrong vendor | `other:Thing` in the `acme` dialect | Otherwise one dialect vouches for another's operations |
+| No overlay row | declared in code only | The row is where the precedence and the evidence are reviewed |
+| No declaration | overlay row only | A row nothing declares reads as a reviewed decision about behaviour that does not exist |
+| Any of the six facts disagreeing | code says 505, overlay says 506 | The record and the behaviour must be one thing |
+| No evidence | `evidence: &[]` | A wire shape nobody sourced is a guess with a comment |
+| Unacknowledged anonymity | floor admits anonymous, row does not say so | An anonymous operation a reviewer cannot see lets an attacker choose the authentication strength by choosing the operation (`GHSA-5qfg-mf7r-jp3w`, `GHSA-3473-5353-xhwh`) |
+| Stale acknowledgement | row says anonymous, floor does not | The other direction; a field that is sometimes wrong stops being read |
+| Reserved endpoint family | `HostClass::S3Express` | That face carries constraints written for the operations AWS defines on it |
+| Empty selector | `selector: &[]` | An empty conjunction accepts every request that reaches its precedence; the route table allows one only in the fallback band, and a vendor operation is never that row |
+| A shadowing declaration about two operations the dialect did not add | `GetBucketAcl` over `ListObjects` | A dialect accounts for the overlaps its own row creates. Signing off on a standard pair is duplication today and a silent approval of a routing change the moment a model upgrade adds a pair nobody has reviewed |
+| Undeclared overlap | a row in front of a standard one | The route table's own decision, reached unchanged: a dialect selector that hides an AWS one needs a declaration with a reason and a source |
+| An added row wearing an AWS name | `RouteEntry { op_name: "GetObject", .. }` | Sends requests AWS defines to a handler nobody reviewed, whatever it registered as |
+
+There is no rule refusing a dialect that changes a standard operation's `OperationSpec`, because
+there is no way to write one: a spec is `&'static` data this crate owns, `Operation::spec` returns a
+shared reference, and no method mutates one. The absence of an API is a stronger guarantee than a
+check.
+
+## Precedence: what a dialect row can and cannot hide
+
+The route table is **first-match**, so the band a dialect row sits in is the whole of what it can
+shadow. The occupied bands are in `crates/core/src/route/table.rs`.
+
+Two consequences worth stating before you pick a number.
+
+**A row is only reachable if it is ahead of every standard row that would also accept the request.**
+A vendor query key on `GET /{bucket}` placed behind `ListObjects` is never reached: `ListObjects`
+pins no query key, so it accepts the request first and the vendor key is silently ignored. The
+answer is the wrong answer rather than an error, which is the worst kind.
+
+**Every overlap that placement creates has to be declared.** The default policy is
+`ShadowingPolicy::EveryOverlap`, and a client may send two query keys at once, so a dialect row in a
+busy method-and-target cell overlaps every other row in that cell — one declaration per pair, each
+with a reason and a source. Two ways to keep that small:
+
+- **Put an admin or STS surface on a path literal.** `POST /acme/admin/...` in the `0..=99` band
+  contradicts every bucket and object row, so it overlaps nothing and needs no declarations. This is
+  the shape to prefer for a whole API surface.
+- **Pick a sparse cell** when the operation genuinely has to look like an S3 request. `HEAD` on an
+  object target holds exactly one standard row, which is why the worked example uses it: one
+  overlap, one declaration.
+
+Moving a row afterwards is not a free edit. The declaration records which of the two has the lower
+precedence, so moving the row behind the operation it declared it shadows is refused as a stale
+declaration — the table will not quietly start answering the other operation.
+
+## Clean-room policy
+
+**Never read MinIO server source when implementing MinIO-compatible behaviour.** The same applies to
+Garage. This is a licence boundary, not a preference.
+
+`minio/minio` is AGPL-3.0 and its repository is archived. Behavioural **facts** are not
+copyrightable and may be used freely: what bytes go on the wire, which status a request gets, which
+element a client expects. The **source** may not be read, copied, vendored, linked or ported —
+a line-by-line translation into Rust is a derivative work, and "inspired by" is not what that is.
+
+Derive behaviour from:
+
+- protocol observation — captures, `mc --debug` output, a client library's own trace;
+- public API documentation;
+- this repository's existing behavioural records under `model/overlays/quirks/`;
+- upstream issue and PR **descriptions of behaviour**, stored as a URL plus a sentence you wrote.
+
+`minio-go` is Apache-2.0 and actively maintained; using it as a **client** in a test is unaffected by
+any of this. `minio/mint` is Apache-2.0 (and archived) and may be used as an external black-box
+runner, pinned by image digest, never as the primary gate.
+
+Enforced by `scripts/check_no_minio_source.sh`, which refuses AGPL licence text outside a short
+allowance list, a comment claiming a port from MinIO or Garage, a vendored server tree or any Go
+source, and a `minio/minio` submodule or dependency. Its negative controls are in
+`scripts/test_guard_scripts.sh`.
+
+A PR that implements a MinIO-compatible behaviour carries this line in its description:
+
+```text
+Clean-room: no minio server source was read; behavior derived from protocol observation only.
+```
