@@ -61,6 +61,13 @@
 //! a dialect or an admin call — registers through `handle_without_codec`, which says so at the
 //! call site and is reported afterwards by `HandlerTable::names_without_codec`.
 //!
+//! A whole surface of them — an admin API, an STS endpoint, a vendor query key — arrives as a
+//! `dialect::Dialect`: a value carrying one route row per operation it adds, checked against a
+//! hand-written overlay that records the same facts where a reviewer reads them. Installing one is
+//! `RouterBuilder::dialect`. What a dialect may and may not do is `docs/dialects.md`; the short
+//! version is that it may only *add*, its names must be `vendor:Name`, and a row that stands in
+//! front of an AWS one needs a declaration with a reason and a source.
+//!
 //! Three properties hold this together. Everything else here exists to serve them.
 //!
 //! 1. **Routing is ordered, not disjoint.** `GET /bucket?acl&tagging` names two subresources and
@@ -88,6 +95,7 @@
 
 pub mod codec;
 pub mod cors;
+pub mod dialect;
 pub mod dispatch;
 pub mod error;
 pub mod fault;
@@ -101,6 +109,7 @@ pub use crate::codec::{
     BodyAllowance, CodecError, EncodedResponse, MetaView, OperationCodec, RequestBody, ResponseBody, ResponseOverride,
     body_allowance,
 };
+pub use crate::dialect::{Dialect, DialectBuilder, DialectError, DialectOperation, DialectOverlay, DialectRoute, OverlayRow};
 pub use crate::dispatch::{Dispatch, Router, RouterBuildError};
 pub use crate::error::{DisallowedPreAuthCode, PRE_AUTH_STATUSES, PreAuthError};
 pub use crate::fault::{

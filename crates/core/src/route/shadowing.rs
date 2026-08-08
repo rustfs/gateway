@@ -29,6 +29,12 @@
 //! file scope, so [`PROVISIONAL_SHADOWING`] carries the declarations the generated table needs
 //! today, in the same four fields the overlay will use, with the loader left to P4-06. It is one
 //! declaration; the type, not the storage, is what the rest of the crate depends on.
+//!
+//! A dialect's declarations do not live here at all: they arrive with the
+//! [`crate::dialect::Dialect`] a deployment installs, are appended by [`ShadowingDecls::and`], and
+//! are checked by the same [`super::table::RouteTable::build`] that checks these ones.
+
+use std::borrow::Cow;
 
 /// One reviewed decision: this operation wins over that one, and here is why.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -77,16 +83,21 @@ pub enum ShadowingPolicy {
 /// placeholder element that is never a real declaration. Callers never see the seams:
 /// [`ShadowingDecls::iter`] reads every group end to end in source order, which is the only order
 /// anything here depends on.
-#[derive(Clone, Copy, Debug, Default)]
+///
+/// The group list is a [`Cow`] rather than a plain slice because a dialect's declarations arrive at
+/// assembly time, one group per dialect, and the count is not known until then — see
+/// [`ShadowingDecls::and`]. Every declaration inside a group is still `&'static`: what varies is
+/// how many groups there are, not where any of them lives.
+#[derive(Clone, Debug, Default)]
 pub struct ShadowingDecls {
-    groups: &'static [&'static [ShadowingDecl]],
+    groups: Cow<'static, [&'static [ShadowingDecl]]>,
     policy: ShadowingPolicy,
 }
 
 impl ShadowingDecls {
     /// An empty set: every cross-precedence overlap will be reported as undeclared.
     pub const NONE: Self = Self {
-        groups: &[],
+        groups: Cow::Borrowed(&[]),
         policy: ShadowingPolicy::EveryOverlap,
     };
 
@@ -97,9 +108,21 @@ impl ShadowingDecls {
     #[must_use]
     pub const fn over(groups: &'static [&'static [ShadowingDecl]]) -> Self {
         Self {
-            groups,
+            groups: Cow::Borrowed(groups),
             policy: ShadowingPolicy::EveryOverlap,
         }
+    }
+
+    /// The same declarations plus one more group.
+    ///
+    /// How a dialect's declarations reach the table: [`crate::registry::RouterBuilder::build`]
+    /// folds one group per installed dialect onto [`PROVISIONAL_SHADOWING`]. Appending rather than
+    /// replacing is the point — a dialect can declare the overlaps its own row creates and cannot
+    /// touch the reviewed record for the generated table.
+    #[must_use]
+    pub fn and(mut self, group: &'static [ShadowingDecl]) -> Self {
+        self.groups.to_mut().push(group);
+        self
     }
 
     /// The same declarations under a different policy. See [`ShadowingPolicy`].

@@ -65,7 +65,7 @@ mod builder;
 mod codecs;
 mod handlers;
 mod opset;
-mod reject;
+pub(crate) mod reject;
 
 use std::collections::BTreeMap;
 use std::fmt;
