@@ -1,0 +1,31 @@
+[case]
+id = "c-bucketconfig-0047"
+schema_version = 1
+title = "An empty logging document is accepted and means stop logging"
+rationale = """
+There is no DeleteBucketLogging, so the empty document is the only spelling of turning logging off. Refusing it would leave a bucket that can be switched on and never switched off again."""
+polarity = "negative"
+operation = "PutBucketLogging"
+tags = ["bucketconfig", "xml"]
+timeout_ms = 10000
+quirks = ["q-log-0002"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketLogging.html"
+summary = "The write reference documents the logging document, its wrapped grant list and its Content-MD5 header."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "conf-bucketconfig"
+[request]
+method = "PUT"
+target = "/conf-bucketconfig?logging"
+headers = { "content-md5" = "5lsneQpMoe/nAzwO1gWWEw==", "content-type" = "application/xml" }
+body = { utf8 = '<BucketLoggingStatus></BucketLoggingStatus>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+connection_after = "open"

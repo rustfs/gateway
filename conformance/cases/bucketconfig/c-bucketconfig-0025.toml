@@ -1,0 +1,32 @@
+[case]
+id = "c-bucketconfig-0025"
+schema_version = 1
+title = "A bucket with no acceleration document answers 200 with an empty document"
+rationale = """
+The same boundary as versioning and notification. An implementation that answered the website family's 404 here would tell every client that acceleration is broken rather than off."""
+polarity = "negative"
+operation = "GetBucketAccelerateConfiguration"
+tags = ["bucketconfig", "xml", "wire-bytes", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-acc-0001"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketAccelerateConfiguration.html"
+summary = "The read reference documents the acceleration status and lists no not-found error for an unconfigured bucket."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "conf-bucketconfig"
+[request]
+method = "GET"
+target = "/conf-bucketconfig?accelerate"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[expect.body]
+golden = "goldens/c-bucketconfig-0025.xml"

@@ -1,0 +1,29 @@
+[case]
+id = "c-bucketconfig-0033"
+schema_version = 1
+title = "Deleting a policy that was never configured answers 204"
+rationale = """
+Idempotent for the same reason as the website delete, and with a sharper consequence: a teardown script that treated the 404 as fatal would stop half way through removing a bucket's access configuration."""
+polarity = "negative"
+operation = "DeleteBucketPolicy"
+tags = ["bucketconfig", "error-shape", "security"]
+timeout_ms = 10000
+quirks = ["q-pol-0004"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketPolicy.html"
+summary = "The delete reference documents a 204 success and lists no not-found error."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "conf-bucketconfig"
+[request]
+method = "DELETE"
+target = "/conf-bucketconfig?policy"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 204
+connection_after = "open"

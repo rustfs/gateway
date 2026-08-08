@@ -1,0 +1,31 @@
+[case]
+id = "c-bucketconfig-0010"
+schema_version = 1
+title = "A notification document with all three destination kinds is accepted with no integrity header"
+rationale = """
+The second of the two writes in this band with no checksum requirement, and the one carrying the family's largest document: two topics' worth of events, a queue with a two-rule key filter, and a function. Accepting it with no Content-MD5 is the observation that separates this operation from the retired v1 write."""
+polarity = "positive"
+operation = "PutBucketNotificationConfiguration"
+tags = ["bucketconfig", "xml", "checksum"]
+timeout_ms = 10000
+quirks = ["q-ntf-0002", "q-ntf-0003"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketNotificationConfiguration.html"
+summary = "The write reference shows the three destination lists and the event list as flattened siblings, and lists no Content-MD5 header."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "conf-bucketconfig"
+[request]
+method = "PUT"
+target = "/conf-bucketconfig?notification"
+headers = { "content-type" = "application/xml" }
+body = { utf8 = '<NotificationConfiguration><TopicConfiguration><Id>topic-one</Id><Topic>arn:aws:sns:us-east-1:111122223333:events</Topic><Event>s3:ObjectCreated:*</Event><Event>s3:ObjectRemoved:*</Event></TopicConfiguration><QueueConfiguration><Id>queue-one</Id><Queue>arn:aws:sqs:us-east-1:111122223333:events</Queue><Event>s3:ObjectCreated:Put</Event><Filter><S3Key><FilterRule><Name>prefix</Name><Value>images/</Value></FilterRule><FilterRule><Name>suffix</Name><Value>.jpg</Value></FilterRule></S3Key></Filter></QueueConfiguration><CloudFunctionConfiguration><Id>fn-one</Id><CloudFunction>arn:aws:lambda:us-east-1:111122223333:function:thumbnail</CloudFunction><Event>s3:ObjectCreated:Post</Event></CloudFunctionConfiguration></NotificationConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+connection_after = "open"

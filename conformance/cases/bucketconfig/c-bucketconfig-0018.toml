@@ -1,0 +1,48 @@
+[case]
+id = "c-bucketconfig-0018"
+schema_version = 1
+title = "Deleting a configured policy answers 204 with no body"
+rationale = """
+The delete of a policy that exists, and the half that makes the idempotent delete in c-bucketconfig-0033 an assertion rather than a tautology."""
+polarity = "positive"
+operation = "DeleteBucketPolicy"
+tags = ["bucketconfig", "security"]
+timeout_ms = 10000
+quirks = ["q-pol-0004"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketPolicy.html"
+summary = "The delete reference documents a 204 success and lists no not-found error."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "conf-bucketconfig"
+[[exchanges]]
+name = "write"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-bucketconfig?policy"
+headers = { "content-md5" = "KQxrePq5VLbu0TlAegiUEQ==", "content-type" = "application/json" }
+body = { utf8 = '{"Version":"2012-10-17","Statement":[{"Sid":"one","Effect":"Allow","Principal":{"AWS":"arn:aws:iam::111122223333:root"},"Action":"s3:GetObject","Resource":"arn:aws:s3:::conf-bucketconfig/*"}]}' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[[exchanges]]
+name = "delete"
+
+[exchanges.request]
+method = "DELETE"
+target = "/conf-bucketconfig?policy"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 204
+connection_after = "open"
+

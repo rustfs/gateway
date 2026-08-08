@@ -1,0 +1,35 @@
+[case]
+id = "c-bucketconfig-0049"
+schema_version = 1
+title = "A website document carrying both a whole-site redirect and an index document is refused"
+rationale = """
+The two describe different sites and there is no reading of the document that serves anything predictable. Each half alone is legal — c-bucketconfig-0012 and c-bucketconfig-0014 — so a gateway that refused either one on its own would fail those instead."""
+polarity = "negative"
+operation = "PutBucketWebsite"
+tags = ["bucketconfig", "xml", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-web-0003"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketWebsite.html"
+summary = "The write reference documents the wrapped routing rules, the redirect exclusion and the Content-MD5 header."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "conf-bucketconfig"
+[request]
+method = "PUT"
+target = "/conf-bucketconfig?website"
+headers = { "content-md5" = "u2Ji5XFSqQvQc+WZXmuVzg==", "content-type" = "application/xml" }
+body = { utf8 = '<WebsiteConfiguration><RedirectAllRequestsTo><HostName>example.com</HostName></RedirectAllRequestsTo><IndexDocument><Suffix>index.html</Suffix></IndexDocument></WebsiteConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+code = "MalformedXML"
+request_id_present = true

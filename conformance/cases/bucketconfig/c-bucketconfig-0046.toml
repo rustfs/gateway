@@ -1,0 +1,36 @@
+[case]
+id = "c-bucketconfig-0046"
+schema_version = 1
+title = "A versioning document carrying an unknown element is accepted"
+rationale = """
+The leniency that matters most in this family. RustFS re-parses stored configurations and its persistence fails open, so a decoder that refused an element it did not recognise would not fail loudly — it would degrade the document to no configuration and switch version retention off, with the overwrites in the interval unrecoverable. The element is skipped and the rest of the document is stored."""
+polarity = "negative"
+operation = "PutBucketVersioning"
+tags = ["bucketconfig", "xml"]
+timeout_ms = 10000
+quirks = ["q-ver-0002"]
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/issues/613"
+summary = "Upstream established that S3 accepts request documents carrying elements it does not define rather than refusing them."
+kind = "s3s-issue"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketVersioning.html"
+summary = "The write reference documents the configuration document, its two status values and its Content-MD5 header."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "conf-bucketconfig"
+[request]
+method = "PUT"
+target = "/conf-bucketconfig?versioning"
+headers = { "content-md5" = "84eO+M44C5AvuBju3EPOEg==", "content-type" = "application/xml" }
+body = { utf8 = '<VersioningConfiguration><Status>Enabled</Status><FutureMember>x</FutureMember></VersioningConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+connection_after = "open"

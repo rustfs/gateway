@@ -1,0 +1,31 @@
+[case]
+id = "c-bucketconfig-0041"
+schema_version = 1
+title = "An acceleration write with no integrity header is not refused"
+rationale = """
+The other direction of the checksum requirement, and the reason the six refusals above are an assertion about the model rather than a uniform rule this project invented. The pinned model carries no Content-MD5 member for this operation; a gateway that required one would break every SDK that follows the reference."""
+polarity = "negative"
+operation = "PutBucketAccelerateConfiguration"
+tags = ["bucketconfig", "checksum"]
+timeout_ms = 10000
+quirks = ["q-acc-0003"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketAccelerateConfiguration.html"
+summary = "The write reference declares the two acceleration status values and lists no Content-MD5 header."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "conf-bucketconfig"
+[request]
+method = "PUT"
+target = "/conf-bucketconfig?accelerate"
+headers = { "content-type" = "application/xml" }
+body = { utf8 = '<AccelerateConfiguration><Status>Enabled</Status></AccelerateConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+connection_after = "open"

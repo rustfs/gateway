@@ -1,0 +1,51 @@
+[case]
+id = "c-bucketconfig-0005"
+schema_version = 1
+title = "A configured acceleration state reads back byte for byte"
+rationale = """
+The stored status must come back inside an AccelerateConfiguration root carrying the S3 namespace. Byte comparison is what separates this from the unconfigured answer in c-bucketconfig-0025, which is the same root with nothing inside it."""
+polarity = "positive"
+operation = "GetBucketAccelerateConfiguration"
+tags = ["bucketconfig", "xml", "wire-bytes"]
+timeout_ms = 10000
+quirks = ["q-acc-0001"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketAccelerateConfiguration.html"
+summary = "The read reference documents the acceleration status and lists no not-found error for an unconfigured bucket."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "conf-bucketconfig"
+[[exchanges]]
+name = "write"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-bucketconfig?accelerate"
+headers = { "content-type" = "application/xml" }
+body = { utf8 = '<AccelerateConfiguration><Status>Enabled</Status></AccelerateConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[[exchanges]]
+name = "read-back"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-bucketconfig?accelerate"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.body]
+golden = "goldens/c-bucketconfig-0005.xml"
+

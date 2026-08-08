@@ -1,0 +1,31 @@
+[case]
+id = "c-bucketconfig-0004"
+schema_version = 1
+title = "An acceleration write with no integrity header at all is accepted"
+rationale = """
+Acceleration is one of the two writes in this band the model exempts from the request checksum requirement. Sending no Content-MD5 and no x-amz-checksum header and getting a 200 is the observation; the six writes that answer 400 to the same omission are cases 0035 to 0040, and the two halves together are what make the requirement a fact rather than a uniform assumption."""
+polarity = "positive"
+operation = "PutBucketAccelerateConfiguration"
+tags = ["bucketconfig", "xml", "checksum"]
+timeout_ms = 10000
+quirks = ["q-acc-0002", "q-acc-0003"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketAccelerateConfiguration.html"
+summary = "The write reference declares the two acceleration status values and lists no Content-MD5 header."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "conf-bucketconfig"
+[request]
+method = "PUT"
+target = "/conf-bucketconfig?accelerate"
+headers = { "content-type" = "application/xml" }
+body = { utf8 = '<AccelerateConfiguration><Status>Enabled</Status></AccelerateConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+connection_after = "open"

@@ -1,0 +1,35 @@
+[case]
+id = "c-bucketconfig-0043"
+schema_version = 1
+title = "A versioning Status outside the documented pair is refused"
+rationale = """
+Status is the whole content of the document, so a value outside Enabled and Suspended leaves nothing to store — and storing it would leave a bucket in a state no later read can interpret. This is one of the few refusals in a family that is otherwise deliberately lenient, and the leniency it is contrasted with is c-bucketconfig-0046."""
+polarity = "negative"
+operation = "PutBucketVersioning"
+tags = ["bucketconfig", "xml", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-ver-0002"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketVersioning.html"
+summary = "The write reference documents the configuration document, its two status values and its Content-MD5 header."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "conf-bucketconfig"
+[request]
+method = "PUT"
+target = "/conf-bucketconfig?versioning"
+headers = { "content-md5" = "wRzOg2c1F3/AfkTaMrrxiQ==", "content-type" = "application/xml" }
+body = { utf8 = '<VersioningConfiguration><Status>Paused</Status></VersioningConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+code = "MalformedXML"
+request_id_present = true

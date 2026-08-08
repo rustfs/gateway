@@ -1,0 +1,48 @@
+[case]
+id = "c-bucketconfig-0022"
+schema_version = 1
+title = "Deleting a configured public-access block answers 204 with no body"
+rationale = """
+The delete of a block that exists. Its idempotent twin is c-bucketconfig-0034, and neither is an assertion without the other."""
+polarity = "positive"
+operation = "DeletePublicAccessBlock"
+tags = ["bucketconfig", "security"]
+timeout_ms = 10000
+quirks = ["q-pab-0003"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeletePublicAccessBlock.html"
+summary = "The delete reference documents a 204 success and lists no not-found error."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "conf-bucketconfig"
+[[exchanges]]
+name = "write"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-bucketconfig?publicAccessBlock"
+headers = { "content-md5" = "njdlwnEoAxGSpOozjhzsJQ==", "content-type" = "application/xml" }
+body = { utf8 = '<PublicAccessBlockConfiguration><BlockPublicAcls>true</BlockPublicAcls><IgnorePublicAcls>true</IgnorePublicAcls><BlockPublicPolicy>true</BlockPublicPolicy><RestrictPublicBuckets>true</RestrictPublicBuckets></PublicAccessBlockConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[[exchanges]]
+name = "delete"
+
+[exchanges.request]
+method = "DELETE"
+target = "/conf-bucketconfig?publicAccessBlock"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 204
+connection_after = "open"
+

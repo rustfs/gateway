@@ -1,0 +1,35 @@
+[case]
+id = "c-bucketconfig-0044"
+schema_version = 1
+title = "An acceleration Status outside the documented pair is refused"
+rationale = """
+The same closed set as versioning, on a document with the same shape. A gateway that enforced one and not the other would be enforcing a rule it happened to write twice."""
+polarity = "negative"
+operation = "PutBucketAccelerateConfiguration"
+tags = ["bucketconfig", "xml", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-acc-0002"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketAccelerateConfiguration.html"
+summary = "The write reference declares the two acceleration status values and lists no Content-MD5 header."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "conf-bucketconfig"
+[request]
+method = "PUT"
+target = "/conf-bucketconfig?accelerate"
+headers = { "content-type" = "application/xml" }
+body = { utf8 = '<AccelerateConfiguration><Status>Fast</Status></AccelerateConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+code = "MalformedXML"
+request_id_present = true

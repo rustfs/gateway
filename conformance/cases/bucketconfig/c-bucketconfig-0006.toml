@@ -1,0 +1,31 @@
+[case]
+id = "c-bucketconfig-0006"
+schema_version = 1
+title = "A request-payment write naming Requester and carrying Content-MD5 is accepted"
+rationale = """
+Switching a bucket to requester-pays changes who is billed for every subsequent read, so the write demands an integrity claim on the body. This is the accepting half; the refusal is c-bucketconfig-0038 and the out-of-set payer is c-bucketconfig-0045."""
+polarity = "positive"
+operation = "PutBucketRequestPayment"
+tags = ["bucketconfig", "xml", "checksum"]
+timeout_ms = 10000
+quirks = ["q-rqp-0002", "q-rqp-0003"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketRequestPayment.html"
+summary = "The write reference declares the payer as required with two valid values and documents Content-MD5."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "conf-bucketconfig"
+[request]
+method = "PUT"
+target = "/conf-bucketconfig?requestPayment"
+headers = { "content-md5" = "nY7aajIaZ01yv5qN1p0uvQ==", "content-type" = "application/xml" }
+body = { utf8 = '<RequestPaymentConfiguration><Payer>Requester</Payer></RequestPaymentConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+connection_after = "open"
