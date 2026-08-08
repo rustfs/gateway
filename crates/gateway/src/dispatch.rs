@@ -43,6 +43,21 @@
 //!
 //! A field on `OperationSpec` would remove the retry entirely; that is a `-core` change and a
 //! regeneration, and it is recorded here rather than guessed at.
+//!
+//! # Where `OpLayer<O>` joins, and what it costs when nobody registered one
+//!
+//! The layer chain is built here because this is the last place `O` exists. The layers arrive as
+//! `Option<Arc<[Arc<dyn OpLayer<O>>]>>`, and the `None` is load-bearing: with no layer registered
+//! the invocation calls `backend.call(..)` directly, so there is no continuation, no `Terminal`
+//! closure and no second `Box::pin`. `GET /b/key` is the overwhelming majority of data-plane
+//! traffic and pays nothing for a level it does not use.
+//!
+//! That property is asserted rather than described. [`layered_invocations`] counts the times the
+//! chain was entered, and the unit tests below drive one invocation with no layers and one with a
+//! layer: the first must not move the counter and the second must. It is a count of *chain
+//! entries*, not of allocations — a counting allocator needs `unsafe impl GlobalAlloc` and the
+//! workspace forbids `unsafe` — so what it proves is that the code path holding the allocations was
+//! not taken.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -55,6 +70,8 @@ use rustfs_gateway_core::{
 use rustfs_gateway_sig::OperationFloor;
 use rustfs_gateway_stream::ByteStream;
 use rustfs_gateway_types::ErrorCode;
+
+use crate::ext::{Next, OpLayer, Terminal};
 
 /// A `Resp<O>`'s output whose `O` this table has forgotten.
 type ErasedOutput = Box<dyn std::any::Any + Send>;
@@ -96,17 +113,40 @@ pub(crate) struct OperationDispatch {
 }
 
 impl OperationDispatch {
-    /// Erases one `(O, B)` pair. The only generic function in this crate's request path.
+    /// Erases one `(O, B)` pair with no middleware around it.
+    #[cfg(test)]
     pub(crate) fn of<O, B>(backend: Arc<B>) -> Self
     where
         O: OperationCodec,
         B: Handler<O>,
     {
+        Self::layered::<O, B>(backend, Vec::new())
+    }
+
+    /// Erases one `(O, B)` pair and the layers registered around it. The only generic function in
+    /// this crate's request path.
+    ///
+    /// `layers` is in registration order, outermost first.
+    pub(crate) fn layered<O, B>(backend: Arc<B>, layers: Vec<Arc<dyn OpLayer<O>>>) -> Self
+    where
+        O: OperationCodec,
+        B: Handler<O>,
+    {
+        // `None` rather than an empty slice, so the hot path's test is a discriminant check and the
+        // per-request work for an unlayered operation is exactly what it was before this level
+        // existed.
+        let layers: Option<Arc<[Arc<dyn OpLayer<O>>]>> = (!layers.is_empty()).then(|| Arc::from(layers));
+
         let invoke: Invoke = Arc::new(move |meta: &MetaView<'_>, bytes: Bytes| {
             let input = decode::<O>(meta, bytes)?;
             let backend = Arc::clone(&backend);
+            let layers = layers.clone();
             Ok(Box::pin(async move {
-                let response: Resp<O> = backend.call(Req::<O>::new(input)).await?;
+                let request = Req::<O>::new(input);
+                let response: Resp<O> = match layers {
+                    None => backend.call(request).await?,
+                    Some(layers) => run_layered::<O, B>(&backend, &layers, request).await?,
+                };
                 let (answer, status) = response.into_parts();
                 let answer = match answer {
                     CoreAnswer::Settled(output) => ErasedAnswer::Settled(Box::new(output) as ErasedOutput),
@@ -185,6 +225,59 @@ impl core::fmt::Debug for OperationDispatch {
     }
 }
 
+// How many times the layer chain has been entered on this thread.
+//
+// Test-only, and the whole of the zero-registration assertion: an invocation with no layer must
+// not move it. See the module documentation for what this measures and what it does not.
+//
+// Thread-local rather than a process-wide atomic, because the test harness runs test functions
+// concurrently and a `#[tokio::test]` drives its future on the thread that started it. A shared
+// counter made the two assertions below observe each other's invocations, which is a flake in
+// exactly the direction that reads like a real defect.
+#[cfg(test)]
+thread_local! {
+    static LAYERED_INVOCATIONS: core::cell::Cell<u64> = const { core::cell::Cell::new(0) };
+}
+
+/// The current value of the chain-entry counter, for this thread.
+#[cfg(test)]
+pub(crate) fn layered_invocations() -> u64 {
+    LAYERED_INVOCATIONS.with(core::cell::Cell::get)
+}
+
+/// Runs one operation's layer chain, outermost first, with the backend as the terminal.
+///
+/// Reached only when at least one layer is registered; see [`OperationDispatch::layered`].
+async fn run_layered<O, B>(backend: &B, layers: &[Arc<dyn OpLayer<O>>], request: Req<O>) -> Result<Resp<O>, HandlerError>
+where
+    O: OperationCodec,
+    B: Handler<O>,
+{
+    #[cfg(test)]
+    LAYERED_INVOCATIONS.with(|entries| entries.set(entries.get().saturating_add(1)));
+    let terminal = BackendTerminal::<O, B> {
+        backend,
+        operation: core::marker::PhantomData,
+    };
+    Next::new(layers, &terminal).run(request).await
+}
+
+/// The innermost link of a chain: the registered backend, in the shape `Next` calls.
+struct BackendTerminal<'a, O, B> {
+    backend: &'a B,
+    operation: core::marker::PhantomData<fn() -> O>,
+}
+
+impl<O, B> Terminal<O> for BackendTerminal<'_, O, B>
+where
+    O: OperationCodec,
+    B: Handler<O>,
+{
+    fn call(&self, request: Req<O>) -> BoxFuture<'_, rustfs_gateway_core::HandlerResult<O>> {
+        Box::pin(self.backend.call(request))
+    }
+}
+
 /// Decodes one operation's input, offering the body as a stream first.
 ///
 /// See the module documentation for why the order is this way round and not the other.
@@ -227,6 +320,10 @@ impl DispatchTable {
     }
 
     /// How many operations are registered.
+    ///
+    /// Test-only since assembly moved to a deferred registration map: `build` counts the pending
+    /// registrations, because that is the set that exists before the erasure runs.
+    #[cfg(test)]
     pub(crate) fn len(&self) -> usize {
         self.entries.len()
     }
@@ -309,6 +406,49 @@ mod tests {
         assert!(!table.contains("GetObject"));
         assert!(table.get("GetObject").is_none());
         assert_eq!(table.names().count(), 0);
+    }
+
+    /// Negative — with no layer registered the chain is never entered, so nothing on the hot path
+    /// builds a continuation, a terminal or a second boxed future.
+    ///
+    /// This is a count of chain entries and not of allocations: a counting global allocator needs
+    /// `unsafe impl GlobalAlloc` and the workspace forbids `unsafe`. What it proves is that the
+    /// branch holding those allocations was not taken — break `layered` so that it always chooses
+    /// the chain and this goes red, which is the mutation that says the assertion is worth having.
+    #[tokio::test]
+    async fn an_unlayered_operation_never_enters_the_chain() {
+        let before = layered_invocations();
+        let dispatch = OperationDispatch::layered::<rustfs_gateway_types::dto::ListBuckets, _>(Arc::new(NoBackend), Vec::new());
+        let _ = invoke_once(&dispatch).await;
+        assert_eq!(layered_invocations(), before, "an unlayered operation entered the layer chain");
+    }
+
+    /// Positive — the other direction. One registered layer does enter the chain, so the counter
+    /// above is a measurement of the branch rather than of a code path nothing ever reaches.
+    #[tokio::test]
+    async fn a_layered_operation_enters_the_chain_exactly_once() {
+        let layer: Arc<dyn OpLayer<rustfs_gateway_types::dto::ListBuckets>> =
+            Arc::new(crate::ext::op_layer(|request, next: Next<'_, rustfs_gateway_types::dto::ListBuckets>| {
+                next.run(request)
+            }));
+        let dispatch = OperationDispatch::layered::<rustfs_gateway_types::dto::ListBuckets, _>(Arc::new(NoBackend), vec![layer]);
+        let before = layered_invocations();
+        let _ = invoke_once(&dispatch).await;
+        assert_eq!(layered_invocations(), before + 1);
+    }
+
+    /// Drives one invocation of an already-erased operation, with an empty body.
+    async fn invoke_once(dispatch: &OperationDispatch) -> Result<(ErasedAnswer, u16), HandlerError> {
+        let request = http::Request::builder()
+            .method(http::Method::GET)
+            .uri("/")
+            .header("host", "s3.example.com")
+            .body(Bytes::new())
+            .expect("a valid request");
+        let wire = rustfs_gateway_http::WireRequest::accept(request, &rustfs_gateway_http::Limits::default())
+            .expect("an acceptable request");
+        let meta = MetaView::of(&wire, TargetKind::Service).expect("a service-level view");
+        dispatch.invoke(&meta, Bytes::new()).expect("a decodable request").await
     }
 
     struct NoBackend;

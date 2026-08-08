@@ -246,6 +246,24 @@ impl<O: Operation> Resp<O> {
         }
     }
 
+    /// The output, mutably, when there already is one.
+    ///
+    /// This is what makes a per-operation middleware (`rustfs_gateway::OpLayer`) three statements
+    /// instead of a tower layer that parses the response XML, edits an element and serialises it
+    /// back. `None` for a committed answer, whose output does not exist yet — and a caller that
+    /// treats the `None` as "nothing to change" is correct: a committed response's content is
+    /// decided inside its own continuation, where no layer of this kind can reach it.
+    ///
+    /// The status is deliberately not settable through this: it belongs to the constructor that
+    /// chose it, and a middleware that could change it after the fact would be able to contradict a
+    /// head that has already gone out.
+    pub const fn output_mut(&mut self) -> Option<&mut O::Output> {
+        match &mut self.answer {
+            Answer::Settled(output) => Some(output),
+            Answer::Committed(_) => None,
+        }
+    }
+
     /// Whether the head is committed and the outcome still pending.
     #[must_use]
     pub const fn is_committed(&self) -> bool {

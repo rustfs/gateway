@@ -69,6 +69,12 @@ pub struct RequestEvent<'a> {
 
 /// Records what happened to a request, and changes nothing.
 ///
+/// **If you need to rewrite something, use [`crate::StageFilter`] or [`crate::OpLayer`]. An
+/// `Observer` is read-only, and no `&mut` method will ever be added to it.** Every parameter below
+/// is a shared reference to a summary, there is no response to hand back, and the call happens
+/// after the response has been decided — so an implementation that wanted to change an answer would
+/// have nothing to change it with.
+///
 /// Synchronous; see the module documentation. Held as `Arc<dyn Observer>` so that the service
 /// stays non-generic over it.
 pub trait Observer: Send + Sync + 'static {

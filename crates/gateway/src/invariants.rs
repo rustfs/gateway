@@ -41,19 +41,34 @@
 //! Only the statuses that carry no content *and* no framing — `1xx`, `204`, `205`, `304` — lose the
 //! header too, which is what `c-cond-0005`, `c-cond-0007`, `c-cond-0010`, `c-cond-0017` and
 //! `c-cond-0022` pin for the `304`.
+//!
+//! # The third rule: a declared length that the body cannot honour
+//!
+//! On the one status class that *may* carry content, a `Content-Length` that disagrees with a body
+//! whose length is known is corrected to the body's. A response announcing more bytes than it sends
+//! desynchronises the connection and hangs the client until its own read timeout — the shape behind
+//! s3s#54 and s3s#350 — and one announcing fewer turns the tail into the next message on a reused
+//! connection.
+//!
+//! The rule exists here rather than in the encoders because [`crate::StageFilter::on_response`] is
+//! the one place a response is rewritten by code the framework did not write. It is a no-op for
+//! every response an encoder produced, and it is deliberately silent about a body whose length is
+//! not known: a stream declares what it declares, and inventing a number for one would be worse
+//! than the disagreement.
 
 use http::{Method, Response};
 use rustfs_gateway_core::{BodyAllowance, body_allowance};
 use rustfs_gateway_stream::Body;
 
-/// Drops whatever content this response is forbidden to carry.
+/// Drops whatever content this response is forbidden to carry, and corrects a length it cannot
+/// honour.
 ///
 /// Idempotent, and deliberately so: the generated encoders already applied the same decision to
 /// their own output, and this call is what extends it to the refusal path without the two paths
 /// holding two copies of the rule.
 pub(crate) fn enforce(response: &mut Response<Body>, method: &Method) {
     match body_allowance(method, response.status()) {
-        BodyAllowance::Content => {}
+        BodyAllowance::Content => reconcile_length(response),
         BodyAllowance::HeadOfContent => *response.body_mut() = Body::empty(),
         BodyAllowance::Bodyless => {
             *response.body_mut() = Body::empty();
@@ -62,6 +77,31 @@ pub(crate) fn enforce(response: &mut Response<Body>, method: &Method) {
             headers.remove(http::header::TRANSFER_ENCODING);
         }
     }
+}
+
+/// Makes `Content-Length` agree with a body whose length is known.
+///
+/// Does nothing when there is no declared length, when the body's length is not known, or when the
+/// two already agree — which is every response this workspace's encoders produce.
+fn reconcile_length(response: &mut Response<Body>) {
+    let Some(actual) = response.body().len_hint() else {
+        return;
+    };
+    let declared = response
+        .headers()
+        .get(http::header::CONTENT_LENGTH)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|text| text.parse::<u64>().ok());
+    if declared.is_none_or(|declared| declared == actual) {
+        return;
+    }
+    let Ok(corrected) = http::HeaderValue::from_str(&actual.to_string()) else {
+        // An ASCII decimal is always a legal header value; the fallible constructor is the only
+        // one there is. Removing the header rather than leaving a lie is the safe half.
+        response.headers_mut().remove(http::header::CONTENT_LENGTH);
+        return;
+    };
+    response.headers_mut().insert(http::header::CONTENT_LENGTH, corrected);
 }
 
 #[cfg(test)]

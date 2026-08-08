@@ -39,9 +39,11 @@
 //! a future extension point has to be threaded through. The invariant is the same either way:
 //! `build` is the only constructor, and it returns `Err` rather than a permissive default.
 
+use std::any::Any;
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use rustfs_gateway_core::{Handler, MissingHandlers, OperationCodec, OperationSet, RouterBuilder};
+use rustfs_gateway_core::{Handler, MissingHandlers, Operation, OperationCodec, OperationSet, RouterBuilder};
 use rustfs_gateway_http::Limits;
 use rustfs_gateway_sig::SecurityFloor;
 use rustfs_gateway_types::{NamePolicy, NameValidator, SlashPolicy};
@@ -51,11 +53,22 @@ use crate::clock::{Clock, system_clock};
 use crate::dispatch::{DispatchTable, OperationDispatch};
 use crate::ext::{
     Authenticator, Authorizer, CachedCorsSource, CorsCacheConfig, CorsSource, Governor, HostResolver, NoCors, NoObserver,
-    Observer, PathStyleOnly, Unlimited,
+    Observer, OpLayer, OpLayerSlot, PathStyleOnly, StageFilter, Unlimited,
 };
 use crate::service::{Inner, S3Service};
 use crate::trace::{MintedTraces, TraceSource};
 use rustfs_gateway_core::cors::CorsPolicy;
+
+/// One registered layer, with its operation type forgotten.
+type ErasedOpLayer = Arc<dyn Any + Send + Sync>;
+
+/// One registration, held until `build` knows which layers belong to it.
+///
+/// The closure is what still knows `O` and `B`, so it is also the only thing able to turn the
+/// erased layers back into `Arc<dyn OpLayer<O>>`. That is the same closure-erasure shape
+/// `rustfs_gateway_core::registry` uses, and the reason registration stays explicit and greppable
+/// rather than reaching for `inventory` (ADR-0003).
+type PendingRegistration = Box<dyn FnOnce(Vec<ErasedOpLayer>) -> Result<OperationDispatch, AssemblyError> + Send>;
 
 /// The ceiling on a request body this assembly will hold in memory.
 ///
@@ -73,7 +86,14 @@ pub const DEFAULT_MAX_BUFFERED_BODY_BYTES: u64 = 64 * 1024 * 1024;
 /// reaching the caller.
 pub struct ServiceBuilder {
     router: RouterBuilder,
-    dispatch: DispatchTable,
+    /// One entry per `register` call, keyed by operation name, in name order. Deferred rather than
+    /// erased on the spot because `op_layer` may arrive after `register` and the erasure has to see
+    /// both.
+    pending: BTreeMap<&'static str, PendingRegistration>,
+    /// The layers registered per operation, in registration order.
+    op_layers: BTreeMap<&'static str, Vec<ErasedOpLayer>>,
+    /// The stage filters, in registration order.
+    filters: Vec<Arc<dyn StageFilter>>,
     floor: SecurityFloor,
     limits: Limits,
     names: NamePolicy,
@@ -93,9 +113,11 @@ pub struct ServiceBuilder {
 impl core::fmt::Debug for ServiceBuilder {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("ServiceBuilder")
-            .field("operations", &self.dispatch.names().collect::<Vec<_>>())
+            .field("operations", &self.registered().collect::<Vec<_>>())
             .field("has_authorizer", &self.authorizer.is_some())
             .field("has_authenticator", &self.authenticator.is_some())
+            .field("stage_filters", &self.filters.len())
+            .field("op_layers", &self.op_layers.values().map(Vec::len).sum::<usize>())
             .finish_non_exhaustive()
     }
 }
@@ -116,7 +138,9 @@ impl ServiceBuilder {
     pub fn new() -> Self {
         Self {
             router: RouterBuilder::new(),
-            dispatch: DispatchTable::default(),
+            pending: BTreeMap::new(),
+            op_layers: BTreeMap::new(),
+            filters: Vec::new(),
             floor: SecurityFloor::new(),
             limits: Limits::default(),
             names: NamePolicy::default(),
@@ -151,7 +175,56 @@ impl ServiceBuilder {
         // A taken name is already a `RegistryError::Duplicate` from the line above, which `build`
         // reports. Inserting over it here would leave the two tables disagreeing about which
         // backend answers the operation.
-        let _ = self.dispatch.insert(O::NAME, OperationDispatch::of::<O, B>(backend));
+        self.pending.entry(O::NAME).or_insert_with(|| {
+            Box::new(move |erased: Vec<ErasedOpLayer>| {
+                let mut layers: Vec<Arc<dyn OpLayer<O>>> = Vec::with_capacity(erased.len());
+                for slot in erased {
+                    // Unreachable through `op_layer`, which keys the slot by the very `O::NAME` the
+                    // registration is under. Refused rather than unwrapped: two operation types
+                    // sharing one name is an assembly defect, and answering it with a panic would
+                    // take a process down at start-up for a reason the message never states.
+                    let slot = slot
+                        .downcast::<OpLayerSlot<O>>()
+                        .map_err(|_| AssemblyError::OpLayerTypeMismatch {
+                            operation: O::NAME,
+                            rule: RuleRef::OP_LAYER_TYPE,
+                        })?;
+                    layers.push(slot.into_layer());
+                }
+                Ok(OperationDispatch::layered::<O, B>(backend, layers))
+            })
+        });
+        self
+    }
+
+    /// Installs a [`StageFilter`]. Every seam it implements runs in registration order.
+    ///
+    /// A filter may observe, may rewrite and may refuse; it may not answer, may not affect a
+    /// signature, may not choose the target, and may not defeat a response invariant. The reasons
+    /// are on the trait, and the decision tree for "which of the three levels is this" is
+    /// `docs/middleware.md`.
+    #[must_use]
+    pub fn stage_filter(mut self, filter: impl StageFilter) -> Self {
+        self.filters.push(Arc::new(filter));
+        self
+    }
+
+    /// Installs an [`OpLayer`] around one operation. Layers nest outer to inner in registration
+    /// order.
+    ///
+    /// The operation must have a handler by the time [`ServiceBuilder::build`] runs, or the build
+    /// is refused with [`RuleRef::OP_LAYER_UNATTACHED`]. Ignoring an unattached layer would leave a
+    /// deployment believing a rewrite is in force while nothing runs it.
+    #[must_use]
+    pub fn op_layer<O, L>(mut self, layer: L) -> Self
+    where
+        O: Operation,
+        L: OpLayer<O>,
+    {
+        self.op_layers
+            .entry(O::NAME)
+            .or_default()
+            .push(OpLayerSlot::<O>::erase(Arc::new(layer)));
         self
     }
 
@@ -333,7 +406,7 @@ impl ServiceBuilder {
 
     /// The operations registered so far, sorted. For an assertion and for a start-up report.
     pub fn registered(&self) -> impl Iterator<Item = &'static str> {
-        self.dispatch.names()
+        self.pending.keys().copied().collect::<Vec<_>>().into_iter()
     }
 
     /// Builds the service, or reports why it refused.
@@ -342,10 +415,10 @@ impl ServiceBuilder {
     ///
     /// [`AssemblyError`], one variant per rule and every one of them carrying its [`RuleRef`]:
     /// a refused registration or route, an empty registry, a missing authorizer, a missing
-    /// authenticator, or an operation the router knows and this crate has no codec for. Nothing
-    /// here degrades to a warning.
-    pub fn build(self) -> Result<S3Service, AssemblyError> {
-        if self.dispatch.len() == 0 {
+    /// authenticator, an [`OpLayer`] on an operation nobody registered, or an operation the router
+    /// knows and this crate has no codec for. Nothing here degrades to a warning.
+    pub fn build(mut self) -> Result<S3Service, AssemblyError> {
+        if self.pending.is_empty() {
             return Err(AssemblyError::EmptyRegistry {
                 rule: RuleRef::EMPTY_REGISTRY,
             });
@@ -361,13 +434,40 @@ impl ServiceBuilder {
             });
         };
 
+        // Before the erasure, so the refusal names the operation the deployment asked for rather
+        // than whatever the erasure happens to reach first.
+        if let Some((operation, _)) = self
+            .op_layers
+            .iter()
+            .find(|(operation, _)| !self.pending.contains_key(*operation))
+        {
+            return Err(AssemblyError::UnattachedOpLayer {
+                operation,
+                rule: RuleRef::OP_LAYER_UNATTACHED,
+            });
+        }
+
+        let mut dispatch = DispatchTable::default();
+        for (name, finalise) in core::mem::take(&mut self.pending) {
+            let layers = self.op_layers.remove(name).unwrap_or_default();
+            // `pending` is a map, so the name is unique by construction and the insert cannot
+            // report a duplicate. Checked anyway rather than discarded: a silently dropped
+            // registration is a request that routes and reaches nothing.
+            if !dispatch.insert(name, finalise(layers)?) {
+                return Err(AssemblyError::MissingCodec {
+                    operation: name,
+                    rule: RuleRef::MISSING_CODEC,
+                });
+            }
+        }
+
         let router = self.router.build()?;
 
         // The two tables are populated by the same call and can only disagree through a defect
         // here. Checked anyway, because the failure mode is a request that routes and then reaches
         // nothing able to read it, which looks like a codec bug rather than an assembly one.
         for name in router.registry().names() {
-            if !self.dispatch.contains(name) {
+            if !dispatch.contains(name) {
                 return Err(AssemblyError::MissingCodec {
                     operation: name,
                     rule: RuleRef::MISSING_CODEC,
@@ -377,7 +477,8 @@ impl ServiceBuilder {
 
         Ok(S3Service::from_inner(Inner {
             router,
-            dispatch: self.dispatch,
+            dispatch,
+            filters: Arc::from(self.filters),
             floor: self.floor,
             limits: self.limits,
             names: self.names,
