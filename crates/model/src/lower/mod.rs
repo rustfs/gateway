@@ -29,7 +29,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::error::{Error, Result};
 use crate::ir::*;
 use crate::json::Value;
-use crate::overlay::{FieldOverlay, OpOverlay, Overlay, ShapeOverlay, Side};
+use crate::overlay::{AttributeOverlay, FieldOverlay, OpOverlay, Overlay, ShapeOverlay, Side};
 use crate::smithy::{Model, has_trait, local_name, target_of, trait_of};
 
 mod support;
@@ -720,14 +720,29 @@ impl Ctx<'_> {
                 } else {
                     ShapeKind::Structure
                 };
+                let attributes = shape_attributes(self.operation, name, &ov.attributes, &fields)?;
+                // A member carried as an attribute is not a child element, so it leaves the
+                // element order: leaving it in would make the encoder write it twice — once as
+                // the attribute the wire wants and once as the element that made
+                // `aws-java-sdk` fail against s3s (#297).
+                let carried: BTreeSet<&str> = attributes
+                    .iter()
+                    .filter_map(|attribute| match &attribute.source {
+                        AttributeSource::Field(member) => Some(member.as_str()),
+                        AttributeSource::Constant(_) => None,
+                    })
+                    .collect();
                 let xml = ShapeXml {
                     element_order: if ov.element_order.is_empty() {
                         body_members(&fields)
                     } else {
                         ov.element_order.clone()
-                    },
+                    }
+                    .into_iter()
+                    .filter(|member| !carried.contains(member.as_str()))
+                    .collect(),
                     empty_value_policy: empty_value_policy(&fields, &ov.empty_value),
-                    attributes: Vec::new(),
+                    attributes,
                 };
                 let nested: Vec<Type> = fields.iter().map(|f| f.ty.clone()).collect();
                 out.insert(name.clone(), Shape { kind, fields, xml });
@@ -744,6 +759,56 @@ impl Ctx<'_> {
         }
         Ok(())
     }
+}
+
+/// Resolves one shape's declared XML attributes against the members it actually has.
+///
+/// A field source that names no member is the failure this exists to catch: the attribute would
+/// silently disappear from the wire and the discriminator with it, which is the shape of the
+/// defect `aws-java-sdk` hit against s3s. A member carried as an attribute must also be
+/// optional — the reader this project ships strips attributes, so a required member the decoder
+/// can never populate would refuse every well-formed request body.
+fn shape_attributes(operation: &str, shape: &str, declared: &[AttributeOverlay], fields: &[Field]) -> Result<Vec<XmlAttribute>> {
+    let mut out = Vec::new();
+    for attribute in declared {
+        let element = attribute.element.clone().unwrap_or_else(|| shape.to_owned());
+        let source = match (&attribute.field, &attribute.value) {
+            (Some(member), _) => {
+                let Some(field) = fields.iter().find(|f| &f.name == member) else {
+                    return Err(Error::ir(
+                        operation,
+                        format!(
+                            "shape `{shape}`: attribute `{}` names member `{member}`, which it does not have",
+                            attribute.name
+                        ),
+                    ));
+                };
+                if field.required {
+                    return Err(Error::ir(
+                        operation,
+                        format!(
+                            "shape `{shape}`: attribute `{}` carries required member `{member}`; the XML reader drops attributes, so a required source can never be decoded",
+                            attribute.name
+                        ),
+                    ));
+                }
+                AttributeSource::Field(member.clone())
+            }
+            (None, Some(value)) => AttributeSource::Constant(value.clone()),
+            (None, None) => {
+                return Err(Error::ir(
+                    operation,
+                    format!("shape `{shape}`: attribute `{}` has no source", attribute.name),
+                ));
+            }
+        };
+        out.push(XmlAttribute {
+            element,
+            name: attribute.name.clone(),
+            source,
+        });
+    }
+    Ok(out)
 }
 
 fn namespace(model: &Model) -> &str {

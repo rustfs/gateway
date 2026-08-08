@@ -30,18 +30,18 @@ pub use crate::ops::enums::{
     ServerSideEncryption, SseAlgorithm, Status, StorageClass, TaggingDirective, Tier, TransitionDefaultMinimumObjectSize, Type,
 };
 pub use crate::ops::shapes::{
-    AbortIncompleteMultipartUpload, AccessControlTranslation, BlockedEncryptionTypes, Bucket, BucketLifecycleConfiguration,
-    Checksum, CommonPrefix, CompletedMultipartUpload, CompletedPart, CorsConfiguration, CorsRule, CreateBucketConfiguration,
-    CsvInput, CsvOutput, DefaultRetention, Delete, DeleteMarkerEntry, DeleteMarkerReplication, DeletedObject, Destination,
-    Encryption, EncryptionConfiguration, Error, ExistingObjectReplication, GetObjectAttributesParts, GlacierJobParameters, Grant,
-    Grantee, Initiator, InputSerialization, JsonInput, JsonOutput, LifecycleExpiration, LifecycleRule, LifecycleRuleAndOperator,
-    LifecycleRuleFilter, MetadataEntry, Metrics, MultipartUpload, NoncurrentVersionExpiration, NoncurrentVersionTransition,
-    Object, ObjectIdentifier, ObjectLockConfiguration, ObjectLockLegalHold, ObjectLockRetention, ObjectLockRule, ObjectPart,
-    ObjectVersion, OutputLocation, OutputSerialization, Owner, ParquetInput, Part, ReplicaModifications,
-    ReplicationConfiguration, ReplicationRule, ReplicationRuleAndOperator, ReplicationRuleFilter, ReplicationTime,
-    ReplicationTimeValue, RequestProgress, RestoreRequest, RestoreStatus, S3Location, ScanRange, SelectParameters,
-    ServerSideEncryptionByDefault, ServerSideEncryptionConfiguration, ServerSideEncryptionRule, SourceSelectionCriteria,
-    SseKmsEncryptedObjects, Tag, Tagging, Transition,
+    AbortIncompleteMultipartUpload, AccessControlPolicy, AccessControlTranslation, BlockedEncryptionTypes, Bucket,
+    BucketLifecycleConfiguration, Checksum, CommonPrefix, CompletedMultipartUpload, CompletedPart, CorsConfiguration, CorsRule,
+    CreateBucketConfiguration, CsvInput, CsvOutput, DefaultRetention, Delete, DeleteMarkerEntry, DeleteMarkerReplication,
+    DeletedObject, Destination, Encryption, EncryptionConfiguration, Error, ExistingObjectReplication, GetObjectAttributesParts,
+    GlacierJobParameters, Grant, Grantee, Initiator, InputSerialization, JsonInput, JsonOutput, LifecycleExpiration,
+    LifecycleRule, LifecycleRuleAndOperator, LifecycleRuleFilter, MetadataEntry, Metrics, MultipartUpload,
+    NoncurrentVersionExpiration, NoncurrentVersionTransition, Object, ObjectIdentifier, ObjectLockConfiguration,
+    ObjectLockLegalHold, ObjectLockRetention, ObjectLockRule, ObjectPart, ObjectVersion, OutputLocation, OutputSerialization,
+    Owner, ParquetInput, Part, ReplicaModifications, ReplicationConfiguration, ReplicationRule, ReplicationRuleAndOperator,
+    ReplicationRuleFilter, ReplicationTime, ReplicationTimeValue, RequestProgress, RestoreRequest, RestoreStatus, S3Location,
+    ScanRange, SelectParameters, ServerSideEncryptionByDefault, ServerSideEncryptionConfiguration, ServerSideEncryptionRule,
+    SourceSelectionCriteria, SseKmsEncryptedObjects, Tag, Tagging, Transition,
 };
 
 pub use crate::ops::abort_multipart_upload::{
@@ -95,6 +95,9 @@ pub use crate::ops::delete_object_tagging::{
 pub use crate::ops::delete_objects::{
     DeleteObjects, Input as DeleteObjectsInput, InputBuilder as DeleteObjectsInputBuilder, Output as DeleteObjectsOutput,
 };
+pub use crate::ops::get_bucket_acl::{
+    GetBucketAcl, Input as GetBucketAclInput, InputBuilder as GetBucketAclInputBuilder, Output as GetBucketAclOutput,
+};
 pub use crate::ops::get_bucket_cors::{
     GetBucketCors, Input as GetBucketCorsInput, InputBuilder as GetBucketCorsInputBuilder, Output as GetBucketCorsOutput,
 };
@@ -120,6 +123,9 @@ pub use crate::ops::get_bucket_tagging::{
 };
 pub use crate::ops::get_object::{
     GetObject, Input as GetObjectInput, InputBuilder as GetObjectInputBuilder, Output as GetObjectOutput,
+};
+pub use crate::ops::get_object_acl::{
+    GetObjectAcl, Input as GetObjectAclInput, InputBuilder as GetObjectAclInputBuilder, Output as GetObjectAclOutput,
 };
 pub use crate::ops::get_object_attributes::{
     GetObjectAttributes, Input as GetObjectAttributesInput, InputBuilder as GetObjectAttributesInputBuilder,
@@ -167,6 +173,9 @@ pub use crate::ops::list_objects_v2::{
 pub use crate::ops::list_parts::{
     Input as ListPartsInput, InputBuilder as ListPartsInputBuilder, ListParts, Output as ListPartsOutput,
 };
+pub use crate::ops::put_bucket_acl::{
+    Input as PutBucketAclInput, InputBuilder as PutBucketAclInputBuilder, Output as PutBucketAclOutput, PutBucketAcl,
+};
 pub use crate::ops::put_bucket_cors::{
     Input as PutBucketCorsInput, InputBuilder as PutBucketCorsInputBuilder, Output as PutBucketCorsOutput, PutBucketCors,
 };
@@ -188,6 +197,9 @@ pub use crate::ops::put_bucket_tagging::{
 };
 pub use crate::ops::put_object::{
     Input as PutObjectInput, InputBuilder as PutObjectInputBuilder, Output as PutObjectOutput, PutObject,
+};
+pub use crate::ops::put_object_acl::{
+    Input as PutObjectAclInput, InputBuilder as PutObjectAclInputBuilder, Output as PutObjectAclOutput, PutObjectAcl,
 };
 pub use crate::ops::put_object_legal_hold::{
     Input as PutObjectLegalHoldInput, InputBuilder as PutObjectLegalHoldInputBuilder, Output as PutObjectLegalHoldOutput,

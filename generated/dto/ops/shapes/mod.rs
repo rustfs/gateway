@@ -24,6 +24,7 @@
 //! Upstream: `cargo xtask codegen`. Downstream: the generated dto and its codecs.
 
 mod abort_incomplete_multipart_upload;
+mod access_control_policy;
 mod access_control_translation;
 mod blocked_encryption_types;
 mod bucket;
@@ -100,6 +101,7 @@ mod tagging;
 mod transition;
 
 pub use self::abort_incomplete_multipart_upload::AbortIncompleteMultipartUpload;
+pub use self::access_control_policy::AccessControlPolicy;
 pub use self::access_control_translation::AccessControlTranslation;
 pub use self::blocked_encryption_types::BlockedEncryptionTypes;
 pub use self::bucket::Bucket;

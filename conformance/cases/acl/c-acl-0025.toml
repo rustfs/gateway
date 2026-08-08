@@ -1,0 +1,55 @@
+[case]
+id = "c-acl-0025"
+schema_version = 1
+title = "Elements this release does not know are skipped, at the root and inside a grant"
+rationale = """
+An ACL request body is request XML, and AWS's forward-compatibility rule applies to it: a document written by a newer SDK has to remain storable. Refusing it would make a client's own upgrade break a gateway that had not upgraded, which is a failure with no owner. Two unknown elements at two depths, because a decoder that skipped unknown children of the root and refused unknown children of a grant would satisfy a case with only the first."""
+polarity = "negative"
+operation = "PutBucketAcl"
+tags = ["acl", "xml", "wire-bytes"]
+timeout_ms = 10000
+quirks = ["q-acl-0006"]
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/issues/613"
+summary = "Upstream refused request bodies carrying elements it did not know, which AWS accepts."
+kind = "s3s-issue"
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/pull/617"
+summary = "The fix was to skip the unknown element rather than widen the schema for each one."
+kind = "s3s-pr"
+
+[[setup.buckets]]
+name = "conf-acl"
+
+[[exchanges]]
+name = "write-with-unknown-elements"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-acl?acl"
+headers = { "content-type" = "application/xml", "content-md5" = "dAVRSr2cz57Vg2paipvjaw==" }
+body = { utf8 = '<AccessControlPolicy><Owner><ID>3f6e2b1c4a8d90e7b5c31f2a6d80e4c97b1a3d5f8e206c4b7a9d1e3f5c7b9a0d</ID><DisplayName>conformance</DisplayName></Owner><FutureSetting>whatever a later SDK sends</FutureSetting><AccessControlList><Grant><Grantee><ID>3f6e2b1c4a8d90e7b5c31f2a6d80e4c97b1a3d5f8e206c4b7a9d1e3f5c7b9a0d</ID><DisplayName>conformance</DisplayName></Grantee><Permission>FULL_CONTROL</Permission><FutureGrantOption>on</FutureGrantOption></Grant></AccessControlList></AccessControlPolicy>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[[exchanges]]
+name = "the-known-members-survived"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-acl?acl"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.body]
+golden = "goldens/c-acl-0025.xml"

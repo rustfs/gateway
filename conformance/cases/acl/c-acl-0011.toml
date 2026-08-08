@@ -1,0 +1,101 @@
+[case]
+id = "c-acl-0011"
+schema_version = 1
+title = "An ACL written to one version is read back from that version and from no other"
+rationale = """
+A permission belongs to a version, not to a key: an ACL written onto the newest version when the caller named an older one is a public grant on bytes nobody asked to publish. The case asserts both directions on purpose — the named version carries the new grant, and the version beside it still answers the default — because a store that ignored versionId entirely and one that applied the write to every version would each satisfy the first assertion alone."""
+polarity = "positive"
+operation = "GetObjectAcl"
+tags = ["acl", "wire-bytes"]
+timeout_ms = 10000
+quirks = ["q-acl-0008"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObjectAcl.html"
+summary = "The read documents versionId as selecting the version whose access control policy is answered."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "conf-acl-versions"
+versioning = "enabled"
+
+[[exchanges]]
+name = "write-first-version"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-acl-versions/doc.txt"
+body = { utf8 = "first" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.capture]
+first = { header = "x-amz-version-id" }
+
+[[exchanges]]
+name = "write-second-version"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-acl-versions/doc.txt"
+body = { utf8 = "second" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.capture]
+second = { header = "x-amz-version-id" }
+
+[[exchanges]]
+name = "grant-on-the-first-version"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-acl-versions/doc.txt?acl&versionId=${capture.first}"
+headers = { "content-type" = "application/xml", "content-md5" = "DAJjwJ3RTOvluljoqa2hhg==" }
+body = { utf8 = '<AccessControlPolicy><Owner><ID>3f6e2b1c4a8d90e7b5c31f2a6d80e4c97b1a3d5f8e206c4b7a9d1e3f5c7b9a0d</ID><DisplayName>conformance</DisplayName></Owner><AccessControlList><Grant><Grantee><URI>http://acs.amazonaws.com/groups/global/AllUsers</URI></Grantee><Permission>READ</Permission></Grant></AccessControlList></AccessControlPolicy>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[[exchanges]]
+name = "read-the-named-version"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-acl-versions/doc.txt?acl&versionId=${capture.first}"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.body]
+golden = "goldens/c-acl-0011-old.xml"
+
+[[exchanges]]
+name = "the-other-version-is-untouched"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-acl-versions/doc.txt?acl&versionId=${capture.second}"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.body]
+golden = "goldens/c-acl-0011-new.xml"

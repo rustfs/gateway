@@ -1,0 +1,38 @@
+[case]
+id = "c-acl-0034"
+schema_version = 1
+title = "An ACL read of a bucket answers the policy, not a listing of its keys"
+rationale = """
+The bucket half of the routing claim, and the reason the ?acl rows sit ahead of the listing band rather than behind it: ListObjects pins no query key, so it accepts every GET on a bucket including this one. A row placed after it would answer every access control question with a page of object keys — which is both the wrong answer and a listing the caller may not have asked to be able to make."""
+polarity = "negative"
+operation = "GetBucketAcl"
+tags = ["acl", "routing", "security", "wire-bytes"]
+timeout_ms = 10000
+quirks = ["q-acl-0001"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjects.html"
+summary = "A bucket GET that no subresource claimed is the key listing, which is what makes the row order load-bearing."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "conf-acl"
+
+[[setup.objects]]
+bucket = "conf-acl"
+key = "listed.txt"
+body = { utf8 = "payload" }
+
+[request]
+method = "GET"
+target = "/conf-acl?acl"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[expect.body]
+not_contains_utf8 = ["ListBucketResult", "listed.txt"]
+contains_utf8 = ["<AccessControlPolicy", "<AccessControlList>"]

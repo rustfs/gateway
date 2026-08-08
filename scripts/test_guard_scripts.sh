@@ -480,15 +480,17 @@ expect_fail check_shared_reachable.sh \
 # -----------------------------------------------------------------------------
 # The route-coverage register has to move in both directions or it stops being a
 # measurement. Growing it silently is how `PUT /b/k?acl` came to write the ACL
-# document over the object; shrinking it silently is how a closed exposure keeps
-# being counted, and a count that only ever says 46 is a count nobody reads.
+# document over the object — the row at 560 has since retired that line, which is
+# why the mutation below names `RenameObject` instead; shrinking it silently is
+# how a closed exposure keeps being counted, and a count that only ever says the
+# same number is a count nobody reads.
 #
 # Both controls therefore mutate the register rather than the tree, because the
 # register is the artefact the guard exists to keep honest.
 # -----------------------------------------------------------------------------
 
 mut_forgotten_exposure() {
-    grep -v 'PutObjectAcl' scripts/allowances/route-coverage-allowances.txt >/tmp/rc-allow.$$
+    grep -v 'RenameObject' scripts/allowances/route-coverage-allowances.txt >/tmp/rc-allow.$$
     mv /tmp/rc-allow.$$ scripts/allowances/route-coverage-allowances.txt
 }
 expect_fail check_route_coverage.sh \

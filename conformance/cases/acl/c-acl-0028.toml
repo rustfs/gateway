@@ -1,0 +1,32 @@
+[case]
+id = "c-acl-0028"
+schema_version = 1
+title = "A bucket nobody configured answers 200 with the owner grant, never a 404"
+rationale = """
+Every other bucket subresource read in this suite answers an operation-specific 404 for a document that was never written, and copying that pattern here would be the natural mistake: a client tearing down configuration, or one deciding whether a bucket is shared, would read the 404 as "no access control" — which is the opposite of what an unconfigured bucket means. An ACL is not something a bucket can be without, and the byte comparison pins what the default actually is rather than only that something came back."""
+polarity = "negative"
+operation = "GetBucketAcl"
+tags = ["acl", "xml", "wire-bytes", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-acl-0008"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/acl-overview.html"
+summary = "Every bucket and object carries an ACL from creation, with the resource owner granted full control."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "conf-acl-fresh"
+
+[request]
+method = "GET"
+target = "/conf-acl-fresh?acl"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[expect.body]
+golden = "goldens/c-acl-0028.xml"

@@ -1,0 +1,42 @@
+[case]
+id = "c-acl-0021"
+schema_version = 1
+title = "An unquoted grant-header value is a 400 InvalidArgument, and the id is not echoed back"
+rationale = """
+The failure this exists for is not the status but the silence: a parser that split on commas and skipped what it could not read would answer 200 with an empty grant list, and the caller would believe it had shared a bucket with an account that was never recorded. Two things are asserted at once, because a refusal that quoted the identity back would copy a canonical user id into an error body and every log line that captures one."""
+polarity = "negative"
+operation = "PutBucketAcl"
+tags = ["acl", "security", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-acl-0004", "q-acl-0010", "q-acl-0011"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketAcl.html"
+summary = "The documented grantee list quotes every value, which is what makes the value's end decidable."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/finding-canonical-user-id.html"
+summary = "A canonical user id is an account identifier, so echoing one in an error body is a disclosure."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "conf-acl"
+
+[request]
+method = "PUT"
+target = "/conf-acl?acl"
+headers = { "content-md5" = "1B2M2Y8AsgTpgAmY7PhCfg==", "x-amz-grant-read" = 'id=9c11ab5a4d8e37f0b2c6d19e4a730f85c2b6d4a1e93f70c58b2d6a4e1c93f705' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+code = "InvalidArgument"
+message_present = true
+
+[expect.body]
+not_contains_utf8 = ["9c11ab5a4d8e37f0b2c6d19e4a730f85c2b6d4a1e93f70c58b2d6a4e1c93f705"]

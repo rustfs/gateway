@@ -372,7 +372,7 @@
                                                  "values": ["FULL_CONTROL", "WRITE", "WRITE_ACP", "READ", "READ_ACP"]
                                                },
                                        "hot": false,
-                                       "quirk_refs": []
+                                       "quirk_refs": ["q-acl-0012"]
                                      }
                                    ],
                          "xml": {
@@ -423,26 +423,40 @@
                                        {
                                          "name": "Type",
                                          "wire_name": "xsi:type",
-                                         "required": true,
+                                         "required": false,
                                          "binding": { "kind": "BodyXml" },
                                          "type": {
                                                    "kind": "StringEnum",
                                                    "values": ["CanonicalUser", "AmazonCustomerByEmail", "Group"]
                                                  },
                                          "hot": false,
-                                         "quirk_refs": []
+                                         "quirk_refs": ["q-acl-0003", "q-acl-0004"]
                                        }
                                      ],
                            "xml": {
-                                    "element_order": ["DisplayName", "EmailAddress", "ID", "URI", "Type"],
+                                    "element_order": ["ID", "DisplayName", "EmailAddress", "URI"],
                                     "empty_value_policy": {
                                                             "DisplayName": "omit",
                                                             "EmailAddress": "omit",
                                                             "ID": "omit",
                                                             "URI": "omit",
-                                                            "Type": "emit"
+                                                            "Type": "omit"
                                                           },
-                                    "attributes": []
+                                    "attributes": [
+                                                    {
+                                                      "element": "Grantee",
+                                                      "name": "xmlns:xsi",
+                                                      "source": {
+                                                                  "kind": "Constant",
+                                                                  "value": "http://www.w3.org/2001/XMLSchema-instance"
+                                                                }
+                                                    },
+                                                    {
+                                                      "element": "Grantee",
+                                                      "name": "xsi:type",
+                                                      "source": { "kind": "Field", "field": "Type" }
+                                                    }
+                                                  ]
                                   }
                          },
               "InputSerialization": {
@@ -1035,6 +1049,25 @@
                 "cases": ["c-select-restore-0004", "c-select-restore-0005", "c-select-restore-0019"]
               },
               {
+                "id": "q-acl-0003",
+                "kind": "xml_attribute",
+                "target": "Grantee.Type",
+                "summary": "The grantee discriminator is an XML attribute of <Grantee> and not a child element, which makes it the one member of the supported surface that cannot be written by the ordinary element emitter; the frozen IR reserves xml.attributes for it and the generated encoder writes it from there rather than from a branch in the codec.",
+                "evidence": [
+                              {
+                                "kind": "s3s-pr",
+                                "ref": "https://github.com/s3s-project/s3s/pull/299",
+                                "summary": "Upstream had to add XML attribute support to its serializer before ACL responses could carry the discriminator at all."
+                              },
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_Grantee.html",
+                                "summary": "The Grantee reference documents Type as an attribute of the containing element rather than as a member element."
+                              }
+                            ],
+                "cases": ["c-acl-0001", "c-acl-0002", "c-acl-0003", "c-acl-0004"]
+              },
+              {
                 "id": "q-restore-0003",
                 "kind": "object_state_rule",
                 "target": "RestoreObject",
@@ -1047,6 +1080,25 @@
                               }
                             ],
                 "cases": ["c-select-restore-0010"]
+              },
+              {
+                "id": "q-acl-0004",
+                "kind": "aws_deviation",
+                "target": "Grantee.Type",
+                "summary": "On the way in the discriminator is derived from whichever of ID, URI or EmailAddress the grantee carries, because the XML reader this project ships exposes no attributes at all; for every document AWS accepts the two agree, and a document whose attribute contradicts its members is read by its members.",
+                "evidence": [
+                              {
+                                "kind": "s3s-issue",
+                                "ref": "https://github.com/s3s-project/s3s/issues/297",
+                                "summary": "The same missing capability upstream hit from the writing side; here it is the reading side that has no attribute access."
+                              },
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_Grantee.html",
+                                "summary": "Each documented Type value pairs with exactly one identifying member, which is what makes the member a sound discriminator."
+                              }
+                            ],
+                "cases": ["c-acl-0005", "c-acl-0021", "c-acl-0022"]
               },
               {
                 "id": "q-restore-0004",
@@ -1138,6 +1190,20 @@
                               }
                             ],
                 "cases": ["c-select-restore-0018"]
+              },
+              {
+                "id": "q-acl-0012",
+                "kind": "closed_value_set",
+                "target": "Grant.Permission",
+                "summary": "The five permissions are a closed set and a grant naming anything else is refused rather than stored, which is the one place this family is stricter than its siblings: a stored permission no authorizer can evaluate is a grant that reads as present and enforces as nothing.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/userguide/acl-overview.html#permissions",
+                                "summary": "The permissions table enumerates exactly five values and describes what each one grants on a bucket and on an object."
+                              }
+                            ],
+                "cases": ["c-acl-0012", "c-acl-0020"]
               }
             ],
   "ext_points": []

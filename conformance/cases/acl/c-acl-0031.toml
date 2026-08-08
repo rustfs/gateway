@@ -1,0 +1,34 @@
+[case]
+id = "c-acl-0031"
+schema_version = 1
+title = "An x-amz-acl sent with an empty value is a 400, not a silent private"
+rationale = """
+An empty header is what a client sends when the value it meant to interpolate was missing, and "private" is the value a permissive parser would fall back to. Falling back is wrong in both directions: on a bucket that was public it silently revokes access, and on one that was private it reports a change that never happened. The refusal is what lets the caller see its own bug."""
+polarity = "negative"
+operation = "PutBucketAcl"
+tags = ["acl", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-acl-0005"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/acl-overview.html#canned-acl"
+summary = "The canned-ACL table has no empty member, so an empty value names nothing."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "conf-acl"
+
+[request]
+method = "PUT"
+target = "/conf-acl?acl"
+headers = { "content-md5" = "1B2M2Y8AsgTpgAmY7PhCfg==", "x-amz-acl" = "" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+code = "InvalidArgument"
+message_present = true

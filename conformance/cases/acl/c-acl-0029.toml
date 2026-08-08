@@ -1,0 +1,37 @@
+[case]
+id = "c-acl-0029"
+schema_version = 1
+title = "An object nobody configured answers 200 with the owner grant, unlike its retention neighbour"
+rationale = """
+The object half of the same claim, and the one where the surrounding rows disagree: the ?retention and ?legal-hold reads sitting immediately above this row in the table answer NoSuchObjectLockConfiguration for a document that was never written, so "unconfigured object subresource means 404" is the local convention this family has to break. A 404 here would tell a caller the object has no permissions rather than that it has the default ones."""
+polarity = "negative"
+operation = "GetObjectAcl"
+tags = ["acl", "xml", "wire-bytes", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-acl-0008"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/acl-overview.html"
+summary = "Every object carries an ACL from the moment it is written, with its owner granted full control."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "conf-acl"
+
+[[setup.objects]]
+bucket = "conf-acl"
+key = "fresh.txt"
+body = { utf8 = "payload" }
+
+[request]
+method = "GET"
+target = "/conf-acl/fresh.txt?acl"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[expect.body]
+golden = "goldens/c-acl-0029.xml"

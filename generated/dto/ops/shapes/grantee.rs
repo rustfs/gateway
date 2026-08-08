@@ -21,7 +21,7 @@
 //! NOT responsible for: how it is written to the wire.
 //! Upstream: `cargo xtask codegen`. Downstream: `crate::ops::shapes`.
 
-/// The `Grantee` body shape. Reached from: RestoreObject.
+/// The `Grantee` body shape. Reached from: GetBucketAcl, GetObjectAcl, PutBucketAcl, PutObjectAcl, RestoreObject.
 ///
 /// Public fields plus `Default`, and never `#[non_exhaustive]` — ADR-0004 P1. Do not
 /// destructure it exhaustively (P3). A required member is a bare type and an optional one is
@@ -37,8 +37,8 @@ pub struct Grantee {
     pub id: Option<String>,
     /// Wire `URI`, bound as BodyXml. Optional.
     pub uri: Option<String>,
-    /// Wire `xsi:type`, bound as BodyXml. Required.
-    pub r#type: crate::ops::enums::Type,
+    /// Wire `xsi:type`, bound as BodyXml. Optional.
+    pub r#type: Option<crate::ops::enums::Type>,
 }
 
 impl Grantee {
@@ -57,7 +57,6 @@ impl Grantee {
     ///
     /// Returns [`crate::PlaceholderDefault`] naming the first offending member.
     pub fn check_required(&self) -> Result<(), crate::PlaceholderDefault> {
-        crate::reject_placeholder("Grantee", "Type", &self.r#type)?;
         Ok(())
     }
 }

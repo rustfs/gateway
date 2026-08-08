@@ -1,0 +1,55 @@
+[case]
+id = "c-acl-0005"
+schema_version = 1
+title = "A grantee whose xsi:type contradicts its members is read by its members"
+rationale = """
+The written document says Group and carries an ID, which is a document AWS would not have produced. The reader this project ships exposes no XML attributes at all, so the discriminator is derived from the identifying member instead — and the read-back proves which of the two won. Recorded as a case rather than left implicit because it is a real difference from AWS, and because the alternative reading (trusting a Group attribute over a canonical id) would answer a document whose URI element does not exist."""
+polarity = "positive"
+operation = "PutBucketAcl"
+tags = ["acl", "xml", "wire-bytes", "known-divergence"]
+timeout_ms = 10000
+quirks = ["q-acl-0004"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_Grantee.html"
+summary = "Each documented Type value pairs with exactly one identifying member, which is what makes the member a sound discriminator."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/issues/297"
+summary = "The same missing XML-attribute capability upstream hit from the writing side; here it is the reading side."
+kind = "s3s-issue"
+
+[[setup.buckets]]
+name = "conf-acl"
+
+[[exchanges]]
+name = "write-contradictory-grantee"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-acl?acl"
+headers = { "content-type" = "application/xml", "content-md5" = "5I4b41xmmoAuJ0OAjpUXfw==" }
+body = { utf8 = '<AccessControlPolicy><Owner><ID>3f6e2b1c4a8d90e7b5c31f2a6d80e4c97b1a3d5f8e206c4b7a9d1e3f5c7b9a0d</ID><DisplayName>conformance</DisplayName></Owner><AccessControlList><Grant><Grantee xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:type="Group"><ID>3f6e2b1c4a8d90e7b5c31f2a6d80e4c97b1a3d5f8e206c4b7a9d1e3f5c7b9a0d</ID><DisplayName>conformance</DisplayName></Grantee><Permission>WRITE_ACP</Permission></Grant></AccessControlList></AccessControlPolicy>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[[exchanges]]
+name = "read-back"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-acl?acl"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.body]
+golden = "goldens/c-acl-0005.xml"

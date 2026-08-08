@@ -1,0 +1,40 @@
+[case]
+id = "c-acl-0016"
+schema_version = 1
+title = "An object ACL write with no integrity header is refused the same way"
+rationale = """
+The object half of the requirement, asserted separately because the two operations carry the trait independently in the model and an overlay that stated it for one of them would leave the other accepting unverified permission documents. The object surface is where the consequence is larger: an ACL write to a key is the operation that makes one object public."""
+polarity = "negative"
+operation = "PutObjectAcl"
+tags = ["acl", "checksum", "security", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-acl-0009"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObjectAcl.html"
+summary = "The request syntax documents Content-MD5 as required for the object ACL write as well."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "conf-acl"
+
+[[setup.objects]]
+bucket = "conf-acl"
+key = "doc.txt"
+body = { utf8 = "payload" }
+
+[request]
+method = "PUT"
+target = "/conf-acl/doc.txt?acl"
+headers = { "content-type" = "application/xml" }
+body = { utf8 = '<AccessControlPolicy><Owner><ID>3f6e2b1c4a8d90e7b5c31f2a6d80e4c97b1a3d5f8e206c4b7a9d1e3f5c7b9a0d</ID><DisplayName>conformance</DisplayName></Owner><AccessControlList><Grant><Grantee><ID>3f6e2b1c4a8d90e7b5c31f2a6d80e4c97b1a3d5f8e206c4b7a9d1e3f5c7b9a0d</ID></Grantee><Permission>FULL_CONTROL</Permission></Grant></AccessControlList></AccessControlPolicy>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+code = "InvalidRequest"
+message_present = true

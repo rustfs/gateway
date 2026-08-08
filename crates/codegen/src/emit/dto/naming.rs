@@ -77,7 +77,8 @@ pub fn field_name(name: &str) -> String {
 /// The file on disk keeps the unescaped name — `mod r#type;` resolves to `type.rs` — so this is
 /// only ever the identifier written into a `mod` item or a `use` path, never a path on disk. The
 /// select family's `JSONInput.Type` is what first needed it: an enumeration whose model name is a
-/// Rust keyword produced `mod type;`, which does not parse.
+/// Rust keyword produced `mod type;`, which does not parse. The ACL family's `Grantee.Type`
+/// lowers to the same enumeration from the other direction, so two families now depend on it.
 #[must_use]
 pub fn module_ident(name: &str) -> String {
     escaped(module_name(name))

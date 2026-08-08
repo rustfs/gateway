@@ -34,6 +34,7 @@
 //! being listed is a member nobody knew about, and it is the one that will be broken by the next
 //! change to the shared rule.
 
+pub mod acl;
 pub mod bucket_region;
 pub mod copy_source;
 pub mod cors;

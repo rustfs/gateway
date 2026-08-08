@@ -1,0 +1,50 @@
+[case]
+id = "c-acl-0006"
+schema_version = 1
+title = "An Owner naming another account is stored and echoed, because ownership is not a codec question"
+rationale = """
+A codec that silently rewrote Owner to the caller would answer a document the client never wrote, and one that refused the request would invent a rule AWS documents nowhere in the decoding path. Whether a principal may name itself the owner of a bucket is authorisation, which this family deliberately performs none of; the read-back pins the pass-through so that a later release cannot quietly start deciding it here."""
+polarity = "positive"
+operation = "PutBucketAcl"
+tags = ["acl", "xml", "wire-bytes"]
+timeout_ms = 10000
+quirks = ["q-acl-0013"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketAcl.html"
+summary = "The model marks Owner optional on the policy and documents no decoding rule for its value."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "conf-acl"
+
+[[exchanges]]
+name = "write-foreign-owner"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-acl?acl"
+headers = { "content-type" = "application/xml", "content-md5" = "9xbLE3S+O2x3pyLRW9N6xA==" }
+body = { utf8 = '<AccessControlPolicy><Owner><ID>9c11ab5a4d8e37f0b2c6d19e4a730f85c2b6d4a1e93f70c58b2d6a4e1c93f705</ID><DisplayName>somebody-else</DisplayName></Owner><AccessControlList><Grant><Grantee><ID>9c11ab5a4d8e37f0b2c6d19e4a730f85c2b6d4a1e93f70c58b2d6a4e1c93f705</ID></Grantee><Permission>FULL_CONTROL</Permission></Grant></AccessControlList></AccessControlPolicy>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[[exchanges]]
+name = "read-back"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-acl?acl"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.body]
+golden = "goldens/c-acl-0006.xml"

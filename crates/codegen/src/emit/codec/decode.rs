@@ -60,7 +60,7 @@ use std::fmt::Write as _;
 
 use rustfs_gateway_model::ir::{Binding, Field, OperationIr, Quirk, Shape, Type};
 
-use super::{bounds, expr, forms, tolerance};
+use super::{attribute_name, bounds, carried_as_attribute, expr, forms, tolerance};
 use crate::emit::dto::naming;
 
 /// The default code for a required member the request did not carry.
@@ -578,6 +578,20 @@ pub fn shape_reader(operation: &str, name: &str, shape: &Shape, quirks: &[Quirk]
     let _ = writeln!(out, "    {construct}");
 
     for field in &shape.fields {
+        // A member the IR carries as an XML attribute is not a child element, and the reader this
+        // project ships hands attributes to nobody. Reading it as an element would accept a
+        // spelling no AWS SDK sends and refuse the one they all do; the member is left at its
+        // default and whichever shared contract owns the shape derives it. See `super`'s note on
+        // the attribute mechanism.
+        if carried_as_attribute(shape, &field.name) {
+            let _ = writeln!(
+                out,
+                "    // {} — carried by the `{}` attribute, which the reader does not expose.",
+                field.name,
+                attribute_name(shape, &field.name)
+            );
+            continue;
+        }
         let target = format!("shape.{}", naming::field_name(&field.name));
         out.push_str(&xml_member(operation, field, &target, quirks, "node", 4)?);
     }

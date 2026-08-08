@@ -1,0 +1,237 @@
+# Copyright 2026 RustFS Team
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Family: access control lists. GetBucketAcl, PutBucketAcl, GetObjectAcl, PutObjectAcl.
+#
+# Codec only. Nothing here decides whether a grant lets anybody do anything: evaluating an ACL
+# against a request identity is the deployment's `Authorizer`'s work, and the gateway's whole
+# contribution is that the policy the authorizer reads is the policy the client wrote. The fence
+# is worth stating twice for this family, because an ACL *is* an authorization input and the
+# temptation to interpret one here is stronger than it was for tagging or replication.
+#
+# Two things make this family harder than its four bucket-subresource siblings.
+#
+# The first is `<Grantee>`, the one element in the supported surface whose meaning lives in an XML
+# **attribute**: `xsi:type="CanonicalUser" | "Group" | "AmazonCustomerByEmail"`, with the
+# `xmlns:xsi` declaration written on the element beside it. The frozen IR reserves
+# `xml.attributes` for exactly this — its own description names `xsi:type on Grantee` — and this
+# overlay is the first thing to fill it in, so the attribute is data and the encoder has no branch
+# for it (`q-acl-0002`, `q-acl-0003`). The reading half has no such answer: the XML reader this
+# project ships exposes an element's name, text and children and no attributes at all, so the
+# discriminator is derived on the way in from the identifying member the grantee carries
+# (`q-acl-0004`). `Grantee.Type` is therefore not required — a required member the decoder can
+# never populate would refuse every well-formed request body — and `ops/shared/acl.rs` fills it in
+# before anything stores it, so that a read answers the bytes an SDK expects.
+#
+# The second is that an ACL arrives on **two mutually exclusive channels**: the
+# `<AccessControlPolicy>` body, and the `x-amz-acl` / `x-amz-grant-*` headers. Both at once is a
+# refusal and neither is a refusal (`q-acl-0007`), and the grant-header grammar is parsed in one
+# place (`q-acl-0011`) because two parsers for one grammar are how the two channels come to
+# disagree about what a client asked for while both answer 200.
+#
+# The routing reason is the tagging band's, twice over. A deferred operation contributes no route
+# row, and the route table is first-match, so before these four rows —
+#
+#   * `GET  /{Bucket}?acl`        was claimed by `ListObjects` and answered with a key listing;
+#   * `GET  /{Bucket}/{Key}?acl`  was claimed by `GetObject` and answered with the object's bytes;
+#   * `PUT  /{Bucket}/{Key}?acl`  was claimed by `PutObject`, which **stores the ACL document as
+#                                 the object**, destroying it, and answers 200;
+#   * `PUT  /{Bucket}?acl`        reached nothing at all — `CreateBucket` already names `acl` in
+#                                 its `QueryAbsent` list, so the write was unroutable rather than
+#                                 mis-routed.
+#
+# The first three are the `GetBucketAcl -> ListObjects`, `GetObjectAcl -> GetObject` and
+# `PutObjectAcl -> PutObject` lines of the route-coverage debt register, and this family retires
+# all three.
+
+include = ["GetBucketAcl", "PutBucketAcl", "GetObjectAcl", "PutObjectAcl"]
+
+# =============================================================================================
+# The `?acl` bands: 250 / 260 on a bucket, 550 / 560 on an object
+#
+# The bucket band sits **ahead of `?location` (300)** rather than inside the packed 391-398
+# corner, and the edge that matters is the far one: the table is first-match, `ListObjects` at
+# 700 pins no query key, and a bucket GET row behind the listings hands every `GET /{Bucket}?acl`
+# back to the key listing this family exists to stop. Being first also makes `GetBucketAcl` the
+# declared winner of a pair against every other bucket GET and `PutBucketAcl` the winner against
+# every other bucket PUT; the seventeen declarations are in `route/shadowing_bucket_acl.rs`.
+#
+# The object band sits after the `?legal-hold` rows (540) and before `CopyObject` (790) and
+# `PutObject` (800). Both object edges are decisions: behind the multipart band because a request
+# naming an upload and a subresource at once is undocumented and the multipart reading is the one
+# already settled at 470, and ahead of CopyObject because a `PUT /b/k?acl` carrying
+# `x-amz-copy-source` would otherwise overwrite the destination from the source and discard the
+# policy the request actually carried.
+#
+# There is no `DELETE` in this family: an ACL cannot be removed, only replaced, so `acl` stays
+# absent from `DeleteBucket`'s `QueryAbsent` list and is inert on a bucket delete.
+# =============================================================================================
+
+# =============================================================================================
+# GetBucketAcl
+#
+# The stored policy, answered as `<AccessControlPolicy>` with the grants **wrapped** in an
+# `<AccessControlList>` element — the opposite of the flattened `Contents` and `Rule` lists
+# elsewhere in the surface, which is why it is registered rather than assumed (`q-acl-0001`).
+# =============================================================================================
+[op.GetBucketAcl]
+precedence = 250
+auth_action = "s3:GetBucketAcl"
+# A policy is an owner and at most a hundred grants, each a short identity and one of five
+# permissions. The same 64 KiB ceiling the CORS, tagging and encryption reads use bounds this
+# surface with two orders of magnitude to spare.
+response_max_bytes = 65536
+# Deliberately no `not_configured`: an ACL always exists (`q-acl-0008`). This is the only bucket
+# subresource read in the table without one, and the absence is asserted rather than assumed.
+error_codes = ["NoSuchBucket", "AccessDenied"]
+url_encoded_fields = []
+input_hot = []
+output_hot = ["Grants", "Owner"]
+quirk_refs = ["q-acl-0001", "q-acl-0002", "q-acl-0003", "q-acl-0008"]
+
+# =============================================================================================
+# PutBucketAcl
+#
+# Replaces the whole policy; there is no partial update and no delete. The request root is the
+# payload member's own `xmlName` — `AccessControlPolicy`, wire and model in agreement — so no
+# override is needed.
+# =============================================================================================
+[op.PutBucketAcl]
+precedence = 260
+auth_action = "s3:PutBucketAcl"
+# The pinned model carries `aws.protocols#httpChecksum` with `requestChecksumRequired`, a
+# different trait from the `smithy.api#httpChecksumRequired` the lowering reads, so the
+# requirement is stated here rather than silently lost — exactly as the CORS, tagging, lifecycle,
+# encryption and replication writes state it (`q-acl-0009`).
+http_checksum_required = true
+# The read's ceiling again, from the other direction: what can be written is what can be read
+# back, and an unbounded body is an XML-bomb surface.
+request_max_bytes = 65536
+error_codes = ["NoSuchBucket", "AccessDenied", "MalformedXML", "InvalidRequest", "InvalidArgument", "BadDigest"]
+url_encoded_fields = []
+input_hot = ["AccessControlPolicy"]
+quirk_refs = [
+  "q-acl-0002",
+  "q-acl-0003",
+  "q-acl-0004",
+  "q-acl-0005",
+  "q-acl-0006",
+  "q-acl-0007",
+  "q-acl-0009",
+  "q-acl-0010",
+  "q-acl-0011",
+  "q-acl-0012",
+  "q-acl-0013",
+]
+
+# =============================================================================================
+# GetObjectAcl
+#
+# The policy of one object version. `versionId` selects a version and its absence selects the
+# current one; like the bucket read, an object always has a policy, so there is no
+# `not_configured` here either — which is the difference from the `?retention` and `?legal-hold`
+# reads sitting immediately above it in the band.
+# =============================================================================================
+[op.GetObjectAcl]
+precedence = 550
+auth_action = "s3:GetObjectAcl"
+response_max_bytes = 65536
+error_codes = ["NoSuchBucket", "NoSuchKey", "AccessDenied"]
+url_encoded_fields = []
+input_hot = ["Key", "VersionId"]
+output_hot = ["Grants", "Owner"]
+quirk_refs = ["q-acl-0001", "q-acl-0002", "q-acl-0003", "q-acl-0008"]
+
+# =============================================================================================
+# PutObjectAcl
+#
+# The row this family exists for. Everything the bucket write says applies, with the object's
+# canned-ACL set in place of the bucket's.
+# =============================================================================================
+[op.PutObjectAcl]
+precedence = 560
+auth_action = "s3:PutObjectAcl"
+http_checksum_required = true
+request_max_bytes = 65536
+error_codes = ["NoSuchBucket", "NoSuchKey", "AccessDenied", "MalformedXML", "InvalidRequest", "InvalidArgument", "BadDigest"]
+url_encoded_fields = []
+input_hot = ["Key", "AccessControlPolicy", "VersionId"]
+output_hot = []
+quirk_refs = [
+  "q-acl-0002",
+  "q-acl-0003",
+  "q-acl-0004",
+  "q-acl-0005",
+  "q-acl-0006",
+  "q-acl-0007",
+  "q-acl-0009",
+  "q-acl-0010",
+  "q-acl-0011",
+  "q-acl-0012",
+  "q-acl-0013",
+]
+
+# =============================================================================================
+# Nested shapes owned by this family
+# =============================================================================================
+
+# The `<Grantee>` element and its attributes. `element` defaults to the shape's own name, which
+# is also the wire name of every member that carries one, so it is left implicit; the encoder
+# refuses at generation time if the two ever disagree.
+#
+# `xmlns:xsi` is a constant and comes first, because that is the order AWS writes them in and the
+# read-back goldens compare bytes.
+#
+# The children are written in AWS's own order — `<ID>` before `<DisplayName>` — which is not the
+# model's declaration order, and the difference is only visible in a byte-level comparison.
+[shape.Grantee]
+element_order = ["ID", "DisplayName", "EmailAddress", "URI"]
+
+[[shape.Grantee.attribute]]
+name = "xmlns:xsi"
+value = "http://www.w3.org/2001/XMLSchema-instance"
+
+[[shape.Grantee.attribute]]
+name = "xsi:type"
+field = "Type"
+
+# The model marks `Type` required, and on the wire it is. Here it cannot be: it arrives as an
+# attribute, the reader exposes none, and a required member the decoder can never fill would
+# refuse every well-formed ACL body. It is optional in the dto and filled in by
+# `ops/shared/acl.rs` from the identifying member before anything stores it (`q-acl-0004`).
+[[shape.Grantee.field]]
+name = "Type"
+required = false
+quirks = ["q-acl-0003", "q-acl-0004"]
+
+# The grants are wrapped in `<AccessControlList>`, not flattened. Registered rather than
+# inherited because the neighbouring families flatten and a swap is invisible in a diff.
+[shape.AccessControlPolicy]
+element_order = ["Owner", "Grants"]
+
+[[shape.AccessControlPolicy.field]]
+name = "Grants"
+quirks = ["q-acl-0001"]
+
+[[shape.AccessControlPolicy.field]]
+name = "Owner"
+quirks = ["q-acl-0013"]
+
+# One grant: who, and what they may do. The order is AWS's own.
+[shape.Grant]
+element_order = ["Grantee", "Permission"]
+
+[[shape.Grant.field]]
+name = "Permission"
+quirks = ["q-acl-0012"]

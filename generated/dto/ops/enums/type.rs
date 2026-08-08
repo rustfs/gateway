@@ -23,7 +23,7 @@
 
 use std::borrow::Cow;
 
-/// The `Type` string enumeration. Bound by: RestoreObject, SelectObjectContent.
+/// The `Type` string enumeration. Bound by: GetBucketAcl, GetObjectAcl, PutBucketAcl, PutObjectAcl, RestoreObject, SelectObjectContent.
 ///
 /// An open set: compare against the associated constants, and build a value the pinned
 /// model does not declare with [`Type::custom`]. Adding a constant is a minor version
@@ -32,27 +32,27 @@ use std::borrow::Cow;
 pub struct Type(Cow<'static, str>);
 
 impl Type {
-    /// `SELECT`
-    pub const SELECT: Self = Self(Cow::Borrowed("SELECT"));
-    /// `DOCUMENT`
-    pub const DOCUMENT: Self = Self(Cow::Borrowed("DOCUMENT"));
-    /// `LINES`
-    pub const LINES: Self = Self(Cow::Borrowed("LINES"));
     /// `CanonicalUser`
     pub const CANONICALUSER: Self = Self(Cow::Borrowed("CanonicalUser"));
     /// `AmazonCustomerByEmail`
     pub const AMAZONCUSTOMERBYEMAIL: Self = Self(Cow::Borrowed("AmazonCustomerByEmail"));
     /// `Group`
     pub const GROUP: Self = Self(Cow::Borrowed("Group"));
+    /// `SELECT`
+    pub const SELECT: Self = Self(Cow::Borrowed("SELECT"));
+    /// `DOCUMENT`
+    pub const DOCUMENT: Self = Self(Cow::Borrowed("DOCUMENT"));
+    /// `LINES`
+    pub const LINES: Self = Self(Cow::Borrowed("LINES"));
 
     /// Every value the pinned model declares, in model order.
     pub const VALUES: &'static [&'static str] = &[
-        "SELECT",
-        "DOCUMENT",
-        "LINES",
         "CanonicalUser",
         "AmazonCustomerByEmail",
         "Group",
+        "SELECT",
+        "DOCUMENT",
+        "LINES",
     ];
 
     /// Wraps a value this build has no constant for.

@@ -320,7 +320,21 @@ pub(super) fn validate(ir: &OperationIr) -> Result<()> {
     }
     for shape_name in ir.shapes.keys() {
         let shape = &ir.shapes[shape_name];
-        let body: BTreeSet<String> = body_members(&shape.fields).into_iter().collect();
+        // A member the shape carries as an XML attribute is not one of its child elements, so it
+        // is not in the element order and must not be demanded of it.
+        let carried: BTreeSet<&str> = shape
+            .xml
+            .attributes
+            .iter()
+            .filter_map(|attribute| match &attribute.source {
+                crate::ir::AttributeSource::Field(member) => Some(member.as_str()),
+                crate::ir::AttributeSource::Constant(_) => None,
+            })
+            .collect();
+        let body: BTreeSet<String> = body_members(&shape.fields)
+            .into_iter()
+            .filter(|member| !carried.contains(member.as_str()))
+            .collect();
         let ordered: BTreeSet<String> = shape.xml.element_order.iter().cloned().collect();
         if body != ordered {
             return Err(Error::ir(

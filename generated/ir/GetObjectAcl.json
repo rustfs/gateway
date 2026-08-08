@@ -1,0 +1,369 @@
+{
+  "ir_version": "1",
+  "operation": "GetObjectAcl",
+  "http": {
+            "method": "GET",
+            "target": "Object",
+            "precedence": 550,
+            "predicates": [
+                            { "kind": "Method", "method": "GET" },
+                            { "kind": "Target", "target": "Object" },
+                            { "kind": "QueryPresent", "key": "acl" }
+                          ],
+            "success_status": 200,
+            "alt_success_statuses": [],
+            "path_shape": "/{Bucket}/{Key+}"
+          },
+  "auth": { "requirement": "Required", "action": "s3:GetObjectAcl", "presigned_allowed": true, "service": "s3" },
+  "payload": {
+               "request": { "kind": "None", "buffering": "None", "max_bytes": null },
+               "response": { "kind": "XmlBody", "buffering": "Full", "max_bytes": 65536 }
+             },
+  "checksum": { "http_checksum_required": false, "request_algorithms": [], "response_algorithms": [] },
+  "input": {
+             "fields": [
+                         {
+                           "name": "Bucket",
+                           "wire_name": "Bucket",
+                           "required": true,
+                           "binding": { "kind": "UriLabel", "greedy": false },
+                           "type": { "kind": "BucketName" },
+                           "hot": true,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "Key",
+                           "wire_name": "Key",
+                           "required": true,
+                           "binding": { "kind": "UriLabel", "greedy": true },
+                           "type": { "kind": "ObjectKey" },
+                           "hot": true,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "VersionId",
+                           "wire_name": "versionId",
+                           "required": false,
+                           "binding": { "kind": "Query" },
+                           "type": { "kind": "String" },
+                           "hot": true,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "RequestPayer",
+                           "wire_name": "x-amz-request-payer",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "StringEnum", "values": ["requester"] },
+                           "hot": false,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "ExpectedBucketOwner",
+                           "wire_name": "x-amz-expected-bucket-owner",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "String" },
+                           "hot": false,
+                           "quirk_refs": []
+                         }
+                       ]
+           },
+  "output": {
+              "fields": [
+                          {
+                            "name": "Owner",
+                            "wire_name": "Owner",
+                            "required": false,
+                            "binding": { "kind": "BodyXml" },
+                            "type": { "kind": "Structure", "shape": "Owner" },
+                            "hot": true,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "Grants",
+                            "wire_name": "AccessControlList",
+                            "required": false,
+                            "binding": { "kind": "BodyXml" },
+                            "type": {
+                                      "kind": "List",
+                                      "member": { "kind": "Structure", "shape": "Grant" },
+                                      "flattened": false,
+                                      "wrapper_name": "Grant"
+                                    },
+                            "hot": true,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "RequestCharged",
+                            "wire_name": "x-amz-request-charged",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": { "kind": "StringEnum", "values": ["requester"] },
+                            "hot": false,
+                            "quirk_refs": []
+                          }
+                        ]
+            },
+  "shapes": {
+              "Grant": {
+                         "kind": "Structure",
+                         "fields": [
+                                     {
+                                       "name": "Grantee",
+                                       "wire_name": "Grantee",
+                                       "required": false,
+                                       "binding": { "kind": "BodyXml" },
+                                       "type": { "kind": "Structure", "shape": "Grantee" },
+                                       "hot": false,
+                                       "quirk_refs": []
+                                     },
+                                     {
+                                       "name": "Permission",
+                                       "wire_name": "Permission",
+                                       "required": false,
+                                       "binding": { "kind": "BodyXml" },
+                                       "type": {
+                                                 "kind": "StringEnum",
+                                                 "values": ["FULL_CONTROL", "WRITE", "WRITE_ACP", "READ", "READ_ACP"]
+                                               },
+                                       "hot": false,
+                                       "quirk_refs": ["q-acl-0012"]
+                                     }
+                                   ],
+                         "xml": {
+                                  "element_order": ["Grantee", "Permission"],
+                                  "empty_value_policy": { "Grantee": "omit", "Permission": "omit" },
+                                  "attributes": []
+                                }
+                       },
+              "Grantee": {
+                           "kind": "Structure",
+                           "fields": [
+                                       {
+                                         "name": "DisplayName",
+                                         "wire_name": "DisplayName",
+                                         "required": false,
+                                         "binding": { "kind": "BodyXml" },
+                                         "type": { "kind": "String" },
+                                         "hot": false,
+                                         "quirk_refs": []
+                                       },
+                                       {
+                                         "name": "EmailAddress",
+                                         "wire_name": "EmailAddress",
+                                         "required": false,
+                                         "binding": { "kind": "BodyXml" },
+                                         "type": { "kind": "String" },
+                                         "hot": false,
+                                         "quirk_refs": []
+                                       },
+                                       {
+                                         "name": "ID",
+                                         "wire_name": "ID",
+                                         "required": false,
+                                         "binding": { "kind": "BodyXml" },
+                                         "type": { "kind": "String" },
+                                         "hot": false,
+                                         "quirk_refs": []
+                                       },
+                                       {
+                                         "name": "URI",
+                                         "wire_name": "URI",
+                                         "required": false,
+                                         "binding": { "kind": "BodyXml" },
+                                         "type": { "kind": "String" },
+                                         "hot": false,
+                                         "quirk_refs": []
+                                       },
+                                       {
+                                         "name": "Type",
+                                         "wire_name": "xsi:type",
+                                         "required": false,
+                                         "binding": { "kind": "BodyXml" },
+                                         "type": {
+                                                   "kind": "StringEnum",
+                                                   "values": ["CanonicalUser", "AmazonCustomerByEmail", "Group"]
+                                                 },
+                                         "hot": false,
+                                         "quirk_refs": ["q-acl-0003", "q-acl-0004"]
+                                       }
+                                     ],
+                           "xml": {
+                                    "element_order": ["ID", "DisplayName", "EmailAddress", "URI"],
+                                    "empty_value_policy": {
+                                                            "DisplayName": "omit",
+                                                            "EmailAddress": "omit",
+                                                            "ID": "omit",
+                                                            "URI": "omit",
+                                                            "Type": "omit"
+                                                          },
+                                    "attributes": [
+                                                    {
+                                                      "element": "Grantee",
+                                                      "name": "xmlns:xsi",
+                                                      "source": {
+                                                                  "kind": "Constant",
+                                                                  "value": "http://www.w3.org/2001/XMLSchema-instance"
+                                                                }
+                                                    },
+                                                    {
+                                                      "element": "Grantee",
+                                                      "name": "xsi:type",
+                                                      "source": { "kind": "Field", "field": "Type" }
+                                                    }
+                                                  ]
+                                  }
+                         },
+              "Owner": {
+                         "kind": "Structure",
+                         "fields": [
+                                     {
+                                       "name": "DisplayName",
+                                       "wire_name": "DisplayName",
+                                       "required": false,
+                                       "binding": { "kind": "BodyXml" },
+                                       "type": { "kind": "String" },
+                                       "hot": false,
+                                       "quirk_refs": []
+                                     },
+                                     {
+                                       "name": "ID",
+                                       "wire_name": "ID",
+                                       "required": false,
+                                       "binding": { "kind": "BodyXml" },
+                                       "type": { "kind": "String" },
+                                       "hot": false,
+                                       "quirk_refs": []
+                                     }
+                                   ],
+                         "xml": {
+                                  "element_order": ["ID", "DisplayName"],
+                                  "empty_value_policy": { "DisplayName": "omit", "ID": "omit" },
+                                  "attributes": []
+                                }
+                       }
+            },
+  "xml": {
+           "request_root": null,
+           "request_root_aliases": [],
+           "response_root": "AccessControlPolicy",
+           "xmlns": "emit",
+           "unwrapped_output": false,
+           "element_order": ["Owner", "Grants"],
+           "empty_value_policy": { "Owner": "omit", "Grants": "omit" },
+           "url_encoded_fields": [],
+           "attributes": [],
+           "body_literal": false
+         },
+  "errors": {
+              "not_configured": null,
+              "allows_error_after_200": false,
+              "codes": ["NoSuchBucket", "NoSuchKey", "AccessDenied"]
+            },
+  "derived_resources": [],
+  "head_mirrors": null,
+  "quirk_refs": ["q-acl-0001", "q-acl-0002", "q-acl-0003", "q-acl-0008"],
+  "quirks": [
+              {
+                "id": "q-acl-0001",
+                "kind": "wrapped_list",
+                "target": "AccessControlPolicy.Grants",
+                "summary": "The grants sit inside an <AccessControlList> wrapper rather than repeating directly under the policy root, which is the opposite of the flattened Contents and Rule lists elsewhere in the surface, and a serializer that flattened them would answer a document every SDK reads as no grants at all.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketAcl.html",
+                                "summary": "The documented response syntax nests every Grant element inside a single AccessControlList element under the AccessControlPolicy root."
+                              }
+                            ],
+                "cases": ["c-acl-0001", "c-acl-0004"]
+              },
+              {
+                "id": "q-acl-0002",
+                "kind": "xml_attribute",
+                "target": "Grantee",
+                "summary": "The XMLSchema-instance namespace is declared on the <Grantee> element itself rather than on the document root, so a client that resolves prefixes before reading xsi:type finds the declaration where AWS puts it.",
+                "evidence": [
+                              {
+                                "kind": "s3s-issue",
+                                "ref": "https://github.com/s3s-project/s3s/issues/297",
+                                "summary": "Upstream answered ACL documents whose Grantee carried no xsi:type and no namespace declaration, and the Java SDK failed to parse them."
+                              },
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObjectAcl.html",
+                                "summary": "The documented response syntax shows the xmlns:xsi declaration written on the Grantee element beside the xsi:type attribute."
+                              }
+                            ],
+                "cases": ["c-acl-0001", "c-acl-0002", "c-acl-0003"]
+              },
+              {
+                "id": "q-acl-0003",
+                "kind": "xml_attribute",
+                "target": "Grantee.Type",
+                "summary": "The grantee discriminator is an XML attribute of <Grantee> and not a child element, which makes it the one member of the supported surface that cannot be written by the ordinary element emitter; the frozen IR reserves xml.attributes for it and the generated encoder writes it from there rather than from a branch in the codec.",
+                "evidence": [
+                              {
+                                "kind": "s3s-pr",
+                                "ref": "https://github.com/s3s-project/s3s/pull/299",
+                                "summary": "Upstream had to add XML attribute support to its serializer before ACL responses could carry the discriminator at all."
+                              },
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_Grantee.html",
+                                "summary": "The Grantee reference documents Type as an attribute of the containing element rather than as a member element."
+                              }
+                            ],
+                "cases": ["c-acl-0001", "c-acl-0002", "c-acl-0003", "c-acl-0004"]
+              },
+              {
+                "id": "q-acl-0004",
+                "kind": "aws_deviation",
+                "target": "Grantee.Type",
+                "summary": "On the way in the discriminator is derived from whichever of ID, URI or EmailAddress the grantee carries, because the XML reader this project ships exposes no attributes at all; for every document AWS accepts the two agree, and a document whose attribute contradicts its members is read by its members.",
+                "evidence": [
+                              {
+                                "kind": "s3s-issue",
+                                "ref": "https://github.com/s3s-project/s3s/issues/297",
+                                "summary": "The same missing capability upstream hit from the writing side; here it is the reading side that has no attribute access."
+                              },
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_Grantee.html",
+                                "summary": "Each documented Type value pairs with exactly one identifying member, which is what makes the member a sound discriminator."
+                              }
+                            ],
+                "cases": ["c-acl-0005", "c-acl-0021", "c-acl-0022"]
+              },
+              {
+                "id": "q-acl-0008",
+                "kind": "not_configured_error",
+                "target": "GetBucketAcl",
+                "summary": "An ACL is the one bucket subresource that always exists — a bucket nobody configured still has its owner's FULL_CONTROL — so the read answers 200 with the owner grant and there is no operation-specific 404, unlike every other Get/Put subresource triple in the table.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/userguide/acl-overview.html",
+                                "summary": "The overview states that every bucket and object carries an ACL from creation, with the resource owner granted full control by default."
+                              }
+                            ],
+                "cases": ["c-acl-0028", "c-acl-0029"]
+              },
+              {
+                "id": "q-acl-0012",
+                "kind": "closed_value_set",
+                "target": "Grant.Permission",
+                "summary": "The five permissions are a closed set and a grant naming anything else is refused rather than stored, which is the one place this family is stricter than its siblings: a stored permission no authorizer can evaluate is a grant that reads as present and enforces as nothing.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/userguide/acl-overview.html#permissions",
+                                "summary": "The permissions table enumerates exactly five values and describes what each one grants on a bucket and on an object."
+                              }
+                            ],
+                "cases": ["c-acl-0012", "c-acl-0020"]
+              }
+            ],
+  "ext_points": []
+}
