@@ -54,8 +54,13 @@ not compile here.
 **Secret-bearing values cannot be printed.** `SecretBytes` and `SigningKey` have no `Debug` at all, not a redacting one,
 so the absence propagates to every type that contains them. Both zeroize on drop.
 
+**A CORS preflight is answered without credentials, and never grants any.** It is the one endpoint an anonymous caller
+reaches before the security floor, so its configuration read goes through a cache nothing can bypass, every refusal is
+the same bytes whether or not the bucket exists, and a reflected `Origin` cannot be paired with
+`Access-Control-Allow-Credentials` — that combination has no constructor, no reachable code path, and a guard script.
+
 Details, including the ten-entry timing side-channel register, are in
-[docs/security-model.md](docs/security-model.md).
+[docs/security-model.md](docs/security-model.md); the preflight design is in [docs/cors.md](docs/cors.md).
 
 ## Building
 

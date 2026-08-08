@@ -650,6 +650,86 @@ mut_drop_percent_decode_allowances() {
 }
 expect_fail check_single_normalization.sh \
     'a missing allowance file, which must fail rather than skip' mut_drop_percent_decode_allowances
+# check_cors_credentials_exclusive.sh has four rules, and the fourth exists only to keep the third
+# from being defeated by an import. Each is mutated separately: a single case would leave three of
+# them as prose. GHSA-x5xv-223c-8vm7 is the advisory all four are about.
+
+mut_credentials_in_the_reflected_arm() {
+    python3 - <<'PYEOF'
+import pathlib
+path = pathlib.Path("crates/core/src/cors/answer.rs")
+text = path.read_text()
+# The refactor the guard exists to catch: the credentials writer folded into the function that
+# knows about the wildcard forms, with the reflected arm now able to reach it.
+text = text.replace(
+    "        AllowOrigin::Reflected(_) | AllowOrigin::Wildcard => None,",
+    "        AllowOrigin::Reflected(value) => Some((ACCESS_CONTROL_ALLOW_CREDENTIALS, HeaderValue::from_static(\"true\"))).filter(|_| !value.is_empty()),\n        AllowOrigin::Wildcard => None,",
+)
+path.write_text(text)
+PYEOF
+}
+expect_fail check_cors_credentials_exclusive.sh \
+    'the credentials header written from the reflected-origin arm' mut_credentials_in_the_reflected_arm
+
+mut_second_credentials_writer() {
+    python3 - <<'PYEOF'
+import pathlib
+path = pathlib.Path("crates/core/src/cors/answer.rs")
+text = path.read_text()
+text += """
+fn a_second_writer() -> (HeaderName, HeaderValue) {
+    (ACCESS_CONTROL_ALLOW_CREDENTIALS, HeaderValue::from_static("true"))
+}
+"""
+path.write_text(text)
+PYEOF
+}
+expect_fail check_cors_credentials_exclusive.sh \
+    'a second function writing the credentials header' mut_second_credentials_writer
+
+mut_credentials_written_elsewhere() {
+    python3 - <<'PYEOF'
+import pathlib
+path = pathlib.Path("crates/gateway/src/service.rs")
+text = path.read_text()
+text += """
+fn a_second_component_writing_credentials() -> &'static str {
+    "access-control-allow-credentials"
+}
+"""
+path.write_text(text)
+PYEOF
+}
+expect_fail check_cors_credentials_exclusive.sh \
+    'the credentials header written outside the one answer builder' mut_credentials_written_elsewhere
+
+mut_allow_origin_imported_unqualified() {
+    python3 - <<'PYEOF'
+import pathlib
+path = pathlib.Path("crates/core/src/cors/answer.rs")
+text = path.read_text()
+text = text.replace(
+    "use super::rule::{AllowOrigin, RuleMatch};",
+    "use super::rule::AllowOrigin::*;\nuse super::rule::{AllowOrigin, RuleMatch};",
+)
+path.write_text(text)
+PYEOF
+}
+expect_fail check_cors_credentials_exclusive.sh \
+    "AllowOrigin's variants imported unqualified, which would blind rule 3" mut_allow_origin_imported_unqualified
+
+mut_credentials_constant_renamed() {
+    python3 - <<'PYEOF'
+import pathlib
+# The guard's subject renamed out from under it. Rules 2 and 3 would then be checking nothing,
+# which must be a failure and not a pass.
+for name in ("crates/core/src/cors/answer.rs", "crates/core/src/cors/mod.rs", "crates/gateway/src/lib.rs"):
+    path = pathlib.Path(name)
+    path.write_text(path.read_text().replace("ACCESS_CONTROL_ALLOW_CREDENTIALS", "ALLOW_CREDS"))
+PYEOF
+}
+expect_fail check_cors_credentials_exclusive.sh \
+    'the credentials constant renamed, leaving the guard with nothing to check' mut_credentials_constant_renamed
 
 printf '\n%s case(s), %s failure(s)\n' "$cases" "$failures"
 [[ "$failures" -eq 0 ]]
