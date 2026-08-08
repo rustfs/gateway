@@ -65,14 +65,17 @@ such a row as though the key selected the operation is the opposite of what the 
 | `response-content-language` | [GetObject](#getobject), [HeadObject](#headobject) |
 | `response-content-type` | [GetObject](#getobject), [HeadObject](#headobject) |
 | `response-expires` | [GetObject](#getobject), [HeadObject](#headobject) |
+| `restore` | [RestoreObject](#restoreobject) |
 | `retention` | [GetObjectRetention](#getobjectretention), [PutObjectRetention](#putobjectretention) |
+| `select` | [SelectObjectContent](#selectobjectcontent) |
+| `select-type` | [SelectObjectContent](#selectobjectcontent) |
 | `start-after` | [ListObjectsV2](#listobjectsv2) |
 | `tagging` | [CreateBucket](#createbucket) (absent), [DeleteBucket](#deletebucket) (absent), [DeleteBucketTagging](#deletebuckettagging), [DeleteObjectTagging](#deleteobjecttagging), [GetBucketTagging](#getbuckettagging), [GetObjectTagging](#getobjecttagging), [PutBucketTagging](#putbuckettagging), [PutObjectTagging](#putobjecttagging) |
 | `upload-id-marker` | [ListMultipartUploads](#listmultipartuploads) |
 | `uploadId` | [AbortMultipartUpload](#abortmultipartupload), [CompleteMultipartUpload](#completemultipartupload), [ListParts](#listparts), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
 | `uploads` | [CreateMultipartUpload](#createmultipartupload), [ListMultipartUploads](#listmultipartuploads) |
 | `version-id-marker` | [ListObjectVersions](#listobjectversions) |
-| `versionId` | [DeleteObject](#deleteobject), [DeleteObjectTagging](#deleteobjecttagging), [GetObject](#getobject), [GetObjectAttributes](#getobjectattributes), [GetObjectLegalHold](#getobjectlegalhold), [GetObjectRetention](#getobjectretention), [GetObjectTagging](#getobjecttagging), [HeadObject](#headobject), [PutObjectLegalHold](#putobjectlegalhold), [PutObjectRetention](#putobjectretention), [PutObjectTagging](#putobjecttagging) |
+| `versionId` | [DeleteObject](#deleteobject), [DeleteObjectTagging](#deleteobjecttagging), [GetObject](#getobject), [GetObjectAttributes](#getobjectattributes), [GetObjectLegalHold](#getobjectlegalhold), [GetObjectRetention](#getobjectretention), [GetObjectTagging](#getobjecttagging), [HeadObject](#headobject), [PutObjectLegalHold](#putobjectlegalhold), [PutObjectRetention](#putobjectretention), [PutObjectTagging](#putobjecttagging), [RestoreObject](#restoreobject) |
 | `versioning` | [CreateBucket](#createbucket) (absent) |
 | `versions` | [ListObjectVersions](#listobjectversions) |
 | `website` | [CreateBucket](#createbucket) (absent), [DeleteBucket](#deletebucket) (absent) |
@@ -133,7 +136,7 @@ such a row as though the key selected the operation is the opposite of what the 
 | `x-amz-copy-source-server-side-encryption-customer-key-md5` | [CopyObject](#copyobject), [UploadPartCopy](#uploadpartcopy) |
 | `x-amz-copy-source-version-id` | [CopyObject](#copyobject), [UploadPartCopy](#uploadpartcopy) |
 | `x-amz-delete-marker` | [DeleteObject](#deleteobject), [GetObject](#getobject), [GetObjectAttributes](#getobjectattributes), [HeadObject](#headobject) |
-| `x-amz-expected-bucket-owner` | [AbortMultipartUpload](#abortmultipartupload), [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [DeleteBucket](#deletebucket), [DeleteBucketCors](#deletebucketcors), [DeleteBucketEncryption](#deletebucketencryption), [DeleteBucketLifecycle](#deletebucketlifecycle), [DeleteBucketReplication](#deletebucketreplication), [DeleteBucketTagging](#deletebuckettagging), [DeleteObject](#deleteobject), [DeleteObjectTagging](#deleteobjecttagging), [DeleteObjects](#deleteobjects), [GetBucketCors](#getbucketcors), [GetBucketEncryption](#getbucketencryption), [GetBucketLifecycleConfiguration](#getbucketlifecycleconfiguration), [GetBucketLocation](#getbucketlocation), [GetBucketReplication](#getbucketreplication), [GetBucketTagging](#getbuckettagging), [GetObject](#getobject), [GetObjectAttributes](#getobjectattributes), [GetObjectLegalHold](#getobjectlegalhold), [GetObjectLockConfiguration](#getobjectlockconfiguration), [GetObjectRetention](#getobjectretention), [GetObjectTagging](#getobjecttagging), [HeadBucket](#headbucket), [HeadObject](#headobject), [ListMultipartUploads](#listmultipartuploads), [ListObjectVersions](#listobjectversions), [ListObjects](#listobjects), [ListObjectsV2](#listobjectsv2), [ListParts](#listparts), [PutBucketCors](#putbucketcors), [PutBucketEncryption](#putbucketencryption), [PutBucketLifecycleConfiguration](#putbucketlifecycleconfiguration), [PutBucketReplication](#putbucketreplication), [PutBucketTagging](#putbuckettagging), [PutObject](#putobject), [PutObjectLegalHold](#putobjectlegalhold), [PutObjectLockConfiguration](#putobjectlockconfiguration), [PutObjectRetention](#putobjectretention), [PutObjectTagging](#putobjecttagging), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
+| `x-amz-expected-bucket-owner` | [AbortMultipartUpload](#abortmultipartupload), [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [DeleteBucket](#deletebucket), [DeleteBucketCors](#deletebucketcors), [DeleteBucketEncryption](#deletebucketencryption), [DeleteBucketLifecycle](#deletebucketlifecycle), [DeleteBucketReplication](#deletebucketreplication), [DeleteBucketTagging](#deletebuckettagging), [DeleteObject](#deleteobject), [DeleteObjectTagging](#deleteobjecttagging), [DeleteObjects](#deleteobjects), [GetBucketCors](#getbucketcors), [GetBucketEncryption](#getbucketencryption), [GetBucketLifecycleConfiguration](#getbucketlifecycleconfiguration), [GetBucketLocation](#getbucketlocation), [GetBucketReplication](#getbucketreplication), [GetBucketTagging](#getbuckettagging), [GetObject](#getobject), [GetObjectAttributes](#getobjectattributes), [GetObjectLegalHold](#getobjectlegalhold), [GetObjectLockConfiguration](#getobjectlockconfiguration), [GetObjectRetention](#getobjectretention), [GetObjectTagging](#getobjecttagging), [HeadBucket](#headbucket), [HeadObject](#headobject), [ListMultipartUploads](#listmultipartuploads), [ListObjectVersions](#listobjectversions), [ListObjects](#listobjects), [ListObjectsV2](#listobjectsv2), [ListParts](#listparts), [PutBucketCors](#putbucketcors), [PutBucketEncryption](#putbucketencryption), [PutBucketLifecycleConfiguration](#putbucketlifecycleconfiguration), [PutBucketReplication](#putbucketreplication), [PutBucketTagging](#putbuckettagging), [PutObject](#putobject), [PutObjectLegalHold](#putobjectlegalhold), [PutObjectLockConfiguration](#putobjectlockconfiguration), [PutObjectRetention](#putobjectretention), [PutObjectTagging](#putobjecttagging), [RestoreObject](#restoreobject), [SelectObjectContent](#selectobjectcontent), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
 | `x-amz-expiration` | [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject) |
 | `x-amz-grant-full-control` | [CopyObject](#copyobject), [CreateBucket](#createbucket), [CreateMultipartUpload](#createmultipartupload), [PutObject](#putobject) |
 | `x-amz-grant-read` | [CopyObject](#copyobject), [CreateBucket](#createbucket), [CreateMultipartUpload](#createmultipartupload), [PutObject](#putobject) |
@@ -158,17 +161,18 @@ such a row as though the key selected the operation is the opposite of what the 
 | `x-amz-object-size` | [PutObject](#putobject) |
 | `x-amz-part-number-marker` | [GetObjectAttributes](#getobjectattributes) |
 | `x-amz-replication-status` | [GetObject](#getobject), [HeadObject](#headobject) |
-| `x-amz-request-charged` | [AbortMultipartUpload](#abortmultipartupload), [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [DeleteObject](#deleteobject), [DeleteObjects](#deleteobjects), [GetObject](#getobject), [GetObjectAttributes](#getobjectattributes), [HeadObject](#headobject), [ListMultipartUploads](#listmultipartuploads), [ListObjectVersions](#listobjectversions), [ListObjects](#listobjects), [ListObjectsV2](#listobjectsv2), [ListParts](#listparts), [PutObject](#putobject), [PutObjectLegalHold](#putobjectlegalhold), [PutObjectLockConfiguration](#putobjectlockconfiguration), [PutObjectRetention](#putobjectretention), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
-| `x-amz-request-payer` | [AbortMultipartUpload](#abortmultipartupload), [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [DeleteObject](#deleteobject), [DeleteObjects](#deleteobjects), [GetObject](#getobject), [GetObjectAttributes](#getobjectattributes), [GetObjectLegalHold](#getobjectlegalhold), [GetObjectRetention](#getobjectretention), [GetObjectTagging](#getobjecttagging), [HeadObject](#headobject), [ListMultipartUploads](#listmultipartuploads), [ListObjectVersions](#listobjectversions), [ListObjects](#listobjects), [ListObjectsV2](#listobjectsv2), [ListParts](#listparts), [PutObject](#putobject), [PutObjectLegalHold](#putobjectlegalhold), [PutObjectLockConfiguration](#putobjectlockconfiguration), [PutObjectRetention](#putobjectretention), [PutObjectTagging](#putobjecttagging), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
+| `x-amz-request-charged` | [AbortMultipartUpload](#abortmultipartupload), [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [DeleteObject](#deleteobject), [DeleteObjects](#deleteobjects), [GetObject](#getobject), [GetObjectAttributes](#getobjectattributes), [HeadObject](#headobject), [ListMultipartUploads](#listmultipartuploads), [ListObjectVersions](#listobjectversions), [ListObjects](#listobjects), [ListObjectsV2](#listobjectsv2), [ListParts](#listparts), [PutObject](#putobject), [PutObjectLegalHold](#putobjectlegalhold), [PutObjectLockConfiguration](#putobjectlockconfiguration), [PutObjectRetention](#putobjectretention), [RestoreObject](#restoreobject), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
+| `x-amz-request-payer` | [AbortMultipartUpload](#abortmultipartupload), [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [DeleteObject](#deleteobject), [DeleteObjects](#deleteobjects), [GetObject](#getobject), [GetObjectAttributes](#getobjectattributes), [GetObjectLegalHold](#getobjectlegalhold), [GetObjectRetention](#getobjectretention), [GetObjectTagging](#getobjecttagging), [HeadObject](#headobject), [ListMultipartUploads](#listmultipartuploads), [ListObjectVersions](#listobjectversions), [ListObjects](#listobjects), [ListObjectsV2](#listobjectsv2), [ListParts](#listparts), [PutObject](#putobject), [PutObjectLegalHold](#putobjectlegalhold), [PutObjectLockConfiguration](#putobjectlockconfiguration), [PutObjectRetention](#putobjectretention), [PutObjectTagging](#putobjecttagging), [RestoreObject](#restoreobject), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
 | `x-amz-restore` | [GetObject](#getobject), [HeadObject](#headobject) |
-| `x-amz-sdk-checksum-algorithm` | [DeleteObjects](#deleteobjects), [PutBucketCors](#putbucketcors), [PutBucketEncryption](#putbucketencryption), [PutBucketLifecycleConfiguration](#putbucketlifecycleconfiguration), [PutBucketReplication](#putbucketreplication), [PutBucketTagging](#putbuckettagging), [PutObject](#putobject), [PutObjectLegalHold](#putobjectlegalhold), [PutObjectLockConfiguration](#putobjectlockconfiguration), [PutObjectRetention](#putobjectretention), [PutObjectTagging](#putobjecttagging), [UploadPart](#uploadpart) |
+| `x-amz-restore-output-path` | [RestoreObject](#restoreobject) |
+| `x-amz-sdk-checksum-algorithm` | [DeleteObjects](#deleteobjects), [PutBucketCors](#putbucketcors), [PutBucketEncryption](#putbucketencryption), [PutBucketLifecycleConfiguration](#putbucketlifecycleconfiguration), [PutBucketReplication](#putbucketreplication), [PutBucketTagging](#putbuckettagging), [PutObject](#putobject), [PutObjectLegalHold](#putobjectlegalhold), [PutObjectLockConfiguration](#putobjectlockconfiguration), [PutObjectRetention](#putobjectretention), [PutObjectTagging](#putobjecttagging), [RestoreObject](#restoreobject), [UploadPart](#uploadpart) |
 | `x-amz-server-side-encryption` | [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
 | `x-amz-server-side-encryption-aws-kms-key-id` | [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
 | `x-amz-server-side-encryption-bucket-key-enabled` | [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
 | `x-amz-server-side-encryption-context` | [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [PutObject](#putobject) |
-| `x-amz-server-side-encryption-customer-algorithm` | [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [GetObject](#getobject), [GetObjectAttributes](#getobjectattributes), [HeadObject](#headobject), [ListParts](#listparts), [PutObject](#putobject), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
-| `x-amz-server-side-encryption-customer-key` | [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [GetObject](#getobject), [GetObjectAttributes](#getobjectattributes), [HeadObject](#headobject), [ListParts](#listparts), [PutObject](#putobject), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
-| `x-amz-server-side-encryption-customer-key-md5` | [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [GetObject](#getobject), [GetObjectAttributes](#getobjectattributes), [HeadObject](#headobject), [ListParts](#listparts), [PutObject](#putobject), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
+| `x-amz-server-side-encryption-customer-algorithm` | [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [GetObject](#getobject), [GetObjectAttributes](#getobjectattributes), [HeadObject](#headobject), [ListParts](#listparts), [PutObject](#putobject), [SelectObjectContent](#selectobjectcontent), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
+| `x-amz-server-side-encryption-customer-key` | [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [GetObject](#getobject), [GetObjectAttributes](#getobjectattributes), [HeadObject](#headobject), [ListParts](#listparts), [PutObject](#putobject), [SelectObjectContent](#selectobjectcontent), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
+| `x-amz-server-side-encryption-customer-key-md5` | [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [GetObject](#getobject), [GetObjectAttributes](#getobjectattributes), [HeadObject](#headobject), [ListParts](#listparts), [PutObject](#putobject), [SelectObjectContent](#selectobjectcontent), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
 | `x-amz-source-expected-bucket-owner` | [CopyObject](#copyobject), [UploadPartCopy](#uploadpartcopy) |
 | `x-amz-storage-class` | [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject) |
 | `x-amz-tagging` | [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [PutObject](#putobject) |
@@ -183,47 +187,61 @@ such a row as though the key selected the operation is the opposite of what the 
 
 | Error code | Operations |
 | --- | --- |
-| `AccessDenied` | [AbortMultipartUpload](#abortmultipartupload), [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateBucket](#createbucket), [CreateMultipartUpload](#createmultipartupload), [DeleteBucket](#deletebucket), [DeleteBucketCors](#deletebucketcors), [DeleteBucketEncryption](#deletebucketencryption), [DeleteBucketLifecycle](#deletebucketlifecycle), [DeleteBucketReplication](#deletebucketreplication), [DeleteBucketTagging](#deletebuckettagging), [DeleteObject](#deleteobject), [DeleteObjectTagging](#deleteobjecttagging), [DeleteObjects](#deleteobjects), [GetBucketCors](#getbucketcors), [GetBucketEncryption](#getbucketencryption), [GetBucketLifecycleConfiguration](#getbucketlifecycleconfiguration), [GetBucketLocation](#getbucketlocation), [GetBucketReplication](#getbucketreplication), [GetBucketTagging](#getbuckettagging), [GetObject](#getobject), [GetObjectAttributes](#getobjectattributes), [GetObjectLegalHold](#getobjectlegalhold), [GetObjectLockConfiguration](#getobjectlockconfiguration), [GetObjectRetention](#getobjectretention), [GetObjectTagging](#getobjecttagging), [HeadBucket](#headbucket), [HeadObject](#headobject), [ListBuckets](#listbuckets), [ListMultipartUploads](#listmultipartuploads), [ListObjectVersions](#listobjectversions), [ListObjects](#listobjects), [ListObjectsV2](#listobjectsv2), [ListParts](#listparts), [PutBucketCors](#putbucketcors), [PutBucketEncryption](#putbucketencryption), [PutBucketLifecycleConfiguration](#putbucketlifecycleconfiguration), [PutBucketReplication](#putbucketreplication), [PutBucketTagging](#putbuckettagging), [PutObject](#putobject), [PutObjectLegalHold](#putobjectlegalhold), [PutObjectLockConfiguration](#putobjectlockconfiguration), [PutObjectRetention](#putobjectretention), [PutObjectTagging](#putobjecttagging), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
+| `AccessDenied` | [AbortMultipartUpload](#abortmultipartupload), [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateBucket](#createbucket), [CreateMultipartUpload](#createmultipartupload), [DeleteBucket](#deletebucket), [DeleteBucketCors](#deletebucketcors), [DeleteBucketEncryption](#deletebucketencryption), [DeleteBucketLifecycle](#deletebucketlifecycle), [DeleteBucketReplication](#deletebucketreplication), [DeleteBucketTagging](#deletebuckettagging), [DeleteObject](#deleteobject), [DeleteObjectTagging](#deleteobjecttagging), [DeleteObjects](#deleteobjects), [GetBucketCors](#getbucketcors), [GetBucketEncryption](#getbucketencryption), [GetBucketLifecycleConfiguration](#getbucketlifecycleconfiguration), [GetBucketLocation](#getbucketlocation), [GetBucketReplication](#getbucketreplication), [GetBucketTagging](#getbuckettagging), [GetObject](#getobject), [GetObjectAttributes](#getobjectattributes), [GetObjectLegalHold](#getobjectlegalhold), [GetObjectLockConfiguration](#getobjectlockconfiguration), [GetObjectRetention](#getobjectretention), [GetObjectTagging](#getobjecttagging), [HeadBucket](#headbucket), [HeadObject](#headobject), [ListBuckets](#listbuckets), [ListMultipartUploads](#listmultipartuploads), [ListObjectVersions](#listobjectversions), [ListObjects](#listobjects), [ListObjectsV2](#listobjectsv2), [ListParts](#listparts), [PutBucketCors](#putbucketcors), [PutBucketEncryption](#putbucketencryption), [PutBucketLifecycleConfiguration](#putbucketlifecycleconfiguration), [PutBucketReplication](#putbucketreplication), [PutBucketTagging](#putbuckettagging), [PutObject](#putobject), [PutObjectLegalHold](#putobjectlegalhold), [PutObjectLockConfiguration](#putobjectlockconfiguration), [PutObjectRetention](#putobjectretention), [PutObjectTagging](#putobjecttagging), [RestoreObject](#restoreobject), [SelectObjectContent](#selectobjectcontent), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
 | `BadDigest` | [PutBucketCors](#putbucketcors), [PutBucketEncryption](#putbucketencryption), [PutBucketLifecycleConfiguration](#putbucketlifecycleconfiguration), [PutBucketReplication](#putbucketreplication), [PutObject](#putobject), [PutObjectLegalHold](#putobjectlegalhold), [PutObjectLockConfiguration](#putobjectlockconfiguration), [PutObjectRetention](#putobjectretention), [UploadPart](#uploadpart) |
 | `BucketAlreadyExists` | [CreateBucket](#createbucket) |
 | `BucketAlreadyOwnedByYou` | [CreateBucket](#createbucket) |
 | `BucketNotEmpty` | [DeleteBucket](#deletebucket) |
+| `CSVParsingError` | [SelectObjectContent](#selectobjectcontent) |
 | `ConditionalRequestConflict` | [CompleteMultipartUpload](#completemultipartupload), [PutObject](#putobject) |
 | `EncryptionTypeMismatch` | [PutObject](#putobject) |
 | `EntityTooLarge` | [CopyObject](#copyobject), [PutObject](#putobject), [UploadPart](#uploadpart) |
 | `EntityTooSmall` | [CompleteMultipartUpload](#completemultipartupload) |
+| `ExpressionTooLong` | [SelectObjectContent](#selectobjectcontent) |
 | `IncompleteBody` | [PutObject](#putobject), [UploadPart](#uploadpart) |
-| `InvalidArgument` | [AbortMultipartUpload](#abortmultipartupload), [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateBucket](#createbucket), [CreateMultipartUpload](#createmultipartupload), [DeleteBucketTagging](#deletebuckettagging), [DeleteObject](#deleteobject), [DeleteObjectTagging](#deleteobjecttagging), [DeleteObjects](#deleteobjects), [GetBucketTagging](#getbuckettagging), [GetObject](#getobject), [GetObjectAttributes](#getobjectattributes), [GetObjectTagging](#getobjecttagging), [ListMultipartUploads](#listmultipartuploads), [ListObjectVersions](#listobjectversions), [ListObjects](#listobjects), [ListObjectsV2](#listobjectsv2), [ListParts](#listparts), [PutBucketCors](#putbucketcors), [PutBucketEncryption](#putbucketencryption), [PutBucketLifecycleConfiguration](#putbucketlifecycleconfiguration), [PutBucketReplication](#putbucketreplication), [PutBucketTagging](#putbuckettagging), [PutObject](#putobject), [PutObjectLegalHold](#putobjectlegalhold), [PutObjectLockConfiguration](#putobjectlockconfiguration), [PutObjectRetention](#putobjectretention), [PutObjectTagging](#putobjecttagging), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
+| `InvalidArgument` | [AbortMultipartUpload](#abortmultipartupload), [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateBucket](#createbucket), [CreateMultipartUpload](#createmultipartupload), [DeleteBucketTagging](#deletebuckettagging), [DeleteObject](#deleteobject), [DeleteObjectTagging](#deleteobjecttagging), [DeleteObjects](#deleteobjects), [GetBucketTagging](#getbuckettagging), [GetObject](#getobject), [GetObjectAttributes](#getobjectattributes), [GetObjectTagging](#getobjecttagging), [ListMultipartUploads](#listmultipartuploads), [ListObjectVersions](#listobjectversions), [ListObjects](#listobjects), [ListObjectsV2](#listobjectsv2), [ListParts](#listparts), [PutBucketCors](#putbucketcors), [PutBucketEncryption](#putbucketencryption), [PutBucketLifecycleConfiguration](#putbucketlifecycleconfiguration), [PutBucketReplication](#putbucketreplication), [PutBucketTagging](#putbuckettagging), [PutObject](#putobject), [PutObjectLegalHold](#putobjectlegalhold), [PutObjectLockConfiguration](#putobjectlockconfiguration), [PutObjectRetention](#putobjectretention), [PutObjectTagging](#putobjecttagging), [RestoreObject](#restoreobject), [SelectObjectContent](#selectobjectcontent), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
 | `InvalidBucketName` | [CreateBucket](#createbucket) |
+| `InvalidColumnIndex` | [SelectObjectContent](#selectobjectcontent) |
+| `InvalidCompressionFormat` | [SelectObjectContent](#selectobjectcontent) |
+| `InvalidDataType` | [SelectObjectContent](#selectobjectcontent) |
 | `InvalidDigest` | [PutObject](#putobject), [UploadPart](#uploadpart) |
+| `InvalidExpressionType` | [SelectObjectContent](#selectobjectcontent) |
 | `InvalidLocationConstraint` | [CreateBucket](#createbucket) |
-| `InvalidObjectState` | [GetObject](#getobject) |
+| `InvalidObjectState` | [GetObject](#getobject), [RestoreObject](#restoreobject) |
 | `InvalidPart` | [CompleteMultipartUpload](#completemultipartupload) |
 | `InvalidPartOrder` | [CompleteMultipartUpload](#completemultipartupload) |
 | `InvalidRange` | [GetObject](#getobject), [UploadPartCopy](#uploadpartcopy) |
-| `InvalidRequest` | [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [DeleteObjects](#deleteobjects), [PutBucketCors](#putbucketcors), [PutBucketEncryption](#putbucketencryption), [PutBucketLifecycleConfiguration](#putbucketlifecycleconfiguration), [PutBucketReplication](#putbucketreplication), [PutObject](#putobject), [PutObjectLegalHold](#putobjectlegalhold), [PutObjectLockConfiguration](#putobjectlockconfiguration), [PutObjectRetention](#putobjectretention), [UploadPartCopy](#uploadpartcopy) |
+| `InvalidRequest` | [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [DeleteObjects](#deleteobjects), [PutBucketCors](#putbucketcors), [PutBucketEncryption](#putbucketencryption), [PutBucketLifecycleConfiguration](#putbucketlifecycleconfiguration), [PutBucketReplication](#putbucketreplication), [PutObject](#putobject), [PutObjectLegalHold](#putobjectlegalhold), [PutObjectLockConfiguration](#putobjectlockconfiguration), [PutObjectRetention](#putobjectretention), [RestoreObject](#restoreobject), [SelectObjectContent](#selectobjectcontent), [UploadPartCopy](#uploadpartcopy) |
 | `InvalidStorageClass` | [CreateMultipartUpload](#createmultipartupload) |
 | `InvalidTag` | [PutBucketTagging](#putbuckettagging), [PutObjectTagging](#putobjecttagging) |
+| `InvalidTextEncoding` | [SelectObjectContent](#selectobjectcontent) |
 | `InvalidWriteOffset` | [PutObject](#putobject) |
-| `MalformedXML` | [CompleteMultipartUpload](#completemultipartupload), [CreateBucket](#createbucket), [DeleteObjects](#deleteobjects), [PutBucketCors](#putbucketcors), [PutBucketEncryption](#putbucketencryption), [PutBucketLifecycleConfiguration](#putbucketlifecycleconfiguration), [PutBucketReplication](#putbucketreplication), [PutBucketTagging](#putbuckettagging), [PutObjectLegalHold](#putobjectlegalhold), [PutObjectLockConfiguration](#putobjectlockconfiguration), [PutObjectRetention](#putobjectretention), [PutObjectTagging](#putobjecttagging) |
+| `JSONParsingError` | [SelectObjectContent](#selectobjectcontent) |
+| `MalformedXML` | [CompleteMultipartUpload](#completemultipartupload), [CreateBucket](#createbucket), [DeleteObjects](#deleteobjects), [PutBucketCors](#putbucketcors), [PutBucketEncryption](#putbucketencryption), [PutBucketLifecycleConfiguration](#putbucketlifecycleconfiguration), [PutBucketReplication](#putbucketreplication), [PutBucketTagging](#putbuckettagging), [PutObjectLegalHold](#putobjectlegalhold), [PutObjectLockConfiguration](#putobjectlockconfiguration), [PutObjectRetention](#putobjectretention), [PutObjectTagging](#putobjecttagging), [RestoreObject](#restoreobject), [SelectObjectContent](#selectobjectcontent) |
 | `MethodNotAllowed` | [CopyObject](#copyobject), [UploadPartCopy](#uploadpartcopy) |
 | `MissingContentLength` | [PutObject](#putobject), [UploadPart](#uploadpart) |
-| `NoSuchBucket` | [AbortMultipartUpload](#abortmultipartupload), [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [DeleteBucket](#deletebucket), [DeleteBucketCors](#deletebucketcors), [DeleteBucketEncryption](#deletebucketencryption), [DeleteBucketLifecycle](#deletebucketlifecycle), [DeleteBucketReplication](#deletebucketreplication), [DeleteBucketTagging](#deletebuckettagging), [DeleteObject](#deleteobject), [DeleteObjectTagging](#deleteobjecttagging), [DeleteObjects](#deleteobjects), [GetBucketCors](#getbucketcors), [GetBucketEncryption](#getbucketencryption), [GetBucketLifecycleConfiguration](#getbucketlifecycleconfiguration), [GetBucketLocation](#getbucketlocation), [GetBucketReplication](#getbucketreplication), [GetBucketTagging](#getbuckettagging), [GetObject](#getobject), [GetObjectAttributes](#getobjectattributes), [GetObjectLegalHold](#getobjectlegalhold), [GetObjectLockConfiguration](#getobjectlockconfiguration), [GetObjectRetention](#getobjectretention), [GetObjectTagging](#getobjecttagging), [HeadBucket](#headbucket), [HeadObject](#headobject), [ListMultipartUploads](#listmultipartuploads), [ListObjectVersions](#listobjectversions), [ListObjects](#listobjects), [ListObjectsV2](#listobjectsv2), [ListParts](#listparts), [PutBucketCors](#putbucketcors), [PutBucketEncryption](#putbucketencryption), [PutBucketLifecycleConfiguration](#putbucketlifecycleconfiguration), [PutBucketReplication](#putbucketreplication), [PutBucketTagging](#putbuckettagging), [PutObject](#putobject), [PutObjectLegalHold](#putobjectlegalhold), [PutObjectLockConfiguration](#putobjectlockconfiguration), [PutObjectRetention](#putobjectretention), [PutObjectTagging](#putobjecttagging), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
+| `NoSuchBucket` | [AbortMultipartUpload](#abortmultipartupload), [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [DeleteBucket](#deletebucket), [DeleteBucketCors](#deletebucketcors), [DeleteBucketEncryption](#deletebucketencryption), [DeleteBucketLifecycle](#deletebucketlifecycle), [DeleteBucketReplication](#deletebucketreplication), [DeleteBucketTagging](#deletebuckettagging), [DeleteObject](#deleteobject), [DeleteObjectTagging](#deleteobjecttagging), [DeleteObjects](#deleteobjects), [GetBucketCors](#getbucketcors), [GetBucketEncryption](#getbucketencryption), [GetBucketLifecycleConfiguration](#getbucketlifecycleconfiguration), [GetBucketLocation](#getbucketlocation), [GetBucketReplication](#getbucketreplication), [GetBucketTagging](#getbuckettagging), [GetObject](#getobject), [GetObjectAttributes](#getobjectattributes), [GetObjectLegalHold](#getobjectlegalhold), [GetObjectLockConfiguration](#getobjectlockconfiguration), [GetObjectRetention](#getobjectretention), [GetObjectTagging](#getobjecttagging), [HeadBucket](#headbucket), [HeadObject](#headobject), [ListMultipartUploads](#listmultipartuploads), [ListObjectVersions](#listobjectversions), [ListObjects](#listobjects), [ListObjectsV2](#listobjectsv2), [ListParts](#listparts), [PutBucketCors](#putbucketcors), [PutBucketEncryption](#putbucketencryption), [PutBucketLifecycleConfiguration](#putbucketlifecycleconfiguration), [PutBucketReplication](#putbucketreplication), [PutBucketTagging](#putbuckettagging), [PutObject](#putobject), [PutObjectLegalHold](#putobjectlegalhold), [PutObjectLockConfiguration](#putobjectlockconfiguration), [PutObjectRetention](#putobjectretention), [PutObjectTagging](#putobjecttagging), [RestoreObject](#restoreobject), [SelectObjectContent](#selectobjectcontent), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
 | `NoSuchCORSConfiguration` | [GetBucketCors](#getbucketcors) |
-| `NoSuchKey` | [CopyObject](#copyobject), [DeleteObjectTagging](#deleteobjecttagging), [GetObject](#getobject), [GetObjectAttributes](#getobjectattributes), [GetObjectLegalHold](#getobjectlegalhold), [GetObjectRetention](#getobjectretention), [GetObjectTagging](#getobjecttagging), [HeadObject](#headobject), [PutObjectLegalHold](#putobjectlegalhold), [PutObjectRetention](#putobjectretention), [PutObjectTagging](#putobjecttagging), [UploadPartCopy](#uploadpartcopy) |
+| `NoSuchKey` | [CopyObject](#copyobject), [DeleteObjectTagging](#deleteobjecttagging), [GetObject](#getobject), [GetObjectAttributes](#getobjectattributes), [GetObjectLegalHold](#getobjectlegalhold), [GetObjectRetention](#getobjectretention), [GetObjectTagging](#getobjecttagging), [HeadObject](#headobject), [PutObjectLegalHold](#putobjectlegalhold), [PutObjectRetention](#putobjectretention), [PutObjectTagging](#putobjecttagging), [RestoreObject](#restoreobject), [SelectObjectContent](#selectobjectcontent), [UploadPartCopy](#uploadpartcopy) |
 | `NoSuchLifecycleConfiguration` | [GetBucketLifecycleConfiguration](#getbucketlifecycleconfiguration) |
 | `NoSuchObjectLockConfiguration` | [GetObjectLegalHold](#getobjectlegalhold), [GetObjectRetention](#getobjectretention) |
 | `NoSuchTagSet` | [GetBucketTagging](#getbuckettagging) |
 | `NoSuchUpload` | [AbortMultipartUpload](#abortmultipartupload), [CompleteMultipartUpload](#completemultipartupload), [ListParts](#listparts), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
 | `NotFound` | [HeadBucket](#headbucket), [HeadObject](#headobject) |
 | `NotModified` | [GetObject](#getobject), [HeadObject](#headobject) |
+| `ObjectAlreadyInActiveTierError` | [RestoreObject](#restoreobject) |
 | `ObjectLockConfigurationNotFoundError` | [GetObjectLockConfiguration](#getobjectlockconfiguration) |
 | `ObjectNotInActiveTierError` | [CopyObject](#copyobject) |
+| `ObjectSerializationConflict` | [SelectObjectContent](#selectobjectcontent) |
+| `OverMaxRecordSize` | [SelectObjectContent](#selectobjectcontent) |
+| `ParseUnexpectedToken` | [SelectObjectContent](#selectobjectcontent) |
 | `PermanentRedirect` | [CreateBucket](#createbucket), [DeleteBucket](#deletebucket), [GetBucketLocation](#getbucketlocation), [HeadBucket](#headbucket), [ListMultipartUploads](#listmultipartuploads), [ListObjectVersions](#listobjectversions), [ListObjects](#listobjects), [ListObjectsV2](#listobjectsv2) |
 | `PreconditionFailed` | [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject), [UploadPartCopy](#uploadpartcopy) |
 | `ReplicationConfigurationNotFoundError` | [GetBucketReplication](#getbucketreplication) |
+| `RestoreAlreadyInProgress` | [RestoreObject](#restoreobject) |
 | `ServerSideEncryptionConfigurationNotFoundError` | [GetBucketEncryption](#getbucketencryption) |
 | `TooManyParts` | [PutObject](#putobject) |
+| `UnsupportedFunction` | [SelectObjectContent](#selectobjectcontent) |
 | `XAmzContentChecksumMismatch` | [PutObject](#putobject), [UploadPart](#uploadpart) |
 
 ## Operations
@@ -274,6 +292,8 @@ such a row as though the key selected the operation is the opposite of what the 
 | [PutObjectLockConfiguration](#putobjectlockconfiguration) | PUT | `/{Bucket}` | `object-lock` | — | 200 | `NoSuchBucket`, `AccessDenied`, `MalformedXML`, `InvalidRequest`, `InvalidArgument`, `BadDigest` | `q-lock-0006`, `q-lock-0007`, `q-lock-0008`, `q-lock-0009`, `q-lock-0010`, `q-lock-0014` |
 | [PutObjectRetention](#putobjectretention) | PUT | `/{Bucket}/{Key+}` | `retention`, `versionId` | — | 200 | `NoSuchBucket`, `NoSuchKey`, `AccessDenied`, `MalformedXML`, `InvalidRequest`, `InvalidArgument`, `BadDigest` | `q-lock-0004`, `q-lock-0006`, `q-lock-0007`, `q-lock-0008`, `q-lock-0012`, `q-lock-0013`, `q-lock-0015` |
 | [PutObjectTagging](#putobjecttagging) | PUT | `/{Bucket}/{Key+}` | `tagging`, `versionId` | — | 200 | `NoSuchBucket`, `NoSuchKey`, `AccessDenied`, `InvalidArgument`, `MalformedXML`, `InvalidTag` | `q-tag-md5-required-0092`, `q-tag-limits-0094` |
+| [RestoreObject](#restoreobject) | POST | `/{Bucket}/{Key+}` | `restore`, `versionId` | — | 202 | `NoSuchBucket`, `NoSuchKey`, `AccessDenied`, `MalformedXML`, `InvalidRequest`, `InvalidArgument`, `RestoreAlreadyInProgress`, `InvalidObjectState`, `ObjectAlreadyInActiveTierError` | `q-restore-0001`, `q-restore-0002`, `q-restore-0003`, `q-restore-0004`, `q-restore-0005`, `q-restore-0006`, `q-restore-0007`, `q-restore-0008` |
+| [SelectObjectContent](#selectobjectcontent) | POST | `/{Bucket}/{Key+}` | `select`, `select-type` | — | 200 | `NoSuchBucket`, `NoSuchKey`, `AccessDenied`, `MalformedXML`, `InvalidRequest`, `InvalidArgument`, `InvalidExpressionType`, `ExpressionTooLong`, `InvalidTextEncoding`, `InvalidCompressionFormat`, `ObjectSerializationConflict`, `UnsupportedFunction`, `ParseUnexpectedToken`, `CSVParsingError`, `JSONParsingError`, `InvalidColumnIndex`, `InvalidDataType`, `OverMaxRecordSize` | `q-select-0001`, `q-select-0002`, `q-select-0003`, `q-select-0004`, `q-select-0005`, `q-select-0006`, `q-select-0007`, `q-select-0008`, `q-select-0009` |
 | [UploadPart](#uploadpart) | PUT | `/{Bucket}/{Key+}` | `partNumber`, `uploadId` | `content-length`, `etag`, `x-amz-checksum-` | 200 | `NoSuchBucket`, `NoSuchUpload`, `AccessDenied`, `InvalidArgument`, `MissingContentLength`, `EntityTooLarge`, `IncompleteBody`, `BadDigest`, `InvalidDigest`, `XAmzContentChecksumMismatch` | `q-checksum-0006`, `q-mpu-upload-id-0037`, `q-mpu-limits-0038` |
 | [UploadPartCopy](#uploadpartcopy) | PUT | `/{Bucket}/{Key+}` | `partNumber`, `uploadId` | `x-amz-copy-source` | 200 | `NoSuchBucket`, `NoSuchKey`, `NoSuchUpload`, `AccessDenied`, `InvalidRequest`, `InvalidArgument`, `InvalidRange`, `PreconditionFailed`, `MethodNotAllowed` | `q-copy-source-split-0077`, `q-copy-source-arn-0078`, `q-copy-error-after-200-0082`, `q-copy-source-version-0083`, `q-copy-part-root-0084`, `q-copy-range-0085` |
 
@@ -321,6 +341,8 @@ First match wins; lower precedence is tried first.
 | 520 | [PutObjectRetention](#putobjectretention) | `Method PUT` AND `Target Object` AND `QueryPresent ?retention` |
 | 530 | [GetObjectLegalHold](#getobjectlegalhold) | `Method GET` AND `Target Object` AND `QueryPresent ?legal-hold` |
 | 540 | [PutObjectLegalHold](#putobjectlegalhold) | `Method PUT` AND `Target Object` AND `QueryPresent ?legal-hold` |
+| 570 | [RestoreObject](#restoreobject) | `Method POST` AND `Target Object` AND `QueryPresent ?restore` |
+| 580 | [SelectObjectContent](#selectobjectcontent) | `Method POST` AND `Target Object` AND `QueryPresent ?select` AND `QueryEquals ?select-type=2` |
 | 600 | [ListObjectsV2](#listobjectsv2) | `Method GET` AND `Target Bucket` AND `QueryEquals ?list-type=2` |
 | 610 | [ListObjectVersions](#listobjectversions) | `Method GET` AND `Target Bucket` AND `QueryPresent ?versions` |
 | 650 | [DeleteObjects](#deleteobjects) | `Method POST` AND `Target Bucket` AND `QueryPresent ?delete` |
@@ -2523,6 +2545,137 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 - `Tag` (Structure) — `Key: ObjectKey`, `Value: String`
 - `Tagging` (Structure) — `TagSet: List<Structure(Tag)>(Tag)`
 
+### RestoreObject
+
+`POST /{Bucket}/{Key+}` &rarr; 202 · target Object · precedence 570 · auth Required (`s3:RestoreObject`, presigned allowed) · spec `spec/operations/RestoreObject.toml`
+
+**Route predicates**
+
+- `Method POST`
+- `Target Object`
+- `QueryPresent ?restore`
+
+**Query keys**
+
+- routed on, present: `restore`
+- routed on, exact value: —
+- routed on, absent: —
+- read as parameters: `versionId`
+
+**Headers**
+
+- request: `x-amz-expected-bucket-owner`, `x-amz-request-payer`, `x-amz-sdk-checksum-algorithm`
+- response: `x-amz-request-charged`, `x-amz-restore-output-path`
+- required: —
+
+**Body**
+
+- request: XmlBody (Full, at most 65536 bytes)
+- response: None (None)
+
+**Error codes**
+
+`NoSuchBucket`, `NoSuchKey`, `AccessDenied`, `MalformedXML`, `InvalidRequest`, `InvalidArgument`, `RestoreAlreadyInProgress`, `InvalidObjectState`, `ObjectAlreadyInActiveTierError`
+
+**Checksums**
+
+- required before the handler runs: false
+- request algorithms: `CRC32`, `CRC32C`, `CRC64NVME`, `SHA1`, `SHA256`
+
+**Quirks**
+
+- `q-restore-0001` (status_tri_state on `RestoreObject`) — A restore answers three different statuses for three different states — 202 when a retrieval starts, 200 when the copy is already restored, 409 RestoreAlreadyInProgress while one is running — so the number is decided by a mapping in this crate and declared as the operation's success status plus one alternative, never chosen by a handler.
+- `q-restore-0002` (structured_header on `RestoreObject.RestoreStatus`) — x-amz-restore is a structured header, not a word: an in-progress copy is ongoing-request="true" and a finished one is ongoing-request="false", expiry-date="<RFC 1123>" — quotes around both values, a comma and exactly one space between the pairs — and it is produced and parsed in one place so the two spellings cannot drift.
+- `q-restore-0003` (object_state_rule on `RestoreObject`) — A restore of an object that is not in an archive storage class is refused 403 InvalidObjectState rather than accepted as a no-op: a caller that reads a success has no way to tell a retrieval it does not need from one that never happened.
+- `q-restore-0004` (value_constraint on `RestoreRequest`) — A RestoreRequest must name exactly one of the two documented forms: a Days count of at least one for an ordinary retrieval, or Type SELECT with both SelectParameters and OutputLocation and no Days at all — neither form's members may appear in the other, and a document with neither is refused rather than given a duration nobody asked for.
+- `q-restore-0005` (closed_value_set on `GlacierJobParameters.Tier`) — A retrieval tier outside the documented three-value set — Expedited, Standard, Bulk, exactly in that spelling — is refused as InvalidArgument on both spellings of the member, because a tier nothing can schedule is a retrieval that silently never starts.
+- `q-restore-0006` (required_body on `RestoreObject`) — The payload member is promoted to required, so a restore with an empty body is 400 MalformedXML rather than a retrieval with a duration this implementation invented: neither documented form of the request has a default, and Days in particular has none.
+- `q-restore-0007` (lenient_unknown_elements on `RestoreObject`) — Unknown elements inside a RestoreRequest are skipped rather than refused, and so is an XML namespace on the root: AWS adds elements to this document over time and a decoder that got stricter would refuse retrievals an SDK a version newer sends correctly.
+- `q-restore-0008` (version_selector on `RestoreObject.VersionId`) — versionId selects which version of the object is retrieved, so it is decoded and carried to the handler rather than dropped: a backend that ignored it would retrieve the current version and report success for a request about another one, which is indistinguishable from having honoured it.
+
+Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
+
+**Body shapes**
+
+- `CSVInput` (Structure) — `FileHeaderInfo: StringEnum`, `Comments: String`, `QuoteEscapeCharacter: String`, `RecordDelimiter: String`, `FieldDelimiter: String`, `QuoteCharacter: String`, `AllowQuotedRecordDelimiter: Boolean`
+- `CSVOutput` (Structure) — `QuoteFields: StringEnum`, `QuoteEscapeCharacter: String`, `RecordDelimiter: String`, `FieldDelimiter: String`, `QuoteCharacter: String`
+- `Encryption` (Structure) — `EncryptionType: StringEnum`, `KMSKeyId: String`, `KMSContext: String`
+- `GlacierJobParameters` (Structure) — `Tier: StringEnum`
+- `Grant` (Structure) — `Grantee: Structure(Grantee)`, `Permission: StringEnum`
+- `Grantee` (Structure) — `DisplayName: String`, `EmailAddress: String`, `ID: String`, `URI: String`, `Type: StringEnum`
+- `InputSerialization` (Structure) — `CSV: Structure(CSVInput)`, `CompressionType: StringEnum`, `JSON: Structure(JSONInput)`, `Parquet: Structure(ParquetInput)`
+- `JSONInput` (Structure) — `Type: StringEnum`
+- `JSONOutput` (Structure) — `RecordDelimiter: String`
+- `MetadataEntry` (Structure) — `Name: String`, `Value: String`
+- `OutputLocation` (Structure) — `S3: Structure(S3Location)`
+- `OutputSerialization` (Structure) — `CSV: Structure(CSVOutput)`, `JSON: Structure(JSONOutput)`
+- `ParquetInput` (Structure) — 
+- `RestoreRequest` (Structure) — `Days: Integer`, `GlacierJobParameters: Structure(GlacierJobParameters)`, `Type: StringEnum`, `Tier: StringEnum`, `Description: String`, `SelectParameters: Structure(SelectParameters)`, `OutputLocation: Structure(OutputLocation)`
+- `S3Location` (Structure) — `BucketName: BucketName`, `Prefix: String`, `Encryption: Structure(Encryption)`, `CannedACL: StringEnum`, `AccessControlList: List<Structure(Grant)>(Grant)`, `Tagging: Structure(Tagging)`, `UserMetadata: List<Structure(MetadataEntry)>(MetadataEntry)`, `StorageClass: StringEnum`
+- `SelectParameters` (Structure) — `InputSerialization: Structure(InputSerialization)`, `ExpressionType: StringEnum`, `Expression: String`, `OutputSerialization: Structure(OutputSerialization)`
+- `Tag` (Structure) — `Key: ObjectKey`, `Value: String`
+- `Tagging` (Structure) — `TagSet: List<Structure(Tag)>(Tag)`
+
+### SelectObjectContent
+
+`POST /{Bucket}/{Key+}` &rarr; 200 · target Object · precedence 580 · auth Required (`s3:GetObject`, presigned allowed) · spec `spec/operations/SelectObjectContent.toml`
+
+**Route predicates**
+
+- `Method POST`
+- `Target Object`
+- `QueryPresent ?select`
+- `QueryEquals ?select-type=2`
+
+**Query keys**
+
+- routed on, present: `select`
+- routed on, exact value: `select-type=2`
+- routed on, absent: —
+- read as parameters: —
+
+**Headers**
+
+- request: `x-amz-expected-bucket-owner`, `x-amz-server-side-encryption-customer-algorithm`, `x-amz-server-side-encryption-customer-key`, `x-amz-server-side-encryption-customer-key-md5`
+- response: —
+- required: —
+
+**Body**
+
+- request: XmlBody (Full, at most 327680 bytes)
+- response: None (None)
+
+**Error codes**
+
+`NoSuchBucket`, `NoSuchKey`, `AccessDenied`, `MalformedXML`, `InvalidRequest`, `InvalidArgument`, `InvalidExpressionType`, `ExpressionTooLong`, `InvalidTextEncoding`, `InvalidCompressionFormat`, `ObjectSerializationConflict`, `UnsupportedFunction`, `ParseUnexpectedToken`, `CSVParsingError`, `JSONParsingError`, `InvalidColumnIndex`, `InvalidDataType`, `OverMaxRecordSize`
+
+**Quirks**
+
+- `q-select-0001` (route_predicate on `SelectObjectContent`) — select-type=2 is half of the operation's route predicate and not decoration: the value names the version of the request grammar, so a request that omits it or sends any other value reaches no select row at all rather than being decoded by a version that has never validated it.
+- `q-select-0002` (value_constraint on `SelectObjectContent.Expression`) — The expression is opaque to this crate — never parsed, never logged, never repeated into an error — and bounded at the documented 256 KiB, past which the request is refused 400 ExpressionTooLong before anything reads the text.
+- `q-select-0003` (exclusive_members on `SelectObjectContent.InputSerialization`) — An InputSerialization names exactly one of CSV, JSON and Parquet: two of them together is 400 ObjectSerializationConflict, and none of them is 400 MalformedXML, because a reader that picked one of two declared formats would parse the object as something the caller did not describe.
+- `q-select-0004` (exclusive_members on `SelectObjectContent.OutputSerialization`) — An OutputSerialization names exactly one of CSV and JSON, on the same rule as the input side: both together is 400 ObjectSerializationConflict and neither is 400 MalformedXML.
+- `q-select-0005` (exclusive_members on `SelectObjectContent.ScanRange`) — A ScanRange has two members and three documented forms — both bounds, a Start alone running to the end, an End alone meaning the suffix — so an element with neither bound is refused rather than read as the whole object, and so is an End below a Start or a negative bound: each of those names no window or two.
+- `q-select-0006` (closed_value_set on `SelectObjectContent.ExpressionType`) — ExpressionType has exactly one documented value, SQL, and a request naming any other is 400 InvalidExpressionType; CompressionType is likewise closed at NONE, GZIP and BZIP2, refused as 400 InvalidCompressionFormat, because a compression this side cannot name is a stream nobody can read.
+- `q-select-0007` (lenient_unknown_elements on `SelectObjectContent`) — Unknown elements inside a SelectObjectContentRequest are skipped and a namespace on the root is ignored, the same leniency every other request document in this tree is decoded with.
+- `q-select-0008` (xml_root on `SelectObjectContent`) — This is the only request in the supported surface whose XML members sit at operation level rather than inside a payload structure, so the body root is the input shape's own name, SelectObjectContentRequest, and a body rooted at anything else is 400 MalformedXML.
+- `q-select-0009` (deferred_response on `SelectObjectContent`) — The response half is deliberately absent, and what is absent is only the plumbing: the framing — two CRC-32s over two different ranges, one covering the eight prelude bytes alone and one covering every byte of the message but itself — is implemented and proved byte for byte against independently computed values, while the third response shape a stream needs is not this family's to add, so a well-formed query is told NotImplemented rather than answered a bare 200.
+- `q-sse-0010` (secret_hygiene on `PutObject`) — The customer key is never echoed back and never logged, while the algorithm and key digest must be echoed; customer keys over a plaintext connection are refused.
+
+Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
+
+**Body shapes**
+
+- `CSVInput` (Structure) — `FileHeaderInfo: StringEnum`, `Comments: String`, `QuoteEscapeCharacter: String`, `RecordDelimiter: String`, `FieldDelimiter: String`, `QuoteCharacter: String`, `AllowQuotedRecordDelimiter: Boolean`
+- `CSVOutput` (Structure) — `QuoteFields: StringEnum`, `QuoteEscapeCharacter: String`, `RecordDelimiter: String`, `FieldDelimiter: String`, `QuoteCharacter: String`
+- `InputSerialization` (Structure) — `CSV: Structure(CSVInput)`, `CompressionType: StringEnum`, `JSON: Structure(JSONInput)`, `Parquet: Structure(ParquetInput)`
+- `JSONInput` (Structure) — `Type: StringEnum`
+- `JSONOutput` (Structure) — `RecordDelimiter: String`
+- `OutputSerialization` (Structure) — `CSV: Structure(CSVOutput)`, `JSON: Structure(JSONOutput)`
+- `ParquetInput` (Structure) — 
+- `RequestProgress` (Structure) — `Enabled: Boolean`
+- `ScanRange` (Structure) — `Start: Long`, `End: Long`
+
 ### UploadPart
 
 `PUT /{Bucket}/{Key+}` &rarr; 200 · target Object · precedence 410 · auth Required (`s3:PutObject`, presigned allowed) · spec `spec/operations/UploadPart.toml`
@@ -2694,8 +2847,6 @@ in neither list, so this table is exhaustive by construction.
 | PutObjectAnnotation | Out of scope for the gateway: object annotations, an AWS-only metadata surface with no storage-backend equivalent. |
 | PutPublicAccessBlock | P5 bucket policy and public-access family; every one of these is an authorization surface and reviewed as a group. |
 | RenameObject | P5 copy family; RenameObject is a single-bucket move with no source-authorization stage and no AWS wire form to conform to. |
-| RestoreObject | P5 advanced object family; each member carries a body shape or a framing the data plane does not have. |
-| SelectObjectContent | P5 advanced object family; each member carries a body shape or a framing the data plane does not have. |
 | UpdateBucketMetadataAnnotationTableConfiguration | Out of scope for the gateway: S3 Tables and bucket metadata table configuration, a separate AWS surface with its own control plane. |
 | UpdateBucketMetadataInventoryTableConfiguration | Out of scope for the gateway: S3 Tables and bucket metadata table configuration, a separate AWS surface with its own control plane. |
 | UpdateBucketMetadataJournalTableConfiguration | Out of scope for the gateway: S3 Tables and bucket metadata table configuration, a separate AWS surface with its own control plane. |

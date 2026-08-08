@@ -1,0 +1,266 @@
+# Copyright 2026 RustFS Team
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Quirks of the archive-retrieval and select family.
+#
+# One [[quirk]] per behaviour the pinned Smithy model does not state, or states in a trait the
+# lowering would otherwise lose. `summary` and every `evidence.summary` are written by this
+# project; upstream issue and documentation prose stays under its author's copyright and is
+# never pasted here.
+#
+# The absent quirks are as deliberate as the present ones. Nothing here says what a retrieval
+# costs, how long a tier takes, or when a restored copy expires — those are the storage side's,
+# and this family never waits for one. Nothing here says what an expression means: SQL is opaque
+# to this crate from the first character to the last, and the twelve select-specific error codes
+# are registered so that a backend can *express* a parse failure, never so that this crate can
+# diagnose one.
+
+[[quirk]]
+id      = "q-restore-0001"
+kind    = "status_tri_state"
+target  = "RestoreObject"
+summary = "A restore answers three different statuses for three different states — 202 when a retrieval starts, 200 when the copy is already restored, 409 RestoreAlreadyInProgress while one is running — so the number is decided by a mapping in this crate and declared as the operation's success status plus one alternative, never chosen by a handler."
+cases   = ["c-select-restore-0001", "c-select-restore-0002", "c-select-restore-0011"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_RestoreObject.html"
+  summary = "The operation documents 202 Accepted when a retrieval is initiated and 200 OK when the object copy was already restored, with RestoreAlreadyInProgress for a request that arrives while one is running."
+
+  [[quirk.evidence]]
+  kind    = "s3s-pr"
+  ref     = "https://github.com/s3s-project/s3s/pull/515"
+  summary = "Upstream shipped a default status for error codes it did not know, which is the same failure one level over: a status nobody chose reads exactly like a status somebody did."
+
+[[quirk]]
+id      = "q-restore-0002"
+kind    = "structured_header"
+target  = "RestoreObject.RestoreStatus"
+summary = "x-amz-restore is a structured header, not a word: an in-progress copy is ongoing-request=\"true\" and a finished one is ongoing-request=\"false\", expiry-date=\"<RFC 1123>\" — quotes around both values, a comma and exactly one space between the pairs — and it is produced and parsed in one place so the two spellings cannot drift."
+cases   = ["c-select-restore-0004", "c-select-restore-0005", "c-select-restore-0019"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_HeadObject.html#API_HeadObject_ResponseSyntax"
+  summary = "The read and head responses document x-amz-restore as an ongoing-request flag optionally followed by an expiry-date, each value in double quotes."
+
+  [[quirk.evidence]]
+  kind    = "rfc"
+  ref     = "https://www.rfc-editor.org/rfc/rfc9110.html#section-5.6.7"
+  summary = "The date inside the header is the IMF-fixdate form HTTP fixes for every date it carries, which is what makes the embedded value byte-comparable at all."
+
+[[quirk]]
+id      = "q-restore-0003"
+kind    = "object_state_rule"
+target  = "RestoreObject"
+summary = "A restore of an object that is not in an archive storage class is refused 403 InvalidObjectState rather than accepted as a no-op: a caller that reads a success has no way to tell a retrieval it does not need from one that never happened."
+cases   = ["c-select-restore-0010"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_RestoreObject.html"
+  summary = "The operation documents InvalidObjectState for a request against an object whose storage class is not one of the archive classes."
+
+[[quirk]]
+id      = "q-restore-0004"
+kind    = "value_constraint"
+target  = "RestoreRequest"
+summary = "A RestoreRequest must name exactly one of the two documented forms: a Days count of at least one for an ordinary retrieval, or Type SELECT with both SelectParameters and OutputLocation and no Days at all — neither form's members may appear in the other, and a document with neither is refused rather than given a duration nobody asked for."
+cases   = ["c-select-restore-0003", "c-select-restore-0012", "c-select-restore-0013", "c-select-restore-0014", "c-select-restore-0015"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_RestoreObject.html"
+  summary = "The request syntax documents Days as the lifetime of the active copy for an ordinary retrieval and as not applicable to a select-type restore, which instead carries SelectParameters and an OutputLocation."
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_RestoreRequest.html"
+  summary = "The Days member documents a minimum value of one, so a zero-day or negative retrieval has no representable meaning."
+
+[[quirk]]
+id      = "q-restore-0005"
+kind    = "closed_value_set"
+target  = "GlacierJobParameters.Tier"
+summary = "A retrieval tier outside the documented three-value set — Expedited, Standard, Bulk, exactly in that spelling — is refused as InvalidArgument on both spellings of the member, because a tier nothing can schedule is a retrieval that silently never starts."
+cases   = ["c-select-restore-0006", "c-select-restore-0016"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GlacierJobParameters.html"
+  summary = "The Tier member documents the closed value set Standard, Bulk and Expedited, and the same set appears on the request's own Tier element."
+
+[[quirk]]
+id      = "q-restore-0006"
+kind    = "required_body"
+target  = "RestoreObject"
+summary = "The payload member is promoted to required, so a restore with an empty body is 400 MalformedXML rather than a retrieval with a duration this implementation invented: neither documented form of the request has a default, and Days in particular has none."
+cases   = ["c-select-restore-0017"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_RestoreObject.html"
+  summary = "Every documented request example carries a RestoreRequest document, and no default duration or tier is published for a request that omits it."
+
+  [[quirk.evidence]]
+  kind    = "s3s-pr"
+  ref     = "https://github.com/s3s-project/s3s/pull/377"
+  summary = "Upstream accepted an empty body where a document was required and answered success, and the fix pins the empty-required-XML answer to 400 MalformedXML."
+
+[[quirk]]
+id      = "q-restore-0007"
+kind    = "lenient_unknown_elements"
+target  = "RestoreObject"
+summary = "Unknown elements inside a RestoreRequest are skipped rather than refused, and so is an XML namespace on the root: AWS adds elements to this document over time and a decoder that got stricter would refuse retrievals an SDK a version newer sends correctly."
+cases   = ["c-select-restore-0007"]
+
+  [[quirk.evidence]]
+  kind    = "s3s-issue"
+  ref     = "https://github.com/s3s-project/s3s/issues/613"
+  summary = "AWS ignores unknown elements in request XML, and upstream had to relax its decoder to match after strict parsing broke real clients."
+
+  [[quirk.evidence]]
+  kind    = "s3s-pr"
+  ref     = "https://github.com/s3s-project/s3s/pull/617"
+  summary = "The upstream fix that makes unknown request elements a skip rather than an error, which is the behaviour this decoder generates by construction."
+
+[[quirk]]
+id      = "q-select-0001"
+kind    = "route_predicate"
+target  = "SelectObjectContent"
+summary = "select-type=2 is half of the operation's route predicate and not decoration: the value names the version of the request grammar, so a request that omits it or sends any other value reaches no select row at all rather than being decoded by a version that has never validated it."
+cases   = ["c-select-restore-0020", "c-select-restore-0021"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_SelectObjectContent.html"
+  summary = "The operation is addressed as POST on the object key with the query select and select-type set to 2, and the pinned model spells both into its http uri."
+
+[[quirk]]
+id      = "q-select-0002"
+kind    = "value_constraint"
+target  = "SelectObjectContent.Expression"
+summary = "The expression is opaque to this crate — never parsed, never logged, never repeated into an error — and bounded at the documented 256 KiB, past which the request is refused 400 ExpressionTooLong before anything reads the text."
+cases   = ["c-select-restore-0022", "c-select-restore-0023"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_SelectObjectContent.html"
+  summary = "The Expression member documents a maximum length of 256 KB and the operation publishes ExpressionTooLong as the answer for exceeding it."
+
+[[quirk]]
+id      = "q-select-0003"
+kind    = "exclusive_members"
+target  = "SelectObjectContent.InputSerialization"
+summary = "An InputSerialization names exactly one of CSV, JSON and Parquet: two of them together is 400 ObjectSerializationConflict, and none of them is 400 MalformedXML, because a reader that picked one of two declared formats would parse the object as something the caller did not describe."
+cases   = ["c-select-restore-0024", "c-select-restore-0025"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_InputSerialization.html"
+  summary = "The structure documents CSV, JSON and Parquet as alternative descriptions of one object's format, and the operation publishes ObjectSerializationConflict for a request that names more than one."
+
+[[quirk]]
+id      = "q-select-0004"
+kind    = "exclusive_members"
+target  = "SelectObjectContent.OutputSerialization"
+summary = "An OutputSerialization names exactly one of CSV and JSON, on the same rule as the input side: both together is 400 ObjectSerializationConflict and neither is 400 MalformedXML."
+cases   = ["c-select-restore-0026", "c-select-restore-0027"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_OutputSerialization.html"
+  summary = "The structure documents CSV and JSON as alternative descriptions of how records are returned, one per request."
+
+[[quirk]]
+id      = "q-select-0005"
+kind    = "exclusive_members"
+target  = "SelectObjectContent.ScanRange"
+summary = "A ScanRange has two members and three documented forms — both bounds, a Start alone running to the end, an End alone meaning the suffix — so an element with neither bound is refused rather than read as the whole object, and so is an End below a Start or a negative bound: each of those names no window or two."
+cases   = ["c-select-restore-0008", "c-select-restore-0028", "c-select-restore-0029"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ScanRange.html"
+  summary = "The structure documents Start and End as a byte window and describes the forms in which one of the two may be omitted, with the suffix form spelled as an End with no Start."
+
+[[quirk]]
+id      = "q-select-0006"
+kind    = "closed_value_set"
+target  = "SelectObjectContent.ExpressionType"
+summary = "ExpressionType has exactly one documented value, SQL, and a request naming any other is 400 InvalidExpressionType; CompressionType is likewise closed at NONE, GZIP and BZIP2, refused as 400 InvalidCompressionFormat, because a compression this side cannot name is a stream nobody can read."
+cases   = ["c-select-restore-0030", "c-select-restore-0031"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_SelectObjectContent.html"
+  summary = "The operation documents SQL as the only expression type and publishes InvalidExpressionType and InvalidCompressionFormat as the answers for the two closed sets."
+
+[[quirk]]
+id      = "q-select-0007"
+kind    = "lenient_unknown_elements"
+target  = "SelectObjectContent"
+summary = "Unknown elements inside a SelectObjectContentRequest are skipped and a namespace on the root is ignored, the same leniency every other request document in this tree is decoded with."
+cases   = ["c-select-restore-0009"]
+
+  [[quirk.evidence]]
+  kind    = "s3s-issue"
+  ref     = "https://github.com/s3s-project/s3s/issues/613"
+  summary = "AWS ignores unknown elements in request XML, and upstream had to relax its decoder to match after strict parsing broke real clients."
+
+[[quirk]]
+id      = "q-select-0008"
+kind    = "xml_root"
+target  = "SelectObjectContent"
+summary = "This is the only request in the supported surface whose XML members sit at operation level rather than inside a payload structure, so the body root is the input shape's own name, SelectObjectContentRequest, and a body rooted at anything else is 400 MalformedXML."
+cases   = ["c-select-restore-0032", "c-select-restore-0033", "c-select-restore-0034"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_SelectObjectContent.html"
+  summary = "The documented request syntax roots the body at a SelectObjectContentRequest element carrying the expression and the serialization descriptions directly."
+
+[[quirk]]
+id      = "q-select-0009"
+kind    = "deferred_response"
+target  = "SelectObjectContent"
+summary = "The response half is deliberately absent, and what is absent is only the plumbing: the framing — two CRC-32s over two different ranges, one covering the eight prelude bytes alone and one covering every byte of the message but itself — is implemented and proved byte for byte against independently computed values, while the third response shape a stream needs is not this family's to add, so a well-formed query is told NotImplemented rather than answered a bare 200."
+cases   = ["c-select-restore-0035"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/RESTSelectObjectAppendix.html"
+  summary = "The response is a sequence of self-framed messages, each a prelude with its own CRC, a header block, a payload and a message CRC, rather than one document."
+
+  [[quirk.evidence]]
+  kind    = "s3s-issue"
+  ref     = "https://github.com/s3s-project/s3s/issues/350"
+  summary = "Upstream shipped responses that ended without completing, which hangs a client — the failure a partly-wired stream produces and a refusal does not."
+
+  [[quirk.evidence]]
+  kind    = "rfc"
+  ref     = "https://www.rfc-editor.org/rfc/rfc1952#section-8"
+  summary = "The framing digest is CRC-32/ISO-HDLC, whose published check value over the nine ASCII digits is what pins this implementation to the same parameterisation as everybody else's."
+
+[[quirk]]
+id      = "q-restore-0008"
+kind    = "version_selector"
+target  = "RestoreObject.VersionId"
+summary = "versionId selects which version of the object is retrieved, so it is decoded and carried to the handler rather than dropped: a backend that ignored it would retrieve the current version and report success for a request about another one, which is indistinguishable from having honoured it."
+cases   = ["c-select-restore-0018"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_RestoreObject.html"
+  summary = "The operation documents versionId as the query parameter naming which version of the object the retrieval applies to."

@@ -69,6 +69,8 @@ pub const TAG_VOCABULARY: &[&str] = &[
     "known-divergence",
     "tagging",
     "object-lock",
+    "restore",
+    "select",
     "slow",
 ];
 

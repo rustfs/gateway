@@ -1,0 +1,48 @@
+[case]
+id = "c-select-restore-0029"
+schema_version = 1
+title = "A ScanRange whose End is below its Start is refused"
+rationale = """
+An inverted window selects nothing and is indistinguishable, in the answer, from a query that matched no rows — so accepting it turns a client's arithmetic bug into an empty result set it will believe."""
+polarity = "negative"
+operation = "SelectObjectContent"
+tags = ["select"]
+timeout_ms = 10000
+quirks = ["q-select-0005"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ScanRange.html"
+summary = "The structure documents Start and End as the beginning and end of one window."
+kind = "aws-doc"
+[[setup.buckets]]
+name = "conf-select"
+
+[[setup.objects]]
+bucket = "conf-select"
+key = "rows.csv"
+body = { utf8 = "a,b\n1,2\n" }
+
+[request]
+method = "POST"
+target = "/conf-select/rows.csv?select&select-type=2"
+headers = { "content-type" = "application/xml" }
+body = { utf8 = '<SelectObjectContentRequest><Expression>SELECT * FROM S3Object</Expression><ExpressionType>SQL</ExpressionType><InputSerialization><CSV><FileHeaderInfo>USE</FileHeaderInfo><FieldDelimiter>,</FieldDelimiter><QuoteCharacter>"</QuoteCharacter></CSV><CompressionType>NONE</CompressionType></InputSerialization><OutputSerialization><CSV><RecordDelimiter>\n</RecordDelimiter></CSV></OutputSerialization><ScanRange><Start>100</Start><End>10</End></ScanRange></SelectObjectContentRequest>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+code = "InvalidArgument"
+request_id_present = true
+
+[expect.headers_present]
+"content-type" = "application/xml"
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>InvalidArgument</Code><Message>ScanRange End must not be less than Start, and neither may be negative</Message><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''

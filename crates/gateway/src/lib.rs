@@ -225,6 +225,38 @@ pub use rustfs_gateway_core::ops::shared::replication::{
     MAX_REPLICATION_ID_CHARS, MAX_REPLICATION_RULES, ReplicationRejection, RuleShape, classify_rule, validate_replication,
 };
 
+// The select request contract, exported for the same reason and with one addition of its own:
+// the expression is user-authored SQL, so no rejection here carries a byte of it and a backend
+// that composed its own refusal would be the second place that rule has to hold. The same four
+// members appear twice on the wire — in a `SelectObjectContentRequest` and in a
+// `RestoreRequest`'s `SelectParameters` — which is why the validator takes them as arguments
+// rather than as a request.
+pub use rustfs_gateway_core::ops::shared::select::{
+    MAX_EXPRESSION_BYTES, SelectRejection, validate_input_serialization, validate_output_serialization, validate_scan_range,
+    validate_select,
+};
+
+// The restore contract, and the one thing on this list a backend cannot afford to re-derive:
+// `RestoreState::status` is where the 202/200 difference lives. A client polls on it, both
+// numbers are successes, and a backend that picked its own would break the poll loop while
+// answering something no status assertion would flag. `format_restore_status` is exported
+// beside it because `x-amz-restore` is a structured header the read and head encoders will also
+// have to write, and two `format!`s spell a comma-and-a-space differently sooner or later.
+pub use rustfs_gateway_core::ops::shared::restore::{
+    MAX_RESTORE_HEADER_BYTES, MIN_RESTORE_DAYS, RestoreRejection, RestoreState, RestoreStatus, format_restore_status,
+    parse_restore_status, validate_restore,
+};
+
+// The event-stream framing. Exported although nothing in this workspace sends a frame yet: the
+// response shape a select answer needs is a third variant of `Resp<O>` and is not this family's
+// to add, but the framing is the half an implementation gets wrong invisibly — a CRC over the
+// wrong range encodes, decodes against its own author, and is refused by every SDK. Exporting
+// it is what stops the eventual caller from writing a second one.
+pub use rustfs_gateway_core::ops::shared::event_stream::{
+    EVENT_STREAM_CONTENT_TYPE, EventKind, EventSequence, EventStreamError, MAX_PAYLOAD_BYTES, encode_event, encode_exception,
+    progress_document, stats_document,
+};
+
 // The bucket lifecycle contracts, exported the day they are written rather than found
 // unreachable later. A backend answering CreateBucket needs `resolve` — the us-east-1
 // omission rule, the EU alias and the strict region match — and a backend answering any
@@ -257,6 +289,7 @@ pub use rustfs_gateway_stream::{Body, ByteStream, Payload, TrailingHeaders};
 // service but not the values the service returns is not a facade.
 pub use rustfs_gateway_types::{
     BucketName, ChecksumAlgorithm, ChecksumDigest, ChecksumSpec, ChecksumType, ETag, ErrorCode, ObjectKey, Timestamp,
+    TimestampFormat,
 };
 
 pub use crate::ext::allow_when;

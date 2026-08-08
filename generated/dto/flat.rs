@@ -24,20 +24,22 @@
 //! Upstream: `crate::ops`. Downstream: every consumer mid-migration.
 
 pub use crate::ops::enums::{
-    Acl, ArchiveStatus, ChecksumAlgorithm, ChecksumMode, ChecksumType, EncodingType, EncryptionType, LocationConstraint,
-    MetadataDirective, Mode, ObjectLockEnabled, ObjectLockLegalHoldStatus, ObjectLockMode, ObjectOwnership, ReplicationStatus,
-    RequestCharged, RequestPayer, ServerSideEncryption, SseAlgorithm, Status, StorageClass, TaggingDirective,
-    TransitionDefaultMinimumObjectSize,
+    Acl, ArchiveStatus, CannedAcl, ChecksumAlgorithm, ChecksumMode, ChecksumType, CompressionType, EncodingType, EncryptionType,
+    ExpressionType, FileHeaderInfo, LocationConstraint, MetadataDirective, Mode, ObjectLockEnabled, ObjectLockLegalHoldStatus,
+    ObjectLockMode, ObjectOwnership, Permission, QuoteFields, ReplicationStatus, RequestCharged, RequestPayer,
+    ServerSideEncryption, SseAlgorithm, Status, StorageClass, TaggingDirective, Tier, TransitionDefaultMinimumObjectSize, Type,
 };
 pub use crate::ops::shapes::{
     AbortIncompleteMultipartUpload, AccessControlTranslation, BlockedEncryptionTypes, Bucket, BucketLifecycleConfiguration,
     Checksum, CommonPrefix, CompletedMultipartUpload, CompletedPart, CorsConfiguration, CorsRule, CreateBucketConfiguration,
-    DefaultRetention, Delete, DeleteMarkerEntry, DeleteMarkerReplication, DeletedObject, Destination, EncryptionConfiguration,
-    Error, ExistingObjectReplication, GetObjectAttributesParts, Initiator, LifecycleExpiration, LifecycleRule,
-    LifecycleRuleAndOperator, LifecycleRuleFilter, Metrics, MultipartUpload, NoncurrentVersionExpiration,
-    NoncurrentVersionTransition, Object, ObjectIdentifier, ObjectLockConfiguration, ObjectLockLegalHold, ObjectLockRetention,
-    ObjectLockRule, ObjectPart, ObjectVersion, Owner, Part, ReplicaModifications, ReplicationConfiguration, ReplicationRule,
-    ReplicationRuleAndOperator, ReplicationRuleFilter, ReplicationTime, ReplicationTimeValue, RestoreStatus,
+    CsvInput, CsvOutput, DefaultRetention, Delete, DeleteMarkerEntry, DeleteMarkerReplication, DeletedObject, Destination,
+    Encryption, EncryptionConfiguration, Error, ExistingObjectReplication, GetObjectAttributesParts, GlacierJobParameters, Grant,
+    Grantee, Initiator, InputSerialization, JsonInput, JsonOutput, LifecycleExpiration, LifecycleRule, LifecycleRuleAndOperator,
+    LifecycleRuleFilter, MetadataEntry, Metrics, MultipartUpload, NoncurrentVersionExpiration, NoncurrentVersionTransition,
+    Object, ObjectIdentifier, ObjectLockConfiguration, ObjectLockLegalHold, ObjectLockRetention, ObjectLockRule, ObjectPart,
+    ObjectVersion, OutputLocation, OutputSerialization, Owner, ParquetInput, Part, ReplicaModifications,
+    ReplicationConfiguration, ReplicationRule, ReplicationRuleAndOperator, ReplicationRuleFilter, ReplicationTime,
+    ReplicationTimeValue, RequestProgress, RestoreRequest, RestoreStatus, S3Location, ScanRange, SelectParameters,
     ServerSideEncryptionByDefault, ServerSideEncryptionConfiguration, ServerSideEncryptionRule, SourceSelectionCriteria,
     SseKmsEncryptedObjects, Tag, Tagging, Transition,
 };
@@ -202,6 +204,13 @@ pub use crate::ops::put_object_retention::{
 pub use crate::ops::put_object_tagging::{
     Input as PutObjectTaggingInput, InputBuilder as PutObjectTaggingInputBuilder, Output as PutObjectTaggingOutput,
     PutObjectTagging,
+};
+pub use crate::ops::restore_object::{
+    Input as RestoreObjectInput, InputBuilder as RestoreObjectInputBuilder, Output as RestoreObjectOutput, RestoreObject,
+};
+pub use crate::ops::select_object_content::{
+    Input as SelectObjectContentInput, InputBuilder as SelectObjectContentInputBuilder, Output as SelectObjectContentOutput,
+    SelectObjectContent,
 };
 pub use crate::ops::upload_part::{
     Input as UploadPartInput, InputBuilder as UploadPartInputBuilder, Output as UploadPartOutput, UploadPart,

@@ -850,6 +850,119 @@ fn n_a_bucket_subresource_write_is_a_route_miss_not_a_lifecycle_operation() {
     }
 }
 
+/// Negative — an unhandled restore or select request is refused by name, not by no-route.
+///
+/// The observable this family changes. Before the two rows existed both requests matched
+/// nothing, so the answer was the *first* `501` — [`NO_ROUTE_MESSAGE`], the one that says the
+/// virtual-host domain is probably unconfigured — and an SDK reads that as "this is not an S3
+/// endpoint". Now each comes back as the second `501`, naming the operation it asked for, which
+/// is the answer that means "not available here".
+///
+/// Both directions are checked in one test: the two rows answer by name, and a `?select` without
+/// `select-type=2` still answers no-route, because there is no row for it and inventing one
+/// would decode a request grammar this decoder has never validated.
+#[test]
+fn n_an_unhandled_restore_or_select_request_is_refused_by_name() {
+    let mut registry = Registry::new();
+    registry.register(&GET_OBJECT).expect("a registrable spec");
+    let router = Router::from_generated(registry).expect("the generated table builds");
+
+    for (line, expected) in [
+        ("POST /bucket/key?restore", "RestoreObject"),
+        ("POST /bucket/key?select&select-type=2", "SelectObjectContent"),
+        ("POST /bucket/key?restore&versionId=v1", "RestoreObject"),
+    ] {
+        let error = router
+            .dispatch(&Req::new(line).parts())
+            .expect_err("this registry handles neither operation");
+        assert_eq!(*error.code(), ErrorCode::NOT_IMPLEMENTED, "{line}");
+        assert_eq!(error.message(), NOT_REGISTERED_MESSAGE, "{line}");
+        assert_eq!(error.operation(), Some(expected), "{line} must name the operation it asked for");
+    }
+
+    for line in ["POST /bucket/key?select", "POST /bucket/key?select&select-type=1"] {
+        let error = router.dispatch(&Req::new(line).parts()).expect_err("no route");
+        assert_eq!(error.message(), NO_ROUTE_MESSAGE, "{line}");
+        assert_eq!(error.operation(), None, "{line} names no operation because none claimed it");
+    }
+}
+
+/// The restore operation declares 202, and declares the 200 as its one alternative.
+///
+/// The declaration and the mapping are two things that can disagree, so both directions are
+/// asserted here rather than either one alone:
+///
+/// * every status `RestoreState` can answer on success is either the declared success status or
+///   a declared alternative — a mapping that grew a third success would be red;
+/// * every declared alternative is a status some state actually answers — a list that grew a
+///   number nothing produces would be red too.
+///
+/// Without the second half the list could be `&[200, 418]` and pass; without the first it could
+/// be empty. The pair is the assertion.
+#[test]
+fn the_restore_status_declaration_and_the_state_mapping_agree() {
+    use rustfs_gateway_core::op::Operation;
+    use rustfs_gateway_core::ops::restore_object::ALT_SUCCESS_STATUSES;
+    use rustfs_gateway_core::ops::shared::restore::RestoreState;
+
+    let declared = rustfs_gateway_types::dto::RestoreObject::spec().success_status;
+    assert_eq!(declared, 202, "a first retrieval is Accepted, not OK");
+    assert_eq!(ALT_SUCCESS_STATUSES, &[200], "the repeat against a restored copy");
+
+    let states = [
+        RestoreState::Initiated,
+        RestoreState::AlreadyRestored,
+        RestoreState::InProgress,
+        RestoreState::NotArchived,
+    ];
+    let produced: Vec<u16> = states.iter().filter_map(|state| state.status()).collect();
+    for status in &produced {
+        assert!(
+            *status == declared || ALT_SUCCESS_STATUSES.contains(status),
+            "the mapping answers {status}, which the operation does not declare"
+        );
+    }
+    for alternative in ALT_SUCCESS_STATUSES {
+        assert!(
+            produced.contains(alternative),
+            "the operation declares {alternative}, which no state answers"
+        );
+    }
+    assert_eq!(produced.len(), 2, "exactly two of the four outcomes are successes");
+    assert!(produced.contains(&declared), "the declared status is one a state answers");
+}
+
+/// The two new operations declare no unconfigured code, and that is not an oversight.
+///
+/// `not_configured_error` is the 404 a *subresource read* owes when the document was never
+/// written. Neither of these reads a stored document — a restore acts on the object's storage
+/// class and a select acts on its bytes — so both must declare `None`, and a value here would
+/// tell a backend to answer 404 for a state that is not "unconfigured" at all. Asserted with a
+/// control, because the field defaults to `None` and an assertion that everything is `None`
+/// would hold over an empty table too.
+#[test]
+fn neither_restore_nor_select_declares_an_unconfigured_code() {
+    use rustfs_gateway_core::op::Operation;
+    assert!(
+        rustfs_gateway_types::dto::RestoreObject::spec()
+            .not_configured_error
+            .is_none(),
+        "a restore reads no stored configuration"
+    );
+    assert!(
+        rustfs_gateway_types::dto::SelectObjectContent::spec()
+            .not_configured_error
+            .is_none(),
+        "a select reads no stored configuration"
+    );
+    assert!(
+        rustfs_gateway_types::dto::GetObjectRetention::spec()
+            .not_configured_error
+            .is_some(),
+        "the retention read declares one, so the two assertions above are not vacuous"
+    );
+}
+
 /// A parameter check without a route never runs: the order of the three questions is fixed.
 #[test]
 fn a_request_that_does_not_route_never_reaches_parameter_validation() {

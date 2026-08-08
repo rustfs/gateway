@@ -1,0 +1,34 @@
+[case]
+id = "c-select-restore-0019"
+schema_version = 1
+title = "An object nobody restored carries no x-amz-restore header at all"
+rationale = """
+Absence is the observation. A header saying ongoing-request is false means the copy was retrieved and is readable now; no header means it was never archived or never asked for, and a reader that saw one where the other belongs would draw the opposite conclusion about whether the bytes are there."""
+polarity = "negative"
+operation = "HeadObject"
+tags = ["restore", "wire-bytes"]
+timeout_ms = 10000
+quirks = ["q-restore-0002"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_HeadObject.html#API_HeadObject_ResponseSyntax"
+summary = "The head response documents x-amz-restore as present only for an object a restore was requested for."
+kind = "aws-doc"
+[[setup.buckets]]
+name = "conf-restore"
+
+[[setup.objects]]
+bucket = "conf-restore"
+key = "warm.txt"
+body = { utf8 = "readable payload" }
+
+[request]
+method = "HEAD"
+target = "/conf-restore/warm.txt"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+connection_after = "open"
+headers_absent = ["x-amz-restore"]

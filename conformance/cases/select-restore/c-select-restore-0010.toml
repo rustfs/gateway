@@ -1,0 +1,48 @@
+[case]
+id = "c-select-restore-0010"
+schema_version = 1
+title = "A restore of an object that was never archived is 403 InvalidObjectState"
+rationale = """
+Not a no-op and not a success: a caller that reads a 2xx has no way to tell a retrieval it did not need from one that never happened, and the difference decides whether it waits before reading. The status is a 403 rather than the 409 the name suggests, which is exactly the kind of detail a hand-written mapping gets wrong."""
+polarity = "negative"
+operation = "RestoreObject"
+tags = ["restore", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-restore-0003"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_RestoreObject.html"
+summary = "The operation documents InvalidObjectState for a request against an object outside the archive storage classes."
+kind = "aws-doc"
+[[setup.buckets]]
+name = "conf-restore"
+
+[[setup.objects]]
+bucket = "conf-restore"
+key = "warm.txt"
+body = { utf8 = "readable payload" }
+
+[request]
+method = "POST"
+target = "/conf-restore/warm.txt?restore"
+headers = { "content-type" = "application/xml" }
+body = { utf8 = '<RestoreRequest><Days>1</Days></RestoreRequest>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 403
+connection_after = "open"
+
+[expect.error]
+code = "InvalidObjectState"
+request_id_present = true
+
+[expect.headers_present]
+"content-type" = "application/xml"
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>InvalidObjectState</Code><Message>The operation is not valid for the storage class of this object</Message><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''

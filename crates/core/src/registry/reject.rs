@@ -264,20 +264,25 @@ mod tests {
     /// It can only be written here: [`StandardOperation`]'s field is private, so no crate outside
     /// this one can produce the token this declaration needs. That is the point of the test as much
     /// as the refusal is — a third party cannot reach this state at all.
+    ///
+    /// The name is `GetObjectTorrent`, which the pinned model defines and this build defers. It
+    /// was `RestoreObject` until that operation gained a row; the rule under test is unchanged,
+    /// and the example simply has to be an operation that is still rowless — a property of the
+    /// table, not of the check.
     struct NotInTheTable;
 
     static SPEC: OperationSpec = OperationSpec {
-        name: "RestoreObject",
+        name: "GetObjectTorrent",
         success_status: 200,
         required_params: &[],
         not_configured_error: None,
-        auth: Some(AuthRequirement::new("s3:RestoreObject", ResourceShape::Object)),
+        auth: Some(AuthRequirement::new("s3:GetObjectTorrent", ResourceShape::Object)),
     };
 
-    static FLOOR: OperationFloor = OperationFloor::builtin("RestoreObject", SigService::S3);
+    static FLOOR: OperationFloor = OperationFloor::builtin("GetObjectTorrent", SigService::S3);
 
     impl Operation for NotInTheTable {
-        const NAME: &'static str = "RestoreObject";
+        const NAME: &'static str = "GetObjectTorrent";
         const ORIGIN: OperationOrigin = OperationOrigin::Standard(StandardOperation::TOKEN);
         type Input = ();
         type Output = ();
@@ -296,7 +301,9 @@ mod tests {
     fn a_standard_operation_the_route_table_does_not_have_is_refused() {
         assert_eq!(
             check_operation::<NotInTheTable>(),
-            Err(RegistryError::UnknownStandardOperation { name: "RestoreObject" })
+            Err(RegistryError::UnknownStandardOperation {
+                name: "GetObjectTorrent"
+            })
         );
     }
 

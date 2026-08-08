@@ -1,0 +1,1144 @@
+{
+  "ir_version": "1",
+  "operation": "RestoreObject",
+  "http": {
+            "method": "POST",
+            "target": "Object",
+            "precedence": 570,
+            "predicates": [
+                            { "kind": "Method", "method": "POST" },
+                            { "kind": "Target", "target": "Object" },
+                            { "kind": "QueryPresent", "key": "restore" }
+                          ],
+            "success_status": 202,
+            "alt_success_statuses": [200],
+            "path_shape": "/{Bucket}/{Key+}"
+          },
+  "auth": { "requirement": "Required", "action": "s3:RestoreObject", "presigned_allowed": true, "service": "s3" },
+  "payload": {
+               "request": { "kind": "XmlBody", "buffering": "Full", "max_bytes": 65536 },
+               "response": { "kind": "None", "buffering": "None", "max_bytes": null }
+             },
+  "checksum": {
+                "http_checksum_required": false,
+                "request_algorithms": ["CRC32", "CRC32C", "CRC64NVME", "SHA1", "SHA256"],
+                "response_algorithms": []
+              },
+  "input": {
+             "fields": [
+                         {
+                           "name": "Bucket",
+                           "wire_name": "Bucket",
+                           "required": true,
+                           "binding": { "kind": "UriLabel", "greedy": false },
+                           "type": { "kind": "BucketName" },
+                           "hot": true,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "Key",
+                           "wire_name": "Key",
+                           "required": true,
+                           "binding": { "kind": "UriLabel", "greedy": true },
+                           "type": { "kind": "ObjectKey" },
+                           "hot": true,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "VersionId",
+                           "wire_name": "versionId",
+                           "required": false,
+                           "binding": { "kind": "Query" },
+                           "type": { "kind": "String" },
+                           "hot": true,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "RestoreRequest",
+                           "wire_name": null,
+                           "required": true,
+                           "binding": { "kind": "Payload" },
+                           "type": { "kind": "Structure", "shape": "RestoreRequest" },
+                           "hot": true,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "RequestPayer",
+                           "wire_name": "x-amz-request-payer",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "StringEnum", "values": ["requester"] },
+                           "hot": false,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "ChecksumAlgorithm",
+                           "wire_name": "x-amz-sdk-checksum-algorithm",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": {
+                                     "kind": "StringEnum",
+                                     "values": [
+                                                 "CRC32",
+                                                 "CRC32C",
+                                                 "SHA1",
+                                                 "SHA256",
+                                                 "CRC64NVME",
+                                                 "SHA512",
+                                                 "MD5",
+                                                 "XXHASH64",
+                                                 "XXHASH3",
+                                                 "XXHASH128"
+                                               ]
+                                   },
+                           "hot": false,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "ExpectedBucketOwner",
+                           "wire_name": "x-amz-expected-bucket-owner",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "String" },
+                           "hot": false,
+                           "quirk_refs": []
+                         }
+                       ]
+           },
+  "output": {
+              "fields": [
+                          {
+                            "name": "RequestCharged",
+                            "wire_name": "x-amz-request-charged",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": { "kind": "StringEnum", "values": ["requester"] },
+                            "hot": false,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "RestoreOutputPath",
+                            "wire_name": "x-amz-restore-output-path",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": { "kind": "String" },
+                            "hot": true,
+                            "quirk_refs": []
+                          }
+                        ]
+            },
+  "shapes": {
+              "CSVInput": {
+                            "kind": "Structure",
+                            "fields": [
+                                        {
+                                          "name": "FileHeaderInfo",
+                                          "wire_name": "FileHeaderInfo",
+                                          "required": false,
+                                          "binding": { "kind": "BodyXml" },
+                                          "type": { "kind": "StringEnum", "values": ["USE", "IGNORE", "NONE"] },
+                                          "hot": false,
+                                          "quirk_refs": []
+                                        },
+                                        {
+                                          "name": "Comments",
+                                          "wire_name": "Comments",
+                                          "required": false,
+                                          "binding": { "kind": "BodyXml" },
+                                          "type": { "kind": "String" },
+                                          "hot": false,
+                                          "quirk_refs": []
+                                        },
+                                        {
+                                          "name": "QuoteEscapeCharacter",
+                                          "wire_name": "QuoteEscapeCharacter",
+                                          "required": false,
+                                          "binding": { "kind": "BodyXml" },
+                                          "type": { "kind": "String" },
+                                          "hot": false,
+                                          "quirk_refs": []
+                                        },
+                                        {
+                                          "name": "RecordDelimiter",
+                                          "wire_name": "RecordDelimiter",
+                                          "required": false,
+                                          "binding": { "kind": "BodyXml" },
+                                          "type": { "kind": "String" },
+                                          "hot": false,
+                                          "quirk_refs": []
+                                        },
+                                        {
+                                          "name": "FieldDelimiter",
+                                          "wire_name": "FieldDelimiter",
+                                          "required": false,
+                                          "binding": { "kind": "BodyXml" },
+                                          "type": { "kind": "String" },
+                                          "hot": false,
+                                          "quirk_refs": []
+                                        },
+                                        {
+                                          "name": "QuoteCharacter",
+                                          "wire_name": "QuoteCharacter",
+                                          "required": false,
+                                          "binding": { "kind": "BodyXml" },
+                                          "type": { "kind": "String" },
+                                          "hot": false,
+                                          "quirk_refs": []
+                                        },
+                                        {
+                                          "name": "AllowQuotedRecordDelimiter",
+                                          "wire_name": "AllowQuotedRecordDelimiter",
+                                          "required": false,
+                                          "binding": { "kind": "BodyXml" },
+                                          "type": { "kind": "Boolean" },
+                                          "hot": false,
+                                          "quirk_refs": []
+                                        }
+                                      ],
+                            "xml": {
+                                     "element_order": [
+                                                        "FileHeaderInfo",
+                                                        "Comments",
+                                                        "QuoteEscapeCharacter",
+                                                        "RecordDelimiter",
+                                                        "FieldDelimiter",
+                                                        "QuoteCharacter",
+                                                        "AllowQuotedRecordDelimiter"
+                                                      ],
+                                     "empty_value_policy": {
+                                                             "FileHeaderInfo": "omit",
+                                                             "Comments": "omit",
+                                                             "QuoteEscapeCharacter": "omit",
+                                                             "RecordDelimiter": "omit",
+                                                             "FieldDelimiter": "omit",
+                                                             "QuoteCharacter": "omit",
+                                                             "AllowQuotedRecordDelimiter": "omit"
+                                                           },
+                                     "attributes": []
+                                   }
+                          },
+              "CSVOutput": {
+                             "kind": "Structure",
+                             "fields": [
+                                         {
+                                           "name": "QuoteFields",
+                                           "wire_name": "QuoteFields",
+                                           "required": false,
+                                           "binding": { "kind": "BodyXml" },
+                                           "type": { "kind": "StringEnum", "values": ["ALWAYS", "ASNEEDED"] },
+                                           "hot": false,
+                                           "quirk_refs": []
+                                         },
+                                         {
+                                           "name": "QuoteEscapeCharacter",
+                                           "wire_name": "QuoteEscapeCharacter",
+                                           "required": false,
+                                           "binding": { "kind": "BodyXml" },
+                                           "type": { "kind": "String" },
+                                           "hot": false,
+                                           "quirk_refs": []
+                                         },
+                                         {
+                                           "name": "RecordDelimiter",
+                                           "wire_name": "RecordDelimiter",
+                                           "required": false,
+                                           "binding": { "kind": "BodyXml" },
+                                           "type": { "kind": "String" },
+                                           "hot": false,
+                                           "quirk_refs": []
+                                         },
+                                         {
+                                           "name": "FieldDelimiter",
+                                           "wire_name": "FieldDelimiter",
+                                           "required": false,
+                                           "binding": { "kind": "BodyXml" },
+                                           "type": { "kind": "String" },
+                                           "hot": false,
+                                           "quirk_refs": []
+                                         },
+                                         {
+                                           "name": "QuoteCharacter",
+                                           "wire_name": "QuoteCharacter",
+                                           "required": false,
+                                           "binding": { "kind": "BodyXml" },
+                                           "type": { "kind": "String" },
+                                           "hot": false,
+                                           "quirk_refs": []
+                                         }
+                                       ],
+                             "xml": {
+                                      "element_order": [
+                                                         "QuoteFields",
+                                                         "QuoteEscapeCharacter",
+                                                         "RecordDelimiter",
+                                                         "FieldDelimiter",
+                                                         "QuoteCharacter"
+                                                       ],
+                                      "empty_value_policy": {
+                                                              "QuoteFields": "omit",
+                                                              "QuoteEscapeCharacter": "omit",
+                                                              "RecordDelimiter": "omit",
+                                                              "FieldDelimiter": "omit",
+                                                              "QuoteCharacter": "omit"
+                                                            },
+                                      "attributes": []
+                                    }
+                           },
+              "Encryption": {
+                              "kind": "Structure",
+                              "fields": [
+                                          {
+                                            "name": "EncryptionType",
+                                            "wire_name": "EncryptionType",
+                                            "required": true,
+                                            "binding": { "kind": "BodyXml" },
+                                            "type": {
+                                                      "kind": "StringEnum",
+                                                      "values": ["AES256", "aws:fsx", "aws:kms", "aws:kms:dsse"]
+                                                    },
+                                            "hot": false,
+                                            "quirk_refs": []
+                                          },
+                                          {
+                                            "name": "KMSKeyId",
+                                            "wire_name": "KMSKeyId",
+                                            "required": false,
+                                            "binding": { "kind": "BodyXml" },
+                                            "type": { "kind": "String" },
+                                            "hot": false,
+                                            "quirk_refs": []
+                                          },
+                                          {
+                                            "name": "KMSContext",
+                                            "wire_name": "KMSContext",
+                                            "required": false,
+                                            "binding": { "kind": "BodyXml" },
+                                            "type": { "kind": "String" },
+                                            "hot": false,
+                                            "quirk_refs": []
+                                          }
+                                        ],
+                              "xml": {
+                                       "element_order": ["EncryptionType", "KMSKeyId", "KMSContext"],
+                                       "empty_value_policy": {
+                                                               "EncryptionType": "emit",
+                                                               "KMSKeyId": "omit",
+                                                               "KMSContext": "omit"
+                                                             },
+                                       "attributes": []
+                                     }
+                            },
+              "GlacierJobParameters": {
+                                        "kind": "Structure",
+                                        "fields": [
+                                                    {
+                                                      "name": "Tier",
+                                                      "wire_name": "Tier",
+                                                      "required": true,
+                                                      "binding": { "kind": "BodyXml" },
+                                                      "type": {
+                                                                "kind": "StringEnum",
+                                                                "values": ["Standard", "Bulk", "Expedited"]
+                                                              },
+                                                      "hot": false,
+                                                      "quirk_refs": []
+                                                    }
+                                                  ],
+                                        "xml": {
+                                                 "element_order": ["Tier"],
+                                                 "empty_value_policy": { "Tier": "emit" },
+                                                 "attributes": []
+                                               }
+                                      },
+              "Grant": {
+                         "kind": "Structure",
+                         "fields": [
+                                     {
+                                       "name": "Grantee",
+                                       "wire_name": "Grantee",
+                                       "required": false,
+                                       "binding": { "kind": "BodyXml" },
+                                       "type": { "kind": "Structure", "shape": "Grantee" },
+                                       "hot": false,
+                                       "quirk_refs": []
+                                     },
+                                     {
+                                       "name": "Permission",
+                                       "wire_name": "Permission",
+                                       "required": false,
+                                       "binding": { "kind": "BodyXml" },
+                                       "type": {
+                                                 "kind": "StringEnum",
+                                                 "values": ["FULL_CONTROL", "WRITE", "WRITE_ACP", "READ", "READ_ACP"]
+                                               },
+                                       "hot": false,
+                                       "quirk_refs": []
+                                     }
+                                   ],
+                         "xml": {
+                                  "element_order": ["Grantee", "Permission"],
+                                  "empty_value_policy": { "Grantee": "omit", "Permission": "omit" },
+                                  "attributes": []
+                                }
+                       },
+              "Grantee": {
+                           "kind": "Structure",
+                           "fields": [
+                                       {
+                                         "name": "DisplayName",
+                                         "wire_name": "DisplayName",
+                                         "required": false,
+                                         "binding": { "kind": "BodyXml" },
+                                         "type": { "kind": "String" },
+                                         "hot": false,
+                                         "quirk_refs": []
+                                       },
+                                       {
+                                         "name": "EmailAddress",
+                                         "wire_name": "EmailAddress",
+                                         "required": false,
+                                         "binding": { "kind": "BodyXml" },
+                                         "type": { "kind": "String" },
+                                         "hot": false,
+                                         "quirk_refs": []
+                                       },
+                                       {
+                                         "name": "ID",
+                                         "wire_name": "ID",
+                                         "required": false,
+                                         "binding": { "kind": "BodyXml" },
+                                         "type": { "kind": "String" },
+                                         "hot": false,
+                                         "quirk_refs": []
+                                       },
+                                       {
+                                         "name": "URI",
+                                         "wire_name": "URI",
+                                         "required": false,
+                                         "binding": { "kind": "BodyXml" },
+                                         "type": { "kind": "String" },
+                                         "hot": false,
+                                         "quirk_refs": []
+                                       },
+                                       {
+                                         "name": "Type",
+                                         "wire_name": "xsi:type",
+                                         "required": true,
+                                         "binding": { "kind": "BodyXml" },
+                                         "type": {
+                                                   "kind": "StringEnum",
+                                                   "values": ["CanonicalUser", "AmazonCustomerByEmail", "Group"]
+                                                 },
+                                         "hot": false,
+                                         "quirk_refs": []
+                                       }
+                                     ],
+                           "xml": {
+                                    "element_order": ["DisplayName", "EmailAddress", "ID", "URI", "Type"],
+                                    "empty_value_policy": {
+                                                            "DisplayName": "omit",
+                                                            "EmailAddress": "omit",
+                                                            "ID": "omit",
+                                                            "URI": "omit",
+                                                            "Type": "emit"
+                                                          },
+                                    "attributes": []
+                                  }
+                         },
+              "InputSerialization": {
+                                      "kind": "Structure",
+                                      "fields": [
+                                                  {
+                                                    "name": "CSV",
+                                                    "wire_name": "CSV",
+                                                    "required": false,
+                                                    "binding": { "kind": "BodyXml" },
+                                                    "type": { "kind": "Structure", "shape": "CSVInput" },
+                                                    "hot": false,
+                                                    "quirk_refs": []
+                                                  },
+                                                  {
+                                                    "name": "CompressionType",
+                                                    "wire_name": "CompressionType",
+                                                    "required": false,
+                                                    "binding": { "kind": "BodyXml" },
+                                                    "type": {
+                                                              "kind": "StringEnum",
+                                                              "values": ["NONE", "GZIP", "BZIP2"]
+                                                            },
+                                                    "hot": false,
+                                                    "quirk_refs": []
+                                                  },
+                                                  {
+                                                    "name": "JSON",
+                                                    "wire_name": "JSON",
+                                                    "required": false,
+                                                    "binding": { "kind": "BodyXml" },
+                                                    "type": { "kind": "Structure", "shape": "JSONInput" },
+                                                    "hot": false,
+                                                    "quirk_refs": []
+                                                  },
+                                                  {
+                                                    "name": "Parquet",
+                                                    "wire_name": "Parquet",
+                                                    "required": false,
+                                                    "binding": { "kind": "BodyXml" },
+                                                    "type": { "kind": "Structure", "shape": "ParquetInput" },
+                                                    "hot": false,
+                                                    "quirk_refs": []
+                                                  }
+                                                ],
+                                      "xml": {
+                                               "element_order": ["CSV", "CompressionType", "JSON", "Parquet"],
+                                               "empty_value_policy": {
+                                                                       "CSV": "omit",
+                                                                       "CompressionType": "omit",
+                                                                       "JSON": "omit",
+                                                                       "Parquet": "omit"
+                                                                     },
+                                               "attributes": []
+                                             }
+                                    },
+              "JSONInput": {
+                             "kind": "Structure",
+                             "fields": [
+                                         {
+                                           "name": "Type",
+                                           "wire_name": "Type",
+                                           "required": false,
+                                           "binding": { "kind": "BodyXml" },
+                                           "type": { "kind": "StringEnum", "values": ["DOCUMENT", "LINES"] },
+                                           "hot": false,
+                                           "quirk_refs": []
+                                         }
+                                       ],
+                             "xml": {
+                                      "element_order": ["Type"],
+                                      "empty_value_policy": { "Type": "omit" },
+                                      "attributes": []
+                                    }
+                           },
+              "JSONOutput": {
+                              "kind": "Structure",
+                              "fields": [
+                                          {
+                                            "name": "RecordDelimiter",
+                                            "wire_name": "RecordDelimiter",
+                                            "required": false,
+                                            "binding": { "kind": "BodyXml" },
+                                            "type": { "kind": "String" },
+                                            "hot": false,
+                                            "quirk_refs": []
+                                          }
+                                        ],
+                              "xml": {
+                                       "element_order": ["RecordDelimiter"],
+                                       "empty_value_policy": { "RecordDelimiter": "omit" },
+                                       "attributes": []
+                                     }
+                            },
+              "MetadataEntry": {
+                                 "kind": "Structure",
+                                 "fields": [
+                                             {
+                                               "name": "Name",
+                                               "wire_name": "Name",
+                                               "required": false,
+                                               "binding": { "kind": "BodyXml" },
+                                               "type": { "kind": "String" },
+                                               "hot": false,
+                                               "quirk_refs": []
+                                             },
+                                             {
+                                               "name": "Value",
+                                               "wire_name": "Value",
+                                               "required": false,
+                                               "binding": { "kind": "BodyXml" },
+                                               "type": { "kind": "String" },
+                                               "hot": false,
+                                               "quirk_refs": []
+                                             }
+                                           ],
+                                 "xml": {
+                                          "element_order": ["Name", "Value"],
+                                          "empty_value_policy": { "Name": "omit", "Value": "omit" },
+                                          "attributes": []
+                                        }
+                               },
+              "OutputLocation": {
+                                  "kind": "Structure",
+                                  "fields": [
+                                              {
+                                                "name": "S3",
+                                                "wire_name": "S3",
+                                                "required": false,
+                                                "binding": { "kind": "BodyXml" },
+                                                "type": { "kind": "Structure", "shape": "S3Location" },
+                                                "hot": false,
+                                                "quirk_refs": []
+                                              }
+                                            ],
+                                  "xml": {
+                                           "element_order": ["S3"],
+                                           "empty_value_policy": { "S3": "omit" },
+                                           "attributes": []
+                                         }
+                                },
+              "OutputSerialization": {
+                                       "kind": "Structure",
+                                       "fields": [
+                                                   {
+                                                     "name": "CSV",
+                                                     "wire_name": "CSV",
+                                                     "required": false,
+                                                     "binding": { "kind": "BodyXml" },
+                                                     "type": { "kind": "Structure", "shape": "CSVOutput" },
+                                                     "hot": false,
+                                                     "quirk_refs": []
+                                                   },
+                                                   {
+                                                     "name": "JSON",
+                                                     "wire_name": "JSON",
+                                                     "required": false,
+                                                     "binding": { "kind": "BodyXml" },
+                                                     "type": { "kind": "Structure", "shape": "JSONOutput" },
+                                                     "hot": false,
+                                                     "quirk_refs": []
+                                                   }
+                                                 ],
+                                       "xml": {
+                                                "element_order": ["CSV", "JSON"],
+                                                "empty_value_policy": { "CSV": "omit", "JSON": "omit" },
+                                                "attributes": []
+                                              }
+                                     },
+              "ParquetInput": {
+                                "kind": "Structure",
+                                "fields": [],
+                                "xml": { "element_order": [], "empty_value_policy": {}, "attributes": [] }
+                              },
+              "RestoreRequest": {
+                                  "kind": "Structure",
+                                  "fields": [
+                                              {
+                                                "name": "Days",
+                                                "wire_name": "Days",
+                                                "required": false,
+                                                "binding": { "kind": "BodyXml" },
+                                                "type": { "kind": "Integer" },
+                                                "hot": false,
+                                                "quirk_refs": []
+                                              },
+                                              {
+                                                "name": "GlacierJobParameters",
+                                                "wire_name": "GlacierJobParameters",
+                                                "required": false,
+                                                "binding": { "kind": "BodyXml" },
+                                                "type": { "kind": "Structure", "shape": "GlacierJobParameters" },
+                                                "hot": false,
+                                                "quirk_refs": []
+                                              },
+                                              {
+                                                "name": "Type",
+                                                "wire_name": "Type",
+                                                "required": false,
+                                                "binding": { "kind": "BodyXml" },
+                                                "type": { "kind": "StringEnum", "values": ["SELECT"] },
+                                                "hot": false,
+                                                "quirk_refs": []
+                                              },
+                                              {
+                                                "name": "Tier",
+                                                "wire_name": "Tier",
+                                                "required": false,
+                                                "binding": { "kind": "BodyXml" },
+                                                "type": {
+                                                          "kind": "StringEnum",
+                                                          "values": ["Standard", "Bulk", "Expedited"]
+                                                        },
+                                                "hot": false,
+                                                "quirk_refs": []
+                                              },
+                                              {
+                                                "name": "Description",
+                                                "wire_name": "Description",
+                                                "required": false,
+                                                "binding": { "kind": "BodyXml" },
+                                                "type": { "kind": "String" },
+                                                "hot": false,
+                                                "quirk_refs": []
+                                              },
+                                              {
+                                                "name": "SelectParameters",
+                                                "wire_name": "SelectParameters",
+                                                "required": false,
+                                                "binding": { "kind": "BodyXml" },
+                                                "type": { "kind": "Structure", "shape": "SelectParameters" },
+                                                "hot": false,
+                                                "quirk_refs": []
+                                              },
+                                              {
+                                                "name": "OutputLocation",
+                                                "wire_name": "OutputLocation",
+                                                "required": false,
+                                                "binding": { "kind": "BodyXml" },
+                                                "type": { "kind": "Structure", "shape": "OutputLocation" },
+                                                "hot": false,
+                                                "quirk_refs": []
+                                              }
+                                            ],
+                                  "xml": {
+                                           "element_order": [
+                                                              "Days",
+                                                              "GlacierJobParameters",
+                                                              "Type",
+                                                              "Tier",
+                                                              "Description",
+                                                              "SelectParameters",
+                                                              "OutputLocation"
+                                                            ],
+                                           "empty_value_policy": {
+                                                                   "Days": "omit",
+                                                                   "GlacierJobParameters": "omit",
+                                                                   "Type": "omit",
+                                                                   "Tier": "omit",
+                                                                   "Description": "omit",
+                                                                   "SelectParameters": "omit",
+                                                                   "OutputLocation": "omit"
+                                                                 },
+                                           "attributes": []
+                                         }
+                                },
+              "S3Location": {
+                              "kind": "Structure",
+                              "fields": [
+                                          {
+                                            "name": "BucketName",
+                                            "wire_name": "BucketName",
+                                            "required": true,
+                                            "binding": { "kind": "BodyXml" },
+                                            "type": { "kind": "BucketName" },
+                                            "hot": false,
+                                            "quirk_refs": []
+                                          },
+                                          {
+                                            "name": "Prefix",
+                                            "wire_name": "Prefix",
+                                            "required": true,
+                                            "binding": { "kind": "BodyXml" },
+                                            "type": { "kind": "String" },
+                                            "hot": false,
+                                            "quirk_refs": []
+                                          },
+                                          {
+                                            "name": "Encryption",
+                                            "wire_name": "Encryption",
+                                            "required": false,
+                                            "binding": { "kind": "BodyXml" },
+                                            "type": { "kind": "Structure", "shape": "Encryption" },
+                                            "hot": false,
+                                            "quirk_refs": []
+                                          },
+                                          {
+                                            "name": "CannedACL",
+                                            "wire_name": "CannedACL",
+                                            "required": false,
+                                            "binding": { "kind": "BodyXml" },
+                                            "type": {
+                                                      "kind": "StringEnum",
+                                                      "values": [
+                                                                  "private",
+                                                                  "public-read",
+                                                                  "public-read-write",
+                                                                  "authenticated-read",
+                                                                  "aws-exec-read",
+                                                                  "bucket-owner-read",
+                                                                  "bucket-owner-full-control"
+                                                                ]
+                                                    },
+                                            "hot": false,
+                                            "quirk_refs": []
+                                          },
+                                          {
+                                            "name": "AccessControlList",
+                                            "wire_name": "AccessControlList",
+                                            "required": false,
+                                            "binding": { "kind": "BodyXml" },
+                                            "type": {
+                                                      "kind": "List",
+                                                      "member": { "kind": "Structure", "shape": "Grant" },
+                                                      "flattened": false,
+                                                      "wrapper_name": "Grant"
+                                                    },
+                                            "hot": false,
+                                            "quirk_refs": []
+                                          },
+                                          {
+                                            "name": "Tagging",
+                                            "wire_name": "Tagging",
+                                            "required": false,
+                                            "binding": { "kind": "BodyXml" },
+                                            "type": { "kind": "Structure", "shape": "Tagging" },
+                                            "hot": false,
+                                            "quirk_refs": []
+                                          },
+                                          {
+                                            "name": "UserMetadata",
+                                            "wire_name": "UserMetadata",
+                                            "required": false,
+                                            "binding": { "kind": "BodyXml" },
+                                            "type": {
+                                                      "kind": "List",
+                                                      "member": { "kind": "Structure", "shape": "MetadataEntry" },
+                                                      "flattened": false,
+                                                      "wrapper_name": "MetadataEntry"
+                                                    },
+                                            "hot": false,
+                                            "quirk_refs": []
+                                          },
+                                          {
+                                            "name": "StorageClass",
+                                            "wire_name": "StorageClass",
+                                            "required": false,
+                                            "binding": { "kind": "BodyXml" },
+                                            "type": {
+                                                      "kind": "StringEnum",
+                                                      "values": [
+                                                                  "STANDARD",
+                                                                  "REDUCED_REDUNDANCY",
+                                                                  "STANDARD_IA",
+                                                                  "ONEZONE_IA",
+                                                                  "INTELLIGENT_TIERING",
+                                                                  "GLACIER",
+                                                                  "DEEP_ARCHIVE",
+                                                                  "OUTPOSTS",
+                                                                  "GLACIER_IR",
+                                                                  "SNOW",
+                                                                  "EXPRESS_ONEZONE",
+                                                                  "FSX_OPENZFS",
+                                                                  "FSX_ONTAP"
+                                                                ]
+                                                    },
+                                            "hot": false,
+                                            "quirk_refs": []
+                                          }
+                                        ],
+                              "xml": {
+                                       "element_order": [
+                                                          "BucketName",
+                                                          "Prefix",
+                                                          "Encryption",
+                                                          "CannedACL",
+                                                          "AccessControlList",
+                                                          "Tagging",
+                                                          "UserMetadata",
+                                                          "StorageClass"
+                                                        ],
+                                       "empty_value_policy": {
+                                                               "BucketName": "emit",
+                                                               "Prefix": "emit",
+                                                               "Encryption": "omit",
+                                                               "CannedACL": "omit",
+                                                               "AccessControlList": "omit",
+                                                               "Tagging": "omit",
+                                                               "UserMetadata": "omit",
+                                                               "StorageClass": "omit"
+                                                             },
+                                       "attributes": []
+                                     }
+                            },
+              "SelectParameters": {
+                                    "kind": "Structure",
+                                    "fields": [
+                                                {
+                                                  "name": "InputSerialization",
+                                                  "wire_name": "InputSerialization",
+                                                  "required": true,
+                                                  "binding": { "kind": "BodyXml" },
+                                                  "type": { "kind": "Structure", "shape": "InputSerialization" },
+                                                  "hot": false,
+                                                  "quirk_refs": []
+                                                },
+                                                {
+                                                  "name": "ExpressionType",
+                                                  "wire_name": "ExpressionType",
+                                                  "required": true,
+                                                  "binding": { "kind": "BodyXml" },
+                                                  "type": { "kind": "StringEnum", "values": ["SQL"] },
+                                                  "hot": false,
+                                                  "quirk_refs": []
+                                                },
+                                                {
+                                                  "name": "Expression",
+                                                  "wire_name": "Expression",
+                                                  "required": true,
+                                                  "binding": { "kind": "BodyXml" },
+                                                  "type": { "kind": "String" },
+                                                  "hot": false,
+                                                  "quirk_refs": []
+                                                },
+                                                {
+                                                  "name": "OutputSerialization",
+                                                  "wire_name": "OutputSerialization",
+                                                  "required": true,
+                                                  "binding": { "kind": "BodyXml" },
+                                                  "type": { "kind": "Structure", "shape": "OutputSerialization" },
+                                                  "hot": false,
+                                                  "quirk_refs": []
+                                                }
+                                              ],
+                                    "xml": {
+                                             "element_order": [
+                                                                "InputSerialization",
+                                                                "ExpressionType",
+                                                                "Expression",
+                                                                "OutputSerialization"
+                                                              ],
+                                             "empty_value_policy": {
+                                                                     "InputSerialization": "emit",
+                                                                     "ExpressionType": "emit",
+                                                                     "Expression": "emit",
+                                                                     "OutputSerialization": "emit"
+                                                                   },
+                                             "attributes": []
+                                           }
+                                  },
+              "Tag": {
+                       "kind": "Structure",
+                       "fields": [
+                                   {
+                                     "name": "Key",
+                                     "wire_name": "Key",
+                                     "required": true,
+                                     "binding": { "kind": "BodyXml" },
+                                     "type": { "kind": "ObjectKey" },
+                                     "hot": true,
+                                     "quirk_refs": []
+                                   },
+                                   {
+                                     "name": "Value",
+                                     "wire_name": "Value",
+                                     "required": true,
+                                     "binding": { "kind": "BodyXml" },
+                                     "type": { "kind": "String" },
+                                     "hot": true,
+                                     "quirk_refs": []
+                                   }
+                                 ],
+                       "xml": {
+                                "element_order": ["Key", "Value"],
+                                "empty_value_policy": { "Key": "emit", "Value": "emit" },
+                                "attributes": []
+                              }
+                     },
+              "Tagging": {
+                           "kind": "Structure",
+                           "fields": [
+                                       {
+                                         "name": "TagSet",
+                                         "wire_name": "TagSet",
+                                         "required": true,
+                                         "binding": { "kind": "BodyXml" },
+                                         "type": {
+                                                   "kind": "List",
+                                                   "member": { "kind": "Structure", "shape": "Tag" },
+                                                   "flattened": false,
+                                                   "wrapper_name": "Tag"
+                                                 },
+                                         "hot": true,
+                                         "quirk_refs": []
+                                       }
+                                     ],
+                           "xml": {
+                                    "element_order": ["TagSet"],
+                                    "empty_value_policy": { "TagSet": "emit" },
+                                    "attributes": []
+                                  }
+                         }
+            },
+  "xml": {
+           "request_root": null,
+           "request_root_aliases": [],
+           "response_root": null,
+           "xmlns": "emit",
+           "unwrapped_output": false,
+           "element_order": [],
+           "empty_value_policy": {},
+           "url_encoded_fields": [],
+           "attributes": [],
+           "body_literal": false
+         },
+  "errors": {
+              "not_configured": null,
+              "allows_error_after_200": false,
+              "codes": [
+                         "NoSuchBucket",
+                         "NoSuchKey",
+                         "AccessDenied",
+                         "MalformedXML",
+                         "InvalidRequest",
+                         "InvalidArgument",
+                         "RestoreAlreadyInProgress",
+                         "InvalidObjectState",
+                         "ObjectAlreadyInActiveTierError"
+                       ]
+            },
+  "derived_resources": [],
+  "head_mirrors": null,
+  "quirk_refs": [
+                  "q-restore-0001",
+                  "q-restore-0002",
+                  "q-restore-0003",
+                  "q-restore-0004",
+                  "q-restore-0005",
+                  "q-restore-0006",
+                  "q-restore-0007",
+                  "q-restore-0008"
+                ],
+  "quirks": [
+              {
+                "id": "q-restore-0001",
+                "kind": "status_tri_state",
+                "target": "RestoreObject",
+                "summary": "A restore answers three different statuses for three different states — 202 when a retrieval starts, 200 when the copy is already restored, 409 RestoreAlreadyInProgress while one is running — so the number is decided by a mapping in this crate and declared as the operation's success status plus one alternative, never chosen by a handler.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_RestoreObject.html",
+                                "summary": "The operation documents 202 Accepted when a retrieval is initiated and 200 OK when the object copy was already restored, with RestoreAlreadyInProgress for a request that arrives while one is running."
+                              },
+                              {
+                                "kind": "s3s-pr",
+                                "ref": "https://github.com/s3s-project/s3s/pull/515",
+                                "summary": "Upstream shipped a default status for error codes it did not know, which is the same failure one level over: a status nobody chose reads exactly like a status somebody did."
+                              }
+                            ],
+                "cases": ["c-select-restore-0001", "c-select-restore-0002", "c-select-restore-0011"]
+              },
+              {
+                "id": "q-restore-0002",
+                "kind": "structured_header",
+                "target": "RestoreObject.RestoreStatus",
+                "summary": "x-amz-restore is a structured header, not a word: an in-progress copy is ongoing-request=\"true\" and a finished one is ongoing-request=\"false\", expiry-date=\"<RFC 1123>\" — quotes around both values, a comma and exactly one space between the pairs — and it is produced and parsed in one place so the two spellings cannot drift.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_HeadObject.html#API_HeadObject_ResponseSyntax",
+                                "summary": "The read and head responses document x-amz-restore as an ongoing-request flag optionally followed by an expiry-date, each value in double quotes."
+                              },
+                              {
+                                "kind": "rfc",
+                                "ref": "https://www.rfc-editor.org/rfc/rfc9110.html#section-5.6.7",
+                                "summary": "The date inside the header is the IMF-fixdate form HTTP fixes for every date it carries, which is what makes the embedded value byte-comparable at all."
+                              }
+                            ],
+                "cases": ["c-select-restore-0004", "c-select-restore-0005", "c-select-restore-0019"]
+              },
+              {
+                "id": "q-restore-0003",
+                "kind": "object_state_rule",
+                "target": "RestoreObject",
+                "summary": "A restore of an object that is not in an archive storage class is refused 403 InvalidObjectState rather than accepted as a no-op: a caller that reads a success has no way to tell a retrieval it does not need from one that never happened.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_RestoreObject.html",
+                                "summary": "The operation documents InvalidObjectState for a request against an object whose storage class is not one of the archive classes."
+                              }
+                            ],
+                "cases": ["c-select-restore-0010"]
+              },
+              {
+                "id": "q-restore-0004",
+                "kind": "value_constraint",
+                "target": "RestoreRequest",
+                "summary": "A RestoreRequest must name exactly one of the two documented forms: a Days count of at least one for an ordinary retrieval, or Type SELECT with both SelectParameters and OutputLocation and no Days at all — neither form's members may appear in the other, and a document with neither is refused rather than given a duration nobody asked for.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_RestoreObject.html",
+                                "summary": "The request syntax documents Days as the lifetime of the active copy for an ordinary retrieval and as not applicable to a select-type restore, which instead carries SelectParameters and an OutputLocation."
+                              },
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_RestoreRequest.html",
+                                "summary": "The Days member documents a minimum value of one, so a zero-day or negative retrieval has no representable meaning."
+                              }
+                            ],
+                "cases": [
+                           "c-select-restore-0003",
+                           "c-select-restore-0012",
+                           "c-select-restore-0013",
+                           "c-select-restore-0014",
+                           "c-select-restore-0015"
+                         ]
+              },
+              {
+                "id": "q-restore-0005",
+                "kind": "closed_value_set",
+                "target": "GlacierJobParameters.Tier",
+                "summary": "A retrieval tier outside the documented three-value set — Expedited, Standard, Bulk, exactly in that spelling — is refused as InvalidArgument on both spellings of the member, because a tier nothing can schedule is a retrieval that silently never starts.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GlacierJobParameters.html",
+                                "summary": "The Tier member documents the closed value set Standard, Bulk and Expedited, and the same set appears on the request's own Tier element."
+                              }
+                            ],
+                "cases": ["c-select-restore-0006", "c-select-restore-0016"]
+              },
+              {
+                "id": "q-restore-0006",
+                "kind": "required_body",
+                "target": "RestoreObject",
+                "summary": "The payload member is promoted to required, so a restore with an empty body is 400 MalformedXML rather than a retrieval with a duration this implementation invented: neither documented form of the request has a default, and Days in particular has none.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_RestoreObject.html",
+                                "summary": "Every documented request example carries a RestoreRequest document, and no default duration or tier is published for a request that omits it."
+                              },
+                              {
+                                "kind": "s3s-pr",
+                                "ref": "https://github.com/s3s-project/s3s/pull/377",
+                                "summary": "Upstream accepted an empty body where a document was required and answered success, and the fix pins the empty-required-XML answer to 400 MalformedXML."
+                              }
+                            ],
+                "cases": ["c-select-restore-0017"]
+              },
+              {
+                "id": "q-restore-0007",
+                "kind": "lenient_unknown_elements",
+                "target": "RestoreObject",
+                "summary": "Unknown elements inside a RestoreRequest are skipped rather than refused, and so is an XML namespace on the root: AWS adds elements to this document over time and a decoder that got stricter would refuse retrievals an SDK a version newer sends correctly.",
+                "evidence": [
+                              {
+                                "kind": "s3s-issue",
+                                "ref": "https://github.com/s3s-project/s3s/issues/613",
+                                "summary": "AWS ignores unknown elements in request XML, and upstream had to relax its decoder to match after strict parsing broke real clients."
+                              },
+                              {
+                                "kind": "s3s-pr",
+                                "ref": "https://github.com/s3s-project/s3s/pull/617",
+                                "summary": "The upstream fix that makes unknown request elements a skip rather than an error, which is the behaviour this decoder generates by construction."
+                              }
+                            ],
+                "cases": ["c-select-restore-0007"]
+              },
+              {
+                "id": "q-restore-0008",
+                "kind": "version_selector",
+                "target": "RestoreObject.VersionId",
+                "summary": "versionId selects which version of the object is retrieved, so it is decoded and carried to the handler rather than dropped: a backend that ignored it would retrieve the current version and report success for a request about another one, which is indistinguishable from having honoured it.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_RestoreObject.html",
+                                "summary": "The operation documents versionId as the query parameter naming which version of the object the retrieval applies to."
+                              }
+                            ],
+                "cases": ["c-select-restore-0018"]
+              }
+            ],
+  "ext_points": []
+}

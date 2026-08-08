@@ -81,6 +81,8 @@ pub(crate) static OPERATION_NAMES: &[&str] = &[
     "PutObjectLockConfiguration",
     "PutObjectRetention",
     "PutObjectTagging",
+    "RestoreObject",
+    "SelectObjectContent",
     "UploadPart",
     "UploadPartCopy",
 ];

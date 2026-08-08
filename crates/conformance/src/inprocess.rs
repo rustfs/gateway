@@ -185,6 +185,8 @@ impl InProcess {
             .register::<dto::PutObjectLockConfiguration, _>(Arc::clone(&backend))
             .register::<dto::PutObjectRetention, _>(Arc::clone(&backend))
             .register::<dto::PutObjectTagging, _>(Arc::clone(&backend))
+            .register::<dto::RestoreObject, _>(Arc::clone(&backend))
+            .register::<dto::SelectObjectContent, _>(Arc::clone(&backend))
             .register::<dto::UploadPart, _>(Arc::clone(&backend))
             .register::<dto::UploadPartCopy, _>(Arc::clone(&backend))
             .authenticator(SigV4Authenticator::new(provider, regions))

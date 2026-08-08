@@ -1,0 +1,45 @@
+[case]
+id = "c-select-restore-0009"
+schema_version = 1
+title = "Unknown elements and a namespace on a select request are skipped, not refused"
+rationale = """
+The select document's leniency, the same rule the restore document carries and for the same reason. A namespace-prefixed body is what several SDKs send, and a decoder keyed to the qualified name would refuse every one of them while the bare form worked."""
+polarity = "positive"
+operation = "SelectObjectContent"
+tags = ["select", "xml"]
+timeout_ms = 10000
+quirks = ["q-select-0007"]
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/issues/613"
+summary = "AWS ignores unknown elements in request XML, and upstream relaxed its decoder to match."
+kind = "s3s-issue"
+[[setup.buckets]]
+name = "conf-select"
+
+[[setup.objects]]
+bucket = "conf-select"
+key = "rows.csv"
+body = { utf8 = "a,b\n1,2\n" }
+
+[request]
+method = "POST"
+target = "/conf-select/rows.csv?select&select-type=2"
+headers = { "content-type" = "application/xml" }
+body = { utf8 = '<SelectObjectContentRequest xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Expression>SELECT * FROM S3Object</Expression><ExpressionType>SQL</ExpressionType><Unknown>ignored</Unknown><InputSerialization><JSON><Type>LINES</Type></JSON></InputSerialization><OutputSerialization><JSON></JSON></OutputSerialization></SelectObjectContentRequest>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 501
+connection_after = "open"
+
+[expect.error]
+code = "NotImplemented"
+request_id_present = true
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>NotImplemented</Code><Message>The select request was accepted and validated, but this backend cannot yet write an event-stream response</Message><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''

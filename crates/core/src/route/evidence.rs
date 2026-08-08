@@ -182,3 +182,11 @@ pub(super) const GET_OBJECT_LEGAL_HOLD_DOC: &str = "https://docs.aws.amazon.com/
 /// AWS's own reference for the legal-hold write.
 pub(super) const PUT_OBJECT_LEGAL_HOLD_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObjectLegalHold.html \
      — a legal-hold write is a PUT to the object key carrying the ?legal-hold subresource, and its body is a LegalHold document rather than object data.";
+
+/// AWS's own reference for the archive retrieval.
+pub(super) const RESTORE_OBJECT_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_RestoreObject.html \
+     — a restore is a POST to the object key carrying the ?restore subresource, and its body is a RestoreRequest document rather than object data.";
+
+/// AWS's own reference for the select query.
+pub(super) const SELECT_OBJECT_CONTENT_DOC: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_SelectObjectContent.html \
+     — a select is a POST to the object key carrying ?select together with select-type=2, and it answers with a framed event stream rather than a document.";

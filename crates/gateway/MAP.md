@@ -49,6 +49,7 @@ everything a consumer needs so that nothing downstream depends on `-core`, `-sig
 | `tests/facade_probe.rs` | Every export the conformance runner's `REQUIRED_FACADE_EXPORTS` names, checked by naming it |
 | `tests/backend_reachability.rs` | Every argument of the range contract, built from a decoded request and never from a literal; 5 negative, 1 positive. Read this before adding a constructor a backend is meant to call |
 | `tests/replication_token.rs` | That `x-amz-bucket-object-lock-token` reaches a handler off a decoded `PutBucketReplication`, present **and** absent; 2 negative, 1 positive. It exists because a header parsed and then dropped answers 200 exactly like one that arrived, so the conformance case could not tell them apart |
+| `tests/select_restore_intent.rs` | Two things no response can see: that a select's and a restore's decoded members reach a handler — the scan range, the progress switch, the version selector, the nested select-on-restore query, each asserted present **and** absent — and that the exported event-stream frames read back under a CRC-32 written in the test file itself, with every single-byte corruption of a frame refused; 5 negative, 6 positive |
 | `examples/minimal.rs` | The whole assembly in one file, asserting one answered request and one refused one |
 
 ## Known gaps, recorded rather than discovered

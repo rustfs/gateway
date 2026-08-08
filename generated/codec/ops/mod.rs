@@ -65,5 +65,7 @@ mod put_object_legal_hold;
 mod put_object_lock_configuration;
 mod put_object_retention;
 mod put_object_tagging;
+mod restore_object;
+mod select_object_content;
 mod upload_part;
 mod upload_part_copy;
