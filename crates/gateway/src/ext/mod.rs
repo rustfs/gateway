@@ -39,6 +39,7 @@
 //! | [`HostResolver`] | [`PathStyleOnly`] | a virtual-hosted request is routed by its path, so `Host: bucket.example.com` addressing `/key` is not understood; install [`VirtualHostStyle`] to understand it |
 //! | [`Governor`] | [`Unlimited`] | no request is ever refused for load, in either the per-bucket or the per-identity dimension |
 //! | [`Observer`] | [`NoObserver`] | nothing is recorded; a rejection leaves no trace outside the response |
+//! | [`CorsSource`] | [`NoCors`] | no bucket has a CORS document, so no preflight is ever allowed and no `Access-Control-*` header is ever written |
 //!
 //! Every default above is safe in the sense that it cannot widen access. Two of them —
 //! [`Unlimited`] and [`NoObserver`] — remove a defence rather than open a door, and a deployment
@@ -46,6 +47,7 @@
 
 mod authenticator;
 mod authorizer;
+mod cors;
 mod credentials;
 mod governor;
 mod host;
@@ -54,6 +56,7 @@ mod vhost;
 
 pub use self::authenticator::{Authentication, Authenticator, ChunkSink, ChunkVerification, SigV4Authenticator, Unavailable};
 pub use self::authorizer::{Authorizer, AuthzRequest, Denial, allow_when};
+pub use self::cors::{CORS_PREFLIGHT, CachedCorsSource, CorsCacheConfig, CorsSource, CorsSourceError, NoCors};
 pub use self::credentials::{CredentialProvider, Credentials, CredentialsError, StaticCredentials};
 pub use self::governor::{Governor, GovernorRequest, Lease, Unlimited};
 pub use self::host::{Addressing, HostQuery, HostResolver, PathStyleOnly, ResolvedHost, TargetOrigin, VhostHint};

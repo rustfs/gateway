@@ -1,0 +1,55 @@
+[case]
+id = "c-cors-0028"
+schema_version = 1
+title = "A matched preflight carries the rule's Max-Age and Expose-Headers"
+rationale = """
+MaxAgeSeconds is the only thing standing between one preflight and one preflight per request, and a browser that
+never receives it re-asks on every call — a load multiplier invisible to any status assertion. ExposeHeader is what
+lets a page read the ETag it just wrote; without it a successful upload looks to the script like a response with no
+headers at all."""
+polarity = "positive"
+tags = ["cors", "preflight"]
+timeout_ms = 10000
+quirks = ["q-cors-0009"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CORSRule.html"
+summary = "The rule members a preflight answer is built from: allowed methods, allowed headers, expose headers and max age."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://fetch.spec.whatwg.org/#http-cors-protocol"
+summary = "The preflight and its answer are defined here, including which response header a browser reads from which response."
+kind = "rfc"
+
+[[setup.buckets]]
+name = "conf-cors-rt"
+
+[[exchanges]]
+# Setup traffic: the document the preflight below is answered from. Not under test.
+[exchanges.request]
+method = "PUT"
+target = "/conf-cors-rt?cors"
+headers = { "content-type" = "application/xml", "content-md5" = "1zWaplUYSWSr9qONcHmeYA==" }
+body = { utf8 = "<CORSConfiguration><CORSRule><AllowedMethod>PUT</AllowedMethod><AllowedOrigin>https://app.example.com</AllowedOrigin><MaxAgeSeconds>3000</MaxAgeSeconds><ExposeHeader>ETag</ExposeHeader></CORSRule></CORSConfiguration>" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+
+[[exchanges]]
+[exchanges.request]
+method = "OPTIONS"
+target = "/conf-cors-rt/key.txt"
+headers = { "origin" = "https://app.example.com", "access-control-request-method" = "PUT" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+
+[exchanges.expect.headers_present]
+"access-control-allow-origin" = "https://app.example.com"
+"access-control-max-age" = "3000"
+"access-control-expose-headers" = "ETag"
+"vary" = "origin"

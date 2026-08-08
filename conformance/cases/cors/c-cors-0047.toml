@@ -1,0 +1,75 @@
+[case]
+id = "c-cors-0047"
+schema_version = 1
+title = "A partial wildcard requires its prefix, so a scheme downgrade is refused"
+rationale = """
+`https://*.example.com` names a scheme as well as a domain, and the prefix is the half a matcher drops without anyone
+noticing: `https://app.example.com` still matches, every positive case stays green, and the rule has quietly started
+admitting `http://app.example.com` — a plaintext origin any network attacker can forge, granted access to the same
+bucket. This case is the prefix, asserted on its own; c-cors-0030 is the same rule matching, so the two together say
+the wildcard is a wildcard and not a suffix test."""
+polarity = "negative"
+tags = ["cors", "preflight", "security"]
+timeout_ms = 10000
+quirks = ["q-cors-0015"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CORSRule.html"
+summary = "AllowedOrigin admits one wildcard, and the characters on either side of it are part of the value that must match."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://fetch.spec.whatwg.org/#http-cors-protocol"
+summary = "An origin is a scheme, a host and a port together, so two origins differing only in scheme are different origins."
+kind = "rfc"
+
+
+[[setup.buckets]]
+name = "conf-cors-rt"
+
+[[exchanges]]
+# Setup traffic: the document the preflight below is answered from. Not under test.
+[exchanges.request]
+method = "PUT"
+target = "/conf-cors-rt?cors"
+headers = { "content-type" = "application/xml", "content-md5" = "Wdmv/UN7dhcpsJ85Olv8Kw==" }
+body = { utf8 = "<CORSConfiguration><CORSRule><AllowedMethod>GET</AllowedMethod><AllowedOrigin>https://*.example.com</AllowedOrigin></CORSRule></CORSConfiguration>" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+
+[[exchanges]]
+# The same host the rule admits over https, asked for over http.
+[exchanges.request]
+method = "OPTIONS"
+target = "/conf-cors-rt/key.txt"
+headers = { "origin" = "http://app.example.com", "access-control-request-method" = "GET" }
+
+[exchanges.expect]
+kind = "response"
+status = 403
+connection_after = "open"
+headers_absent = [
+  "access-control-allow-origin",
+  "access-control-allow-methods",
+  "access-control-allow-headers",
+  "access-control-allow-credentials",
+  "access-control-max-age",
+  "access-control-expose-headers",
+]
+
+[exchanges.expect.error]
+code = "AccessForbidden"
+request_id_present = true
+
+[exchanges.expect.headers_present]
+"content-type" = "application/xml"
+"vary" = "origin"
+
+[exchanges.expect.body]
+redact = ["RequestId", "HostId"]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>AccessForbidden</Code><Message>CORSResponse: no CORS rule allows this request</Message><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''

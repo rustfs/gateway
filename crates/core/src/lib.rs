@@ -87,6 +87,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing, clippy::panic)]
 
 pub mod codec;
+pub mod cors;
 pub mod dispatch;
 pub mod error;
 pub mod fault;

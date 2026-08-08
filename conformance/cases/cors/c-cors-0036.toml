@@ -1,0 +1,57 @@
+[case]
+id = "c-cors-0036"
+schema_version = 1
+title = "A preflight naming an illegal bucket answers exactly what a non-existent bucket does"
+rationale = """
+Refusing an illegal name with its own error is the well-meaning version of the same leak: an attacker learns that
+the names which come back differently are the ones worth probing further, and the grammar itself becomes an oracle
+for what this deployment considers addressable. One answer for every negative, or the previous two cases are
+decoration."""
+polarity = "negative"
+tags = ["cors", "preflight", "security"]
+timeout_ms = 10000
+quirks = ["q-cors-0015"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/cors.html"
+summary = "S3 answers a bucket preflight out of that bucket's stored CORS document and refuses an unmatched one with 403."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://github.com/rustfs/rustfs/security/advisories/GHSA-x5xv-223c-8vm7"
+summary = "RustFS reflected an arbitrary Origin alongside a credentials allowance, which lets any site read a user's data."
+kind = "other"
+
+
+
+[request]
+method = "OPTIONS"
+target = "/ab/key.txt"
+headers = { "origin" = "https://app.example.com", "access-control-request-method" = "PUT" }
+
+[expect]
+kind = "response"
+status = 403
+connection_after = "open"
+headers_absent = [
+  "access-control-allow-origin",
+  "access-control-allow-methods",
+  "access-control-allow-headers",
+  "access-control-allow-credentials",
+  "access-control-max-age",
+  "access-control-expose-headers",
+]
+
+[expect.error]
+code = "AccessForbidden"
+request_id_present = true
+
+[expect.headers_present]
+"content-type" = "application/xml"
+"vary" = "origin"
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>AccessForbidden</Code><Message>CORSResponse: no CORS rule allows this request</Message><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''

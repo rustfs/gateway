@@ -72,8 +72,12 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use http::{Request, Response, StatusCode};
+use rustfs_gateway_core::cors::{
+    CorsHeaders, CorsPolicy, PreflightClass, PreflightOutcome, PreflightRequest, VARY, VARY_ORIGIN, answer_actual,
+    answer_preflight, classify, preflight_refusal,
+};
 use rustfs_gateway_core::{
-    EncodedResponse, MetaView, ResponseBody, RouteRequestParts, Router,
+    EncodedResponse, MetaView, ResponseBody, RouteRequestParts, Router, TargetKind,
     dispatch::{NO_ROUTE_MESSAGE, NOT_REGISTERED_MESSAGE},
 };
 use rustfs_gateway_http::{Limits, WireRequest};
@@ -86,8 +90,8 @@ use rustfs_gateway_types::{ErrorCode, NamePolicy};
 use crate::clock::Clock;
 use crate::dispatch::{DispatchTable, ErasedAnswer, target_of};
 use crate::ext::{
-    Authentication, Authenticator, Authorizer, AuthzRequest, Governor, GovernorRequest, HostQuery, HostResolver, Observer,
-    RequestEvent,
+    Authentication, Authenticator, Authorizer, AuthzRequest, CORS_PREFLIGHT, CachedCorsSource, Governor, GovernorRequest,
+    HostQuery, HostResolver, Observer, RequestEvent, ResolvedHost,
 };
 use crate::gate::{Authenticated, BodyCeilings, SealedBody};
 use crate::render::{S3Error, render};
@@ -109,6 +113,8 @@ pub(crate) struct Inner {
     pub(crate) observer: Arc<dyn Observer>,
     pub(crate) clock: Arc<dyn Clock>,
     pub(crate) traces: Arc<dyn TraceSource>,
+    pub(crate) cors: Arc<CachedCorsSource>,
+    pub(crate) cors_policy: CorsPolicy,
 }
 
 /// An assembled S3 service.
@@ -168,6 +174,18 @@ impl S3Service {
         let method = request.method().clone();
         let mut outcome = Outcome::new(&trace);
         let mut response = self.run(request, &mut outcome, now).await;
+        // The CORS decoration for an ordinary request, applied here because it belongs on
+        // **every** answer the pipeline produced once authorisation was granted — the `404` and
+        // the `500` included. A browser cannot read a response it was not granted access to, so
+        // an error without these headers reaches the page as an opaque network failure and the
+        // status the operator is looking at is invisible to the client. Nothing is applied when
+        // `run` never got as far as authorising: see `Outcome::cors`.
+        if let Some(cors) = outcome.cors.take() {
+            let headers = response.headers_mut();
+            for (name, value) in cors.iter() {
+                headers.insert(name, value.clone());
+            }
+        }
         // The one place the body invariants run, on both paths: the body is chosen and nothing has
         // been written. A refusal never reaches an encoder, so this is the only position from which
         // "a `HEAD` response has no content" can cover it.
@@ -218,6 +236,31 @@ impl S3Service {
             path: wire.raw_path().as_str(),
             method: wire.method(),
         });
+
+        // ── CORS preflight ───────────────────────────────────────────────────────────────
+        // After acceptance, after host resolution, and before routing. Every part of that is
+        // load-bearing.
+        //
+        // *After acceptance* so that a preflight is subject to the same wire-level refusals as
+        // everything else — a smuggled request must not become answerable by adding an `Origin`.
+        // *After host resolution* because whether the path names a bucket is the resolver's
+        // answer and not this file's. *Before routing* because the route table has no `OPTIONS`
+        // row and never will: a preflight is answered **instead of** an operation, from the
+        // bucket's stored document, and routing it would answer a CORS question with a `501`.
+        // Removing this branch is therefore visible as an `OPTIONS` reaching the route table.
+        //
+        // Nothing below this point runs for a preflight: no security floor, no authenticator, no
+        // authorizer, no handler. That is not a shortcut, it is the protocol — a browser sends no
+        // credentials on a preflight, so requiring a signature here would switch CORS off.
+        match classify(wire.method(), &wire.headers()) {
+            PreflightClass::NotPreflight => {}
+            PreflightClass::Malformed => return outcome.refuse_preflight(),
+            PreflightClass::Preflight(preflight) => {
+                return self
+                    .serve_preflight(wire.raw_path().as_str(), resolved, &preflight, outcome, now)
+                    .await;
+            }
+        }
 
         let dispatched = match self.inner.router.dispatch(&RouteRequestParts {
             method: wire.method(),
@@ -386,6 +429,12 @@ impl S3Service {
             return outcome.refuse(S3Error::from(denial));
         }
 
+        // Authorised, so the configuration read below is one an authenticated and permitted
+        // caller paid for — which is what keeps an ordinary `GET` carrying an `Origin` from
+        // becoming a second unauthenticated path to the store. Everything from here on carries
+        // the headers, including every refusal: `crate::S3Service::call` applies them.
+        outcome.cors = self.actual_cors(&headers, meta.bucket(), wire.method(), now).await;
+
         // Head-decidable and body-free: two different `x-amz-checksum-*` headers are two integrity
         // claims, and no body byte can settle which one the caller meant. `checksum_spec` is the
         // one place that rule lives — the generated decoders call the same function — and this is
@@ -458,6 +507,120 @@ impl S3Service {
             Err(error) => outcome.refuse(S3Error::from(error)),
         }
     }
+
+    /// Answers one preflight, and never anything else.
+    ///
+    /// The order below is the mitigation, in three steps that may not be reordered:
+    ///
+    /// 1. **The governor, first and unconditionally**, including for a bucket name that is not a
+    ///    legal one. A limit applied after the read is a limit on nothing, and skipping it for
+    ///    the illegal-name case would make that case cheaper than the others — a difference an
+    ///    attacker can measure.
+    /// 2. **The document, through the mandatory cache.** Every negative answer — no document, no
+    ///    bucket, no legal name, source failure — is the same `None` by the time it gets here.
+    /// 3. **One answer or one refusal.** The refusal has a single constructor with no arguments,
+    ///    so the four ways to reach it produce identical bytes.
+    async fn serve_preflight(
+        &self,
+        path: &str,
+        resolved: ResolvedHost,
+        preflight: &PreflightRequest<'_>,
+        outcome: &mut Outcome<'_>,
+        now: RequestNow,
+    ) -> Response<Body> {
+        let bucket = preflight_bucket(path, &resolved);
+        if self
+            .inner
+            .governor
+            .try_acquire(&GovernorRequest {
+                operation: CORS_PREFLIGHT,
+                bucket: bucket.as_ref(),
+                declared_body_bytes: None,
+                identity: None,
+            })
+            .await
+            .is_err()
+        {
+            return outcome.refuse(S3Error::new(ErrorCode::SLOW_DOWN, "the service is not accepting this request right now"));
+        }
+        let document = match bucket.as_ref() {
+            Some(name) => self.inner.cors.get(name, now).await,
+            // An illegal bucket name, or a path that names no bucket at all. Answered exactly as
+            // a bucket that does not exist is, and without a read.
+            None => None,
+        };
+        match answer_preflight(&self.inner.cors_policy, document.as_deref(), preflight) {
+            PreflightOutcome::Allowed(headers) => preflight_response(&headers),
+            PreflightOutcome::Refused => outcome.refuse_preflight(),
+        }
+    }
+
+    /// The CORS decoration an ordinary response should carry, if any.
+    ///
+    /// Called once, after authorisation. `None` for a request with no usable `Origin`, for a path
+    /// that names no bucket, and for an origin no rule admits — the last of which is not an error:
+    /// the request is served and the browser is the one that withholds the answer from the page.
+    async fn actual_cors(
+        &self,
+        headers: &http::HeaderMap,
+        bucket: Option<&rustfs_gateway_types::BucketName>,
+        method: &http::Method,
+        now: RequestNow,
+    ) -> Option<CorsHeaders> {
+        let view = rustfs_gateway_http::HeaderView::new(headers);
+        // Exactly one line, and one this runtime would be willing to echo. Two `Origin` lines are
+        // refused here as they are on a preflight, and for the same cache-poisoning reason.
+        let origin = (view.count(&rustfs_gateway_core::cors::ORIGIN) == 1)
+            .then(|| view.get_str(&rustfs_gateway_core::cors::ORIGIN))
+            .flatten()
+            .filter(|origin| rustfs_gateway_core::cors::is_plausible_origin(origin))?;
+        let document = self.inner.cors.get(bucket?, now).await?;
+        answer_actual(&self.inner.cors_policy, Some(&document), origin, method.as_str())
+    }
+}
+
+/// The bucket a preflight addresses, from the host when the host named one and from the path
+/// otherwise.
+///
+/// **The host wins, and it has to.** On a virtual-hosted request the whole path is the object key,
+/// so reading the first path segment would answer a preflight for a bucket called `key.txt` —
+/// present, absent or somebody else's, at the caller's choice. `OPTIONS https://b.s3.example.com/`
+/// would be worse: the path names nothing, the derivation returns `None`, and every browser
+/// preflight against a virtual-hosted bucket is refused while the same request path-style is
+/// served. Both are the same one-line mistake, and [`ResolvedHost::bucket`] is the answer to it —
+/// the resolver already read the host, and this is not a second place that decides.
+///
+/// The path branch is reached only when the resolver reports [`Addressing::Path`], and it agrees
+/// with `MetaView`'s split by construction: the first segment, and the resolver's own
+/// [`TargetKind`] deciding whether there is a segment to take.
+///
+/// A name the bucket grammar refuses answers `None`, which the caller turns into the same refusal
+/// a non-existent bucket gets. Telling a caller that a name is *illegal* rather than *absent* is
+/// two probes away from an enumeration oracle.
+///
+/// [`Addressing::Path`]: crate::Addressing::Path
+fn preflight_bucket(path: &str, resolved: &ResolvedHost) -> Option<rustfs_gateway_types::BucketName> {
+    if let Some(bucket) = resolved.bucket() {
+        return Some(bucket.clone());
+    }
+    if !matches!(resolved.target, TargetKind::Bucket | TargetKind::Object) {
+        return None;
+    }
+    let trimmed = path.strip_prefix('/').unwrap_or(path);
+    let first = trimmed.split('/').next().unwrap_or(trimmed);
+    rustfs_gateway_types::BucketName::new(first).ok()
+}
+
+/// The response an allowed preflight goes out with: `200`, the headers, and no body.
+fn preflight_response(headers: &CorsHeaders) -> Response<Body> {
+    let mut response = Response::new(Body::empty());
+    *response.status_mut() = StatusCode::OK;
+    let map = response.headers_mut();
+    for (name, value) in headers.iter() {
+        map.insert(name, value.clone());
+    }
+    map.insert(http::header::CONTENT_LENGTH, http::HeaderValue::from_static("0"));
+    response
 }
 
 /// What the observer is told, accumulated as the pipeline learns it.
@@ -470,6 +633,11 @@ struct Outcome<'a> {
     operation: Option<&'static str>,
     identity: Option<rustfs_gateway_sig::Identity>,
     error: Option<ErrorCode>,
+    /// The CORS decoration for an ordinary response, set once authorisation has been granted and
+    /// applied by [`S3Service::call`] to whatever the pipeline produced afterwards. `None` for
+    /// every request that never got that far, which is what keeps a pre-authentication refusal
+    /// from costing a configuration read.
+    cors: Option<CorsHeaders>,
 }
 
 impl<'a> Outcome<'a> {
@@ -480,6 +648,7 @@ impl<'a> Outcome<'a> {
             operation: None,
             identity: None,
             error: None,
+            cors: None,
         }
     }
 
@@ -487,6 +656,22 @@ impl<'a> Outcome<'a> {
     fn refuse(&mut self, error: S3Error) -> Response<Body> {
         self.error = Some(error.code().clone());
         render(&error, self.trace)
+    }
+
+    /// The one refusal a preflight can receive.
+    ///
+    /// Built from `rustfs_gateway_core::cors::preflight_refusal`, which takes no arguments — so
+    /// the "no rule matched", "no document", "no bucket" and "illegal name" paths cannot render
+    /// different bytes, whatever a future edit does to any one of them. `Vary: Origin` rides
+    /// along because the refusal is still an answer that depends on the `Origin` header: a shared
+    /// cache that stored it under the URL alone would serve it to an origin that would have been
+    /// allowed.
+    fn refuse_preflight(&mut self) -> Response<Body> {
+        let error = S3Error::from(preflight_refusal());
+        self.error = Some(error.code().clone());
+        let mut response = render(&error, self.trace);
+        response.headers_mut().insert(VARY, VARY_ORIGIN);
+        response
     }
 
     /// The same, for a refusal that arrived after the head had gone out.

@@ -1,0 +1,53 @@
+[case]
+id = "c-cors-0029"
+schema_version = 1
+title = "A trailing wildcard in AllowedHeader admits the requested names case-insensitively"
+rationale = """
+RFC 9110 makes field names case-insensitive and a browser is free to send X-Amz-Acl for a rule that says x-amz-acl,
+so a matcher that folded neither case nor the wildcard would refuse a configuration its author had every reason to
+believe correct. The echoed Allow-Headers line is asserted too: a preflight that allows the request and then names
+none of the headers is one the browser still refuses."""
+polarity = "positive"
+tags = ["cors", "preflight"]
+timeout_ms = 10000
+quirks = ["q-cors-0012"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CORSRule.html"
+summary = "The rule members a preflight answer is built from: allowed methods, allowed headers, expose headers and max age."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://fetch.spec.whatwg.org/#http-cors-protocol"
+summary = "The preflight and its answer are defined here, including which response header a browser reads from which response."
+kind = "rfc"
+
+[[setup.buckets]]
+name = "conf-cors-rt"
+
+[[exchanges]]
+# Setup traffic: the document the preflight below is answered from. Not under test.
+[exchanges.request]
+method = "PUT"
+target = "/conf-cors-rt?cors"
+headers = { "content-type" = "application/xml", "content-md5" = "JwjOZkFs+i5vAUZUg/9fsw==" }
+body = { utf8 = "<CORSConfiguration><CORSRule><AllowedMethod>PUT</AllowedMethod><AllowedOrigin>*</AllowedOrigin><AllowedHeader>x-amz-*</AllowedHeader></CORSRule></CORSConfiguration>" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+
+[[exchanges]]
+[exchanges.request]
+method = "OPTIONS"
+target = "/conf-cors-rt/key.txt"
+headers = { "origin" = "https://anything.invalid", "access-control-request-method" = "PUT", "access-control-request-headers" = "X-Amz-Acl, x-amz-meta-a" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+
+[exchanges.expect.headers_present]
+"access-control-allow-headers" = "X-Amz-Acl, x-amz-meta-a"
+"vary" = "origin"

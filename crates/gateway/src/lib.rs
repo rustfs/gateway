@@ -95,10 +95,11 @@ pub use crate::builder::{DEFAULT_MAX_BUFFERED_BODY_BYTES, ServiceBuilder};
 pub use crate::clock::{Clock, FixedClock, system_clock};
 pub use crate::close::ConnectionIntent;
 pub use crate::ext::{
-    Addressing, Authentication, Authenticator, Authorizer, AuthzRequest, BaseDomain, ChunkSink, ChunkVerification,
-    CredentialProvider, Credentials, CredentialsError, Denial, DomainError, Governor, GovernorRequest, HostQuery, HostResolver,
-    Lease, MAX_BASE_DOMAIN_BYTES, NoObserver, Observer, PathStyleOnly, RequestEvent, ResolvedHost, SigV4Authenticator,
-    StaticCredentials, TargetOrigin, Unavailable, Unlimited, VhostHint, VirtualHostStyle,
+    Addressing, Authentication, Authenticator, Authorizer, AuthzRequest, BaseDomain, CORS_PREFLIGHT, CachedCorsSource, ChunkSink,
+    ChunkVerification, CorsCacheConfig, CorsSource, CorsSourceError, CredentialProvider, Credentials, CredentialsError, Denial,
+    DomainError, Governor, GovernorRequest, HostQuery, HostResolver, Lease, MAX_BASE_DOMAIN_BYTES, NoCors, NoObserver, Observer,
+    PathStyleOnly, RequestEvent, ResolvedHost, SigV4Authenticator, StaticCredentials, TargetOrigin, Unavailable, Unlimited,
+    VhostHint, VirtualHostStyle,
 };
 pub use crate::probe::{BodyProgress, ObservedBody};
 pub use crate::render::{S3Error, connection_intent_of, declaration, document, document_body, render};
@@ -171,6 +172,20 @@ pub use rustfs_gateway_core::ops::shared::copy_source::{
 // matcher can never satisfy, and the only symptom would be browser-side.
 pub use rustfs_gateway_core::ops::shared::cors::{
     CORS_ALLOWED_METHODS, CorsRejection, MAX_CORS_ID_CHARS, MAX_CORS_RULES, validate_cors,
+};
+// The CORS **runtime**, exported for the reason the document contract above is: a deployment
+// installs a `CorsSource` and a `CorsPolicy`, and neither is nameable without these. `CorsOrigins`
+// and `CorsPolicyError` ride along or `CorsPolicy::new`'s argument and error types are
+// unnameable outside the workspace — the same defect as an unexported contract, one step on. The
+// matcher itself is exported too, because a deployment answering `OPTIONS` on a second protocol
+// face (a website endpoint, a console) must reach the one evaluator rather than write a second.
+pub use rustfs_gateway_core::cors::{
+    ACCESS_CONTROL_ALLOW_CREDENTIALS, ACCESS_CONTROL_ALLOW_HEADERS, ACCESS_CONTROL_ALLOW_METHODS, ACCESS_CONTROL_ALLOW_ORIGIN,
+    ACCESS_CONTROL_EXPOSE_HEADERS, ACCESS_CONTROL_MAX_AGE, ACCESS_CONTROL_REQUEST_HEADERS, ACCESS_CONTROL_REQUEST_METHOD,
+    AllowOrigin, CorsHeaders, CorsOrigins, CorsPolicy, CorsPolicyError, ORIGIN, PREFLIGHT_REFUSAL_MESSAGE,
+    PREFLIGHT_SUCCESS_STATUS, PreflightClass, PreflightOutcome, PreflightRequest, RequestedHeaders, RuleMatch, UnrenderableRule,
+    VARY, VARY_ORIGIN, actual_headers, answer_actual, answer_preflight, classify, match_actual, match_preflight,
+    preflight_headers, preflight_refusal,
 };
 
 // The tagging contract. The tag set has two request channels — the `<Tagging>` document of the

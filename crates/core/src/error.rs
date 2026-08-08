@@ -100,6 +100,16 @@ impl PreAuthError {
         Self::of(ErrorCode::ACCESS_DENIED, message)
     }
 
+    /// `403 AccessForbidden` — the code S3's CORS runtime answers a preflight it will not serve.
+    ///
+    /// A second `403` beside [`PreAuthError::access_denied`] because the two are different
+    /// sentences: `AccessDenied` is about the caller's permissions, and a preflight has no caller
+    /// to have permissions. Browser-side tooling branches on the difference.
+    #[must_use]
+    pub const fn access_forbidden(message: &'static str) -> Self {
+        Self::of(ErrorCode::ACCESS_FORBIDDEN, message)
+    }
+
     /// `501 NotImplemented` — no route, or a route this backend does not handle.
     #[must_use]
     pub const fn not_implemented(message: &'static str) -> Self {

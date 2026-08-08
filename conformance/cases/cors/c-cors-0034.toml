@@ -1,0 +1,59 @@
+[case]
+id = "c-cors-0034"
+schema_version = 1
+title = "A preflight against a bucket with no CORS document is 403 with a CORSResponse message"
+rationale = """
+This is the behaviour P5-14 registered and could not implement: no codec-only case can observe an OPTIONS response.
+The status matters because 404 here is a private-bucket enumeration oracle, and the message prefix matters because
+it is how browser-side tooling tells a CORS refusal from an authorisation one. The body is pinned byte for byte so
+that the three cases after this one can be compared against it."""
+polarity = "negative"
+tags = ["cors", "preflight", "security", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-cors-0009", "q-cors-0015"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/cors.html"
+summary = "S3 answers a bucket preflight out of that bucket's stored CORS document and refuses an unmatched one with 403."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://fetch.spec.whatwg.org/#http-cors-protocol"
+summary = "The preflight and its answer are defined here, including which response header a browser reads from which response."
+kind = "rfc"
+
+[[setup.buckets]]
+name = "conf-cors-none"
+
+
+[request]
+method = "OPTIONS"
+target = "/conf-cors-none/key.txt"
+headers = { "origin" = "https://app.example.com", "access-control-request-method" = "PUT" }
+
+[expect]
+kind = "response"
+status = 403
+connection_after = "open"
+headers_absent = [
+  "access-control-allow-origin",
+  "access-control-allow-methods",
+  "access-control-allow-headers",
+  "access-control-allow-credentials",
+  "access-control-max-age",
+  "access-control-expose-headers",
+]
+
+[expect.error]
+code = "AccessForbidden"
+request_id_present = true
+
+[expect.headers_present]
+"content-type" = "application/xml"
+"vary" = "origin"
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>AccessForbidden</Code><Message>CORSResponse: no CORS rule allows this request</Message><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''

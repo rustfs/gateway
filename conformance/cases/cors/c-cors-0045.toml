@@ -1,0 +1,70 @@
+[case]
+id = "c-cors-0045"
+schema_version = 1
+title = "A preflight that allowed PUT does not authorise the PUT that follows it"
+rationale = """
+CORS is not authorisation, and the preflight branch deliberately runs before the security floor — so if the two were
+ever confused, an unauthenticated write would be one OPTIONS away. The case does the allowed preflight and then the
+unsigned write, and asserts the write is still refused. Nothing else in the suite would notice if the preflight
+branch started admitting the request it described."""
+polarity = "negative"
+tags = ["cors", "preflight", "security"]
+timeout_ms = 10000
+quirks = ["q-cors-0016"]
+
+[[case.evidence]]
+url = "https://fetch.spec.whatwg.org/#http-cors-protocol"
+summary = "The preflight and its answer are defined here, including which response header a browser reads from which response."
+kind = "rfc"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/cors.html"
+summary = "S3 answers a bucket preflight out of that bucket's stored CORS document and refuses an unmatched one with 403."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "conf-cors-rt"
+
+[[exchanges]]
+# Setup traffic: the document the preflight below is answered from. Not under test.
+[exchanges.request]
+method = "PUT"
+target = "/conf-cors-rt?cors"
+headers = { "content-type" = "application/xml", "content-md5" = "XJlNYZK8aMSUEeoSq5lj4w==" }
+body = { utf8 = "<CORSConfiguration><CORSRule><AllowedMethod>GET</AllowedMethod><AllowedMethod>PUT</AllowedMethod><AllowedOrigin>https://app.example.com</AllowedOrigin></CORSRule></CORSConfiguration>" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+
+[[exchanges]]
+[exchanges.request]
+method = "OPTIONS"
+target = "/conf-cors-rt/key.txt"
+headers = { "origin" = "https://app.example.com", "access-control-request-method" = "PUT" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+
+[exchanges.expect.headers_present]
+"access-control-allow-origin" = "https://app.example.com"
+
+[[exchanges]]
+# The real request the preflight described, unsigned. The allowance was about the browser, never
+# about the caller's identity.
+[exchanges.request]
+method = "PUT"
+target = "/conf-cors-rt/key.txt"
+headers = { "origin" = "https://app.example.com" }
+body = { utf8 = "payload" }
+
+[exchanges.expect]
+kind = "response"
+status = 403
+headers_absent = ["access-control-allow-origin"]
+
+[exchanges.expect.error]
+code = "AccessDenied"
+request_id_present = true

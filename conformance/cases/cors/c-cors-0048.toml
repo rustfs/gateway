@@ -1,0 +1,60 @@
+[case]
+id = "c-cors-0048"
+schema_version = 1
+title = "A virtual-hosted preflight is answered from the bucket the host named, not the path"
+rationale = """
+On a virtual-hosted request the whole path is the object key, so a preflight branch that took its bucket from the
+first path segment would answer `OPTIONS https://b.s3.example.com/key.txt` out of a bucket called `key.txt` — some
+other tenant's document, or none. It was exactly that until `ResolvedHost::bucket()` existed: the derivation was
+path-only and documented as a limitation, and the moment the resolver started reporting a host-named bucket the
+limitation became a defect. This case is the fix, asserted where a browser would see it."""
+polarity = "positive"
+tags = ["cors", "preflight", "vhost", "security"]
+timeout_ms = 10000
+quirks = ["q-cors-0009"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/VirtualHosting.html"
+summary = "In virtual-hosted style the bucket is the host label and the entire request path is the object key."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/cors.html"
+summary = "A bucket preflight is served from that bucket's own stored CORS document, whichever way the request addressed the bucket."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "conf-cors-vh"
+
+[[exchanges]]
+# Setup traffic, path-style: establishing the document is not what this case measures.
+[exchanges.request]
+method = "PUT"
+target = "/conf-cors-vh?cors"
+headers = { "content-type" = "application/xml", "content-md5" = "rAqMzbtniOyp6dCmIWiViw==" }
+body = { utf8 = "<CORSConfiguration><CORSRule><AllowedMethod>PUT</AllowedMethod><AllowedOrigin>https://app.example.com</AllowedOrigin></CORSRule></CORSConfiguration>" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+
+[[exchanges]]
+# The host names the bucket; `key.txt` is the object key and names nothing. A path-derived
+# preflight would look for a bucket called `key.txt`, find no document and answer 403.
+[exchanges.request]
+method = "OPTIONS"
+target = "/key.txt"
+host = "conf-cors-vh.s3.example.com"
+headers = { "origin" = "https://app.example.com", "access-control-request-method" = "PUT" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.headers_present]
+"access-control-allow-origin" = "https://app.example.com"
+"access-control-allow-methods" = "PUT"
+"vary" = "origin"

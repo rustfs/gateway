@@ -1,0 +1,67 @@
+[case]
+id = "c-cors-0033"
+schema_version = 1
+title = "A post-authorisation failure still carries the CORS headers"
+rationale = """
+This is the CORS trap that costs the most debugging time. A 404 without an allow-origin header does not reach the
+page as a 404: the browser withholds the whole response and the script sees an opaque network error, so the
+developer is looking for a connectivity fault while the server is answering exactly what it should. The headers
+have to ride on the refusal as well as on the success.
+
+The rule names one origin literally rather than using `*`, because the harness reads `*` in `headers_present` as
+"present with any value" (conformance/README.md) — an assertion of `access-control-allow-origin = "*"` would therefore
+be an assertion about presence only. The literal `*` answer is pinned exactly in
+`crates/gateway/tests/cors_runtime.rs`."""
+polarity = "positive"
+tags = ["cors", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-cors-0014"]
+
+[[case.evidence]]
+url = "https://fetch.spec.whatwg.org/#http-cors-protocol"
+summary = "The preflight and its answer are defined here, including which response header a browser reads from which response."
+kind = "rfc"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/cors.html"
+summary = "S3 answers a bucket preflight out of that bucket's stored CORS document and refuses an unmatched one with 403."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "conf-cors-rt"
+
+[[setup.objects]]
+bucket = "conf-cors-rt"
+key = "absent.txt"
+absent = true
+
+[[exchanges]]
+# Setup traffic: the document the preflight below is answered from. Not under test.
+[exchanges.request]
+method = "PUT"
+target = "/conf-cors-rt?cors"
+headers = { "content-type" = "application/xml", "content-md5" = "NdkNVi2f4lE+sDHrLVzN2A==" }
+body = { utf8 = "<CORSConfiguration><CORSRule><AllowedMethod>GET</AllowedMethod><AllowedOrigin>https://app.example.com</AllowedOrigin><ExposeHeader>ETag</ExposeHeader></CORSRule></CORSConfiguration>" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+
+[[exchanges]]
+[exchanges.request]
+method = "GET"
+target = "/conf-cors-rt/absent.txt"
+headers = { "origin" = "https://app.example.com" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 404
+
+[exchanges.expect.error]
+code = "NoSuchKey"
+
+[exchanges.expect.headers_present]
+"access-control-allow-origin" = "https://app.example.com"
+"vary" = "origin"

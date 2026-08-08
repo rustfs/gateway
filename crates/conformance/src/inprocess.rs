@@ -84,8 +84,8 @@ use rustfs_gateway::sig::{
     AmzDate, PayloadMode, SigService, SigV4Signer, SigningCredentials, SigningRequest, SigningScope, Tamper, TamperComponent,
 };
 use rustfs_gateway::{
-    Credentials, FixedClock, Limits, ObservedBody, RegionSet, S3Service, ServiceBuilder, SigV4Authenticator, StaticCredentials,
-    VirtualHostStyle, WireRequest, allow_when, collect, dto,
+    BoxFuture, BucketName, CorsSource, CorsSourceError, Credentials, FixedClock, Limits, ObservedBody, RegionSet, S3Service,
+    ServiceBuilder, SigV4Authenticator, StaticCredentials, VirtualHostStyle, WireRequest, allow_when, collect, dto,
 };
 
 use crate::exec::block_on;
@@ -223,6 +223,9 @@ impl InProcess {
             .register::<dto::SelectObjectContent, _>(Arc::clone(&backend))
             .register::<dto::UploadPart, _>(Arc::clone(&backend))
             .register::<dto::UploadPartCopy, _>(Arc::clone(&backend))
+            .cors_source(FixtureCors {
+                state: Arc::clone(&self.state),
+            })
             .authenticator(SigV4Authenticator::new(provider, regions))
             // Authorisation is not what this corpus measures: every case that reaches a handler is
             // signed with the one identity the fixtures know, and a policy engine here would turn
@@ -281,6 +284,26 @@ impl InProcess {
             return Ok(generate(size, fill));
         }
         Err(SutError::Environment("a payload names no source".to_owned()))
+    }
+}
+
+/// The fixture's CORS store, read the way a deployment's would be.
+///
+/// `Ok(None)` covers both "this bucket has no document" and "this bucket does not exist", which is
+/// what the trait asks for: a source that distinguished them would be handing the preflight branch
+/// a fact it is required to discard.
+struct FixtureCors {
+    state: Arc<Mutex<Fixture>>,
+}
+
+impl CorsSource for FixtureCors {
+    fn load<'a>(&'a self, bucket: &'a BucketName) -> BoxFuture<'a, Result<Option<dto::CorsConfiguration>, CorsSourceError>> {
+        let found = self
+            .state
+            .lock()
+            .ok()
+            .and_then(|fixture| fixture.cors(bucket.as_str()).cloned());
+        Box::pin(async move { Ok(found) })
     }
 }
 
