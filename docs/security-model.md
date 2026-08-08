@@ -60,6 +60,60 @@ debug build therefore has secret-dependent control flow that no amount of care i
 remove. `subtle`'s barriers are `read_volatile`-based and documented as best-effort, so a release
 build is a strong mitigation rather than a proof.
 
+## Naming and normalization: your responsibilities
+
+Three published RustFS advisories have one shape. `GHSA-8r6f-hmq2-28rg`: an object key carrying a
+traversal reached the filesystem mapping. `GHSA-f4vq-9ffr-m8m3`: a copy source was authorised as a
+key and then used as a path, so the write landed in a bucket nobody had checked.
+`GHSA-pq29-69jg-9mxc`: an untrusted path was joined onto a root and guarded by a length check,
+which is not a containment check. In each of them the value the authorisation check read was not
+the value the storage layer used, and the difference between the two was the vulnerability.
+
+**What the framework guarantees.** A bucket label and an object key are turned into a
+`BucketName` and an `ObjectKey` in exactly one place — `crates/types/src/scalar/naming.rs`, reached
+through `ObjectKey::materialize`, `ObjectKey::materialize_decoded` and `BucketName::materialize`.
+That one place decodes percent-encoding exactly once, applies the deployment's `SlashPolicy`, runs
+a safety floor no configuration can lower, and only then consults the deployment's
+`NameValidator`. The value it produces is the value the authorizer is shown, the value the codec
+puts into the operation input, and the value the backend receives. Nothing downstream is handed
+the request path to parse again. `scripts/check_single_normalization.sh` fails the build if a
+second normalisation, a second percent decoder, or a `Deref`/`AsRef<str>`/`From<String>` on
+`ObjectKey` appears.
+
+The floor refuses, whatever the validator says: an empty key, a key over 1024 UTF-8 bytes, a NUL,
+a control character, a `..` segment delimited by `/` or `\`, a drive-letter or UNC root, a value
+that is not UTF-8 after one decode, and a value that still spells an encoded separator after that
+one decode. For a bucket label: anything outside 3..=63 bytes, a separator, a NUL, a non-graphic
+byte, or a `%`. `NameValidator` returns `Stricter`, which has no `Allow` variant — the framework
+ANDs its answer with the floor's, so a deployment can narrow the rules and has no way to widen
+past the floor.
+
+**What is still yours.** The framework's promise stops at handing you a validated `ObjectKey`. It
+does not map that key onto a physical location, and it cannot: only you know what the root is. You
+must ensure the mapped path lands inside the intended root — resolve it and compare, do not join
+and measure. `GHSA-pq29` is what a length check instead of a containment check looks like. Two
+further rules follow from the same argument:
+
+- **Never re-parse, re-decode, or re-clean a name the framework gave you.** A backend that runs
+  its own tidy-up is the second normalisation, and it is on the storage side of the authorisation
+  decision. The conformance fixture in this repository had exactly that defect — its own
+  percent decoder and its own copy-source parser — and it is now routed through the shared one.
+- **`SlashPolicy` is persistence-affecting.** `SlashPolicy::Collapse` makes `a//b` and `a/b` the
+  same object; switching it on a deployment that already holds data renames every object whose key
+  contained an empty segment. `SlashPolicy::rewrites_keys()` answers this so a start-up posture
+  report can name it. The default is `AwsPreserve`, which is the AWS semantics.
+
+Two rules are deliberately **stricter than AWS**, and are registered as divergences in
+`model/overlays/quirks/naming.toml`: a client may not name a key containing a `..` segment, and
+may not name one containing a control character. Neither restricts what a backend may *hold* — an
+object already stored under such a key is still listable, because the floor governs the naming
+path and not the representation.
+
+One gap, stated rather than hidden: keys arriving in a request **body** — `DeleteObjects` names its
+keys there — get the floor but not the deployment's `NameValidator`, because a generated decoder
+has no policy to hand. The floor is uniform; a custom validator today covers the request path and
+`x-amz-copy-source`.
+
 ## Where the boundary sits
 
 This framework verifies signatures, enforces presigned constraints, frames payloads, and rejects

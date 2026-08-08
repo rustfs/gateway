@@ -115,7 +115,7 @@ must agree case for case; a case that could name a path would be a case that hid
   `xml`, `wire-bytes`, `etag`, `routing`, `vhost`, `conditional`, `preconditions`, `list`,
   `pagination`, `multipart`, `checksum`, `range`, `encoding`, `cors`, `encryption`, `lifecycle`, `replication`, `bucketconfig`, `region`, `security`, `dos`,
   `timing`, `connection`, `event-stream`, `tls`, `h2`, `error-shape`, `known-divergence`, `tagging`,
-  `object-lock`, `restore`, `select`, `acl`, and `slow`. `slow` is reserved: it moves a case out of
+  `object-lock`, `restore`, `select`, `acl`, `naming`, and `slow`. `slow` is reserved: it moves a case out of
   the pull-request gate and
   into the merge queue. `region` marks a case whose subject is the deployment's region posture — the
   location-constraint rules and the `x-amz-bucket-region` redirect contract. `object-lock` marks a
@@ -128,7 +128,9 @@ must agree case for case; a case that could name a path would be a case that hid
   where it appears beside `select`. `acl` marks a case about the access control list family's
   codec — the two input channels, the canned-ACL sets, the grant-header grammar and the `xsi:type`
   discriminator; ACL *evaluation* is the deployment's authorizer's, and no case here asserts that a
-  grant permits anything.
+  grant permits anything. `naming` marks a case about the single normalisation an object key
+  and a bucket label go through — the slash policy, the one decode, the safety floor, and the
+  two rules under which this gateway is deliberately stricter than AWS.
 
 ## Cases and quirks reference each other
 

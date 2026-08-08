@@ -576,7 +576,11 @@ fn decode(value: &str) -> Result<String, CopySourceRejection> {
         .map_err(|_| CopySourceRejection::new(ErrorCode::INVALID_ARGUMENT, "x-amz-copy-source is not valid UTF-8 once decoded"))
 }
 
-/// Decodes and validates the key half. Never normalised: `../` is four ordinary bytes of a key.
+/// Decodes and validates the key half through the same normalisation the request path uses.
+///
+/// `GHSA-f4vq-9ffr-m8m3` is what happens when this half is judged by looser rules than the
+/// destination: authorisation reads a key, storage reads a path. The refusal names the rule and
+/// never the value — a message quoting the header back is a header echoed into every log.
 fn key_of(encoded: &str) -> Result<ObjectKey, CopySourceRejection> {
     ObjectKey::from_encoded_path(encoded).map_err(|_| {
         CopySourceRejection::new(
@@ -637,8 +641,18 @@ mod tests {
     }
 
     #[test]
-    fn a_traversal_looking_key_is_four_ordinary_bytes() {
-        assert_eq!(resolved("bucket/../../etc/passwd").key().as_str(), "../../etc/passwd");
+    fn a_traversal_in_the_copy_source_is_refused_and_never_resolved() {
+        // This used to assert the spelling was ordinary key bytes, on the grounds that an S3 key
+        // is opaque text. It is, and that reasoning was still wrong here: `GHSA-f4vq-9ffr-m8m3`
+        // is a copy source spelled exactly like this, authorised as a key and used as a path.
+        // `%252e%252e` decodes *once* to `%2e%2e`; a second decode would make it `..`, so the
+        // residue is refused too rather than stored for a later helper to decode again.
+        let err = CopySource::parse("bucket/../../etc/passwd").expect_err("refused");
+        assert_eq!(err.code(), &ErrorCode::INVALID_ARGUMENT);
+        assert!(CopySource::parse("bucket/%252e%252e/x").is_err());
+        assert!(CopySource::parse("bucket/%2e%2e/x").is_err());
+        // A single dot segment is still opaque text: the rule is `..`, not "any dot".
+        assert_eq!(resolved("bucket/a/./b").key().as_str(), "a/./b");
     }
 
     #[test]

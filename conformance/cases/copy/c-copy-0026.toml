@@ -5,14 +5,14 @@
 [case]
 id = "c-copy-0026"
 schema_version = 1
-title = "A copy source key containing dot-dot segments is treated as literal key bytes"
+title = "A copy source key containing dot-dot segments is refused before any lookup"
 rationale = """
-An object key is opaque text and the storage layer behind it is a filesystem often enough that a key spelled like a traversal is the first thing an attacker tries. The correct behaviour is boring and has to be pinned as boring: the key is looked up literally, nothing outside the bucket is ever opened, and the answer is an ordinary not-found. What must never appear is a success — that would mean a file outside the bucket was read — and the case asserts that directly."""
+An object key is opaque text and the storage layer behind it is a filesystem often enough that a key spelled like a traversal is the first thing an attacker tries. This case used to pin the boring answer: look the key up literally and report not-found. P6-05 replaced that with an earlier and stronger one. A dot-dot segment is refused by the naming safety floor, at the point the header is read, so no lookup is attempted at all — which is what GHSA-f4vq-9ffr-m8m3 needed and did not have, because there the authorisation check read a key and the storage layer read a path. The assertion that must never change is the last one: no success, and nothing from outside the bucket in the body. What changed is that the refusal now arrives before the backend, not after it."""
 polarity = "negative"
 operation = "CopyObject"
 tags = ["security", "error-shape"]
 timeout_ms = 10000
-quirks = ["q-copy-source-split-0077"]
+quirks = ["q-copy-source-split-0077", "q-naming-0003"]
 
 [[case.evidence]]
 url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/object-keys.html"
@@ -45,15 +45,15 @@ sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential
 
 [expect]
 kind = "response"
-status = 404
+status = 400
 connection_after = "open"
 headers_absent = ["etag", "x-amz-version-id", "x-amz-copy-source-version-id"]
 
 [expect.error]
-code = "NoSuchKey"
+code = "InvalidArgument"
 request_id_present = true
 
 [expect.body]
 redact = ["RequestId", "HostId"]
-contains_utf8 = ["<Code>NoSuchKey</Code>"]
-not_contains_utf8 = ["<CopyObjectResult", "root:"]
+contains_utf8 = ["<Code>InvalidArgument</Code>"]
+not_contains_utf8 = ["<CopyObjectResult", "root:", "../../etc/passwd"]

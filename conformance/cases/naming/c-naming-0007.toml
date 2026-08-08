@@ -1,0 +1,54 @@
+# c-naming-0007 — the double-encoded traversal is not decoded a second time
+#
+[case]
+id = "c-naming-0007"
+schema_version = 1
+title = "A double-encoded dot-dot is refused as a residue rather than decoded into a traversal"
+rationale = """
+`%252e%252e` decodes once to `%2e%2e`. Decoding until the value stops changing would make it `..`, which is the whole double-decode trap; accepting it as a literal key would leave a value in storage that any consumer performing one more decode reads as a parent reference. So exactly one decode happens, and a value still spelling a separator after it is refused. The observable difference from a second decode is that this is a 400 about a rule rather than a traversal."""
+polarity = "negative"
+operation = "GetObject"
+tags = ["naming", "routing", "security", "encoding"]
+timeout_ms = 10000
+quirks = ["q-naming-0002"]
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc3986#section-2.1"
+summary = "Percent-encoding carries one octet per triplet, so decoding an already-decoded value reads octets the sender never encoded."
+kind = "rfc"
+
+[[case.evidence]]
+url = "https://github.com/rustfs/rustfs/security/advisories/GHSA-8r6f-hmq2-28rg"
+summary = "An object key carrying a traversal sequence reached the filesystem mapping and read outside the bucket."
+kind = "other"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-naming"
+
+[[setup.objects]]
+bucket = "conf-naming"
+key = "real.txt"
+body = { utf8 = "in the bucket" }
+
+[request]
+method = "GET"
+target = "/conf-naming/%252e%252e/x"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+code = "InvalidArgument"
+message_present = true
+request_id_present = true
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+contains_utf8 = ["<Code>InvalidArgument</Code>"]
+not_contains_utf8 = ["root:", "in the bucket"]

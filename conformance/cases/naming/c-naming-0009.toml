@@ -1,0 +1,54 @@
+# c-naming-0009 — a control character is not a name a client may choose
+#
+[case]
+id = "c-naming-0009"
+schema_version = 1
+title = "A key whose decoded form carries a C0 control character is refused"
+rationale = """
+The partner of the NUL case, and the reason the rule is written as `is_control` rather than as a NUL check: a key holding U+0001 has no XML spelling at all, escaped or otherwise, so one such object hides every other object in the bucket from a client parsing a listing. Refusing it at the naming floor is stricter than AWS and is recorded as such."""
+polarity = "negative"
+operation = "GetObject"
+tags = ["naming", "routing", "security", "known-divergence"]
+timeout_ms = 10000
+quirks = ["q-naming-0006"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/object-keys.html"
+summary = "A key is an opaque sequence of Unicode characters up to 1024 UTF-8 bytes long, with no path structure of its own."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/issues/102"
+summary = "Upstream saw a platform path separator inside a key derange a listing on the platform that reads it as syntax."
+kind = "s3s-issue"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-naming"
+
+[[setup.objects]]
+bucket = "conf-naming"
+key = "real.txt"
+body = { utf8 = "in the bucket" }
+
+[request]
+method = "GET"
+target = "/conf-naming/a%01b"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+code = "InvalidArgument"
+message_present = true
+request_id_present = true
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+contains_utf8 = ["<Code>InvalidArgument</Code>"]
+not_contains_utf8 = ["root:", "in the bucket"]

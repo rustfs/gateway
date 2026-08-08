@@ -81,7 +81,7 @@ use rustfs_gateway_sig::{
     Admission, PayloadMode, RawQuery, RequestNow, SecurityFloor, TrailerSet, Verdict, WireView, detect_credentials,
 };
 use rustfs_gateway_stream::Body;
-use rustfs_gateway_types::ErrorCode;
+use rustfs_gateway_types::{ErrorCode, NamePolicy};
 
 use crate::clock::Clock;
 use crate::dispatch::{DispatchTable, ErasedAnswer, target_of};
@@ -100,6 +100,7 @@ pub(crate) struct Inner {
     pub(crate) dispatch: DispatchTable,
     pub(crate) floor: SecurityFloor,
     pub(crate) limits: Limits,
+    pub(crate) names: NamePolicy,
     pub(crate) max_buffered_body_bytes: u64,
     pub(crate) authorizer: Arc<dyn Authorizer>,
     pub(crate) authenticator: Arc<dyn Authenticator>,
@@ -261,11 +262,12 @@ impl S3Service {
         let mut pending = None;
         let wire = wire.map_body(|body| pending = Some(body));
 
-        // The bucket has one source, and this is where it is chosen: the host's, when the resolver
-        // read one out of the host, and the path's otherwise. Everything downstream — the governor,
-        // the authorizer, the decoder, the backend — reads `meta`, so there is no second reading
-        // for one of them to disagree with.
-        let meta = match MetaView::addressed(&wire, target, resolved.bucket().cloned()) {
+        // Two decisions, one call. The bucket has one source — the host's, when the resolver read
+        // one out of the host, and the path's otherwise — and the name it produces goes through
+        // the single normalisation under the deployment's policy. Routing above read the raw path
+        // and the signature below reads the raw path; everything after this line reads `meta` and
+        // is never handed the path to parse again.
+        let meta = match MetaView::addressed_with(&wire, target, resolved.bucket().cloned(), &self.inner.names) {
             Ok(meta) => meta,
             Err(error) => return outcome.refuse(S3Error::from(error)),
         };

@@ -1,0 +1,54 @@
+# c-naming-0006 — the single-encoded traversal decodes into the one the floor refuses
+#
+[case]
+id = "c-naming-0006"
+schema_version = 1
+title = "A percent-encoded dot-dot is decoded once and then refused like the literal spelling"
+rationale = """
+`%2e%2e` is the same traversal wearing an encoding, and the single decode is what makes the floor see it. A gateway that ran its floor on the raw label would pass this through and hand the backend a key that decodes to a parent reference; a gateway that decoded twice would turn the double-encoded spelling into one too. The answer has to be identical to the literal case, so the two are asserted the same way."""
+polarity = "negative"
+operation = "GetObject"
+tags = ["naming", "routing", "security", "encoding"]
+timeout_ms = 10000
+quirks = ["q-naming-0002"]
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc3986#section-2.1"
+summary = "Percent-encoding carries one octet per triplet, so decoding an already-decoded value reads octets the sender never encoded."
+kind = "rfc"
+
+[[case.evidence]]
+url = "https://github.com/rustfs/rustfs/security/advisories/GHSA-8r6f-hmq2-28rg"
+summary = "An object key carrying a traversal sequence reached the filesystem mapping and read outside the bucket."
+kind = "other"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-naming"
+
+[[setup.objects]]
+bucket = "conf-naming"
+key = "real.txt"
+body = { utf8 = "in the bucket" }
+
+[request]
+method = "GET"
+target = "/conf-naming/%2e%2e/other/obj"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+code = "InvalidArgument"
+message_present = true
+request_id_present = true
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+contains_utf8 = ["<Code>InvalidArgument</Code>"]
+not_contains_utf8 = ["root:", "in the bucket"]
