@@ -1,0 +1,52 @@
+# c-host-0010 — [S] an A-label is not decoded into a bucket name.
+
+[case]
+id = "c-host-0010"
+schema_version = 1
+title = "A punycode label in the bucket position is not mapped and names no bucket"
+rationale = """
+Mapping an internationalised host would give one bucket two host spellings while the signature \
+covers only the one that was sent -- the same many-to-one hazard as normalising a host before signing \
+it. No mapping is performed and none is planned; `xn--` is a reserved bucket prefix in any case, so the \
+label is not a legal bucket name even read literally. The request is answered from its path."""
+polarity = "negative"
+operation = "GetObject"
+tags = ["vhost", "routing", "security"]
+timeout_ms = 10000
+# Empty on purpose. A quirk in `model/overlays/quirks/` is scoped to an operation or a shape, and
+# host resolution is neither: it happens before an operation has been chosen. The whole family is
+# therefore held by `crates/gateway/tests/vhost_resolution.rs` and by the negative cases beside
+# this one, not by the quirk mutation gate.
+quirks = []
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/bucketnamingrules.html"
+summary = "The naming rules admit only lowercase letters, digits, hyphens and dots, reserve the xn-- prefix, and record that a dotted name cannot be addressed virtual-hosted over HTTPS."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "conf-host"
+
+[[setup.objects]]
+bucket = "conf-host"
+key = "nested/plain.txt"
+content_type = "text/plain; charset=utf-8"
+body = { utf8 = "virtual hosted" }
+
+[request]
+method = "GET"
+target = "/conf-host/nested/plain.txt"
+host = "xn--80ak6aa92e.s3.example.com"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[expect.headers_present]
+"content-type" = "text/plain; charset=utf-8"
+
+[expect.body]
+exact_utf8 = "virtual hosted"

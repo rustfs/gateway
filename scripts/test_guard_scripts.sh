@@ -551,5 +551,56 @@ PYEOF
 expect_fail check_case_keys_honoured.sh \
     'a DECLARED entry naming a field the schema dropped' mut_declaration_for_a_dropped_field
 
+# -----------------------------------------------------------------------------
+# check_resolver_pure.sh has four rules and each gets its own control, because
+# three of them are regexes over source text and the fourth is an awk field
+# extractor — every one of which turns into a no-op from a single typo. The
+# properties are worth this much: the resolver runs before authentication, so
+# "it cannot await", "it holds no store handle" and "it cannot see a forwarded
+# header" are the three sentences standing between an unauthenticated caller and
+# either an amplifier or a bucket of somebody else's choosing.
+# -----------------------------------------------------------------------------
+
+mut_async_resolver() {
+    perl -0pi -e 's/    fn resolve\(&self, query: &HostQuery/    async fn resolve(&self, query: &HostQuery/' \
+        crates/gateway/src/ext/vhost.rs
+}
+expect_fail check_resolver_pure.sh \
+    'a host resolver whose resolve() is async' mut_async_resolver
+
+mut_awaiting_resolver() {
+    perl -0pi -e 's/        let host = query\.host\.host_without_port\(\);/        let host = lookup(query).await;/' \
+        crates/gateway/src/ext/vhost.rs
+}
+expect_fail check_resolver_pure.sh \
+    'a host resolver that awaits' mut_awaiting_resolver
+
+mut_resolver_store_handle() {
+    perl -0pi -e 's/pub struct VirtualHostStyle \{/pub struct VirtualHostStyle {\n    buckets: std::sync::Arc<dyn BucketStore>,/' \
+        crates/gateway/src/ext/vhost.rs
+}
+expect_fail check_resolver_pure.sh \
+    'a resolver holding a store handle' mut_resolver_store_handle
+
+mut_forwarded_field_on_the_query() {
+    perl -0pi -e 's/    \/\/\/ The request method\.\n    pub method: &.a Method,/    \/\/\/ The request method.\n    pub method: &\x27a Method,\n    pub extra: &\x27a str,/' \
+        crates/gateway/src/ext/host.rs
+}
+expect_fail check_resolver_pure.sh \
+    'a field added to the resolver input surface' mut_forwarded_field_on_the_query
+
+mut_forwarded_header_read() {
+    perl -0pi -e 's/        let host = query\.host\.host_without_port\(\);/        let host = lookup("x-forwarded-host");/' \
+        crates/gateway/src/ext/vhost.rs
+}
+expect_fail check_resolver_pure.sh \
+    'a forwarded header named in resolver code' mut_forwarded_header_read
+
+mut_no_resolver_trait_file() {
+    rm -f crates/gateway/src/ext/host.rs
+}
+expect_fail check_resolver_pure.sh \
+    'the resolver trait file missing entirely (a guard whose input is gone must fail, not skip)' mut_no_resolver_trait_file
+
 printf '\n%s case(s), %s failure(s)\n' "$cases" "$failures"
 [[ "$failures" -eq 0 ]]

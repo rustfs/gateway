@@ -181,6 +181,11 @@ impl ServiceBuilder {
     }
 
     /// Installs a host resolver. Defaults to [`PathStyleOnly`].
+    ///
+    /// A deployment that serves `bucket.example.com` installs
+    /// [`VirtualHostStyle`](crate::VirtualHostStyle) here with the base domains it answers for;
+    /// the default takes the bucket from the path and never from the host, so those requests would
+    /// otherwise be routed by their path.
     #[must_use]
     pub fn host_resolver(mut self, resolver: impl HostResolver) -> Self {
         self.host_resolver = Arc::new(resolver);

@@ -36,7 +36,7 @@
 //! | --- | --- | --- |
 //! | [`Authorizer`] | none — [`crate::ServiceBuilder::build`] refuses | there is no safe default: allow-all is a hole, deny-all is a service nobody can use |
 //! | [`Authenticator`] | none — `build` refuses | the same asymmetry, one stage earlier |
-//! | [`HostResolver`] | [`PathStyleOnly`] | a virtual-hosted request is routed by its path, so `Host: bucket.example.com` addressing `/key` is not understood |
+//! | [`HostResolver`] | [`PathStyleOnly`] | a virtual-hosted request is routed by its path, so `Host: bucket.example.com` addressing `/key` is not understood; install [`VirtualHostStyle`] to understand it |
 //! | [`Governor`] | [`Unlimited`] | no request is ever refused for load, in either the per-bucket or the per-identity dimension |
 //! | [`Observer`] | [`NoObserver`] | nothing is recorded; a rejection leaves no trace outside the response |
 //!
@@ -50,10 +50,12 @@ mod credentials;
 mod governor;
 mod host;
 mod observer;
+mod vhost;
 
 pub use self::authenticator::{Authentication, Authenticator, ChunkSink, ChunkVerification, SigV4Authenticator, Unavailable};
 pub use self::authorizer::{Authorizer, AuthzRequest, Denial, allow_when};
 pub use self::credentials::{CredentialProvider, Credentials, CredentialsError, StaticCredentials};
 pub use self::governor::{Governor, GovernorRequest, Lease, Unlimited};
-pub use self::host::{HostQuery, HostResolver, PathStyleOnly, ResolvedHost};
+pub use self::host::{Addressing, HostQuery, HostResolver, PathStyleOnly, ResolvedHost, TargetOrigin, VhostHint};
 pub use self::observer::{NoObserver, Observer, RequestEvent};
+pub use self::vhost::{BaseDomain, DomainError, MAX_BASE_DOMAIN_BYTES, VirtualHostStyle};
