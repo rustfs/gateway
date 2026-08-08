@@ -1,0 +1,47 @@
+[case]
+id = "c-ssec-0001"
+schema_version = 1
+title = "A customer-provided encryption key on a cleartext connection is a 400 InvalidRequest"
+rationale = """
+The key in this header is a raw AES-256 key. Sent over cleartext it is readable by every hop between the client and the gateway, and no correct behaviour afterwards undoes the disclosure — which is why AWS refuses the request rather than serving it and warning. The refusal has to be the framework's and not a backend's: a gateway that left the decision to whoever implements PutObject has a deployment where it was never implemented. This case is the cleartext half of the gate; the encrypted half cannot be a case at all, because this suite's runner has no socket, and it lives in crates/gateway/tests/sse_runtime.rs instead.
+"""
+polarity = "negative"
+operation = "PutObject"
+tags = ["sse", "encryption", "security", "tls"]
+timeout_ms = 10000
+quirks = ["q-sse-0010"]
+
+[case.applies_to]
+tls = "forbidden"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/ServerSideEncryptionCustomerKeys.html"
+summary = "Requests using a customer-provided key must be made over a secure connection, and the key is base64 of a 256-bit key sent in a request header."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "conf-ssec"
+
+[request]
+method = "PUT"
+target = "/conf-ssec/plaintext-key.bin"
+headers = { "x-amz-server-side-encryption-customer-algorithm" = "AES256", "x-amz-server-side-encryption-customer-key" = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=", "x-amz-server-side-encryption-customer-key-md5" = "tP/LI3N87DFaSk0aoqYgzg==" }
+body = { size = 16 }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+headers_absent = ["x-amz-server-side-encryption-customer-key"]
+
+[expect.error]
+code = "InvalidRequest"
+request_id_present = true
+
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>InvalidRequest</Code><Message>requests specifying a customer-provided encryption key must be made over a secure connection</Message><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''

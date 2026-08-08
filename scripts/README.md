@@ -59,6 +59,7 @@ fixed now so that the same check does not get written twice under two names.
 | `check_no_exhaustive_destructuring.sh` | No hand-written code destructures a dto without a trailing `..`; that is the one pattern a new field breaks (ADR-0004 P3) | P1-06 |
 | `check_resolver_pure.sh` | `HostResolver::resolve` is synchronous and awaits nothing, no implementation holds a store handle, `HostQuery` declares exactly `host`/`path`/`method`, and no resolver code names a forwarded header. The resolver answers before authentication, so all four are amplification and enumeration properties rather than tidiness | P6-04 |
 | `check_no_minio_source.sh` | Clean-room provenance: no AGPL licence text outside `scripts/allowances/clean-room-allowances.txt`, no comment claiming a port from MinIO or Garage, no vendored server tree or Go source, no `minio/minio` submodule or dependency. Rules 2-4 are not exemptable | P6-08 |
+| `check_sse_key_never_leaks.sh` | The SSE-C customer key never leaves: no operation *output* binds a key header, the response invariant still strips both spellings, `KeyText::expose` has one call site, the SSE module has one `subtle::Choice`-to-`bool` conversion, and no formatting or logging macro names a customer key | P6-06 |
 | `test_guard_scripts.sh` | Not a guard: runs every guard on the tree and asserts each one fails on an injected violation | P0 |
 
 ### Registered, not yet implemented (TODO)

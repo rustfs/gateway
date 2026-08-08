@@ -1,0 +1,42 @@
+[case]
+id = "c-ssec-0010"
+schema_version = 1
+title = "A bucket-key switch that is not true or false is a 400 InvalidArgument"
+rationale = """
+TRUE and 1 are the two spellings a tolerant parser accepts and a strict one refuses. Tolerance here is not a kindness: the switch decides whether a bucket key is used, so a value the parser did not understand and defaulted to false is a caller who asked for one setting and received the other, with no error to notice. The refusal is stated over the value set rather than over a list of rejected spellings, so a spelling nobody thought of is refused too.
+"""
+polarity = "negative"
+operation = "PutObject"
+tags = ["sse", "encryption"]
+timeout_ms = 10000
+quirks = ["q-sse-0010"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/UsingKMSEncryption.html"
+summary = "The bucket-key switch is a boolean header accompanying a KMS request."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "conf-ssec"
+
+[request]
+method = "PUT"
+target = "/conf-ssec/bucket-key-switch.bin"
+headers = { "x-amz-server-side-encryption" = "aws:kms", "x-amz-server-side-encryption-bucket-key-enabled" = "TRUE" }
+body = { size = 16 }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+code = "InvalidArgument"
+request_id_present = true
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>InvalidArgument</Code><Message>x-amz-server-side-encryption-bucket-key-enabled must be true or false</Message><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''

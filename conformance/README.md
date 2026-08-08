@@ -114,7 +114,7 @@ must agree case for case; a case that could name a path would be a case that hid
 - **Tag vocabulary.** `streaming`, `chunked`, `trailer`, `signature`, `sigv4`, `sigv2`, `presigned`,
   `xml`, `wire-bytes`, `etag`, `routing`, `vhost`, `conditional`, `preconditions`, `list`,
   `pagination`, `multipart`, `checksum`, `range`, `encoding`, `cors`, `preflight`, `encryption`, `lifecycle`, `replication`, `bucketconfig`, `region`, `security`, `dos`,
-  `timing`, `connection`, `event-stream`, `tls`, `h2`, `error-shape`, `known-divergence`, `tagging`,
+  `sse`, `timing`, `connection`, `event-stream`, `tls`, `h2`, `error-shape`, `known-divergence`, `tagging`,
   `object-lock`, `restore`, `select`, `acl`, `naming`, and `slow`. `slow` is reserved: it moves a case out of
   the pull-request gate and
   into the merge queue. `region` marks a case whose subject is the deployment's region posture — the

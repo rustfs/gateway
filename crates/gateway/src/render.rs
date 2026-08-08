@@ -268,6 +268,23 @@ impl From<Denial> for S3Error {
     }
 }
 
+impl From<rustfs_gateway_core::SseRejection> for S3Error {
+    fn from(rejection: rustfs_gateway_core::SseRejection) -> Self {
+        // `reason()` is a constant sentence per variant and `code()` is one of two codes. Nothing
+        // from the request reaches either, which is the property `crates/core`'s
+        // `n_no_refusal_sentence_carries_a_key_a_digest_or_a_key_id` pins: a refusal about a key
+        // must not quote the key, the digest, the expected digest, or a KMS key id.
+        //
+        // The status comes from the shared table rather than being written here, so that
+        // `InvalidRequest` means the same thing in a `400` from this stage as it does anywhere
+        // else. The connection survives: the caller is authenticated by this point and the
+        // request head was fully readable, so none of RFC 9112 §9.3's reasoning applies.
+        let code = rejection.code();
+        let status = code.default_status();
+        Self::new(code, rejection.reason()).with_status(status)
+    }
+}
+
 impl From<CodecError> for S3Error {
     fn from(error: CodecError) -> Self {
         let status = error.status();

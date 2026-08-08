@@ -43,7 +43,7 @@ use std::any::Any;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use rustfs_gateway_core::{Handler, MissingHandlers, Operation, OperationCodec, OperationSet, RouterBuilder};
+use rustfs_gateway_core::{Handler, MissingHandlers, Operation, OperationCodec, OperationSet, RouterBuilder, SseConfig};
 use rustfs_gateway_http::Limits;
 use rustfs_gateway_sig::SecurityFloor;
 use rustfs_gateway_types::{NamePolicy, NameValidator, SlashPolicy};
@@ -108,6 +108,7 @@ pub struct ServiceBuilder {
     cors_source: Arc<dyn CorsSource>,
     cors_cache: CorsCacheConfig,
     cors_policy: CorsPolicy,
+    sse: SseConfig,
 }
 
 impl core::fmt::Debug for ServiceBuilder {
@@ -155,6 +156,7 @@ impl ServiceBuilder {
             cors_source: Arc::new(NoCors),
             cors_cache: CorsCacheConfig::default(),
             cors_policy: CorsPolicy::default(),
+            sse: SseConfig::strict(),
         }
     }
 
@@ -348,6 +350,26 @@ impl ServiceBuilder {
         self
     }
 
+    /// Installs the deployment's server-side-encryption posture.
+    ///
+    /// Defaults to [`SseConfig::strict`], under which a customer-provided encryption key on a
+    /// cleartext connection is refused with `400 InvalidRequest` before the request body is read.
+    /// The only way to relax that is
+    /// [`SseConfig::allowing_customer_keys_over_plaintext`][relaxed], which takes a witness whose
+    /// name has to be typed out — and a deployment that reaches for it should first ask whether
+    /// its transport can declare [`rustfs_gateway_core::TransportSecurity::Encrypted`] instead,
+    /// because that states the fact per connection rather than asserting it about all of them.
+    ///
+    /// This setter cannot refuse anything: the witness is the refusal, and it is a compile-time
+    /// one.
+    ///
+    /// [relaxed]: rustfs_gateway_core::SseConfig::allowing_customer_keys_over_plaintext
+    #[must_use]
+    pub const fn sse_config(mut self, config: SseConfig) -> Self {
+        self.sse = config;
+        self
+    }
+
     /// Installs an observer. Defaults to [`NoObserver`].
     #[must_use]
     pub fn observer(mut self, observer: impl Observer) -> Self {
@@ -492,6 +514,7 @@ impl ServiceBuilder {
             traces: self.traces,
             cors: Arc::new(CachedCorsSource::new(self.cors_source, self.cors_cache)),
             cors_policy: self.cors_policy,
+            sse: self.sse,
         }))
     }
 }

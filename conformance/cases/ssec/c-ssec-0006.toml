@@ -1,0 +1,37 @@
+[case]
+id = "c-ssec-0006"
+schema_version = 1
+title = "A server-managed algorithm is served over cleartext"
+rationale = """
+The counterweight to every case above. SSE-S3 and SSE-KMS put no key on the wire — the server holds it — so the transport gate has nothing to say about them, and a gate that refused the whole x-amz-server-side-encryption family would satisfy all five refusal cases while breaking every encrypted write over an internal cleartext hop. This is also the direction that proves the gate branches at all. What this case does NOT assert is that the header comes back: the fixture backend does not echo it on a PutObject, and c-mpu-0016 already pins the echo on the operation where it does — asserting it here would be asserting the fixture rather than the gate.
+"""
+polarity = "positive"
+operation = "PutObject"
+tags = ["sse", "encryption", "tls"]
+timeout_ms = 10000
+quirks = ["q-sse-0010"]
+
+[case.applies_to]
+tls = "forbidden"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/UsingServerSideEncryption.html"
+summary = "SSE-S3 is requested with a single header naming AES256 and the value is returned on the response."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "conf-ssec"
+
+[request]
+method = "PUT"
+target = "/conf-ssec/managed.bin"
+headers = { "x-amz-server-side-encryption" = "AES256" }
+body = { size = 16 }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+connection_after = "open"
+headers_absent = ["x-amz-server-side-encryption-customer-key", "x-amz-copy-source-server-side-encryption-customer-key"]
+
