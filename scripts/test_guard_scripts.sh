@@ -789,6 +789,95 @@ mut_clean_room_allowance_widened() {
 }
 expect_fail check_no_minio_source.sh \
     'an allowance list widened to a glob, which is not a path' mut_clean_room_allowance_widened
+# check_stage_filter_sync.sh has four rules and each one gets its own negative
+# control, for the reason check_resolver_pure.sh's do: two of the three seams
+# run before the request has been authenticated, so "it cannot await", "it holds
+# no store handle", "there are exactly these three seams" and "it cannot reach
+# the method, the target or the routed bucket" are the four sentences standing
+# between a deployment's own rewrite and a pre-authentication storage read or a
+# forged signature input.
+# -----------------------------------------------------------------------------
+
+mut_async_seam() {
+    perl -0pi -e 's/    fn on_wire\(&self, _head: &mut WireHead/    async fn on_wire(&self, _head: &mut WireHead/' \
+        crates/gateway/src/ext/filter.rs
+}
+expect_fail check_stage_filter_sync.sh \
+    'a StageFilter seam declared async' mut_async_seam
+
+mut_awaiting_filter() {
+    perl -0pi -e 's/        \(\*\*self\)\.on_wire\(head\)/        lookup().await;\n        (**self).on_wire(head)/' \
+        crates/gateway/src/ext/filter.rs
+}
+expect_fail check_stage_filter_sync.sh \
+    'a StageFilter implementation that awaits' mut_awaiting_filter
+
+mut_filter_store_handle() {
+    perl -0pi -e 's/pub struct WireHead<.a> \{/pub struct WireHead<\x27a> {\n    buckets: std::sync::Arc<dyn BucketStore>,/' \
+        crates/gateway/src/ext/filter.rs
+}
+expect_fail check_stage_filter_sync.sh \
+    'a store handle in a guarded StageFilter file' mut_filter_store_handle
+
+mut_fourth_seam() {
+    perl -0pi -e 's/    fn on_routed\(&self, _routed: &RoutedView/    fn on_body(&self, _routed: &RoutedView<\x27_>) -> Result<\(\), S3Error> {\n        Ok\(\(\)\)\n    }\n\n    fn on_routed(&self, _routed: &RoutedView/' \
+        crates/gateway/src/ext/filter.rs
+}
+expect_fail check_stage_filter_sync.sh \
+    'a fourth seam added to the trait without an argument for it' mut_fourth_seam
+
+mut_writable_routed_view() {
+    perl -0pi -e 's/    \/\/\/ The bucket, from the one place a bucket is produced\./    pub fn bucket_mut(&mut self) -> Option<&mut BucketName> {\n        None\n    }\n\n    \/\/\/ The bucket, from the one place a bucket is produced./' \
+        crates/gateway/src/ext/filter.rs
+}
+expect_fail check_stage_filter_sync.sh \
+    'a mutable accessor on RoutedView, which would be a second producer of the target' mut_writable_routed_view
+
+mut_head_target_setter() {
+    perl -0pi -e 's/    \/\/\/ The frozen check, in one place/    pub fn set_path(&mut self, _path: \&str) {}\n\n    \/\/\/ The frozen check, in one place/' \
+        crates/gateway/src/ext/filter.rs
+}
+expect_fail check_stage_filter_sync.sh \
+    'a request-target setter on WireHead, which the frozen header snapshot does not cover' mut_head_target_setter
+
+mut_no_filter_trait_file() {
+    rm -f crates/gateway/src/ext/filter.rs
+}
+expect_fail check_stage_filter_sync.sh \
+    'the StageFilter trait file missing entirely (a guard whose input is gone must fail, not skip)' mut_no_filter_trait_file
+
+# -----------------------------------------------------------------------------
+# check_patch_layer_map.sh is checked in both directions plus the count, because
+# the failure it exists to prevent is silent: a renamed test leaves the table
+# saying what it said, and the table is what P10-06 deletes nine tower layers
+# against.
+# -----------------------------------------------------------------------------
+
+mut_orphan_table_row() {
+    perl -0pi -e 's/`bodyless_status_fix_is_the_response_invariant`/`bodyless_status_fix_renamed_away`/' \
+        docs/middleware.md
+}
+expect_fail check_patch_layer_map.sh \
+    'a table row naming a test that does not exist' mut_orphan_table_row
+
+mut_orphan_test() {
+    printf '\n/// A landing with no row.\n#[test]\nfn a_tenth_landing_nobody_wrote_down() {}\n' \
+        >>crates/gateway/tests/patch_layer_landings.rs
+}
+expect_fail check_patch_layer_map.sh \
+    'a landing test with no row in the table' mut_orphan_test
+
+mut_deleted_table_row() {
+    perl -0ni -e 's/^\| 3 \|.*\n//m; print' docs/middleware.md
+}
+expect_fail check_patch_layer_map.sh \
+    'a landing row deleted, leaving eight layers accounted for out of nine' mut_deleted_table_row
+
+mut_no_landing_test_file() {
+    rm -f crates/gateway/tests/patch_layer_landings.rs
+}
+expect_fail check_patch_layer_map.sh \
+    'the landings file missing entirely (a guard whose input is gone must fail, not skip)' mut_no_landing_test_file
 
 printf '\n%s case(s), %s failure(s)\n' "$cases" "$failures"
 [[ "$failures" -eq 0 ]]

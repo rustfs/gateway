@@ -65,6 +65,14 @@
 //! the only exceptions, because registration erases them behind a closure and neither is ever
 //! reached through `dyn`. ADR-0002 is the full statement, and this crate re-exports the
 //! [`BoxFuture`] alias so that no downstream crate takes a dependency on `futures` to name it.
+//!
+//! # The three middleware levels
+//!
+//! A tower [`Layer`](https://docs.rs/tower/latest/tower/trait.Layer.html) wraps the whole service
+//! and needs nothing from this crate. [`StageFilter`] intercepts between the pipeline's stages and
+//! may rewrite the head or the response. [`OpLayer`] wraps one operation with its input and output
+//! types intact. [`Observer`] only watches, and always will. `docs/middleware.md` is the decision
+//! tree and the table of which of RustFS's nine tower patch layers lands where.
 #![forbid(unsafe_code)]
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing, clippy::panic)]
 
@@ -97,9 +105,10 @@ pub use crate::close::ConnectionIntent;
 pub use crate::ext::{
     Addressing, Authentication, Authenticator, Authorizer, AuthzRequest, BaseDomain, CORS_PREFLIGHT, CachedCorsSource, ChunkSink,
     ChunkVerification, CorsCacheConfig, CorsSource, CorsSourceError, CredentialProvider, Credentials, CredentialsError, Denial,
-    DomainError, Governor, GovernorRequest, HostQuery, HostResolver, Lease, MAX_BASE_DOMAIN_BYTES, NoCors, NoObserver, Observer,
-    PathStyleOnly, RequestEvent, ResolvedHost, SigV4Authenticator, StaticCredentials, TargetOrigin, Unavailable, Unlimited,
-    VhostHint, VirtualHostStyle,
+    DomainError, FROZEN_WIRE_HEADERS, FrozenHeader, Governor, GovernorRequest, HostQuery, HostResolver, Lease,
+    MAX_BASE_DOMAIN_BYTES, Next, NoCors, NoObserver, Observer, OpLayer, PathStyleOnly, RequestEvent, ResolvedHost, ResponseView,
+    RoutedView, SigV4Authenticator, StageFilter, StaticCredentials, TargetOrigin, Unavailable, Unlimited, VhostHint,
+    VirtualHostStyle, WireHead, op_layer, response_filter, routed_filter, wire_filter,
 };
 pub use crate::probe::{BodyProgress, ObservedBody};
 pub use crate::render::{S3Error, connection_intent_of, declaration, document, document_body, render};

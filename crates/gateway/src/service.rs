@@ -25,9 +25,13 @@
 //! # The order, and what each position is load-bearing for
 //!
 //! ```text
+//!   freeze        the signing material, copied out before anything may touch the head
+//!   FILTER wire   the deployment's head rewrite — before acceptance, so acceptance judges it
 //!   accept        every wire-level ambiguity refused; no body byte read
 //!   resolve host  what the path addresses, and which endpoint family
 //!   route         which operation — decided before anything is authenticated
+//!   address       the one percent-decode, the one bucket and the one key
+//!   FILTER routed the deployment's chance to refuse by operation, read-only, still pre-auth
 //!   govern        the deployment's chance to refuse: routed, so it has a bucket; before the body
 //!   admit         the seven unconditional rules, outside every replaceable verifier
 //!   authenticate  who the caller is, from a request the floor has already cleared
@@ -35,9 +39,28 @@
 //!   contradict    the head-decidable contradictions, refused while the body is still outside
 //!   read body     bounded by the assembly's ceiling and by the operation's own cap
 //!   decode        the request head and body into the operation's input
+//!   OP LAYERS     per-operation middleware, outer to inner, inside dispatch
 //!   dispatch      the backend
-//!   encode        the answer, plus the RFC 9110 body invariants
+//!   encode        the answer
+//!   FILTER resp   the deployment's response rewrite — before the invariants, never after
+//!   invariants    the RFC 9110 body rules
+//!   stamp         the four headers the framework guarantees, last on every path
 //! ```
+//!
+//! # The three middleware seams, and why they sit where they do
+//!
+//! `docs/middleware.md` argues the whole design; the three positions above are the part that is
+//! this file's. **`FILTER wire` before acceptance** so that whatever a filter writes is judged by
+//! the same acceptance rules a client's own bytes are — a seam after acceptance would need a second
+//! acceptance pass over rewritten input, and "the front end and the back end parsed different
+//! bytes" is request smuggling. **`freeze` before it** so that no rewrite can reach the verifier:
+//! the header copy this function already took for `SecurityFloor` is now also the reason a filter
+//! can neither forge a signature nor break one. **`FILTER routed` after `address`** because that is
+//! the earliest point at which the operation, the bucket and the key are all decided, and it is
+//! read-only because they are decided — the target has one producer and a seam is not a second one.
+//! **`FILTER resp` before `invariants` and `stamp`** so that the two things the framework
+//! guarantees about every response survive a deployment's rewrite: a `304` cannot be given content,
+//! and a response cannot lose its request identifier.
 //!
 //! Three positions would be defects if moved. **Govern before the body** is the difference between
 //! refusing a gibibyte upload and paying for it first. **Authorize before dispatch** is what gives
@@ -91,7 +114,7 @@ use crate::clock::Clock;
 use crate::dispatch::{DispatchTable, ErasedAnswer, target_of};
 use crate::ext::{
     Authentication, Authenticator, Authorizer, AuthzRequest, CORS_PREFLIGHT, CachedCorsSource, Governor, GovernorRequest,
-    HostQuery, HostResolver, Observer, RequestEvent, ResolvedHost,
+    HostQuery, HostResolver, Observer, RequestEvent, ResolvedHost, ResponseView, RoutedView, StageFilter, WireHead,
 };
 use crate::gate::{Authenticated, BodyCeilings, SealedBody};
 use crate::render::{S3Error, render};
@@ -102,6 +125,9 @@ use crate::trace::{RequestTrace, TraceSource};
 pub(crate) struct Inner {
     pub(crate) router: Router,
     pub(crate) dispatch: DispatchTable,
+    /// The deployment's stage filters, in registration order. Empty for almost every deployment,
+    /// and the emptiness is checked before any of the three seams does any work.
+    pub(crate) filters: Arc<[Arc<dyn StageFilter>]>,
     pub(crate) floor: SecurityFloor,
     pub(crate) limits: Limits,
     pub(crate) names: NamePolicy,
@@ -186,6 +212,23 @@ impl S3Service {
                 headers.insert(name, value.clone());
             }
         }
+        // The response seam. After the CORS decoration, so a filter sees the response a browser
+        // would; before the invariants and the stamp, so neither can be defeated by one. It runs
+        // for every response this service produces, including one refused at acceptance — which is
+        // most of what a compatibility rewrite is about.
+        if !self.inner.filters.is_empty() {
+            let view = ResponseView {
+                request_id: trace.request_id(),
+                operation: outcome.operation,
+                method: &method,
+            };
+            for filter in self.inner.filters.iter() {
+                if let Err(error) = filter.on_response(&view, &mut response) {
+                    response = outcome.refuse(error);
+                    break;
+                }
+            }
+        }
         // The one place the body invariants run, on both paths: the body is chosen and nothing has
         // been written. A refusal never reaches an encoder, so this is the only position from which
         // "a `HEAD` response has no content" can cover it.
@@ -224,9 +267,27 @@ impl S3Service {
         // draw — while `SecurityFloor` and the canonical request are defined over the raw map. The
         // copy is taken before acceptance and used only after it has succeeded, so what is held is
         // an accepted map. Removing the copy needs a signing accessor on `WireRequest` itself.
-        let headers = request.headers().clone();
+        //
+        // It is also the whole of "a stage filter cannot touch a signature". This line runs before
+        // the wire seam below, so every verifier downstream reads the head as the *caller* sent it:
+        // a filter that writes an `Authorization` header does not make an anonymous request
+        // authenticated, and one that deletes it does not make a signed request fail.
+        let (mut parts, body) = request.into_parts();
+        let headers = parts.headers.clone();
 
-        let wire = match WireRequest::accept(request, &self.inner.limits) {
+        // The wire seam, before acceptance so that whatever it writes is subject to every
+        // acceptance rule — the framing conflict, the duplicate headers, the limits — exactly as a
+        // client's own bytes are.
+        if !self.inner.filters.is_empty() {
+            let mut head = WireHead::new(&mut parts);
+            for filter in self.inner.filters.iter() {
+                if let Err(error) = filter.on_wire(&mut head) {
+                    return outcome.refuse(error);
+                }
+            }
+        }
+
+        let wire = match WireRequest::accept(Request::from_parts(parts, body), &self.inner.limits) {
             Ok(wire) => wire,
             Err(reject) => return outcome.refuse(S3Error::from(reject)),
         };
@@ -314,6 +375,28 @@ impl S3Service {
             Ok(meta) => meta,
             Err(error) => return outcome.refuse(S3Error::from(error)),
         };
+
+        // The routed seam. Read-only, and this is the position that makes it so: the operation, the
+        // bucket and the key are all decided by the line above, and the whole point of the single
+        // normalisation is that they have one producer. A seam able to write them would be a
+        // second.
+        if !self.inner.filters.is_empty() {
+            let view = RoutedView {
+                operation,
+                spec: dispatched.spec,
+                method: wire.method(),
+                path: wire.raw_path().as_str(),
+                target,
+                bucket: meta.bucket(),
+                key: meta.key(),
+                declared_body_bytes: declared_length,
+            };
+            for filter in self.inner.filters.iter() {
+                if let Err(error) = filter.on_routed(&view) {
+                    return outcome.refuse(error);
+                }
+            }
+        }
 
         // Routed, so there is a bucket to limit on; before the body, so a refusal costs the
         // response and nothing else.
