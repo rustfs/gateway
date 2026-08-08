@@ -1,0 +1,57 @@
+# c-host-0004 — the bare base domain is path style, so configuring a domain breaks nothing.
+
+[case]
+id = "c-host-0004"
+schema_version = 1
+title = "A request to the configured base domain itself is path style and reads the bucket from the path"
+rationale = """
+s3s#643 is the report that configuring base domains makes path-style requests stop working. The \
+first place that shows is the base domain itself: it matches, and the prefix in front of it is empty, \
+so there is no bucket in the host and the path has to be read as it always was. A resolver that treated \
+any match as a virtual host answers this with a bucket named `nested`, or with no bucket at all."""
+polarity = "positive"
+operation = "GetObject"
+tags = ["vhost", "routing"]
+timeout_ms = 10000
+# Empty on purpose. A quirk in `model/overlays/quirks/` is scoped to an operation or a shape, and
+# host resolution is neither: it happens before an operation has been chosen. The whole family is
+# therefore held by `crates/gateway/tests/vhost_resolution.rs` and by the negative cases beside
+# this one, not by the quirk mutation gate.
+quirks = []
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/VirtualHosting.html"
+summary = "Virtual-hosted-style addressing puts the bucket in the host name, leaving the entire path to be the object key."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/issues/643"
+summary = "Upstream reports that configuring a domain list makes path-style requests on hosts outside the list unusable."
+kind = "s3s-issue"
+
+
+[[setup.buckets]]
+name = "conf-host"
+
+[[setup.objects]]
+bucket = "conf-host"
+key = "nested/plain.txt"
+content_type = "text/plain; charset=utf-8"
+body = { utf8 = "virtual hosted" }
+
+[request]
+method = "GET"
+target = "/conf-host/nested/plain.txt"
+host = "s3.example.com"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[expect.headers_present]
+"content-type" = "text/plain; charset=utf-8"
+
+[expect.body]
+exact_utf8 = "virtual hosted"

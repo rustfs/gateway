@@ -33,7 +33,8 @@ everything a consumer needs so that nothing downstream depends on `-core`, `-sig
 | `src/ext/authenticator.rs` | `Authenticator` (no default), and `SigV4Authenticator` assembled from `-sig`'s public primitives | Authentication behaved unexpectedly, or you are replacing the scheme |
 | `src/ext/authorizer.rs` | `Authorizer` (no default), `AuthzRequest`, `Denial`, `allow_when` | You are writing a policy, or asking why there is no default |
 | `src/ext/credentials.rs` | `Credentials`, `CredentialProvider`, `StaticCredentials` | You are wiring an IAM store, or a secret appeared somewhere it should not |
-| `src/ext/host.rs` | `HostResolver` (synchronous), `PathStyleOnly` | Virtual-hosted addressing is not working — the default does not read the host |
+| `src/ext/host.rs` | `HostResolver` (synchronous), the `Addressing`/`TargetOrigin`/`VhostHint` vocabulary its answer is written in, and the default `PathStyleOnly` | You are asking where the bucket in a request came from, or why a `501` came back with a sentence about virtual hosts |
+| `src/ext/vhost.rs` | `VirtualHostStyle`: label-boundary matching against configured `BaseDomain`s, the bucket/region prefix table, and the unconditional path-style fallback | Virtual-hosted addressing is not working, a host resolved to a bucket you did not expect, or you are configuring base domains and `new()` refused one |
 | `src/ext/governor.rs` | `Governor`, `Unlimited`; the hook that runs after routing and before the body | You are adding a quota, or checking the hook's position |
 | `src/ext/observer.rs` | `Observer` (synchronous), `NoObserver`, and the `RequestEvent` that carries the request identifier | You are wiring an audit trail, or joining a log line to the identifier a caller quoted |
 
@@ -48,6 +49,7 @@ everything a consumer needs so that nothing downstream depends on `-core`, `-sig
 | `tests/connection_teardown.rs` | That the connection verdict branches and reaches the response, that the two `403`s do not share one, and that nothing here claims to have observed a socket; 9 negative, 1 positive |
 | `tests/facade_probe.rs` | Every export the conformance runner's `REQUIRED_FACADE_EXPORTS` names, checked by naming it |
 | `tests/backend_reachability.rs` | Every argument of the range contract, built from a decoded request and never from a literal; 5 negative, 1 positive. Read this before adding a constructor a backend is meant to call |
+| `tests/vhost_resolution.rs` | Which byte of a `Host` header may become a bucket name: the label boundary that separates `bucket.s3.example.com` from `evils3.example.com`, the prefix table, the base-domain refusals, and the two properties of the diagnostic — it fires only when a request really looks virtual-hosted, and it never changes the resolution. 18 negative, 8 positive. Read it before changing anything in `src/ext/vhost.rs`; the resolution *shape* is what no response can show |
 | `tests/replication_token.rs` | That `x-amz-bucket-object-lock-token` reaches a handler off a decoded `PutBucketReplication`, present **and** absent; 2 negative, 1 positive. It exists because a header parsed and then dropped answers 200 exactly like one that arrived, so the conformance case could not tell them apart |
 | `tests/select_restore_intent.rs` | Two things no response can see: that a select's and a restore's decoded members reach a handler — the scan range, the progress switch, the version selector, the nested select-on-restore query, each asserted present **and** absent — and that the exported event-stream frames read back under a CRC-32 written in the test file itself, with every single-byte corruption of a frame refused; 5 negative, 6 positive |
 | `examples/minimal.rs` | The whole assembly in one file, asserting one answered request and one refused one |
@@ -95,6 +97,17 @@ everything a consumer needs so that nothing downstream depends on `-core`, `-sig
   `IngestPipeline::commit_allowed` stays `false` until the trailer is verified and that is P3-04's.
   Signed chunk verification needs `k_signing`, which no `Verdict` carries, so it travels beside the
   verdict through `ext::ChunkSink` — additive, and an existing `Authenticator` simply never fills it.
+- **Virtual-hosted addressing resolves, and three things around it do not yet.** `VirtualHostStyle`
+  reads the bucket and the region out of a host and `MetaView::addressed` applies them, so
+  `Host: bucket.s3.example.com` with `GET /key` reaches `bucket`. What is *not* wired: the region
+  the host carried is published on `ResolvedHost` and read by nobody — `SigV4Authenticator` verifies
+  against the `RegionSet` a deployment configured, which is the right source for a signature, and no
+  consumer has yet asked "which region did the endpoint claim"; `HostClass` is always `Standard`,
+  because the Object Lambda, S3 Express, Outposts, Accelerate, Dualstack and website host shapes are
+  a routing-predicate question and no built-in resolver produces those values; and `TargetOrigin` is
+  computable from `ResolvedHost` but is not yet in `RequestEvent`, so an audit trail cannot say "this
+  bucket name came out of the Host header" without asking the resolver again. The last one is the
+  smallest and the most worth doing.
 - **The header map is cloned once per request**, because `WireRequest` publishes no way back to it
   and `SecurityFloor` is defined over the raw map.
 - **The conformance runner does not pin the request identifier yet.** `FixedTrace` and

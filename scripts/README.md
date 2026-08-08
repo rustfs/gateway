@@ -57,6 +57,7 @@ fixed now so that the same check does not get written twice under two names.
 | `check_generated_dto_packaged.sh` | Every `#[path]` under `crates/*/src` stays inside its crate, reaching the generated dto through the `crates/types/generated` symlink | P1-06 |
 | `check_no_dto_non_exhaustive.sh` | No generated dto struct carries `#[non_exhaustive]`; it forbids `..Default::default()` (E0639), which is the very syntax that keeps a new field minor (ADR-0004 P1) | P1-06 |
 | `check_no_exhaustive_destructuring.sh` | No hand-written code destructures a dto without a trailing `..`; that is the one pattern a new field breaks (ADR-0004 P3) | P1-06 |
+| `check_resolver_pure.sh` | `HostResolver::resolve` is synchronous and awaits nothing, no implementation holds a store handle, `HostQuery` declares exactly `host`/`path`/`method`, and no resolver code names a forwarded header. The resolver answers before authentication, so all four are amplification and enumeration properties rather than tidiness | P6-04 |
 | `test_guard_scripts.sh` | Not a guard: runs every guard on the tree and asserts each one fails on an injected violation | P0 |
 
 ### Registered, not yet implemented (TODO)

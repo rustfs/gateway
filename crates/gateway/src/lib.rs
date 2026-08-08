@@ -95,9 +95,10 @@ pub use crate::builder::{DEFAULT_MAX_BUFFERED_BODY_BYTES, ServiceBuilder};
 pub use crate::clock::{Clock, FixedClock, system_clock};
 pub use crate::close::ConnectionIntent;
 pub use crate::ext::{
-    Authentication, Authenticator, Authorizer, AuthzRequest, ChunkSink, ChunkVerification, CredentialProvider, Credentials,
-    CredentialsError, Denial, Governor, GovernorRequest, HostQuery, HostResolver, Lease, NoObserver, Observer, PathStyleOnly,
-    RequestEvent, ResolvedHost, SigV4Authenticator, StaticCredentials, Unavailable, Unlimited,
+    Addressing, Authentication, Authenticator, Authorizer, AuthzRequest, BaseDomain, ChunkSink, ChunkVerification,
+    CredentialProvider, Credentials, CredentialsError, Denial, DomainError, Governor, GovernorRequest, HostQuery, HostResolver,
+    Lease, MAX_BASE_DOMAIN_BYTES, NoObserver, Observer, PathStyleOnly, RequestEvent, ResolvedHost, SigV4Authenticator,
+    StaticCredentials, TargetOrigin, Unavailable, Unlimited, VhostHint, VirtualHostStyle,
 };
 pub use crate::probe::{BodyProgress, ObservedBody};
 pub use crate::render::{S3Error, connection_intent_of, declaration, document, document_body, render};

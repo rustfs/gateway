@@ -72,7 +72,10 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use http::{Request, Response, StatusCode};
-use rustfs_gateway_core::{EncodedResponse, MetaView, ResponseBody, RouteRequestParts, Router, dispatch::NOT_REGISTERED_MESSAGE};
+use rustfs_gateway_core::{
+    EncodedResponse, MetaView, ResponseBody, RouteRequestParts, Router,
+    dispatch::{NO_ROUTE_MESSAGE, NOT_REGISTERED_MESSAGE},
+};
 use rustfs_gateway_http::{Limits, WireRequest};
 use rustfs_gateway_sig::{
     Admission, PayloadMode, RawQuery, RequestNow, SecurityFloor, TrailerSet, Verdict, WireView, detect_credentials,
@@ -225,7 +228,21 @@ impl S3Service {
             headers: wire.headers(),
         }) {
             Ok(dispatched) => dispatched,
-            Err(error) => return outcome.refuse(S3Error::from(error)),
+            // The one place a `VhostHint` is rendered. It replaces the message of the generic
+            // "this names no operation" `501` and nothing else — same code, same status, same
+            // connection verdict — because a request that failed to route on a host the deployment
+            // does not serve has almost always been addressed virtual-hosted at a gateway that was
+            // never told the domain. The sentence is `VhostHint::message()`, a constant: this runs
+            // before authentication, so nothing derived from the request may appear in it.
+            Err(error) => {
+                let refusal = match resolved.diagnostic {
+                    Some(hint) if error.message() == NO_ROUTE_MESSAGE => {
+                        S3Error::new(error.code().clone(), hint.message()).with_status(error.status())
+                    }
+                    _ => S3Error::from(error),
+                };
+                return outcome.refuse(refusal);
+            }
         };
         let operation = dispatched.spec.name;
         let target = target_of(dispatched.entry);
@@ -244,7 +261,11 @@ impl S3Service {
         let mut pending = None;
         let wire = wire.map_body(|body| pending = Some(body));
 
-        let meta = match MetaView::of(&wire, target) {
+        // The bucket has one source, and this is where it is chosen: the host's, when the resolver
+        // read one out of the host, and the path's otherwise. Everything downstream — the governor,
+        // the authorizer, the decoder, the backend — reads `meta`, so there is no second reading
+        // for one of them to disagree with.
+        let meta = match MetaView::addressed(&wire, target, resolved.bucket().cloned()) {
             Ok(meta) => meta,
             Err(error) => return outcome.refuse(S3Error::from(error)),
         };

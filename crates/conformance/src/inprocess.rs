@@ -85,7 +85,7 @@ use rustfs_gateway::sig::{
 };
 use rustfs_gateway::{
     Credentials, FixedClock, Limits, ObservedBody, RegionSet, S3Service, ServiceBuilder, SigV4Authenticator, StaticCredentials,
-    WireRequest, allow_when, collect, dto,
+    VirtualHostStyle, WireRequest, allow_when, collect, dto,
 };
 
 use crate::exec::block_on;
@@ -105,8 +105,18 @@ pub const VALID_SECRET: &[u8] = b"wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
 pub const UNKNOWN_ACCESS_KEY: &str = "AKIAI44QH8DHBEXAMPLE";
 /// The secret used when a case asks to sign with the wrong one.
 pub const WRONG_SECRET: &[u8] = b"this-is-not-the-secret-the-target-knows--";
-/// The host every request addresses. Path-style, because the corpus writes `/bucket/key` targets.
+/// The host every request addresses unless a case overrides it with `request.host`.
+///
+/// Also the first entry of [`BASE_DOMAINS`], which is what lets the `host/` family address a
+/// bucket virtual-hosted without disturbing the rest of the corpus: the bare base domain has no
+/// prefix, so `Host: s3.example.com` with a `/bucket/key` target is path-style exactly as it was
+/// before the resolver was installed.
 pub const HOST: &str = "s3.example.com";
+/// The virtual-hosted base domains the target is assembled with.
+///
+/// Two of them, and the second is the region-bearing form, because a resolver that only ever holds
+/// one domain cannot show that the *longest* match wins or that a second domain matches at all.
+pub const BASE_DOMAINS: [&str; 2] = [HOST, "s3.us-east-1.example.com"];
 /// The region every case signs for.
 pub const REGION: &str = "us-east-1";
 
@@ -218,6 +228,14 @@ impl InProcess {
             // signed with the one identity the fixtures know, and a policy engine here would turn
             // protocol failures into authorisation failures.
             .authorizer(allow_when(|request| !request.is_anonymous()))
+            // Installed rather than left at the default, because the default reads no host and a
+            // `host/` case that could not be answered differently from a path-style one would be a
+            // case that cannot fail. Every other family addresses the bare base domain, which has
+            // no prefix and is therefore path-style — so this changes nothing for them.
+            .host_resolver(
+                VirtualHostStyle::new(BASE_DOMAINS)
+                    .map_err(|error| SutError::Environment(format!("the base domains are not usable: {error}")))?,
+            )
             .clock(clock)
             .limits(self.limits)
             .build()

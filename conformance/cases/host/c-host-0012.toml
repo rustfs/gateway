@@ -1,0 +1,59 @@
+# c-host-0012 — [S] the virtual-host diagnostic: a fixed sentence, and not one byte of the request.
+
+[case]
+id = "c-host-0012"
+schema_version = 1
+title = "A virtual-hosted request on an unserved domain is refused with a fixed sentence that repeats nothing it was sent"
+rationale = """
+Two things are asserted at once and neither is worth much alone. The first is the diagnostic s3s#259 \
+asks for: `PUT /` on a host whose first label is a legal bucket name, at a gateway that serves no \
+matching base domain, is a virtual-hosted request nobody configured -- and answering it with the \
+generic "this names no operation" leaves an operator reading route tables. The second is the constraint \
+that makes the first safe. This refusal is rendered before the request has been authenticated, so the \
+message must be a constant: the host, the bucket label and every other byte the caller chose stay out \
+of it, or the error document becomes a reflection surface for an unauthenticated peer. The body is \
+pinned exactly, and the host and bucket label are additionally named in `not_contains_utf8` so that a \
+later message which interpolates them fails here rather than passing on a substring nobody re-read."""
+polarity = "negative"
+tags = ["vhost", "routing", "security", "error-shape"]
+timeout_ms = 10000
+# Empty on purpose. A quirk in `model/overlays/quirks/` is scoped to an operation or a shape, and
+# host resolution is neither: it happens before an operation has been chosen. The whole family is
+# therefore held by `crates/gateway/tests/vhost_resolution.rs` and by the negative cases beside
+# this one, not by the quirk mutation gate.
+quirks = []
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/issues/259"
+summary = "Upstream reports that a virtual-hosted request reaching an installation with no configured domain is answered 501 with nothing that says why."
+kind = "s3s-issue"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/VirtualHosting.html"
+summary = "Virtual-hosted-style addressing puts the bucket in the host name, so a gateway that does not know the domain cannot find the bucket anywhere in the request."
+kind = "aws-doc"
+
+[request]
+method = "PUT"
+target = "/"
+host = "conf-host.other-domain.test"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 501
+connection_after = "open"
+
+[expect.error]
+code = "NotImplemented"
+request_id_present = true
+
+[expect.headers_present]
+"content-type" = "application/xml"
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+not_contains_utf8 = ["conf-host", "other-domain.test", "other-domain", "PUT"]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>NotImplemented</Code><Message>This request addresses a bucket as a virtual host, and this gateway serves no base domain that the host of the request belongs to. Configure the virtual-hosted base domains this deployment answers for, or address the bucket in the request path.</Message><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''

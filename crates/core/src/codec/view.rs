@@ -61,8 +61,33 @@ impl<'a> MetaView<'a> {
     /// label is not a valid bucket name or object key. Both are `400`: routing has already decided
     /// which operation this is, so an unusable label is the caller's mistake and not a `501`.
     pub fn of<B>(request: &'a WireRequest<B>, target: TargetKind) -> Result<Self, CodecError> {
+        Self::addressed(request, target, None)
+    }
+
+    /// Splits an accepted request's path, with the bucket a virtual host already named.
+    ///
+    /// `host_bucket` is `None` for a path-style request, which is [`MetaView::of`]. When it is
+    /// `Some`, the host has named the bucket and the **whole** path is the object key: `GET /b2/key`
+    /// on `bucket.example.com` is the object `b2/key` in `bucket`, and never the bucket `b2`. That
+    /// is the single-source rule — the resolver decides once where the bucket came from, and this
+    /// is the one place the decision is applied. Two readings of the same path, one for routing and
+    /// one for authorization, is exactly how a request gets authorized against a bucket it was not
+    /// served from.
+    ///
+    /// # Errors
+    ///
+    /// As [`MetaView::of`]. A virtual-hosted request whose path does not decode as a key is still
+    /// a `400`; the host being right does not make the path readable.
+    pub fn addressed<B>(
+        request: &'a WireRequest<B>,
+        target: TargetKind,
+        host_bucket: Option<BucketName>,
+    ) -> Result<Self, CodecError> {
         let path = request.raw_path().as_str();
-        let (bucket, key) = split_labels(path, target)?;
+        let (bucket, key) = match host_bucket {
+            Some(bucket) => (Some(bucket), vhost_key(path, target)?),
+            None => split_labels(path, target)?,
+        };
         Ok(Self {
             method: request.method(),
             headers: request.headers(),
@@ -187,6 +212,22 @@ impl<'a> MetaView<'a> {
         self.key
             .clone()
             .ok_or_else(|| CodecError::invalid_argument("the request path names no object key").about("Key"))
+    }
+}
+
+/// The object key of a virtual-hosted request: the whole path, decoded once.
+///
+/// No bucket is taken here, because the host already supplied it. A `Service` target cannot occur
+/// on a virtual host — the host names a bucket, so there is no service-root request to be had —
+/// and is treated as the bucket root rather than being given a key it does not have.
+fn vhost_key(path: &str, target: TargetKind) -> Result<Option<ObjectKey>, CodecError> {
+    let trimmed = path.strip_prefix('/').unwrap_or(path);
+    match target {
+        TargetKind::Service | TargetKind::Bucket => Ok(None),
+        // `from_encoded_path` is the single decode, exactly as in `split_labels`.
+        TargetKind::Object => ObjectKey::from_encoded_path(trimmed)
+            .map(Some)
+            .map_err(|_| CodecError::invalid_argument("the object key in the request path is not usable").about("Key")),
     }
 }
 
