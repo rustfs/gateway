@@ -1,0 +1,42 @@
+[case]
+id = "c-ssec-0009"
+schema_version = 1
+title = "A KMS key id beside AES256 is a 400 InvalidArgument"
+rationale = """
+A key id names a KMS key, and AES256 is the scheme where the service manages the key itself. Accepting both means silently ignoring one of them, and the one that would be ignored is the caller's explicit choice of key — a compliance answer, not a preference. The refusal never quotes the key id: an identifier in an error message is an identifier in whatever aggregates error messages.
+"""
+polarity = "negative"
+operation = "PutObject"
+tags = ["sse", "encryption", "security"]
+timeout_ms = 10000
+quirks = ["q-sse-0010"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/UsingKMSEncryption.html"
+summary = "The KMS key id member is meaningful only when the algorithm names a KMS scheme."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "conf-ssec"
+
+[request]
+method = "PUT"
+target = "/conf-ssec/key-id-beside-aes.bin"
+headers = { "x-amz-server-side-encryption" = "AES256", "x-amz-server-side-encryption-aws-kms-key-id" = "arn:aws:kms:us-east-1:111122223333:key/1234abcd-12ab-34cd-56ef-1234567890ab" }
+body = { size = 16 }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+code = "InvalidArgument"
+request_id_present = true
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>InvalidArgument</Code><Message>x-amz-server-side-encryption-aws-kms-key-id is only valid with aws:kms or aws:kms:dsse</Message><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''

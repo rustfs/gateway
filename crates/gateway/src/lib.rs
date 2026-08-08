@@ -226,6 +226,20 @@ pub use rustfs_gateway_core::ops::shared::lifecycle::{
 // (`q-enc-0009`).
 pub use rustfs_gateway_core::ops::shared::encryption::{EncryptionRejection, validate_encryption};
 
+// The **run-time** half of server-side encryption, which the document contract above deliberately
+// does not answer. Three of these are named by a deployment: `TransportSecurity` is what a
+// transport puts into a request's extensions to say the socket was encrypted, `SseConfig` and
+// `PlaintextCustomerKeyAck` are how a deployment says it will serve customer-provided keys over
+// cleartext anyway. The rest are what a **backend** needs: `KeyFingerprint` is the sixteen bytes
+// an upload is bound to, `check_part` is the cross-request comparison the framework cannot make
+// for it because it holds no upload state, and `enforce` is how a handler obtains a fingerprint
+// the framework has already validated. `SseEnforced` carries digests and an algorithm — never a
+// key; there is no accessor for one, on purpose.
+pub use rustfs_gateway_core::sse::{
+    KeyFingerprint, KeySide, ManagedRejection, PartRejection, PlaintextCustomerKeyAck, SseConfig, SseEnforced, SseRejection,
+    TransportSecurity, check_part, enforce as enforce_sse, presented_customer_key,
+};
+
 // The object-lock document contracts, exported for the same reason as the three above — with
 // the sharpest stakes in the table: what the lock, retention and legal-hold writes may store is
 // a WORM compliance answer, so the closed value sets, the Days/Years mutex and the future-only

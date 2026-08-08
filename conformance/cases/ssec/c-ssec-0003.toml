@@ -1,0 +1,45 @@
+[case]
+id = "c-ssec-0003"
+schema_version = 1
+title = "A lone customer-key header over cleartext is refused before its shape is judged"
+rationale = """
+A gate written over the complete trio would serve a request carrying only the key — the one header of the three that actually holds the secret. The rule is stated over any of the six customer-key headers being present, and the refusal is the transport one rather than the incompleteness one, because the transport check runs first: over cleartext every such request gets one answer, so the refusal cannot be used to learn anything about the key that was just disclosed.
+"""
+polarity = "negative"
+operation = "PutObject"
+tags = ["sse", "encryption", "security", "tls"]
+timeout_ms = 10000
+quirks = ["q-sse-0010"]
+
+[case.applies_to]
+tls = "forbidden"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/ServerSideEncryptionCustomerKeys.html"
+summary = "The three headers form one group; the key header alone carries the key material."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "conf-ssec"
+
+[request]
+method = "PUT"
+target = "/conf-ssec/lone-key.bin"
+headers = { "x-amz-server-side-encryption-customer-key" = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=" }
+body = { size = 16 }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+code = "InvalidRequest"
+request_id_present = true
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>InvalidRequest</Code><Message>requests specifying a customer-provided encryption key must be made over a secure connection</Message><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''

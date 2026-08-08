@@ -104,6 +104,7 @@ pub mod op;
 pub mod ops;
 pub mod registry;
 pub mod route;
+pub mod sse;
 
 pub use crate::codec::{
     BodyAllowance, CodecError, EncodedResponse, MetaView, OperationCodec, RequestBody, ResponseBody, ResponseOverride,
@@ -129,4 +130,7 @@ pub use crate::registry::{
 pub use crate::route::{
     ArnForm, CompileError, CompiledRouter, Explanation, HostClass, OpId, Predicate, RequestShape, RouteBuildError, RouteEntry,
     RouteRequestParts, RouteSelector, RouteTable, ShadowingDecl, ShadowingDecls, ShadowingPolicy, TargetKind,
+};
+pub use crate::sse::{
+    KeyFingerprint, KeySide, PartRejection, PlaintextCustomerKeyAck, SseConfig, SseEnforced, SseRejection, TransportSecurity,
 };

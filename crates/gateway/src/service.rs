@@ -37,6 +37,8 @@
 //!   authenticate  who the caller is, from a request the floor has already cleared
 //!   authorize     whether that caller may do this — identity known, operation known
 //!   contradict    the head-decidable contradictions, refused while the body is still outside
+//!                 — two checksum claims, and the server-side-encryption family's transport
+//!                   gate, key/digest agreement and channel exclusivity
 //!   read body     bounded by the assembly's ceiling and by the operation's own cap
 //!   decode        the request head and body into the operation's input
 //!   OP LAYERS     per-operation middleware, outer to inner, inside dispatch
@@ -75,6 +77,22 @@
 //! [`rustfs_gateway_sig::Verdict`] — so the read below cannot be moved above the verifier without
 //! failing to compile, which is what axiom A3 asks of an ordering contract.
 //!
+//! # Where the connection's security comes from
+//!
+//! [`rustfs_gateway_core::TransportSecurity`] is read out of the `http::Request`'s extensions, at
+//! the top of [`S3Service::call`] and before anything consumes the request. Extensions are a
+//! server-side channel: nothing a client can put on the wire lands in one, so whatever is there
+//! was put there by the code that accepted the socket. Absent, the answer is
+//! `TransportSecurity::Plaintext` — fail closed, because a deployment that has not said is a
+//! deployment nobody has checked.
+//!
+//! `X-Forwarded-Proto` and its family are **never** consulted. They are request headers, so a
+//! caller sending a customer-provided encryption key over cleartext could switch off the gate that
+//! exists to refuse exactly that request. A deployment terminating TLS in front of this service
+//! declares it through its transport, or acknowledges the risk through
+//! [`rustfs_gateway_core::SseConfig`]; there is no third way, and
+//! `tests/sse_runtime.rs` asserts the header does not become one.
+//!
 //! # Why the clock is read once
 //!
 //! At the top, before acceptance, and never again — the reading is taken in [`S3Service::call`] and
@@ -100,7 +118,7 @@ use rustfs_gateway_core::cors::{
     answer_preflight, classify, preflight_refusal,
 };
 use rustfs_gateway_core::{
-    EncodedResponse, MetaView, ResponseBody, RouteRequestParts, Router, TargetKind,
+    EncodedResponse, MetaView, ResponseBody, RouteRequestParts, Router, SseConfig, TargetKind, TransportSecurity,
     dispatch::{NO_ROUTE_MESSAGE, NOT_REGISTERED_MESSAGE},
 };
 use rustfs_gateway_http::{Limits, WireRequest};
@@ -141,6 +159,7 @@ pub(crate) struct Inner {
     pub(crate) traces: Arc<dyn TraceSource>,
     pub(crate) cors: Arc<CachedCorsSource>,
     pub(crate) cors_policy: CorsPolicy,
+    pub(crate) sse: SseConfig,
 }
 
 /// An assembled S3 service.
@@ -198,8 +217,13 @@ impl S3Service {
         // rules are stated over the request method, and every stage below has either forgotten it or
         // never had it.
         let method = request.method().clone();
+        // Read here for the same reason as the method: this is the last place the whole request
+        // exists, and `WireRequest::accept` publishes no way back to its extensions. Absent means
+        // cleartext, which is what makes the customer-key gate fail closed for a transport that
+        // has not been taught to declare anything.
+        let connection = connection_security(request.extensions());
         let mut outcome = Outcome::new(&trace);
-        let mut response = self.run(request, &mut outcome, now).await;
+        let mut response = self.run(request, &mut outcome, now, connection).await;
         // The CORS decoration for an ordinary request, applied here because it belongs on
         // **every** answer the pipeline produced once authorisation was granted — the `404` and
         // the `500` included. A browser cannot read a response it was not granted access to, so
@@ -257,7 +281,13 @@ impl S3Service {
         self.call(Request::from_parts(parts, http_body_util::Full::new(body))).await
     }
 
-    async fn run<B>(&self, request: Request<B>, outcome: &mut Outcome<'_>, now: RequestNow) -> Response<Body>
+    async fn run<B>(
+        &self,
+        request: Request<B>,
+        outcome: &mut Outcome<'_>,
+        now: RequestNow,
+        connection: TransportSecurity,
+    ) -> Response<Body>
     where
         B: http_body::Body + Send + 'static,
         B::Data: Send,
@@ -525,6 +555,37 @@ impl S3Service {
         // what keeps a rejected upload from costing the whole transfer.
         if let Err(error) = rustfs_gateway_core::codec::value::refuse_contradictory_checksums(&meta) {
             return outcome.refuse(S3Error::from(error));
+        }
+
+        // The server-side-encryption family, on the same terms and in the same position, and for
+        // **every** operation rather than the ones whose model happens to bind the headers. Three
+        // reasons this is here and not in a codec:
+        //
+        // *Head-decidable*, so it costs the response and never the transfer — a customer-provided
+        // key on a cleartext connection is refused before a byte of the object is read.
+        // *Unconditional*, so a backend cannot decline the gate by not implementing it; the
+        // refusal is the framework's, exactly as the checksum contradiction above is.
+        // *Before the key can be handed anywhere*, which is the whole of the hygiene argument: once
+        // a decoded input carrying the key exists, keeping it out of a log is somebody else's care.
+        //
+        // **Stated over `meta`, which is the head the wire seam produced — not the snapshot.**
+        // There are two heads from `StageFilter::on_wire` onwards, and the choice is load-bearing
+        // in both directions. Reading the snapshot would let a filter that *adds* the trio hand a
+        // key to a handler over cleartext that this gate never looked at; it would also refuse a
+        // request whose key a filter had *removed*, which is a wrong answer rather than a
+        // protection. The invariant is that the gate and every consumer of the key read one head,
+        // with no window between them — the decoder builds its input from this same `meta`.
+        // `tests/sse_runtime.rs` pins both directions with a filter that adds the trio and one
+        // that removes it. The signature is the deliberate exception and reads the pre-seam
+        // `headers` snapshot, which is P6-01's isolation property and is not this rule's business.
+        //
+        // `SseEnforced` is dropped here. `Req<O>` carries a decoded input and nothing else, so
+        // there is no seat on it for a proof — see the module docs of
+        // `rustfs_gateway_core::sse` and the note in `crates/gateway/MAP.md`. A backend that needs
+        // the fingerprint calls `rustfs_gateway_core::sse::presented_customer_key` from its own
+        // decoder, which has the `MetaView`; it is the same code path this gate ran.
+        if let Err(rejection) = rustfs_gateway_core::sse::enforce(&meta, connection, &self.inner.sse) {
+            return outcome.refuse(S3Error::from(rejection));
         }
 
         // Whether the `aws-chunked` parser runs, decided from `x-amz-content-sha256` and from
@@ -823,6 +884,34 @@ fn declared_trailers(headers: &http::HeaderMap) -> Result<TrailerSet, S3Error> {
         .map_err(|_| malformed())
 }
 
+/// What the transport said about this connection, or [`TransportSecurity::Plaintext`].
+///
+/// The **only** source. A transport that terminates TLS, or that is handed a connection by one
+/// that did, inserts a `TransportSecurity` into the request's extensions:
+///
+/// ```
+/// # use rustfs_gateway::TransportSecurity;
+/// let mut request = http::Request::new(());
+/// request.extensions_mut().insert(TransportSecurity::Encrypted);
+/// ```
+///
+/// Extensions cannot be written from the wire, which is the property that makes this trustworthy
+/// and `X-Forwarded-Proto` not. A deployment behind a TLS-terminating proxy that cannot be taught
+/// to set the extension has one other option, and it is an explicit one:
+/// `ServiceBuilder::sse_config` with
+/// `rustfs_gateway_core::SseConfig::allowing_customer_keys_over_plaintext`, whose witness has to be
+/// named in full.
+///
+/// Absent is cleartext. The alternative — assuming encryption when nobody said — is the failure
+/// mode where a development deployment that was never given a transport quietly serves customer
+/// keys over HTTP.
+fn connection_security(extensions: &http::Extensions) -> TransportSecurity {
+    extensions
+        .get::<TransportSecurity>()
+        .copied()
+        .unwrap_or(TransportSecurity::Plaintext)
+}
+
 /// Turns an encoder's output into the response that goes on the wire.
 fn into_response(encoded: EncodedResponse) -> Response<Body> {
     let body = match encoded.body {
@@ -853,6 +942,25 @@ mod tests {
     #[test]
     fn an_absent_content_sha256_is_the_empty_payload() {
         assert_eq!(payload_mode(&http::HeaderMap::new()).expect("no header"), PayloadMode::Empty);
+    }
+
+    /// Negative — a request nobody annotated is cleartext, so the customer-key gate is closed by
+    /// default rather than open by default.
+    #[test]
+    fn an_unannotated_request_is_cleartext() {
+        assert_eq!(connection_security(&http::Extensions::new()), TransportSecurity::Plaintext);
+    }
+
+    /// Negative — and the other direction, so the reader is not simply stuck on one answer. A
+    /// function that returned `Plaintext` unconditionally satisfies every test above.
+    #[test]
+    fn n_a_transport_that_declares_tls_is_believed_and_one_that_declares_cleartext_is_too() {
+        let mut encrypted = http::Extensions::new();
+        encrypted.insert(TransportSecurity::Encrypted);
+        assert_eq!(connection_security(&encrypted), TransportSecurity::Encrypted);
+        let mut plaintext = http::Extensions::new();
+        plaintext.insert(TransportSecurity::Plaintext);
+        assert_eq!(connection_security(&plaintext), TransportSecurity::Plaintext);
     }
 
     /// Negative — a value this assembly cannot frame is refused rather than admitted and then

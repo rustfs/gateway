@@ -56,6 +56,7 @@ pub const TAG_VOCABULARY: &[&str] = &[
     "cors",
     "preflight",
     "encryption",
+    "sse",
     "lifecycle",
     "replication",
     "bucketconfig",

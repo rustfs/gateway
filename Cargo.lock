@@ -491,6 +491,7 @@ version = "0.1.0"
 dependencies = [
  "bytes",
  "http",
+ "md-5",
  "percent-encoding",
  "proptest",
  "rustfs-gateway-http",
@@ -498,6 +499,8 @@ dependencies = [
  "rustfs-gateway-stream",
  "rustfs-gateway-types",
  "rustfs-gateway-xml",
+ "subtle",
+ "zeroize",
 ]
 
 [[package]]

@@ -1,0 +1,42 @@
+[case]
+id = "c-ssec-0008"
+schema_version = 1
+title = "An unknown x-amz-server-side-encryption value is a 400 InvalidArgument"
+rationale = """
+The value set is closed, and the lowercase spelling is the one clients actually send. Accepting a value nothing can apply stores an object the caller believes is encrypted and nothing encrypted — the same argument that makes the stored bucket document refuse an unknown SSEAlgorithm, applied to the header that overrides it. The two share one implementation of the rule, so they cannot come to different conclusions about a spelling.
+"""
+polarity = "negative"
+operation = "PutObject"
+tags = ["sse", "encryption"]
+timeout_ms = 10000
+quirks = ["q-sse-0010"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/UsingKMSEncryption.html"
+summary = "The header takes one of the documented algorithm values; anything else names an encryption scheme the service cannot apply."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "conf-ssec"
+
+[request]
+method = "PUT"
+target = "/conf-ssec/unknown-algorithm.bin"
+headers = { "x-amz-server-side-encryption" = "aes256" }
+body = { size = 16 }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+code = "InvalidArgument"
+request_id_present = true
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>InvalidArgument</Code><Message>x-amz-server-side-encryption must be one of AES256, aws:fsx, aws:kms or aws:kms:dsse</Message><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''

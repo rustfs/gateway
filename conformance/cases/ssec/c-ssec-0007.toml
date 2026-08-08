@@ -1,0 +1,45 @@
+[case]
+id = "c-ssec-0007"
+schema_version = 1
+title = "Both encryption channels at once over cleartext answers the transport refusal"
+rationale = """
+A request naming a server-managed algorithm and a customer-provided key is a contradiction, and over cleartext it is also a disclosure. Both are refusals, and which one a caller receives is fixed rather than incidental: the transport check runs first, so a caller cannot learn from the answer whether its key was well formed. Pinning the order is the point of this case — an implementation that evaluated the contradiction first would answer InvalidArgument here and would have looked at the key to do it.
+"""
+polarity = "negative"
+operation = "PutObject"
+tags = ["sse", "encryption", "security", "tls"]
+timeout_ms = 10000
+quirks = ["q-sse-0010"]
+
+[case.applies_to]
+tls = "forbidden"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/UsingKMSEncryption.html"
+summary = "SSE-KMS and a customer-provided key are alternative ways to encrypt one object, not a combination."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "conf-ssec"
+
+[request]
+method = "PUT"
+target = "/conf-ssec/both-channels.bin"
+headers = { "x-amz-server-side-encryption" = "aws:kms", "x-amz-server-side-encryption-customer-algorithm" = "AES256", "x-amz-server-side-encryption-customer-key" = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=", "x-amz-server-side-encryption-customer-key-md5" = "tP/LI3N87DFaSk0aoqYgzg==" }
+body = { size = 16 }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+code = "InvalidRequest"
+request_id_present = true
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>InvalidRequest</Code><Message>requests specifying a customer-provided encryption key must be made over a secure connection</Message><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''

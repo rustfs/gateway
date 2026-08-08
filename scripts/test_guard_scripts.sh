@@ -878,6 +878,108 @@ mut_no_landing_test_file() {
 }
 expect_fail check_patch_layer_map.sh \
     'the landings file missing entirely (a guard whose input is gone must fail, not skip)' mut_no_landing_test_file
+# check_sse_key_never_leaks.sh has five rules over the SSE-C customer key, plus the missing-input
+# rule every guard owes. Each is mutated separately: one case would leave four of them as prose.
+# rustfs/backlog#1751 is the task all six are about, and GHSA-8cm2-h255-v749 is what a key in a log
+# line looks like once it has happened.
+
+mut_sse_key_bound_as_an_output() {
+    python3 - <<'SSEPY'
+import pathlib
+path = pathlib.Path("spec/operations/PutObject.toml")
+# The generated encoder that would write the key onto the response, spelled the way the emitter
+# spells one.
+path.write_text(path.read_text() + """
+[[output]]
+name = "SSECustomerKey"
+wire_name = "x-amz-server-side-encryption-customer-key"
+binding = "Header"
+type = "String"
+required = false
+hot = false
+quirks = []
+""")
+SSEPY
+}
+expect_fail check_sse_key_never_leaks.sh \
+    'an operation output binding the customer key header' mut_sse_key_bound_as_an_output
+
+mut_sse_copy_source_key_dropped_from_the_list() {
+    python3 - <<'SSEPY'
+import pathlib
+path = pathlib.Path("crates/core/src/sse/headers.rs")
+# The half of the list nobody looks at: a CopyObject's source-side key.
+path.write_text(path.read_text().replace(
+    "pub const NEVER_IN_A_RESPONSE: &[&str] = &[SSEC_KEY, COPY_SSEC_KEY];",
+    "pub const NEVER_IN_A_RESPONSE: &[&str] = &[SSEC_KEY];",
+))
+SSEPY
+}
+expect_fail check_sse_key_never_leaks.sh \
+    'the copy-source key dropped from the never-echoed list' mut_sse_copy_source_key_dropped_from_the_list
+
+mut_sse_response_strip_removed() {
+    python3 - <<'SSEPY'
+import pathlib
+path = pathlib.Path("crates/gateway/src/invariants.rs")
+# The strip deleted from the one place every response passes through.
+path.write_text(path.read_text().replace(
+    "    for name in rustfs_gateway_core::sse::NEVER_IN_A_RESPONSE {",
+    "    for name in [] as [&str; 0] {",
+))
+SSEPY
+}
+expect_fail check_sse_key_never_leaks.sh \
+    'the response invariant no longer stripping the customer-key headers' mut_sse_response_strip_removed
+
+mut_sse_second_expose_call_site() {
+    python3 - <<'SSEPY'
+import pathlib
+path = pathlib.Path("crates/core/src/sse/mod.rs")
+path.write_text(path.read_text() + """
+fn a_second_reader(text: &headers::KeyText<'_>) -> usize {
+    text.expose().len()
+}
+""")
+SSEPY
+}
+expect_fail check_sse_key_never_leaks.sh \
+    'a second reader of the customer key text' mut_sse_second_expose_call_site
+
+mut_sse_second_choice_to_bool() {
+    python3 - <<'SSEPY'
+import pathlib
+path = pathlib.Path("crates/core/src/sse/consistency.rs")
+path.write_text(path.read_text() + """
+fn a_second_escape_hatch(choice: subtle::Choice) -> bool {
+    bool::from(choice)
+}
+""")
+SSEPY
+}
+expect_fail check_sse_key_never_leaks.sh \
+    'a second subtle::Choice-to-bool conversion in the SSE module' mut_sse_second_choice_to_bool
+
+mut_sse_key_in_a_log_line() {
+    python3 - <<'SSEPY'
+import pathlib
+path = pathlib.Path("crates/gateway/src/service.rs")
+path.write_text(path.read_text() + """
+fn an_operator_friendly_diagnostic(customer_key: &str) -> String {
+    format!("rejected the customer_key {customer_key}")
+}
+""")
+SSEPY
+}
+expect_fail check_sse_key_never_leaks.sh \
+    'a formatting macro naming the customer key' mut_sse_key_in_a_log_line
+
+mut_sse_headers_module_deleted() {
+    rm -f crates/core/src/sse/headers.rs
+}
+expect_fail check_sse_key_never_leaks.sh \
+    "the guard's own subject deleted, which must fail rather than skip" mut_sse_headers_module_deleted
+
 
 printf '\n%s case(s), %s failure(s)\n' "$cases" "$failures"
 [[ "$failures" -eq 0 ]]

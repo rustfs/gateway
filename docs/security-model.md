@@ -114,6 +114,43 @@ keys there — get the floor but not the deployment's `NameValidator`, because a
 has no policy to hand. The floor is uniform; a custom validator today covers the request path and
 `x-amz-copy-source`.
 
+## Server-side encryption: your responsibilities
+
+SSE-C is the one place in S3 where the client hands the server a raw encryption key over the wire,
+in a request header. The framework's half of that is small, absolute, and not optional:
+
+- **A customer-provided key on a cleartext connection is refused**, `400 InvalidRequest`, before
+  the request body is read and for every operation. The framework does not ask a backend's
+  opinion, and there is no way to reach a handler with a key that came over cleartext.
+- **The key never appears on a response.** `x-amz-server-side-encryption-customer-key` and its
+  `copy-source` twin are removed from every response the service writes, answered or refused. The
+  algorithm and the key digest survive, because AWS returns both.
+- **The key never appears in a refusal.** Every SSE refusal message is a compile-time constant. No
+  key, no digest, no expected-versus-actual, and no KMS key id.
+- **The key and its digest are agreed in constant time**, both decoded strictly to their exact
+  widths first, and the refusal does not say which half was wrong.
+- **The key does not outlive the function that hashes it.** There is no type in this workspace's
+  enforcement path that stores one; the bytes live in a zeroized stack array for as long as it
+  takes to compute the digest.
+
+Two things are **yours**:
+
+1. **The connection's security.** The framework believes exactly one source: a
+   `TransportSecurity` value that your transport puts into the request's extensions.
+   `X-Forwarded-Proto` is never consulted — it is a request header, so believing it would let the
+   caller switch the gate off. If you terminate TLS in front of the gateway, teach the transport
+   to declare it. `SseConfig::allowing_customer_keys_over_plaintext` exists for the deployment
+   that cannot, and its witness has to be typed out in full for a reason.
+2. **Your own handler and storage layer.** Once a decoded input reaches your backend it carries
+   the key, and this framework can guarantee nothing about what you do with it. Do not log it, do
+   not put it in a trace attribute, do not persist it — a multipart upload binds `MD5(key)`, never
+   the key, and `check_part` is written against the digest so that you never have to store one.
+
+The multipart rule is the one the framework can only half-enforce: every `UploadPart` must repeat
+the same customer-key headers its `CreateMultipartUpload` carried. The comparison lives in
+`rustfs_gateway_core::sse::check_part`, which returns a `Result` you cannot silently discard, but
+the binding itself is yours to store, because this framework holds no upload state.
+
 ## Where the boundary sits
 
 This framework verifies signatures, enforces presigned constraints, frames payloads, and rejects
