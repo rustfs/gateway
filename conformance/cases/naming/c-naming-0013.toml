@@ -1,0 +1,54 @@
+# c-naming-0013 — a key that names a location rather than an object
+#
+[case]
+id = "c-naming-0013"
+schema_version = 1
+title = "A key spelled as a UNC root is refused, while a single leading slash stays legal"
+rationale = """
+Two leading slashes is the UNC spelling and one is the AWS empty-segment spelling, so the two cannot be treated alike: refusing both would break the empty-segment case this suite also pins, and accepting both would hand a Windows storage layer a host name where it expected a key. The floor draws the line at the second slash, and this case is the half that must be refused."""
+polarity = "negative"
+operation = "GetObject"
+tags = ["naming", "routing", "security"]
+timeout_ms = 10000
+quirks = ["q-naming-0003"]
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/issues/102"
+summary = "Upstream saw a platform path separator inside a key derange a listing on the platform that reads it as syntax."
+kind = "s3s-issue"
+
+[[case.evidence]]
+url = "https://github.com/rustfs/rustfs/security/advisories/GHSA-8r6f-hmq2-28rg"
+summary = "An object key carrying a traversal sequence reached the filesystem mapping and read outside the bucket."
+kind = "other"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-naming"
+
+[[setup.objects]]
+bucket = "conf-naming"
+key = "real.txt"
+body = { utf8 = "in the bucket" }
+
+[request]
+method = "GET"
+target = "/conf-naming///server/share"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+code = "InvalidArgument"
+message_present = true
+request_id_present = true
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+contains_utf8 = ["<Code>InvalidArgument</Code>"]
+not_contains_utf8 = ["root:", "in the bucket"]

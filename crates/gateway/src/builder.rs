@@ -44,6 +44,7 @@ use std::sync::Arc;
 use rustfs_gateway_core::{Handler, MissingHandlers, OperationCodec, OperationSet, RouterBuilder};
 use rustfs_gateway_http::Limits;
 use rustfs_gateway_sig::SecurityFloor;
+use rustfs_gateway_types::{NamePolicy, NameValidator, SlashPolicy};
 
 use crate::assembly::{AssemblyError, RuleRef};
 use crate::clock::{Clock, system_clock};
@@ -71,6 +72,7 @@ pub struct ServiceBuilder {
     dispatch: DispatchTable,
     floor: SecurityFloor,
     limits: Limits,
+    names: NamePolicy,
     max_buffered_body_bytes: u64,
     authorizer: Option<Arc<dyn Authorizer>>,
     authenticator: Option<Arc<dyn Authenticator>>,
@@ -110,6 +112,7 @@ impl ServiceBuilder {
             dispatch: DispatchTable::default(),
             floor: SecurityFloor::new(),
             limits: Limits::default(),
+            names: NamePolicy::default(),
             max_buffered_body_bytes: DEFAULT_MAX_BUFFERED_BODY_BYTES,
             authorizer: None,
             authenticator: None,
@@ -177,6 +180,38 @@ impl ServiceBuilder {
     #[must_use]
     pub fn authenticator(mut self, authenticator: impl Authenticator) -> Self {
         self.authenticator = Some(Arc::new(authenticator));
+        self
+    }
+
+    /// Installs a naming policy: the slash rule and the validator.
+    ///
+    /// Defaults to [`NamePolicy::default`] — AWS slash semantics and the AWS bucket naming rules.
+    /// Whatever is installed here, the safety floor underneath it does not move: a validator has
+    /// no variant with which to permit what the floor refused.
+    #[must_use]
+    pub fn name_policy(mut self, names: NamePolicy) -> Self {
+        self.names = names;
+        self
+    }
+
+    /// Installs a name validator, keeping the slash policy already set.
+    ///
+    /// It may refuse more than the built-in `AwsNameValidator` does, and it cannot refuse less
+    /// than the floor: the framework runs the floor first and ANDs the two answers.
+    #[must_use]
+    pub fn name_validator(mut self, validator: impl NameValidator) -> Self {
+        self.names = self.names.with_validator(Arc::new(validator));
+        self
+    }
+
+    /// Chooses what happens to a run of slashes in an object key.
+    ///
+    /// **Persistence-affecting.** [`SlashPolicy::Collapse`] makes `a//b` and `a/b` the same object;
+    /// switching it on a deployment that has data renames every object whose key held an empty
+    /// segment. [`SlashPolicy::rewrites_keys`] is what a start-up posture report reads.
+    #[must_use]
+    pub fn slash_policy(mut self, slash: SlashPolicy) -> Self {
+        self.names = self.names.with_slash_policy(slash);
         self
     }
 
@@ -304,6 +339,7 @@ impl ServiceBuilder {
             dispatch: self.dispatch,
             floor: self.floor,
             limits: self.limits,
+            names: self.names,
             max_buffered_body_bytes: self.max_buffered_body_bytes,
             authorizer,
             authenticator,

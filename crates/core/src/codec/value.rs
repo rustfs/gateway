@@ -261,10 +261,22 @@ pub fn render_etag(value: &ETag, context: EtagRender) -> String {
 
 /// Parses an object key out of a body element or a query value, already percent-decoded.
 ///
+/// The safety floor runs here too. A key that arrives in a `<Delete>` body is a key a client
+/// chose, and a floor that governed the request path but not the request body would be a floor
+/// with a door in it — `DeleteObjects` names its keys in the body and nowhere else.
+///
+/// No decode happens: the XML or query reader that produced this value already performed the one
+/// decode, and a second one is the `%252e%252e` trap.
+///
+/// The *validator* half of the policy is not applied here, only the floor: a generated decoder has
+/// no deployment policy to hand, and inventing a default would make the assembled service's
+/// validator disagree with this one. See the note in `docs/security-model.md`.
+///
 /// # Errors
 ///
 /// [`CodecError`] naming the member.
 pub fn object_key(value: &str, member: &'static str) -> Result<ObjectKey, CodecError> {
+    rustfs_gateway_types::floor_check_key(value).map_err(|_| unusable(member))?;
     ObjectKey::new(value.to_owned()).map_err(|_| unusable(member))
 }
 

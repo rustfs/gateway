@@ -27,6 +27,18 @@
 //! anywhere can be decoded twice, and a doubly decoded `%252e%252e` is a traversal no single-decode
 //! check would have seen. This is the one place the single decode happens, on the way to a
 //! [`rustfs_gateway_types::ObjectKey`], and the result is what every decoder reads.
+//!
+//! # Where the naming policy enters, and where it must not
+//!
+//! [`MetaView::of_with`] takes the deployment's [`NamePolicy`] and hands it to
+//! `ObjectKey::materialize`, which is the workspace's single normalisation. Everything after this
+//! point — governance, authorization, auditing, the codec, the backend — reads the value that came
+//! out of it and is never given the path to re-parse.
+//!
+//! Signature canonicalisation is the one stage that must **not** see it. `rustfs-gateway-sig`
+//! builds its canonical request from `WireRequest::raw_path`, the undecoded bytes, and there is no
+//! conversion from an [`rustfs_gateway_types::ObjectKey`] back into one. Two different raw paths
+//! that normalise to the same key must not share a signature.
 
 use std::borrow::Cow;
 
@@ -34,7 +46,7 @@ use bytes::Bytes;
 use http::Method;
 use rustfs_gateway_http::{HeaderView, QueryView, WireRequest};
 use rustfs_gateway_stream::ByteStream;
-use rustfs_gateway_types::{BucketName, ObjectKey};
+use rustfs_gateway_types::{BucketName, NamePolicy, NameRejection, ObjectKey};
 
 use crate::codec::error::CodecError;
 use crate::route::TargetKind;
@@ -50,10 +62,11 @@ pub struct MetaView<'a> {
     query: QueryView<'a>,
     bucket: Option<BucketName>,
     key: Option<ObjectKey>,
+    names: NamePolicy,
 }
 
 impl<'a> MetaView<'a> {
-    /// Splits an accepted request's path according to what the route says it addresses.
+    /// Splits an accepted request's path under the default naming policy.
     ///
     /// # Errors
     ///
@@ -61,7 +74,7 @@ impl<'a> MetaView<'a> {
     /// label is not a valid bucket name or object key. Both are `400`: routing has already decided
     /// which operation this is, so an unusable label is the caller's mistake and not a `501`.
     pub fn of<B>(request: &'a WireRequest<B>, target: TargetKind) -> Result<Self, CodecError> {
-        Self::addressed(request, target, None)
+        Self::addressed_with(request, target, None, &NamePolicy::default())
     }
 
     /// Splits an accepted request's path, with the bucket a virtual host already named.
@@ -83,10 +96,42 @@ impl<'a> MetaView<'a> {
         target: TargetKind,
         host_bucket: Option<BucketName>,
     ) -> Result<Self, CodecError> {
+        Self::addressed_with(request, target, host_bucket, &NamePolicy::default())
+    }
+
+    /// Splits an accepted request's path under the deployment's naming policy.
+    ///
+    /// The policy is threaded rather than read from a global, because a global would be a second
+    /// place the answer could come from and the whole point of this stage is that there is one.
+    ///
+    /// # Errors
+    ///
+    /// [`CodecError`], as [`MetaView::of`].
+    pub fn of_with<B>(request: &'a WireRequest<B>, target: TargetKind, names: &NamePolicy) -> Result<Self, CodecError> {
+        Self::addressed_with(request, target, None, names)
+    }
+
+    /// **The one constructor.** Both addressing styles and both policy sources end here.
+    ///
+    /// The other three are named shorthands for it, so that a virtual-hosted key and a path-style
+    /// key cannot be materialised by two different pieces of code. That is not tidiness: if the
+    /// host-addressed path went through its own decode, `a//b` would be one key when the client
+    /// addressed the bucket by host and another when it addressed it by path, and a policy written
+    /// against one spelling would not cover the other.
+    ///
+    /// # Errors
+    ///
+    /// [`CodecError`], as [`MetaView::of`].
+    pub fn addressed_with<B>(
+        request: &'a WireRequest<B>,
+        target: TargetKind,
+        host_bucket: Option<BucketName>,
+        names: &NamePolicy,
+    ) -> Result<Self, CodecError> {
         let path = request.raw_path().as_str();
         let (bucket, key) = match host_bucket {
-            Some(bucket) => (Some(bucket), vhost_key(path, target)?),
-            None => split_labels(path, target)?,
+            Some(bucket) => (Some(bucket), vhost_key(path, target, names)?),
+            None => split_labels(path, target, names)?,
         };
         Ok(Self {
             method: request.method(),
@@ -94,7 +139,19 @@ impl<'a> MetaView<'a> {
             query: request.query(),
             bucket,
             key,
+            names: names.clone(),
         })
+    }
+
+    /// The naming policy this view was built under.
+    ///
+    /// Read by the decoders that have a second name to materialise — `x-amz-copy-source` is the
+    /// one — so that the source of a copy is judged by the same rules as its destination. A copy
+    /// whose source went through different rules than its destination is the shape of
+    /// `GHSA-f4vq-9ffr-m8m3`.
+    #[must_use]
+    pub fn names(&self) -> &NamePolicy {
+        &self.names
     }
 
     /// The request method. Needed by encoders, because a `HEAD` response never carries a body.
@@ -220,50 +277,63 @@ impl<'a> MetaView<'a> {
 /// No bucket is taken here, because the host already supplied it. A `Service` target cannot occur
 /// on a virtual host — the host names a bucket, so there is no service-root request to be had —
 /// and is treated as the bucket root rather than being given a key it does not have.
-fn vhost_key(path: &str, target: TargetKind) -> Result<Option<ObjectKey>, CodecError> {
+fn vhost_key(path: &str, target: TargetKind, names: &NamePolicy) -> Result<Option<ObjectKey>, CodecError> {
     let trimmed = path.strip_prefix('/').unwrap_or(path);
     match target {
         TargetKind::Service | TargetKind::Bucket => Ok(None),
-        // `from_encoded_path` is the single decode, exactly as in `split_labels`.
-        TargetKind::Object => ObjectKey::from_encoded_path(trimmed)
-            .map(Some)
-            .map_err(|_| CodecError::invalid_argument("the object key in the request path is not usable").about("Key")),
+        // `materialize` under the *same* policy `split_labels` uses, not merely the same function.
+        // A virtual-hosted key that went through the default policy while a path-style one went
+        // through the deployment's would make `a//b` two different objects depending on how the
+        // client spelled the bucket — the drift this module exists to prevent, arriving through
+        // the addressing style rather than through a second decoder.
+        TargetKind::Object => ObjectKey::materialize(trimmed, names).map(Some).map_err(key_rejected),
     }
 }
 
 /// Splits a request path into the labels the target kind declares.
-fn split_labels(path: &str, target: TargetKind) -> Result<(Option<BucketName>, Option<ObjectKey>), CodecError> {
+fn split_labels(
+    path: &str,
+    target: TargetKind,
+    names: &NamePolicy,
+) -> Result<(Option<BucketName>, Option<ObjectKey>), CodecError> {
     let trimmed = path.strip_prefix('/').unwrap_or(path);
     match target {
         TargetKind::Service => Ok((None, None)),
         TargetKind::Bucket => {
             let name = trimmed.strip_suffix('/').unwrap_or(trimmed);
-            Ok((Some(bucket_of(name)?), None))
+            Ok((Some(bucket_of(name, names)?), None))
         }
         TargetKind::Object => {
             let (name, key) = trimmed
                 .split_once('/')
                 .ok_or_else(|| CodecError::invalid_argument("the request path names no object key").about("Key"))?;
-            // `from_encoded_path` is the single decode. It rejects a key whose decoded form is
-            // empty or carries a byte an object key may not hold.
-            let key = ObjectKey::from_encoded_path(key)
-                .map_err(|_| CodecError::invalid_argument("the object key in the request path is not usable").about("Key"))?;
-            Ok((Some(bucket_of(name)?), Some(key)))
+            // `materialize` is the single normalisation: one decode, the slash policy, the safety
+            // floor, then the deployment's validator. Nothing downstream re-reads the path.
+            let key = ObjectKey::materialize(key, names).map_err(key_rejected)?;
+            Ok((Some(bucket_of(name, names)?), Some(key)))
         }
     }
 }
 
-fn bucket_of(raw: &str) -> Result<BucketName, CodecError> {
+/// Turns a refused key into the error the caller sees.
+///
+/// The rejection's own reason is used, and the value never is: a message that echoed the key back
+/// would put whatever the caller sent into a log line and an error body.
+pub(crate) fn key_rejected(rejection: NameRejection) -> CodecError {
+    CodecError::new(rejection.key_error_code(), rejection.reason()).about("Key")
+}
+
+fn bucket_of(raw: &str, names: &NamePolicy) -> Result<BucketName, CodecError> {
     // A bucket label is never percent-encoded on the wire: the naming rules admit only characters
-    // that need no escaping, so a `%` here is a spelling no client produces.
+    // that need no escaping, so a `%` here is a spelling no client produces — and the floor
+    // refuses one that carries a `%` rather than decoding it.
     //
     // `InvalidBucketName`, not the generic `InvalidArgument`: AWS answers a name that breaks the
     // bucket naming rules with its own code on every operation, and an SDK branching on it —
     // `CreateBucket` is the one that has to — cannot tell a bad name from any other bad parameter
     // when both arrive as `InvalidArgument`.
-    BucketName::new(raw).map_err(|_| {
-        CodecError::new(rustfs_gateway_types::ErrorCode::INVALID_BUCKET_NAME, "The specified bucket is not valid").about("Bucket")
-    })
+    BucketName::materialize(raw, names)
+        .map_err(|rejection| CodecError::new(rejection.bucket_error_code(), "The specified bucket is not valid").about("Bucket"))
 }
 
 /// Percent-decodes one query component, borrowing when there is nothing to decode.

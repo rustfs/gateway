@@ -1,0 +1,57 @@
+# c-naming-0016 — the floor covers the body, not only the path
+#
+[case]
+id = "c-naming-0016"
+schema_version = 1
+title = "A key naming a traversal inside a DeleteObjects body is refused"
+rationale = """
+DeleteObjects names its keys in the request body and nowhere else, so a floor that governed the request path alone would be a floor with a door in it — and the operation behind that door deletes things. The same rule that refuses a traversal in the path refuses one here, at the point the body element is read, so no key in the batch reaches the backend."""
+polarity = "negative"
+operation = "DeleteObjects"
+tags = ["naming", "routing", "security", "xml", "checksum"]
+timeout_ms = 10000
+quirks = ["q-naming-0003"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/object-keys.html"
+summary = "A key is an opaque sequence of Unicode characters up to 1024 UTF-8 bytes long, with no path structure of its own."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://github.com/rustfs/rustfs/security/advisories/GHSA-f4vq-9ffr-m8m3"
+summary = "A source spelled with a parent traversal was authorised as a key and then used as a path, so the write landed in another bucket."
+kind = "other"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-naming"
+
+[[setup.objects]]
+bucket = "conf-naming"
+key = "batch/one"
+body = { utf8 = "one" }
+
+[request]
+method = "POST"
+target = "/conf-naming?delete"
+# The integrity header this operation requires; the value is md5 of the body below.
+headers = { "content-type" = "application/xml", "content-md5" = "EwfibNzab1Pr9Lcm4bdd5A==" }
+body = { utf8 = "<Delete><Object><Key>../../etc/passwd</Key></Object></Delete>" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+code = "InvalidArgument"
+message_present = true
+request_id_present = true
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+contains_utf8 = ["<Code>InvalidArgument</Code>"]
+not_contains_utf8 = ["root:", "<Deleted>"]

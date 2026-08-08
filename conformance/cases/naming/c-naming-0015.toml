@@ -1,0 +1,44 @@
+# c-naming-0015 — the default bucket rules, and where the floor stops
+#
+[case]
+id = "c-naming-0015"
+schema_version = 1
+title = "A bucket label breaking the AWS naming rules is refused with InvalidBucketName"
+rationale = """
+An uppercase label is refused by the default validator and not by the floor, which is the distinction the extension point rests on: a deployment serving clients whose buckets were created under looser rules can replace the validator and reach them again, and the floor underneath — length, no separator, no control byte — does not move when it does. What must never happen is the generic InvalidArgument, which leaves CreateBucket unable to tell a bad name from a bad parameter."""
+polarity = "negative"
+operation = "GetObject"
+tags = ["naming", "routing", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-naming-0005"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/bucketnamingrules.html"
+summary = "The general-purpose rules give the length bounds, the character set, the address-shaped exclusion and the reserved affixes."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-naming"
+
+[request]
+method = "GET"
+target = "/MyBucket/key.txt"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+code = "InvalidBucketName"
+message_present = true
+request_id_present = true
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+contains_utf8 = ["<Code>InvalidBucketName</Code>"]
+not_contains_utf8 = ["<Contents>", "conf-naming"]

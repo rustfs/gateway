@@ -602,5 +602,54 @@ mut_no_resolver_trait_file() {
 expect_fail check_resolver_pure.sh \
     'the resolver trait file missing entirely (a guard whose input is gone must fail, not skip)' mut_no_resolver_trait_file
 
+# -----------------------------------------------------------------------------
+# check_single_normalization.sh has four rules and each one gets its own
+# negative control. The rule this file exists for is the second normalisation:
+# a guard that only catches a renamed function would have missed the one that
+# was actually here, which was a hand-rolled percent decoder in the conformance
+# fixture parsing x-amz-copy-source a second time.
+# -----------------------------------------------------------------------------
+
+mut_second_normalisation() {
+    printf '\nfn normalize_key(_s: &str) -> String { String::new() }\n' \
+        >>crates/core/src/codec/view.rs
+}
+expect_fail check_single_normalization.sh \
+    'a second normalize_key, which is how the two values start to differ' mut_second_normalisation
+
+mut_second_floor() {
+    printf '\nfn floor_check_key(_s: &str) -> Result<(), ()> { Ok(()) }\n' \
+        >>crates/core/src/codec/value.rs
+}
+expect_fail check_single_normalization.sh \
+    'a second floor_check_key, whose verdict would differ from the real one' mut_second_floor
+
+mut_unallowed_percent_decode() {
+    printf '\nfn again(s: &str) -> String {\n    percent_encoding::percent_decode_str(s).decode_utf8_lossy().into_owned()\n}\n' \
+        >>crates/gateway/src/wire.rs
+}
+expect_fail check_single_normalization.sh \
+    'a percent decoder in a file no allowance covers' mut_unallowed_percent_decode
+
+mut_object_key_deref() {
+    printf '\nimpl std::ops::Deref for ObjectKey {\n    type Target = str;\n    fn deref(&self) -> &str { &self.key }\n}\n' \
+        >>crates/types/src/scalar/name.rs
+}
+expect_fail check_single_normalization.sh \
+    'a Deref on ObjectKey, which hands the storage layer a &str to re-parse' mut_object_key_deref
+
+mut_lossy_in_scalar() {
+    printf '\nfn repair(b: &[u8]) -> String { String::from_utf8_lossy(b).into_owned() }\n' \
+        >>crates/types/src/scalar/naming.rs
+}
+expect_fail check_single_normalization.sh \
+    'a lossy decode in the scalar vocabulary, which merges two client inputs' mut_lossy_in_scalar
+
+mut_drop_percent_decode_allowances() {
+    rm -f scripts/allowances/percent-decode-allowances.txt
+}
+expect_fail check_single_normalization.sh \
+    'a missing allowance file, which must fail rather than skip' mut_drop_percent_decode_allowances
+
 printf '\n%s case(s), %s failure(s)\n' "$cases" "$failures"
 [[ "$failures" -eq 0 ]]

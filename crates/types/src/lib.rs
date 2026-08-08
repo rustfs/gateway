@@ -62,8 +62,9 @@ pub mod dto;
 
 pub use crate::placeholder::{PlaceholderDefault, WirePlaceholder, reject_placeholder};
 pub use crate::scalar::{
-    BucketName, ByteRange, ChecksumAlgorithm, ChecksumDigest, ChecksumError, ChecksumSpec, ChecksumType, Checksummer, ContentMd5,
-    ETag, ErrorCode, ErrorContext, EtagRender, ObjectKey, OpaqueString, ParseError, RangeOutcome, RangeParse, RangeSpec,
-    Timestamp, TimestampFormat, is_xml_representable, mask_for_authorization, parse_request_checksum, rules, status_of,
-    validate_bucket_name, validate_object_key,
+    AwsNameValidator, BucketName, ByteRange, ChecksumAlgorithm, ChecksumDigest, ChecksumError, ChecksumSpec, ChecksumType,
+    Checksummer, ContentMd5, ETag, ErrorCode, ErrorContext, EtagRender, NamePolicy, NameRejection, NameValidator, ObjectKey,
+    OpaqueString, ParseError, RangeOutcome, RangeParse, RangeSpec, SlashPolicy, Stricter, Timestamp, TimestampFormat,
+    aws_bucket_rules, decode_once, floor_check_bucket, floor_check_key, is_xml_representable, mask_for_authorization,
+    parse_request_checksum, rules, status_of, validate_bucket_name, validate_object_key,
 };

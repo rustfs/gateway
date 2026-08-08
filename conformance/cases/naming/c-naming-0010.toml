@@ -1,0 +1,49 @@
+# c-naming-0010 — a key that is not utf-8 after one decode is refused, never repaired
+#
+[case]
+id = "c-naming-0010"
+schema_version = 1
+title = "A key whose decoded octets are not UTF-8 is refused rather than replaced lossily"
+rationale = """
+The tempting answer is a lossy decode, because it always succeeds. It also invents a key: every unpaired octet becomes U+FFFD, so two different requests collapse onto one name and the value authorisation sees is not the value the client sent. That is the same one-value-two-readings shape as a double decode, arriving through a different door. The refusal is what keeps the mapping from client bytes to key injective."""
+polarity = "negative"
+operation = "GetObject"
+tags = ["naming", "routing", "security", "encoding"]
+timeout_ms = 10000
+quirks = ["q-naming-0002"]
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc3986#section-2.1"
+summary = "Percent-encoding carries one octet per triplet, so decoding an already-decoded value reads octets the sender never encoded."
+kind = "rfc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-naming"
+
+[[setup.objects]]
+bucket = "conf-naming"
+key = "real.txt"
+body = { utf8 = "in the bucket" }
+
+[request]
+method = "GET"
+target = "/conf-naming/a%FFb"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+code = "InvalidArgument"
+message_present = true
+request_id_present = true
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+contains_utf8 = ["<Code>InvalidArgument</Code>"]
+not_contains_utf8 = ["root:", "in the bucket"]

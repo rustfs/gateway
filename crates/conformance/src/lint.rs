@@ -73,6 +73,7 @@ pub const TAG_VOCABULARY: &[&str] = &[
     "restore",
     "select",
     "acl",
+    "naming",
     "slow",
 ];
 

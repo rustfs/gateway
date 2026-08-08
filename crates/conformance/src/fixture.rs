@@ -2055,37 +2055,32 @@ fn unknown_source_arn() -> HandlerError {
 /// `%XX` is one octet and everything else is itself — a `+` stays a plus sign, because this is a
 /// path and not a form. Percent encoding carries octets rather than characters, so a client can
 /// spell a source whose decoded bytes are not text; that is a refusal and never a panic.
+///
+/// This used to be a hand-rolled decoder living in this file. It was the workspace's second
+/// percent decoder and the second place a copy source was parsed, which is precisely the shape
+/// `GHSA-f4vq-9ffr-m8m3` has: a backend that re-reads a name the framework already read. It now
+/// calls [`rustfs_gateway::decode_once`], and `scripts/check_single_normalization.sh` refuses
+/// a third one.
 fn decode_source(value: &str) -> Result<String, HandlerError> {
-    let bytes = value.as_bytes();
-    let mut out: Vec<u8> = Vec::with_capacity(bytes.len());
-    let mut index = 0usize;
-    while let Some(&byte) = bytes.get(index) {
-        let pair = (
-            bytes.get(index + 1).and_then(|digit| char::from(*digit).to_digit(16)),
-            bytes.get(index + 2).and_then(|digit| char::from(*digit).to_digit(16)),
-        );
-        if byte == b'%'
-            && let (Some(high), Some(low)) = pair
-        {
-            out.push((((high * 16) + low) & 0xff) as u8);
-            index += 3;
-            continue;
-        }
-        out.push(byte);
-        index += 1;
-    }
-    String::from_utf8(out).map_err(|_| bad_copy_source("x-amz-copy-source is not valid UTF-8 once decoded"))
+    rustfs_gateway::decode_once(value).map_err(|_| bad_copy_source("x-amz-copy-source is not valid UTF-8 once decoded"))
 }
 
-/// Validates the bucket half of a copy source.
+/// Validates the bucket half of a copy source, through the framework's floor and rules.
 fn source_bucket(name: &str) -> Result<BucketName, HandlerError> {
-    BucketName::new(name.to_owned())
+    BucketName::materialize(name, &rustfs_gateway::NamePolicy::default())
         .map_err(|_| bad_copy_source("the bucket named by x-amz-copy-source is not a valid bucket name"))
 }
 
-/// Validates the key half. Never normalised: `../` is three ordinary bytes of a key.
+/// Validates the key half against the same safety floor the request path is held to.
+///
+/// A `.` segment is still opaque text — an S3 key has no directory semantics — but a `..` segment,
+/// a control character or a UNC shape is refused here rather than looked up literally. A backend
+/// that applied looser rules than the gateway would be the second normalisation the whole of
+/// P6-05 exists to prevent, and it would be the one on the storage side of the authorisation
+/// check.
 fn source_key(key: &str) -> Result<ObjectKey, HandlerError> {
-    ObjectKey::new(key.to_owned()).map_err(|_| bad_copy_source("the key named by x-amz-copy-source is not a valid object key"))
+    ObjectKey::materialize_decoded(key, &rustfs_gateway::NamePolicy::default())
+        .map_err(|rejection| bad_copy_source(rejection.reason()))
 }
 
 /// The source-side ownership gate, answered from what `[setup]` declared and nothing else.
@@ -5883,11 +5878,13 @@ mod tests {
         let source = parse_copy_source("/bucket/na%C3%AFve%20%E2%82%AC%26a%2Bb.txt").expect("parses");
         assert_eq!(source.key.as_str(), "naïve €&a+b.txt");
         assert_eq!(source.bucket.as_str(), "bucket");
-        // A traversal spelling is ordinary key bytes, never a path.
-        assert_eq!(
-            parse_copy_source("/bucket/../../etc/passwd").expect("parses").key.as_str(),
-            "../../etc/passwd"
-        );
+        // A traversal spelling used to be accepted here as ordinary key bytes and looked up
+        // literally. That is the backend half of `GHSA-f4vq-9ffr-m8m3`: the gateway's floor
+        // refuses it and a backend with its own parser did not, so the two disagreed about what
+        // the name was. This backend now calls the same normalisation and refuses it too.
+        assert!(parse_copy_source("/bucket/../../etc/passwd").is_err());
+        // A single dot segment is still opaque text, so the rule is about `..` and not about dots.
+        assert_eq!(parse_copy_source("/bucket/a/./b").expect("parses").key.as_str(), "a/./b");
     }
 
     /// Both S3 ARN spellings resolve, and every other ARN is refused rather than demoted to a

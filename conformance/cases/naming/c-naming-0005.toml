@@ -1,0 +1,54 @@
+# c-naming-0005 — a traversal in the request path is refused before anything is looked up
+#
+[case]
+id = "c-naming-0005"
+schema_version = 1
+title = "A dot-dot segment in the request path is refused and no object is read"
+rationale = """
+This is the shape of GHSA-8r6f: a key spelled like a traversal reaching a storage layer that maps keys onto files. The refusal is at the naming floor, which runs before authorisation and before the backend, so the answer is a 400 that describes a rule and never a 200, a 403, or a 404 that would each tell the caller something about what is out there. The body must not carry the path back either: an error that echoes the request is a log line the caller writes."""
+polarity = "negative"
+operation = "GetObject"
+tags = ["naming", "routing", "security"]
+timeout_ms = 10000
+quirks = ["q-naming-0003"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/object-keys.html"
+summary = "A key is an opaque sequence of Unicode characters up to 1024 UTF-8 bytes long, with no path structure of its own."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://github.com/rustfs/rustfs/security/advisories/GHSA-8r6f-hmq2-28rg"
+summary = "An object key carrying a traversal sequence reached the filesystem mapping and read outside the bucket."
+kind = "other"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-naming"
+
+[[setup.objects]]
+bucket = "conf-naming"
+key = "real.txt"
+body = { utf8 = "in the bucket" }
+
+[request]
+method = "GET"
+target = "/conf-naming/../other/obj"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+code = "InvalidArgument"
+message_present = true
+request_id_present = true
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+contains_utf8 = ["<Code>InvalidArgument</Code>"]
+not_contains_utf8 = ["root:", "in the bucket", "../other/obj"]
