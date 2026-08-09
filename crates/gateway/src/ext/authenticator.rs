@@ -35,19 +35,29 @@
 //!
 //! # Why an unknown access key still runs the full derivation
 //!
-//! `InvalidAccessKeyId` and `SignatureDoesNotMatch` stay distinct because S3 clients branch on the
-//! code. That leaves a timing difference — an unknown key would otherwise answer before any HMAC
-//! ran — so [`SigV4Authenticator`] derives from
+//! Every credential failure has one wire answer. An unknown key would otherwise also answer before
+//! any HMAC ran, so [`SigV4Authenticator`] derives from
 //! [`rustfs_gateway_sig::timing::placeholder_secret`] and completes the comparison before
 //! answering. The mitigation is parity work, not a proof; row `T1` of
 //! [`rustfs_gateway_sig::timing::SIDE_CHANNELS`] is the full reasoning.
 //!
+//! # Why a session rule is decided early and answered late
+//!
+//! A temporary credential can fail for reasons the signature knows nothing about: its lifetime has
+//! ended, it was presented without the token it is bound to, or the access key is long-term and a
+//! token came anyway. Each of those is a single comparison, and each is therefore tempting to
+//! answer the moment it is noticed — which would make an expired token answer before any HMAC ran,
+//! reopening exactly the enumeration channel `T1` closes for unknown keys.
+//!
+//! So [`SigV4Authenticator`] computes the session verdict where the credential arrives and
+//! consumes it after the comparison, and every one of those refusals is answered
+//! `InvalidAccessKeyId` — the same bytes an unknown key or wrong signature gets.
+//!
 //! # Why a store outage is not a verdict
 //!
-//! A credential store that cannot answer has not decided anything about the caller. Folding it
-//! into `AuthError::InvalidAccessKeyId` would tell every client during an outage that its
-//! credentials had been revoked, and folding it into `AccessDenied` would tell them their
-//! permissions had changed. It is [`Unavailable`], which the service answers `500 InternalError`.
+//! A credential store that cannot answer has not authenticated the caller. The guarded provider
+//! records the fault for operators, while the client receives the same closed `403` as every other
+//! credential failure. It is never downgraded to anonymous.
 
 use std::sync::Arc;
 
@@ -56,10 +66,12 @@ use rustfs_gateway_core::BoxFuture;
 use rustfs_gateway_sig::{
     AUTHORIZATION_HEADER, AmzDate, AuthError, AuthScheme, CanonicalRequestSpec, CredentialScope, ExpectedScope, PayloadMode,
     PresignedParams, RawHost, RegionSet, SealedAws, SigIdentity, SigLocation, SigV4Authorization, Signature, SignatureMatch,
-    SignedHeaderSet, UriPathCandidates, Verdict, calculate_signature, enforce_scope, signing_key, timing,
+    SignedHeaderSet, UriPathCandidates, Verdict, X_AMZ_SECURITY_TOKEN, X_AMZ_SECURITY_TOKEN_HEADER, calculate_signature,
+    enforce_scope, signing_key, timing,
 };
 
-use super::credentials::{CredentialProvider, CredentialsError};
+use super::credential_guard::{CredentialGuardConfig, GuardedCredentialProvider};
+use super::credentials::{CredentialLookup, CredentialProvider};
 
 /// The credential store could not answer.
 ///
@@ -286,11 +298,24 @@ pub trait Authenticator: Send + Sync + 'static {
     /// `Anonymous` needs an `AnonymousAck` that only a request which presented nothing can yield.
     /// So an implementation can decide, and cannot invent.
     fn authenticate<'a>(&'a self, request: &'a Authentication<'a>) -> BoxFuture<'a, Result<Verdict, Unavailable>>;
+
+    /// The credential-lookup protection this authenticator contributes to the assembled service.
+    ///
+    /// `None` means the authenticator has no credential-provider lookup. The built-in SigV4
+    /// implementation always returns `Some`; this hook exists so the start-up posture report can
+    /// name a deliberately disabled negative cache without inspecting a trait object.
+    fn credential_guard_config(&self) -> Option<CredentialGuardConfig> {
+        None
+    }
 }
 
 impl<T: Authenticator + ?Sized> Authenticator for Arc<T> {
     fn authenticate<'a>(&'a self, request: &'a Authentication<'a>) -> BoxFuture<'a, Result<Verdict, Unavailable>> {
         (**self).authenticate(request)
+    }
+
+    fn credential_guard_config(&self) -> Option<CredentialGuardConfig> {
+        (**self).credential_guard_config()
     }
 }
 
@@ -301,7 +326,7 @@ impl<T: Authenticator + ?Sized> Authenticator for Arc<T> {
 /// secret, enforce the signed-header list, canonicalise every path spelling, derive, and compare
 /// in constant time.
 pub struct SigV4Authenticator {
-    credentials: Arc<dyn CredentialProvider>,
+    credentials: Arc<GuardedCredentialProvider>,
     regions: RegionSet,
 }
 
@@ -309,7 +334,10 @@ impl core::fmt::Debug for SigV4Authenticator {
     /// Hand-written: a credential provider is not required to be `Debug`, and requiring it would
     /// push a derive onto every implementation for the sake of one line here.
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("SigV4Authenticator").field("regions", &self.regions).finish()
+        f.debug_struct("SigV4Authenticator")
+            .field("regions", &self.regions)
+            .field("credential_guard", self.credentials.config())
+            .finish()
     }
 }
 
@@ -321,7 +349,23 @@ impl SigV4Authenticator {
     /// listed a region it does not serve would accept a signature minted for another endpoint.
     #[must_use]
     pub fn new(credentials: Arc<dyn CredentialProvider>, regions: RegionSet) -> Self {
-        Self { credentials, regions }
+        Self {
+            credentials: Arc::new(GuardedCredentialProvider::new(credentials)),
+            regions,
+        }
+    }
+
+    /// Builds the verifier with an explicit credential lookup posture.
+    #[must_use]
+    pub fn with_guard_config(
+        credentials: Arc<dyn CredentialProvider>,
+        regions: RegionSet,
+        config: CredentialGuardConfig,
+    ) -> Self {
+        Self {
+            credentials: Arc::new(GuardedCredentialProvider::with_config(credentials, config)),
+            regions,
+        }
     }
 
     async fn verify(&self, request: &Authentication<'_>) -> Result<Verdict, Unavailable> {
@@ -337,7 +381,10 @@ impl SigV4Authenticator {
         let sealed = request.sealed();
         let view = sealed.view();
         let location = sealed.marker().location();
-        let presented = Presented::read(sealed, location)?;
+        // Once a credential surface is present, parsing failure is still a credential failure.
+        // Normalising it here keeps malformed material on the same 403 path and prevents a caller
+        // from learning how far parsing got before an access key could be recovered.
+        let presented = Presented::read(sealed, location).map_err(|_| AuthError::InvalidAccessKeyId)?;
 
         // H5, and the only public producer of the `VerifiedScope` the derivation takes. A scope
         // the client chose therefore cannot seed a signing key.
@@ -348,14 +395,27 @@ impl SigV4Authenticator {
             .credentials
             .lookup(presented.scope().access_key_id().access_key_id())
             .await;
-        if resolved.as_ref().err() == Some(&CredentialsError::Unavailable) {
-            return Ok(None);
-        }
-        // An unknown key derives from a placeholder rather than returning early, so that the two
-        // distinct codes are not also two distinct latencies.
+        // An unknown key derives from a placeholder rather than returning early, so that the
+        // uniform wire response does not still carry two distinct latency classes.
         let secret = match &resolved {
-            Ok(credentials) => credentials.secret().clone_secret(),
-            Err(_) => timing::placeholder_secret(),
+            Ok(CredentialLookup::Found(credentials)) => credentials.secret().clone_secret(),
+            Ok(CredentialLookup::NotFound) | Err(_) => timing::placeholder_secret(),
+        };
+
+        // Decided here, answered at the bottom. The session rules — expiry, and the binding
+        // between the access key and the token — are cheap enough to be tempting as an early
+        // return, and an early return is exactly what makes an expired token distinguishable from
+        // a wrong secret by the clock. Holding the verdict until after the derivation is also what
+        // keeps cheap session checks from introducing a shorter rejection path.
+        let refusal = match &resolved {
+            Ok(CredentialLookup::Found(credentials)) => match view.headers().get(X_AMZ_SECURITY_TOKEN_HEADER) {
+                Some(value) => credentials.admit(Some(value.as_bytes()), sealed.clock().now()).err(),
+                None if view.query_contains(X_AMZ_SECURITY_TOKEN) => {
+                    credentials.admit_query(view.query(), sealed.clock().now()).err()
+                }
+                None => credentials.admit(None, sealed.clock().now()).err(),
+            },
+            Ok(CredentialLookup::NotFound) | Err(_) => None,
         };
 
         let signed =
@@ -388,13 +448,21 @@ impl SigV4Authenticator {
         }
 
         // The unknown-key branch has now paid for the same derivation a known key does. Only after
-        // that is the distinct code answered.
-        let Ok(credentials) = resolved else {
+        // that is the uniform credential rejection answered.
+        let Ok(CredentialLookup::Found(credentials)) = resolved else {
             return Err(AuthError::InvalidAccessKeyId);
         };
         let Some(proof) = proof else {
-            return Err(AuthError::SignatureDoesNotMatch);
+            return Err(AuthError::InvalidAccessKeyId);
         };
+        // A credential that exists, is correctly signed for, and is still not usable: switched
+        // off, expired, or presented without the token it is bound to. Answered as
+        // `InvalidAccessKeyId` — the same code, the same message and the same bytes an unknown key
+        // gets — because "this key exists but you may not use it this way" confirms the key exists
+        // to whoever is guessing. GHSA-3p3x-734c-h5vx is the FTPS version of that confirmation.
+        if refusal.is_some() {
+            return Err(AuthError::InvalidAccessKeyId);
+        }
 
         let identity_axis = match credentials.session_token() {
             Some(token) => SigIdentity::Session {
@@ -428,6 +496,10 @@ impl SigV4Authenticator {
 impl Authenticator for SigV4Authenticator {
     fn authenticate<'a>(&'a self, request: &'a Authentication<'a>) -> BoxFuture<'a, Result<Verdict, Unavailable>> {
         Box::pin(self.verify(request))
+    }
+
+    fn credential_guard_config(&self) -> Option<CredentialGuardConfig> {
+        Some(*self.credentials.config())
     }
 }
 

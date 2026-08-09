@@ -36,11 +36,10 @@ fail_msg() {
     failures=$((failures + 1))
 }
 
-# One sandbox, reused. Each negative case mutates it, the guard runs, and the tree is
-# reset with `git checkout` plus a clean of untracked files — a few milliseconds instead
-# of a fresh copy. Twenty-nine full copies plus twenty-nine `git add -A` runs pushed this
-# suite past the ten-minute budget of the CI job it lives in, which is a gate that fails
-# for a reason having nothing to do with what it checks.
+# One sandbox, reused. Each negative case mutates it, the guard runs, and only the paths
+# changed by that case are checked out before untracked files are cleaned. Checking out
+# the whole tree for every case made the reset cost grow with the repository rather than
+# with the mutation and pushed the suite past the ten-minute CI budget.
 SANDBOX=""
 
 # Reuse the caller's build directory. A guard that declares REQUIRES-BUILD compiles
@@ -58,11 +57,20 @@ export CARGO_TARGET_DIR="$GUARD_TARGET_DIR"
 
 make_sandbox() {
     if [[ -n "$SANDBOX" ]]; then
+        local changed
+        changed="$(mktemp "${TMPDIR:-/tmp}/gateway-guard-changed.XXXXXX")"
         (
             cd "$SANDBOX"
+            git reset -q HEAD -- . >/dev/null 2>&1
             git clean -fdq >/dev/null 2>&1 || true
-            git checkout -f HEAD -- . >/dev/null 2>&1
+            # Resetting the index turns staged additions back into untracked files; clean removes
+            # those before this list is built, so every remaining path is known to HEAD.
+            git diff --name-only -z HEAD -- >"$changed"
+            if [[ -s "$changed" ]]; then
+                xargs -0 git checkout -f HEAD -- <"$changed" >/dev/null 2>&1
+            fi
         )
+        rm -f "$changed"
         return
     fi
 
@@ -164,6 +172,34 @@ done
 # Negative cases
 # -----------------------------------------------------------------------------
 printf '\nNegative cases (guards must fail)\n'
+
+# Prove the selective reset itself before relying on it for the remaining cases. The probe dirties
+# the index, a tracked file and an untracked file, then asks the next sandbox acquisition for the
+# same clean baseline every guard case expects.
+probe_selective_reset() {
+    local sandbox
+    cases=$((cases + 1))
+    make_sandbox
+    sandbox="$SANDBOX"
+    (
+        cd "$sandbox"
+        printf '\n# reset probe\n' >>Cargo.toml
+        printf 'probe\n' >reset-probe.txt
+        git add -A >/dev/null 2>&1
+    )
+    make_sandbox
+    if (
+        cd "$sandbox"
+        git diff --quiet HEAD -- &&
+            git diff --cached --quiet HEAD -- &&
+            [[ -z "$(git ls-files --others --exclude-standard)" ]]
+    ); then
+        pass_msg 'selective sandbox reset restores the tracked, staged and untracked baseline'
+    else
+        fail_msg 'selective sandbox reset left state from the preceding mutation'
+    fi
+}
+probe_selective_reset
 
 mut_reverse_edge() {
     printf 'rustfs-gateway-types = { workspace = true }\n' >>crates/xml/Cargo.toml
@@ -1179,7 +1215,24 @@ GOVPY
 }
 expect_fail check_governor_fast_path.sh \
     'client-map allocation moved into the decision path' mut_governor_client_map_allocates_on_demand
+# check_secret_hygiene.sh has six rules over the credential containers in crates/gateway/src/ext/,
+# which is outside the path scope of check_ct_eq.sh rules 3-6. Each is mutated separately, because
+# one case would leave the other five as prose. rustfs/backlog#1736 is the task, and
+# GHSA-333v-68xh-8mmq is what a secret in a diagnostic looks like once it has happened.
 
+mut_credentials_debug_derived() {
+    python3 - <<'CREDPY'
+import pathlib, re
+path = pathlib.Path("crates/gateway/src/ext/credentials.rs")
+text = path.read_text()
+# The redacting Debug deleted and the derive put back — the whole leak in two edits.
+text = re.sub(r"impl core::fmt::Debug for Credentials \{.*?\n\}\n", "", text, flags=re.S)
+text = text.replace("pub struct Credentials {", "#[derive(Debug)]\npub struct Credentials {")
+path.write_text(text)
+CREDPY
+}
+expect_fail check_secret_hygiene.sh \
+    'the redacting Debug on Credentials replaced by a derive' mut_credentials_debug_derived
 
 # ── check_authz_fail_closed.sh (P6-02) ─────────────────────────────────────────
 
@@ -1406,6 +1459,107 @@ mut_cargo_binstall_added() {
 expect_fail check_tool_versions_pinned.sh \
     'cargo-binstall introduced into the CI workflow' mut_cargo_binstall_added
 
+mut_credentials_display() {
+    python3 - <<'CREDPY'
+import pathlib
+path = pathlib.Path("crates/gateway/src/ext/credentials.rs")
+path.write_text(path.read_text() + """
+impl core::fmt::Display for Credentials {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str(self.identity().access_key_id())
+    }
+}
+""")
+CREDPY
+}
+expect_fail check_secret_hygiene.sh \
+    'a Display implementation on Credentials' mut_credentials_display
 
+mut_secret_in_a_log_line() {
+    python3 - <<'CREDPY'
+import pathlib
+path = pathlib.Path("crates/gateway/src/ext/authenticator.rs")
+path.write_text(path.read_text() + """
+fn an_operator_friendly_diagnostic(secret: &str) -> String {
+    format!("the secret did not match: {secret}")
+}
+""")
+CREDPY
+}
+expect_fail check_secret_hygiene.sh \
+    'a formatting macro naming a secret in the gateway extension tree' mut_secret_in_a_log_line
+
+mut_refusal_in_a_log_line() {
+    python3 - <<'CREDPY'
+import pathlib
+path = pathlib.Path("crates/gateway/src/ext/authenticator.rs")
+path.write_text(path.read_text() + """
+fn why_it_was_refused(reason: crate::ext::CredentialRefusal) -> String {
+    format!("refused: {reason:?}")
+}
+""")
+CREDPY
+}
+expect_fail check_secret_hygiene.sh \
+    'the refusal reason travelling out of the module that produced it' mut_refusal_in_a_log_line
+
+mut_secret_in_a_growing_buffer() {
+    python3 - <<'CREDPY'
+import pathlib
+path = pathlib.Path("crates/gateway/src/ext/credentials.rs")
+path.write_text(path.read_text() + """
+fn accumulate(parts: &[&[u8]]) -> Vec<u8> {
+    let mut secret: Vec<u8> = Vec::new();
+    for part in parts {
+        secret.extend_from_slice(part);
+    }
+    secret
+}
+""")
+CREDPY
+}
+expect_fail check_secret_hygiene.sh \
+    'key material accumulated into a reallocating buffer' mut_secret_in_a_growing_buffer
+
+mut_extra_expose_call_site() {
+    python3 - <<'CREDPY'
+import pathlib
+path = pathlib.Path("crates/gateway/src/ext/credentials.rs")
+path.write_text(path.read_text() + """
+fn a_second_reader(credentials: &Credentials) -> usize {
+    credentials.secret().expose().len()
+}
+""")
+CREDPY
+}
+expect_fail check_secret_hygiene.sh \
+    'one more place key material leaves its container' mut_extra_expose_call_site
+
+mut_credentials_module_deleted() {
+    rm -f crates/gateway/src/ext/credentials.rs
+}
+expect_fail check_secret_hygiene.sh \
+    "the guard's own subject deleted, which must fail rather than skip" mut_credentials_module_deleted
+
+mut_provider_error_interpolates_request() {
+    python3 - <<'PYEOF'
+import pathlib
+path = pathlib.Path("crates/gateway/src/ext/credentials.rs")
+text = path.read_text().replace("pub enum ProviderError {", "pub enum ProviderError {\n    Request(String),", 1)
+path.write_text(text)
+PYEOF
+}
+expect_fail check_preauth_no_interp.sh \
+    'a provider error carrying request-derived text' mut_provider_error_interpolates_request
+
+mut_signing_key_cache() {
+    python3 - <<'PYEOF'
+import pathlib
+path = pathlib.Path("crates/gateway/src/ext/authenticator.rs")
+path.write_text(path.read_text() + "\nstruct BadCache { signing_key_cache: std::collections::HashMap<String, rustfs_gateway_sig::SigningKey> }\n")
+PYEOF
+}
+expect_fail check_no_signing_key_cache.sh \
+    'a cache retaining derived signing keys' mut_signing_key_cache
 printf '\n%s case(s), %s failure(s)\n' "$cases" "$failures"
 [[ "$failures" -eq 0 ]]

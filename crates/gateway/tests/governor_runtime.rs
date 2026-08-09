@@ -52,8 +52,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use bytes::Bytes;
 use rustfs_gateway::dto::CorsConfiguration;
 use rustfs_gateway::{
-    BoxFuture, BucketName, ClientAddr, Clock, ClockSkewAck, CorsSource, CorsSourceError, CredentialProvider, Credentials,
-    CredentialsError, DefaultGovernor, GovernorRates, ManualMonotonic, MonotonicClock, Rate, RegionSet, S3Service,
+    BoxFuture, BucketName, ClientAddr, Clock, ClockSkewAck, CorsSource, CorsSourceError, CredentialLookup, CredentialProvider,
+    DefaultGovernor, GovernorRates, ManualMonotonic, MonotonicClock, ProviderError, Rate, RegionSet, S3Service,
     SigV4Authenticator, SystemMonotonic, Unlimited, WireResponse,
 };
 use support::{Backend, CountingBody, Ping, ping_route, wired};
@@ -333,9 +333,9 @@ struct CountingCredentials {
 }
 
 impl CredentialProvider for CountingCredentials {
-    fn lookup<'a>(&'a self, _access_key_id: &'a str) -> BoxFuture<'a, Result<Credentials, CredentialsError>> {
+    fn lookup<'a>(&'a self, _access_key_id: &'a str) -> BoxFuture<'a, Result<CredentialLookup, ProviderError>> {
         self.calls.fetch_add(1, Ordering::SeqCst);
-        Box::pin(async { Err(CredentialsError::Unknown) })
+        Box::pin(async { Err(ProviderError::Backend) })
     }
 }
 

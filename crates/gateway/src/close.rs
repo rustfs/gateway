@@ -166,8 +166,8 @@ pub fn after_chunk_reject(reject: &ChunkReject) -> ConnectionIntent {
 /// Note what this is *not*: an authorisation **denial** is a different stage and answers
 /// [`ConnectionIntent::MayKeepAlive`] — see [`after_denial`]. The corpus agrees: `c-copy-0019`,
 /// `c-copy-0020` and `c-copy-0021` are `403 AccessDenied` with `connection_after = "open"`, while
-/// `c-sig-0001` is `403 SignatureDoesNotMatch` with `connection_after = "closed"`. Two `403`s, two
-/// connection verdicts, and identity is what separates them.
+/// `c-sig-0001` is the uniform credential `403` with `connection_after = "closed"`. Two `403`s,
+/// two connection verdicts, and identity is what separates them.
 #[must_use]
 pub const fn after_auth_failure(_error: &AuthError) -> ConnectionIntent {
     ConnectionIntent::Close

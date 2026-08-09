@@ -146,7 +146,7 @@ fn an_authentication_failure_closes_the_connection() {
 
 /// Negative — an authorisation denial does not, though it shares a status with one of them.
 ///
-/// Two `403`s, two connection verdicts: `c-sig-0001` is `SignatureDoesNotMatch` and asserts
+/// Two `403`s, two connection verdicts: `c-sig-0001` is a uniform credential refusal and asserts
 /// `closed`, while `c-copy-0019`, `c-copy-0020` and `c-copy-0021` are `AccessDenied` and assert
 /// `open`. A rule written on the status would get all four wrong in one direction or the other;
 /// what separates them is whether the caller was ever established.

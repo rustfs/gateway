@@ -108,20 +108,22 @@ pub use crate::close::ConnectionIntent;
 pub use crate::ext::{
     Addressing, AuthSchemeRef, Authentication, Authenticator, Authorizer, AuthzAuditEvent, AuthzAuditSink, AuthzRequest,
     AuthzStage, BaseDomain, CORS_PREFLIGHT, CachedCorsSource, ChunkSink, ChunkVerification, ClassKind, ClientAddr,
-    CorsCacheConfig, CorsSource, CorsSourceError, CredentialProvider, Credentials, CredentialsError,
-    DEFAULT_POLICY_SNAPSHOT_TIMEOUT, Decision, DefaultGovernor, Denial, DenyAllAuthorizer, DomainError, FROZEN_WIRE_HEADERS,
-    FrozenHeader, Governor, GovernorRates, GovernorRequest, HostQuery, HostResolver, InputAuthzRequest, InputDecisions,
-    LayeredGovernor, Lease, MAX_BASE_DOMAIN_BYTES, MAX_POLICY_SNAPSHOT_TIMEOUT, Next, NoAuthzAudit, NoCors, NoObserver, NoPolicy,
-    Observer, OpLayer, PathStyleOnly, PolicyError, PolicySnapshot, PolicySource, PolicyTimeout, PolicyTimeoutError, Rate,
-    RequestContext, RequestEvent, ResolvedHost, ResponseView, RoutedView, ServerExtensions, SigV4Authenticator, SnapshotId,
-    StageFilter, StaticCredentials, TargetOrigin, Unavailable, Unlimited, VhostHint, VirtualHostStyle, WireHead, allow_when,
-    decide_with, op_layer, policy_from, response_filter, routed_filter, wire_filter,
+    CorsCacheConfig, CorsSource, CorsSourceError, Credential, CredentialGuardConfig, CredentialLookup, CredentialProvider,
+    CredentialRefusal, Credentials, CredentialsError, DEFAULT_POLICY_SNAPSHOT_TIMEOUT, Decision, DefaultGovernor, Denial,
+    DenyAllAuthorizer, DomainError, FROZEN_WIRE_HEADERS, FrozenHeader, Governor, GovernorRates, GovernorRequest,
+    GuardedCredentialProvider, HostQuery, HostResolver, InputAuthzRequest, InputDecisions, LayeredGovernor, Lease,
+    MAX_BASE_DOMAIN_BYTES, MAX_POLICY_SNAPSHOT_TIMEOUT, Next, NoAuthzAudit, NoCors, NoObserver, NoPolicy, Observer, OpLayer,
+    PathStyleOnly, PolicyError, PolicySnapshot, PolicySource, PolicyTimeout, PolicyTimeoutError, ProviderError, ProviderMetrics,
+    Rate, RequestContext, RequestEvent, ResolvedHost, ResponseView, RoutedView, ServerExtensions, SessionBinding,
+    SessionBindingError, SigV4Authenticator, SnapshotId, StageFilter, StaticCredentials, TargetOrigin, Unavailable, Unlimited,
+    VhostHint, VirtualHostStyle, WireHead, allow_when, decide_with, fn_credential_provider, op_layer, policy_from,
+    response_filter, routed_filter, wire_filter,
 };
 #[cfg(feature = "dangerous-allow-all-authorizer")]
 pub use crate::ext::{AllowAllAuthorizer, DangerAck};
 pub use crate::probe::{BodyProgress, ObservedBody};
 pub use crate::render::{S3Error, connection_intent_of, declaration, document, document_body, render};
-pub use crate::service::S3Service;
+pub use crate::service::{S3Service, SecurityPosture};
 pub use crate::trace::{
     FixedTrace, HOST_ID_HEADER, HostId, MintedTraces, REQUEST_ID_HEADER, RequestId, RequestTrace, TraceSource,
 };

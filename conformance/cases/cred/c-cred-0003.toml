@@ -1,0 +1,43 @@
+# c-cred-0003 — A live session token in a signed header authenticates.
+
+[case]
+id = "c-cred-0003"
+schema_version = 1
+title = "A live session token in a signed header authenticates"
+rationale = """
+A temporary credential is usable only with the exact token issued beside its access key and secret, and the authenticated identity retains the session binding. The request and response are measured by the in-process conformance target."""
+polarity = "positive"
+operation = "GetObject"
+tags = ["signature", "sigv4", "security"]
+timeout_ms = 10000
+quirks = ["q-cred-session-token-must-be-signed-0001", "q-cred-session-token-position-0002"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/IAM/latest/UserGuide/create-signed-request.html"
+summary = "AWS signing binds an access key and, for temporary credentials, its security token to the request being authenticated."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+request_time = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-cred"
+
+[[setup.objects]]
+bucket = "conf-cred"
+key = "probe"
+body = { utf8 = "credential-probe" }
+
+[request]
+method = "GET"
+target = "/conf-cred/probe"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "live_session" }
+
+[expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[expect.body]
+exact_utf8 = "credential-probe"

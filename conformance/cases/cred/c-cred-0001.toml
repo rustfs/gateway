@@ -1,0 +1,51 @@
+# c-cred-0001 — the control: the same request, with credentials that work.
+#
+# Schema dimensions exercised: sign.credential = "valid" against the object the three refusal
+# cases in this directory address, so that "403" there is a statement about the credential rather
+# than about the endpoint.
+
+[case]
+id = "c-cred-0001"
+schema_version = 1
+title = "A correctly signed request against a known access key is served"
+rationale = """
+Three cases in this directory assert that a credential which cannot be used is refused, and all \
+three would pass against a gateway that refused everything. This is the other direction: the same \
+object, the same operation, the same signing mode, and the only difference is a credential the \
+provider knows and that has nothing wrong with it. Without it the refusals measure the endpoint \
+and not the credential."""
+polarity = "positive"
+operation = "GetObject"
+tags = ["signature", "sigv4", "security"]
+timeout_ms = 10000
+quirks = []
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/IAM/latest/UserGuide/create-signed-request.html"
+summary = "A request is authenticated by an Authorization header whose signature is computed from the secret belonging to the access key it names."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+request_time = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-cred"
+
+[[setup.objects]]
+bucket = "conf-cred"
+key = "probe"
+body = { utf8 = "credential-probe" }
+
+[request]
+method = "GET"
+target = "/conf-cred/probe"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[expect.body]
+exact_utf8 = "credential-probe"

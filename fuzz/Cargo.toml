@@ -1,0 +1,22 @@
+[package]
+name = "rustfs-gateway-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+rustfs-gateway-sig = { path = "../crates/sig" }
+
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "credential_header_parse"
+path = "fuzz_targets/credential_header_parse.rs"
+test = false
+doc = false
+bench = false

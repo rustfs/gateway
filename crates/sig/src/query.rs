@@ -36,6 +36,10 @@
 //! `response-content-disposition`, or a `versionId` — is the most common real signature bypass,
 //! because it lets an attacker append meaning to a request somebody else signed.
 
+use zeroize::Zeroizing;
+
+use crate::secret::SessionToken;
+use crate::signature::ct_bytes_equal;
 use crate::verdict::AuthError;
 
 /// The unreserved set of RFC 3986, which SigV4 leaves unencoded: `A-Z a-z 0-9 - _ . ~`.
@@ -261,6 +265,72 @@ impl<'q> RawQuery<'q> {
         }
         Ok(found)
     }
+
+    /// Compares one decoded query value with an issued session token without materialising the
+    /// token in a `String` or a reallocating buffer.
+    ///
+    /// The outer `Option` says whether the parameter exists. A repeated parameter or malformed
+    /// percent escape is rejected before comparison.
+    pub fn session_token_matches(&self, name: &str, expected: &SessionToken) -> Result<Option<bool>, AuthError> {
+        let mut found = None;
+        for component in self.raw.split('&') {
+            if component.is_empty() {
+                continue;
+            }
+            let (raw_key, raw_value) = component.split_once('=').map_or((component, ""), |pair| pair);
+            if percent_decode(raw_key)? != name.as_bytes() {
+                continue;
+            }
+            if found.is_some() {
+                return Err(AuthError::AuthorizationHeaderMalformed);
+            }
+            let decoded = percent_decode_secret(raw_value)?;
+            found = Some(ct_bytes_equal(expected.expose(), &decoded));
+        }
+        Ok(found)
+    }
+}
+
+/// Percent-decodes a secret into one exact-sized allocation and wipes it on drop.
+fn percent_decode_secret(input: &str) -> Result<Zeroizing<Box<[u8]>>, AuthError> {
+    let bytes = input.as_bytes();
+    let mut decoded_len = 0usize;
+    let mut index = 0usize;
+    while index < bytes.len() {
+        if bytes[index] == b'%' {
+            bytes
+                .get(index + 1)
+                .copied()
+                .and_then(hex_value)
+                .ok_or(AuthError::AuthorizationHeaderMalformed)?;
+            bytes
+                .get(index + 2)
+                .copied()
+                .and_then(hex_value)
+                .ok_or(AuthError::AuthorizationHeaderMalformed)?;
+            index += 3;
+        } else {
+            index += 1;
+        }
+        decoded_len += 1;
+    }
+
+    let mut out = Zeroizing::new(vec![0u8; decoded_len].into_boxed_slice());
+    let mut read = 0usize;
+    let mut written = 0usize;
+    while read < bytes.len() {
+        if bytes[read] == b'%' {
+            let hi = hex_value(bytes[read + 1]).ok_or(AuthError::AuthorizationHeaderMalformed)?;
+            let lo = hex_value(bytes[read + 2]).ok_or(AuthError::AuthorizationHeaderMalformed)?;
+            out[written] = (hi << 4) | lo;
+            read += 3;
+        } else {
+            out[written] = bytes[read];
+            read += 1;
+        }
+        written += 1;
+    }
+    Ok(out)
 }
 
 #[cfg(test)]
@@ -282,6 +352,24 @@ mod tests {
             .canonical(QueryExclusion::None)
             .expect("valid");
         assert_eq!(canonical, "%E1%88%B4=Value1&Param=Value2&Param-3=Value3");
+    }
+
+    /// Negative — a query token must match after one strict percent-decoding pass.
+    #[test]
+    fn a_session_token_is_compared_without_losing_its_query_spelling() {
+        let expected = SessionToken::new("a/+ token").expect("non-empty");
+        assert_eq!(
+            RawQuery::new("X-Amz-Security-Token=a%2F%2B%20token")
+                .session_token_matches("X-Amz-Security-Token", &expected)
+                .expect("valid"),
+            Some(true)
+        );
+        assert_eq!(
+            RawQuery::new("X-Amz-Security-Token=other")
+                .session_token_matches("X-Amz-Security-Token", &expected)
+                .expect("valid"),
+            Some(false)
+        );
     }
 
     #[test]

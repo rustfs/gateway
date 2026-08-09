@@ -58,7 +58,7 @@ use crate::ext::{
     GovernorRates, HostResolver, LayeredGovernor, NoAuthzAudit, NoCors, NoObserver, NoPolicy, Observer, OpLayer, OpLayerSlot,
     PathStyleOnly, PolicySource, PolicyTimeout, StageFilter,
 };
-use crate::service::{Inner, S3Service};
+use crate::service::{Inner, S3Service, SecurityPosture};
 use crate::trace::{MintedTraces, TraceSource};
 use rustfs_gateway_core::cors::CorsPolicy;
 
@@ -577,6 +577,7 @@ impl ServiceBuilder {
         }
 
         let framework_governor = DefaultGovernor::with_rates(self.governor_rates);
+        let security_posture = SecurityPosture::new(authenticator.credential_guard_config(), self.governor_rates.per_ip);
         let governor: Arc<dyn Governor> = match self.governor {
             Some(user) => Arc::new(LayeredGovernor::new(framework_governor, user)),
             None => Arc::new(framework_governor),
@@ -601,6 +602,7 @@ impl ServiceBuilder {
             observer: self.observer,
             clock: self.clock,
             clock_posture: self.clock_posture,
+            security_posture,
             traces: self.traces,
             cors: Arc::new(CachedCorsSource::new(self.cors_source, self.cors_cache)),
             cors_policy: self.cors_policy,

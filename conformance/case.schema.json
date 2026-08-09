@@ -367,7 +367,20 @@
         },
         "service": { "enum": ["s3", "sts"] },
         "region": { "type": "string" },
-        "credential": { "enum": ["valid", "unknown_access_key", "expired_session", "wrong_secret"] },
+        "credential": {
+          "enum": [
+            "valid",
+            "unknown_access_key",
+            "expired_session",
+            "wrong_secret",
+            "live_session",
+            "session_without_token",
+            "long_term_with_token",
+            "swapped_session_token",
+            "disabled",
+            "empty_secret"
+          ]
+        },
         "signed_headers": {
           "type": "array",
           "items": { "$ref": "#/$defs/headerName" },
@@ -520,6 +533,11 @@
       "properties": {
         "name": { "type": "string", "maxLength": 80 },
         "delay_ms": { "type": "integer", "minimum": 0 },
+        "repeat": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Run this identical request and expectation this many times. Used for cache and retry contracts where one exchange proves nothing."
+        },
         "request": { "$ref": "#/$defs/requestSpec" },
         "expect": { "$ref": "#/$defs/expect" }
       }

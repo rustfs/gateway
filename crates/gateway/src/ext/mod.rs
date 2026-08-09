@@ -66,6 +66,7 @@ mod authenticator;
 mod authorizer;
 mod authz_audit;
 mod cors;
+mod credential_guard;
 mod credentials;
 mod filter;
 mod governor;
@@ -85,7 +86,11 @@ pub use self::authorizer::{
 pub(crate) use self::authz_audit::emit_safely;
 pub use self::authz_audit::{AuthzAuditEvent, AuthzAuditSink, AuthzStage, NoAuthzAudit};
 pub use self::cors::{CORS_PREFLIGHT, CachedCorsSource, CorsCacheConfig, CorsSource, CorsSourceError, NoCors};
-pub use self::credentials::{CredentialProvider, Credentials, CredentialsError, StaticCredentials};
+pub use self::credential_guard::{CredentialGuardConfig, GuardedCredentialProvider, ProviderMetrics};
+pub use self::credentials::{
+    Credential, CredentialLookup, CredentialProvider, CredentialRefusal, Credentials, CredentialsError, ProviderError,
+    SessionBinding, SessionBindingError, StaticCredentials, fn_credential_provider,
+};
 pub use self::filter::{
     FROZEN_WIRE_HEADERS, FrozenHeader, ResponseView, RoutedView, StageFilter, WireHead, response_filter, routed_filter,
     wire_filter,

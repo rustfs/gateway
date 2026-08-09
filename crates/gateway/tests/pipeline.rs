@@ -556,8 +556,9 @@ async fn an_unsigned_request_to_an_aws_operation_never_has_its_body_read() {
 
 /// Negative — the same property against a signature that is well formed and wrong, which is the
 /// exact shape `c-sig-0001` sends: the request parses, reaches the verifier, and is refused
-/// `SignatureDoesNotMatch`. An implementation could plausibly refuse an *absent* signature early and
-/// still read the body before checking a present one, so the two cases are not one case.
+/// with the uniform credential error. An implementation could plausibly refuse an *absent*
+/// signature early and still read the body before checking a present one, so the two cases are not
+/// one case.
 #[tokio::test]
 async fn a_mismatched_signature_is_refused_before_the_body_is_read() {
     let service = wired()
@@ -591,7 +592,7 @@ async fn a_mismatched_signature_is_refused_before_the_body_is_read() {
     let collected = rustfs_gateway::collect(response).await.expect("an in-memory body");
     let document = String::from_utf8(collected.body().to_vec()).expect("utf-8");
     assert_eq!(collected.status(), http::StatusCode::FORBIDDEN);
-    assert!(document.contains("<Code>SignatureDoesNotMatch</Code>"), "{document}");
+    assert!(document.contains("<Code>InvalidAccessKeyId</Code>"), "{document}");
     assert_eq!(progress.bytes_read(), 0, "the payload was read before the signature was judged");
     assert!(!progress.is_exhausted());
 }

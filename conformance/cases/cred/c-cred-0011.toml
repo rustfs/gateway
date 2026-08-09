@@ -1,0 +1,43 @@
+# c-cred-0011 — A provider backend error fails closed.
+
+[case]
+id = "c-cred-0011"
+schema_version = 1
+title = "A provider backend error fails closed"
+rationale = """
+The in-process provider returns Backend for this case; the request must be refused with the same client response and never become anonymous. The request and response are measured by the in-process conformance target."""
+polarity = "negative"
+operation = "GetObject"
+tags = ["signature", "sigv4", "security"]
+timeout_ms = 10000
+quirks = []
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/IAM/latest/UserGuide/create-signed-request.html"
+summary = "AWS signing binds an access key and, for temporary credentials, its security token to the request being authenticated."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+request_time = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-cred"
+
+[[setup.objects]]
+bucket = "conf-cred"
+key = "probe"
+body = { utf8 = "credential-probe" }
+
+[request]
+method = "GET"
+target = "/conf-cred/probe"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 403
+connection_after = "open"
+
+[expect.headers_present]
+"content-type" = "application/xml"

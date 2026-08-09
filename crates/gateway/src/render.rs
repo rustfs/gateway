@@ -246,13 +246,24 @@ impl From<PreAuthError> for S3Error {
 
 impl From<AuthError> for S3Error {
     fn from(error: AuthError) -> Self {
-        // The code strings are `AuthError`'s own, because SDK credential-refresh logic branches on
-        // them; the status comes from the shared table so that one code has one status everywhere.
+        // A comparison failure is deliberately collapsed into the unknown-key response. Keeping
+        // the internal variants distinct lets the verifier test its state machine without making
+        // the access-key store observable on the wire.
         //
         // The third leg issue #20 asks for: an authentication failure is neither a `WireReject` nor
         // a `ChunkReject`, so neither flag could ever have reached `c-sig-0001`. The reasoning for
         // the verdict is `crate::close::after_auth_failure`, and it is a policy row, not an RFC one.
-        Self::new(ErrorCode::custom(error.code()), error.message()).closing(crate::close::after_auth_failure(&error))
+        let rendered = if error == AuthError::SignatureDoesNotMatch {
+            Self::new(ErrorCode::INVALID_ACCESS_KEY_ID, AuthError::InvalidAccessKeyId.message())
+        } else {
+            Self::new(ErrorCode::custom(error.code()), error.message())
+        };
+        let rendered = if error == AuthError::AuthorizationHeaderMalformed {
+            rendered.with_status(http::StatusCode::FORBIDDEN)
+        } else {
+            rendered
+        };
+        rendered.closing(crate::close::after_auth_failure(&error))
     }
 }
 
@@ -431,7 +442,8 @@ mod tests {
         RequestTrace::from_bits(0x0123_4567_89AB_CDEF, 0)
     }
 
-    /// Negative — a rejection body carries the code and the message and nothing else. This is the
+    /// Negative — a comparison rejection carries the uniform credential code and message and
+    /// nothing else. This is the
     /// assertion that stops a future edit from adding the request path "for debuggability".
     #[tokio::test]
     async fn a_rendered_refusal_echoes_nothing_from_the_request() {
@@ -440,19 +452,28 @@ mod tests {
             .await
             .expect("an in-memory body");
         let body = String::from_utf8(collected.body().to_vec()).expect("utf-8");
-        assert!(body.contains("<Code>SignatureDoesNotMatch</Code>"), "{body}");
+        assert!(body.contains("<Code>InvalidAccessKeyId</Code>"), "{body}");
         assert!(body.contains("the request was not authenticated"), "{body}");
         assert!(!body.contains("Authorization"), "{body}");
     }
 
-    /// Negative — the two credential rejections keep distinct codes and identical messages, so the
-    /// body is not an access-key oracle even though the code is faithful to S3.
+    /// Negative — a wrong signature and unknown key have one rendered response.
     #[test]
-    fn the_two_credential_rejections_differ_only_in_their_code() {
+    fn the_two_credential_rejections_are_indistinguishable() {
         let unknown = S3Error::from(AuthError::InvalidAccessKeyId);
         let mismatch = S3Error::from(AuthError::SignatureDoesNotMatch);
-        assert_ne!(unknown.code(), mismatch.code());
+        assert_eq!(unknown.code(), mismatch.code());
         assert_eq!(unknown.message(), mismatch.message());
+        assert_eq!(unknown.status(), mismatch.status());
+    }
+
+    /// Negative — malformed presented credentials are forbidden, never a 400 anonymous fallback.
+    #[test]
+    fn malformed_presented_credentials_are_forbidden() {
+        assert_eq!(
+            S3Error::from(AuthError::AuthorizationHeaderMalformed).status(),
+            http::StatusCode::FORBIDDEN
+        );
     }
 
     /// Negative — a denial says nothing about which policy condition failed.
