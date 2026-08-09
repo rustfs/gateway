@@ -18,7 +18,8 @@
 //! budget. NOT responsible for: defining crate-local tests.
 //! Upstream: the `verify` command. Downstream: Cargo and the operation catalog.
 
-use std::process::{Command, ExitCode};
+use std::path::Path;
+use std::process::{Command, ExitCode, Output, Stdio};
 use std::time::{Duration, Instant};
 
 use crate::catalog;
@@ -312,6 +313,11 @@ fn run_steps(
 fn run_all(json: bool) -> ExitCode {
     let root = codegen::repo_root();
     let scripts = root.join("scripts");
+    let setup = (
+        env!("CARGO").to_owned(),
+        vec!["test".to_owned(), "--workspace".to_owned(), "--no-run".to_owned()],
+        "workspace test build".to_owned(),
+    );
     let commands = vec![
         (
             env!("CARGO").to_owned(),
@@ -326,8 +332,7 @@ fn run_all(json: bool) -> ExitCode {
     ];
 
     let started = Instant::now();
-    for (program, args, step) in commands {
-        let output = Command::new(&program).args(&args).current_dir(&root).output();
+    for (step, output) in run_setup_then_concurrently(&setup, &commands, &root) {
         match output {
             Ok(output) if output.status.success() => {}
             Ok(output) => {
@@ -358,6 +363,40 @@ fn run_all(json: bool) -> ExitCode {
     }
     print_success("workspace tests and build guards", elapsed, json, None);
     ExitCode::SUCCESS
+}
+
+type GateCommand = (String, Vec<String>, String);
+type GateResult = (String, std::io::Result<Output>);
+
+fn run_setup_then_concurrently(setup: &GateCommand, commands: &[GateCommand], current_dir: &Path) -> Vec<GateResult> {
+    let (program, args, step) = setup;
+    let output = Command::new(program).args(args).current_dir(current_dir).output();
+    let succeeded = output.as_ref().is_ok_and(|output| output.status.success());
+    let mut outputs = vec![(step.clone(), output)];
+    if succeeded {
+        outputs.extend(run_commands_concurrently(commands, current_dir));
+    }
+    outputs
+}
+
+fn run_commands_concurrently(commands: &[GateCommand], current_dir: &Path) -> Vec<GateResult> {
+    let children = commands
+        .iter()
+        .map(|(program, args, step)| {
+            let child = Command::new(program)
+                .args(args)
+                .current_dir(current_dir)
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn();
+            (step.clone(), child)
+        })
+        .collect::<Vec<_>>();
+
+    children
+        .into_iter()
+        .map(|(step, child)| (step, child.and_then(|child| child.wait_with_output())))
+        .collect()
 }
 
 fn run(args: &[&str], budget: Duration, subject: &str, rule: &str, json: bool) -> ExitCode {
@@ -455,4 +494,53 @@ fn diagnostic(what: &str, where_: &str, rule: &str) -> ExitCode {
     eprintln!("where: {where_}");
     eprintln!("rule: {rule}");
     ExitCode::FAILURE
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+
+    use super::*;
+
+    #[test]
+    fn full_gate_steps_start_before_either_is_awaited() {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("test clock must be after the Unix epoch")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("gateway-parallel-{}-{nonce}", std::process::id()));
+        fs::create_dir_all(&root).expect("test directory must be creatable");
+        let ready = root.join("ready");
+        let first = root.join("first");
+        let second = root.join("second");
+        let wait_for = |own: &std::path::Path, peer: &std::path::Path| {
+            vec![
+                "-c".to_owned(),
+                format!(
+                    "test -f '{}' || exit 1; touch '{}'; for _ in $(seq 1 200); do test -f '{}' && exit 0; sleep 0.01; done; exit 1",
+                    ready.display(),
+                    own.display(),
+                    peer.display()
+                ),
+            ]
+        };
+        let setup = (
+            "sh".to_owned(),
+            vec!["-c".to_owned(), format!("touch '{}'", ready.display())],
+            "setup".to_owned(),
+        );
+        let commands = vec![
+            ("sh".to_owned(), wait_for(&first, &second), "first".to_owned()),
+            ("sh".to_owned(), wait_for(&second, &first), "second".to_owned()),
+        ];
+
+        let outputs = run_setup_then_concurrently(&setup, &commands, &root);
+
+        assert!(
+            outputs
+                .iter()
+                .all(|(_, output)| output.as_ref().is_ok_and(|output| output.status.success()))
+        );
+        fs::remove_dir_all(root).expect("test directory must be removable");
+    }
 }
