@@ -19,8 +19,8 @@
 //! two documents a `Stats` and a `Progress` frame carry; and [`EventSequence`], which refuses an
 //! order the protocol does not allow and refuses to be dropped without a terminator.
 //! NOT responsible for: deciding *what* to send — no query is evaluated here and no record is
-//! produced here; nor for putting the bytes on a socket, which needs a response shape this crate
-//! does not have yet (see below); nor for **decoding** a stream, because S3 has no inbound one
+//! produced here; nor for putting the bytes on a socket, which the facade does for a
+//! [`crate::Resp::event_stream`]; nor for **decoding** a stream, because S3 has no inbound one
 //! and a parser with no traffic is an attack surface with no user.
 //! Upstream: nothing but `rustfs-gateway-types`' CRC-32. Downstream: whichever assembly
 //! eventually writes a select response, and the conformance suite, which reads frames back with
@@ -29,14 +29,13 @@
 //! Shares: event_stream.
 //! Members: SelectObjectContent
 //!
-//! # What is here and what is deliberately not wired
+//! # How framing reaches the response model
 //!
-//! `Resp<O>` has two shapes — a settled answer and a committed one — and an event stream is a
-//! third. Adding it changes this crate's response type, the facade's, and every assembly above
-//! them at once, which is not this family's decision to take; the task issue says so explicitly.
-//! So the frames are encoded here and nothing in this workspace sends one. That split is on
-//! purpose, and it is the useful half: the part a later implementation gets subtly wrong is the
-//! framing, and the part it cannot get wrong by accident is the plumbing.
+//! An event stream is the third [`crate::Answer`] shape beside settled and committed output.
+//! A backend frames messages here, wraps their [`rustfs_gateway_stream::ByteStream`] with
+//! [`crate::Resp::event_stream`], and the facade writes the documented content type without
+//! invoking an output-document encoder. The conformance target then reads the bytes back with its
+//! own parser and CRC implementation.
 //!
 //! # Why the CRCs are the whole point
 //!

@@ -90,6 +90,8 @@ pub(crate) enum ErasedAnswer {
     Settled(ErasedOutput),
     /// The status is committed and the outcome is still running.
     Committed(ErasedCommitWork),
+    /// An already framed event stream, with no generated output document to encode.
+    EventStream(ByteStream),
 }
 
 /// The answer a backend produced, and the status it goes out with.
@@ -161,6 +163,7 @@ impl OperationDispatch {
                             async move { work.await.map(|output| Box::new(output) as ErasedOutput) },
                         ))
                     }
+                    CoreAnswer::EventStream(stream) => ErasedAnswer::EventStream(stream),
                 };
                 Ok((answer, status))
             }))

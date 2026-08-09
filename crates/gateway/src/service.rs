@@ -877,6 +877,13 @@ impl S3Service {
                     Err(error) => outcome.refuse_after_commit(S3Error::from(error), committed),
                 };
             }
+            ErasedAnswer::EventStream(stream) => {
+                let mut encoded = EncodedResponse::of(status);
+                encoded.set_header("content-type", crate::EVENT_STREAM_CONTENT_TYPE);
+                encoded.body = ResponseBody::Stream(stream);
+                encoded.enforce_http_invariants(meta.method());
+                return into_response(encoded);
+            }
         };
         match op.encode(output, &meta, status) {
             Ok(encoded) => into_response(encoded),

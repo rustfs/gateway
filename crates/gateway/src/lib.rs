@@ -297,11 +297,9 @@ pub use rustfs_gateway_core::ops::shared::restore::{
     parse_restore_status, validate_restore,
 };
 
-// The event-stream framing. Exported although nothing in this workspace sends a frame yet: the
-// response shape a select answer needs is a third variant of `Resp<O>` and is not this family's
-// to add, but the framing is the half an implementation gets wrong invisibly — a CRC over the
-// wrong range encodes, decodes against its own author, and is refused by every SDK. Exporting
-// it is what stops the eventual caller from writing a second one.
+// The event-stream framing used with `Resp::event_stream`. A CRC over the wrong range encodes,
+// decodes against its own author, and is refused by every SDK, so the encoder is exported beside
+// the response constructor rather than leaving each backend to write another one.
 pub use rustfs_gateway_core::ops::shared::event_stream::{
     EVENT_STREAM_CONTENT_TYPE, EventKind, EventSequence, EventStreamError, MAX_PAYLOAD_BYTES, encode_event, encode_exception,
     progress_document, stats_document,

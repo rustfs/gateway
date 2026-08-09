@@ -66,6 +66,8 @@ pub enum StreamTermination {
     Reset,
     /// The failure was reported in a trailer.
     TrailerError,
+    /// The body claimed to be an event stream but its framing or sequence was invalid.
+    MalformedEventStream,
 }
 
 impl StreamTermination {
@@ -77,6 +79,7 @@ impl StreamTermination {
             StreamTermination::AbruptClose => "abrupt_close",
             StreamTermination::Reset => "reset",
             StreamTermination::TrailerError => "trailer_error",
+            StreamTermination::MalformedEventStream => "malformed_event_stream",
         }
     }
 }
@@ -116,6 +119,166 @@ pub struct ObservedEvent {
     pub headers: Vec<(String, String)>,
     /// Event payload bytes.
     pub payload: Vec<u8>,
+}
+
+/// Whether the observed head declares an AWS event-stream body.
+#[must_use]
+pub(crate) fn has_event_stream_content_type(headers: &[(String, String)]) -> bool {
+    headers.iter().any(|(name, value)| {
+        name.eq_ignore_ascii_case("content-type")
+            && value
+                .split(';')
+                .next()
+                .is_some_and(|media_type| media_type.trim().eq_ignore_ascii_case("application/vnd.amazon.event-stream"))
+    })
+}
+
+/// Decodes and validates the complete event-stream body observed on the wire.
+///
+/// This parser is deliberately independent of the framework's encoder. It checks both CRC-32s,
+/// every declared length, the string-header grammar and the Select sequence contract before an
+/// event becomes observable to a case.
+pub(crate) fn decode_event_stream(body: &[u8]) -> Result<Vec<ObservedEvent>, String> {
+    const MIN_FRAME_BYTES: usize = 16;
+    const MAX_FRAME_BYTES: usize = 16 * 1024 * 1024;
+
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    enum Phase {
+        Scanning,
+        Counted,
+        Terminated,
+    }
+
+    let mut remaining = body;
+    let mut events = Vec::new();
+    let mut phase = Phase::Scanning;
+    while !remaining.is_empty() {
+        if phase == Phase::Terminated {
+            return Err("an event-stream frame followed the terminator".to_owned());
+        }
+        let total = read_u32(remaining, 0)? as usize;
+        let headers_len = read_u32(remaining, 4)? as usize;
+        if !(MIN_FRAME_BYTES..=MAX_FRAME_BYTES).contains(&total) {
+            return Err("an event-stream frame declared an invalid total length".to_owned());
+        }
+        let frame = remaining
+            .get(..total)
+            .ok_or_else(|| "an event-stream frame ended before its declared total length".to_owned())?;
+        let payload_start = 12_usize
+            .checked_add(headers_len)
+            .ok_or_else(|| "the event-stream header length overflowed".to_owned())?;
+        let payload_end = total
+            .checked_sub(4)
+            .ok_or_else(|| "the event-stream frame is shorter than its checksum".to_owned())?;
+        if payload_start > payload_end {
+            return Err("the event-stream header block runs past the frame".to_owned());
+        }
+        if crate::crc32::checksum(frame.get(..8).unwrap_or_default()) != read_u32(frame, 8)? {
+            return Err("the event-stream prelude CRC does not match".to_owned());
+        }
+        if crate::crc32::checksum(frame.get(..payload_end).unwrap_or_default()) != read_u32(frame, payload_end)? {
+            return Err("the event-stream message CRC does not match".to_owned());
+        }
+        let headers = decode_event_headers(
+            frame
+                .get(12..payload_start)
+                .ok_or_else(|| "the event-stream header block is outside the frame".to_owned())?,
+        )?;
+        let message_type =
+            event_header(&headers, ":message-type").ok_or_else(|| "an event-stream frame has no :message-type".to_owned())?;
+        let event_type = match message_type {
+            "event" => event_header(&headers, ":event-type")
+                .ok_or_else(|| "an event frame has no :event-type".to_owned())?
+                .to_owned(),
+            "exception" => event_header(&headers, ":exception-type")
+                .ok_or_else(|| "an exception frame has no :exception-type".to_owned())?
+                .to_owned(),
+            _ => return Err("an event-stream frame has an unknown :message-type".to_owned()),
+        };
+        phase = match (message_type, event_type.as_str(), phase) {
+            ("exception", _, Phase::Scanning | Phase::Counted) => Phase::Terminated,
+            ("event", "Records" | "Progress" | "Cont", Phase::Scanning) => Phase::Scanning,
+            ("event", "Stats", Phase::Scanning) => Phase::Counted,
+            ("event", "End", Phase::Counted) => Phase::Terminated,
+            _ => return Err("an event-stream frame arrived out of sequence".to_owned()),
+        };
+        events.push(ObservedEvent {
+            event_type,
+            headers,
+            payload: frame.get(payload_start..payload_end).unwrap_or_default().to_vec(),
+        });
+        remaining = remaining
+            .get(total..)
+            .ok_or_else(|| "the event-stream cursor ran past the body".to_owned())?;
+    }
+    if phase != Phase::Terminated {
+        return Err("the event stream ended without End or an exception".to_owned());
+    }
+    Ok(events)
+}
+
+fn read_u32(bytes: &[u8], offset: usize) -> Result<u32, String> {
+    let value = bytes
+        .get(offset..offset.saturating_add(4))
+        .ok_or_else(|| "an event-stream integer runs past the available bytes".to_owned())?;
+    let wide: [u8; 4] = value
+        .try_into()
+        .map_err(|_| "an event-stream integer is not four bytes".to_owned())?;
+    Ok(u32::from_be_bytes(wide))
+}
+
+fn decode_event_headers(mut bytes: &[u8]) -> Result<Vec<(String, String)>, String> {
+    let mut headers = Vec::new();
+    while !bytes.is_empty() {
+        let name_len = usize::from(
+            *bytes
+                .first()
+                .ok_or_else(|| "an event-stream header has no name length".to_owned())?,
+        );
+        let name_end = 1_usize
+            .checked_add(name_len)
+            .ok_or_else(|| "an event-stream header name length overflowed".to_owned())?;
+        let value_type = *bytes
+            .get(name_end)
+            .ok_or_else(|| "an event-stream header has no value type".to_owned())?;
+        if value_type != 7 {
+            return Err("an event-stream header value is not a string".to_owned());
+        }
+        let value_len_offset = name_end.saturating_add(1);
+        let value_len_bytes = bytes
+            .get(value_len_offset..value_len_offset.saturating_add(2))
+            .ok_or_else(|| "an event-stream header has no value length".to_owned())?;
+        let value_len = usize::from(u16::from_be_bytes(
+            value_len_bytes
+                .try_into()
+                .map_err(|_| "an event-stream header value length is not two bytes".to_owned())?,
+        ));
+        let value_start = value_len_offset.saturating_add(2);
+        let value_end = value_start
+            .checked_add(value_len)
+            .ok_or_else(|| "an event-stream header value length overflowed".to_owned())?;
+        let name = core::str::from_utf8(
+            bytes
+                .get(1..name_end)
+                .ok_or_else(|| "an event-stream header name runs past the block".to_owned())?,
+        )
+        .map_err(|_| "an event-stream header name is not UTF-8".to_owned())?;
+        let value = core::str::from_utf8(
+            bytes
+                .get(value_start..value_end)
+                .ok_or_else(|| "an event-stream header value runs past the block".to_owned())?,
+        )
+        .map_err(|_| "an event-stream header value is not UTF-8".to_owned())?;
+        headers.push((name.to_owned(), value.to_owned()));
+        bytes = bytes
+            .get(value_end..)
+            .ok_or_else(|| "the event-stream header cursor ran past the block".to_owned())?;
+    }
+    Ok(headers)
+}
+
+fn event_header<'a>(headers: &'a [(String, String)], name: &str) -> Option<&'a str> {
+    headers.iter().find(|(key, _)| key == name).map(|(_, value)| value.as_str())
 }
 
 /// Where an `<Error>` document begins in a response whose status line says the request succeeded.
@@ -253,6 +416,77 @@ impl Observation {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rustfs_gateway::EventKind;
+    use rustfs_gateway::{EventSequence, encode_event, stats_document};
+
+    /// Positive — a complete stream becomes the events the case schema judges, in wire order.
+    #[test]
+    fn a_complete_event_stream_is_observed_frame_by_frame() {
+        let mut bytes = Vec::new();
+        let mut sequence = EventSequence::new();
+        sequence.records(b"a,b\n", &mut bytes).expect("records first");
+        sequence.stats(&stats_document(4, 4, 4), &mut bytes).expect("accounting");
+        sequence.end(&mut bytes).expect("terminator");
+
+        let events = decode_event_stream(&bytes).expect("a valid stream");
+        let types: Vec<&str> = events.iter().map(|event| event.event_type.as_str()).collect();
+        assert_eq!(types, ["Records", "Stats", "End"]);
+        assert_eq!(events[0].payload, b"a,b\n");
+        assert_eq!(events[0].headers[0], (":message-type".to_owned(), "event".to_owned()));
+    }
+
+    /// Negative — a frame whose message CRC no longer covers its bytes is not an observation.
+    #[test]
+    fn n_a_corrupt_event_stream_frame_is_refused() {
+        let mut bytes = Vec::new();
+        let mut sequence = EventSequence::new();
+        sequence.records(b"a,b\n", &mut bytes).expect("records first");
+        let first_frame = read_u32(&bytes, 0).expect("a total length") as usize;
+        sequence.stats(&stats_document(4, 4, 4), &mut bytes).expect("accounting");
+        sequence.end(&mut bytes).expect("terminator");
+        let payload = first_frame - 5;
+        bytes[payload] ^= 1;
+        assert!(decode_event_stream(&bytes).is_err());
+    }
+
+    /// Negative — an incomplete frame is not silently reported as a shorter successful stream.
+    #[test]
+    fn n_a_truncated_event_stream_frame_is_refused() {
+        let mut bytes = Vec::new();
+        let mut sequence = EventSequence::new();
+        sequence.records(b"a,b\n", &mut bytes).expect("records first");
+        sequence.stats(&stats_document(4, 4, 4), &mut bytes).expect("accounting");
+        sequence.end(&mut bytes).expect("terminator");
+        bytes.pop();
+        assert!(decode_event_stream(&bytes).is_err());
+    }
+
+    /// Negative — a syntactically valid Records frame is not a complete Select response without a
+    /// terminal End or exception frame.
+    #[test]
+    fn n_an_event_stream_without_a_terminator_is_refused() {
+        let mut bytes = Vec::new();
+        encode_event(EventKind::Records, b"a,b\n", &mut bytes).expect("a records frame");
+        assert!(decode_event_stream(&bytes).is_err());
+    }
+
+    /// Negative — the event-stream header grammar used by Select carries string values. Accepting
+    /// another type would move the cursor by the wrong width and misread every following byte.
+    #[test]
+    fn n_a_non_string_event_header_is_refused() {
+        let mut bytes = Vec::new();
+        let mut sequence = EventSequence::new();
+        sequence.records(b"a,b\n", &mut bytes).expect("records first");
+        let first_frame = read_u32(&bytes, 0).expect("a total length") as usize;
+        sequence.stats(&stats_document(4, 4, 4), &mut bytes).expect("accounting");
+        sequence.end(&mut bytes).expect("terminator");
+        let first_value_type = 12 + 1 + ":message-type".len();
+        bytes[first_value_type] = 6;
+        let message_crc_offset = first_frame - 4;
+        let message_crc = crate::crc32::checksum(&bytes[..message_crc_offset]);
+        bytes[message_crc_offset..first_frame].copy_from_slice(&message_crc.to_be_bytes());
+        assert!(decode_event_stream(&bytes).is_err());
+    }
 
     #[test]
     fn header_lookup_ignores_case_but_the_record_keeps_it() {
@@ -265,6 +499,7 @@ mod tests {
     fn kind_spellings_match_the_schema() {
         assert_eq!(Outcome::StreamError.as_kind(), "stream_error");
         assert_eq!(StreamTermination::ErrorDocument.as_str(), "error_document");
+        assert_eq!(StreamTermination::MalformedEventStream.as_str(), "malformed_event_stream");
         assert_eq!(ConnectionState::HalfClosed.as_str(), "half_closed");
     }
 

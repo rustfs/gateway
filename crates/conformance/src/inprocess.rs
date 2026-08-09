@@ -97,7 +97,10 @@ use rustfs_gateway::{
 use crate::exec::block_on;
 use crate::fixture::{Fixture, StoredObject, Stub};
 use crate::interpolate::Captures;
-use crate::observation::{ConnectionState, Observation, Outcome, StreamTermination, late_error_offset};
+use crate::observation::{
+    ConnectionState, Observation, Outcome, StreamTermination, decode_event_stream, has_event_stream_content_type,
+    late_error_offset,
+};
 use crate::sut::{ExchangePlan, Sut, SutError};
 use crate::time;
 use crate::value::Value;
@@ -1321,17 +1324,41 @@ impl Sut for InProcess {
                 .collect()
         };
 
-        let (body, trailers, outcome, termination, before_error) = match drained {
+        let rendered_head = render(head);
+        let (body, trailers, outcome, termination, before_error, events, notes) = match drained {
             Ok(collected) => {
                 let (_, _, body, trailers) = collected.into_parts();
                 let body = body.to_vec();
-                // The status line and the document can disagree, and when they do the disagreement
-                // *is* the observation. Everything else about the exchange is unchanged: the head
-                // arrived, the body arrived, and the connection is reusable — what differs is that
-                // the request failed and only the body says so.
-                match late_error_offset(status.as_u16(), &body) {
-                    None => (body, trailers, Outcome::Response, None, None),
-                    Some(offset) => (body, trailers, Outcome::StreamError, Some(StreamTermination::ErrorDocument), Some(offset)),
+                if has_event_stream_content_type(&rendered_head) {
+                    match decode_event_stream(&body) {
+                        Ok(events) => (body, trailers, Outcome::EventStream, None, None, events, Vec::new()),
+                        Err(error) => (
+                            body,
+                            trailers,
+                            Outcome::StreamError,
+                            Some(StreamTermination::MalformedEventStream),
+                            None,
+                            Vec::new(),
+                            vec![format!("the event stream could not be decoded: {error}")],
+                        ),
+                    }
+                } else {
+                    // The status line and the document can disagree, and when they do the disagreement
+                    // *is* the observation. Everything else about the exchange is unchanged: the head
+                    // arrived, the body arrived, and the connection is reusable — what differs is that
+                    // the request failed and only the body says so.
+                    match late_error_offset(status.as_u16(), &body) {
+                        None => (body, trailers, Outcome::Response, None, None, Vec::new(), Vec::new()),
+                        Some(offset) => (
+                            body,
+                            trailers,
+                            Outcome::StreamError,
+                            Some(StreamTermination::ErrorDocument),
+                            Some(offset),
+                            Vec::new(),
+                            Vec::new(),
+                        ),
+                    }
                 }
             }
             // A body that could not be read to its end is a stream that stopped, which is a fact
@@ -1339,7 +1366,15 @@ impl Sut for InProcess {
             // would *skip* the case, and a skipped case asserts nothing. The byte count is left
             // unrecorded rather than guessed: `collect` discards what it had read when it failed, so
             // a case pinning `body_bytes_before_error` stays red here and says why.
-            Err(_) => (Vec::new(), Vec::new(), Outcome::StreamError, Some(StreamTermination::AbruptClose), None),
+            Err(_) => (
+                Vec::new(),
+                Vec::new(),
+                Outcome::StreamError,
+                Some(StreamTermination::AbruptClose),
+                None,
+                Vec::new(),
+                Vec::new(),
+            ),
         };
 
         Ok(Observation {
@@ -1347,7 +1382,7 @@ impl Sut for InProcess {
             stream_termination: termination,
             status: Some(status.as_u16()),
             http_version: None,
-            headers: render(head),
+            headers: rendered_head,
             trailers: render(trailers),
             body,
             body_bytes_before_error: before_error,
@@ -1371,8 +1406,8 @@ impl Sut for InProcess {
             // A case that asserts `closed` therefore cannot pass here. `--transport conn` watches
             // the socket and answers for itself.
             connection_after: Some(ConnectionState::Open),
-            events: Vec::new(),
-            notes: Vec::new(),
+            events,
+            notes,
         })
     }
 }

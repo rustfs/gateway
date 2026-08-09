@@ -27,11 +27,10 @@
 //!
 //! Two reasons, and both are the same shape as `object_lock_intent.rs`'s.
 //!
-//! The first is that a decoded member nothing observes is invisible. A select's answer is not
-//! implemented, so **every** well-formed select gets the same `501` whatever the document said;
-//! a restore answers `202` whether or not its scan of the document kept the version selector.
-//! No response-level assertion in the corpus can see the difference, so the assertions below
-//! read the decoded input directly.
+//! The first is that a decoded member nothing observes is invisible. The fixture's select answer
+//! deliberately does not evaluate SQL, so the response cannot show whether every optional request
+//! member survived; a restore likewise answers `202` whether or not its scan of the document kept
+//! the version selector. The assertions below therefore read the decoded input directly.
 //!
 //! The second is the CRCs. `rustfs-gateway-core`'s own tests pin the frames against literal bytes
 //! produced outside the workspace; this file goes the other way and *parses* the frames, with a

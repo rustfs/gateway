@@ -30,27 +30,24 @@
 //!
 //! Shares: event_stream, select.
 //!
-//! # What is decoded here and what is deliberately not answered
+//! # Request decoding and the event-stream answer
 //!
 //! The request half is complete: expression, expression type, all three input serializations
 //! with their sub-members, both output serializations, the progress switch and the scan range
-//! reach a handler decoded and validated. The response half is **not wired**, and the reason is
-//! a type rather than an omission. `Resp<O>` has two shapes — a settled answer and a committed
-//! one — and an event stream is a third: a status line sent before the first record exists,
-//! then a sequence of self-framed messages, with failures expressed *inside* the stream while
-//! the status line already says `200`. Adding that shape changes `Resp`, `EncodedResponse` and
-//! the facade's response type at once, which is a contract decision this family is not entitled
-//! to take alone; the task issue says so in as many words.
+//! reach a handler decoded and validated. The handler returns the third [`crate::Answer`] shape,
+//! [`crate::Resp::event_stream`]: a status line sent before the first record exists, then a
+//! sequence of self-framed messages, with failures expressed *inside* the stream while the status
+//! line remains `200`. The facade preserves that shape through type erasure and writes it through
+//! the same service exit as an ordinary response, without invoking the generated empty-output
+//! encoder.
 //!
-//! What this family does deliver towards it is the framing itself:
 //! [`shared::event_stream`](super::shared::event_stream) encodes a `Records` / `Stats` /
 //! `Progress` / `Cont` / `End` / exception message byte for byte, both CRC-32s included, and is
-//! exported through the facade. So the piece that a hand-rolled implementation gets subtly
+//! exported through the facade. The conformance target parses those frames independently. So the
+//! piece that a hand-rolled implementation gets subtly
 //! wrong — a CRC over the wrong range produces a stream every SDK rejects and no unit test of
-//! the producer's own notices — is written once and proved against an independent decoder. The
-//! piece that is missing is the plumbing that would put those bytes on a socket, and until it
-//! exists no request to this operation returns a stream. That is recorded in the overlay
-//! (`q-select-0009`), here, and in `crates/core/MAP.md`.
+//! the producer's own notices — is written once and proved against an independent decoder
+//! (`q-select-0009`).
 //!
 //! # Why the row exists before a backend does
 //!

@@ -62,6 +62,14 @@
 //! the connection while the work runs, and the fact that the trailing document carries no XML
 //! declaration of its own — is the facade's, not a backend's. A backend that could choose the
 //! keep-alive cadence would be choosing an observable contract that clients time out against.
+//!
+//! # The fourth thing a handler can say: "the answer is a framed stream"
+//!
+//! [`Resp::event_stream`] carries a [`ByteStream`] whose messages are already framed. It is not a
+//! committed XML answer: an error after the `200` head is an exception frame inside the same
+//! stream, and the generated `O::Output` encoder must never see it. [`Answer::EventStream`] keeps
+//! that distinction through registration-time erasure so the facade supplies the event-stream
+//! content type and writes the body through its ordinary service exit.
 
 use std::borrow::Cow;
 use std::fmt;
@@ -69,6 +77,7 @@ use std::future::Future;
 use std::pin::Pin;
 
 use http::StatusCode;
+use rustfs_gateway_stream::ByteStream;
 use rustfs_gateway_types::{ErrorCode, ErrorContext, status_of};
 
 use crate::fault::{ErrorDetail, ErrorHeader, PRECONDITION_FAILED_MESSAGE, RANGE_NOT_SATISFIABLE_MESSAGE};
@@ -189,6 +198,12 @@ pub enum Answer<O: Operation> {
     Settled(O::Output),
     /// The status is decided; the content is not, and the head has gone out on the strength of it.
     Committed(CommitWork<O>),
+    /// A sequence of already framed event-stream messages.
+    ///
+    /// Unlike [`Self::Committed`], errors after the head are frames inside this stream rather than
+    /// a trailing XML document. The facade therefore sends this body without invoking the
+    /// operation's generated output encoder.
+    EventStream(ByteStream),
 }
 
 impl<O: Operation> fmt::Debug for Answer<O>
@@ -199,6 +214,7 @@ where
         match self {
             Self::Settled(output) => f.debug_tuple("Settled").field(output).finish(),
             Self::Committed(_) => f.write_str("Committed(..)"),
+            Self::EventStream(stream) => f.debug_tuple("EventStream").field(stream).finish(),
         }
     }
 }
@@ -267,6 +283,20 @@ impl<O: Operation> Resp<O> {
         }
     }
 
+    /// Answers with an `application/vnd.amazon.event-stream` frame sequence.
+    ///
+    /// The stream is already framed: a backend uses the exported event-stream encoder to produce
+    /// `Records`, `Stats`, `Progress`, `Cont`, `End`, or an in-band exception. The facade supplies
+    /// the response content type and sends the operation's declared success status; no generated
+    /// document encoder is involved.
+    #[must_use]
+    pub fn event_stream(stream: ByteStream) -> Self {
+        Self {
+            answer: Answer::EventStream(stream),
+            status: O::spec().success_status,
+        }
+    }
+
     /// The output, when there already is one.
     ///
     /// `None` for a committed answer, whose output does not exist yet. An accessor that could not
@@ -274,7 +304,7 @@ impl<O: Operation> Resp<O> {
     pub const fn output(&self) -> Option<&O::Output> {
         match &self.answer {
             Answer::Settled(output) => Some(output),
-            Answer::Committed(_) => None,
+            Answer::Committed(_) | Answer::EventStream(_) => None,
         }
     }
 
@@ -292,7 +322,7 @@ impl<O: Operation> Resp<O> {
     pub const fn output_mut(&mut self) -> Option<&mut O::Output> {
         match &mut self.answer {
             Answer::Settled(output) => Some(output),
-            Answer::Committed(_) => None,
+            Answer::Committed(_) | Answer::EventStream(_) => None,
         }
     }
 
@@ -300,6 +330,12 @@ impl<O: Operation> Resp<O> {
     #[must_use]
     pub const fn is_committed(&self) -> bool {
         matches!(self.answer, Answer::Committed(_))
+    }
+
+    /// Whether the answer is an event-stream frame sequence.
+    #[must_use]
+    pub const fn is_event_stream(&self) -> bool {
+        matches!(self.answer, Answer::EventStream(_))
     }
 
     /// The status this answer goes out with.
@@ -312,7 +348,7 @@ impl<O: Operation> Resp<O> {
     pub fn into_output(self) -> Option<O::Output> {
         match self.answer {
             Answer::Settled(output) => Some(output),
-            Answer::Committed(_) => None,
+            Answer::Committed(_) | Answer::EventStream(_) => None,
         }
     }
 
@@ -499,6 +535,32 @@ pub trait Handler<O: Operation>: Send + Sync + 'static {
 #[allow(clippy::expect_used, clippy::panic, clippy::unwrap_used, clippy::indexing_slicing)]
 mod tests {
     use super::*;
+    use bytes::Bytes;
+    use rustfs_gateway_stream::ByteStream;
+    use rustfs_gateway_types::dto::SelectObjectContent;
+
+    /// Positive — an event stream carries the operation's declared success status and no typed
+    /// output. Treating the stream as a settled empty output is the defect this response shape
+    /// exists to make impossible.
+    #[test]
+    fn an_event_stream_is_a_third_answer_shape() {
+        let response = Resp::<SelectObjectContent>::event_stream(ByteStream::from_bytes(Bytes::from_static(b"frame")));
+        assert_eq!(response.status(), 200);
+        assert!(response.is_event_stream());
+        assert!(!response.is_committed());
+        assert!(response.output().is_none());
+        assert!(response.into_output().is_none());
+    }
+
+    /// Negative — erasing an event stream must not turn it into a settled output. The facade's
+    /// dispatch matches this exact variant to bypass the generated document encoder.
+    #[test]
+    fn an_event_stream_survives_into_parts() {
+        let response = Resp::<SelectObjectContent>::event_stream(ByteStream::from_bytes(Bytes::from_static(b"frame")));
+        let (answer, status) = response.into_parts();
+        assert_eq!(status, 200);
+        assert!(matches!(answer, Answer::EventStream(_)));
+    }
 
     /// Negative — a plain error carries no headers and no elements, so nothing this file added can
     /// change the shape of a document that did not ask for it.
