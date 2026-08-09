@@ -1,8 +1,8 @@
 [case]
 id = "c-authz-1011"
 schema_version = 1
-title = "A traversal copy source is denied before storage"
-rationale = "A dot-dot source must not be authorized under one spelling and consumed as a different storage path."
+title = "A traversal copy source is refused as an invalid argument before storage"
+rationale = "A dot-dot source is invalid input and must not be authorized under one spelling and consumed as a different storage path."
 polarity = "negative"
 operation = "CopyObject"
 tags = ["security", "naming"]
@@ -21,6 +21,6 @@ headers = { "x-amz-copy-source" = "/authz-traversal/../other/secret" }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 [expect]
 kind = "response"
-status = 403
+status = 400
 [expect.error]
-code = "AccessDenied"
+code = "InvalidArgument"

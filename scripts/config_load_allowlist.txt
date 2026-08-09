@@ -16,6 +16,6 @@ crates/gateway/src/ext/governor/meter.rs:90
 crates/gateway/src/ext/oplayer.rs:286
 crates/gateway/src/probe.rs:60
 crates/gateway/src/probe.rs:69
-crates/gateway/src/service.rs:1053
-crates/gateway/src/service.rs:1060
-crates/gateway/src/service.rs:298
+crates/gateway/src/service.rs:1065
+crates/gateway/src/service.rs:1072
+crates/gateway/src/service.rs:299

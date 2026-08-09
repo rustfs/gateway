@@ -1,8 +1,8 @@
 [case]
 id = "c-authz-1012"
 schema_version = 1
-title = "An encoded traversal copy source is denied before storage"
-rationale = "Percent encoding cannot hide a dot-dot segment from the single normalization boundary."
+title = "An encoded traversal copy source is refused as an invalid argument before storage"
+rationale = "Percent encoding cannot hide an invalid dot-dot segment from the single normalization boundary."
 polarity = "negative"
 operation = "CopyObject"
 tags = ["security", "naming"]
@@ -21,6 +21,6 @@ headers = { "x-amz-copy-source" = "/authz-traversal/%2e%2e/other/secret" }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 [expect]
 kind = "response"
-status = 403
+status = 400
 [expect.error]
-code = "AccessDenied"
+code = "InvalidArgument"

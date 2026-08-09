@@ -43,7 +43,7 @@ fn a_traversal_in_the_copy_source_is_refused_and_never_resolved() {
     // This used to assert the spelling was ordinary key bytes. `GHSA-f4vq-9ffr-m8m3` shows why
     // that is unsafe when authorization and storage do not share one normalization.
     let err = rejected("bucket/../../etc/passwd");
-    assert_eq!(err.code(), &ErrorCode::ACCESS_DENIED);
+    assert_eq!(err.code(), &ErrorCode::INVALID_ARGUMENT);
     assert!(CopySource::parse("bucket/%252e%252e/x").is_err());
     assert!(CopySource::parse("bucket/%252e%252e%252fsecret").is_err());
     assert!(CopySource::parse("bucket/a%255csecret").is_err());

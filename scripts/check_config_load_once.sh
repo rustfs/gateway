@@ -28,7 +28,7 @@ expected="$(grep -Ev '^[[:space:]]*(#|$)' "$ALLOWLIST" | LC_ALL=C sort)"
     printf 'check_config_load_once: expected:\n%s\nactual:\n%s\n' "$expected" "$actual" >&2
     exit 1
 }
-[[ "$(grep -c '^crates/gateway/src/service.rs:298$' <<<"$expected")" == 1 ]] \
+[[ "$(grep -c '^crates/gateway/src/service.rs:299$' <<<"$expected")" == 1 ]] \
     || fail 'the one request-entry configuration load is not allowlisted exactly once'
 
 printf 'OK: all load/load_full sites are frozen; one is the request-entry configuration load\n'
