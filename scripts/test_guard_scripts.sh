@@ -178,6 +178,32 @@ done
 # -----------------------------------------------------------------------------
 printf '\nNegative cases (guards must fail)\n'
 
+# ── check_minimal_assembly_lines.sh (P7-01) ───────────────────────────────────
+
+mut_minimal_assembly_exceeds_twenty_lines() {
+    python3 - <<'PY'
+from pathlib import Path
+
+path = Path("crates/gateway/examples/minimal.rs")
+text = path.read_text()
+extra = "".join(f"    let _extra_{index} = {index};\n" for index in range(21))
+path.write_text(text.replace("    // END MINIMAL ASSEMBLY", extra + "    // END MINIMAL ASSEMBLY", 1))
+PY
+}
+expect_fail check_minimal_assembly_lines.sh \
+    'the minimal ServiceBuilder assembly grows beyond twenty effective lines' mut_minimal_assembly_exceeds_twenty_lines
+
+mut_minimal_assembly_marker_removed() {
+    python3 - <<'PY'
+from pathlib import Path
+
+path = Path("crates/gateway/examples/minimal.rs")
+path.write_text(path.read_text().replace("    // BEGIN MINIMAL ASSEMBLY\n", "", 1))
+PY
+}
+expect_fail check_minimal_assembly_lines.sh \
+    'the assembly measurement loses its opening marker' mut_minimal_assembly_marker_removed
+
 # Prove the selective reset itself before relying on it for the remaining cases. The probe dirties
 # the index, a tracked file and an untracked file, then asks the next sandbox acquisition for the
 # same clean baseline every guard case expects.
@@ -1899,6 +1925,198 @@ mut_ci_workflow_deleted() {
 }
 expect_fail check_ci_test_split.sh \
     "the guard's own workflow input deleted, which must fail rather than skip" mut_ci_workflow_deleted
+mut_second_config_load() {
+    python3 - <<'PYEOF'
+import pathlib
+path = pathlib.Path("crates/gateway/src/service.rs")
+text = path.read_text().replace(
+    "let config = self.inner.config.load_full();",
+    "let config = self.inner.config.load_full();\n        let _torn = self.inner.config.load_full();",
+    1,
+)
+path.write_text(text)
+PYEOF
+}
+expect_fail check_config_load_once.sh \
+    'a second hot-configuration read in the request pipeline' mut_second_config_load
+
+mut_aliased_second_config_load() {
+    python3 - <<'PYEOF'
+import pathlib
+path = pathlib.Path("crates/gateway/src/service.rs")
+text = path.read_text().replace(
+    "let config = self.inner.config.load_full();",
+    "let config = self.inner.config.load_full();\n        let config_store = &self.inner.config;\n        let _torn = config_store.load_full();",
+    1,
+)
+path.write_text(text)
+PYEOF
+}
+expect_fail check_config_load_once.sh \
+    'a second hot-configuration read through an aliased store' mut_aliased_second_config_load
+
+mut_as_ref_second_config_load() {
+    python3 - <<'PYEOF'
+import pathlib
+path = pathlib.Path("crates/gateway/src/service.rs")
+text = path.read_text().replace(
+    "let config = self.inner.config.load_full();",
+    "let config = self.inner.config.load_full();\n        let _torn = self.inner.config.as_ref().load_full();",
+    1,
+)
+path.write_text(text)
+PYEOF
+}
+expect_fail check_config_load_once.sh \
+    'a second hot-configuration read through Arc::as_ref' mut_as_ref_second_config_load
+
+mut_guarded_config_load() {
+    python3 - <<'PYEOF'
+import pathlib
+path = pathlib.Path("crates/gateway/src/service.rs")
+text = path.read_text().replace(
+    "let config = self.inner.config.load_full();",
+    "let config = self.inner.config.load_full();\n        let _torn = self.inner.config.load();",
+    1,
+)
+path.write_text(text)
+PYEOF
+}
+expect_fail check_config_load_once.sh \
+    'a second hot-configuration read through ArcSwap::load' mut_guarded_config_load
+
+mut_ufcs_config_load_full() {
+    python3 - <<'PYEOF'
+import pathlib
+path = pathlib.Path("crates/gateway/src/service.rs")
+text = path.read_text().replace(
+    "let config = self.inner.config.load_full();",
+    "let config = self.inner.config.load_full();\n        let _torn = arc_swap::ArcSwapAny::load_full(self.inner.config.as_ref());",
+    1,
+)
+path.write_text(text)
+PYEOF
+}
+expect_fail check_config_load_once.sh \
+    'a second hot-configuration read through UFCS load_full' mut_ufcs_config_load_full
+
+mut_ufcs_config_load() {
+    python3 - <<'PYEOF'
+import pathlib
+path = pathlib.Path("crates/gateway/src/service.rs")
+text = path.read_text().replace(
+    "let config = self.inner.config.load_full();",
+    "let config = self.inner.config.load_full();\n        let _torn = arc_swap::ArcSwapAny::load(self.inner.config.as_ref());",
+    1,
+)
+path.write_text(text)
+PYEOF
+}
+expect_fail check_config_load_once.sh \
+    'a second hot-configuration read through UFCS load' mut_ufcs_config_load
+
+mut_import_aliased_config_load_full() {
+    python3 - <<'PYEOF'
+import pathlib
+path = pathlib.Path("crates/gateway/src/service.rs")
+text = path.read_text().replace(
+    "let config = self.inner.config.load_full();",
+    "let config = self.inner.config.load_full();\n        use arc_swap::ArcSwapAny as Swap;\n        let _torn = Swap::load_full(self.inner.config.as_ref());",
+    1,
+)
+path.write_text(text)
+PYEOF
+}
+expect_fail check_config_load_once.sh \
+    'a second hot-configuration read through an imported type alias' mut_import_aliased_config_load_full
+
+mut_type_aliased_config_load() {
+    python3 - <<'PYEOF'
+import pathlib
+path = pathlib.Path("crates/gateway/src/service.rs")
+text = path.read_text().replace(
+    "let config = self.inner.config.load_full();",
+    "let config = self.inner.config.load_full();\n        type ConfigStoreAlias = arc_swap::ArcSwapAny<Arc<ServiceConfig>>;\n        let _torn = ConfigStoreAlias::load(self.inner.config.as_ref());",
+    1,
+)
+path.write_text(text)
+PYEOF
+}
+expect_fail check_config_load_once.sh \
+    'a second hot-configuration read through a type alias' mut_type_aliased_config_load
+
+mut_config_load_function_item() {
+    python3 - <<'PYEOF'
+import pathlib
+path = pathlib.Path("crates/gateway/src/service.rs")
+text = path.read_text().replace(
+    "let config = self.inner.config.load_full();",
+    "let config = self.inner.config.load_full();\n        use arc_swap::ArcSwapAny as Swap;\n        let read = Swap::load_full;\n        let _torn = read(self.inner.config.as_ref());",
+    1,
+)
+path.write_text(text)
+PYEOF
+}
+expect_fail check_config_load_once.sh \
+    'a second hot-configuration read through a function item' mut_config_load_function_item
+
+mut_config_load_allowlist_deleted() {
+    rm -f scripts/config_load_allowlist.txt
+}
+expect_fail check_config_load_once.sh \
+    'the config-load allowlist being absent' mut_config_load_allowlist_deleted
+
+mut_default_security_doc_deleted() {
+    python3 - <<'PYEOF'
+import pathlib
+path = pathlib.Path("crates/gateway/src/ext/policy.rs")
+text = path.read_text().replace("/// # Security\n", "", 1)
+path.write_text(text)
+PYEOF
+}
+expect_fail check_default_doc.sh \
+    'a Default implementation losing its security consequences' mut_default_security_doc_deleted
+
+mut_derived_default_security_doc_deleted() {
+    python3 - <<'PYEOF'
+import pathlib
+path = pathlib.Path("crates/gateway/src/ext/host.rs")
+text = path.read_text().replace("/// # Security\n", "", 1)
+path.write_text(text)
+PYEOF
+}
+expect_fail check_default_doc.sh \
+    'a derived extension default losing its security consequences' mut_derived_default_security_doc_deleted
+
+mut_undocumented_derived_default_added() {
+    python3 - <<'PYEOF'
+import pathlib
+path = pathlib.Path("crates/gateway/src/ext/observer.rs")
+text = path.read_text()
+text += "\n#[derive(Default)]\npub struct UndocumentedObserverDefault;\n"
+path.write_text(text)
+PYEOF
+}
+expect_fail check_default_doc.sh \
+    'a newly derived extension default without security documentation' mut_undocumented_derived_default_added
+
+mut_inline_undocumented_derived_default_added() {
+    python3 - <<'PYEOF'
+import pathlib
+path = pathlib.Path("crates/gateway/src/ext/observer.rs")
+text = path.read_text()
+text += "\n#[derive(Default)] pub struct InlineUndocumentedDefault;\n"
+path.write_text(text)
+PYEOF
+}
+expect_fail check_default_doc.sh \
+    'an inline derived extension default without security documentation' mut_inline_undocumented_derived_default_added
+
+mut_default_doc_subject_deleted() {
+    rm -f crates/gateway/src/ext/policy.rs
+}
+expect_fail check_default_doc.sh \
+    "a documented Default implementation's source being absent" mut_default_doc_subject_deleted
 
 printf '\n%s case(s), %s failure(s)\n' "$cases" "$failures"
 [[ "$failures" -eq 0 ]]

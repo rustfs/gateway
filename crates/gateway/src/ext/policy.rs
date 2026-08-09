@@ -85,6 +85,9 @@ impl PolicyTimeout {
     }
 }
 
+/// # Security
+///
+/// The default bounds a policy-store stall; it never turns an unavailable policy into allow.
 impl Default for PolicyTimeout {
     fn default() -> Self {
         Self(DEFAULT_POLICY_SNAPSHOT_TIMEOUT)

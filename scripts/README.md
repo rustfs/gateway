@@ -73,6 +73,9 @@ fixed now so that the same check does not get written twice under two names.
 | `check_file_size.sh` | Hand-written Rust files stay within 800 lines or a reasoned, issue-linked allowance | P7-05 |
 | `check_agents_forbidden_list.sh` | The three context-budget prohibitions each retain a reason and safe alternative | P7-05 |
 | `check_agents_layering.sh` | Scoped AGENTS files wait for the five-rule trigger and duplicate checker | P7-05 |
+| `check_config_load_once.sh` | Every `.load()` / `.load_full()` call site is frozen so hot service configuration can be loaded only once at request entry | P7-01 |
+| `check_default_doc.sh` | Every public extension `Default` implementation states its security consequence; derived subjects are discovered rather than listed by hand | P7-01 |
+| `check_minimal_assembly_lines.sh` | The complete assembly in the minimal example stays within twenty effective Rust lines | P7-01 |
 | `test_guard_scripts.sh` | Not a guard: runs every guard on the tree and asserts each one fails on an injected violation | P0 |
 
 ### Registered, not yet implemented (TODO)
@@ -90,7 +93,6 @@ fixed now so that the same check does not get written twice under two names.
 | `check_no_trailer_mutex.sh` | No `Arc<Mutex<Option<_>>>` trailer timing contract — the ordering must be encoded in the type | P3 |
 | `check_multer_constraints.sh` | multipart parsing sets explicit limits (multer defaults to `u64::MAX`) | P3 |
 | `check_governor_position.sh` | `Governor::try_acquire` is called after routing and before the body is read | P3 |
-| `check_config_load_once.sh` | The policy/config snapshot is taken exactly once per request | P3 |
 | `check_no_header_unwrap.sh` | Header parsing never `unwrap`s | P3 |
 | `check_no_duplicate_fuzz_targets.sh` | Fuzz targets are not duplicated between P2-07 and P8-07 | P8-07 |
 | `check_agents_no_dup.sh` | Scoped `AGENTS.md` files do not restate root rules | Deferred until layered `AGENTS.md` files exist |

@@ -128,6 +128,9 @@ pub struct CorsCacheConfig {
     pub jitter_seconds: u32,
 }
 
+/// # Security
+///
+/// The bounded entry count and short lifetime limit unauthenticated cache amplification.
 impl Default for CorsCacheConfig {
     /// 4096 buckets, 30 seconds, spread over a further 30.
     ///

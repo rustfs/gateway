@@ -228,7 +228,9 @@ fn verify_scaffold(entry: &catalog::ScaffoldEntry, json: bool) -> ExitCode {
 }
 
 fn package_name(name: &str) -> String {
-    if name == "xtask" || name.starts_with("rustfs-gateway-") {
+    if name == "rustfs-gateway" || name == "s3gate" {
+        "rustfs-gateway".to_owned()
+    } else if name == "xtask" || name.starts_with("rustfs-gateway-") {
         name.to_owned()
     } else if let Some(suffix) = name.strip_prefix("s3gate-") {
         format!("rustfs-gateway-{suffix}")
@@ -542,5 +544,11 @@ mod tests {
                 .all(|(_, output)| output.as_ref().is_ok_and(|output| output.status.success()))
         );
         fs::remove_dir_all(root).expect("test directory must be removable");
+    }
+
+    #[test]
+    fn the_facade_accepts_its_current_and_legacy_crate_names() {
+        assert_eq!(package_name("rustfs-gateway"), "rustfs-gateway");
+        assert_eq!(package_name("s3gate"), "rustfs-gateway");
     }
 }

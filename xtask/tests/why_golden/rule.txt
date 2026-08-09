@@ -1,6 +1,7 @@
 RULE      asm-missing-authorizer — no Authorizer was installed; there is no default allow and no default deny, because a default either fails open or makes every deployment look broken in the same way
 EVIDENCE  NONE
-CASES     NONE
+CASES     a_asm_0009_and_0010_missing_authorizer_is_refused_at_build — crates/gateway/tests/assembly.rs
+          a_refusal_leads_with_its_rule — crates/gateway/src/assembly.rs
 ADR       NONE
 SPEC      crates/gateway/src/assembly.rs:RuleRef::ALL
 RELATED   NONE

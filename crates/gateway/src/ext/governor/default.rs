@@ -172,6 +172,9 @@ impl core::fmt::Debug for DefaultGovernor {
     }
 }
 
+/// # Security
+///
+/// Default construction installs the bounded framework rates rather than an unlimited governor.
 impl Default for DefaultGovernor {
     fn default() -> Self {
         Self::new()

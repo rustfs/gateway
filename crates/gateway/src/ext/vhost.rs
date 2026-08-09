@@ -226,6 +226,11 @@ impl BaseDomain {
 /// # let _ = builder;
 /// # Ok::<(), rustfs_gateway::DomainError>(())
 /// ```
+///
+/// # Security
+///
+/// The default has no trusted base domains, so no unauthenticated `Host` value can select a
+/// bucket; requests remain path-style.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct VirtualHostStyle {
     /// Sorted longest first, so the first match is the longest one and the answer does not depend

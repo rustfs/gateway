@@ -1,39 +1,83 @@
 # rustfs-gateway facade crate map
 
-Agent entry point for service assembly and the end-to-end request pipeline.
+The public facade. It assembles the protocol kernel into one non-generic `S3Service` and re-exports
+the consumer surface. Ring 1: no rustfs crate dependency. Start at `src/lib.rs`; read
+`src/service.rs` for request order and `docs/assembly-order.md` for extension call counts.
+
+## Runtime and assembly
 
 | File | Responsibility | Read it when |
-|---|---|---|
-| `src/lib.rs` | Public facade and re-exports. | Start a facade task or change a public export. |
-| `src/builder.rs` | `ServiceBuilder` configuration and assembly inputs. | Add or validate a builder option. |
-| `src/assembly.rs` | Closed `asm-*` startup rules and errors. | A service refuses to start or `xtask why asm-*` changes. |
-| `src/service.rs` | Ordered request pipeline. | A request stage runs in the wrong order. |
-| `src/dispatch.rs` | Typed dispatch into registered codecs and handlers. | A routed request does not reach its handler. |
-| `src/gate.rs` | Body-read proof and request-size ceilings. | A request body is read too early or exceeds a limit. |
-| `src/probe.rs` | Observable request-body progress. | A test must prove whether a body was read. |
-| `src/render.rs` | S3 error response rendering. | Status, headers, or XML error bytes are wrong. |
-| `src/invariants.rs` | HTTP and secret-header response invariants. | A response carries forbidden content or headers. |
-| `src/commit.rs` | Responses whose head is committed before their outcome. | Change the post-commit error path. |
-| `src/stamp.rs` | Framework-owned response headers. | A response lacks request IDs, server, or date. |
-| `src/close.rs` | Connection intent after each refusal. | A refusal keeps or closes the connection incorrectly. |
-| `src/chunked.rs` | Signed `aws-chunked` ingestion handoff. | Framed uploads are decoded or rejected incorrectly. |
-| `src/wire.rs` | Drained response shape with header order. | Assert on a response at the conformance boundary. |
-| `src/trace.rs` | Request and host identifier sources. | IDs are missing, repeated, or need pinning in a test. |
-| `src/ext/mod.rs` | Extension-point roster and defaults. | Choose or add an extension seam. |
-| `src/ext/authenticator.rs` | Request authentication adapter. | Authentication accepts, refuses, or reports the wrong outcome. |
-| `src/ext/credentials.rs` | Secret-bearing credential types and provider contract. | Wire IAM/STS credentials or review secret exposure. |
-| `src/ext/credential_guard.rs` | Provider timeout, cache, panic isolation, and metrics. | Credential lookup cost or availability is wrong. |
-| `src/ext/authorizer.rs` | Authorization request and decision contract. | Change fail-closed authorization. |
-| `src/ext/policy.rs` | Per-request policy snapshots. | Authorization stages disagree about policy state. |
-| `src/ext/authz_audit.rs` | Authorization audit events. | A decision is missing from audit output. |
-| `src/ext/host.rs` | Addressing classification and host resolution seam. | A bucket or object target resolves incorrectly. |
-| `src/ext/vhost.rs` | Virtual-hosted addressing implementation. | Host suffix or region parsing is wrong. |
-| `src/ext/governor.rs` | Request-governor contract. | Add or tune a quota seam. |
-| `src/ext/filter.rs` | Wire, routed, and response filters. | A deployment-level filter runs at the wrong stage. |
-| `src/ext/oplayer.rs` | Per-operation typed middleware. | Middleware needs decoded input or typed output. |
-| `tests/support/` | Shared integration backends and builders. | Add a facade integration scenario. |
-| `tests/pipeline.rs` | End-to-end stage ordering. | Change the service pipeline. |
-| `tests/authz_contract.rs` | Fail-closed authorization matrix. | Change authorization consumption. |
-| `tests/credential_runtime.rs` | Credential lookup runtime guarantees. | Change credential-provider behavior. |
-| `tests/trybuild_credential.rs` | Credential compile-fail surface. | Change what credential APIs expose. |
-| `tests/middleware.rs` | Filter and operation-layer matrix. | Change middleware or its assembly rules. |
+| --- | --- | --- |
+| `src/lib.rs` | Modules and public re-exports | A downstream caller cannot name a type |
+| `src/builder.rs` | Registration, extension setters, assembly checks | Adding a knob or diagnosing `build()` |
+| `src/config.rs` | Hot config, update handle, immutable request snapshot | Adding a runtime setting or checking one-load-per-request |
+| `src/service.rs` | Ordered pipeline and `S3Service` | Moving a stage or tracing a response |
+| `src/adapt.rs` | tower and hyper adapters | Wiring a server or checking `Infallible` |
+| `src/assembly.rs` | `AssemblyError` and `asm-*` rule refs | Adding an assembly refusal |
+| `src/dispatch.rs` | Codec-aware operation erasure and dispatch table | A route cannot decode or invoke |
+| `src/gate.rs` | Authentication proof, sealed body, body ceilings | Moving work around the body read |
+| `src/probe.rs` | Observable request-body progress | Testing whether a refusal read bytes |
+| `src/chunked.rs` | `aws-chunked` ingest selection and execution | A framed upload stores wrong bytes |
+| `src/render.rs` | One S3 error renderer | Changing refusal bytes or headers |
+| `src/commit.rs` | 200-then-answer/error response shape | Work continues after the head commits |
+| `src/invariants.rs` | HEAD/bodyless and SSE-C response rules | A forbidden body or key reaches the wire |
+| `src/stamp.rs` | Framework-owned response headers | A response lacks IDs, `Server`, or `Date` |
+| `src/trace.rs` | Request IDs and trace sources | Joining an answer to an audit record |
+| `src/clock.rs` | Wall and monotonic clock sources | A request reads time twice |
+| `src/close.rs` | Connection intent table | A refusal changes reuse behavior |
+| `src/wire.rs` | Drained response preserving header order | Asserting exact response shape |
+| `src/transport.rs` | Assembly-path vocabulary | A runner names its transport |
+| `src/sig.rs` | Signature re-exports | A caller needs signing vocabulary |
+
+## Extension points
+
+| File | Responsibility | Read it when |
+| --- | --- | --- |
+| `src/ext/mod.rs` | Extension roster and safe defaults | Choosing or adding an extension |
+| `src/ext/authenticator.rs` | `Authenticator`, SigV4 implementation | Replacing authentication |
+| `src/ext/authorizer.rs` | Two-stage authorization contract | Writing policy decisions |
+| `src/ext/authz_audit.rs` | Read-only decision audit sink | Recording authorization outcomes |
+| `src/ext/policy.rs` | One policy snapshot per request | Two stages disagree on policy |
+| `src/ext/credentials.rs` | Credential provider and secret-safe values | Wiring IAM or STS credentials |
+| `src/ext/credential_guard.rs` | Provider timeout, panic isolation, negative cache | Bounding credential lookup work |
+| `src/ext/host.rs` | Host resolution and path-style default | Locating the bucket source |
+| `src/ext/vhost.rs` | Virtual-host label-boundary matching | Configuring served domains |
+| `src/ext/governor.rs` | Governor contract and request dimensions | Adding deployment quotas |
+| `src/ext/governor/default.rs` | Mandatory layered token buckets | Tuning shipped limits |
+| `src/ext/governor/meter.rs` | Atomic token-bucket meter | Changing quota accounting |
+| `src/ext/governor/rates.rs` | Validated default rates | Changing capacity defaults |
+| `src/ext/cors.rs` | Cached bucket CORS source | Serving browser requests |
+| `src/ext/observer.rs` | Final response observer | Wiring logs or metrics |
+| `src/ext/filter.rs` | Wire, routed, and response seams | Rewriting untyped HTTP shape |
+| `src/ext/oplayer.rs` | Typed per-operation middleware | Rewriting one DTO |
+
+## Tests and examples
+
+| Path | Contract |
+| --- | --- |
+| `tests/assembly.rs` | Assembly refusals, one-Arc service, required extensions |
+| `tests/assembly_order.rs` | Aggregate extension call order and counts |
+| `tests/service_clone_allocations.rs` | Zero-allocation connection clones |
+| `tests/service_concurrency.rs` | One hundred concurrent clones and requests |
+| `tests/service_config.rs` | Mid-request updates cannot tear a snapshot |
+| `tests/handler_panic.rs` | Handler panic becomes 500; next request still runs |
+| `tests/pipeline.rs` | End-to-end ordering, response shapes, body progress |
+| `tests/authz_contract.rs` | Two authorization stages, audit, failure floor |
+| `tests/governor_runtime.rs` | Limits run before expensive work and recover |
+| `tests/cors_runtime.rs` | Preflight and actual-response CORS behavior |
+| `tests/middleware.rs` | Filter and operation-layer seams |
+| `tests/sse_runtime.rs` | TLS gate, key hygiene, multipart consistency |
+| `tests/vhost_resolution.rs` | Host boundary and fallback behavior |
+| `tests/connection_teardown.rs` | Connection intent propagation |
+| `tests/refusal_order_guards.rs` | Body-proof source guards |
+| `tests/support/mod.rs` | Shared operations, backends, signing, probes |
+| `examples/minimal.rs` | Minimal complete assembly and two requests |
+
+## Known gaps
+
+- Request bodies are buffered, bounded by `ServiceConfig::max_buffered_body_bytes` and operation caps.
+- `SseEnforced` is positional rather than carried on `Req<O>`; changing that needs a core API ADR.
+- Trailered `aws-chunked` modes remain unimplemented until trailer verification can commit safely.
+- This crate declares connection intent; only a transport can observe a socket close.
+- The header map is cloned once because `WireRequest` does not expose the accepted signing view.
+- `x-amz-id-2` is a fixed uppercase-hex token, intentionally not AWS-shaped.

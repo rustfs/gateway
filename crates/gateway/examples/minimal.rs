@@ -145,6 +145,7 @@ impl Handler<ListBuckets> for InMemory {
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // BEGIN MINIMAL ASSEMBLY
     let credentials = Arc::new(StaticCredentials::new().with(Credentials::new("AKIDEXAMPLE", b"secret")?));
     let backend = Arc::new(InMemory {
         buckets: vec![BucketName::new("alpha")?, BucketName::new("beta")?],
@@ -161,6 +162,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .authenticator(SigV4Authenticator::new(credentials, RegionSet::new(["us-east-1"])?))
         .authorizer(allow_when(|request| request.operation == "example:Ping"))
         .build()?;
+    // END MINIMAL ASSEMBLY
 
     // The whole pipeline, end to end: accepted, resolved, routed, governed, admitted, decoded,
     // authorised, dispatched, encoded.

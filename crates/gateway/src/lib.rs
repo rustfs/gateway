@@ -85,6 +85,7 @@ mod chunked;
 mod clock;
 pub mod close;
 pub mod commit;
+mod config;
 mod dispatch;
 mod ext;
 mod gate;
@@ -107,6 +108,7 @@ pub use crate::clock::{
     SystemMonotonic, system_clock,
 };
 pub use crate::close::ConnectionIntent;
+pub use crate::config::{ConfigHandle, ConfigSnapshot, ServiceConfig};
 pub use crate::ext::{
     Addressing, AuthSchemeRef, Authentication, Authenticator, Authorizer, AuthzAuditEvent, AuthzAuditSink, AuthzRequest,
     AuthzStage, BaseDomain, CORS_PREFLIGHT, CachedCorsSource, ChunkSink, ChunkVerification, ClassKind, ClientAddr,
