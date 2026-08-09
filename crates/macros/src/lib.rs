@@ -15,8 +15,8 @@
 //! `#[handlers]`: the optional sugar that writes the `impl Handler<O>` blocks nobody wants to type.
 //!
 //! Responsible for: the attribute macro's entry point, and nothing else. The expansion lives in
-//! [`expand`], the name mapping in [`mapping`], the suggestion metric in [`levenshtein`], and the
-//! operation names in [`op_names`].
+//! `expand`, the name mapping in `mapping`, the suggestion metric in `levenshtein`, and the
+//! operation names in `op_names`.
 //! NOT responsible for: registration semantics (that is `rustfs-gateway-core`), specs, floors,
 //! or authorisation. The macro never decides anything a reader could not decide by looking at the
 //! method name.
@@ -68,6 +68,9 @@
 //! 4. A test proves the macro form and the hand-written form register the same operations with the
 //!    same behaviour.
 //! 5. Errors point at the method name, not at the `impl` block, and suggest near misses.
+
+#![doc = include_str!("../README.md")]
+#![deny(missing_docs)]
 
 mod expand;
 mod levenshtein;

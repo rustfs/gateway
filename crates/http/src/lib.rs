@@ -49,6 +49,8 @@
 //! `Content-Length` / `Transfer-Encoding` pair before this layer sees it defeats rule W-1 no
 //! matter what is written here, so the facade that wires up a server is responsible for handing
 //! the request over as received.
+#![doc = include_str!("../README.md")]
+#![deny(missing_docs)]
 #![forbid(unsafe_code)]
 #![deny(
     clippy::unwrap_used,

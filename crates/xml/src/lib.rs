@@ -26,6 +26,8 @@
 //! S3 writes a response body with no whitespace between elements and writes an empty element in
 //! its paired form. Both are byte-observable, and a conformance case that pins a body fails on
 //! either. An option a caller could set the other way is a defect waiting for a caller.
+#![doc = include_str!("../README.md")]
+#![deny(missing_docs)]
 #![forbid(unsafe_code)]
 
 pub mod error;

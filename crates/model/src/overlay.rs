@@ -17,8 +17,8 @@
 //! Responsible for: the operation whitelist, the scalar vocabulary map, per-operation and
 //! per-shape wire overrides, and the quirk records with their evidence — merged from one file per
 //! operation family, with every cross-file collision reported as a load failure.
-//! NOT responsible for: applying any of it (that is [`crate::lower`]).
-//! Upstream: [`crate::toml_lite`]. Downstream: [`crate::lower`].
+//! NOT responsible for: applying any of it (that is [`mod@crate::lower`]).
+//! Upstream: [`crate::toml_lite`]. Downstream: [`mod@crate::lower`].
 //!
 //! Everything a human is allowed to decide about the wire lives here and nowhere else. The
 //! Smithy model is read-only and every artefact below the overlay is generated, so this is the

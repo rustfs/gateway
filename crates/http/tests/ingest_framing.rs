@@ -18,6 +18,7 @@
 //! the interaction between HTTP's own framing decision and the payload framing layered inside it.
 //! NOT responsible for: chunk syntax (`ingest_chunk_rules`) or the signature chain
 //! (`ingest_verify`).
+//! Upstream: the module's declared inputs. Downstream: its callers and regression tests.
 //!
 //! 5 positive / 13 negative.
 

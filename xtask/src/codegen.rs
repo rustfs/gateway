@@ -23,7 +23,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::{fs, io};
 
-use rustfs_gateway_codegen::{CodegenInput, CodegenOutput, Report, semantic, why};
+use rustfs_gateway_codegen::{CodegenInput, CodegenOutput, Report, semantic};
 
 use crate::catalog;
 
@@ -177,35 +177,6 @@ fn write_verify_map(operations: &[rustfs_gateway_model::ir::OperationIr]) -> Res
 
 fn io_error(path: &Path, error: io::Error) -> String {
     format!("{}: {error}", path.display())
-}
-
-/// `cargo xtask why <quirk-id | operation | error-code | header | query-key>`.
-pub(crate) fn why(args: &[String]) -> ExitCode {
-    let (args, json) = take_json(args);
-    let [argument] = args.as_slice() else {
-        eprintln!("usage: cargo xtask why <quirk-id | operation | error-code | header | query-key>");
-        return ExitCode::from(2);
-    };
-    let root = repo_root();
-    let artifacts = match rustfs_gateway_codegen::generate(&CodegenInput::at(&root), &CodegenOutput::at(&root)) {
-        Ok(artifacts) => artifacts,
-        Err(err) => return fail(err),
-    };
-    match why::why(&artifacts.operations, argument) {
-        Ok(text) => {
-            if json {
-                println!(
-                    "{{\"command\":\"why\",\"target\":\"{}\",\"ok\":true,\"explanation\":\"{}\"}}",
-                    escape_json(argument),
-                    escape_json(&text)
-                );
-            } else {
-                print!("{text}");
-            }
-            ExitCode::SUCCESS
-        }
-        Err(err) => fail(err),
-    }
 }
 
 fn take_json(args: &[String]) -> (Vec<String>, bool) {

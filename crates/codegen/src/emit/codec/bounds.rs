@@ -70,7 +70,7 @@ const RANGES: &[(&str, Bound)] = &[
 ///
 /// # Errors
 ///
-/// A string naming the operation and member when a `bounded_range` quirk has no row in [`RANGES`],
+/// A string naming the operation and member when a `bounded_range` quirk has no row in `RANGES`,
 /// or when one is attached to a field whose type is not an integer. Both are overlay mistakes that
 /// would otherwise disable a refusal silently, which is the failure mode a hand-written file can
 /// least afford.

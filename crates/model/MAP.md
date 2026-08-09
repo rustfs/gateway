@@ -33,7 +33,7 @@ overlays/quirks/*.toml  ──┘
 
 **Structure comes from the model. Decisions come from the overlay.**
 
-| From `model/s3.json` | From `overlays/` |
+| From the pinned Smithy source | From `overlays/` |
 |---|---|
 | method, uri, labels, query literals | route `precedence`, extra predicates |
 | member bindings, wire names, enum values | IAM action, presigned policy |

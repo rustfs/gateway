@@ -112,7 +112,7 @@ impl ObjectKey {
     /// parameter, whose decode belongs to the XML or query reader that produced it.
     ///
     /// No decode happens here. Decoding a value that was already decoded is the double-decode bug
-    /// [`super::naming`] exists to prevent, so this applies the floor and the validator to what it
+    /// `super::naming` exists to prevent, so this applies the floor and the validator to what it
     /// was given.
     ///
     /// # Errors

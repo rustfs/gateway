@@ -61,7 +61,7 @@
 //!
 //! `CopyObject` and `UploadPartCopy` name a second object. Their live handler path reads the
 //! framework's `CopySourceResources` and resolves it with the `AuthorizedRead` proof carried by
-//! the same `Req`; it never parses the header again. [`parse_copy_source`] remains only for focused
+//! the same `Req`; it never parses the header again. `parse_copy_source` remains only for focused
 //! fixture unit tests that exercise legacy edge cases directly. The copy range likewise delegates
 //! to the shared [`resolve_copy_range`] contract.
 //!
@@ -74,7 +74,7 @@
 //!
 //! An upload id is the only handle in S3 that names *state a later request will write into*, and
 //! that is what makes it the family's whole security surface. Five operations accept one, and all
-//! five go through [`require_upload`], which resolves the id **against the bucket and the key of
+//! five go through `require_upload`, which resolves the id **against the bucket and the key of
 //! the request that named it** rather than on its own. s3s#51 is the cost of the other spelling:
 //! knowing an id was enough to push a part into a stranger's upload, and the owner completed it
 //! without ever learning that somebody else had contributed bytes. `c-mpu-0029` and `c-mpu-0030`
@@ -86,7 +86,7 @@
 //! order it makes them, and each because the alternative is an object nobody can detect is wrong:
 //! a part list that is not strictly ascending is `InvalidPartOrder`; a part number that was never
 //! uploaded, or one whose claimed digest is not the digest of the bytes on file, is `InvalidPart`;
-//! and a non-final part under [`MIN_PART_BYTES`] is `EntityTooSmall`, because the object is the
+//! and a non-final part under `MIN_PART_BYTES` is `EntityTooSmall`, because the object is the
 //! concatenation and a short part in the middle leaves a hole no later read can see. The tag the
 //! completion answers is not the digest of those bytes either — it is
 //! `ETag::from_part_digests`, the digest of the concatenated part digests with `-N` after it, and
@@ -188,7 +188,7 @@ pub struct StoredObject {
     /// A `Vec` rather than a map, and ordered rather than sorted, because the tag set is what the
     /// writer sent: `x-amz-tagging: a=1&b=2` and a `<Tagging>` document both carry an order, and a
     /// stub that re-sorted them would be answering from a decision of its own. Duplicate keys never
-    /// reach here — [`read_tagging_header`] and [`tag_pairs`] refuse them — so the sequence is a
+    /// reach here — `read_tagging_header` and `tag_pairs` refuse them — so the sequence is a
     /// map in everything but lookup cost, and ten pairs is the ceiling AWS documents.
     pub tags: Vec<(String, String)>,
     /// The retention document a retention write stored, exactly as validated — never invented,
@@ -945,7 +945,7 @@ impl Fixture {
 
     /// The upload an id names, whichever bucket and key it belongs to.
     ///
-    /// Every handler goes through [`require_upload`] instead, which is the same lookup plus the
+    /// Every handler goes through `require_upload` instead, which is the same lookup plus the
     /// ownership check; this accessor exists for that function and for `setup`.
     #[must_use]
     pub fn upload(&self, upload_id: &str) -> Option<&StoredUpload> {

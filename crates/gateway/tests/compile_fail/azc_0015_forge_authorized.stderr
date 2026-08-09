@@ -1,5 +1,5 @@
 error[E0599]: no associated function or constant named `new` found for struct `Authorized<O>` in the current scope
-  --> tests/compile_fail/azc_0015_forge_authorized.rs:20:43
+  --> tests/compile_fail/azc_0015_forge_authorized.rs:26:43
    |
-20 |     let _ = Authorized::<dto::GetObject>::new();
+26 |     let _ = Authorized::<dto::GetObject>::new();
    |                                           ^^^ associated function or constant not found in `Authorized<GetObject>`

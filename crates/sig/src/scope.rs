@@ -130,7 +130,7 @@ impl<'a> ExpectedScope<'a> {
 /// * the terminator is `aws4_request` — already guaranteed, because [`CredentialScope::parse`]
 ///   refuses anything else, and this is the function that depends on it.
 ///
-/// The timestamp arrives as a [`ClockChecked`], not as an [`AmzDate`]: a scope cannot be
+/// The timestamp arrives as a [`ClockChecked`], not as an [`crate::AmzDate`]: a scope cannot be
 /// cross-checked against a timestamp that nobody compared to the clock, because the receipt is the
 /// only way to name one here.
 ///

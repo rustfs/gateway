@@ -12,6 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! Compile-fail fixture for the credential-provider return type.
+//!
+//! Responsible for: proving a provider cannot return bare secret bytes.
+//! NOT responsible for: runtime credential lookup.
+//! Upstream: `rustfs-gateway`. Downstream: the credential trybuild contract.
+
 use rustfs_gateway::{BoxFuture, CredentialProvider, ProviderError};
 use rustfs_gateway::sig::SecretBytes;
 

@@ -12,6 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! Compile-time or regression support for this module.
+//!
+//! Responsible for: exercising the contract named by this file.
+//! NOT responsible for: implementing the production behavior under test.
+//! Upstream: the test harness and subject module. Downstream: the repository verification gate.
+
 // Two operations in one group, which is how a family of operations in one file registers. A second
 // file with `group = buckets` generates `register_buckets`, and the assembly point calls both.
 

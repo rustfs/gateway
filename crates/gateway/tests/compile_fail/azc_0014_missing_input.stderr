@@ -1,7 +1,7 @@
 error[E0046]: not all trait items implemented, missing: `authorize_input`
-  --> tests/compile_fail/azc_0014_missing_input.rs:21:1
+  --> tests/compile_fail/azc_0014_missing_input.rs:27:1
    |
-21 | impl Authorizer for RouteOnly {
+27 | impl Authorizer for RouteOnly {
    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ missing `authorize_input` in implementation
    |
    = help: implement the missing item: `fn authorize_input(&'a self, _: &'a RequestContext<'a>, _: &'a InputAuthzRequest<'a>) -> Pin<Box<(dyn Future<Output = InputDecisions> + Send + 'a)>> { todo!() }`

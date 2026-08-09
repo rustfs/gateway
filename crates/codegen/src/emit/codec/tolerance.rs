@@ -110,7 +110,7 @@ const TOLERANCES: &[(&str, Tolerance)] = &[
 /// # Errors
 ///
 /// A string naming the operation and member when a `header_tolerance` quirk has no row in
-/// [`TOLERANCES`], when one is attached to a member whose type or binding the reading has no form
+/// `TOLERANCES`, when one is attached to a member whose type or binding the reading has no form
 /// for, or when two of them claim different readings for one member. All three are overlay
 /// mistakes that would otherwise leave a member strict where the specification requires tolerance
 /// — a failure indistinguishable, from the outside, from a decoder simply doing its job.

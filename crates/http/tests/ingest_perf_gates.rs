@@ -18,6 +18,7 @@
 //! and the absence of any adapting copy when the body is consumed in its native model.
 //! NOT responsible for: throughput. A wall-clock assertion on a shared runner is noise, and a
 //! noisy gate is a muted gate within a month; every gate here is a count.
+//! Upstream: the module's declared inputs. Downstream: its callers and regression tests.
 //!
 //! 7 positive / 10 negative.
 

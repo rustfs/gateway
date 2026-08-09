@@ -1,0 +1,42 @@
+RULE      NoSuchKey — S3 error code produced by CopyObject, DeleteObjectTagging, GetObject, GetObjectAcl, GetObjectAttributes, GetObjectLegalHold, GetObjectRetention, GetObjectTagging, HeadObject, PutObjectAcl, PutObjectLegalHold, PutObjectRetention, PutObjectTagging, RestoreObject, SelectObjectContent, UploadPartCopy
+EVIDENCE  NONE
+CASES     c-copy-0025 — A copy source that is an ARN of another service is refused rather than read as a bucket name
+          c-copy-0034 — A copy from a missing key answers NoSuchKey and from a missing bucket answers NoSuchBucket
+          c-copy-0038 — A copy that fails after its head is flushed answers with an Error document under a success status
+          c-cors-0033 — A post-authorisation failure still carries the CORS headers
+          c-object-0007 — A read of a key that does not exist is a 404 NoSuchKey with no object headers at all
+          c-object-0016 — The response- overrides apply to a successful read and never to the error document
+          c-tagging-0016 — PutObject with x-amz-tagging carrying a segment without '=' is a 400 and stores nothing
+ADR       NONE
+SPEC      spec/operations/CopyObject.toml:errors
+          spec/operations/DeleteObjectTagging.toml:errors
+          spec/operations/GetObject.toml:errors
+          spec/operations/GetObjectAcl.toml:errors
+          spec/operations/GetObjectAttributes.toml:errors
+          spec/operations/GetObjectLegalHold.toml:errors
+          spec/operations/GetObjectRetention.toml:errors
+          spec/operations/GetObjectTagging.toml:errors
+          spec/operations/HeadObject.toml:errors
+          spec/operations/PutObjectAcl.toml:errors
+          spec/operations/PutObjectLegalHold.toml:errors
+          spec/operations/PutObjectRetention.toml:errors
+          spec/operations/PutObjectTagging.toml:errors
+          spec/operations/RestoreObject.toml:errors
+          spec/operations/SelectObjectContent.toml:errors
+          spec/operations/UploadPartCopy.toml:errors
+RELATED   CopyObject
+          DeleteObjectTagging
+          GetObject
+          GetObjectAcl
+          GetObjectAttributes
+          GetObjectLegalHold
+          GetObjectRetention
+          GetObjectTagging
+          HeadObject
+          PutObjectAcl
+          PutObjectLegalHold
+          PutObjectRetention
+          PutObjectTagging
+          RestoreObject
+          SelectObjectContent
+          UploadPartCopy

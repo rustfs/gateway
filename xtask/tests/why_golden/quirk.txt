@@ -1,0 +1,8 @@
+RULE      q-etag-0001 — GetObjectAttributes returns a bare ETag while ListObjectsV2 returns a quoted one
+EVIDENCE  https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObjectAttributes.html — AWS response syntax for GetObjectAttributes shows a bare ETag value in the XML body.
+          https://github.com/s3s-project/s3s/issues/629 — Report that GetObjectAttributes must emit the ETag without quotes, unlike every other response.
+          https://github.com/s3s-project/s3s/pull/499 — Change that added literal quotes around ETag in XML output for list and multipart responses.
+CASES     c-etag-0001 — GetObjectAttributes returns a bare ETag while ListObjectsV2 returns a quoted one
+ADR       ADR-0001 — Licensing and provenance boundary
+SPEC      conformance/cases/etag/c-etag-0001.toml:case.quirks
+RELATED   GetObjectAttributes

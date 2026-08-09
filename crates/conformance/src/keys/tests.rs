@@ -12,6 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! Compile-time or regression support for this module.
+//!
+//! Responsible for: exercising the contract named by this file.
+//! NOT responsible for: implementing the production behavior under test.
+//! Upstream: the test harness and subject module. Downstream: the repository verification gate.
+
 //! The guard's own controls.
 //!
 //! [`super::audit`] is pure, so every way it is meant to go red is exercised here without running a

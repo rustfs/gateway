@@ -17,6 +17,7 @@
 //! Responsible for: the `cargo xtask` command surface. Subcommands are added by the task that
 //! needs them; this file only owns dispatch.
 //! NOT responsible for: any protocol logic.
+//! Upstream: the module's declared inputs. Downstream: its callers and regression tests.
 
 mod bootstrap;
 mod catalog;
@@ -24,6 +25,7 @@ mod codegen;
 mod new_op;
 mod route;
 mod verify;
+mod why;
 
 use std::process::ExitCode;
 
@@ -41,7 +43,7 @@ fn main() -> ExitCode {
                 ExitCode::from(2)
             }
         },
-        Some("why") => codegen::why(&rest),
+        Some("why") => why::run(&rest),
         Some("conformance") => conformance(rest),
         Some("route") => route::route(&rest),
         Some("new-op") => new_op::new_op(&rest),
@@ -74,8 +76,7 @@ commands:
   codegen diff --semantic   print a semantic diff capped at 50 lines
   codegen --check           fail when generated output or the verify map drifted
   spec verify               fail when any generated artefact differs from a fresh run
-  why <target>              why a behaviour is the way it is: quirk id, operation, error code,
-                            header or query key
+  why <target> [--json]     trace a quirk, operation, error code, header, ADR or assembly rule
   route explain [--json] 'METHOD /path?query'
                             explain route selection and every predicate
   new-op <Operation>        create an intentionally-red operation scaffold

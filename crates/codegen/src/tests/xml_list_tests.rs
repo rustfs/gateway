@@ -19,6 +19,7 @@
 //! defect was a property of the emitter, so a suite that only pins the single operation that
 //! happened to expose it re-opens the moment AWS adds another.
 //! NOT responsible for: what the bytes mean to a client, which is `conformance/cases/list`.
+//! Upstream: the module's declared inputs. Downstream: its callers and regression tests.
 //!
 //! # Why a synthetic operation
 //!

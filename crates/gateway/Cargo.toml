@@ -21,6 +21,10 @@ ring = 1
 [features]
 dangerous-allow-all-authorizer = []
 
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
 [lints]
 workspace = true
 

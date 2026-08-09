@@ -1479,6 +1479,57 @@ CREDPY
 }
 expect_fail check_secret_hygiene.sh \
     'a Display implementation on Credentials' mut_credentials_display
+# P7-05 documentation/context guards. Each acceptance rule has an explicit mutation so a green
+# guard proves both directions rather than merely describing the current tree.
+mut_map_deleted() {
+    rm -f crates/xml/MAP.md
+}
+expect_fail check_map_files.sh \
+    'a workspace crate losing its MAP.md' mut_map_deleted
+
+mut_map_too_long() {
+    for _ in $(seq 1 101); do printf 'extra\n' >>crates/xml/MAP.md; done
+}
+expect_fail check_map_files.sh \
+    'a MAP.md growing beyond the 100-line entry-point budget' mut_map_too_long
+
+mut_map_recommends_generated() {
+    printf '| `generated/**` | generated details | Read it when debugging |\n' >>crates/xml/MAP.md
+}
+expect_fail check_map_files.sh \
+    'a MAP.md directing an agent into generated output' mut_map_recommends_generated
+
+mut_module_doc_loses_boundary() {
+    sed '/NOT responsible for:/d' xtask/src/main.rs >xtask/src/main.rs.mut
+    mv xtask/src/main.rs.mut xtask/src/main.rs
+}
+expect_fail check_module_doc.sh \
+    'a Rust file documenting responsibility but not its boundary' mut_module_doc_loses_boundary
+
+mut_unallowed_large_file() {
+    for _ in $(seq 1 801); do printf '// padding\n' >>xtask/src/main.rs; done
+}
+expect_fail check_file_size.sh \
+    'a Rust file exceeding 800 lines without an allowance' mut_unallowed_large_file
+
+mut_invalid_file_size_allowance() {
+    printf 'xtask/src/main.rs 900 missing-reason\n' >>allowances/file_size.txt
+}
+expect_fail check_file_size.sh \
+    'a file-size allowance without an issue URL and reason' mut_invalid_file_size_allowance
+
+mut_forbidden_list_loses_alternative() {
+    sed 's|`cargo tree -p <crate> -e normal`|none|' AGENTS.md >AGENTS.md.mut
+    mv AGENTS.md.mut AGENTS.md
+}
+expect_fail check_agents_forbidden_list.sh \
+    'a forbidden-list entry losing its safe alternative' mut_forbidden_list_loses_alternative
+
+mut_scoped_agents_file() {
+    printf '# local rules\n' >crates/xml/AGENTS.md
+}
+expect_fail check_agents_layering.sh \
+    'a scoped AGENTS.md introduced before the layering trigger' mut_scoped_agents_file
 
 mut_secret_in_a_log_line() {
     python3 - <<'CREDPY'

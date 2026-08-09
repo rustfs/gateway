@@ -31,6 +31,8 @@
 //!
 //! The crate carries no third-party dependency beyond `thiserror`: the workspace dependency set is
 //! pinned and has no serde, so [`json`] and [`toml_lite`] are small hand-written readers.
+#![doc = include_str!("../README.md")]
+#![deny(missing_docs)]
 #![forbid(unsafe_code)]
 
 pub mod error;

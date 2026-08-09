@@ -1,7 +1,7 @@
 error[E0432]: unresolved import `rustfs_gateway::AllowAllAuthorizer`
-  --> tests/compile_fail/azc_0021_allow_all.rs:17:5
+  --> tests/compile_fail/azc_0021_allow_all.rs:23:5
    |
-17 | use rustfs_gateway::AllowAllAuthorizer;
+23 | use rustfs_gateway::AllowAllAuthorizer;
    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ no `AllowAllAuthorizer` in the root
    |
 note: found an item that was configured out
@@ -13,6 +13,6 @@ note: found an item that was configured out
    |                      ^^^^^^^^^^^^^^^^^^
 help: a similar name exists in the module
    |
-17 - use rustfs_gateway::AllowAllAuthorizer;
-17 + use rustfs_gateway::DenyAllAuthorizer;
+23 - use rustfs_gateway::AllowAllAuthorizer;
+23 + use rustfs_gateway::DenyAllAuthorizer;
    |

@@ -79,6 +79,13 @@ cargo fmt --all                  # format (settings in rustfmt.toml)
 `cargo xtask` is the repository's automation entry point; prefer it over hand-rolled scripts so that local runs and CI
 stay identical.
 
+## Relationship to s3s
+
+We thank the [s3s project](https://github.com/s3s-project/s3s): behavior reported in its issue and
+pull-request history is an important source of facts for this project's acceptance cases. This
+repository is not a fork and contains an independent implementation. Both projects use the
+Apache-2.0 license; evidence here remains a link plus our own summary, never copied source code.
+
 ## Status
 
 **Pre-alpha, and internal.** The API surface, crate boundaries and feature flags change without notice, and there is no

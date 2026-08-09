@@ -12,6 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! Compile-time or regression support for this module.
+//!
+//! Responsible for: exercising the contract named by this file.
+//! NOT responsible for: implementing the production behavior under test.
+//! Upstream: the test harness and subject module. Downstream: the repository verification gate.
+
 //! What a wire refusal actually says to a client, checked on the rendered bytes.
 //!
 //! `rustfs-gateway-http` has two strings per refusal, for two audiences: [`WireReject::message`]

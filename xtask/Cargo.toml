@@ -15,5 +15,9 @@ rustfs-gateway-core = { workspace = true }
 rustfs-gateway-model = { workspace = true }
 http = { workspace = true }
 
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
 [lints]
 workspace = true

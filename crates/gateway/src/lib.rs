@@ -73,6 +73,8 @@
 //! may rewrite the head or the response. [`OpLayer`] wraps one operation with its input and output
 //! types intact. [`Observer`] only watches, and always will. `docs/middleware.md` is the decision
 //! tree and the table of which of RustFS's nine tower patch layers lands where.
+#![doc = include_str!("../README.md")]
+#![deny(missing_docs)]
 #![forbid(unsafe_code)]
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing, clippy::panic)]
 
