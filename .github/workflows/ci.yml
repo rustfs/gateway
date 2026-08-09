@@ -37,8 +37,8 @@ name: CI
 #   client matrix / s3-tests / mint -> P8 at the earliest, and on cron, never on PRs
 #
 # The jobs below cover the four-command gate in AGENTS.md. Formatting and
-# clippy remain separate parallel jobs; the test job enters through
-# `cargo xtask verify --all`, the same bounded verification surface used locally.
+# clippy remain separate parallel jobs; workspace tests and guard mutations also
+# use separate nine-minute runners, then report through a one-minute branch-protected Test check.
 # If they ever disagree, fix this file to match AGENTS.md — AGENTS.md is the
 # source of truth.
 #
@@ -88,7 +88,7 @@ jobs:
       # Architecture guards. A guard that does not run in CI is decoration.
       #
       # A guard that declares REQUIRES-BUILD compiles the workspace, so it runs in
-      # the test job instead — this job has no cargo cache and exists to be fast.
+      # the guard-self-test job instead — this job has no cargo cache and exists to be fast.
       # The split is read from the guards themselves rather than listed here, so a
       # guard that starts needing a build cannot silently make this job slow, and
       # the two loops cannot drift apart.
@@ -97,7 +97,7 @@ jobs:
           ran=0
           for guard in scripts/check_*.sh; do
             if grep -q '^# REQUIRES-BUILD$' "$guard"; then
-              echo "deferred to the test job: $guard"
+              echo "deferred to the guard-self-test job: $guard"
               continue
             fi
             echo "::group::$guard"
@@ -162,16 +162,49 @@ jobs:
           timeout 30s cargo xtask verify --op PutObject
           timeout 30s cargo xtask verify --op ListObjectsV2
 
-  test:
-    name: Test
+  workspace-tests:
+    name: Workspace tests
     runs-on: ubuntu-latest
+    timeout-minutes: 9
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-      - name: Verify all (maximum 10 minutes)
+      - name: Workspace tests (maximum 8 minutes after setup)
         run: |
           started="$(date +%s)"
-          timeout 600s cargo xtask verify --all
+          timeout 480s cargo test --workspace
           elapsed="$(( $(date +%s) - started ))"
-          echo "full verification completed in ${elapsed}s"
+          echo "workspace tests completed in ${elapsed}s"
+
+  guard-self-test:
+    name: Guard self-test
+    runs-on: ubuntu-latest
+    timeout-minutes: 9
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Guard mutations (maximum 8 minutes after setup)
+        run: |
+          started="$(date +%s)"
+          timeout 480s bash scripts/test_guard_scripts.sh
+          elapsed="$(( $(date +%s) - started ))"
+          echo "guard mutations completed in ${elapsed}s"
+
+  # Branch protection requires this exact check name. It aggregates both parallel jobs and must
+  # run even after a dependency fails, otherwise a skipped required check could hide the failure.
+  test:
+    name: Test
+    needs: [workspace-tests, guard-self-test]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      - name: Require both test jobs
+        env:
+          WORKSPACE_RESULT: ${{ needs.workspace-tests.result }}
+          GUARD_RESULT: ${{ needs.guard-self-test.result }}
+        run: |
+          test "$WORKSPACE_RESULT" = success
+          test "$GUARD_RESULT" = success

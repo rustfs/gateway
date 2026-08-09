@@ -1617,5 +1617,288 @@ PYEOF
 }
 expect_fail check_no_signing_key_cache.sh \
     'a cache retaining derived signing keys' mut_signing_key_cache
+
+replace_ci_text() {
+    python3 - "$1" "$2" <<'PYEOF'
+import pathlib
+import sys
+
+path = pathlib.Path(".github/workflows/ci.yml")
+text = path.read_text()
+old, new = sys.argv[1:]
+if old not in text:
+    raise SystemExit(f"missing mutation subject: {old}")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+
+mut_ci_workspace_job_missing() {
+    replace_ci_text '  workspace-tests:' '  workspace-testz:'
+}
+expect_fail check_ci_test_split.sh \
+    'the workspace-tests job being renamed away' mut_ci_workspace_job_missing
+
+mut_ci_workspace_command_weakened() {
+    replace_ci_text 'timeout 480s cargo test --workspace' 'timeout 480s cargo test -p xtask'
+}
+expect_fail check_ci_test_split.sh \
+    'the workspace test job running only one package' mut_ci_workspace_command_weakened
+
+mut_ci_workspace_failure_swallowed() {
+    replace_ci_text '          timeout 480s cargo test --workspace' \
+        '          timeout 480s cargo test --workspace || true'
+}
+expect_fail check_ci_test_split.sh \
+    'the workspace test job swallowing a failure or timeout' mut_ci_workspace_failure_swallowed
+
+mut_ci_workspace_budget_widened() {
+    replace_ci_text '  workspace-tests:
+    name: Workspace tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 9' '  workspace-tests:
+    name: Workspace tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10'
+}
+expect_fail check_ci_test_split.sh \
+    'the workspace test job consuming the aggregation minute' mut_ci_workspace_budget_widened
+
+mut_ci_workspace_serialized() {
+    replace_ci_text '  workspace-tests:
+    name: Workspace tests' '  workspace-tests:
+    needs: guard-self-test
+    name: Workspace tests'
+}
+expect_fail check_ci_test_split.sh \
+    'the workspace test job waiting for guard mutations' mut_ci_workspace_serialized
+
+mut_ci_workspace_setup_action_replaced() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path(".github/workflows/ci.yml")
+text = path.read_text()
+start = text.index("  workspace-tests:")
+old = "      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2"
+position = text.index(old, start)
+new = "      - uses: example/environment-injector@0000000000000000000000000000000000000000"
+path.write_text(text[:position] + text[position:].replace(old, new, 1))
+PYEOF
+}
+expect_fail check_ci_test_split.sh \
+    'a workspace setup action being replaced by an environment injector' mut_ci_workspace_setup_action_replaced
+
+mut_ci_guard_job_missing() {
+    replace_ci_text '  guard-self-test:' '  guard-self-tesx:'
+}
+expect_fail check_ci_test_split.sh \
+    'the guard-self-test job being renamed away' mut_ci_guard_job_missing
+
+mut_ci_guard_command_dropped() {
+    replace_ci_text 'timeout 480s bash scripts/test_guard_scripts.sh' 'timeout 480s true'
+}
+expect_fail check_ci_test_split.sh \
+    'the guard mutation suite being replaced with a no-op' mut_ci_guard_command_dropped
+
+mut_ci_guard_failure_swallowed() {
+    replace_ci_text '          timeout 480s bash scripts/test_guard_scripts.sh' \
+        '          timeout 480s bash scripts/test_guard_scripts.sh || true'
+}
+expect_fail check_ci_test_split.sh \
+    'the guard mutation job swallowing a failure or timeout' mut_ci_guard_failure_swallowed
+
+mut_ci_guard_budget_widened() {
+    replace_ci_text '  guard-self-test:
+    name: Guard self-test
+    runs-on: ubuntu-latest
+    timeout-minutes: 9' '  guard-self-test:
+    name: Guard self-test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10'
+}
+expect_fail check_ci_test_split.sh \
+    'the guard mutation job consuming the aggregation minute' mut_ci_guard_budget_widened
+
+mut_ci_guard_serialized() {
+    replace_ci_text '  guard-self-test:
+    name: Guard self-test' '  guard-self-test:
+    needs: workspace-tests
+    name: Guard self-test'
+}
+expect_fail check_ci_test_split.sh \
+    'the guard mutation job waiting for workspace tests' mut_ci_guard_serialized
+
+mut_ci_required_name_changed() {
+    replace_ci_text '    name: Test' '    name: Tests'
+}
+expect_fail check_ci_test_split.sh \
+    'the branch-protected Test check being renamed' mut_ci_required_name_changed
+
+mut_ci_aggregate_drops_guard() {
+    replace_ci_text 'needs: [workspace-tests, guard-self-test]' 'needs: [workspace-tests]'
+}
+expect_fail check_ci_test_split.sh \
+    'the required Test check no longer waiting for guard mutations' mut_ci_aggregate_drops_guard
+
+mut_ci_aggregate_skips_on_failure() {
+    replace_ci_text 'if: always()' 'if: success()'
+}
+expect_fail check_ci_test_split.sh \
+    'the required Test check being skipped after a dependency failure' mut_ci_aggregate_skips_on_failure
+
+mut_ci_aggregate_hides_always_in_comment() {
+    replace_ci_text '    if: always()' '    if: success() # if: always()'
+}
+expect_fail check_ci_test_split.sh \
+    'the aggregate check hiding a skipped condition behind a comment' mut_ci_aggregate_hides_always_in_comment
+
+mut_ci_aggregate_step_skips_failure() {
+    replace_ci_text '      - name: Require both test jobs' \
+        '      - name: Require both test jobs
+        if: ${{ needs.workspace-tests.result == '\''success'\'' && needs.guard-self-test.result == '\''success'\'' }}'
+}
+expect_fail check_ci_test_split.sh \
+    'the aggregate comparison step being skipped after a worker failure' mut_ci_aggregate_step_skips_failure
+
+mut_ci_aggregate_budget_widened() {
+    replace_ci_text '  test:
+    name: Test
+    needs: [workspace-tests, guard-self-test]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 1' '  test:
+    name: Test
+    needs: [workspace-tests, guard-self-test]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 2'
+}
+expect_fail check_ci_test_split.sh \
+    'the aggregate check widening the total job budget past ten minutes' mut_ci_aggregate_budget_widened
+
+mut_ci_workspace_result_ignored() {
+    replace_ci_text 'WORKSPACE_RESULT: ${{ needs.workspace-tests.result }}' 'WORKSPACE_RESULT: success'
+}
+expect_fail check_ci_test_split.sh \
+    'the aggregate check ignoring the workspace test result' mut_ci_workspace_result_ignored
+
+mut_ci_guard_result_ignored() {
+    replace_ci_text 'GUARD_RESULT: ${{ needs.guard-self-test.result }}' 'GUARD_RESULT: success'
+}
+expect_fail check_ci_test_split.sh \
+    'the aggregate check ignoring the guard mutation result' mut_ci_guard_result_ignored
+
+mut_ci_workspace_comparison_dropped() {
+    replace_ci_text '          test "$WORKSPACE_RESULT" = success' '          true'
+}
+expect_fail check_ci_test_split.sh \
+    'the aggregate check not executing the workspace result comparison' mut_ci_workspace_comparison_dropped
+
+mut_ci_guard_comparison_dropped() {
+    replace_ci_text '          test "$GUARD_RESULT" = success' '          true'
+}
+expect_fail check_ci_test_split.sh \
+    'the aggregate check not executing the guard result comparison' mut_ci_guard_comparison_dropped
+
+mut_ci_workers_share_concurrency_lane() {
+    replace_ci_text '  workspace-tests:
+    name: Workspace tests' '  workspace-tests:
+    concurrency: split-test-lane
+    name: Workspace tests'
+    replace_ci_text '  guard-self-test:
+    name: Guard self-test' '  guard-self-test:
+    concurrency: split-test-lane
+    name: Guard self-test'
+}
+expect_fail check_ci_test_split.sh \
+    'the parallel workers sharing a serial concurrency lane' mut_ci_workers_share_concurrency_lane
+
+mut_ci_guard_quoted_dependency() {
+    replace_ci_text '  guard-self-test:
+    name: Guard self-test' '  guard-self-test:
+    "needs": workspace-tests
+    name: Guard self-test'
+}
+expect_fail check_ci_test_split.sh \
+    'a quoted worker dependency serializing the split jobs' mut_ci_guard_quoted_dependency
+
+mut_ci_worker_continues_on_error() {
+    replace_ci_text '      - name: Workspace tests (maximum 8 minutes after setup)' \
+        '      - name: Workspace tests (maximum 8 minutes after setup)
+        continue-on-error: true'
+}
+expect_fail check_ci_test_split.sh \
+    'the workspace test step being allowed to fail' mut_ci_worker_continues_on_error
+
+mut_ci_worker_shell_disables_errexit() {
+    replace_ci_text '      - name: Guard mutations (maximum 8 minutes after setup)' \
+        '      - name: Guard mutations (maximum 8 minutes after setup)
+        shell: bash {0}'
+}
+expect_fail check_ci_test_split.sh \
+    'the guard mutation step overriding the fail-fast shell' mut_ci_worker_shell_disables_errexit
+
+mut_ci_workflow_shell_disables_errexit() {
+    replace_ci_text 'permissions:
+  contents: read' 'defaults:
+  run:
+    shell: bash {0}
+
+permissions:
+  contents: read'
+}
+expect_fail check_ci_test_split.sh \
+    'workflow defaults overriding the fail-fast shell' mut_ci_workflow_shell_disables_errexit
+
+mut_ci_workflow_bash_env() {
+    replace_ci_text 'env:
+  CARGO_TERM_COLOR: always' 'env:
+  BASH_ENV: scripts/disable-errexit.sh
+  CARGO_TERM_COLOR: always'
+}
+expect_fail check_ci_test_split.sh \
+    'the workflow environment overriding bash startup' mut_ci_workflow_bash_env
+
+mut_ci_workflow_overrides_test() {
+    replace_ci_text 'env:
+  CARGO_TERM_COLOR: always' 'env:
+  "BASH_FUNC_test%%": '\''() { return 0; }'\''
+  CARGO_TERM_COLOR: always'
+}
+expect_fail check_ci_test_split.sh \
+    'the workflow environment overriding the aggregate test command' mut_ci_workflow_overrides_test
+
+mut_ci_workflow_overrides_timeout() {
+    replace_ci_text 'env:
+  CARGO_TERM_COLOR: always' 'env:
+  "BASH_FUNC_timeout%%": '\''() { shift; "$@" || true; }'\''
+  CARGO_TERM_COLOR: always'
+}
+expect_fail check_ci_test_split.sh \
+    'the workflow environment overriding worker timeouts' mut_ci_workflow_overrides_timeout
+
+mut_ci_serial_verify_returns() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path(".github/workflows/ci.yml")
+path.write_text(path.read_text() + """
+  serialized-regression:
+    name: Serialized regression
+    runs-on: ubuntu-latest
+    steps:
+      - run: cargo xtask verify --all
+""")
+PYEOF
+}
+expect_fail check_ci_test_split.sh \
+    'workspace tests and guard mutations being serialized again' mut_ci_serial_verify_returns
+
+mut_ci_workflow_deleted() {
+    rm -f .github/workflows/ci.yml
+}
+expect_fail check_ci_test_split.sh \
+    "the guard's own workflow input deleted, which must fail rather than skip" mut_ci_workflow_deleted
+
 printf '\n%s case(s), %s failure(s)\n' "$cases" "$failures"
 [[ "$failures" -eq 0 ]]
