@@ -97,6 +97,9 @@ pub struct GovernorRates {
     pub tracked_clients: usize,
 }
 
+/// # Security
+///
+/// Every pre-authentication class remains bounded; the default does not admit unlimited work.
 impl Default for GovernorRates {
     /// The defaults, which are deliberately not "unlimited".
     ///

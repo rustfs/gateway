@@ -48,6 +48,7 @@ use rustfs_gateway_core::BuildError;
 pub struct RuleRef {
     id: &'static str,
     explanation: &'static str,
+    acceptance: &'static str,
 }
 
 impl RuleRef {
@@ -66,12 +67,19 @@ impl RuleRef {
         self.explanation
     }
 
+    /// The acceptance checks that exercise the rule.
+    #[must_use]
+    pub const fn acceptance(self) -> &'static str {
+        self.acceptance
+    }
+
     /// A registration this build refused: a duplicate, an un-namespaced third-party name, a name
     /// that collides with an AWS one, or an operation with no authorisation action.
     pub const REGISTRATION: Self = Self {
         id: "asm-registration-refused",
         explanation: "a handler registration was refused: a duplicate operation, a third-party name that is not namespaced or \
                       that collides with an AWS one, or an operation with no authorisation action",
+        acceptance: "a-asm-0012, a-asm-0013, a-asm-0014",
     };
 
     /// A route table that will not build: an overlap at one precedence, or a third-party entry
@@ -80,6 +88,7 @@ impl RuleRef {
         id: "asm-route-refused",
         explanation: "the route table refused to build: two entries overlap at one precedence, or a third-party entry stands \
                       in front of a standard operation",
+        acceptance: "a-asm-0011, a-asm-0015",
     };
 
     /// No operation was registered at all.
@@ -87,6 +96,7 @@ impl RuleRef {
         id: "asm-empty-registry",
         explanation: "no operation was registered; a service that answers every request with 501 is a configuration mistake \
                       rather than a deployment, and starting it hides the mistake until traffic arrives",
+        acceptance: "a-asm-0016",
     };
 
     /// No [`crate::Authorizer`] was installed.
@@ -94,6 +104,7 @@ impl RuleRef {
         id: "asm-missing-authorizer",
         explanation: "no Authorizer was installed; there is no default allow and no default deny, because a default either \
                       fails open or makes every deployment look broken in the same way",
+        acceptance: "a-asm-0009, a-asm-0010",
     };
 
     /// No [`crate::Authenticator`] was installed.
@@ -101,6 +112,7 @@ impl RuleRef {
         id: "asm-missing-authenticator",
         explanation: "no Authenticator was installed; without one an AWS-signed request has nothing to verify it, and the only \
                       two ways out of that are to reject everything or to accept everything",
+        acceptance: "a-asm-0017",
     };
 
     /// An operation was registered with the core router but has no wire codec bound to it.
@@ -108,6 +120,7 @@ impl RuleRef {
         id: "asm-missing-codec",
         explanation: "an operation reached the router without a wire codec; the request would route and then have nothing able \
                       to read it",
+        acceptance: "a-asm-0017",
     };
 
     /// An [`crate::OpLayer`] was registered for an operation that has no handler.
@@ -115,6 +128,7 @@ impl RuleRef {
         id: "asm-op-layer-unattached",
         explanation: "an operation layer was registered for an operation with no handler; ignoring it would leave the \
                       deployment believing a rewrite is in force while nothing ever runs it",
+        acceptance: "a-asm-0017",
     };
 
     /// Two operation types claimed one name, so a layer could not be matched to its operation.
@@ -122,6 +136,7 @@ impl RuleRef {
         id: "asm-op-layer-type",
         explanation: "an operation layer could not be matched to the operation it was registered under; two operation types \
                       are claiming one name, and running the layer would apply it to the wrong input",
+        acceptance: "a-asm-0017",
     };
 
     /// A custom wall clock was too far from the system clock without an explicit acknowledgement.
@@ -129,6 +144,7 @@ impl RuleRef {
         id: "asm-clock-skew",
         explanation: "a custom wall clock differs from the system clock by more than the allowed window; a frozen or skewed \
                       clock can keep captured signatures valid, so assembly requires an explicit acknowledgement",
+        acceptance: "a-asm-0017",
     };
 
     /// Every rule this crate can cite, for a reverse lookup and for the assertion that the set is

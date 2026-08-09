@@ -46,6 +46,10 @@ pub struct CredentialGuardConfig {
     pub negative_entries: usize,
 }
 
+/// # Security
+///
+/// Lookup timeout and bounded negative caching are enabled so forged identities cannot amplify
+/// provider work without limit.
 impl Default for CredentialGuardConfig {
     /// One-second timeout, 30-second negative TTL, 0–30-second deterministic jitter, 4096 entries.
     fn default() -> Self {

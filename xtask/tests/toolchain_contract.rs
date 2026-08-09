@@ -82,6 +82,18 @@ fn a_failed_verification_has_the_diagnostic_triplet() {
 }
 
 #[test]
+fn every_assembly_rule_can_be_looked_up() {
+    for rule in rustfs_gateway::RuleRef::ALL {
+        let output = xtask(&["why", rule.as_str()]);
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(stdout.contains(rule.as_str()), "{stdout}");
+        assert!(stdout.contains(rule.acceptance()), "{stdout}");
+        assert!(stdout.contains("rustfs/backlog/issues/1738"), "{stdout}");
+    }
+}
+
+#[test]
 fn bootstrap_checks_drift_before_it_can_regenerate() {
     let verify = BOOTSTRAP_SOURCE
         .find("codegen::verify_generated()")

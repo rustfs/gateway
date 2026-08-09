@@ -36,6 +36,7 @@ rustfs-gateway-stream = { workspace = true }
 rustfs-gateway-types = { workspace = true }
 rustfs-gateway-xml = { workspace = true }
 
+arc-swap = { workspace = true }
 bytes = { workspace = true }
 futures-timer = { workspace = true }
 http = { workspace = true }

@@ -52,6 +52,7 @@ use rustfs_gateway_types::{NamePolicy, NameValidator, SlashPolicy};
 
 use crate::assembly::{AssemblyError, RuleRef};
 use crate::clock::{Clock, ClockPosture, ClockSkewAck, MAX_CLOCK_SKEW_SECONDS, SystemMonotonic, skew_from_system, system_clock};
+use crate::config::{ConfigHandle, ConfigStore, ServiceConfig};
 use crate::dispatch::{DispatchTable, OperationDispatch};
 use crate::ext::{
     Authenticator, Authorizer, AuthzAuditSink, CachedCorsSource, CorsCacheConfig, CorsSource, DefaultGovernor, Governor,
@@ -100,7 +101,7 @@ pub struct ServiceBuilder {
     floor: SecurityFloor,
     limits: Limits,
     names: NamePolicy,
-    max_buffered_body_bytes: u64,
+    config: ConfigStore,
     authorizer: Option<Arc<dyn Authorizer>>,
     dangerous_allow_all_authorizer: bool,
     authenticator: Option<Arc<dyn Authenticator>>,
@@ -154,7 +155,7 @@ impl ServiceBuilder {
             floor: SecurityFloor::new(),
             limits: Limits::default(),
             names: NamePolicy::default(),
-            max_buffered_body_bytes: DEFAULT_MAX_BUFFERED_BODY_BYTES,
+            config: Arc::new(arc_swap::ArcSwap::from_pointee(ServiceConfig::new(DEFAULT_MAX_BUFFERED_BODY_BYTES))),
             authorizer: None,
             dangerous_allow_all_authorizer: false,
             authenticator: None,
@@ -481,13 +482,24 @@ impl ServiceBuilder {
         self
     }
 
+    /// Installs hot service configuration and returns the handle that may replace it.
+    ///
+    /// A request loads one immutable snapshot at entry. Calling [`ConfigHandle::store`] affects
+    /// later requests and cannot change the settings an in-flight request already observes.
+    #[must_use]
+    pub fn config(mut self, config: ServiceConfig) -> (Self, ConfigHandle) {
+        self.config = Arc::new(arc_swap::ArcSwap::from_pointee(config));
+        let handle = ConfigHandle::new(&self.config);
+        (self, handle)
+    }
+
     /// Sets the ceiling on a request body this service will hold in memory.
     ///
     /// See [`DEFAULT_MAX_BUFFERED_BODY_BYTES`] for why this exists and why it is far below
     /// `Limits::max_body_bytes`.
     #[must_use]
-    pub const fn max_buffered_body_bytes(mut self, bytes: u64) -> Self {
-        self.max_buffered_body_bytes = bytes;
+    pub fn max_buffered_body_bytes(self, bytes: u64) -> Self {
+        self.config.store(Arc::new(ServiceConfig::new(bytes)));
         self
     }
 
@@ -590,7 +602,7 @@ impl ServiceBuilder {
             floor: self.floor,
             limits: self.limits,
             names: self.names,
-            max_buffered_body_bytes: self.max_buffered_body_bytes,
+            config: self.config,
             authorizer,
             authenticator,
             policy_source: self.policy_source,

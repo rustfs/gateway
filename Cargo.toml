@@ -28,6 +28,7 @@ rustfs-gateway-xml = { path = "crates/xml", version = "0.1.0" }
 # Third-party. Versions verified against crates.io on 2026-08-05; MSRV 1.97.1 constrains this set.
 # `aws-sigv4` is deliberately absent: its server-side verification has measured defects; see
 # docs/msrv.md and ADR-0001.
+arc-swap = "1.8"
 bitflags = "2.13"
 bytes = "1.12"
 # default-features off: the crate's default pulls in optional backends we do not use. Declared

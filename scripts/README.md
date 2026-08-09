@@ -73,6 +73,8 @@ fixed now so that the same check does not get written twice under two names.
 | `check_file_size.sh` | Hand-written Rust files stay within 800 lines or a reasoned, issue-linked allowance | P7-05 |
 | `check_agents_forbidden_list.sh` | The three context-budget prohibitions each retain a reason and safe alternative | P7-05 |
 | `check_agents_layering.sh` | Scoped AGENTS files wait for the five-rule trigger and duplicate checker | P7-05 |
+| `check_config_load_once.sh` | Hot service configuration is loaded exactly once at request entry, from the one allowlisted site | P7-01 |
+| `check_default_doc.sh` | Every extension `Default` implementation states its security consequence and the subject list cannot silently shrink | P7-01 |
 | `test_guard_scripts.sh` | Not a guard: runs every guard on the tree and asserts each one fails on an injected violation | P0 |
 
 ### Registered, not yet implemented (TODO)

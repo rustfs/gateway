@@ -137,6 +137,7 @@ use rustfs_gateway_stream::Body;
 use rustfs_gateway_types::{ErrorCode, NamePolicy};
 
 use crate::clock::{Clock, ClockPosture, MonotonicClock, MonotonicNow};
+use crate::config::{ConfigSnapshot, ConfigStore};
 use crate::dispatch::{DispatchTable, ErasedAnswer, target_of};
 use crate::ext::{
     AuthSchemeRef, Authentication, Authenticator, Authorizer, AuthzAuditEvent, AuthzAuditSink, AuthzRequest, AuthzStage,
@@ -159,7 +160,7 @@ pub(crate) struct Inner {
     pub(crate) floor: SecurityFloor,
     pub(crate) limits: Limits,
     pub(crate) names: NamePolicy,
-    pub(crate) max_buffered_body_bytes: u64,
+    pub(crate) config: ConfigStore,
     pub(crate) authorizer: Arc<dyn Authorizer>,
     pub(crate) authenticator: Arc<dyn Authenticator>,
     pub(crate) policy_source: Arc<dyn PolicySource>,
@@ -292,6 +293,9 @@ impl S3Service {
         // handed both values; nothing below holds either source, so neither a second identifier nor
         // a second instant can be produced — which is what lets the `Date` header and the skew
         // window name the same moment.
+        // Exactly one load per request. The snapshot is passed down rather than the store, so no
+        // later stage can observe a replacement made while this request is in flight.
+        let config = self.inner.config.load_full();
         let trace = self.inner.traces.mint();
         let now = self.inner.clock.now();
         // Read before the request is consumed, and the only thing kept out of it: the RFC 9110 body
@@ -305,7 +309,7 @@ impl S3Service {
         let connection = connection_security(request.extensions());
         let client_addr = request.extensions().get::<ClientAddr>().copied();
         let mut outcome = Outcome::new(&trace);
-        let mut response = self.run(request, &mut outcome, now, connection, client_addr).await;
+        let mut response = self.run(request, &mut outcome, &config, now, connection, client_addr).await;
         // The CORS decoration for an ordinary request, applied here because it belongs on
         // **every** answer the pipeline produced once authorisation was granted — the `404` and
         // the `500` included. A browser cannot read a response it was not granted access to, so
@@ -367,6 +371,7 @@ impl S3Service {
         &self,
         request: Request<B>,
         outcome: &mut Outcome<'_>,
+        config: &ConfigSnapshot,
         now: RequestNow,
         connection: TransportSecurity,
         client_addr: Option<ClientAddr>,
@@ -668,7 +673,7 @@ impl S3Service {
         let authz_context = RequestContext::from_request(now, &policy, auth_scheme, &server_extensions);
         let route_started = self.inner.authz_clock.monotonic();
         let route_decision =
-            match catch_authorizer(|| self.inner.authorizer.authorize_route(&authz_context, &route_request)).await {
+            match catch_boxed_future(|| self.inner.authorizer.authorize_route(&authz_context, &route_request)).await {
                 Ok(decision) => decision,
                 Err(()) => {
                     return outcome.refuse(S3Error::new(ErrorCode::INTERNAL_ERROR, "the authorizer failed"));
@@ -773,7 +778,7 @@ impl S3Service {
 
         // The bytes, at last, and only now. Two ceilings, both enforced as the body arrives, and
         // both counted on the wire bytes rather than the decoded ones.
-        let ceilings = BodyCeilings::of(operation, self.inner.max_buffered_body_bytes);
+        let ceilings = BodyCeilings::of(operation, config.max_buffered_body_bytes());
         let body = match sealed.read(&authenticated, ceilings, ingest).await {
             Ok(body) => body,
             Err(error) => return outcome.refuse(error),
@@ -814,7 +819,7 @@ impl S3Service {
         let input_request = InputAuthzRequest::new(&route_request, &input_resources);
         let input_started = self.inner.authz_clock.monotonic();
         let input_decisions =
-            match catch_authorizer(|| self.inner.authorizer.authorize_input(&authz_context, &input_request)).await {
+            match catch_boxed_future(|| self.inner.authorizer.authorize_input(&authz_context, &input_request)).await {
                 Ok(decisions) => decisions,
                 Err(()) => {
                     return outcome.refuse(S3Error::new(ErrorCode::INTERNAL_ERROR, "the authorizer failed"));
@@ -854,13 +859,15 @@ impl S3Service {
                 return outcome.refuse(S3Error::from(denial));
             }
         };
-        let invocation = match op.invoke(authorized) {
-            Ok(invocation) => invocation,
-            Err(error) => return outcome.refuse(S3Error::from(error)),
+        let invocation = match std::panic::catch_unwind(AssertUnwindSafe(|| op.invoke(authorized))) {
+            Ok(Ok(invocation)) => invocation,
+            Ok(Err(error)) => return outcome.refuse(S3Error::from(error)),
+            Err(_) => return outcome.refuse(S3Error::new(ErrorCode::INTERNAL_ERROR, "the handler failed")),
         };
-        let (answer, status) = match invocation.await {
-            Ok(answer) => answer,
-            Err(error) => return outcome.refuse(S3Error::from(error)),
+        let (answer, status) = match catch_boxed_future(|| invocation).await {
+            Ok(Ok(answer)) => answer,
+            Ok(Err(error)) => return outcome.refuse(S3Error::from(error)),
+            Err(()) => return outcome.refuse(S3Error::new(ErrorCode::INTERNAL_ERROR, "the handler failed")),
         };
         let output = match answer {
             ErasedAnswer::Settled(output) => output,
@@ -869,12 +876,15 @@ impl S3Service {
             // carries a code and a message and no status of its own.
             ErasedAnswer::Committed(work) => {
                 let committed = StatusCode::from_u16(status).unwrap_or(StatusCode::OK);
-                return match work.await {
-                    Ok(output) => match op.encode(output, &meta, status) {
+                return match catch_boxed_future(|| work).await {
+                    Ok(Ok(output)) => match op.encode(output, &meta, status) {
                         Ok(encoded) => crate::commit::answered(encoded, committed),
                         Err(error) => outcome.refuse_after_commit(S3Error::from(error), committed),
                     },
-                    Err(error) => outcome.refuse_after_commit(S3Error::from(error), committed),
+                    Ok(Err(error)) => outcome.refuse_after_commit(S3Error::from(error), committed),
+                    Err(()) => {
+                        outcome.refuse_after_commit(S3Error::new(ErrorCode::INTERNAL_ERROR, "the handler failed"), committed)
+                    }
                 };
             }
             ErasedAnswer::EventStream(stream) => {
@@ -965,7 +975,7 @@ impl S3Service {
     }
 }
 
-async fn catch_authorizer<'a, T, F>(build: F) -> Result<T, ()>
+async fn catch_boxed_future<'a, T, F>(build: F) -> Result<T, ()>
 where
     F: FnOnce() -> BoxFuture<'a, T>,
 {

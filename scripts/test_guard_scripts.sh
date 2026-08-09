@@ -1899,6 +1899,54 @@ mut_ci_workflow_deleted() {
 }
 expect_fail check_ci_test_split.sh \
     "the guard's own workflow input deleted, which must fail rather than skip" mut_ci_workflow_deleted
+mut_second_config_load() {
+    python3 - <<'PYEOF'
+import pathlib
+path = pathlib.Path("crates/gateway/src/service.rs")
+text = path.read_text().replace(
+    "let config = self.inner.config.load_full();",
+    "let config = self.inner.config.load_full();\n        let _torn = self.inner.config.load_full();",
+    1,
+)
+path.write_text(text)
+PYEOF
+}
+expect_fail check_config_load_once.sh \
+    'a second hot-configuration read in the request pipeline' mut_second_config_load
+
+mut_config_load_allowlist_deleted() {
+    rm -f scripts/config_load_allowlist.txt
+}
+expect_fail check_config_load_once.sh \
+    'the config-load allowlist being absent' mut_config_load_allowlist_deleted
+
+mut_default_security_doc_deleted() {
+    python3 - <<'PYEOF'
+import pathlib
+path = pathlib.Path("crates/gateway/src/ext/policy.rs")
+text = path.read_text().replace("/// # Security\n", "", 1)
+path.write_text(text)
+PYEOF
+}
+expect_fail check_default_doc.sh \
+    'a Default implementation losing its security consequences' mut_default_security_doc_deleted
+
+mut_derived_default_security_doc_deleted() {
+    python3 - <<'PYEOF'
+import pathlib
+path = pathlib.Path("crates/gateway/src/ext/host.rs")
+text = path.read_text().replace("/// # Security\n", "", 1)
+path.write_text(text)
+PYEOF
+}
+expect_fail check_default_doc.sh \
+    'a derived extension default losing its security consequences' mut_derived_default_security_doc_deleted
+
+mut_default_doc_subject_deleted() {
+    rm -f crates/gateway/src/ext/policy.rs
+}
+expect_fail check_default_doc.sh \
+    "a documented Default implementation's source being absent" mut_default_doc_subject_deleted
 
 printf '\n%s case(s), %s failure(s)\n' "$cases" "$failures"
 [[ "$failures" -eq 0 ]]
