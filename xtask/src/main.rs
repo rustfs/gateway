@@ -18,7 +18,12 @@
 //! needs them; this file only owns dispatch.
 //! NOT responsible for: any protocol logic.
 
+mod bootstrap;
+mod catalog;
 mod codegen;
+mod new_op;
+mod route;
+mod verify;
 
 use std::process::ExitCode;
 
@@ -27,28 +32,31 @@ fn main() -> ExitCode {
     let first = args.next();
     let rest: Vec<String> = args.collect();
     match first.as_deref() {
-        Some("verify") => verify(rest),
+        Some("verify") => verify::verify(&rest),
         Some("codegen") => codegen::codegen(&rest),
         Some("spec") => match rest.first().map(String::as_str) {
             Some("verify") => codegen::verify(&rest[1..]),
             other => {
                 eprintln!("unknown `spec` subcommand: {}\n\n{USAGE}", other.unwrap_or("(none)"));
-                ExitCode::FAILURE
+                ExitCode::from(2)
             }
         },
         Some("why") => codegen::why(&rest),
         Some("conformance") => conformance(rest),
-        Some("bootstrap") => {
-            println!("nothing to bootstrap yet");
+        Some("route") => route::route(&rest),
+        Some("new-op") => new_op::new_op(&rest),
+        Some("bootstrap") => bootstrap::bootstrap(&rest),
+        Some("-h" | "--help") => {
+            print!("{USAGE}");
             ExitCode::SUCCESS
         }
         Some(other) => {
             eprintln!("unknown subcommand: {other}\n\n{USAGE}");
-            ExitCode::FAILURE
+            ExitCode::from(2)
         }
         None => {
             eprintln!("{USAGE}");
-            ExitCode::FAILURE
+            ExitCode::from(2)
         }
     }
 }
@@ -56,49 +64,30 @@ fn main() -> ExitCode {
 const USAGE: &str = "\
 usage: cargo xtask <command>
 
+use --json to request a machine-readable result
+
 commands:
-  verify [--crate <name>]   run the test suite (whole workspace, or one crate)
+  verify --op <operation>   run the affected operation crates (<=30 seconds)
+  verify --crate <name>     run one crate's tests (<=30 seconds)
+  verify --all              run the workspace tests (<=10 minutes)
   codegen                   regenerate spec/operations, OPERATIONS.md and generated/
-  codegen --diff            print the semantic diff between the working tree and a fresh run
+  codegen diff --semantic   print a semantic diff capped at 50 lines
+  codegen --check           fail when generated output or the verify map drifted
   spec verify               fail when any generated artefact differs from a fresh run
   why <target>              why a behaviour is the way it is: quirk id, operation, error code,
                             header or query key
-  bootstrap                 prepare a fresh checkout for work
+  route explain [--json] 'METHOD /path?query'
+                            explain route selection and every predicate
+  new-op <Operation>        create an intentionally-red operation scaffold
+  bootstrap                 prepare a fresh checkout for work (<=5 minutes)
   conformance <run|validate|baseline> [--filter <glob>] [--transport hyper|conn]
               [--profile aws|minio|strict] [--baseline <f>] [--json <f>] [--junit <f>]
 ";
 
-/// Forwards to `cargo test`. Widened by later tasks into the <=30s per-crate feedback loop.
-fn verify(args: Vec<String>) -> ExitCode {
-    let mut cmd = std::process::Command::new(env!("CARGO"));
-    cmd.arg("test");
-    match args.as_slice() {
-        [] => {
-            cmd.arg("--workspace");
-        }
-        [flag, name] if flag == "--crate" => {
-            cmd.args(["-p", name]);
-        }
-        _ => {
-            eprintln!("{USAGE}");
-            return ExitCode::FAILURE;
-        }
-    }
-    match cmd.status() {
-        Ok(status) if status.success() => ExitCode::SUCCESS,
-        Ok(_) => ExitCode::FAILURE,
-        Err(err) => {
-            eprintln!("failed to run cargo: {err}");
-            ExitCode::FAILURE
-        }
-    }
-}
-
 /// Shells out to the conformance binary.
 ///
-/// `xtask` may not depend on `rustfs-gateway-conformance`: the layer matrix gives it
-/// `-codegen` and `-model` only, and the suite is meant to exercise the public facade the
-/// way an outside implementation would, not to reach into the workspace from a build tool.
+/// The suite remains a separate process so its exit classes and public-facade boundary are the
+/// same here as they are for an outside implementation.
 fn conformance(args: Vec<String>) -> ExitCode {
     let mut cmd = std::process::Command::new(env!("CARGO"));
     cmd.args([

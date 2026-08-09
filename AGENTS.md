@@ -74,6 +74,20 @@ shape. The rule: after changing a crate you must **know exactly one command to r
 command must go red or green in **≤30 seconds**. `cargo xtask verify --crate <name>` is that
 command. If it exceeds 30 seconds for any crate, that is a bug — open an issue, do not absorb it.
 
+Use this map rather than guessing a broader command:
+
+| What changed | Run |
+| --- | --- |
+| One operation, its codec, or its route | `cargo xtask verify --op <OperationName>` |
+| One crate | `cargo xtask verify --crate <crate-name>` |
+| The pinned model, an overlay, or code generation | `cargo xtask codegen --check` |
+| One conformance case | `cargo xtask conformance validate --filter '<case-id>'` |
+| Cross-crate wiring, scripts, or CI | `cargo xtask verify --all` |
+
+`verify --op` and `verify --crate` have a 30-second budget. `verify --all` is the CI surface and has
+a 10-minute budget. A budget failure is a tooling defect; do not replace the command with a wider,
+slower one.
+
 ### TDD
 
 Write the failing test first, watch it fail, then implement. Implementing first and back-filling
@@ -273,6 +287,7 @@ closes the cycle.
 
   build-time only, never present in a runtime dependency tree:
         rustfs-gateway-codegen ──▶ rustfs-gateway-model   codegen emits generated/**, spec/, OPERATIONS.md
+        xtask ──▶ codegen + gateway/core + conformance   generation plus runtime diagnostics; build-time only
 ```
 
 Three annotations you must not lose:

@@ -1,0 +1,31 @@
+# SCAFFOLD: implement before merge
+
+[case]
+id = "c-scaffold-{{SNAKE}}"
+schema_version = 1
+title = "The {{NAME}} scaffold must stay red until implemented"
+rationale = "A green placeholder would claim support for an operation whose wire behaviour has not been implemented."
+polarity = "negative"
+operation = "scaffold:{{NAME}}"
+tags = ["scaffold"]
+timeout_ms = 1000
+quirks = []
+
+[[case.evidence]]
+url = "https://github.com/rustfs/backlog/issues/1743"
+summary = "The task requires every generated operation scaffold to fail until its implementation replaces the placeholder."
+kind = "issue"
+
+[request]
+method = "GET"
+target = "/__scaffold/{{SNAKE}}"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[expect.body]
+exact_utf8 = "implemented"
+

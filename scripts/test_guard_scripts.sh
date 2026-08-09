@@ -43,18 +43,17 @@ fail_msg() {
 # for a reason having nothing to do with what it checks.
 SANDBOX=""
 
-# One build directory, shared with whoever ran this. A guard that declares
-# REQUIRES-BUILD compiles the workspace, and a sandbox with its own target/ compiles it
-# from nothing — three times over, once as the positive control and once per negative
-# case. That took this suite from under a minute to past ten, which is the same
-# budget failure the sandbox reuse above was written to avoid, arriving by a different
-# road.
+# Reuse the caller's build directory. A guard that declares REQUIRES-BUILD compiles
+# the workspace, and a separate target/ recompiles it after `cargo test --workspace`.
+# CI measured that duplication past the ten-minute hard limit. Sandbox mutations still
+# rebuild affected workspace crates because Cargo fingerprints their different source
+# root, while registry dependencies and the positive control remain reusable.
 #
 # Sharing is sound because a sandbox differs from the tree only in the one file a case
 # mutates: every dependency is already built, and cargo rebuilds the workspace crates
 # alone. It is not a correctness shortcut — the guards still read the sandbox, and
 # CARGO_TARGET_DIR changes where objects land, not what is compiled.
-GUARD_TARGET_DIR="${CARGO_TARGET_DIR:-${REPO_ROOT}/target}/guard-self-test"
+GUARD_TARGET_DIR="${CARGO_TARGET_DIR:-${REPO_ROOT}/target}"
 export CARGO_TARGET_DIR="$GUARD_TARGET_DIR"
 
 make_sandbox() {
@@ -111,6 +110,10 @@ expect_fail_unstaged() {
     local guard="$1" desc="$2" mutate="$3"
     local sandbox rc=0
     cases=$((cases + 1))
+    if [[ ! -x "${SCRIPT_DIR}/${guard}" ]]; then
+        fail_msg "${guard} is missing or not executable; cannot test: ${desc}"
+        return
+    fi
     make_sandbox
     sandbox="$SANDBOX"
     (cd "$sandbox" && "$mutate" >/dev/null)
@@ -128,6 +131,10 @@ expect_fail() {
     local guard="$1" desc="$2" mutate="$3"
     local sandbox rc=0
     cases=$((cases + 1))
+    if [[ ! -x "${SCRIPT_DIR}/${guard}" ]]; then
+        fail_msg "${guard} is missing or not executable; cannot test: ${desc}"
+        return
+    fi
     make_sandbox
     sandbox="$SANDBOX"
     (cd "$sandbox" && "$mutate" >/dev/null)
@@ -1344,6 +1351,60 @@ AZPY
 }
 expect_fail check_authz_no_default_impl.sh \
     'a default body on authorize_route' mut_authorize_route_default_body
+
+# -----------------------------------------------------------------------------
+# P7-06. An operation scaffold is deliberately red while it is being implemented,
+# but the exact marker must never survive into a merge. Both tracked and brand-new
+# files are controls because a guard that only reads the index misses the latter.
+# -----------------------------------------------------------------------------
+
+mut_scaffold_marker_in_module() {
+    printf '\n// SCAF%s\n' 'FOLD: implement before merge' >>crates/core/src/ops/mod.rs
+}
+expect_fail check_no_scaffold_on_main.sh \
+    'a scaffold marker inserted into an existing operation module' mut_scaffold_marker_in_module
+
+mut_untracked_scaffold_marker() {
+    printf '// SCAF%s\n' 'FOLD: implement before merge' >crates/core/tests/scaffold_untracked.rs
+}
+expect_fail_unstaged check_no_scaffold_on_main.sh \
+    'a scaffold marker in a new unstaged test file' mut_untracked_scaffold_marker
+
+# The operation-to-test map is codegen-owned. A guard that checks only its header
+# accepts a hand-edited body, while a guard that regenerates in memory catches it.
+mut_verify_map_edited() {
+    printf '\n# hand-edited mapping\n' >>xtask/verify-map.toml
+}
+expect_fail check_verify_map_generated.sh \
+    'a manual edit to the generated operation verification map' mut_verify_map_edited
+
+mut_verify_map_deleted() {
+    rm -f xtask/verify-map.toml
+}
+expect_fail check_verify_map_generated.sh \
+    'the generated operation verification map being absent' mut_verify_map_deleted
+
+# Tool pins are one reviewable block. Test a moving version, a missing pin and the
+# explicitly rejected installer independently so each assertion has gone red.
+mut_tool_version_latest() {
+    sed 's/cargo-hack@0\.6\.45/cargo-hack@latest/' .github/workflows/ci.yml >.github/workflows/ci.yml.mut
+    mv .github/workflows/ci.yml.mut .github/workflows/ci.yml
+}
+expect_fail check_tool_versions_pinned.sh \
+    'a CI tool pin changed to latest' mut_tool_version_latest
+
+mut_tool_pin_deleted() {
+    grep -v 'CARGO_DENY_TOOL:' .github/workflows/ci.yml >.github/workflows/ci.yml.mut
+    mv .github/workflows/ci.yml.mut .github/workflows/ci.yml
+}
+expect_fail check_tool_versions_pinned.sh \
+    'one of the six CI tool pins being removed' mut_tool_pin_deleted
+
+mut_cargo_binstall_added() {
+    printf '\n# cargo install cargo-%s\n' 'binstall' >>.github/workflows/ci.yml
+}
+expect_fail check_tool_versions_pinned.sh \
+    'cargo-binstall introduced into the CI workflow' mut_cargo_binstall_added
 
 
 printf '\n%s case(s), %s failure(s)\n' "$cases" "$failures"

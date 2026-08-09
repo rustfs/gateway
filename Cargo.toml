@@ -15,6 +15,7 @@ authors = ["RustFS Team"]
 # that crates.io would require is just another thing to keep in sync.
 rustfs-gateway = { path = "crates/gateway", version = "0.2.0" }
 rustfs-gateway-codegen = { path = "crates/codegen", version = "0.1.0" }
+rustfs-gateway-conformance = { path = "crates/conformance", version = "0.1.0" }
 rustfs-gateway-core = { path = "crates/core", version = "0.1.0" }
 rustfs-gateway-http = { path = "crates/http", version = "0.1.0" }
 rustfs-gateway-macros = { path = "crates/macros", version = "0.1.0" }

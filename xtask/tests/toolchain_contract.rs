@@ -1,0 +1,93 @@
+// Copyright 2026 RustFS Team
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+//! Stable process contracts for P7 repository automation.
+//!
+//! Responsible for: checking exit classes, compact semantic output, case-id routing, and
+//! diagnostics. NOT responsible for: the slow workspace and bootstrap time budgets, which CI owns.
+//! Upstream: the xtask binary. Downstream: agents and CI.
+
+use std::process::{Command, Output};
+
+const BOOTSTRAP_SOURCE: &str = include_str!("../src/bootstrap.rs");
+
+fn xtask(args: &[&str]) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_xtask"))
+        .args(args)
+        .output()
+        .unwrap_or_else(|error| panic!("xtask must start: {error}"))
+}
+
+#[test]
+fn spec_and_generated_verification_map_are_clean() {
+    let output = xtask(&["spec", "verify"]);
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(String::from_utf8_lossy(&output.stdout).contains("0 differ"));
+}
+
+#[test]
+fn semantic_diff_is_never_more_than_fifty_lines() {
+    let output = xtask(&["codegen", "diff", "--semantic"]);
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(String::from_utf8_lossy(&output.stdout).lines().count() <= 50);
+}
+
+#[test]
+fn a_case_id_can_drive_route_explain() {
+    let output = xtask(&["route", "explain", "--json", "c-object-0001"]);
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(String::from_utf8_lossy(&output.stdout).contains("\"selected\":\"GetObject\""));
+}
+
+#[test]
+fn headers_participate_in_route_explain() {
+    let output = xtask(&[
+        "route",
+        "explain",
+        "--json",
+        "PUT /target/key",
+        "--header",
+        "x-amz-copy-source:/source/key",
+    ]);
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(String::from_utf8_lossy(&output.stdout).contains("\"selected\":\"CopyObject\""));
+}
+
+#[test]
+fn case_headers_participate_in_route_explain() {
+    let output = xtask(&["route", "explain", "--json", "c-authz-1002"]);
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(String::from_utf8_lossy(&output.stdout).contains("\"selected\":\"CopyObject\""));
+}
+
+#[test]
+fn a_failed_verification_has_the_diagnostic_triplet() {
+    let output = xtask(&["verify", "--crate", "not-a-real-crate"]);
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    for key in ["what:", "where:", "rule:"] {
+        assert!(stderr.contains(key), "missing {key}: {stderr}");
+    }
+}
+
+#[test]
+fn bootstrap_checks_drift_before_it_can_regenerate() {
+    let verify = BOOTSTRAP_SOURCE
+        .find("codegen::verify_generated()")
+        .expect("bootstrap must verify generated output");
+    let regenerate = BOOTSTRAP_SOURCE
+        .find("codegen::regenerate()")
+        .expect("bootstrap must regenerate output");
+    assert!(verify < regenerate);
+}

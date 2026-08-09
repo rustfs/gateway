@@ -86,7 +86,7 @@ LAYERS=(
     "rustfs-gateway-core|rustfs-gateway-sig rustfs-gateway-http rustfs-gateway-types rustfs-gateway-xml rustfs-gateway-stream"
     "rustfs-gateway|rustfs-gateway-core rustfs-gateway-sig rustfs-gateway-http rustfs-gateway-types rustfs-gateway-xml rustfs-gateway-stream"
     "rustfs-gateway-conformance|rustfs-gateway"
-    "xtask|rustfs-gateway-codegen rustfs-gateway-model"
+    "xtask|rustfs-gateway-codegen rustfs-gateway-model rustfs-gateway-core rustfs-gateway-conformance rustfs-gateway"
 )
 
 status=0

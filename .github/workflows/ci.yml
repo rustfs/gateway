@@ -37,9 +37,9 @@ name: CI
 #   fuzz                            -> alongside the rustfs-gateway-sig / rustfs-gateway-http parsers
 #   client matrix / s3-tests / mint -> P8 at the earliest, and on cron, never on PRs
 #
-# The three jobs below mirror, verbatim, the first three commands of the
-# four-command gate in AGENTS.md. (The fourth, `cargo xtask verify`, is a
-# per-crate fast loop for local use and is covered by the three below.)
+# The jobs below cover the four-command gate in AGENTS.md. Formatting and
+# clippy remain separate parallel jobs; the test job enters through
+# `cargo xtask verify --all`, the same bounded verification surface used locally.
 # If they ever disagree, fix this file to match AGENTS.md — AGENTS.md is the
 # source of truth.
 #
@@ -62,6 +62,16 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
+  # Central registry for tools introduced by later release, coverage, audit and
+  # fuzz jobs. Keeping all six pins here makes an upgrade one reviewable diff.
+  # The first four install through taiki-e/install-action; cargo-public-api uses
+  # `cargo install --locked`, and cargo-fuzz uses dtolnay/install.
+  CARGO_SEMVER_CHECKS_TOOL: cargo-semver-checks@0.50.0
+  CARGO_HACK_TOOL: cargo-hack@0.6.45
+  CARGO_LLVM_COV_TOOL: cargo-llvm-cov@0.8.7
+  CARGO_DENY_TOOL: cargo-deny@0.20.2
+  CARGO_PUBLIC_API_TOOL: cargo-public-api@0.52.0
+  CARGO_FUZZ_TOOL: cargo-fuzz@0.13.2
 
 jobs:
   # Everything deterministic and sub-second lives here rather than in jobs of its own:
@@ -112,6 +122,35 @@ jobs:
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - run: cargo clippy --workspace --all-targets -- -D warnings
 
+  bootstrap:
+    name: Cold bootstrap
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+      # No cargo cache: the five-minute measurement includes compiling xtask itself.
+      - name: Bootstrap from a cold checkout (maximum 5 minutes)
+        run: |
+          started="$(date +%s)"
+          timeout 300s cargo xtask bootstrap
+          elapsed="$(( $(date +%s) - started ))"
+          echo "cold bootstrap completed in ${elapsed}s"
+
+  feedback-loop:
+    name: Operation feedback loop
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - run: cargo build -p xtask
+      - name: Three operation samples (maximum 30 seconds each)
+        run: |
+          timeout 30s cargo xtask verify --op GetObject
+          timeout 30s cargo xtask verify --op PutObject
+          timeout 30s cargo xtask verify --op ListObjectsV2
+
   test:
     name: Test
     runs-on: ubuntu-latest
@@ -119,20 +158,9 @@ jobs:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-      - run: cargo test --workspace
-      # The guards that need a compiled workspace, and the self-test that runs every
-      # guard as its positive control. Both are here rather than in `static` because
-      # they build; the cache this job already warms is the whole reason.
-      - name: Repository guards that need a build
+      - name: Verify all (maximum 10 minutes)
         run: |
-          ran=0
-          for guard in scripts/check_*.sh; do
-            grep -q '^# REQUIRES-BUILD$' "$guard" || continue
-            echo "::group::$guard"
-            bash "$guard"
-            echo "::endgroup::"
-            ran=$((ran + 1))
-          done
-          echo "ran $ran guard(s)"
-      - name: Guard self-test
-        run: bash scripts/test_guard_scripts.sh
+          started="$(date +%s)"
+          timeout 600s cargo xtask verify --all
+          elapsed="$(( $(date +%s) - started ))"
+          echo "full verification completed in ${elapsed}s"
