@@ -36,35 +36,46 @@ fail_msg() {
     failures=$((failures + 1))
 }
 
-# One sandbox, reused. Each negative case mutates it, the guard runs, and the tree is
-# reset with `git checkout` plus a clean of untracked files — a few milliseconds instead
-# of a fresh copy. Twenty-nine full copies plus twenty-nine `git add -A` runs pushed this
-# suite past the ten-minute budget of the CI job it lives in, which is a gate that fails
-# for a reason having nothing to do with what it checks.
+# One sandbox, reused. Each negative case mutates it, the guard runs, and only the paths
+# changed by that case are checked out before untracked files are cleaned. Checking out
+# the whole tree for every case made the reset cost grow with the repository rather than
+# with the mutation and pushed the suite past the ten-minute CI budget.
 SANDBOX=""
 
-# One build directory, shared with whoever ran this. A guard that declares
-# REQUIRES-BUILD compiles the workspace, and a sandbox with its own target/ compiles it
-# from nothing — three times over, once as the positive control and once per negative
-# case. That took this suite from under a minute to past ten, which is the same
-# budget failure the sandbox reuse above was written to avoid, arriving by a different
-# road.
+# Reuse the caller's build directory. A guard that declares REQUIRES-BUILD compiles
+# the workspace, and a separate target/ recompiles it after `cargo test --workspace`.
+# CI measured that duplication past the ten-minute hard limit. Sandbox mutations still
+# rebuild affected workspace crates because Cargo fingerprints their different source
+# root, while registry dependencies and the positive control remain reusable.
 #
 # Sharing is sound because a sandbox differs from the tree only in the one file a case
 # mutates: every dependency is already built, and cargo rebuilds the workspace crates
 # alone. It is not a correctness shortcut — the guards still read the sandbox, and
 # CARGO_TARGET_DIR changes where objects land, not what is compiled.
-GUARD_TARGET_DIR="${CARGO_TARGET_DIR:-${REPO_ROOT}/target}/guard-self-test"
+GUARD_TARGET_DIR="${CARGO_TARGET_DIR:-${REPO_ROOT}/target}"
 export CARGO_TARGET_DIR="$GUARD_TARGET_DIR"
 
 make_sandbox() {
     if [[ -n "$SANDBOX" ]]; then
+        local changed untracked
+        changed="$(mktemp "${TMPDIR:-/tmp}/gateway-guard-changed.XXXXXX")"
+        untracked="$(mktemp "${TMPDIR:-/tmp}/gateway-guard-untracked.XXXXXX")"
         (
             cd "$SANDBOX"
-            git checkout -- . >/dev/null 2>&1 || true
-            git clean -fdq >/dev/null 2>&1 || true
+            git diff --name-only -z HEAD -- >"$changed"
+            if [[ -s "$changed" ]]; then
+                xargs -0 git reset -q HEAD -- <"$changed" >/dev/null 2>&1
+            fi
+            git ls-files --others --exclude-standard -z >"$untracked"
+            if [[ -s "$untracked" ]]; then
+                xargs -0 git clean -fdq -- <"$untracked" >/dev/null 2>&1
+            fi
+            git diff --name-only -z HEAD -- >"$changed"
+            if [[ -s "$changed" ]]; then
+                xargs -0 git checkout -f HEAD -- <"$changed" >/dev/null 2>&1
+            fi
         )
-        printf '%s' "$SANDBOX"
+        rm -f "$changed" "$untracked"
         return
     fi
 
@@ -92,7 +103,6 @@ make_sandbox() {
         git -c user.name=t -c user.email=t@t commit -qm base >/dev/null 2>&1
     )
     SANDBOX="$dir"
-    printf '%s' "$dir"
 }
 
 cleanup_sandbox() {
@@ -113,7 +123,12 @@ expect_fail_unstaged() {
     local guard="$1" desc="$2" mutate="$3"
     local sandbox rc=0
     cases=$((cases + 1))
-    sandbox="$(make_sandbox)"
+    if [[ ! -x "${SCRIPT_DIR}/${guard}" ]]; then
+        fail_msg "${guard} is missing or not executable; cannot test: ${desc}"
+        return
+    fi
+    make_sandbox
+    sandbox="$SANDBOX"
     (cd "$sandbox" && "$mutate" >/dev/null)
     GATEWAY_CHECK_ROOT="$sandbox" "${SCRIPT_DIR}/${guard}" >/dev/null 2>&1 || rc=$?
     if [[ "$rc" -ne 0 ]]; then
@@ -129,7 +144,12 @@ expect_fail() {
     local guard="$1" desc="$2" mutate="$3"
     local sandbox rc=0
     cases=$((cases + 1))
-    sandbox="$(make_sandbox)"
+    if [[ ! -x "${SCRIPT_DIR}/${guard}" ]]; then
+        fail_msg "${guard} is missing or not executable; cannot test: ${desc}"
+        return
+    fi
+    make_sandbox
+    sandbox="$SANDBOX"
     (cd "$sandbox" && "$mutate" >/dev/null)
     (cd "$sandbox" && git add -A >/dev/null 2>&1)
     GATEWAY_CHECK_ROOT="$sandbox" "${SCRIPT_DIR}/${guard}" >/dev/null 2>&1 || rc=$?
@@ -157,6 +177,34 @@ done
 # Negative cases
 # -----------------------------------------------------------------------------
 printf '\nNegative cases (guards must fail)\n'
+
+# Prove the selective reset itself before relying on it for the remaining cases. The probe dirties
+# the index, a tracked file and an untracked file, then asks the next sandbox acquisition for the
+# same clean baseline every guard case expects.
+probe_selective_reset() {
+    local sandbox
+    cases=$((cases + 1))
+    make_sandbox
+    sandbox="$SANDBOX"
+    (
+        cd "$sandbox"
+        printf '\n# reset probe\n' >>Cargo.toml
+        printf 'probe\n' >reset-probe.txt
+        git add -A >/dev/null 2>&1
+    )
+    make_sandbox
+    if (
+        cd "$sandbox"
+        git diff --quiet HEAD -- &&
+            git diff --cached --quiet HEAD -- &&
+            [[ -z "$(git ls-files --others --exclude-standard)" ]]
+    ); then
+        pass_msg 'selective sandbox reset restores the tracked, staged and untracked baseline'
+    else
+        fail_msg 'selective sandbox reset left state from the preceding mutation'
+    fi
+}
+probe_selective_reset
 
 mut_reverse_edge() {
     printf 'rustfs-gateway-types = { workspace = true }\n' >>crates/xml/Cargo.toml
@@ -1039,6 +1087,818 @@ mut_sse_headers_module_deleted() {
 expect_fail check_sse_key_never_leaks.sh \
     "the guard's own subject deleted, which must fail rather than skip" mut_sse_headers_module_deleted
 
+mut_clock_second_wall_reading() {
+    python3 - <<'CLOCKPY'
+import pathlib
+path = pathlib.Path("crates/gateway/src/service.rs")
+# The shape this guard exists for: a second reading taken half way down the
+# pipeline, so the skew check and the expiry check judge two different presents.
+path.write_text(path.read_text() + """
+fn a_second_present() -> std::time::SystemTime {
+    std::time::SystemTime::now()
+}
+""")
+CLOCKPY
+}
+expect_fail check_clock_single_source.sh \
+    'a second wall-clock reading inside the pipeline' mut_clock_second_wall_reading
+
+mut_clock_stray_monotonic_reading() {
+    python3 - <<'CLOCKPY'
+import pathlib
+path = pathlib.Path("crates/core/src/lib.rs")
+path.write_text(path.read_text() + """
+fn a_stray_stopwatch() -> std::time::Instant {
+    std::time::Instant::now()
+}
+""")
+CLOCKPY
+}
+expect_fail check_clock_single_source.sh \
+    'a monotonic reading taken outside the monotonic source' mut_clock_stray_monotonic_reading
+
+mut_clock_wall_source_reads_the_monotonic_clock() {
+    python3 - <<'CLOCKPY'
+import pathlib
+path = pathlib.Path("crates/sig/src/clock.rs")
+# Mixing the two: signature expiry judged against a source with no absolute time.
+path.write_text(path.read_text() + """
+fn expiry_on_a_stopwatch() -> std::time::Instant {
+    std::time::Instant::now()
+}
+""")
+CLOCKPY
+}
+expect_fail check_clock_single_source.sh \
+    'the wall-clock source reading the monotonic clock' mut_clock_wall_source_reads_the_monotonic_clock
+
+mut_clock_monotonic_source_reads_the_wall_clock() {
+    python3 - <<'CLOCKPY'
+import pathlib
+path = pathlib.Path("crates/gateway/src/clock.rs")
+# The other direction: a rate limiter an NTP step can steer.
+path.write_text(path.read_text() + """
+fn refill_on_the_wall_clock() -> std::time::SystemTime {
+    std::time::SystemTime::now()
+}
+""")
+CLOCKPY
+}
+expect_fail check_clock_single_source.sh \
+    'the monotonic source reading the wall clock' mut_clock_monotonic_source_reads_the_wall_clock
+
+mut_clock_wall_source_stops_reading_the_clock() {
+    python3 - <<'CLOCKPY'
+import pathlib
+path = pathlib.Path("crates/sig/src/clock.rs")
+# The subject refactored away. The guard must fail rather than pass vacuously.
+path.write_text(path.read_text().replace("std::time::SystemTime::now()", "SOME_OTHER_SOURCE.read()"))
+CLOCKPY
+}
+expect_fail check_clock_single_source.sh \
+    "the guard's own subject refactored away, which must fail rather than skip" \
+    mut_clock_wall_source_stops_reading_the_clock
+
+mut_clock_monotonic_source_deleted() {
+    rm -f crates/gateway/src/clock.rs
+}
+expect_fail check_clock_single_source.sh \
+    "the monotonic source deleted, which must fail rather than skip" mut_clock_monotonic_source_deleted
+
+mut_governor_sync_path_allocates() {
+    python3 - <<'GOVPY'
+import pathlib
+path = pathlib.Path("crates/gateway/src/ext/governor/default.rs")
+text = path.read_text()
+needle = "    pub fn try_acquire_sync(&self, request: &GovernorRequest<'_>) -> Option<Lease> {"
+path.write_text(text.replace(needle, needle + "\n        let _allocation = Box::new(0_u8);", 1))
+GOVPY
+}
+expect_fail check_governor_fast_path.sh \
+    'an allocation added to the synchronous governor path' mut_governor_sync_path_allocates
+
+mut_governor_single_client_lock() {
+    python3 - <<'GOVPY'
+import pathlib
+path = pathlib.Path("crates/gateway/src/ext/governor/default.rs")
+path.write_text(path.read_text().replace("const CLIENT_SHARDS: usize = 32;", "const CLIENT_SHARDS: usize = 1;", 1))
+GOVPY
+}
+expect_fail check_governor_fast_path.sh \
+    'the address table collapsed to one lock' mut_governor_single_client_lock
+
+mut_governor_user_replaces_framework() {
+    python3 - <<'GOVPY'
+import pathlib
+path = pathlib.Path("crates/gateway/src/builder.rs")
+path.write_text(path.read_text().replace(
+    "Arc::new(LayeredGovernor::new(framework_governor, user))",
+    "user",
+    1,
+))
+GOVPY
+}
+expect_fail check_governor_fast_path.sh \
+    'a user governor replacing the framework governor' mut_governor_user_replaces_framework
+
+mut_governor_request_constructor_public() {
+    python3 - <<'GOVPY'
+import pathlib
+path = pathlib.Path("crates/gateway/src/ext/governor.rs")
+path.write_text(path.read_text().replace("pub(crate) const fn new(", "pub const fn new(", 1))
+GOVPY
+}
+expect_fail check_governor_fast_path.sh \
+    'GovernorRequest construction exposed to extensions' mut_governor_request_constructor_public
+
+mut_governor_client_map_allocates_on_demand() {
+    python3 - <<'GOVPY'
+import pathlib
+path = pathlib.Path("crates/gateway/src/ext/governor/default.rs")
+path.write_text(path.read_text().replace("HashMap::with_capacity(capacity)", "HashMap::new()", 1))
+GOVPY
+}
+expect_fail check_governor_fast_path.sh \
+    'client-map allocation moved into the decision path' mut_governor_client_map_allocates_on_demand
+# check_secret_hygiene.sh has six rules over the credential containers in crates/gateway/src/ext/,
+# which is outside the path scope of check_ct_eq.sh rules 3-6. Each is mutated separately, because
+# one case would leave the other five as prose. rustfs/backlog#1736 is the task, and
+# GHSA-333v-68xh-8mmq is what a secret in a diagnostic looks like once it has happened.
+
+mut_credentials_debug_derived() {
+    python3 - <<'CREDPY'
+import pathlib, re
+path = pathlib.Path("crates/gateway/src/ext/credentials.rs")
+text = path.read_text()
+# The redacting Debug deleted and the derive put back — the whole leak in two edits.
+text = re.sub(r"impl core::fmt::Debug for Credentials \{.*?\n\}\n", "", text, flags=re.S)
+text = text.replace("pub struct Credentials {", "#[derive(Debug)]\npub struct Credentials {")
+path.write_text(text)
+CREDPY
+}
+expect_fail check_secret_hygiene.sh \
+    'the redacting Debug on Credentials replaced by a derive' mut_credentials_debug_derived
+
+# ── check_authz_fail_closed.sh (P6-02) ─────────────────────────────────────────
+
+mut_a_fourth_verdict_state() {
+    python3 - <<'AZPY'
+import pathlib
+p = pathlib.Path("crates/core/src/authz/mod.rs")
+s = p.read_text()
+s = s.replace("    Indeterminate,\n}", "    Indeterminate,\n    Unknown,\n}", 1)
+p.write_text(s)
+AZPY
+}
+expect_fail check_authz_fail_closed.sh \
+    'a fourth Decision state, which no interpretation site was written for' mut_a_fourth_verdict_state
+
+mut_decision_from_a_bool() {
+    cat >>crates/gateway/src/ext/mod.rs <<'AZEOF'
+
+impl Default for Decision {
+    fn default() -> Self {
+        Self::Allow
+    }
+}
+AZEOF
+}
+expect_fail check_authz_fail_closed.sh \
+    'a Default impl for Decision, so a verdict nobody reached becomes Allow' mut_decision_from_a_bool
+
+mut_a_second_interpretation_site() {
+    cat >>crates/gateway/src/service.rs <<'AZEOF'
+
+fn interpret(verdict: crate::ext::Decision) -> bool {
+    match verdict {
+        crate::ext::Decision::Allow => true,
+        crate::ext::Decision::Deny => false,
+        crate::ext::Decision::Indeterminate => true,
+    }
+}
+AZEOF
+}
+expect_fail check_authz_fail_closed.sh \
+    'a second place deciding what a verdict means, reading Indeterminate as allow' mut_a_second_interpretation_site
+
+mut_a_wildcard_in_settle() {
+    python3 - <<'AZPY'
+import pathlib
+p = pathlib.Path("crates/core/src/authz/mod.rs")
+s = p.read_text()
+s = s.replace("            Self::Deny | Self::Indeterminate => Err(Denied { decision: self }),",
+              "            _ => Err(Denied { decision: self }),", 1)
+p.write_text(s)
+AZPY
+}
+expect_fail check_authz_fail_closed.sh \
+    'a wildcard arm in settle, so a later state inherits a branch nobody chose for it' mut_a_wildcard_in_settle
+
+mut_a_denial_that_picks_its_code() {
+    python3 - <<'AZPY'
+import pathlib
+p = pathlib.Path("crates/core/src/authz/mod.rs")
+s = p.read_text()
+s = s.replace("impl Denied {\n", "impl Denied {\n    pub fn with_code(code: ErrorCode) -> Self {\n        let _ = code;\n        Self { decision: Decision::Deny }\n    }\n\n", 1)
+p.write_text(s)
+AZPY
+}
+expect_fail check_authz_fail_closed.sh \
+    'a Denial constructor taking an ErrorCode, which is a private-bucket enumeration oracle' mut_a_denial_that_picks_its_code
+
+mut_an_audit_sink_that_answers() {
+    python3 - <<'AZPY'
+import pathlib
+p = pathlib.Path("crates/gateway/src/ext/authz_audit.rs")
+s = p.read_text()
+s = s.replace("    fn on_decision(&self, event: &AuthzAuditEvent<'_>);",
+              "    fn on_decision(&self, event: &AuthzAuditEvent<'_>) -> Decision;", 1)
+p.write_text(s)
+AZPY
+}
+expect_fail check_authz_fail_closed.sh \
+    'an audit sink whose method returns a verdict, so the hook could overturn the decision' mut_an_audit_sink_that_answers
+
+mut_an_allow_all_example() {
+    cat >>crates/gateway/examples/minimal.rs <<'AZEOF'
+
+fn convenient() -> impl rustfs_gateway::Authorizer {
+    rustfs_gateway::allow_when(|_| true)
+}
+AZEOF
+}
+expect_fail check_authz_fail_closed.sh \
+    'a copy-pasteable allow-all in an example, which is API' mut_an_allow_all_example
+expect_fail check_no_allow_all_in_examples.sh \
+    'a copy-pasteable allow-all in an example' mut_an_allow_all_example
+
+mut_authorizer_module_deleted() {
+    rm -f crates/gateway/src/ext/authorizer.rs
+}
+expect_fail check_authz_fail_closed.sh \
+    "the guard's own subject deleted, which must fail rather than skip" mut_authorizer_module_deleted
+
+mut_an_authz_case_removed() {
+    python3 - <<'AZPY'
+import pathlib
+p = pathlib.Path("crates/gateway/tests/authz_contract.rs")
+p.write_text(p.read_text().replace("c-azc-0030", "removed-case", 1))
+AZPY
+}
+expect_fail check_authz_fail_closed.sh \
+    'one of the thirty executable authorization cases removed' mut_an_authz_case_removed
+
+# ── check_policy_snapshot_once.sh (P6-02) ──────────────────────────────────────
+
+mut_a_second_reading_in_the_pipeline() {
+    cat >>crates/gateway/src/service.rs <<'AZEOF'
+
+async fn reread(inner: &Inner) {
+    let _ = inner.policy_source.snapshot(None).await;
+}
+AZEOF
+}
+expect_fail check_policy_snapshot_once.sh \
+    'a second reading of policy inside the pipeline crate' mut_a_second_reading_in_the_pipeline
+
+mut_a_reading_outside_the_pipeline() {
+    cat >>crates/gateway/src/dispatch.rs <<'AZEOF'
+
+async fn own_view(source: &dyn crate::ext::PolicySource) {
+    let _ = source.snapshot(None).await;
+}
+AZEOF
+}
+expect_fail check_policy_snapshot_once.sh \
+    'a stage reading its own view of policy instead of the one it was handed' mut_a_reading_outside_the_pipeline
+
+mut_the_reading_taken_after_the_reader() {
+    python3 - <<'AZPY'
+import pathlib
+p = pathlib.Path("crates/gateway/src/service.rs")
+lines = p.read_text().splitlines(keepends=True)
+# An authorize call above the snapshot: the reading is then not the one the
+# reader used, whatever the response looks like.
+lines.insert(14, "fn early(a: &dyn crate::ext::Authorizer) { let _ = |c, r| a.authorize_route(c, r); }\n")
+p.write_text("".join(lines))
+AZPY
+}
+expect_fail check_policy_snapshot_once.sh \
+    'the policy reading taken after the authorizer has already run' mut_the_reading_taken_after_the_reader
+
+mut_policy_module_deleted() {
+    rm -f crates/gateway/src/ext/policy.rs
+}
+expect_fail check_policy_snapshot_once.sh \
+    "the guard's own subject deleted, which must fail rather than skip" mut_policy_module_deleted
+
+# ── check_authz_no_default_impl.sh (P6-02) ─────────────────────────────────────
+
+mut_authorize_route_default_body() {
+    python3 - <<'AZPY'
+import pathlib
+p = pathlib.Path("crates/gateway/src/ext/authorizer.rs")
+s = p.read_text()
+s = s.replace(
+    ") -> BoxFuture<'a, Decision>;",
+    ") -> BoxFuture<'a, Decision> { Box::pin(async { Decision::Deny }) }",
+    1,
+)
+p.write_text(s)
+AZPY
+}
+expect_fail check_authz_no_default_impl.sh \
+    'a default body on authorize_route' mut_authorize_route_default_body
+
+# -----------------------------------------------------------------------------
+# P7-06. An operation scaffold is deliberately red while it is being implemented,
+# but the exact marker must never survive into a merge. Both tracked and brand-new
+# files are controls because a guard that only reads the index misses the latter.
+# -----------------------------------------------------------------------------
+
+mut_scaffold_marker_in_module() {
+    printf '\n// SCAF%s\n' 'FOLD: implement before merge' >>crates/core/src/ops/mod.rs
+}
+expect_fail check_no_scaffold_on_main.sh \
+    'a scaffold marker inserted into an existing operation module' mut_scaffold_marker_in_module
+
+mut_untracked_scaffold_marker() {
+    printf '// SCAF%s\n' 'FOLD: implement before merge' >crates/core/tests/scaffold_untracked.rs
+}
+expect_fail_unstaged check_no_scaffold_on_main.sh \
+    'a scaffold marker in a new unstaged test file' mut_untracked_scaffold_marker
+
+# The operation-to-test map is codegen-owned. A guard that checks only its header
+# accepts a hand-edited body, while a guard that regenerates in memory catches it.
+mut_verify_map_edited() {
+    printf '\n# hand-edited mapping\n' >>xtask/verify-map.toml
+}
+expect_fail check_verify_map_generated.sh \
+    'a manual edit to the generated operation verification map' mut_verify_map_edited
+
+mut_verify_map_deleted() {
+    rm -f xtask/verify-map.toml
+}
+expect_fail check_verify_map_generated.sh \
+    'the generated operation verification map being absent' mut_verify_map_deleted
+
+# Tool pins are one reviewable block. Test a moving version, a missing pin and the
+# explicitly rejected installer independently so each assertion has gone red.
+mut_tool_version_latest() {
+    sed 's/cargo-hack@0\.6\.45/cargo-hack@latest/' .github/workflows/ci.yml >.github/workflows/ci.yml.mut
+    mv .github/workflows/ci.yml.mut .github/workflows/ci.yml
+}
+expect_fail check_tool_versions_pinned.sh \
+    'a CI tool pin changed to latest' mut_tool_version_latest
+
+mut_tool_pin_deleted() {
+    grep -v 'CARGO_DENY_TOOL:' .github/workflows/ci.yml >.github/workflows/ci.yml.mut
+    mv .github/workflows/ci.yml.mut .github/workflows/ci.yml
+}
+expect_fail check_tool_versions_pinned.sh \
+    'one of the six CI tool pins being removed' mut_tool_pin_deleted
+
+mut_cargo_binstall_added() {
+    printf '\n# cargo install cargo-%s\n' 'binstall' >>.github/workflows/ci.yml
+}
+expect_fail check_tool_versions_pinned.sh \
+    'cargo-binstall introduced into the CI workflow' mut_cargo_binstall_added
+
+mut_credentials_display() {
+    python3 - <<'CREDPY'
+import pathlib
+path = pathlib.Path("crates/gateway/src/ext/credentials.rs")
+path.write_text(path.read_text() + """
+impl core::fmt::Display for Credentials {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str(self.identity().access_key_id())
+    }
+}
+""")
+CREDPY
+}
+expect_fail check_secret_hygiene.sh \
+    'a Display implementation on Credentials' mut_credentials_display
+# P7-05 documentation/context guards. Each acceptance rule has an explicit mutation so a green
+# guard proves both directions rather than merely describing the current tree.
+mut_map_deleted() {
+    rm -f crates/xml/MAP.md
+}
+expect_fail check_map_files.sh \
+    'a workspace crate losing its MAP.md' mut_map_deleted
+
+mut_map_too_long() {
+    for _ in $(seq 1 101); do printf 'extra\n' >>crates/xml/MAP.md; done
+}
+expect_fail check_map_files.sh \
+    'a MAP.md growing beyond the 100-line entry-point budget' mut_map_too_long
+
+mut_map_recommends_generated() {
+    printf '| `generated/**` | generated details | Read it when debugging |\n' >>crates/xml/MAP.md
+}
+expect_fail check_map_files.sh \
+    'a MAP.md directing an agent into generated output' mut_map_recommends_generated
+
+mut_module_doc_loses_boundary() {
+    sed '/NOT responsible for:/d' xtask/src/main.rs >xtask/src/main.rs.mut
+    mv xtask/src/main.rs.mut xtask/src/main.rs
+}
+expect_fail check_module_doc.sh \
+    'a Rust file documenting responsibility but not its boundary' mut_module_doc_loses_boundary
+
+mut_unallowed_large_file() {
+    for _ in $(seq 1 801); do printf '// padding\n' >>xtask/src/main.rs; done
+}
+expect_fail check_file_size.sh \
+    'a Rust file exceeding 800 lines without an allowance' mut_unallowed_large_file
+
+mut_invalid_file_size_allowance() {
+    printf 'xtask/src/main.rs 900 missing-reason\n' >>allowances/file_size.txt
+}
+expect_fail check_file_size.sh \
+    'a file-size allowance without an issue URL and reason' mut_invalid_file_size_allowance
+
+mut_forbidden_list_loses_alternative() {
+    sed 's|`cargo tree -p <crate> -e normal`|none|' AGENTS.md >AGENTS.md.mut
+    mv AGENTS.md.mut AGENTS.md
+}
+expect_fail check_agents_forbidden_list.sh \
+    'a forbidden-list entry losing its safe alternative' mut_forbidden_list_loses_alternative
+
+mut_scoped_agents_file() {
+    printf '# local rules\n' >crates/xml/AGENTS.md
+}
+expect_fail check_agents_layering.sh \
+    'a scoped AGENTS.md introduced before the layering trigger' mut_scoped_agents_file
+
+mut_secret_in_a_log_line() {
+    python3 - <<'CREDPY'
+import pathlib
+path = pathlib.Path("crates/gateway/src/ext/authenticator.rs")
+path.write_text(path.read_text() + """
+fn an_operator_friendly_diagnostic(secret: &str) -> String {
+    format!("the secret did not match: {secret}")
+}
+""")
+CREDPY
+}
+expect_fail check_secret_hygiene.sh \
+    'a formatting macro naming a secret in the gateway extension tree' mut_secret_in_a_log_line
+
+mut_refusal_in_a_log_line() {
+    python3 - <<'CREDPY'
+import pathlib
+path = pathlib.Path("crates/gateway/src/ext/authenticator.rs")
+path.write_text(path.read_text() + """
+fn why_it_was_refused(reason: crate::ext::CredentialRefusal) -> String {
+    format!("refused: {reason:?}")
+}
+""")
+CREDPY
+}
+expect_fail check_secret_hygiene.sh \
+    'the refusal reason travelling out of the module that produced it' mut_refusal_in_a_log_line
+
+mut_secret_in_a_growing_buffer() {
+    python3 - <<'CREDPY'
+import pathlib
+path = pathlib.Path("crates/gateway/src/ext/credentials.rs")
+path.write_text(path.read_text() + """
+fn accumulate(parts: &[&[u8]]) -> Vec<u8> {
+    let mut secret: Vec<u8> = Vec::new();
+    for part in parts {
+        secret.extend_from_slice(part);
+    }
+    secret
+}
+""")
+CREDPY
+}
+expect_fail check_secret_hygiene.sh \
+    'key material accumulated into a reallocating buffer' mut_secret_in_a_growing_buffer
+
+mut_extra_expose_call_site() {
+    python3 - <<'CREDPY'
+import pathlib
+path = pathlib.Path("crates/gateway/src/ext/credentials.rs")
+path.write_text(path.read_text() + """
+fn a_second_reader(credentials: &Credentials) -> usize {
+    credentials.secret().expose().len()
+}
+""")
+CREDPY
+}
+expect_fail check_secret_hygiene.sh \
+    'one more place key material leaves its container' mut_extra_expose_call_site
+
+mut_credentials_module_deleted() {
+    rm -f crates/gateway/src/ext/credentials.rs
+}
+expect_fail check_secret_hygiene.sh \
+    "the guard's own subject deleted, which must fail rather than skip" mut_credentials_module_deleted
+
+mut_provider_error_interpolates_request() {
+    python3 - <<'PYEOF'
+import pathlib
+path = pathlib.Path("crates/gateway/src/ext/credentials.rs")
+text = path.read_text().replace("pub enum ProviderError {", "pub enum ProviderError {\n    Request(String),", 1)
+path.write_text(text)
+PYEOF
+}
+expect_fail check_preauth_no_interp.sh \
+    'a provider error carrying request-derived text' mut_provider_error_interpolates_request
+
+mut_signing_key_cache() {
+    python3 - <<'PYEOF'
+import pathlib
+path = pathlib.Path("crates/gateway/src/ext/authenticator.rs")
+path.write_text(path.read_text() + "\nstruct BadCache { signing_key_cache: std::collections::HashMap<String, rustfs_gateway_sig::SigningKey> }\n")
+PYEOF
+}
+expect_fail check_no_signing_key_cache.sh \
+    'a cache retaining derived signing keys' mut_signing_key_cache
+
+replace_ci_text() {
+    python3 - "$1" "$2" <<'PYEOF'
+import pathlib
+import sys
+
+path = pathlib.Path(".github/workflows/ci.yml")
+text = path.read_text()
+old, new = sys.argv[1:]
+if old not in text:
+    raise SystemExit(f"missing mutation subject: {old}")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+
+mut_ci_workspace_job_missing() {
+    replace_ci_text '  workspace-tests:' '  workspace-testz:'
+}
+expect_fail check_ci_test_split.sh \
+    'the workspace-tests job being renamed away' mut_ci_workspace_job_missing
+
+mut_ci_workspace_command_weakened() {
+    replace_ci_text 'timeout 480s cargo test --workspace' 'timeout 480s cargo test -p xtask'
+}
+expect_fail check_ci_test_split.sh \
+    'the workspace test job running only one package' mut_ci_workspace_command_weakened
+
+mut_ci_workspace_failure_swallowed() {
+    replace_ci_text '          timeout 480s cargo test --workspace' \
+        '          timeout 480s cargo test --workspace || true'
+}
+expect_fail check_ci_test_split.sh \
+    'the workspace test job swallowing a failure or timeout' mut_ci_workspace_failure_swallowed
+
+mut_ci_workspace_budget_widened() {
+    replace_ci_text '  workspace-tests:
+    name: Workspace tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 9' '  workspace-tests:
+    name: Workspace tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10'
+}
+expect_fail check_ci_test_split.sh \
+    'the workspace test job consuming the aggregation minute' mut_ci_workspace_budget_widened
+
+mut_ci_workspace_serialized() {
+    replace_ci_text '  workspace-tests:
+    name: Workspace tests' '  workspace-tests:
+    needs: guard-self-test
+    name: Workspace tests'
+}
+expect_fail check_ci_test_split.sh \
+    'the workspace test job waiting for guard mutations' mut_ci_workspace_serialized
+
+mut_ci_workspace_setup_action_replaced() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path(".github/workflows/ci.yml")
+text = path.read_text()
+start = text.index("  workspace-tests:")
+old = "      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2"
+position = text.index(old, start)
+new = "      - uses: example/environment-injector@0000000000000000000000000000000000000000"
+path.write_text(text[:position] + text[position:].replace(old, new, 1))
+PYEOF
+}
+expect_fail check_ci_test_split.sh \
+    'a workspace setup action being replaced by an environment injector' mut_ci_workspace_setup_action_replaced
+
+mut_ci_guard_job_missing() {
+    replace_ci_text '  guard-self-test:' '  guard-self-tesx:'
+}
+expect_fail check_ci_test_split.sh \
+    'the guard-self-test job being renamed away' mut_ci_guard_job_missing
+
+mut_ci_guard_command_dropped() {
+    replace_ci_text 'timeout 480s bash scripts/test_guard_scripts.sh' 'timeout 480s true'
+}
+expect_fail check_ci_test_split.sh \
+    'the guard mutation suite being replaced with a no-op' mut_ci_guard_command_dropped
+
+mut_ci_guard_failure_swallowed() {
+    replace_ci_text '          timeout 480s bash scripts/test_guard_scripts.sh' \
+        '          timeout 480s bash scripts/test_guard_scripts.sh || true'
+}
+expect_fail check_ci_test_split.sh \
+    'the guard mutation job swallowing a failure or timeout' mut_ci_guard_failure_swallowed
+
+mut_ci_guard_budget_widened() {
+    replace_ci_text '  guard-self-test:
+    name: Guard self-test
+    runs-on: ubuntu-latest
+    timeout-minutes: 9' '  guard-self-test:
+    name: Guard self-test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10'
+}
+expect_fail check_ci_test_split.sh \
+    'the guard mutation job consuming the aggregation minute' mut_ci_guard_budget_widened
+
+mut_ci_guard_serialized() {
+    replace_ci_text '  guard-self-test:
+    name: Guard self-test' '  guard-self-test:
+    needs: workspace-tests
+    name: Guard self-test'
+}
+expect_fail check_ci_test_split.sh \
+    'the guard mutation job waiting for workspace tests' mut_ci_guard_serialized
+
+mut_ci_required_name_changed() {
+    replace_ci_text '    name: Test' '    name: Tests'
+}
+expect_fail check_ci_test_split.sh \
+    'the branch-protected Test check being renamed' mut_ci_required_name_changed
+
+mut_ci_aggregate_drops_guard() {
+    replace_ci_text 'needs: [workspace-tests, guard-self-test]' 'needs: [workspace-tests]'
+}
+expect_fail check_ci_test_split.sh \
+    'the required Test check no longer waiting for guard mutations' mut_ci_aggregate_drops_guard
+
+mut_ci_aggregate_skips_on_failure() {
+    replace_ci_text 'if: always()' 'if: success()'
+}
+expect_fail check_ci_test_split.sh \
+    'the required Test check being skipped after a dependency failure' mut_ci_aggregate_skips_on_failure
+
+mut_ci_aggregate_hides_always_in_comment() {
+    replace_ci_text '    if: always()' '    if: success() # if: always()'
+}
+expect_fail check_ci_test_split.sh \
+    'the aggregate check hiding a skipped condition behind a comment' mut_ci_aggregate_hides_always_in_comment
+
+mut_ci_aggregate_step_skips_failure() {
+    replace_ci_text '      - name: Require both test jobs' \
+        '      - name: Require both test jobs
+        if: ${{ needs.workspace-tests.result == '\''success'\'' && needs.guard-self-test.result == '\''success'\'' }}'
+}
+expect_fail check_ci_test_split.sh \
+    'the aggregate comparison step being skipped after a worker failure' mut_ci_aggregate_step_skips_failure
+
+mut_ci_aggregate_budget_widened() {
+    replace_ci_text '  test:
+    name: Test
+    needs: [workspace-tests, guard-self-test]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 1' '  test:
+    name: Test
+    needs: [workspace-tests, guard-self-test]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 2'
+}
+expect_fail check_ci_test_split.sh \
+    'the aggregate check widening the total job budget past ten minutes' mut_ci_aggregate_budget_widened
+
+mut_ci_workspace_result_ignored() {
+    replace_ci_text 'WORKSPACE_RESULT: ${{ needs.workspace-tests.result }}' 'WORKSPACE_RESULT: success'
+}
+expect_fail check_ci_test_split.sh \
+    'the aggregate check ignoring the workspace test result' mut_ci_workspace_result_ignored
+
+mut_ci_guard_result_ignored() {
+    replace_ci_text 'GUARD_RESULT: ${{ needs.guard-self-test.result }}' 'GUARD_RESULT: success'
+}
+expect_fail check_ci_test_split.sh \
+    'the aggregate check ignoring the guard mutation result' mut_ci_guard_result_ignored
+
+mut_ci_workspace_comparison_dropped() {
+    replace_ci_text '          test "$WORKSPACE_RESULT" = success' '          true'
+}
+expect_fail check_ci_test_split.sh \
+    'the aggregate check not executing the workspace result comparison' mut_ci_workspace_comparison_dropped
+
+mut_ci_guard_comparison_dropped() {
+    replace_ci_text '          test "$GUARD_RESULT" = success' '          true'
+}
+expect_fail check_ci_test_split.sh \
+    'the aggregate check not executing the guard result comparison' mut_ci_guard_comparison_dropped
+
+mut_ci_workers_share_concurrency_lane() {
+    replace_ci_text '  workspace-tests:
+    name: Workspace tests' '  workspace-tests:
+    concurrency: split-test-lane
+    name: Workspace tests'
+    replace_ci_text '  guard-self-test:
+    name: Guard self-test' '  guard-self-test:
+    concurrency: split-test-lane
+    name: Guard self-test'
+}
+expect_fail check_ci_test_split.sh \
+    'the parallel workers sharing a serial concurrency lane' mut_ci_workers_share_concurrency_lane
+
+mut_ci_guard_quoted_dependency() {
+    replace_ci_text '  guard-self-test:
+    name: Guard self-test' '  guard-self-test:
+    "needs": workspace-tests
+    name: Guard self-test'
+}
+expect_fail check_ci_test_split.sh \
+    'a quoted worker dependency serializing the split jobs' mut_ci_guard_quoted_dependency
+
+mut_ci_worker_continues_on_error() {
+    replace_ci_text '      - name: Workspace tests (maximum 8 minutes after setup)' \
+        '      - name: Workspace tests (maximum 8 minutes after setup)
+        continue-on-error: true'
+}
+expect_fail check_ci_test_split.sh \
+    'the workspace test step being allowed to fail' mut_ci_worker_continues_on_error
+
+mut_ci_worker_shell_disables_errexit() {
+    replace_ci_text '      - name: Guard mutations (maximum 8 minutes after setup)' \
+        '      - name: Guard mutations (maximum 8 minutes after setup)
+        shell: bash {0}'
+}
+expect_fail check_ci_test_split.sh \
+    'the guard mutation step overriding the fail-fast shell' mut_ci_worker_shell_disables_errexit
+
+mut_ci_workflow_shell_disables_errexit() {
+    replace_ci_text 'permissions:
+  contents: read' 'defaults:
+  run:
+    shell: bash {0}
+
+permissions:
+  contents: read'
+}
+expect_fail check_ci_test_split.sh \
+    'workflow defaults overriding the fail-fast shell' mut_ci_workflow_shell_disables_errexit
+
+mut_ci_workflow_bash_env() {
+    replace_ci_text 'env:
+  CARGO_TERM_COLOR: always' 'env:
+  BASH_ENV: scripts/disable-errexit.sh
+  CARGO_TERM_COLOR: always'
+}
+expect_fail check_ci_test_split.sh \
+    'the workflow environment overriding bash startup' mut_ci_workflow_bash_env
+
+mut_ci_workflow_overrides_test() {
+    replace_ci_text 'env:
+  CARGO_TERM_COLOR: always' 'env:
+  "BASH_FUNC_test%%": '\''() { return 0; }'\''
+  CARGO_TERM_COLOR: always'
+}
+expect_fail check_ci_test_split.sh \
+    'the workflow environment overriding the aggregate test command' mut_ci_workflow_overrides_test
+
+mut_ci_workflow_overrides_timeout() {
+    replace_ci_text 'env:
+  CARGO_TERM_COLOR: always' 'env:
+  "BASH_FUNC_timeout%%": '\''() { shift; "$@" || true; }'\''
+  CARGO_TERM_COLOR: always'
+}
+expect_fail check_ci_test_split.sh \
+    'the workflow environment overriding worker timeouts' mut_ci_workflow_overrides_timeout
+
+mut_ci_serial_verify_returns() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path(".github/workflows/ci.yml")
+path.write_text(path.read_text() + """
+  serialized-regression:
+    name: Serialized regression
+    runs-on: ubuntu-latest
+    steps:
+      - run: cargo xtask verify --all
+""")
+PYEOF
+}
+expect_fail check_ci_test_split.sh \
+    'workspace tests and guard mutations being serialized again' mut_ci_serial_verify_returns
+
+mut_ci_workflow_deleted() {
+    rm -f .github/workflows/ci.yml
+}
+expect_fail check_ci_test_split.sh \
+    "the guard's own workflow input deleted, which must fail rather than skip" mut_ci_workflow_deleted
 
 printf '\n%s case(s), %s failure(s)\n' "$cases" "$failures"
 [[ "$failures" -eq 0 ]]

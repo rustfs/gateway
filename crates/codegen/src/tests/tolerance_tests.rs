@@ -19,6 +19,7 @@
 //! a second `Some`.
 //! NOT responsible for: what the tolerance does to a request, which is `rustfs-gateway-core`'s
 //! `tests/tolerant_conditions.rs`.
+//! Upstream: the module's declared inputs. Downstream: its callers and regression tests.
 //!
 //! 3 positive / 6 negative. The negatives are the ones that matter: a tolerance that fails to
 //! resolve leaves the member strict, which looks exactly like a decoder doing its job and is a

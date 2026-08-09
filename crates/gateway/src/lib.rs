@@ -73,6 +73,8 @@
 //! may rewrite the head or the response. [`OpLayer`] wraps one operation with its input and output
 //! types intact. [`Observer`] only watches, and always will. `docs/middleware.md` is the decision
 //! tree and the table of which of RustFS's nine tower patch layers lands where.
+#![doc = include_str!("../README.md")]
+#![deny(missing_docs)]
 #![forbid(unsafe_code)]
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing, clippy::panic)]
 
@@ -100,20 +102,30 @@ pub mod sig;
 pub use crate::adapt::ServiceFuture;
 pub use crate::assembly::{AssemblyError, RuleRef};
 pub use crate::builder::{DEFAULT_MAX_BUFFERED_BODY_BYTES, ServiceBuilder};
-pub use crate::clock::{Clock, FixedClock, system_clock};
+pub use crate::clock::{
+    Clock, ClockPosture, ClockSkewAck, FixedClock, MAX_CLOCK_SKEW_SECONDS, ManualMonotonic, MonotonicClock, MonotonicNow,
+    SystemMonotonic, system_clock,
+};
 pub use crate::close::ConnectionIntent;
 pub use crate::ext::{
-    Addressing, Authentication, Authenticator, Authorizer, AuthzRequest, BaseDomain, CORS_PREFLIGHT, CachedCorsSource, ChunkSink,
-    ChunkVerification, CorsCacheConfig, CorsSource, CorsSourceError, CredentialProvider, Credentials, CredentialsError, Decision,
-    Denial, DomainError, FROZEN_WIRE_HEADERS, FrozenHeader, Governor, GovernorRequest, HostQuery, HostResolver, Lease,
-    MAX_BASE_DOMAIN_BYTES, Next, NoCors, NoObserver, NoPolicy, Observer, OpLayer, PathStyleOnly, PolicyError, PolicySnapshot,
-    PolicySource, RequestContext, RequestEvent, ResolvedHost, ResponseView, RoutedView, SigV4Authenticator, SnapshotId,
-    StageFilter, StaticCredentials, TargetOrigin, Unavailable, Unlimited, VhostHint, VirtualHostStyle, WireHead, op_layer,
-    policy_from, response_filter, routed_filter, wire_filter,
+    Addressing, AuthSchemeRef, Authentication, Authenticator, Authorizer, AuthzAuditEvent, AuthzAuditSink, AuthzRequest,
+    AuthzStage, BaseDomain, CORS_PREFLIGHT, CachedCorsSource, ChunkSink, ChunkVerification, ClassKind, ClientAddr,
+    CorsCacheConfig, CorsSource, CorsSourceError, Credential, CredentialGuardConfig, CredentialLookup, CredentialProvider,
+    CredentialRefusal, Credentials, CredentialsError, DEFAULT_POLICY_SNAPSHOT_TIMEOUT, Decision, DefaultGovernor, Denial,
+    DenyAllAuthorizer, DomainError, FROZEN_WIRE_HEADERS, FrozenHeader, Governor, GovernorRates, GovernorRequest,
+    GuardedCredentialProvider, HostQuery, HostResolver, InputAuthzRequest, InputDecisions, LayeredGovernor, Lease,
+    MAX_BASE_DOMAIN_BYTES, MAX_POLICY_SNAPSHOT_TIMEOUT, Next, NoAuthzAudit, NoCors, NoObserver, NoPolicy, Observer, OpLayer,
+    PathStyleOnly, PolicyError, PolicySnapshot, PolicySource, PolicyTimeout, PolicyTimeoutError, ProviderError, ProviderMetrics,
+    Rate, RequestContext, RequestEvent, ResolvedHost, ResponseView, RoutedView, ServerExtensions, SessionBinding,
+    SessionBindingError, SigV4Authenticator, SnapshotId, StageFilter, StaticCredentials, TargetOrigin, Unavailable, Unlimited,
+    VhostHint, VirtualHostStyle, WireHead, allow_when, decide_with, fn_credential_provider, op_layer, policy_from,
+    response_filter, routed_filter, wire_filter,
 };
+#[cfg(feature = "dangerous-allow-all-authorizer")]
+pub use crate::ext::{AllowAllAuthorizer, DangerAck};
 pub use crate::probe::{BodyProgress, ObservedBody};
 pub use crate::render::{S3Error, connection_intent_of, declaration, document, document_body, render};
-pub use crate::service::S3Service;
+pub use crate::service::{S3Service, SecurityPosture};
 pub use crate::trace::{
     FixedTrace, HOST_ID_HEADER, HostId, MintedTraces, REQUEST_ID_HEADER, RequestId, RequestTrace, TraceSource,
 };
@@ -135,11 +147,11 @@ pub use rustfs_gateway_types::dto;
 // one, and cannot match on what `into_parts` gives back. An exported constructor whose argument
 // type is unnameable is the same defect as an unexported contract, one step further along.
 pub use rustfs_gateway_core::{
-    Answer, ArnForm, AuthRequirement, BoxFuture, CodecError, CommitOutcome, CommitWork, ELEMENT_ORDER, EncodedResponse,
-    ErrorDetail, ErrorHeader, Handler, HandlerError, HandlerResult, HostClass, MetaView, MissingHandlers, Operation,
-    OperationCodec, OperationSet, OperationSpec, PRECONDITION_FAILED_MESSAGE, ParamKind, PreAuthError, Predicate,
-    RANGE_NOT_SATISFIABLE_MESSAGE, Req, RequestBody, RequiredParam, ResourceIdentity, ResourceShape, Resp, ResponseBody,
-    ResponseOverride, RouteEntry, RouteSelector, TargetKind,
+    Answer, ArnForm, AuthRequirement, Authorized, BoxFuture, CodecError, CommitOutcome, CommitWork, DerivedResourceError,
+    ELEMENT_ORDER, EncodedResponse, ErrorDetail, ErrorHeader, Handler, HandlerError, HandlerResult, HostClass, MetaView,
+    MissingHandlers, NoDerived, Operation, OperationCodec, OperationSet, OperationSpec, PRECONDITION_FAILED_MESSAGE, ParamKind,
+    PreAuthError, Predicate, RANGE_NOT_SATISFIABLE_MESSAGE, Req, RequestBody, RequiredParam, ResourceIdentity, ResourceShape,
+    Resp, ResponseBody, ResponseOverride, RouteEntry, RouteSelector, TargetKind,
 };
 // The pagination contract. Found unreachable by check_shared_reachable.sh the moment that
 // guard existed — the fourth contract in a row written for backends and left where no
@@ -285,11 +297,9 @@ pub use rustfs_gateway_core::ops::shared::restore::{
     parse_restore_status, validate_restore,
 };
 
-// The event-stream framing. Exported although nothing in this workspace sends a frame yet: the
-// response shape a select answer needs is a third variant of `Resp<O>` and is not this family's
-// to add, but the framing is the half an implementation gets wrong invisibly — a CRC over the
-// wrong range encodes, decodes against its own author, and is refused by every SDK. Exporting
-// it is what stops the eventual caller from writing a second one.
+// The event-stream framing used with `Resp::event_stream`. A CRC over the wrong range encodes,
+// decodes against its own author, and is refused by every SDK, so the encoder is exported beside
+// the response constructor rather than leaving each backend to write another one.
 pub use rustfs_gateway_core::ops::shared::event_stream::{
     EVENT_STREAM_CONTENT_TYPE, EventKind, EventSequence, EventStreamError, MAX_PAYLOAD_BYTES, encode_event, encode_exception,
     progress_document, stats_document,
@@ -362,7 +372,7 @@ pub use rustfs_gateway_core::{InvalidWireLabel, RedirectTarget, RegionLabel};
 // exists to prevent. This is the value `CreateBucket` declares, and it is what a backend reads.
 pub use rustfs_gateway_core::ops::create_bucket::REGION_MATCH_POLICY;
 pub use rustfs_gateway_http::{EffectiveHost, Limits, WireReject, WireRequest};
-pub use rustfs_gateway_sig::{Identity, OperationFloor, RegionSet, SecurityFloor, SigService, SkewWindow, Verdict};
+pub use rustfs_gateway_sig::{Identity, OperationFloor, RegionSet, RequestNow, SecurityFloor, SigService, SkewWindow, Verdict};
 pub use rustfs_gateway_stream::{Body, ByteStream, Payload, TrailingHeaders};
 // `ETag`, `Timestamp` and the checksum types are here because a backend cannot answer without
 // them: `Object`, `ObjectVersion`, `Part` and `Bucket` all require one, so without these a
@@ -375,8 +385,6 @@ pub use rustfs_gateway_types::{
     NameRejection, NameValidator, ObjectKey, SlashPolicy, Stricter, Timestamp, TimestampFormat, decode_once, floor_check_bucket,
     floor_check_key,
 };
-
-pub use crate::ext::allow_when;
 
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]

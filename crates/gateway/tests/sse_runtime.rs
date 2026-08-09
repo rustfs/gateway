@@ -284,7 +284,10 @@ fn build_with(sse: SseConfig, filter: Option<Arc<dyn StageFilter>>) -> (S3Servic
             rustfs_gateway::RegionSet::new(["us-east-1"]).expect("non-empty"),
         ))
         .authorizer(allow_when(|_| true))
-        .clock(FixedClock::at_unix_seconds(1_767_225_600))
+        .clock_with_skew_ack(
+            FixedClock::at_unix_seconds(1_767_225_600),
+            rustfs_gateway::ClockSkewAck::i_understand_a_skewed_clock_can_disable_signature_expiry(),
+        )
         .sse_config(sse);
     if let Some(filter) = filter {
         builder = builder.stage_filter(filter);

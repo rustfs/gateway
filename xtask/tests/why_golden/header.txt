@@ -1,0 +1,10 @@
+RULE      x-amz-restore — HTTP header bound by GetObject, HeadObject
+EVIDENCE  NONE
+CASES     c-select-restore-0004 — A running retrieval reports x-amz-restore ongoing-request true, byte for byte
+          c-select-restore-0005 — A finished retrieval reports both pairs of x-amz-restore, byte for byte
+          c-select-restore-0019 — An object nobody restored carries no x-amz-restore header at all
+ADR       NONE
+SPEC      spec/operations/GetObject.toml:wire_name
+          spec/operations/HeadObject.toml:wire_name
+RELATED   GetObject
+          HeadObject

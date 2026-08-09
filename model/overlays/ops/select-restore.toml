@@ -16,16 +16,11 @@
 # SelectObjectContent (`POST /b/k?select&select-type=2`) — the two object operations that do not
 # fit the request-then-one-answer model, and the reason they travel together.
 #
-# What lands here is the request half of both, complete, plus the routing that stops either from
-# being answered by a neighbour, plus the frame encoder a select response is made of. What does
-# not land is the select **response**: an event stream is a third shape of `Resp<O>`, alongside
-# the settled answer and the committed one, and adding it changes the response type of this
-# crate, of the facade, and of every assembly above them. The task issue puts that decision with
-# the response-model owner rather than with this family, so it is fenced here in the overlay
-# (`q-select-0009`), in `crates/core/src/ops/select_object_content.rs`, and in
-# `crates/core/src/ops/shared/event_stream.rs`. Nothing in this tree emits a stream, and no
-# conformance case asserts one — a half-wired stream that answered structurally plausible frames
-# would be worse than the honest gap, because it would read as working.
+# Both request halves, the routing that keeps them from a neighbour, and Select's framed response
+# are wired end to end. `Resp<O>` carries an event stream as its third answer shape beside settled
+# and committed output; the facade preserves that shape through erasure and writes it through the
+# same service exit as ordinary responses. The conformance target decodes the frames independently,
+# including both CRCs and the required terminator (`q-select-0009`).
 #
 # The routing reason is not the object-lock family's data loss, and is stated as what it is.
 # `POST /{Bucket}/{Key+}` was a shape the table knew only as the multipart band, so both requests
@@ -94,10 +89,9 @@ quirk_refs = [
 # decoder emitter grew the symmetric case of the response side's `xml_body` to read it
 # (q-select-0008).
 #
-# `Payload` — the output's event stream — is dropped, because there is no response shape that
-# could carry it and a generated encoder for a union of frames would compile and be wrong. The
-# operation therefore encodes a bare 200 with no body, which is what an unimplemented response
-# half looks like when it is admitted rather than faked (q-select-0009).
+# `Payload` — the model's event union — stays dropped from the generated output because a generated
+# document encoder for frame variants would be wrong. A backend instead returns the explicit
+# `Resp::event_stream` shape, whose bytes are already framed by the shared encoder (q-select-0009).
 # =============================================================================================
 [op.SelectObjectContent]
 precedence = 580

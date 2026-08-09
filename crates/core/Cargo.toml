@@ -1,7 +1,7 @@
 [package]
 name = "rustfs-gateway-core"
 description = "Operations, routing table, typed pipeline and extension points"
-version.workspace = true
+version = "0.2.0"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -17,6 +17,10 @@ ring = 1
 # Ring 0 and 1 must not depend on any rustfs-* business crate or on a ring-2 crate.
 # This is what keeps the cross-repository graph acyclic: ring-0 types are consumed by
 # rustfs crates, which ring-2 then depends on. Enforced by check_ring_boundaries.sh.
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
 
 [lints]
 workspace = true

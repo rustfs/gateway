@@ -19,7 +19,7 @@
 //! when a required member is still holding one.
 //! NOT responsible for: validating a value against its wire rules (that is each scalar's own
 //! constructor), or deciding which members are required (that is the IR).
-//! Upstream: [`super::scalar`]. Downstream: the generated dto's `check_required`, and the codecs
+//! Upstream: `super::scalar`. Downstream: the generated dto's `check_required`, and the codecs
 //! that call it at the end of decoding.
 //!
 //! # Why the placeholders exist at all

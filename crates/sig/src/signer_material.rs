@@ -61,7 +61,7 @@ impl SigningCredentials {
     ///
     /// # Errors
     ///
-    /// [`SignerError::Scope`] carrying [`SigParseError::InvalidAccessKeyId`] when the access key id
+    /// [`SignerError::Scope`] carrying [`crate::SigParseError::InvalidAccessKeyId`] when the access key id
     /// is empty, over 128 bytes, or not ASCII-graphic — the same rule
     /// [`crate::CredentialScope::parse`] applies to the value that arrives on the wire, so a
     /// credential this signer accepts is one the verifier can read back.
@@ -131,7 +131,7 @@ impl SigningScope {
     ///
     /// # Errors
     ///
-    /// [`SignerError::Canonical`] carrying [`AuthError::AuthorizationHeaderMalformed`] for a region
+    /// [`SignerError::Canonical`] carrying [`crate::AuthError::AuthorizationHeaderMalformed`] for a region
     /// that is empty, over [`crate::CredentialScope::MAX_REGION_LEN`], or not ASCII-graphic.
     pub fn new(date: ScopeDate, region: &str, service: SigService) -> Result<Self, SignerError> {
         let probe = format!("AKIDPROBE/{date}/{region}/{service}/{SCOPE_TERMINATOR}");

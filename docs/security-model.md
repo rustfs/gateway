@@ -43,8 +43,8 @@ Two properties of the design are worth stating outside the code:
 
 - **The unknown-access-key path does the same work as the known one.** It signs with a placeholder
   secret and runs the full four-step derivation and comparison before answering
-  `InvalidAccessKeyId`. Error codes stay distinct because S3 clients branch on them; latency parity
-  plus rate limiting is the mitigation, not error-code normalisation.
+  `InvalidAccessKeyId`. A wrong signature and every other unusable credential receive the same
+  response, so neither response bytes nor the derivation path confirms that an access key exists.
 - **The failure floor never sleeps.** `FailureFloor` returns the delay to wait for. A blocking
   sleep inside an async server turns a timing defence into a denial-of-service lever.
 
@@ -150,6 +150,132 @@ The multipart rule is the one the framework can only half-enforce: every `Upload
 the same customer-key headers its `CreateMultipartUpload` carried. The comparison lives in
 `rustfs_gateway_core::sse::check_part`, which returns a `Result` you cannot silently discard, but
 the binding itself is yours to store, because this framework holds no upload state.
+
+## Authorization: your responsibilities
+
+The framework does not evaluate policy. It calls `Authorizer`, and everything behind that call is
+yours. What the framework does own is the *shape* of the call, and that shape is where the known
+failures of this area have been designed out.
+
+The framework's half:
+
+- **The verdict has three states, and two of them refuse.** `Decision::Allow` continues;
+  `Decision::Deny` and `Decision::Indeterminate` both become `403 AccessDenied`. There is no
+  `Result` for an authorizer to `?` a storage error through, so a policy store that cannot answer
+  cannot become a `500` — and a `5xx` is the status a front end retries and, in some deployments,
+  passes through. `Decision::settle` is the only place in the workspace that reads a verdict, it
+  is exhaustive over all three states with no wildcard arm, and
+  `scripts/check_authz_fail_closed.sh` keeps it the only one.
+- **The refusal cannot choose its code.** `Denial` is a unit struct: no fields, no constructor
+  taking an `ErrorCode`. A bucket you may not read and a bucket that does not exist are the same
+  response, because a deployment that answered `404` for the first and `403` for the second would
+  have built a private-bucket enumeration oracle out of the difference.
+- **Policy is read once per request.** `PolicySource::snapshot` is called after the caller's
+  identity is known and before the authorizer, and the resulting `PolicySnapshot` is handed to
+  every reader through the server-derived authorization context. Client request extensions are a
+  different type and are not exposed to an authorizer. Two readings inside one request are a
+  window whose timing the caller chooses. `scripts/check_policy_snapshot_once.sh` asserts the
+  single call site.
+- **A failed reading is a refusal, not an error.** `PolicySource` returning `Err` produces
+  `Indeterminate`, and the authorizer is not consulted at all — an implementation handed an empty
+  snapshot cannot tell "the store is down" from "this deployment installed no source". The one
+  read has a hard timeout: 250 ms by default, configurable to a non-zero value no greater than five
+  seconds. A timeout follows the same `Indeterminate` path.
+- **The audit event is the framework's, and the sink cannot answer back.** `AuthzAuditSink` takes
+  shared references and returns `()`, and it is called after the outcome has been settled. The
+  event carries the principal, authentication scheme, operation, action, every resource judged,
+  **where the target's name came from** (`Host` or path), the snapshot identifier, stage, elapsed
+  time, and which of the three states was reached — including the distinction the wire collapses.
+  A sink panic is caught, reported as an error, and cannot change the response.
+- **There is no default `Authorizer`.** `ServiceBuilder::build` returns
+  `AssemblyError::MissingAuthorizer`. `DenyAllAuthorizer` is shipped and must be chosen; there is
+  no allow-all type in a normal build, and no example contains an unconditional allow. The
+  `dangerous-allow-all-authorizer` feature exposes one only behind a deliberately verbose
+  `DangerAck`; a service assembled with it prints a named start-up warning.
+
+Four things are **yours**:
+
+1. **The policy language and its semantics.** Wildcard expansion, condition keys, `Deny`
+   precedence, resource ARNs, the whole of it. `PolicySnapshot` is opaque to the framework.
+2. **Answering `Indeterminate` when you mean it.** The framework cannot tell a considered `Deny`
+   from a swallowed error; only your code knows which one it reached. Every `Ok(false)` that is
+   really "the record did not load" is a rustfs `GHSA-j548-9grx-fh4f` waiting to happen.
+3. **Not panicking.** A panic in an authorizer is isolated and answered as `500`, never as allow.
+   That keeps the authorization boundary fail closed, but retries can still amplify a panicking
+   policy implementation.
+4. **The timing of your own evaluation.** The framework does not equalise it. A policy engine
+   whose evaluation time depends on how many statements matched leaks something about the policy
+   to a caller who can measure it; see "Timing side channels" above for what the framework does
+   equalise and what it does not.
+
+### Accepted risks
+
+- **Policy-evaluation timing is not equalised above the failure floor.** Every denied or
+  indeterminate authorization pays the same minimum-latency floor, but the framework does not hide
+  differences beyond that floor. An engine whose evaluation time varies with statement count can
+  therefore still leak coarse policy shape.
+
+## Credentials: your responsibilities
+
+`CredentialProvider` is the only extension point on the **unauthenticated** path: anybody who can
+reach the port can make the gateway call it, and what it returns is a long-term secret. The
+framework's half:
+
+- **It cannot make verification not happen.** The trait returns
+  `Result<CredentialLookup, ProviderError>`, never a `Verdict`.
+  An empty secret is not a bypass — the derivation runs against it and the comparison fails. A
+  lookup that succeeds is not authentication; only `Signature::ct_verify` produces the
+  `SignatureMatch` that `Verdict::Authenticated` requires.
+- **A store that cannot answer fails closed.** A backend error, timeout or isolated panic is
+  counted, is never cached, and receives the same 403 response as another credential failure. It
+  is never treated as an anonymous request.
+- **An unknown key costs what a known one costs.** The unknown-key path derives from
+  `timing::placeholder_secret`, runs the full four-step chain and completes the comparison before
+  answering, so the two are not separable by latency (`timing::SIDE_CHANNELS`, row T1).
+- **A credential that exists but cannot be used answers as one that does not exist.** Disabled,
+  expired, presented without the session token it is bound to, or presented with a token when it is
+  long-term: all four are `InvalidAccessKeyId`, byte for byte the answer an unknown access key
+  gets. The session verdict is computed when the credential arrives and consumed *after* the
+  signature comparison, so none of the four can answer early either.
+- **A session token and a lifetime are one value.** `Credentials::with_session` takes both;
+  "temporary credentials with no expiry" — the shape of GHSA-ccrv-v8v9-ch9q — is not
+  representable. The lifetime is judged against the request's single clock snapshot.
+- **The token is covered and bound.** `x-amz-security-token` is an `x-amz-*` header,
+  so the signed-header rules require it to be in `SignedHeaders`; the query spelling is part of the
+  canonical query. The framework also compares its exact wire value against the token issued with
+  that access key in constant time, so a correctly signed token from another issuance is refused.
+- **The unauthenticated lookup is guarded by default.** The default is a one-second hard timeout,
+  a 30-second negative TTL plus deterministic 0–30-second jitter, and at most 4096 negative
+  entries. Provider errors are not cached. Positive caching is absent, so deletion and rotation
+  are visible on the next lookup and secret material is not retained by the framework.
+- **The governor sees the work before it happens.** Any signature or session-token surface is
+  classified as `ClassKind::CredentialLookup` before the provider runs, including malformed
+  and forged credentials. The mandatory framework governor therefore applies its per-IP and
+  credential-class budgets to the whole lookup path without parsing credentials itself; a
+  deployment governor may add tighter limits but cannot remove those budgets.
+- **A weakened lookup posture is visible.** `S3Service::security_posture` names whether the
+  negative cache is enabled and whether the mandatory per-IP bucket is bounded or closed. A
+  start-up report can print that value without downcasting the authenticator or governor.
+- **Nothing that is a credential can be printed.** `SecretBytes`, `SessionToken` and `SigningKey`
+  have no `Debug`, no `Display`, no `PartialEq`, no `Clone` and no serializer, and that absence
+  propagates into anything holding one. `scripts/check_secret_hygiene.sh` and
+  `scripts/check_ct_eq.sh` keep it that way.
+
+Four things are **yours**:
+
+1. **The store behind the provider.** The framework bounds calls, but the IAM or database
+   implementation, its connection pool and its circuit breaker remain yours. The framework's
+   per-IP quota is mandatory; a deployment `Governor` may add a store-specific quota after it.
+2. **Never a blanket answer for an unrecognised key.** Return `CredentialLookup::NotFound`. A
+   provider that hands the same secret to every access key it does not recognise has replaced
+   authentication with a constant, and no framework rule can see that from outside.
+3. **Everything the session token means.** Who issued it, whether the issuer's signature is
+   genuine, what role and policy it names: the framework holds `SessionBinding`'s `issuer` and
+   `inline_policy` as opaque handles and parses neither. It enforces the expiry and the binding to
+   the access key, and nothing else about the token.
+4. **The identity store itself** — users, key rotation and revocation. The framework has no
+   positive cache; if your provider adds one, you own that window and the additional secret
+   residency.
 
 ## Where the boundary sits
 

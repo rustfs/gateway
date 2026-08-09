@@ -90,6 +90,8 @@
 //! Everything on the pre-authentication path is non-`async`, holds no store handle, allocates
 //! nothing per request, and can say nothing about the request beyond a compile-time constant.
 //! `tests/purity_guard.rs` asserts each of those over the source.
+#![doc = include_str!("../README.md")]
+#![deny(missing_docs)]
 #![forbid(unsafe_code)]
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing, clippy::panic)]
 

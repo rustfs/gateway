@@ -61,7 +61,7 @@
 //!
 //! `CopyObject` and `UploadPartCopy` name a second object. Their live handler path reads the
 //! framework's `CopySourceResources` and resolves it with the `AuthorizedRead` proof carried by
-//! the same `Req`; it never parses the header again. [`parse_copy_source`] remains only for focused
+//! the same `Req`; it never parses the header again. `parse_copy_source` remains only for focused
 //! fixture unit tests that exercise legacy edge cases directly. The copy range likewise delegates
 //! to the shared [`resolve_copy_range`] contract.
 //!
@@ -74,7 +74,7 @@
 //!
 //! An upload id is the only handle in S3 that names *state a later request will write into*, and
 //! that is what makes it the family's whole security surface. Five operations accept one, and all
-//! five go through [`require_upload`], which resolves the id **against the bucket and the key of
+//! five go through `require_upload`, which resolves the id **against the bucket and the key of
 //! the request that named it** rather than on its own. s3s#51 is the cost of the other spelling:
 //! knowing an id was enough to push a part into a stranger's upload, and the owner completed it
 //! without ever learning that somebody else had contributed bytes. `c-mpu-0029` and `c-mpu-0030`
@@ -86,7 +86,7 @@
 //! order it makes them, and each because the alternative is an object nobody can detect is wrong:
 //! a part list that is not strictly ascending is `InvalidPartOrder`; a part number that was never
 //! uploaded, or one whose claimed digest is not the digest of the bytes on file, is `InvalidPart`;
-//! and a non-final part under [`MIN_PART_BYTES`] is `EntityTooSmall`, because the object is the
+//! and a non-final part under `MIN_PART_BYTES` is `EntityTooSmall`, because the object is the
 //! concatenation and a short part in the middle leaves a hole no later read can see. The tag the
 //! completion answers is not the digest of those bytes either — it is
 //! `ETag::from_part_digests`, the digest of the concatenated part digests with `-N` after it, and
@@ -111,15 +111,15 @@ use std::sync::{Arc, Mutex};
 use rustfs_gateway::dto;
 use rustfs_gateway::{
     AclHeaders, AclInput, AclRejection, AclTarget, BucketName, ByteStream, ChecksumAlgorithm, ChecksumSpec, ConditionalOutcome,
-    CopyRange, CopySourceRejection, CursorSpec, ETag, ErrorCode, ErrorDetail, GranteeType, Handler, HandlerError, HandlerResult,
-    IfRange, ObjectKey, ObjectValidators, PRECONDITION_FAILED_MESSAGE, PreconditionRejection, Preconditions, REGION_MATCH_POLICY,
-    RangeDecision, RangeSelectors, RegionLabel, RegionSet, Req, RequestKind, Resp, RestoreState, RestoreStatus, TagScope,
-    TaggingRejection, Timestamp, collect, evaluate, evaluate_range, format_restore_status, parse_conditional_etag,
-    parse_tagging_header, permanent_redirect_for, resolve_copy_range, resolve_grantee_type, resolve_input as resolve_acl_input,
-    resolve_location_constraint, validate_accelerate, validate_cors, validate_encryption, validate_legal_hold,
-    validate_lifecycle, validate_lock_configuration, validate_logging, validate_notification, validate_policy,
-    validate_public_access_block, validate_replication, validate_request_payment, validate_restore, validate_retention,
-    validate_select, validate_tag_set, validate_versioning, validate_website,
+    CopyRange, CopySourceRejection, CursorSpec, ETag, ErrorCode, ErrorDetail, EventSequence, GranteeType, Handler, HandlerError,
+    HandlerResult, IfRange, ObjectKey, ObjectValidators, PRECONDITION_FAILED_MESSAGE, PreconditionRejection, Preconditions,
+    REGION_MATCH_POLICY, RangeDecision, RangeSelectors, RegionLabel, RegionSet, Req, RequestKind, Resp, RestoreState,
+    RestoreStatus, TagScope, TaggingRejection, Timestamp, collect, evaluate, evaluate_range, format_restore_status,
+    parse_conditional_etag, parse_tagging_header, permanent_redirect_for, resolve_copy_range, resolve_grantee_type,
+    resolve_input as resolve_acl_input, resolve_location_constraint, stats_document, validate_accelerate, validate_cors,
+    validate_encryption, validate_legal_hold, validate_lifecycle, validate_lock_configuration, validate_logging,
+    validate_notification, validate_policy, validate_public_access_block, validate_replication, validate_request_payment,
+    validate_restore, validate_retention, validate_select, validate_tag_set, validate_versioning, validate_website,
 };
 
 /// The canonical user id every listing reports as the owner.
@@ -188,7 +188,7 @@ pub struct StoredObject {
     /// A `Vec` rather than a map, and ordered rather than sorted, because the tag set is what the
     /// writer sent: `x-amz-tagging: a=1&b=2` and a `<Tagging>` document both carry an order, and a
     /// stub that re-sorted them would be answering from a decision of its own. Duplicate keys never
-    /// reach here — [`read_tagging_header`] and [`tag_pairs`] refuse them — so the sequence is a
+    /// reach here — `read_tagging_header` and `tag_pairs` refuse them — so the sequence is a
     /// map in everything but lookup cost, and ten pairs is the ceiling AWS documents.
     pub tags: Vec<(String, String)>,
     /// The retention document a retention write stored, exactly as validated — never invented,
@@ -945,7 +945,7 @@ impl Fixture {
 
     /// The upload an id names, whichever bucket and key it belongs to.
     ///
-    /// Every handler goes through [`require_upload`] instead, which is the same lookup plus the
+    /// Every handler goes through `require_upload` instead, which is the same lookup plus the
     /// ownership check; this accessor exists for that function and for `setup`.
     #[must_use]
     pub fn upload(&self, upload_id: &str) -> Option<&StoredUpload> {
@@ -1805,14 +1805,6 @@ fn storage_class_header(object: &StoredObject) -> Option<dto::StorageClass> {
     }
     Some(dto::StorageClass::custom(object.storage_class.clone()))
 }
-
-/// What a select is told, once its request has been read and found well formed.
-///
-/// A constant, and deliberately explicit about which half is missing: "not implemented" on its
-/// own would read as "this operation is unavailable", when the request half of it works and only
-/// the framed answer does not exist yet.
-pub const SELECT_RESPONSE_NOT_IMPLEMENTED: &str =
-    "The select request was accepted and validated, but this backend cannot yet write an event-stream response";
 
 /// Refuses `?versionId` on a restore rather than retrieving the current version instead.
 ///
@@ -4527,19 +4519,12 @@ impl Stub {
         ))
     }
 
-    /// A select query, decoded and validated in full, and then refused.
+    /// A select query, decoded and validated in full, then answered as a framed event stream.
     ///
-    /// The refusal is the honest answer and the case corpus asserts it as one. A select's
-    /// response is a sequence of self-framed messages, which is a shape this crate's `Resp` does
-    /// not have; the framing itself is implemented and exported, and the plumbing that would put
-    /// it on a socket is not. So a well-formed query reaches this point and is told `501` — never
-    /// a bare `200`, which is what an unimplemented response half looks like when it is faked and
-    /// is indistinguishable to a client from a query that matched no rows.
-    ///
-    /// Everything before the refusal is real, and that is the part under test: the body was
-    /// parsed out of a document rooted at `SelectObjectContentRequest`, every member reached the
-    /// input, and [`validate_select`] refused the ones AWS documents as impossible — which is why
-    /// a malformed query answers its own `400` here rather than this `501`.
+    /// This fixture does not evaluate SQL: after validating the opaque expression and the input
+    /// and output descriptions, it emits the stored bytes as one `Records` event, the accounting,
+    /// and `End`. The response path under test is real — the handler returns [`Resp::event_stream`]
+    /// and the same assembled service used by ordinary operations writes it.
     fn select_object_content(&self, input: &dto::SelectObjectContentInput) -> HandlerResult<dto::SelectObjectContent> {
         let fixture = self.borrow()?;
         require_bucket(&fixture, &input.bucket)?;
@@ -4551,10 +4536,24 @@ impl Stub {
             input.scan_range.as_ref(),
         )
         .map_err(|rejection| HandlerError::new(rejection.code(), rejection.reason()))?;
-        if fixture.object(input.bucket.as_str(), input.key.as_str()).is_none() {
-            return Err(no_such_key(input.key.as_str()));
-        }
-        Err(HandlerError::new(ErrorCode::NOT_IMPLEMENTED, SELECT_RESPONSE_NOT_IMPLEMENTED))
+        let body = fixture
+            .object(input.bucket.as_str(), input.key.as_str())
+            .ok_or_else(|| no_such_key(input.key.as_str()))?
+            .body
+            .clone();
+        let count = body.len() as u64;
+        let mut frames = Vec::new();
+        let mut sequence = EventSequence::new();
+        sequence
+            .records(&body, &mut frames)
+            .map_err(|error| HandlerError::internal_error(error.message()))?;
+        sequence
+            .stats(&stats_document(count, count, count), &mut frames)
+            .map_err(|error| HandlerError::internal_error(error.message()))?;
+        sequence
+            .end(&mut frames)
+            .map_err(|error| HandlerError::internal_error(error.message()))?;
+        Ok(Resp::event_stream(ByteStream::from_bytes(bytes::Bytes::from(frames))))
     }
 
     /// Opens a multipart upload, and records the attributes only this request can state.

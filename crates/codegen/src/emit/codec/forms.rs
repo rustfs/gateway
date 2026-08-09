@@ -121,7 +121,7 @@ const FORMS: &[(&str, Form)] = &[
 ///
 /// # Errors
 ///
-/// A string naming the operation and member when a `wire_form` quirk has no row in [`FORMS`], when
+/// A string naming the operation and member when a `wire_form` quirk has no row in `FORMS`, when
 /// one is attached to a member whose type the form has no grammar for, or when two of them claim
 /// different forms for one member. All three are overlay mistakes that would otherwise disable a
 /// refusal silently, which is the failure a hand-written file can least afford.

@@ -266,15 +266,14 @@ pub const DECLARED: &[(&str, Disposition, &str)] = &[
     (
         "expect.events[].headers",
         Disposition::Unhonoured,
-        "per-frame headers of an event stream. The event matcher counts frames by `type`; no \
-         transport here produces framed events at all, so a case using them fails on the counts \
-         first",
+        "per-frame headers of an observed event stream. Both transports decode and record them, \
+         but the event matcher currently counts frames by `type` and never compares these values",
     ),
     (
         "expect.events[].payload",
         Disposition::Unhonoured,
-        "per-frame payload of an event stream, judged as a body expectation. Not compared, for the \
-         same reason as the headers above",
+        "per-frame payload of an observed event stream, judged as a body expectation. Both \
+         transports record it, but the event matcher does not compare it",
     ),
     // -- Unreachable behind a refusal -------------------------------------------------------------
     (
@@ -338,22 +337,6 @@ pub const DECLARED: &[(&str, Disposition, &str)] = &[
         "the pause before a scripted frame is written; `request.h2_frames` is refused whole for want of an HTTP/2 framing layer",
     ),
     // -- Read, but out of reach of this corpus ---------------------------------------------------
-    (
-        "expect.events[].type",
-        Disposition::Unexercised("expect.events"),
-        "`crate::expect::check_events` reads it once per declared event, and no case in this corpus \
-         declares an event stream, so this run cannot show the read happening",
-    ),
-    (
-        "expect.events[].min_count",
-        Disposition::Unexercised("expect.events"),
-        "the floor on how many frames of a type arrived; read once per declared event, and no case in this corpus declares an event stream",
-    ),
-    (
-        "expect.events[].max_count",
-        Disposition::Unexercised("expect.events"),
-        "the ceiling on how many frames of a type arrived; read once per declared event, and no case in this corpus declares an event stream",
-    ),
     (
         "signSpec.payload_hash_literal",
         Disposition::BehindRefusal("signSpec.payload_hash"),

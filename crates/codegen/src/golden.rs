@@ -18,7 +18,7 @@
 //! against `spec/ir/samples/*.json` is a reviewable list rather than "the files differ".
 //! NOT responsible for: deciding who is right. A difference is a question for a human: either the
 //! sample was written from an older model, or lowering is wrong.
-//! Upstream: [`crate::run`]. Downstream: the `xtask codegen` report.
+//! Upstream: [`crate::generate()`]. Downstream: the `xtask codegen` report.
 //!
 //! Objects are compared as unordered maps and arrays as ordered sequences, except that an array
 //! whose elements carry a `name` member is matched by name — field order inside `input.fields` is

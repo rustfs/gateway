@@ -183,7 +183,9 @@ fn the_credential_lookup_is_bounded_and_negatively_cached() {
         "without a negative cache every forged key is a round trip"
     );
     assert!(!budget.negative_ttl_jitter().is_zero(), "unjittered expiry is a thundering herd");
-    assert!(budget.jittered_negative_ttl(0.5) <= budget.negative_ttl());
+    let spread = budget.jittered_negative_ttl(0.5);
+    assert!(spread >= budget.negative_ttl());
+    assert!(spread <= budget.negative_ttl().saturating_add(budget.negative_ttl_jitter()));
 }
 
 // ---------------------------------------------------------------------------
@@ -442,7 +444,7 @@ fn an_unavailable_provider_is_not_an_authentication_failure() {
     let verdict = authenticate(signed_request(), CredentialLookup::Unavailable, &presented);
     assert_ne!(verdict.rejection(), Some(AuthError::SignatureDoesNotMatch));
     assert_ne!(verdict.rejection(), Some(AuthError::InvalidAccessKeyId));
-    assert!(!CredentialLookup::Unavailable.requires_parity_work());
+    assert!(CredentialLookup::Unavailable.requires_parity_work());
 }
 
 /// Negative — an access key id that could corrupt an audit record is rejected at construction.

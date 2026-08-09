@@ -16,7 +16,7 @@
 //!
 //! Responsible for: turning IR into bytes, deterministically. Every emitter is a pure function of
 //! the IR: no clock, no host name, no generator version, no hash-map iteration order.
-//! NOT responsible for: writing files (that is [`crate::run`]) or deciding content.
+//! NOT responsible for: writing files (that is [`crate::write()`]) or deciding content.
 //! Upstream: [`rustfs_gateway_model::ir`]. Downstream: the checked-in artefacts.
 
 pub mod codec;

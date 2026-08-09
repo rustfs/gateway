@@ -19,6 +19,7 @@
 //! directions in which the decoded length can disagree with what arrives.
 //! NOT responsible for: the signature chain (`ingest_verify`) or the framing decision
 //! (`ingest_framing`).
+//! Upstream: the module's declared inputs. Downstream: its callers and regression tests.
 //!
 //! 5 positive / 27 negative.
 

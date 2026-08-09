@@ -76,7 +76,7 @@ pub fn is_text_payload(field: &Field) -> bool {
 /// # Errors
 ///
 /// A string naming the operation and member when a `media_type` quirk has no row in
-/// [`MEDIA_TYPES`], when one is attached to a member that is not a string payload, or when two of
+/// `MEDIA_TYPES`, when one is attached to a member that is not a string payload, or when two of
 /// them claim different types for one member. All three are overlay mistakes that would otherwise
 /// put the wrong `Content-Type` on a body, which no test that reads only the body would catch.
 pub fn of(field: &Field, quirks: &[Quirk], operation: &str) -> Result<Option<&'static str>, String> {

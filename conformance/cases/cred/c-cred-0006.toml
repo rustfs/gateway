@@ -1,0 +1,48 @@
+# c-cred-0006 — repeated misses exercise the default negative cache.
+
+[case]
+id = "c-cred-0006"
+schema_version = 1
+title = "One missing access key does not amplify into one hundred backend lookups"
+rationale = """
+One invented key is sent one hundred times through the same guarded provider. The target records real backend calls and fails cleanup unless the count remains far below one hundred."""
+polarity = "positive"
+operation = "GetObject"
+tags = ["signature", "sigv4", "security", "timing"]
+timeout_ms = 10000
+quirks = []
+
+[[case.evidence]]
+url = "urn:rustfs:backlog:1736"
+summary = "Credential lookup sits on an unauthenticated path, so repeated missing keys require bounded negative caching."
+kind = "other"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+request_time = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-cred"
+
+[[setup.objects]]
+bucket = "conf-cred"
+key = "probe"
+body = { utf8 = "credential-probe" }
+
+[[exchanges]]
+name = "one-hundred-misses"
+repeat = 100
+
+[exchanges.request]
+method = "GET"
+target = "/conf-cred/probe"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "unknown_access_key" }
+
+[exchanges.expect]
+kind = "response"
+status = 403
+connection_after = "open"
+
+[exchanges.expect.error]
+code = "InvalidAccessKeyId"
+request_id_present = true

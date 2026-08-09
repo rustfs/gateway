@@ -24,6 +24,10 @@ ring = 0
 # This is what keeps the cross-repository graph acyclic: ring-0 types are consumed by
 # rustfs crates, which ring-2 then depends on. Enforced by check_ring_boundaries.sh.
 
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
 [lints]
 workspace = true
 

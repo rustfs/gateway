@@ -44,6 +44,8 @@
 //! there. The price is that every scalar reachable from a required member has a `Default`, whose
 //! value is deliberately **invalid on the wire** — see [`placeholder`] for what that means, why it
 //! is safe, and the guard that keeps one off the decode path.
+#![doc = include_str!("../README.md")]
+#![deny(missing_docs)]
 #![forbid(unsafe_code)]
 
 pub mod placeholder;

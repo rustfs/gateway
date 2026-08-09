@@ -25,7 +25,6 @@ name: CI
 # DEFERRED JOBS — do NOT add these here "while you are in the file".
 # Each line records where the job belongs and why it is not here yet.
 #
-#   doc (RUSTDOCFLAGS=-D warnings)  -> once real rustdoc exists; zero value today
 #   msrv (pinned toolchain build)   -> Week-1; skeleton has no deps to break MSRV
 #   advisories (cargo-deny)         -> Week-1, together with deny.toml
 #   protected-files                 -> task P0-09 (appends a job to THIS file)
@@ -37,9 +36,9 @@ name: CI
 #   fuzz                            -> alongside the rustfs-gateway-sig / rustfs-gateway-http parsers
 #   client matrix / s3-tests / mint -> P8 at the earliest, and on cron, never on PRs
 #
-# The three jobs below mirror, verbatim, the first three commands of the
-# four-command gate in AGENTS.md. (The fourth, `cargo xtask verify`, is a
-# per-crate fast loop for local use and is covered by the three below.)
+# The jobs below cover the four-command gate in AGENTS.md. Formatting and
+# clippy remain separate parallel jobs; workspace tests and guard mutations also
+# use separate nine-minute runners, then report through a one-minute branch-protected Test check.
 # If they ever disagree, fix this file to match AGENTS.md — AGENTS.md is the
 # source of truth.
 #
@@ -62,6 +61,16 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
+  # Central registry for tools introduced by later release, coverage, audit and
+  # fuzz jobs. Keeping all six pins here makes an upgrade one reviewable diff.
+  # The first four install through taiki-e/install-action; cargo-public-api uses
+  # `cargo install --locked`, and cargo-fuzz uses dtolnay/install.
+  CARGO_SEMVER_CHECKS_TOOL: cargo-semver-checks@0.50.0
+  CARGO_HACK_TOOL: cargo-hack@0.6.45
+  CARGO_LLVM_COV_TOOL: cargo-llvm-cov@0.8.7
+  CARGO_DENY_TOOL: cargo-deny@0.20.2
+  CARGO_PUBLIC_API_TOOL: cargo-public-api@0.52.0
+  CARGO_FUZZ_TOOL: cargo-fuzz@0.13.2
 
 jobs:
   # Everything deterministic and sub-second lives here rather than in jobs of its own:
@@ -79,7 +88,7 @@ jobs:
       # Architecture guards. A guard that does not run in CI is decoration.
       #
       # A guard that declares REQUIRES-BUILD compiles the workspace, so it runs in
-      # the test job instead — this job has no cargo cache and exists to be fast.
+      # the guard-self-test job instead — this job has no cargo cache and exists to be fast.
       # The split is read from the guards themselves rather than listed here, so a
       # guard that starts needing a build cannot silently make this job slow, and
       # the two loops cannot drift apart.
@@ -88,7 +97,7 @@ jobs:
           ran=0
           for guard in scripts/check_*.sh; do
             if grep -q '^# REQUIRES-BUILD$' "$guard"; then
-              echo "deferred to the test job: $guard"
+              echo "deferred to the guard-self-test job: $guard"
               continue
             fi
             echo "::group::$guard"
@@ -112,27 +121,90 @@ jobs:
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - run: cargo clippy --workspace --all-targets -- -D warnings
 
-  test:
-    name: Test
+  docs:
+    name: Documentation
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-      - run: cargo test --workspace
-      # The guards that need a compiled workspace, and the self-test that runs every
-      # guard as its positive control. Both are here rather than in `static` because
-      # they build; the cache this job already warms is the whole reason.
-      - name: Repository guards that need a build
+      - name: Build documentation without warnings
+        run: RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
+      - name: Run README and API examples
+        run: cargo test --doc --workspace
+
+  bootstrap:
+    name: Cold bootstrap
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+      # No cargo cache: the five-minute measurement includes compiling xtask itself.
+      - name: Bootstrap from a cold checkout (maximum 5 minutes)
         run: |
-          ran=0
-          for guard in scripts/check_*.sh; do
-            grep -q '^# REQUIRES-BUILD$' "$guard" || continue
-            echo "::group::$guard"
-            bash "$guard"
-            echo "::endgroup::"
-            ran=$((ran + 1))
-          done
-          echo "ran $ran guard(s)"
-      - name: Guard self-test
-        run: bash scripts/test_guard_scripts.sh
+          started="$(date +%s)"
+          timeout 300s cargo xtask bootstrap
+          elapsed="$(( $(date +%s) - started ))"
+          echo "cold bootstrap completed in ${elapsed}s"
+
+  feedback-loop:
+    name: Operation feedback loop
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - run: cargo build -p xtask
+      - name: Three operation samples (maximum 30 seconds each)
+        run: |
+          timeout 30s cargo xtask verify --op GetObject
+          timeout 30s cargo xtask verify --op PutObject
+          timeout 30s cargo xtask verify --op ListObjectsV2
+
+  workspace-tests:
+    name: Workspace tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 9
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Workspace tests (maximum 8 minutes after setup)
+        run: |
+          started="$(date +%s)"
+          timeout 480s cargo test --workspace
+          elapsed="$(( $(date +%s) - started ))"
+          echo "workspace tests completed in ${elapsed}s"
+
+  guard-self-test:
+    name: Guard self-test
+    runs-on: ubuntu-latest
+    timeout-minutes: 9
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Guard mutations (maximum 8 minutes after setup)
+        run: |
+          started="$(date +%s)"
+          timeout 480s bash scripts/test_guard_scripts.sh
+          elapsed="$(( $(date +%s) - started ))"
+          echo "guard mutations completed in ${elapsed}s"
+
+  # Branch protection requires this exact check name. It aggregates both parallel jobs and must
+  # run even after a dependency fails, otherwise a skipped required check could hide the failure.
+  test:
+    name: Test
+    needs: [workspace-tests, guard-self-test]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      - name: Require both test jobs
+        env:
+          WORKSPACE_RESULT: ${{ needs.workspace-tests.result }}
+          GUARD_RESULT: ${{ needs.guard-self-test.result }}
+        run: |
+          test "$WORKSPACE_RESULT" = success
+          test "$GUARD_RESULT" = success

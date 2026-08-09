@@ -81,6 +81,8 @@
 //!    [`timing::placeholder_secret`] for unknown keys — and rate limiting, which belongs to the
 //!    `Governor` extension point (P6-08). The full reasoning is the `T1` row of
 //!    [`timing::SIDE_CHANNELS`].
+#![doc = include_str!("../README.md")]
+#![deny(missing_docs)]
 #![forbid(unsafe_code)]
 
 mod canonical;
@@ -131,6 +133,7 @@ pub use parse::{
     X_AMZ_CREDENTIAL, X_AMZ_DATE, X_AMZ_SIGNED_HEADERS,
 };
 pub use query::{QueryExclusion, RawQuery, X_AMZ_SIGNATURE, percent_decode, percent_encode};
+pub use secret::{SessionTokenMatch, TokenMismatch};
 // The effective host is determined in `rustfs-gateway-http` and nowhere else. These are
 // re-exports, not a second implementation: `rustfs_gateway_sig::RawHost` and
 // `rustfs_gateway_http::RawHost` are the same type, so a value produced by the wire layer is
@@ -151,7 +154,9 @@ pub use signer::{
     SigningRequest, SigningScope, TRAILER_ALGORITHM, Tamper, TamperComponent, X_AMZ_CONTENT_SHA256_HEADER_NAME,
     X_AMZ_DECODED_CONTENT_LENGTH_HEADER_NAME, X_AMZ_TRAILER_HEADER_NAME,
 };
-pub use verdict::{AnonymousAck, AuthError, CredentialPresence, CredentialsWerePresented, Identity, Verdict};
+pub use verdict::{
+    AnonymousAck, AuthError, CredentialPresence, CredentialsWerePresented, Identity, SessionBinding, SessionBindingError, Verdict,
+};
 pub use verifier::{
     AUTHORIZATION_HEADER, AWS_ACCESS_KEY_ID_PARAM, AwsCredentialMarker, CustomAuthRequest, CustomAuthScheme,
     CustomSchemeRegistry, ReplayDecision, ReplayFingerprint, ReplayNonceStore, SIGV2_SIGNATURE_PARAM, SchemeRegistrationError,

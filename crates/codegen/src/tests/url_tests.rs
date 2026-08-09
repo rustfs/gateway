@@ -19,6 +19,7 @@
 //! calls that resolution produces in the generated response half.
 //! NOT responsible for: what percent-encoding does to bytes, which is
 //! `rustfs-gateway-core`'s codec suite, or whether the parameter is echoed, which is a handler.
+//! Upstream: the module's declared inputs. Downstream: its callers and regression tests.
 
 #![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 

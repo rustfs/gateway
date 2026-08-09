@@ -8,8 +8,16 @@ license.workspace = true
 publish = false
 
 [dependencies]
+rustfs-gateway = { workspace = true }
 rustfs-gateway-codegen = { workspace = true }
+rustfs-gateway-conformance = { workspace = true }
+rustfs-gateway-core = { workspace = true }
 rustfs-gateway-model = { workspace = true }
+http = { workspace = true }
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
 
 [lints]
 workspace = true

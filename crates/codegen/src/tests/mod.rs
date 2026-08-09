@@ -18,6 +18,7 @@
 //! gate, the golden comparison, the XML element names a list is written and read through, and
 //! `why`.
 //! NOT responsible for: the parsers, which are tested in `rustfs-gateway-model`.
+//! Upstream: the module's declared inputs. Downstream: its callers and regression tests.
 
 mod bounds_tests;
 mod codegen_tests;

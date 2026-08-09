@@ -18,6 +18,7 @@
 //! `Option`-optional member shape, the placeholder contract that pays for it, the identity of the
 //! two facades, open string enumerations, and the redaction of key material in `Debug`.
 //! NOT responsible for: the shape of the generator's output text — that is `rustfs-gateway-codegen`.
+//! Upstream: the module's declared inputs. Downstream: its callers and regression tests.
 //!
 //! Every test here compiles the property it asserts. A test that only inspects a string could not
 //! tell whether `..Default::default()` still works, and that is the single fact this whole layout

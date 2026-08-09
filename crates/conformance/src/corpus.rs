@@ -124,6 +124,7 @@ impl Case {
                     request: item.read("exchange.request"),
                     expect: item.read("exchange.expect"),
                     delay_ms: item.read("exchange.delay_ms").and_then(Value::as_integer),
+                    repeat: item.read("exchange.repeat").and_then(Value::as_integer).unwrap_or(1),
                 })
                 .collect();
         }
@@ -134,6 +135,7 @@ impl Case {
             request: document.read("request"),
             expect: document.read("expect"),
             delay_ms: None,
+            repeat: 1,
         }]
     }
 }
@@ -153,6 +155,8 @@ pub struct Exchange<'a> {
     pub expect: Option<&'a Value>,
     /// Pause before this exchange.
     pub delay_ms: Option<i64>,
+    /// Number of identical attempts this exchange requests.
+    pub repeat: i64,
 }
 
 impl Exchange<'_> {

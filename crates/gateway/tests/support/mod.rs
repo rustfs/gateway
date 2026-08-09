@@ -30,6 +30,8 @@
 // re-exports it. Both are properties of a shared test fixture rather than of the code under test.
 #![allow(dead_code, unreachable_pub, clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 
+pub mod vhost_stub;
+
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
@@ -794,7 +796,10 @@ pub fn attributes_service(with_layer: bool) -> S3Service {
     use rustfs_gateway::{BoxFuture, Next, op_layer};
 
     let builder = wired()
-        .clock(fixed_clock())
+        .clock_with_skew_ack(
+            fixed_clock(),
+            rustfs_gateway::ClockSkewAck::i_understand_a_skewed_clock_can_disable_signature_expiry(),
+        )
         .register::<GetObjectAttributes, _>(Arc::new(Attributes));
     let builder = if with_layer {
         builder.op_layer::<GetObjectAttributes, _>(op_layer(

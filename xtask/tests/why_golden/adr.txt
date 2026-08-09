@@ -1,0 +1,6 @@
+RULE      ADR-0005 — The generated dto crosses the package boundary by symlink
+EVIDENCE  NONE
+CASES     NONE
+ADR       ADR-0005 — The generated dto crosses the package boundary by symlink
+SPEC      docs/adr/0005-generated-dto-package-boundary.md
+RELATED   NONE

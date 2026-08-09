@@ -1,0 +1,62 @@
+# c-cred-0023 — positive credential results are not cached by default.
+
+[case]
+id = "c-cred-0023"
+schema_version = 1
+title = "Deleting a key takes effect on the next request"
+rationale = """
+The fixture provider returns one valid credential and then deletes it. Two requests share the guarded provider: the first succeeds and the second must be refused, proving no positive cache extends the key lifetime."""
+polarity = "negative"
+operation = "GetObject"
+tags = ["signature", "sigv4", "security"]
+timeout_ms = 10000
+quirks = []
+
+[[case.evidence]]
+url = "urn:rustfs:backlog:1736"
+summary = "Positive credential caching is disabled by default so key deletion is visible on the next lookup."
+kind = "other"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+request_time = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-cred"
+
+[[setup.objects]]
+bucket = "conf-cred"
+key = "probe"
+body = { utf8 = "credential-probe" }
+
+[[exchanges]]
+name = "before-deletion"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-cred/probe"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.body]
+exact_utf8 = "credential-probe"
+
+[[exchanges]]
+name = "after-deletion"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-cred/probe"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 403
+connection_after = "open"
+
+[exchanges.expect.headers_present]
+"content-type" = "application/xml"

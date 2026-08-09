@@ -165,6 +165,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2cd50c473c80f6d7c3670a752354b8e569b1a7cbfdc0419ec88e5edad85e0dc7"
 
 [[package]]
+name = "futures-timer"
+version = "3.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "af43fadb8a98512d547e37b4e92e0ced13e205c061b87b4623eff01d918d6968"
+
+[[package]]
 name = "generic-array"
 version = "0.14.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -478,9 +484,10 @@ checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 
 [[package]]
 name = "rustfs-gateway"
-version = "0.1.0"
+version = "0.4.0"
 dependencies = [
  "bytes",
+ "futures-timer",
  "http",
  "http-body",
  "http-body-util",
@@ -493,6 +500,7 @@ dependencies = [
  "rustfs-gateway-xml",
  "tokio",
  "tower",
+ "trybuild",
 ]
 
 [[package]]
@@ -505,7 +513,7 @@ dependencies = [
 
 [[package]]
 name = "rustfs-gateway-conformance"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "bytes",
  "http",
@@ -515,7 +523,7 @@ dependencies = [
 
 [[package]]
 name = "rustfs-gateway-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "bytes",
  "http",
@@ -976,7 +984,11 @@ checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
 name = "xtask"
 version = "0.1.0"
 dependencies = [
+ "http",
+ "rustfs-gateway",
  "rustfs-gateway-codegen",
+ "rustfs-gateway-conformance",
+ "rustfs-gateway-core",
  "rustfs-gateway-model",
 ]
 

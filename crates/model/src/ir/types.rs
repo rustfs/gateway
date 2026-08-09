@@ -18,7 +18,7 @@
 //! rendering, and value suppression.
 //! NOT responsible for: the document structure (that is [`super`]) or JSON rendering (that is
 //! [`super::emit`]).
-//! Upstream: [`crate::lower`]. Downstream: `rustfs-gateway-codegen`.
+//! Upstream: [`mod@crate::lower`]. Downstream: `rustfs-gateway-codegen`.
 //!
 //! Nothing here has a default rendering. An `ETag` in a header and an `ETag` in an XML body are
 //! two different wire forms, so the context is a parameter of the type rather than a convention

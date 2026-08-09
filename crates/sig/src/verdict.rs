@@ -102,6 +102,78 @@ use crate::signature::{SignatureMatch, VerifyRejection};
 /// Longest access key id accepted. AWS issues 20 characters; STS issues longer ones, and the
 /// documented ceiling for the credential field is 128.
 const MAX_ACCESS_KEY_ID_LEN: usize = 128;
+const MAX_SESSION_HANDLE_LEN: usize = 256;
+
+/// The non-secret identity context issued with temporary credentials.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct SessionBinding {
+    expires_at_unix_seconds: i64,
+    issuer: Box<str>,
+    inline_policy: Option<Box<str>>,
+}
+
+impl SessionBinding {
+    /// Records who issued a temporary credential and when it stops working.
+    ///
+    /// # Errors
+    ///
+    /// [`SessionBindingError`] when the issuer cannot safely enter an audit record.
+    pub fn new(issuer: &str, expires_at_unix_seconds: i64) -> Result<Self, SessionBindingError> {
+        Ok(Self {
+            expires_at_unix_seconds,
+            issuer: Box::from(check_session_handle(issuer)?),
+            inline_policy: None,
+        })
+    }
+
+    /// Attaches an opaque session-policy handle.
+    ///
+    /// # Errors
+    ///
+    /// [`SessionBindingError`] under the same audit-safe rule as [`SessionBinding::new`].
+    pub fn with_inline_policy(mut self, handle: &str) -> Result<Self, SessionBindingError> {
+        self.inline_policy = Some(Box::from(check_session_handle(handle)?));
+        Ok(self)
+    }
+
+    /// The final usable Unix second.
+    #[must_use]
+    pub const fn expires_at_unix_seconds(&self) -> i64 {
+        self.expires_at_unix_seconds
+    }
+
+    /// Opaque issuer identifier.
+    #[must_use]
+    pub fn issuer(&self) -> &str {
+        &self.issuer
+    }
+
+    /// Opaque inline-policy handle.
+    #[must_use]
+    pub fn inline_policy(&self) -> Option<&str> {
+        self.inline_policy.as_deref()
+    }
+}
+
+/// A session binding contains an empty, overlong or non-graphic audit handle.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SessionBindingError;
+
+impl fmt::Display for SessionBindingError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("the session binding names a value an audit record could not carry")
+    }
+}
+
+impl std::error::Error for SessionBindingError {}
+
+fn check_session_handle(value: &str) -> Result<&str, SessionBindingError> {
+    let bytes = value.as_bytes();
+    if bytes.is_empty() || bytes.len() > MAX_SESSION_HANDLE_LEN || !bytes.iter().all(u8::is_ascii_graphic) {
+        return Err(SessionBindingError);
+    }
+    Ok(value)
+}
 
 /// Who a request runs as, once a [`SignatureMatch`] has proved it.
 ///
@@ -117,6 +189,7 @@ const MAX_ACCESS_KEY_ID_LEN: usize = 128;
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Identity {
     access_key_id: Box<str>,
+    session: Option<SessionBinding>,
 }
 
 impl Identity {
@@ -137,6 +210,7 @@ impl Identity {
         }
         Ok(Self {
             access_key_id: Box::from(access_key_id),
+            session: None,
         })
     }
 
@@ -144,6 +218,19 @@ impl Identity {
     #[must_use]
     pub fn access_key_id(&self) -> &str {
         &self.access_key_id
+    }
+
+    /// Attaches the non-secret identity context of a verified temporary credential.
+    #[must_use]
+    pub fn with_session_binding(mut self, binding: SessionBinding) -> Self {
+        self.session = Some(binding);
+        self
+    }
+
+    /// The verified temporary-credential context, when this principal used one.
+    #[must_use]
+    pub const fn session(&self) -> Option<&SessionBinding> {
+        self.session.as_ref()
     }
 }
 
@@ -154,16 +241,13 @@ impl Identity {
 /// an authentication error is a signing oracle, which is how GHSA-r54g, GHSA-8cm2 and GHSA-333v
 /// happened.
 ///
-/// # Why two credential rejections still exist
+/// # Why two credential rejections still exist internally
 ///
 /// [`AuthError::InvalidAccessKeyId`] and [`AuthError::SignatureDoesNotMatch`] are distinct because
-/// AWS S3 returns distinct error codes and clients branch on them; collapsing them would be a
-/// compatibility break, not a hardening. Everything *else* about the two is identical by
-/// construction — same [`AuthError::message`], no detail field, and the failure path is held to a
-/// common floor by [`crate::timing::FailureFloor`] so the two are not separable by latency either.
-/// The residual leak is exactly one bit, delivered only to a client that already guessed a
-/// well-formed request, and the mitigation is rate limiting (deferred to the `Governor` extension
-/// point), not error-code normalisation.
+/// AWS S3 defines distinct internal reasons, and retaining both keeps verification tests precise.
+/// The gateway renderer deliberately collapses both into the same public code, message, status,
+/// headers and body. The failure path is also held to a common floor by
+/// [`crate::timing::FailureFloor`] so the store cannot be probed through response latency.
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum AuthError {

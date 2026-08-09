@@ -1,7 +1,7 @@
 [package]
 name = "rustfs-gateway-conformance"
 description = "Data-driven S3 conformance suite runnable against any implementation"
-version = "0.1.0"   # independent version: this is a product other S3 implementations run against themselves
+version = "0.3.0"   # independent version: this is a product other S3 implementations run against themselves
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -17,6 +17,10 @@ ring = 1
 # Ring 0 and 1 must not depend on any rustfs-* business crate or on a ring-2 crate.
 # This is what keeps the cross-repository graph acyclic: ring-0 types are consumed by
 # rustfs crates, which ring-2 then depends on. Enforced by check_ring_boundaries.sh.
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
 
 [lints]
 workspace = true

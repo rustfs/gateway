@@ -1,0 +1,13 @@
+RULE      GetBucketLocation — GET /{Bucket} selects GetBucketLocation with precedence 300
+EVIDENCE  captures/get-bucket-location-aws.http — Recorded AWS response used as the byte level reference for the unwrapped body.
+          captures/get-bucket-location-us-east-1.http — Recorded AWS response for a us-east-1 bucket showing the self closing element rather than an absent one.
+          https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketLocation.html — States that buckets in us-east-1 have a null location constraint, while the element itself is still part of the response.
+          https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketLocation.html — The documented response syntax shows one top level LocationConstraint element with no enclosing output element.
+          https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketLocation.html — The enumerated constraint values include the historical EU alias alongside the modern region identifiers.
+          https://github.com/s3s-project/s3s/pull/127 — Upstream shipped a double wrapped body until this change, which is why the unwrapping must be data in the IR rather than a codegen special case.
+CASES     NONE
+ADR       ADR-0001 — Licensing and provenance boundary
+SPEC      spec/operations/GetBucketLocation.toml
+RELATED   q-empty-0002
+          q-region-0003
+          q-unwrapped-0001

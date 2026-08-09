@@ -40,6 +40,8 @@
 //! `build` is the only constructor, and it returns `Err` rather than a permissive default.
 
 use std::any::Any;
+#[cfg(feature = "dangerous-allow-all-authorizer")]
+use std::any::TypeId;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -49,13 +51,14 @@ use rustfs_gateway_sig::SecurityFloor;
 use rustfs_gateway_types::{NamePolicy, NameValidator, SlashPolicy};
 
 use crate::assembly::{AssemblyError, RuleRef};
-use crate::clock::{Clock, system_clock};
+use crate::clock::{Clock, ClockPosture, ClockSkewAck, MAX_CLOCK_SKEW_SECONDS, SystemMonotonic, skew_from_system, system_clock};
 use crate::dispatch::{DispatchTable, OperationDispatch};
 use crate::ext::{
-    Authenticator, Authorizer, CachedCorsSource, CorsCacheConfig, CorsSource, Governor, HostResolver, NoCors, NoObserver,
-    NoPolicy, Observer, OpLayer, OpLayerSlot, PathStyleOnly, PolicySource, StageFilter, Unlimited,
+    Authenticator, Authorizer, AuthzAuditSink, CachedCorsSource, CorsCacheConfig, CorsSource, DefaultGovernor, Governor,
+    GovernorRates, HostResolver, LayeredGovernor, NoAuthzAudit, NoCors, NoObserver, NoPolicy, Observer, OpLayer, OpLayerSlot,
+    PathStyleOnly, PolicySource, PolicyTimeout, StageFilter,
 };
-use crate::service::{Inner, S3Service};
+use crate::service::{Inner, S3Service, SecurityPosture};
 use crate::trace::{MintedTraces, TraceSource};
 use rustfs_gateway_core::cors::CorsPolicy;
 
@@ -99,12 +102,17 @@ pub struct ServiceBuilder {
     names: NamePolicy,
     max_buffered_body_bytes: u64,
     authorizer: Option<Arc<dyn Authorizer>>,
+    dangerous_allow_all_authorizer: bool,
     authenticator: Option<Arc<dyn Authenticator>>,
     policy_source: Arc<dyn PolicySource>,
+    policy_timeout: PolicyTimeout,
+    authz_audit: Arc<dyn AuthzAuditSink>,
     host_resolver: Arc<dyn HostResolver>,
-    governor: Arc<dyn Governor>,
+    governor_rates: GovernorRates,
+    governor: Option<Arc<dyn Governor>>,
     observer: Arc<dyn Observer>,
     clock: Arc<dyn Clock>,
+    clock_posture: ClockPosture,
     traces: Arc<dyn TraceSource>,
     cors_source: Arc<dyn CorsSource>,
     cors_cache: CorsCacheConfig,
@@ -148,12 +156,17 @@ impl ServiceBuilder {
             names: NamePolicy::default(),
             max_buffered_body_bytes: DEFAULT_MAX_BUFFERED_BODY_BYTES,
             authorizer: None,
+            dangerous_allow_all_authorizer: false,
             authenticator: None,
             policy_source: Arc::new(NoPolicy),
+            policy_timeout: PolicyTimeout::default(),
+            authz_audit: Arc::new(NoAuthzAudit),
             host_resolver: Arc::new(PathStyleOnly),
-            governor: Arc::new(Unlimited),
+            governor_rates: GovernorRates::default(),
+            governor: None,
             observer: Arc::new(NoObserver),
             clock: Arc::new(system_clock()),
+            clock_posture: ClockPosture::System,
             traces: Arc::new(MintedTraces::new()),
             cors_source: Arc::new(NoCors),
             cors_cache: CorsCacheConfig::default(),
@@ -258,7 +271,11 @@ impl ServiceBuilder {
 
     /// Installs the authorizer. Required: there is no default.
     #[must_use]
-    pub fn authorizer(mut self, authorizer: impl Authorizer) -> Self {
+    pub fn authorizer<A: Authorizer>(mut self, authorizer: A) -> Self {
+        #[cfg(feature = "dangerous-allow-all-authorizer")]
+        {
+            self.dangerous_allow_all_authorizer = TypeId::of::<A>() == TypeId::of::<crate::AllowAllAuthorizer>();
+        }
         self.authorizer = Some(Arc::new(authorizer));
         self
     }
@@ -274,6 +291,20 @@ impl ServiceBuilder {
     #[must_use]
     pub fn policy_source(mut self, source: impl PolicySource) -> Self {
         self.policy_source = Arc::new(source);
+        self
+    }
+
+    /// Sets the validated hard limit for the one policy read per request.
+    #[must_use]
+    pub const fn policy_timeout(mut self, timeout: PolicyTimeout) -> Self {
+        self.policy_timeout = timeout;
+        self
+    }
+
+    /// Installs the read-only authorization audit sink.
+    #[must_use]
+    pub fn authz_audit(mut self, sink: impl AuthzAuditSink) -> Self {
+        self.authz_audit = Arc::new(sink);
         self
     }
 
@@ -321,10 +352,26 @@ impl ServiceBuilder {
         self
     }
 
-    /// Installs a governor. Defaults to [`Unlimited`].
+    /// Tunes the mandatory framework governor.
+    #[must_use]
+    pub const fn framework_governor_rates(mut self, rates: GovernorRates) -> Self {
+        self.governor_rates = rates;
+        self
+    }
+
+    /// Installs a deployment governor after the mandatory framework governor.
+    ///
+    /// The default is [`DefaultGovernor`] at [`GovernorRates::default`](crate::GovernorRates), not
+    /// an unlimited one, and the difference matters: three of this service's paths — a preflight,
+    /// a credential lookup, and any request that reaches the body — do work for a caller who has
+    /// not authenticated, so a limit that has to be configured before it applies is a limit that
+    /// is missing from every deployment nobody has read the documentation for.
+    ///
+    /// Both must admit. Installing [`Unlimited`](crate::Unlimited) therefore means the deployment
+    /// adds no quota of its own; it does not remove the framework's pre-authentication limits.
     #[must_use]
     pub fn governor(mut self, governor: impl Governor) -> Self {
-        self.governor = Arc::new(governor);
+        self.governor = Some(Arc::new(governor));
         self
     }
 
@@ -392,6 +439,15 @@ impl ServiceBuilder {
     #[must_use]
     pub fn clock(mut self, clock: impl Clock) -> Self {
         self.clock = Arc::new(clock);
+        self.clock_posture = ClockPosture::CustomChecked;
+        self
+    }
+
+    /// Installs a deliberately skewed clock with an explicit replay-risk acknowledgement.
+    #[must_use]
+    pub fn clock_with_skew_ack(mut self, clock: impl Clock, _ack: ClockSkewAck) -> Self {
+        self.clock = Arc::new(clock);
+        self.clock_posture = ClockPosture::CustomAcknowledged;
         self
     }
 
@@ -465,6 +521,16 @@ impl ServiceBuilder {
             });
         };
 
+        if self.clock_posture == ClockPosture::CustomChecked {
+            let skew_seconds = skew_from_system(self.clock.as_ref());
+            if skew_seconds > MAX_CLOCK_SKEW_SECONDS {
+                return Err(AssemblyError::ClockSkew {
+                    skew_seconds,
+                    rule: RuleRef::CLOCK_SKEW,
+                });
+            }
+        }
+
         // Before the erasure, so the refusal names the operation the deployment asked for rather
         // than whatever the erasure happens to reach first.
         if let Some((operation, _)) = self
@@ -506,6 +572,17 @@ impl ServiceBuilder {
             }
         }
 
+        if self.dangerous_allow_all_authorizer {
+            eprintln!("WARN: dangerous allow-all authorizer disables authorization for every request");
+        }
+
+        let framework_governor = DefaultGovernor::with_rates(self.governor_rates);
+        let security_posture = SecurityPosture::new(authenticator.credential_guard_config(), self.governor_rates.per_ip);
+        let governor: Arc<dyn Governor> = match self.governor {
+            Some(user) => Arc::new(LayeredGovernor::new(framework_governor, user)),
+            None => Arc::new(framework_governor),
+        };
+
         Ok(S3Service::from_inner(Inner {
             router,
             dispatch,
@@ -517,10 +594,15 @@ impl ServiceBuilder {
             authorizer,
             authenticator,
             policy_source: self.policy_source,
+            policy_timeout: self.policy_timeout,
+            authz_audit: self.authz_audit,
+            authz_clock: Arc::new(SystemMonotonic::new()),
             host_resolver: self.host_resolver,
-            governor: self.governor,
+            governor,
             observer: self.observer,
             clock: self.clock,
+            clock_posture: self.clock_posture,
+            security_posture,
             traces: self.traces,
             cors: Arc::new(CachedCorsSource::new(self.cors_source, self.cors_cache)),
             cors_policy: self.cors_policy,

@@ -84,7 +84,7 @@ use crate::verifier::AUTHORIZATION_HEADER;
 
 /// The `x-amz-content-sha256` header name, lowercased.
 ///
-/// Named here because nothing on the verification side publishes it: [`crate::floor`] holds it in
+/// Named here because nothing on the verification side publishes it: `crate::floor` holds it in
 /// a private duplicate-detection list, and [`PayloadMode::parse`] takes the *value*, not the name.
 pub const X_AMZ_CONTENT_SHA256_HEADER_NAME: &str = "x-amz-content-sha256";
 /// The `x-amz-decoded-content-length` header name, lowercased.

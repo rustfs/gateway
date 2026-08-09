@@ -74,6 +74,20 @@ shape. The rule: after changing a crate you must **know exactly one command to r
 command must go red or green in **≤30 seconds**. `cargo xtask verify --crate <name>` is that
 command. If it exceeds 30 seconds for any crate, that is a bug — open an issue, do not absorb it.
 
+Use this map rather than guessing a broader command:
+
+| What changed | Run |
+| --- | --- |
+| One operation, its codec, or its route | `cargo xtask verify --op <OperationName>` |
+| One crate | `cargo xtask verify --crate <crate-name>` |
+| The pinned model, an overlay, or code generation | `cargo xtask codegen --check` |
+| One conformance case | `cargo xtask conformance validate --filter '<case-id>'` |
+| Cross-crate wiring, scripts, or CI | `cargo xtask verify --all` |
+
+`verify --op` and `verify --crate` have a 30-second budget. `verify --all` is the CI surface and has
+a 10-minute budget. A budget failure is a tooling defect; do not replace the command with a wider,
+slower one.
+
 ### TDD
 
 Write the failing test first, watch it fail, then implement. Implementing first and back-filling
@@ -273,6 +287,7 @@ closes the cycle.
 
   build-time only, never present in a runtime dependency tree:
         rustfs-gateway-codegen ──▶ rustfs-gateway-model   codegen emits generated/**, spec/, OPERATIONS.md
+        xtask ──▶ codegen + gateway/core + conformance   generation plus runtime diagnostics; build-time only
 ```
 
 Three annotations you must not lose:
@@ -298,7 +313,7 @@ Direction violations are hard-blocked by `scripts/check_layer_dependencies.sh` (
 | --- | --- | --- |
 | `generated/**`, and its second name `crates/types/generated/**` | Generated code at s3s scale: `dto/generated.rs` alone is 39,374 lines, all `generated.rs` files total 73,019. Once 70k lines of it are in context, every `grep ETag` returns hundreds of noise hits and you can no longer locate anything. The second path is the ADR-0005 symlink onto `generated/dto` — same files, same rule | `OPERATIONS.md` for operation shapes |
 | `model/s3.json` | 3MB. One read consumes the entire session budget | `spec/operations/*.toml`, which is generated from it |
-| `Cargo.lock` | Large and information-free | `cargo tree -p <crate>` |
+| `Cargo.lock` | Large and information-free | `cargo tree -p <crate> -e normal` |
 
 For field-level bindings read `spec/`; for operation shapes read `OPERATIONS.md`. These rules apply
 before the paths exist — the first PR that generates `generated/**` must not be the PR where an

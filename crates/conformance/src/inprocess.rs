@@ -82,19 +82,25 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use rustfs_gateway::sig::{
-    AmzDate, PayloadMode, SigService, SigV4Signer, SigningCredentials, SigningRequest, SigningScope, Tamper, TamperComponent,
+    AmzDate, LookupBudget, PayloadMode, SessionToken, SigService, SigV4Signer, SigningCredentials, SigningRequest, SigningScope,
+    Tamper, TamperComponent,
 };
 use rustfs_gateway::{
-    Authorizer, AuthzRequest, BoxFuture, BucketName, CorsSource, CorsSourceError, Credentials, Decision, FixedClock,
-    HandlerResult, Limits, Next, ObservedBody, PolicyError, PolicySnapshot, RegionSet, Req, RequestContext, S3Service,
-    ServiceBuilder, SigV4Authenticator, SnapshotId, StaticCredentials, VirtualHostStyle, WireRequest, allow_when, collect, dto,
-    op_layer, policy_from,
+    Authorizer, AuthzRequest, BoxFuture, BucketName, ClassKind, CorsSource, CorsSourceError, CredentialGuardConfig,
+    CredentialLookup, CredentialProvider, Credentials, Decision, FixedClock, Governor, GovernorRequest,
+    GuardedCredentialProvider, HandlerResult, InputAuthzRequest, InputDecisions, Lease, Limits, Next, ObservedBody, PolicyError,
+    PolicySnapshot, ProviderError, RegionSet, Req, RequestContext, S3Service, ServiceBuilder, SessionBinding, SigV4Authenticator,
+    SnapshotId, StaticCredentials, VirtualHostStyle, WireRequest, allow_when, collect, dto, fn_credential_provider, op_layer,
+    policy_from,
 };
 
 use crate::exec::block_on;
 use crate::fixture::{Fixture, StoredObject, Stub};
 use crate::interpolate::Captures;
-use crate::observation::{ConnectionState, Observation, Outcome, StreamTermination, late_error_offset};
+use crate::observation::{
+    ConnectionState, Observation, Outcome, StreamTermination, decode_event_stream, has_event_stream_content_type,
+    late_error_offset,
+};
 use crate::sut::{ExchangePlan, Sut, SutError};
 use crate::time;
 use crate::value::Value;
@@ -108,6 +114,31 @@ pub const VALID_SECRET: &[u8] = b"wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
 pub const UNKNOWN_ACCESS_KEY: &str = "AKIAI44QH8DHBEXAMPLE";
 /// The secret used when a case asks to sign with the wrong one.
 pub const WRONG_SECRET: &[u8] = b"this-is-not-the-secret-the-target-knows--";
+/// The access key id of a temporary STS issuance whose lifetime has already ended.
+///
+/// A distinct identity rather than the valid one under another name, and its secret is
+/// [`VALID_SECRET`], so a request signed for it verifies. The only thing wrong with it is the
+/// expiry — which is what makes the case measure the expiry and nothing else.
+pub const EXPIRED_SESSION_ACCESS_KEY: &str = "ASIAI44QH8DHBEXAMPLE";
+/// The token that issuance was handed out with. Presented on the request, and held by the
+/// provider, so the access-key-to-token binding holds and only the lifetime fails.
+pub const EXPIRED_SESSION_TOKEN: &str = "FQoGZXIvYXdzEExpiredSessionTokenForConformance";
+/// A live temporary credential used by header and presigned-query cases.
+pub const LIVE_SESSION_ACCESS_KEY: &str = "ASIAIOSFODNN7EXAMPLE";
+/// The token issued with [`LIVE_SESSION_ACCESS_KEY`].
+pub const LIVE_SESSION_TOKEN: &str = "FQoGZXIvYXdzELiveSessionTokenForConformance";
+/// A different token, signed with the same key pair, used to prove issuance binding.
+pub const OTHER_SESSION_TOKEN: &str = "FQoGZXIvYXdzEOtherSessionTokenForConformance";
+/// A known credential switched off in the fixture provider.
+pub const DISABLED_ACCESS_KEY: &str = "AKIADISABLED00EXAMPLE";
+/// The issuer recorded on the expired session. Opaque to the framework.
+const SESSION_ISSUER: &str = "sts.conformance.invalid";
+/// How far in the past the expired session's lifetime ended, relative to the case's own clock.
+///
+/// Relative rather than absolute, so a case may fix its clock wherever it likes and the session is
+/// expired for all of them. An absolute instant would make the fixture silently *live* for any
+/// case whose clock predates it.
+const EXPIRED_SESSION_AGE_SECONDS: i64 = 3_600;
 /// The host every request addresses unless a case overrides it with `request.host`.
 ///
 /// Also the first entry of [`BASE_DOMAINS`], which is what lets the `host/` family address a
@@ -126,8 +157,21 @@ pub const REGION: &str = "us-east-1";
 struct FixedDecision(Decision);
 
 impl Authorizer for FixedDecision {
-    fn authorize<'a>(&'a self, _context: &'a RequestContext<'a>, _request: &'a AuthzRequest<'a>) -> BoxFuture<'a, Decision> {
+    fn authorize_route<'a>(
+        &'a self,
+        _context: &'a RequestContext<'a>,
+        _request: &'a AuthzRequest<'a>,
+    ) -> BoxFuture<'a, Decision> {
         Box::pin(async move { self.0 })
+    }
+
+    fn authorize_input<'a>(
+        &'a self,
+        _context: &'a RequestContext<'a>,
+        request: &'a InputAuthzRequest<'a>,
+    ) -> BoxFuture<'a, InputDecisions> {
+        let decisions = request.decide_all(self.0, |_| self.0);
+        Box::pin(async move { decisions })
     }
 }
 
@@ -135,10 +179,10 @@ struct SameSnapshot {
     first: Mutex<Option<(SnapshotId, i64)>>,
 }
 
-impl Authorizer for SameSnapshot {
-    fn authorize<'a>(&'a self, context: &'a RequestContext<'a>, _request: &'a AuthzRequest<'a>) -> BoxFuture<'a, Decision> {
+impl SameSnapshot {
+    fn decide(&self, context: &RequestContext<'_>) -> Decision {
         let observed = (context.policy().id(), context.now().unix_seconds());
-        let decision = match self.first.lock() {
+        match self.first.lock() {
             Ok(mut first) => match *first {
                 None => {
                     *first = Some(observed);
@@ -148,8 +192,24 @@ impl Authorizer for SameSnapshot {
                 Some(_) => Decision::Deny,
             },
             Err(_) => Decision::Indeterminate,
-        };
+        }
+    }
+}
+
+impl Authorizer for SameSnapshot {
+    fn authorize_route<'a>(&'a self, context: &'a RequestContext<'a>, _request: &'a AuthzRequest<'a>) -> BoxFuture<'a, Decision> {
+        let decision = self.decide(context);
         Box::pin(async move { decision })
+    }
+
+    fn authorize_input<'a>(
+        &'a self,
+        context: &'a RequestContext<'a>,
+        request: &'a InputAuthzRequest<'a>,
+    ) -> BoxFuture<'a, InputDecisions> {
+        let stage = self.decide(context);
+        let decisions = request.decide_all(stage, |_| self.decide(context));
+        Box::pin(async move { decisions })
     }
 }
 
@@ -157,10 +217,52 @@ struct HotUpdate {
     current: Arc<AtomicUsize>,
 }
 
-impl Authorizer for HotUpdate {
-    fn authorize<'a>(&'a self, context: &'a RequestContext<'a>, request: &'a AuthzRequest<'a>) -> BoxFuture<'a, Decision> {
-        let version = context.policy().get::<usize>().copied();
-        let decision = match version {
+struct CountedCredentials {
+    inner: Arc<dyn CredentialProvider>,
+    calls: Arc<AtomicUsize>,
+}
+
+impl CredentialProvider for CountedCredentials {
+    fn lookup<'a>(&'a self, access_key_id: &'a str) -> BoxFuture<'a, Result<CredentialLookup, ProviderError>> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        self.inner.lookup(access_key_id)
+    }
+}
+
+struct DeletedAfterFirstLookup {
+    credentials: Mutex<Option<Credentials>>,
+    calls: Arc<AtomicUsize>,
+}
+
+struct CredentialClassProbe {
+    calls: Arc<AtomicUsize>,
+}
+
+impl Governor for CredentialClassProbe {
+    fn try_acquire<'a>(&'a self, request: &'a GovernorRequest<'a>) -> BoxFuture<'a, Result<Lease, ()>> {
+        if request.kind() == ClassKind::CredentialLookup {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+        }
+        Box::pin(async { Ok(Lease::admit()) })
+    }
+}
+
+impl CredentialProvider for DeletedAfterFirstLookup {
+    fn lookup<'a>(&'a self, _access_key_id: &'a str) -> BoxFuture<'a, Result<CredentialLookup, ProviderError>> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        let lookup = self
+            .credentials
+            .lock()
+            .ok()
+            .and_then(|mut credentials| credentials.take())
+            .map_or(CredentialLookup::NotFound, CredentialLookup::Found);
+        Box::pin(async move { Ok(lookup) })
+    }
+}
+
+impl HotUpdate {
+    fn decide(&self, context: &RequestContext<'_>, request: &AuthzRequest<'_>) -> Decision {
+        match context.policy().get::<usize>().copied() {
             Some(1) => {
                 if request.action == "s3:PutObject" {
                     self.current.store(2, Ordering::SeqCst);
@@ -169,8 +271,24 @@ impl Authorizer for HotUpdate {
             }
             Some(2) => Decision::Deny,
             _ => Decision::Indeterminate,
-        };
+        }
+    }
+}
+
+impl Authorizer for HotUpdate {
+    fn authorize_route<'a>(&'a self, context: &'a RequestContext<'a>, request: &'a AuthzRequest<'a>) -> BoxFuture<'a, Decision> {
+        let decision = self.decide(context, request);
         Box::pin(async move { decision })
+    }
+
+    fn authorize_input<'a>(
+        &'a self,
+        context: &'a RequestContext<'a>,
+        request: &'a InputAuthzRequest<'a>,
+    ) -> BoxFuture<'a, InputDecisions> {
+        let stage = self.decide(context, request.route());
+        let decisions = request.decide_all(stage, |resource| self.decide(context, resource));
+        Box::pin(async move { decisions })
     }
 }
 
@@ -182,6 +300,10 @@ pub struct InProcess {
     case_id: String,
     authz_policy_version: Arc<AtomicUsize>,
     authz_backend_calls: Arc<AtomicUsize>,
+    credential_backend_calls: Arc<AtomicUsize>,
+    credential_exchanges: AtomicUsize,
+    credential_governor_calls: Arc<AtomicUsize>,
+    persistent_credentials: Mutex<Option<Arc<dyn CredentialProvider>>>,
 }
 
 impl InProcess {
@@ -196,6 +318,10 @@ impl InProcess {
             case_id: String::new(),
             authz_policy_version: Arc::new(AtomicUsize::new(1)),
             authz_backend_calls: Arc::new(AtomicUsize::new(0)),
+            credential_backend_calls: Arc::new(AtomicUsize::new(0)),
+            credential_exchanges: AtomicUsize::new(0),
+            credential_governor_calls: Arc::new(AtomicUsize::new(0)),
+            persistent_credentials: Mutex::new(None),
         }
     }
 
@@ -207,7 +333,63 @@ impl InProcess {
         let backend = Arc::new(Stub::new(Arc::clone(&self.state)));
         let credentials = Credentials::new(VALID_ACCESS_KEY, VALID_SECRET)
             .map_err(|error| SutError::Environment(format!("the fixture credentials are not valid: {error}")))?;
-        let provider = Arc::new(StaticCredentials::new().with(credentials));
+        // The second identity exists so that `sign.credential = "expired_session"` measures an
+        // expiry rather than being skipped. Its lifetime is pinned to this exchange's own clock,
+        // so it is expired whatever instant the case fixed.
+        let expired_binding = SessionBinding::new(SESSION_ISSUER, at_unix_seconds.saturating_sub(EXPIRED_SESSION_AGE_SECONDS))
+            .map_err(|error| SutError::Environment(format!("the fixture session binding is not valid: {error}")))?;
+        let expired = Credentials::new(EXPIRED_SESSION_ACCESS_KEY, VALID_SECRET)
+            .and_then(|credentials| credentials.with_session(EXPIRED_SESSION_TOKEN, expired_binding))
+            .map_err(|error| SutError::Environment(format!("the fixture session credentials are not valid: {error}")))?;
+        let live_binding = SessionBinding::new(SESSION_ISSUER, at_unix_seconds.saturating_add(EXPIRED_SESSION_AGE_SECONDS))
+            .map_err(|error| SutError::Environment(format!("the live fixture session binding is not valid: {error}")))?;
+        let live = Credentials::new(LIVE_SESSION_ACCESS_KEY, VALID_SECRET)
+            .and_then(|credentials| credentials.with_session(LIVE_SESSION_TOKEN, live_binding))
+            .map_err(|error| SutError::Environment(format!("the live fixture session is not valid: {error}")))?;
+        let disabled = Credentials::new(DISABLED_ACCESS_KEY, VALID_SECRET)
+            .map_err(|error| SutError::Environment(format!("the disabled fixture credential is not valid: {error}")))?
+            .disable();
+        let fixture_provider: Arc<dyn CredentialProvider> = Arc::new(
+            StaticCredentials::new()
+                .with(credentials)
+                .with(expired)
+                .with(live)
+                .with(disabled),
+        );
+        let provider = match self.case_id.as_str() {
+            "c-cred-0005" => {
+                let fixture = Arc::clone(&fixture_provider);
+                Arc::new(fn_credential_provider(move |access_key_id: &str| {
+                    let fixture = Arc::clone(&fixture);
+                    let access_key_id = access_key_id.to_owned();
+                    Box::pin(async move { fixture.lookup(&access_key_id).await })
+                        as BoxFuture<'_, Result<CredentialLookup, ProviderError>>
+                })) as Arc<dyn CredentialProvider>
+            }
+            "c-cred-0011" => Arc::new(fn_credential_provider(|_| {
+                Box::pin(async { Err(ProviderError::Backend) }) as BoxFuture<'_, Result<CredentialLookup, ProviderError>>
+            })) as Arc<dyn CredentialProvider>,
+            "c-cred-0012" => Arc::new(fn_credential_provider(|_| {
+                Box::pin(std::future::pending()) as BoxFuture<'_, Result<CredentialLookup, ProviderError>>
+            })) as Arc<dyn CredentialProvider>,
+            "c-cred-0028" => Arc::new(fn_credential_provider(|_| {
+                Box::pin(async {
+                    panic!("credential provider panic fixture");
+                    #[allow(unreachable_code)]
+                    Ok(CredentialLookup::NotFound)
+                }) as BoxFuture<'_, Result<CredentialLookup, ProviderError>>
+            })) as Arc<dyn CredentialProvider>,
+            "c-cred-0006" | "c-cred-0023" => self
+                .persistent_credentials
+                .lock()
+                .ok()
+                .and_then(|provider| provider.clone())
+                .ok_or_else(|| SutError::Environment("the persistent credential fixture was not prepared".to_owned()))?,
+            _ => Arc::new(CountedCredentials {
+                inner: fixture_provider,
+                calls: Arc::clone(&self.credential_backend_calls),
+            }) as Arc<dyn CredentialProvider>,
+        };
         let regions =
             RegionSet::new([REGION]).map_err(|error| SutError::Environment(format!("`{REGION}` is not a region: {error}")))?;
         let clock = FixedClock::at_unix_seconds(at_unix_seconds).skewed_by_millis(skew_ms);
@@ -286,7 +468,29 @@ impl InProcess {
             .cors_source(FixtureCors {
                 state: Arc::clone(&self.state),
             })
-            .authenticator(SigV4Authenticator::new(provider, regions));
+            .authenticator(if self.case_id == "c-cred-0012" {
+                SigV4Authenticator::with_guard_config(
+                    provider,
+                    regions,
+                    CredentialGuardConfig {
+                        budget: LookupBudget::new(
+                            std::time::Duration::from_millis(5),
+                            std::time::Duration::from_secs(30),
+                            std::time::Duration::from_secs(30),
+                        ),
+                        ..CredentialGuardConfig::default()
+                    },
+                )
+            } else {
+                SigV4Authenticator::new(provider, regions)
+            });
+        let builder = if self.case_id == "c-cred-0024" {
+            builder.governor(CredentialClassProbe {
+                calls: Arc::clone(&self.credential_governor_calls),
+            })
+        } else {
+            builder
+        };
         let builder = match self.case_id.as_str() {
             "c-authz-0005" => builder.authorizer(SameSnapshot { first: Mutex::new(None) }),
             "c-authz-1009" => builder
@@ -334,7 +538,10 @@ impl InProcess {
                 VirtualHostStyle::new(BASE_DOMAINS)
                     .map_err(|error| SutError::Environment(format!("the base domains are not usable: {error}")))?,
             )
-            .clock(clock)
+            .clock_with_skew_ack(
+                clock,
+                rustfs_gateway::ClockSkewAck::i_understand_a_skewed_clock_can_disable_signature_expiry(),
+            )
             .limits(self.limits)
             .build()
             .map_err(|error| SutError::Environment(format!("the service could not be assembled: {error}")))
@@ -849,6 +1056,30 @@ impl Sut for InProcess {
         self.case_id.push_str(case_id);
         self.authz_policy_version.store(1, Ordering::SeqCst);
         self.authz_backend_calls.store(0, Ordering::SeqCst);
+        self.credential_backend_calls.store(0, Ordering::SeqCst);
+        self.credential_exchanges.store(0, Ordering::SeqCst);
+        self.credential_governor_calls.store(0, Ordering::SeqCst);
+        if let Ok(mut provider) = self.persistent_credentials.lock() {
+            *provider = None;
+            match case_id {
+                "c-cred-0006" => {
+                    let counted = Arc::new(CountedCredentials {
+                        inner: Arc::new(StaticCredentials::new()),
+                        calls: Arc::clone(&self.credential_backend_calls),
+                    });
+                    *provider = Some(Arc::new(GuardedCredentialProvider::new(counted)));
+                }
+                "c-cred-0023" => {
+                    let credentials = Credentials::new(VALID_ACCESS_KEY, VALID_SECRET)
+                        .map_err(|error| SutError::Environment(format!("the deletion fixture is not valid: {error}")))?;
+                    *provider = Some(Arc::new(GuardedCredentialProvider::new(Arc::new(DeletedAfterFirstLookup {
+                        credentials: Mutex::new(Some(credentials)),
+                        calls: Arc::clone(&self.credential_backend_calls),
+                    }))));
+                }
+                _ => {}
+            }
+        }
         let mut captures = Captures::new();
         let mut fixture = Fixture::at(
             time::parse_rfc3339(time::DEFAULT_FIXED)
@@ -1005,10 +1236,36 @@ impl Sut for InProcess {
                 "{case_id} reached the copy backend after authorization refused the source"
             )));
         }
+        match case_id {
+            "c-cred-0002" if self.credential_backend_calls.load(Ordering::SeqCst) != 0 => {
+                return Err(SutError::Environment(
+                    "c-cred-0002 called the credential provider for an anonymous request".to_owned(),
+                ));
+            }
+            "c-cred-0006" if self.credential_backend_calls.load(Ordering::SeqCst) >= 100 => {
+                return Err(SutError::Environment(
+                    "c-cred-0006 sent all 100 misses to the credential backend".to_owned(),
+                ));
+            }
+            "c-cred-0006" if self.credential_exchanges.load(Ordering::SeqCst) != 100 => {
+                return Err(SutError::Environment(
+                    "c-cred-0006 did not execute exactly 100 identical misses".to_owned(),
+                ));
+            }
+            "c-cred-0024" if self.credential_governor_calls.load(Ordering::SeqCst) != 1 => {
+                return Err(SutError::Environment(
+                    "c-cred-0024 did not classify the forged key as a credential lookup".to_owned(),
+                ));
+            }
+            _ => {}
+        }
         Ok(())
     }
 
     fn exchange(&mut self, plan: &ExchangePlan<'_>) -> Result<Observation, SutError> {
+        if self.case_id == "c-cred-0006" {
+            self.credential_exchanges.fetch_add(1, Ordering::SeqCst);
+        }
         let (fixed, request_time, skew_ms) = clock_of(plan.clock)?;
         read_connection(plan.connection)?;
         if let Ok(mut fixture) = self.state.lock() {
@@ -1067,17 +1324,41 @@ impl Sut for InProcess {
                 .collect()
         };
 
-        let (body, trailers, outcome, termination, before_error) = match drained {
+        let rendered_head = render(head);
+        let (body, trailers, outcome, termination, before_error, events, notes) = match drained {
             Ok(collected) => {
                 let (_, _, body, trailers) = collected.into_parts();
                 let body = body.to_vec();
-                // The status line and the document can disagree, and when they do the disagreement
-                // *is* the observation. Everything else about the exchange is unchanged: the head
-                // arrived, the body arrived, and the connection is reusable — what differs is that
-                // the request failed and only the body says so.
-                match late_error_offset(status.as_u16(), &body) {
-                    None => (body, trailers, Outcome::Response, None, None),
-                    Some(offset) => (body, trailers, Outcome::StreamError, Some(StreamTermination::ErrorDocument), Some(offset)),
+                if has_event_stream_content_type(&rendered_head) {
+                    match decode_event_stream(&body) {
+                        Ok(events) => (body, trailers, Outcome::EventStream, None, None, events, Vec::new()),
+                        Err(error) => (
+                            body,
+                            trailers,
+                            Outcome::StreamError,
+                            Some(StreamTermination::MalformedEventStream),
+                            None,
+                            Vec::new(),
+                            vec![format!("the event stream could not be decoded: {error}")],
+                        ),
+                    }
+                } else {
+                    // The status line and the document can disagree, and when they do the disagreement
+                    // *is* the observation. Everything else about the exchange is unchanged: the head
+                    // arrived, the body arrived, and the connection is reusable — what differs is that
+                    // the request failed and only the body says so.
+                    match late_error_offset(status.as_u16(), &body) {
+                        None => (body, trailers, Outcome::Response, None, None, Vec::new(), Vec::new()),
+                        Some(offset) => (
+                            body,
+                            trailers,
+                            Outcome::StreamError,
+                            Some(StreamTermination::ErrorDocument),
+                            Some(offset),
+                            Vec::new(),
+                            Vec::new(),
+                        ),
+                    }
                 }
             }
             // A body that could not be read to its end is a stream that stopped, which is a fact
@@ -1085,7 +1366,15 @@ impl Sut for InProcess {
             // would *skip* the case, and a skipped case asserts nothing. The byte count is left
             // unrecorded rather than guessed: `collect` discards what it had read when it failed, so
             // a case pinning `body_bytes_before_error` stays red here and says why.
-            Err(_) => (Vec::new(), Vec::new(), Outcome::StreamError, Some(StreamTermination::AbruptClose), None),
+            Err(_) => (
+                Vec::new(),
+                Vec::new(),
+                Outcome::StreamError,
+                Some(StreamTermination::AbruptClose),
+                None,
+                Vec::new(),
+                Vec::new(),
+            ),
         };
 
         Ok(Observation {
@@ -1093,7 +1382,7 @@ impl Sut for InProcess {
             stream_termination: termination,
             status: Some(status.as_u16()),
             http_version: None,
-            headers: render(head),
+            headers: rendered_head,
             trailers: render(trailers),
             body,
             body_bytes_before_error: before_error,
@@ -1117,8 +1406,8 @@ impl Sut for InProcess {
             // A case that asserts `closed` therefore cannot pass here. `--transport conn` watches
             // the socket and answers for itself.
             connection_after: Some(ConnectionState::Open),
-            events: Vec::new(),
-            notes: Vec::new(),
+            events,
+            notes,
         })
     }
 }
@@ -1150,30 +1439,14 @@ pub(crate) fn sign_request(
     let mode = sign.read("signSpec.mode").and_then(Value::as_str).unwrap_or("sigv4_header");
     match mode {
         "anonymous" | "none" => return Ok((headers.to_vec(), wire.target.clone())),
-        "sigv4_header" | "sigv4_unsigned_payload" => {}
+        "sigv4_header" | "sigv4_unsigned_payload" | "presigned_v4" => {}
         other => {
             return Err(SutError::Environment(format!(
                 "`sign.mode = \"{other}\"` is not wired: the in-process target signs the header \
-                 form and the unsigned-payload form, and a streaming or presigned mode needs the \
+                 form, the unsigned-payload form and presigned URLs; a streaming mode needs the \
                  chunk framing a socket transport owns"
             )));
         }
-    }
-    if sign.read("signSpec.signed_headers").is_some() {
-        return Err(SutError::Environment(
-            "`sign.signed_headers` under-signs deliberately by pinning the SignedHeaders list; the \
-             facade's signer derives that list from the headers it is given and exposes no way to \
-             override it, so the request would go out fully signed and the case would assert \
-             against a signature nobody meant to send"
-                .to_owned(),
-        ));
-    }
-    if sign.read("signSpec.expires_s").is_some() {
-        return Err(SutError::Environment(
-            "`sign.expires_s` is the lifetime of a presigned URL, and presigned modes are refused \
-             above"
-                .to_owned(),
-        ));
     }
 
     // The host has to reach the canonical request in the byte-exact form the acceptance layer
@@ -1200,24 +1473,31 @@ pub(crate) fn sign_request(
     }
 
     let credential = sign.read("signSpec.credential").and_then(Value::as_str).unwrap_or("valid");
-    let (access_key, secret) = match credential {
-        "unknown_access_key" => (UNKNOWN_ACCESS_KEY, VALID_SECRET),
-        "wrong_secret" => (VALID_ACCESS_KEY, WRONG_SECRET),
-        // An expired session token is a distinct identity, not the valid one under another name.
-        // Signing it with the fixture's own credentials answered `200` and the case then asserted
-        // against a request that was never expired.
-        "expired_session" => {
-            return Err(SutError::Environment(
-                "`sign.credential = \"expired_session\"` needs a session token the provider has \
-                 seen and expired; `StaticCredentials` holds one long-lived identity and no \
-                 session state, so this target cannot present an expired one"
-                    .to_owned(),
-            ));
-        }
-        _ => (VALID_ACCESS_KEY, VALID_SECRET),
+    // An expired session token is a distinct identity, not the valid one under another name.
+    // Signing it with the fixture's own credentials answered `200` and the case then asserted
+    // against a request that was never expired.
+    let (access_key, secret, token) = match credential {
+        "unknown_access_key" => (UNKNOWN_ACCESS_KEY, VALID_SECRET, None),
+        "wrong_secret" => (VALID_ACCESS_KEY, WRONG_SECRET, None),
+        "expired_session" => (EXPIRED_SESSION_ACCESS_KEY, VALID_SECRET, Some(EXPIRED_SESSION_TOKEN)),
+        "live_session" => (LIVE_SESSION_ACCESS_KEY, VALID_SECRET, Some(LIVE_SESSION_TOKEN)),
+        "session_without_token" => (LIVE_SESSION_ACCESS_KEY, VALID_SECRET, None),
+        "long_term_with_token" => (VALID_ACCESS_KEY, VALID_SECRET, Some(LIVE_SESSION_TOKEN)),
+        "swapped_session_token" => (LIVE_SESSION_ACCESS_KEY, VALID_SECRET, Some(OTHER_SESSION_TOKEN)),
+        "disabled" => (DISABLED_ACCESS_KEY, VALID_SECRET, None),
+        "empty_secret" => (VALID_ACCESS_KEY, b"" as &[u8], None),
+        _ => (VALID_ACCESS_KEY, VALID_SECRET, None),
     };
-    let credentials = SigningCredentials::new(access_key, secret)
+    let mut credentials = SigningCredentials::new(access_key, secret)
         .map_err(|error| SutError::Environment(format!("the signing credentials are not valid: {error}")))?;
+    if let Some(token) = token {
+        // The signer mints `x-amz-security-token` and it is an `x-amz-*` header, so it joins
+        // `SignedHeaders` on its own. A token the signature did not cover would be refused for a
+        // reason that has nothing to do with the expiry the case is measuring.
+        let token = SessionToken::new(token)
+            .map_err(|error| SutError::Environment(format!("the fixture session token is not valid: {error}")))?;
+        credentials = credentials.with_session_token(token);
+    }
     let stamp = AmzDate::parse(&request_time.amz_stamp)
         .map_err(|error| SutError::Environment(format!("`{}` is not a SigV4 stamp: {error}", request_time.amz_stamp)))?;
     let region = sign.read("signSpec.region").and_then(Value::as_str).unwrap_or(REGION);
@@ -1237,7 +1517,7 @@ pub(crate) fn sign_request(
     // than falling through to the computed digest: a case that asked for a streaming or a literal
     // hash and was silently given the correct one asserts nothing about the hash it named.
     let payload = match (mode, sign.read("signSpec.payload_hash").and_then(Value::as_str)) {
-        ("sigv4_unsigned_payload", _) | (_, Some("unsigned")) => PayloadMode::Unsigned,
+        ("sigv4_unsigned_payload" | "presigned_v4", _) | (_, Some("unsigned")) => PayloadMode::Unsigned,
         (_, Some("empty")) => PayloadMode::Empty,
         (_, Some(other @ ("streaming" | "streaming_trailer" | "base64" | "literal"))) => {
             return Err(SutError::Environment(format!(
@@ -1253,6 +1533,23 @@ pub(crate) fn sign_request(
     let method = http::Method::from_bytes(wire.method.as_bytes())
         .map_err(|_| SutError::Environment(format!("`{}` is not a method", wire.method)))?;
     let mut signing = SigningRequest::new(&method, path, query, &map, accepted.host().raw_for_signing(), payload, stamp);
+    let signed_header_names = sign
+        .read("signSpec.signed_headers")
+        .and_then(Value::as_array)
+        .map(|names| {
+            names
+                .iter()
+                .filter_map(Value::as_str)
+                .map(|name| {
+                    name.parse::<http::HeaderName>()
+                        .map_err(|_| SutError::Environment(format!("`{name}` is not a signed header name")))
+                })
+                .collect::<Result<Vec<_>, _>>()
+        })
+        .transpose()?;
+    if let Some(names) = signed_header_names.as_deref() {
+        signing = signing.with_signed_headers(names);
+    }
     // Always declared, including for the empty body: the signed-header rules cross-check
     // `content-length` against the length the wire layer settled on, and omitting it makes a
     // request that declares `content-length: 0` unsignable. The value is the caller's rather than
@@ -1260,9 +1557,13 @@ pub(crate) fn sign_request(
     // `c-mpu-0027` announces five gigabytes and writes ten bytes — and the signature has to cover
     // the header that is going on the wire, not the payload that follows it.
     signing = signing.with_wire_content_length(wire_content_length);
-    let signed = signer
-        .sign_headers(&signing)
-        .map_err(|error| SutError::Environment(format!("the request could not be signed: {error}")))?;
+    let signed = if mode == "presigned_v4" {
+        let expires = sign.read("signSpec.expires_s").and_then(Value::as_integer).unwrap_or(900);
+        signer.presign(&signing, expires.unsigned_abs())
+    } else {
+        signer.sign_headers(&signing)
+    }
+    .map_err(|error| SutError::Environment(format!("the request could not be signed: {error}")))?;
     let signed = match sign.read("signSpec.tamper") {
         None => signed,
         Some(spec) => signed

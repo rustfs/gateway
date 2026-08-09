@@ -19,6 +19,7 @@
 //! destructuring, no AWS prose, and a field-count baseline that only grows.
 //! NOT responsible for: whether the generated code compiles, which is `rustfs-gateway-types`' problem and
 //! is proved by its own test suite.
+//! Upstream: the module's declared inputs. Downstream: its callers and regression tests.
 //!
 //! Case ids from the P1-06 issue are in the test names, so a red test names the criterion it
 //! broke. Negative cases outnumber positive ones, as AGENTS.md requires.

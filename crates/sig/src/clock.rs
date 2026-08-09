@@ -281,7 +281,7 @@ impl PresignExpiry {
 
 /// H2, the arithmetic half — the range check, the overflow check and the expiry comparison.
 ///
-/// The strict parse of the `X-Amz-Expires` *text* lives in [`crate::floor`], because a spelling
+/// The strict parse of the `X-Amz-Expires` *text* lives in `crate::floor`, because a spelling
 /// rule belongs with the query reader. What lives here is what must not be got wrong once the
 /// number exists: the range, and the addition.
 ///

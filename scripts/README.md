@@ -61,6 +61,18 @@ fixed now so that the same check does not get written twice under two names.
 | `check_no_minio_source.sh` | Clean-room provenance: no AGPL licence text outside `scripts/allowances/clean-room-allowances.txt`, no comment claiming a port from MinIO or Garage, no vendored server tree or Go source, no `minio/minio` submodule or dependency. Rules 2-4 are not exemptable | P6-08 |
 | `check_sse_key_never_leaks.sh` | The SSE-C customer key never leaves: no operation *output* binds a key header, the response invariant still strips both spellings, `KeyText::expose` has one call site, the SSE module has one `subtle::Choice`-to-`bool` conversion, and no formatting or logging macro names a customer key | P6-06 |
 | `check_authz_consumption.sh` | Dispatch accepts only `Authorized<O>`; the authorization proof types have no public constructor; every operation explicitly declares derived resources | P4-05 |
+| `check_authz_fail_closed.sh` | Authorization has exactly three decisions; only core settles them; denial is always AccessDenied; audit sinks cannot answer; examples contain no allow-all shortcut | P6-02 |
+| `check_policy_snapshot_once.sh` | The service reads policy exactly once before either mandatory authorization stage | P6-02 |
+| `check_authz_no_default_impl.sh` | Both `Authorizer` stages exist and neither has a default method body | P6-02 |
+| `check_no_allow_all_in_examples.sh` | Rust examples contain no unconditional allow authorizer | P6-02 |
+| `check_no_scaffold_on_main.sh` | No tracked or untracked `new-op` artefact retains the `SCAFFOLD: implement before merge` marker | P7-06 |
+| `check_verify_map_generated.sh` | The operation-to-test map is codegen-owned and byte-for-byte current, never hand-maintained | P7-06 |
+| `check_tool_versions_pinned.sh` | Six CI Cargo tools have one central exact version pin; no moving `latest` or `cargo-binstall` installer | P7-06 |
+| `check_map_files.sh` | Every workspace package has a bounded three-column MAP, docs.rs metadata and README-backed crate docs; maps never recommend forbidden inputs | P7-05 |
+| `check_module_doc.sh` | Every hand-written Rust file answers responsibility, non-responsibility and upstream/downstream in its opening docs | P7-05 |
+| `check_file_size.sh` | Hand-written Rust files stay within 800 lines or a reasoned, issue-linked allowance | P7-05 |
+| `check_agents_forbidden_list.sh` | The three context-budget prohibitions each retain a reason and safe alternative | P7-05 |
+| `check_agents_layering.sh` | Scoped AGENTS files wait for the five-rule trigger and duplicate checker | P7-05 |
 | `test_guard_scripts.sh` | Not a guard: runs every guard on the tree and asserts each one fails on an injected violation | P0 |
 
 ### Registered, not yet implemented (TODO)

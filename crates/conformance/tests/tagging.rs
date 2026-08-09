@@ -130,7 +130,10 @@ impl Harness {
             .register::<dto::PutObjectTagging, _>(Arc::clone(&backend))
             .authenticator(SigV4Authenticator::new(credentials, RegionSet::new([REGION]).expect("non-empty")))
             .authorizer(allow_when(|request| !request.is_anonymous()))
-            .clock(FixedClock::at_unix_seconds(NOW))
+            .clock_with_skew_ack(
+                FixedClock::at_unix_seconds(NOW),
+                rustfs_gateway::ClockSkewAck::i_understand_a_skewed_clock_can_disable_signature_expiry(),
+            )
             .build()
             .expect("the service assembles");
         Harness { service, state }

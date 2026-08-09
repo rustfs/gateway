@@ -12,6 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! Compile-time or regression support for this module.
+//!
+//! Responsible for: exercising the contract named by this file.
+//! NOT responsible for: implementing the production behavior under test.
+//! Upstream: the test harness and subject module. Downstream: the repository verification gate.
+
 //! Tests for the sharded overlay directory: the merge, and every collision it refuses.
 //!
 //! The merge itself is one positive case. Everything else here is a collision, because a

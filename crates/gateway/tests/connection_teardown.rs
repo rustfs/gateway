@@ -12,6 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! Compile-time or regression support for this module.
+//!
+//! Responsible for: exercising the contract named by this file.
+//! NOT responsible for: implementing the production behavior under test.
+//! Upstream: the test harness and subject module. Downstream: the repository verification gate.
+
 //! What a refusal does to the connection it arrived on, checked where the decision is carried.
 //!
 //! Two flags — `WireReject::must_close_connection` and `ChunkReject::must_close_connection` — were
@@ -146,7 +152,7 @@ fn an_authentication_failure_closes_the_connection() {
 
 /// Negative — an authorisation denial does not, though it shares a status with one of them.
 ///
-/// Two `403`s, two connection verdicts: `c-sig-0001` is `SignatureDoesNotMatch` and asserts
+/// Two `403`s, two connection verdicts: `c-sig-0001` is a uniform credential refusal and asserts
 /// `closed`, while `c-copy-0019`, `c-copy-0020` and `c-copy-0021` are `AccessDenied` and assert
 /// `open`. A rule written on the status would get all four wrong in one direction or the other;
 /// what separates them is whether the caller was ever established.

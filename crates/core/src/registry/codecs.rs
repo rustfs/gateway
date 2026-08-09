@@ -95,6 +95,14 @@ const RESPONSE_MISMATCH: CodecError =
 const COMMITTED_UNSUPPORTED: &str =
     "a committed response has no output to encode yet; drive it through the facade's dispatch table";
 
+/// The answer this output-only erasure gives when handed a framed stream.
+///
+/// Like a committed answer, a framed stream has no `O::Output` for the generated encoder. The
+/// facade's dispatch table preserves and writes this third shape; this older output-only adapter
+/// refuses it explicitly instead of turning it into an empty success.
+const EVENT_STREAM_UNSUPPORTED: &str =
+    "an event-stream response has no output document to encode; drive it through the facade's dispatch table";
+
 /// One operation's wire codec, with the operation type erased.
 ///
 /// Produced only by the crate's erasure function and only from a `register_handler::<O, B>` call, so the decoder and
@@ -226,6 +234,7 @@ pub(crate) fn erase<O: OperationCodec>() -> ErasedCodec {
             // may not do (`tests/purity_guard.rs`). The facade's own table is the path that drives
             // one, and it is the path every request actually takes.
             crate::handler::Answer::Committed(_) => Err(CodecError::internal(COMMITTED_UNSUPPORTED)),
+            crate::handler::Answer::EventStream(_) => Err(CodecError::internal(EVENT_STREAM_UNSUPPORTED)),
         }
     });
     ErasedCodec {
