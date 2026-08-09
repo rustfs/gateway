@@ -1,0 +1,37 @@
+[case]
+id = "c-authz-0001"
+schema_version = 1
+title = "UploadPartCopy authorizes its source before committing a part"
+rationale = "A successful part copy proves that route and source authorization both completed before the handler received the request."
+polarity = "positive"
+operation = "UploadPartCopy"
+tags = ["security", "multipart"]
+timeout_ms = 10000
+quirks = ["q-copy-source-authz-0086"]
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UploadPartCopy.html"
+summary = "A part copy requires permission to read the named source and write the destination part."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "authz-destination"
+[[setup.buckets]]
+name = "authz-source"
+[[setup.objects]]
+bucket = "authz-source"
+key = "plain.txt"
+body = { utf8 = "hello" }
+[[setup.multipart_uploads]]
+bucket = "authz-destination"
+key = "copy"
+capture_upload_id_as = "upload"
+
+[request]
+method = "PUT"
+target = "/authz-destination/copy?partNumber=1&uploadId=${capture.upload}"
+headers = { "x-amz-copy-source" = "/authz-source/plain.txt" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200

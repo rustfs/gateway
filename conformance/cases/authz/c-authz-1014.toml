@@ -1,0 +1,42 @@
+[case]
+id = "c-authz-1014"
+schema_version = 1
+title = "A hot policy update cannot split one request across versions"
+rationale = "The first route decision flips the source to version two; its source decision must retain version one, while the next request sees version two and is denied."
+polarity = "negative"
+operation = "CopyObject"
+tags = ["security", "timing"]
+timeout_ms = 10000
+quirks = ["q-copy-source-authz-0086"]
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CopyObject.html"
+summary = "One copy request needs consistent destination and source authorization decisions."
+kind = "aws-doc"
+[[setup.buckets]]
+name = "authz-hot"
+[[setup.objects]]
+bucket = "authz-hot"
+key = "source"
+body = { utf8 = "secret" }
+[[exchanges]]
+name = "request-keeps-old-snapshot"
+[exchanges.request]
+method = "PUT"
+target = "/authz-hot/first"
+headers = { "x-amz-copy-source" = "/authz-hot/source" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+[exchanges.expect]
+kind = "response"
+status = 200
+[[exchanges]]
+name = "next-request-sees-revocation"
+[exchanges.request]
+method = "PUT"
+target = "/authz-hot/second"
+headers = { "x-amz-copy-source" = "/authz-hot/source" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+[exchanges.expect]
+kind = "response"
+status = 403
+[exchanges.expect.error]
+code = "AccessDenied"

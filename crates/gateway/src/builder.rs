@@ -53,7 +53,7 @@ use crate::clock::{Clock, system_clock};
 use crate::dispatch::{DispatchTable, OperationDispatch};
 use crate::ext::{
     Authenticator, Authorizer, CachedCorsSource, CorsCacheConfig, CorsSource, Governor, HostResolver, NoCors, NoObserver,
-    Observer, OpLayer, OpLayerSlot, PathStyleOnly, StageFilter, Unlimited,
+    NoPolicy, Observer, OpLayer, OpLayerSlot, PathStyleOnly, PolicySource, StageFilter, Unlimited,
 };
 use crate::service::{Inner, S3Service};
 use crate::trace::{MintedTraces, TraceSource};
@@ -100,6 +100,7 @@ pub struct ServiceBuilder {
     max_buffered_body_bytes: u64,
     authorizer: Option<Arc<dyn Authorizer>>,
     authenticator: Option<Arc<dyn Authenticator>>,
+    policy_source: Arc<dyn PolicySource>,
     host_resolver: Arc<dyn HostResolver>,
     governor: Arc<dyn Governor>,
     observer: Arc<dyn Observer>,
@@ -148,6 +149,7 @@ impl ServiceBuilder {
             max_buffered_body_bytes: DEFAULT_MAX_BUFFERED_BODY_BYTES,
             authorizer: None,
             authenticator: None,
+            policy_source: Arc::new(NoPolicy),
             host_resolver: Arc::new(PathStyleOnly),
             governor: Arc::new(Unlimited),
             observer: Arc::new(NoObserver),
@@ -268,6 +270,13 @@ impl ServiceBuilder {
         self
     }
 
+    /// Installs the source read exactly once for each request's authorization stages.
+    #[must_use]
+    pub fn policy_source(mut self, source: impl PolicySource) -> Self {
+        self.policy_source = Arc::new(source);
+        self
+    }
+
     /// Installs a naming policy: the slash rule and the validator.
     ///
     /// Defaults to [`NamePolicy::default`] — AWS slash semantics and the AWS bucket naming rules.
@@ -379,7 +388,7 @@ impl ServiceBuilder {
 
     /// Installs the clock. Defaults to the system one.
     ///
-    /// One reading is taken per request, at the top of the pipeline. See [`crate::clock`].
+    /// One reading is taken per request, at the top of the pipeline. See the crate's clock module.
     #[must_use]
     pub fn clock(mut self, clock: impl Clock) -> Self {
         self.clock = Arc::new(clock);
@@ -390,7 +399,7 @@ impl ServiceBuilder {
     ///
     /// One trace is minted per request, at the top of the pipeline, and the same value reaches the
     /// `x-amz-request-id` header, the `<RequestId>` element of an error document and the audit
-    /// event. See [`crate::trace`] for why a source cannot echo anything the caller sent, and read
+    /// event. See the crate's trace module for why a source cannot echo anything the caller sent, and read
     /// the security note on [`crate::FixedTrace`] before installing that one.
     #[must_use]
     pub fn trace_source(mut self, traces: impl TraceSource) -> Self {
@@ -507,6 +516,7 @@ impl ServiceBuilder {
             max_buffered_body_bytes: self.max_buffered_body_bytes,
             authorizer,
             authenticator,
+            policy_source: self.policy_source,
             host_resolver: self.host_resolver,
             governor: self.governor,
             observer: self.observer,

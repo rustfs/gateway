@@ -1,0 +1,26 @@
+[case]
+id = "c-authz-1011"
+schema_version = 1
+title = "A traversal copy source is denied before storage"
+rationale = "A dot-dot source must not be authorized under one spelling and consumed as a different storage path."
+polarity = "negative"
+operation = "CopyObject"
+tags = ["security", "naming"]
+timeout_ms = 10000
+quirks = ["q-copy-source-authz-0086"]
+[[case.evidence]]
+url = "https://github.com/rustfs/rustfs/security/advisories/GHSA-f4vq-9ffr-m8m3"
+summary = "Authorization and storage must use one normalized object path to prevent cross-bucket traversal."
+kind = "other"
+[[setup.buckets]]
+name = "authz-traversal"
+[request]
+method = "PUT"
+target = "/authz-traversal/destination"
+headers = { "x-amz-copy-source" = "/authz-traversal/../other/secret" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+[expect]
+kind = "response"
+status = 403
+[expect.error]
+code = "AccessDenied"

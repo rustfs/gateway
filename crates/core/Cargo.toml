@@ -45,3 +45,4 @@ zeroize = { workspace = true }
 # router is only allowed to exist because a generator can be pointed at both and told to find a
 # request they disagree about.
 proptest = { workspace = true }
+trybuild = { workspace = true }

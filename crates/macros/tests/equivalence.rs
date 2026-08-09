@@ -232,14 +232,16 @@ fn the_two_forms_answer_identically() {
     let one = block_on(
         generated
             .registry()
-            .invoke::<GetBucketLocation>(Req::new(GetBucketLocationInput::default()))
+            .authorize_and_invoke_no_derived::<GetBucketLocation>(GetBucketLocationInput::default())
+            .expect("input authorization succeeds")
             .expect("registered"),
     )
     .expect("answered");
     let two = block_on(
         written
             .registry()
-            .invoke::<GetBucketLocation>(Req::new(GetBucketLocationInput::default()))
+            .authorize_and_invoke_no_derived::<GetBucketLocation>(GetBucketLocationInput::default())
+            .expect("input authorization succeeds")
             .expect("registered"),
     )
     .expect("answered");
@@ -259,14 +261,16 @@ fn the_two_forms_answer_identically() {
     let one = block_on(
         generated
             .registry()
-            .invoke::<ListObjectsV2>(Req::new(ListObjectsV2Input::default()))
+            .authorize_and_invoke_no_derived::<ListObjectsV2>(ListObjectsV2Input::default())
+            .expect("input authorization succeeds")
             .expect("registered"),
     )
     .expect("answered");
     let two = block_on(
         written
             .registry()
-            .invoke::<ListObjectsV2>(Req::new(ListObjectsV2Input::default()))
+            .authorize_and_invoke_no_derived::<ListObjectsV2>(ListObjectsV2Input::default())
+            .expect("input authorization succeeds")
             .expect("registered"),
     )
     .expect("answered");
@@ -276,14 +280,16 @@ fn the_two_forms_answer_identically() {
     let one = block_on(
         generated
             .registry()
-            .invoke::<PutObject>(Req::new(PutObjectInput::default()))
+            .authorize_and_invoke_no_derived::<PutObject>(PutObjectInput::default())
+            .expect("input authorization succeeds")
             .expect("registered"),
     )
     .expect("answered");
     let two = block_on(
         written
             .registry()
-            .invoke::<PutObject>(Req::new(PutObjectInput::default()))
+            .authorize_and_invoke_no_derived::<PutObject>(PutObjectInput::default())
+            .expect("input authorization succeeds")
             .expect("registered"),
     )
     .expect("answered");
@@ -312,7 +318,8 @@ fn the_macro_registers_nothing_it_was_not_given() {
     assert!(
         router
             .registry()
-            .invoke::<PutObject>(Req::new(PutObjectInput::default()))
+            .authorize_and_invoke_no_derived::<PutObject>(PutObjectInput::default())
+            .expect("input authorization succeeds")
             .is_none()
     );
     assert_eq!(router.registry().handler_names().collect::<Vec<_>>(), vec!["GetBucketLocation"]);

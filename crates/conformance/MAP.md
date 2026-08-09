@@ -164,12 +164,10 @@ expected to be red, and the baseline exists to freeze how red rather than to exc
    `GetObject` and is answered wrongly rather than refused. `c-etag-0001` is the case that sees it.
    `CopyObject` and `UploadPartCopy` were in this list and no longer are: both are registered by
    `inprocess` and answered by `fixture`.
-8. **The copy-source contract is reachable now; `fixture` still mirrors half of it.** The facade
-   re-exports `CopySource`, `authorize_source`, `classify_self_copy` and `resolve_copy_range`, so
-   the reachability half of this finding is closed. What is left is that `fixture`'s
-   `parse_copy_source` / `parse_source_path` / `parse_source_arn` are still a *hand-written copy* of
-   the split rule and the two ARN grammars, and every backend that copies them can hold them
-   differently — which is what both advisories on this family were.
+8. **The live copy-source path uses the shared normalized value.** `CopyObject` and
+   `UploadPartCopy` handlers resolve `Req::resources()` with `Req::read_proof()`; their service path
+   no longer parses `x-amz-copy-source` a second time. The local parser remains only for focused
+   fixture unit tests.
 
    The copy **range** is no longer among them, and the state it was in is the argument for finishing
    the job. `fixture::resolve_copy_span` is a call to `resolve_copy_range` now; the arithmetic it

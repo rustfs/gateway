@@ -95,7 +95,7 @@ pub const MAX_CONTEXT_BYTES: usize = 2048;
 
 /// The text of a customer-provided key, carried without a way to render it.
 ///
-/// No `Debug`, no `Display`, no `PartialEq`, no `Clone`. [`KeyText::expose`] is the single
+/// No `Debug`, no `Display`, no `PartialEq`, no `Clone`. Its private `expose` method is the single
 /// accessor and exists for [`super::key::fingerprint_of`]; a second call site is a finding for
 /// `scripts/check_sse_key_never_leaks.sh` rather than a judgement call at review time.
 pub struct KeyText<'a>(Cow<'a, str>);

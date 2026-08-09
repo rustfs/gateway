@@ -14,8 +14,8 @@
 
 //! Whether an authenticated caller may perform the operation routing already chose.
 //!
-//! Responsible for: [`Authorizer`], the request it is asked about ([`AuthzRequest`]), the one
-//! refusal it may produce ([`Denial`]), and the closure adapter ADR-0002 requires every
+//! Responsible for: [`Authorizer`], the request it is asked about ([`AuthzRequest`]), the
+//! three-state [`Decision`], and the closure adapter ADR-0002 requires every
 //! `BoxFuture` extension point to ship ([`allow_when`]).
 //! NOT responsible for: authentication (`super::authenticator`), deciding which operation was
 //! named (`rustfs_gateway_core::route`), or the action-to-resource mapping, which is
@@ -37,9 +37,38 @@
 //! answered to a caller whose identity is known but whose permission is not, and a refusal that
 //! explained which condition failed would let that caller map the policy one request at a time.
 
-use rustfs_gateway_core::{BoxFuture, ResourceShape};
-use rustfs_gateway_sig::Identity;
+use rustfs_gateway_core::{BoxFuture, ResourceIdentity, ResourceShape};
+use rustfs_gateway_sig::{Identity, RequestNow};
 use rustfs_gateway_types::{BucketName, ErrorCode, ObjectKey};
+
+pub use rustfs_gateway_core::Decision;
+
+use super::PolicySnapshot;
+
+/// The immutable values every authorization stage in one request must share.
+#[derive(Debug)]
+pub struct RequestContext<'a> {
+    now: RequestNow,
+    policy: &'a PolicySnapshot,
+}
+
+impl<'a> RequestContext<'a> {
+    pub(crate) const fn new(now: RequestNow, policy: &'a PolicySnapshot) -> Self {
+        Self { now, policy }
+    }
+
+    /// The single clock reading captured for this request.
+    #[must_use]
+    pub const fn now(&self) -> RequestNow {
+        self.now
+    }
+
+    /// The single policy reading captured for this request.
+    #[must_use]
+    pub const fn policy(&self) -> &'a PolicySnapshot {
+        self.policy
+    }
+}
 
 /// What an [`Authorizer`] is asked about.
 ///
@@ -57,6 +86,16 @@ pub struct AuthzRequest<'a> {
     pub bucket: Option<&'a BucketName>,
     /// The object key the path addressed, when it addressed one.
     pub key: Option<&'a ObjectKey>,
+    /// The addressing identity of a derived copy source, when this is its second-stage check.
+    pub copy_source_identity: Option<&'a ResourceIdentity>,
+    /// The exact object version for a derived version action, when any.
+    pub version_id: Option<&'a str>,
+    /// The route-level destination action for the same request.
+    pub route_action: &'a str,
+    /// The route-level destination bucket for the same request.
+    pub route_bucket: Option<&'a BucketName>,
+    /// The route-level destination key for the same request.
+    pub route_key: Option<&'a ObjectKey>,
     /// Who the request runs as. `None` for an anonymous request, which is a request that presented
     /// nothing and was confirmed to have presented nothing — never a request whose verification
     /// failed.
@@ -125,16 +164,12 @@ impl Default for Denial {
 /// whose did.
 pub trait Authorizer: Send + Sync + 'static {
     /// Decides one request.
-    ///
-    /// Returning `Ok(())` permits it. Any error refuses it; there is no third answer, because
-    /// "abstain" would have to mean either allow or deny and whichever it meant would be invisible
-    /// at the call site.
-    fn authorize<'a>(&'a self, request: &'a AuthzRequest<'a>) -> BoxFuture<'a, Result<(), Denial>>;
+    fn authorize<'a>(&'a self, context: &'a RequestContext<'a>, request: &'a AuthzRequest<'a>) -> BoxFuture<'a, Decision>;
 }
 
 impl<T: Authorizer + ?Sized> Authorizer for std::sync::Arc<T> {
-    fn authorize<'a>(&'a self, request: &'a AuthzRequest<'a>) -> BoxFuture<'a, Result<(), Denial>> {
-        (**self).authorize(request)
+    fn authorize<'a>(&'a self, context: &'a RequestContext<'a>, request: &'a AuthzRequest<'a>) -> BoxFuture<'a, Decision> {
+        (**self).authorize(context, request)
     }
 }
 
@@ -158,12 +193,8 @@ where
     where
         F: Fn(&AuthzRequest<'_>) -> bool + Send + Sync + 'static,
     {
-        fn authorize<'a>(&'a self, request: &'a AuthzRequest<'a>) -> BoxFuture<'a, Result<(), Denial>> {
-            let outcome = if (self.0)(request) {
-                Ok(())
-            } else {
-                Err(Denial::access_denied())
-            };
+        fn authorize<'a>(&'a self, _context: &'a RequestContext<'a>, request: &'a AuthzRequest<'a>) -> BoxFuture<'a, Decision> {
+            let outcome = if (self.0)(request) { Decision::Allow } else { Decision::Deny };
             Box::pin(async move { outcome })
         }
     }
@@ -183,6 +214,11 @@ mod tests {
             resource: ResourceShape::Object,
             bucket: None,
             key: None,
+            copy_source_identity: None,
+            version_id: None,
+            route_action: "s3:GetObject",
+            route_bucket: None,
+            route_key: None,
             identity,
         }
     }
@@ -192,11 +228,9 @@ mod tests {
     #[tokio::test]
     async fn a_false_predicate_refuses_with_access_denied() {
         let authorizer = allow_when(|request| request.operation == "ListBuckets");
-        let denial = authorizer
-            .authorize(&request("GetObject", None))
-            .await
-            .expect_err("the predicate is false");
-        assert_eq!(denial.code(), &ErrorCode::ACCESS_DENIED);
+        let policy = PolicySnapshot::empty();
+        let context = RequestContext::new(RequestNow::from_unix_seconds(0), &policy);
+        assert_eq!(authorizer.authorize(&context, &request("GetObject", None)).await, Decision::Deny);
     }
 
     /// Negative — a denial renders nothing about the request, so it cannot become a policy oracle.
@@ -220,6 +254,8 @@ mod tests {
     #[tokio::test]
     async fn the_adapter_is_dyn_compatible() {
         let authorizer: std::sync::Arc<dyn Authorizer> = std::sync::Arc::new(allow_when(|_| true));
-        assert!(authorizer.authorize(&request("GetObject", None)).await.is_ok());
+        let policy = PolicySnapshot::empty();
+        let context = RequestContext::new(RequestNow::from_unix_seconds(0), &policy);
+        assert_eq!(authorizer.authorize(&context, &request("GetObject", None)).await, Decision::Allow);
     }
 }

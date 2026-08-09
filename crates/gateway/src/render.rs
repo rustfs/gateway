@@ -360,7 +360,7 @@ pub fn document_body(error: &S3Error, trace: &RequestTrace) -> String {
 /// is the whole of the request-identifier invariant.
 ///
 /// The refusing stage's own headers are written **first**, before the document's framing headers
-/// and before the identifiers. That order is the point: a name in [`crate::stamp::is_reserved`] is
+/// and before the identifiers. That order is the point: a name reserved by the stamp module is
 /// skipped outright, and even if that predicate were wrong, the framework's own writes come
 /// afterwards and win. Two locks, because the first one is a list somebody has to keep correct.
 #[must_use]

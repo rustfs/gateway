@@ -93,6 +93,7 @@
 #![forbid(unsafe_code)]
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing, clippy::panic)]
 
+pub mod authz;
 pub mod codec;
 pub mod cors;
 pub mod dialect;
@@ -106,6 +107,10 @@ pub mod registry;
 pub mod route;
 pub mod sse;
 
+pub use crate::authz::{
+    Authorized, AuthorizedRead, Decision, Denied, DerivedResourceError, DerivedResourceSet, NoDerived, OwnedResource,
+    ResourceIdentity, ResourceRef,
+};
 pub use crate::codec::{
     BodyAllowance, CodecError, EncodedResponse, MetaView, OperationCodec, RequestBody, ResponseBody, ResponseOverride,
     body_allowance,
@@ -123,9 +128,9 @@ pub use crate::op::{
     standard_operation_names,
 };
 pub use crate::registry::{
-    BuildError, ErasedCodec, ErasedDecode, ErasedEncode, ErasedHandler, ErasedRequest, ErasedResponse, HandlerTable, Invocation,
-    MissingHandlers, OperationSet, OperationSpec, ParamKind, Registry, RegistryError, RequiredParam, RouterBuilder, WireEntry,
-    check_required,
+    BuildError, ErasedAuthorize, ErasedCodec, ErasedDecode, ErasedDecoded, ErasedEncode, ErasedHandler, ErasedRequest,
+    ErasedResources, ErasedResponse, HandlerTable, Invocation, MissingHandlers, OperationSet, OperationSpec, ParamKind, Registry,
+    RegistryError, RequiredParam, RouterBuilder, WireEntry, check_required, erase_authorized_handler,
 };
 pub use crate::route::{
     ArnForm, CompileError, CompiledRouter, Explanation, HostClass, OpId, Predicate, RequestShape, RouteBuildError, RouteEntry,

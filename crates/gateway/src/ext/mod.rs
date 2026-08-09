@@ -68,10 +68,11 @@ mod governor;
 mod host;
 mod observer;
 mod oplayer;
+mod policy;
 mod vhost;
 
 pub use self::authenticator::{Authentication, Authenticator, ChunkSink, ChunkVerification, SigV4Authenticator, Unavailable};
-pub use self::authorizer::{Authorizer, AuthzRequest, Denial, allow_when};
+pub use self::authorizer::{Authorizer, AuthzRequest, Decision, Denial, RequestContext, allow_when};
 pub use self::cors::{CORS_PREFLIGHT, CachedCorsSource, CorsCacheConfig, CorsSource, CorsSourceError, NoCors};
 pub use self::credentials::{CredentialProvider, Credentials, CredentialsError, StaticCredentials};
 pub use self::filter::{
@@ -83,4 +84,5 @@ pub use self::host::{Addressing, HostQuery, HostResolver, PathStyleOnly, Resolve
 pub use self::observer::{NoObserver, Observer, RequestEvent};
 pub use self::oplayer::{Next, OpLayer, op_layer};
 pub(crate) use self::oplayer::{OpLayerSlot, Terminal};
+pub use self::policy::{NoPolicy, PolicyError, PolicySnapshot, PolicySource, SnapshotId, policy_from};
 pub use self::vhost::{BaseDomain, DomainError, MAX_BASE_DOMAIN_BYTES, VirtualHostStyle};

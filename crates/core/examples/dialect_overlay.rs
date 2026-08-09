@@ -80,6 +80,13 @@ impl Operation for HeadObjectReport {
     const NAME: &'static str = "acme:HeadObjectReport";
     type Input = ();
     type Output = ();
+    type DerivedResources = rustfs_gateway_core::NoDerived;
+
+    fn derive_resources(_input: &Self::Input) -> Result<Self::DerivedResources, rustfs_gateway_core::DerivedResourceError> {
+        Ok(rustfs_gateway_core::NoDerived)
+    }
+
+    fn seal_derived_input(_input: &mut Self::Input) {}
 
     fn spec() -> &'static OperationSpec {
         &SPEC

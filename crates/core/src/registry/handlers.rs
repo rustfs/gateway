@@ -59,12 +59,26 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 
-use crate::handler::{BoxFuture, Handler, HandlerError, Req, Resp};
+use crate::Authorized;
+use crate::handler::{BoxFuture, Handler, HandlerError, Resp};
 use crate::op::Operation;
 use crate::registry::codecs::{ErasedCodec, ErasedDecode, ErasedEncode};
 
-/// A `Req<O>` whose `O` the registry has forgotten.
-pub type ErasedRequest = Box<dyn Any + Send>;
+/// An authorized request whose operation type the registry has forgotten.
+///
+/// The payload stays private so erasure cannot become a public constructor for
+/// [`Authorized<O>`]. It can only be consumed by the registered typed dispatch.
+pub struct ErasedRequest(Box<dyn Any + Send>);
+
+impl ErasedRequest {
+    pub(crate) fn authorized<O: Operation>(request: Authorized<O>) -> Self {
+        Self(Box::new(request))
+    }
+
+    fn into_inner(self) -> Box<dyn Any + Send> {
+        self.0
+    }
+}
 
 /// A `Resp<O>` whose `O` the registry has forgotten.
 pub type ErasedResponse = Box<dyn Any + Send>;
@@ -80,7 +94,7 @@ pub type ErasedHandler = Arc<dyn Fn(ErasedRequest) -> BoxFuture<'static, Result<
 ///
 /// This is the whole registration mechanism. The returned closure knows how to call `B` for `O`
 /// and mentions neither in its type.
-pub(crate) fn erase<O, B>(implementation: Arc<B>) -> ErasedHandler
+pub fn erase_authorized_handler<O, B>(implementation: Arc<B>) -> ErasedHandler
 where
     O: Operation,
     B: Handler<O>,
@@ -88,11 +102,23 @@ where
     Arc::new(move |request: ErasedRequest| {
         let implementation = Arc::clone(&implementation);
         Box::pin(async move {
-            let request = request.downcast::<Req<O>>().map_err(|_| mismatch::<O>())?;
-            let response = implementation.call(*request).await?;
-            Ok(Box::new(response) as ErasedResponse)
+            let authorized = request
+                .into_inner()
+                .downcast::<Authorized<O>>()
+                .map_err(|_| mismatch::<O>())?;
+            dispatch::<O, B>(implementation, *authorized).await
         })
     })
+}
+
+/// The only typed transition from authorization into a backend call.
+async fn dispatch<O, B>(implementation: Arc<B>, authorized: Authorized<O>) -> Result<ErasedResponse, HandlerError>
+where
+    O: Operation,
+    B: Handler<O>,
+{
+    let response = implementation.call(authorized.into_request()).await?;
+    Ok(Box::new(response) as ErasedResponse)
 }
 
 /// The error for a payload that is not the type the entry was registered with.
@@ -108,7 +134,7 @@ fn mismatch<O: Operation>() -> HandlerError {
     ))
 }
 
-/// The typed future [`HandlerTable::invoke`] returns.
+/// The typed future the handler table's internal invoke path returns.
 ///
 /// Wraps the already-pinned erased future and downcasts its answer in `poll`, so the typed path
 /// costs no allocation over the erased one. Every field is `Unpin`, so the projection needs no
@@ -256,10 +282,10 @@ impl HandlerTable {
     /// `None` when nothing is registered under [`Operation::NAME`] — the caller answers that with
     /// a 501, which is what makes a partial backend legal without a single default method.
     #[must_use]
-    pub fn invoke<O: Operation>(&self, request: Req<O>) -> Option<Invocation<O>> {
+    pub(crate) fn invoke<O: Operation>(&self, request: Authorized<O>) -> Option<Invocation<O>> {
         let handler = self.handler(O::NAME)?;
         Some(Invocation {
-            inner: handler(Box::new(request)),
+            inner: handler(ErasedRequest::authorized(request)),
             operation: PhantomData,
         })
     }

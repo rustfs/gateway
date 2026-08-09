@@ -80,7 +80,9 @@ make_sandbox() {
     # whole tree. One sandbox is built per run and reset between cases, so the
     # 3.2 MB is paid once.
     list="$(mktemp "${TMPDIR:-/tmp}/gateway-guard-files.XXXXXX")"
-    (cd "$REPO_ROOT" && git ls-files) >"$list"
+    # Include new, unignored files: a guard introduced in the same change must be able to test its
+    # own inputs before the author stages them.
+    (cd "$REPO_ROOT" && { git ls-files; git ls-files --others --exclude-standard; } | sort -u) >"$list"
     (cd "$REPO_ROOT" && tar -cf - -T "$list") | (cd "$dir" && tar -xf -)
     rm -f "$list"
     (
@@ -650,6 +652,63 @@ mut_drop_percent_decode_allowances() {
 }
 expect_fail check_single_normalization.sh \
     'a missing allowance file, which must fail rather than skip' mut_drop_percent_decode_allowances
+
+# check_authz_consumption.sh guards the type transition, not a call-site convention. Each mutation
+# below compiles as plausible framework code and must still make the source guard fail.
+mut_dispatch_decoded() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/core/src/registry/handlers.rs")
+text = path.read_text()
+text = text.replace("authorized: Authorized<O>", "authorized: Decoded<O>", 1)
+path.write_text(text)
+PYEOF
+}
+expect_fail check_authz_consumption.sh \
+    'dispatch widened back to Decoded<O>' mut_dispatch_decoded
+
+mut_authorized_constructor() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/core/src/authz/mod.rs")
+text = path.read_text()
+needle = "impl<O: Operation> Authorized<O> {"
+text = text.replace(needle, needle + "\n    pub fn forge(input: O::Input, resources: O::DerivedResources, read: AuthorizedRead) -> Self { Self { input, resources, read } }", 1)
+path.write_text(text)
+PYEOF
+}
+expect_fail check_authz_consumption.sh \
+    'a public Authorized<O> constructor' mut_authorized_constructor
+
+mut_public_read_proof() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/core/src/authz/mod.rs")
+path.write_text(path.read_text().replace("    resources: Vec<OwnedResource>,", "    pub resources: Vec<OwnedResource>,", 1))
+PYEOF
+}
+expect_fail check_authz_consumption.sh \
+    'a publicly constructible AuthorizedRead proof' mut_public_read_proof
+
+mut_public_authorize_input() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/core/src/authz/mod.rs")
+path.write_text(path.read_text().replace("pub(crate) fn authorize_input", "pub fn authorize_input", 1))
+PYEOF
+}
+expect_fail check_authz_consumption.sh \
+    'a public function that can mint Authorized<O>' mut_public_authorize_input
+
+mut_public_erased_proof() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/core/src/registry/handlers.rs")
+path.write_text(path.read_text().replace("pub struct ErasedRequest(Box<dyn Any + Send>);", "pub struct ErasedRequest(pub Box<dyn Any + Send>);", 1))
+PYEOF
+}
+expect_fail check_authz_consumption.sh \
+    'a public erased authorization payload' mut_public_erased_proof
 # check_cors_credentials_exclusive.sh has four rules, and the fourth exists only to keep the third
 # from being defeated by an import. Each is mutated separately: a single case would leave three of
 # them as prose. GHSA-x5xv-223c-8vm7 is the advisory all four are about.

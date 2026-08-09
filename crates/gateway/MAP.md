@@ -31,7 +31,8 @@ everything a consumer needs so that nothing downstream depends on `-core`, `-sig
 | `src/sig.rs` | The signature vocabulary re-exported through the facade, including `sig::Signer` (the client-side `SigV4Signer`) | You need to name a `Verdict`, a `SecurityFloor` or an `AuthError`, or a test harness has to sign a request |
 | `src/ext/mod.rs` | The extension-point roster, and the table of which have defaults and what each default costs | You are choosing what to install, or adding an extension point |
 | `src/ext/authenticator.rs` | `Authenticator` (no default), and `SigV4Authenticator` assembled from `-sig`'s public primitives | Authentication behaved unexpectedly, or you are replacing the scheme |
-| `src/ext/authorizer.rs` | `Authorizer` (no default), `AuthzRequest`, `Denial`, `allow_when` | You are writing a policy, or asking why there is no default |
+| `src/ext/authorizer.rs` | `Authorizer` (no default), three-state `Decision`, `RequestContext`, `AuthzRequest`, `Denial`, `allow_when` | You are writing a policy, or asking why there is no default |
+| `src/ext/policy.rs` | `PolicySource` and the opaque `PolicySnapshot` read once per request | Two authorization stages observed different policy versions |
 | `src/ext/credentials.rs` | `Credentials`, `CredentialProvider`, `StaticCredentials` | You are wiring an IAM store, or a secret appeared somewhere it should not |
 | `src/ext/host.rs` | `HostResolver` (synchronous), the `Addressing`/`TargetOrigin`/`VhostHint` vocabulary its answer is written in, and the default `PathStyleOnly` | You are asking where the bucket in a request came from, or why a `501` came back with a sentence about virtual hosts |
 | `src/ext/vhost.rs` | `VirtualHostStyle`: label-boundary matching against configured `BaseDomain`s, the bucket/region prefix table, and the unconditional path-style fallback | Virtual-hosted addressing is not working, a host resolved to a bucket you did not expect, or you are configuring base domains and `new()` refused one |
@@ -78,9 +79,6 @@ everything a consumer needs so that nothing downstream depends on `-core`, `-sig
 - **Nothing in this crate drives a signed request.** `sig::Signer` is re-exported but unused here;
   every AWS operation is header-signatures-only, and the tests reach a handler through a vendor
   operation that declares itself anonymously reachable instead.
-- **`rustfs_gateway_core::registry::ErasedCodec` supersedes `src/dispatch.rs`.** The core registry
-  gained its own codec erasure after this crate's was written; folding one into the other is a
-  follow-up, not a behaviour change.
 - **The request body is buffered.** Capped by `DEFAULT_MAX_BUFFERED_BODY_BYTES` (64 MiB); the
   streaming ingest path is not wired through the facade. The ceiling is now applied *inside* the
   frame loop rather than to the collected result, so the refusal arrives at the frame that crosses

@@ -75,13 +75,13 @@ use rustfs_gateway_types::ErrorCode;
 
 use crate::codec::OperationCodec;
 use crate::error::PreAuthError;
-use crate::handler::{Handler, Req};
+use crate::handler::Handler;
 use crate::op::{AuthRequirement, Operation};
 use crate::route::RouteRequestParts;
 
 pub use self::builder::{BuildError, RouterBuilder};
-pub use self::codecs::{ErasedCodec, ErasedDecode, ErasedEncode};
-pub use self::handlers::{ErasedHandler, ErasedRequest, ErasedResponse, HandlerTable, Invocation};
+pub use self::codecs::{ErasedAuthorize, ErasedCodec, ErasedDecode, ErasedDecoded, ErasedEncode, ErasedResources};
+pub use self::handlers::{ErasedHandler, ErasedRequest, ErasedResponse, HandlerTable, Invocation, erase_authorized_handler};
 pub use self::opset::{MissingHandlers, OperationSet};
 pub use self::reject::RegistryError;
 
@@ -190,7 +190,7 @@ impl Registry {
     ///
     /// # Errors
     ///
-    /// [`RegistryError`] for any rule in [`reject`]: a name that is not namespaced, a third-party
+    /// [`RegistryError`] for any registration rule: a name that is not namespaced, a third-party
     /// name colliding with an AWS one, a missing authorisation action, a spec or floor registered
     /// under another name, or a duplicate.
     pub fn register_handler<O, B>(&mut self, implementation: Arc<B>) -> Result<(), RegistryError>
@@ -206,7 +206,7 @@ impl Registry {
     ///
     /// The escape hatch for a dialect operation that has no [`OperationCodec`] — an admin call
     /// whose transport is somebody else's, or a dispatch-only test. Routing, registration refusals
-    /// and the typed [`Registry::invoke`] path all work; what does not is serving it from the
+    /// and the typed [`Registry::authorize_and_invoke_no_derived`] path all work; what does not is serving it from the
     /// wire, because nothing here can turn bytes into its input. The name says so at the call
     /// site, and [`HandlerTable::names_without_codec`] says so afterwards, which is what lets an
     /// assembly-time check refuse to start a service that would route such an operation and then
@@ -237,7 +237,8 @@ impl Registry {
             return Err(RegistryError::Duplicate { name: O::NAME });
         }
         self.specs.insert(O::NAME, O::spec());
-        self.handlers.insert(O::NAME, handlers::erase::<O, B>(implementation), codec);
+        self.handlers
+            .insert(O::NAME, handlers::erase_authorized_handler::<O, B>(implementation), codec);
         Ok(())
     }
 
@@ -286,17 +287,29 @@ impl Registry {
             spec,
             handler,
             decode: codec.decoder(),
+            resources: codec.resources(),
+            authorize: codec.authorizer(),
             encode: codec.encoder(),
         })
     }
 
-    /// Calls the handler registered for `O`, if there is one.
+    /// Authorizes and calls a handler whose operation declares no derived resources.
     ///
-    /// `None` is the 501: an operation with no handler is not an error condition, it is a backend
-    /// that does not implement it. No default method anywhere had to be written for that.
-    #[must_use]
-    pub fn invoke<O: Operation>(&self, request: Req<O>) -> Option<Invocation<O>> {
-        self.handlers.invoke(request)
+    /// This convenience preserves the consuming type-state transition for typed integrations that
+    /// have no second-stage policy decisions to supply. Operations with derived resources must use
+    /// the erased decode/resource/authorize path.
+    ///
+    /// # Errors
+    ///
+    /// Returns a fail-closed authorization error if an operation claiming `NoDerived` fails to
+    /// derive its empty resource set.
+    pub fn authorize_and_invoke_no_derived<O>(&self, input: O::Input) -> Result<Option<Invocation<O>>, crate::Denied>
+    where
+        O: Operation<DerivedResources = crate::NoDerived>,
+    {
+        let decoded = crate::authz::prepare_input::<O>(input).map_err(|_| crate::Denied::indeterminate())?;
+        let authorized = crate::authz::authorize_input(decoded, |_| crate::Decision::Indeterminate)?;
+        Ok(self.handlers.invoke(authorized))
     }
 
     /// How many operations are registered.
@@ -337,6 +350,10 @@ pub struct WireEntry<'a> {
     pub handler: &'a ErasedHandler,
     /// The erased decoder, whose output the handler accepts.
     pub decode: &'a ErasedDecode,
+    /// Reads the normalized resources that must receive input-stage decisions.
+    pub resources: &'a ErasedResources,
+    /// Consumes decoded input and those decisions into the handler payload.
+    pub authorize: &'a ErasedAuthorize,
     /// The erased encoder, which accepts the handler's answer.
     pub encode: &'a ErasedEncode,
 }

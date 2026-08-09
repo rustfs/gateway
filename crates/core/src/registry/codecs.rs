@@ -50,15 +50,26 @@
 use std::fmt;
 use std::sync::Arc;
 
+use crate::authz::{Decoded, authorize_input, prepare_input};
 use crate::codec::{CodecError, EncodedResponse, MetaView, OperationCodec, RequestBody};
-use crate::handler::{Req, Resp};
+use crate::handler::Resp;
 use crate::registry::handlers::{ErasedRequest, ErasedResponse};
+use crate::{Decision, Denied, DerivedResourceSet, OwnedResource};
+
+/// A decoded operation input whose operation type has been erased.
+pub type ErasedDecoded = Box<dyn std::any::Any + Send>;
 
 /// An operation's decoder, with the operation type erased.
 ///
 /// `Arc` rather than `Box` for the same reason as [`super::ErasedHandler`]: [`super::Registry`]
 /// stays `Clone`, so handing a router to another task costs a refcount rather than a rebuild.
-pub type ErasedDecode = Arc<dyn Fn(&MetaView<'_>, RequestBody) -> Result<ErasedRequest, CodecError> + Send + Sync>;
+pub type ErasedDecode = Arc<dyn Fn(&MetaView<'_>, RequestBody) -> Result<ErasedDecoded, CodecError> + Send + Sync>;
+
+/// Reads the normalized resources from one erased decoded request.
+pub type ErasedResources = Arc<dyn Fn(&ErasedDecoded) -> Result<Vec<OwnedResource>, CodecError> + Send + Sync>;
+
+/// Consumes one erased decoded request and the decisions made for its resources.
+pub type ErasedAuthorize = Arc<dyn Fn(ErasedDecoded, &[Decision]) -> Result<ErasedRequest, Denied> + Send + Sync>;
 
 /// An operation's encoder, with the operation type erased.
 ///
@@ -86,17 +97,28 @@ const COMMITTED_UNSUPPORTED: &str =
 
 /// One operation's wire codec, with the operation type erased.
 ///
-/// Produced only by [`erase`], and only from a `register_handler::<O, B>` call, so the decoder and
+/// Produced only by the crate's erasure function and only from a `register_handler::<O, B>` call, so the decoder and
 /// the encoder in one of these are always the two halves of a single [`OperationCodec`]
 /// implementation.
 #[derive(Clone)]
 pub struct ErasedCodec {
     operation: &'static str,
     decode: ErasedDecode,
+    resources: ErasedResources,
+    authorize: ErasedAuthorize,
     encode: ErasedEncode,
 }
 
 impl ErasedCodec {
+    /// Builds the single erased wire/authz boundary for one operation.
+    ///
+    /// The typed authorization constructor remains crate-private; callers can only carry the
+    /// erased handler request produced after every supplied decision was enforced.
+    #[must_use]
+    pub fn for_operation<O: OperationCodec>() -> Self {
+        erase::<O>()
+    }
+
     /// The operation this codec was erased from.
     #[must_use]
     pub const fn operation_name(&self) -> &'static str {
@@ -109,20 +131,42 @@ impl ErasedCodec {
         &self.decode
     }
 
+    /// The normalized-resource reader paired with this decoder.
+    #[must_use]
+    pub const fn resources(&self) -> &ErasedResources {
+        &self.resources
+    }
+
+    /// The consuming authorization transition paired with this decoder.
+    #[must_use]
+    pub const fn authorizer(&self) -> &ErasedAuthorize {
+        &self.authorize
+    }
+
     /// The encoder, for a caller that wants to keep it.
     #[must_use]
     pub const fn encoder(&self) -> &ErasedEncode {
         &self.encode
     }
 
-    /// Reads a request head and a body into a boxed `Req<O>`.
+    /// Reads a request head and body into an erased `Decoded<O>`.
     ///
     /// # Errors
     ///
     /// [`CodecError`] naming the model member that could not be read. The operation has already
     /// been routed, so every failure here is a statement about a value and never a `501`.
-    pub fn decode(&self, request: &MetaView<'_>, body: RequestBody) -> Result<ErasedRequest, CodecError> {
+    pub fn decode(&self, request: &MetaView<'_>, body: RequestBody) -> Result<ErasedDecoded, CodecError> {
         (self.decode)(request, body)
+    }
+
+    /// Copies the normalized derived resources out of a decoded request for policy evaluation.
+    pub fn derived_resources(&self, decoded: &ErasedDecoded) -> Result<Vec<OwnedResource>, CodecError> {
+        (self.resources)(decoded)
+    }
+
+    /// Consumes decoded input into the only payload a handler accepts.
+    pub fn authorize(&self, decoded: ErasedDecoded, decisions: &[Decision]) -> Result<ErasedRequest, Denied> {
+        (self.authorize)(decoded, decisions)
     }
 
     /// Writes a boxed `Resp<O>` as a status, a header set and a body.
@@ -150,7 +194,27 @@ impl fmt::Debug for ErasedCodec {
 pub(crate) fn erase<O: OperationCodec>() -> ErasedCodec {
     let decode: ErasedDecode = Arc::new(|request: &MetaView<'_>, body: RequestBody| {
         let input = O::decode(request, body)?;
-        Ok(Box::new(Req::<O>::new(input)) as ErasedRequest)
+        let decoded = prepare_input::<O>(input).map_err(|error| CodecError::new(error.code().clone(), error.message()))?;
+        Ok(Box::new(decoded) as ErasedDecoded)
+    });
+    let resources: ErasedResources = Arc::new(|decoded: &ErasedDecoded| {
+        let decoded = decoded
+            .downcast_ref::<Decoded<O>>()
+            .ok_or_else(|| CodecError::internal("the registered resource reader received another operation's input"))?;
+        let mut resources = Vec::with_capacity(decoded.resources().len());
+        decoded
+            .resources()
+            .visit(&mut |resource| resources.push(OwnedResource::from_ref(resource)));
+        Ok(resources)
+    });
+    let authorize: ErasedAuthorize = Arc::new(|decoded: ErasedDecoded, decisions: &[Decision]| {
+        let decoded = decoded.downcast::<Decoded<O>>().map_err(|_| Denied::indeterminate())?;
+        let mut decisions = decisions.iter().copied();
+        let authorized = authorize_input(*decoded, |_| decisions.next().unwrap_or(Decision::Indeterminate))?;
+        if decisions.next().is_some() {
+            return Err(Denied::indeterminate());
+        }
+        Ok(ErasedRequest::authorized(authorized))
     });
     let encode: ErasedEncode = Arc::new(|response: ErasedResponse, request: &MetaView<'_>| {
         let response = response.downcast::<Resp<O>>().map_err(|_| RESPONSE_MISMATCH)?;
@@ -167,6 +231,8 @@ pub(crate) fn erase<O: OperationCodec>() -> ErasedCodec {
     ErasedCodec {
         operation: O::NAME,
         decode,
+        resources,
+        authorize,
         encode,
     }
 }

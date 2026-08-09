@@ -1,0 +1,8 @@
+error[E0277]: `rustfs_gateway_core::ops::shared::copy_source::CopySource` doesn't implement `Debug`
+  --> tests/compile_fail/authz_copy_debug.rs:18:15
+   |
+18 |     println!("{source:?}");
+   |               ^^^^^^^^^^ `rustfs_gateway_core::ops::shared::copy_source::CopySource` cannot be formatted using `{:?}` because it doesn't implement `Debug`
+   |
+   = help: the trait `Debug` is not implemented for `rustfs_gateway_core::ops::shared::copy_source::CopySource`
+   = note: required for `&rustfs_gateway_core::ops::shared::copy_source::CopySource` to implement `Debug`

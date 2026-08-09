@@ -47,6 +47,7 @@ use rustfs_gateway_sig::{OperationFloor, SigService};
 use rustfs_gateway_types::dto::{UploadPartCopy, UploadPartCopyInput, UploadPartCopyOutput};
 
 use crate::op::{AuthRequirement, HasOperation, Operation, OperationOrigin, ResourceShape, StandardOperation};
+use crate::ops::shared::copy_source::CopySourceResources;
 use crate::registry::OperationSpec;
 
 /// What this operation requires of a request once routing has chosen it.
@@ -73,6 +74,15 @@ impl Operation for UploadPartCopy {
 
     type Input = UploadPartCopyInput;
     type Output = UploadPartCopyOutput;
+    type DerivedResources = CopySourceResources;
+
+    fn derive_resources(input: &Self::Input) -> Result<Self::DerivedResources, crate::authz::DerivedResourceError> {
+        CopySourceResources::parse(&input.copy_source)
+    }
+
+    fn seal_derived_input(input: &mut Self::Input) {
+        input.copy_source.clear();
+    }
 
     fn spec() -> &'static OperationSpec {
         &SPEC

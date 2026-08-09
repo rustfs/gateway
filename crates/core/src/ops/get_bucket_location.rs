@@ -46,6 +46,13 @@ impl Operation for GetBucketLocation {
 
     type Input = GetBucketLocationInput;
     type Output = rustfs_gateway_types::dto::GetBucketLocationOutput;
+    type DerivedResources = crate::authz::NoDerived;
+
+    fn derive_resources(_input: &Self::Input) -> Result<Self::DerivedResources, crate::authz::DerivedResourceError> {
+        Ok(crate::authz::NoDerived)
+    }
+
+    fn seal_derived_input(_input: &mut Self::Input) {}
 
     fn spec() -> &'static OperationSpec {
         &SPEC

@@ -156,6 +156,13 @@ impl Operation for SsePut {
     const NAME: &'static str = "example:SsePut";
     type Input = PresentedKey;
     type Output = Answered;
+    type DerivedResources = rustfs_gateway_core::NoDerived;
+
+    fn derive_resources(_input: &Self::Input) -> Result<Self::DerivedResources, rustfs_gateway_core::DerivedResourceError> {
+        Ok(rustfs_gateway_core::NoDerived)
+    }
+
+    fn seal_derived_input(_input: &mut Self::Input) {}
     fn spec() -> &'static OperationSpec {
         &PUT_SPEC
     }
@@ -168,6 +175,13 @@ impl Operation for SsePart {
     const NAME: &'static str = "example:SsePart";
     type Input = PresentedKey;
     type Output = Answered;
+    type DerivedResources = rustfs_gateway_core::NoDerived;
+
+    fn derive_resources(_input: &Self::Input) -> Result<Self::DerivedResources, rustfs_gateway_core::DerivedResourceError> {
+        Ok(rustfs_gateway_core::NoDerived)
+    }
+
+    fn seal_derived_input(_input: &mut Self::Input) {}
     fn spec() -> &'static OperationSpec {
         &PART_SPEC
     }

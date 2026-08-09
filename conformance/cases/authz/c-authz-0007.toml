@@ -1,0 +1,22 @@
+[case]
+id = "c-authz-0007"
+schema_version = 1
+title = "A registered action-bearing operation reaches its handler"
+rationale = "The assembled registry accepts ListBuckets because its operation specification declares an authorization action."
+polarity = "positive"
+operation = "ListBuckets"
+tags = ["security", "routing"]
+timeout_ms = 10000
+quirks = []
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/list_amazons3.html"
+summary = "S3 operations have explicit policy actions and supported resource shapes."
+kind = "aws-doc"
+
+[request]
+method = "GET"
+target = "/"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+[expect]
+kind = "response"
+status = 200
