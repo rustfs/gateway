@@ -3,7 +3,7 @@ id = "c-select-restore-0008"
 schema_version = 1
 title = "A scan range with both bounds is decoded and reaches the handler"
 rationale = """
-The accepting direction of the ScanRange grammar, and of the request codec as a whole: the answer is the deferral of the framed response, which can only be reached after the whole document — expression, both serializations, the compression and the window — has been parsed and validated. A decoder that lost the scan range would answer this identically, so the refusing cases beside it are what pin the member; this one pins that a legal window is not refused."""
+The accepting direction of the ScanRange grammar, and of the request codec as a whole: the framed answer can only be reached after the whole document — expression, both serializations, the compression and the window — has been parsed and validated. A decoder that lost the scan range would answer this identically, so the refusing cases beside it are what pin the member; this one pins that a legal window is not refused."""
 polarity = "positive"
 operation = "SelectObjectContent"
 tags = ["select", "xml"]
@@ -30,16 +30,16 @@ body = { utf8 = '<SelectObjectContentRequest><Expression>SELECT * FROM S3Object<
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 
 [expect]
-kind = "response"
-status = 501
+kind = "event_stream"
+status = 200
 connection_after = "open"
+headers_present = { "content-type" = "application/vnd.amazon.event-stream" }
 
-[expect.error]
-code = "NotImplemented"
-request_id_present = true
+[[expect.events]]
+type = "Records"
+min_count = 1
 
-[expect.body]
-redact = ["RequestId", "HostId"]
-exact_utf8 = '''
-<?xml version="1.0" encoding="UTF-8"?>
-<Error><Code>NotImplemented</Code><Message>The select request was accepted and validated, but this backend cannot yet write an event-stream response</Message><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''
+[[expect.events]]
+type = "End"
+min_count = 1
+max_count = 1

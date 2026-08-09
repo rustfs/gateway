@@ -628,9 +628,9 @@
               },
               {
                 "id": "q-select-0009",
-                "kind": "deferred_response",
+                "kind": "event_stream_response",
                 "target": "SelectObjectContent",
-                "summary": "The response half is deliberately absent, and what is absent is only the plumbing: the framing — two CRC-32s over two different ranges, one covering the eight prelude bytes alone and one covering every byte of the message but itself — is implemented and proved byte for byte against independently computed values, while the third response shape a stream needs is not this family's to add, so a well-formed query is told NotImplemented rather than answered a bare 200.",
+                "summary": "A successful SelectObjectContent response is a third Answer shape: the handler supplies already framed messages, the shared facade writes status 200 and the event-stream content type without invoking the generated document encoder, and conformance independently validates both CRCs and the terminating sequence.",
                 "evidence": [
                               {
                                 "kind": "aws-doc",

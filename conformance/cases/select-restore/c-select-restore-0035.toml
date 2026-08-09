@@ -1,12 +1,12 @@
 [case]
 id = "c-select-restore-0035"
 schema_version = 1
-title = "A well-formed select is told the framed response is not implemented, not answered 200"
+title = "A well-formed select leaves the shared service as a complete event stream"
 rationale = """
-The deferral, asserted as a fact rather than left as a comment. A select's answer is a sequence of self-framed messages, which is a response shape this framework's Resp does not have; the framing is implemented and proved by unit tests, and the plumbing that would put it on a socket is not. The alternative — a bare 200 with no body — is indistinguishable to a client from a query that matched no rows, which is the failure this case exists to make impossible to ship quietly."""
-polarity = "negative"
+A select response is neither an empty generated output nor the XML continuation used by operations that commit a 200 before finishing. The handler returns the third response shape through the same assembled service as ordinary operations, and the observed body must contain a Records frame, exactly one Stats frame, and a terminating End frame with both CRCs valid."""
+polarity = "positive"
 operation = "SelectObjectContent"
-tags = ["select", "event-stream", "known-divergence"]
+tags = ["select", "event-stream"]
 timeout_ms = 10000
 quirks = ["q-select-0009"]
 
@@ -35,17 +35,25 @@ body = { utf8 = '<SelectObjectContentRequest><Expression>SELECT * FROM S3Object<
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 
 [expect]
-kind = "response"
-status = 501
+kind = "event_stream"
+status = 200
 connection_after = "open"
-headers_absent = ["x-amz-content-type"]
+headers_present = { "content-type" = "application/vnd.amazon.event-stream" }
 
-[expect.error]
-code = "NotImplemented"
-request_id_present = true
+[[expect.events]]
+type = "Records"
+min_count = 1
+max_count = 1
+
+[[expect.events]]
+type = "Stats"
+min_count = 1
+max_count = 1
+
+[[expect.events]]
+type = "End"
+min_count = 1
+max_count = 1
 
 [expect.body]
-redact = ["RequestId", "HostId"]
-exact_utf8 = '''
-<?xml version="1.0" encoding="UTF-8"?>
-<Error><Code>NotImplemented</Code><Message>The select request was accepted and validated, but this backend cannot yet write an event-stream response</Message><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''
+exact_hex = "0000006d000000551f81c9ee0d3a6d6573736167652d747970650700056576656e740b3a6576656e742d747970650700075265636f7264730d3a636f6e74656e742d747970650700186170706c69636174696f6e2f6f637465742d73747265616d612c620a312c320a339ad29f000000d500000043cbe23f6a0d3a6d6573736167652d747970650700056576656e740b3a6576656e742d7479706507000553746174730d3a636f6e74656e742d74797065070008746578742f786d6c3c53746174733e3c44657461696c733e3c42797465735363616e6e65643e383c2f42797465735363616e6e65643e3c427974657350726f6365737365643e383c2f427974657350726f6365737365643e3c427974657352657475726e65643e383c2f427974657352657475726e65643e3c2f44657461696c733e3c2f53746174733e217b407a0000003800000028c1c684d40d3a6d6573736167652d747970650700056576656e740b3a6576656e742d74797065070003456e64cf97d392"

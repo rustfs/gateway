@@ -13,6 +13,7 @@ ADRs; this map only selects files.
 | `src/runner.rs` | Case/exchange execution order and timeout coordination. | A case runs in the wrong order or never reaches a verdict. |
 | `src/expect.rs` | Expected observation matching. | A response, stream error or timing assertion is judged wrongly. |
 | `src/inprocess.rs` | In-process facade transport. | Hyper-independent execution differs from the socket path. |
+| `src/observation.rs` | Response and event-stream observations, including frame validation. | An event-stream case is classified incorrectly. |
 | `src/socket.rs` | Real socket transport and connection observations. | A wire-level close/reuse fact is wrong. |
 | `src/conn/` | Connection state and reusable transport helpers. | A multi-exchange case loses connection state. |
 | `src/sign.rs` | Request signing for corpus inputs. | A signed case sends the wrong request. |

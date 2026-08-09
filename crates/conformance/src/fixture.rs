@@ -111,15 +111,15 @@ use std::sync::{Arc, Mutex};
 use rustfs_gateway::dto;
 use rustfs_gateway::{
     AclHeaders, AclInput, AclRejection, AclTarget, BucketName, ByteStream, ChecksumAlgorithm, ChecksumSpec, ConditionalOutcome,
-    CopyRange, CopySourceRejection, CursorSpec, ETag, ErrorCode, ErrorDetail, GranteeType, Handler, HandlerError, HandlerResult,
-    IfRange, ObjectKey, ObjectValidators, PRECONDITION_FAILED_MESSAGE, PreconditionRejection, Preconditions, REGION_MATCH_POLICY,
-    RangeDecision, RangeSelectors, RegionLabel, RegionSet, Req, RequestKind, Resp, RestoreState, RestoreStatus, TagScope,
-    TaggingRejection, Timestamp, collect, evaluate, evaluate_range, format_restore_status, parse_conditional_etag,
-    parse_tagging_header, permanent_redirect_for, resolve_copy_range, resolve_grantee_type, resolve_input as resolve_acl_input,
-    resolve_location_constraint, validate_accelerate, validate_cors, validate_encryption, validate_legal_hold,
-    validate_lifecycle, validate_lock_configuration, validate_logging, validate_notification, validate_policy,
-    validate_public_access_block, validate_replication, validate_request_payment, validate_restore, validate_retention,
-    validate_select, validate_tag_set, validate_versioning, validate_website,
+    CopyRange, CopySourceRejection, CursorSpec, ETag, ErrorCode, ErrorDetail, EventSequence, GranteeType, Handler, HandlerError,
+    HandlerResult, IfRange, ObjectKey, ObjectValidators, PRECONDITION_FAILED_MESSAGE, PreconditionRejection, Preconditions,
+    REGION_MATCH_POLICY, RangeDecision, RangeSelectors, RegionLabel, RegionSet, Req, RequestKind, Resp, RestoreState,
+    RestoreStatus, TagScope, TaggingRejection, Timestamp, collect, evaluate, evaluate_range, format_restore_status,
+    parse_conditional_etag, parse_tagging_header, permanent_redirect_for, resolve_copy_range, resolve_grantee_type,
+    resolve_input as resolve_acl_input, resolve_location_constraint, stats_document, validate_accelerate, validate_cors,
+    validate_encryption, validate_legal_hold, validate_lifecycle, validate_lock_configuration, validate_logging,
+    validate_notification, validate_policy, validate_public_access_block, validate_replication, validate_request_payment,
+    validate_restore, validate_retention, validate_select, validate_tag_set, validate_versioning, validate_website,
 };
 
 /// The canonical user id every listing reports as the owner.
@@ -1805,14 +1805,6 @@ fn storage_class_header(object: &StoredObject) -> Option<dto::StorageClass> {
     }
     Some(dto::StorageClass::custom(object.storage_class.clone()))
 }
-
-/// What a select is told, once its request has been read and found well formed.
-///
-/// A constant, and deliberately explicit about which half is missing: "not implemented" on its
-/// own would read as "this operation is unavailable", when the request half of it works and only
-/// the framed answer does not exist yet.
-pub const SELECT_RESPONSE_NOT_IMPLEMENTED: &str =
-    "The select request was accepted and validated, but this backend cannot yet write an event-stream response";
 
 /// Refuses `?versionId` on a restore rather than retrieving the current version instead.
 ///
@@ -4527,19 +4519,12 @@ impl Stub {
         ))
     }
 
-    /// A select query, decoded and validated in full, and then refused.
+    /// A select query, decoded and validated in full, then answered as a framed event stream.
     ///
-    /// The refusal is the honest answer and the case corpus asserts it as one. A select's
-    /// response is a sequence of self-framed messages, which is a shape this crate's `Resp` does
-    /// not have; the framing itself is implemented and exported, and the plumbing that would put
-    /// it on a socket is not. So a well-formed query reaches this point and is told `501` — never
-    /// a bare `200`, which is what an unimplemented response half looks like when it is faked and
-    /// is indistinguishable to a client from a query that matched no rows.
-    ///
-    /// Everything before the refusal is real, and that is the part under test: the body was
-    /// parsed out of a document rooted at `SelectObjectContentRequest`, every member reached the
-    /// input, and [`validate_select`] refused the ones AWS documents as impossible — which is why
-    /// a malformed query answers its own `400` here rather than this `501`.
+    /// This fixture does not evaluate SQL: after validating the opaque expression and the input
+    /// and output descriptions, it emits the stored bytes as one `Records` event, the accounting,
+    /// and `End`. The response path under test is real — the handler returns [`Resp::event_stream`]
+    /// and the same assembled service used by ordinary operations writes it.
     fn select_object_content(&self, input: &dto::SelectObjectContentInput) -> HandlerResult<dto::SelectObjectContent> {
         let fixture = self.borrow()?;
         require_bucket(&fixture, &input.bucket)?;
@@ -4551,10 +4536,24 @@ impl Stub {
             input.scan_range.as_ref(),
         )
         .map_err(|rejection| HandlerError::new(rejection.code(), rejection.reason()))?;
-        if fixture.object(input.bucket.as_str(), input.key.as_str()).is_none() {
-            return Err(no_such_key(input.key.as_str()));
-        }
-        Err(HandlerError::new(ErrorCode::NOT_IMPLEMENTED, SELECT_RESPONSE_NOT_IMPLEMENTED))
+        let body = fixture
+            .object(input.bucket.as_str(), input.key.as_str())
+            .ok_or_else(|| no_such_key(input.key.as_str()))?
+            .body
+            .clone();
+        let count = body.len() as u64;
+        let mut frames = Vec::new();
+        let mut sequence = EventSequence::new();
+        sequence
+            .records(&body, &mut frames)
+            .map_err(|error| HandlerError::internal_error(error.message()))?;
+        sequence
+            .stats(&stats_document(count, count, count), &mut frames)
+            .map_err(|error| HandlerError::internal_error(error.message()))?;
+        sequence
+            .end(&mut frames)
+            .map_err(|error| HandlerError::internal_error(error.message()))?;
+        Ok(Resp::event_stream(ByteStream::from_bytes(bytes::Bytes::from(frames))))
     }
 
     /// Opens a multipart upload, and records the attributes only this request can state.

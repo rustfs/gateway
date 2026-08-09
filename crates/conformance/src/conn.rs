@@ -61,7 +61,10 @@ use std::time::Duration;
 
 use crate::inprocess::{ChunkStep, HOST, InProcess, Wire, clock_of, sign_request};
 use crate::interpolate::Captures;
-use crate::observation::{ConnectionState, Observation, Outcome, StreamTermination, late_error_offset};
+use crate::observation::{
+    ConnectionState, Observation, Outcome, StreamTermination, decode_event_stream, has_event_stream_content_type,
+    late_error_offset,
+};
 use crate::socket::{Announce, Connection, Demand, Listener, Pacer, ReadFailure, honour_the_services_intent, parse_head};
 use crate::sut::{ExchangePlan, Sut, SutError};
 use crate::value::Value;
@@ -364,10 +367,34 @@ impl Sut for Conn {
         let observation = match read {
             Ok(response) => {
                 let elapsed_ms = elapsed_ms(started);
-                let (outcome, termination, before_error) = match late_error_offset(response.status, &response.body) {
-                    None => (Outcome::Response, None, None),
-                    Some(offset) => (Outcome::StreamError, Some(StreamTermination::ErrorDocument), Some(offset)),
+                let (outcome, termination, before_error, events, event_note) = if has_event_stream_content_type(&response.headers)
+                {
+                    match decode_event_stream(&response.body) {
+                        Ok(events) => (Outcome::EventStream, None, None, events, None),
+                        Err(error) => (
+                            Outcome::StreamError,
+                            Some(StreamTermination::MalformedEventStream),
+                            None,
+                            Vec::new(),
+                            Some(format!("the event stream could not be decoded: {error}")),
+                        ),
+                    }
+                } else {
+                    match late_error_offset(response.status, &response.body) {
+                        None => (Outcome::Response, None, None, Vec::new(), None),
+                        Some(offset) => (
+                            Outcome::StreamError,
+                            Some(StreamTermination::ErrorDocument),
+                            Some(offset),
+                            Vec::new(),
+                            None,
+                        ),
+                    }
                 };
+                let mut notes = progress.notes;
+                if let Some(note) = event_note {
+                    notes.push(note);
+                }
                 Observation {
                     outcome,
                     stream_termination: termination,
@@ -382,8 +409,8 @@ impl Sut for Conn {
                     ttfb_ms: Some(ttfb_ms),
                     elapsed_ms,
                     connection_after: None,
-                    events: Vec::new(),
-                    notes: progress.notes,
+                    events,
+                    notes,
                 }
             }
             Err(ReadFailure::TimedOut) => Observation {
