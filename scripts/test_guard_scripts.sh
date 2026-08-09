@@ -61,10 +61,9 @@ make_sandbox() {
     if [[ -n "$SANDBOX" ]]; then
         (
             cd "$SANDBOX"
-            git checkout -- . >/dev/null 2>&1 || true
             git clean -fdq >/dev/null 2>&1 || true
+            git checkout -f HEAD -- . >/dev/null 2>&1
         )
-        printf '%s' "$SANDBOX"
         return
     fi
 
@@ -92,7 +91,6 @@ make_sandbox() {
         git -c user.name=t -c user.email=t@t commit -qm base >/dev/null 2>&1
     )
     SANDBOX="$dir"
-    printf '%s' "$dir"
 }
 
 cleanup_sandbox() {
@@ -113,7 +111,8 @@ expect_fail_unstaged() {
     local guard="$1" desc="$2" mutate="$3"
     local sandbox rc=0
     cases=$((cases + 1))
-    sandbox="$(make_sandbox)"
+    make_sandbox
+    sandbox="$SANDBOX"
     (cd "$sandbox" && "$mutate" >/dev/null)
     GATEWAY_CHECK_ROOT="$sandbox" "${SCRIPT_DIR}/${guard}" >/dev/null 2>&1 || rc=$?
     if [[ "$rc" -ne 0 ]]; then
@@ -129,7 +128,8 @@ expect_fail() {
     local guard="$1" desc="$2" mutate="$3"
     local sandbox rc=0
     cases=$((cases + 1))
-    sandbox="$(make_sandbox)"
+    make_sandbox
+    sandbox="$SANDBOX"
     (cd "$sandbox" && "$mutate" >/dev/null)
     (cd "$sandbox" && git add -A >/dev/null 2>&1)
     GATEWAY_CHECK_ROOT="$sandbox" "${SCRIPT_DIR}/${guard}" >/dev/null 2>&1 || rc=$?
