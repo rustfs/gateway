@@ -80,7 +80,9 @@ make_sandbox() {
     # whole tree. One sandbox is built per run and reset between cases, so the
     # 3.2 MB is paid once.
     list="$(mktemp "${TMPDIR:-/tmp}/gateway-guard-files.XXXXXX")"
-    (cd "$REPO_ROOT" && git ls-files) >"$list"
+    # Include new, unignored files: a guard introduced in the same change must be able to test its
+    # own inputs before the author stages them.
+    (cd "$REPO_ROOT" && { git ls-files; git ls-files --others --exclude-standard; } | sort -u) >"$list"
     (cd "$REPO_ROOT" && tar -cf - -T "$list") | (cd "$dir" && tar -xf -)
     rm -f "$list"
     (
@@ -480,15 +482,17 @@ expect_fail check_shared_reachable.sh \
 # -----------------------------------------------------------------------------
 # The route-coverage register has to move in both directions or it stops being a
 # measurement. Growing it silently is how `PUT /b/k?acl` came to write the ACL
-# document over the object; shrinking it silently is how a closed exposure keeps
-# being counted, and a count that only ever says 46 is a count nobody reads.
+# document over the object — the row at 560 has since retired that line, which is
+# why the mutation below names `RenameObject` instead; shrinking it silently is
+# how a closed exposure keeps being counted, and a count that only ever says the
+# same number is a count nobody reads.
 #
 # Both controls therefore mutate the register rather than the tree, because the
 # register is the artefact the guard exists to keep honest.
 # -----------------------------------------------------------------------------
 
 mut_forgotten_exposure() {
-    grep -v 'PutObjectAcl' scripts/allowances/route-coverage-allowances.txt >/tmp/rc-allow.$$
+    grep -v 'RenameObject' scripts/allowances/route-coverage-allowances.txt >/tmp/rc-allow.$$
     mv /tmp/rc-allow.$$ scripts/allowances/route-coverage-allowances.txt
 }
 expect_fail check_route_coverage.sh \
@@ -548,6 +552,493 @@ PYEOF
 }
 expect_fail check_case_keys_honoured.sh \
     'a DECLARED entry naming a field the schema dropped' mut_declaration_for_a_dropped_field
+
+# -----------------------------------------------------------------------------
+# check_resolver_pure.sh has four rules and each gets its own control, because
+# three of them are regexes over source text and the fourth is an awk field
+# extractor — every one of which turns into a no-op from a single typo. The
+# properties are worth this much: the resolver runs before authentication, so
+# "it cannot await", "it holds no store handle" and "it cannot see a forwarded
+# header" are the three sentences standing between an unauthenticated caller and
+# either an amplifier or a bucket of somebody else's choosing.
+# -----------------------------------------------------------------------------
+
+mut_async_resolver() {
+    perl -0pi -e 's/    fn resolve\(&self, query: &HostQuery/    async fn resolve(&self, query: &HostQuery/' \
+        crates/gateway/src/ext/vhost.rs
+}
+expect_fail check_resolver_pure.sh \
+    'a host resolver whose resolve() is async' mut_async_resolver
+
+mut_awaiting_resolver() {
+    perl -0pi -e 's/        let host = query\.host\.host_without_port\(\);/        let host = lookup(query).await;/' \
+        crates/gateway/src/ext/vhost.rs
+}
+expect_fail check_resolver_pure.sh \
+    'a host resolver that awaits' mut_awaiting_resolver
+
+mut_resolver_store_handle() {
+    perl -0pi -e 's/pub struct VirtualHostStyle \{/pub struct VirtualHostStyle {\n    buckets: std::sync::Arc<dyn BucketStore>,/' \
+        crates/gateway/src/ext/vhost.rs
+}
+expect_fail check_resolver_pure.sh \
+    'a resolver holding a store handle' mut_resolver_store_handle
+
+mut_forwarded_field_on_the_query() {
+    perl -0pi -e 's/    \/\/\/ The request method\.\n    pub method: &.a Method,/    \/\/\/ The request method.\n    pub method: &\x27a Method,\n    pub extra: &\x27a str,/' \
+        crates/gateway/src/ext/host.rs
+}
+expect_fail check_resolver_pure.sh \
+    'a field added to the resolver input surface' mut_forwarded_field_on_the_query
+
+mut_forwarded_header_read() {
+    perl -0pi -e 's/        let host = query\.host\.host_without_port\(\);/        let host = lookup("x-forwarded-host");/' \
+        crates/gateway/src/ext/vhost.rs
+}
+expect_fail check_resolver_pure.sh \
+    'a forwarded header named in resolver code' mut_forwarded_header_read
+
+mut_no_resolver_trait_file() {
+    rm -f crates/gateway/src/ext/host.rs
+}
+expect_fail check_resolver_pure.sh \
+    'the resolver trait file missing entirely (a guard whose input is gone must fail, not skip)' mut_no_resolver_trait_file
+
+# -----------------------------------------------------------------------------
+# check_single_normalization.sh has four rules and each one gets its own
+# negative control. The rule this file exists for is the second normalisation:
+# a guard that only catches a renamed function would have missed the one that
+# was actually here, which was a hand-rolled percent decoder in the conformance
+# fixture parsing x-amz-copy-source a second time.
+# -----------------------------------------------------------------------------
+
+mut_second_normalisation() {
+    printf '\nfn normalize_key(_s: &str) -> String { String::new() }\n' \
+        >>crates/core/src/codec/view.rs
+}
+expect_fail check_single_normalization.sh \
+    'a second normalize_key, which is how the two values start to differ' mut_second_normalisation
+
+mut_second_floor() {
+    printf '\nfn floor_check_key(_s: &str) -> Result<(), ()> { Ok(()) }\n' \
+        >>crates/core/src/codec/value.rs
+}
+expect_fail check_single_normalization.sh \
+    'a second floor_check_key, whose verdict would differ from the real one' mut_second_floor
+
+mut_unallowed_percent_decode() {
+    printf '\nfn again(s: &str) -> String {\n    percent_encoding::percent_decode_str(s).decode_utf8_lossy().into_owned()\n}\n' \
+        >>crates/gateway/src/wire.rs
+}
+expect_fail check_single_normalization.sh \
+    'a percent decoder in a file no allowance covers' mut_unallowed_percent_decode
+
+mut_object_key_deref() {
+    printf '\nimpl std::ops::Deref for ObjectKey {\n    type Target = str;\n    fn deref(&self) -> &str { &self.key }\n}\n' \
+        >>crates/types/src/scalar/name.rs
+}
+expect_fail check_single_normalization.sh \
+    'a Deref on ObjectKey, which hands the storage layer a &str to re-parse' mut_object_key_deref
+
+mut_lossy_in_scalar() {
+    printf '\nfn repair(b: &[u8]) -> String { String::from_utf8_lossy(b).into_owned() }\n' \
+        >>crates/types/src/scalar/naming.rs
+}
+expect_fail check_single_normalization.sh \
+    'a lossy decode in the scalar vocabulary, which merges two client inputs' mut_lossy_in_scalar
+
+mut_drop_percent_decode_allowances() {
+    rm -f scripts/allowances/percent-decode-allowances.txt
+}
+expect_fail check_single_normalization.sh \
+    'a missing allowance file, which must fail rather than skip' mut_drop_percent_decode_allowances
+
+# check_authz_consumption.sh guards the type transition, not a call-site convention. Each mutation
+# below compiles as plausible framework code and must still make the source guard fail.
+mut_dispatch_decoded() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/core/src/registry/handlers.rs")
+text = path.read_text()
+text = text.replace("authorized: Authorized<O>", "authorized: Decoded<O>", 1)
+path.write_text(text)
+PYEOF
+}
+expect_fail check_authz_consumption.sh \
+    'dispatch widened back to Decoded<O>' mut_dispatch_decoded
+
+mut_authorized_constructor() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/core/src/authz/mod.rs")
+text = path.read_text()
+needle = "impl<O: Operation> Authorized<O> {"
+text = text.replace(needle, needle + "\n    pub fn forge(input: O::Input, resources: O::DerivedResources, read: AuthorizedRead) -> Self { Self { input, resources, read } }", 1)
+path.write_text(text)
+PYEOF
+}
+expect_fail check_authz_consumption.sh \
+    'a public Authorized<O> constructor' mut_authorized_constructor
+
+mut_public_read_proof() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/core/src/authz/mod.rs")
+path.write_text(path.read_text().replace("    resources: Vec<OwnedResource>,", "    pub resources: Vec<OwnedResource>,", 1))
+PYEOF
+}
+expect_fail check_authz_consumption.sh \
+    'a publicly constructible AuthorizedRead proof' mut_public_read_proof
+
+mut_public_authorize_input() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/core/src/authz/mod.rs")
+path.write_text(path.read_text().replace("pub(crate) fn authorize_input", "pub fn authorize_input", 1))
+PYEOF
+}
+expect_fail check_authz_consumption.sh \
+    'a public function that can mint Authorized<O>' mut_public_authorize_input
+
+mut_public_erased_proof() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/core/src/registry/handlers.rs")
+path.write_text(path.read_text().replace("pub struct ErasedRequest(Box<dyn Any + Send>);", "pub struct ErasedRequest(pub Box<dyn Any + Send>);", 1))
+PYEOF
+}
+expect_fail check_authz_consumption.sh \
+    'a public erased authorization payload' mut_public_erased_proof
+# check_cors_credentials_exclusive.sh has four rules, and the fourth exists only to keep the third
+# from being defeated by an import. Each is mutated separately: a single case would leave three of
+# them as prose. GHSA-x5xv-223c-8vm7 is the advisory all four are about.
+
+mut_credentials_in_the_reflected_arm() {
+    python3 - <<'PYEOF'
+import pathlib
+path = pathlib.Path("crates/core/src/cors/answer.rs")
+text = path.read_text()
+# The refactor the guard exists to catch: the credentials writer folded into the function that
+# knows about the wildcard forms, with the reflected arm now able to reach it.
+text = text.replace(
+    "        AllowOrigin::Reflected(_) | AllowOrigin::Wildcard => None,",
+    "        AllowOrigin::Reflected(value) => Some((ACCESS_CONTROL_ALLOW_CREDENTIALS, HeaderValue::from_static(\"true\"))).filter(|_| !value.is_empty()),\n        AllowOrigin::Wildcard => None,",
+)
+path.write_text(text)
+PYEOF
+}
+expect_fail check_cors_credentials_exclusive.sh \
+    'the credentials header written from the reflected-origin arm' mut_credentials_in_the_reflected_arm
+
+mut_second_credentials_writer() {
+    python3 - <<'PYEOF'
+import pathlib
+path = pathlib.Path("crates/core/src/cors/answer.rs")
+text = path.read_text()
+text += """
+fn a_second_writer() -> (HeaderName, HeaderValue) {
+    (ACCESS_CONTROL_ALLOW_CREDENTIALS, HeaderValue::from_static("true"))
+}
+"""
+path.write_text(text)
+PYEOF
+}
+expect_fail check_cors_credentials_exclusive.sh \
+    'a second function writing the credentials header' mut_second_credentials_writer
+
+mut_credentials_written_elsewhere() {
+    python3 - <<'PYEOF'
+import pathlib
+path = pathlib.Path("crates/gateway/src/service.rs")
+text = path.read_text()
+text += """
+fn a_second_component_writing_credentials() -> &'static str {
+    "access-control-allow-credentials"
+}
+"""
+path.write_text(text)
+PYEOF
+}
+expect_fail check_cors_credentials_exclusive.sh \
+    'the credentials header written outside the one answer builder' mut_credentials_written_elsewhere
+
+mut_allow_origin_imported_unqualified() {
+    python3 - <<'PYEOF'
+import pathlib
+path = pathlib.Path("crates/core/src/cors/answer.rs")
+text = path.read_text()
+text = text.replace(
+    "use super::rule::{AllowOrigin, RuleMatch};",
+    "use super::rule::AllowOrigin::*;\nuse super::rule::{AllowOrigin, RuleMatch};",
+)
+path.write_text(text)
+PYEOF
+}
+expect_fail check_cors_credentials_exclusive.sh \
+    "AllowOrigin's variants imported unqualified, which would blind rule 3" mut_allow_origin_imported_unqualified
+
+mut_credentials_constant_renamed() {
+    python3 - <<'PYEOF'
+import pathlib
+# The guard's subject renamed out from under it. Rules 2 and 3 would then be checking nothing,
+# which must be a failure and not a pass.
+for name in ("crates/core/src/cors/answer.rs", "crates/core/src/cors/mod.rs", "crates/gateway/src/lib.rs"):
+    path = pathlib.Path(name)
+    path.write_text(path.read_text().replace("ACCESS_CONTROL_ALLOW_CREDENTIALS", "ALLOW_CREDS"))
+PYEOF
+}
+expect_fail check_cors_credentials_exclusive.sh \
+    'the credentials constant renamed, leaving the guard with nothing to check' mut_credentials_constant_renamed
+
+# -----------------------------------------------------------------------------
+# check_no_minio_source.sh
+#
+# The clean-room provenance guard. Rule 1 (AGPL licence text) is exemptable through
+# scripts/allowances/clean-room-allowances.txt, so it gets two cases: one for a file
+# that is not on the list, and one proving the list is read as a list of paths rather
+# than as a licence to say anything anywhere. Rules 2, 3 and 4 have no exemption.
+#
+# The licence text and the provenance sentence are written with byte escapes, the same
+# device the Chinese cases above use and for the same reason: spelling them literally
+# would make the guard flag this file, and allowing this file would then let real AGPL
+# text and a real port comment sit here unnoticed forever. `\x41` is `A` and `\x6f` is
+# `o`, so the strings reach the sandbox intact and are absent from this source.
+# -----------------------------------------------------------------------------
+
+mut_agpl_licence_text() {
+    printf '\n// Licensed under the GNU \x41FFERO GENERAL PUBLIC LICENSE Version 3\n' \
+        >>crates/core/src/dialect/overlay.rs
+}
+expect_fail check_no_minio_source.sh \
+    'AGPL licence text in a source file' mut_agpl_licence_text
+
+mut_agpl_in_unlisted_prose() {
+    printf 'This component is offered under \x41GPL-3.0.\n' >crates/core/PROVENANCE.md
+}
+expect_fail check_no_minio_source.sh \
+    'a file naming the AGPL that the allowance list does not carry' mut_agpl_in_unlisted_prose
+
+mut_port_provenance_comment() {
+    printf '\n// The ordering above was p\x6frted from the minio server bucket handler.\n' \
+        >>crates/core/src/dialect/mod.rs
+}
+expect_fail check_no_minio_source.sh \
+    'a comment giving the contents a MinIO-server origin' mut_port_provenance_comment
+
+mut_vendored_server_tree() {
+    mkdir -p vendor/github.com/minio/minio/cmd
+    printf 'package cmd\n' >vendor/github.com/minio/minio/cmd/api-router.go
+}
+expect_fail check_no_minio_source.sh \
+    'a vendored MinIO server tree' mut_vendored_server_tree
+
+mut_minio_submodule() {
+    printf '[submodule "minio"]\n\tpath = third_party/minio\n\turl = https://github.com/minio/minio.git\n' \
+        >.gitmodules
+}
+expect_fail check_no_minio_source.sh \
+    'the MinIO server declared as a git submodule' mut_minio_submodule
+
+mut_clean_room_allowance_widened() {
+    # The allowance list turned into a blanket permission. The guard reads it as a list of
+    # paths, so a glob is not a path and the offending file is still reported -- which is the
+    # behaviour under test: widening the list must not silence rule 1 for everything.
+    printf '*\n' >scripts/allowances/clean-room-allowances.txt
+    printf 'Offered under the \x41ffero General Public License.\n' >crates/core/PROVENANCE.md
+}
+expect_fail check_no_minio_source.sh \
+    'an allowance list widened to a glob, which is not a path' mut_clean_room_allowance_widened
+# check_stage_filter_sync.sh has four rules and each one gets its own negative
+# control, for the reason check_resolver_pure.sh's do: two of the three seams
+# run before the request has been authenticated, so "it cannot await", "it holds
+# no store handle", "there are exactly these three seams" and "it cannot reach
+# the method, the target or the routed bucket" are the four sentences standing
+# between a deployment's own rewrite and a pre-authentication storage read or a
+# forged signature input.
+# -----------------------------------------------------------------------------
+
+mut_async_seam() {
+    perl -0pi -e 's/    fn on_wire\(&self, _head: &mut WireHead/    async fn on_wire(&self, _head: &mut WireHead/' \
+        crates/gateway/src/ext/filter.rs
+}
+expect_fail check_stage_filter_sync.sh \
+    'a StageFilter seam declared async' mut_async_seam
+
+mut_awaiting_filter() {
+    perl -0pi -e 's/        \(\*\*self\)\.on_wire\(head\)/        lookup().await;\n        (**self).on_wire(head)/' \
+        crates/gateway/src/ext/filter.rs
+}
+expect_fail check_stage_filter_sync.sh \
+    'a StageFilter implementation that awaits' mut_awaiting_filter
+
+mut_filter_store_handle() {
+    perl -0pi -e 's/pub struct WireHead<.a> \{/pub struct WireHead<\x27a> {\n    buckets: std::sync::Arc<dyn BucketStore>,/' \
+        crates/gateway/src/ext/filter.rs
+}
+expect_fail check_stage_filter_sync.sh \
+    'a store handle in a guarded StageFilter file' mut_filter_store_handle
+
+mut_fourth_seam() {
+    perl -0pi -e 's/    fn on_routed\(&self, _routed: &RoutedView/    fn on_body(&self, _routed: &RoutedView<\x27_>) -> Result<\(\), S3Error> {\n        Ok\(\(\)\)\n    }\n\n    fn on_routed(&self, _routed: &RoutedView/' \
+        crates/gateway/src/ext/filter.rs
+}
+expect_fail check_stage_filter_sync.sh \
+    'a fourth seam added to the trait without an argument for it' mut_fourth_seam
+
+mut_writable_routed_view() {
+    perl -0pi -e 's/    \/\/\/ The bucket, from the one place a bucket is produced\./    pub fn bucket_mut(&mut self) -> Option<&mut BucketName> {\n        None\n    }\n\n    \/\/\/ The bucket, from the one place a bucket is produced./' \
+        crates/gateway/src/ext/filter.rs
+}
+expect_fail check_stage_filter_sync.sh \
+    'a mutable accessor on RoutedView, which would be a second producer of the target' mut_writable_routed_view
+
+mut_head_target_setter() {
+    perl -0pi -e 's/    \/\/\/ The frozen check, in one place/    pub fn set_path(&mut self, _path: \&str) {}\n\n    \/\/\/ The frozen check, in one place/' \
+        crates/gateway/src/ext/filter.rs
+}
+expect_fail check_stage_filter_sync.sh \
+    'a request-target setter on WireHead, which the frozen header snapshot does not cover' mut_head_target_setter
+
+mut_no_filter_trait_file() {
+    rm -f crates/gateway/src/ext/filter.rs
+}
+expect_fail check_stage_filter_sync.sh \
+    'the StageFilter trait file missing entirely (a guard whose input is gone must fail, not skip)' mut_no_filter_trait_file
+
+# -----------------------------------------------------------------------------
+# check_patch_layer_map.sh is checked in both directions plus the count, because
+# the failure it exists to prevent is silent: a renamed test leaves the table
+# saying what it said, and the table is what P10-06 deletes nine tower layers
+# against.
+# -----------------------------------------------------------------------------
+
+mut_orphan_table_row() {
+    perl -0pi -e 's/`bodyless_status_fix_is_the_response_invariant`/`bodyless_status_fix_renamed_away`/' \
+        docs/middleware.md
+}
+expect_fail check_patch_layer_map.sh \
+    'a table row naming a test that does not exist' mut_orphan_table_row
+
+mut_orphan_test() {
+    printf '\n/// A landing with no row.\n#[test]\nfn a_tenth_landing_nobody_wrote_down() {}\n' \
+        >>crates/gateway/tests/patch_layer_landings.rs
+}
+expect_fail check_patch_layer_map.sh \
+    'a landing test with no row in the table' mut_orphan_test
+
+mut_deleted_table_row() {
+    perl -0ni -e 's/^\| 3 \|.*\n//m; print' docs/middleware.md
+}
+expect_fail check_patch_layer_map.sh \
+    'a landing row deleted, leaving eight layers accounted for out of nine' mut_deleted_table_row
+
+mut_no_landing_test_file() {
+    rm -f crates/gateway/tests/patch_layer_landings.rs
+}
+expect_fail check_patch_layer_map.sh \
+    'the landings file missing entirely (a guard whose input is gone must fail, not skip)' mut_no_landing_test_file
+# check_sse_key_never_leaks.sh has five rules over the SSE-C customer key, plus the missing-input
+# rule every guard owes. Each is mutated separately: one case would leave four of them as prose.
+# rustfs/backlog#1751 is the task all six are about, and GHSA-8cm2-h255-v749 is what a key in a log
+# line looks like once it has happened.
+
+mut_sse_key_bound_as_an_output() {
+    python3 - <<'SSEPY'
+import pathlib
+path = pathlib.Path("spec/operations/PutObject.toml")
+# The generated encoder that would write the key onto the response, spelled the way the emitter
+# spells one.
+path.write_text(path.read_text() + """
+[[output]]
+name = "SSECustomerKey"
+wire_name = "x-amz-server-side-encryption-customer-key"
+binding = "Header"
+type = "String"
+required = false
+hot = false
+quirks = []
+""")
+SSEPY
+}
+expect_fail check_sse_key_never_leaks.sh \
+    'an operation output binding the customer key header' mut_sse_key_bound_as_an_output
+
+mut_sse_copy_source_key_dropped_from_the_list() {
+    python3 - <<'SSEPY'
+import pathlib
+path = pathlib.Path("crates/core/src/sse/headers.rs")
+# The half of the list nobody looks at: a CopyObject's source-side key.
+path.write_text(path.read_text().replace(
+    "pub const NEVER_IN_A_RESPONSE: &[&str] = &[SSEC_KEY, COPY_SSEC_KEY];",
+    "pub const NEVER_IN_A_RESPONSE: &[&str] = &[SSEC_KEY];",
+))
+SSEPY
+}
+expect_fail check_sse_key_never_leaks.sh \
+    'the copy-source key dropped from the never-echoed list' mut_sse_copy_source_key_dropped_from_the_list
+
+mut_sse_response_strip_removed() {
+    python3 - <<'SSEPY'
+import pathlib
+path = pathlib.Path("crates/gateway/src/invariants.rs")
+# The strip deleted from the one place every response passes through.
+path.write_text(path.read_text().replace(
+    "    for name in rustfs_gateway_core::sse::NEVER_IN_A_RESPONSE {",
+    "    for name in [] as [&str; 0] {",
+))
+SSEPY
+}
+expect_fail check_sse_key_never_leaks.sh \
+    'the response invariant no longer stripping the customer-key headers' mut_sse_response_strip_removed
+
+mut_sse_second_expose_call_site() {
+    python3 - <<'SSEPY'
+import pathlib
+path = pathlib.Path("crates/core/src/sse/mod.rs")
+path.write_text(path.read_text() + """
+fn a_second_reader(text: &headers::KeyText<'_>) -> usize {
+    text.expose().len()
+}
+""")
+SSEPY
+}
+expect_fail check_sse_key_never_leaks.sh \
+    'a second reader of the customer key text' mut_sse_second_expose_call_site
+
+mut_sse_second_choice_to_bool() {
+    python3 - <<'SSEPY'
+import pathlib
+path = pathlib.Path("crates/core/src/sse/consistency.rs")
+path.write_text(path.read_text() + """
+fn a_second_escape_hatch(choice: subtle::Choice) -> bool {
+    bool::from(choice)
+}
+""")
+SSEPY
+}
+expect_fail check_sse_key_never_leaks.sh \
+    'a second subtle::Choice-to-bool conversion in the SSE module' mut_sse_second_choice_to_bool
+
+mut_sse_key_in_a_log_line() {
+    python3 - <<'SSEPY'
+import pathlib
+path = pathlib.Path("crates/gateway/src/service.rs")
+path.write_text(path.read_text() + """
+fn an_operator_friendly_diagnostic(customer_key: &str) -> String {
+    format!("rejected the customer_key {customer_key}")
+}
+""")
+SSEPY
+}
+expect_fail check_sse_key_never_leaks.sh \
+    'a formatting macro naming the customer key' mut_sse_key_in_a_log_line
+
+mut_sse_headers_module_deleted() {
+    rm -f crates/core/src/sse/headers.rs
+}
+expect_fail check_sse_key_never_leaks.sh \
+    "the guard's own subject deleted, which must fail rather than skip" mut_sse_headers_module_deleted
+
 
 printf '\n%s case(s), %s failure(s)\n' "$cases" "$failures"
 [[ "$failures" -eq 0 ]]

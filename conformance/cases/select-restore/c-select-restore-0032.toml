@@ -1,0 +1,49 @@
+[case]
+id = "c-select-restore-0032"
+schema_version = 1
+title = "A select body rooted at the wrong element is MalformedXML even when every member is there"
+rationale = """
+This is the only request in the supported surface whose XML members sit at operation level rather than inside a payload structure, so the root is the input shape's own name and there is no wrapper to fall back on. The document below is complete — expression, type and both serializations — so the refusal can only come from the root check: a decoder that accepted any root would read this as a valid query and answer the deferral instead. An earlier version of this case omitted two members, which made it pass against a decoder with no root check at all."""
+polarity = "negative"
+operation = "SelectObjectContent"
+tags = ["select", "xml"]
+timeout_ms = 10000
+quirks = ["q-select-0008"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_SelectObjectContent.html"
+summary = "The documented request syntax roots the body at a SelectObjectContentRequest element."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "conf-select"
+
+[[setup.objects]]
+bucket = "conf-select"
+key = "rows.csv"
+body = { utf8 = "a,b\n1,2\n" }
+
+[request]
+method = "POST"
+target = "/conf-select/rows.csv?select&select-type=2"
+headers = { "content-type" = "application/xml" }
+body = { utf8 = '<SelectRequest><Expression>SELECT * FROM S3Object</Expression><ExpressionType>SQL</ExpressionType><InputSerialization><CSV></CSV></InputSerialization><OutputSerialization><CSV></CSV></OutputSerialization></SelectRequest>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+code = "MalformedXML"
+request_id_present = true
+
+[expect.headers_present]
+"content-type" = "application/xml"
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>MalformedXML</Code><Message>the request body has the wrong root element</Message><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''

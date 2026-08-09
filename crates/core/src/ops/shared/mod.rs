@@ -34,14 +34,23 @@
 //! being listed is a member nobody knew about, and it is the one that will be broken by the next
 //! change to the shared rule.
 
+pub mod acl;
+pub mod bucket_config;
+pub mod bucket_notification;
+pub mod bucket_policy;
 pub mod bucket_region;
+pub mod bucket_website;
 pub mod copy_source;
 pub mod cors;
 pub mod encryption;
 pub mod etag;
+pub mod event_stream;
 pub mod lifecycle;
 pub mod location_constraint;
 pub mod object_lock;
 pub mod pagination;
 pub mod precondition;
+pub mod replication;
+pub mod restore;
+pub mod select;
 pub mod tagging;

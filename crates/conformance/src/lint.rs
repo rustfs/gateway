@@ -54,8 +54,12 @@ pub const TAG_VOCABULARY: &[&str] = &[
     "range",
     "encoding",
     "cors",
+    "preflight",
     "encryption",
+    "sse",
     "lifecycle",
+    "replication",
+    "bucketconfig",
     "region",
     "security",
     "dos",
@@ -68,6 +72,10 @@ pub const TAG_VOCABULARY: &[&str] = &[
     "known-divergence",
     "tagging",
     "object-lock",
+    "restore",
+    "select",
+    "acl",
+    "naming",
     "slow",
 ];
 

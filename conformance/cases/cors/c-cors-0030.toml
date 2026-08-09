@@ -1,0 +1,56 @@
+[case]
+id = "c-cors-0030"
+schema_version = 1
+title = "A partial wildcard answers the concrete Origin and never the literal star"
+rationale = """
+This is the fork the advisory turns on. Answering `*` for a rule that says https://*.example.com would widen it from
+one operator's subdomains to every origin on the internet, and the widening is invisible: the browser accepts the
+answer either way. The case pins the concrete origin in the header and the star out of it, so the wrong choice is
+two red assertions rather than a silent policy change."""
+polarity = "positive"
+tags = ["cors", "preflight", "security"]
+timeout_ms = 10000
+quirks = ["q-cors-0010"]
+
+[[case.evidence]]
+url = "https://github.com/rustfs/rustfs/security/advisories/GHSA-x5xv-223c-8vm7"
+summary = "RustFS reflected an arbitrary Origin alongside a credentials allowance, which lets any site read a user's data."
+kind = "other"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CORSRule.html"
+summary = "The rule members a preflight answer is built from: allowed methods, allowed headers, expose headers and max age."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "conf-cors-rt"
+
+[[exchanges]]
+# Setup traffic: the document the preflight below is answered from. Not under test.
+[exchanges.request]
+method = "PUT"
+target = "/conf-cors-rt?cors"
+headers = { "content-type" = "application/xml", "content-md5" = "Wdmv/UN7dhcpsJ85Olv8Kw==" }
+body = { utf8 = "<CORSConfiguration><CORSRule><AllowedMethod>GET</AllowedMethod><AllowedOrigin>https://*.example.com</AllowedOrigin></CORSRule></CORSConfiguration>" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+
+[[exchanges]]
+[exchanges.request]
+method = "OPTIONS"
+target = "/conf-cors-rt/key.txt"
+headers = { "origin" = "https://app.example.com", "access-control-request-method" = "GET" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+# The reflected form and the credentials allowance may never appear together, and this is the
+# reflected form.
+headers_absent = ["access-control-allow-credentials"]
+
+[exchanges.expect.headers_present]
+"access-control-allow-origin" = "https://app.example.com"
+"vary" = "origin"

@@ -1,0 +1,32 @@
+[case]
+id = "c-authz-0005"
+schema_version = 1
+title = "Both authorization stages receive one policy and clock snapshot"
+rationale = "The case-specific authorizer denies if the route and source stages observe different snapshot identities or times."
+polarity = "positive"
+operation = "CopyObject"
+tags = ["security", "timing"]
+timeout_ms = 10000
+quirks = ["q-copy-source-authz-0086"]
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CopyObject.html"
+summary = "One copy request needs consistent destination and source authorization decisions."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "authz-snapshot"
+[[setup.objects]]
+bucket = "authz-snapshot"
+key = "source"
+body = { utf8 = "secret" }
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+[request]
+method = "PUT"
+target = "/authz-snapshot/destination"
+headers = { "x-amz-copy-source" = "/authz-snapshot/source" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+[expect]
+kind = "response"
+status = 200

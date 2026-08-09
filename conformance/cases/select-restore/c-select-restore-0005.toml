@@ -1,0 +1,70 @@
+[case]
+id = "c-select-restore-0005"
+schema_version = 1
+title = "A finished retrieval reports both pairs of x-amz-restore, byte for byte"
+rationale = """
+The second spelling is the one with a grammar inside a grammar: two quoted values, a comma and exactly one space between them, and an RFC 1123 date whose own text contains a comma and a space. A renderer that used a different separator, and a parser that split on the one inside the date, are both invisible to any assertion weaker than the bytes. The expiry is a function of the clock this case pins."""
+polarity = "positive"
+operation = "HeadObject"
+tags = ["restore", "wire-bytes"]
+timeout_ms = 10000
+quirks = ["q-restore-0002"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_HeadObject.html#API_HeadObject_ResponseSyntax"
+summary = "The head response documents ongoing-request followed by expiry-date, each value in double quotes."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9110.html#section-5.6.7"
+summary = "The embedded date is the IMF-fixdate form HTTP fixes for every date it carries."
+kind = "rfc"
+[[setup.buckets]]
+name = "conf-restore"
+
+[[setup.objects]]
+bucket = "conf-restore"
+key = "cold.txt"
+body = { utf8 = "archived payload" }
+storage_class = "GLACIER"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+request_time = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = true
+
+[[exchanges]]
+name = "initiate-expedited"
+
+[exchanges.request]
+method = "POST"
+target = "/conf-restore/cold.txt?restore"
+headers = { "content-type" = "application/xml" }
+body = { utf8 = '<RestoreRequest><Days>1</Days><GlacierJobParameters><Tier>Expedited</Tier></GlacierJobParameters></RestoreRequest>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 202
+connection_after = "open"
+
+[exchanges.expect.body]
+size = 0
+
+[[exchanges]]
+name = "head-when-back"
+
+[exchanges.request]
+method = "HEAD"
+target = "/conf-restore/cold.txt"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.headers_present]
+"x-amz-restore" = 'ongoing-request="false", expiry-date="Sat, 03 Jan 2026 03:04:05 GMT"'

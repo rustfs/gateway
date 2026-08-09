@@ -1,0 +1,57 @@
+[case]
+id = "c-bucketconfig-0058"
+schema_version = 1
+title = "A logging grantee reads back with xsi:type as an attribute, not as a child element"
+rationale = """
+`<TargetGrants>` reaches the ACL family's `Grantee` through the logging document, which makes this family the second producer of that element in the tree — and the one with no case over it until now. The discriminator is an XML attribute, and the wrong spelling is not a cosmetic difference: a `<xsi:type>` child element is the shape upstream shipped and no Java SDK parses. It is asserted here byte for byte because nothing else would notice: the element name, the children and the permission are identical either way, and only the attribute moves.
+
+The reader is the other half. This project's XML reader exposes no attributes, so a decoded grantee arrives with its type unset; the backend derives it from the identifying member the grantee does carry, using the ACL family's own derivation rather than a second one. Sending the attribute and getting it back is what proves the round trip closes — an implementation that dropped the type on the way in would answer a `<Grantee>` with no discriminator and pass every assertion that reads only the URI."""
+polarity = "positive"
+operation = "PutBucketLogging"
+tags = ["bucketconfig", "acl", "xml", "wire-bytes"]
+timeout_ms = 10000
+quirks = ["q-log-0003"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketLogging.html"
+summary = "The documented request syntax nests Grant elements inside TargetGrants and spells the grantee's kind as an xsi:type attribute on the Grantee element."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/pull/297"
+summary = "Upstream emitted the grantee discriminator as a child element rather than as an attribute, and SDKs refused the resulting document."
+kind = "s3s-pr"
+
+
+[[setup.buckets]]
+name = "conf-bucketconfig"
+[[exchanges]]
+name = "write"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-bucketconfig?logging"
+headers = { "content-md5" = "qVYsUeWBbfxwcqolA3RALA==", "content-type" = "application/xml" }
+body = { utf8 = '<BucketLoggingStatus><LoggingEnabled><TargetBucket>conf-log-target</TargetBucket><TargetPrefix>access/</TargetPrefix><TargetGrants><Grant><Grantee xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:type="Group"><URI>http://acs.amazonaws.com/groups/s3/LogDelivery</URI></Grantee><Permission>WRITE</Permission></Grant></TargetGrants></LoggingEnabled></BucketLoggingStatus>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[[exchanges]]
+name = "read-back"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-bucketconfig?logging"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.body]
+golden = "goldens/c-bucketconfig-0058.xml"

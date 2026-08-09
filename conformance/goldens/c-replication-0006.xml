@@ -1,0 +1,2 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ReplicationConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Role>arn:aws:iam::111122223333:role/replication-role</Role><Rule><Priority>1</Priority><Filter><Prefix>docs/</Prefix></Filter><Status>Enabled</Status><Destination><Bucket>arn:aws:s3:::replica-bucket</Bucket><Account>111122223333</Account><StorageClass>STANDARD_IA</StorageClass></Destination><DeleteMarkerReplication><Status>Disabled</Status></DeleteMarkerReplication></Rule></ReplicationConfiguration>

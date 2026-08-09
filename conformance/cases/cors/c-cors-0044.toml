@@ -1,0 +1,63 @@
+[case]
+id = "c-cors-0044"
+schema_version = 1
+title = "An ordinary GET from an origin no rule names is served with no CORS header at all"
+rationale = """
+The fail-closed direction of the actual-response path. The request itself is legitimate and signed, so refusing it
+would be wrong; what must not happen is an allow-origin header, because that is the entire mechanism by which the
+browser decides the page may read the bytes. Serving the object and withholding the header is the only correct
+answer, and it is the one an implementation gets wrong by defaulting the header to the request's Origin."""
+polarity = "negative"
+tags = ["cors", "security"]
+timeout_ms = 10000
+quirks = ["q-cors-0011"]
+
+[[case.evidence]]
+url = "https://fetch.spec.whatwg.org/#http-cors-protocol"
+summary = "The preflight and its answer are defined here, including which response header a browser reads from which response."
+kind = "rfc"
+
+[[case.evidence]]
+url = "https://github.com/rustfs/rustfs/security/advisories/GHSA-x5xv-223c-8vm7"
+summary = "RustFS reflected an arbitrary Origin alongside a credentials allowance, which lets any site read a user's data."
+kind = "other"
+
+[[setup.buckets]]
+name = "conf-cors-rt"
+
+[[setup.objects]]
+bucket = "conf-cors-rt"
+key = "key.txt"
+body = { utf8 = "hello" }
+
+[[exchanges]]
+# Setup traffic: the document the preflight below is answered from. Not under test.
+[exchanges.request]
+method = "PUT"
+target = "/conf-cors-rt?cors"
+headers = { "content-type" = "application/xml", "content-md5" = "rAqMzbtniOyp6dCmIWiViw==" }
+body = { utf8 = "<CORSConfiguration><CORSRule><AllowedMethod>PUT</AllowedMethod><AllowedOrigin>https://app.example.com</AllowedOrigin></CORSRule></CORSConfiguration>" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+
+[[exchanges]]
+[exchanges.request]
+method = "GET"
+target = "/conf-cors-rt/key.txt"
+headers = { "origin" = "https://evil.invalid" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+headers_absent = [
+  "access-control-allow-origin",
+  "access-control-allow-credentials",
+  "access-control-expose-headers",
+]
+
+[exchanges.expect.body]
+exact_utf8 = "hello"

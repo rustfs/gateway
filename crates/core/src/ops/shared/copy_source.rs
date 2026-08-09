@@ -38,11 +38,10 @@
 //!
 //! The rejected alternative was a `check_source_permission()` call in each handler. It has no type
 //! relationship to anything, so omitting it compiles, and both advisories are exactly that
-//! omission. Here [`CopySource`] holds its bucket and key privately and the only way out is
-//! [`CopySource::resolve`], which takes a [`SourceAuthorized`] that only [`authorize_source`] can
-//! produce. A handler that forgets the stage does not compile; a handler that authorizes a
-//! *different* source than it resolves is refused at run time, because the proof carries the
-//! resource it was issued for.
+//! omission. Here [`CopySourceResources`] is derived before input authorization, dispatch accepts
+//! only [`crate::Authorized`], and [`CopySource::resolve`] requires the [`crate::AuthorizedRead`]
+//! proof carried by the resulting handler request. The normalized value policy saw is the value
+//! storage receives.
 //!
 //! # Why the version suffix is split before anything is decoded
 //!
@@ -104,106 +103,39 @@ impl CopySourceRejection {
 /// a resource nobody can read is a resource nobody can authorize. What stays unreadable is
 /// [`ResolvedCopySource`], the value the copy itself is performed against.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SourceResource {
+struct SourceResource {
     form: CopySourceForm,
     /// The access point name, or the Outposts bucket's outpost id. `None` for the path form.
     container: Option<String>,
+    identity: crate::ResourceIdentity,
     bucket: BucketName,
     key: ObjectKey,
     version_id: Option<String>,
 }
 
 impl SourceResource {
-    /// The grammar the value was written in.
-    #[must_use]
-    pub const fn form(&self) -> CopySourceForm {
-        self.form
-    }
-
     /// The access point name or outpost id an ARN named, when there was one.
+    #[cfg(test)]
     #[must_use]
-    pub fn container(&self) -> Option<&str> {
+    fn container(&self) -> Option<&str> {
         self.container.as_deref()
     }
 
     /// The source bucket.
+    #[cfg(test)]
     #[must_use]
-    pub const fn bucket(&self) -> &BucketName {
+    const fn bucket(&self) -> &BucketName {
         &self.bucket
-    }
-
-    /// The source key, decoded exactly once and never normalised.
-    #[must_use]
-    pub const fn key(&self) -> &ObjectKey {
-        &self.key
-    }
-
-    /// The requested source version, when the header carried one.
-    #[must_use]
-    pub fn version_id(&self) -> Option<&str> {
-        self.version_id.as_deref()
-    }
-}
-
-/// The verdict an authorizer reached about a [`SourceResource`].
-///
-/// An explicit two-valued answer rather than a `bool`, so that the one call site which converts a
-/// policy decision into a proof reads as a decision and can be found by name.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum SourceAccess {
-    /// The caller may read the source object.
-    Granted,
-    /// The caller may not. `s3:GetObject` on the source is missing.
-    Denied,
-}
-
-/// Proof that the source-read stage ran and granted access to one particular resource.
-///
-/// Constructible only by [`authorize_source`]. It carries the resource it was issued for, so a
-/// handler cannot authorize the source it was cheapest to authorize and then resolve another.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SourceAuthorized {
-    resource: SourceResource,
-}
-
-impl SourceAuthorized {
-    /// The resource this proof was issued for.
-    #[must_use]
-    pub const fn resource(&self) -> &SourceResource {
-        &self.resource
-    }
-}
-
-/// Turns an authorizer's verdict about the source into the proof [`CopySource::resolve`] demands.
-///
-/// This is the whole second stage. It is a function rather than a method so that `grep
-/// authorize_source` finds every copy operation in the tree, and it takes the verdict rather than
-/// computing it because nothing in this crate may consult a policy.
-///
-/// # Errors
-///
-/// Returns a [`CopySourceRejection`] carrying `AccessDenied` when the verdict is
-/// [`SourceAccess::Denied`]. The refusal names no bucket and no key: a copy that reports *which*
-/// source was denied is an existence oracle over every bucket in the deployment.
-pub fn authorize_source(resource: &SourceResource, access: SourceAccess) -> Result<SourceAuthorized, CopySourceRejection> {
-    match access {
-        SourceAccess::Granted => Ok(SourceAuthorized {
-            resource: resource.clone(),
-        }),
-        SourceAccess::Denied => Err(CopySourceRejection::new(
-            ErrorCode::ACCESS_DENIED,
-            "the caller may not read the copy source",
-        )),
     }
 }
 
 /// A parsed but unauthorized copy source.
 ///
-/// The bucket and the key are private and there is no accessor for them. [`CopySource::resource`]
+/// The bucket and the key are private and there is no accessor for them. The derived resource view
 /// hands the authorizer what it needs; [`CopySource::resolve`] is the only way to the value a copy
 /// can be performed against, and it consumes `self` so the unauthorized form cannot be kept around
 /// beside the authorized one.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct CopySource {
     resource: SourceResource,
 }
@@ -221,7 +153,7 @@ impl CopySource {
     /// not UTF-8, and any ARN that is neither of the two S3 forms. An unrecognised ARN is never
     /// demoted to a bucket name: `arn:aws:iam::1:user/bob` would otherwise address a bucket
     /// literally called `arn:aws:iam::1:user`.
-    pub fn parse(raw: &str) -> Result<Self, CopySourceRejection> {
+    pub(crate) fn parse(raw: &str) -> Result<Self, CopySourceRejection> {
         if raw.is_empty() {
             return Err(CopySourceRejection::new(
                 ErrorCode::INVALID_ARGUMENT,
@@ -248,28 +180,60 @@ impl CopySource {
         self.resource.form
     }
 
-    /// What the authorization stage is given. See [`authorize_source`].
+    /// Reveals the normalized source only after the framework authorized every derived resource.
     #[must_use]
-    pub const fn resource(&self) -> &SourceResource {
-        &self.resource
+    pub fn resolve(&self, proof: &crate::AuthorizedRead) -> Option<ResolvedCopySource> {
+        proof
+            .permits(crate::ResourceRef::copy_source(
+                if self.resource.version_id.is_some() {
+                    "s3:GetObjectVersion"
+                } else {
+                    "s3:GetObject"
+                },
+                &self.resource.bucket,
+                &self.resource.key,
+                &self.resource.identity,
+                self.resource.version_id.as_deref(),
+            ))
+            .then(|| ResolvedCopySource {
+                resource: self.resource.clone(),
+            })
+    }
+}
+
+/// The single normalized source resource derived by either copy operation.
+#[derive(Clone, PartialEq, Eq)]
+pub struct CopySourceResources {
+    source: CopySource,
+}
+
+impl CopySourceResources {
+    pub(crate) fn parse(raw: &str) -> Result<Self, crate::DerivedResourceError> {
+        CopySource::parse(raw)
+            .map(|source| Self { source })
+            .map_err(|error| crate::DerivedResourceError::new(error.code().clone(), error.reason()))
     }
 
-    /// Exchanges a proof for the readable source.
-    ///
-    /// # Errors
-    ///
-    /// Returns a [`CopySourceRejection`] carrying `AccessDenied` when the proof was issued for a
-    /// different resource. That is a programming error rather than a hostile request, and it fails
-    /// closed for the same reason the type exists: the alternative is a copy performed against a
-    /// source nobody authorized.
-    pub fn resolve(self, proof: &SourceAuthorized) -> Result<ResolvedCopySource, CopySourceRejection> {
-        if proof.resource != self.resource {
-            return Err(CopySourceRejection::new(
-                ErrorCode::ACCESS_DENIED,
-                "the source authorization was issued for a different resource",
-            ));
-        }
-        Ok(ResolvedCopySource { resource: self.resource })
+    /// The sealed source. Its bucket and key require [`crate::AuthorizedRead`] to reveal.
+    #[must_use]
+    pub const fn source(&self) -> &CopySource {
+        &self.source
+    }
+}
+
+impl crate::DerivedResourceSet for CopySourceResources {
+    fn visit(&self, visitor: &mut dyn FnMut(crate::ResourceRef<'_>)) {
+        visitor(crate::ResourceRef::copy_source(
+            if self.source.resource.version_id.is_some() {
+                "s3:GetObjectVersion"
+            } else {
+                "s3:GetObject"
+            },
+            &self.source.resource.bucket,
+            &self.source.resource.key,
+            &self.source.resource.identity,
+            self.source.resource.version_id.as_deref(),
+        ));
     }
 }
 
@@ -512,6 +476,7 @@ fn parse_path(path: &str) -> Result<SourceResource, CopySourceRejection> {
     Ok(SourceResource {
         form: CopySourceForm::Path,
         container: None,
+        identity: crate::ResourceIdentity::Path,
         bucket: bucket_of(&decode(bucket)?)?,
         key: key_of(key)?,
         version_id: None,
@@ -523,7 +488,7 @@ fn parse_arn(path: &str) -> Result<SourceResource, CopySourceRejection> {
     // arn : partition : service : region : account : resource…, where the resource half itself
     // contains colons in neither form, so five splits is the whole grammar.
     let mut parts = path.splitn(6, ':');
-    let (Some(_arn), Some(_partition), Some(service), Some(_region), Some(_account), Some(resource)) =
+    let (Some(_arn), Some(partition), Some(service), Some(region), Some(account), Some(resource)) =
         (parts.next(), parts.next(), parts.next(), parts.next(), parts.next(), parts.next())
     else {
         return Err(unknown_arn());
@@ -536,6 +501,12 @@ fn parse_arn(path: &str) -> Result<SourceResource, CopySourceRejection> {
             Ok(SourceResource {
                 form: CopySourceForm::AccessPointArn,
                 container: Some(non_empty(name)?.to_owned()),
+                identity: crate::ResourceIdentity::AccessPoint {
+                    partition: non_empty(partition)?.to_owned(),
+                    region: non_empty(region)?.to_owned(),
+                    account: non_empty(account)?.to_owned(),
+                    name: non_empty(name)?.to_owned(),
+                },
                 // An access point is addressed by name; the bucket behind it is resolved by the
                 // control plane, so the name is what an authorizer writes its resource against and
                 // what stands in for the bucket until then.
@@ -551,6 +522,12 @@ fn parse_arn(path: &str) -> Result<SourceResource, CopySourceRejection> {
             Ok(SourceResource {
                 form: CopySourceForm::OutpostsArn,
                 container: Some(non_empty(outpost)?.to_owned()),
+                identity: crate::ResourceIdentity::Outposts {
+                    partition: non_empty(partition)?.to_owned(),
+                    region: non_empty(region)?.to_owned(),
+                    account: non_empty(account)?.to_owned(),
+                    outpost_id: non_empty(outpost)?.to_owned(),
+                },
                 bucket: bucket_of(bucket)?,
                 key: key_of(key)?,
                 version_id: None,
@@ -576,14 +553,45 @@ fn decode(value: &str) -> Result<String, CopySourceRejection> {
         .map_err(|_| CopySourceRejection::new(ErrorCode::INVALID_ARGUMENT, "x-amz-copy-source is not valid UTF-8 once decoded"))
 }
 
-/// Decodes and validates the key half. Never normalised: `../` is four ordinary bytes of a key.
+/// Decodes and validates the key half through the same normalisation the request path uses.
+///
+/// `GHSA-f4vq-9ffr-m8m3` is what happens when this half is judged by looser rules than the
+/// destination: authorisation reads a key, storage reads a path. The refusal names the rule and
+/// never the value — a message quoting the header back is a header echoed into every log.
 fn key_of(encoded: &str) -> Result<ObjectKey, CopySourceRejection> {
-    ObjectKey::from_encoded_path(encoded).map_err(|_| {
+    let decoded = decode(encoded)?;
+    if decoded.is_empty() {
+        return Err(CopySourceRejection::new(
+            ErrorCode::INVALID_ARGUMENT,
+            "the key named by x-amz-copy-source is not a valid object key",
+        ));
+    }
+    let mut validation = decoded.clone();
+    let mut unsafe_path = key_has_unsafe_path(&validation);
+    while !unsafe_path && validation.contains('%') {
+        let next = decode(&validation)?;
+        if next == validation {
+            break;
+        }
+        unsafe_path = key_has_unsafe_path(&next);
+        validation = next;
+    }
+    if unsafe_path {
+        return Err(CopySourceRejection::new(
+            ErrorCode::ACCESS_DENIED,
+            "the key named by x-amz-copy-source is not authorized",
+        ));
+    }
+    ObjectKey::new(decoded).map_err(|_| {
         CopySourceRejection::new(
             ErrorCode::INVALID_ARGUMENT,
             "the key named by x-amz-copy-source is not a valid object key",
         )
     })
+}
+
+fn key_has_unsafe_path(value: &str) -> bool {
+    value.contains('\\') || value.split('/').any(|segment| segment.is_empty() || segment == "..")
 }
 
 /// Validates the bucket half.
@@ -602,20 +610,40 @@ fn non_empty(value: &str) -> Result<&str, CopySourceRejection> {
 }
 
 #[cfg(test)]
+#[path = "copy_source_security_tests.rs"]
+#[allow(clippy::expect_used)]
+mod security_tests;
+
+#[cfg(test)]
 // Test code only. The crate denies these three so that no request path can panic; a test that
 // cannot assert an `Ok` is a test that says less than it should.
 #[allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 mod tests {
     use super::*;
+    use rustfs_gateway_types::dto::{CopyObject, CopyObjectInput};
 
-    fn granted(source: &CopySource) -> SourceAuthorized {
-        authorize_source(source.resource(), SourceAccess::Granted).expect("granted")
+    use crate::Decision;
+    use crate::authz::{DerivedResourceSet, authorize_input, prepare_input};
+
+    pub(super) fn rejected(raw: &str) -> CopySourceRejection {
+        match CopySource::parse(raw) {
+            Err(error) => error,
+            Ok(_) => panic!("copy source should be refused"),
+        }
     }
 
-    fn resolved(raw: &str) -> ResolvedCopySource {
-        let source = CopySource::parse(raw).expect("parses");
-        let proof = granted(&source);
-        source.resolve(&proof).expect("resolves")
+    pub(super) fn resolved(raw: &str) -> ResolvedCopySource {
+        let input = CopyObjectInput {
+            copy_source: raw.to_owned(),
+            ..Default::default()
+        };
+        let decoded = prepare_input::<CopyObject>(input).expect("parses");
+        let authorized = authorize_input(decoded, |_| Decision::Allow).expect("authorized");
+        authorized
+            .resources()
+            .source()
+            .resolve(authorized.read_proof())
+            .expect("the proof belongs to this source")
     }
 
     #[test]
@@ -623,6 +651,18 @@ mod tests {
         let source = resolved("bucket/a%3Fb?versionId=v1");
         assert_eq!(source.key().as_str(), "a?b");
         assert_eq!(source.version_id(), Some("v1"));
+    }
+
+    #[test]
+    fn a_versioned_source_requires_get_object_version() {
+        let input = CopyObjectInput {
+            copy_source: "bucket/key?versionId=v1".to_owned(),
+            ..Default::default()
+        };
+        let decoded = prepare_input::<CopyObject>(input).expect("parses");
+        let mut actions = Vec::new();
+        decoded.resources().visit(&mut |resource| actions.push(resource.action()));
+        assert_eq!(actions, ["s3:GetObjectVersion"]);
     }
 
     #[test]
@@ -637,11 +677,6 @@ mod tests {
     }
 
     #[test]
-    fn a_traversal_looking_key_is_four_ordinary_bytes() {
-        assert_eq!(resolved("bucket/../../etc/passwd").key().as_str(), "../../etc/passwd");
-    }
-
-    #[test]
     fn both_arn_forms_are_recognised() {
         let ap = resolved("arn:aws:s3:us-east-1:123456789012:accesspoint/my-ap/object/dir/key.txt");
         assert_eq!(ap.form(), CopySourceForm::AccessPointArn);
@@ -649,54 +684,30 @@ mod tests {
 
         let op = CopySource::parse("arn:aws:s3-outposts:us-east-1:1:outpost/op-1/bucket/src-bucket/object/k").expect("parses");
         assert_eq!(op.form(), CopySourceForm::OutpostsArn);
-        assert_eq!(op.resource().container(), Some("op-1"));
-        assert_eq!(op.resource().bucket().as_str(), "src-bucket");
+        assert_eq!(op.resource.container(), Some("op-1"));
+        assert_eq!(op.resource.bucket().as_str(), "src-bucket");
     }
 
     #[test]
     fn an_unrecognised_arn_is_refused_rather_than_read_as_a_bucket() {
-        let err = CopySource::parse("arn:aws:iam::123456789012:user/bob").expect_err("refused");
+        let err = rejected("arn:aws:iam::123456789012:user/bob");
         assert_eq!(err.code(), &ErrorCode::INVALID_ARGUMENT);
     }
 
     #[test]
     fn an_empty_or_keyless_value_is_refused() {
         for raw in ["", "bucket", "bucket/", "/bucket"] {
-            let err = CopySource::parse(raw).expect_err("refused");
+            let err = rejected(raw);
             assert_eq!(err.code(), &ErrorCode::INVALID_ARGUMENT, "{raw}");
         }
     }
 
     #[test]
-    fn a_query_that_is_not_a_version_is_refused_rather_than_folded_into_the_key() {
-        let err = CopySource::parse("bucket/a?b").expect_err("refused");
-        assert_eq!(err.code(), &ErrorCode::INVALID_ARGUMENT);
-        assert_eq!(
-            CopySource::parse("bucket/a?versionId=").expect_err("refused").code(),
-            &ErrorCode::INVALID_ARGUMENT
-        );
-    }
-
-    #[test]
-    fn non_utf8_percent_bytes_are_refused_and_do_not_panic() {
-        let err = CopySource::parse("bucket/%FF%FE").expect_err("refused");
-        assert_eq!(err.code(), &ErrorCode::INVALID_ARGUMENT);
-    }
-
-    #[test]
-    fn a_denied_source_yields_no_proof_and_no_bucket() {
-        let source = CopySource::parse("bucket/key").expect("parses");
-        let err = authorize_source(source.resource(), SourceAccess::Denied).expect_err("denied");
-        assert_eq!(err.code(), &ErrorCode::ACCESS_DENIED);
-        assert!(!err.reason().contains("bucket"));
-    }
-
-    #[test]
-    fn a_proof_for_another_resource_does_not_resolve_this_one() {
-        let mine = CopySource::parse("bucket/key").expect("parses");
-        let other = CopySource::parse("bucket/other").expect("parses");
-        let err = mine.resolve(&granted(&other)).expect_err("refused");
-        assert_eq!(err.code(), &ErrorCode::ACCESS_DENIED);
+    fn the_handler_resolves_the_same_normalized_resource_authorization_saw() {
+        let resolved = resolved("bucket/a%2Fb?versionId=v1");
+        assert_eq!(resolved.bucket().as_str(), "bucket");
+        assert_eq!(resolved.key().as_str(), "a/b");
+        assert_eq!(resolved.version_id(), Some("v1"));
     }
 
     #[test]

@@ -1,0 +1,30 @@
+# Files allowed to call a percent-decoder, and what each one decodes.
+#
+# Every entry here is a place where the thing being decoded is NOT a bucket name
+# or an object key. A name is decoded in exactly one place —
+# crates/types/src/scalar/naming.rs — and everything else reaches it through
+# ObjectKey::materialize, ObjectKey::materialize_decoded or
+# BucketName::materialize.
+#
+# Adding a line here is a decision, not a formality: say what is decoded and why
+# it is not a name.
+
+# The single normalisation itself. This is the one decode a name ever gets.
+crates/types/src/scalar/naming.rs
+
+# Query components — prefix, delimiter, marker, continuation token. These are
+# parameters rather than names; the value that is key-shaped is parsed into an
+# ObjectKey afterwards, which is where the floor runs.
+crates/core/src/codec/view.rs
+
+# The bucket half and the versionId of x-amz-copy-source. The key half of that
+# header is NOT decoded here: it goes through ObjectKey::from_encoded_path,
+# which is ObjectKey::materialize under the default policy.
+crates/core/src/ops/shared/copy_source.rs
+
+# SigV4 canonicalisation. This decodes and re-encodes the RAW request target to
+# build the canonical URI, and it must never see a normalised value: two raw
+# paths that normalise to one key would then share one signature.
+crates/sig/src/canonical.rs
+crates/sig/src/query.rs
+crates/sig/src/floor.rs

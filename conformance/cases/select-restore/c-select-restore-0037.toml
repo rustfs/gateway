@@ -1,0 +1,49 @@
+[case]
+id = "c-select-restore-0037"
+schema_version = 1
+title = "A select omitting ExpressionType is refused by the binding that looked for it"
+rationale = """
+Four of the six members of a select request are required by the model, and each is refused one at a time by the binding that looked for it — before any semantic rule runs, and with the decoder's own message rather than the validator's. Omitting the type is not the same as sending SQL: the member is required, and defaulting it here would make this implementation accept a document AWS refuses while every other implementation rejects the caller's requests."""
+polarity = "negative"
+operation = "SelectObjectContent"
+tags = ["select", "xml"]
+timeout_ms = 10000
+quirks = ["q-select-0008"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_SelectObjectContent.html"
+summary = "The documented request syntax lists ExpressionType among the members every query carries."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "conf-select"
+
+[[setup.objects]]
+bucket = "conf-select"
+key = "rows.csv"
+body = { utf8 = "a,b\n1,2\n" }
+
+[request]
+method = "POST"
+target = "/conf-select/rows.csv?select&select-type=2"
+headers = { "content-type" = "application/xml" }
+body = { utf8 = '<SelectObjectContentRequest><Expression>SELECT * FROM S3Object</Expression><InputSerialization><CSV></CSV></InputSerialization><OutputSerialization><CSV></CSV></OutputSerialization></SelectObjectContentRequest>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+code = "MalformedXML"
+request_id_present = true
+
+[expect.headers_present]
+"content-type" = "application/xml"
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>MalformedXML</Code><Message>the body omits a member the schema requires</Message><Resource>ExpressionType</Resource><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''

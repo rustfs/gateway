@@ -1,0 +1,69 @@
+[case]
+id = "c-cors-0032"
+schema_version = 1
+title = "An ordinary GET carrying an Origin is served and decorated, not treated as a preflight"
+rationale = """
+The request a browser makes after a successful preflight is an ordinary signed GET with an Origin header, and a
+gateway that mistook it for a preflight would answer 200 with an empty body — an object read that silently returns
+nothing. The preflight-only headers are asserted absent because a browser reads Allow-Methods and Max-Age from a
+preflight response only, and writing them here would be a claim about a response nobody caches.
+A note on the allow-origin value: the harness reads `*` in `headers_present` as "this header is present with any
+value" (conformance/README.md), so a case asserting `access-control-allow-origin = "*"` asserts presence and nothing
+more. That is why the rule here names one origin literally — the asserted value is then a concrete string the harness
+compares byte for byte. The literal `*` answer a `*` rule produces is pinned in `crates/gateway/tests/cors_runtime.rs`
+instead, where it can be compared exactly."""
+polarity = "positive"
+tags = ["cors"]
+timeout_ms = 10000
+quirks = ["q-cors-0011"]
+
+[[case.evidence]]
+url = "https://fetch.spec.whatwg.org/#http-cors-protocol"
+summary = "The preflight and its answer are defined here, including which response header a browser reads from which response."
+kind = "rfc"
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9110#section-12.5.5"
+summary = "A response whose content varies with a request header must name that header in Vary or a shared cache will mix them up."
+kind = "rfc"
+
+[[setup.buckets]]
+name = "conf-cors-rt"
+
+[[setup.objects]]
+bucket = "conf-cors-rt"
+key = "key.txt"
+body = { utf8 = "hello" }
+
+[[exchanges]]
+# Setup traffic: the document the preflight below is answered from. Not under test.
+[exchanges.request]
+method = "PUT"
+target = "/conf-cors-rt?cors"
+headers = { "content-type" = "application/xml", "content-md5" = "NdkNVi2f4lE+sDHrLVzN2A==" }
+body = { utf8 = "<CORSConfiguration><CORSRule><AllowedMethod>GET</AllowedMethod><AllowedOrigin>https://app.example.com</AllowedOrigin><ExposeHeader>ETag</ExposeHeader></CORSRule></CORSConfiguration>" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+
+[[exchanges]]
+[exchanges.request]
+method = "GET"
+target = "/conf-cors-rt/key.txt"
+headers = { "origin" = "https://app.example.com" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+headers_absent = ["access-control-allow-methods", "access-control-max-age", "access-control-allow-headers", "access-control-allow-credentials"]
+
+[exchanges.expect.headers_present]
+"access-control-allow-origin" = "https://app.example.com"
+"access-control-expose-headers" = "ETag"
+"vary" = "origin"
+
+[exchanges.expect.body]
+exact_utf8 = "hello"

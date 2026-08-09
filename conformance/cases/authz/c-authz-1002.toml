@@ -1,0 +1,33 @@
+[case]
+id = "c-authz-1002"
+schema_version = 1
+title = "CopyObject refuses a source the caller cannot read"
+rationale = "The single-copy path enforces the same source authorization contract as multipart copy."
+polarity = "negative"
+operation = "CopyObject"
+tags = ["security"]
+timeout_ms = 10000
+quirks = ["q-copy-source-authz-0086"]
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CopyObject.html"
+summary = "CopyObject requires source read permission in addition to destination write permission."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "authz-destination"
+[[setup.buckets]]
+name = "authz-denied-source"
+[[setup.objects]]
+bucket = "authz-denied-source"
+key = "secret"
+body = { utf8 = "secret" }
+[request]
+method = "PUT"
+target = "/authz-destination/copy"
+headers = { "x-amz-copy-source" = "/authz-denied-source/secret" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+[expect]
+kind = "response"
+status = 403
+[expect.error]
+code = "AccessDenied"

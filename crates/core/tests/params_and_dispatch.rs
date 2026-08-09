@@ -97,6 +97,16 @@ static COPY_OBJECT: OperationSpec = OperationSpec {
     auth: Some(AuthRequirement::new("s3:PutObject", ResourceShape::Object)),
 };
 
+/// The plain object write, registered by the ACL block below so that a request reaching it
+/// instead of its subresource row is a wrong answer rather than a second `501`.
+static PUT_OBJECT: OperationSpec = OperationSpec {
+    name: "PutObject",
+    success_status: 200,
+    required_params: &[],
+    not_configured_error: None,
+    auth: Some(AuthRequirement::new("s3:PutObject", ResourceShape::Object)),
+};
+
 /// Deliberately unregistrable, and kept for the test that says so.
 ///
 /// `MissingContentLength` is a good S3 code and a bad pre-authentication one: it maps to `411`,
@@ -569,6 +579,35 @@ fn n_an_unhandled_encryption_request_is_refused_rather_than_answered_by_the_list
     }
 }
 
+/// Negative — an unhandled replication-configuration request is refused by name, in all three
+/// methods.
+///
+/// Same shape as the encryption block above: the registry handles the listing fallback and
+/// nothing else, which is the shape of every deployment that has not implemented replication.
+/// Each of the three must come back as the second `501` naming the replication operation the
+/// request asked for — the GET in particular must not fall through to `ListObjects`, which is
+/// exactly what it did while the operation was deferred (the
+/// `GetBucketReplication -> ListObjects` debt-register line).
+#[test]
+fn n_an_unhandled_replication_request_is_refused_rather_than_answered_by_the_listing() {
+    let mut registry = Registry::new();
+    registry.register(&LIST_OBJECTS).expect("a registrable spec");
+    let router = Router::from_generated(registry).expect("the generated table builds");
+
+    for (line, expected) in [
+        ("GET /bucket?replication", "GetBucketReplication"),
+        ("PUT /bucket?replication", "PutBucketReplication"),
+        ("DELETE /bucket?replication", "DeleteBucketReplication"),
+    ] {
+        let error = router
+            .dispatch(&Req::new(line).parts())
+            .expect_err("this registry handles no replication operation");
+        assert_eq!(*error.code(), ErrorCode::NOT_IMPLEMENTED, "{line}");
+        assert_eq!(error.message(), NOT_REGISTERED_MESSAGE, "{line}");
+        assert_eq!(error.operation(), Some(expected), "{line} must name the operation it asked for");
+    }
+}
+
 /// The registered fallback is still served, so the refusal above is not a blanket one.
 #[test]
 fn the_generated_router_still_serves_the_listing_beside_the_cors_rows() {
@@ -846,6 +885,49 @@ fn the_lock_reads_declare_their_two_distinct_not_configured_codes() {
     );
 }
 
+/// The replication read declares its own unconfigured code, and its two siblings declare none.
+///
+/// The declaration is what a backend outside this workspace reads to learn which 404 an
+/// unconfigured bucket owes; the conformance fixture answers the code from its own constant, so
+/// without this test the spec field could be deleted and every replication case would still pass
+/// — a value declared and never observed, which is the defect the Measurement rules exist for.
+///
+/// Both directions are asserted deliberately. A spec field stuck on `Some(..)` would satisfy the
+/// first assertion alone, and the write and the delete are exactly the operations that must
+/// carry `None`: neither reads a configuration, and a 404 from either would mean "no such
+/// bucket" to a client that branches on the code.
+#[test]
+fn the_replication_read_declares_its_own_not_configured_code() {
+    use rustfs_gateway_core::op::Operation;
+    let code = rustfs_gateway_types::dto::GetBucketReplication::spec()
+        .not_configured_error
+        .clone()
+        .expect("the bucket subresource read declares one");
+    assert_eq!(code, ErrorCode::REPLICATION_CONFIGURATION_NOT_FOUND);
+    assert_eq!(code.default_status(), StatusCode::NOT_FOUND);
+    assert_eq!(
+        code.as_str(),
+        "ReplicationConfigurationNotFoundError",
+        "the literal ends in Error, which is the spelling clients branch on"
+    );
+    for (name, declared) in [
+        (
+            "PutBucketReplication",
+            rustfs_gateway_types::dto::PutBucketReplication::spec()
+                .not_configured_error
+                .is_none(),
+        ),
+        (
+            "DeleteBucketReplication",
+            rustfs_gateway_types::dto::DeleteBucketReplication::spec()
+                .not_configured_error
+                .is_none(),
+        ),
+    ] {
+        assert!(declared, "{name} reads no configuration and must declare no unconfigured code");
+    }
+}
+
 /// Negative — an unhandled bucket lifecycle request is refused by name, in all three methods.
 ///
 /// The registry below handles the object band and nothing else. Each bucket-level request must
@@ -875,24 +957,319 @@ fn n_an_unhandled_bucket_lifecycle_request_is_refused_by_name() {
 
 /// Negative — a deferred bucket subresource write has no route, so it is the first `501`, never a
 /// lifecycle operation's answer. This is the dispatch-level half of the `query_absent` guarantee:
-/// `PUT /b?acl` must not create a bucket and `DELETE /b?policy` must not delete one, whether or
-/// not the lifecycle family is registered. The served subresources (`cors`, `tagging`) are the
-/// same rule with a different observable and are asserted with their own rows in
-/// `route_table.rs`.
+/// `DELETE /b?policy` must not delete a bucket and `PUT /b?versioning` must not create one,
+/// whether or not the lifecycle family is registered. The served subresources (`cors`, `tagging`,
+/// `acl`, and the nine configuration-band keys) are the same rule with a different observable —
+/// a `501` naming their own operation — and are asserted below and in `route_table.rs`.
 #[test]
 fn n_a_bucket_subresource_write_is_a_route_miss_not_a_lifecycle_operation() {
     let mut registry = Registry::new();
     registry.register(&GET_OBJECT).expect("a registrable spec");
     let router = Router::from_generated(registry).expect("the generated table builds");
     for line in [
-        "PUT /bucket?acl",
-        "DELETE /bucket?policy",
-        "PUT /bucket?versioning",
-        "DELETE /bucket?website",
+        "PUT /bucket?abac",
+        "DELETE /bucket?ownershipControls",
+        "PUT /bucket?inventory",
+        "DELETE /bucket?analytics",
     ] {
         let error = router.dispatch(&Req::new(line).parts()).expect_err("no route");
         assert_eq!(error.message(), NO_ROUTE_MESSAGE, "{line}");
         assert_eq!(error.operation(), None, "{line} names no operation because none claimed it");
+    }
+    // The other direction, for the four keys that moved out of the list above when the
+    // bucket-configuration band landed: a served subresource write is a 501 that *names its own
+    // operation*, never a lifecycle answer and never a route miss. Without this half, deleting the
+    // rows would turn these back into the first branch and the test would still pass.
+    for (line, expected) in [
+        ("PUT /bucket?versioning", "PutBucketVersioning"),
+        ("DELETE /bucket?policy", "DeleteBucketPolicy"),
+        ("DELETE /bucket?website", "DeleteBucketWebsite"),
+        ("PUT /bucket?publicAccessBlock", "PutPublicAccessBlock"),
+    ] {
+        let error = router
+            .dispatch(&Req::new(line).parts())
+            .expect_err("no handler is registered");
+        assert_eq!(error.message(), NOT_REGISTERED_MESSAGE, "{line}");
+        assert_eq!(error.operation(), Some(expected), "{line} must name the operation it asked for");
+    }
+}
+
+/// Negative — an unhandled restore or select request is refused by name, not by no-route.
+///
+/// The observable this family changes. Before the two rows existed both requests matched
+/// nothing, so the answer was the *first* `501` — [`NO_ROUTE_MESSAGE`], the one that says the
+/// virtual-host domain is probably unconfigured — and an SDK reads that as "this is not an S3
+/// endpoint". Now each comes back as the second `501`, naming the operation it asked for, which
+/// is the answer that means "not available here".
+///
+/// Both directions are checked in one test: the two rows answer by name, and a `?select` without
+/// `select-type=2` still answers no-route, because there is no row for it and inventing one
+/// would decode a request grammar this decoder has never validated.
+#[test]
+fn n_an_unhandled_restore_or_select_request_is_refused_by_name() {
+    let mut registry = Registry::new();
+    registry.register(&GET_OBJECT).expect("a registrable spec");
+    let router = Router::from_generated(registry).expect("the generated table builds");
+
+    for (line, expected) in [
+        ("POST /bucket/key?restore", "RestoreObject"),
+        ("POST /bucket/key?select&select-type=2", "SelectObjectContent"),
+        ("POST /bucket/key?restore&versionId=v1", "RestoreObject"),
+    ] {
+        let error = router
+            .dispatch(&Req::new(line).parts())
+            .expect_err("this registry handles neither operation");
+        assert_eq!(*error.code(), ErrorCode::NOT_IMPLEMENTED, "{line}");
+        assert_eq!(error.message(), NOT_REGISTERED_MESSAGE, "{line}");
+        assert_eq!(error.operation(), Some(expected), "{line} must name the operation it asked for");
+    }
+
+    for line in ["POST /bucket/key?select", "POST /bucket/key?select&select-type=1"] {
+        let error = router.dispatch(&Req::new(line).parts()).expect_err("no route");
+        assert_eq!(error.message(), NO_ROUTE_MESSAGE, "{line}");
+        assert_eq!(error.operation(), None, "{line} names no operation because none claimed it");
+    }
+}
+
+/// The restore operation declares 202, and declares the 200 as its one alternative.
+///
+/// The declaration and the mapping are two things that can disagree, so both directions are
+/// asserted here rather than either one alone:
+///
+/// * every status `RestoreState` can answer on success is either the declared success status or
+///   a declared alternative — a mapping that grew a third success would be red;
+/// * every declared alternative is a status some state actually answers — a list that grew a
+///   number nothing produces would be red too.
+///
+/// Without the second half the list could be `&[200, 418]` and pass; without the first it could
+/// be empty. The pair is the assertion.
+#[test]
+fn the_restore_status_declaration_and_the_state_mapping_agree() {
+    use rustfs_gateway_core::op::Operation;
+    use rustfs_gateway_core::ops::restore_object::ALT_SUCCESS_STATUSES;
+    use rustfs_gateway_core::ops::shared::restore::RestoreState;
+
+    let declared = rustfs_gateway_types::dto::RestoreObject::spec().success_status;
+    assert_eq!(declared, 202, "a first retrieval is Accepted, not OK");
+    assert_eq!(ALT_SUCCESS_STATUSES, &[200], "the repeat against a restored copy");
+
+    let states = [
+        RestoreState::Initiated,
+        RestoreState::AlreadyRestored,
+        RestoreState::InProgress,
+        RestoreState::NotArchived,
+    ];
+    let produced: Vec<u16> = states.iter().filter_map(|state| state.status()).collect();
+    for status in &produced {
+        assert!(
+            *status == declared || ALT_SUCCESS_STATUSES.contains(status),
+            "the mapping answers {status}, which the operation does not declare"
+        );
+    }
+    for alternative in ALT_SUCCESS_STATUSES {
+        assert!(
+            produced.contains(alternative),
+            "the operation declares {alternative}, which no state answers"
+        );
+    }
+    assert_eq!(produced.len(), 2, "exactly two of the four outcomes are successes");
+    assert!(produced.contains(&declared), "the declared status is one a state answers");
+}
+
+/// The two new operations declare no unconfigured code, and that is not an oversight.
+///
+/// `not_configured_error` is the 404 a *subresource read* owes when the document was never
+/// written. Neither of these reads a stored document — a restore acts on the object's storage
+/// class and a select acts on its bytes — so both must declare `None`, and a value here would
+/// tell a backend to answer 404 for a state that is not "unconfigured" at all. Asserted with a
+/// control, because the field defaults to `None` and an assertion that everything is `None`
+/// would hold over an empty table too.
+#[test]
+fn neither_restore_nor_select_declares_an_unconfigured_code() {
+    use rustfs_gateway_core::op::Operation;
+    assert!(
+        rustfs_gateway_types::dto::RestoreObject::spec()
+            .not_configured_error
+            .is_none(),
+        "a restore reads no stored configuration"
+    );
+    assert!(
+        rustfs_gateway_types::dto::SelectObjectContent::spec()
+            .not_configured_error
+            .is_none(),
+        "a select reads no stored configuration"
+    );
+    assert!(
+        rustfs_gateway_types::dto::GetObjectRetention::spec()
+            .not_configured_error
+            .is_some(),
+        "the retention read declares one, so the two assertions above are not vacuous"
+    );
+}
+
+/// Negative — every read in the 200-249 configuration band is refused by name rather than
+/// answered by the key listing.
+///
+/// The registry below handles `ListObjects` and nothing else, which is the shape of a deployment
+/// that has not implemented any of this family. Each of the nine must come back as the second
+/// `501` naming the operation the request asked for. While these were deferred, every one of them
+/// fell through to `ListObjects` and was answered with a page of keys — nine lines of the
+/// route-coverage debt register — and a page of keys is a *success*, so nothing the client could
+/// see said the question had not been answered.
+#[test]
+fn n_an_unhandled_bucket_configuration_read_is_refused_rather_than_answered_by_the_listing() {
+    let mut registry = Registry::new();
+    registry.register(&LIST_OBJECTS).expect("a registrable spec");
+    let router = Router::from_generated(registry).expect("the generated table builds");
+
+    for (line, expected) in [
+        ("GET /bucket?accelerate", "GetBucketAccelerateConfiguration"),
+        ("GET /bucket?logging", "GetBucketLogging"),
+        ("GET /bucket?notification", "GetBucketNotificationConfiguration"),
+        ("GET /bucket?policy", "GetBucketPolicy"),
+        ("GET /bucket?policyStatus", "GetBucketPolicyStatus"),
+        ("GET /bucket?publicAccessBlock", "GetPublicAccessBlock"),
+        ("GET /bucket?requestPayment", "GetBucketRequestPayment"),
+        ("GET /bucket?versioning", "GetBucketVersioning"),
+        ("GET /bucket?website", "GetBucketWebsite"),
+    ] {
+        let error = router
+            .dispatch(&Req::new(line).parts())
+            .expect_err("this registry handles no bucket configuration operation");
+        assert_eq!(*error.code(), ErrorCode::NOT_IMPLEMENTED, "{line}");
+        assert_eq!(error.message(), NOT_REGISTERED_MESSAGE, "{line}");
+        assert_eq!(error.operation(), Some(expected), "{line} must name the operation it asked for");
+    }
+}
+
+/// The band's nine unconfigured answers are declared, not improvised — and the declaration is
+/// what an external backend reads.
+///
+/// This test exists because the equivalent claim in the replication family could be **deleted
+/// outright** and the whole workspace stayed green: the conformance 404 comes from the fixture's
+/// own constant, so `not_configured_error` was decoration. It is asserted here in both
+/// directions, because a field stuck on `Some(..)` satisfies only the first half and a field
+/// stuck on `None` satisfies only the second:
+///
+/// * three reads declare a code, and no two of them declare the same one;
+/// * six reads declare **none**, because their unconfigured answer is a `200` — five an empty
+///   document and one a default value — and a `404` there is a bug a client sees as a missing
+///   bucket;
+/// * every write and delete declares none, because neither has an unconfigured answer at all.
+#[test]
+fn the_configuration_band_declares_three_distinct_not_configured_codes_and_six_absences() {
+    use rustfs_gateway_core::op::Operation;
+    use rustfs_gateway_types::dto;
+
+    for (name, code, expected) in [
+        (
+            "GetBucketWebsite",
+            dto::GetBucketWebsite::spec().not_configured_error.clone(),
+            ErrorCode::NO_SUCH_WEBSITE_CONFIGURATION,
+        ),
+        (
+            "GetBucketPolicy",
+            dto::GetBucketPolicy::spec().not_configured_error.clone(),
+            ErrorCode::NO_SUCH_BUCKET_POLICY,
+        ),
+        (
+            "GetBucketPolicyStatus",
+            dto::GetBucketPolicyStatus::spec().not_configured_error.clone(),
+            ErrorCode::NO_SUCH_BUCKET_POLICY,
+        ),
+        (
+            "GetPublicAccessBlock",
+            dto::GetPublicAccessBlock::spec().not_configured_error.clone(),
+            ErrorCode::NO_SUCH_PUBLIC_ACCESS_BLOCK_CONFIGURATION,
+        ),
+    ] {
+        let declared = code.unwrap_or_else(|| panic!("{name} answers a 404 when unconfigured and must declare which"));
+        assert_eq!(declared, expected, "{name}");
+        assert_eq!(declared.default_status(), StatusCode::NOT_FOUND, "{name}");
+    }
+
+    // The website and public-access literals are distinct from each other and from the policy
+    // one. `GetBucketPolicyStatus` shares the policy read's code on purpose — it is the same
+    // missing document — and that sharing is asserted above rather than left to coincidence.
+    assert_ne!(ErrorCode::NO_SUCH_WEBSITE_CONFIGURATION, ErrorCode::NO_SUCH_BUCKET_POLICY);
+    assert_ne!(ErrorCode::NO_SUCH_PUBLIC_ACCESS_BLOCK_CONFIGURATION, ErrorCode::NO_SUCH_BUCKET_POLICY);
+    assert_ne!(
+        ErrorCode::NO_SUCH_WEBSITE_CONFIGURATION,
+        ErrorCode::NO_SUCH_PUBLIC_ACCESS_BLOCK_CONFIGURATION
+    );
+
+    // The six reads whose unconfigured answer is a 200. A code here would turn "acceleration is
+    // off" into "this bucket is missing something", which is what a client's error branch reads.
+    for (name, code) in [
+        (
+            "GetBucketAccelerateConfiguration",
+            dto::GetBucketAccelerateConfiguration::spec().not_configured_error.clone(),
+        ),
+        ("GetBucketLogging", dto::GetBucketLogging::spec().not_configured_error.clone()),
+        (
+            "GetBucketNotificationConfiguration",
+            dto::GetBucketNotificationConfiguration::spec().not_configured_error.clone(),
+        ),
+        (
+            "GetBucketRequestPayment",
+            dto::GetBucketRequestPayment::spec().not_configured_error.clone(),
+        ),
+        ("GetBucketVersioning", dto::GetBucketVersioning::spec().not_configured_error.clone()),
+        // The writes and deletes, which have no unconfigured answer of any kind.
+        ("PutBucketVersioning", dto::PutBucketVersioning::spec().not_configured_error.clone()),
+        ("PutBucketWebsite", dto::PutBucketWebsite::spec().not_configured_error.clone()),
+        ("DeleteBucketWebsite", dto::DeleteBucketWebsite::spec().not_configured_error.clone()),
+        ("PutBucketPolicy", dto::PutBucketPolicy::spec().not_configured_error.clone()),
+        ("DeleteBucketPolicy", dto::DeleteBucketPolicy::spec().not_configured_error.clone()),
+        ("PutPublicAccessBlock", dto::PutPublicAccessBlock::spec().not_configured_error.clone()),
+        (
+            "DeletePublicAccessBlock",
+            dto::DeletePublicAccessBlock::spec().not_configured_error.clone(),
+        ),
+        (
+            "PutBucketAccelerateConfiguration",
+            dto::PutBucketAccelerateConfiguration::spec().not_configured_error.clone(),
+        ),
+        ("PutBucketLogging", dto::PutBucketLogging::spec().not_configured_error.clone()),
+        (
+            "PutBucketNotificationConfiguration",
+            dto::PutBucketNotificationConfiguration::spec().not_configured_error.clone(),
+        ),
+        (
+            "PutBucketRequestPayment",
+            dto::PutBucketRequestPayment::spec().not_configured_error.clone(),
+        ),
+    ] {
+        assert!(code.is_none(), "{name} must declare no unconfigured code, it declared {code:?}");
+    }
+}
+
+/// The band's success statuses are declared, and the three deletes are the only 204s in it.
+///
+/// Worth its own assertion because the family mixes them: eight writes answer 200 while the three
+/// deletes answer 204, and a delete that answered 200 with no body is a response some clients
+/// treat as a truncated document.
+#[test]
+fn the_configuration_band_answers_204_for_its_three_deletes_and_200_for_everything_else() {
+    use rustfs_gateway_core::op::Operation;
+    use rustfs_gateway_types::dto;
+
+    for (name, status) in [
+        ("DeleteBucketWebsite", dto::DeleteBucketWebsite::spec().success_status),
+        ("DeleteBucketPolicy", dto::DeleteBucketPolicy::spec().success_status),
+        ("DeletePublicAccessBlock", dto::DeletePublicAccessBlock::spec().success_status),
+    ] {
+        assert_eq!(status, 204, "{name}");
+    }
+    for (name, status) in [
+        ("PutBucketVersioning", dto::PutBucketVersioning::spec().success_status),
+        ("PutBucketWebsite", dto::PutBucketWebsite::spec().success_status),
+        ("PutBucketPolicy", dto::PutBucketPolicy::spec().success_status),
+        ("PutPublicAccessBlock", dto::PutPublicAccessBlock::spec().success_status),
+        ("GetBucketPolicy", dto::GetBucketPolicy::spec().success_status),
+        ("GetBucketVersioning", dto::GetBucketVersioning::spec().success_status),
+    ] {
+        assert_eq!(status, 200, "{name}");
     }
 }
 
@@ -906,4 +1283,141 @@ fn a_request_that_does_not_route_never_reaches_parameter_validation() {
         .expect_err("no route");
     assert_eq!(error.message(), NO_ROUTE_MESSAGE);
     assert_ne!(*error.code(), ErrorCode::INVALID_ARGUMENT);
+}
+
+/// Negative — an unhandled ACL request is refused by name, on both targets and both methods.
+///
+/// Three of the four had a *wrong answer* rather than no answer while they were deferred, and
+/// the registry here is the shape that produced it: a deployment that handles the listing, the
+/// object read and the object write and nothing else. `GET /b?acl` fell through to `ListObjects`,
+/// `GET /b/k?acl` to `GetObject` and `PUT /b/k?acl` to `PutObject` — the three debt-register
+/// lines this family retires — so each must now come back as the second `501` naming the ACL
+/// operation the request asked for.
+#[test]
+fn n_an_unhandled_acl_request_is_refused_rather_than_answered_by_its_neighbour() {
+    let mut registry = Registry::new();
+    registry.register(&LIST_OBJECTS).expect("a registrable spec");
+    registry.register(&GET_OBJECT).expect("a registrable spec");
+    registry.register(&PUT_OBJECT).expect("a registrable spec");
+    let router = Router::from_generated(registry).expect("the generated table builds");
+
+    for (line, expected) in [
+        ("GET /bucket?acl", "GetBucketAcl"),
+        ("PUT /bucket?acl", "PutBucketAcl"),
+        ("GET /bucket/key?acl", "GetObjectAcl"),
+        ("PUT /bucket/key?acl", "PutObjectAcl"),
+    ] {
+        let error = router
+            .dispatch(&Req::new(line).parts())
+            .expect_err("this registry handles no ACL operation");
+        assert_eq!(*error.code(), ErrorCode::NOT_IMPLEMENTED, "{line}");
+        assert_eq!(error.message(), NOT_REGISTERED_MESSAGE, "{line}");
+        assert_eq!(error.operation(), Some(expected), "{line} must name the operation it asked for");
+    }
+
+    // And the neighbours are still served, so the refusals above are not a blanket one — a
+    // router that had stopped dispatching anything would satisfy the loop alone.
+    for (line, expected) in [
+        ("GET /bucket", "ListObjects"),
+        ("GET /bucket/key", "GetObject"),
+        ("PUT /bucket/key", "PutObject"),
+    ] {
+        let dispatch = router
+            .dispatch(&Req::new(line).parts())
+            .unwrap_or_else(|_| panic!("{line} routed"));
+        assert_eq!(dispatch.entry.op_name, expected, "{line}");
+    }
+}
+
+/// All four ACL operations declare **no** unconfigured error, which is what makes this family
+/// different from every other subresource in the table.
+///
+/// The declaration is what a backend outside this workspace reads to learn which 404 an
+/// unconfigured resource owes, and here the answer is "none, because there is no such state".
+/// Asserted against the neighbours rather than alone: a spec field stuck on `None` would satisfy
+/// the ACL half by itself, so the two reads that *do* declare one are checked in the same test.
+#[test]
+fn the_acl_reads_declare_no_unconfigured_code_where_their_neighbours_do() {
+    use rustfs_gateway_core::op::Operation;
+    for (name, code) in [
+        (
+            "GetBucketAcl",
+            rustfs_gateway_types::dto::GetBucketAcl::spec().not_configured_error.clone(),
+        ),
+        (
+            "PutBucketAcl",
+            rustfs_gateway_types::dto::PutBucketAcl::spec().not_configured_error.clone(),
+        ),
+        (
+            "GetObjectAcl",
+            rustfs_gateway_types::dto::GetObjectAcl::spec().not_configured_error.clone(),
+        ),
+        (
+            "PutObjectAcl",
+            rustfs_gateway_types::dto::PutObjectAcl::spec().not_configured_error.clone(),
+        ),
+    ] {
+        assert!(
+            code.is_none(),
+            "{name}: an ACL always exists, so there is no unconfigured answer to declare"
+        );
+    }
+    // The control: the two subresource reads either side of the object ACL row in the table do
+    // declare one, so "every read declares None" is not what this is measuring.
+    assert_eq!(
+        rustfs_gateway_types::dto::GetObjectRetention::spec()
+            .not_configured_error
+            .clone()
+            .expect("the retention read declares one"),
+        ErrorCode::NO_SUCH_OBJECT_LOCK_CONFIGURATION
+    );
+    assert_eq!(
+        rustfs_gateway_types::dto::GetBucketTagging::spec()
+            .not_configured_error
+            .clone()
+            .expect("the bucket tagging read declares one"),
+        ErrorCode::NO_SUCH_TAG_SET
+    );
+}
+
+/// The four ACL operations declare the authorisation actions and resource shapes AWS documents.
+///
+/// A backend reads these to build its policy check, and a bucket action asked about an object
+/// resource — or an object action about a bucket — is a policy evaluated against the wrong ARN,
+/// which is a check that passes for the wrong reason.
+#[test]
+fn the_acl_operations_declare_their_own_actions_and_resource_shapes() {
+    use rustfs_gateway_core::op::Operation;
+    for (name, spec, action, shape) in [
+        (
+            "GetBucketAcl",
+            rustfs_gateway_types::dto::GetBucketAcl::spec(),
+            "s3:GetBucketAcl",
+            ResourceShape::Bucket,
+        ),
+        (
+            "PutBucketAcl",
+            rustfs_gateway_types::dto::PutBucketAcl::spec(),
+            "s3:PutBucketAcl",
+            ResourceShape::Bucket,
+        ),
+        (
+            "GetObjectAcl",
+            rustfs_gateway_types::dto::GetObjectAcl::spec(),
+            "s3:GetObjectAcl",
+            ResourceShape::Object,
+        ),
+        (
+            "PutObjectAcl",
+            rustfs_gateway_types::dto::PutObjectAcl::spec(),
+            "s3:PutObjectAcl",
+            ResourceShape::Object,
+        ),
+    ] {
+        let auth = spec.auth.as_ref().unwrap_or_else(|| panic!("{name} declares an action"));
+        assert_eq!(auth.action, action, "{name}");
+        assert_eq!(auth.resource, shape, "{name}");
+        assert_eq!(spec.success_status, 200, "{name}");
+        assert!(spec.required_params.is_empty(), "{name}: ?acl is a discriminator, not a parameter");
+    }
 }

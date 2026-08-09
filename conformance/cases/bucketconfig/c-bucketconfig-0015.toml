@@ -1,0 +1,48 @@
+[case]
+id = "c-bucketconfig-0015"
+schema_version = 1
+title = "Deleting a configured website document answers 204 with no body"
+rationale = """
+The delete of a document that exists, which is the half that makes the idempotent delete in c-bucketconfig-0032 meaningful: a handler that answered 204 to everything would pass that case alone."""
+polarity = "positive"
+operation = "DeleteBucketWebsite"
+tags = ["bucketconfig", "xml"]
+timeout_ms = 10000
+quirks = ["q-web-0005"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketWebsite.html"
+summary = "The delete reference documents a 204 success and lists no not-found error."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "conf-bucketconfig"
+[[exchanges]]
+name = "write"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-bucketconfig?website"
+headers = { "content-md5" = "9qOvg44x092Bkn0ZW2RFjg==", "content-type" = "application/xml" }
+body = { utf8 = '<WebsiteConfiguration><IndexDocument><Suffix>index.html</Suffix></IndexDocument><ErrorDocument><Key>error.html</Key></ErrorDocument><RoutingRules><RoutingRule><Condition><KeyPrefixEquals>docs/</KeyPrefixEquals></Condition><Redirect><ReplaceKeyPrefixWith>documents/</ReplaceKeyPrefixWith></Redirect></RoutingRule></RoutingRules></WebsiteConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[[exchanges]]
+name = "delete"
+
+[exchanges.request]
+method = "DELETE"
+target = "/conf-bucketconfig?website"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 204
+connection_after = "open"
+

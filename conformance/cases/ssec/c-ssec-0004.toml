@@ -1,0 +1,46 @@
+[case]
+id = "c-ssec-0004"
+schema_version = 1
+title = "A copy-source customer key over cleartext is refused like the target-side one"
+rationale = """
+A copy carries two independent keys, and the source-side trio is the one an implementation forgets: it is spelled differently, it belongs to a different object, and a gate written against the target-side names alone would let it through. Refusing it costs nothing and the alternative is disclosing a key for an object the caller is only reading.
+"""
+polarity = "negative"
+operation = "CopyObject"
+tags = ["sse", "encryption", "security", "tls"]
+timeout_ms = 10000
+quirks = ["q-sse-0010"]
+
+[case.applies_to]
+tls = "forbidden"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CopyObject.html"
+summary = "A copy from an object written with a customer-provided key carries a separate copy-source trio alongside the destination's own."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "conf-ssec"
+
+[request]
+method = "PUT"
+target = "/conf-ssec/copy-destination.bin"
+headers = { "x-amz-copy-source" = "/conf-ssec/copy-source.bin", "x-amz-copy-source-server-side-encryption-customer-algorithm" = "AES256", "x-amz-copy-source-server-side-encryption-customer-key" = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=", "x-amz-copy-source-server-side-encryption-customer-key-md5" = "tP/LI3N87DFaSk0aoqYgzg==" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+headers_absent = ["x-amz-copy-source-server-side-encryption-customer-key"]
+
+[expect.error]
+code = "InvalidRequest"
+request_id_present = true
+
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>InvalidRequest</Code><Message>requests specifying a customer-provided encryption key must be made over a secure connection</Message><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''

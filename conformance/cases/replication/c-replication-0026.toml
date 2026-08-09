@@ -1,0 +1,53 @@
+[case]
+id = "c-replication-0026"
+schema_version = 1
+title = "Two rules with the same Priority are stored and echoed rather than refused"
+rationale = """
+The deliberate leniency, pinned so it cannot be tightened by accident: AWS documents how the engine resolves equal priorities between conflicting rules — the higher number wins, and equal numbers are a conflict the engine owns — but no refusal, and this project will not invent one under the single configuration RustFS parses fail-closed. A uniqueness rule added tomorrow would refuse a document stored today, and the symptom would not be a feature quietly off but a bucket that stops answering."""
+polarity = "negative"
+operation = "PutBucketReplication"
+tags = ["replication", "xml", "known-divergence"]
+timeout_ms = 10000
+quirks = ["q-repl-0009"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ReplicationRule.html"
+summary = "The Priority member documents only precedence between conflicting rules and states no uniqueness constraint."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "conf-replication"
+[[exchanges]]
+name = "put-duplicate-priorities"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-replication?replication"
+headers = { "content-type" = "application/xml", "content-md5" = "XNWTGE8xp0sWUWtaILCUtg==" }
+body = { utf8 = '<ReplicationConfiguration><Role>arn:aws:iam::111122223333:role/replication-role</Role><Rule><ID>first</ID><Priority>1</Priority><Filter><Prefix>a/</Prefix></Filter><Status>Enabled</Status><Destination><Bucket>arn:aws:s3:::replica-bucket</Bucket></Destination><DeleteMarkerReplication><Status>Disabled</Status></DeleteMarkerReplication></Rule><Rule><ID>second</ID><Priority>1</Priority><Filter><Prefix>b/</Prefix></Filter><Status>Enabled</Status><Destination><Bucket>arn:aws:s3:::replica-two</Bucket></Destination><DeleteMarkerReplication><Status>Disabled</Status></DeleteMarkerReplication></Rule></ReplicationConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[[exchanges]]
+name = "read-back"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-replication?replication"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.headers_present]
+"content-type" = "application/xml"
+
+[exchanges.expect.body]
+golden = "goldens/c-replication-0026.xml"

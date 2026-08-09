@@ -1,0 +1,45 @@
+[case]
+id = "c-ssec-0005"
+schema_version = 1
+title = "X-Forwarded-Proto: https does not open the customer-key gate"
+rationale = """
+X-Forwarded-Proto is a request header, so the caller writes it. A gateway that derived "this connection is encrypted" from it would switch the gate off for precisely the caller trying to switch it off, and would do so silently — the request succeeds and the key is on the wire in cleartext. The connection's security has one source, the transport that accepted the socket, and this case is the regression that keeps a well-meaning "support for proxies" change from becoming the bypass.
+"""
+polarity = "negative"
+operation = "PutObject"
+tags = ["sse", "encryption", "security", "tls"]
+timeout_ms = 10000
+quirks = ["q-sse-0010"]
+
+[case.applies_to]
+tls = "forbidden"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/ServerSideEncryptionCustomerKeys.html"
+summary = "The requirement is a property of the connection, which a request header cannot establish."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "conf-ssec"
+
+[request]
+method = "PUT"
+target = "/conf-ssec/forwarded-claim.bin"
+headers = { "x-forwarded-proto" = "https", "x-amz-server-side-encryption-customer-algorithm" = "AES256", "x-amz-server-side-encryption-customer-key" = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=", "x-amz-server-side-encryption-customer-key-md5" = "tP/LI3N87DFaSk0aoqYgzg==" }
+body = { size = 16 }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+code = "InvalidRequest"
+request_id_present = true
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>InvalidRequest</Code><Message>requests specifying a customer-provided encryption key must be made over a secure connection</Message><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''

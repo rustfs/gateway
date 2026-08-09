@@ -1,0 +1,49 @@
+[case]
+id = "c-select-restore-0013"
+schema_version = 1
+title = "A RestoreRequest that describes neither documented form is refused"
+rationale = """
+Neither Days nor Type SELECT means the document has not said what kind of retrieval it wants, and there is no published default for either form. Picking one would run a retrieval the caller did not describe and bill for it."""
+polarity = "negative"
+operation = "RestoreObject"
+tags = ["restore", "xml", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-restore-0004"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_RestoreObject.html"
+summary = "The request syntax documents two forms, one carrying Days and one carrying Type SELECT, with no default for either."
+kind = "aws-doc"
+[[setup.buckets]]
+name = "conf-restore"
+
+[[setup.objects]]
+bucket = "conf-restore"
+key = "cold.txt"
+body = { utf8 = "archived payload" }
+storage_class = "GLACIER"
+
+[request]
+method = "POST"
+target = "/conf-restore/cold.txt?restore"
+headers = { "content-type" = "application/xml" }
+body = { utf8 = '<RestoreRequest><Description>nothing useful</Description></RestoreRequest>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+code = "MalformedXML"
+request_id_present = true
+
+[expect.headers_present]
+"content-type" = "application/xml"
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>MalformedXML</Code><Message>RestoreRequest must specify Days, or Type SELECT with SelectParameters and OutputLocation</Message><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''

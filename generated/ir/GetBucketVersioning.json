@@ -1,0 +1,115 @@
+{
+  "ir_version": "1",
+  "operation": "GetBucketVersioning",
+  "http": {
+            "method": "GET",
+            "target": "Bucket",
+            "precedence": 235,
+            "predicates": [
+                            { "kind": "Method", "method": "GET" },
+                            { "kind": "Target", "target": "Bucket" },
+                            { "kind": "QueryPresent", "key": "versioning" }
+                          ],
+            "success_status": 200,
+            "alt_success_statuses": [],
+            "path_shape": "/{Bucket}"
+          },
+  "auth": { "requirement": "Required", "action": "s3:GetBucketVersioning", "presigned_allowed": true, "service": "s3" },
+  "payload": {
+               "request": { "kind": "None", "buffering": "None", "max_bytes": null },
+               "response": { "kind": "XmlBody", "buffering": "Full", "max_bytes": 4096 }
+             },
+  "checksum": { "http_checksum_required": false, "request_algorithms": [], "response_algorithms": [] },
+  "input": {
+             "fields": [
+                         {
+                           "name": "Bucket",
+                           "wire_name": "Bucket",
+                           "required": true,
+                           "binding": { "kind": "UriLabel", "greedy": false },
+                           "type": { "kind": "BucketName" },
+                           "hot": true,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "ExpectedBucketOwner",
+                           "wire_name": "x-amz-expected-bucket-owner",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "String" },
+                           "hot": false,
+                           "quirk_refs": []
+                         }
+                       ]
+           },
+  "output": {
+              "fields": [
+                          {
+                            "name": "Status",
+                            "wire_name": "Status",
+                            "required": false,
+                            "binding": { "kind": "BodyXml" },
+                            "type": { "kind": "StringEnum", "values": ["Enabled", "Suspended"] },
+                            "hot": false,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "MFADelete",
+                            "wire_name": "MfaDelete",
+                            "required": false,
+                            "binding": { "kind": "BodyXml" },
+                            "type": { "kind": "StringEnum", "values": ["Enabled", "Disabled"] },
+                            "hot": false,
+                            "quirk_refs": []
+                          }
+                        ]
+            },
+  "shapes": {},
+  "xml": {
+           "request_root": null,
+           "request_root_aliases": [],
+           "response_root": "VersioningConfiguration",
+           "xmlns": "emit",
+           "unwrapped_output": false,
+           "element_order": ["Status", "MFADelete"],
+           "empty_value_policy": { "Status": "omit", "MFADelete": "omit" },
+           "url_encoded_fields": [],
+           "attributes": [],
+           "body_literal": false
+         },
+  "errors": { "not_configured": null, "allows_error_after_200": false, "codes": ["NoSuchBucket", "AccessDenied"] },
+  "derived_resources": [],
+  "head_mirrors": null,
+  "quirk_refs": ["q-ver-0001", "q-ver-0004"],
+  "quirks": [
+              {
+                "id": "q-ver-0001",
+                "kind": "not_configured_error",
+                "target": "GetBucketVersioning",
+                "summary": "A bucket that was never versioned answers 200 with an empty VersioningConfiguration element and no Status child at all, which is a different state from Suspended and is not a 404.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketVersioning.html",
+                                "summary": "The operation documents that a bucket whose versioning was never configured returns an empty configuration element rather than a status value or an error."
+                              }
+                            ],
+                "cases": ["c-bucketconfig-0023", "c-bucketconfig-0002"]
+              },
+              {
+                "id": "q-ver-0004",
+                "kind": "element_name",
+                "target": "VersioningConfiguration.MFADelete",
+                "summary": "The member the model calls MFADelete is spelled MfaDelete on the wire, and the pinned model gives the read and the write the same spelling, so no alternate-name rule is needed for it here.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketVersioning.html",
+                                "summary": "The documented request syntax spells the multi-factor delete element MfaDelete, and the read reference beside it spells the same element the same way."
+                              }
+                            ],
+                "cases": ["c-bucketconfig-0003"]
+              }
+            ],
+  "ext_points": []
+}

@@ -1,0 +1,56 @@
+[case]
+id = "c-bucketconfig-0013"
+schema_version = 1
+title = "A website document reads back with RoutingRules wrapped"
+rationale = """
+The wrapped list is this family's shape and the flattened list is the notification family's, one file over. Both parse; a flattened rendering here is a document every SDK reads as having no routing rules, so the site's redirects silently stop applying. Byte comparison is the only assertion that separates the two."""
+polarity = "positive"
+operation = "GetBucketWebsite"
+tags = ["bucketconfig", "xml", "wire-bytes"]
+timeout_ms = 10000
+quirks = ["q-web-0001", "q-web-0002"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketWebsite.html"
+summary = "The read reference documents NoSuchWebsiteConfiguration for a bucket with no website document."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketWebsite.html"
+summary = "The write reference documents the wrapped routing rules, the redirect exclusion and the Content-MD5 header."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "conf-bucketconfig"
+[[exchanges]]
+name = "write"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-bucketconfig?website"
+headers = { "content-md5" = "9qOvg44x092Bkn0ZW2RFjg==", "content-type" = "application/xml" }
+body = { utf8 = '<WebsiteConfiguration><IndexDocument><Suffix>index.html</Suffix></IndexDocument><ErrorDocument><Key>error.html</Key></ErrorDocument><RoutingRules><RoutingRule><Condition><KeyPrefixEquals>docs/</KeyPrefixEquals></Condition><Redirect><ReplaceKeyPrefixWith>documents/</ReplaceKeyPrefixWith></Redirect></RoutingRule></RoutingRules></WebsiteConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[[exchanges]]
+name = "read-back"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-bucketconfig?website"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.body]
+golden = "goldens/c-bucketconfig-0013.xml"
+

@@ -1,0 +1,80 @@
+[case]
+id = "c-cors-0049"
+schema_version = 1
+title = "A virtual-hosted preflight ignores a configured bucket named in the path"
+rationale = """
+The host names a bucket with no CORS document; the path's first segment names one that has a permissive document. If
+the preflight branch read the path it would hand the caller an allowance belonging to a bucket the request never
+addressed — a cross-tenant confusion an attacker constructs by choosing the path, and one no later stage can catch,
+because the browser has already been told yes. The companion positive c-cors-0048 proves the host branch does serve,
+so this is not a case that passes because nothing is ever allowed."""
+polarity = "negative"
+tags = ["cors", "preflight", "vhost", "security"]
+timeout_ms = 10000
+quirks = ["q-cors-0015"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/VirtualHosting.html"
+summary = "When the host names the bucket the request path is the key in full, so the first path segment addresses nothing."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/cors.html"
+summary = "A preflight S3 will not serve is refused with 403 rather than answered out of some other bucket's configuration."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "conf-cors-vh"
+
+[[setup.buckets]]
+name = "conf-cors-bare"
+
+[[exchanges]]
+# The permissive document goes on the bucket the *path* will name, so the only thing standing
+# between the caller and an allowance is which of the two the preflight reads.
+[exchanges.request]
+method = "PUT"
+target = "/conf-cors-vh?cors"
+headers = { "content-type" = "application/xml", "content-md5" = "JwjOZkFs+i5vAUZUg/9fsw==" }
+body = { utf8 = "<CORSConfiguration><CORSRule><AllowedMethod>PUT</AllowedMethod><AllowedOrigin>*</AllowedOrigin><AllowedHeader>x-amz-*</AllowedHeader></CORSRule></CORSConfiguration>" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+
+[[exchanges]]
+# Host: conf-cors-bare (no document). Path: /conf-cors-vh/key.txt (a document that allows anyone).
+[exchanges.request]
+method = "OPTIONS"
+target = "/conf-cors-vh/key.txt"
+host = "conf-cors-bare.s3.example.com"
+headers = { "origin" = "https://app.example.com", "access-control-request-method" = "PUT" }
+
+[exchanges.expect]
+kind = "response"
+status = 403
+connection_after = "open"
+headers_absent = [
+  "access-control-allow-origin",
+  "access-control-allow-methods",
+  "access-control-allow-headers",
+  "access-control-allow-credentials",
+  "access-control-max-age",
+  "access-control-expose-headers",
+]
+
+[exchanges.expect.error]
+code = "AccessForbidden"
+request_id_present = true
+
+[exchanges.expect.headers_present]
+"content-type" = "application/xml"
+"vary" = "origin"
+
+[exchanges.expect.body]
+redact = ["RequestId", "HostId"]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>AccessForbidden</Code><Message>CORSResponse: no CORS rule allows this request</Message><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''

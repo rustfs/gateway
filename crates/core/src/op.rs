@@ -49,6 +49,7 @@
 
 use rustfs_gateway_sig::OperationFloor;
 
+use crate::authz::{DerivedResourceError, DerivedResourceSet};
 use crate::registry::OperationSpec;
 use crate::route::ROUTES;
 
@@ -165,6 +166,23 @@ pub trait Operation: Send + Sync + 'static {
 
     /// The response before it is encoded.
     type Output: Send + 'static;
+
+    /// Resources found only after the typed input has been decoded.
+    ///
+    /// There is deliberately no default. Operations without any write
+    /// `type DerivedResources = NoDerived` and return the ZST explicitly.
+    type DerivedResources: DerivedResourceSet;
+
+    /// Extracts every resource that requires the second authorization stage.
+    fn derive_resources(input: &Self::Input) -> Result<Self::DerivedResources, DerivedResourceError>;
+
+    /// Removes any raw representation whose normalized resource now lives in
+    /// [`Self::DerivedResources`].
+    ///
+    /// Copy operations clear `x-amz-copy-source` here, so a handler cannot parse a second value
+    /// after policy approved the first. Operations whose typed input is already the canonical
+    /// resource representation implement this as an explicit no-op.
+    fn seal_derived_input(input: &mut Self::Input);
 
     /// What this operation requires of a request once routing has chosen it.
     ///

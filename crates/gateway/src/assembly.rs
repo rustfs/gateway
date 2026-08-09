@@ -110,15 +110,31 @@ impl RuleRef {
                       to read it",
     };
 
+    /// An [`crate::OpLayer`] was registered for an operation that has no handler.
+    pub const OP_LAYER_UNATTACHED: Self = Self {
+        id: "asm-op-layer-unattached",
+        explanation: "an operation layer was registered for an operation with no handler; ignoring it would leave the \
+                      deployment believing a rewrite is in force while nothing ever runs it",
+    };
+
+    /// Two operation types claimed one name, so a layer could not be matched to its operation.
+    pub const OP_LAYER_TYPE: Self = Self {
+        id: "asm-op-layer-type",
+        explanation: "an operation layer could not be matched to the operation it was registered under; two operation types \
+                      are claiming one name, and running the layer would apply it to the wrong input",
+    };
+
     /// Every rule this crate can cite, for a reverse lookup and for the assertion that the set is
     /// closed.
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 8] = [
         Self::REGISTRATION,
         Self::ROUTE,
         Self::EMPTY_REGISTRY,
         Self::MISSING_AUTHORIZER,
         Self::MISSING_AUTHENTICATOR,
         Self::MISSING_CODEC,
+        Self::OP_LAYER_UNATTACHED,
+        Self::OP_LAYER_TYPE,
     ];
 }
 
@@ -168,6 +184,20 @@ pub enum AssemblyError {
         /// Which assembly rule this is.
         rule: RuleRef,
     },
+    /// An [`crate::OpLayer`] was registered for an operation nobody handles.
+    UnattachedOpLayer {
+        /// The operation the layer named.
+        operation: &'static str,
+        /// Which assembly rule this is.
+        rule: RuleRef,
+    },
+    /// A layer could not be matched back to the operation it was registered under.
+    OpLayerTypeMismatch {
+        /// The operation name both types claimed.
+        operation: &'static str,
+        /// Which assembly rule this is.
+        rule: RuleRef,
+    },
 }
 
 impl AssemblyError {
@@ -179,7 +209,9 @@ impl AssemblyError {
             | Self::EmptyRegistry { rule }
             | Self::MissingAuthorizer { rule }
             | Self::MissingAuthenticator { rule }
-            | Self::MissingCodec { rule, .. } => *rule,
+            | Self::MissingCodec { rule, .. }
+            | Self::UnattachedOpLayer { rule, .. }
+            | Self::OpLayerTypeMismatch { rule, .. } => *rule,
         }
     }
 }
@@ -191,6 +223,9 @@ impl fmt::Display for AssemblyError {
             Self::Router { source, .. } => write!(f, "[{rule}] {source}"),
             Self::MissingCodec { operation, .. } => {
                 write!(f, "[{rule}] the operation {operation} has no wire codec: {}", rule.explanation())
+            }
+            Self::UnattachedOpLayer { operation, .. } | Self::OpLayerTypeMismatch { operation, .. } => {
+                write!(f, "[{rule}] the operation {operation}: {}", rule.explanation())
             }
             _ => write!(f, "[{rule}] {}", rule.explanation()),
         }

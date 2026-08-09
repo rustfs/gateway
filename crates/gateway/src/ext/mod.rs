@@ -36,24 +36,53 @@
 //! | --- | --- | --- |
 //! | [`Authorizer`] | none — [`crate::ServiceBuilder::build`] refuses | there is no safe default: allow-all is a hole, deny-all is a service nobody can use |
 //! | [`Authenticator`] | none — `build` refuses | the same asymmetry, one stage earlier |
-//! | [`HostResolver`] | [`PathStyleOnly`] | a virtual-hosted request is routed by its path, so `Host: bucket.example.com` addressing `/key` is not understood |
+//! | [`HostResolver`] | [`PathStyleOnly`] | a virtual-hosted request is routed by its path, so `Host: bucket.example.com` addressing `/key` is not understood; install [`VirtualHostStyle`] to understand it |
 //! | [`Governor`] | [`Unlimited`] | no request is ever refused for load, in either the per-bucket or the per-identity dimension |
 //! | [`Observer`] | [`NoObserver`] | nothing is recorded; a rejection leaves no trace outside the response |
+//! | [`CorsSource`] | [`NoCors`] | no bucket has a CORS document, so no preflight is ever allowed and no `Access-Control-*` header is ever written |
+//! | [`StageFilter`] | none installed | the three seams run nothing, and the pipeline allocates nothing for them |
+//! | [`OpLayer`] | none installed | dispatch calls the backend directly, with no continuation and no chain |
 //!
 //! Every default above is safe in the sense that it cannot widen access. Two of them —
 //! [`Unlimited`] and [`NoObserver`] — remove a defence rather than open a door, and a deployment
 //! that ships with both has no rate limit and no audit trail.
+//!
+//! # The three middleware levels, and which requirement belongs to which
+//!
+//! `docs/middleware.md` is the decision tree, and it is also the acceptance list for deleting the
+//! nine tower patch layers RustFS carries around s3s today. The short form:
+//!
+//! | The shape of the requirement | The level |
+//! | --- | --- |
+//! | Connection or service-wide, no S3 semantics: panic capture, tracing, global rate limit | a tower `Layer` outside the whole service — nothing here |
+//! | See or rewrite the HTTP shape, or a finished response; no typed input needed | [`StageFilter`] |
+//! | One operation, and it needs the decoded input or the typed output | [`OpLayer`] |
+//! | Only watching: logs, metrics, audit | [`Observer`], which is read-only and always will be |
 
 mod authenticator;
 mod authorizer;
+mod cors;
 mod credentials;
+mod filter;
 mod governor;
 mod host;
 mod observer;
+mod oplayer;
+mod policy;
+mod vhost;
 
 pub use self::authenticator::{Authentication, Authenticator, ChunkSink, ChunkVerification, SigV4Authenticator, Unavailable};
-pub use self::authorizer::{Authorizer, AuthzRequest, Denial, allow_when};
+pub use self::authorizer::{Authorizer, AuthzRequest, Decision, Denial, RequestContext, allow_when};
+pub use self::cors::{CORS_PREFLIGHT, CachedCorsSource, CorsCacheConfig, CorsSource, CorsSourceError, NoCors};
 pub use self::credentials::{CredentialProvider, Credentials, CredentialsError, StaticCredentials};
+pub use self::filter::{
+    FROZEN_WIRE_HEADERS, FrozenHeader, ResponseView, RoutedView, StageFilter, WireHead, response_filter, routed_filter,
+    wire_filter,
+};
 pub use self::governor::{Governor, GovernorRequest, Lease, Unlimited};
-pub use self::host::{HostQuery, HostResolver, PathStyleOnly, ResolvedHost};
+pub use self::host::{Addressing, HostQuery, HostResolver, PathStyleOnly, ResolvedHost, TargetOrigin, VhostHint};
 pub use self::observer::{NoObserver, Observer, RequestEvent};
+pub use self::oplayer::{Next, OpLayer, op_layer};
+pub(crate) use self::oplayer::{OpLayerSlot, Terminal};
+pub use self::policy::{NoPolicy, PolicyError, PolicySnapshot, PolicySource, SnapshotId, policy_from};
+pub use self::vhost::{BaseDomain, DomainError, MAX_BASE_DOMAIN_BYTES, VirtualHostStyle};

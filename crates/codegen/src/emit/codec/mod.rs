@@ -42,6 +42,7 @@ pub mod decode;
 pub mod encode;
 pub mod expr;
 pub mod forms;
+pub mod media;
 pub mod tolerance;
 pub mod url;
 
@@ -49,7 +50,7 @@ use std::collections::BTreeSet;
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
-use rustfs_gateway_model::ir::{Binding, OperationIr, Type};
+use rustfs_gateway_model::ir::{AttributeSource, Binding, OperationIr, Shape, Type};
 
 use super::dto::{LICENSE, naming};
 
@@ -153,6 +154,34 @@ fn operation(ir: &OperationIr) -> Result<String, String> {
         }
     }
     Ok(out)
+}
+
+/// Whether a shape member is carried by an XML attribute rather than by a child element.
+///
+/// The two emitters ask this for opposite reasons and must agree: `decode` skips such a member
+/// because the reader hands attributes to nobody, and `encode` skips it as an element because it
+/// is written into the opening tag instead. One answer, one place — a disagreement here is a
+/// member written as an attribute and read back as an element, which is the round trip nothing
+/// would notice until an SDK did.
+#[must_use]
+pub fn carried_as_attribute(shape: &Shape, member: &str) -> bool {
+    shape
+        .xml
+        .attributes
+        .iter()
+        .any(|attribute| matches!(&attribute.source, AttributeSource::Field(name) if name == member))
+}
+
+/// The attribute name carrying a member, for the comment the emitters leave behind.
+#[must_use]
+pub fn attribute_name(shape: &Shape, member: &str) -> String {
+    shape
+        .xml
+        .attributes
+        .iter()
+        .find(|attribute| matches!(&attribute.source, AttributeSource::Field(name) if name == member))
+        .map(|attribute| attribute.name.clone())
+        .unwrap_or_default()
 }
 
 /// The two element names a list is written and read through.

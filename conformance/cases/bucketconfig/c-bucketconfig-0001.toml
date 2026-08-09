@@ -1,0 +1,31 @@
+[case]
+id = "c-bucketconfig-0001"
+schema_version = 1
+title = "A versioning write carrying Content-MD5 is accepted"
+rationale = """
+The write is the only way a bucket becomes versioned, and it is one of the six writes in this band that demand an integrity claim. This is the accepting half of that pair: the same request without the header is c-bucketconfig-0035, and without both halves a gateway that required nothing and a gateway that required everything would each pass one of them."""
+polarity = "positive"
+operation = "PutBucketVersioning"
+tags = ["bucketconfig", "xml", "checksum"]
+timeout_ms = 10000
+quirks = ["q-ver-0003"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketVersioning.html"
+summary = "The write reference documents the configuration document, its two status values and its Content-MD5 header."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "conf-bucketconfig"
+[request]
+method = "PUT"
+target = "/conf-bucketconfig?versioning"
+headers = { "content-md5" = "8qj8HSeDu3APPMQZVG06WQ==", "content-type" = "application/xml" }
+body = { utf8 = '<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+connection_after = "open"

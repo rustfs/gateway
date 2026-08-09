@@ -1,0 +1,5 @@
+error[E0599]: no associated function or constant named `new` found for struct `Authorized<O>` in the current scope
+  --> tests/compile_fail/authz_authorized_new.rs:19:38
+   |
+19 |     let _ = Authorized::<GetObject>::new();
+   |                                      ^^^ associated function or constant not found in `Authorized<GetObject>`

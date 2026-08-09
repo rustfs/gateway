@@ -38,6 +38,7 @@ mod error_code;
 mod error_status;
 mod etag;
 mod name;
+mod naming;
 mod opaque_string;
 mod parse_error;
 mod range;
@@ -53,6 +54,10 @@ pub use self::error_code::ErrorCode;
 pub use self::error_status::{ErrorContext, mask_for_authorization, status_of};
 pub use self::etag::{ETag, EtagRender};
 pub use self::name::{BucketName, ObjectKey, is_xml_representable, validate_bucket_name, validate_object_key};
+pub use self::naming::{
+    AwsNameValidator, NamePolicy, NameRejection, NameValidator, SlashPolicy, Stricter, aws_bucket_rules, decode_once,
+    floor_check_bucket, floor_check_key,
+};
 pub use self::opaque_string::OpaqueString;
 pub use self::parse_error::{ParseError, rules};
 pub use self::range::{ByteRange, RangeOutcome, RangeParse, RangeSpec};

@@ -1,0 +1,77 @@
+[case]
+id = "c-cors-0041"
+schema_version = 1
+title = "A repeated Origin header is refused and no CORS header is written"
+rationale = """
+Two Origin lines are the cache-poisoning shape of this feature: whichever one an intermediary keys its entry on, the
+stored answer belongs to the other, and a gateway that echoed either has granted the second origin an allowance it
+never asked for. Refusing before anything is echoed is the only answer that does not depend on which line the header
+map happened to keep."""
+polarity = "negative"
+tags = ["cors", "preflight", "security", "wire-bytes"]
+timeout_ms = 10000
+quirks = ["q-cors-0015"]
+
+[[case.evidence]]
+url = "https://fetch.spec.whatwg.org/#http-cors-protocol"
+summary = "The preflight and its answer are defined here, including which response header a browser reads from which response."
+kind = "rfc"
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9110#section-12.5.5"
+summary = "A response whose content varies with a request header must name that header in Vary or a shared cache will mix them up."
+kind = "rfc"
+
+[[setup.buckets]]
+name = "conf-cors-rt"
+
+[[exchanges]]
+# Setup traffic: the document the preflight below is answered from. Not under test.
+[exchanges.request]
+method = "PUT"
+target = "/conf-cors-rt?cors"
+headers = { "content-type" = "application/xml", "content-md5" = "rAqMzbtniOyp6dCmIWiViw==" }
+body = { utf8 = "<CORSConfiguration><CORSRule><AllowedMethod>PUT</AllowedMethod><AllowedOrigin>https://app.example.com</AllowedOrigin></CORSRule></CORSConfiguration>" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+
+[[exchanges]]
+[exchanges.request]
+method = "OPTIONS"
+target = "/conf-cors-rt/key.txt"
+raw_headers = [
+  ["host", "s3.example.com"],
+  ["origin", "https://app.example.com"],
+  ["origin", "https://evil.invalid"],
+  ["access-control-request-method", "PUT"],
+]
+
+[exchanges.expect]
+kind = "response"
+status = 403
+connection_after = "open"
+headers_absent = [
+  "access-control-allow-origin",
+  "access-control-allow-methods",
+  "access-control-allow-headers",
+  "access-control-allow-credentials",
+  "access-control-max-age",
+  "access-control-expose-headers",
+]
+
+[exchanges.expect.error]
+code = "AccessForbidden"
+request_id_present = true
+
+[exchanges.expect.headers_present]
+"content-type" = "application/xml"
+"vary" = "origin"
+
+[exchanges.expect.body]
+redact = ["RequestId", "HostId"]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>AccessForbidden</Code><Message>CORSResponse: no CORS rule allows this request</Message><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''

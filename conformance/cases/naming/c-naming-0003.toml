@@ -1,0 +1,42 @@
+# c-naming-0003 — a single dot is a key byte and not a directory
+#
+[case]
+id = "c-naming-0003"
+schema_version = 1
+title = "A key containing a single-dot segment is looked up exactly as spelled"
+rationale = """
+The floor refuses `..` because a storage layer may read it as a parent. `.` is not that: it has no traversal meaning even to a filesystem, and an S3 key has no directory semantics at all. Refusing it, or silently deleting the segment, would make a key a client can create on AWS unreachable here — so the rule has to be `..` specifically, and this case is what stops it from drifting into `any dot looks suspicious`."""
+polarity = "positive"
+operation = "GetObject"
+tags = ["naming", "routing", "security"]
+timeout_ms = 10000
+quirks = ["q-naming-0003"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/object-keys.html"
+summary = "A key is an opaque sequence of Unicode characters up to 1024 UTF-8 bytes long, with no path structure of its own."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-naming"
+
+[[setup.objects]]
+bucket = "conf-naming"
+key = "a/./b.txt"
+body = { utf8 = "dot segments are data" }
+
+[request]
+method = "GET"
+target = "/conf-naming/a/./b.txt"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[expect.body]
+exact_utf8 = "dot segments are data"

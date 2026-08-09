@@ -1,0 +1,30 @@
+[case]
+id = "c-acl-0009"
+schema_version = 1
+title = "log-delivery-write is accepted on a bucket, which is the only place it means anything"
+rationale = """
+This is the bucket half of the split canned-ACL set, and it is the value the pinned Smithy enumeration omits altogether — a gateway that took its accepted set from the model would refuse the canned ACL server access logging is enabled with, and the caller would conclude logging is unavailable. Its other half is c-acl-0018, which refuses the same value on an object."""
+polarity = "positive"
+operation = "PutBucketAcl"
+tags = ["acl"]
+timeout_ms = 10000
+quirks = ["q-acl-0005"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/acl-overview.html#canned-acl"
+summary = "The canned-ACL table lists log-delivery-write as applying to a bucket and to nothing else."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "conf-acl"
+
+[request]
+method = "PUT"
+target = "/conf-acl?acl"
+headers = { "content-md5" = "1B2M2Y8AsgTpgAmY7PhCfg==", "x-amz-acl" = "log-delivery-write" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+connection_after = "open"

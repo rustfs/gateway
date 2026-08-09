@@ -1,0 +1,44 @@
+[case]
+id = "c-replication-0023"
+schema_version = 1
+title = "A V1 rule carrying a Priority is refused as InvalidRequest"
+rationale = """
+The mixing refused the other way round: Priority belongs to the V2 schema, and a rule whose scope is the V1 rule-level Prefix has no version that defines the member. Accepting it would store a document whose schema version no reader can name — V1 by its scope, V2 by its priority — under the one configuration whose stored form every future release must keep parsing."""
+polarity = "negative"
+operation = "PutBucketReplication"
+tags = ["replication", "xml", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-repl-0006"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/replication-add-config.html"
+summary = "The backward-compatibility section shows the V1 rule form without Priority, which arrives only with the V2 Filter element."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "conf-replication"
+[request]
+method = "PUT"
+target = "/conf-replication?replication"
+headers = { "content-type" = "application/xml", "content-md5" = "eNNyjmvDIijB5V9cE/qx3Q==" }
+body = { utf8 = '<ReplicationConfiguration><Role>arn:aws:iam::111122223333:role/replication-role</Role><Rule><Priority>1</Priority><Prefix>logs/</Prefix><Status>Enabled</Status><Destination><Bucket>arn:aws:s3:::replica-bucket</Bucket></Destination></Rule></ReplicationConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+code = "InvalidRequest"
+request_id_present = true
+
+[expect.headers_present]
+"content-type" = "application/xml"
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>InvalidRequest</Code><Message>Priority can only be used together with a Filter; a rule-level Prefix belongs to the earlier schema</Message><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''

@@ -1,0 +1,42 @@
+[case]
+id = "c-authz-0006"
+schema_version = 1
+title = "A versioned copy source keeps its version through authorization"
+rationale = "The named version is captured, authorized as GetObjectVersion, and copied rather than silently falling back to the latest object."
+polarity = "positive"
+operation = "CopyObject"
+tags = ["security"]
+timeout_ms = 10000
+quirks = ["q-copy-source-version-0083", "q-copy-source-authz-0086"]
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CopyObject.html"
+summary = "A copy source may name a version and that version requires version-read authorization."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "authz-version"
+versioning = "enabled"
+
+[[exchanges]]
+name = "write-version"
+[exchanges.request]
+method = "PUT"
+target = "/authz-version/source"
+body = { utf8 = "version-one" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+[exchanges.expect]
+kind = "response"
+status = 200
+[exchanges.expect.capture]
+version = { header = "x-amz-version-id" }
+
+[[exchanges]]
+name = "copy-version"
+[exchanges.request]
+method = "PUT"
+target = "/authz-version/destination"
+headers = { "x-amz-copy-source" = "/authz-version/source?versionId=${capture.version}" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+[exchanges.expect]
+kind = "response"
+status = 200

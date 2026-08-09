@@ -1,0 +1,59 @@
+[case]
+id = "c-bucketconfig-0002"
+schema_version = 1
+title = "A versioned bucket reads back Status Enabled under an xmlns-bearing root"
+rationale = """
+The read-back is where the stored state becomes observable, and byte comparison is the only assertion that notices a missing xmlns or a renamed element. A strict client refuses an unnamespaced root outright, so an implementation that stored the state correctly and rendered it without the namespace would look correct to every structural assertion and fail every real SDK."""
+polarity = "positive"
+operation = "GetBucketVersioning"
+tags = ["bucketconfig", "xml", "wire-bytes"]
+timeout_ms = 10000
+quirks = ["q-ver-0001"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketVersioning.html"
+summary = "The read reference shows the versioning state as an element that is absent until versioning is configured."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketVersioning.html"
+summary = "The write reference documents the configuration document, its two status values and its Content-MD5 header."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "conf-bucketconfig"
+[[exchanges]]
+name = "write"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-bucketconfig?versioning"
+headers = { "content-md5" = "8qj8HSeDu3APPMQZVG06WQ==", "content-type" = "application/xml" }
+body = { utf8 = '<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[[exchanges]]
+name = "read-back"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-bucketconfig?versioning"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.headers_present]
+"content-type" = "application/xml"
+
+[exchanges.expect.body]
+golden = "goldens/c-bucketconfig-0002.xml"
+

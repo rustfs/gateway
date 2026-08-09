@@ -14,38 +14,49 @@
 
 //! Bucket names and object keys: the two identifiers authorization and storage must agree on.
 //!
-//! Responsible for: the default AWS validation rules for both names, the *single* decoding path
-//! for an object key, and the predicates the wire layer needs (`needs_url_encoding`,
-//! `is_vhost_safe`).
-//! NOT responsible for: pluggable naming policy — a `NameValidator` extension point arrives later
-//! and will consume [`validate_bucket_name`] as its default — and for percent-decoding the request
-//! target as a whole, which is the HTTP layer's job up to the point where it hands over one key.
-//! Upstream: [`super::parse_error`]. Downstream: routing, authorization, and every operation that
-//! names a bucket or an object.
+//! Responsible for: the two name types themselves, their wire-shape rules, the ingress
+//! constructors that run [`super::naming`]'s single normalisation, and the predicates the wire
+//! layer needs (`needs_url_encoding`, `is_vhost_safe`).
+//! NOT responsible for: the normalisation and the safety floor themselves, which live in
+//! [`super::naming`] so that there is exactly one of each; percent-decoding the request target as
+//! a whole, which the HTTP layer does up to the point where it hands over one label.
+//! Upstream: [`super::parse_error`], [`super::naming`]. Downstream: routing, authorization, and
+//! every operation that names a bucket or an object.
 //!
-//! # One decoding path, for a security reason
+//! # Two constructors, and the difference between them
 //!
-//! Two published advisories against S3 implementations have the same shape: the value the
+//! Three published advisories against S3 implementations have the same shape: the value the
 //! authorization check reads is not byte-identical to the value the storage layer uses, because
 //! one of them decoded, normalised, or collapsed something the other did not. A policy that denies
 //! `secret/*` does not deny `secret//x` if only one side collapses the double slash.
 //!
-//! Therefore: [`ObjectKey`] never normalises. Duplicate slashes stay, `.` and `..` segments stay,
-//! Unicode is not case-folded and not NFC-normalised. Decoding happens exactly once, in
-//! [`ObjectKey::from_encoded_path`], which also keeps the original encoded bytes — the signature
-//! canonicalisation needs those, and re-encoding a decoded key is not guaranteed to reproduce
-//! them.
+//! So a name a *client chose* is built by [`ObjectKey::materialize`] or
+//! [`BucketName::materialize`] — the ingress constructors, which decode once, apply the
+//! [`SlashPolicy`], run the safety floor and then the deployment's [`NameValidator`]. Every stage
+//! downstream reads that one value.
+//!
+//! [`ObjectKey::new`] and [`BucketName::new`] are the *representation* constructors. They enforce
+//! the rules a value must satisfy to be expressible at all — non-empty, within the length limit,
+//! no NUL — and nothing else, because a key that already exists in a backend may hold bytes no
+//! client would be allowed to name today, and a listing has to be able to answer with it.
+//! `conformance/cases/list/c-list-0035` is exactly that object. Anything reading a name off the
+//! wire uses `materialize`; a `new` on a request path would be the second normalisation site this
+//! module exists to prevent.
+//!
+//! Within both: [`ObjectKey`] never rewrites bytes beyond the [`SlashPolicy`]. `.` segments stay,
+//! Unicode is not case-folded and not NFC-normalised. The encoded spelling is retained separately
+//! — the signature canonicalisation needs it, and re-encoding a decoded key is not guaranteed to
+//! reproduce it.
 
-use percent_encoding::percent_decode_str;
-
+use super::naming::{
+    MAX_KEY_BYTES, NamePolicy, NameRejection, aws_bucket_rules, check_bucket, check_decoded_key, floor_check_bucket,
+    normalize_key,
+};
 use super::parse_error::{ParseError, rules};
 use crate::placeholder::WirePlaceholder;
 
-/// Maximum object key length, in UTF-8 bytes.
-const MAX_KEY_BYTES: usize = 1024;
-/// Bucket name length bounds.
-const MIN_BUCKET_BYTES: usize = 3;
-const MAX_BUCKET_BYTES: usize = 63;
+#[cfg(doc)]
+use super::naming::{NameValidator, SlashPolicy};
 
 /// An object key: 1..=1024 UTF-8 bytes, never normalised.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -70,7 +81,12 @@ impl ObjectKey {
         })
     }
 
-    /// Builds a key from the percent-encoded path segment the request carried.
+    /// **The single ingress.** Builds a key from the percent-encoded label the request carried.
+    ///
+    /// Decodes exactly once, refuses a residual encoded separator, applies the policy's
+    /// [`SlashPolicy`], runs the unconditional safety floor and then the deployment's
+    /// [`NameValidator`]. The value it returns is the one authorization, auditing and storage all
+    /// read; there is no second, differently normalised spelling to choose from.
     ///
     /// The encoded spelling is retained: SigV4 canonicalises the *encoded* path, so a signature
     /// check that re-encodes a decoded key can disagree with the client over any byte the client
@@ -78,22 +94,50 @@ impl ObjectKey {
     ///
     /// # Errors
     ///
-    /// Returns a [`ParseError`] when the decoded bytes are not UTF-8, or fail
-    /// [`ObjectKey::new`]'s rules.
-    pub fn from_encoded_path(encoded: &str) -> Result<Self, ParseError> {
-        let decoded = percent_decode_str(encoded)
-            .decode_utf8()
-            .map_err(|_| ParseError::new("ObjectKey", rules::AWS_OBJECT_KEY, "the percent-decoded key is not valid UTF-8"))?;
-        validate_object_key(&decoded)?;
-        let encoded = if decoded == encoded {
+    /// The [`NameRejection`] naming the first rule that refused the label.
+    pub fn materialize(encoded: &str, policy: &NamePolicy) -> Result<Self, NameRejection> {
+        let key = normalize_key(encoded, policy)?;
+        let encoded = if key == encoded {
             None
         } else {
             Some(encoded.to_owned().into_boxed_str())
         };
         Ok(Self {
-            key: decoded.into_owned().into_boxed_str(),
+            key: key.into_boxed_str(),
             encoded,
         })
+    }
+
+    /// The ingress for a key some other reader has already decoded — a body element or a query
+    /// parameter, whose decode belongs to the XML or query reader that produced it.
+    ///
+    /// No decode happens here. Decoding a value that was already decoded is the double-decode bug
+    /// [`super::naming`] exists to prevent, so this applies the floor and the validator to what it
+    /// was given.
+    ///
+    /// # Errors
+    ///
+    /// The [`NameRejection`] naming the rule that refused it.
+    pub fn materialize_decoded(decoded: &str, policy: &NamePolicy) -> Result<Self, NameRejection> {
+        check_decoded_key(decoded, policy)?;
+        Ok(Self {
+            key: decoded.to_owned().into_boxed_str(),
+            encoded: None,
+        })
+    }
+
+    /// Builds a key from the percent-encoded label under the default policy.
+    ///
+    /// Equivalent to [`ObjectKey::materialize`] with [`NamePolicy::default`]. Kept for the call
+    /// sites that have no policy to hand and documented as the default rather than as a second
+    /// rule: it calls the same normalisation, so there is still only one.
+    ///
+    /// # Errors
+    ///
+    /// A [`ParseError`] carrying the rejection's reason.
+    pub fn from_encoded_path(encoded: &str) -> Result<Self, ParseError> {
+        Self::materialize(encoded, &NamePolicy::default())
+            .map_err(|rejection| ParseError::new("ObjectKey", rules::AWS_OBJECT_KEY, rejection.reason()))
     }
 
     /// The decoded key, exactly as supplied. This is the value both authorization and storage must
@@ -207,6 +251,20 @@ impl BucketName {
         Ok(Self(name.into_boxed_str()))
     }
 
+    /// **The single ingress.** Validates a bucket label against the floor and then the
+    /// deployment's [`NameValidator`].
+    ///
+    /// A bucket label is never percent-decoded — the floor refuses one containing `%` — and no
+    /// [`SlashPolicy`] applies to it, because a label containing a separator is not a label.
+    ///
+    /// # Errors
+    ///
+    /// The [`NameRejection`] naming the rule that refused it.
+    pub fn materialize(name: &str, policy: &NamePolicy) -> Result<Self, NameRejection> {
+        check_bucket(name, policy)?;
+        Ok(Self(name.to_owned().into_boxed_str()))
+    }
+
     /// The name.
     #[must_use]
     pub fn as_str(&self) -> &str {
@@ -250,57 +308,19 @@ impl WirePlaceholder for BucketName {
     }
 }
 
-/// The default AWS bucket naming rules.
+/// The default bucket naming rules: the safety floor, then the AWS rules on top of it.
+///
+/// This is [`BucketName::materialize`] under [`NamePolicy::default`], expressed as a free function
+/// for the call sites that predate the policy. It calls the same two implementations, so there is
+/// no second copy of either rule set to drift from this one.
 ///
 /// # Errors
 ///
-/// Returns a [`ParseError`] when the name is outside 3..=63 characters, uses a character outside
-/// `[a-z0-9.-]`, does not start and end with a letter or digit, contains `..`, is formatted as an
-/// IPv4 address, or uses one of the reserved prefixes or suffixes.
+/// Returns a [`ParseError`] when the name breaks a floor rule, is outside 3..=63 bytes, uses a
+/// character outside `[a-z0-9.-]`, does not start and end with a letter or digit, contains `..`,
+/// is formatted as an IPv4 address, or uses one of the reserved prefixes or suffixes.
 pub fn validate_bucket_name(name: &str) -> Result<(), ParseError> {
-    let err = |reason: &'static str| ParseError::new("BucketName", rules::AWS_BUCKET_NAMING, reason);
-
-    if !(MIN_BUCKET_BYTES..=MAX_BUCKET_BYTES).contains(&name.len()) {
-        return Err(err("a bucket name must be between 3 and 63 characters long"));
-    }
-    if !name
-        .bytes()
-        .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-' || b == b'.')
-    {
-        return Err(err("a bucket name may only contain lowercase letters, digits, hyphens and dots"));
-    }
-    let first_last_ok = |b: Option<u8>| b.is_some_and(|b| b.is_ascii_lowercase() || b.is_ascii_digit());
-    if !first_last_ok(name.bytes().next()) || !first_last_ok(name.bytes().next_back()) {
-        return Err(err("a bucket name must begin and end with a letter or a digit"));
-    }
-    if name.contains("..") {
-        return Err(err("a bucket name must not contain two consecutive dots"));
-    }
-    if is_ipv4_shaped(name) {
-        return Err(err("a bucket name must not be formatted as an IPv4 address"));
-    }
-    if name.starts_with("xn--") || name.starts_with("sthree-") {
-        return Err(err("a bucket name must not use a reserved prefix"));
-    }
-    if name.ends_with("-s3alias") || name.ends_with("--ol-s3") {
-        return Err(err("a bucket name must not use a reserved suffix"));
-    }
-    Ok(())
-}
-
-/// Whether the name is four dot-separated decimal octets, which would make a path-style URL
-/// ambiguous with an address.
-fn is_ipv4_shaped(name: &str) -> bool {
-    let mut labels = 0usize;
-    for label in name.split('.') {
-        labels += 1;
-        let valid = !label.is_empty()
-            && label.len() <= 3
-            && label.bytes().all(|b| b.is_ascii_digit())
-            && label.parse::<u16>().is_ok_and(|value| value <= 255);
-        if !valid {
-            return false;
-        }
-    }
-    labels == 4
+    floor_check_bucket(name)
+        .and_then(|()| aws_bucket_rules(name))
+        .map_err(|rejection| ParseError::new("BucketName", rules::AWS_BUCKET_NAMING, rejection.reason()))
 }

@@ -78,14 +78,17 @@
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use rustfs_gateway::sig::{
     AmzDate, PayloadMode, SigService, SigV4Signer, SigningCredentials, SigningRequest, SigningScope, Tamper, TamperComponent,
 };
 use rustfs_gateway::{
-    Credentials, FixedClock, Limits, ObservedBody, RegionSet, S3Service, ServiceBuilder, SigV4Authenticator, StaticCredentials,
-    WireRequest, allow_when, collect, dto,
+    Authorizer, AuthzRequest, BoxFuture, BucketName, CorsSource, CorsSourceError, Credentials, Decision, FixedClock,
+    HandlerResult, Limits, Next, ObservedBody, PolicyError, PolicySnapshot, RegionSet, Req, RequestContext, S3Service,
+    ServiceBuilder, SigV4Authenticator, SnapshotId, StaticCredentials, VirtualHostStyle, WireRequest, allow_when, collect, dto,
+    op_layer, policy_from,
 };
 
 use crate::exec::block_on;
@@ -105,16 +108,80 @@ pub const VALID_SECRET: &[u8] = b"wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
 pub const UNKNOWN_ACCESS_KEY: &str = "AKIAI44QH8DHBEXAMPLE";
 /// The secret used when a case asks to sign with the wrong one.
 pub const WRONG_SECRET: &[u8] = b"this-is-not-the-secret-the-target-knows--";
-/// The host every request addresses. Path-style, because the corpus writes `/bucket/key` targets.
+/// The host every request addresses unless a case overrides it with `request.host`.
+///
+/// Also the first entry of [`BASE_DOMAINS`], which is what lets the `host/` family address a
+/// bucket virtual-hosted without disturbing the rest of the corpus: the bare base domain has no
+/// prefix, so `Host: s3.example.com` with a `/bucket/key` target is path-style exactly as it was
+/// before the resolver was installed.
 pub const HOST: &str = "s3.example.com";
+/// The virtual-hosted base domains the target is assembled with.
+///
+/// Two of them, and the second is the region-bearing form, because a resolver that only ever holds
+/// one domain cannot show that the *longest* match wins or that a second domain matches at all.
+pub const BASE_DOMAINS: [&str; 2] = [HOST, "s3.us-east-1.example.com"];
 /// The region every case signs for.
 pub const REGION: &str = "us-east-1";
+
+struct FixedDecision(Decision);
+
+impl Authorizer for FixedDecision {
+    fn authorize<'a>(&'a self, _context: &'a RequestContext<'a>, _request: &'a AuthzRequest<'a>) -> BoxFuture<'a, Decision> {
+        Box::pin(async move { self.0 })
+    }
+}
+
+struct SameSnapshot {
+    first: Mutex<Option<(SnapshotId, i64)>>,
+}
+
+impl Authorizer for SameSnapshot {
+    fn authorize<'a>(&'a self, context: &'a RequestContext<'a>, _request: &'a AuthzRequest<'a>) -> BoxFuture<'a, Decision> {
+        let observed = (context.policy().id(), context.now().unix_seconds());
+        let decision = match self.first.lock() {
+            Ok(mut first) => match *first {
+                None => {
+                    *first = Some(observed);
+                    Decision::Allow
+                }
+                Some(expected) if expected == observed => Decision::Allow,
+                Some(_) => Decision::Deny,
+            },
+            Err(_) => Decision::Indeterminate,
+        };
+        Box::pin(async move { decision })
+    }
+}
+
+struct HotUpdate {
+    current: Arc<AtomicUsize>,
+}
+
+impl Authorizer for HotUpdate {
+    fn authorize<'a>(&'a self, context: &'a RequestContext<'a>, request: &'a AuthzRequest<'a>) -> BoxFuture<'a, Decision> {
+        let version = context.policy().get::<usize>().copied();
+        let decision = match version {
+            Some(1) => {
+                if request.action == "s3:PutObject" {
+                    self.current.store(2, Ordering::SeqCst);
+                }
+                Decision::Allow
+            }
+            Some(2) => Decision::Deny,
+            _ => Decision::Indeterminate,
+        };
+        Box::pin(async move { decision })
+    }
+}
 
 /// A service assembled from the facade, plus the fixtures the current case established.
 pub struct InProcess {
     root: PathBuf,
     state: Arc<Mutex<Fixture>>,
     limits: Limits,
+    case_id: String,
+    authz_policy_version: Arc<AtomicUsize>,
+    authz_backend_calls: Arc<AtomicUsize>,
 }
 
 impl InProcess {
@@ -126,6 +193,9 @@ impl InProcess {
             root,
             state: Arc::new(Mutex::new(Fixture::at(0))),
             limits: Limits::default(),
+            case_id: String::new(),
+            authz_policy_version: Arc::new(AtomicUsize::new(1)),
+            authz_backend_calls: Arc::new(AtomicUsize::new(0)),
         }
     }
 
@@ -141,7 +211,7 @@ impl InProcess {
         let regions =
             RegionSet::new([REGION]).map_err(|error| SutError::Environment(format!("`{REGION}` is not a region: {error}")))?;
         let clock = FixedClock::at_unix_seconds(at_unix_seconds).skewed_by_millis(skew_ms);
-        ServiceBuilder::new()
+        let builder = ServiceBuilder::new()
             .register::<dto::AbortMultipartUpload, _>(Arc::clone(&backend))
             .register::<dto::CompleteMultipartUpload, _>(Arc::clone(&backend))
             .register::<dto::CopyObject, _>(Arc::clone(&backend))
@@ -151,17 +221,33 @@ impl InProcess {
             .register::<dto::DeleteBucketCors, _>(Arc::clone(&backend))
             .register::<dto::DeleteBucketEncryption, _>(Arc::clone(&backend))
             .register::<dto::DeleteBucketLifecycle, _>(Arc::clone(&backend))
+            .register::<dto::DeleteBucketPolicy, _>(Arc::clone(&backend))
+            .register::<dto::DeleteBucketReplication, _>(Arc::clone(&backend))
             .register::<dto::DeleteBucketTagging, _>(Arc::clone(&backend))
+            .register::<dto::DeleteBucketWebsite, _>(Arc::clone(&backend))
             .register::<dto::DeleteObject, _>(Arc::clone(&backend))
             .register::<dto::DeleteObjectTagging, _>(Arc::clone(&backend))
             .register::<dto::DeleteObjects, _>(Arc::clone(&backend))
+            .register::<dto::DeletePublicAccessBlock, _>(Arc::clone(&backend))
+            .register::<dto::GetBucketAccelerateConfiguration, _>(Arc::clone(&backend))
+            .register::<dto::GetBucketAcl, _>(Arc::clone(&backend))
             .register::<dto::GetBucketCors, _>(Arc::clone(&backend))
             .register::<dto::GetBucketEncryption, _>(Arc::clone(&backend))
             .register::<dto::GetBucketLifecycleConfiguration, _>(Arc::clone(&backend))
             .register::<dto::GetBucketLocation, _>(Arc::clone(&backend))
+            .register::<dto::GetBucketLogging, _>(Arc::clone(&backend))
+            .register::<dto::GetBucketNotificationConfiguration, _>(Arc::clone(&backend))
+            .register::<dto::GetBucketPolicy, _>(Arc::clone(&backend))
+            .register::<dto::GetBucketPolicyStatus, _>(Arc::clone(&backend))
+            .register::<dto::GetBucketReplication, _>(Arc::clone(&backend))
+            .register::<dto::GetBucketRequestPayment, _>(Arc::clone(&backend))
             .register::<dto::GetBucketTagging, _>(Arc::clone(&backend))
+            .register::<dto::GetBucketVersioning, _>(Arc::clone(&backend))
+            .register::<dto::GetBucketWebsite, _>(Arc::clone(&backend))
+            .register::<dto::GetPublicAccessBlock, _>(Arc::clone(&backend))
             .register::<dto::HeadBucket, _>(Arc::clone(&backend))
             .register::<dto::GetObject, _>(Arc::clone(&backend))
+            .register::<dto::GetObjectAcl, _>(Arc::clone(&backend))
             .register::<dto::GetObjectLegalHold, _>(Arc::clone(&backend))
             .register::<dto::GetObjectLockConfiguration, _>(Arc::clone(&backend))
             .register::<dto::GetObjectRetention, _>(Arc::clone(&backend))
@@ -173,22 +259,81 @@ impl InProcess {
             .register::<dto::ListObjects, _>(Arc::clone(&backend))
             .register::<dto::ListObjectsV2, _>(Arc::clone(&backend))
             .register::<dto::ListParts, _>(Arc::clone(&backend))
+            .register::<dto::PutBucketAcl, _>(Arc::clone(&backend))
             .register::<dto::PutBucketCors, _>(Arc::clone(&backend))
+            .register::<dto::PutBucketAccelerateConfiguration, _>(Arc::clone(&backend))
             .register::<dto::PutBucketEncryption, _>(Arc::clone(&backend))
             .register::<dto::PutBucketLifecycleConfiguration, _>(Arc::clone(&backend))
+            .register::<dto::PutBucketLogging, _>(Arc::clone(&backend))
+            .register::<dto::PutBucketNotificationConfiguration, _>(Arc::clone(&backend))
+            .register::<dto::PutBucketPolicy, _>(Arc::clone(&backend))
+            .register::<dto::PutBucketReplication, _>(Arc::clone(&backend))
+            .register::<dto::PutBucketRequestPayment, _>(Arc::clone(&backend))
             .register::<dto::PutBucketTagging, _>(Arc::clone(&backend))
+            .register::<dto::PutBucketVersioning, _>(Arc::clone(&backend))
+            .register::<dto::PutBucketWebsite, _>(Arc::clone(&backend))
+            .register::<dto::PutPublicAccessBlock, _>(Arc::clone(&backend))
             .register::<dto::PutObject, _>(Arc::clone(&backend))
+            .register::<dto::PutObjectAcl, _>(Arc::clone(&backend))
             .register::<dto::PutObjectLegalHold, _>(Arc::clone(&backend))
             .register::<dto::PutObjectLockConfiguration, _>(Arc::clone(&backend))
             .register::<dto::PutObjectRetention, _>(Arc::clone(&backend))
             .register::<dto::PutObjectTagging, _>(Arc::clone(&backend))
+            .register::<dto::RestoreObject, _>(Arc::clone(&backend))
+            .register::<dto::SelectObjectContent, _>(Arc::clone(&backend))
             .register::<dto::UploadPart, _>(Arc::clone(&backend))
             .register::<dto::UploadPartCopy, _>(Arc::clone(&backend))
-            .authenticator(SigV4Authenticator::new(provider, regions))
-            // Authorisation is not what this corpus measures: every case that reaches a handler is
-            // signed with the one identity the fixtures know, and a policy engine here would turn
-            // protocol failures into authorisation failures.
-            .authorizer(allow_when(|request| !request.is_anonymous()))
+            .cors_source(FixtureCors {
+                state: Arc::clone(&self.state),
+            })
+            .authenticator(SigV4Authenticator::new(provider, regions));
+        let builder = match self.case_id.as_str() {
+            "c-authz-0005" => builder.authorizer(SameSnapshot { first: Mutex::new(None) }),
+            "c-authz-1009" => builder
+                .policy_source(policy_from(|_| Err(PolicyError::unavailable())))
+                .authorizer(allow_when(|_| true)),
+            "c-authz-1010" => builder.authorizer(FixedDecision(Decision::Indeterminate)),
+            "c-authz-1014" => {
+                let source = Arc::clone(&self.authz_policy_version);
+                builder
+                    .policy_source(policy_from(move |_| Ok(PolicySnapshot::of(Arc::new(source.load(Ordering::SeqCst))))))
+                    .authorizer(HotUpdate {
+                        current: Arc::clone(&self.authz_policy_version),
+                    })
+            }
+            _ => builder.authorizer(allow_when(|request| {
+                !request.is_anonymous()
+                    && !(request.action == "s3:GetObject"
+                        && request.bucket.is_some_and(|bucket| bucket.as_str() == "authz-denied-source"))
+            })),
+        };
+        let backend_calls = Arc::clone(&self.authz_backend_calls);
+        let copy_backend_calls = Arc::clone(&self.authz_backend_calls);
+        builder
+            .op_layer::<dto::CopyObject, _>(op_layer(move |request: Req<dto::CopyObject>, next: Next<'_, dto::CopyObject>| {
+                let backend_calls = Arc::clone(&copy_backend_calls);
+                Box::pin(async move {
+                    backend_calls.fetch_add(1, Ordering::SeqCst);
+                    next.run(request).await
+                }) as BoxFuture<'_, HandlerResult<dto::CopyObject>>
+            }))
+            .op_layer::<dto::UploadPartCopy, _>(op_layer(
+                move |request: Req<dto::UploadPartCopy>, next: Next<'_, dto::UploadPartCopy>| {
+                    let backend_calls = Arc::clone(&backend_calls);
+                    Box::pin(async move {
+                        backend_calls.fetch_add(1, Ordering::SeqCst);
+                        next.run(request).await
+                    }) as BoxFuture<'_, HandlerResult<dto::UploadPartCopy>>
+                },
+            ))
+            // Installed rather than left at the default, because the default reads no host and a
+            // `host/` case that could not be answered differently from a path-style one would be a
+            // case that cannot fail. Every other family addresses the bare base domain, which has
+            // no prefix and is therefore path-style — so this changes nothing for them.
+            .host_resolver(
+                VirtualHostStyle::new(BASE_DOMAINS)
+                    .map_err(|error| SutError::Environment(format!("the base domains are not usable: {error}")))?,
+            )
             .clock(clock)
             .limits(self.limits)
             .build()
@@ -234,6 +379,26 @@ impl InProcess {
             return Ok(generate(size, fill));
         }
         Err(SutError::Environment("a payload names no source".to_owned()))
+    }
+}
+
+/// The fixture's CORS store, read the way a deployment's would be.
+///
+/// `Ok(None)` covers both "this bucket has no document" and "this bucket does not exist", which is
+/// what the trait asks for: a source that distinguished them would be handing the preflight branch
+/// a fact it is required to discard.
+struct FixtureCors {
+    state: Arc<Mutex<Fixture>>,
+}
+
+impl CorsSource for FixtureCors {
+    fn load<'a>(&'a self, bucket: &'a BucketName) -> BoxFuture<'a, Result<Option<dto::CorsConfiguration>, CorsSourceError>> {
+        let found = self
+            .state
+            .lock()
+            .ok()
+            .and_then(|fixture| fixture.cors(bucket.as_str()).cloned());
+        Box::pin(async move { Ok(found) })
     }
 }
 
@@ -679,7 +844,11 @@ impl Sut for InProcess {
         "rustfs-gateway assembled in process from the facade, over a fixture backend".to_owned()
     }
 
-    fn prepare(&mut self, _case_id: &str, setup: Option<&Value>) -> Result<Captures, SutError> {
+    fn prepare(&mut self, case_id: &str, setup: Option<&Value>) -> Result<Captures, SutError> {
+        self.case_id.clear();
+        self.case_id.push_str(case_id);
+        self.authz_policy_version.store(1, Ordering::SeqCst);
+        self.authz_backend_calls.store(0, Ordering::SeqCst);
         let mut captures = Captures::new();
         let mut fixture = Fixture::at(
             time::parse_rfc3339(time::DEFAULT_FIXED)
@@ -826,6 +995,17 @@ impl Sut for InProcess {
 
         *self.state.lock().map_err(poisoned)? = fixture;
         Ok(captures)
+    }
+
+    fn finish(&mut self, case_id: &str) -> Result<(), SutError> {
+        if matches!(case_id, "c-authz-1001" | "c-authz-1011" | "c-authz-1012")
+            && self.authz_backend_calls.load(Ordering::SeqCst) != 0
+        {
+            return Err(SutError::Environment(format!(
+                "{case_id} reached the copy backend after authorization refused the source"
+            )));
+        }
+        Ok(())
     }
 
     fn exchange(&mut self, plan: &ExchangePlan<'_>) -> Result<Observation, SutError> {

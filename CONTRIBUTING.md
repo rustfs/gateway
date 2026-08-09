@@ -51,6 +51,28 @@ identifiable upstream implementation. If you port code from anywhere, it must be
 license-compatible, carry an in-file attribution comment naming the upstream project and
 revision, and be registered in [NOTICE](NOTICE) in the same pull request.
 
+## The clean-room rule: MinIO and Garage server source is off limits
+
+The s3s rule above is about a permissively licensed project we still decline to copy. This one is
+harder: **never read MinIO server source when implementing MinIO-compatible behaviour**, and the
+same for Garage. `minio/minio` is AGPL-3.0 and archived, and a translation of AGPL logic into Rust
+is a derivative work — not "inspiration", and not laundered by a rewrite.
+
+Behavioural **facts** remain free to use: what bytes go on the wire, which status a request gets,
+which element a client expects. Derive them from protocol observation, `mc --debug` output, public
+API documentation, or this repository's own records under `model/overlays/quirks/`. `minio-go` is
+Apache-2.0 and using it as a **client** in a test is unaffected.
+
+A pull request that implements a MinIO-compatible behaviour carries this line in its description:
+
+```text
+Clean-room: no minio server source was read; behavior derived from protocol observation only.
+```
+
+`scripts/check_no_minio_source.sh` enforces the mechanical half — no AGPL licence text, no comment
+claiming a port, no vendored server tree, no dependency edge. The half a script cannot check is
+what you read, which is why the affirmation is yours. See [docs/dialects.md](docs/dialects.md).
+
 ## Licensing of your contribution
 
 Contributions are accepted under the [Apache License, Version 2.0](LICENSE) only. Unless you

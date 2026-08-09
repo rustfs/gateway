@@ -1,0 +1,72 @@
+# c-host-0006 — [S] the base domain as a whole label sequence inside the host is not a match.
+
+[case]
+id = "c-host-0006"
+schema_version = 1
+title = "A host that carries the base domain in the middle is not a subdomain of it and stays path style"
+rationale = """
+The label-boundary bug read from the other end. `evil-vhost.s3.example.com.attacker.net` contains \
+the configured domain as a whole label sequence -- every label intact, every dot in place -- and \
+means nothing by it, because the registrable domain is `attacker.net`. A resolver that searched for \
+the configured domain anywhere in the host instead of anchoring it at the end reads `evil-vhost` as \
+the bucket. The two readings are made to answer differently rather than merely to differ in status: \
+path style serves `conf-host`, and the containment reading serves an object the attacker planted at \
+the same path inside a bucket they control. Asserting the body is what separates them -- both are \
+200, and a status-only case would pass either way."""
+polarity = "negative"
+operation = "GetObject"
+tags = ["vhost", "routing", "security"]
+timeout_ms = 10000
+# Empty on purpose. A quirk in `model/overlays/quirks/` is scoped to an operation or a shape, and
+# host resolution is neither: it happens before an operation has been chosen. The whole family is
+# therefore held by `crates/gateway/tests/vhost_resolution.rs` and by the negative cases beside
+# this one, not by the quirk mutation gate.
+quirks = []
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/issues/648"
+summary = "Upstream matches a configured base domain with a suffix test and no label-boundary check, so a look-alike domain resolves a bucket out of the characters around the suffix."
+kind = "s3s-issue"
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/issues/643"
+summary = "Upstream reports that configuring a domain list makes path-style requests on hosts outside the list unusable."
+kind = "s3s-issue"
+
+[[setup.buckets]]
+name = "conf-host"
+
+[[setup.objects]]
+bucket = "conf-host"
+key = "nested/plain.txt"
+content_type = "text/plain; charset=utf-8"
+body = { utf8 = "virtual hosted" }
+
+[[setup.buckets]]
+name = "evil-vhost"
+
+# Planted at exactly the path the request carries, so a containment match answers 200 with these
+# bytes instead of failing in a way a status assertion would have noticed.
+[[setup.objects]]
+bucket = "evil-vhost"
+key = "conf-host/nested/plain.txt"
+content_type = "text/plain; charset=utf-8"
+body = { utf8 = "not yours" }
+
+[request]
+method = "GET"
+target = "/conf-host/nested/plain.txt"
+host = "evil-vhost.s3.example.com.attacker.net"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[expect.headers_present]
+"content-type" = "text/plain; charset=utf-8"
+
+[expect.body]
+exact_utf8 = "virtual hosted"
+not_contains_utf8 = ["not yours"]

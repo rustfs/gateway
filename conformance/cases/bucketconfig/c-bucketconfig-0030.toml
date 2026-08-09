@@ -1,0 +1,33 @@
+[case]
+id = "c-bucketconfig-0030"
+schema_version = 1
+title = "A bucket with no policy answers the policy read's 404 for the status read too"
+rationale = """
+The status is a reading of the policy, so the missing thing is the same document and the code is the same literal. A status-specific code here would tell a client the status feature is unavailable rather than that there is nothing to report on."""
+polarity = "negative"
+operation = "GetBucketPolicyStatus"
+tags = ["bucketconfig", "error-shape", "security"]
+timeout_ms = 10000
+quirks = ["q-pol-0005"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketPolicyStatus.html"
+summary = "The status reference documents the PolicyStatus document with a single lower-case boolean."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "conf-bucketconfig"
+[request]
+method = "GET"
+target = "/conf-bucketconfig?policyStatus"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 404
+connection_after = "open"
+
+[expect.error]
+code = "NoSuchBucketPolicy"
+request_id_present = true

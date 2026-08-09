@@ -598,26 +598,20 @@ fn the_bucket_lifecycle_rows_route_their_three_methods() {
 #[test]
 fn n_a_bucket_subresource_request_is_never_claimed_by_the_lifecycle_band() {
     let table = generated_table();
+    // `acl` and the nine configuration-band keys are deliberately absent: they stopped being
+    // deferred when those two families landed, so they belong in the served list below, where
+    // the assertion is the stronger one. `PUT /bucket?acl` is asserted separately by
+    // `the_bucket_acl_subresource_routes_to_the_acl_operations`.
     let deferred_put = [
         "abac",
-        "accelerate",
-        "acl",
         "analytics",
         "intelligent-tiering",
         "inventory",
-        "logging",
         "metadataAnnotationTable",
         "metadataInventoryTable",
         "metadataJournalTable",
         "metrics",
-        "notification",
         "ownershipControls",
-        "policy",
-        "publicAccessBlock",
-        "replication",
-        "requestPayment",
-        "versioning",
-        "website",
     ];
     for key in deferred_put {
         let line = format!("PUT /bucket?{key}");
@@ -631,10 +625,6 @@ fn n_a_bucket_subresource_request_is_never_claimed_by_the_lifecycle_band() {
         "metadataTable",
         "metrics",
         "ownershipControls",
-        "policy",
-        "publicAccessBlock",
-        "replication",
-        "website",
     ];
     for key in deferred_delete {
         let line = format!("DELETE /bucket?{key}");
@@ -642,13 +632,28 @@ fn n_a_bucket_subresource_request_is_never_claimed_by_the_lifecycle_band() {
     }
     // The served subresources are the same rule with a different observable: the request reaches
     // the subresource's own row, never the lifecycle one. `?object-lock` moved from the deferred
-    // list above to this one when its pair landed at 397/398.
+    // list above to this one when its pair landed at 397/398, `?acl` moved with the ACL band at
+    // 250/260, and the eleven bucket-configuration keys moved with the 200-249 band — the
+    // assertion each of them carries is the stronger one, because "reaches its own operation"
+    // implies "is not a bucket creation" and not the reverse.
     for (line, expected) in [
         ("PUT /bucket?cors", "PutBucketCors"),
         ("PUT /bucket?tagging", "PutBucketTagging"),
         ("PUT /bucket?object-lock", "PutObjectLockConfiguration"),
+        ("PUT /bucket?acl", "PutBucketAcl"),
+        ("PUT /bucket?accelerate", "PutBucketAccelerateConfiguration"),
+        ("PUT /bucket?logging", "PutBucketLogging"),
+        ("PUT /bucket?notification", "PutBucketNotificationConfiguration"),
+        ("PUT /bucket?policy", "PutBucketPolicy"),
+        ("PUT /bucket?publicAccessBlock", "PutPublicAccessBlock"),
+        ("PUT /bucket?requestPayment", "PutBucketRequestPayment"),
+        ("PUT /bucket?versioning", "PutBucketVersioning"),
+        ("PUT /bucket?website", "PutBucketWebsite"),
         ("DELETE /bucket?cors", "DeleteBucketCors"),
         ("DELETE /bucket?tagging", "DeleteBucketTagging"),
+        ("DELETE /bucket?policy", "DeleteBucketPolicy"),
+        ("DELETE /bucket?publicAccessBlock", "DeletePublicAccessBlock"),
+        ("DELETE /bucket?website", "DeleteBucketWebsite"),
     ] {
         assert_eq!(routed(&table, &Req::new(line)), Some(expected), "{line}");
     }
@@ -1212,6 +1217,287 @@ fn n_the_object_band_is_unchanged_by_the_lock_state_rows() {
     }
 }
 
+/// The `?replication` band claims its own three requests, one per method, on the bucket target.
+///
+/// Positive half of the block below, checked as a whole for the same reason the encryption band
+/// is: a table that gained the read and forgot the write would leave a replication document to
+/// be stored by a neighbour, and a table that forgot the delete would leave
+/// `DELETE /b?replication` unroutable.
+#[test]
+fn the_replication_subresource_routes_to_the_replication_operations() {
+    let table = generated_table();
+    for (line, expected) in [
+        ("GET /bucket?replication", "GetBucketReplication"),
+        ("PUT /bucket?replication", "PutBucketReplication"),
+        ("DELETE /bucket?replication", "DeleteBucketReplication"),
+    ] {
+        let hit = table
+            .resolve(&Req::new(line).parts())
+            .unwrap_or_else(|| panic!("{line} has a route"));
+        assert_eq!(hit.op_name, expected, "{line}");
+        assert!(
+            hit.precedence < 460,
+            "{line} must sit in the bucket subresource band ahead of the listings, got {}",
+            hit.precedence
+        );
+    }
+}
+
+/// Negative — the replication read is never claimed by the bucket listing fallback.
+///
+/// `ListObjects` pins no query key, so before the row existed `GET /b?replication` was answered
+/// with a key listing — the `GetBucketReplication -> ListObjects` debt-register line this band
+/// retires. The PUT and DELETE halves had no fallback to be claimed by, so for them the fault
+/// mode was "no route at all", asserted above.
+#[test]
+fn n_the_replication_read_is_never_claimed_by_the_listing_fallback() {
+    let table = generated_table();
+    for (line, forbidden) in [
+        ("GET /bucket?replication", "ListObjects"),
+        ("GET /bucket?replication", "ListObjectsV2"),
+        ("GET /bucket?replication", "ListObjectVersions"),
+    ] {
+        assert_ne!(
+            routed(&table, &Req::new(line)),
+            Some(forbidden),
+            "{line}: a replication document request answered with a key listing"
+        );
+    }
+}
+
+/// Negative — a request naming an earlier subresource beside `?replication` stays with the
+/// earlier band.
+///
+/// AWS documents no such combination, so the order is fixed by precedence (300, 310, 340, 370
+/// and 391 before 394) rather than left to source order — the same rule every other both-keys
+/// pair in the table follows. Four configuration bands now sit ahead of this one, so every
+/// method has neighbours to lose to.
+#[test]
+fn n_a_request_naming_an_earlier_subresource_and_replication_stays_with_the_earlier_row() {
+    let table = generated_table();
+    for (line, expected) in [
+        ("GET /bucket?location&replication", "GetBucketLocation"),
+        ("GET /bucket?cors&replication", "GetBucketCors"),
+        ("GET /bucket?tagging&replication", "GetBucketTagging"),
+        ("GET /bucket?lifecycle&replication", "GetBucketLifecycleConfiguration"),
+        ("GET /bucket?encryption&replication", "GetBucketEncryption"),
+        ("PUT /bucket?cors&replication", "PutBucketCors"),
+        ("PUT /bucket?tagging&replication", "PutBucketTagging"),
+        ("PUT /bucket?lifecycle&replication", "PutBucketLifecycleConfiguration"),
+        ("PUT /bucket?encryption&replication", "PutBucketEncryption"),
+        ("DELETE /bucket?cors&replication", "DeleteBucketCors"),
+        ("DELETE /bucket?tagging&replication", "DeleteBucketTagging"),
+        ("DELETE /bucket?lifecycle&replication", "DeleteBucketLifecycle"),
+        ("DELETE /bucket?encryption&replication", "DeleteBucketEncryption"),
+    ] {
+        assert_eq!(routed(&table, &Req::new(line)), Some(expected), "{line}");
+    }
+}
+
+/// Negative — `?replication` beats the listings it overlaps, in both directions of the band.
+#[test]
+fn n_a_request_naming_replication_and_a_listing_stays_with_the_replication_row() {
+    let table = generated_table();
+    for line in [
+        "GET /bucket?replication&uploads",
+        "GET /bucket?replication&list-type=2",
+        "GET /bucket?replication&versions",
+    ] {
+        assert_eq!(routed(&table, &Req::new(line)), Some("GetBucketReplication"), "{line}");
+    }
+}
+
+/// Negative — each replication row is bound to one method, so the key alone does not reach it.
+#[test]
+fn n_a_replication_row_is_not_reachable_under_another_method() {
+    let table = generated_table();
+    for (line, forbidden) in [
+        ("PUT /bucket?replication", "GetBucketReplication"),
+        ("DELETE /bucket?replication", "PutBucketReplication"),
+        ("GET /bucket?replication", "DeleteBucketReplication"),
+        ("HEAD /bucket?replication", "GetBucketReplication"),
+        ("POST /bucket?replication", "PutBucketReplication"),
+    ] {
+        assert_ne!(routed(&table, &Req::new(line)), Some(forbidden), "{line}");
+    }
+}
+
+/// Negative — `?replication` on an object key is not a bucket subresource and must not reach
+/// the band.
+///
+/// The three replication rows pin `Target(Bucket)`, so `GET /bucket/key?replication` is a plain
+/// object read carrying an inert query key, exactly as it is on AWS.
+#[test]
+fn n_the_replication_key_on_an_object_does_not_reach_a_bucket_replication_row() {
+    let table = generated_table();
+    for (line, expected) in [
+        ("GET /bucket/key?replication", "GetObject"),
+        ("PUT /bucket/key?replication", "PutObject"),
+        ("DELETE /bucket/key?replication", "DeleteObject"),
+    ] {
+        assert_eq!(routed(&table, &Req::new(line)), Some(expected), "{line}");
+    }
+}
+
+/// Negative — the neighbouring bands still answer their own requests beside the new band.
+#[test]
+fn n_the_bucket_bands_are_unchanged_by_the_replication_band() {
+    let table = generated_table();
+    for (line, expected) in [
+        ("GET /bucket", "ListObjects"),
+        ("GET /bucket?list-type=2", "ListObjectsV2"),
+        ("GET /bucket?location", "GetBucketLocation"),
+        ("GET /bucket?encryption", "GetBucketEncryption"),
+        ("PUT /bucket?encryption", "PutBucketEncryption"),
+        ("DELETE /bucket?encryption", "DeleteBucketEncryption"),
+        ("GET /bucket?uploads", "ListMultipartUploads"),
+    ] {
+        assert_eq!(routed(&table, &Req::new(line)), Some(expected), "{line}");
+    }
+}
+
+/// The `?restore` and `?select` rows claim the two POSTs the object target had no row for.
+///
+/// Positive half of the block below. Both are `POST /{Bucket}/{Key+}`, a shape the table only
+/// knew as the multipart band, so before these rows the two requests reached **no route at all**
+/// and were answered `501` with the "the vhost domain is probably unconfigured" message — the
+/// answer an SDK reads as "this endpoint does not implement S3", not as "this operation is not
+/// available here".
+#[test]
+fn the_restore_and_select_subresources_route_to_their_rows() {
+    let table = generated_table();
+    for (line, expected) in [
+        ("POST /bucket/key?restore", "RestoreObject"),
+        ("POST /bucket/key?select&select-type=2", "SelectObjectContent"),
+    ] {
+        let hit = table
+            .resolve(&Req::new(line).parts())
+            .unwrap_or_else(|| panic!("{line} has a route"));
+        assert_eq!(hit.op_name, expected, "{line}");
+        assert!(
+            hit.precedence > 540 && hit.precedence < 650,
+            "{line} must sit after the lock band and ahead of the plain object rows, got {}",
+            hit.precedence
+        );
+    }
+}
+
+/// Negative — `select-type` is part of the predicate, not decoration.
+///
+/// AWS spells the operation `?select&select-type=2`, and the `2` is the version of the request
+/// grammar. A table that pinned only `?select` would hand `?select&select-type=1` — a document
+/// this decoder has never validated — to `SelectObjectContent`. There is no row for it, so the
+/// request must reach nothing at all rather than the version-2 operation.
+#[test]
+fn n_a_select_request_without_select_type_two_does_not_reach_the_select_row() {
+    let table = generated_table();
+    for line in [
+        "POST /bucket/key?select",
+        "POST /bucket/key?select&select-type=1",
+        "POST /bucket/key?select&select-type=3",
+        "POST /bucket/key?select&select-type=",
+        "POST /bucket/key?select&select-type=02",
+        "POST /bucket/key?select-type=2",
+    ] {
+        assert_ne!(
+            routed(&table, &Req::new(line)),
+            Some("SelectObjectContent"),
+            "{line} must not be read as a version-2 select"
+        );
+    }
+}
+
+/// Negative — neither row is answered by a plain object operation in any method.
+///
+/// The control runs in both directions: the same two subresource keys are checked on `GET` and
+/// `PUT`, where the rows pin `Method(POST)` and the keys are inert, so the assertion below
+/// cannot be satisfied by a table that simply refuses everything.
+#[test]
+fn n_the_restore_and_select_keys_are_not_answered_by_the_object_band_on_post() {
+    let table = generated_table();
+    for line in ["POST /bucket/key?restore", "POST /bucket/key?select&select-type=2"] {
+        let hit = routed(&table, &Req::new(line));
+        assert_ne!(hit, Some("PutObject"), "{line}");
+        assert_ne!(hit, Some("GetObject"), "{line}");
+        assert_ne!(hit, Some("CopyObject"), "{line}");
+    }
+    for (line, expected) in [
+        ("GET /bucket/key?restore", "GetObject"),
+        ("PUT /bucket/key?restore", "PutObject"),
+        ("GET /bucket/key?select&select-type=2", "GetObject"),
+        ("PUT /bucket/key?select&select-type=2", "PutObject"),
+    ] {
+        assert_eq!(routed(&table, &Req::new(line)), Some(expected), "{line}");
+    }
+}
+
+/// Negative — a POST naming an upload beside `?restore` or `?select` stays with the multipart
+/// band.
+///
+/// This is the pair with teeth. `CompleteMultipartUpload` is `POST /{Bucket}/{Key+}?uploadId`,
+/// so a completion that also carried `?restore` reaches both rows; the multipart band is tried
+/// first (420/450 before 570/580), which keeps a completion a completion.
+#[test]
+fn n_a_post_naming_an_upload_and_a_restore_or_select_stays_with_the_multipart_band() {
+    let table = generated_table();
+    for (line, expected) in [
+        ("POST /bucket/key?uploadId=u1&restore", "CompleteMultipartUpload"),
+        ("POST /bucket/key?uploads&restore", "CreateMultipartUpload"),
+        ("POST /bucket/key?uploadId=u1&select&select-type=2", "CompleteMultipartUpload"),
+        ("POST /bucket/key?uploads&select&select-type=2", "CreateMultipartUpload"),
+    ] {
+        assert_eq!(routed(&table, &Req::new(line)), Some(expected), "{line}");
+    }
+}
+
+/// Negative — inside the family the band order decides, and it is recorded rather than inherited
+/// from source order.
+///
+/// Neither selector refines the other — `?restore` and `?select&select-type=2` are different
+/// keys — so a request carrying both is settled by precedence alone: the restore row is at 570.
+#[test]
+fn n_the_restore_row_wins_over_the_select_row_when_a_request_carries_both() {
+    let table = generated_table();
+    let line = "POST /bucket/key?restore&select&select-type=2";
+    assert_eq!(routed(&table, &Req::new(line)), Some("RestoreObject"), "{line}");
+}
+
+/// Negative — both keys on a bucket target are inert.
+///
+/// Both rows pin `Target(Object)`. On a bucket, `POST /bucket?restore` reaches no row (the only
+/// bucket POST is `?delete`), and the GET falls to the listing fallback exactly as an unknown
+/// query key does on AWS.
+#[test]
+fn n_the_restore_and_select_keys_on_a_bucket_do_not_reach_the_object_rows() {
+    let table = generated_table();
+    for line in ["POST /bucket?restore", "POST /bucket?select&select-type=2"] {
+        assert_eq!(routed(&table, &Req::new(line)), None, "{line}");
+    }
+    for (line, expected) in [
+        ("GET /bucket?restore", "ListObjects"),
+        ("GET /bucket?select&select-type=2", "ListObjects"),
+    ] {
+        assert_eq!(routed(&table, &Req::new(line)), Some(expected), "{line}");
+    }
+}
+
+/// Negative — the neighbouring bands still answer their own requests beside the two new rows.
+#[test]
+fn n_the_object_band_is_unchanged_by_the_restore_and_select_rows() {
+    let table = generated_table();
+    for (line, expected) in [
+        ("GET /bucket/key", "GetObject"),
+        ("PUT /bucket/key", "PutObject"),
+        ("DELETE /bucket/key", "DeleteObject"),
+        ("POST /bucket/key?uploads", "CreateMultipartUpload"),
+        ("POST /bucket/key?uploadId=u1", "CompleteMultipartUpload"),
+        ("POST /bucket?delete", "DeleteObjects"),
+        ("GET /bucket/key?retention", "GetObjectRetention"),
+    ] {
+        assert_eq!(routed(&table, &Req::new(line)), Some(expected), "{line}");
+    }
+}
+
 /// c-route-1001 — two subresources at one precedence, reachable together.
 #[test]
 fn two_subresources_at_one_precedence_are_a_conflict() {
@@ -1369,6 +1655,7 @@ fn a_route_made_unreachable_by_an_earlier_one_fails_the_build() {
 /// c-route-1005 — a declaration about selectors that do not overlap has rotted.
 #[test]
 fn a_declaration_for_selectors_that_do_not_overlap_is_stale() {
+    static GROUPS: &[&[ShadowingDecl]] = &[DECLS];
     static DECLS: &[ShadowingDecl] = &[ShadowingDecl {
         winner: "GetBucketAcl",
         shadowed: "PutObject",
@@ -1391,7 +1678,7 @@ fn a_declaration_for_selectors_that_do_not_overlap_is_stale() {
             vec![Predicate::Method(Method::PUT), Predicate::Target(TargetKind::Object)],
         ),
     ];
-    let error = RouteTable::build(entries, &ShadowingDecls::new(DECLS)).expect_err("a declaration must describe reality");
+    let error = RouteTable::build(entries, &ShadowingDecls::over(GROUPS)).expect_err("a declaration must describe reality");
     assert!(
         matches!(error, RouteBuildError::StaleShadowing { .. }),
         "expected a stale declaration, got {error}"
@@ -1402,6 +1689,7 @@ fn a_declaration_for_selectors_that_do_not_overlap_is_stale() {
 /// A declaration naming an operation the table does not contain.
 #[test]
 fn a_declaration_naming_an_unknown_operation_is_stale() {
+    static GROUPS: &[&[ShadowingDecl]] = &[DECLS];
     static DECLS: &[ShadowingDecl] = &[ShadowingDecl {
         winner: "GetBucketAcl",
         shadowed: "GetBucketRetiredThing",
@@ -1417,13 +1705,14 @@ fn a_declaration_naming_an_unknown_operation_is_stale() {
             Predicate::QueryPresent("acl"),
         ],
     )];
-    let error = RouteTable::build(entries, &ShadowingDecls::new(DECLS)).expect_err("an unknown operation is stale");
+    let error = RouteTable::build(entries, &ShadowingDecls::over(GROUPS)).expect_err("an unknown operation is stale");
     assert!(error.to_string().contains("not in the route table"), "got {error}");
 }
 
 /// A declaration whose winner does not actually win.
 #[test]
 fn a_declaration_in_the_wrong_direction_is_stale() {
+    static GROUPS: &[&[ShadowingDecl]] = &[DECLS];
     static DECLS: &[ShadowingDecl] = &[ShadowingDecl {
         winner: "ListBucketAnalyticsConfigurations",
         shadowed: "GetBucketAnalyticsConfiguration",
@@ -1451,13 +1740,14 @@ fn a_declaration_in_the_wrong_direction_is_stale() {
             ],
         ),
     ];
-    let error = RouteTable::build(entries, &ShadowingDecls::new(DECLS)).expect_err("the direction is checked");
+    let error = RouteTable::build(entries, &ShadowingDecls::over(GROUPS)).expect_err("the direction is checked");
     assert!(error.to_string().contains("lower precedence"), "got {error}");
 }
 
 /// An ordering nobody sourced is a guess with a comment attached.
 #[test]
 fn a_declaration_with_no_evidence_is_refused() {
+    static GROUPS: &[&[ShadowingDecl]] = &[DECLS];
     static DECLS: &[ShadowingDecl] = &[ShadowingDecl {
         winner: "GetBucketAnalyticsConfiguration",
         shadowed: "ListBucketAnalyticsConfigurations",
@@ -1485,7 +1775,7 @@ fn a_declaration_with_no_evidence_is_refused() {
             ],
         ),
     ];
-    let error = RouteTable::build(entries, &ShadowingDecls::new(DECLS)).expect_err("evidence is mandatory");
+    let error = RouteTable::build(entries, &ShadowingDecls::over(GROUPS)).expect_err("evidence is mandatory");
     assert!(
         matches!(error, RouteBuildError::UnsourcedShadowing { .. }),
         "expected an unsourced declaration, got {error}"
@@ -1757,5 +2047,173 @@ fn the_witness_of_a_conflict_reaches_both_entries() {
     let parts = request.parts();
     for entry in &clone {
         assert!(entry.selector.matches(&parts), "the witness {line} must reach {}", entry.op_name);
+    }
+}
+
+// ── the ACL family ───────────────────────────────────────────────────────────────────────────
+
+/// The two bucket `?acl` rows route their own requests, and both precede the listings.
+///
+/// The band boundary is the claim: `ListObjects` at 700 pins no query key, so a bucket ACL row
+/// behind it is a key listing answering a question about permissions.
+#[test]
+fn the_bucket_acl_subresource_routes_to_the_acl_operations() {
+    let table = generated_table();
+    for (line, expected) in [("GET /bucket?acl", "GetBucketAcl"), ("PUT /bucket?acl", "PutBucketAcl")] {
+        let hit = table
+            .resolve(&Req::new(line).parts())
+            .unwrap_or_else(|| panic!("{line} has a route"));
+        assert_eq!(hit.op_name, expected, "{line}");
+        assert!(hit.precedence < 600, "{line} must sit ahead of the listing band, got {}", hit.precedence);
+    }
+}
+
+/// The object halves route, and both sit ahead of `CopyObject`, `PutObject` and `GetObject`.
+#[test]
+fn the_object_acl_subresource_routes_to_the_acl_operations() {
+    let table = generated_table();
+    for (line, expected) in [
+        ("GET /bucket/key?acl", "GetObjectAcl"),
+        ("PUT /bucket/key?acl", "PutObjectAcl"),
+    ] {
+        let hit = table
+            .resolve(&Req::new(line).parts())
+            .unwrap_or_else(|| panic!("{line} has a route"));
+        assert_eq!(hit.op_name, expected, "{line}");
+        assert!(
+            hit.precedence < 790,
+            "{line} must sit ahead of the plain object band, got {}",
+            hit.precedence
+        );
+    }
+}
+
+/// Negative — the bucket ACL read is never claimed by a listing.
+///
+/// This is the `GetBucketAcl -> ListObjects` debt-register line: before the row existed, asking
+/// who may read a bucket was answered with a page of the keys inside it.
+#[test]
+fn n_the_bucket_acl_read_is_never_claimed_by_a_listing() {
+    let table = generated_table();
+    for forbidden in ["ListObjects", "ListObjectsV2", "ListObjectVersions", "ListMultipartUploads"] {
+        assert_ne!(routed(&table, &Req::new("GET /bucket?acl")), Some(forbidden));
+    }
+    // And with the listing's own discriminators present, which is the request that reaches both.
+    for line in [
+        "GET /bucket?acl&list-type=2",
+        "GET /bucket?acl&versions",
+        "GET /bucket?acl&uploads",
+    ] {
+        assert_eq!(routed(&table, &Req::new(line)), Some("GetBucketAcl"), "{line}");
+    }
+}
+
+/// Negative — the object ACL rows are never claimed by the plain object band.
+///
+/// The `PUT` half is the one this family exists for: `PutObject` accepts every `PUT` to a key, so
+/// without the row an ACL write stores the `<AccessControlPolicy>` document **as the object** and
+/// answers 200 for it. The `GET` half discloses the object's bytes to a caller asking about
+/// permissions.
+#[test]
+fn n_the_object_acl_requests_are_never_claimed_by_the_plain_object_band() {
+    let table = generated_table();
+    for (line, forbidden, harm) in [
+        (
+            "GET /bucket/key?acl",
+            "GetObject",
+            "the object's bytes answer a question about its permissions",
+        ),
+        (
+            "PUT /bucket/key?acl",
+            "PutObject",
+            "the access control policy is stored as the object, destroying it",
+        ),
+    ] {
+        assert_ne!(routed(&table, &Req::new(line)), Some(forbidden), "{line}: {harm}");
+    }
+}
+
+/// Negative — an ACL write carrying a copy source is an ACL write, not a copy.
+#[test]
+fn n_a_copy_source_header_does_not_pull_an_acl_write_into_the_copy_row() {
+    let table = generated_table();
+    let request = Req::new("PUT /bucket/key?acl").header("x-amz-copy-source", "/other/source");
+    assert_eq!(routed(&table, &request), Some("PutObjectAcl"));
+}
+
+/// Negative — neither ACL row is reachable under a method or a target it does not name.
+#[test]
+fn n_an_acl_row_is_not_reachable_under_another_method_or_target() {
+    let table = generated_table();
+    for (line, forbidden) in [
+        ("PUT /bucket?acl", "GetBucketAcl"),
+        ("GET /bucket?acl", "PutBucketAcl"),
+        ("DELETE /bucket?acl", "GetBucketAcl"),
+        ("DELETE /bucket?acl", "PutBucketAcl"),
+        ("HEAD /bucket?acl", "GetBucketAcl"),
+        ("POST /bucket?acl", "PutBucketAcl"),
+        ("PUT /bucket/key?acl", "GetObjectAcl"),
+        ("GET /bucket/key?acl", "PutObjectAcl"),
+        ("DELETE /bucket/key?acl", "GetObjectAcl"),
+        ("HEAD /bucket/key?acl", "GetObjectAcl"),
+        // And the two targets never reach each other's rows.
+        ("GET /bucket?acl", "GetObjectAcl"),
+        ("PUT /bucket?acl", "PutObjectAcl"),
+        ("GET /bucket/key?acl", "GetBucketAcl"),
+        ("PUT /bucket/key?acl", "PutBucketAcl"),
+    ] {
+        assert_ne!(routed(&table, &Req::new(line)), Some(forbidden), "{line}");
+    }
+}
+
+/// Negative — `DELETE /b?acl` is a bucket deletion, because there is no ACL delete.
+///
+/// Every other bucket subresource family has a delete and names its key in `DeleteBucket`'s
+/// `QueryAbsent` list. `acl` has no delete operation at all — an ACL cannot be removed, only
+/// replaced — so the key is inert on a `DELETE`, exactly as it is on AWS. Asserted rather than
+/// assumed, because a row added later would change it silently.
+#[test]
+fn n_the_acl_key_is_inert_on_a_delete() {
+    let table = generated_table();
+    assert_eq!(routed(&table, &Req::new("DELETE /bucket?acl")), Some("DeleteBucket"));
+    assert_eq!(routed(&table, &Req::new("DELETE /bucket/key?acl")), Some("DeleteObject"));
+}
+
+/// Negative — a request naming an earlier subresource and `?acl` stays with the earlier row.
+///
+/// The bucket half is the mirror image of the object half. `?acl` is the *earliest* bucket
+/// subresource, so it wins every bucket pair; the object rows sit behind the multipart band and
+/// the three object document subresources, so those win instead. Both directions are asserted,
+/// because a table that answered `GetBucketAcl` to everything would satisfy the first half alone.
+#[test]
+fn n_the_declared_winner_wins_beside_an_acl_subresource() {
+    let table = generated_table();
+    for (line, expected) in [
+        // Bucket: ?acl is first, so it wins.
+        ("GET /bucket?acl&location", "GetBucketAcl"),
+        ("GET /bucket?acl&cors", "GetBucketAcl"),
+        ("GET /bucket?acl&tagging", "GetBucketAcl"),
+        ("GET /bucket?acl&lifecycle", "GetBucketAcl"),
+        ("GET /bucket?acl&encryption", "GetBucketAcl"),
+        ("GET /bucket?acl&replication", "GetBucketAcl"),
+        ("GET /bucket?acl&object-lock", "GetBucketAcl"),
+        ("PUT /bucket?acl&cors", "PutBucketAcl"),
+        ("PUT /bucket?acl&tagging", "PutBucketAcl"),
+        ("PUT /bucket?acl&lifecycle", "PutBucketAcl"),
+        ("PUT /bucket?acl&encryption", "PutBucketAcl"),
+        ("PUT /bucket?acl&replication", "PutBucketAcl"),
+        ("PUT /bucket?acl&object-lock", "PutBucketAcl"),
+        // Object: ?acl is last of the subresources, so the earlier one wins.
+        ("GET /bucket/key?acl&attributes", "GetObjectAttributes"),
+        ("GET /bucket/key?acl&tagging", "GetObjectTagging"),
+        ("GET /bucket/key?acl&retention", "GetObjectRetention"),
+        ("GET /bucket/key?acl&legal-hold", "GetObjectLegalHold"),
+        ("GET /bucket/key?acl&uploadId=u", "ListParts"),
+        ("PUT /bucket/key?acl&tagging", "PutObjectTagging"),
+        ("PUT /bucket/key?acl&retention", "PutObjectRetention"),
+        ("PUT /bucket/key?acl&legal-hold", "PutObjectLegalHold"),
+        ("PUT /bucket/key?acl&partNumber=1&uploadId=u", "UploadPart"),
+    ] {
+        assert_eq!(routed(&table, &Req::new(line)), Some(expected), "{line}");
     }
 }

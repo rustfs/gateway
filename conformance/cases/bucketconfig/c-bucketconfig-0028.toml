@@ -1,0 +1,33 @@
+[case]
+id = "c-bucketconfig-0028"
+schema_version = 1
+title = "A bucket with no website document answers 404 NoSuchWebsiteConfiguration"
+rationale = """
+The first of the three 404 literals in this band, and the boundary the six empty-200 reads exist to contrast with. The code is specific: a generic not-found reads as a missing bucket, and the policy or public-access code would send a client looking at the wrong subresource."""
+polarity = "negative"
+operation = "GetBucketWebsite"
+tags = ["bucketconfig", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-web-0001"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketWebsite.html"
+summary = "The read reference documents NoSuchWebsiteConfiguration for a bucket with no website document."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "conf-bucketconfig"
+[request]
+method = "GET"
+target = "/conf-bucketconfig?website"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 404
+connection_after = "open"
+
+[expect.error]
+code = "NoSuchWebsiteConfiguration"
+request_id_present = true

@@ -42,13 +42,14 @@
 use std::sync::Arc;
 
 use crate::codec::OperationCodec;
+use crate::dialect::Dialect;
 use crate::dispatch::{Router, RouterBuildError};
 use crate::handler::Handler;
 use crate::op::{Operation, is_standard_operation_name};
 use crate::registry::Registry;
 use crate::registry::opset::{MissingHandlers, OperationSet};
 use crate::registry::reject::RegistryError;
-use crate::route::{PROVISIONAL_SHADOWING, RouteEntry, RouteTable, generated_entries};
+use crate::route::{PROVISIONAL_SHADOWING, RouteEntry, RouteTable, ShadowingDecl, ShadowingDecls, generated_entries};
 
 /// Why a router refused to be built.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -109,6 +110,8 @@ impl From<RouterBuildError> for BuildError {
 pub struct RouterBuilder {
     registry: Registry,
     entries: Vec<RouteEntry>,
+    /// One group per installed dialect, folded onto [`PROVISIONAL_SHADOWING`] at build time.
+    shadowing: Vec<&'static [ShadowingDecl]>,
     errors: Vec<RegistryError>,
 }
 
@@ -167,6 +170,31 @@ impl RouterBuilder {
         self
     }
 
+    /// Installs a dialect: one route row per operation it adds, and the overlaps those rows
+    /// declare.
+    ///
+    /// The rows join the generated ones and face the same build-time decision, so a dialect
+    /// selector that collides with an AWS one at the same precedence refuses the build, and one
+    /// that stands in front of an AWS row at a different precedence needs a declaration. The
+    /// declarations a dialect brings are *appended* to the reviewed record for the generated table
+    /// — [`ShadowingDecls::and`] — so a dialect can account for the overlaps its own placement
+    /// creates and cannot rewrite anybody else's.
+    ///
+    /// Handlers are a separate call. See the module docs of [`crate::dialect`] for why: a route
+    /// with no handler answers `501`, which is the correct answer for an operation a backend has
+    /// not implemented, and making installation implicit is the link-time collection ADR-0003
+    /// bans.
+    #[must_use]
+    pub fn dialect(mut self, dialect: &Dialect) -> Self {
+        for operation in dialect.operations() {
+            self.entries.push(operation.entry().clone());
+            if !operation.shadows().is_empty() {
+                self.shadowing.push(operation.shadows());
+            }
+        }
+        self
+    }
+
     /// Asserts that every operation in `set` has a handler.
     ///
     /// This replaces a compile-time completeness check. See [`MissingHandlers`] for why one
@@ -206,7 +234,11 @@ impl RouterBuilder {
         }
         let mut entries = generated_entries().map_err(RouterBuildError::from)?;
         entries.extend(self.entries);
-        let table = RouteTable::build(entries, &PROVISIONAL_SHADOWING).map_err(RouterBuildError::from)?;
+        let mut shadowing: ShadowingDecls = PROVISIONAL_SHADOWING;
+        for group in self.shadowing {
+            shadowing = shadowing.and(group);
+        }
+        let table = RouteTable::build(entries, &shadowing).map_err(RouterBuildError::from)?;
         Ok(Router::new(table, self.registry)?)
     }
 }

@@ -1,0 +1,71 @@
+[case]
+id = "c-cors-0038"
+schema_version = 1
+title = "A preflight for a method the matched origin's rule does not name is refused"
+rationale = """
+The method dimension has to refuse on its own too, and this is the dimension where a permissive answer does damage:
+a rule that allows GET from a partner site must not authorise that site's page to issue a DELETE. The origin here is
+one the document names, so nothing but the method can be doing the refusing."""
+polarity = "negative"
+tags = ["cors", "preflight", "security"]
+timeout_ms = 10000
+quirks = ["q-cors-0015"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CORSRule.html"
+summary = "The rule members a preflight answer is built from: allowed methods, allowed headers, expose headers and max age."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://fetch.spec.whatwg.org/#http-cors-protocol"
+summary = "The preflight and its answer are defined here, including which response header a browser reads from which response."
+kind = "rfc"
+
+[[setup.buckets]]
+name = "conf-cors-rt"
+
+[[exchanges]]
+# Setup traffic: the document the preflight below is answered from. Not under test.
+[exchanges.request]
+method = "PUT"
+target = "/conf-cors-rt?cors"
+headers = { "content-type" = "application/xml", "content-md5" = "rAqMzbtniOyp6dCmIWiViw==" }
+body = { utf8 = "<CORSConfiguration><CORSRule><AllowedMethod>PUT</AllowedMethod><AllowedOrigin>https://app.example.com</AllowedOrigin></CORSRule></CORSConfiguration>" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+
+[[exchanges]]
+[exchanges.request]
+method = "OPTIONS"
+target = "/conf-cors-rt/key.txt"
+headers = { "origin" = "https://app.example.com", "access-control-request-method" = "DELETE" }
+
+[exchanges.expect]
+kind = "response"
+status = 403
+connection_after = "open"
+headers_absent = [
+  "access-control-allow-origin",
+  "access-control-allow-methods",
+  "access-control-allow-headers",
+  "access-control-allow-credentials",
+  "access-control-max-age",
+  "access-control-expose-headers",
+]
+
+[exchanges.expect.error]
+code = "AccessForbidden"
+request_id_present = true
+
+[exchanges.expect.headers_present]
+"content-type" = "application/xml"
+"vary" = "origin"
+
+[exchanges.expect.body]
+redact = ["RequestId", "HostId"]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>AccessForbidden</Code><Message>CORSResponse: no CORS rule allows this request</Message><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''

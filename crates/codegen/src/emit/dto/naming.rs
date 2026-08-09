@@ -69,7 +69,23 @@ pub fn module_name(name: &str) -> String {
 /// cannot be raw identifiers get a trailing underscore instead.
 #[must_use]
 pub fn field_name(name: &str) -> String {
-    let snake = module_name(name);
+    escaped(module_name(name))
+}
+
+/// The module *declaration* spelling: [`module_name`] escaped the same way a field is.
+///
+/// The file on disk keeps the unescaped name — `mod r#type;` resolves to `type.rs` — so this is
+/// only ever the identifier written into a `mod` item or a `use` path, never a path on disk. The
+/// select family's `JSONInput.Type` is what first needed it: an enumeration whose model name is a
+/// Rust keyword produced `mod type;`, which does not parse. The ACL family's `Grantee.Type`
+/// lowers to the same enumeration from the other direction, so two families now depend on it.
+#[must_use]
+pub fn module_ident(name: &str) -> String {
+    escaped(module_name(name))
+}
+
+/// The one keyword-escaping rule, so the module item and the field spelling cannot disagree.
+fn escaped(snake: String) -> String {
     match snake.as_str() {
         "self" | "Self" | "super" | "crate" => format!("{snake}_"),
         other if KEYWORDS.contains(&other) => format!("r#{snake}"),

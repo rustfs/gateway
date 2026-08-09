@@ -1,0 +1,54 @@
+# c-naming-0012 — a backslash delimits a segment on the platform that matters
+#
+[case]
+id = "c-naming-0012"
+schema_version = 1
+title = "A dot-dot segment delimited by a backslash is refused like the forward-slash spelling"
+rationale = """
+A storage layer running on Windows reads a backslash as a separator, so `..\\x` is the same traversal as `../x` and a floor that split only on forward slashes would refuse neither. Refusing only one of the two spellings is the same as refusing none, because an attacker picks the spelling that works. A backslash that is not delimiting a dot-dot stays an ordinary key byte, which is what keeps this from being a ban on the character."""
+polarity = "negative"
+operation = "GetObject"
+tags = ["naming", "routing", "security"]
+timeout_ms = 10000
+quirks = ["q-naming-0003"]
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/issues/102"
+summary = "Upstream saw a platform path separator inside a key derange a listing on the platform that reads it as syntax."
+kind = "s3s-issue"
+
+[[case.evidence]]
+url = "https://github.com/rustfs/rustfs/security/advisories/GHSA-8r6f-hmq2-28rg"
+summary = "An object key carrying a traversal sequence reached the filesystem mapping and read outside the bucket."
+kind = "other"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-naming"
+
+[[setup.objects]]
+bucket = "conf-naming"
+key = "real.txt"
+body = { utf8 = "in the bucket" }
+
+[request]
+method = "GET"
+target = "/conf-naming/..%5Cx"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+code = "InvalidArgument"
+message_present = true
+request_id_present = true
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+contains_utf8 = ["<Code>InvalidArgument</Code>"]
+not_contains_utf8 = ["root:", "in the bucket"]

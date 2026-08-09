@@ -1,0 +1,47 @@
+# c-naming-0001 — an empty path segment is part of the key, not something to fold away
+#
+[case]
+id = "c-naming-0001"
+schema_version = 1
+title = "GET /bucket//key addresses the object whose key begins with a slash"
+rationale = """
+AWS keeps an empty path segment and MinIO folds it, so `a//b` and `a/b` are one object on one implementation and two on the other. This gateway defaults to the AWS answer, and the default has to be pinned by a request that can only succeed if the empty segment survived: the stored key is `/preserved.txt`, and a gateway that folded the run would look up `preserved.txt` and answer 404."""
+polarity = "positive"
+operation = "GetObject"
+tags = ["naming", "routing", "encoding", "security"]
+timeout_ms = 10000
+quirks = ["q-naming-0001"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/object-keys.html"
+summary = "A key is an opaque sequence of Unicode characters up to 1024 UTF-8 bytes long, with no path structure of its own."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/issues/569"
+summary = "Upstream recorded that AWS keeps an empty path segment in the key while MinIO folds it away."
+kind = "s3s-issue"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-naming"
+
+[[setup.objects]]
+bucket = "conf-naming"
+key = "/preserved.txt"
+body = { utf8 = "the empty segment survived" }
+
+[request]
+method = "GET"
+target = "/conf-naming//preserved.txt"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[expect.body]
+exact_utf8 = "the empty segment survived"

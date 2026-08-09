@@ -1,0 +1,59 @@
+[case]
+id = "c-replication-0019"
+schema_version = 1
+title = "Unknown elements are skipped, the write succeeds, and the read-back proves they were dropped"
+rationale = """
+The leniency with the highest stakes in the family: AWS ignores unknown elements in request XML, and RustFS parses the stored replication document fail-closed — so a decoder that refused a future AWS member or another vendor's extension would not merely reject a request, it would strand every bucket whose stored document already carries one. The write must succeed, and the read-back golden proves the unknown elements were skipped rather than stored: what the next parser meets is exactly the vocabulary this release understands."""
+polarity = "negative"
+operation = "PutBucketReplication"
+tags = ["replication", "xml", "known-divergence"]
+timeout_ms = 10000
+quirks = ["q-repl-0005"]
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/issues/613"
+summary = "AWS ignores unknown elements in request XML, and upstream had to relax its decoder to match."
+kind = "s3s-issue"
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/pull/617"
+summary = "The upstream fix that makes unknown request elements a skip rather than an error."
+kind = "s3s-pr"
+
+
+[[setup.buckets]]
+name = "conf-replication"
+[[exchanges]]
+name = "put-with-unknowns"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-replication?replication"
+headers = { "content-type" = "application/xml", "content-md5" = "l8nKMT0fT4DXzySLuXoVVQ==" }
+body = { utf8 = '<ReplicationConfiguration><Role>arn:aws:iam::111122223333:role/replication-role</Role><Rule><FutureSelector><Mode>eventual</Mode></FutureSelector><Prefix>logs/</Prefix><Status>Enabled</Status><Destination><Bucket>arn:aws:s3:::replica-bucket</Bucket><VendorExtension>fast</VendorExtension></Destination></Rule></ReplicationConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[[exchanges]]
+name = "read-back"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-replication?replication"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.headers_present]
+"content-type" = "application/xml"
+
+[exchanges.expect.body]
+golden = "goldens/c-replication-0019.xml"
+not_contains_utf8 = ["FutureSelector", "VendorExtension"]

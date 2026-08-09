@@ -1,0 +1,49 @@
+[case]
+id = "c-replication-0022"
+schema_version = 1
+title = "A rule with a Filter but no DeleteMarkerReplication is refused as InvalidRequest"
+rationale = """
+The second member the V2 schema demands beside a Filter: V1 and V2 handle delete markers differently, so a V2 rule must say which behaviour it wants rather than inherit whichever the engine assumes. The refusal is the documented one, and it is cheaper than the alternative — a stored rule whose delete-marker behaviour changes meaning with the engine's default."""
+polarity = "negative"
+operation = "PutBucketReplication"
+tags = ["replication", "xml", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-repl-0006"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketReplication.html"
+summary = "The operation documents that a configuration adding the Filter element must also add DeleteMarkerReplication, Status and Priority."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ReplicationRule.html"
+summary = "The DeleteMarkerReplication member documents that a configuration specifying a Filter must include it."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "conf-replication"
+[request]
+method = "PUT"
+target = "/conf-replication?replication"
+headers = { "content-type" = "application/xml", "content-md5" = "Vc7VLwridcS+Tgk+4i6zTQ==" }
+body = { utf8 = '<ReplicationConfiguration><Role>arn:aws:iam::111122223333:role/replication-role</Role><Rule><Priority>1</Priority><Filter><Prefix>docs/</Prefix></Filter><Status>Enabled</Status><Destination><Bucket>arn:aws:s3:::replica-bucket</Bucket></Destination></Rule></ReplicationConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+code = "InvalidRequest"
+request_id_present = true
+
+[expect.headers_present]
+"content-type" = "application/xml"
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>InvalidRequest</Code><Message>A Rule that specifies a Filter must also specify DeleteMarkerReplication</Message><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''

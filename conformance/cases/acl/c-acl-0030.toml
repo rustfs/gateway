@@ -1,0 +1,50 @@
+[case]
+id = "c-acl-0030"
+schema_version = 1
+title = "A policy with no Owner is stored without one rather than given an invented owner"
+rationale = """
+The other direction of c-acl-0006. Owner is optional in the model, so a document that omits it is well formed — and a gateway that helpfully filled in the caller's own identity would answer a document the client never wrote, on the one member that says who controls the resource. Nothing is invented and nothing is refused; the read-back is byte-exact so that an inserted Owner element cannot pass as a formatting difference."""
+polarity = "negative"
+operation = "PutBucketAcl"
+tags = ["acl", "xml", "wire-bytes"]
+timeout_ms = 10000
+quirks = ["q-acl-0013"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketAcl.html"
+summary = "The model marks Owner optional on the policy, so a document without one is well formed."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "conf-acl"
+
+[[exchanges]]
+name = "write-without-owner"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-acl?acl"
+headers = { "content-type" = "application/xml", "content-md5" = "Fn29rEmzFLNOObfmb3bkCQ==" }
+body = { utf8 = '<AccessControlPolicy><AccessControlList><Grant><Grantee><URI>http://acs.amazonaws.com/groups/global/AllUsers</URI></Grantee><Permission>READ</Permission></Grant></AccessControlList></AccessControlPolicy>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[[exchanges]]
+name = "read-back"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-acl?acl"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.body]
+golden = "goldens/c-acl-0030.xml"

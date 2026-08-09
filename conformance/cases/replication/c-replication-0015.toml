@@ -1,0 +1,44 @@
+[case]
+id = "c-replication-0015"
+schema_version = 1
+title = "A replication write with no integrity claim at all is refused with 400 before the document is parsed"
+rationale = """
+The write demands Content-MD5 or an x-amz-checksum header, and the refusal must precede the parse: a replication document corrupted in transit that still parses would install a destination or a role nobody chose, and the first symptom would be objects shipped to the wrong account — or nowhere. Refusing with 400 InvalidRequest and naming the missing header is what lets a caller fix the request; a 200 here means the integrity requirement was silently dropped from the operation's contract."""
+polarity = "negative"
+operation = "PutBucketReplication"
+tags = ["replication", "checksum", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-repl-0004"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketReplication.html"
+summary = "The request documents Content-MD5 as the base64 digest of the configuration, required for this operation."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "conf-replication"
+[request]
+method = "PUT"
+target = "/conf-replication?replication"
+headers = { "content-type" = "application/xml" }
+body = { utf8 = '<ReplicationConfiguration><Role>arn:aws:iam::111122223333:role/replication-role</Role><Rule><Status>Enabled</Status><Destination><Bucket>arn:aws:s3:::replica-bucket</Bucket></Destination></Rule></ReplicationConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+code = "InvalidRequest"
+request_id_present = true
+
+[expect.headers_present]
+"content-type" = "application/xml"
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>InvalidRequest</Code><Message>this operation requires an integrity check on the request body: send Content-MD5 or an x-amz-checksum-* header</Message><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''

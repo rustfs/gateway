@@ -1,0 +1,206 @@
+{
+  "ir_version": "1",
+  "operation": "PutBucketVersioning",
+  "http": {
+            "method": "PUT",
+            "target": "Bucket",
+            "precedence": 236,
+            "predicates": [
+                            { "kind": "Method", "method": "PUT" },
+                            { "kind": "Target", "target": "Bucket" },
+                            { "kind": "QueryPresent", "key": "versioning" }
+                          ],
+            "success_status": 200,
+            "alt_success_statuses": [],
+            "path_shape": "/{Bucket}"
+          },
+  "auth": { "requirement": "Required", "action": "s3:PutBucketVersioning", "presigned_allowed": true, "service": "s3" },
+  "payload": {
+               "request": { "kind": "XmlBody", "buffering": "Full", "max_bytes": 4096 },
+               "response": { "kind": "None", "buffering": "None", "max_bytes": null }
+             },
+  "checksum": {
+                "http_checksum_required": true,
+                "request_algorithms": ["CRC32", "CRC32C", "CRC64NVME", "SHA1", "SHA256"],
+                "response_algorithms": []
+              },
+  "input": {
+             "fields": [
+                         {
+                           "name": "Bucket",
+                           "wire_name": "Bucket",
+                           "required": true,
+                           "binding": { "kind": "UriLabel", "greedy": false },
+                           "type": { "kind": "BucketName" },
+                           "hot": true,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "ContentMD5",
+                           "wire_name": "content-md5",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "String" },
+                           "hot": false,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "ChecksumAlgorithm",
+                           "wire_name": "x-amz-sdk-checksum-algorithm",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": {
+                                     "kind": "StringEnum",
+                                     "values": [
+                                                 "CRC32",
+                                                 "CRC32C",
+                                                 "SHA1",
+                                                 "SHA256",
+                                                 "CRC64NVME",
+                                                 "SHA512",
+                                                 "MD5",
+                                                 "XXHASH64",
+                                                 "XXHASH3",
+                                                 "XXHASH128"
+                                               ]
+                                   },
+                           "hot": false,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "MFA",
+                           "wire_name": "x-amz-mfa",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "String" },
+                           "hot": false,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "VersioningConfiguration",
+                           "wire_name": null,
+                           "required": true,
+                           "binding": { "kind": "Payload" },
+                           "type": { "kind": "Structure", "shape": "VersioningConfiguration" },
+                           "hot": true,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "ExpectedBucketOwner",
+                           "wire_name": "x-amz-expected-bucket-owner",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "String" },
+                           "hot": false,
+                           "quirk_refs": []
+                         }
+                       ]
+           },
+  "output": { "fields": [] },
+  "shapes": {
+              "VersioningConfiguration": {
+                                           "kind": "Structure",
+                                           "fields": [
+                                                       {
+                                                         "name": "MFADelete",
+                                                         "wire_name": "MfaDelete",
+                                                         "required": false,
+                                                         "binding": { "kind": "BodyXml" },
+                                                         "type": {
+                                                                   "kind": "StringEnum",
+                                                                   "values": ["Enabled", "Disabled"]
+                                                                 },
+                                                         "hot": false,
+                                                         "quirk_refs": []
+                                                       },
+                                                       {
+                                                         "name": "Status",
+                                                         "wire_name": "Status",
+                                                         "required": false,
+                                                         "binding": { "kind": "BodyXml" },
+                                                         "type": {
+                                                                   "kind": "StringEnum",
+                                                                   "values": ["Enabled", "Suspended"]
+                                                                 },
+                                                         "hot": false,
+                                                         "quirk_refs": []
+                                                       }
+                                                     ],
+                                           "xml": {
+                                                    "element_order": ["MFADelete", "Status"],
+                                                    "empty_value_policy": { "MFADelete": "omit", "Status": "omit" },
+                                                    "attributes": []
+                                                  }
+                                         }
+            },
+  "xml": {
+           "request_root": null,
+           "request_root_aliases": [],
+           "response_root": null,
+           "xmlns": "emit",
+           "unwrapped_output": false,
+           "element_order": [],
+           "empty_value_policy": {},
+           "url_encoded_fields": [],
+           "attributes": [],
+           "body_literal": false
+         },
+  "errors": {
+              "not_configured": null,
+              "allows_error_after_200": false,
+              "codes": ["NoSuchBucket", "AccessDenied", "MalformedXML", "InvalidArgument", "BadDigest"]
+            },
+  "derived_resources": [],
+  "head_mirrors": null,
+  "quirk_refs": ["q-ver-0002", "q-ver-0003", "q-ver-0004"],
+  "quirks": [
+              {
+                "id": "q-ver-0002",
+                "kind": "lenient_unknown_elements",
+                "target": "PutBucketVersioning",
+                "summary": "An element the decoder does not know is skipped and the rest of the document is stored, because a versioning document that stopped parsing would be degraded to no configuration and turn version retention off without any visible failure.",
+                "evidence": [
+                              {
+                                "kind": "s3s-issue",
+                                "ref": "https://github.com/s3s-project/s3s/issues/613",
+                                "summary": "Upstream established that S3 accepts request documents carrying elements it does not define rather than refusing them, and a stricter parser broke clients that sent them."
+                              },
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/userguide/Versioning.html",
+                                "summary": "The versioning guide describes suspension as retaining existing versions, which is what makes a silently unconfigured document a data-retention change rather than a feature toggle."
+                              }
+                            ],
+                "cases": ["c-bucketconfig-0046"]
+              },
+              {
+                "id": "q-ver-0003",
+                "kind": "checksum_required",
+                "target": "PutBucketVersioning",
+                "summary": "The versioning write demands an integrity claim on the body, so a request with neither Content-MD5 nor an x-amz-checksum header is refused with 400 before the document is parsed.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketVersioning.html",
+                                "summary": "The request documents Content-MD5 as the base64 digest of the configuration, which the pinned model spells as a request checksum requirement the lowering does not read."
+                              }
+                            ],
+                "cases": ["c-bucketconfig-0035", "c-bucketconfig-0001"]
+              },
+              {
+                "id": "q-ver-0004",
+                "kind": "element_name",
+                "target": "VersioningConfiguration.MFADelete",
+                "summary": "The member the model calls MFADelete is spelled MfaDelete on the wire, and the pinned model gives the read and the write the same spelling, so no alternate-name rule is needed for it here.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketVersioning.html",
+                                "summary": "The documented request syntax spells the multi-factor delete element MfaDelete, and the read reference beside it spells the same element the same way."
+                              }
+                            ],
+                "cases": ["c-bucketconfig-0003"]
+              }
+            ],
+  "ext_points": []
+}

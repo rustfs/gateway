@@ -57,20 +57,13 @@
 //! element of a v1 listing and of `ListAllMyBucketsResult`. [`OWNER_ID`] is that identity, fixed
 //! and shared, so the value is the same in every run and every golden redacts one thing.
 //!
-//! # The copy half, and the parser it had to write twice
+//! # The copy half and its consumed authorization proof
 //!
-//! `CopyObject` and `UploadPartCopy` name a *second* object the caller chose, so both go through
-//! [`parse_copy_source`], [`confirm_source_owner`] and [`read_copy_source`] — one set of functions,
-//! called from both, because the two published advisories on this family were a part copy that
-//! authorized the upload it wrote to and never the object it read from.
-//!
-//! Those three still mirror `crates/core/src/ops/shared/copy_source.rs` rather than calling it,
-//! and that is now a debt rather than a necessity: the facade *does* export `CopySource`,
-//! `authorize_source` and `classify_self_copy`, so the mirror is a second copy of a rule that has
-//! one owner. The copy **range** no longer is — [`resolve_copy_span`] is a call to the contract's
-//! `resolve_copy_range`, and the arithmetic and the opinion this file used to hold beside it are
-//! gone. The two had drifted apart in exactly the way the shared directory exists to prevent: this
-//! file trimmed an overlong span and the contract's doc comment said it refused one.
+//! `CopyObject` and `UploadPartCopy` name a second object. Their live handler path reads the
+//! framework's `CopySourceResources` and resolves it with the `AuthorizedRead` proof carried by
+//! the same `Req`; it never parses the header again. [`parse_copy_source`] remains only for focused
+//! fixture unit tests that exercise legacy edge cases directly. The copy range likewise delegates
+//! to the shared [`resolve_copy_range`] contract.
 //!
 //! Where a mirror is still here, it is faithful **including where it and the corpus disagree**, and
 //! each disagreement is recorded on the function that carries it. A stub that answered what a case
@@ -117,13 +110,16 @@ use std::sync::{Arc, Mutex};
 
 use rustfs_gateway::dto;
 use rustfs_gateway::{
-    BucketName, ByteStream, ChecksumAlgorithm, ChecksumSpec, ConditionalOutcome, CopyRange, CopySourceRejection, CursorSpec,
-    ETag, ErrorCode, ErrorDetail, Handler, HandlerError, HandlerResult, IfRange, ObjectKey, ObjectValidators,
-    PRECONDITION_FAILED_MESSAGE, PreconditionRejection, Preconditions, REGION_MATCH_POLICY, RangeDecision, RangeSelectors,
-    RegionLabel, RegionSet, Req, RequestKind, Resp, TagScope, TaggingRejection, Timestamp, collect, evaluate, evaluate_range,
-    parse_conditional_etag, parse_tagging_header, permanent_redirect_for, resolve_copy_range, resolve_location_constraint,
-    validate_cors, validate_encryption, validate_legal_hold, validate_lifecycle, validate_lock_configuration, validate_retention,
-    validate_tag_set,
+    AclHeaders, AclInput, AclRejection, AclTarget, BucketName, ByteStream, ChecksumAlgorithm, ChecksumSpec, ConditionalOutcome,
+    CopyRange, CopySourceRejection, CursorSpec, ETag, ErrorCode, ErrorDetail, GranteeType, Handler, HandlerError, HandlerResult,
+    IfRange, ObjectKey, ObjectValidators, PRECONDITION_FAILED_MESSAGE, PreconditionRejection, Preconditions, REGION_MATCH_POLICY,
+    RangeDecision, RangeSelectors, RegionLabel, RegionSet, Req, RequestKind, Resp, RestoreState, RestoreStatus, TagScope,
+    TaggingRejection, Timestamp, collect, evaluate, evaluate_range, format_restore_status, parse_conditional_etag,
+    parse_tagging_header, permanent_redirect_for, resolve_copy_range, resolve_grantee_type, resolve_input as resolve_acl_input,
+    resolve_location_constraint, validate_accelerate, validate_cors, validate_encryption, validate_legal_hold,
+    validate_lifecycle, validate_lock_configuration, validate_logging, validate_notification, validate_policy,
+    validate_public_access_block, validate_replication, validate_request_payment, validate_restore, validate_retention,
+    validate_select, validate_tag_set, validate_versioning, validate_website,
 };
 
 /// The canonical user id every listing reports as the owner.
@@ -177,6 +173,16 @@ pub struct StoredObject {
     pub expires: Option<String>,
     /// User metadata.
     pub metadata: BTreeMap<String, String>,
+    /// The access control policy a `PutObjectAcl` stored, canonicalised: every grantee already
+    /// carries the `xsi:type` a read will write back as an attribute.
+    ///
+    /// `None` is not an observable state — every object has an ACL from the moment it exists —
+    /// so the read answers the owner's `FULL_CONTROL` for it rather than a `404`, which is what
+    /// makes this family the only object subresource with no unconfigured error. Held on the
+    /// object beside the tag set, and for the same reason: `[setup.objects]` declares no
+    /// per-version ACL, so what a read answers is always either the default or something a
+    /// request wrote.
+    pub acl: Option<dto::AccessControlPolicy>,
     /// The tag set, in the order the request that wrote it listed the pairs.
     ///
     /// A `Vec` rather than a map, and ordered rather than sorted, because the tag set is what the
@@ -196,6 +202,14 @@ pub struct StoredObject {
     /// same object-level 404 as an unset retention — not a `200` carrying `OFF`, which a
     /// compliance audit would read as a hold that exists.
     pub legal_hold: Option<dto::ObjectLockLegalHold>,
+    /// The state of an archive retrieval on this copy, or `None` when none was ever asked for.
+    ///
+    /// `None` is what makes `x-amz-restore` absent, which is a fact a client reads: an object
+    /// with no header was never retrieved, and one carrying `ongoing-request="false"` is back.
+    /// Held on the object beside the tag set and the lock documents, for the same reason — the
+    /// case format declares no per-version restore state, and inventing one would be state no
+    /// case wrote.
+    pub restore: Option<RestoreStatus>,
     /// The storage class the writer named, or `STANDARD`.
     pub storage_class: String,
     /// The unquoted MD5 entity tag of `body`.
@@ -359,6 +373,13 @@ struct BucketState {
     /// it — a recreated bucket inheriting the previous owner's KMS key would encrypt the new
     /// owner's data to somebody else's key.
     encryption: Option<dto::ServerSideEncryptionConfiguration>,
+    /// The stored replication configuration, written by `PutBucketReplication` within the case.
+    /// `None` is the observable state `ReplicationConfigurationNotFoundError` reports; there is
+    /// no "empty document" state, because the decoder refuses a document with no rule. It lives
+    /// in `BucketState` so that deleting the bucket deletes the document with it — a recreated
+    /// bucket inheriting the previous owner's replication rules would ship the new owner's data
+    /// to somebody else's destination bucket under somebody else's IAM role.
+    replication: Option<dto::ReplicationConfiguration>,
     /// The stored object-lock configuration, written by `PutObjectLockConfiguration` within the
     /// case. `None` with `object_lock` false is the observable state
     /// `ObjectLockConfigurationNotFoundError` reports; `None` with `object_lock` true answers
@@ -367,6 +388,60 @@ struct BucketState {
     /// the previous owner's WORM configuration would lock the new owner's data to somebody
     /// else's compliance rules.
     lock_configuration: Option<dto::ObjectLockConfiguration>,
+    /// The stored access control policy, written by `PutBucketAcl` within the case and already
+    /// canonicalised.
+    ///
+    /// `None` is **not** an observable state here, unlike every other document in this
+    /// structure: a bucket always has an ACL, so `None` reads back as the owner's
+    /// `FULL_CONTROL` rather than as a `404`. It still lives in `BucketState` so that deleting
+    /// the bucket deletes the policy with it — a recreated bucket inheriting the previous
+    /// owner's grants would hand the new owner's data to whoever the last one shared it with,
+    /// and unlike an inherited lifecycle or encryption document that one is silent.
+    acl: Option<dto::AccessControlPolicy>,
+    /// The stored versioning document, written by `PutBucketVersioning` within the case.
+    ///
+    /// `None` is the never-versioned state, and the read answers it with an empty
+    /// `<VersioningConfiguration/>` and a `200` — **not** a `404` and not
+    /// `<Status>Suspended</Status>`, which is a bucket that was versioned and stopped. It lives
+    /// in `BucketState` so that deleting the bucket deletes the state with it: a recreated bucket
+    /// that inherited `Suspended` would report a version history the new owner never had.
+    versioning: Option<dto::VersioningConfiguration>,
+    /// The stored acceleration document. `None` reads back as an empty
+    /// `<AccelerateConfiguration/>` with a `200`.
+    accelerate: Option<dto::AccelerateConfiguration>,
+    /// The stored request-payment document. `None` reads back as `<Payer>BucketOwner</Payer>` —
+    /// the *default*, not an empty document, because every bucket has a payer. Inheriting
+    /// `Requester` across a recreation would bill the new owner's readers.
+    request_payment: Option<dto::RequestPaymentConfiguration>,
+    /// The stored logging document. `None` reads back as an empty `<BucketLoggingStatus/>`. A
+    /// recreated bucket that inherited one would keep writing the new owner's access log to the
+    /// previous owner's target bucket, which is a disclosure and not merely a stale setting.
+    logging: Option<dto::BucketLoggingStatus>,
+    /// The stored notification document. `None` reads back as an empty
+    /// `<NotificationConfiguration/>`; inheriting one across a recreation would publish the new
+    /// owner's object events to the previous owner's topic.
+    notification: Option<dto::NotificationConfiguration>,
+    /// The stored website document. `None` is the observable state
+    /// `NoSuchWebsiteConfiguration` reports — one of the three reads in this band that answer a
+    /// `404`, each with its own literal.
+    website: Option<dto::WebsiteConfiguration>,
+    /// The stored bucket policy, byte for byte as the write sent it. `None` is the observable
+    /// state `NoSuchBucketPolicy` reports, for both the policy read and the policy-status read.
+    /// It is stored as the original text rather than as a parse, because the read is documented
+    /// to answer the document that was written and a re-serialisation is a different document.
+    /// A recreated bucket inheriting one would grant the previous owner's principals access to
+    /// the new owner's data, which is the sharpest inheritance in the whole band.
+    policy: Option<String>,
+    /// Whether the stored policy makes the bucket public, as `GetBucketPolicyStatus` reports it.
+    ///
+    /// Set by the case through [`Fixture::set_policy`], never computed: this workspace contains
+    /// no policy evaluator and inventing one in a test fixture would be a second implementation
+    /// of the thing the family's fence says does not exist here.
+    policy_is_public: bool,
+    /// The stored public-access block. `None` is the observable state
+    /// `NoSuchPublicAccessBlockConfiguration` reports — the third distinct `404` literal, and the
+    /// one whose inheritance would silently *unblock* public access on a recreated bucket.
+    public_access_block: Option<dto::PublicAccessBlockConfiguration>,
 }
 
 /// A bucket's lifecycle document exactly as one write stored it.
@@ -409,6 +484,22 @@ impl Fixture {
             home_region: HOME_REGION.to_owned(),
             ..Fixture::default()
         }
+    }
+
+    /// When a copy retrieved *now* would lapse, as the RFC 1123 string `x-amz-restore` carries.
+    ///
+    /// One day past the case's own clock rather than a hard-coded date, so the value a case
+    /// asserts byte for byte is a function of the instant that case pinned. `Days` from the
+    /// request is deliberately not consulted: the request asks for a lifetime and this stub does
+    /// not model one, and reading the number without honouring it would be the more misleading of
+    /// the two. The fallback is the clock itself, reachable only from an instant `Timestamp`
+    /// refuses to render, which no case's `[clock]` can produce.
+    #[must_use]
+    pub fn restore_expiry(&self) -> String {
+        const ONE_DAY_SECONDS: i64 = 24 * 60 * 60;
+        Timestamp::from_secs(self.now.saturating_add(ONE_DAY_SECONDS))
+            .render(rustfs_gateway::TimestampFormat::HttpDate)
+            .unwrap_or_else(|_| String::new())
     }
 
     /// Declares a bucket. `versioned` decides whether a later write appends a version or replaces
@@ -589,16 +680,182 @@ impl Fixture {
         }
     }
 
+    /// Installs a bucket's replication document, replacing whatever was there.
+    /// `PutBucketReplication` only.
+    pub fn set_replication(&mut self, name: &str, configuration: dto::ReplicationConfiguration) {
+        self.buckets.entry(name.to_owned()).or_default().replication = Some(configuration);
+    }
+
+    /// The stored replication document, or `None` for a bucket that never had one.
+    #[must_use]
+    fn replication(&self, name: &str) -> Option<&dto::ReplicationConfiguration> {
+        self.buckets.get(name).and_then(|bucket| bucket.replication.as_ref())
+    }
+
+    /// Removes a bucket's replication document. Idempotent on purpose: the delete answers `204`
+    /// whether or not a document was there, so this reports nothing.
+    pub fn clear_replication(&mut self, name: &str) {
+        if let Some(bucket) = self.buckets.get_mut(name) {
+            bucket.replication = None;
+        }
+    }
+
+    /// Installs a bucket's access control policy, replacing whatever was there.
+    /// `PutBucketAcl` only.
+    pub fn set_bucket_acl(&mut self, name: &str, policy: dto::AccessControlPolicy) {
+        self.buckets.entry(name.to_owned()).or_default().acl = Some(policy);
+    }
+
+    /// The stored bucket policy, or `None` for a bucket nobody ever wrote one to.
+    ///
+    /// `None` is answered as the default owner grant by the read rather than as a `404`: an ACL
+    /// is the one bucket subresource that always exists.
+    #[must_use]
+    fn bucket_acl(&self, name: &str) -> Option<&dto::AccessControlPolicy> {
+        self.buckets.get(name).and_then(|bucket| bucket.acl.as_ref())
+    }
+
+    /// Installs a bucket's versioning document. `PutBucketVersioning` only.
+    pub fn set_versioning(&mut self, name: &str, configuration: dto::VersioningConfiguration) {
+        self.buckets.entry(name.to_owned()).or_default().versioning = Some(configuration);
+    }
+
+    /// The stored versioning document, or `None` for a bucket that was never versioned. The
+    /// distinction is the family's most consequential: `None` is not `Suspended`.
+    #[must_use]
+    fn versioning(&self, name: &str) -> Option<&dto::VersioningConfiguration> {
+        self.buckets.get(name).and_then(|bucket| bucket.versioning.as_ref())
+    }
+
+    /// Installs a bucket's acceleration document. `PutBucketAccelerateConfiguration` only.
+    pub fn set_accelerate(&mut self, name: &str, configuration: dto::AccelerateConfiguration) {
+        self.buckets.entry(name.to_owned()).or_default().accelerate = Some(configuration);
+    }
+
+    /// The stored acceleration document, or `None` for a bucket that never had one.
+    #[must_use]
+    fn accelerate(&self, name: &str) -> Option<&dto::AccelerateConfiguration> {
+        self.buckets.get(name).and_then(|bucket| bucket.accelerate.as_ref())
+    }
+
+    /// Installs a bucket's request-payment document. `PutBucketRequestPayment` only.
+    pub fn set_request_payment(&mut self, name: &str, configuration: dto::RequestPaymentConfiguration) {
+        self.buckets.entry(name.to_owned()).or_default().request_payment = Some(configuration);
+    }
+
+    /// The stored request-payment document, or `None` for a bucket that was never switched. The
+    /// read turns `None` into the documented default rather than into an empty document.
+    #[must_use]
+    fn request_payment(&self, name: &str) -> Option<&dto::RequestPaymentConfiguration> {
+        self.buckets.get(name).and_then(|bucket| bucket.request_payment.as_ref())
+    }
+
+    /// Installs a bucket's logging document. `PutBucketLogging` only.
+    pub fn set_logging(&mut self, name: &str, configuration: dto::BucketLoggingStatus) {
+        self.buckets.entry(name.to_owned()).or_default().logging = Some(configuration);
+    }
+
+    /// The stored logging document, or `None` for a bucket that is not logging.
+    #[must_use]
+    fn logging(&self, name: &str) -> Option<&dto::BucketLoggingStatus> {
+        self.buckets.get(name).and_then(|bucket| bucket.logging.as_ref())
+    }
+
+    /// Installs a bucket's notification document. `PutBucketNotificationConfiguration` only.
+    pub fn set_notification(&mut self, name: &str, configuration: dto::NotificationConfiguration) {
+        self.buckets.entry(name.to_owned()).or_default().notification = Some(configuration);
+    }
+
+    /// The stored notification document, or `None` for a bucket that delivers no events.
+    #[must_use]
+    fn notification(&self, name: &str) -> Option<&dto::NotificationConfiguration> {
+        self.buckets.get(name).and_then(|bucket| bucket.notification.as_ref())
+    }
+
+    /// Installs a bucket's website document. `PutBucketWebsite` only.
+    pub fn set_website(&mut self, name: &str, configuration: dto::WebsiteConfiguration) {
+        self.buckets.entry(name.to_owned()).or_default().website = Some(configuration);
+    }
+
+    /// The stored website document, or `None` for a bucket that answers the family's `404`.
+    #[must_use]
+    fn website(&self, name: &str) -> Option<&dto::WebsiteConfiguration> {
+        self.buckets.get(name).and_then(|bucket| bucket.website.as_ref())
+    }
+
+    /// Removes a bucket's website document. Idempotent: the delete answers `204` whether or not a
+    /// document was there, even though the read of the same bucket answers `404`.
+    pub fn clear_website(&mut self, name: &str) {
+        if let Some(bucket) = self.buckets.get_mut(name) {
+            bucket.website = None;
+        }
+    }
+
+    /// Installs a bucket's policy, byte for byte, together with the public verdict the case
+    /// declares for it.
+    ///
+    /// The verdict is a parameter and not a computation on purpose: `GetBucketPolicyStatus`
+    /// transports a boolean a policy evaluator produced, and this workspace has no evaluator. A
+    /// fixture that guessed one would be asserting its own guess.
+    pub fn set_policy(&mut self, name: &str, document: String, is_public: bool) {
+        let bucket = self.buckets.entry(name.to_owned()).or_default();
+        bucket.policy = Some(document);
+        bucket.policy_is_public = is_public;
+    }
+
+    /// The stored policy document, or `None` for a bucket that answers `NoSuchBucketPolicy`.
+    #[must_use]
+    fn policy(&self, name: &str) -> Option<&str> {
+        self.buckets.get(name).and_then(|bucket| bucket.policy.as_deref())
+    }
+
+    /// The public verdict the case declared beside the policy.
+    #[must_use]
+    fn policy_is_public(&self, name: &str) -> bool {
+        self.buckets.get(name).is_some_and(|bucket| bucket.policy_is_public)
+    }
+
+    /// Removes a bucket's policy. Idempotent: the delete answers `204` whether or not one was
+    /// there. The verdict goes with it, because a verdict about a policy that is gone is not an
+    /// answer about anything.
+    pub fn clear_policy(&mut self, name: &str) {
+        if let Some(bucket) = self.buckets.get_mut(name) {
+            bucket.policy = None;
+            bucket.policy_is_public = false;
+        }
+    }
+
+    /// Installs a bucket's public-access block. `PutPublicAccessBlock` only.
+    pub fn set_public_access_block(&mut self, name: &str, configuration: dto::PublicAccessBlockConfiguration) {
+        self.buckets.entry(name.to_owned()).or_default().public_access_block = Some(configuration);
+    }
+
+    /// The stored public-access block, or `None` for a bucket that answers
+    /// `NoSuchPublicAccessBlockConfiguration`.
+    #[must_use]
+    fn public_access_block(&self, name: &str) -> Option<&dto::PublicAccessBlockConfiguration> {
+        self.buckets.get(name).and_then(|bucket| bucket.public_access_block.as_ref())
+    }
+
+    /// Removes a bucket's public-access block. Idempotent, like the other two deletes in the band.
+    pub fn clear_public_access_block(&mut self, name: &str) {
+        if let Some(bucket) = self.buckets.get_mut(name) {
+            bucket.public_access_block = None;
+        }
+    }
+
     /// Removes a bucket, for `setup.buckets[].absent` and for `DeleteBucket`.
     ///
     /// The whole `BucketState` entry goes, and the CORS document and tag set go with it because
-    /// they live inside it — the lifecycle, encryption and object-lock documents too: a bucket's
-    /// configuration is a property of the bucket, not of the name,
-    /// so a later creation under the same name starts unconfigured rather than inheriting a
-    /// document nobody wrote to it. `Fixture::bucket_lifecycle` tests pin this, and for the lock
-    /// document the stakes are the sharpest in the family: a recreated bucket that inherited a
-    /// COMPLIANCE default would apply the previous owner's WORM rules to the new owner's data,
-    /// with no way to lift them.
+    /// they live inside it — the lifecycle, encryption, replication, object-lock and access
+    /// control documents too: a bucket's configuration is a property of the bucket, not of the
+    /// name, so a later creation under the same name starts unconfigured rather than inheriting a
+    /// document nobody wrote to it. `Fixture::bucket_lifecycle` tests pin this, and two of them
+    /// carry the sharpest stakes in the family: a recreated bucket that inherited a COMPLIANCE
+    /// default would apply the previous owner's WORM rules to the new owner's data with no way to
+    /// lift them, and one that inherited an ACL would keep handing the new owner's data to
+    /// whoever the previous owner had shared it with — silently, because an inherited grant looks
+    /// exactly like an intended one.
     pub fn remove_bucket(&mut self, name: &str) {
         self.buckets.remove(name);
         self.objects.retain(|(bucket, _), _| bucket != name);
@@ -750,6 +1007,20 @@ impl Fixture {
         self.objects
             .get(&(bucket.to_owned(), key.to_owned()))?
             .iter()
+            .find(|version| version.version_id == version_id)
+    }
+
+    /// One named version of one key, writable.
+    ///
+    /// The twin of [`Fixture::version`] for the one family that writes into a version the caller
+    /// named rather than into the newest one: `PutObjectAcl` takes a `versionId`, and an ACL
+    /// written onto the wrong version is a permission change nobody asked for on an object
+    /// nobody named.
+    #[must_use]
+    pub fn version_mut(&mut self, bucket: &str, key: &str, version_id: &str) -> Option<&mut StoredVersion> {
+        self.objects
+            .get_mut(&(bucket.to_owned(), key.to_owned()))?
+            .iter_mut()
             .find(|version| version.version_id == version_id)
     }
 
@@ -1307,8 +1578,41 @@ fn no_such_lifecycle_configuration() -> HandlerError {
     HandlerError::new(ErrorCode::NO_SUCH_LIFECYCLE_CONFIGURATION, "The lifecycle configuration does not exist")
 }
 
+/// `NoSuchWebsiteConfiguration`, for a bucket that never had a website document.
+///
+/// One of the three distinct not-configured literals in the 200-249 band, and not
+/// interchangeable with the other two: a client tearing configuration down branches on which one
+/// it got.
+fn no_such_website_configuration() -> HandlerError {
+    HandlerError::new(
+        ErrorCode::NO_SUCH_WEBSITE_CONFIGURATION,
+        "The specified bucket does not have a website configuration",
+    )
+}
+
+/// `NoSuchBucketPolicy`, for a bucket that never had a policy — answered by the policy read and,
+/// because it is the same missing document, by the policy-status read beside it.
+fn no_such_bucket_policy() -> HandlerError {
+    HandlerError::new(ErrorCode::NO_SUCH_BUCKET_POLICY, "The bucket policy does not exist")
+}
+
+/// `NoSuchPublicAccessBlockConfiguration`, for a bucket with no public-access block.
+fn no_such_public_access_block() -> HandlerError {
+    HandlerError::new(
+        ErrorCode::NO_SUCH_PUBLIC_ACCESS_BLOCK_CONFIGURATION,
+        "The public access block configuration was not found",
+    )
+}
+
 /// `ServerSideEncryptionConfigurationNotFoundError`, in AWS's own wording for a bucket that
 /// never had a default-encryption document.
+fn no_such_replication_configuration() -> HandlerError {
+    HandlerError::new(
+        ErrorCode::REPLICATION_CONFIGURATION_NOT_FOUND,
+        "The replication configuration was not found",
+    )
+}
+
 fn no_such_encryption_configuration() -> HandlerError {
     HandlerError::new(
         ErrorCode::SERVER_SIDE_ENCRYPTION_CONFIGURATION_NOT_FOUND,
@@ -1382,6 +1686,14 @@ fn refuse_versioned_lock_state(version_id: Option<&str>) -> Result<(), HandlerEr
 fn no_such_key(key: &str) -> HandlerError {
     HandlerError::new(ErrorCode::NO_SUCH_KEY, "The specified key does not exist.")
         .with_detail(ErrorDetail::Key(key.to_owned().into()))
+}
+
+/// AWS's own wording for a version id that names nothing.
+///
+/// The message never repeats the id: a caller who can tell a mistyped id from one that belongs to
+/// somebody else's object apart by the `<Message>` element has been told the id is genuine.
+fn no_such_version() -> HandlerError {
+    HandlerError::new(ErrorCode::NO_SUCH_VERSION, "The specified version does not exist.")
 }
 
 /// A resolved range: the window to send, and the `Content-Range` value that describes it.
@@ -1494,6 +1806,67 @@ fn storage_class_header(object: &StoredObject) -> Option<dto::StorageClass> {
     Some(dto::StorageClass::custom(object.storage_class.clone()))
 }
 
+/// What a select is told, once its request has been read and found well formed.
+///
+/// A constant, and deliberately explicit about which half is missing: "not implemented" on its
+/// own would read as "this operation is unavailable", when the request half of it works and only
+/// the framed answer does not exist yet.
+pub const SELECT_RESPONSE_NOT_IMPLEMENTED: &str =
+    "The select request was accepted and validated, but this backend cannot yet write an event-stream response";
+
+/// Refuses `?versionId` on a restore rather than retrieving the current version instead.
+///
+/// The lock family's rule, for the same reason: this fixture keeps one restore state per key,
+/// because the case format declares no per-version one. Silently ignoring the parameter would
+/// report the current copy's retrieval as the named version's, and a case asserting on that would
+/// go green against a wrong answer about which bytes are readable.
+///
+/// # Errors
+///
+/// `NotImplemented` whenever the parameter is present, with a value or without.
+fn refuse_versioned_restore(version_id: Option<&str>) -> Result<(), HandlerError> {
+    if version_id.is_none() {
+        return Ok(());
+    }
+    Err(HandlerError::new(
+        ErrorCode::NOT_IMPLEMENTED,
+        "A header you provided implies functionality that is not implemented",
+    ))
+}
+
+/// The `x-amz-restore-output-path` a select-on-restore reports, built from where it asked for the
+/// answer to be written.
+///
+/// `None` when the location names no bucket, which the validator has already refused — so this is
+/// total rather than defensive, and it is written with `?` so that a future shape with an optional
+/// bucket cannot turn into a panic here.
+fn output_path_of(location: &dto::OutputLocation) -> Option<String> {
+    let s3 = location.s3.as_ref()?;
+    Some(format!("{}/{}", s3.bucket_name.as_str(), s3.prefix))
+}
+
+/// The storage classes an object has to be retrieved from before it can be read.
+///
+/// Two, and not three: `GLACIER_IR` is an instant-retrieval class, so an object in it is readable
+/// without a restore and a restore of it is the `InvalidObjectState` refusal.
+const ARCHIVE_STORAGE_CLASSES: &[&str] = &["GLACIER", "DEEP_ARCHIVE"];
+
+/// Whether this copy has to be retrieved before it can be read.
+fn is_archived(object: &StoredObject) -> bool {
+    ARCHIVE_STORAGE_CLASSES.contains(&object.storage_class.as_str())
+}
+
+/// The `x-amz-restore` value a read reports, or `None` when no retrieval was ever asked for.
+///
+/// Rendered by [`format_restore_status`] rather than by a `format!` here, which is the whole
+/// point of that function existing: this header has internal structure — two quoted values, a
+/// comma, exactly one space — and a second renderer is how the two spellings drift. An object
+/// nobody restored carries no header at all, which is a different observation from a header
+/// saying the retrieval finished.
+fn restore_header(object: &StoredObject) -> Option<String> {
+    object.restore.as_ref().map(format_restore_status)
+}
+
 /// The tag count an object read reports, which S3 omits when it would be zero.
 ///
 /// `None` for an untagged object rather than `Some(0)`: readers use the header's *presence* to
@@ -1539,16 +1912,14 @@ fn checksum_of(checksum: &UploadChecksum, bytes: &[u8]) -> Result<ChecksumSpec, 
 
 /// `x-amz-copy-source`, resolved to the object it names.
 ///
-/// # Why this parser is written again here
+/// # Why this parser remains here
 ///
 /// `crates/core/src/ops/shared/copy_source.rs` is this gateway's copy-source contract — the split
 /// rule, the two ARN grammars, the self-copy classification and the stricter range rule — and the
-/// parser below is still a hand-written mirror of the first two. It no longer has to be: the facade
-/// re-exports `CopySource`, `authorize_source` and `classify_self_copy`, so this mirror is a second
-/// copy of a rule that has an owner, and a rule two implementations hold separately is a rule they
-/// can hold differently. That is the shape of the two advisories the shared module was written to
-/// prevent, and replacing this parser with the contract's is the outstanding half of the job the
-/// range rule has already had done to it — see [`resolve_copy_span`].
+/// parser below remains for direct fixture unit tests. The live `Handler` implementations do not
+/// call it: they consume the normalized source from `Req::resources()` after the framework has
+/// authorized it. Keeping the test helper out of the service path prevents a second parser from
+/// deciding which object storage reads.
 ///
 /// The mirror is faithful, including where the shared module and the corpus disagree. Those
 /// disagreements are recorded on the functions that carry them; none of them is smoothed over here,
@@ -1564,11 +1935,22 @@ struct CopySource {
     version_id: Option<String>,
 }
 
+impl CopySource {
+    fn from_resolved(source: &rustfs_gateway::ResolvedCopySource) -> Self {
+        Self {
+            bucket: source.bucket().clone(),
+            key: source.key().clone(),
+            version_id: source.version_id().map(str::to_owned),
+        }
+    }
+}
+
 /// `InvalidArgument`, in AWS's own wording, for a copy source this fixture will not read.
 ///
 /// The explanation is a `&'static str` chosen from a fixed set, never assembled from the rejected
 /// value: this header carries a bucket name the caller may have no right to learn the existence of,
 /// and echoing it into an error document turns a refusal into an oracle.
+#[cfg(test)]
 fn bad_copy_source(reason: &'static str) -> HandlerError {
     HandlerError::new(ErrorCode::INVALID_ARGUMENT, reason)
 }
@@ -1578,6 +1960,7 @@ fn bad_copy_source(reason: &'static str) -> HandlerError {
 /// The order is the point: the optional `?versionId=` suffix is split off the **raw** value at its
 /// last `?`, and only then is each half percent-decoded. Decode first and `a%3Fb?versionId=v1`
 /// becomes `a?b?versionId=v1`, where no split rule recovers which `?` the client sent.
+#[cfg(test)]
 fn parse_copy_source(raw: &str) -> Result<CopySource, HandlerError> {
     if raw.is_empty() {
         return Err(bad_copy_source("x-amz-copy-source must name a source object"));
@@ -1601,6 +1984,7 @@ fn parse_copy_source(raw: &str) -> Result<CopySource, HandlerError> {
 /// `versionId=<value>`. A suffix that is anything else is refused instead of folded back into the
 /// key, because folding it back makes one header mean two things depending on whether the value
 /// happens to parse.
+#[cfg(test)]
 fn split_source_version(raw: &str) -> Result<(&str, Option<String>), HandlerError> {
     let Some((path, query)) = raw.rsplit_once('?') else {
         return Ok((raw, None));
@@ -1619,6 +2003,7 @@ fn split_source_version(raw: &str) -> Result<(&str, Option<String>), HandlerErro
 ///
 /// The two halves are separated on the still-encoded value, so a key containing `%2F` keeps it
 /// rather than being cut at a separator the client escaped on purpose.
+#[cfg(test)]
 fn parse_source_path(path: &str) -> Result<(String, String), HandlerError> {
     let path = path.strip_prefix('/').unwrap_or(path);
     let Some((bucket, key)) = path.split_once('/') else {
@@ -1632,6 +2017,7 @@ fn parse_source_path(path: &str) -> Result<(String, String), HandlerError> {
 /// An unrecognised ARN is never demoted to a bucket name. `arn:aws:iam::1:user/bob` would otherwise
 /// address a bucket literally called `arn:aws:iam::1:user`, and in a deployment where somebody has
 /// created one, every unrecognised ARN copy is silently redirected into it.
+#[cfg(test)]
 fn parse_source_arn(path: &str) -> Result<(String, String), HandlerError> {
     // arn : partition : service : region : account : resource…, where the resource half contains
     // colons in neither form, so five splits is the whole grammar.
@@ -1666,6 +2052,7 @@ fn parse_source_arn(path: &str) -> Result<(String, String), HandlerError> {
 }
 
 /// The one refusal every unrecognised ARN shares.
+#[cfg(test)]
 fn unknown_source_arn() -> HandlerError {
     bad_copy_source("x-amz-copy-source accepts an access point or Outposts ARN, or a bucket and key")
 }
@@ -1675,37 +2062,35 @@ fn unknown_source_arn() -> HandlerError {
 /// `%XX` is one octet and everything else is itself — a `+` stays a plus sign, because this is a
 /// path and not a form. Percent encoding carries octets rather than characters, so a client can
 /// spell a source whose decoded bytes are not text; that is a refusal and never a panic.
+///
+/// This used to be a hand-rolled decoder living in this file. It was the workspace's second
+/// percent decoder and the second place a copy source was parsed, which is precisely the shape
+/// `GHSA-f4vq-9ffr-m8m3` has: a backend that re-reads a name the framework already read. It now
+/// calls [`rustfs_gateway::decode_once`], and `scripts/check_single_normalization.sh` refuses
+/// a third one.
+#[cfg(test)]
 fn decode_source(value: &str) -> Result<String, HandlerError> {
-    let bytes = value.as_bytes();
-    let mut out: Vec<u8> = Vec::with_capacity(bytes.len());
-    let mut index = 0usize;
-    while let Some(&byte) = bytes.get(index) {
-        let pair = (
-            bytes.get(index + 1).and_then(|digit| char::from(*digit).to_digit(16)),
-            bytes.get(index + 2).and_then(|digit| char::from(*digit).to_digit(16)),
-        );
-        if byte == b'%'
-            && let (Some(high), Some(low)) = pair
-        {
-            out.push((((high * 16) + low) & 0xff) as u8);
-            index += 3;
-            continue;
-        }
-        out.push(byte);
-        index += 1;
-    }
-    String::from_utf8(out).map_err(|_| bad_copy_source("x-amz-copy-source is not valid UTF-8 once decoded"))
+    rustfs_gateway::decode_once(value).map_err(|_| bad_copy_source("x-amz-copy-source is not valid UTF-8 once decoded"))
 }
 
-/// Validates the bucket half of a copy source.
+/// Validates the bucket half of a copy source, through the framework's floor and rules.
+#[cfg(test)]
 fn source_bucket(name: &str) -> Result<BucketName, HandlerError> {
-    BucketName::new(name.to_owned())
+    BucketName::materialize(name, &rustfs_gateway::NamePolicy::default())
         .map_err(|_| bad_copy_source("the bucket named by x-amz-copy-source is not a valid bucket name"))
 }
 
-/// Validates the key half. Never normalised: `../` is three ordinary bytes of a key.
+/// Validates the key half against the same safety floor the request path is held to.
+///
+/// A `.` segment is still opaque text — an S3 key has no directory semantics — but a `..` segment,
+/// a control character or a UNC shape is refused here rather than looked up literally. A backend
+/// that applied looser rules than the gateway would be the second normalisation the whole of
+/// P6-05 exists to prevent, and it would be the one on the storage side of the authorisation
+/// check.
+#[cfg(test)]
 fn source_key(key: &str) -> Result<ObjectKey, HandlerError> {
-    ObjectKey::new(key.to_owned()).map_err(|_| bad_copy_source("the key named by x-amz-copy-source is not a valid object key"))
+    ObjectKey::materialize_decoded(key, &rustfs_gateway::NamePolicy::default())
+        .map_err(|rejection| bad_copy_source(rejection.reason()))
 }
 
 /// The source-side ownership gate, answered from what `[setup]` declared and nothing else.
@@ -1858,6 +2243,84 @@ fn refuse_versioned_tagging(version_id: Option<&str>) -> Result<(), HandlerError
     ))
 }
 
+/// The access control policy a bucket or an object that nobody configured answers with.
+///
+/// Every resource has one from the moment it exists, and this is it: the owner, and the owner's
+/// `FULL_CONTROL`. Built rather than stored, because a fixture that had to write the default in
+/// before a read could see it would make "the default" a property of the setup rather than of
+/// the resource — and `c-acl-0028` asks precisely what a bucket nobody ever called
+/// `PutBucketAcl` on answers.
+fn default_acl() -> dto::AccessControlPolicy {
+    dto::AccessControlPolicy {
+        owner: Some(fixture_owner()),
+        grants: vec![dto::Grant {
+            grantee: Some(dto::Grantee {
+                id: Some(OWNER_ID.to_owned()),
+                display_name: Some(OWNER_DISPLAY_NAME.to_owned()),
+                r#type: Some(GranteeType::CanonicalUser.as_dto()),
+                ..dto::Grantee::default()
+            }),
+            permission: Some(dto::Permission::FULL_CONTROL),
+        }],
+    }
+}
+
+/// The owner every listing and every ACL in this fixture reports.
+fn fixture_owner() -> dto::Owner {
+    dto::Owner {
+        id: Some(OWNER_ID.to_owned()),
+        display_name: Some(OWNER_DISPLAY_NAME.to_owned()),
+    }
+}
+
+/// The ACL headers of a request, lifted off the decoded input for the shared contract.
+///
+/// One function rather than two copies, because the bucket write and the object write carry the
+/// same six headers and the exclusivity rule is decided from all of them at once: a version that
+/// looked at `x-amz-acl` alone would let every grant header through beside a body.
+fn acl_headers<'a>(
+    canned: Option<&'a dto::Acl>,
+    full_control: Option<&'a String>,
+    read: Option<&'a String>,
+    write: Option<&'a String>,
+    read_acp: Option<&'a String>,
+    write_acp: Option<&'a String>,
+) -> AclHeaders<'a> {
+    AclHeaders {
+        canned: canned.map(dto::Acl::as_str),
+        full_control: full_control.map(String::as_str),
+        read: read.map(String::as_str),
+        write: write.map(String::as_str),
+        read_acp: read_acp.map(String::as_str),
+        write_acp: write_acp.map(String::as_str),
+    }
+}
+
+/// The shared ACL contract's own refusal, rendered.
+fn refused_acl(rejection: AclRejection) -> HandlerError {
+    HandlerError::new(rejection.code(), rejection.reason())
+}
+
+/// The policy one resolved ACL write stores.
+///
+/// The body channel stores the document it carried. The header channel stores the grants the
+/// explicit headers named, under this fixture's owner — and a canned ACL is *not* expanded into
+/// grants: expansion depends on the bucket owner, the object owner and, for `log-delivery-write`,
+/// a predefined group, and the shared contract deliberately validates canned values rather than
+/// inventing an expansion. What is stored for a canned-only write is therefore the default
+/// policy, and the case that asserts a canned write succeeds asserts the `200` and not a
+/// read-back this fixture would have made up.
+fn policy_of(resolved: AclInput) -> dto::AccessControlPolicy {
+    match resolved {
+        AclInput::Document(document) => document,
+        AclInput::Headers { canned: _, grants } if grants.is_empty() => default_acl(),
+        AclInput::Headers { canned: _, grants } => dto::AccessControlPolicy {
+            owner: Some(fixture_owner()),
+            grants,
+        },
+    }
+}
+
 /// The source object a copy will read, and the version id to report for it.
 ///
 /// Every refusal here is the *source's*: a copy that reports on the destination answers a missing
@@ -1939,7 +2402,10 @@ impl Handler<dto::HeadObject> for Stub {
 
 impl Handler<dto::CopyObject> for Stub {
     fn call(&self, request: Req<dto::CopyObject>) -> impl core::future::Future<Output = HandlerResult<dto::CopyObject>> + Send {
-        let outcome = self.copy_object(request.input());
+        let outcome = match request.resources().source().resolve(request.read_proof()) {
+            Some(resolved) => self.copy_object_with_source(request.input(), CopySource::from_resolved(&resolved)),
+            None => Err(HandlerError::internal_error("the copy-source authorization proof did not match")),
+        };
         async move { outcome }
     }
 }
@@ -1949,7 +2415,10 @@ impl Handler<dto::UploadPartCopy> for Stub {
         &self,
         request: Req<dto::UploadPartCopy>,
     ) -> impl core::future::Future<Output = HandlerResult<dto::UploadPartCopy>> + Send {
-        let outcome = self.upload_part_copy(request.input());
+        let outcome = match request.resources().source().resolve(request.read_proof()) {
+            Some(resolved) => self.upload_part_copy_with_source(request.input(), CopySource::from_resolved(&resolved)),
+            None => Err(HandlerError::internal_error("the copy-source authorization proof did not match")),
+        };
         async move { outcome }
     }
 }
@@ -1994,6 +2463,46 @@ impl Handler<dto::DeleteObjectTagging> for Stub {
     }
 }
 
+impl Handler<dto::GetBucketAcl> for Stub {
+    fn call(
+        &self,
+        request: Req<dto::GetBucketAcl>,
+    ) -> impl core::future::Future<Output = HandlerResult<dto::GetBucketAcl>> + Send {
+        let outcome = self.get_bucket_acl(request.input());
+        async move { outcome }
+    }
+}
+
+impl Handler<dto::PutBucketAcl> for Stub {
+    fn call(
+        &self,
+        request: Req<dto::PutBucketAcl>,
+    ) -> impl core::future::Future<Output = HandlerResult<dto::PutBucketAcl>> + Send {
+        let outcome = self.put_bucket_acl(request.input());
+        async move { outcome }
+    }
+}
+
+impl Handler<dto::GetObjectAcl> for Stub {
+    fn call(
+        &self,
+        request: Req<dto::GetObjectAcl>,
+    ) -> impl core::future::Future<Output = HandlerResult<dto::GetObjectAcl>> + Send {
+        let outcome = self.get_object_acl(request.input());
+        async move { outcome }
+    }
+}
+
+impl Handler<dto::PutObjectAcl> for Stub {
+    fn call(
+        &self,
+        request: Req<dto::PutObjectAcl>,
+    ) -> impl core::future::Future<Output = HandlerResult<dto::PutObjectAcl>> + Send {
+        let outcome = self.put_object_acl(request.input());
+        async move { outcome }
+    }
+}
+
 impl Handler<dto::GetBucketTagging> for Stub {
     fn call(
         &self,
@@ -2029,7 +2538,11 @@ impl Handler<dto::DeleteObjects> for Stub {
         &self,
         request: Req<dto::DeleteObjects>,
     ) -> impl core::future::Future<Output = HandlerResult<dto::DeleteObjects>> + Send {
-        let outcome = self.delete_objects(request.input());
+        let input = request.input();
+        let outcome = match request.resources().resolve(request.read_proof()) {
+            Some(objects) => self.delete_objects(&input.bucket, input.delete.quiet.unwrap_or(false), objects),
+            None => Err(HandlerError::internal_error("the batch-delete authorization proof did not match")),
+        };
         async move { outcome }
     }
 }
@@ -2161,6 +2674,236 @@ impl Handler<dto::DeleteBucketEncryption> for Stub {
     }
 }
 
+impl Handler<dto::GetBucketReplication> for Stub {
+    fn call(
+        &self,
+        request: Req<dto::GetBucketReplication>,
+    ) -> impl core::future::Future<Output = HandlerResult<dto::GetBucketReplication>> + Send {
+        let outcome = self.get_bucket_replication(request.input());
+        async move { outcome }
+    }
+}
+
+impl Handler<dto::PutBucketReplication> for Stub {
+    fn call(
+        &self,
+        request: Req<dto::PutBucketReplication>,
+    ) -> impl core::future::Future<Output = HandlerResult<dto::PutBucketReplication>> + Send {
+        let outcome = self.put_bucket_replication(request.input());
+        async move { outcome }
+    }
+}
+
+impl Handler<dto::DeleteBucketReplication> for Stub {
+    fn call(
+        &self,
+        request: Req<dto::DeleteBucketReplication>,
+    ) -> impl core::future::Future<Output = HandlerResult<dto::DeleteBucketReplication>> + Send {
+        let outcome = self.delete_bucket_replication(request.input());
+        async move { outcome }
+    }
+}
+
+impl Handler<dto::GetBucketVersioning> for Stub {
+    fn call(
+        &self,
+        request: Req<dto::GetBucketVersioning>,
+    ) -> impl core::future::Future<Output = HandlerResult<dto::GetBucketVersioning>> + Send {
+        let outcome = self.get_bucket_versioning(request.input());
+        async move { outcome }
+    }
+}
+
+impl Handler<dto::PutBucketVersioning> for Stub {
+    fn call(
+        &self,
+        request: Req<dto::PutBucketVersioning>,
+    ) -> impl core::future::Future<Output = HandlerResult<dto::PutBucketVersioning>> + Send {
+        let outcome = self.put_bucket_versioning(request.input());
+        async move { outcome }
+    }
+}
+
+impl Handler<dto::GetBucketAccelerateConfiguration> for Stub {
+    fn call(
+        &self,
+        request: Req<dto::GetBucketAccelerateConfiguration>,
+    ) -> impl core::future::Future<Output = HandlerResult<dto::GetBucketAccelerateConfiguration>> + Send {
+        let outcome = self.get_bucket_accelerate_configuration(request.input());
+        async move { outcome }
+    }
+}
+
+impl Handler<dto::PutBucketAccelerateConfiguration> for Stub {
+    fn call(
+        &self,
+        request: Req<dto::PutBucketAccelerateConfiguration>,
+    ) -> impl core::future::Future<Output = HandlerResult<dto::PutBucketAccelerateConfiguration>> + Send {
+        let outcome = self.put_bucket_accelerate_configuration(request.input());
+        async move { outcome }
+    }
+}
+
+impl Handler<dto::GetBucketRequestPayment> for Stub {
+    fn call(
+        &self,
+        request: Req<dto::GetBucketRequestPayment>,
+    ) -> impl core::future::Future<Output = HandlerResult<dto::GetBucketRequestPayment>> + Send {
+        let outcome = self.get_bucket_request_payment(request.input());
+        async move { outcome }
+    }
+}
+
+impl Handler<dto::PutBucketRequestPayment> for Stub {
+    fn call(
+        &self,
+        request: Req<dto::PutBucketRequestPayment>,
+    ) -> impl core::future::Future<Output = HandlerResult<dto::PutBucketRequestPayment>> + Send {
+        let outcome = self.put_bucket_request_payment(request.input());
+        async move { outcome }
+    }
+}
+
+impl Handler<dto::GetBucketLogging> for Stub {
+    fn call(
+        &self,
+        request: Req<dto::GetBucketLogging>,
+    ) -> impl core::future::Future<Output = HandlerResult<dto::GetBucketLogging>> + Send {
+        let outcome = self.get_bucket_logging(request.input());
+        async move { outcome }
+    }
+}
+
+impl Handler<dto::PutBucketLogging> for Stub {
+    fn call(
+        &self,
+        request: Req<dto::PutBucketLogging>,
+    ) -> impl core::future::Future<Output = HandlerResult<dto::PutBucketLogging>> + Send {
+        let outcome = self.put_bucket_logging(request.input());
+        async move { outcome }
+    }
+}
+
+impl Handler<dto::GetBucketNotificationConfiguration> for Stub {
+    fn call(
+        &self,
+        request: Req<dto::GetBucketNotificationConfiguration>,
+    ) -> impl core::future::Future<Output = HandlerResult<dto::GetBucketNotificationConfiguration>> + Send {
+        let outcome = self.get_bucket_notification_configuration(request.input());
+        async move { outcome }
+    }
+}
+
+impl Handler<dto::PutBucketNotificationConfiguration> for Stub {
+    fn call(
+        &self,
+        request: Req<dto::PutBucketNotificationConfiguration>,
+    ) -> impl core::future::Future<Output = HandlerResult<dto::PutBucketNotificationConfiguration>> + Send {
+        let outcome = self.put_bucket_notification_configuration(request.input());
+        async move { outcome }
+    }
+}
+
+impl Handler<dto::GetBucketWebsite> for Stub {
+    fn call(
+        &self,
+        request: Req<dto::GetBucketWebsite>,
+    ) -> impl core::future::Future<Output = HandlerResult<dto::GetBucketWebsite>> + Send {
+        let outcome = self.get_bucket_website(request.input());
+        async move { outcome }
+    }
+}
+
+impl Handler<dto::PutBucketWebsite> for Stub {
+    fn call(
+        &self,
+        request: Req<dto::PutBucketWebsite>,
+    ) -> impl core::future::Future<Output = HandlerResult<dto::PutBucketWebsite>> + Send {
+        let outcome = self.put_bucket_website(request.input());
+        async move { outcome }
+    }
+}
+
+impl Handler<dto::DeleteBucketWebsite> for Stub {
+    fn call(
+        &self,
+        request: Req<dto::DeleteBucketWebsite>,
+    ) -> impl core::future::Future<Output = HandlerResult<dto::DeleteBucketWebsite>> + Send {
+        let outcome = self.delete_bucket_website(request.input());
+        async move { outcome }
+    }
+}
+
+impl Handler<dto::GetBucketPolicy> for Stub {
+    fn call(
+        &self,
+        request: Req<dto::GetBucketPolicy>,
+    ) -> impl core::future::Future<Output = HandlerResult<dto::GetBucketPolicy>> + Send {
+        let outcome = self.get_bucket_policy(request.input());
+        async move { outcome }
+    }
+}
+
+impl Handler<dto::PutBucketPolicy> for Stub {
+    fn call(
+        &self,
+        request: Req<dto::PutBucketPolicy>,
+    ) -> impl core::future::Future<Output = HandlerResult<dto::PutBucketPolicy>> + Send {
+        let outcome = self.put_bucket_policy(request.input());
+        async move { outcome }
+    }
+}
+
+impl Handler<dto::DeleteBucketPolicy> for Stub {
+    fn call(
+        &self,
+        request: Req<dto::DeleteBucketPolicy>,
+    ) -> impl core::future::Future<Output = HandlerResult<dto::DeleteBucketPolicy>> + Send {
+        let outcome = self.delete_bucket_policy(request.input());
+        async move { outcome }
+    }
+}
+
+impl Handler<dto::GetBucketPolicyStatus> for Stub {
+    fn call(
+        &self,
+        request: Req<dto::GetBucketPolicyStatus>,
+    ) -> impl core::future::Future<Output = HandlerResult<dto::GetBucketPolicyStatus>> + Send {
+        let outcome = self.get_bucket_policy_status(request.input());
+        async move { outcome }
+    }
+}
+
+impl Handler<dto::GetPublicAccessBlock> for Stub {
+    fn call(
+        &self,
+        request: Req<dto::GetPublicAccessBlock>,
+    ) -> impl core::future::Future<Output = HandlerResult<dto::GetPublicAccessBlock>> + Send {
+        let outcome = self.get_public_access_block(request.input());
+        async move { outcome }
+    }
+}
+
+impl Handler<dto::PutPublicAccessBlock> for Stub {
+    fn call(
+        &self,
+        request: Req<dto::PutPublicAccessBlock>,
+    ) -> impl core::future::Future<Output = HandlerResult<dto::PutPublicAccessBlock>> + Send {
+        let outcome = self.put_public_access_block(request.input());
+        async move { outcome }
+    }
+}
+
+impl Handler<dto::DeletePublicAccessBlock> for Stub {
+    fn call(
+        &self,
+        request: Req<dto::DeletePublicAccessBlock>,
+    ) -> impl core::future::Future<Output = HandlerResult<dto::DeletePublicAccessBlock>> + Send {
+        let outcome = self.delete_public_access_block(request.input());
+        async move { outcome }
+    }
+}
+
 impl Handler<dto::GetObjectLockConfiguration> for Stub {
     fn call(
         &self,
@@ -2217,6 +2960,26 @@ impl Handler<dto::PutObjectLegalHold> for Stub {
         request: Req<dto::PutObjectLegalHold>,
     ) -> impl core::future::Future<Output = HandlerResult<dto::PutObjectLegalHold>> + Send {
         let outcome = self.put_object_legal_hold(request.input());
+        async move { outcome }
+    }
+}
+
+impl Handler<dto::RestoreObject> for Stub {
+    fn call(
+        &self,
+        request: Req<dto::RestoreObject>,
+    ) -> impl core::future::Future<Output = HandlerResult<dto::RestoreObject>> + Send {
+        let outcome = self.restore_object(request.input());
+        async move { outcome }
+    }
+}
+
+impl Handler<dto::SelectObjectContent> for Stub {
+    fn call(
+        &self,
+        request: Req<dto::SelectObjectContent>,
+    ) -> impl core::future::Future<Output = HandlerResult<dto::SelectObjectContent>> + Send {
+        let outcome = self.select_object_content(request.input());
         async move { outcome }
     }
 }
@@ -2460,6 +3223,10 @@ impl Stub {
                 expires: object.expires.clone().map(Into::into),
                 metadata: object.metadata.clone(),
                 storage_class: storage_class_header(object),
+                // `x-amz-restore` when a retrieval was asked for, and no header at all when none
+                // was: the absence is the observation that this copy was never archived or never
+                // retrieved (q-restore-0002).
+                restore: restore_header(object),
                 tag_count: tag_count_header(object),
                 body: Some(ByteStream::from_bytes(bytes::Bytes::from(body))),
                 ..dto::GetObjectOutput::default()
@@ -2521,6 +3288,10 @@ impl Stub {
                 expires: object.expires.clone().map(Into::into),
                 metadata: object.metadata.clone(),
                 storage_class: storage_class_header(object),
+                // `x-amz-restore` when a retrieval was asked for, and no header at all when none
+                // was: the absence is the observation that this copy was never archived or never
+                // retrieved (q-restore-0002).
+                restore: restore_header(object),
                 tag_count: tag_count_header(object),
                 ..dto::HeadObjectOutput::default()
             },
@@ -2549,8 +3320,13 @@ impl Stub {
     /// and evaluating both sets of conditions all happen before the copy action starts, so all of
     /// them keep their own status — which is what `c-copy-0026` and `c-copy-0034` assert, each a
     /// `404` for a source that is not there. What the commit covers is the copy itself.
+    #[cfg(test)]
     fn copy_object(&self, input: &dto::CopyObjectInput) -> HandlerResult<dto::CopyObject> {
         let source = parse_copy_source(&input.copy_source)?;
+        self.copy_object_with_source(input, source)
+    }
+
+    fn copy_object_with_source(&self, input: &dto::CopyObjectInput, source: CopySource) -> HandlerResult<dto::CopyObject> {
         let metadata_from = directive_of(
             input.metadata_directive.as_ref().map(dto::MetadataDirective::as_str),
             "Unknown metadata directive.",
@@ -2662,13 +3438,15 @@ impl Stub {
 
     /// One part of a multipart upload, copied out of an object rather than sent.
     ///
-    /// Shares [`parse_copy_source`] and [`confirm_source_owner`] with [`Stub::copy_object`], and
-    /// that sharing is the point: both advisories on this family were a part copy that authorized
-    /// the upload it was writing to and never the object it read from, so "both operations gate the
-    /// source the same way" has to be a fact about which function is called and not a claim in a
-    /// comment.
-    fn upload_part_copy(&self, input: &dto::UploadPartCopyInput) -> HandlerResult<dto::UploadPartCopy> {
-        let source = parse_copy_source(&input.copy_source)?;
+    /// Shares the framework's `CopySourceResources` and [`confirm_source_owner`] with
+    /// [`Stub::copy_object`]. Both advisories on this family were a part copy that authorized the
+    /// upload it wrote to and never the object it read from, so both operations must consume the
+    /// same proof-gated source type.
+    fn upload_part_copy_with_source(
+        &self,
+        input: &dto::UploadPartCopyInput,
+        source: CopySource,
+    ) -> HandlerResult<dto::UploadPartCopy> {
         confirm_source_owner(input.expected_source_bucket_owner.as_deref())?;
 
         let mut fixture = self.borrow()?;
@@ -2778,6 +3556,108 @@ impl Stub {
         Ok(Resp::new(dto::DeleteObjectTaggingOutput::default()))
     }
 
+    /// The bucket's access control policy — always a `200`, never a `404`.
+    ///
+    /// This is the family's defining difference from every other bucket subresource read in this
+    /// file: `?cors`, `?lifecycle`, `?encryption`, `?replication` and `?object-lock` each answer
+    /// an operation-specific not-found for a bucket that was never configured, and this one
+    /// answers the owner's `FULL_CONTROL`, because an ACL is not something a bucket can be
+    /// without. The bucket itself still has to exist.
+    fn get_bucket_acl(&self, input: &dto::GetBucketAclInput) -> HandlerResult<dto::GetBucketAcl> {
+        let fixture = self.borrow()?;
+        require_bucket(&fixture, &input.bucket)?;
+        let stored = fixture.bucket_acl(input.bucket.as_str()).cloned().unwrap_or_else(default_acl);
+        Ok(Resp::new(dto::GetBucketAclOutput {
+            owner: stored.owner,
+            grants: stored.grants,
+        }))
+    }
+
+    /// The whole policy, replaced — after the one channel decision every backend shares.
+    ///
+    /// `rustfs_gateway::resolve_input` is called rather than mirrored: which of the two channels
+    /// the request used, whether it used both or neither, whether the canned value is one a
+    /// bucket accepts and whether each grant header parses are all its questions, and a second
+    /// copy of any of them here would be the drift the shared contract exists to prevent. What
+    /// comes back is already canonicalised, so what is stored carries the `xsi:type` the read
+    /// writes back as an attribute.
+    fn put_bucket_acl(&self, input: &dto::PutBucketAclInput) -> HandlerResult<dto::PutBucketAcl> {
+        let headers = acl_headers(
+            input.acl.as_ref(),
+            input.grant_full_control.as_ref(),
+            input.grant_read.as_ref(),
+            input.grant_write.as_ref(),
+            input.grant_read_acp.as_ref(),
+            input.grant_write_acp.as_ref(),
+        );
+        let resolved = resolve_acl_input(headers, input.access_control_policy.clone(), AclTarget::Bucket).map_err(refused_acl)?;
+        let mut fixture = self.borrow()?;
+        require_bucket(&fixture, &input.bucket)?;
+        fixture.set_bucket_acl(input.bucket.as_str(), policy_of(resolved));
+        Ok(Resp::new(dto::PutBucketAclOutput::default()))
+    }
+
+    /// One object version's policy, defaulting the same way the bucket read does.
+    ///
+    /// `versionId` is honoured rather than refused, which is where this family parts company with
+    /// the tagging and lock-state reads next door: an ACL is held on the version, so the named
+    /// one can be answered exactly. An id this fixture never minted is `NoSuchVersion`, and a
+    /// version that is a delete marker has no object and therefore no policy.
+    fn get_object_acl(&self, input: &dto::GetObjectAclInput) -> HandlerResult<dto::GetObjectAcl> {
+        let fixture = self.borrow()?;
+        require_bucket(&fixture, &input.bucket)?;
+        let object = match input.version_id.as_deref() {
+            None => fixture
+                .object(input.bucket.as_str(), input.key.as_str())
+                .ok_or_else(|| no_such_key(input.key.as_str()))?,
+            Some(version_id) => fixture
+                .version(input.bucket.as_str(), input.key.as_str(), version_id)
+                .ok_or_else(no_such_version)?
+                .object
+                .as_ref()
+                .ok_or_else(|| no_such_key(input.key.as_str()))?,
+        };
+        let stored = object.acl.clone().unwrap_or_else(default_acl);
+        Ok(Resp::new(dto::GetObjectAclOutput {
+            owner: stored.owner,
+            grants: stored.grants,
+            ..dto::GetObjectAclOutput::default()
+        }))
+    }
+
+    /// One object version's policy, replaced.
+    ///
+    /// The write is in place, for the tagging family's reason: a permission change is not a new
+    /// representation of the object, so no version is minted and the bytes, the entity tag and
+    /// `Last-Modified` are left exactly as they were.
+    fn put_object_acl(&self, input: &dto::PutObjectAclInput) -> HandlerResult<dto::PutObjectAcl> {
+        let headers = acl_headers(
+            input.acl.as_ref(),
+            input.grant_full_control.as_ref(),
+            input.grant_read.as_ref(),
+            input.grant_write.as_ref(),
+            input.grant_read_acp.as_ref(),
+            input.grant_write_acp.as_ref(),
+        );
+        let resolved = resolve_acl_input(headers, input.access_control_policy.clone(), AclTarget::Object).map_err(refused_acl)?;
+        let policy = policy_of(resolved);
+        let mut fixture = self.borrow()?;
+        require_bucket(&fixture, &input.bucket)?;
+        let object = match input.version_id.clone() {
+            None => fixture
+                .object_mut(input.bucket.as_str(), input.key.as_str())
+                .ok_or_else(|| no_such_key(input.key.as_str()))?,
+            Some(version_id) => fixture
+                .version_mut(input.bucket.as_str(), input.key.as_str(), &version_id)
+                .ok_or_else(no_such_version)?
+                .object
+                .as_mut()
+                .ok_or_else(|| no_such_key(input.key.as_str()))?,
+        };
+        object.acl = Some(policy);
+        Ok(Resp::new(dto::PutObjectAclOutput::default()))
+    }
+
     /// The tag set of one bucket, or the read's own 404.
     ///
     /// The unconfigured answer is the *opposite* of the object read's: a bucket that never had a
@@ -2825,14 +3705,18 @@ impl Stub {
         Ok(Resp::new(dto::DeleteBucketTaggingOutput::default()))
     }
 
-    fn delete_objects(&self, input: &dto::DeleteObjectsInput) -> HandlerResult<dto::DeleteObjects> {
+    fn delete_objects<'a>(
+        &self,
+        bucket: &BucketName,
+        quiet: bool,
+        objects: impl IntoIterator<Item = (&'a ObjectKey, Option<&'a str>)>,
+    ) -> HandlerResult<dto::DeleteObjects> {
         let mut fixture = self.borrow()?;
-        require_bucket(&fixture, &input.bucket)?;
-        let quiet = input.delete.quiet.unwrap_or(false);
+        require_bucket(&fixture, bucket)?;
         let mut deleted = Vec::new();
         let mut errors = Vec::new();
-        let locked = fixture.has_object_lock(input.bucket.as_str());
-        for identifier in &input.delete.objects {
+        let locked = fixture.has_object_lock(bucket.as_str());
+        for (key, version_id) in objects {
             // Deleting a *version* is where `setup.buckets[].object_lock` becomes observable. On a
             // lock-enabled bucket removing a version needs `s3:BypassGovernanceRetention`, and the
             // refusal is an authorisation decision taken before the version is looked up — so the
@@ -2840,24 +3724,24 @@ impl Stub {
             // object lock the fixture keeps no version history, so the same request is a per-key
             // `NoSuchVersion`. Reporting either per key rather than failing the whole request is
             // the shape this operation is being measured for.
-            if let Some(version) = identifier.version_id.as_ref() {
+            if let Some(version) = version_id {
                 let (code, message) = if locked {
                     ("AccessDenied", "Access Denied")
                 } else {
                     ("NoSuchVersion", "The specified version does not exist.")
                 };
                 errors.push(dto::Error {
-                    key: Some(identifier.key.clone()),
-                    version_id: Some(version.clone()),
+                    key: Some(key.clone()),
+                    version_id: Some(version.to_owned()),
                     code: Some(code.to_owned()),
                     message: Some(message.to_owned()),
                 });
                 continue;
             }
-            fixture.remove_object(input.bucket.as_str(), identifier.key.as_str());
+            fixture.remove_object(bucket.as_str(), key.as_str());
             if !quiet {
                 deleted.push(dto::DeletedObject {
-                    key: Some(identifier.key.clone()),
+                    key: Some(key.clone()),
                     ..dto::DeletedObject::default()
                 });
             }
@@ -3107,6 +3991,357 @@ impl Stub {
         Ok(Resp::new(dto::DeleteBucketEncryptionOutput::default()))
     }
 
+    /// The stored replication document, or the family's defining 404.
+    ///
+    /// The bucket is resolved first, so a missing bucket is `NoSuchBucket` and only a bucket
+    /// that exists without a document is `ReplicationConfigurationNotFoundError` — two
+    /// different facts a client tearing down configuration branches on.
+    fn get_bucket_replication(&self, input: &dto::GetBucketReplicationInput) -> HandlerResult<dto::GetBucketReplication> {
+        let fixture = self.borrow()?;
+        require_bucket(&fixture, &input.bucket)?;
+        let stored = fixture
+            .replication(input.bucket.as_str())
+            .ok_or_else(no_such_replication_configuration)?;
+        Ok(Resp::new(dto::GetBucketReplicationOutput {
+            replication_configuration: Some(stored.clone()),
+        }))
+    }
+
+    /// The whole document, replaced — after the one validation pass every backend shares.
+    ///
+    /// The rules are `rustfs_gateway::validate_replication`'s, not this file's: the V1/V2
+    /// schema couplings, the filter grammar and the `ID` bounds live once in the shared
+    /// contract, and this fixture calls it rather than mirroring it. What is stored is exactly
+    /// what was sent, in the order it was sent — the read-back is a byte-level golden, and that
+    /// includes the leniencies: an unknown element was already skipped by the decoder, an
+    /// out-of-set `Status` and a duplicated `Priority` are stored whole. The
+    /// `x-amz-bucket-object-lock-token` header is available on the input and deliberately
+    /// unread: whether the token permits enabling Object Lock is a semantic question this stub,
+    /// like the codec, does not answer (`q-repl-0013`).
+    fn put_bucket_replication(&self, input: &dto::PutBucketReplicationInput) -> HandlerResult<dto::PutBucketReplication> {
+        let mut fixture = self.borrow()?;
+        require_bucket(&fixture, &input.bucket)?;
+        let configuration = &input.replication_configuration;
+        validate_replication(configuration).map_err(|rejection| HandlerError::new(rejection.code(), rejection.reason()))?;
+        fixture.set_replication(input.bucket.as_str(), configuration.clone());
+        Ok(Resp::new(dto::PutBucketReplicationOutput::default()))
+    }
+
+    /// The document removed, the bucket left alone.
+    ///
+    /// The `204` is unconditional in the same sense `DeleteBucketEncryption`'s is: removing the
+    /// replication configuration of a bucket that has none is a success, not a `404`. The
+    /// bucket itself still has to exist — a success for a bucket that is not there would tell a
+    /// caller its teardown landed on something.
+    fn delete_bucket_replication(
+        &self,
+        input: &dto::DeleteBucketReplicationInput,
+    ) -> HandlerResult<dto::DeleteBucketReplication> {
+        let mut fixture = self.borrow()?;
+        require_bucket(&fixture, &input.bucket)?;
+        fixture.clear_replication(input.bucket.as_str());
+        Ok(Resp::new(dto::DeleteBucketReplicationOutput::default()))
+    }
+
+    // =========================================================================================
+    // The bucket-configuration band at 200-242.
+    //
+    // Nine subresources, and the thing worth reading them together for is the unconfigured
+    // answer, which differs three ways. Six of the reads below turn a missing document into a
+    // `200` — five into an empty document and one, `?requestPayment`, into a documented default
+    // value — while three turn it into a `404` with three literals that are not interchangeable.
+    // Every one of those nine answers is produced here by an explicit branch, so a case that
+    // expects the wrong one fails rather than being absorbed.
+    // =========================================================================================
+
+    /// The versioning state, or the empty document a never-versioned bucket answers.
+    ///
+    /// `None` becomes `VersioningConfigurationOutput` with **no** `Status` — not `Suspended`, and
+    /// not a `404`. The three are different facts: never versioned, versioned and stopped, and no
+    /// such bucket.
+    fn get_bucket_versioning(&self, input: &dto::GetBucketVersioningInput) -> HandlerResult<dto::GetBucketVersioning> {
+        let fixture = self.borrow()?;
+        require_bucket(&fixture, &input.bucket)?;
+        let stored = fixture.versioning(input.bucket.as_str());
+        Ok(Resp::new(dto::GetBucketVersioningOutput {
+            status: stored.and_then(|configuration| configuration.status.clone()),
+            mfa_delete: stored.and_then(|configuration| configuration.mfa_delete.clone()),
+        }))
+    }
+
+    /// The versioning state, replaced, after the shared closed-set check.
+    ///
+    /// `x-amz-mfa` is available on the input and deliberately unread: whether the device and code
+    /// it names authorise the change is a semantic question this stub, like the codec, does not
+    /// answer. It is never echoed and never appears in a refusal.
+    fn put_bucket_versioning(&self, input: &dto::PutBucketVersioningInput) -> HandlerResult<dto::PutBucketVersioning> {
+        let mut fixture = self.borrow()?;
+        require_bucket(&fixture, &input.bucket)?;
+        let configuration = &input.versioning_configuration;
+        validate_versioning(configuration).map_err(|rejection| HandlerError::new(rejection.code(), rejection.reason()))?;
+        fixture.set_versioning(input.bucket.as_str(), configuration.clone());
+        Ok(Resp::new(dto::PutBucketVersioningOutput::default()))
+    }
+
+    /// The acceleration state, or the empty document an unconfigured bucket answers.
+    fn get_bucket_accelerate_configuration(
+        &self,
+        input: &dto::GetBucketAccelerateConfigurationInput,
+    ) -> HandlerResult<dto::GetBucketAccelerateConfiguration> {
+        let fixture = self.borrow()?;
+        require_bucket(&fixture, &input.bucket)?;
+        let stored = fixture.accelerate(input.bucket.as_str());
+        Ok(Resp::new(dto::GetBucketAccelerateConfigurationOutput {
+            status: stored.and_then(|configuration| configuration.status.clone()),
+            ..dto::GetBucketAccelerateConfigurationOutput::default()
+        }))
+    }
+
+    /// The acceleration state, replaced. No integrity claim is required of the request: this is
+    /// one of the two writes in the band the model exempts.
+    fn put_bucket_accelerate_configuration(
+        &self,
+        input: &dto::PutBucketAccelerateConfigurationInput,
+    ) -> HandlerResult<dto::PutBucketAccelerateConfiguration> {
+        let mut fixture = self.borrow()?;
+        require_bucket(&fixture, &input.bucket)?;
+        let configuration = &input.accelerate_configuration;
+        validate_accelerate(configuration).map_err(|rejection| HandlerError::new(rejection.code(), rejection.reason()))?;
+        fixture.set_accelerate(input.bucket.as_str(), configuration.clone());
+        Ok(Resp::new(dto::PutBucketAccelerateConfigurationOutput::default()))
+    }
+
+    /// Who pays, or the documented default for a bucket that was never switched.
+    ///
+    /// This is the band's third shape of unconfigured answer: not a `404`, and not an empty
+    /// document either — `BucketOwner`, because every bucket has a payer.
+    fn get_bucket_request_payment(
+        &self,
+        input: &dto::GetBucketRequestPaymentInput,
+    ) -> HandlerResult<dto::GetBucketRequestPayment> {
+        let fixture = self.borrow()?;
+        require_bucket(&fixture, &input.bucket)?;
+        let payer = fixture
+            .request_payment(input.bucket.as_str())
+            .map_or_else(|| dto::Payer::BUCKETOWNER, |configuration| configuration.payer.clone());
+        Ok(Resp::new(dto::GetBucketRequestPaymentOutput { payer: Some(payer) }))
+    }
+
+    /// Who pays, switched, after the shared closed-set check.
+    fn put_bucket_request_payment(
+        &self,
+        input: &dto::PutBucketRequestPaymentInput,
+    ) -> HandlerResult<dto::PutBucketRequestPayment> {
+        let mut fixture = self.borrow()?;
+        require_bucket(&fixture, &input.bucket)?;
+        let configuration = &input.request_payment_configuration;
+        validate_request_payment(configuration).map_err(|rejection| HandlerError::new(rejection.code(), rejection.reason()))?;
+        fixture.set_request_payment(input.bucket.as_str(), configuration.clone());
+        Ok(Resp::new(dto::PutBucketRequestPaymentOutput::default()))
+    }
+
+    /// The logging destination, or the empty document a bucket that is not logging answers.
+    fn get_bucket_logging(&self, input: &dto::GetBucketLoggingInput) -> HandlerResult<dto::GetBucketLogging> {
+        let fixture = self.borrow()?;
+        require_bucket(&fixture, &input.bucket)?;
+        let stored = fixture.logging(input.bucket.as_str());
+        Ok(Resp::new(dto::GetBucketLoggingOutput {
+            logging_enabled: stored.and_then(|configuration| configuration.logging_enabled.clone()),
+        }))
+    }
+
+    /// The logging destination, replaced — and an empty document is how logging is turned off,
+    /// because the model declares no delete for this subresource.
+    ///
+    /// `<TargetGrants>` reaches the ACL family's `Grantee` through this document, which makes this
+    /// the second producer of that element in the tree and puts it under the same rule: the
+    /// `xsi:type` discriminator is an XML **attribute**, this project's reader exposes none, so a
+    /// decoded grantee arrives with `Type` unset and a read that echoed it verbatim would answer a
+    /// `<Grantee>` no SDK can classify. The type is derived from the identifying member the
+    /// grantee does carry, by the ACL family's own `resolve_grantee_type` and not by a second
+    /// derivation of this family's invention (`q-acl-0004`).
+    fn put_bucket_logging(&self, input: &dto::PutBucketLoggingInput) -> HandlerResult<dto::PutBucketLogging> {
+        let mut fixture = self.borrow()?;
+        require_bucket(&fixture, &input.bucket)?;
+        let mut configuration = input.bucket_logging_status.clone();
+        validate_logging(&configuration).map_err(|rejection| HandlerError::new(rejection.code(), rejection.reason()))?;
+        if let Some(enabled) = configuration.logging_enabled.as_mut() {
+            for grant in &mut enabled.target_grants {
+                if let Some(grantee) = grant.grantee.as_mut() {
+                    let kind = resolve_grantee_type(grantee).map_err(refused_acl)?;
+                    grantee.r#type = Some(kind.as_dto());
+                }
+            }
+        }
+        fixture.set_logging(input.bucket.as_str(), configuration);
+        Ok(Resp::new(dto::PutBucketLoggingOutput::default()))
+    }
+
+    /// The notification document, or the empty one a bucket delivering nothing answers.
+    ///
+    /// What is stored is echoed member for member, in the order it was sent: the read-back is a
+    /// byte-level golden, and that is where the flattened list shape becomes observable.
+    fn get_bucket_notification_configuration(
+        &self,
+        input: &dto::GetBucketNotificationConfigurationInput,
+    ) -> HandlerResult<dto::GetBucketNotificationConfiguration> {
+        let fixture = self.borrow()?;
+        require_bucket(&fixture, &input.bucket)?;
+        let stored = fixture.notification(input.bucket.as_str()).cloned().unwrap_or_default();
+        Ok(Resp::new(dto::GetBucketNotificationConfigurationOutput {
+            topic_configurations: stored.topic_configurations,
+            queue_configurations: stored.queue_configurations,
+            lambda_function_configurations: stored.lambda_function_configurations,
+            event_bridge_configuration: stored.event_bridge_configuration,
+        }))
+    }
+
+    /// The notification document, replaced. The empty document is accepted and means "deliver
+    /// nothing": there is no delete operation to say it any other way.
+    fn put_bucket_notification_configuration(
+        &self,
+        input: &dto::PutBucketNotificationConfigurationInput,
+    ) -> HandlerResult<dto::PutBucketNotificationConfiguration> {
+        let mut fixture = self.borrow()?;
+        require_bucket(&fixture, &input.bucket)?;
+        let configuration = &input.notification_configuration;
+        validate_notification(configuration).map_err(|rejection| HandlerError::new(rejection.code(), rejection.reason()))?;
+        fixture.set_notification(input.bucket.as_str(), configuration.clone());
+        Ok(Resp::new(dto::PutBucketNotificationConfigurationOutput::default()))
+    }
+
+    /// The website document, or this subresource's own `404`.
+    fn get_bucket_website(&self, input: &dto::GetBucketWebsiteInput) -> HandlerResult<dto::GetBucketWebsite> {
+        let fixture = self.borrow()?;
+        require_bucket(&fixture, &input.bucket)?;
+        let stored = fixture
+            .website(input.bucket.as_str())
+            .ok_or_else(no_such_website_configuration)?;
+        Ok(Resp::new(dto::GetBucketWebsiteOutput {
+            error_document: stored.error_document.clone(),
+            index_document: stored.index_document.clone(),
+            redirect_all_requests_to: stored.redirect_all_requests_to.clone(),
+            routing_rules: stored.routing_rules.clone(),
+        }))
+    }
+
+    /// The website document, replaced, after the shared exclusion and rewrite checks.
+    fn put_bucket_website(&self, input: &dto::PutBucketWebsiteInput) -> HandlerResult<dto::PutBucketWebsite> {
+        let mut fixture = self.borrow()?;
+        require_bucket(&fixture, &input.bucket)?;
+        let configuration = &input.website_configuration;
+        validate_website(configuration).map_err(|rejection| HandlerError::new(rejection.code(), rejection.reason()))?;
+        fixture.set_website(input.bucket.as_str(), configuration.clone());
+        Ok(Resp::new(dto::PutBucketWebsiteOutput::default()))
+    }
+
+    /// The website document removed. `204` whether or not one was there, even though the read of
+    /// the same unconfigured bucket is a `404`.
+    fn delete_bucket_website(&self, input: &dto::DeleteBucketWebsiteInput) -> HandlerResult<dto::DeleteBucketWebsite> {
+        let mut fixture = self.borrow()?;
+        require_bucket(&fixture, &input.bucket)?;
+        fixture.clear_website(input.bucket.as_str());
+        Ok(Resp::new(dto::DeleteBucketWebsiteOutput::default()))
+    }
+
+    /// The stored policy, answered as the bytes that were written.
+    ///
+    /// Not a re-serialisation of a parse: the documented behaviour is that the read hands back the
+    /// document the write sent, and a gateway that normalised it would hand a client a policy it
+    /// cannot compare with the one it stored.
+    fn get_bucket_policy(&self, input: &dto::GetBucketPolicyInput) -> HandlerResult<dto::GetBucketPolicy> {
+        let fixture = self.borrow()?;
+        require_bucket(&fixture, &input.bucket)?;
+        let stored = fixture.policy(input.bucket.as_str()).ok_or_else(no_such_bucket_policy)?;
+        Ok(Resp::new(dto::GetBucketPolicyOutput {
+            policy: Some(stored.to_owned()),
+        }))
+    }
+
+    /// The policy, replaced, after the three checks a gateway is allowed to make.
+    ///
+    /// `validate_policy` asks whether the document is within the size ceiling, is JSON, and is an
+    /// object. It asks nothing about what the policy *grants*, and neither does this: the verdict
+    /// the status read reports is the case's declaration, not a computation, because this
+    /// workspace contains no policy evaluator and a fixture that invented one would be asserting
+    /// its own guess. A write therefore leaves the previous verdict alone unless the case sets it.
+    fn put_bucket_policy(&self, input: &dto::PutBucketPolicyInput) -> HandlerResult<dto::PutBucketPolicy> {
+        let mut fixture = self.borrow()?;
+        require_bucket(&fixture, &input.bucket)?;
+        validate_policy(&input.policy).map_err(|rejection| HandlerError::new(rejection.code(), rejection.reason()))?;
+        let verdict = fixture.policy_is_public(input.bucket.as_str());
+        fixture.set_policy(input.bucket.as_str(), input.policy.clone(), verdict);
+        Ok(Resp::new(dto::PutBucketPolicyOutput::default()))
+    }
+
+    /// The policy removed. `204` whether or not one was there.
+    fn delete_bucket_policy(&self, input: &dto::DeleteBucketPolicyInput) -> HandlerResult<dto::DeleteBucketPolicy> {
+        let mut fixture = self.borrow()?;
+        require_bucket(&fixture, &input.bucket)?;
+        fixture.clear_policy(input.bucket.as_str());
+        Ok(Resp::new(dto::DeleteBucketPolicyOutput::default()))
+    }
+
+    /// Whether the stored policy makes the bucket public.
+    ///
+    /// A bucket with no policy has no status to report and answers the policy read's own `404`,
+    /// because it is the same missing document.
+    fn get_bucket_policy_status(&self, input: &dto::GetBucketPolicyStatusInput) -> HandlerResult<dto::GetBucketPolicyStatus> {
+        let fixture = self.borrow()?;
+        require_bucket(&fixture, &input.bucket)?;
+        if fixture.policy(input.bucket.as_str()).is_none() {
+            return Err(no_such_bucket_policy());
+        }
+        Ok(Resp::new(dto::GetBucketPolicyStatusOutput {
+            policy_status: Some(dto::PolicyStatus {
+                is_public: Some(fixture.policy_is_public(input.bucket.as_str())),
+            }),
+        }))
+    }
+
+    /// The four switches, or this subresource's own `404`.
+    fn get_public_access_block(&self, input: &dto::GetPublicAccessBlockInput) -> HandlerResult<dto::GetPublicAccessBlock> {
+        let fixture = self.borrow()?;
+        require_bucket(&fixture, &input.bucket)?;
+        let stored = fixture
+            .public_access_block(input.bucket.as_str())
+            .ok_or_else(no_such_public_access_block)?;
+        Ok(Resp::new(dto::GetPublicAccessBlockOutput {
+            public_access_block_configuration: Some(stored.clone()),
+        }))
+    }
+
+    /// The four switches, replaced. An omitted switch is stored as omitted and read back as
+    /// `false`, which is the same thing: the read renders every one of the four.
+    fn put_public_access_block(&self, input: &dto::PutPublicAccessBlockInput) -> HandlerResult<dto::PutPublicAccessBlock> {
+        let mut fixture = self.borrow()?;
+        require_bucket(&fixture, &input.bucket)?;
+        let configuration = &input.public_access_block_configuration;
+        validate_public_access_block(configuration)
+            .map_err(|rejection| HandlerError::new(rejection.code(), rejection.reason()))?;
+        fixture.set_public_access_block(
+            input.bucket.as_str(),
+            dto::PublicAccessBlockConfiguration {
+                block_public_acls: Some(configuration.block_public_acls.unwrap_or(false)),
+                ignore_public_acls: Some(configuration.ignore_public_acls.unwrap_or(false)),
+                block_public_policy: Some(configuration.block_public_policy.unwrap_or(false)),
+                restrict_public_buckets: Some(configuration.restrict_public_buckets.unwrap_or(false)),
+            },
+        );
+        Ok(Resp::new(dto::PutPublicAccessBlockOutput::default()))
+    }
+
+    /// The four switches removed. `204` whether or not they were there.
+    fn delete_public_access_block(
+        &self,
+        input: &dto::DeletePublicAccessBlockInput,
+    ) -> HandlerResult<dto::DeletePublicAccessBlock> {
+        let mut fixture = self.borrow()?;
+        require_bucket(&fixture, &input.bucket)?;
+        fixture.clear_public_access_block(input.bucket.as_str());
+        Ok(Resp::new(dto::DeletePublicAccessBlockOutput::default()))
+    }
+
     /// The bucket's object-lock document, or the family's bucket-level 404.
     ///
     /// `ObjectLockConfigurationNotFoundError` and `NoSuchBucket` are different answers to
@@ -3226,6 +4461,100 @@ impl Stub {
             .ok_or_else(|| no_such_key(input.key.as_str()))?;
         object.legal_hold = Some(input.legal_hold.clone());
         Ok(Resp::new(dto::PutObjectLegalHoldOutput::default()))
+    }
+
+    /// An archive retrieval, in the one of four states the object is actually in.
+    ///
+    /// The order is fixed and the reasons differ: the document is validated first, because a
+    /// request this side cannot read is a `400` whatever the object's class is; then the object
+    /// has to exist; then the storage class decides whether a retrieval is even a question.
+    ///
+    /// **What is a fixture policy and what is not.** The status — `202`, `200`, `409`, `403` —
+    /// is [`RestoreState`]'s, from the framework, and this method's only job is to say which
+    /// state the copy is in. How long a retrieval takes is the fixture's, and it takes either no
+    /// time or forever: an `Expedited` retrieval is back by the time the response is written, and
+    /// every other tier is still running. That is a dial the corpus turns, not a claim about S3,
+    /// where every tier takes minutes to hours — and it is written down here rather than left for
+    /// a reader of a case to infer, because a case that asserts `200` is asserting the framework's
+    /// mapping and not this stub's timing.
+    fn restore_object(&self, input: &dto::RestoreObjectInput) -> HandlerResult<dto::RestoreObject> {
+        let mut fixture = self.borrow()?;
+        // The payload is a *required* member, so an empty body was already refused as
+        // `MalformedXML` by the generated decoder and never reaches here (q-restore-0006).
+        let document = &input.restore_request;
+        validate_restore(document).map_err(|rejection| HandlerError::new(rejection.code(), rejection.reason()))?;
+        require_bucket(&fixture, &input.bucket)?;
+        refuse_versioned_restore(input.version_id.as_deref())?;
+        let expedited = document.glacier_job_parameters.as_ref().map(|parameters| &parameters.tier)
+            == Some(&dto::Tier::EXPEDITED)
+            || document.tier.as_ref() == Some(&dto::Tier::EXPEDITED);
+        let expiry = fixture.restore_expiry();
+        let object = fixture
+            .object_mut(input.bucket.as_str(), input.key.as_str())
+            .ok_or_else(|| no_such_key(input.key.as_str()))?;
+
+        let state = if !is_archived(object) {
+            RestoreState::NotArchived
+        } else {
+            match &object.restore {
+                None => RestoreState::Initiated,
+                Some(status) if status.ongoing => RestoreState::InProgress,
+                Some(_) => RestoreState::AlreadyRestored,
+            }
+        };
+        if state == RestoreState::Initiated {
+            object.restore = Some(if expedited {
+                RestoreStatus::restored(expiry)
+            } else {
+                RestoreStatus::ongoing()
+            });
+        }
+        // The two refusals answer their own codes, and the two successes answer their own
+        // statuses. Both halves come out of the framework's mapping: nothing here writes a number.
+        if let Some(code) = state.error() {
+            let reason = state.reason().unwrap_or("The restore request could not be served");
+            return Err(HandlerError::new(code, reason));
+        }
+        let status = state.status().unwrap_or(202);
+        Ok(Resp::with_status(
+            dto::RestoreObjectOutput {
+                // Present exactly when the request named one, which is what a select-on-restore
+                // asks for and an ordinary retrieval does not.
+                restore_output_path: document.output_location.as_ref().and_then(output_path_of),
+                ..dto::RestoreObjectOutput::default()
+            },
+            status,
+        ))
+    }
+
+    /// A select query, decoded and validated in full, and then refused.
+    ///
+    /// The refusal is the honest answer and the case corpus asserts it as one. A select's
+    /// response is a sequence of self-framed messages, which is a shape this crate's `Resp` does
+    /// not have; the framing itself is implemented and exported, and the plumbing that would put
+    /// it on a socket is not. So a well-formed query reaches this point and is told `501` — never
+    /// a bare `200`, which is what an unimplemented response half looks like when it is faked and
+    /// is indistinguishable to a client from a query that matched no rows.
+    ///
+    /// Everything before the refusal is real, and that is the part under test: the body was
+    /// parsed out of a document rooted at `SelectObjectContentRequest`, every member reached the
+    /// input, and [`validate_select`] refused the ones AWS documents as impossible — which is why
+    /// a malformed query answers its own `400` here rather than this `501`.
+    fn select_object_content(&self, input: &dto::SelectObjectContentInput) -> HandlerResult<dto::SelectObjectContent> {
+        let fixture = self.borrow()?;
+        require_bucket(&fixture, &input.bucket)?;
+        validate_select(
+            &input.expression,
+            &input.expression_type,
+            &input.input_serialization,
+            &input.output_serialization,
+            input.scan_range.as_ref(),
+        )
+        .map_err(|rejection| HandlerError::new(rejection.code(), rejection.reason()))?;
+        if fixture.object(input.bucket.as_str(), input.key.as_str()).is_none() {
+            return Err(no_such_key(input.key.as_str()));
+        }
+        Err(HandlerError::new(ErrorCode::NOT_IMPLEMENTED, SELECT_RESPONSE_NOT_IMPLEMENTED))
     }
 
     /// Opens a multipart upload, and records the attributes only this request can state.
@@ -4580,11 +5909,13 @@ mod tests {
         let source = parse_copy_source("/bucket/na%C3%AFve%20%E2%82%AC%26a%2Bb.txt").expect("parses");
         assert_eq!(source.key.as_str(), "naïve €&a+b.txt");
         assert_eq!(source.bucket.as_str(), "bucket");
-        // A traversal spelling is ordinary key bytes, never a path.
-        assert_eq!(
-            parse_copy_source("/bucket/../../etc/passwd").expect("parses").key.as_str(),
-            "../../etc/passwd"
-        );
+        // A traversal spelling used to be accepted here as ordinary key bytes and looked up
+        // literally. That is the backend half of `GHSA-f4vq-9ffr-m8m3`: the gateway's floor
+        // refuses it and a backend with its own parser did not, so the two disagreed about what
+        // the name was. This backend now calls the same normalisation and refuses it too.
+        assert!(parse_copy_source("/bucket/../../etc/passwd").is_err());
+        // A single dot segment is still opaque text, so the rule is about `..` and not about dots.
+        assert_eq!(parse_copy_source("/bucket/a/./b").expect("parses").key.as_str(), "a/./b");
     }
 
     /// Both S3 ARN spellings resolve, and every other ARN is refused rather than demoted to a

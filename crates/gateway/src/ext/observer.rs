@@ -53,7 +53,7 @@ use crate::trace::RequestId;
 #[derive(Debug)]
 pub struct RequestEvent<'a> {
     /// The identifier this request was answered with, and the one the caller received. Minted by
-    /// the service, never read from the request; see [`crate::trace`].
+    /// the service, never read from the request; see the crate's trace module.
     pub request_id: &'a RequestId,
     /// The operation routing chose, when routing chose one. `None` when the request named none,
     /// which is the case an operator most often needs to see.
@@ -68,6 +68,12 @@ pub struct RequestEvent<'a> {
 }
 
 /// Records what happened to a request, and changes nothing.
+///
+/// **If you need to rewrite something, use [`crate::StageFilter`] or [`crate::OpLayer`]. An
+/// `Observer` is read-only, and no `&mut` method will ever be added to it.** Every parameter below
+/// is a shared reference to a summary, there is no response to hand back, and the call happens
+/// after the response has been decided — so an implementation that wanted to change an answer would
+/// have nothing to change it with.
 ///
 /// Synchronous; see the module documentation. Held as `Arc<dyn Observer>` so that the service
 /// stays non-generic over it.

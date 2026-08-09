@@ -24,19 +24,30 @@
 //! Upstream: `crate::ops`. Downstream: every consumer mid-migration.
 
 pub use crate::ops::enums::{
-    Acl, ArchiveStatus, ChecksumAlgorithm, ChecksumMode, ChecksumType, EncodingType, EncryptionType, LocationConstraint,
-    MetadataDirective, Mode, ObjectLockEnabled, ObjectLockLegalHoldStatus, ObjectLockMode, ObjectOwnership, ReplicationStatus,
-    RequestCharged, RequestPayer, ServerSideEncryption, SseAlgorithm, Status, StorageClass, TaggingDirective,
-    TransitionDefaultMinimumObjectSize,
+    Acl, ArchiveStatus, CannedAcl, ChecksumAlgorithm, ChecksumMode, ChecksumType, CompressionType, EncodingType, EncryptionType,
+    Events, ExpressionType, FileHeaderInfo, LocationConstraint, MetadataDirective, MfaDelete, Mode, Name, ObjectLockEnabled,
+    ObjectLockLegalHoldStatus, ObjectLockMode, ObjectOwnership, PartitionDateSource, Payer, Permission, Protocol, QuoteFields,
+    ReplicationStatus, RequestCharged, RequestPayer, ServerSideEncryption, SseAlgorithm, Status, StorageClass, TaggingDirective,
+    Tier, TransitionDefaultMinimumObjectSize, Type,
 };
 pub use crate::ops::shapes::{
-    AbortIncompleteMultipartUpload, BlockedEncryptionTypes, Bucket, BucketLifecycleConfiguration, Checksum, CommonPrefix,
-    CompletedMultipartUpload, CompletedPart, CorsConfiguration, CorsRule, CreateBucketConfiguration, DefaultRetention, Delete,
-    DeleteMarkerEntry, DeletedObject, Error, GetObjectAttributesParts, Initiator, LifecycleExpiration, LifecycleRule,
-    LifecycleRuleAndOperator, LifecycleRuleFilter, MultipartUpload, NoncurrentVersionExpiration, NoncurrentVersionTransition,
-    Object, ObjectIdentifier, ObjectLockConfiguration, ObjectLockLegalHold, ObjectLockRetention, ObjectLockRule, ObjectPart,
-    ObjectVersion, Owner, Part, RestoreStatus, ServerSideEncryptionByDefault, ServerSideEncryptionConfiguration,
-    ServerSideEncryptionRule, Tag, Tagging, Transition,
+    AbortIncompleteMultipartUpload, AccelerateConfiguration, AccessControlPolicy, AccessControlTranslation,
+    BlockedEncryptionTypes, Bucket, BucketLifecycleConfiguration, BucketLoggingStatus, Checksum, CommonPrefix,
+    CompletedMultipartUpload, CompletedPart, Condition, CorsConfiguration, CorsRule, CreateBucketConfiguration, CsvInput,
+    CsvOutput, DefaultRetention, Delete, DeleteMarkerEntry, DeleteMarkerReplication, DeletedObject, Destination, Encryption,
+    EncryptionConfiguration, Error, ErrorDocument, EventBridgeConfiguration, ExistingObjectReplication, FilterRule,
+    GetObjectAttributesParts, GlacierJobParameters, Grant, Grantee, IndexDocument, Initiator, InputSerialization, JsonInput,
+    JsonOutput, LambdaFunctionConfiguration, LifecycleExpiration, LifecycleRule, LifecycleRuleAndOperator, LifecycleRuleFilter,
+    LoggingEnabled, MetadataEntry, Metrics, MultipartUpload, NoncurrentVersionExpiration, NoncurrentVersionTransition,
+    NotificationConfiguration, NotificationConfigurationFilter, Object, ObjectIdentifier, ObjectLockConfiguration,
+    ObjectLockLegalHold, ObjectLockRetention, ObjectLockRule, ObjectPart, ObjectVersion, OutputLocation, OutputSerialization,
+    Owner, ParquetInput, Part, PartitionedPrefix, PolicyStatus, PublicAccessBlockConfiguration, QueueConfiguration, Redirect,
+    RedirectAllRequestsTo, ReplicaModifications, ReplicationConfiguration, ReplicationRule, ReplicationRuleAndOperator,
+    ReplicationRuleFilter, ReplicationTime, ReplicationTimeValue, RequestPaymentConfiguration, RequestProgress, RestoreRequest,
+    RestoreStatus, RoutingRule, S3KeyFilter, S3Location, ScanRange, SelectParameters, ServerSideEncryptionByDefault,
+    ServerSideEncryptionConfiguration, ServerSideEncryptionRule, SimplePrefix, SourceSelectionCriteria, SseKmsEncryptedObjects,
+    Tag, Tagging, TargetGrant, TargetObjectKeyFormat, TopicConfiguration, Transition, VersioningConfiguration,
+    WebsiteConfiguration,
 };
 
 pub use crate::ops::abort_multipart_upload::{
@@ -72,9 +83,21 @@ pub use crate::ops::delete_bucket_lifecycle::{
     DeleteBucketLifecycle, Input as DeleteBucketLifecycleInput, InputBuilder as DeleteBucketLifecycleInputBuilder,
     Output as DeleteBucketLifecycleOutput,
 };
+pub use crate::ops::delete_bucket_policy::{
+    DeleteBucketPolicy, Input as DeleteBucketPolicyInput, InputBuilder as DeleteBucketPolicyInputBuilder,
+    Output as DeleteBucketPolicyOutput,
+};
+pub use crate::ops::delete_bucket_replication::{
+    DeleteBucketReplication, Input as DeleteBucketReplicationInput, InputBuilder as DeleteBucketReplicationInputBuilder,
+    Output as DeleteBucketReplicationOutput,
+};
 pub use crate::ops::delete_bucket_tagging::{
     DeleteBucketTagging, Input as DeleteBucketTaggingInput, InputBuilder as DeleteBucketTaggingInputBuilder,
     Output as DeleteBucketTaggingOutput,
+};
+pub use crate::ops::delete_bucket_website::{
+    DeleteBucketWebsite, Input as DeleteBucketWebsiteInput, InputBuilder as DeleteBucketWebsiteInputBuilder,
+    Output as DeleteBucketWebsiteOutput,
 };
 pub use crate::ops::delete_object::{
     DeleteObject, Input as DeleteObjectInput, InputBuilder as DeleteObjectInputBuilder, Output as DeleteObjectOutput,
@@ -85,6 +108,17 @@ pub use crate::ops::delete_object_tagging::{
 };
 pub use crate::ops::delete_objects::{
     DeleteObjects, Input as DeleteObjectsInput, InputBuilder as DeleteObjectsInputBuilder, Output as DeleteObjectsOutput,
+};
+pub use crate::ops::delete_public_access_block::{
+    DeletePublicAccessBlock, Input as DeletePublicAccessBlockInput, InputBuilder as DeletePublicAccessBlockInputBuilder,
+    Output as DeletePublicAccessBlockOutput,
+};
+pub use crate::ops::get_bucket_accelerate_configuration::{
+    GetBucketAccelerateConfiguration, Input as GetBucketAccelerateConfigurationInput,
+    InputBuilder as GetBucketAccelerateConfigurationInputBuilder, Output as GetBucketAccelerateConfigurationOutput,
+};
+pub use crate::ops::get_bucket_acl::{
+    GetBucketAcl, Input as GetBucketAclInput, InputBuilder as GetBucketAclInputBuilder, Output as GetBucketAclOutput,
 };
 pub use crate::ops::get_bucket_cors::{
     GetBucketCors, Input as GetBucketCorsInput, InputBuilder as GetBucketCorsInputBuilder, Output as GetBucketCorsOutput,
@@ -101,12 +135,46 @@ pub use crate::ops::get_bucket_location::{
     GetBucketLocation, Input as GetBucketLocationInput, InputBuilder as GetBucketLocationInputBuilder,
     Output as GetBucketLocationOutput,
 };
+pub use crate::ops::get_bucket_logging::{
+    GetBucketLogging, Input as GetBucketLoggingInput, InputBuilder as GetBucketLoggingInputBuilder,
+    Output as GetBucketLoggingOutput,
+};
+pub use crate::ops::get_bucket_notification_configuration::{
+    GetBucketNotificationConfiguration, Input as GetBucketNotificationConfigurationInput,
+    InputBuilder as GetBucketNotificationConfigurationInputBuilder, Output as GetBucketNotificationConfigurationOutput,
+};
+pub use crate::ops::get_bucket_policy::{
+    GetBucketPolicy, Input as GetBucketPolicyInput, InputBuilder as GetBucketPolicyInputBuilder, Output as GetBucketPolicyOutput,
+};
+pub use crate::ops::get_bucket_policy_status::{
+    GetBucketPolicyStatus, Input as GetBucketPolicyStatusInput, InputBuilder as GetBucketPolicyStatusInputBuilder,
+    Output as GetBucketPolicyStatusOutput,
+};
+pub use crate::ops::get_bucket_replication::{
+    GetBucketReplication, Input as GetBucketReplicationInput, InputBuilder as GetBucketReplicationInputBuilder,
+    Output as GetBucketReplicationOutput,
+};
+pub use crate::ops::get_bucket_request_payment::{
+    GetBucketRequestPayment, Input as GetBucketRequestPaymentInput, InputBuilder as GetBucketRequestPaymentInputBuilder,
+    Output as GetBucketRequestPaymentOutput,
+};
 pub use crate::ops::get_bucket_tagging::{
     GetBucketTagging, Input as GetBucketTaggingInput, InputBuilder as GetBucketTaggingInputBuilder,
     Output as GetBucketTaggingOutput,
 };
+pub use crate::ops::get_bucket_versioning::{
+    GetBucketVersioning, Input as GetBucketVersioningInput, InputBuilder as GetBucketVersioningInputBuilder,
+    Output as GetBucketVersioningOutput,
+};
+pub use crate::ops::get_bucket_website::{
+    GetBucketWebsite, Input as GetBucketWebsiteInput, InputBuilder as GetBucketWebsiteInputBuilder,
+    Output as GetBucketWebsiteOutput,
+};
 pub use crate::ops::get_object::{
     GetObject, Input as GetObjectInput, InputBuilder as GetObjectInputBuilder, Output as GetObjectOutput,
+};
+pub use crate::ops::get_object_acl::{
+    GetObjectAcl, Input as GetObjectAclInput, InputBuilder as GetObjectAclInputBuilder, Output as GetObjectAclOutput,
 };
 pub use crate::ops::get_object_attributes::{
     GetObjectAttributes, Input as GetObjectAttributesInput, InputBuilder as GetObjectAttributesInputBuilder,
@@ -127,6 +195,10 @@ pub use crate::ops::get_object_retention::{
 pub use crate::ops::get_object_tagging::{
     GetObjectTagging, Input as GetObjectTaggingInput, InputBuilder as GetObjectTaggingInputBuilder,
     Output as GetObjectTaggingOutput,
+};
+pub use crate::ops::get_public_access_block::{
+    GetPublicAccessBlock, Input as GetPublicAccessBlockInput, InputBuilder as GetPublicAccessBlockInputBuilder,
+    Output as GetPublicAccessBlockOutput,
 };
 pub use crate::ops::head_bucket::{
     HeadBucket, Input as HeadBucketInput, InputBuilder as HeadBucketInputBuilder, Output as HeadBucketOutput,
@@ -154,6 +226,13 @@ pub use crate::ops::list_objects_v2::{
 pub use crate::ops::list_parts::{
     Input as ListPartsInput, InputBuilder as ListPartsInputBuilder, ListParts, Output as ListPartsOutput,
 };
+pub use crate::ops::put_bucket_accelerate_configuration::{
+    Input as PutBucketAccelerateConfigurationInput, InputBuilder as PutBucketAccelerateConfigurationInputBuilder,
+    Output as PutBucketAccelerateConfigurationOutput, PutBucketAccelerateConfiguration,
+};
+pub use crate::ops::put_bucket_acl::{
+    Input as PutBucketAclInput, InputBuilder as PutBucketAclInputBuilder, Output as PutBucketAclOutput, PutBucketAcl,
+};
 pub use crate::ops::put_bucket_cors::{
     Input as PutBucketCorsInput, InputBuilder as PutBucketCorsInputBuilder, Output as PutBucketCorsOutput, PutBucketCors,
 };
@@ -165,12 +244,42 @@ pub use crate::ops::put_bucket_lifecycle_configuration::{
     Input as PutBucketLifecycleConfigurationInput, InputBuilder as PutBucketLifecycleConfigurationInputBuilder,
     Output as PutBucketLifecycleConfigurationOutput, PutBucketLifecycleConfiguration,
 };
+pub use crate::ops::put_bucket_logging::{
+    Input as PutBucketLoggingInput, InputBuilder as PutBucketLoggingInputBuilder, Output as PutBucketLoggingOutput,
+    PutBucketLogging,
+};
+pub use crate::ops::put_bucket_notification_configuration::{
+    Input as PutBucketNotificationConfigurationInput, InputBuilder as PutBucketNotificationConfigurationInputBuilder,
+    Output as PutBucketNotificationConfigurationOutput, PutBucketNotificationConfiguration,
+};
+pub use crate::ops::put_bucket_policy::{
+    Input as PutBucketPolicyInput, InputBuilder as PutBucketPolicyInputBuilder, Output as PutBucketPolicyOutput, PutBucketPolicy,
+};
+pub use crate::ops::put_bucket_replication::{
+    Input as PutBucketReplicationInput, InputBuilder as PutBucketReplicationInputBuilder, Output as PutBucketReplicationOutput,
+    PutBucketReplication,
+};
+pub use crate::ops::put_bucket_request_payment::{
+    Input as PutBucketRequestPaymentInput, InputBuilder as PutBucketRequestPaymentInputBuilder,
+    Output as PutBucketRequestPaymentOutput, PutBucketRequestPayment,
+};
 pub use crate::ops::put_bucket_tagging::{
     Input as PutBucketTaggingInput, InputBuilder as PutBucketTaggingInputBuilder, Output as PutBucketTaggingOutput,
     PutBucketTagging,
 };
+pub use crate::ops::put_bucket_versioning::{
+    Input as PutBucketVersioningInput, InputBuilder as PutBucketVersioningInputBuilder, Output as PutBucketVersioningOutput,
+    PutBucketVersioning,
+};
+pub use crate::ops::put_bucket_website::{
+    Input as PutBucketWebsiteInput, InputBuilder as PutBucketWebsiteInputBuilder, Output as PutBucketWebsiteOutput,
+    PutBucketWebsite,
+};
 pub use crate::ops::put_object::{
     Input as PutObjectInput, InputBuilder as PutObjectInputBuilder, Output as PutObjectOutput, PutObject,
+};
+pub use crate::ops::put_object_acl::{
+    Input as PutObjectAclInput, InputBuilder as PutObjectAclInputBuilder, Output as PutObjectAclOutput, PutObjectAcl,
 };
 pub use crate::ops::put_object_legal_hold::{
     Input as PutObjectLegalHoldInput, InputBuilder as PutObjectLegalHoldInputBuilder, Output as PutObjectLegalHoldOutput,
@@ -187,6 +296,17 @@ pub use crate::ops::put_object_retention::{
 pub use crate::ops::put_object_tagging::{
     Input as PutObjectTaggingInput, InputBuilder as PutObjectTaggingInputBuilder, Output as PutObjectTaggingOutput,
     PutObjectTagging,
+};
+pub use crate::ops::put_public_access_block::{
+    Input as PutPublicAccessBlockInput, InputBuilder as PutPublicAccessBlockInputBuilder, Output as PutPublicAccessBlockOutput,
+    PutPublicAccessBlock,
+};
+pub use crate::ops::restore_object::{
+    Input as RestoreObjectInput, InputBuilder as RestoreObjectInputBuilder, Output as RestoreObjectOutput, RestoreObject,
+};
+pub use crate::ops::select_object_content::{
+    Input as SelectObjectContentInput, InputBuilder as SelectObjectContentInputBuilder, Output as SelectObjectContentOutput,
+    SelectObjectContent,
 };
 pub use crate::ops::upload_part::{
     Input as UploadPartInput, InputBuilder as UploadPartInputBuilder, Output as UploadPartOutput, UploadPart,

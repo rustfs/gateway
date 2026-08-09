@@ -268,6 +268,23 @@ impl From<Denial> for S3Error {
     }
 }
 
+impl From<rustfs_gateway_core::SseRejection> for S3Error {
+    fn from(rejection: rustfs_gateway_core::SseRejection) -> Self {
+        // `reason()` is a constant sentence per variant and `code()` is one of two codes. Nothing
+        // from the request reaches either, which is the property `crates/core`'s
+        // `n_no_refusal_sentence_carries_a_key_a_digest_or_a_key_id` pins: a refusal about a key
+        // must not quote the key, the digest, the expected digest, or a KMS key id.
+        //
+        // The status comes from the shared table rather than being written here, so that
+        // `InvalidRequest` means the same thing in a `400` from this stage as it does anywhere
+        // else. The connection survives: the caller is authenticated by this point and the
+        // request head was fully readable, so none of RFC 9112 §9.3's reasoning applies.
+        let code = rejection.code();
+        let status = code.default_status();
+        Self::new(code, rejection.reason()).with_status(status)
+    }
+}
+
 impl From<CodecError> for S3Error {
     fn from(error: CodecError) -> Self {
         let status = error.status();
@@ -343,7 +360,7 @@ pub fn document_body(error: &S3Error, trace: &RequestTrace) -> String {
 /// is the whole of the request-identifier invariant.
 ///
 /// The refusing stage's own headers are written **first**, before the document's framing headers
-/// and before the identifiers. That order is the point: a name in [`crate::stamp::is_reserved`] is
+/// and before the identifiers. That order is the point: a name reserved by the stamp module is
 /// skipped outright, and even if that predicate were wrong, the framework's own writes come
 /// afterwards and win. Two locks, because the first one is a list somebody has to keep correct.
 #[must_use]

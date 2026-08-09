@@ -113,13 +113,27 @@ must agree case for case; a case that could name a path would be a case that hid
   requests. Anything a case asserts must appear in `request` or `exchanges`.
 - **Tag vocabulary.** `streaming`, `chunked`, `trailer`, `signature`, `sigv4`, `sigv2`, `presigned`,
   `xml`, `wire-bytes`, `etag`, `routing`, `vhost`, `conditional`, `preconditions`, `list`,
-  `pagination`, `multipart`, `checksum`, `range`, `encoding`, `cors`, `encryption`, `lifecycle`, `region`, `security`, `dos`,
-  `timing`, `connection`, `event-stream`, `tls`, `h2`, `error-shape`, `known-divergence`, `tagging`,
-  `object-lock`, and `slow`. `slow` is reserved: it moves a case out of the pull-request gate and
+  `pagination`, `multipart`, `checksum`, `range`, `encoding`, `cors`, `preflight`, `encryption`, `lifecycle`, `replication`, `bucketconfig`, `region`, `security`, `dos`,
+  `sse`, `timing`, `connection`, `event-stream`, `tls`, `h2`, `error-shape`, `known-divergence`, `tagging`,
+  `object-lock`, `restore`, `select`, `acl`, `naming`, and `slow`. `slow` is reserved: it moves a case out of
+  the pull-request gate and
   into the merge queue. `region` marks a case whose subject is the deployment's region posture — the
   location-constraint rules and the `x-amz-bucket-region` redirect contract. `object-lock` marks a
   case about the WORM family's codec — the lock configuration, retention and legal-hold documents;
-  lock *enforcement* is later work and no case here asserts it.
+  lock *enforcement* is later work and no case here asserts it. `restore` marks a case about
+  archive retrieval — the four-state status mapping, the `RestoreRequest` document and the
+  structured `x-amz-restore` header; how long a retrieval takes is the backend's and no case here
+  asserts it. `select` marks a case about the select request codec; the framed response is not
+  wired, so no case asserts an event stream and the deferral itself is what `event-stream` marks
+  where it appears beside `select`. `acl` marks a case about the access control list family's
+  codec — the two input channels, the canned-ACL sets, the grant-header grammar and the `xsi:type`
+  discriminator; ACL *evaluation* is the deployment's authorizer's, and no case here asserts that a
+  grant permits anything. `naming` marks a case about the single normalisation an object key
+  and a bucket label go through — the slash policy, the one decode, the safety floor, and the
+  two rules under which this gateway is deliberately stricter than AWS. `preflight` marks a case
+  about the CORS **runtime** rather than its configuration codec — an `OPTIONS` answered from a
+  stored document instead of being routed, the headers that answer carries, and the one refusal
+  every failure shares; it appears beside `cors`, which stays on the codec cases as well.
 
 ## Cases and quirks reference each other
 

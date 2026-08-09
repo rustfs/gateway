@@ -1,0 +1,129 @@
+{
+  "ir_version": "1",
+  "operation": "GetBucketPolicy",
+  "http": {
+            "method": "GET",
+            "target": "Bucket",
+            "precedence": 215,
+            "predicates": [
+                            { "kind": "Method", "method": "GET" },
+                            { "kind": "Target", "target": "Bucket" },
+                            { "kind": "QueryPresent", "key": "policy" }
+                          ],
+            "success_status": 200,
+            "alt_success_statuses": [],
+            "path_shape": "/{Bucket}"
+          },
+  "auth": { "requirement": "Required", "action": "s3:GetBucketPolicy", "presigned_allowed": true, "service": "s3" },
+  "payload": {
+               "request": { "kind": "None", "buffering": "None", "max_bytes": null },
+               "response": { "kind": "XmlBody", "buffering": "Full", "max_bytes": 20480 }
+             },
+  "checksum": { "http_checksum_required": false, "request_algorithms": [], "response_algorithms": [] },
+  "input": {
+             "fields": [
+                         {
+                           "name": "Bucket",
+                           "wire_name": "Bucket",
+                           "required": true,
+                           "binding": { "kind": "UriLabel", "greedy": false },
+                           "type": { "kind": "BucketName" },
+                           "hot": true,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "ExpectedBucketOwner",
+                           "wire_name": "x-amz-expected-bucket-owner",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "String" },
+                           "hot": false,
+                           "quirk_refs": []
+                         }
+                       ]
+           },
+  "output": {
+              "fields": [
+                          {
+                            "name": "Policy",
+                            "wire_name": null,
+                            "required": false,
+                            "binding": { "kind": "Payload" },
+                            "type": { "kind": "String" },
+                            "hot": true,
+                            "quirk_refs": ["q-pol-0001"]
+                          }
+                        ]
+            },
+  "shapes": {},
+  "xml": {
+           "request_root": null,
+           "request_root_aliases": [],
+           "response_root": null,
+           "xmlns": "emit",
+           "unwrapped_output": false,
+           "element_order": [],
+           "empty_value_policy": {},
+           "url_encoded_fields": [],
+           "attributes": [],
+           "body_literal": false
+         },
+  "errors": {
+              "not_configured": "NoSuchBucketPolicy",
+              "allows_error_after_200": false,
+              "codes": ["NoSuchBucket", "AccessDenied", "NoSuchBucketPolicy"]
+            },
+  "derived_resources": [],
+  "head_mirrors": null,
+  "quirk_refs": ["q-pol-0001", "q-pol-0002", "q-pol-0003"],
+  "quirks": [
+              {
+                "id": "q-pol-0001",
+                "kind": "media_type",
+                "target": "GetBucketPolicy.Policy",
+                "summary": "The bucket policy body is JSON on both the read and the write, the only success body in the S3 surface that is not XML, and the read answers Content-Type application/json with the stored document byte for byte.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketPolicy.html",
+                                "summary": "The documented response syntax for the policy read is a bare JSON policy document rather than an XML element tree."
+                              },
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketPolicy.html",
+                                "summary": "The documented request syntax for the policy write is a bare JSON policy document sent as the whole body."
+                              }
+                            ],
+                "cases": ["c-bucketconfig-0017", "c-bucketconfig-0016"]
+              },
+              {
+                "id": "q-pol-0002",
+                "kind": "error_body",
+                "target": "GetBucketPolicy",
+                "summary": "The error body of the policy read stays XML even though its success body is JSON, so a client that switched parsers on the success content type would be reading the wrong format on every failure.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/ErrorResponses.html",
+                                "summary": "The error-response reference describes one XML Error document for the whole REST API and names no JSON alternative for any operation."
+                              }
+                            ],
+                "cases": ["c-bucketconfig-0029"]
+              },
+              {
+                "id": "q-pol-0003",
+                "kind": "not_configured_error",
+                "target": "GetBucketPolicy",
+                "summary": "A bucket with no policy answers 404 NoSuchBucketPolicy, the code specific to this subresource, rather than an empty JSON document or a generic not-found.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketPolicy.html",
+                                "summary": "The operation documents NoSuchBucketPolicy as the error for a bucket whose policy does not exist."
+                              }
+                            ],
+                "cases": ["c-bucketconfig-0029", "c-bucketconfig-0017"]
+              }
+            ],
+  "ext_points": []
+}

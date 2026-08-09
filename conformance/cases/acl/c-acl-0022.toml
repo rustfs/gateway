@@ -1,0 +1,37 @@
+[case]
+id = "c-acl-0022"
+schema_version = 1
+title = "An unknown grant-header key is a 400 InvalidArgument and the value is not echoed"
+rationale = """
+The bound on c-acl-0008's tolerance: keys are read case-insensitively, and that must not slide into reading any key at all. A parser that accepted an unknown key and guessed a grantee kind for it would store a grant of a kind the client did not name — and the guess would be invisible, because the read-back would look well formed. The email address is asserted absent from the refusal for the same reason a canonical id is."""
+polarity = "negative"
+operation = "PutBucketAcl"
+tags = ["acl", "security", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-acl-0004", "q-acl-0010", "q-acl-0011"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketAcl.html"
+summary = "The grantee list defines exactly three keys, and no extension point for a fourth."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "conf-acl"
+
+[request]
+method = "PUT"
+target = "/conf-acl?acl"
+headers = { "content-md5" = "1B2M2Y8AsgTpgAmY7PhCfg==", "x-amz-grant-read" = 'account="grantee@example.com"' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+code = "InvalidArgument"
+message_present = true
+
+[expect.body]
+not_contains_utf8 = ["grantee@example.com"]

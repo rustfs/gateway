@@ -39,18 +39,36 @@
 //! a future extension point has to be threaded through. The invariant is the same either way:
 //! `build` is the only constructor, and it returns `Err` rather than a permissive default.
 
+use std::any::Any;
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use rustfs_gateway_core::{Handler, MissingHandlers, OperationCodec, OperationSet, RouterBuilder};
+use rustfs_gateway_core::{Handler, MissingHandlers, Operation, OperationCodec, OperationSet, RouterBuilder, SseConfig};
 use rustfs_gateway_http::Limits;
 use rustfs_gateway_sig::SecurityFloor;
+use rustfs_gateway_types::{NamePolicy, NameValidator, SlashPolicy};
 
 use crate::assembly::{AssemblyError, RuleRef};
 use crate::clock::{Clock, system_clock};
 use crate::dispatch::{DispatchTable, OperationDispatch};
-use crate::ext::{Authenticator, Authorizer, Governor, HostResolver, NoObserver, Observer, PathStyleOnly, Unlimited};
+use crate::ext::{
+    Authenticator, Authorizer, CachedCorsSource, CorsCacheConfig, CorsSource, Governor, HostResolver, NoCors, NoObserver,
+    NoPolicy, Observer, OpLayer, OpLayerSlot, PathStyleOnly, PolicySource, StageFilter, Unlimited,
+};
 use crate::service::{Inner, S3Service};
 use crate::trace::{MintedTraces, TraceSource};
+use rustfs_gateway_core::cors::CorsPolicy;
+
+/// One registered layer, with its operation type forgotten.
+type ErasedOpLayer = Arc<dyn Any + Send + Sync>;
+
+/// One registration, held until `build` knows which layers belong to it.
+///
+/// The closure is what still knows `O` and `B`, so it is also the only thing able to turn the
+/// erased layers back into `Arc<dyn OpLayer<O>>`. That is the same closure-erasure shape
+/// `rustfs_gateway_core::registry` uses, and the reason registration stays explicit and greppable
+/// rather than reaching for `inventory` (ADR-0003).
+type PendingRegistration = Box<dyn FnOnce(Vec<ErasedOpLayer>) -> Result<OperationDispatch, AssemblyError> + Send>;
 
 /// The ceiling on a request body this assembly will hold in memory.
 ///
@@ -68,25 +86,40 @@ pub const DEFAULT_MAX_BUFFERED_BODY_BYTES: u64 = 64 * 1024 * 1024;
 /// reaching the caller.
 pub struct ServiceBuilder {
     router: RouterBuilder,
-    dispatch: DispatchTable,
+    /// One entry per `register` call, keyed by operation name, in name order. Deferred rather than
+    /// erased on the spot because `op_layer` may arrive after `register` and the erasure has to see
+    /// both.
+    pending: BTreeMap<&'static str, PendingRegistration>,
+    /// The layers registered per operation, in registration order.
+    op_layers: BTreeMap<&'static str, Vec<ErasedOpLayer>>,
+    /// The stage filters, in registration order.
+    filters: Vec<Arc<dyn StageFilter>>,
     floor: SecurityFloor,
     limits: Limits,
+    names: NamePolicy,
     max_buffered_body_bytes: u64,
     authorizer: Option<Arc<dyn Authorizer>>,
     authenticator: Option<Arc<dyn Authenticator>>,
+    policy_source: Arc<dyn PolicySource>,
     host_resolver: Arc<dyn HostResolver>,
     governor: Arc<dyn Governor>,
     observer: Arc<dyn Observer>,
     clock: Arc<dyn Clock>,
     traces: Arc<dyn TraceSource>,
+    cors_source: Arc<dyn CorsSource>,
+    cors_cache: CorsCacheConfig,
+    cors_policy: CorsPolicy,
+    sse: SseConfig,
 }
 
 impl core::fmt::Debug for ServiceBuilder {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("ServiceBuilder")
-            .field("operations", &self.dispatch.names().collect::<Vec<_>>())
+            .field("operations", &self.registered().collect::<Vec<_>>())
             .field("has_authorizer", &self.authorizer.is_some())
             .field("has_authenticator", &self.authenticator.is_some())
+            .field("stage_filters", &self.filters.len())
+            .field("op_layers", &self.op_layers.values().map(Vec::len).sum::<usize>())
             .finish_non_exhaustive()
     }
 }
@@ -107,17 +140,25 @@ impl ServiceBuilder {
     pub fn new() -> Self {
         Self {
             router: RouterBuilder::new(),
-            dispatch: DispatchTable::default(),
+            pending: BTreeMap::new(),
+            op_layers: BTreeMap::new(),
+            filters: Vec::new(),
             floor: SecurityFloor::new(),
             limits: Limits::default(),
+            names: NamePolicy::default(),
             max_buffered_body_bytes: DEFAULT_MAX_BUFFERED_BODY_BYTES,
             authorizer: None,
             authenticator: None,
+            policy_source: Arc::new(NoPolicy),
             host_resolver: Arc::new(PathStyleOnly),
             governor: Arc::new(Unlimited),
             observer: Arc::new(NoObserver),
             clock: Arc::new(system_clock()),
             traces: Arc::new(MintedTraces::new()),
+            cors_source: Arc::new(NoCors),
+            cors_cache: CorsCacheConfig::default(),
+            cors_policy: CorsPolicy::default(),
+            sse: SseConfig::strict(),
         }
     }
 
@@ -138,7 +179,56 @@ impl ServiceBuilder {
         // A taken name is already a `RegistryError::Duplicate` from the line above, which `build`
         // reports. Inserting over it here would leave the two tables disagreeing about which
         // backend answers the operation.
-        let _ = self.dispatch.insert(O::NAME, OperationDispatch::of::<O, B>(backend));
+        self.pending.entry(O::NAME).or_insert_with(|| {
+            Box::new(move |erased: Vec<ErasedOpLayer>| {
+                let mut layers: Vec<Arc<dyn OpLayer<O>>> = Vec::with_capacity(erased.len());
+                for slot in erased {
+                    // Unreachable through `op_layer`, which keys the slot by the very `O::NAME` the
+                    // registration is under. Refused rather than unwrapped: two operation types
+                    // sharing one name is an assembly defect, and answering it with a panic would
+                    // take a process down at start-up for a reason the message never states.
+                    let slot = slot
+                        .downcast::<OpLayerSlot<O>>()
+                        .map_err(|_| AssemblyError::OpLayerTypeMismatch {
+                            operation: O::NAME,
+                            rule: RuleRef::OP_LAYER_TYPE,
+                        })?;
+                    layers.push(slot.into_layer());
+                }
+                Ok(OperationDispatch::layered::<O, B>(backend, layers))
+            })
+        });
+        self
+    }
+
+    /// Installs a [`StageFilter`]. Every seam it implements runs in registration order.
+    ///
+    /// A filter may observe, may rewrite and may refuse; it may not answer, may not affect a
+    /// signature, may not choose the target, and may not defeat a response invariant. The reasons
+    /// are on the trait, and the decision tree for "which of the three levels is this" is
+    /// `docs/middleware.md`.
+    #[must_use]
+    pub fn stage_filter(mut self, filter: impl StageFilter) -> Self {
+        self.filters.push(Arc::new(filter));
+        self
+    }
+
+    /// Installs an [`OpLayer`] around one operation. Layers nest outer to inner in registration
+    /// order.
+    ///
+    /// The operation must have a handler by the time [`ServiceBuilder::build`] runs, or the build
+    /// is refused with [`RuleRef::OP_LAYER_UNATTACHED`]. Ignoring an unattached layer would leave a
+    /// deployment believing a rewrite is in force while nothing runs it.
+    #[must_use]
+    pub fn op_layer<O, L>(mut self, layer: L) -> Self
+    where
+        O: Operation,
+        L: OpLayer<O>,
+    {
+        self.op_layers
+            .entry(O::NAME)
+            .or_default()
+            .push(OpLayerSlot::<O>::erase(Arc::new(layer)));
         self
     }
 
@@ -180,7 +270,51 @@ impl ServiceBuilder {
         self
     }
 
+    /// Installs the source read exactly once for each request's authorization stages.
+    #[must_use]
+    pub fn policy_source(mut self, source: impl PolicySource) -> Self {
+        self.policy_source = Arc::new(source);
+        self
+    }
+
+    /// Installs a naming policy: the slash rule and the validator.
+    ///
+    /// Defaults to [`NamePolicy::default`] — AWS slash semantics and the AWS bucket naming rules.
+    /// Whatever is installed here, the safety floor underneath it does not move: a validator has
+    /// no variant with which to permit what the floor refused.
+    #[must_use]
+    pub fn name_policy(mut self, names: NamePolicy) -> Self {
+        self.names = names;
+        self
+    }
+
+    /// Installs a name validator, keeping the slash policy already set.
+    ///
+    /// It may refuse more than the built-in `AwsNameValidator` does, and it cannot refuse less
+    /// than the floor: the framework runs the floor first and ANDs the two answers.
+    #[must_use]
+    pub fn name_validator(mut self, validator: impl NameValidator) -> Self {
+        self.names = self.names.with_validator(Arc::new(validator));
+        self
+    }
+
+    /// Chooses what happens to a run of slashes in an object key.
+    ///
+    /// **Persistence-affecting.** [`SlashPolicy::Collapse`] makes `a//b` and `a/b` the same object;
+    /// switching it on a deployment that has data renames every object whose key held an empty
+    /// segment. [`SlashPolicy::rewrites_keys`] is what a start-up posture report reads.
+    #[must_use]
+    pub fn slash_policy(mut self, slash: SlashPolicy) -> Self {
+        self.names = self.names.with_slash_policy(slash);
+        self
+    }
+
     /// Installs a host resolver. Defaults to [`PathStyleOnly`].
+    ///
+    /// A deployment that serves `bucket.example.com` installs
+    /// [`VirtualHostStyle`](crate::VirtualHostStyle) here with the base domains it answers for;
+    /// the default takes the bucket from the path and never from the host, so those requests would
+    /// otherwise be routed by their path.
     #[must_use]
     pub fn host_resolver(mut self, resolver: impl HostResolver) -> Self {
         self.host_resolver = Arc::new(resolver);
@@ -194,6 +328,57 @@ impl ServiceBuilder {
         self
     }
 
+    /// Installs the source of bucket CORS documents. Defaults to [`NoCors`], under which no
+    /// preflight is ever allowed.
+    ///
+    /// The source is wrapped in [`CachedCorsSource`] here and stored wrapped, which is the whole
+    /// of the "no un-cached call path" property: this is the only setter, it takes a bare source,
+    /// and nothing hands the inner one back. See `crate::ext::cors` for why an unauthenticated
+    /// read that reaches storage once per request is an amplifier.
+    #[must_use]
+    pub fn cors_source(mut self, source: impl CorsSource) -> Self {
+        self.cors_source = Arc::new(source);
+        self
+    }
+
+    /// Tunes the mandatory CORS cache. Defaults to [`CorsCacheConfig::default`].
+    #[must_use]
+    pub const fn cors_cache(mut self, config: CorsCacheConfig) -> Self {
+        self.cors_cache = config;
+        self
+    }
+
+    /// Installs the deployment's credential posture for CORS.
+    ///
+    /// Defaults to "any origin the bucket's rules admit, no credentials". A policy that would
+    /// pair a reflected origin with credentials cannot be constructed at all, so there is nothing
+    /// for this setter to refuse — see `rustfs_gateway_core::cors::CorsPolicy::new`.
+    #[must_use]
+    pub fn cors_policy(mut self, policy: CorsPolicy) -> Self {
+        self.cors_policy = policy;
+        self
+    }
+
+    /// Installs the deployment's server-side-encryption posture.
+    ///
+    /// Defaults to [`SseConfig::strict`], under which a customer-provided encryption key on a
+    /// cleartext connection is refused with `400 InvalidRequest` before the request body is read.
+    /// The only way to relax that is
+    /// [`SseConfig::allowing_customer_keys_over_plaintext`][relaxed], which takes a witness whose
+    /// name has to be typed out — and a deployment that reaches for it should first ask whether
+    /// its transport can declare [`rustfs_gateway_core::TransportSecurity::Encrypted`] instead,
+    /// because that states the fact per connection rather than asserting it about all of them.
+    ///
+    /// This setter cannot refuse anything: the witness is the refusal, and it is a compile-time
+    /// one.
+    ///
+    /// [relaxed]: rustfs_gateway_core::SseConfig::allowing_customer_keys_over_plaintext
+    #[must_use]
+    pub const fn sse_config(mut self, config: SseConfig) -> Self {
+        self.sse = config;
+        self
+    }
+
     /// Installs an observer. Defaults to [`NoObserver`].
     #[must_use]
     pub fn observer(mut self, observer: impl Observer) -> Self {
@@ -203,7 +388,7 @@ impl ServiceBuilder {
 
     /// Installs the clock. Defaults to the system one.
     ///
-    /// One reading is taken per request, at the top of the pipeline. See [`crate::clock`].
+    /// One reading is taken per request, at the top of the pipeline. See the crate's clock module.
     #[must_use]
     pub fn clock(mut self, clock: impl Clock) -> Self {
         self.clock = Arc::new(clock);
@@ -214,7 +399,7 @@ impl ServiceBuilder {
     ///
     /// One trace is minted per request, at the top of the pipeline, and the same value reaches the
     /// `x-amz-request-id` header, the `<RequestId>` element of an error document and the audit
-    /// event. See [`crate::trace`] for why a source cannot echo anything the caller sent, and read
+    /// event. See the crate's trace module for why a source cannot echo anything the caller sent, and read
     /// the security note on [`crate::FixedTrace`] before installing that one.
     #[must_use]
     pub fn trace_source(mut self, traces: impl TraceSource) -> Self {
@@ -252,7 +437,7 @@ impl ServiceBuilder {
 
     /// The operations registered so far, sorted. For an assertion and for a start-up report.
     pub fn registered(&self) -> impl Iterator<Item = &'static str> {
-        self.dispatch.names()
+        self.pending.keys().copied().collect::<Vec<_>>().into_iter()
     }
 
     /// Builds the service, or reports why it refused.
@@ -261,10 +446,10 @@ impl ServiceBuilder {
     ///
     /// [`AssemblyError`], one variant per rule and every one of them carrying its [`RuleRef`]:
     /// a refused registration or route, an empty registry, a missing authorizer, a missing
-    /// authenticator, or an operation the router knows and this crate has no codec for. Nothing
-    /// here degrades to a warning.
-    pub fn build(self) -> Result<S3Service, AssemblyError> {
-        if self.dispatch.len() == 0 {
+    /// authenticator, an [`OpLayer`] on an operation nobody registered, or an operation the router
+    /// knows and this crate has no codec for. Nothing here degrades to a warning.
+    pub fn build(mut self) -> Result<S3Service, AssemblyError> {
+        if self.pending.is_empty() {
             return Err(AssemblyError::EmptyRegistry {
                 rule: RuleRef::EMPTY_REGISTRY,
             });
@@ -280,13 +465,40 @@ impl ServiceBuilder {
             });
         };
 
+        // Before the erasure, so the refusal names the operation the deployment asked for rather
+        // than whatever the erasure happens to reach first.
+        if let Some((operation, _)) = self
+            .op_layers
+            .iter()
+            .find(|(operation, _)| !self.pending.contains_key(*operation))
+        {
+            return Err(AssemblyError::UnattachedOpLayer {
+                operation,
+                rule: RuleRef::OP_LAYER_UNATTACHED,
+            });
+        }
+
+        let mut dispatch = DispatchTable::default();
+        for (name, finalise) in core::mem::take(&mut self.pending) {
+            let layers = self.op_layers.remove(name).unwrap_or_default();
+            // `pending` is a map, so the name is unique by construction and the insert cannot
+            // report a duplicate. Checked anyway rather than discarded: a silently dropped
+            // registration is a request that routes and reaches nothing.
+            if !dispatch.insert(name, finalise(layers)?) {
+                return Err(AssemblyError::MissingCodec {
+                    operation: name,
+                    rule: RuleRef::MISSING_CODEC,
+                });
+            }
+        }
+
         let router = self.router.build()?;
 
         // The two tables are populated by the same call and can only disagree through a defect
         // here. Checked anyway, because the failure mode is a request that routes and then reaches
         // nothing able to read it, which looks like a codec bug rather than an assembly one.
         for name in router.registry().names() {
-            if !self.dispatch.contains(name) {
+            if !dispatch.contains(name) {
                 return Err(AssemblyError::MissingCodec {
                     operation: name,
                     rule: RuleRef::MISSING_CODEC,
@@ -296,17 +508,23 @@ impl ServiceBuilder {
 
         Ok(S3Service::from_inner(Inner {
             router,
-            dispatch: self.dispatch,
+            dispatch,
+            filters: Arc::from(self.filters),
             floor: self.floor,
             limits: self.limits,
+            names: self.names,
             max_buffered_body_bytes: self.max_buffered_body_bytes,
             authorizer,
             authenticator,
+            policy_source: self.policy_source,
             host_resolver: self.host_resolver,
             governor: self.governor,
             observer: self.observer,
             clock: self.clock,
             traces: self.traces,
+            cors: Arc::new(CachedCorsSource::new(self.cors_source, self.cors_cache)),
+            cors_policy: self.cors_policy,
+            sse: self.sse,
         }))
     }
 }

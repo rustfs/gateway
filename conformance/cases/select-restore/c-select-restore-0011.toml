@@ -1,0 +1,70 @@
+[case]
+id = "c-select-restore-0011"
+schema_version = 1
+title = "A second retrieval while one is running is 409 RestoreAlreadyInProgress"
+rationale = """
+The third of the four outcomes, and the one a client must not read as either success: 202 would make it re-arm its poll timer for a retrieval that is already queued, and 200 would make it read bytes that are not there. The first exchange establishes the running state, so the refusal is reached through the same mapping the successes come from rather than from a constant."""
+polarity = "negative"
+operation = "RestoreObject"
+tags = ["restore", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-restore-0001"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_RestoreObject.html"
+summary = "The operation documents RestoreAlreadyInProgress for a request that arrives while a retrieval is running."
+kind = "aws-doc"
+[[setup.buckets]]
+name = "conf-restore"
+
+[[setup.objects]]
+bucket = "conf-restore"
+key = "cold.txt"
+body = { utf8 = "archived payload" }
+storage_class = "GLACIER"
+
+[connection]
+reuse = true
+
+[[exchanges]]
+name = "initiate"
+
+[exchanges.request]
+method = "POST"
+target = "/conf-restore/cold.txt?restore"
+headers = { "content-type" = "application/xml" }
+body = { utf8 = '<RestoreRequest><Days>1</Days><GlacierJobParameters><Tier>Standard</Tier></GlacierJobParameters></RestoreRequest>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 202
+connection_after = "open"
+
+[exchanges.expect.body]
+size = 0
+
+[[exchanges]]
+name = "again-while-running"
+
+[exchanges.request]
+method = "POST"
+target = "/conf-restore/cold.txt?restore"
+headers = { "content-type" = "application/xml" }
+body = { utf8 = '<RestoreRequest><Days>1</Days><GlacierJobParameters><Tier>Standard</Tier></GlacierJobParameters></RestoreRequest>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 409
+connection_after = "open"
+
+[exchanges.expect.error]
+code = "RestoreAlreadyInProgress"
+request_id_present = true
+
+[exchanges.expect.body]
+redact = ["RequestId", "HostId"]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>RestoreAlreadyInProgress</Code><Message>Object restore is already in progress</Message><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''

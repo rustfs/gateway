@@ -1,0 +1,60 @@
+[case]
+id = "c-acl-0032"
+schema_version = 1
+title = "An ACL write to an object key does not overwrite the object with the policy document"
+rationale = """
+This is the defect the route row exists to retire, and it is data loss rather than a mis-route: PutObject accepts every PUT to an object key, so with no ?acl row the AccessControlPolicy document is stored as the object's body and answered 200. Nothing the client sees is wrong until it reads the object back and finds XML where its data was. The second exchange is the assertion; the first alone would be green either way."""
+polarity = "negative"
+operation = "PutObjectAcl"
+tags = ["acl", "routing", "security", "wire-bytes"]
+timeout_ms = 10000
+quirks = ["q-acl-0007"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObjectAcl.html"
+summary = "An ACL write is a PUT to the object key carrying ?acl, and its body is a policy rather than object data."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObject.html"
+summary = "A plain object write is the same method and path without the subresource, which is what makes the two collide."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "conf-acl"
+
+[[setup.objects]]
+bucket = "conf-acl"
+key = "precious.txt"
+body = { utf8 = "the bytes that must survive" }
+
+[[exchanges]]
+name = "write-the-acl"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-acl/precious.txt?acl"
+headers = { "content-type" = "application/xml", "content-md5" = "fBaaRmvJGD60XAttQUgMKQ==" }
+body = { utf8 = '<AccessControlPolicy><Owner><ID>3f6e2b1c4a8d90e7b5c31f2a6d80e4c97b1a3d5f8e206c4b7a9d1e3f5c7b9a0d</ID><DisplayName>conformance</DisplayName></Owner><AccessControlList><Grant><Grantee><ID>3f6e2b1c4a8d90e7b5c31f2a6d80e4c97b1a3d5f8e206c4b7a9d1e3f5c7b9a0d</ID></Grantee><Permission>FULL_CONTROL</Permission></Grant></AccessControlList></AccessControlPolicy>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[[exchanges]]
+name = "the-object-is-untouched"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-acl/precious.txt"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.body]
+exact_utf8 = "the bytes that must survive"

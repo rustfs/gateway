@@ -1,0 +1,52 @@
+# c-naming-0004 — one decode, and no unicode normalisation
+#
+[case]
+id = "c-naming-0004"
+schema_version = 1
+title = "A percent-encoded key decodes once and the composed spelling is not the decomposed one"
+rationale = """
+Two things are pinned at once because they are the same decision. The label is decoded exactly once, so `%C3%A9` becomes one character and not a re-decode of anything; and the result is not NFC-normalised, so U+00E9 and U+0065 U+0301 stay two keys. Normalising would merge two objects a client can distinguish and can create separately on AWS, and the merge is silent — the second PUT overwrites the first and nothing reports it."""
+polarity = "positive"
+operation = "GetObject"
+tags = ["naming", "routing", "encoding"]
+timeout_ms = 10000
+quirks = ["q-naming-0007"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/object-keys.html"
+summary = "A key is an opaque sequence of Unicode characters up to 1024 UTF-8 bytes long, with no path structure of its own."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc3986#section-2.1"
+summary = "Percent-encoding carries one octet per triplet, so decoding an already-decoded value reads octets the sender never encoded."
+kind = "rfc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-naming"
+
+[[setup.objects]]
+bucket = "conf-naming"
+key = "caf\u00E9.txt"
+body = { utf8 = "composed" }
+
+[[setup.objects]]
+bucket = "conf-naming"
+key = "cafe\u0301.txt"
+body = { utf8 = "decomposed" }
+
+[request]
+method = "GET"
+target = "/conf-naming/caf%C3%A9.txt"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[expect.body]
+exact_utf8 = "composed"

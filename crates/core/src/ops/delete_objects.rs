@@ -30,10 +30,52 @@
 //! gets back fewer entries than it sent cannot tell which of its keys survived.
 
 use rustfs_gateway_sig::{OperationFloor, SigService};
+use rustfs_gateway_types::ObjectKey;
 use rustfs_gateway_types::dto::{DeleteObjects, DeleteObjectsInput, DeleteObjectsOutput};
 
 use crate::op::{AuthRequirement, HasOperation, Operation, OperationOrigin, ResourceShape, StandardOperation};
 use crate::registry::OperationSpec;
+
+/// Every key carried by one multi-object delete body.
+struct DeleteObjectResource {
+    action: &'static str,
+    key: ObjectKey,
+    version_id: Option<String>,
+}
+
+impl DeleteObjectResource {
+    fn as_ref(&self) -> crate::ResourceRef<'_> {
+        match self.version_id.as_deref() {
+            Some(version_id) => crate::ResourceRef::object_version(self.action, None, &self.key, version_id),
+            None => crate::ResourceRef::object(self.action, None, &self.key),
+        }
+    }
+}
+
+/// Every key carried by one multi-object delete body.
+pub struct DeleteObjectResources(Vec<DeleteObjectResource>);
+
+impl DeleteObjectResources {
+    /// Reveals the exact authorized delete list, never the mutable raw DTO list.
+    #[must_use]
+    pub fn resolve<'a>(
+        &'a self,
+        proof: &'a crate::AuthorizedRead,
+    ) -> Option<impl ExactSizeIterator<Item = (&'a ObjectKey, Option<&'a str>)> + 'a> {
+        self.0
+            .iter()
+            .all(|resource| proof.permits(resource.as_ref()))
+            .then(|| self.0.iter().map(|resource| (&resource.key, resource.version_id.as_deref())))
+    }
+}
+
+impl crate::DerivedResourceSet for DeleteObjectResources {
+    fn visit(&self, visitor: &mut dyn FnMut(crate::ResourceRef<'_>)) {
+        for resource in &self.0 {
+            visitor(resource.as_ref());
+        }
+    }
+}
 
 /// What this operation requires of a request once routing has chosen it.
 static SPEC: OperationSpec = OperationSpec {
@@ -53,6 +95,30 @@ impl Operation for DeleteObjects {
 
     type Input = DeleteObjectsInput;
     type Output = DeleteObjectsOutput;
+    type DerivedResources = DeleteObjectResources;
+
+    fn derive_resources(input: &Self::Input) -> Result<Self::DerivedResources, crate::authz::DerivedResourceError> {
+        Ok(DeleteObjectResources(
+            input
+                .delete
+                .objects
+                .iter()
+                .map(|object| DeleteObjectResource {
+                    action: if object.version_id.is_some() {
+                        "s3:DeleteObjectVersion"
+                    } else {
+                        "s3:DeleteObject"
+                    },
+                    key: object.key.clone(),
+                    version_id: object.version_id.clone(),
+                })
+                .collect(),
+        ))
+    }
+
+    fn seal_derived_input(input: &mut Self::Input) {
+        input.delete.objects.clear();
+    }
 
     fn spec() -> &'static OperationSpec {
         &SPEC
@@ -65,4 +131,39 @@ impl Operation for DeleteObjects {
 
 impl HasOperation for DeleteObjectsInput {
     type Op = DeleteObjects;
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used)]
+mod tests {
+    use super::*;
+    use crate::Decision;
+    use crate::authz::{authorize_input, prepare_input};
+
+    #[test]
+    fn a_post_authorization_input_mutation_cannot_add_a_delete() {
+        let mut input = DeleteObjectsInput::default();
+        let first = rustfs_gateway_types::dto::ObjectIdentifier {
+            key: ObjectKey::new("allowed").expect("valid key"),
+            ..Default::default()
+        };
+        input.delete.objects.push(first);
+
+        let authorized =
+            authorize_input(prepare_input::<DeleteObjects>(input).expect("derived"), |_| Decision::Allow).expect("authorized");
+        let mut request = authorized.into_request();
+        let injected = rustfs_gateway_types::dto::ObjectIdentifier {
+            key: ObjectKey::new("injected").expect("valid key"),
+            ..Default::default()
+        };
+        request.input_mut().delete.objects.push(injected);
+
+        assert_eq!(request.input().delete.objects.len(), 1, "the mutable raw input received the injected key");
+        let resolved = request
+            .resources()
+            .resolve(request.read_proof())
+            .expect("the original resource proof matches");
+        let keys = resolved.map(|(key, _)| key.as_str()).collect::<Vec<_>>();
+        assert_eq!(keys, ["allowed"]);
+    }
 }

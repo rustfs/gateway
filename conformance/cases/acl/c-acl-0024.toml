@@ -1,0 +1,34 @@
+[case]
+id = "c-acl-0024"
+schema_version = 1
+title = "An ACL write with an empty body and no ACL header is a 400 MalformedXML"
+rationale = """
+The other end of the channel rule from c-acl-0013. A write that names no access control at all has no defensible reading: treating it as "grant nobody anything" would revoke every existing grant on a request the caller almost certainly did not mean, and treating it as a no-op would answer 200 to a request that changed nothing. Neither is something a client can distinguish from success afterwards."""
+polarity = "negative"
+operation = "PutBucketAcl"
+tags = ["acl", "security", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-acl-0007"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketAcl.html"
+summary = "The request reference documents the two ways to specify permissions and no third meaning for neither."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "conf-acl"
+
+[request]
+method = "PUT"
+target = "/conf-acl?acl"
+headers = { "content-md5" = "1B2M2Y8AsgTpgAmY7PhCfg==" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+code = "MalformedXML"
+message_present = true

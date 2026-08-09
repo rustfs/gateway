@@ -18,8 +18,8 @@ such a row as though the key selected the operation is the opposite of what the 
 | Query key | Operations |
 | --- | --- |
 | `abac` | [CreateBucket](#createbucket) (absent) |
-| `accelerate` | [CreateBucket](#createbucket) (absent) |
-| `acl` | [CreateBucket](#createbucket) (absent) |
+| `accelerate` | [CreateBucket](#createbucket) (absent), [GetBucketAccelerateConfiguration](#getbucketaccelerateconfiguration), [PutBucketAccelerateConfiguration](#putbucketaccelerateconfiguration) |
+| `acl` | [CreateBucket](#createbucket) (absent), [GetBucketAcl](#getbucketacl), [GetObjectAcl](#getobjectacl), [PutBucketAcl](#putbucketacl), [PutObjectAcl](#putobjectacl) |
 | `analytics` | [CreateBucket](#createbucket) (absent), [DeleteBucket](#deletebucket) (absent) |
 | `attributes` | [GetObjectAttributes](#getobjectattributes) |
 | `bucket-region` | [ListBuckets](#listbuckets) |
@@ -37,7 +37,7 @@ such a row as though the key selected the operation is the opposite of what the 
 | `lifecycle` | [CreateBucket](#createbucket) (absent), [DeleteBucket](#deletebucket) (absent), [DeleteBucketLifecycle](#deletebucketlifecycle), [GetBucketLifecycleConfiguration](#getbucketlifecycleconfiguration), [PutBucketLifecycleConfiguration](#putbucketlifecycleconfiguration) |
 | `list-type` | [ListObjectsV2](#listobjectsv2) |
 | `location` | [GetBucketLocation](#getbucketlocation) |
-| `logging` | [CreateBucket](#createbucket) (absent) |
+| `logging` | [CreateBucket](#createbucket) (absent), [GetBucketLogging](#getbucketlogging), [PutBucketLogging](#putbucketlogging) |
 | `marker` | [ListObjects](#listobjects) |
 | `max-buckets` | [ListBuckets](#listbuckets) |
 | `max-keys` | [ListObjectVersions](#listobjectversions), [ListObjects](#listobjects), [ListObjectsV2](#listobjectsv2) |
@@ -49,33 +49,37 @@ such a row as though the key selected the operation is the opposite of what the 
 | `metadataJournalTable` | [CreateBucket](#createbucket) (absent) |
 | `metadataTable` | [DeleteBucket](#deletebucket) (absent) |
 | `metrics` | [CreateBucket](#createbucket) (absent), [DeleteBucket](#deletebucket) (absent) |
-| `notification` | [CreateBucket](#createbucket) (absent) |
+| `notification` | [CreateBucket](#createbucket) (absent), [GetBucketNotificationConfiguration](#getbucketnotificationconfiguration), [PutBucketNotificationConfiguration](#putbucketnotificationconfiguration) |
 | `object-lock` | [CreateBucket](#createbucket) (absent), [GetObjectLockConfiguration](#getobjectlockconfiguration), [PutObjectLockConfiguration](#putobjectlockconfiguration) |
 | `ownershipControls` | [CreateBucket](#createbucket) (absent), [DeleteBucket](#deletebucket) (absent) |
 | `part-number-marker` | [ListParts](#listparts) |
 | `partNumber` | [GetObject](#getobject), [HeadObject](#headobject), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
-| `policy` | [CreateBucket](#createbucket) (absent), [DeleteBucket](#deletebucket) (absent) |
+| `policy` | [CreateBucket](#createbucket) (absent), [DeleteBucket](#deletebucket) (absent), [DeleteBucketPolicy](#deletebucketpolicy), [GetBucketPolicy](#getbucketpolicy), [PutBucketPolicy](#putbucketpolicy) |
+| `policyStatus` | [GetBucketPolicyStatus](#getbucketpolicystatus) |
 | `prefix` | [ListBuckets](#listbuckets), [ListMultipartUploads](#listmultipartuploads), [ListObjectVersions](#listobjectversions), [ListObjects](#listobjects), [ListObjectsV2](#listobjectsv2) |
-| `publicAccessBlock` | [CreateBucket](#createbucket) (absent), [DeleteBucket](#deletebucket) (absent) |
-| `replication` | [CreateBucket](#createbucket) (absent), [DeleteBucket](#deletebucket) (absent) |
-| `requestPayment` | [CreateBucket](#createbucket) (absent) |
+| `publicAccessBlock` | [CreateBucket](#createbucket) (absent), [DeleteBucket](#deletebucket) (absent), [DeletePublicAccessBlock](#deletepublicaccessblock), [GetPublicAccessBlock](#getpublicaccessblock), [PutPublicAccessBlock](#putpublicaccessblock) |
+| `replication` | [CreateBucket](#createbucket) (absent), [DeleteBucket](#deletebucket) (absent), [DeleteBucketReplication](#deletebucketreplication), [GetBucketReplication](#getbucketreplication), [PutBucketReplication](#putbucketreplication) |
+| `requestPayment` | [CreateBucket](#createbucket) (absent), [GetBucketRequestPayment](#getbucketrequestpayment), [PutBucketRequestPayment](#putbucketrequestpayment) |
 | `response-cache-control` | [GetObject](#getobject), [HeadObject](#headobject) |
 | `response-content-disposition` | [GetObject](#getobject), [HeadObject](#headobject) |
 | `response-content-encoding` | [GetObject](#getobject), [HeadObject](#headobject) |
 | `response-content-language` | [GetObject](#getobject), [HeadObject](#headobject) |
 | `response-content-type` | [GetObject](#getobject), [HeadObject](#headobject) |
 | `response-expires` | [GetObject](#getobject), [HeadObject](#headobject) |
+| `restore` | [RestoreObject](#restoreobject) |
 | `retention` | [GetObjectRetention](#getobjectretention), [PutObjectRetention](#putobjectretention) |
+| `select` | [SelectObjectContent](#selectobjectcontent) |
+| `select-type` | [SelectObjectContent](#selectobjectcontent) |
 | `start-after` | [ListObjectsV2](#listobjectsv2) |
 | `tagging` | [CreateBucket](#createbucket) (absent), [DeleteBucket](#deletebucket) (absent), [DeleteBucketTagging](#deletebuckettagging), [DeleteObjectTagging](#deleteobjecttagging), [GetBucketTagging](#getbuckettagging), [GetObjectTagging](#getobjecttagging), [PutBucketTagging](#putbuckettagging), [PutObjectTagging](#putobjecttagging) |
 | `upload-id-marker` | [ListMultipartUploads](#listmultipartuploads) |
 | `uploadId` | [AbortMultipartUpload](#abortmultipartupload), [CompleteMultipartUpload](#completemultipartupload), [ListParts](#listparts), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
 | `uploads` | [CreateMultipartUpload](#createmultipartupload), [ListMultipartUploads](#listmultipartuploads) |
 | `version-id-marker` | [ListObjectVersions](#listobjectversions) |
-| `versionId` | [DeleteObject](#deleteobject), [DeleteObjectTagging](#deleteobjecttagging), [GetObject](#getobject), [GetObjectAttributes](#getobjectattributes), [GetObjectLegalHold](#getobjectlegalhold), [GetObjectRetention](#getobjectretention), [GetObjectTagging](#getobjecttagging), [HeadObject](#headobject), [PutObjectLegalHold](#putobjectlegalhold), [PutObjectRetention](#putobjectretention), [PutObjectTagging](#putobjecttagging) |
-| `versioning` | [CreateBucket](#createbucket) (absent) |
+| `versionId` | [DeleteObject](#deleteobject), [DeleteObjectTagging](#deleteobjecttagging), [GetObject](#getobject), [GetObjectAcl](#getobjectacl), [GetObjectAttributes](#getobjectattributes), [GetObjectLegalHold](#getobjectlegalhold), [GetObjectRetention](#getobjectretention), [GetObjectTagging](#getobjecttagging), [HeadObject](#headobject), [PutObjectAcl](#putobjectacl), [PutObjectLegalHold](#putobjectlegalhold), [PutObjectRetention](#putobjectretention), [PutObjectTagging](#putobjecttagging), [RestoreObject](#restoreobject) |
+| `versioning` | [CreateBucket](#createbucket) (absent), [GetBucketVersioning](#getbucketversioning), [PutBucketVersioning](#putbucketversioning) |
 | `versions` | [ListObjectVersions](#listobjectversions) |
-| `website` | [CreateBucket](#createbucket) (absent), [DeleteBucket](#deletebucket) (absent) |
+| `website` | [CreateBucket](#createbucket) (absent), [DeleteBucket](#deletebucket) (absent), [DeleteBucketWebsite](#deletebucketwebsite), [GetBucketWebsite](#getbucketwebsite), [PutBucketWebsite](#putbucketwebsite) |
 
 ## Reverse index: header to operations
 
@@ -87,7 +91,7 @@ such a row as though the key selected the operation is the opposite of what the 
 | `content-encoding` | [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject) |
 | `content-language` | [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject) |
 | `content-length` | [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject), [UploadPart](#uploadpart) |
-| `content-md5` | [PutBucketCors](#putbucketcors), [PutBucketEncryption](#putbucketencryption), [PutBucketTagging](#putbuckettagging), [PutObject](#putobject), [PutObjectLegalHold](#putobjectlegalhold), [PutObjectLockConfiguration](#putobjectlockconfiguration), [PutObjectRetention](#putobjectretention), [PutObjectTagging](#putobjecttagging), [UploadPart](#uploadpart) |
+| `content-md5` | [PutBucketAcl](#putbucketacl), [PutBucketCors](#putbucketcors), [PutBucketEncryption](#putbucketencryption), [PutBucketLogging](#putbucketlogging), [PutBucketPolicy](#putbucketpolicy), [PutBucketReplication](#putbucketreplication), [PutBucketRequestPayment](#putbucketrequestpayment), [PutBucketTagging](#putbuckettagging), [PutBucketVersioning](#putbucketversioning), [PutBucketWebsite](#putbucketwebsite), [PutObject](#putobject), [PutObjectAcl](#putobjectacl), [PutObjectLegalHold](#putobjectlegalhold), [PutObjectLockConfiguration](#putobjectlockconfiguration), [PutObjectRetention](#putobjectretention), [PutObjectTagging](#putobjecttagging), [PutPublicAccessBlock](#putpublicaccessblock), [UploadPart](#uploadpart) |
 | `content-range` | [GetObject](#getobject), [HeadObject](#headobject) |
 | `content-type` | [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject) |
 | `etag` | [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject), [UploadPart](#uploadpart) |
@@ -102,10 +106,10 @@ such a row as though the key selected the operation is the opposite of what the 
 | `range` | [GetObject](#getobject), [HeadObject](#headobject) |
 | `x-amz-abort-date` | [CreateMultipartUpload](#createmultipartupload), [ListParts](#listparts) |
 | `x-amz-abort-rule-id` | [CreateMultipartUpload](#createmultipartupload), [ListParts](#listparts) |
-| `x-amz-acl` | [CopyObject](#copyobject), [CreateBucket](#createbucket), [CreateMultipartUpload](#createmultipartupload), [PutObject](#putobject) |
+| `x-amz-acl` | [CopyObject](#copyobject), [CreateBucket](#createbucket), [CreateMultipartUpload](#createmultipartupload), [PutBucketAcl](#putbucketacl), [PutObject](#putobject), [PutObjectAcl](#putobjectacl) |
 | `x-amz-archive-status` | [HeadObject](#headobject) |
 | `x-amz-bucket-object-lock-enabled` | [CreateBucket](#createbucket) |
-| `x-amz-bucket-object-lock-token` | [PutObjectLockConfiguration](#putobjectlockconfiguration) |
+| `x-amz-bucket-object-lock-token` | [PutBucketReplication](#putbucketreplication), [PutObjectLockConfiguration](#putobjectlockconfiguration) |
 | `x-amz-bucket-region` | [HeadBucket](#headbucket) |
 | `x-amz-bypass-governance-retention` | [DeleteObject](#deleteobject), [DeleteObjects](#deleteobjects), [PutObjectRetention](#putobjectretention) |
 | `x-amz-checksum-` | [CompleteMultipartUpload](#completemultipartupload), [PutObject](#putobject), [UploadPart](#uploadpart) |
@@ -122,6 +126,7 @@ such a row as though the key selected the operation is the opposite of what the 
 | `x-amz-checksum-xxhash128` | [GetObject](#getobject), [HeadObject](#headobject) |
 | `x-amz-checksum-xxhash3` | [GetObject](#getobject), [HeadObject](#headobject) |
 | `x-amz-checksum-xxhash64` | [GetObject](#getobject), [HeadObject](#headobject) |
+| `x-amz-confirm-remove-self-bucket-access` | [PutBucketPolicy](#putbucketpolicy) |
 | `x-amz-copy-source` | [CopyObject](#copyobject), [UploadPartCopy](#uploadpartcopy) |
 | `x-amz-copy-source-if-match` | [CopyObject](#copyobject), [UploadPartCopy](#uploadpartcopy) |
 | `x-amz-copy-source-if-modified-since` | [CopyObject](#copyobject), [UploadPartCopy](#uploadpartcopy) |
@@ -133,20 +138,20 @@ such a row as though the key selected the operation is the opposite of what the 
 | `x-amz-copy-source-server-side-encryption-customer-key-md5` | [CopyObject](#copyobject), [UploadPartCopy](#uploadpartcopy) |
 | `x-amz-copy-source-version-id` | [CopyObject](#copyobject), [UploadPartCopy](#uploadpartcopy) |
 | `x-amz-delete-marker` | [DeleteObject](#deleteobject), [GetObject](#getobject), [GetObjectAttributes](#getobjectattributes), [HeadObject](#headobject) |
-| `x-amz-expected-bucket-owner` | [AbortMultipartUpload](#abortmultipartupload), [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [DeleteBucket](#deletebucket), [DeleteBucketCors](#deletebucketcors), [DeleteBucketEncryption](#deletebucketencryption), [DeleteBucketLifecycle](#deletebucketlifecycle), [DeleteBucketTagging](#deletebuckettagging), [DeleteObject](#deleteobject), [DeleteObjectTagging](#deleteobjecttagging), [DeleteObjects](#deleteobjects), [GetBucketCors](#getbucketcors), [GetBucketEncryption](#getbucketencryption), [GetBucketLifecycleConfiguration](#getbucketlifecycleconfiguration), [GetBucketLocation](#getbucketlocation), [GetBucketTagging](#getbuckettagging), [GetObject](#getobject), [GetObjectAttributes](#getobjectattributes), [GetObjectLegalHold](#getobjectlegalhold), [GetObjectLockConfiguration](#getobjectlockconfiguration), [GetObjectRetention](#getobjectretention), [GetObjectTagging](#getobjecttagging), [HeadBucket](#headbucket), [HeadObject](#headobject), [ListMultipartUploads](#listmultipartuploads), [ListObjectVersions](#listobjectversions), [ListObjects](#listobjects), [ListObjectsV2](#listobjectsv2), [ListParts](#listparts), [PutBucketCors](#putbucketcors), [PutBucketEncryption](#putbucketencryption), [PutBucketLifecycleConfiguration](#putbucketlifecycleconfiguration), [PutBucketTagging](#putbuckettagging), [PutObject](#putobject), [PutObjectLegalHold](#putobjectlegalhold), [PutObjectLockConfiguration](#putobjectlockconfiguration), [PutObjectRetention](#putobjectretention), [PutObjectTagging](#putobjecttagging), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
+| `x-amz-expected-bucket-owner` | [AbortMultipartUpload](#abortmultipartupload), [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [DeleteBucket](#deletebucket), [DeleteBucketCors](#deletebucketcors), [DeleteBucketEncryption](#deletebucketencryption), [DeleteBucketLifecycle](#deletebucketlifecycle), [DeleteBucketPolicy](#deletebucketpolicy), [DeleteBucketReplication](#deletebucketreplication), [DeleteBucketTagging](#deletebuckettagging), [DeleteBucketWebsite](#deletebucketwebsite), [DeleteObject](#deleteobject), [DeleteObjectTagging](#deleteobjecttagging), [DeleteObjects](#deleteobjects), [DeletePublicAccessBlock](#deletepublicaccessblock), [GetBucketAccelerateConfiguration](#getbucketaccelerateconfiguration), [GetBucketAcl](#getbucketacl), [GetBucketCors](#getbucketcors), [GetBucketEncryption](#getbucketencryption), [GetBucketLifecycleConfiguration](#getbucketlifecycleconfiguration), [GetBucketLocation](#getbucketlocation), [GetBucketLogging](#getbucketlogging), [GetBucketNotificationConfiguration](#getbucketnotificationconfiguration), [GetBucketPolicy](#getbucketpolicy), [GetBucketPolicyStatus](#getbucketpolicystatus), [GetBucketReplication](#getbucketreplication), [GetBucketRequestPayment](#getbucketrequestpayment), [GetBucketTagging](#getbuckettagging), [GetBucketVersioning](#getbucketversioning), [GetBucketWebsite](#getbucketwebsite), [GetObject](#getobject), [GetObjectAcl](#getobjectacl), [GetObjectAttributes](#getobjectattributes), [GetObjectLegalHold](#getobjectlegalhold), [GetObjectLockConfiguration](#getobjectlockconfiguration), [GetObjectRetention](#getobjectretention), [GetObjectTagging](#getobjecttagging), [GetPublicAccessBlock](#getpublicaccessblock), [HeadBucket](#headbucket), [HeadObject](#headobject), [ListMultipartUploads](#listmultipartuploads), [ListObjectVersions](#listobjectversions), [ListObjects](#listobjects), [ListObjectsV2](#listobjectsv2), [ListParts](#listparts), [PutBucketAccelerateConfiguration](#putbucketaccelerateconfiguration), [PutBucketAcl](#putbucketacl), [PutBucketCors](#putbucketcors), [PutBucketEncryption](#putbucketencryption), [PutBucketLifecycleConfiguration](#putbucketlifecycleconfiguration), [PutBucketLogging](#putbucketlogging), [PutBucketNotificationConfiguration](#putbucketnotificationconfiguration), [PutBucketPolicy](#putbucketpolicy), [PutBucketReplication](#putbucketreplication), [PutBucketRequestPayment](#putbucketrequestpayment), [PutBucketTagging](#putbuckettagging), [PutBucketVersioning](#putbucketversioning), [PutBucketWebsite](#putbucketwebsite), [PutObject](#putobject), [PutObjectAcl](#putobjectacl), [PutObjectLegalHold](#putobjectlegalhold), [PutObjectLockConfiguration](#putobjectlockconfiguration), [PutObjectRetention](#putobjectretention), [PutObjectTagging](#putobjecttagging), [PutPublicAccessBlock](#putpublicaccessblock), [RestoreObject](#restoreobject), [SelectObjectContent](#selectobjectcontent), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
 | `x-amz-expiration` | [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject) |
-| `x-amz-grant-full-control` | [CopyObject](#copyobject), [CreateBucket](#createbucket), [CreateMultipartUpload](#createmultipartupload), [PutObject](#putobject) |
-| `x-amz-grant-read` | [CopyObject](#copyobject), [CreateBucket](#createbucket), [CreateMultipartUpload](#createmultipartupload), [PutObject](#putobject) |
-| `x-amz-grant-read-acp` | [CopyObject](#copyobject), [CreateBucket](#createbucket), [CreateMultipartUpload](#createmultipartupload), [PutObject](#putobject) |
-| `x-amz-grant-write` | [CreateBucket](#createbucket) |
-| `x-amz-grant-write-acp` | [CopyObject](#copyobject), [CreateBucket](#createbucket), [CreateMultipartUpload](#createmultipartupload), [PutObject](#putobject) |
+| `x-amz-grant-full-control` | [CopyObject](#copyobject), [CreateBucket](#createbucket), [CreateMultipartUpload](#createmultipartupload), [PutBucketAcl](#putbucketacl), [PutObject](#putobject), [PutObjectAcl](#putobjectacl) |
+| `x-amz-grant-read` | [CopyObject](#copyobject), [CreateBucket](#createbucket), [CreateMultipartUpload](#createmultipartupload), [PutBucketAcl](#putbucketacl), [PutObject](#putobject), [PutObjectAcl](#putobjectacl) |
+| `x-amz-grant-read-acp` | [CopyObject](#copyobject), [CreateBucket](#createbucket), [CreateMultipartUpload](#createmultipartupload), [PutBucketAcl](#putbucketacl), [PutObject](#putobject), [PutObjectAcl](#putobjectacl) |
+| `x-amz-grant-write` | [CreateBucket](#createbucket), [PutBucketAcl](#putbucketacl), [PutObjectAcl](#putobjectacl) |
+| `x-amz-grant-write-acp` | [CopyObject](#copyobject), [CreateBucket](#createbucket), [CreateMultipartUpload](#createmultipartupload), [PutBucketAcl](#putbucketacl), [PutObject](#putobject), [PutObjectAcl](#putobjectacl) |
 | `x-amz-if-match-initiated-time` | [AbortMultipartUpload](#abortmultipartupload) |
 | `x-amz-if-match-last-modified-time` | [DeleteObject](#deleteobject) |
 | `x-amz-if-match-size` | [DeleteObject](#deleteobject) |
 | `x-amz-max-parts` | [GetObjectAttributes](#getobjectattributes) |
 | `x-amz-meta-` | [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject) |
 | `x-amz-metadata-directive` | [CopyObject](#copyobject) |
-| `x-amz-mfa` | [DeleteObject](#deleteobject), [DeleteObjects](#deleteobjects) |
+| `x-amz-mfa` | [DeleteObject](#deleteobject), [DeleteObjects](#deleteobjects), [PutBucketVersioning](#putbucketversioning) |
 | `x-amz-missing-meta` | [GetObject](#getobject), [HeadObject](#headobject) |
 | `x-amz-mp-object-size` | [CompleteMultipartUpload](#completemultipartupload) |
 | `x-amz-mp-parts-count` | [GetObject](#getobject), [HeadObject](#headobject) |
@@ -158,17 +163,19 @@ such a row as though the key selected the operation is the opposite of what the 
 | `x-amz-object-size` | [PutObject](#putobject) |
 | `x-amz-part-number-marker` | [GetObjectAttributes](#getobjectattributes) |
 | `x-amz-replication-status` | [GetObject](#getobject), [HeadObject](#headobject) |
-| `x-amz-request-charged` | [AbortMultipartUpload](#abortmultipartupload), [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [DeleteObject](#deleteobject), [DeleteObjects](#deleteobjects), [GetObject](#getobject), [GetObjectAttributes](#getobjectattributes), [HeadObject](#headobject), [ListMultipartUploads](#listmultipartuploads), [ListObjectVersions](#listobjectversions), [ListObjects](#listobjects), [ListObjectsV2](#listobjectsv2), [ListParts](#listparts), [PutObject](#putobject), [PutObjectLegalHold](#putobjectlegalhold), [PutObjectLockConfiguration](#putobjectlockconfiguration), [PutObjectRetention](#putobjectretention), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
-| `x-amz-request-payer` | [AbortMultipartUpload](#abortmultipartupload), [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [DeleteObject](#deleteobject), [DeleteObjects](#deleteobjects), [GetObject](#getobject), [GetObjectAttributes](#getobjectattributes), [GetObjectLegalHold](#getobjectlegalhold), [GetObjectRetention](#getobjectretention), [GetObjectTagging](#getobjecttagging), [HeadObject](#headobject), [ListMultipartUploads](#listmultipartuploads), [ListObjectVersions](#listobjectversions), [ListObjects](#listobjects), [ListObjectsV2](#listobjectsv2), [ListParts](#listparts), [PutObject](#putobject), [PutObjectLegalHold](#putobjectlegalhold), [PutObjectLockConfiguration](#putobjectlockconfiguration), [PutObjectRetention](#putobjectretention), [PutObjectTagging](#putobjecttagging), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
+| `x-amz-request-charged` | [AbortMultipartUpload](#abortmultipartupload), [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [DeleteObject](#deleteobject), [DeleteObjects](#deleteobjects), [GetBucketAccelerateConfiguration](#getbucketaccelerateconfiguration), [GetObject](#getobject), [GetObjectAcl](#getobjectacl), [GetObjectAttributes](#getobjectattributes), [HeadObject](#headobject), [ListMultipartUploads](#listmultipartuploads), [ListObjectVersions](#listobjectversions), [ListObjects](#listobjects), [ListObjectsV2](#listobjectsv2), [ListParts](#listparts), [PutObject](#putobject), [PutObjectAcl](#putobjectacl), [PutObjectLegalHold](#putobjectlegalhold), [PutObjectLockConfiguration](#putobjectlockconfiguration), [PutObjectRetention](#putobjectretention), [RestoreObject](#restoreobject), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
+| `x-amz-request-payer` | [AbortMultipartUpload](#abortmultipartupload), [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [DeleteObject](#deleteobject), [DeleteObjects](#deleteobjects), [GetBucketAccelerateConfiguration](#getbucketaccelerateconfiguration), [GetObject](#getobject), [GetObjectAcl](#getobjectacl), [GetObjectAttributes](#getobjectattributes), [GetObjectLegalHold](#getobjectlegalhold), [GetObjectRetention](#getobjectretention), [GetObjectTagging](#getobjecttagging), [HeadObject](#headobject), [ListMultipartUploads](#listmultipartuploads), [ListObjectVersions](#listobjectversions), [ListObjects](#listobjects), [ListObjectsV2](#listobjectsv2), [ListParts](#listparts), [PutObject](#putobject), [PutObjectAcl](#putobjectacl), [PutObjectLegalHold](#putobjectlegalhold), [PutObjectLockConfiguration](#putobjectlockconfiguration), [PutObjectRetention](#putobjectretention), [PutObjectTagging](#putobjecttagging), [RestoreObject](#restoreobject), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
 | `x-amz-restore` | [GetObject](#getobject), [HeadObject](#headobject) |
-| `x-amz-sdk-checksum-algorithm` | [DeleteObjects](#deleteobjects), [PutBucketCors](#putbucketcors), [PutBucketEncryption](#putbucketencryption), [PutBucketLifecycleConfiguration](#putbucketlifecycleconfiguration), [PutBucketTagging](#putbuckettagging), [PutObject](#putobject), [PutObjectLegalHold](#putobjectlegalhold), [PutObjectLockConfiguration](#putobjectlockconfiguration), [PutObjectRetention](#putobjectretention), [PutObjectTagging](#putobjecttagging), [UploadPart](#uploadpart) |
+| `x-amz-restore-output-path` | [RestoreObject](#restoreobject) |
+| `x-amz-sdk-checksum-algorithm` | [DeleteObjects](#deleteobjects), [PutBucketAccelerateConfiguration](#putbucketaccelerateconfiguration), [PutBucketAcl](#putbucketacl), [PutBucketCors](#putbucketcors), [PutBucketEncryption](#putbucketencryption), [PutBucketLifecycleConfiguration](#putbucketlifecycleconfiguration), [PutBucketLogging](#putbucketlogging), [PutBucketPolicy](#putbucketpolicy), [PutBucketReplication](#putbucketreplication), [PutBucketRequestPayment](#putbucketrequestpayment), [PutBucketTagging](#putbuckettagging), [PutBucketVersioning](#putbucketversioning), [PutBucketWebsite](#putbucketwebsite), [PutObject](#putobject), [PutObjectAcl](#putobjectacl), [PutObjectLegalHold](#putobjectlegalhold), [PutObjectLockConfiguration](#putobjectlockconfiguration), [PutObjectRetention](#putobjectretention), [PutObjectTagging](#putobjecttagging), [PutPublicAccessBlock](#putpublicaccessblock), [RestoreObject](#restoreobject), [UploadPart](#uploadpart) |
 | `x-amz-server-side-encryption` | [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
 | `x-amz-server-side-encryption-aws-kms-key-id` | [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
 | `x-amz-server-side-encryption-bucket-key-enabled` | [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
 | `x-amz-server-side-encryption-context` | [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [PutObject](#putobject) |
-| `x-amz-server-side-encryption-customer-algorithm` | [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [GetObject](#getobject), [GetObjectAttributes](#getobjectattributes), [HeadObject](#headobject), [ListParts](#listparts), [PutObject](#putobject), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
-| `x-amz-server-side-encryption-customer-key` | [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [GetObject](#getobject), [GetObjectAttributes](#getobjectattributes), [HeadObject](#headobject), [ListParts](#listparts), [PutObject](#putobject), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
-| `x-amz-server-side-encryption-customer-key-md5` | [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [GetObject](#getobject), [GetObjectAttributes](#getobjectattributes), [HeadObject](#headobject), [ListParts](#listparts), [PutObject](#putobject), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
+| `x-amz-server-side-encryption-customer-algorithm` | [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [GetObject](#getobject), [GetObjectAttributes](#getobjectattributes), [HeadObject](#headobject), [ListParts](#listparts), [PutObject](#putobject), [SelectObjectContent](#selectobjectcontent), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
+| `x-amz-server-side-encryption-customer-key` | [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [GetObject](#getobject), [GetObjectAttributes](#getobjectattributes), [HeadObject](#headobject), [ListParts](#listparts), [PutObject](#putobject), [SelectObjectContent](#selectobjectcontent), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
+| `x-amz-server-side-encryption-customer-key-md5` | [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [GetObject](#getobject), [GetObjectAttributes](#getobjectattributes), [HeadObject](#headobject), [ListParts](#listparts), [PutObject](#putobject), [SelectObjectContent](#selectobjectcontent), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
+| `x-amz-skip-destination-validation` | [PutBucketNotificationConfiguration](#putbucketnotificationconfiguration) |
 | `x-amz-source-expected-bucket-owner` | [CopyObject](#copyobject), [UploadPartCopy](#uploadpartcopy) |
 | `x-amz-storage-class` | [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject) |
 | `x-amz-tagging` | [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [PutObject](#putobject) |
@@ -183,46 +190,66 @@ such a row as though the key selected the operation is the opposite of what the 
 
 | Error code | Operations |
 | --- | --- |
-| `AccessDenied` | [AbortMultipartUpload](#abortmultipartupload), [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateBucket](#createbucket), [CreateMultipartUpload](#createmultipartupload), [DeleteBucket](#deletebucket), [DeleteBucketCors](#deletebucketcors), [DeleteBucketEncryption](#deletebucketencryption), [DeleteBucketLifecycle](#deletebucketlifecycle), [DeleteBucketTagging](#deletebuckettagging), [DeleteObject](#deleteobject), [DeleteObjectTagging](#deleteobjecttagging), [DeleteObjects](#deleteobjects), [GetBucketCors](#getbucketcors), [GetBucketEncryption](#getbucketencryption), [GetBucketLifecycleConfiguration](#getbucketlifecycleconfiguration), [GetBucketLocation](#getbucketlocation), [GetBucketTagging](#getbuckettagging), [GetObject](#getobject), [GetObjectAttributes](#getobjectattributes), [GetObjectLegalHold](#getobjectlegalhold), [GetObjectLockConfiguration](#getobjectlockconfiguration), [GetObjectRetention](#getobjectretention), [GetObjectTagging](#getobjecttagging), [HeadBucket](#headbucket), [HeadObject](#headobject), [ListBuckets](#listbuckets), [ListMultipartUploads](#listmultipartuploads), [ListObjectVersions](#listobjectversions), [ListObjects](#listobjects), [ListObjectsV2](#listobjectsv2), [ListParts](#listparts), [PutBucketCors](#putbucketcors), [PutBucketEncryption](#putbucketencryption), [PutBucketLifecycleConfiguration](#putbucketlifecycleconfiguration), [PutBucketTagging](#putbuckettagging), [PutObject](#putobject), [PutObjectLegalHold](#putobjectlegalhold), [PutObjectLockConfiguration](#putobjectlockconfiguration), [PutObjectRetention](#putobjectretention), [PutObjectTagging](#putobjecttagging), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
-| `BadDigest` | [PutBucketCors](#putbucketcors), [PutBucketEncryption](#putbucketencryption), [PutBucketLifecycleConfiguration](#putbucketlifecycleconfiguration), [PutObject](#putobject), [PutObjectLegalHold](#putobjectlegalhold), [PutObjectLockConfiguration](#putobjectlockconfiguration), [PutObjectRetention](#putobjectretention), [UploadPart](#uploadpart) |
+| `AccessDenied` | [AbortMultipartUpload](#abortmultipartupload), [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateBucket](#createbucket), [CreateMultipartUpload](#createmultipartupload), [DeleteBucket](#deletebucket), [DeleteBucketCors](#deletebucketcors), [DeleteBucketEncryption](#deletebucketencryption), [DeleteBucketLifecycle](#deletebucketlifecycle), [DeleteBucketPolicy](#deletebucketpolicy), [DeleteBucketReplication](#deletebucketreplication), [DeleteBucketTagging](#deletebuckettagging), [DeleteBucketWebsite](#deletebucketwebsite), [DeleteObject](#deleteobject), [DeleteObjectTagging](#deleteobjecttagging), [DeleteObjects](#deleteobjects), [DeletePublicAccessBlock](#deletepublicaccessblock), [GetBucketAccelerateConfiguration](#getbucketaccelerateconfiguration), [GetBucketAcl](#getbucketacl), [GetBucketCors](#getbucketcors), [GetBucketEncryption](#getbucketencryption), [GetBucketLifecycleConfiguration](#getbucketlifecycleconfiguration), [GetBucketLocation](#getbucketlocation), [GetBucketLogging](#getbucketlogging), [GetBucketNotificationConfiguration](#getbucketnotificationconfiguration), [GetBucketPolicy](#getbucketpolicy), [GetBucketPolicyStatus](#getbucketpolicystatus), [GetBucketReplication](#getbucketreplication), [GetBucketRequestPayment](#getbucketrequestpayment), [GetBucketTagging](#getbuckettagging), [GetBucketVersioning](#getbucketversioning), [GetBucketWebsite](#getbucketwebsite), [GetObject](#getobject), [GetObjectAcl](#getobjectacl), [GetObjectAttributes](#getobjectattributes), [GetObjectLegalHold](#getobjectlegalhold), [GetObjectLockConfiguration](#getobjectlockconfiguration), [GetObjectRetention](#getobjectretention), [GetObjectTagging](#getobjecttagging), [GetPublicAccessBlock](#getpublicaccessblock), [HeadBucket](#headbucket), [HeadObject](#headobject), [ListBuckets](#listbuckets), [ListMultipartUploads](#listmultipartuploads), [ListObjectVersions](#listobjectversions), [ListObjects](#listobjects), [ListObjectsV2](#listobjectsv2), [ListParts](#listparts), [PutBucketAccelerateConfiguration](#putbucketaccelerateconfiguration), [PutBucketAcl](#putbucketacl), [PutBucketCors](#putbucketcors), [PutBucketEncryption](#putbucketencryption), [PutBucketLifecycleConfiguration](#putbucketlifecycleconfiguration), [PutBucketLogging](#putbucketlogging), [PutBucketNotificationConfiguration](#putbucketnotificationconfiguration), [PutBucketPolicy](#putbucketpolicy), [PutBucketReplication](#putbucketreplication), [PutBucketRequestPayment](#putbucketrequestpayment), [PutBucketTagging](#putbuckettagging), [PutBucketVersioning](#putbucketversioning), [PutBucketWebsite](#putbucketwebsite), [PutObject](#putobject), [PutObjectAcl](#putobjectacl), [PutObjectLegalHold](#putobjectlegalhold), [PutObjectLockConfiguration](#putobjectlockconfiguration), [PutObjectRetention](#putobjectretention), [PutObjectTagging](#putobjecttagging), [PutPublicAccessBlock](#putpublicaccessblock), [RestoreObject](#restoreobject), [SelectObjectContent](#selectobjectcontent), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
+| `BadDigest` | [PutBucketAcl](#putbucketacl), [PutBucketCors](#putbucketcors), [PutBucketEncryption](#putbucketencryption), [PutBucketLifecycleConfiguration](#putbucketlifecycleconfiguration), [PutBucketLogging](#putbucketlogging), [PutBucketPolicy](#putbucketpolicy), [PutBucketReplication](#putbucketreplication), [PutBucketRequestPayment](#putbucketrequestpayment), [PutBucketVersioning](#putbucketversioning), [PutBucketWebsite](#putbucketwebsite), [PutObject](#putobject), [PutObjectAcl](#putobjectacl), [PutObjectLegalHold](#putobjectlegalhold), [PutObjectLockConfiguration](#putobjectlockconfiguration), [PutObjectRetention](#putobjectretention), [PutPublicAccessBlock](#putpublicaccessblock), [UploadPart](#uploadpart) |
 | `BucketAlreadyExists` | [CreateBucket](#createbucket) |
 | `BucketAlreadyOwnedByYou` | [CreateBucket](#createbucket) |
 | `BucketNotEmpty` | [DeleteBucket](#deletebucket) |
+| `CSVParsingError` | [SelectObjectContent](#selectobjectcontent) |
 | `ConditionalRequestConflict` | [CompleteMultipartUpload](#completemultipartupload), [PutObject](#putobject) |
 | `EncryptionTypeMismatch` | [PutObject](#putobject) |
 | `EntityTooLarge` | [CopyObject](#copyobject), [PutObject](#putobject), [UploadPart](#uploadpart) |
 | `EntityTooSmall` | [CompleteMultipartUpload](#completemultipartupload) |
+| `ExpressionTooLong` | [SelectObjectContent](#selectobjectcontent) |
 | `IncompleteBody` | [PutObject](#putobject), [UploadPart](#uploadpart) |
-| `InvalidArgument` | [AbortMultipartUpload](#abortmultipartupload), [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateBucket](#createbucket), [CreateMultipartUpload](#createmultipartupload), [DeleteBucketTagging](#deletebuckettagging), [DeleteObject](#deleteobject), [DeleteObjectTagging](#deleteobjecttagging), [DeleteObjects](#deleteobjects), [GetBucketTagging](#getbuckettagging), [GetObject](#getobject), [GetObjectAttributes](#getobjectattributes), [GetObjectTagging](#getobjecttagging), [ListMultipartUploads](#listmultipartuploads), [ListObjectVersions](#listobjectversions), [ListObjects](#listobjects), [ListObjectsV2](#listobjectsv2), [ListParts](#listparts), [PutBucketCors](#putbucketcors), [PutBucketEncryption](#putbucketencryption), [PutBucketLifecycleConfiguration](#putbucketlifecycleconfiguration), [PutBucketTagging](#putbuckettagging), [PutObject](#putobject), [PutObjectLegalHold](#putobjectlegalhold), [PutObjectLockConfiguration](#putobjectlockconfiguration), [PutObjectRetention](#putobjectretention), [PutObjectTagging](#putobjecttagging), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
+| `InvalidArgument` | [AbortMultipartUpload](#abortmultipartupload), [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateBucket](#createbucket), [CreateMultipartUpload](#createmultipartupload), [DeleteBucketTagging](#deletebuckettagging), [DeleteObject](#deleteobject), [DeleteObjectTagging](#deleteobjecttagging), [DeleteObjects](#deleteobjects), [GetBucketTagging](#getbuckettagging), [GetObject](#getobject), [GetObjectAttributes](#getobjectattributes), [GetObjectTagging](#getobjecttagging), [ListMultipartUploads](#listmultipartuploads), [ListObjectVersions](#listobjectversions), [ListObjects](#listobjects), [ListObjectsV2](#listobjectsv2), [ListParts](#listparts), [PutBucketAccelerateConfiguration](#putbucketaccelerateconfiguration), [PutBucketAcl](#putbucketacl), [PutBucketCors](#putbucketcors), [PutBucketEncryption](#putbucketencryption), [PutBucketLifecycleConfiguration](#putbucketlifecycleconfiguration), [PutBucketLogging](#putbucketlogging), [PutBucketNotificationConfiguration](#putbucketnotificationconfiguration), [PutBucketReplication](#putbucketreplication), [PutBucketRequestPayment](#putbucketrequestpayment), [PutBucketTagging](#putbuckettagging), [PutBucketVersioning](#putbucketversioning), [PutBucketWebsite](#putbucketwebsite), [PutObject](#putobject), [PutObjectAcl](#putobjectacl), [PutObjectLegalHold](#putobjectlegalhold), [PutObjectLockConfiguration](#putobjectlockconfiguration), [PutObjectRetention](#putobjectretention), [PutObjectTagging](#putobjecttagging), [PutPublicAccessBlock](#putpublicaccessblock), [RestoreObject](#restoreobject), [SelectObjectContent](#selectobjectcontent), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
 | `InvalidBucketName` | [CreateBucket](#createbucket) |
+| `InvalidColumnIndex` | [SelectObjectContent](#selectobjectcontent) |
+| `InvalidCompressionFormat` | [SelectObjectContent](#selectobjectcontent) |
+| `InvalidDataType` | [SelectObjectContent](#selectobjectcontent) |
 | `InvalidDigest` | [PutObject](#putobject), [UploadPart](#uploadpart) |
+| `InvalidExpressionType` | [SelectObjectContent](#selectobjectcontent) |
 | `InvalidLocationConstraint` | [CreateBucket](#createbucket) |
-| `InvalidObjectState` | [GetObject](#getobject) |
+| `InvalidObjectState` | [GetObject](#getobject), [RestoreObject](#restoreobject) |
 | `InvalidPart` | [CompleteMultipartUpload](#completemultipartupload) |
 | `InvalidPartOrder` | [CompleteMultipartUpload](#completemultipartupload) |
+| `InvalidPolicyDocument` | [PutBucketPolicy](#putbucketpolicy) |
 | `InvalidRange` | [GetObject](#getobject), [UploadPartCopy](#uploadpartcopy) |
-| `InvalidRequest` | [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [DeleteObjects](#deleteobjects), [PutBucketCors](#putbucketcors), [PutBucketEncryption](#putbucketencryption), [PutBucketLifecycleConfiguration](#putbucketlifecycleconfiguration), [PutObject](#putobject), [PutObjectLegalHold](#putobjectlegalhold), [PutObjectLockConfiguration](#putobjectlockconfiguration), [PutObjectRetention](#putobjectretention), [UploadPartCopy](#uploadpartcopy) |
+| `InvalidRequest` | [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [DeleteObjects](#deleteobjects), [PutBucketAcl](#putbucketacl), [PutBucketCors](#putbucketcors), [PutBucketEncryption](#putbucketencryption), [PutBucketLifecycleConfiguration](#putbucketlifecycleconfiguration), [PutBucketReplication](#putbucketreplication), [PutObject](#putobject), [PutObjectAcl](#putobjectacl), [PutObjectLegalHold](#putobjectlegalhold), [PutObjectLockConfiguration](#putobjectlockconfiguration), [PutObjectRetention](#putobjectretention), [RestoreObject](#restoreobject), [SelectObjectContent](#selectobjectcontent), [UploadPartCopy](#uploadpartcopy) |
 | `InvalidStorageClass` | [CreateMultipartUpload](#createmultipartupload) |
 | `InvalidTag` | [PutBucketTagging](#putbuckettagging), [PutObjectTagging](#putobjecttagging) |
+| `InvalidTextEncoding` | [SelectObjectContent](#selectobjectcontent) |
 | `InvalidWriteOffset` | [PutObject](#putobject) |
-| `MalformedXML` | [CompleteMultipartUpload](#completemultipartupload), [CreateBucket](#createbucket), [DeleteObjects](#deleteobjects), [PutBucketCors](#putbucketcors), [PutBucketEncryption](#putbucketencryption), [PutBucketLifecycleConfiguration](#putbucketlifecycleconfiguration), [PutBucketTagging](#putbuckettagging), [PutObjectLegalHold](#putobjectlegalhold), [PutObjectLockConfiguration](#putobjectlockconfiguration), [PutObjectRetention](#putobjectretention), [PutObjectTagging](#putobjecttagging) |
+| `JSONParsingError` | [SelectObjectContent](#selectobjectcontent) |
+| `MalformedPolicy` | [PutBucketPolicy](#putbucketpolicy) |
+| `MalformedXML` | [CompleteMultipartUpload](#completemultipartupload), [CreateBucket](#createbucket), [DeleteObjects](#deleteobjects), [PutBucketAccelerateConfiguration](#putbucketaccelerateconfiguration), [PutBucketAcl](#putbucketacl), [PutBucketCors](#putbucketcors), [PutBucketEncryption](#putbucketencryption), [PutBucketLifecycleConfiguration](#putbucketlifecycleconfiguration), [PutBucketLogging](#putbucketlogging), [PutBucketNotificationConfiguration](#putbucketnotificationconfiguration), [PutBucketReplication](#putbucketreplication), [PutBucketRequestPayment](#putbucketrequestpayment), [PutBucketTagging](#putbuckettagging), [PutBucketVersioning](#putbucketversioning), [PutBucketWebsite](#putbucketwebsite), [PutObjectAcl](#putobjectacl), [PutObjectLegalHold](#putobjectlegalhold), [PutObjectLockConfiguration](#putobjectlockconfiguration), [PutObjectRetention](#putobjectretention), [PutObjectTagging](#putobjecttagging), [PutPublicAccessBlock](#putpublicaccessblock), [RestoreObject](#restoreobject), [SelectObjectContent](#selectobjectcontent) |
 | `MethodNotAllowed` | [CopyObject](#copyobject), [UploadPartCopy](#uploadpartcopy) |
 | `MissingContentLength` | [PutObject](#putobject), [UploadPart](#uploadpart) |
-| `NoSuchBucket` | [AbortMultipartUpload](#abortmultipartupload), [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [DeleteBucket](#deletebucket), [DeleteBucketCors](#deletebucketcors), [DeleteBucketEncryption](#deletebucketencryption), [DeleteBucketLifecycle](#deletebucketlifecycle), [DeleteBucketTagging](#deletebuckettagging), [DeleteObject](#deleteobject), [DeleteObjectTagging](#deleteobjecttagging), [DeleteObjects](#deleteobjects), [GetBucketCors](#getbucketcors), [GetBucketEncryption](#getbucketencryption), [GetBucketLifecycleConfiguration](#getbucketlifecycleconfiguration), [GetBucketLocation](#getbucketlocation), [GetBucketTagging](#getbuckettagging), [GetObject](#getobject), [GetObjectAttributes](#getobjectattributes), [GetObjectLegalHold](#getobjectlegalhold), [GetObjectLockConfiguration](#getobjectlockconfiguration), [GetObjectRetention](#getobjectretention), [GetObjectTagging](#getobjecttagging), [HeadBucket](#headbucket), [HeadObject](#headobject), [ListMultipartUploads](#listmultipartuploads), [ListObjectVersions](#listobjectversions), [ListObjects](#listobjects), [ListObjectsV2](#listobjectsv2), [ListParts](#listparts), [PutBucketCors](#putbucketcors), [PutBucketEncryption](#putbucketencryption), [PutBucketLifecycleConfiguration](#putbucketlifecycleconfiguration), [PutBucketTagging](#putbuckettagging), [PutObject](#putobject), [PutObjectLegalHold](#putobjectlegalhold), [PutObjectLockConfiguration](#putobjectlockconfiguration), [PutObjectRetention](#putobjectretention), [PutObjectTagging](#putobjecttagging), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
+| `NoSuchBucket` | [AbortMultipartUpload](#abortmultipartupload), [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [DeleteBucket](#deletebucket), [DeleteBucketCors](#deletebucketcors), [DeleteBucketEncryption](#deletebucketencryption), [DeleteBucketLifecycle](#deletebucketlifecycle), [DeleteBucketPolicy](#deletebucketpolicy), [DeleteBucketReplication](#deletebucketreplication), [DeleteBucketTagging](#deletebuckettagging), [DeleteBucketWebsite](#deletebucketwebsite), [DeleteObject](#deleteobject), [DeleteObjectTagging](#deleteobjecttagging), [DeleteObjects](#deleteobjects), [DeletePublicAccessBlock](#deletepublicaccessblock), [GetBucketAccelerateConfiguration](#getbucketaccelerateconfiguration), [GetBucketAcl](#getbucketacl), [GetBucketCors](#getbucketcors), [GetBucketEncryption](#getbucketencryption), [GetBucketLifecycleConfiguration](#getbucketlifecycleconfiguration), [GetBucketLocation](#getbucketlocation), [GetBucketLogging](#getbucketlogging), [GetBucketNotificationConfiguration](#getbucketnotificationconfiguration), [GetBucketPolicy](#getbucketpolicy), [GetBucketPolicyStatus](#getbucketpolicystatus), [GetBucketReplication](#getbucketreplication), [GetBucketRequestPayment](#getbucketrequestpayment), [GetBucketTagging](#getbuckettagging), [GetBucketVersioning](#getbucketversioning), [GetBucketWebsite](#getbucketwebsite), [GetObject](#getobject), [GetObjectAcl](#getobjectacl), [GetObjectAttributes](#getobjectattributes), [GetObjectLegalHold](#getobjectlegalhold), [GetObjectLockConfiguration](#getobjectlockconfiguration), [GetObjectRetention](#getobjectretention), [GetObjectTagging](#getobjecttagging), [GetPublicAccessBlock](#getpublicaccessblock), [HeadBucket](#headbucket), [HeadObject](#headobject), [ListMultipartUploads](#listmultipartuploads), [ListObjectVersions](#listobjectversions), [ListObjects](#listobjects), [ListObjectsV2](#listobjectsv2), [ListParts](#listparts), [PutBucketAccelerateConfiguration](#putbucketaccelerateconfiguration), [PutBucketAcl](#putbucketacl), [PutBucketCors](#putbucketcors), [PutBucketEncryption](#putbucketencryption), [PutBucketLifecycleConfiguration](#putbucketlifecycleconfiguration), [PutBucketLogging](#putbucketlogging), [PutBucketNotificationConfiguration](#putbucketnotificationconfiguration), [PutBucketPolicy](#putbucketpolicy), [PutBucketReplication](#putbucketreplication), [PutBucketRequestPayment](#putbucketrequestpayment), [PutBucketTagging](#putbuckettagging), [PutBucketVersioning](#putbucketversioning), [PutBucketWebsite](#putbucketwebsite), [PutObject](#putobject), [PutObjectAcl](#putobjectacl), [PutObjectLegalHold](#putobjectlegalhold), [PutObjectLockConfiguration](#putobjectlockconfiguration), [PutObjectRetention](#putobjectretention), [PutObjectTagging](#putobjecttagging), [PutPublicAccessBlock](#putpublicaccessblock), [RestoreObject](#restoreobject), [SelectObjectContent](#selectobjectcontent), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
+| `NoSuchBucketPolicy` | [GetBucketPolicy](#getbucketpolicy), [GetBucketPolicyStatus](#getbucketpolicystatus) |
 | `NoSuchCORSConfiguration` | [GetBucketCors](#getbucketcors) |
-| `NoSuchKey` | [CopyObject](#copyobject), [DeleteObjectTagging](#deleteobjecttagging), [GetObject](#getobject), [GetObjectAttributes](#getobjectattributes), [GetObjectLegalHold](#getobjectlegalhold), [GetObjectRetention](#getobjectretention), [GetObjectTagging](#getobjecttagging), [HeadObject](#headobject), [PutObjectLegalHold](#putobjectlegalhold), [PutObjectRetention](#putobjectretention), [PutObjectTagging](#putobjecttagging), [UploadPartCopy](#uploadpartcopy) |
+| `NoSuchKey` | [CopyObject](#copyobject), [DeleteObjectTagging](#deleteobjecttagging), [GetObject](#getobject), [GetObjectAcl](#getobjectacl), [GetObjectAttributes](#getobjectattributes), [GetObjectLegalHold](#getobjectlegalhold), [GetObjectRetention](#getobjectretention), [GetObjectTagging](#getobjecttagging), [HeadObject](#headobject), [PutObjectAcl](#putobjectacl), [PutObjectLegalHold](#putobjectlegalhold), [PutObjectRetention](#putobjectretention), [PutObjectTagging](#putobjecttagging), [RestoreObject](#restoreobject), [SelectObjectContent](#selectobjectcontent), [UploadPartCopy](#uploadpartcopy) |
 | `NoSuchLifecycleConfiguration` | [GetBucketLifecycleConfiguration](#getbucketlifecycleconfiguration) |
 | `NoSuchObjectLockConfiguration` | [GetObjectLegalHold](#getobjectlegalhold), [GetObjectRetention](#getobjectretention) |
+| `NoSuchPublicAccessBlockConfiguration` | [GetPublicAccessBlock](#getpublicaccessblock) |
 | `NoSuchTagSet` | [GetBucketTagging](#getbuckettagging) |
 | `NoSuchUpload` | [AbortMultipartUpload](#abortmultipartupload), [CompleteMultipartUpload](#completemultipartupload), [ListParts](#listparts), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
+| `NoSuchWebsiteConfiguration` | [GetBucketWebsite](#getbucketwebsite) |
 | `NotFound` | [HeadBucket](#headbucket), [HeadObject](#headobject) |
 | `NotModified` | [GetObject](#getobject), [HeadObject](#headobject) |
+| `ObjectAlreadyInActiveTierError` | [RestoreObject](#restoreobject) |
 | `ObjectLockConfigurationNotFoundError` | [GetObjectLockConfiguration](#getobjectlockconfiguration) |
 | `ObjectNotInActiveTierError` | [CopyObject](#copyobject) |
+| `ObjectSerializationConflict` | [SelectObjectContent](#selectobjectcontent) |
+| `OverMaxRecordSize` | [SelectObjectContent](#selectobjectcontent) |
+| `ParseUnexpectedToken` | [SelectObjectContent](#selectobjectcontent) |
 | `PermanentRedirect` | [CreateBucket](#createbucket), [DeleteBucket](#deletebucket), [GetBucketLocation](#getbucketlocation), [HeadBucket](#headbucket), [ListMultipartUploads](#listmultipartuploads), [ListObjectVersions](#listobjectversions), [ListObjects](#listobjects), [ListObjectsV2](#listobjectsv2) |
 | `PreconditionFailed` | [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject), [UploadPartCopy](#uploadpartcopy) |
+| `ReplicationConfigurationNotFoundError` | [GetBucketReplication](#getbucketreplication) |
+| `RestoreAlreadyInProgress` | [RestoreObject](#restoreobject) |
 | `ServerSideEncryptionConfigurationNotFoundError` | [GetBucketEncryption](#getbucketencryption) |
 | `TooManyParts` | [PutObject](#putobject) |
+| `UnsupportedFunction` | [SelectObjectContent](#selectobjectcontent) |
 | `XAmzContentChecksumMismatch` | [PutObject](#putobject), [UploadPart](#uploadpart) |
 
 ## Operations
@@ -238,21 +265,37 @@ such a row as though the key selected the operation is the opposite of what the 
 | [DeleteBucketCors](#deletebucketcors) | DELETE | `/{Bucket}` | `cors` | — | 204 | `NoSuchBucket`, `AccessDenied` | `q-cors-0006` |
 | [DeleteBucketEncryption](#deletebucketencryption) | DELETE | `/{Bucket}` | `encryption` | — | 204 | `NoSuchBucket`, `AccessDenied` | `q-enc-0003` |
 | [DeleteBucketLifecycle](#deletebucketlifecycle) | DELETE | `/{Bucket}` | `lifecycle` | — | 204 | `NoSuchBucket`, `AccessDenied` | `q-lc-0004` |
+| [DeleteBucketPolicy](#deletebucketpolicy) | DELETE | `/{Bucket}` | `policy` | — | 204 | `NoSuchBucket`, `AccessDenied` | `q-pol-0004` |
+| [DeleteBucketReplication](#deletebucketreplication) | DELETE | `/{Bucket}` | `replication` | — | 204 | `NoSuchBucket`, `AccessDenied` | `q-repl-0003` |
 | [DeleteBucketTagging](#deletebuckettagging) | DELETE | `/{Bucket}` | `tagging` | — | 204 | `NoSuchBucket`, `AccessDenied`, `InvalidArgument` | `q-tag-delete-idempotent-0091` |
+| [DeleteBucketWebsite](#deletebucketwebsite) | DELETE | `/{Bucket}` | `website` | — | 204 | `NoSuchBucket`, `AccessDenied` | `q-web-0005` |
 | [DeleteObject](#deleteobject) | DELETE | `/{Bucket}/{Key+}` | `versionId` | — | 204 | `NoSuchBucket`, `AccessDenied`, `InvalidArgument` | `q-delete-0026` |
 | [DeleteObjectTagging](#deleteobjecttagging) | DELETE | `/{Bucket}/{Key+}` | `tagging`, `versionId` | — | 204 | `NoSuchBucket`, `NoSuchKey`, `AccessDenied`, `InvalidArgument` | `q-tag-delete-idempotent-0091` |
 | [DeleteObjects](#deleteobjects) | POST | `/{Bucket}` | `delete` | — | 200 | `NoSuchBucket`, `AccessDenied`, `MalformedXML`, `InvalidRequest`, `InvalidArgument` | `q-checksum-0006`, `q-deletes-0027` |
+| [DeletePublicAccessBlock](#deletepublicaccessblock) | DELETE | `/{Bucket}` | `publicAccessBlock` | — | 204 | `NoSuchBucket`, `AccessDenied` | `q-pab-0003` |
+| [GetBucketAccelerateConfiguration](#getbucketaccelerateconfiguration) | GET | `/{Bucket}` | `accelerate` | — | 200 | `NoSuchBucket`, `AccessDenied` | `q-acc-0001`, `q-acc-0002` |
+| [GetBucketAcl](#getbucketacl) | GET | `/{Bucket}` | `acl` | — | 200 | `NoSuchBucket`, `AccessDenied` | `q-acl-0001`, `q-acl-0002`, `q-acl-0003`, `q-acl-0008` |
 | [GetBucketCors](#getbucketcors) | GET | `/{Bucket}` | `cors` | — | 200 | `NoSuchBucket`, `AccessDenied`, `NoSuchCORSConfiguration` | `q-cors-0001`, `q-cors-0002` |
 | [GetBucketEncryption](#getbucketencryption) | GET | `/{Bucket}` | `encryption` | — | 200 | `NoSuchBucket`, `AccessDenied`, `ServerSideEncryptionConfigurationNotFoundError` | `q-enc-0001`, `q-enc-0002` |
 | [GetBucketLifecycleConfiguration](#getbucketlifecycleconfiguration) | GET | `/{Bucket}` | `lifecycle` | — | 200 | `NoSuchBucket`, `AccessDenied`, `NoSuchLifecycleConfiguration` | `q-lc-0001`, `q-lc-0003` |
 | [GetBucketLocation](#getbucketlocation) | GET | `/{Bucket}` | `location` | — | 200 | `NoSuchBucket`, `AccessDenied`, `PermanentRedirect` | `q-unwrapped-0001` |
+| [GetBucketLogging](#getbucketlogging) | GET | `/{Bucket}` | `logging` | — | 200 | `NoSuchBucket`, `AccessDenied` | `q-log-0001`, `q-log-0003` |
+| [GetBucketNotificationConfiguration](#getbucketnotificationconfiguration) | GET | `/{Bucket}` | `notification` | — | 200 | `NoSuchBucket`, `AccessDenied` | `q-ntf-0001`, `q-ntf-0002` |
+| [GetBucketPolicy](#getbucketpolicy) | GET | `/{Bucket}` | `policy` | — | 200 | `NoSuchBucket`, `AccessDenied`, `NoSuchBucketPolicy` | `q-pol-0001`, `q-pol-0002`, `q-pol-0003` |
+| [GetBucketPolicyStatus](#getbucketpolicystatus) | GET | `/{Bucket}` | `policyStatus` | — | 200 | `NoSuchBucket`, `AccessDenied`, `NoSuchBucketPolicy` | `q-pol-0005` |
+| [GetBucketReplication](#getbucketreplication) | GET | `/{Bucket}` | `replication` | — | 200 | `NoSuchBucket`, `AccessDenied`, `ReplicationConfigurationNotFoundError` | `q-repl-0001`, `q-repl-0002` |
+| [GetBucketRequestPayment](#getbucketrequestpayment) | GET | `/{Bucket}` | `requestPayment` | — | 200 | `NoSuchBucket`, `AccessDenied` | `q-rqp-0001` |
 | [GetBucketTagging](#getbuckettagging) | GET | `/{Bucket}` | `tagging` | — | 200 | `NoSuchBucket`, `NoSuchTagSet`, `AccessDenied`, `InvalidArgument` | `q-tag-wrapped-0088`, `q-tag-bucket-unconfigured-0089` |
+| [GetBucketVersioning](#getbucketversioning) | GET | `/{Bucket}` | `versioning` | — | 200 | `NoSuchBucket`, `AccessDenied` | `q-ver-0001`, `q-ver-0004` |
+| [GetBucketWebsite](#getbucketwebsite) | GET | `/{Bucket}` | `website` | — | 200 | `NoSuchBucket`, `AccessDenied`, `NoSuchWebsiteConfiguration` | `q-web-0001`, `q-web-0002` |
 | [GetObject](#getobject) | GET | `/{Bucket}/{Key+}` | `partNumber`, `response-cache-control`, `response-content-disposition`, `response-content-encoding`, `response-content-language`, `response-content-type`, `response-expires`, `versionId` | `x-amz-meta-` | 200 | `NoSuchBucket`, `NoSuchKey`, `AccessDenied`, `InvalidObjectState`, `InvalidArgument`, `InvalidRange`, `PreconditionFailed`, `NotModified` | `q-response-0023`, `q-storageclass-0024`, `q-tag-count-omit-0095` |
+| [GetObjectAcl](#getobjectacl) | GET | `/{Bucket}/{Key+}` | `acl`, `versionId` | — | 200 | `NoSuchBucket`, `NoSuchKey`, `AccessDenied` | `q-acl-0001`, `q-acl-0002`, `q-acl-0003`, `q-acl-0008` |
 | [GetObjectAttributes](#getobjectattributes) | GET | `/{Bucket}/{Key+}` | `attributes`, `versionId` | `x-amz-object-attributes` | 200 | `NoSuchBucket`, `NoSuchKey`, `AccessDenied`, `InvalidArgument` | `q-mpu-attributes-etag-0036`, `q-attributes-root-0087` |
 | [GetObjectLegalHold](#getobjectlegalhold) | GET | `/{Bucket}/{Key+}` | `legal-hold`, `versionId` | — | 200 | `NoSuchBucket`, `NoSuchKey`, `AccessDenied`, `NoSuchObjectLockConfiguration` | `q-lock-0003`, `q-lock-0005` |
 | [GetObjectLockConfiguration](#getobjectlockconfiguration) | GET | `/{Bucket}` | `object-lock` | — | 200 | `NoSuchBucket`, `AccessDenied`, `ObjectLockConfigurationNotFoundError` | `q-lock-0001` |
 | [GetObjectRetention](#getobjectretention) | GET | `/{Bucket}/{Key+}` | `retention`, `versionId` | — | 200 | `NoSuchBucket`, `NoSuchKey`, `AccessDenied`, `NoSuchObjectLockConfiguration` | `q-lock-0002`, `q-lock-0004` |
 | [GetObjectTagging](#getobjecttagging) | GET | `/{Bucket}/{Key+}` | `tagging`, `versionId` | — | 200 | `NoSuchBucket`, `NoSuchKey`, `AccessDenied`, `InvalidArgument` | `q-tag-wrapped-0088`, `q-tag-object-unconfigured-0090` |
+| [GetPublicAccessBlock](#getpublicaccessblock) | GET | `/{Bucket}` | `publicAccessBlock` | — | 200 | `NoSuchBucket`, `AccessDenied`, `NoSuchPublicAccessBlockConfiguration` | `q-pab-0001`, `q-pab-0004` |
 | [HeadBucket](#headbucket) | HEAD | `/{Bucket}` | — | `x-amz-bucket-region` | 200 | `NoSuchBucket`, `AccessDenied`, `PermanentRedirect`, `NotFound` | `q-bkt-0009`, `q-bkt-0010` |
 | [HeadObject](#headobject) | HEAD | `/{Bucket}/{Key+}` | `partNumber`, `response-cache-control`, `response-content-disposition`, `response-content-encoding`, `response-content-language`, `response-content-type`, `response-expires`, `versionId` | `x-amz-meta-` | 200 | `NoSuchBucket`, `NoSuchKey`, `AccessDenied`, `NotFound`, `PreconditionFailed`, `NotModified` | `q-storageclass-0024`, `q-head-0025` |
 | [ListBuckets](#listbuckets) | GET | `/` | `bucket-region`, `continuation-token`, `max-buckets`, `prefix` | — | 200 | `AccessDenied` | `q-token-0021`, `q-wrapped-0062`, `q-order-0066`, `q-buckets-0071` |
@@ -261,15 +304,28 @@ such a row as though the key selected the operation is the opposite of what the 
 | [ListObjects](#listobjects) | GET | `/{Bucket}` | `delimiter`, `encoding-type`, `marker`, `max-keys`, `prefix` | — | 200 | `NoSuchBucket`, `AccessDenied`, `InvalidArgument`, `PermanentRedirect` | `q-root-0013`, `q-empty-0063`, `q-marker-0064`, `q-owner-0065`, `q-order-0066`, `q-encoding-0067`, `q-maxkeys-0068` |
 | [ListObjectsV2](#listobjectsv2) | GET | `/{Bucket}` | `continuation-token`, `delimiter`, `encoding-type`, `fetch-owner`, `list-type`, `max-keys`, `prefix`, `start-after` | — | 200 | `NoSuchBucket`, `AccessDenied`, `InvalidArgument`, `PermanentRedirect` | `q-root-0013`, `q-order-0014`, `q-encoding-0015` |
 | [ListParts](#listparts) | GET | `/{Bucket}/{Key+}` | `max-parts`, `part-number-marker`, `uploadId` | — | 200 | `NoSuchBucket`, `NoSuchUpload`, `AccessDenied`, `InvalidArgument` | `q-mpu-part-0031`, `q-mpu-upload-id-0037`, `q-mpu-marker-0040` |
+| [PutBucketAccelerateConfiguration](#putbucketaccelerateconfiguration) | PUT | `/{Bucket}` | `accelerate` | — | 200 | `NoSuchBucket`, `AccessDenied`, `MalformedXML`, `InvalidArgument` | `q-acc-0002`, `q-acc-0003` |
+| [PutBucketAcl](#putbucketacl) | PUT | `/{Bucket}` | `acl` | — | 200 | `NoSuchBucket`, `AccessDenied`, `MalformedXML`, `InvalidRequest`, `InvalidArgument`, `BadDigest` | `q-acl-0002`, `q-acl-0003`, `q-acl-0004`, `q-acl-0005`, `q-acl-0006`, `q-acl-0007`, `q-acl-0009`, `q-acl-0010`, `q-acl-0011`, `q-acl-0012`, `q-acl-0013` |
 | [PutBucketCors](#putbucketcors) | PUT | `/{Bucket}` | `cors` | — | 200 | `NoSuchBucket`, `AccessDenied`, `MalformedXML`, `InvalidRequest`, `InvalidArgument`, `BadDigest` | `q-cors-0003`, `q-cors-0004`, `q-cors-0005`, `q-cors-0007`, `q-cors-0008` |
 | [PutBucketEncryption](#putbucketencryption) | PUT | `/{Bucket}` | `encryption` | — | 200 | `NoSuchBucket`, `AccessDenied`, `MalformedXML`, `InvalidRequest`, `InvalidArgument`, `BadDigest` | `q-enc-0004`, `q-enc-0005`, `q-enc-0006`, `q-enc-0007`, `q-enc-0008`, `q-enc-0009` |
 | [PutBucketLifecycleConfiguration](#putbucketlifecycleconfiguration) | PUT | `/{Bucket}` | `lifecycle` | — | 200 | `NoSuchBucket`, `AccessDenied`, `MalformedXML`, `InvalidRequest`, `InvalidArgument`, `BadDigest` | `q-lc-0002`, `q-lc-0005`, `q-lc-0006`, `q-lc-0007`, `q-lc-0008`, `q-lc-0009`, `q-lc-0010`, `q-lc-0011`, `q-lc-0012`, `q-lc-0013`, `q-lc-0014` |
+| [PutBucketLogging](#putbucketlogging) | PUT | `/{Bucket}` | `logging` | — | 200 | `NoSuchBucket`, `AccessDenied`, `MalformedXML`, `InvalidArgument`, `BadDigest` | `q-log-0002`, `q-log-0003`, `q-log-0004` |
+| [PutBucketNotificationConfiguration](#putbucketnotificationconfiguration) | PUT | `/{Bucket}` | `notification` | — | 200 | `NoSuchBucket`, `AccessDenied`, `MalformedXML`, `InvalidArgument` | `q-ntf-0002`, `q-ntf-0003`, `q-ntf-0004`, `q-ntf-0005` |
+| [PutBucketPolicy](#putbucketpolicy) | PUT | `/{Bucket}` | `policy` | — | 200 | `NoSuchBucket`, `AccessDenied`, `MalformedPolicy`, `InvalidPolicyDocument`, `BadDigest` | `q-pol-0001`, `q-pol-0006`, `q-pol-0007`, `q-pol-0008` |
+| [PutBucketReplication](#putbucketreplication) | PUT | `/{Bucket}` | `replication` | — | 200 | `NoSuchBucket`, `AccessDenied`, `MalformedXML`, `InvalidRequest`, `InvalidArgument`, `BadDigest` | `q-repl-0004`, `q-repl-0005`, `q-repl-0006`, `q-repl-0007`, `q-repl-0008`, `q-repl-0009`, `q-repl-0010`, `q-repl-0011`, `q-repl-0012`, `q-repl-0013` |
+| [PutBucketRequestPayment](#putbucketrequestpayment) | PUT | `/{Bucket}` | `requestPayment` | — | 200 | `NoSuchBucket`, `AccessDenied`, `MalformedXML`, `InvalidArgument`, `BadDigest` | `q-rqp-0002`, `q-rqp-0003` |
 | [PutBucketTagging](#putbuckettagging) | PUT | `/{Bucket}` | `tagging` | — | 200 | `NoSuchBucket`, `AccessDenied`, `InvalidArgument`, `MalformedXML`, `InvalidTag` | `q-tag-md5-required-0092`, `q-tag-limits-0094` |
+| [PutBucketVersioning](#putbucketversioning) | PUT | `/{Bucket}` | `versioning` | — | 200 | `NoSuchBucket`, `AccessDenied`, `MalformedXML`, `InvalidArgument`, `BadDigest` | `q-ver-0002`, `q-ver-0003`, `q-ver-0004` |
+| [PutBucketWebsite](#putbucketwebsite) | PUT | `/{Bucket}` | `website` | — | 200 | `NoSuchBucket`, `AccessDenied`, `MalformedXML`, `InvalidArgument`, `BadDigest` | `q-web-0002`, `q-web-0003`, `q-web-0004`, `q-web-0006` |
 | [PutObject](#putobject) | PUT | `/{Bucket}/{Key+}` | — | `content-length`, `etag`, `x-amz-checksum-`, `x-amz-meta-` | 200 | `NoSuchBucket`, `AccessDenied`, `MissingContentLength`, `EntityTooLarge`, `IncompleteBody`, `InvalidDigest`, `BadDigest`, `XAmzContentChecksumMismatch`, `InvalidRequest`, `InvalidArgument`, `PreconditionFailed`, `ConditionalRequestConflict`, `EncryptionTypeMismatch`, `InvalidWriteOffset`, `TooManyParts` | `q-checksum-0006`, `q-tag-header-form-0093` |
+| [PutObjectAcl](#putobjectacl) | PUT | `/{Bucket}/{Key+}` | `acl`, `versionId` | — | 200 | `NoSuchBucket`, `NoSuchKey`, `AccessDenied`, `MalformedXML`, `InvalidRequest`, `InvalidArgument`, `BadDigest` | `q-acl-0002`, `q-acl-0003`, `q-acl-0004`, `q-acl-0005`, `q-acl-0006`, `q-acl-0007`, `q-acl-0009`, `q-acl-0010`, `q-acl-0011`, `q-acl-0012`, `q-acl-0013` |
 | [PutObjectLegalHold](#putobjectlegalhold) | PUT | `/{Bucket}/{Key+}` | `legal-hold`, `versionId` | — | 200 | `NoSuchBucket`, `NoSuchKey`, `AccessDenied`, `MalformedXML`, `InvalidRequest`, `InvalidArgument`, `BadDigest` | `q-lock-0005`, `q-lock-0006`, `q-lock-0007`, `q-lock-0011`, `q-lock-0015` |
 | [PutObjectLockConfiguration](#putobjectlockconfiguration) | PUT | `/{Bucket}` | `object-lock` | — | 200 | `NoSuchBucket`, `AccessDenied`, `MalformedXML`, `InvalidRequest`, `InvalidArgument`, `BadDigest` | `q-lock-0006`, `q-lock-0007`, `q-lock-0008`, `q-lock-0009`, `q-lock-0010`, `q-lock-0014` |
 | [PutObjectRetention](#putobjectretention) | PUT | `/{Bucket}/{Key+}` | `retention`, `versionId` | — | 200 | `NoSuchBucket`, `NoSuchKey`, `AccessDenied`, `MalformedXML`, `InvalidRequest`, `InvalidArgument`, `BadDigest` | `q-lock-0004`, `q-lock-0006`, `q-lock-0007`, `q-lock-0008`, `q-lock-0012`, `q-lock-0013`, `q-lock-0015` |
 | [PutObjectTagging](#putobjecttagging) | PUT | `/{Bucket}/{Key+}` | `tagging`, `versionId` | — | 200 | `NoSuchBucket`, `NoSuchKey`, `AccessDenied`, `InvalidArgument`, `MalformedXML`, `InvalidTag` | `q-tag-md5-required-0092`, `q-tag-limits-0094` |
+| [PutPublicAccessBlock](#putpublicaccessblock) | PUT | `/{Bucket}` | `publicAccessBlock` | — | 200 | `NoSuchBucket`, `AccessDenied`, `MalformedXML`, `InvalidArgument`, `BadDigest` | `q-pab-0002`, `q-pab-0004` |
+| [RestoreObject](#restoreobject) | POST | `/{Bucket}/{Key+}` | `restore`, `versionId` | — | 202 | `NoSuchBucket`, `NoSuchKey`, `AccessDenied`, `MalformedXML`, `InvalidRequest`, `InvalidArgument`, `RestoreAlreadyInProgress`, `InvalidObjectState`, `ObjectAlreadyInActiveTierError` | `q-restore-0001`, `q-restore-0002`, `q-restore-0003`, `q-restore-0004`, `q-restore-0005`, `q-restore-0006`, `q-restore-0007`, `q-restore-0008` |
+| [SelectObjectContent](#selectobjectcontent) | POST | `/{Bucket}/{Key+}` | `select`, `select-type` | — | 200 | `NoSuchBucket`, `NoSuchKey`, `AccessDenied`, `MalformedXML`, `InvalidRequest`, `InvalidArgument`, `InvalidExpressionType`, `ExpressionTooLong`, `InvalidTextEncoding`, `InvalidCompressionFormat`, `ObjectSerializationConflict`, `UnsupportedFunction`, `ParseUnexpectedToken`, `CSVParsingError`, `JSONParsingError`, `InvalidColumnIndex`, `InvalidDataType`, `OverMaxRecordSize` | `q-select-0001`, `q-select-0002`, `q-select-0003`, `q-select-0004`, `q-select-0005`, `q-select-0006`, `q-select-0007`, `q-select-0008`, `q-select-0009` |
 | [UploadPart](#uploadpart) | PUT | `/{Bucket}/{Key+}` | `partNumber`, `uploadId` | `content-length`, `etag`, `x-amz-checksum-` | 200 | `NoSuchBucket`, `NoSuchUpload`, `AccessDenied`, `InvalidArgument`, `MissingContentLength`, `EntityTooLarge`, `IncompleteBody`, `BadDigest`, `InvalidDigest`, `XAmzContentChecksumMismatch` | `q-checksum-0006`, `q-mpu-upload-id-0037`, `q-mpu-limits-0038` |
 | [UploadPartCopy](#uploadpartcopy) | PUT | `/{Bucket}/{Key+}` | `partNumber`, `uploadId` | `x-amz-copy-source` | 200 | `NoSuchBucket`, `NoSuchKey`, `NoSuchUpload`, `AccessDenied`, `InvalidRequest`, `InvalidArgument`, `InvalidRange`, `PreconditionFailed`, `MethodNotAllowed` | `q-copy-source-split-0077`, `q-copy-source-arn-0078`, `q-copy-error-after-200-0082`, `q-copy-source-version-0083`, `q-copy-part-root-0084`, `q-copy-range-0085` |
 
@@ -284,6 +340,28 @@ First match wins; lower precedence is tried first.
 | Precedence | Operation | Predicates |
 | --- | --- | --- |
 | 100 | [ListBuckets](#listbuckets) | `Method GET` AND `Target Service` |
+| 200 | [GetBucketAccelerateConfiguration](#getbucketaccelerateconfiguration) | `Method GET` AND `Target Bucket` AND `QueryPresent ?accelerate` |
+| 201 | [PutBucketAccelerateConfiguration](#putbucketaccelerateconfiguration) | `Method PUT` AND `Target Bucket` AND `QueryPresent ?accelerate` |
+| 205 | [GetBucketLogging](#getbucketlogging) | `Method GET` AND `Target Bucket` AND `QueryPresent ?logging` |
+| 206 | [PutBucketLogging](#putbucketlogging) | `Method PUT` AND `Target Bucket` AND `QueryPresent ?logging` |
+| 210 | [GetBucketNotificationConfiguration](#getbucketnotificationconfiguration) | `Method GET` AND `Target Bucket` AND `QueryPresent ?notification` |
+| 211 | [PutBucketNotificationConfiguration](#putbucketnotificationconfiguration) | `Method PUT` AND `Target Bucket` AND `QueryPresent ?notification` |
+| 215 | [GetBucketPolicy](#getbucketpolicy) | `Method GET` AND `Target Bucket` AND `QueryPresent ?policy` |
+| 216 | [PutBucketPolicy](#putbucketpolicy) | `Method PUT` AND `Target Bucket` AND `QueryPresent ?policy` |
+| 217 | [DeleteBucketPolicy](#deletebucketpolicy) | `Method DELETE` AND `Target Bucket` AND `QueryPresent ?policy` |
+| 220 | [GetBucketPolicyStatus](#getbucketpolicystatus) | `Method GET` AND `Target Bucket` AND `QueryPresent ?policyStatus` |
+| 225 | [GetPublicAccessBlock](#getpublicaccessblock) | `Method GET` AND `Target Bucket` AND `QueryPresent ?publicAccessBlock` |
+| 226 | [PutPublicAccessBlock](#putpublicaccessblock) | `Method PUT` AND `Target Bucket` AND `QueryPresent ?publicAccessBlock` |
+| 227 | [DeletePublicAccessBlock](#deletepublicaccessblock) | `Method DELETE` AND `Target Bucket` AND `QueryPresent ?publicAccessBlock` |
+| 230 | [GetBucketRequestPayment](#getbucketrequestpayment) | `Method GET` AND `Target Bucket` AND `QueryPresent ?requestPayment` |
+| 231 | [PutBucketRequestPayment](#putbucketrequestpayment) | `Method PUT` AND `Target Bucket` AND `QueryPresent ?requestPayment` |
+| 235 | [GetBucketVersioning](#getbucketversioning) | `Method GET` AND `Target Bucket` AND `QueryPresent ?versioning` |
+| 236 | [PutBucketVersioning](#putbucketversioning) | `Method PUT` AND `Target Bucket` AND `QueryPresent ?versioning` |
+| 240 | [GetBucketWebsite](#getbucketwebsite) | `Method GET` AND `Target Bucket` AND `QueryPresent ?website` |
+| 241 | [PutBucketWebsite](#putbucketwebsite) | `Method PUT` AND `Target Bucket` AND `QueryPresent ?website` |
+| 242 | [DeleteBucketWebsite](#deletebucketwebsite) | `Method DELETE` AND `Target Bucket` AND `QueryPresent ?website` |
+| 250 | [GetBucketAcl](#getbucketacl) | `Method GET` AND `Target Bucket` AND `QueryPresent ?acl` |
+| 260 | [PutBucketAcl](#putbucketacl) | `Method PUT` AND `Target Bucket` AND `QueryPresent ?acl` |
 | 300 | [GetBucketLocation](#getbucketlocation) | `Method GET` AND `Target Bucket` AND `QueryPresent ?location` |
 | 310 | [GetBucketCors](#getbucketcors) | `Method GET` AND `Target Bucket` AND `QueryPresent ?cors` |
 | 320 | [PutBucketCors](#putbucketcors) | `Method PUT` AND `Target Bucket` AND `QueryPresent ?cors` |
@@ -297,6 +375,9 @@ First match wins; lower precedence is tried first.
 | 391 | [GetBucketEncryption](#getbucketencryption) | `Method GET` AND `Target Bucket` AND `QueryPresent ?encryption` |
 | 392 | [PutBucketEncryption](#putbucketencryption) | `Method PUT` AND `Target Bucket` AND `QueryPresent ?encryption` |
 | 393 | [DeleteBucketEncryption](#deletebucketencryption) | `Method DELETE` AND `Target Bucket` AND `QueryPresent ?encryption` |
+| 394 | [GetBucketReplication](#getbucketreplication) | `Method GET` AND `Target Bucket` AND `QueryPresent ?replication` |
+| 395 | [PutBucketReplication](#putbucketreplication) | `Method PUT` AND `Target Bucket` AND `QueryPresent ?replication` |
+| 396 | [DeleteBucketReplication](#deletebucketreplication) | `Method DELETE` AND `Target Bucket` AND `QueryPresent ?replication` |
 | 397 | [GetObjectLockConfiguration](#getobjectlockconfiguration) | `Method GET` AND `Target Bucket` AND `QueryPresent ?object-lock` |
 | 398 | [PutObjectLockConfiguration](#putobjectlockconfiguration) | `Method PUT` AND `Target Bucket` AND `QueryPresent ?object-lock` |
 | 400 | [UploadPartCopy](#uploadpartcopy) | `Method PUT` AND `Target Object` AND `QueryPresent ?partNumber` AND `QueryPresent ?uploadId` AND `HeaderPresent x-amz-copy-source` |
@@ -314,6 +395,10 @@ First match wins; lower precedence is tried first.
 | 520 | [PutObjectRetention](#putobjectretention) | `Method PUT` AND `Target Object` AND `QueryPresent ?retention` |
 | 530 | [GetObjectLegalHold](#getobjectlegalhold) | `Method GET` AND `Target Object` AND `QueryPresent ?legal-hold` |
 | 540 | [PutObjectLegalHold](#putobjectlegalhold) | `Method PUT` AND `Target Object` AND `QueryPresent ?legal-hold` |
+| 550 | [GetObjectAcl](#getobjectacl) | `Method GET` AND `Target Object` AND `QueryPresent ?acl` |
+| 560 | [PutObjectAcl](#putobjectacl) | `Method PUT` AND `Target Object` AND `QueryPresent ?acl` |
+| 570 | [RestoreObject](#restoreobject) | `Method POST` AND `Target Object` AND `QueryPresent ?restore` |
+| 580 | [SelectObjectContent](#selectobjectcontent) | `Method POST` AND `Target Object` AND `QueryPresent ?select` AND `QueryEquals ?select-type=2` |
 | 600 | [ListObjectsV2](#listobjectsv2) | `Method GET` AND `Target Bucket` AND `QueryEquals ?list-type=2` |
 | 610 | [ListObjectVersions](#listobjectversions) | `Method GET` AND `Target Bucket` AND `QueryPresent ?versions` |
 | 650 | [DeleteObjects](#deleteobjects) | `Method POST` AND `Target Bucket` AND `QueryPresent ?delete` |
@@ -768,6 +853,82 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 
 Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 
+### DeleteBucketPolicy
+
+`DELETE /{Bucket}` &rarr; 204 · target Bucket · precedence 217 · auth Required (`s3:DeleteBucketPolicy`, presigned allowed) · spec `spec/operations/DeleteBucketPolicy.toml`
+
+**Route predicates**
+
+- `Method DELETE`
+- `Target Bucket`
+- `QueryPresent ?policy`
+
+**Query keys**
+
+- routed on, present: `policy`
+- routed on, exact value: —
+- routed on, absent: —
+- read as parameters: —
+
+**Headers**
+
+- request: `x-amz-expected-bucket-owner`
+- response: —
+- required: —
+
+**Body**
+
+- request: None (None)
+- response: None (None)
+
+**Error codes**
+
+`NoSuchBucket`, `AccessDenied`
+
+**Quirks**
+
+- `q-pol-0004` (idempotent_delete on `DeleteBucketPolicy`) — The delete answers 204 whether or not a policy existed, so removing the policy of an unconfigured bucket is a success rather than the 404 the read of the same bucket answers.
+
+Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
+
+### DeleteBucketReplication
+
+`DELETE /{Bucket}` &rarr; 204 · target Bucket · precedence 396 · auth Required (`s3:PutReplicationConfiguration`, presigned allowed) · spec `spec/operations/DeleteBucketReplication.toml`
+
+**Route predicates**
+
+- `Method DELETE`
+- `Target Bucket`
+- `QueryPresent ?replication`
+
+**Query keys**
+
+- routed on, present: `replication`
+- routed on, exact value: —
+- routed on, absent: —
+- read as parameters: —
+
+**Headers**
+
+- request: `x-amz-expected-bucket-owner`
+- response: —
+- required: —
+
+**Body**
+
+- request: None (None)
+- response: None (None)
+
+**Error codes**
+
+`NoSuchBucket`, `AccessDenied`
+
+**Quirks**
+
+- `q-repl-0003` (idempotent_delete on `DeleteBucketReplication`) — The delete answers 204 with no body whether or not a configuration existed, so removing the replication document of an unconfigured bucket is a success rather than a 404.
+
+Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
+
 ### DeleteBucketTagging
 
 `DELETE /{Bucket}` &rarr; 204 · target Bucket · precedence 360 · auth Required (`s3:DeleteBucketTagging`, presigned allowed) · spec `spec/operations/DeleteBucketTagging.toml`
@@ -803,6 +964,44 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 **Quirks**
 
 - `q-tag-delete-idempotent-0091` (idempotent_delete on `DeleteBucketTagging`) — Removing a tag set answers an unconditional 204: untagging a bucket or an object that carries no tags is a success, so the delete is idempotent where the bucket-scope GET on the same state is a 404.
+
+Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
+
+### DeleteBucketWebsite
+
+`DELETE /{Bucket}` &rarr; 204 · target Bucket · precedence 242 · auth Required (`s3:DeleteBucketWebsite`, presigned allowed) · spec `spec/operations/DeleteBucketWebsite.toml`
+
+**Route predicates**
+
+- `Method DELETE`
+- `Target Bucket`
+- `QueryPresent ?website`
+
+**Query keys**
+
+- routed on, present: `website`
+- routed on, exact value: —
+- routed on, absent: —
+- read as parameters: —
+
+**Headers**
+
+- request: `x-amz-expected-bucket-owner`
+- response: —
+- required: —
+
+**Body**
+
+- request: None (None)
+- response: None (None)
+
+**Error codes**
+
+`NoSuchBucket`, `AccessDenied`
+
+**Quirks**
+
+- `q-web-0005` (idempotent_delete on `DeleteBucketWebsite`) — The delete answers 204 whether or not a website document existed, even though the read of the same unconfigured bucket answers 404, so a retry after a lost response is a success rather than a failure.
 
 Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 
@@ -934,6 +1133,136 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 - `DeletedObject` (Structure) — `Key: ObjectKey`, `VersionId: String`, `DeleteMarker: Boolean`, `DeleteMarkerVersionId: String`
 - `Error` (Structure) — `Key: ObjectKey`, `VersionId: String`, `Code: String`, `Message: String`
 - `ObjectIdentifier` (Structure) — `Key: ObjectKey`, `VersionId: String`, `ETag: ETag(XmlQuoted)`, `LastModifiedTime: Timestamp(HttpDate)`, `Size: Long`
+
+### DeletePublicAccessBlock
+
+`DELETE /{Bucket}` &rarr; 204 · target Bucket · precedence 227 · auth Required (`s3:PutBucketPublicAccessBlock`, presigned allowed) · spec `spec/operations/DeletePublicAccessBlock.toml`
+
+**Route predicates**
+
+- `Method DELETE`
+- `Target Bucket`
+- `QueryPresent ?publicAccessBlock`
+
+**Query keys**
+
+- routed on, present: `publicAccessBlock`
+- routed on, exact value: —
+- routed on, absent: —
+- read as parameters: —
+
+**Headers**
+
+- request: `x-amz-expected-bucket-owner`
+- response: —
+- required: —
+
+**Body**
+
+- request: None (None)
+- response: None (None)
+
+**Error codes**
+
+`NoSuchBucket`, `AccessDenied`
+
+**Quirks**
+
+- `q-pab-0003` (idempotent_delete on `DeletePublicAccessBlock`) — The delete answers 204 whether or not a public-access block existed, so removing one from an unconfigured bucket is a success rather than the 404 the read of the same bucket answers.
+
+Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
+
+### GetBucketAccelerateConfiguration
+
+`GET /{Bucket}` &rarr; 200 · target Bucket · precedence 200 · auth Required (`s3:GetAccelerateConfiguration`, presigned allowed) · spec `spec/operations/GetBucketAccelerateConfiguration.toml`
+
+**Route predicates**
+
+- `Method GET`
+- `Target Bucket`
+- `QueryPresent ?accelerate`
+
+**Query keys**
+
+- routed on, present: `accelerate`
+- routed on, exact value: —
+- routed on, absent: —
+- read as parameters: —
+
+**Headers**
+
+- request: `x-amz-expected-bucket-owner`, `x-amz-request-payer`
+- response: `x-amz-request-charged`
+- required: —
+
+**Body**
+
+- request: None (None)
+- response: XmlBody (Full, at most 4096 bytes)
+- response root: `<AccelerateConfiguration>`, xmlns emit
+- element order: `Status`
+
+**Error codes**
+
+`NoSuchBucket`, `AccessDenied`
+
+**Quirks**
+
+- `q-acc-0001` (not_configured_error on `GetBucketAccelerateConfiguration`) — A bucket with no acceleration document answers 200 with an empty AccelerateConfiguration element, not a 404, so a client reads acceleration as off rather than as an error.
+- `q-acc-0002` (closed_value_set on `AccelerateConfiguration.Status`) — The acceleration status is Enabled or Suspended and nothing else; the element is the whole document, so a value outside the pair leaves nothing meaningful to store.
+
+Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
+
+### GetBucketAcl
+
+`GET /{Bucket}` &rarr; 200 · target Bucket · precedence 250 · auth Required (`s3:GetBucketAcl`, presigned allowed) · spec `spec/operations/GetBucketAcl.toml`
+
+**Route predicates**
+
+- `Method GET`
+- `Target Bucket`
+- `QueryPresent ?acl`
+
+**Query keys**
+
+- routed on, present: `acl`
+- routed on, exact value: —
+- routed on, absent: —
+- read as parameters: —
+
+**Headers**
+
+- request: `x-amz-expected-bucket-owner`
+- response: —
+- required: —
+
+**Body**
+
+- request: None (None)
+- response: XmlBody (Full, at most 65536 bytes)
+- response root: `<AccessControlPolicy>`, xmlns emit
+- element order: `Owner`, `Grants`
+
+**Error codes**
+
+`NoSuchBucket`, `AccessDenied`
+
+**Quirks**
+
+- `q-acl-0001` (wrapped_list on `AccessControlPolicy.Grants`) — The grants sit inside an <AccessControlList> wrapper rather than repeating directly under the policy root, which is the opposite of the flattened Contents and Rule lists elsewhere in the surface, and a serializer that flattened them would answer a document every SDK reads as no grants at all.
+- `q-acl-0002` (xml_attribute on `Grantee`) — The XMLSchema-instance namespace is declared on the <Grantee> element itself rather than on the document root, so a client that resolves prefixes before reading xsi:type finds the declaration where AWS puts it.
+- `q-acl-0003` (xml_attribute on `Grantee.Type`) — The grantee discriminator is an XML attribute of <Grantee> and not a child element, which makes it the one member of the supported surface that cannot be written by the ordinary element emitter; the frozen IR reserves xml.attributes for it and the generated encoder writes it from there rather than from a branch in the codec.
+- `q-acl-0004` (aws_deviation on `Grantee.Type`) — On the way in the discriminator is derived from whichever of ID, URI or EmailAddress the grantee carries, because the XML reader this project ships exposes no attributes at all; for every document AWS accepts the two agree, and a document whose attribute contradicts its members is read by its members.
+- `q-acl-0008` (not_configured_error on `GetBucketAcl`) — An ACL is the one bucket subresource that always exists — a bucket nobody configured still has its owner's FULL_CONTROL — so the read answers 200 with the owner grant and there is no operation-specific 404, unlike every other Get/Put subresource triple in the table.
+- `q-acl-0012` (closed_value_set on `Grant.Permission`) — The five permissions are a closed set and a grant naming anything else is refused rather than stored, which is the one place this family is stricter than its siblings: a stored permission no authorizer can evaluate is a grant that reads as present and enforces as nothing.
+
+Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
+
+**Body shapes**
+
+- `Grant` (Structure) — `Grantee: Structure(Grantee)`, `Permission: StringEnum`
+- `Grantee` (Structure) — `DisplayName: String`, `EmailAddress: String`, `ID: String`, `URI: String`, `Type: StringEnum`
+- `Owner` (Structure) — `DisplayName: String`, `ID: String`
 
 ### GetBucketCors
 
@@ -1126,6 +1455,296 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 
 Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 
+### GetBucketLogging
+
+`GET /{Bucket}` &rarr; 200 · target Bucket · precedence 205 · auth Required (`s3:GetBucketLogging`, presigned allowed) · spec `spec/operations/GetBucketLogging.toml`
+
+**Route predicates**
+
+- `Method GET`
+- `Target Bucket`
+- `QueryPresent ?logging`
+
+**Query keys**
+
+- routed on, present: `logging`
+- routed on, exact value: —
+- routed on, absent: —
+- read as parameters: —
+
+**Headers**
+
+- request: `x-amz-expected-bucket-owner`
+- response: —
+- required: —
+
+**Body**
+
+- request: None (None)
+- response: XmlBody (Full, at most 65536 bytes)
+- response root: `<BucketLoggingStatus>`, xmlns emit
+- element order: `LoggingEnabled`
+
+**Error codes**
+
+`NoSuchBucket`, `AccessDenied`
+
+**Quirks**
+
+- `q-log-0001` (not_configured_error on `GetBucketLogging`) — A bucket that is not logging answers 200 with an empty BucketLoggingStatus element rather than a 404, so the absence of a LoggingEnabled child is the whole answer.
+- `q-acl-0003` (xml_attribute on `Grantee.Type`) — The grantee discriminator is an XML attribute of <Grantee> and not a child element, which makes it the one member of the supported surface that cannot be written by the ordinary element emitter; the frozen IR reserves xml.attributes for it and the generated encoder writes it from there rather than from a branch in the codec.
+- `q-log-0003` (element_name on `LoggingEnabled.TargetGrants`) — The grant list is wrapped in a TargetGrants element whose entries are spelled Grant rather than TargetGrant, so a reader looking for the member name on the wire will not find it.
+- `q-acl-0004` (aws_deviation on `Grantee.Type`) — On the way in the discriminator is derived from whichever of ID, URI or EmailAddress the grantee carries, because the XML reader this project ships exposes no attributes at all; for every document AWS accepts the two agree, and a document whose attribute contradicts its members is read by its members.
+
+Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
+
+**Body shapes**
+
+- `Grantee` (Structure) — `DisplayName: String`, `EmailAddress: String`, `ID: String`, `URI: String`, `Type: StringEnum`
+- `LoggingEnabled` (Structure) — `TargetBucket: String`, `TargetGrants: List<Structure(TargetGrant)>(Grant)`, `TargetPrefix: String`, `TargetObjectKeyFormat: Structure(TargetObjectKeyFormat)`
+- `PartitionedPrefix` (Structure) — `PartitionDateSource: StringEnum`
+- `SimplePrefix` (Structure) — 
+- `TargetGrant` (Structure) — `Grantee: Structure(Grantee)`, `Permission: StringEnum`
+- `TargetObjectKeyFormat` (Structure) — `SimplePrefix: Structure(SimplePrefix)`, `PartitionedPrefix: Structure(PartitionedPrefix)`
+
+### GetBucketNotificationConfiguration
+
+`GET /{Bucket}` &rarr; 200 · target Bucket · precedence 210 · auth Required (`s3:GetBucketNotification`, presigned allowed) · spec `spec/operations/GetBucketNotificationConfiguration.toml`
+
+**Route predicates**
+
+- `Method GET`
+- `Target Bucket`
+- `QueryPresent ?notification`
+
+**Query keys**
+
+- routed on, present: `notification`
+- routed on, exact value: —
+- routed on, absent: —
+- read as parameters: —
+
+**Headers**
+
+- request: `x-amz-expected-bucket-owner`
+- response: —
+- required: —
+
+**Body**
+
+- request: None (None)
+- response: XmlBody (Full, at most 262144 bytes)
+- response root: `<NotificationConfiguration>`, xmlns emit
+- element order: `TopicConfigurations`, `QueueConfigurations`, `LambdaFunctionConfigurations`, `EventBridgeConfiguration`
+
+**Error codes**
+
+`NoSuchBucket`, `AccessDenied`
+
+**Quirks**
+
+- `q-ntf-0001` (not_configured_error on `GetBucketNotificationConfiguration`) — A bucket that delivers no events answers 200 with an empty NotificationConfiguration element rather than a 404, so a client reads no subscriptions rather than a missing resource.
+- `q-ntf-0002` (flattened_list on `NotificationConfiguration`) — All three destination lists and the Event list inside each of them repeat as sibling elements directly under their parent with no wrapper, which is the opposite of the website family's wrapped routing rules.
+
+Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
+
+**Body shapes**
+
+- `EventBridgeConfiguration` (Structure) — 
+- `FilterRule` (Structure) — `Name: StringEnum`, `Value: String`
+- `LambdaFunctionConfiguration` (Structure) — `Id: String`, `LambdaFunctionArn: String`, `Events: List<StringEnum>(flattened)`, `Filter: Structure(NotificationConfigurationFilter)`
+- `NotificationConfigurationFilter` (Structure) — `Key: Structure(S3KeyFilter)`
+- `QueueConfiguration` (Structure) — `Id: String`, `QueueArn: String`, `Events: List<StringEnum>(flattened)`, `Filter: Structure(NotificationConfigurationFilter)`
+- `S3KeyFilter` (Structure) — `FilterRules: List<Structure(FilterRule)>(flattened)`
+- `TopicConfiguration` (Structure) — `Id: String`, `TopicArn: String`, `Events: List<StringEnum>(flattened)`, `Filter: Structure(NotificationConfigurationFilter)`
+
+### GetBucketPolicy
+
+`GET /{Bucket}` &rarr; 200 · target Bucket · precedence 215 · auth Required (`s3:GetBucketPolicy`, presigned allowed) · spec `spec/operations/GetBucketPolicy.toml`
+
+**Route predicates**
+
+- `Method GET`
+- `Target Bucket`
+- `QueryPresent ?policy`
+
+**Query keys**
+
+- routed on, present: `policy`
+- routed on, exact value: —
+- routed on, absent: —
+- read as parameters: —
+
+**Headers**
+
+- request: `x-amz-expected-bucket-owner`
+- response: —
+- required: —
+
+**Body**
+
+- request: None (None)
+- response: XmlBody (Full, at most 20480 bytes)
+
+**Error codes**
+
+`NoSuchBucket`, `AccessDenied`, `NoSuchBucketPolicy`
+
+Unconfigured subresource returns `NoSuchBucketPolicy`.
+
+**Quirks**
+
+- `q-pol-0001` (media_type on `GetBucketPolicy.Policy`) — The bucket policy body is JSON on both the read and the write, the only success body in the S3 surface that is not XML, and the read answers Content-Type application/json with the stored document byte for byte.
+- `q-pol-0002` (error_body on `GetBucketPolicy`) — The error body of the policy read stays XML even though its success body is JSON, so a client that switched parsers on the success content type would be reading the wrong format on every failure.
+- `q-pol-0003` (not_configured_error on `GetBucketPolicy`) — A bucket with no policy answers 404 NoSuchBucketPolicy, the code specific to this subresource, rather than an empty JSON document or a generic not-found.
+
+Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
+
+### GetBucketPolicyStatus
+
+`GET /{Bucket}` &rarr; 200 · target Bucket · precedence 220 · auth Required (`s3:GetBucketPolicyStatus`, presigned allowed) · spec `spec/operations/GetBucketPolicyStatus.toml`
+
+**Route predicates**
+
+- `Method GET`
+- `Target Bucket`
+- `QueryPresent ?policyStatus`
+
+**Query keys**
+
+- routed on, present: `policyStatus`
+- routed on, exact value: —
+- routed on, absent: —
+- read as parameters: —
+
+**Headers**
+
+- request: `x-amz-expected-bucket-owner`
+- response: —
+- required: —
+
+**Body**
+
+- request: None (None)
+- response: XmlBody (Full, at most 4096 bytes)
+
+**Error codes**
+
+`NoSuchBucket`, `AccessDenied`, `NoSuchBucketPolicy`
+
+Unconfigured subresource returns `NoSuchBucketPolicy`.
+
+**Quirks**
+
+- `q-pol-0005` (not_configured_error on `GetBucketPolicyStatus`) — The policy-status read answers the policy read's own 404 code, NoSuchBucketPolicy, because a bucket with no policy has no status to report and the missing thing is the same document.
+
+Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
+
+**Body shapes**
+
+- `PolicyStatus` (Structure) — `IsPublic: Boolean`
+
+### GetBucketReplication
+
+`GET /{Bucket}` &rarr; 200 · target Bucket · precedence 394 · auth Required (`s3:GetReplicationConfiguration`, presigned allowed) · spec `spec/operations/GetBucketReplication.toml`
+
+**Route predicates**
+
+- `Method GET`
+- `Target Bucket`
+- `QueryPresent ?replication`
+
+**Query keys**
+
+- routed on, present: `replication`
+- routed on, exact value: —
+- routed on, absent: —
+- read as parameters: —
+
+**Headers**
+
+- request: `x-amz-expected-bucket-owner`
+- response: —
+- required: —
+
+**Body**
+
+- request: None (None)
+- response: XmlBody (Full, at most 2097152 bytes)
+
+**Error codes**
+
+`NoSuchBucket`, `AccessDenied`, `ReplicationConfigurationNotFoundError`
+
+Unconfigured subresource returns `ReplicationConfigurationNotFoundError`.
+
+**Quirks**
+
+- `q-repl-0001` (not_configured_error on `GetBucketReplication`) — A bucket that never had a replication document answers 404 with the operation-specific code ReplicationConfigurationNotFoundError — one of the few AWS codes whose literal ends in Error — not a generic not-found and not an empty 200.
+- `q-repl-0002` (flattened_list on `ReplicationConfiguration.Rules`) — The rules repeat as sibling Rule elements directly under the ReplicationConfiguration root; a Rules wrapper element would make every SDK read zero rules and conclude the bucket replicates nothing.
+- `q-repl-0011` (arn_valued_member on `Destination.Bucket`) — The destination Bucket member is typed as a bucket name in the model but carries an ARN on the wire — arn:aws:s3:::bucket — so it is decoded as a plain string and neither the bucket-name grammar nor any ARN grammar is enforced on it: the model's type is unenforceable and a stricter grammar would be this project's invention.
+
+Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
+
+**Body shapes**
+
+- `AccessControlTranslation` (Structure) — `Owner: String`
+- `DeleteMarkerReplication` (Structure) — `Status: StringEnum`
+- `Destination` (Structure) — `Bucket: String`, `Account: String`, `StorageClass: StringEnum`, `AccessControlTranslation: Structure(AccessControlTranslation)`, `EncryptionConfiguration: Structure(EncryptionConfiguration)`, `ReplicationTime: Structure(ReplicationTime)`, `Metrics: Structure(Metrics)`
+- `EncryptionConfiguration` (Structure) — `ReplicaKmsKeyID: String`
+- `ExistingObjectReplication` (Structure) — `Status: StringEnum`
+- `Metrics` (Structure) — `Status: StringEnum`, `EventThreshold: Structure(ReplicationTimeValue)`
+- `ReplicaModifications` (Structure) — `Status: StringEnum`
+- `ReplicationConfiguration` (Structure) — `Role: String`, `Rules: List<Structure(ReplicationRule)>(flattened)`
+- `ReplicationRule` (Structure) — `ID: String`, `Priority: Integer`, `Prefix: String`, `Filter: Structure(ReplicationRuleFilter)`, `Status: StringEnum`, `SourceSelectionCriteria: Structure(SourceSelectionCriteria)`, `ExistingObjectReplication: Structure(ExistingObjectReplication)`, `Destination: Structure(Destination)`, `DeleteMarkerReplication: Structure(DeleteMarkerReplication)`
+- `ReplicationRuleAndOperator` (Structure) — `Prefix: String`, `Tags: List<Structure(Tag)>(flattened)`
+- `ReplicationRuleFilter` (Structure) — `Prefix: String`, `Tag: Structure(Tag)`, `And: Structure(ReplicationRuleAndOperator)`
+- `ReplicationTime` (Structure) — `Status: StringEnum`, `Time: Structure(ReplicationTimeValue)`
+- `ReplicationTimeValue` (Structure) — `Minutes: Integer`
+- `SourceSelectionCriteria` (Structure) — `SseKmsEncryptedObjects: Structure(SseKmsEncryptedObjects)`, `ReplicaModifications: Structure(ReplicaModifications)`
+- `SseKmsEncryptedObjects` (Structure) — `Status: StringEnum`
+- `Tag` (Structure) — `Key: ObjectKey`, `Value: String`
+
+### GetBucketRequestPayment
+
+`GET /{Bucket}` &rarr; 200 · target Bucket · precedence 230 · auth Required (`s3:GetBucketRequestPayment`, presigned allowed) · spec `spec/operations/GetBucketRequestPayment.toml`
+
+**Route predicates**
+
+- `Method GET`
+- `Target Bucket`
+- `QueryPresent ?requestPayment`
+
+**Query keys**
+
+- routed on, present: `requestPayment`
+- routed on, exact value: —
+- routed on, absent: —
+- read as parameters: —
+
+**Headers**
+
+- request: `x-amz-expected-bucket-owner`
+- response: —
+- required: —
+
+**Body**
+
+- request: None (None)
+- response: XmlBody (Full, at most 4096 bytes)
+- response root: `<RequestPaymentConfiguration>`, xmlns emit
+- element order: `Payer`
+
+**Error codes**
+
+`NoSuchBucket`, `AccessDenied`
+
+**Quirks**
+
+- `q-rqp-0001` (not_configured_error on `GetBucketRequestPayment`) — A bucket that was never switched to requester-pays answers 200 with the default payer BucketOwner rather than an empty document or a 404, because every bucket has a payer.
+
+Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
+
 ### GetBucketTagging
 
 `GET /{Bucket}` &rarr; 200 · target Bucket · precedence 340 · auth Required (`s3:GetBucketTagging`, presigned allowed) · spec `spec/operations/GetBucketTagging.toml`
@@ -1173,6 +1792,99 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 
 - `Tag` (Structure) — `Key: ObjectKey`, `Value: String`
 
+### GetBucketVersioning
+
+`GET /{Bucket}` &rarr; 200 · target Bucket · precedence 235 · auth Required (`s3:GetBucketVersioning`, presigned allowed) · spec `spec/operations/GetBucketVersioning.toml`
+
+**Route predicates**
+
+- `Method GET`
+- `Target Bucket`
+- `QueryPresent ?versioning`
+
+**Query keys**
+
+- routed on, present: `versioning`
+- routed on, exact value: —
+- routed on, absent: —
+- read as parameters: —
+
+**Headers**
+
+- request: `x-amz-expected-bucket-owner`
+- response: —
+- required: —
+
+**Body**
+
+- request: None (None)
+- response: XmlBody (Full, at most 4096 bytes)
+- response root: `<VersioningConfiguration>`, xmlns emit
+- element order: `Status`, `MFADelete`
+
+**Error codes**
+
+`NoSuchBucket`, `AccessDenied`
+
+**Quirks**
+
+- `q-ver-0001` (not_configured_error on `GetBucketVersioning`) — A bucket that was never versioned answers 200 with an empty VersioningConfiguration element and no Status child at all, which is a different state from Suspended and is not a 404.
+- `q-ver-0004` (element_name on `VersioningConfiguration.MFADelete`) — The member the model calls MFADelete is spelled MfaDelete on the wire, and the pinned model gives the read and the write the same spelling, so no alternate-name rule is needed for it here.
+
+Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
+
+### GetBucketWebsite
+
+`GET /{Bucket}` &rarr; 200 · target Bucket · precedence 240 · auth Required (`s3:GetBucketWebsite`, presigned allowed) · spec `spec/operations/GetBucketWebsite.toml`
+
+**Route predicates**
+
+- `Method GET`
+- `Target Bucket`
+- `QueryPresent ?website`
+
+**Query keys**
+
+- routed on, present: `website`
+- routed on, exact value: —
+- routed on, absent: —
+- read as parameters: —
+
+**Headers**
+
+- request: `x-amz-expected-bucket-owner`
+- response: —
+- required: —
+
+**Body**
+
+- request: None (None)
+- response: XmlBody (Full, at most 65536 bytes)
+- response root: `<WebsiteConfiguration>`, xmlns emit
+- element order: `RedirectAllRequestsTo`, `IndexDocument`, `ErrorDocument`, `RoutingRules`
+
+**Error codes**
+
+`NoSuchBucket`, `AccessDenied`, `NoSuchWebsiteConfiguration`
+
+Unconfigured subresource returns `NoSuchWebsiteConfiguration`.
+
+**Quirks**
+
+- `q-web-0001` (not_configured_error on `GetBucketWebsite`) — A bucket with no website document answers 404 with the subresource-specific code NoSuchWebsiteConfiguration, which is neither the policy code nor the public-access code nor an empty 200.
+- `q-web-0002` (element_name on `WebsiteConfiguration.RoutingRules`) — The routing rules are wrapped: the list sits inside a RoutingRules element with one RoutingRule per entry, where every list in the notification family is flattened, and a flattened rendering here is a document SDKs read as having no rules.
+
+Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
+
+**Body shapes**
+
+- `Condition` (Structure) — `HttpErrorCodeReturnedEquals: String`, `KeyPrefixEquals: String`
+- `ErrorDocument` (Structure) — `Key: ObjectKey`
+- `IndexDocument` (Structure) — `Suffix: String`
+- `Redirect` (Structure) — `HostName: String`, `HttpRedirectCode: String`, `Protocol: StringEnum`, `ReplaceKeyPrefixWith: String`, `ReplaceKeyWith: String`
+- `RedirectAllRequestsTo` (Structure) — `HostName: String`, `Protocol: StringEnum`
+- `RoutingRule` (Structure) — `Condition: Structure(Condition)`, `Redirect: Structure(Redirect)`
+
 ### GetObject
 
 `GET /{Bucket}/{Key+}` &rarr; 200 · target Object · precedence 900 · auth Required (`s3:GetObject`, presigned allowed) · spec `spec/operations/GetObject.toml`
@@ -1218,6 +1930,57 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 - `q-tag-count-omit-0095` (omit_when on `GetObject`) — The x-amz-tagging-count response header carries the object's tag count as an integer and is omitted entirely when the count would be zero — presence is the signal readers branch on, so a literal 0 is a wrong answer.
 
 Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
+
+### GetObjectAcl
+
+`GET /{Bucket}/{Key+}` &rarr; 200 · target Object · precedence 550 · auth Required (`s3:GetObjectAcl`, presigned allowed) · spec `spec/operations/GetObjectAcl.toml`
+
+**Route predicates**
+
+- `Method GET`
+- `Target Object`
+- `QueryPresent ?acl`
+
+**Query keys**
+
+- routed on, present: `acl`
+- routed on, exact value: —
+- routed on, absent: —
+- read as parameters: `versionId`
+
+**Headers**
+
+- request: `x-amz-expected-bucket-owner`, `x-amz-request-payer`
+- response: `x-amz-request-charged`
+- required: —
+
+**Body**
+
+- request: None (None)
+- response: XmlBody (Full, at most 65536 bytes)
+- response root: `<AccessControlPolicy>`, xmlns emit
+- element order: `Owner`, `Grants`
+
+**Error codes**
+
+`NoSuchBucket`, `NoSuchKey`, `AccessDenied`
+
+**Quirks**
+
+- `q-acl-0001` (wrapped_list on `AccessControlPolicy.Grants`) — The grants sit inside an <AccessControlList> wrapper rather than repeating directly under the policy root, which is the opposite of the flattened Contents and Rule lists elsewhere in the surface, and a serializer that flattened them would answer a document every SDK reads as no grants at all.
+- `q-acl-0002` (xml_attribute on `Grantee`) — The XMLSchema-instance namespace is declared on the <Grantee> element itself rather than on the document root, so a client that resolves prefixes before reading xsi:type finds the declaration where AWS puts it.
+- `q-acl-0003` (xml_attribute on `Grantee.Type`) — The grantee discriminator is an XML attribute of <Grantee> and not a child element, which makes it the one member of the supported surface that cannot be written by the ordinary element emitter; the frozen IR reserves xml.attributes for it and the generated encoder writes it from there rather than from a branch in the codec.
+- `q-acl-0004` (aws_deviation on `Grantee.Type`) — On the way in the discriminator is derived from whichever of ID, URI or EmailAddress the grantee carries, because the XML reader this project ships exposes no attributes at all; for every document AWS accepts the two agree, and a document whose attribute contradicts its members is read by its members.
+- `q-acl-0008` (not_configured_error on `GetBucketAcl`) — An ACL is the one bucket subresource that always exists — a bucket nobody configured still has its owner's FULL_CONTROL — so the read answers 200 with the owner grant and there is no operation-specific 404, unlike every other Get/Put subresource triple in the table.
+- `q-acl-0012` (closed_value_set on `Grant.Permission`) — The five permissions are a closed set and a grant naming anything else is refused rather than stored, which is the one place this family is stricter than its siblings: a stored permission no authorizer can evaluate is a grant that reads as present and enforces as nothing.
+
+Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
+
+**Body shapes**
+
+- `Grant` (Structure) — `Grantee: Structure(Grantee)`, `Permission: StringEnum`
+- `Grantee` (Structure) — `DisplayName: String`, `EmailAddress: String`, `ID: String`, `URI: String`, `Type: StringEnum`
+- `Owner` (Structure) — `DisplayName: String`, `ID: String`
 
 ### GetObjectAttributes
 
@@ -1450,6 +2213,51 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 **Body shapes**
 
 - `Tag` (Structure) — `Key: ObjectKey`, `Value: String`
+
+### GetPublicAccessBlock
+
+`GET /{Bucket}` &rarr; 200 · target Bucket · precedence 225 · auth Required (`s3:GetBucketPublicAccessBlock`, presigned allowed) · spec `spec/operations/GetPublicAccessBlock.toml`
+
+**Route predicates**
+
+- `Method GET`
+- `Target Bucket`
+- `QueryPresent ?publicAccessBlock`
+
+**Query keys**
+
+- routed on, present: `publicAccessBlock`
+- routed on, exact value: —
+- routed on, absent: —
+- read as parameters: —
+
+**Headers**
+
+- request: `x-amz-expected-bucket-owner`
+- response: —
+- required: —
+
+**Body**
+
+- request: None (None)
+- response: XmlBody (Full, at most 4096 bytes)
+
+**Error codes**
+
+`NoSuchBucket`, `AccessDenied`, `NoSuchPublicAccessBlockConfiguration`
+
+Unconfigured subresource returns `NoSuchPublicAccessBlockConfiguration`.
+
+**Quirks**
+
+- `q-pab-0001` (not_configured_error on `GetPublicAccessBlock`) — A bucket with no public-access block answers 404 NoSuchPublicAccessBlockConfiguration, the third distinct not-configured literal in this band and interchangeable with neither of the other two.
+- `q-pab-0004` (default_value on `PublicAccessBlockConfiguration`) — All four switches are optional and an omitted one is false, so a document naming two of them turns the other two off rather than leaving them undefined, and the read renders every one of them in lower case.
+
+Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
+
+**Body shapes**
+
+- `PublicAccessBlockConfiguration` (Structure) — `BlockPublicAcls: Boolean`, `IgnorePublicAcls: Boolean`, `BlockPublicPolicy: Boolean`, `RestrictPublicBuckets: Boolean`
 
 ### HeadBucket
 
@@ -1865,6 +2673,115 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 - `Owner` (Structure) — `DisplayName: String`, `ID: String`
 - `Part` (Structure) — `PartNumber: Integer`, `LastModified: Timestamp(Iso8601)`, `ETag: ETag(XmlQuoted)`, `Size: Long`, `ChecksumCRC32: String`, `ChecksumCRC32C: String`, `ChecksumCRC64NVME: String`, `ChecksumSHA1: String`, `ChecksumSHA256: String`, `ChecksumSHA512: String`, `ChecksumMD5: String`, `ChecksumXXHASH64: String`, `ChecksumXXHASH3: String`, `ChecksumXXHASH128: String`
 
+### PutBucketAccelerateConfiguration
+
+`PUT /{Bucket}` &rarr; 200 · target Bucket · precedence 201 · auth Required (`s3:PutAccelerateConfiguration`, presigned allowed) · spec `spec/operations/PutBucketAccelerateConfiguration.toml`
+
+**Route predicates**
+
+- `Method PUT`
+- `Target Bucket`
+- `QueryPresent ?accelerate`
+
+**Query keys**
+
+- routed on, present: `accelerate`
+- routed on, exact value: —
+- routed on, absent: —
+- read as parameters: —
+
+**Headers**
+
+- request: `x-amz-expected-bucket-owner`, `x-amz-sdk-checksum-algorithm`
+- response: —
+- required: —
+
+**Body**
+
+- request: XmlBody (Full, at most 4096 bytes)
+- response: None (None)
+
+**Error codes**
+
+`NoSuchBucket`, `AccessDenied`, `MalformedXML`, `InvalidArgument`
+
+**Checksums**
+
+- required before the handler runs: false
+- request algorithms: `CRC32`, `CRC32C`, `CRC64NVME`, `SHA1`, `SHA256`
+
+**Quirks**
+
+- `q-acc-0002` (closed_value_set on `AccelerateConfiguration.Status`) — The acceleration status is Enabled or Suspended and nothing else; the element is the whole document, so a value outside the pair leaves nothing meaningful to store.
+- `q-acc-0003` (checksum_required on `PutBucketAccelerateConfiguration`) — The acceleration write is one of two writes in this band that carry no integrity requirement, so a body with neither Content-MD5 nor an x-amz-checksum header is accepted.
+
+Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
+
+**Body shapes**
+
+- `AccelerateConfiguration` (Structure) — `Status: StringEnum`
+
+### PutBucketAcl
+
+`PUT /{Bucket}` &rarr; 200 · target Bucket · precedence 260 · auth Required (`s3:PutBucketAcl`, presigned allowed) · spec `spec/operations/PutBucketAcl.toml`
+
+**Route predicates**
+
+- `Method PUT`
+- `Target Bucket`
+- `QueryPresent ?acl`
+
+**Query keys**
+
+- routed on, present: `acl`
+- routed on, exact value: —
+- routed on, absent: —
+- read as parameters: —
+
+**Headers**
+
+- request: `content-md5`, `x-amz-acl`, `x-amz-expected-bucket-owner`, `x-amz-grant-full-control`, `x-amz-grant-read`, `x-amz-grant-read-acp`, `x-amz-grant-write`, `x-amz-grant-write-acp`, `x-amz-sdk-checksum-algorithm`
+- response: —
+- required: —
+
+**Body**
+
+- request: XmlBody (Full, at most 65536 bytes)
+- response: None (None)
+
+**Error codes**
+
+`NoSuchBucket`, `AccessDenied`, `MalformedXML`, `InvalidRequest`, `InvalidArgument`, `BadDigest`
+
+**Checksums**
+
+- required before the handler runs: true
+- request algorithms: `CRC32`, `CRC32C`, `CRC64NVME`, `SHA1`, `SHA256`
+
+**Quirks**
+
+- `q-acl-0001` (wrapped_list on `AccessControlPolicy.Grants`) — The grants sit inside an <AccessControlList> wrapper rather than repeating directly under the policy root, which is the opposite of the flattened Contents and Rule lists elsewhere in the surface, and a serializer that flattened them would answer a document every SDK reads as no grants at all.
+- `q-acl-0002` (xml_attribute on `Grantee`) — The XMLSchema-instance namespace is declared on the <Grantee> element itself rather than on the document root, so a client that resolves prefixes before reading xsi:type finds the declaration where AWS puts it.
+- `q-acl-0003` (xml_attribute on `Grantee.Type`) — The grantee discriminator is an XML attribute of <Grantee> and not a child element, which makes it the one member of the supported surface that cannot be written by the ordinary element emitter; the frozen IR reserves xml.attributes for it and the generated encoder writes it from there rather than from a branch in the codec.
+- `q-acl-0004` (aws_deviation on `Grantee.Type`) — On the way in the discriminator is derived from whichever of ID, URI or EmailAddress the grantee carries, because the XML reader this project ships exposes no attributes at all; for every document AWS accepts the two agree, and a document whose attribute contradicts its members is read by its members.
+- `q-acl-0005` (closed_value_set on `PutBucketAcl.ACL`) — A bucket and an object accept different canned ACLs — log-delivery-write is a bucket's alone and the two bucket-owner values are an object's alone — and the pinned model's BucketCannedACL enumeration is narrower still than AWS's own canned-ACL table, omitting aws-exec-read and log-delivery-write, so the accepted sets are stated here rather than inherited.
+- `q-acl-0006` (lenient_unknown_elements on `PutBucketAcl.AccessControlPolicy`) — An ACL request body is request XML, so an element this release does not know is skipped and an xmlns attribute is ignored rather than validated; refusing either would make a document written by a newer SDK unstorable, and this family is not one of the three security configurations that opt into strict decoding.
+- `q-acl-0007` (exclusive_members on `PutBucketAcl`) — The AccessControlPolicy body and the ACL request headers are two spellings of the same thing and a request may use only one of them, but no exclusion is documented between the canned header and the explicit grant headers, so those two may appear together and the pair is passed through rather than refused.
+- `q-acl-0009` (checksum_required on `PutBucketAcl`) — Both ACL writes carry the aws.protocols#httpChecksum trait with requestChecksumRequired, which is a different trait from the smithy.api#httpChecksumRequired the lowering reads, so the requirement is stated in the overlay and a write with neither Content-MD5 nor an x-amz-checksum-* header is refused before the body is parsed.
+- `q-acl-0010` (secret_hygiene on `PutBucketAcl`) — A canonical user id and an account email address are identities, so every refusal in this family is a constant that names the rule broken and never the grantee that broke it — an error body is copied into logs, tickets and client telemetry, and an identity that reaches one of those has left the request it arrived on.
+- `q-acl-0011` (structured_header on `PutBucketAcl.GrantRead`) — A grant header is a comma-separated list of quoted key="value" pairs whose key is one of id, uri or emailAddress read case-insensitively; the quotation marks are load-bearing rather than decorative, because without them a comma inside a value silently splits one grantee into two.
+- `q-acl-0012` (closed_value_set on `Grant.Permission`) — The five permissions are a closed set and a grant naming anything else is refused rather than stored, which is the one place this family is stricter than its siblings: a stored permission no authorizer can evaluate is a grant that reads as present and enforces as nothing.
+- `q-acl-0013` (lenient_value_set on `AccessControlPolicy.Owner`) — The Owner element of a written policy is stored and echoed as sent and is never checked against the caller, because deciding whether a principal may name itself the owner is authorisation and this family deliberately performs none.
+
+Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
+
+**Body shapes**
+
+- `AccessControlPolicy` (Structure) — `Grants: List<Structure(Grant)>(Grant)`, `Owner: Structure(Owner)`
+- `Grant` (Structure) — `Grantee: Structure(Grantee)`, `Permission: StringEnum`
+- `Grantee` (Structure) — `DisplayName: String`, `EmailAddress: String`, `ID: String`, `URI: String`, `Type: StringEnum`
+- `Owner` (Structure) — `DisplayName: String`, `ID: String`
+
 ### PutBucketCors
 
 `PUT /{Bucket}` &rarr; 200 · target Bucket · precedence 320 · auth Required (`s3:PutBucketCORS`, presigned allowed) · spec `spec/operations/PutBucketCors.toml`
@@ -2038,6 +2955,280 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 - `Tag` (Structure) — `Key: ObjectKey`, `Value: String`
 - `Transition` (Structure) — `Date: Timestamp(Iso8601)`, `Days: Integer`, `StorageClass: StringEnum`
 
+### PutBucketLogging
+
+`PUT /{Bucket}` &rarr; 200 · target Bucket · precedence 206 · auth Required (`s3:PutBucketLogging`, presigned allowed) · spec `spec/operations/PutBucketLogging.toml`
+
+**Route predicates**
+
+- `Method PUT`
+- `Target Bucket`
+- `QueryPresent ?logging`
+
+**Query keys**
+
+- routed on, present: `logging`
+- routed on, exact value: —
+- routed on, absent: —
+- read as parameters: —
+
+**Headers**
+
+- request: `content-md5`, `x-amz-expected-bucket-owner`, `x-amz-sdk-checksum-algorithm`
+- response: —
+- required: —
+
+**Body**
+
+- request: XmlBody (Full, at most 65536 bytes)
+- response: None (None)
+
+**Error codes**
+
+`NoSuchBucket`, `AccessDenied`, `MalformedXML`, `InvalidArgument`, `BadDigest`
+
+**Checksums**
+
+- required before the handler runs: true
+- request algorithms: `CRC32`, `CRC32C`, `CRC64NVME`, `SHA1`, `SHA256`
+
+**Quirks**
+
+- `q-log-0002` (required_body on `PutBucketLogging`) — An empty BucketLoggingStatus document is the documented way to stop logging and is accepted rather than refused, because this subresource has no delete operation to say it any other way.
+- `q-acl-0003` (xml_attribute on `Grantee.Type`) — The grantee discriminator is an XML attribute of <Grantee> and not a child element, which makes it the one member of the supported surface that cannot be written by the ordinary element emitter; the frozen IR reserves xml.attributes for it and the generated encoder writes it from there rather than from a branch in the codec.
+- `q-log-0003` (element_name on `LoggingEnabled.TargetGrants`) — The grant list is wrapped in a TargetGrants element whose entries are spelled Grant rather than TargetGrant, so a reader looking for the member name on the wire will not find it.
+- `q-acl-0004` (aws_deviation on `Grantee.Type`) — On the way in the discriminator is derived from whichever of ID, URI or EmailAddress the grantee carries, because the XML reader this project ships exposes no attributes at all; for every document AWS accepts the two agree, and a document whose attribute contradicts its members is read by its members.
+- `q-log-0004` (checksum_required on `PutBucketLogging`) — The logging write demands an integrity claim on the body, so a request with neither Content-MD5 nor an x-amz-checksum header is refused with 400 before the document is parsed.
+
+Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
+
+**Body shapes**
+
+- `BucketLoggingStatus` (Structure) — `LoggingEnabled: Structure(LoggingEnabled)`
+- `Grantee` (Structure) — `DisplayName: String`, `EmailAddress: String`, `ID: String`, `URI: String`, `Type: StringEnum`
+- `LoggingEnabled` (Structure) — `TargetBucket: String`, `TargetGrants: List<Structure(TargetGrant)>(Grant)`, `TargetPrefix: String`, `TargetObjectKeyFormat: Structure(TargetObjectKeyFormat)`
+- `PartitionedPrefix` (Structure) — `PartitionDateSource: StringEnum`
+- `SimplePrefix` (Structure) — 
+- `TargetGrant` (Structure) — `Grantee: Structure(Grantee)`, `Permission: StringEnum`
+- `TargetObjectKeyFormat` (Structure) — `SimplePrefix: Structure(SimplePrefix)`, `PartitionedPrefix: Structure(PartitionedPrefix)`
+
+### PutBucketNotificationConfiguration
+
+`PUT /{Bucket}` &rarr; 200 · target Bucket · precedence 211 · auth Required (`s3:PutBucketNotification`, presigned allowed) · spec `spec/operations/PutBucketNotificationConfiguration.toml`
+
+**Route predicates**
+
+- `Method PUT`
+- `Target Bucket`
+- `QueryPresent ?notification`
+
+**Query keys**
+
+- routed on, present: `notification`
+- routed on, exact value: —
+- routed on, absent: —
+- read as parameters: —
+
+**Headers**
+
+- request: `x-amz-expected-bucket-owner`, `x-amz-skip-destination-validation`
+- response: —
+- required: —
+
+**Body**
+
+- request: XmlBody (Full, at most 262144 bytes)
+- response: None (None)
+
+**Error codes**
+
+`NoSuchBucket`, `AccessDenied`, `MalformedXML`, `InvalidArgument`
+
+**Quirks**
+
+- `q-ntf-0002` (flattened_list on `NotificationConfiguration`) — All three destination lists and the Event list inside each of them repeat as sibling elements directly under their parent with no wrapper, which is the opposite of the website family's wrapped routing rules.
+- `q-ntf-0003` (checksum_required on `PutBucketNotificationConfiguration`) — The v2 notification write is the second of two writes in this band that carry no integrity requirement, so a body with neither Content-MD5 nor an x-amz-checksum header is accepted.
+- `q-ntf-0004` (element_name on `NotificationConfiguration.LambdaFunctionConfigurations`) — Five members of this document are spelled differently on the wire than in the model: the function configuration is CloudFunctionConfiguration, its ARN is CloudFunction, the queue and topic ARNs are Queue and Topic, and the key filter is S3Key.
+- `q-ntf-0005` (lenient_enum on `NotificationConfiguration`) — An event name this build has no constant for is stored and echoed as sent rather than refused, because AWS adds event types continuously and a gateway that refused unknown ones would reject configurations AWS accepts until it was rebuilt.
+
+Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
+
+**Body shapes**
+
+- `EventBridgeConfiguration` (Structure) — 
+- `FilterRule` (Structure) — `Name: StringEnum`, `Value: String`
+- `LambdaFunctionConfiguration` (Structure) — `Id: String`, `LambdaFunctionArn: String`, `Events: List<StringEnum>(flattened)`, `Filter: Structure(NotificationConfigurationFilter)`
+- `NotificationConfiguration` (Structure) — `TopicConfigurations: List<Structure(TopicConfiguration)>(flattened)`, `QueueConfigurations: List<Structure(QueueConfiguration)>(flattened)`, `LambdaFunctionConfigurations: List<Structure(LambdaFunctionConfiguration)>(flattened)`, `EventBridgeConfiguration: Structure(EventBridgeConfiguration)`
+- `NotificationConfigurationFilter` (Structure) — `Key: Structure(S3KeyFilter)`
+- `QueueConfiguration` (Structure) — `Id: String`, `QueueArn: String`, `Events: List<StringEnum>(flattened)`, `Filter: Structure(NotificationConfigurationFilter)`
+- `S3KeyFilter` (Structure) — `FilterRules: List<Structure(FilterRule)>(flattened)`
+- `TopicConfiguration` (Structure) — `Id: String`, `TopicArn: String`, `Events: List<StringEnum>(flattened)`, `Filter: Structure(NotificationConfigurationFilter)`
+
+### PutBucketPolicy
+
+`PUT /{Bucket}` &rarr; 200 · target Bucket · precedence 216 · auth Required (`s3:PutBucketPolicy`, presigned allowed) · spec `spec/operations/PutBucketPolicy.toml`
+
+**Route predicates**
+
+- `Method PUT`
+- `Target Bucket`
+- `QueryPresent ?policy`
+
+**Query keys**
+
+- routed on, present: `policy`
+- routed on, exact value: —
+- routed on, absent: —
+- read as parameters: —
+
+**Headers**
+
+- request: `content-md5`, `x-amz-confirm-remove-self-bucket-access`, `x-amz-expected-bucket-owner`, `x-amz-sdk-checksum-algorithm`
+- response: —
+- required: —
+
+**Body**
+
+- request: XmlBody (Full, at most 20480 bytes)
+- response: None (None)
+
+**Error codes**
+
+`NoSuchBucket`, `AccessDenied`, `MalformedPolicy`, `InvalidPolicyDocument`, `BadDigest`
+
+**Checksums**
+
+- required before the handler runs: true
+- request algorithms: `CRC32`, `CRC32C`, `CRC64NVME`, `SHA1`, `SHA256`
+
+**Quirks**
+
+- `q-pol-0001` (media_type on `GetBucketPolicy.Policy`) — The bucket policy body is JSON on both the read and the write, the only success body in the S3 surface that is not XML, and the read answers Content-Type application/json with the stored document byte for byte.
+- `q-pol-0006` (checksum_required on `PutBucketPolicy`) — The policy write demands an integrity claim on the body, so a request with neither Content-MD5 nor an x-amz-checksum header is refused with 400 before an access-control document is read at all.
+- `q-pol-0007` (bounded_input on `PutBucketPolicy`) — A policy is capped at 20 KB and at a nesting depth this parser will follow, both checked before anything interprets the document, and the depth check counts in a loop rather than recursing so that the limit is a refusal instead of a stack overflow.
+- `q-pol-0008` (value_constraint on `PutBucketPolicy`) — The framework checks that a policy is UTF-8, is syntactically JSON and is an object, and evaluates none of its meaning; the refusal is MalformedPolicy with a constant message that never repeats the document, because a policy names principals and account identifiers.
+
+Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
+
+### PutBucketReplication
+
+`PUT /{Bucket}` &rarr; 200 · target Bucket · precedence 395 · auth Required (`s3:PutReplicationConfiguration`, presigned allowed) · spec `spec/operations/PutBucketReplication.toml`
+
+**Route predicates**
+
+- `Method PUT`
+- `Target Bucket`
+- `QueryPresent ?replication`
+
+**Query keys**
+
+- routed on, present: `replication`
+- routed on, exact value: —
+- routed on, absent: —
+- read as parameters: —
+
+**Headers**
+
+- request: `content-md5`, `x-amz-bucket-object-lock-token`, `x-amz-expected-bucket-owner`, `x-amz-sdk-checksum-algorithm`
+- response: —
+- required: —
+
+**Body**
+
+- request: XmlBody (Full, at most 2097152 bytes)
+- response: None (None)
+
+**Error codes**
+
+`NoSuchBucket`, `AccessDenied`, `MalformedXML`, `InvalidRequest`, `InvalidArgument`, `BadDigest`
+
+**Checksums**
+
+- required before the handler runs: true
+- request algorithms: `CRC32`, `CRC32C`, `CRC64NVME`, `SHA1`, `SHA256`
+
+**Quirks**
+
+- `q-repl-0004` (checksum_required on `PutBucketReplication`) — The write demands an integrity claim on the body, so a request with neither Content-MD5 nor an x-amz-checksum header is refused with 400 before the document is parsed.
+- `q-repl-0005` (lenient_unknown_elements on `PutBucketReplication`) — Unknown elements inside the request document are skipped rather than refused — and the stakes are higher here than in any sibling family, because RustFS parses the stored replication document fail-closed: a decoder that got stricter on the next release would not silently switch replication off, it would make the bucket unusable.
+- `q-repl-0006` (schema_version_exclusive on `ReplicationRule`) — A rule is either V2 — a Filter, which then demands Priority and DeleteMarkerReplication beside it — or V1 — a bare rule-level Prefix, which carries neither; a rule mixing the two schema versions is refused with 400 InvalidRequest, because the version of a stored configuration is decided by exactly this distinction.
+- `q-repl-0007` (filter_grammar on `ReplicationRuleFilter`) — A Filter takes at most one direct child — Prefix, Tag or And — and several conditions must nest inside one And, which exists only to combine and therefore needs at least two; two direct siblings are refused as MalformedXML. An empty Filter passes: it is the documented spelling for a rule that applies to every object.
+- `q-repl-0008` (value_constraint on `ReplicationRule.ID`) — A rule ID is bounded at 255 characters and must be unique within the configuration, and the document as a whole is bounded at 1000 rules; an ID over the cap or duplicated is refused with 400 InvalidArgument, the rule-count overflow with 400 InvalidRequest.
+- `q-repl-0009` (lenient_duplicates on `ReplicationRule.Priority`) — Two rules carrying the same Priority are stored and echoed rather than refused: AWS documents no uniqueness requirement, only how the engine resolves a conflict between overlapping rules by taking the highest number — so refusing duplicates would invent a rule a stored document could already be breaking, under the one configuration RustFS parses fail-closed.
+- `q-repl-0010` (secret_hygiene on `EncryptionConfiguration.ReplicaKmsKeyID`) — The replica KMS key id and the destination account id are configuration secrets: the stored document echoes them on the read — that is the documented GET behaviour — but every refusal message is a constant that never carries them, so a rejected write cannot leak a key id or an account id into an error body or a log line.
+- `q-repl-0011` (arn_valued_member on `Destination.Bucket`) — The destination Bucket member is typed as a bucket name in the model but carries an ARN on the wire — arn:aws:s3:::bucket — so it is decoded as a plain string and neither the bucket-name grammar nor any ARN grammar is enforced on it: the model's type is unenforceable and a stricter grammar would be this project's invention.
+- `q-repl-0012` (lenient_value_set on `ReplicationRule.Status`) — A Status outside the documented Enabled/Disabled pair is stored and echoed rather than refused: the stored document is re-parsed by every future release, RustFS parses this one configuration fail-closed, and a spelling refused tomorrow that was accepted yesterday would make the bucket unusable rather than merely switch a feature off.
+- `q-repl-0013` (header_passthrough on `PutBucketReplication.Token`) — The x-amz-bucket-object-lock-token request header is parsed into the input and passed through to the backend untouched: whether the token actually permits enabling Object Lock on the source bucket is the storage backend's semantic question, and the codec neither requires nor validates the header.
+
+Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
+
+**Body shapes**
+
+- `AccessControlTranslation` (Structure) — `Owner: String`
+- `DeleteMarkerReplication` (Structure) — `Status: StringEnum`
+- `Destination` (Structure) — `Bucket: String`, `Account: String`, `StorageClass: StringEnum`, `AccessControlTranslation: Structure(AccessControlTranslation)`, `EncryptionConfiguration: Structure(EncryptionConfiguration)`, `ReplicationTime: Structure(ReplicationTime)`, `Metrics: Structure(Metrics)`
+- `EncryptionConfiguration` (Structure) — `ReplicaKmsKeyID: String`
+- `ExistingObjectReplication` (Structure) — `Status: StringEnum`
+- `Metrics` (Structure) — `Status: StringEnum`, `EventThreshold: Structure(ReplicationTimeValue)`
+- `ReplicaModifications` (Structure) — `Status: StringEnum`
+- `ReplicationConfiguration` (Structure) — `Role: String`, `Rules: List<Structure(ReplicationRule)>(flattened)`
+- `ReplicationRule` (Structure) — `ID: String`, `Priority: Integer`, `Prefix: String`, `Filter: Structure(ReplicationRuleFilter)`, `Status: StringEnum`, `SourceSelectionCriteria: Structure(SourceSelectionCriteria)`, `ExistingObjectReplication: Structure(ExistingObjectReplication)`, `Destination: Structure(Destination)`, `DeleteMarkerReplication: Structure(DeleteMarkerReplication)`
+- `ReplicationRuleAndOperator` (Structure) — `Prefix: String`, `Tags: List<Structure(Tag)>(flattened)`
+- `ReplicationRuleFilter` (Structure) — `Prefix: String`, `Tag: Structure(Tag)`, `And: Structure(ReplicationRuleAndOperator)`
+- `ReplicationTime` (Structure) — `Status: StringEnum`, `Time: Structure(ReplicationTimeValue)`
+- `ReplicationTimeValue` (Structure) — `Minutes: Integer`
+- `SourceSelectionCriteria` (Structure) — `SseKmsEncryptedObjects: Structure(SseKmsEncryptedObjects)`, `ReplicaModifications: Structure(ReplicaModifications)`
+- `SseKmsEncryptedObjects` (Structure) — `Status: StringEnum`
+- `Tag` (Structure) — `Key: ObjectKey`, `Value: String`
+
+### PutBucketRequestPayment
+
+`PUT /{Bucket}` &rarr; 200 · target Bucket · precedence 231 · auth Required (`s3:PutBucketRequestPayment`, presigned allowed) · spec `spec/operations/PutBucketRequestPayment.toml`
+
+**Route predicates**
+
+- `Method PUT`
+- `Target Bucket`
+- `QueryPresent ?requestPayment`
+
+**Query keys**
+
+- routed on, present: `requestPayment`
+- routed on, exact value: —
+- routed on, absent: —
+- read as parameters: —
+
+**Headers**
+
+- request: `content-md5`, `x-amz-expected-bucket-owner`, `x-amz-sdk-checksum-algorithm`
+- response: —
+- required: —
+
+**Body**
+
+- request: XmlBody (Full, at most 4096 bytes)
+- response: None (None)
+
+**Error codes**
+
+`NoSuchBucket`, `AccessDenied`, `MalformedXML`, `InvalidArgument`, `BadDigest`
+
+**Checksums**
+
+- required before the handler runs: true
+- request algorithms: `CRC32`, `CRC32C`, `CRC64NVME`, `SHA1`, `SHA256`
+
+**Quirks**
+
+- `q-rqp-0002` (closed_value_set on `RequestPaymentConfiguration.Payer`) — The payer is Requester or BucketOwner and nothing else, and the member is required, so an unknown value has no reading of the document to fall back to.
+- `q-rqp-0003` (checksum_required on `PutBucketRequestPayment`) — The request-payment write demands an integrity claim on the body, so a request with neither Content-MD5 nor an x-amz-checksum header is refused with 400 before the document is parsed.
+
+Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
+
+**Body shapes**
+
+- `RequestPaymentConfiguration` (Structure) — `Payer: StringEnum`
+
 ### PutBucketTagging
 
 `PUT /{Bucket}` &rarr; 200 · target Bucket · precedence 350 · auth Required (`s3:PutBucketTagging`, presigned allowed) · spec `spec/operations/PutBucketTagging.toml`
@@ -2086,6 +3277,111 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 
 - `Tag` (Structure) — `Key: ObjectKey`, `Value: String`
 - `Tagging` (Structure) — `TagSet: List<Structure(Tag)>(Tag)`
+
+### PutBucketVersioning
+
+`PUT /{Bucket}` &rarr; 200 · target Bucket · precedence 236 · auth Required (`s3:PutBucketVersioning`, presigned allowed) · spec `spec/operations/PutBucketVersioning.toml`
+
+**Route predicates**
+
+- `Method PUT`
+- `Target Bucket`
+- `QueryPresent ?versioning`
+
+**Query keys**
+
+- routed on, present: `versioning`
+- routed on, exact value: —
+- routed on, absent: —
+- read as parameters: —
+
+**Headers**
+
+- request: `content-md5`, `x-amz-expected-bucket-owner`, `x-amz-mfa`, `x-amz-sdk-checksum-algorithm`
+- response: —
+- required: —
+
+**Body**
+
+- request: XmlBody (Full, at most 4096 bytes)
+- response: None (None)
+
+**Error codes**
+
+`NoSuchBucket`, `AccessDenied`, `MalformedXML`, `InvalidArgument`, `BadDigest`
+
+**Checksums**
+
+- required before the handler runs: true
+- request algorithms: `CRC32`, `CRC32C`, `CRC64NVME`, `SHA1`, `SHA256`
+
+**Quirks**
+
+- `q-ver-0002` (lenient_unknown_elements on `PutBucketVersioning`) — An element the decoder does not know is skipped and the rest of the document is stored, because a versioning document that stopped parsing would be degraded to no configuration and turn version retention off without any visible failure.
+- `q-ver-0003` (checksum_required on `PutBucketVersioning`) — The versioning write demands an integrity claim on the body, so a request with neither Content-MD5 nor an x-amz-checksum header is refused with 400 before the document is parsed.
+- `q-ver-0004` (element_name on `VersioningConfiguration.MFADelete`) — The member the model calls MFADelete is spelled MfaDelete on the wire, and the pinned model gives the read and the write the same spelling, so no alternate-name rule is needed for it here.
+
+Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
+
+**Body shapes**
+
+- `VersioningConfiguration` (Structure) — `MFADelete: StringEnum`, `Status: StringEnum`
+
+### PutBucketWebsite
+
+`PUT /{Bucket}` &rarr; 200 · target Bucket · precedence 241 · auth Required (`s3:PutBucketWebsite`, presigned allowed) · spec `spec/operations/PutBucketWebsite.toml`
+
+**Route predicates**
+
+- `Method PUT`
+- `Target Bucket`
+- `QueryPresent ?website`
+
+**Query keys**
+
+- routed on, present: `website`
+- routed on, exact value: —
+- routed on, absent: —
+- read as parameters: —
+
+**Headers**
+
+- request: `content-md5`, `x-amz-expected-bucket-owner`, `x-amz-sdk-checksum-algorithm`
+- response: —
+- required: —
+
+**Body**
+
+- request: XmlBody (Full, at most 65536 bytes)
+- response: None (None)
+
+**Error codes**
+
+`NoSuchBucket`, `AccessDenied`, `MalformedXML`, `InvalidArgument`, `BadDigest`
+
+**Checksums**
+
+- required before the handler runs: true
+- request algorithms: `CRC32`, `CRC32C`, `CRC64NVME`, `SHA1`, `SHA256`
+
+**Quirks**
+
+- `q-web-0002` (element_name on `WebsiteConfiguration.RoutingRules`) — The routing rules are wrapped: the list sits inside a RoutingRules element with one RoutingRule per entry, where every list in the notification family is flattened, and a flattened rendering here is a document SDKs read as having no rules.
+- `q-web-0003` (exclusive_members on `WebsiteConfiguration`) — RedirectAllRequestsTo and the IndexDocument/ErrorDocument/RoutingRules group are alternatives: a document carrying both describes two different sites and there is no reading of it that serves anything predictable.
+- `q-web-0004` (required_body on `RoutingRule.Redirect`) — A routing rule must carry a Redirect: a rule that says what to match and not what to do is refused by the decoder as MalformedXML, because the member is required in the pinned model.
+- `q-web-0006` (checksum_required on `PutBucketWebsite`) — The website write demands an integrity claim on the body, so a request with neither Content-MD5 nor an x-amz-checksum header is refused with 400 before the document is parsed.
+
+Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
+
+**Body shapes**
+
+- `Condition` (Structure) — `HttpErrorCodeReturnedEquals: String`, `KeyPrefixEquals: String`
+- `ErrorDocument` (Structure) — `Key: ObjectKey`
+- `IndexDocument` (Structure) — `Suffix: String`
+- `Redirect` (Structure) — `HostName: String`, `HttpRedirectCode: String`, `Protocol: StringEnum`, `ReplaceKeyPrefixWith: String`, `ReplaceKeyWith: String`
+- `RedirectAllRequestsTo` (Structure) — `HostName: String`, `Protocol: StringEnum`
+- `RoutingRule` (Structure) — `Condition: Structure(Condition)`, `Redirect: Structure(Redirect)`
+- `WebsiteConfiguration` (Structure) — `ErrorDocument: Structure(ErrorDocument)`, `IndexDocument: Structure(IndexDocument)`, `RedirectAllRequestsTo: Structure(RedirectAllRequestsTo)`, `RoutingRules: List<Structure(RoutingRule)>(RoutingRule)`
 
 ### PutObject
 
@@ -2138,6 +3434,67 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 - `q-tag-header-form-0093` (wire_form on `PutObject`) — The x-amz-tagging header on PutObject and CopyObject carries the tag set as URL query-string pairs, UTF-8 then URL-encoded, so `a%20b=c%2Bd` names the key `a b` and the value `c+d`, and a malformed spelling is a 400 before anything is stored.
 
 Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
+
+### PutObjectAcl
+
+`PUT /{Bucket}/{Key+}` &rarr; 200 · target Object · precedence 560 · auth Required (`s3:PutObjectAcl`, presigned allowed) · spec `spec/operations/PutObjectAcl.toml`
+
+**Route predicates**
+
+- `Method PUT`
+- `Target Object`
+- `QueryPresent ?acl`
+
+**Query keys**
+
+- routed on, present: `acl`
+- routed on, exact value: —
+- routed on, absent: —
+- read as parameters: `versionId`
+
+**Headers**
+
+- request: `content-md5`, `x-amz-acl`, `x-amz-expected-bucket-owner`, `x-amz-grant-full-control`, `x-amz-grant-read`, `x-amz-grant-read-acp`, `x-amz-grant-write`, `x-amz-grant-write-acp`, `x-amz-request-payer`, `x-amz-sdk-checksum-algorithm`
+- response: `x-amz-request-charged`
+- required: —
+
+**Body**
+
+- request: XmlBody (Full, at most 65536 bytes)
+- response: None (None)
+
+**Error codes**
+
+`NoSuchBucket`, `NoSuchKey`, `AccessDenied`, `MalformedXML`, `InvalidRequest`, `InvalidArgument`, `BadDigest`
+
+**Checksums**
+
+- required before the handler runs: true
+- request algorithms: `CRC32`, `CRC32C`, `CRC64NVME`, `SHA1`, `SHA256`
+
+**Quirks**
+
+- `q-acl-0001` (wrapped_list on `AccessControlPolicy.Grants`) — The grants sit inside an <AccessControlList> wrapper rather than repeating directly under the policy root, which is the opposite of the flattened Contents and Rule lists elsewhere in the surface, and a serializer that flattened them would answer a document every SDK reads as no grants at all.
+- `q-acl-0002` (xml_attribute on `Grantee`) — The XMLSchema-instance namespace is declared on the <Grantee> element itself rather than on the document root, so a client that resolves prefixes before reading xsi:type finds the declaration where AWS puts it.
+- `q-acl-0003` (xml_attribute on `Grantee.Type`) — The grantee discriminator is an XML attribute of <Grantee> and not a child element, which makes it the one member of the supported surface that cannot be written by the ordinary element emitter; the frozen IR reserves xml.attributes for it and the generated encoder writes it from there rather than from a branch in the codec.
+- `q-acl-0004` (aws_deviation on `Grantee.Type`) — On the way in the discriminator is derived from whichever of ID, URI or EmailAddress the grantee carries, because the XML reader this project ships exposes no attributes at all; for every document AWS accepts the two agree, and a document whose attribute contradicts its members is read by its members.
+- `q-acl-0005` (closed_value_set on `PutBucketAcl.ACL`) — A bucket and an object accept different canned ACLs — log-delivery-write is a bucket's alone and the two bucket-owner values are an object's alone — and the pinned model's BucketCannedACL enumeration is narrower still than AWS's own canned-ACL table, omitting aws-exec-read and log-delivery-write, so the accepted sets are stated here rather than inherited.
+- `q-acl-0006` (lenient_unknown_elements on `PutBucketAcl.AccessControlPolicy`) — An ACL request body is request XML, so an element this release does not know is skipped and an xmlns attribute is ignored rather than validated; refusing either would make a document written by a newer SDK unstorable, and this family is not one of the three security configurations that opt into strict decoding.
+- `q-acl-0007` (exclusive_members on `PutBucketAcl`) — The AccessControlPolicy body and the ACL request headers are two spellings of the same thing and a request may use only one of them, but no exclusion is documented between the canned header and the explicit grant headers, so those two may appear together and the pair is passed through rather than refused.
+- `q-acl-0009` (checksum_required on `PutBucketAcl`) — Both ACL writes carry the aws.protocols#httpChecksum trait with requestChecksumRequired, which is a different trait from the smithy.api#httpChecksumRequired the lowering reads, so the requirement is stated in the overlay and a write with neither Content-MD5 nor an x-amz-checksum-* header is refused before the body is parsed.
+- `q-acl-0010` (secret_hygiene on `PutBucketAcl`) — A canonical user id and an account email address are identities, so every refusal in this family is a constant that names the rule broken and never the grantee that broke it — an error body is copied into logs, tickets and client telemetry, and an identity that reaches one of those has left the request it arrived on.
+- `q-acl-0011` (structured_header on `PutBucketAcl.GrantRead`) — A grant header is a comma-separated list of quoted key="value" pairs whose key is one of id, uri or emailAddress read case-insensitively; the quotation marks are load-bearing rather than decorative, because without them a comma inside a value silently splits one grantee into two.
+- `q-acl-0012` (closed_value_set on `Grant.Permission`) — The five permissions are a closed set and a grant naming anything else is refused rather than stored, which is the one place this family is stricter than its siblings: a stored permission no authorizer can evaluate is a grant that reads as present and enforces as nothing.
+- `q-acl-0013` (lenient_value_set on `AccessControlPolicy.Owner`) — The Owner element of a written policy is stored and echoed as sent and is never checked against the caller, because deciding whether a principal may name itself the owner is authorisation and this family deliberately performs none.
+
+Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
+
+**Body shapes**
+
+- `AccessControlPolicy` (Structure) — `Grants: List<Structure(Grant)>(Grant)`, `Owner: Structure(Owner)`
+- `Grant` (Structure) — `Grantee: Structure(Grantee)`, `Permission: StringEnum`
+- `Grantee` (Structure) — `DisplayName: String`, `EmailAddress: String`, `ID: String`, `URI: String`, `Type: StringEnum`
+- `Owner` (Structure) — `DisplayName: String`, `ID: String`
 
 ### PutObjectLegalHold
 
@@ -2346,6 +3703,188 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 - `Tag` (Structure) — `Key: ObjectKey`, `Value: String`
 - `Tagging` (Structure) — `TagSet: List<Structure(Tag)>(Tag)`
 
+### PutPublicAccessBlock
+
+`PUT /{Bucket}` &rarr; 200 · target Bucket · precedence 226 · auth Required (`s3:PutBucketPublicAccessBlock`, presigned allowed) · spec `spec/operations/PutPublicAccessBlock.toml`
+
+**Route predicates**
+
+- `Method PUT`
+- `Target Bucket`
+- `QueryPresent ?publicAccessBlock`
+
+**Query keys**
+
+- routed on, present: `publicAccessBlock`
+- routed on, exact value: —
+- routed on, absent: —
+- read as parameters: —
+
+**Headers**
+
+- request: `content-md5`, `x-amz-expected-bucket-owner`, `x-amz-sdk-checksum-algorithm`
+- response: —
+- required: —
+
+**Body**
+
+- request: XmlBody (Full, at most 4096 bytes)
+- response: None (None)
+
+**Error codes**
+
+`NoSuchBucket`, `AccessDenied`, `MalformedXML`, `InvalidArgument`, `BadDigest`
+
+**Checksums**
+
+- required before the handler runs: true
+- request algorithms: `CRC32`, `CRC32C`, `CRC64NVME`, `SHA1`, `SHA256`
+
+**Quirks**
+
+- `q-pab-0002` (checksum_required on `PutPublicAccessBlock`) — The public-access write demands an integrity claim on the body, so a request with neither Content-MD5 nor an x-amz-checksum header is refused with 400 before the switches are read.
+- `q-pab-0004` (default_value on `PublicAccessBlockConfiguration`) — All four switches are optional and an omitted one is false, so a document naming two of them turns the other two off rather than leaving them undefined, and the read renders every one of them in lower case.
+
+Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
+
+**Body shapes**
+
+- `PublicAccessBlockConfiguration` (Structure) — `BlockPublicAcls: Boolean`, `IgnorePublicAcls: Boolean`, `BlockPublicPolicy: Boolean`, `RestrictPublicBuckets: Boolean`
+
+### RestoreObject
+
+`POST /{Bucket}/{Key+}` &rarr; 202 · target Object · precedence 570 · auth Required (`s3:RestoreObject`, presigned allowed) · spec `spec/operations/RestoreObject.toml`
+
+**Route predicates**
+
+- `Method POST`
+- `Target Object`
+- `QueryPresent ?restore`
+
+**Query keys**
+
+- routed on, present: `restore`
+- routed on, exact value: —
+- routed on, absent: —
+- read as parameters: `versionId`
+
+**Headers**
+
+- request: `x-amz-expected-bucket-owner`, `x-amz-request-payer`, `x-amz-sdk-checksum-algorithm`
+- response: `x-amz-request-charged`, `x-amz-restore-output-path`
+- required: —
+
+**Body**
+
+- request: XmlBody (Full, at most 65536 bytes)
+- response: None (None)
+
+**Error codes**
+
+`NoSuchBucket`, `NoSuchKey`, `AccessDenied`, `MalformedXML`, `InvalidRequest`, `InvalidArgument`, `RestoreAlreadyInProgress`, `InvalidObjectState`, `ObjectAlreadyInActiveTierError`
+
+**Checksums**
+
+- required before the handler runs: false
+- request algorithms: `CRC32`, `CRC32C`, `CRC64NVME`, `SHA1`, `SHA256`
+
+**Quirks**
+
+- `q-restore-0001` (status_tri_state on `RestoreObject`) — A restore answers three different statuses for three different states — 202 when a retrieval starts, 200 when the copy is already restored, 409 RestoreAlreadyInProgress while one is running — so the number is decided by a mapping in this crate and declared as the operation's success status plus one alternative, never chosen by a handler.
+- `q-restore-0002` (structured_header on `RestoreObject.RestoreStatus`) — x-amz-restore is a structured header, not a word: an in-progress copy is ongoing-request="true" and a finished one is ongoing-request="false", expiry-date="<RFC 1123>" — quotes around both values, a comma and exactly one space between the pairs — and it is produced and parsed in one place so the two spellings cannot drift.
+- `q-acl-0003` (xml_attribute on `Grantee.Type`) — The grantee discriminator is an XML attribute of <Grantee> and not a child element, which makes it the one member of the supported surface that cannot be written by the ordinary element emitter; the frozen IR reserves xml.attributes for it and the generated encoder writes it from there rather than from a branch in the codec.
+- `q-restore-0003` (object_state_rule on `RestoreObject`) — A restore of an object that is not in an archive storage class is refused 403 InvalidObjectState rather than accepted as a no-op: a caller that reads a success has no way to tell a retrieval it does not need from one that never happened.
+- `q-acl-0004` (aws_deviation on `Grantee.Type`) — On the way in the discriminator is derived from whichever of ID, URI or EmailAddress the grantee carries, because the XML reader this project ships exposes no attributes at all; for every document AWS accepts the two agree, and a document whose attribute contradicts its members is read by its members.
+- `q-restore-0004` (value_constraint on `RestoreRequest`) — A RestoreRequest must name exactly one of the two documented forms: a Days count of at least one for an ordinary retrieval, or Type SELECT with both SelectParameters and OutputLocation and no Days at all — neither form's members may appear in the other, and a document with neither is refused rather than given a duration nobody asked for.
+- `q-restore-0005` (closed_value_set on `GlacierJobParameters.Tier`) — A retrieval tier outside the documented three-value set — Expedited, Standard, Bulk, exactly in that spelling — is refused as InvalidArgument on both spellings of the member, because a tier nothing can schedule is a retrieval that silently never starts.
+- `q-restore-0006` (required_body on `RestoreObject`) — The payload member is promoted to required, so a restore with an empty body is 400 MalformedXML rather than a retrieval with a duration this implementation invented: neither documented form of the request has a default, and Days in particular has none.
+- `q-restore-0007` (lenient_unknown_elements on `RestoreObject`) — Unknown elements inside a RestoreRequest are skipped rather than refused, and so is an XML namespace on the root: AWS adds elements to this document over time and a decoder that got stricter would refuse retrievals an SDK a version newer sends correctly.
+- `q-restore-0008` (version_selector on `RestoreObject.VersionId`) — versionId selects which version of the object is retrieved, so it is decoded and carried to the handler rather than dropped: a backend that ignored it would retrieve the current version and report success for a request about another one, which is indistinguishable from having honoured it.
+- `q-acl-0012` (closed_value_set on `Grant.Permission`) — The five permissions are a closed set and a grant naming anything else is refused rather than stored, which is the one place this family is stricter than its siblings: a stored permission no authorizer can evaluate is a grant that reads as present and enforces as nothing.
+
+Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
+
+**Body shapes**
+
+- `CSVInput` (Structure) — `FileHeaderInfo: StringEnum`, `Comments: String`, `QuoteEscapeCharacter: String`, `RecordDelimiter: String`, `FieldDelimiter: String`, `QuoteCharacter: String`, `AllowQuotedRecordDelimiter: Boolean`
+- `CSVOutput` (Structure) — `QuoteFields: StringEnum`, `QuoteEscapeCharacter: String`, `RecordDelimiter: String`, `FieldDelimiter: String`, `QuoteCharacter: String`
+- `Encryption` (Structure) — `EncryptionType: StringEnum`, `KMSKeyId: String`, `KMSContext: String`
+- `GlacierJobParameters` (Structure) — `Tier: StringEnum`
+- `Grant` (Structure) — `Grantee: Structure(Grantee)`, `Permission: StringEnum`
+- `Grantee` (Structure) — `DisplayName: String`, `EmailAddress: String`, `ID: String`, `URI: String`, `Type: StringEnum`
+- `InputSerialization` (Structure) — `CSV: Structure(CSVInput)`, `CompressionType: StringEnum`, `JSON: Structure(JSONInput)`, `Parquet: Structure(ParquetInput)`
+- `JSONInput` (Structure) — `Type: StringEnum`
+- `JSONOutput` (Structure) — `RecordDelimiter: String`
+- `MetadataEntry` (Structure) — `Name: String`, `Value: String`
+- `OutputLocation` (Structure) — `S3: Structure(S3Location)`
+- `OutputSerialization` (Structure) — `CSV: Structure(CSVOutput)`, `JSON: Structure(JSONOutput)`
+- `ParquetInput` (Structure) — 
+- `RestoreRequest` (Structure) — `Days: Integer`, `GlacierJobParameters: Structure(GlacierJobParameters)`, `Type: StringEnum`, `Tier: StringEnum`, `Description: String`, `SelectParameters: Structure(SelectParameters)`, `OutputLocation: Structure(OutputLocation)`
+- `S3Location` (Structure) — `BucketName: BucketName`, `Prefix: String`, `Encryption: Structure(Encryption)`, `CannedACL: StringEnum`, `AccessControlList: List<Structure(Grant)>(Grant)`, `Tagging: Structure(Tagging)`, `UserMetadata: List<Structure(MetadataEntry)>(MetadataEntry)`, `StorageClass: StringEnum`
+- `SelectParameters` (Structure) — `InputSerialization: Structure(InputSerialization)`, `ExpressionType: StringEnum`, `Expression: String`, `OutputSerialization: Structure(OutputSerialization)`
+- `Tag` (Structure) — `Key: ObjectKey`, `Value: String`
+- `Tagging` (Structure) — `TagSet: List<Structure(Tag)>(Tag)`
+
+### SelectObjectContent
+
+`POST /{Bucket}/{Key+}` &rarr; 200 · target Object · precedence 580 · auth Required (`s3:GetObject`, presigned allowed) · spec `spec/operations/SelectObjectContent.toml`
+
+**Route predicates**
+
+- `Method POST`
+- `Target Object`
+- `QueryPresent ?select`
+- `QueryEquals ?select-type=2`
+
+**Query keys**
+
+- routed on, present: `select`
+- routed on, exact value: `select-type=2`
+- routed on, absent: —
+- read as parameters: —
+
+**Headers**
+
+- request: `x-amz-expected-bucket-owner`, `x-amz-server-side-encryption-customer-algorithm`, `x-amz-server-side-encryption-customer-key`, `x-amz-server-side-encryption-customer-key-md5`
+- response: —
+- required: —
+
+**Body**
+
+- request: XmlBody (Full, at most 327680 bytes)
+- response: None (None)
+
+**Error codes**
+
+`NoSuchBucket`, `NoSuchKey`, `AccessDenied`, `MalformedXML`, `InvalidRequest`, `InvalidArgument`, `InvalidExpressionType`, `ExpressionTooLong`, `InvalidTextEncoding`, `InvalidCompressionFormat`, `ObjectSerializationConflict`, `UnsupportedFunction`, `ParseUnexpectedToken`, `CSVParsingError`, `JSONParsingError`, `InvalidColumnIndex`, `InvalidDataType`, `OverMaxRecordSize`
+
+**Quirks**
+
+- `q-select-0001` (route_predicate on `SelectObjectContent`) — select-type=2 is half of the operation's route predicate and not decoration: the value names the version of the request grammar, so a request that omits it or sends any other value reaches no select row at all rather than being decoded by a version that has never validated it.
+- `q-select-0002` (value_constraint on `SelectObjectContent.Expression`) — The expression is opaque to this crate — never parsed, never logged, never repeated into an error — and bounded at the documented 256 KiB, past which the request is refused 400 ExpressionTooLong before anything reads the text.
+- `q-select-0003` (exclusive_members on `SelectObjectContent.InputSerialization`) — An InputSerialization names exactly one of CSV, JSON and Parquet: two of them together is 400 ObjectSerializationConflict, and none of them is 400 MalformedXML, because a reader that picked one of two declared formats would parse the object as something the caller did not describe.
+- `q-select-0004` (exclusive_members on `SelectObjectContent.OutputSerialization`) — An OutputSerialization names exactly one of CSV and JSON, on the same rule as the input side: both together is 400 ObjectSerializationConflict and neither is 400 MalformedXML.
+- `q-select-0005` (exclusive_members on `SelectObjectContent.ScanRange`) — A ScanRange has two members and three documented forms — both bounds, a Start alone running to the end, an End alone meaning the suffix — so an element with neither bound is refused rather than read as the whole object, and so is an End below a Start or a negative bound: each of those names no window or two.
+- `q-select-0006` (closed_value_set on `SelectObjectContent.ExpressionType`) — ExpressionType has exactly one documented value, SQL, and a request naming any other is 400 InvalidExpressionType; CompressionType is likewise closed at NONE, GZIP and BZIP2, refused as 400 InvalidCompressionFormat, because a compression this side cannot name is a stream nobody can read.
+- `q-select-0007` (lenient_unknown_elements on `SelectObjectContent`) — Unknown elements inside a SelectObjectContentRequest are skipped and a namespace on the root is ignored, the same leniency every other request document in this tree is decoded with.
+- `q-select-0008` (xml_root on `SelectObjectContent`) — This is the only request in the supported surface whose XML members sit at operation level rather than inside a payload structure, so the body root is the input shape's own name, SelectObjectContentRequest, and a body rooted at anything else is 400 MalformedXML.
+- `q-select-0009` (deferred_response on `SelectObjectContent`) — The response half is deliberately absent, and what is absent is only the plumbing: the framing — two CRC-32s over two different ranges, one covering the eight prelude bytes alone and one covering every byte of the message but itself — is implemented and proved byte for byte against independently computed values, while the third response shape a stream needs is not this family's to add, so a well-formed query is told NotImplemented rather than answered a bare 200.
+- `q-sse-0010` (secret_hygiene on `PutObject`) — The customer key is never echoed back and never logged, while the algorithm and key digest must be echoed; customer keys over a plaintext connection are refused.
+
+Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
+
+**Body shapes**
+
+- `CSVInput` (Structure) — `FileHeaderInfo: StringEnum`, `Comments: String`, `QuoteEscapeCharacter: String`, `RecordDelimiter: String`, `FieldDelimiter: String`, `QuoteCharacter: String`, `AllowQuotedRecordDelimiter: Boolean`
+- `CSVOutput` (Structure) — `QuoteFields: StringEnum`, `QuoteEscapeCharacter: String`, `RecordDelimiter: String`, `FieldDelimiter: String`, `QuoteCharacter: String`
+- `InputSerialization` (Structure) — `CSV: Structure(CSVInput)`, `CompressionType: StringEnum`, `JSON: Structure(JSONInput)`, `Parquet: Structure(ParquetInput)`
+- `JSONInput` (Structure) — `Type: StringEnum`
+- `JSONOutput` (Structure) — `RecordDelimiter: String`
+- `OutputSerialization` (Structure) — `CSV: Structure(CSVOutput)`, `JSON: Structure(JSONOutput)`
+- `ParquetInput` (Structure) — 
+- `RequestProgress` (Structure) — `Enabled: Boolean`
+- `ScanRange` (Structure) — `Start: Long`, `End: Long`
+
 ### UploadPart
 
 `PUT /{Bucket}/{Key+}` &rarr; 200 · target Object · precedence 410 · auth Required (`s3:PutObject`, presigned allowed) · spec `spec/operations/UploadPart.toml`
@@ -2461,67 +4000,38 @@ in neither list, so this table is exhaustive by construction.
 | CreateBucketMetadataConfiguration | Out of scope for the gateway: S3 Tables and bucket metadata table configuration, a separate AWS surface with its own control plane. |
 | CreateBucketMetadataTableConfiguration | Out of scope for the gateway: S3 Tables and bucket metadata table configuration, a separate AWS surface with its own control plane. |
 | CreateSession | Out of scope for the gateway: S3 Express One Zone session credentials. |
-| DeleteBucketAnalyticsConfiguration | P5 bucket subresource configuration family; one Get/Put/Delete triple per subresource, all sharing the not_configured 404 rule. |
-| DeleteBucketIntelligentTieringConfiguration | P5 bucket subresource configuration family; one Get/Put/Delete triple per subresource, all sharing the not_configured 404 rule. |
-| DeleteBucketInventoryConfiguration | P5 bucket subresource configuration family; one Get/Put/Delete triple per subresource, all sharing the not_configured 404 rule. |
+| DeleteBucketAnalyticsConfiguration | Two groups, deferred for two different reasons, and neither is one of the nine configurations the 200-249 band covers. OwnershipControls belongs with the ACL family that landed at 250/260 and did not take it: BucketOwnerEnforced is the ownership value that disables ACLs outright, so the switch and the grant grammar answer each other and are reviewed together. The analytics, inventory, metrics and intelligent-tiering sets are the only bucket subresources that are keyed — each carries an id, so each has a list operation beside its triple and a selector that pins a query key both with and without a value, which is a routing shape no band in the table has yet. |
+| DeleteBucketIntelligentTieringConfiguration | Two groups, deferred for two different reasons, and neither is one of the nine configurations the 200-249 band covers. OwnershipControls belongs with the ACL family that landed at 250/260 and did not take it: BucketOwnerEnforced is the ownership value that disables ACLs outright, so the switch and the grant grammar answer each other and are reviewed together. The analytics, inventory, metrics and intelligent-tiering sets are the only bucket subresources that are keyed — each carries an id, so each has a list operation beside its triple and a selector that pins a query key both with and without a value, which is a routing shape no band in the table has yet. |
+| DeleteBucketInventoryConfiguration | Two groups, deferred for two different reasons, and neither is one of the nine configurations the 200-249 band covers. OwnershipControls belongs with the ACL family that landed at 250/260 and did not take it: BucketOwnerEnforced is the ownership value that disables ACLs outright, so the switch and the grant grammar answer each other and are reviewed together. The analytics, inventory, metrics and intelligent-tiering sets are the only bucket subresources that are keyed — each carries an id, so each has a list operation beside its triple and a selector that pins a query key both with and without a value, which is a routing shape no band in the table has yet. |
 | DeleteBucketMetadataConfiguration | Out of scope for the gateway: S3 Tables and bucket metadata table configuration, a separate AWS surface with its own control plane. |
 | DeleteBucketMetadataTableConfiguration | Out of scope for the gateway: S3 Tables and bucket metadata table configuration, a separate AWS surface with its own control plane. |
-| DeleteBucketMetricsConfiguration | P5 bucket subresource configuration family; one Get/Put/Delete triple per subresource, all sharing the not_configured 404 rule. |
-| DeleteBucketOwnershipControls | P5 bucket subresource configuration family; one Get/Put/Delete triple per subresource, all sharing the not_configured 404 rule. |
-| DeleteBucketPolicy | P5 bucket policy and public-access family; every one of these is an authorization surface and reviewed as a group. |
-| DeleteBucketReplication | P5 bucket subresource configuration family; one Get/Put/Delete triple per subresource, all sharing the not_configured 404 rule. |
-| DeleteBucketWebsite | P5 bucket subresource configuration family; one Get/Put/Delete triple per subresource, all sharing the not_configured 404 rule. |
+| DeleteBucketMetricsConfiguration | Two groups, deferred for two different reasons, and neither is one of the nine configurations the 200-249 band covers. OwnershipControls belongs with the ACL family that landed at 250/260 and did not take it: BucketOwnerEnforced is the ownership value that disables ACLs outright, so the switch and the grant grammar answer each other and are reviewed together. The analytics, inventory, metrics and intelligent-tiering sets are the only bucket subresources that are keyed — each carries an id, so each has a list operation beside its triple and a selector that pins a query key both with and without a value, which is a routing shape no band in the table has yet. |
+| DeleteBucketOwnershipControls | Two groups, deferred for two different reasons, and neither is one of the nine configurations the 200-249 band covers. OwnershipControls belongs with the ACL family that landed at 250/260 and did not take it: BucketOwnerEnforced is the ownership value that disables ACLs outright, so the switch and the grant grammar answer each other and are reviewed together. The analytics, inventory, metrics and intelligent-tiering sets are the only bucket subresources that are keyed — each carries an id, so each has a list operation beside its triple and a selector that pins a query key both with and without a value, which is a routing shape no band in the table has yet. |
 | DeleteObjectAnnotation | Out of scope for the gateway: object annotations, an AWS-only metadata surface with no storage-backend equivalent. |
-| DeletePublicAccessBlock | P5 bucket policy and public-access family; every one of these is an authorization surface and reviewed as a group. |
-| GetBucketAbac | P5 bucket policy and public-access family; every one of these is an authorization surface and reviewed as a group. |
-| GetBucketAccelerateConfiguration | P5 bucket subresource configuration family; one Get/Put/Delete triple per subresource, all sharing the not_configured 404 rule. |
-| GetBucketAcl | P5 bucket subresource configuration family; one Get/Put/Delete triple per subresource, all sharing the not_configured 404 rule. |
-| GetBucketAnalyticsConfiguration | P5 bucket subresource configuration family; one Get/Put/Delete triple per subresource, all sharing the not_configured 404 rule. |
-| GetBucketIntelligentTieringConfiguration | P5 bucket subresource configuration family; one Get/Put/Delete triple per subresource, all sharing the not_configured 404 rule. |
-| GetBucketInventoryConfiguration | P5 bucket subresource configuration family; one Get/Put/Delete triple per subresource, all sharing the not_configured 404 rule. |
-| GetBucketLogging | P5 bucket subresource configuration family; one Get/Put/Delete triple per subresource, all sharing the not_configured 404 rule. |
+| GetBucketAbac | The ?abac attribute-based access-control pair is a RustFS extension outside the AWS surface this family codifies; it needs its own evidence and its own review. |
+| GetBucketAnalyticsConfiguration | Two groups, deferred for two different reasons, and neither is one of the nine configurations the 200-249 band covers. OwnershipControls belongs with the ACL family that landed at 250/260 and did not take it: BucketOwnerEnforced is the ownership value that disables ACLs outright, so the switch and the grant grammar answer each other and are reviewed together. The analytics, inventory, metrics and intelligent-tiering sets are the only bucket subresources that are keyed — each carries an id, so each has a list operation beside its triple and a selector that pins a query key both with and without a value, which is a routing shape no band in the table has yet. |
+| GetBucketIntelligentTieringConfiguration | Two groups, deferred for two different reasons, and neither is one of the nine configurations the 200-249 band covers. OwnershipControls belongs with the ACL family that landed at 250/260 and did not take it: BucketOwnerEnforced is the ownership value that disables ACLs outright, so the switch and the grant grammar answer each other and are reviewed together. The analytics, inventory, metrics and intelligent-tiering sets are the only bucket subresources that are keyed — each carries an id, so each has a list operation beside its triple and a selector that pins a query key both with and without a value, which is a routing shape no band in the table has yet. |
+| GetBucketInventoryConfiguration | Two groups, deferred for two different reasons, and neither is one of the nine configurations the 200-249 band covers. OwnershipControls belongs with the ACL family that landed at 250/260 and did not take it: BucketOwnerEnforced is the ownership value that disables ACLs outright, so the switch and the grant grammar answer each other and are reviewed together. The analytics, inventory, metrics and intelligent-tiering sets are the only bucket subresources that are keyed — each carries an id, so each has a list operation beside its triple and a selector that pins a query key both with and without a value, which is a routing shape no band in the table has yet. |
 | GetBucketMetadataConfiguration | Out of scope for the gateway: S3 Tables and bucket metadata table configuration, a separate AWS surface with its own control plane. |
 | GetBucketMetadataTableConfiguration | Out of scope for the gateway: S3 Tables and bucket metadata table configuration, a separate AWS surface with its own control plane. |
-| GetBucketMetricsConfiguration | P5 bucket subresource configuration family; one Get/Put/Delete triple per subresource, all sharing the not_configured 404 rule. |
-| GetBucketNotificationConfiguration | P5 bucket subresource configuration family; one Get/Put/Delete triple per subresource, all sharing the not_configured 404 rule. |
-| GetBucketOwnershipControls | P5 bucket subresource configuration family; one Get/Put/Delete triple per subresource, all sharing the not_configured 404 rule. |
-| GetBucketPolicy | P5 bucket policy and public-access family; every one of these is an authorization surface and reviewed as a group. |
-| GetBucketPolicyStatus | P5 bucket policy and public-access family; every one of these is an authorization surface and reviewed as a group. |
-| GetBucketReplication | P5 bucket subresource configuration family; one Get/Put/Delete triple per subresource, all sharing the not_configured 404 rule. |
-| GetBucketRequestPayment | P5 bucket subresource configuration family; one Get/Put/Delete triple per subresource, all sharing the not_configured 404 rule. |
-| GetBucketVersioning | P5 bucket subresource configuration family; one Get/Put/Delete triple per subresource, all sharing the not_configured 404 rule. |
-| GetBucketWebsite | P5 bucket subresource configuration family; one Get/Put/Delete triple per subresource, all sharing the not_configured 404 rule. |
-| GetObjectAcl | P5 object ACL family; grant parsing is a shared cluster of its own. |
+| GetBucketMetricsConfiguration | Two groups, deferred for two different reasons, and neither is one of the nine configurations the 200-249 band covers. OwnershipControls belongs with the ACL family that landed at 250/260 and did not take it: BucketOwnerEnforced is the ownership value that disables ACLs outright, so the switch and the grant grammar answer each other and are reviewed together. The analytics, inventory, metrics and intelligent-tiering sets are the only bucket subresources that are keyed — each carries an id, so each has a list operation beside its triple and a selector that pins a query key both with and without a value, which is a routing shape no band in the table has yet. |
+| GetBucketOwnershipControls | Two groups, deferred for two different reasons, and neither is one of the nine configurations the 200-249 band covers. OwnershipControls belongs with the ACL family that landed at 250/260 and did not take it: BucketOwnerEnforced is the ownership value that disables ACLs outright, so the switch and the grant grammar answer each other and are reviewed together. The analytics, inventory, metrics and intelligent-tiering sets are the only bucket subresources that are keyed — each carries an id, so each has a list operation beside its triple and a selector that pins a query key both with and without a value, which is a routing shape no band in the table has yet. |
 | GetObjectAnnotation | Out of scope for the gateway: object annotations, an AWS-only metadata surface with no storage-backend equivalent. |
 | GetObjectTorrent | P5 advanced object family; each member carries a body shape or a framing the data plane does not have. |
-| GetPublicAccessBlock | P5 bucket policy and public-access family; every one of these is an authorization surface and reviewed as a group. |
-| ListBucketAnalyticsConfigurations | P5 bucket subresource configuration family; one Get/Put/Delete triple per subresource, all sharing the not_configured 404 rule. |
-| ListBucketIntelligentTieringConfigurations | P5 bucket subresource configuration family; one Get/Put/Delete triple per subresource, all sharing the not_configured 404 rule. |
-| ListBucketInventoryConfigurations | P5 bucket subresource configuration family; one Get/Put/Delete triple per subresource, all sharing the not_configured 404 rule. |
-| ListBucketMetricsConfigurations | P5 bucket subresource configuration family; one Get/Put/Delete triple per subresource, all sharing the not_configured 404 rule. |
+| ListBucketAnalyticsConfigurations | Two groups, deferred for two different reasons, and neither is one of the nine configurations the 200-249 band covers. OwnershipControls belongs with the ACL family that landed at 250/260 and did not take it: BucketOwnerEnforced is the ownership value that disables ACLs outright, so the switch and the grant grammar answer each other and are reviewed together. The analytics, inventory, metrics and intelligent-tiering sets are the only bucket subresources that are keyed — each carries an id, so each has a list operation beside its triple and a selector that pins a query key both with and without a value, which is a routing shape no band in the table has yet. |
+| ListBucketIntelligentTieringConfigurations | Two groups, deferred for two different reasons, and neither is one of the nine configurations the 200-249 band covers. OwnershipControls belongs with the ACL family that landed at 250/260 and did not take it: BucketOwnerEnforced is the ownership value that disables ACLs outright, so the switch and the grant grammar answer each other and are reviewed together. The analytics, inventory, metrics and intelligent-tiering sets are the only bucket subresources that are keyed — each carries an id, so each has a list operation beside its triple and a selector that pins a query key both with and without a value, which is a routing shape no band in the table has yet. |
+| ListBucketInventoryConfigurations | Two groups, deferred for two different reasons, and neither is one of the nine configurations the 200-249 band covers. OwnershipControls belongs with the ACL family that landed at 250/260 and did not take it: BucketOwnerEnforced is the ownership value that disables ACLs outright, so the switch and the grant grammar answer each other and are reviewed together. The analytics, inventory, metrics and intelligent-tiering sets are the only bucket subresources that are keyed — each carries an id, so each has a list operation beside its triple and a selector that pins a query key both with and without a value, which is a routing shape no band in the table has yet. |
+| ListBucketMetricsConfigurations | Two groups, deferred for two different reasons, and neither is one of the nine configurations the 200-249 band covers. OwnershipControls belongs with the ACL family that landed at 250/260 and did not take it: BucketOwnerEnforced is the ownership value that disables ACLs outright, so the switch and the grant grammar answer each other and are reviewed together. The analytics, inventory, metrics and intelligent-tiering sets are the only bucket subresources that are keyed — each carries an id, so each has a list operation beside its triple and a selector that pins a query key both with and without a value, which is a routing shape no band in the table has yet. |
 | ListDirectoryBuckets | Directory buckets are an S3 Express dialect with their own endpoint and session auth; the listing shape is shared with this family but the addressing is not, and it needs its own reviewed pass. |
 | ListObjectAnnotations | Out of scope for the gateway: object annotations, an AWS-only metadata surface with no storage-backend equivalent. |
-| PutBucketAbac | P5 bucket policy and public-access family; every one of these is an authorization surface and reviewed as a group. |
-| PutBucketAccelerateConfiguration | P5 bucket subresource configuration family; one Get/Put/Delete triple per subresource, all sharing the not_configured 404 rule. |
-| PutBucketAcl | P5 bucket subresource configuration family; one Get/Put/Delete triple per subresource, all sharing the not_configured 404 rule. |
-| PutBucketAnalyticsConfiguration | P5 bucket subresource configuration family; one Get/Put/Delete triple per subresource, all sharing the not_configured 404 rule. |
-| PutBucketIntelligentTieringConfiguration | P5 bucket subresource configuration family; one Get/Put/Delete triple per subresource, all sharing the not_configured 404 rule. |
-| PutBucketInventoryConfiguration | P5 bucket subresource configuration family; one Get/Put/Delete triple per subresource, all sharing the not_configured 404 rule. |
-| PutBucketLogging | P5 bucket subresource configuration family; one Get/Put/Delete triple per subresource, all sharing the not_configured 404 rule. |
-| PutBucketMetricsConfiguration | P5 bucket subresource configuration family; one Get/Put/Delete triple per subresource, all sharing the not_configured 404 rule. |
-| PutBucketNotificationConfiguration | P5 bucket subresource configuration family; one Get/Put/Delete triple per subresource, all sharing the not_configured 404 rule. |
-| PutBucketOwnershipControls | P5 bucket subresource configuration family; one Get/Put/Delete triple per subresource, all sharing the not_configured 404 rule. |
-| PutBucketPolicy | P5 bucket policy and public-access family; every one of these is an authorization surface and reviewed as a group. |
-| PutBucketReplication | P5 bucket subresource configuration family; one Get/Put/Delete triple per subresource, all sharing the not_configured 404 rule. |
-| PutBucketRequestPayment | P5 bucket subresource configuration family; one Get/Put/Delete triple per subresource, all sharing the not_configured 404 rule. |
-| PutBucketVersioning | P5 bucket subresource configuration family; one Get/Put/Delete triple per subresource, all sharing the not_configured 404 rule. |
-| PutBucketWebsite | P5 bucket subresource configuration family; one Get/Put/Delete triple per subresource, all sharing the not_configured 404 rule. |
-| PutObjectAcl | P5 object ACL family; grant parsing is a shared cluster of its own. |
+| PutBucketAbac | The ?abac attribute-based access-control pair is a RustFS extension outside the AWS surface this family codifies; it needs its own evidence and its own review. |
+| PutBucketAnalyticsConfiguration | Two groups, deferred for two different reasons, and neither is one of the nine configurations the 200-249 band covers. OwnershipControls belongs with the ACL family that landed at 250/260 and did not take it: BucketOwnerEnforced is the ownership value that disables ACLs outright, so the switch and the grant grammar answer each other and are reviewed together. The analytics, inventory, metrics and intelligent-tiering sets are the only bucket subresources that are keyed — each carries an id, so each has a list operation beside its triple and a selector that pins a query key both with and without a value, which is a routing shape no band in the table has yet. |
+| PutBucketIntelligentTieringConfiguration | Two groups, deferred for two different reasons, and neither is one of the nine configurations the 200-249 band covers. OwnershipControls belongs with the ACL family that landed at 250/260 and did not take it: BucketOwnerEnforced is the ownership value that disables ACLs outright, so the switch and the grant grammar answer each other and are reviewed together. The analytics, inventory, metrics and intelligent-tiering sets are the only bucket subresources that are keyed — each carries an id, so each has a list operation beside its triple and a selector that pins a query key both with and without a value, which is a routing shape no band in the table has yet. |
+| PutBucketInventoryConfiguration | Two groups, deferred for two different reasons, and neither is one of the nine configurations the 200-249 band covers. OwnershipControls belongs with the ACL family that landed at 250/260 and did not take it: BucketOwnerEnforced is the ownership value that disables ACLs outright, so the switch and the grant grammar answer each other and are reviewed together. The analytics, inventory, metrics and intelligent-tiering sets are the only bucket subresources that are keyed — each carries an id, so each has a list operation beside its triple and a selector that pins a query key both with and without a value, which is a routing shape no band in the table has yet. |
+| PutBucketMetricsConfiguration | Two groups, deferred for two different reasons, and neither is one of the nine configurations the 200-249 band covers. OwnershipControls belongs with the ACL family that landed at 250/260 and did not take it: BucketOwnerEnforced is the ownership value that disables ACLs outright, so the switch and the grant grammar answer each other and are reviewed together. The analytics, inventory, metrics and intelligent-tiering sets are the only bucket subresources that are keyed — each carries an id, so each has a list operation beside its triple and a selector that pins a query key both with and without a value, which is a routing shape no band in the table has yet. |
+| PutBucketOwnershipControls | Two groups, deferred for two different reasons, and neither is one of the nine configurations the 200-249 band covers. OwnershipControls belongs with the ACL family that landed at 250/260 and did not take it: BucketOwnerEnforced is the ownership value that disables ACLs outright, so the switch and the grant grammar answer each other and are reviewed together. The analytics, inventory, metrics and intelligent-tiering sets are the only bucket subresources that are keyed — each carries an id, so each has a list operation beside its triple and a selector that pins a query key both with and without a value, which is a routing shape no band in the table has yet. |
 | PutObjectAnnotation | Out of scope for the gateway: object annotations, an AWS-only metadata surface with no storage-backend equivalent. |
-| PutPublicAccessBlock | P5 bucket policy and public-access family; every one of these is an authorization surface and reviewed as a group. |
 | RenameObject | P5 copy family; RenameObject is a single-bucket move with no source-authorization stage and no AWS wire form to conform to. |
-| RestoreObject | P5 advanced object family; each member carries a body shape or a framing the data plane does not have. |
-| SelectObjectContent | P5 advanced object family; each member carries a body shape or a framing the data plane does not have. |
 | UpdateBucketMetadataAnnotationTableConfiguration | Out of scope for the gateway: S3 Tables and bucket metadata table configuration, a separate AWS surface with its own control plane. |
 | UpdateBucketMetadataInventoryTableConfiguration | Out of scope for the gateway: S3 Tables and bucket metadata table configuration, a separate AWS surface with its own control plane. |
 | UpdateBucketMetadataJournalTableConfiguration | Out of scope for the gateway: S3 Tables and bucket metadata table configuration, a separate AWS surface with its own control plane. |

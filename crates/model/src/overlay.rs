@@ -174,8 +174,28 @@ pub struct ShapeOverlay {
     pub hot: Vec<String>,
     /// Members dropped from the supported surface.
     pub drop: Vec<String>,
+    /// XML attributes written on the element this shape occupies.
+    pub attributes: Vec<AttributeOverlay>,
     /// Field-level overrides.
     pub fields: Vec<FieldOverlay>,
+}
+
+/// One XML attribute declared on the element a shape occupies.
+///
+/// The frozen IR reserves `xml.attributes` and names `xsi:type on Grantee` as the case it exists
+/// for; this is the hand-written source that fills it. An attribute is either a fixed string —
+/// the `xmlns:xsi` declaration AWS writes beside the discriminator — or one of the shape's own
+/// members, which then stops being written as a child element.
+#[derive(Debug, Default, Clone)]
+pub struct AttributeOverlay {
+    /// The element carrying the attribute. Defaults to the shape's own name.
+    pub element: Option<String>,
+    /// Attribute name, prefix included.
+    pub name: String,
+    /// The member whose value the attribute carries, when it is not a constant.
+    pub field: Option<String>,
+    /// The fixed value, when the attribute is not a member.
+    pub value: Option<String>,
 }
 
 /// One field override, or one synthesized field.
@@ -647,8 +667,43 @@ fn shape_overlay(name: &str, table: &Toml) -> Result<ShapeOverlay> {
         required: list(table, "required", &what)?,
         hot: list(table, "hot", &what)?,
         drop: list(table, "drop", &what)?,
+        attributes: attribute_overlays(table, &what)?,
         fields: field_overlays(table, &what, false)?,
     })
+}
+
+/// Reads the `[[shape.X.attribute]]` entries of one shape.
+///
+/// Exactly one source per attribute: a `field` or a `value`, never both and never neither. The
+/// refusal is here rather than in lowering because an attribute with two sources has no
+/// meaning to resolve — it is a typo in the one hand-written protocol-exception file.
+fn attribute_overlays(table: &Toml, what: &str) -> Result<Vec<AttributeOverlay>> {
+    let mut out = Vec::new();
+    for entry in array_of_tables(table, "attribute") {
+        let name = required_str(entry, "name", what)?;
+        let field = opt_str(entry, "field");
+        let value = opt_str(entry, "value");
+        match (field.is_some(), value.is_some()) {
+            (true, true) => {
+                return Err(Error::Overlay(format!(
+                    "{what}.attribute `{name}`: `field` and `value` are two sources and only one is allowed"
+                )));
+            }
+            (false, false) => {
+                return Err(Error::Overlay(format!(
+                    "{what}.attribute `{name}`: needs either a `field` source or a constant `value`"
+                )));
+            }
+            _ => {}
+        }
+        out.push(AttributeOverlay {
+            element: opt_str(entry, "element"),
+            name,
+            field,
+            value,
+        });
+    }
+    Ok(out)
 }
 
 fn field_overlays(table: &Toml, what: &str, sided: bool) -> Result<Vec<FieldOverlay>> {

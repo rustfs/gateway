@@ -1,0 +1,2 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<AccessControlPolicy xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Owner><ID>9c11ab5a4d8e37f0b2c6d19e4a730f85c2b6d4a1e93f70c58b2d6a4e1c93f705</ID><DisplayName>somebody-else</DisplayName></Owner><AccessControlList><Grant><Grantee xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:type="CanonicalUser"><ID>9c11ab5a4d8e37f0b2c6d19e4a730f85c2b6d4a1e93f70c58b2d6a4e1c93f705</ID></Grantee><Permission>FULL_CONTROL</Permission></Grant></AccessControlList></AccessControlPolicy>

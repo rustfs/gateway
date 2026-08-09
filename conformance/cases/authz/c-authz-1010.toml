@@ -1,0 +1,23 @@
+[case]
+id = "c-authz-1010"
+schema_version = 1
+title = "Indeterminate cannot be interpreted as allow"
+rationale = "The case-specific authorizer returns Indeterminate and the framework owns its fixed 403 interpretation."
+polarity = "negative"
+operation = "ListBuckets"
+tags = ["security"]
+timeout_ms = 10000
+quirks = []
+[[case.evidence]]
+url = "https://github.com/rustfs/rustfs/security/advisories/GHSA-j548-9grx-fh4f"
+summary = "An authorization dependency failure must be a refusal rather than permission."
+kind = "other"
+[request]
+method = "GET"
+target = "/"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+[expect]
+kind = "response"
+status = 403
+[expect.error]
+code = "AccessDenied"

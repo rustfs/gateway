@@ -1700,8 +1700,16 @@ mod tests {
     #[test]
     fn a_service_that_reads_the_body_gets_all_of_it_from_a_paced_client() {
         let listener = listener(never_close(), Announce::Matching);
+        // Two pacers, and they must stay two. `serve` raises `server_answered` on whichever pacer
+        // it was handed, the moment the service returns — and this service does not read the body,
+        // so it returns at once. Sharing one pacer put that answer in a race with the demand raised
+        // below, and `await_demand` reports `Answered` ahead of `More` when both are set, so the
+        // assertion turned on which thread the runner scheduled first. It failed about one run in
+        // three on a loaded machine and never on an idle one. Nothing here needs the served pacer:
+        // `Connection` does not hold one, and `write_body` only writes and counts.
+        let serving = Arc::new(Pacer::new());
+        listener.enqueue_pacer(&serving);
         let pacer = Arc::new(Pacer::new());
-        listener.enqueue_pacer(&pacer);
         let mut connection = Connection::open(listener.addr()).expect("the listener accepts");
         let body = b"hello world";
         connection.write(&put_head(body.len())).expect("written");
@@ -1713,6 +1721,14 @@ mod tests {
         assert_eq!(pacer.await_demand(&mut satisfied, Duration::from_secs(5)), Demand::More);
         connection.write_body(body).expect("written");
         assert_eq!(connection.body_written(), body.len() as u64);
+        // The separation asserted rather than assumed, and in both directions: the served pacer is
+        // the one that carries the answer, and the rendezvous under test never does. Waiting for
+        // the answer first is what makes the pair deterministic — without the wait the second line
+        // would pass merely by being early. Sharing one pacer fails here on any machine, which is
+        // the point: the defect this replaced only failed on a loaded one.
+        let mut served = 0;
+        assert_eq!(serving.await_demand(&mut served, Duration::from_secs(5)), Demand::Answered);
+        assert!(!pacer.answered());
     }
 
     /// Negative — two listeners are on two different ports without either of them naming one.

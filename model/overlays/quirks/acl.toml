@@ -1,0 +1,203 @@
+# Copyright 2026 RustFS Team
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Quirks of the access control list family.
+#
+# One [[quirk]] per behaviour the pinned Smithy model does not state, or states in a trait the
+# lowering would otherwise lose. `summary` and every `evidence.summary` are written by this
+# project; upstream issue and documentation prose stays under its author's copyright and is never
+# pasted here.
+#
+# The family's two hard facts are here and nowhere else: `<Grantee>` is the one place in the S3
+# surface where the wire needs an XML **attribute**, and an ACL arrives on two mutually exclusive
+# channels that say the same thing. Everything else in this file is a consequence of one of them.
+#
+# ACL *evaluation* — whether a grant lets a principal read an object — is deliberately absent.
+# That is the deployment's Authorizer's question, and no quirk here describes an answer to it.
+
+[[quirk]]
+id      = "q-acl-0001"
+kind    = "wrapped_list"
+target  = "AccessControlPolicy.Grants"
+summary = "The grants sit inside an <AccessControlList> wrapper rather than repeating directly under the policy root, which is the opposite of the flattened Contents and Rule lists elsewhere in the surface, and a serializer that flattened them would answer a document every SDK reads as no grants at all."
+cases   = ["c-acl-0001", "c-acl-0004"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketAcl.html"
+  summary = "The documented response syntax nests every Grant element inside a single AccessControlList element under the AccessControlPolicy root."
+
+[[quirk]]
+id      = "q-acl-0002"
+kind    = "xml_attribute"
+target  = "Grantee"
+summary = "The XMLSchema-instance namespace is declared on the <Grantee> element itself rather than on the document root, so a client that resolves prefixes before reading xsi:type finds the declaration where AWS puts it."
+cases   = ["c-acl-0001", "c-acl-0002", "c-acl-0003"]
+
+  [[quirk.evidence]]
+  kind    = "s3s-issue"
+  ref     = "https://github.com/s3s-project/s3s/issues/297"
+  summary = "Upstream answered ACL documents whose Grantee carried no xsi:type and no namespace declaration, and the Java SDK failed to parse them."
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObjectAcl.html"
+  summary = "The documented response syntax shows the xmlns:xsi declaration written on the Grantee element beside the xsi:type attribute."
+
+[[quirk]]
+id      = "q-acl-0003"
+kind    = "xml_attribute"
+target  = "Grantee.Type"
+summary = "The grantee discriminator is an XML attribute of <Grantee> and not a child element, which makes it the one member of the supported surface that cannot be written by the ordinary element emitter; the frozen IR reserves xml.attributes for it and the generated encoder writes it from there rather than from a branch in the codec."
+cases   = ["c-acl-0001", "c-acl-0002", "c-acl-0003", "c-acl-0004"]
+
+  [[quirk.evidence]]
+  kind    = "s3s-pr"
+  ref     = "https://github.com/s3s-project/s3s/pull/299"
+  summary = "Upstream had to add XML attribute support to its serializer before ACL responses could carry the discriminator at all."
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_Grantee.html"
+  summary = "The Grantee reference documents Type as an attribute of the containing element rather than as a member element."
+
+[[quirk]]
+id      = "q-acl-0004"
+kind    = "aws_deviation"
+target  = "Grantee.Type"
+summary = "On the way in the discriminator is derived from whichever of ID, URI or EmailAddress the grantee carries, because the XML reader this project ships exposes no attributes at all; for every document AWS accepts the two agree, and a document whose attribute contradicts its members is read by its members."
+cases   = ["c-acl-0005", "c-acl-0021", "c-acl-0022"]
+
+  [[quirk.evidence]]
+  kind    = "s3s-issue"
+  ref     = "https://github.com/s3s-project/s3s/issues/297"
+  summary = "The same missing capability upstream hit from the writing side; here it is the reading side that has no attribute access."
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_Grantee.html"
+  summary = "Each documented Type value pairs with exactly one identifying member, which is what makes the member a sound discriminator."
+
+[[quirk]]
+id      = "q-acl-0005"
+kind    = "closed_value_set"
+target  = "PutBucketAcl.ACL"
+summary = "A bucket and an object accept different canned ACLs — log-delivery-write is a bucket's alone and the two bucket-owner values are an object's alone — and the pinned model's BucketCannedACL enumeration is narrower still than AWS's own canned-ACL table, omitting aws-exec-read and log-delivery-write, so the accepted sets are stated here rather than inherited."
+cases   = ["c-acl-0009", "c-acl-0010", "c-acl-0018", "c-acl-0019"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/acl-overview.html#canned-acl"
+  summary = "The canned-ACL table lists eight values and names, for each one, whether it applies to a bucket, an object or both."
+
+[[quirk]]
+id      = "q-acl-0006"
+kind    = "lenient_unknown_elements"
+target  = "PutBucketAcl.AccessControlPolicy"
+summary = "An ACL request body is request XML, so an element this release does not know is skipped and an xmlns attribute is ignored rather than validated; refusing either would make a document written by a newer SDK unstorable, and this family is not one of the three security configurations that opt into strict decoding."
+cases   = ["c-acl-0025", "c-acl-0026"]
+
+  [[quirk.evidence]]
+  kind    = "s3s-issue"
+  ref     = "https://github.com/s3s-project/s3s/issues/613"
+  summary = "Upstream refused request bodies carrying elements it did not know, and AWS accepts them, so forward compatibility broke for clients that were correct."
+
+  [[quirk.evidence]]
+  kind    = "s3s-pr"
+  ref     = "https://github.com/s3s-project/s3s/pull/617"
+  summary = "The fix was to skip the unknown element rather than to widen the schema for each one."
+
+[[quirk]]
+id      = "q-acl-0007"
+kind    = "exclusive_members"
+target  = "PutBucketAcl"
+summary = "The AccessControlPolicy body and the ACL request headers are two spellings of the same thing and a request may use only one of them, but no exclusion is documented between the canned header and the explicit grant headers, so those two may appear together and the pair is passed through rather than refused."
+cases   = ["c-acl-0013", "c-acl-0014", "c-acl-0024", "c-acl-0027"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketAcl.html"
+  summary = "The request reference states that access permissions may be set with the request body or with the request headers, and not with both at once."
+
+[[quirk]]
+id      = "q-acl-0008"
+kind    = "not_configured_error"
+target  = "GetBucketAcl"
+summary = "An ACL is the one bucket subresource that always exists — a bucket nobody configured still has its owner's FULL_CONTROL — so the read answers 200 with the owner grant and there is no operation-specific 404, unlike every other Get/Put subresource triple in the table."
+cases   = ["c-acl-0028", "c-acl-0029"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/acl-overview.html"
+  summary = "The overview states that every bucket and object carries an ACL from creation, with the resource owner granted full control by default."
+
+[[quirk]]
+id      = "q-acl-0009"
+kind    = "checksum_required"
+target  = "PutBucketAcl"
+summary = "Both ACL writes carry the aws.protocols#httpChecksum trait with requestChecksumRequired, which is a different trait from the smithy.api#httpChecksumRequired the lowering reads, so the requirement is stated in the overlay and a write with neither Content-MD5 nor an x-amz-checksum-* header is refused before the body is parsed."
+cases   = ["c-acl-0015", "c-acl-0016", "c-acl-0017"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketAcl.html"
+  summary = "The request syntax documents Content-MD5 as required for this operation, with a 400 when it and every checksum header are absent."
+
+[[quirk]]
+id      = "q-acl-0010"
+kind    = "secret_hygiene"
+target  = "PutBucketAcl"
+summary = "A canonical user id and an account email address are identities, so every refusal in this family is a constant that names the rule broken and never the grantee that broke it — an error body is copied into logs, tickets and client telemetry, and an identity that reaches one of those has left the request it arrived on."
+cases   = ["c-acl-0021", "c-acl-0022", "c-acl-0023"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/finding-canonical-user-id.html"
+  summary = "AWS documents the canonical user id as an account identifier, which is what makes echoing one in an error body a disclosure rather than a diagnostic."
+
+[[quirk]]
+id      = "q-acl-0011"
+kind    = "structured_header"
+target  = "PutBucketAcl.GrantRead"
+summary = "A grant header is a comma-separated list of quoted key=\"value\" pairs whose key is one of id, uri or emailAddress read case-insensitively; the quotation marks are load-bearing rather than decorative, because without them a comma inside a value silently splits one grantee into two."
+cases   = ["c-acl-0007", "c-acl-0008", "c-acl-0021", "c-acl-0022", "c-acl-0023"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketAcl.html"
+  summary = "The request headers section gives the grantee list as comma-separated pairs of a key and a quoted value, with three keys defined."
+
+[[quirk]]
+id      = "q-acl-0012"
+kind    = "closed_value_set"
+target  = "Grant.Permission"
+summary = "The five permissions are a closed set and a grant naming anything else is refused rather than stored, which is the one place this family is stricter than its siblings: a stored permission no authorizer can evaluate is a grant that reads as present and enforces as nothing."
+cases   = ["c-acl-0012", "c-acl-0020"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/acl-overview.html#permissions"
+  summary = "The permissions table enumerates exactly five values and describes what each one grants on a bucket and on an object."
+
+[[quirk]]
+id      = "q-acl-0013"
+kind    = "lenient_value_set"
+target  = "AccessControlPolicy.Owner"
+summary = "The Owner element of a written policy is stored and echoed as sent and is never checked against the caller, because deciding whether a principal may name itself the owner is authorisation and this family deliberately performs none."
+cases   = ["c-acl-0006", "c-acl-0030"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketAcl.html"
+  summary = "The model marks Owner optional on the policy and documents no decoding rule for it, so any check on its value would be this project's invention."

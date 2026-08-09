@@ -1,0 +1,49 @@
+# c-naming-0008 — a NUL is not a name a client may choose
+#
+[case]
+id = "c-naming-0008"
+schema_version = 1
+title = "A key whose decoded form carries a NUL byte is refused"
+rationale = """
+A NUL terminates a string in every C-family layer a storage backend eventually reaches, so a key carrying one is a key whose meaning changes depending on which layer is looking. AWS admits the byte; this gateway does not, and the divergence is registered rather than silent. The representation is untouched: an object already stored under such a key is still listable, because this rule is about what a client may name."""
+polarity = "negative"
+operation = "GetObject"
+tags = ["naming", "routing", "security", "known-divergence"]
+timeout_ms = 10000
+quirks = ["q-naming-0006"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/object-keys.html"
+summary = "A key is an opaque sequence of Unicode characters up to 1024 UTF-8 bytes long, with no path structure of its own."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-naming"
+
+[[setup.objects]]
+bucket = "conf-naming"
+key = "real.txt"
+body = { utf8 = "in the bucket" }
+
+[request]
+method = "GET"
+target = "/conf-naming/a%00b"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+code = "InvalidArgument"
+message_present = true
+request_id_present = true
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+contains_utf8 = ["<Code>InvalidArgument</Code>"]
+not_contains_utf8 = ["root:", "in the bucket"]

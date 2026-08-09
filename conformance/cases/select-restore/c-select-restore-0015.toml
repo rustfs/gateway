@@ -1,0 +1,49 @@
+[case]
+id = "c-select-restore-0015"
+schema_version = 1
+title = "Days beside a SELECT restore is refused rather than silently ignored"
+rationale = """
+Days is how long an active copy survives, and a select restore produces no active copy — its answer is written to the OutputLocation. A document carrying both has crossed the two forms, and ignoring the member would leave the caller believing it had bought a lifetime it did not."""
+polarity = "negative"
+operation = "RestoreObject"
+tags = ["restore", "select"]
+timeout_ms = 10000
+quirks = ["q-restore-0004"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_RestoreObject.html"
+summary = "The request syntax documents Days as not applicable to a select-type restore."
+kind = "aws-doc"
+[[setup.buckets]]
+name = "conf-restore"
+
+[[setup.objects]]
+bucket = "conf-restore"
+key = "cold.txt"
+body = { utf8 = "archived payload" }
+storage_class = "GLACIER"
+
+[request]
+method = "POST"
+target = "/conf-restore/cold.txt?restore"
+headers = { "content-type" = "application/xml" }
+body = { utf8 = '<RestoreRequest><Days>1</Days><Type>SELECT</Type><SelectParameters><InputSerialization><CSV><FileHeaderInfo>USE</FileHeaderInfo></CSV></InputSerialization><ExpressionType>SQL</ExpressionType><Expression>SELECT * FROM S3Object</Expression><OutputSerialization><CSV></CSV></OutputSerialization></SelectParameters><OutputLocation><S3><BucketName>conf-results</BucketName><Prefix>out/</Prefix></S3></OutputLocation></RestoreRequest>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+code = "InvalidRequest"
+request_id_present = true
+
+[expect.headers_present]
+"content-type" = "application/xml"
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>InvalidRequest</Code><Message>Days must not be specified for a SELECT restore</Message><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''

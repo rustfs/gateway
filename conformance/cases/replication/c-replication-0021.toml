@@ -1,0 +1,44 @@
+[case]
+id = "c-replication-0021"
+schema_version = 1
+title = "A rule with a Filter but no Priority is refused as InvalidRequest"
+rationale = """
+The documentation is explicit: a configuration that adds the Filter element must also add Priority. The member exists because V2 rules can overlap — two filters can match one object — and the priority is what makes the engine's choice deterministic. A stored V2 rule without one is a conflict deferred to replication time, which is the worst place to discover it."""
+polarity = "negative"
+operation = "PutBucketReplication"
+tags = ["replication", "xml", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-repl-0006"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketReplication.html"
+summary = "The operation documents that a configuration adding the Filter element must also add DeleteMarkerReplication, Status and Priority."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "conf-replication"
+[request]
+method = "PUT"
+target = "/conf-replication?replication"
+headers = { "content-type" = "application/xml", "content-md5" = "NKgY0Hfb0jEaG8WA5BaeLA==" }
+body = { utf8 = '<ReplicationConfiguration><Role>arn:aws:iam::111122223333:role/replication-role</Role><Rule><Filter><Prefix>docs/</Prefix></Filter><Status>Enabled</Status><Destination><Bucket>arn:aws:s3:::replica-bucket</Bucket></Destination><DeleteMarkerReplication><Status>Disabled</Status></DeleteMarkerReplication></Rule></ReplicationConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+code = "InvalidRequest"
+request_id_present = true
+
+[expect.headers_present]
+"content-type" = "application/xml"
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>InvalidRequest</Code><Message>A Rule that specifies a Filter must also specify a Priority</Message><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''

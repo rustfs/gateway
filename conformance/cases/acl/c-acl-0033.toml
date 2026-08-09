@@ -1,0 +1,41 @@
+[case]
+id = "c-acl-0033"
+schema_version = 1
+title = "An ACL read of an object key answers the policy, not the object's bytes"
+rationale = """
+The read half of the same collision, and a disclosure rather than a loss: GetObject accepts every GET to an object key, so without the ?acl row a caller asking who may read an object is handed what the object contains. The body is asserted to be the policy and not the payload, because a status-only case is green under exactly the routing this asserts against."""
+polarity = "negative"
+operation = "GetObjectAcl"
+tags = ["acl", "routing", "security", "wire-bytes"]
+timeout_ms = 10000
+quirks = ["q-acl-0008"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObjectAcl.html"
+summary = "An ACL read is a GET to the object key carrying ?acl, and it answers the policy rather than the object."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "conf-acl"
+
+[[setup.objects]]
+bucket = "conf-acl"
+key = "secret.txt"
+body = { utf8 = "the bytes a permission question must not disclose" }
+
+[request]
+method = "GET"
+target = "/conf-acl/secret.txt?acl"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[expect.headers_present]
+"content-type" = "application/xml"
+
+[expect.body]
+not_contains_utf8 = ["the bytes a permission question must not disclose"]
+contains_utf8 = ["<AccessControlPolicy", "xsi:type"]

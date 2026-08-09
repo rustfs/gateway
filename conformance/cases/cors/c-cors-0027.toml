@@ -1,0 +1,55 @@
+[case]
+id = "c-cors-0027"
+schema_version = 1
+title = "A preflight a stored rule admits answers 200 with the origin, the methods and Vary"
+rationale = """
+This is the only case in the suite that proves an OPTIONS is answered at all. Every other CORS case asserts what the configuration codec stores; none of them can observe the runtime, and until this one existed the whole preflight half of the feature could have been absent without a single red line. The three headers asserted are the three a browser refuses the real request without."""
+polarity = "positive"
+tags = ["cors", "preflight", "security"]
+timeout_ms = 10000
+quirks = ["q-cors-0009", "q-cors-0011"]
+
+[[case.evidence]]
+url = "https://fetch.spec.whatwg.org/#http-cors-protocol"
+summary = "A browser sends Origin and Access-Control-Request-Method on a preflight and requires an allow-origin and an allow-methods header back."
+kind = "rfc"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/cors.html"
+summary = "S3 answers a bucket preflight from the bucket's own stored CORS document rather than from a service-wide setting."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "conf-cors-rt"
+
+[[exchanges]]
+# Store the document the preflight below is answered from. Setup traffic, not under test.
+[exchanges.request]
+method = "PUT"
+target = "/conf-cors-rt?cors"
+headers = { "content-type" = "application/xml", "content-md5" = "rAqMzbtniOyp6dCmIWiViw==" }
+body = { utf8 = "<CORSConfiguration><CORSRule><AllowedMethod>PUT</AllowedMethod><AllowedOrigin>https://app.example.com</AllowedOrigin></CORSRule></CORSConfiguration>" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+
+[[exchanges]]
+# The preflight itself. Unsigned on purpose: a browser sends no credentials on one, so a service
+# that required a signature here would have switched CORS off.
+[exchanges.request]
+method = "OPTIONS"
+target = "/conf-cors-rt/key.txt"
+headers = { "origin" = "https://app.example.com", "access-control-request-method" = "PUT" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.headers_present]
+"access-control-allow-origin" = "https://app.example.com"
+"access-control-allow-methods" = "PUT"
+"vary" = "origin"

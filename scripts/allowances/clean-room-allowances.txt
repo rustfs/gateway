@@ -1,0 +1,15 @@
+# Files allowed to name the AGPL, for check_no_minio_source.sh rule 1 only.
+#
+# Rule 1 refuses a file that names the AGPL, because AGPL licence text in an Apache-2.0 tree is
+# what an AGPL source file brings with it. Prose that states the clean-room policy has to name the
+# licence it is about, and that is the only reason a path belongs here.
+#
+# Rules 2 (a provenance comment claiming a port), 3 (vendored server source) and 4 (a dependency
+# edge) are not exemptable and this file does not affect them.
+#
+# One path per line. A comment saying why.
+
+docs/adr/0001-licensing-and-provenance-boundary.md    # the ADR that draws the boundary
+docs/dialects.md                                      # the clean-room policy itself
+scripts/README.md                                     # the guard index, which describes this guard
+CONTRIBUTING.md                                       # the contributor clause

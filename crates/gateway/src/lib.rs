@@ -65,6 +65,14 @@
 //! the only exceptions, because registration erases them behind a closure and neither is ever
 //! reached through `dyn`. ADR-0002 is the full statement, and this crate re-exports the
 //! [`BoxFuture`] alias so that no downstream crate takes a dependency on `futures` to name it.
+//!
+//! # The three middleware levels
+//!
+//! A tower [`Layer`](https://docs.rs/tower/latest/tower/trait.Layer.html) wraps the whole service
+//! and needs nothing from this crate. [`StageFilter`] intercepts between the pipeline's stages and
+//! may rewrite the head or the response. [`OpLayer`] wraps one operation with its input and output
+//! types intact. [`Observer`] only watches, and always will. `docs/middleware.md` is the decision
+//! tree and the table of which of RustFS's nine tower patch layers lands where.
 #![forbid(unsafe_code)]
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing, clippy::panic)]
 
@@ -95,9 +103,13 @@ pub use crate::builder::{DEFAULT_MAX_BUFFERED_BODY_BYTES, ServiceBuilder};
 pub use crate::clock::{Clock, FixedClock, system_clock};
 pub use crate::close::ConnectionIntent;
 pub use crate::ext::{
-    Authentication, Authenticator, Authorizer, AuthzRequest, ChunkSink, ChunkVerification, CredentialProvider, Credentials,
-    CredentialsError, Denial, Governor, GovernorRequest, HostQuery, HostResolver, Lease, NoObserver, Observer, PathStyleOnly,
-    RequestEvent, ResolvedHost, SigV4Authenticator, StaticCredentials, Unavailable, Unlimited,
+    Addressing, Authentication, Authenticator, Authorizer, AuthzRequest, BaseDomain, CORS_PREFLIGHT, CachedCorsSource, ChunkSink,
+    ChunkVerification, CorsCacheConfig, CorsSource, CorsSourceError, CredentialProvider, Credentials, CredentialsError, Decision,
+    Denial, DomainError, FROZEN_WIRE_HEADERS, FrozenHeader, Governor, GovernorRequest, HostQuery, HostResolver, Lease,
+    MAX_BASE_DOMAIN_BYTES, Next, NoCors, NoObserver, NoPolicy, Observer, OpLayer, PathStyleOnly, PolicyError, PolicySnapshot,
+    PolicySource, RequestContext, RequestEvent, ResolvedHost, ResponseView, RoutedView, SigV4Authenticator, SnapshotId,
+    StageFilter, StaticCredentials, TargetOrigin, Unavailable, Unlimited, VhostHint, VirtualHostStyle, WireHead, op_layer,
+    policy_from, response_filter, routed_filter, wire_filter,
 };
 pub use crate::probe::{BodyProgress, ObservedBody};
 pub use crate::render::{S3Error, connection_intent_of, declaration, document, document_body, render};
@@ -126,13 +138,14 @@ pub use rustfs_gateway_core::{
     Answer, ArnForm, AuthRequirement, BoxFuture, CodecError, CommitOutcome, CommitWork, ELEMENT_ORDER, EncodedResponse,
     ErrorDetail, ErrorHeader, Handler, HandlerError, HandlerResult, HostClass, MetaView, MissingHandlers, Operation,
     OperationCodec, OperationSet, OperationSpec, PRECONDITION_FAILED_MESSAGE, ParamKind, PreAuthError, Predicate,
-    RANGE_NOT_SATISFIABLE_MESSAGE, Req, RequestBody, RequiredParam, ResourceShape, Resp, ResponseBody, ResponseOverride,
-    RouteEntry, RouteSelector, TargetKind,
+    RANGE_NOT_SATISFIABLE_MESSAGE, Req, RequestBody, RequiredParam, ResourceIdentity, ResourceShape, Resp, ResponseBody,
+    ResponseOverride, RouteEntry, RouteSelector, TargetKind,
 };
 // The pagination contract. Found unreachable by check_shared_reachable.sh the moment that
 // guard existed — the fourth contract in a row written for backends and left where no
 // backend could see it. key_count is the KeyCount = Contents + CommonPrefixes rule that
 // made OpenDAL page forever when a listing got it wrong.
+pub use rustfs_gateway_core::ops::delete_objects::DeleteObjectResources;
 pub use rustfs_gateway_core::ops::shared::pagination::{CursorKind, CursorSpec, MAX_CURSOR_BYTES, key_count};
 
 // The conditional-request and entity-tag contracts, exported for the same reason as
@@ -152,15 +165,12 @@ pub use rustfs_gateway_core::ops::shared::precondition::{
     RequestKind, evaluate, evaluate_range,
 };
 
-// The copy-source contract. Exported because a backend cannot honour it otherwise: the
-// conformance fixture had to mirror `CopySource`, `authorize_source` and `classify_self_copy`
-// by hand, and every backend outside this workspace would have done the same. A type state
-// that only this workspace can reach is a type state that does not prevent the defect it was
-// written for — GHSA-mx42 and GHSA-wfxj were both a second implementation forgetting the
-// check the first one made.
+// The copy-source contract. A backend receives `CopySourceResources` through `Req::resources`
+// and can reveal the normalized source only with the proof on that same request. It never needs
+// to parse the raw header again.
 pub use rustfs_gateway_core::ops::shared::copy_source::{
-    CopyRange, CopySource, CopySourceForm, CopySourceRejection, ResolvedCopySource, SelfCopy, SourceAccess, SourceAuthorized,
-    SourceResource, authorize_source, classify_self_copy, resolve_copy_range,
+    CopyRange, CopySource, CopySourceForm, CopySourceRejection, CopySourceResources, ResolvedCopySource, SelfCopy,
+    classify_self_copy, resolve_copy_range,
 };
 // The CORS document contract. A backend stores what `PutBucketCors` hands it and the preflight
 // runtime later answers browsers out of that store, so the rules for what may be stored — the
@@ -170,6 +180,20 @@ pub use rustfs_gateway_core::ops::shared::copy_source::{
 // matcher can never satisfy, and the only symptom would be browser-side.
 pub use rustfs_gateway_core::ops::shared::cors::{
     CORS_ALLOWED_METHODS, CorsRejection, MAX_CORS_ID_CHARS, MAX_CORS_RULES, validate_cors,
+};
+// The CORS **runtime**, exported for the reason the document contract above is: a deployment
+// installs a `CorsSource` and a `CorsPolicy`, and neither is nameable without these. `CorsOrigins`
+// and `CorsPolicyError` ride along or `CorsPolicy::new`'s argument and error types are
+// unnameable outside the workspace — the same defect as an unexported contract, one step on. The
+// matcher itself is exported too, because a deployment answering `OPTIONS` on a second protocol
+// face (a website endpoint, a console) must reach the one evaluator rather than write a second.
+pub use rustfs_gateway_core::cors::{
+    ACCESS_CONTROL_ALLOW_CREDENTIALS, ACCESS_CONTROL_ALLOW_HEADERS, ACCESS_CONTROL_ALLOW_METHODS, ACCESS_CONTROL_ALLOW_ORIGIN,
+    ACCESS_CONTROL_EXPOSE_HEADERS, ACCESS_CONTROL_MAX_AGE, ACCESS_CONTROL_REQUEST_HEADERS, ACCESS_CONTROL_REQUEST_METHOD,
+    AllowOrigin, CorsHeaders, CorsOrigins, CorsPolicy, CorsPolicyError, ORIGIN, PREFLIGHT_REFUSAL_MESSAGE,
+    PREFLIGHT_SUCCESS_STATUS, PreflightClass, PreflightOutcome, PreflightRequest, RequestedHeaders, RuleMatch, UnrenderableRule,
+    VARY, VARY_ORIGIN, actual_headers, answer_actual, answer_preflight, classify, match_actual, match_preflight,
+    preflight_headers, preflight_refusal,
 };
 
 // The tagging contract. The tag set has two request channels — the `<Tagging>` document of the
@@ -201,6 +225,20 @@ pub use rustfs_gateway_core::ops::shared::lifecycle::{
 // (`q-enc-0009`).
 pub use rustfs_gateway_core::ops::shared::encryption::{EncryptionRejection, validate_encryption};
 
+// The **run-time** half of server-side encryption, which the document contract above deliberately
+// does not answer. Three of these are named by a deployment: `TransportSecurity` is what a
+// transport puts into a request's extensions to say the socket was encrypted, `SseConfig` and
+// `PlaintextCustomerKeyAck` are how a deployment says it will serve customer-provided keys over
+// cleartext anyway. The rest are what a **backend** needs: `KeyFingerprint` is the sixteen bytes
+// an upload is bound to, `check_part` is the cross-request comparison the framework cannot make
+// for it because it holds no upload state, and `enforce` is how a handler obtains a fingerprint
+// the framework has already validated. `SseEnforced` carries digests and an algorithm — never a
+// key; there is no accessor for one, on purpose.
+pub use rustfs_gateway_core::sse::{
+    KeyFingerprint, KeySide, ManagedRejection, PartRejection, PlaintextCustomerKeyAck, SseConfig, SseEnforced, SseRejection,
+    TransportSecurity, check_part, enforce as enforce_sse, presented_customer_key,
+};
+
 // The object-lock document contracts, exported for the same reason as the three above — with
 // the sharpest stakes in the table: what the lock, retention and legal-hold writes may store is
 // a WORM compliance answer, so the closed value sets, the Days/Years mutex and the future-only
@@ -212,6 +250,95 @@ pub use rustfs_gateway_core::ops::shared::encryption::{EncryptionRejection, vali
 pub use rustfs_gateway_core::ops::shared::object_lock::{
     ObjectLockRejection, validate_legal_hold, validate_lock_configuration, validate_retention,
 };
+
+// The replication document contract, exported for the same reason as the three above: what
+// `PutBucketReplication` may store — the V1/V2 schema couplings, the filter grammar, the rule
+// cap and the id bounds — must be one implementation every backend calls, and its leniencies
+// matter even more than its refusals: this is the one configuration RustFS parses fail-closed,
+// so a backend that re-derived a stricter rule would make buckets unusable on the next
+// re-parse. The rejection reasons are constant on purpose: `ReplicaKmsKeyID` and `Account` are
+// configuration secrets, and a backend that composed its own refusal from the document's bytes
+// would copy them into an error body (`q-repl-0010`).
+pub use rustfs_gateway_core::ops::shared::replication::{
+    MAX_REPLICATION_ID_CHARS, MAX_REPLICATION_RULES, ReplicationRejection, RuleShape, classify_rule, validate_replication,
+};
+
+// The select request contract, exported for the same reason and with one addition of its own:
+// the expression is user-authored SQL, so no rejection here carries a byte of it and a backend
+// that composed its own refusal would be the second place that rule has to hold. The same four
+// members appear twice on the wire — in a `SelectObjectContentRequest` and in a
+// `RestoreRequest`'s `SelectParameters` — which is why the validator takes them as arguments
+// rather than as a request.
+pub use rustfs_gateway_core::ops::shared::select::{
+    MAX_EXPRESSION_BYTES, SelectRejection, validate_input_serialization, validate_output_serialization, validate_scan_range,
+    validate_select,
+};
+
+// The restore contract, and the one thing on this list a backend cannot afford to re-derive:
+// `RestoreState::status` is where the 202/200 difference lives. A client polls on it, both
+// numbers are successes, and a backend that picked its own would break the poll loop while
+// answering something no status assertion would flag. `format_restore_status` is exported
+// beside it because `x-amz-restore` is a structured header the read and head encoders will also
+// have to write, and two `format!`s spell a comma-and-a-space differently sooner or later.
+pub use rustfs_gateway_core::ops::shared::restore::{
+    MAX_RESTORE_HEADER_BYTES, MIN_RESTORE_DAYS, RestoreRejection, RestoreState, RestoreStatus, format_restore_status,
+    parse_restore_status, validate_restore,
+};
+
+// The event-stream framing. Exported although nothing in this workspace sends a frame yet: the
+// response shape a select answer needs is a third variant of `Resp<O>` and is not this family's
+// to add, but the framing is the half an implementation gets wrong invisibly — a CRC over the
+// wrong range encodes, decodes against its own author, and is refused by every SDK. Exporting
+// it is what stops the eventual caller from writing a second one.
+pub use rustfs_gateway_core::ops::shared::event_stream::{
+    EVENT_STREAM_CONTENT_TYPE, EventKind, EventSequence, EventStreamError, MAX_PAYLOAD_BYTES, encode_event, encode_exception,
+    progress_document, stats_document,
+};
+
+// The ACL contract, exported for the same reason as the five above, plus one this family has to
+// itself: an ACL arrives on **two** wire channels — the `<AccessControlPolicy>` body and the
+// `x-amz-acl` / `x-amz-grant-*` headers — and a backend that parsed the grant-header grammar for
+// itself would end up with two parsers for one grammar. The two would then disagree about what a
+// client asked for while both answered 200, which on an authorization input is the failure mode
+// worth an export on its own. `resolve_grantee_type` is exported beside them because the
+// `<Grantee>` discriminator is an XML attribute this project's reader cannot see (`q-acl-0004`),
+// so every backend has to derive it the same way or a read answers a document no SDK can parse.
+pub use rustfs_gateway_core::ops::shared::acl::{
+    ALL_USERS_GROUP, AUTHENTICATED_USERS_GROUP, AclHeaders, AclInput, AclRejection, AclTarget, BUCKET_CANNED_ACLS, GranteeType,
+    LOG_DELIVERY_GROUP, MAX_GRANT_HEADER_BYTES, MAX_GRANTEES_PER_HEADER, OBJECT_CANNED_ACLS, PERMISSIONS, XSI_NAMESPACE,
+    canonicalize_policy, parse_canned, parse_grant_header, resolve_grantee_type, resolve_input,
+};
+
+// The bucket-configuration band's four contracts, exported for the same reason as the families
+// above. The stakes are lowest here and the leniency is widest: RustFS parses these documents
+// fail-open, so a backend that re-derived a stricter rule would not refuse a write — it would
+// switch a feature off on the next re-parse, and for `?versioning` that means version retention.
+// What is refused is the short list AWS documents as a refusal, once, here.
+pub use rustfs_gateway_core::ops::shared::bucket_config::{
+    BucketConfigRejection, mfa_delete_states, payers, switch_statuses, validate_accelerate, validate_logging,
+    validate_request_payment, validate_versioning,
+};
+
+// The notification document contract. Its leniency is the load-bearing part: AWS adds event
+// types continuously, so a backend that refused a name it did not know would reject
+// configurations AWS accepts until it was rebuilt.
+pub use rustfs_gateway_core::ops::shared::bucket_notification::{NotificationRejection, validate_notification};
+
+// The bucket policy contract — and the fence around it. What is exported is the size ceiling, the
+// depth ceiling and the syntax check; what is deliberately **not** exported, because it is
+// deliberately not implemented, is any evaluation of what a policy grants. The rejection reasons
+// are constant with no offset and no excerpt: a policy names principals and account identifiers,
+// and an error that said where the syntax broke would let a caller who cannot read the policy
+// back reconstruct it one probe at a time.
+pub use rustfs_gateway_core::ops::shared::bucket_policy::{
+    MAX_POLICY_BYTES, MAX_POLICY_DEPTH, PolicyRejection, validate_policy, validate_public_access_block,
+};
+
+// The website document contract: the exclusion between a whole-site redirect and a
+// document-serving site, and the one-rewrite-per-redirect rule. Serving anything from the
+// document is a second protocol face this workspace does not implement, so nothing about the
+// runtime is exported — there is nothing to export.
+pub use rustfs_gateway_core::ops::shared::bucket_website::{WebsiteRejection, validate_website};
 
 // The bucket lifecycle contracts, exported the day they are written rather than found
 // unreachable later. A backend answering CreateBucket needs `resolve` — the us-east-1
@@ -244,7 +371,9 @@ pub use rustfs_gateway_stream::{Body, ByteStream, Payload, TrailingHeaders};
 // while `REQUIRED_FACADE_EXPORTS` was satisfied to the letter. A facade that exports the
 // service but not the values the service returns is not a facade.
 pub use rustfs_gateway_types::{
-    BucketName, ChecksumAlgorithm, ChecksumDigest, ChecksumSpec, ChecksumType, ETag, ErrorCode, ObjectKey, Timestamp,
+    AwsNameValidator, BucketName, ChecksumAlgorithm, ChecksumDigest, ChecksumSpec, ChecksumType, ETag, ErrorCode, NamePolicy,
+    NameRejection, NameValidator, ObjectKey, SlashPolicy, Stricter, Timestamp, TimestampFormat, decode_once, floor_check_bucket,
+    floor_check_key,
 };
 
 pub use crate::ext::allow_when;

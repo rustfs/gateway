@@ -36,7 +36,8 @@ use std::future::Future;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use http::Method;
+use bytes::Bytes;
+use http::{Method, Request};
 use rustfs_gateway_core::dispatch::NOT_REGISTERED_MESSAGE;
 use rustfs_gateway_core::handler::{Handler, HandlerError, HandlerResult, Req, Resp};
 use rustfs_gateway_core::op::{AuthRequirement, HasOperation, Operation, ResourceShape};
@@ -44,12 +45,29 @@ use rustfs_gateway_core::registry::{
     BuildError, MissingHandlers, OperationSet, OperationSpec, Registry, RegistryError, RouterBuilder,
 };
 use rustfs_gateway_core::route::{Predicate, TargetKind};
+use rustfs_gateway_http::{Limits, WireRequest};
 use rustfs_gateway_sig::{OperationFloor, SigService};
 use rustfs_gateway_types::ErrorCode;
 use rustfs_gateway_types::dto::{
     GetBucketLocation, GetBucketLocationInput, GetBucketLocationOutput, PutObject, PutObjectInput, PutObjectOutput,
 };
 use support::{Req as RouteReq, block_on, entry};
+
+fn erased_get_bucket_location() -> rustfs_gateway_core::ErasedRequest {
+    let request = Request::builder()
+        .method("GET")
+        .uri("http://host.invalid/bucket?location")
+        .header("host", "host.invalid")
+        .body(())
+        .expect("valid request");
+    let wire = WireRequest::accept(request, &Limits::default()).expect("accepted request");
+    let meta = rustfs_gateway_core::MetaView::of(&wire, TargetKind::Bucket).expect("bucket target");
+    let codec = rustfs_gateway_core::ErasedCodec::for_operation::<GetBucketLocation>();
+    let decoded = codec
+        .decode(&meta, rustfs_gateway_core::RequestBody::Buffered(Bytes::new()))
+        .expect("decoded");
+    codec.authorize(decoded, &[]).expect("no derived resources")
+}
 
 // ── a backend ────────────────────────────────────────────────────────────────────────────────
 
@@ -113,6 +131,13 @@ impl Operation for AdminSetConfig {
     const NAME: &'static str = "rustfs:AdminSetConfig";
     type Input = ();
     type Output = ();
+    type DerivedResources = rustfs_gateway_core::NoDerived;
+
+    fn derive_resources(_input: &Self::Input) -> Result<Self::DerivedResources, rustfs_gateway_core::DerivedResourceError> {
+        Ok(rustfs_gateway_core::NoDerived)
+    }
+
+    fn seal_derived_input(_input: &mut Self::Input) {}
 
     fn spec() -> &'static OperationSpec {
         &ADMIN_SPEC
@@ -154,6 +179,15 @@ macro_rules! bad_operation {
                 const NAME: &'static str = $name;
                 type Input = ();
                 type Output = ();
+                type DerivedResources = rustfs_gateway_core::NoDerived;
+
+                fn derive_resources(
+                    _input: &Self::Input,
+                ) -> Result<Self::DerivedResources, rustfs_gateway_core::DerivedResourceError> {
+                    Ok(rustfs_gateway_core::NoDerived)
+                }
+
+                fn seal_derived_input(_input: &mut Self::Input) {}
 
                 fn spec() -> &'static OperationSpec {
                     &SPEC
@@ -252,7 +286,8 @@ fn an_erased_registration_still_calls_the_typed_handler() {
 
     let invocation = router
         .registry()
-        .invoke::<GetBucketLocation>(Req::new(GetBucketLocationInput::default()))
+        .authorize_and_invoke_no_derived::<GetBucketLocation>(GetBucketLocationInput::default())
+        .expect("input authorization succeeds")
         .expect("GetBucketLocation is registered");
     let response = block_on(invocation).expect("the handler answers");
 
@@ -289,7 +324,8 @@ fn two_backends_coexist_in_one_process() {
     let region_of = |router: &rustfs_gateway_core::Router| {
         let invocation = router
             .registry()
-            .invoke::<GetBucketLocation>(Req::new(GetBucketLocationInput::default()))
+            .authorize_and_invoke_no_derived::<GetBucketLocation>(GetBucketLocationInput::default())
+            .expect("input authorization succeeds")
             .expect("registered");
         block_on(invocation)
             .expect("answered")
@@ -323,7 +359,13 @@ fn a_namespaced_third_party_operation_registers() {
         router.registry().handler_names().collect::<Vec<_>>(),
         vec!["PutObject", "rustfs:AdminSetConfig"]
     );
-    let answer = block_on(router.registry().invoke::<AdminSetConfig>(Req::new(())).expect("registered"));
+    let answer = block_on(
+        router
+            .registry()
+            .authorize_and_invoke_no_derived::<AdminSetConfig>(())
+            .expect("input authorization succeeds")
+            .expect("registered"),
+    );
     assert!(answer.is_ok());
 }
 
@@ -358,7 +400,12 @@ fn a_spec_registration_without_a_handler_still_routes() {
         .expect("the generated spec is registrable");
     assert_eq!(registry.names().collect::<Vec<_>>(), vec!["PutObject"]);
     assert_eq!(registry.handler_names().count(), 0);
-    assert!(registry.invoke::<PutObject>(Req::new(PutObjectInput::default())).is_none());
+    assert!(
+        registry
+            .authorize_and_invoke_no_derived::<PutObject>(PutObjectInput::default())
+            .expect("input authorization succeeds")
+            .is_none()
+    );
 }
 
 /// Positive — the answer's status comes from the operation's spec, and can be overridden per call.
@@ -382,7 +429,8 @@ fn an_unregistered_operation_is_not_implemented() {
     assert!(
         router
             .registry()
-            .invoke::<GetBucketLocation>(Req::new(GetBucketLocationInput::default()))
+            .authorize_and_invoke_no_derived::<GetBucketLocation>(GetBucketLocationInput::default())
+            .expect("input authorization succeeds")
             .is_none()
     );
 
@@ -535,7 +583,8 @@ fn a_second_registration_does_not_win() {
 
     let answer = block_on(
         registry
-            .invoke::<GetBucketLocation>(Req::new(GetBucketLocationInput::default()))
+            .authorize_and_invoke_no_derived::<GetBucketLocation>(GetBucketLocationInput::default())
+            .expect("input authorization succeeds")
             .expect("registered"),
     )
     .expect("answered");
@@ -617,7 +666,8 @@ fn a_failed_rebuild_leaves_the_running_router_alone() {
     let answer = block_on(
         running
             .registry()
-            .invoke::<GetBucketLocation>(Req::new(GetBucketLocationInput::default()))
+            .authorize_and_invoke_no_derived::<GetBucketLocation>(GetBucketLocationInput::default())
+            .expect("input authorization succeeds")
             .expect("still registered"),
     );
     assert!(answer.is_ok());
@@ -641,7 +691,7 @@ fn require_reports_the_missing_operations_on_one_line() {
         text,
         "backend is missing handlers for: AbortMultipartUpload, CompleteMultipartUpload, CopyObject, \
          CreateBucket, CreateMultipartUpload, DeleteBucket, DeleteBucketCors, DeleteBucketEncryption, DeleteBucketLifecycle, \
-         DeleteBucketTagging, ... and 32 more (42 of 43)"
+         DeleteBucketPolicy, ... and 61 more (71 of 72)"
     );
     assert_eq!(
         missing.missing(),
@@ -655,21 +705,37 @@ fn require_reports_the_missing_operations_on_one_line() {
             "DeleteBucketCors",
             "DeleteBucketEncryption",
             "DeleteBucketLifecycle",
+            "DeleteBucketPolicy",
+            "DeleteBucketReplication",
             "DeleteBucketTagging",
+            "DeleteBucketWebsite",
             "DeleteObject",
             "DeleteObjectTagging",
             "DeleteObjects",
+            "DeletePublicAccessBlock",
+            "GetBucketAccelerateConfiguration",
+            "GetBucketAcl",
             "GetBucketCors",
             "GetBucketEncryption",
             "GetBucketLifecycleConfiguration",
             "GetBucketLocation",
+            "GetBucketLogging",
+            "GetBucketNotificationConfiguration",
+            "GetBucketPolicy",
+            "GetBucketPolicyStatus",
+            "GetBucketReplication",
+            "GetBucketRequestPayment",
             "GetBucketTagging",
+            "GetBucketVersioning",
+            "GetBucketWebsite",
             "GetObject",
+            "GetObjectAcl",
             "GetObjectAttributes",
             "GetObjectLegalHold",
             "GetObjectLockConfiguration",
             "GetObjectRetention",
             "GetObjectTagging",
+            "GetPublicAccessBlock",
             "HeadBucket",
             "HeadObject",
             "ListBuckets",
@@ -678,19 +744,32 @@ fn require_reports_the_missing_operations_on_one_line() {
             "ListObjects",
             "ListObjectsV2",
             "ListParts",
+            "PutBucketAccelerateConfiguration",
+            "PutBucketAcl",
             "PutBucketCors",
             "PutBucketEncryption",
             "PutBucketLifecycleConfiguration",
+            "PutBucketLogging",
+            "PutBucketNotificationConfiguration",
+            "PutBucketPolicy",
+            "PutBucketReplication",
+            "PutBucketRequestPayment",
             "PutBucketTagging",
+            "PutBucketVersioning",
+            "PutBucketWebsite",
+            "PutObjectAcl",
             "PutObjectLegalHold",
             "PutObjectLockConfiguration",
             "PutObjectRetention",
             "PutObjectTagging",
+            "PutPublicAccessBlock",
+            "RestoreObject",
+            "SelectObjectContent",
             "UploadPart",
             "UploadPartCopy"
         ]
     );
-    assert_eq!(missing.required(), 43);
+    assert_eq!(missing.required(), 72);
 }
 
 /// Negative — a long list is truncated and still says how much is missing in total.
@@ -722,7 +801,7 @@ fn an_erased_call_with_the_wrong_payload_is_an_error_not_a_panic() {
         .build()
         .expect("built");
 
-    let wrong: rustfs_gateway_core::ErasedRequest = Box::new(Req::<GetBucketLocation>::new(GetBucketLocationInput::default()));
+    let wrong = erased_get_bucket_location();
     let call = router
         .registry()
         .handlers()
@@ -737,7 +816,7 @@ fn an_erased_call_with_the_wrong_payload_is_an_error_not_a_panic() {
 #[test]
 fn an_erased_call_for_an_unregistered_operation_finds_nothing() {
     let router = RouterBuilder::new().build().expect("an empty backend still builds");
-    let payload: rustfs_gateway_core::ErasedRequest = Box::new(Req::<PutObject>::new(PutObjectInput::default()));
+    let payload = erased_get_bucket_location();
     assert!(router.registry().handlers().invoke_erased("PutObject", payload).is_none());
     assert!(router.registry().handlers().is_empty());
 }

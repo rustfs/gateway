@@ -1,0 +1,39 @@
+[case]
+id = "c-select-restore-0007"
+schema_version = 1
+title = "Unknown elements and a namespace on a RestoreRequest are skipped, not refused"
+rationale = """
+AWS adds elements to this document over time and every SDK a version newer sends them, so a decoder that refused what it did not recognise would reject correct requests as the model moves. The namespace is the same rule at the root: members are matched by local name, so a prefixed document decodes identically to a bare one."""
+polarity = "positive"
+operation = "RestoreObject"
+tags = ["restore", "xml"]
+timeout_ms = 10000
+quirks = ["q-restore-0007"]
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/issues/613"
+summary = "AWS ignores unknown elements in request XML, and upstream had to relax its decoder after strict parsing broke real clients."
+kind = "s3s-issue"
+[[setup.buckets]]
+name = "conf-restore"
+
+[[setup.objects]]
+bucket = "conf-restore"
+key = "cold.txt"
+body = { utf8 = "archived payload" }
+storage_class = "GLACIER"
+
+[request]
+method = "POST"
+target = "/conf-restore/cold.txt?restore"
+headers = { "content-type" = "application/xml" }
+body = { utf8 = '<RestoreRequest xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Days>1</Days><Nonsense>x</Nonsense><Nested><Deeper>y</Deeper></Nested></RestoreRequest>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 202
+connection_after = "open"
+
+[expect.body]
+size = 0

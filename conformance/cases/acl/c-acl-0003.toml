@@ -1,0 +1,55 @@
+[case]
+id = "c-acl-0003"
+schema_version = 1
+title = "A grant by email round-trips as xsi:type AmazonCustomerByEmail on an object"
+rationale = """
+The third union member, on the object half of the family, and the one whose discriminator is never inferable from the value's shape alone: an email address is a string like any other. The written document carries no xsi:type attribute at all — the reader this project ships cannot see one — so the read-back is what proves the discriminator was derived rather than dropped."""
+polarity = "positive"
+operation = "PutObjectAcl"
+tags = ["acl", "xml", "wire-bytes"]
+timeout_ms = 10000
+quirks = ["q-acl-0002", "q-acl-0003"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_Grantee.html"
+summary = "The AmazonCustomerByEmail form is documented as carrying an EmailAddress element and no canonical id."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "conf-acl"
+
+[[setup.objects]]
+bucket = "conf-acl"
+key = "doc.txt"
+body = { utf8 = "payload" }
+
+[[exchanges]]
+name = "grant-by-email"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-acl/doc.txt?acl"
+headers = { "content-type" = "application/xml", "content-md5" = "5IJpMZEnXOQ5OgbXoymc1w==" }
+body = { utf8 = '<AccessControlPolicy><Owner><ID>3f6e2b1c4a8d90e7b5c31f2a6d80e4c97b1a3d5f8e206c4b7a9d1e3f5c7b9a0d</ID><DisplayName>conformance</DisplayName></Owner><AccessControlList><Grant><Grantee><EmailAddress>grantee@example.com</EmailAddress></Grantee><Permission>READ_ACP</Permission></Grant></AccessControlList></AccessControlPolicy>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[[exchanges]]
+name = "read-back"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-acl/doc.txt?acl"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.body]
+golden = "goldens/c-acl-0003.xml"

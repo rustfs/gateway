@@ -1,0 +1,524 @@
+{
+  "ir_version": "1",
+  "operation": "GetBucketNotificationConfiguration",
+  "http": {
+            "method": "GET",
+            "target": "Bucket",
+            "precedence": 210,
+            "predicates": [
+                            { "kind": "Method", "method": "GET" },
+                            { "kind": "Target", "target": "Bucket" },
+                            { "kind": "QueryPresent", "key": "notification" }
+                          ],
+            "success_status": 200,
+            "alt_success_statuses": [],
+            "path_shape": "/{Bucket}"
+          },
+  "auth": {
+            "requirement": "Required",
+            "action": "s3:GetBucketNotification",
+            "presigned_allowed": true,
+            "service": "s3"
+          },
+  "payload": {
+               "request": { "kind": "None", "buffering": "None", "max_bytes": null },
+               "response": { "kind": "XmlBody", "buffering": "Full", "max_bytes": 262144 }
+             },
+  "checksum": { "http_checksum_required": false, "request_algorithms": [], "response_algorithms": [] },
+  "input": {
+             "fields": [
+                         {
+                           "name": "Bucket",
+                           "wire_name": "Bucket",
+                           "required": true,
+                           "binding": { "kind": "UriLabel", "greedy": false },
+                           "type": { "kind": "BucketName" },
+                           "hot": true,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "ExpectedBucketOwner",
+                           "wire_name": "x-amz-expected-bucket-owner",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "String" },
+                           "hot": false,
+                           "quirk_refs": []
+                         }
+                       ]
+           },
+  "output": {
+              "fields": [
+                          {
+                            "name": "TopicConfigurations",
+                            "wire_name": "TopicConfiguration",
+                            "required": false,
+                            "binding": { "kind": "BodyXml" },
+                            "type": {
+                                      "kind": "List",
+                                      "member": { "kind": "Structure", "shape": "TopicConfiguration" },
+                                      "flattened": true,
+                                      "wrapper_name": null
+                                    },
+                            "hot": true,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "QueueConfigurations",
+                            "wire_name": "QueueConfiguration",
+                            "required": false,
+                            "binding": { "kind": "BodyXml" },
+                            "type": {
+                                      "kind": "List",
+                                      "member": { "kind": "Structure", "shape": "QueueConfiguration" },
+                                      "flattened": true,
+                                      "wrapper_name": null
+                                    },
+                            "hot": true,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "LambdaFunctionConfigurations",
+                            "wire_name": "CloudFunctionConfiguration",
+                            "required": false,
+                            "binding": { "kind": "BodyXml" },
+                            "type": {
+                                      "kind": "List",
+                                      "member": { "kind": "Structure", "shape": "LambdaFunctionConfiguration" },
+                                      "flattened": true,
+                                      "wrapper_name": null
+                                    },
+                            "hot": true,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "EventBridgeConfiguration",
+                            "wire_name": "EventBridgeConfiguration",
+                            "required": false,
+                            "binding": { "kind": "BodyXml" },
+                            "type": { "kind": "Structure", "shape": "EventBridgeConfiguration" },
+                            "hot": false,
+                            "quirk_refs": []
+                          }
+                        ]
+            },
+  "shapes": {
+              "EventBridgeConfiguration": {
+                                            "kind": "Structure",
+                                            "fields": [],
+                                            "xml": { "element_order": [], "empty_value_policy": {}, "attributes": [] }
+                                          },
+              "FilterRule": {
+                              "kind": "Structure",
+                              "fields": [
+                                          {
+                                            "name": "Name",
+                                            "wire_name": "Name",
+                                            "required": false,
+                                            "binding": { "kind": "BodyXml" },
+                                            "type": { "kind": "StringEnum", "values": ["prefix", "suffix"] },
+                                            "hot": false,
+                                            "quirk_refs": []
+                                          },
+                                          {
+                                            "name": "Value",
+                                            "wire_name": "Value",
+                                            "required": false,
+                                            "binding": { "kind": "BodyXml" },
+                                            "type": { "kind": "String" },
+                                            "hot": false,
+                                            "quirk_refs": []
+                                          }
+                                        ],
+                              "xml": {
+                                       "element_order": ["Name", "Value"],
+                                       "empty_value_policy": { "Name": "omit", "Value": "omit" },
+                                       "attributes": []
+                                     }
+                            },
+              "LambdaFunctionConfiguration": {
+                                               "kind": "Structure",
+                                               "fields": [
+                                                           {
+                                                             "name": "Id",
+                                                             "wire_name": "Id",
+                                                             "required": false,
+                                                             "binding": { "kind": "BodyXml" },
+                                                             "type": { "kind": "String" },
+                                                             "hot": false,
+                                                             "quirk_refs": []
+                                                           },
+                                                           {
+                                                             "name": "LambdaFunctionArn",
+                                                             "wire_name": "CloudFunction",
+                                                             "required": true,
+                                                             "binding": { "kind": "BodyXml" },
+                                                             "type": { "kind": "String" },
+                                                             "hot": false,
+                                                             "quirk_refs": []
+                                                           },
+                                                           {
+                                                             "name": "Events",
+                                                             "wire_name": "Event",
+                                                             "required": true,
+                                                             "binding": { "kind": "BodyXml" },
+                                                             "type": {
+                                                                       "kind": "List",
+                                                                       "member": {
+                                                                                   "kind": "StringEnum",
+                                                                                   "values": [
+                                                                                               "s3:ReducedRedundancyLostObject",
+                                                                                               "s3:ObjectCreated:*",
+                                                                                               "s3:ObjectCreated:Put",
+                                                                                               "s3:ObjectCreated:Post",
+                                                                                               "s3:ObjectCreated:Copy",
+                                                                                               "s3:ObjectCreated:CompleteMultipartUpload",
+                                                                                               "s3:ObjectRemoved:*",
+                                                                                               "s3:ObjectRemoved:Delete",
+                                                                                               "s3:ObjectRemoved:DeleteMarkerCreated",
+                                                                                               "s3:ObjectRestore:*",
+                                                                                               "s3:ObjectRestore:Post",
+                                                                                               "s3:ObjectRestore:Completed",
+                                                                                               "s3:Replication:*",
+                                                                                               "s3:Replication:OperationFailedReplication",
+                                                                                               "s3:Replication:OperationNotTracked",
+                                                                                               "s3:Replication:OperationMissedThreshold",
+                                                                                               "s3:Replication:OperationReplicatedAfterThreshold",
+                                                                                               "s3:ObjectRestore:Delete",
+                                                                                               "s3:LifecycleTransition",
+                                                                                               "s3:IntelligentTiering",
+                                                                                               "s3:ObjectAcl:Put",
+                                                                                               "s3:LifecycleExpiration:*",
+                                                                                               "s3:LifecycleExpiration:Delete",
+                                                                                               "s3:LifecycleExpiration:DeleteMarkerCreated",
+                                                                                               "s3:ObjectTagging:*",
+                                                                                               "s3:ObjectTagging:Put",
+                                                                                               "s3:ObjectTagging:Delete",
+                                                                                               "s3:ObjectAnnotation:*",
+                                                                                               "s3:ObjectAnnotation:Put",
+                                                                                               "s3:ObjectAnnotation:Delete"
+                                                                                             ]
+                                                                                 },
+                                                                       "flattened": true,
+                                                                       "wrapper_name": null
+                                                                     },
+                                                             "hot": false,
+                                                             "quirk_refs": []
+                                                           },
+                                                           {
+                                                             "name": "Filter",
+                                                             "wire_name": "Filter",
+                                                             "required": false,
+                                                             "binding": { "kind": "BodyXml" },
+                                                             "type": {
+                                                                       "kind": "Structure",
+                                                                       "shape": "NotificationConfigurationFilter"
+                                                                     },
+                                                             "hot": false,
+                                                             "quirk_refs": []
+                                                           }
+                                                         ],
+                                               "xml": {
+                                                        "element_order": ["Id", "LambdaFunctionArn", "Events", "Filter"],
+                                                        "empty_value_policy": {
+                                                                                "Id": "omit",
+                                                                                "LambdaFunctionArn": "emit",
+                                                                                "Events": "emit",
+                                                                                "Filter": "omit"
+                                                                              },
+                                                        "attributes": []
+                                                      }
+                                             },
+              "NotificationConfigurationFilter": {
+                                                   "kind": "Structure",
+                                                   "fields": [
+                                                               {
+                                                                 "name": "Key",
+                                                                 "wire_name": "S3Key",
+                                                                 "required": false,
+                                                                 "binding": { "kind": "BodyXml" },
+                                                                 "type": { "kind": "Structure", "shape": "S3KeyFilter" },
+                                                                 "hot": false,
+                                                                 "quirk_refs": []
+                                                               }
+                                                             ],
+                                                   "xml": {
+                                                            "element_order": ["Key"],
+                                                            "empty_value_policy": { "Key": "omit" },
+                                                            "attributes": []
+                                                          }
+                                                 },
+              "QueueConfiguration": {
+                                      "kind": "Structure",
+                                      "fields": [
+                                                  {
+                                                    "name": "Id",
+                                                    "wire_name": "Id",
+                                                    "required": false,
+                                                    "binding": { "kind": "BodyXml" },
+                                                    "type": { "kind": "String" },
+                                                    "hot": false,
+                                                    "quirk_refs": []
+                                                  },
+                                                  {
+                                                    "name": "QueueArn",
+                                                    "wire_name": "Queue",
+                                                    "required": true,
+                                                    "binding": { "kind": "BodyXml" },
+                                                    "type": { "kind": "String" },
+                                                    "hot": false,
+                                                    "quirk_refs": []
+                                                  },
+                                                  {
+                                                    "name": "Events",
+                                                    "wire_name": "Event",
+                                                    "required": true,
+                                                    "binding": { "kind": "BodyXml" },
+                                                    "type": {
+                                                              "kind": "List",
+                                                              "member": {
+                                                                          "kind": "StringEnum",
+                                                                          "values": [
+                                                                                      "s3:ReducedRedundancyLostObject",
+                                                                                      "s3:ObjectCreated:*",
+                                                                                      "s3:ObjectCreated:Put",
+                                                                                      "s3:ObjectCreated:Post",
+                                                                                      "s3:ObjectCreated:Copy",
+                                                                                      "s3:ObjectCreated:CompleteMultipartUpload",
+                                                                                      "s3:ObjectRemoved:*",
+                                                                                      "s3:ObjectRemoved:Delete",
+                                                                                      "s3:ObjectRemoved:DeleteMarkerCreated",
+                                                                                      "s3:ObjectRestore:*",
+                                                                                      "s3:ObjectRestore:Post",
+                                                                                      "s3:ObjectRestore:Completed",
+                                                                                      "s3:Replication:*",
+                                                                                      "s3:Replication:OperationFailedReplication",
+                                                                                      "s3:Replication:OperationNotTracked",
+                                                                                      "s3:Replication:OperationMissedThreshold",
+                                                                                      "s3:Replication:OperationReplicatedAfterThreshold",
+                                                                                      "s3:ObjectRestore:Delete",
+                                                                                      "s3:LifecycleTransition",
+                                                                                      "s3:IntelligentTiering",
+                                                                                      "s3:ObjectAcl:Put",
+                                                                                      "s3:LifecycleExpiration:*",
+                                                                                      "s3:LifecycleExpiration:Delete",
+                                                                                      "s3:LifecycleExpiration:DeleteMarkerCreated",
+                                                                                      "s3:ObjectTagging:*",
+                                                                                      "s3:ObjectTagging:Put",
+                                                                                      "s3:ObjectTagging:Delete",
+                                                                                      "s3:ObjectAnnotation:*",
+                                                                                      "s3:ObjectAnnotation:Put",
+                                                                                      "s3:ObjectAnnotation:Delete"
+                                                                                    ]
+                                                                        },
+                                                              "flattened": true,
+                                                              "wrapper_name": null
+                                                            },
+                                                    "hot": false,
+                                                    "quirk_refs": []
+                                                  },
+                                                  {
+                                                    "name": "Filter",
+                                                    "wire_name": "Filter",
+                                                    "required": false,
+                                                    "binding": { "kind": "BodyXml" },
+                                                    "type": {
+                                                              "kind": "Structure",
+                                                              "shape": "NotificationConfigurationFilter"
+                                                            },
+                                                    "hot": false,
+                                                    "quirk_refs": []
+                                                  }
+                                                ],
+                                      "xml": {
+                                               "element_order": ["Id", "QueueArn", "Events", "Filter"],
+                                               "empty_value_policy": {
+                                                                       "Id": "omit",
+                                                                       "QueueArn": "emit",
+                                                                       "Events": "emit",
+                                                                       "Filter": "omit"
+                                                                     },
+                                               "attributes": []
+                                             }
+                                    },
+              "S3KeyFilter": {
+                               "kind": "Structure",
+                               "fields": [
+                                           {
+                                             "name": "FilterRules",
+                                             "wire_name": "FilterRule",
+                                             "required": false,
+                                             "binding": { "kind": "BodyXml" },
+                                             "type": {
+                                                       "kind": "List",
+                                                       "member": { "kind": "Structure", "shape": "FilterRule" },
+                                                       "flattened": true,
+                                                       "wrapper_name": null
+                                                     },
+                                             "hot": false,
+                                             "quirk_refs": []
+                                           }
+                                         ],
+                               "xml": {
+                                        "element_order": ["FilterRules"],
+                                        "empty_value_policy": { "FilterRules": "omit" },
+                                        "attributes": []
+                                      }
+                             },
+              "TopicConfiguration": {
+                                      "kind": "Structure",
+                                      "fields": [
+                                                  {
+                                                    "name": "Id",
+                                                    "wire_name": "Id",
+                                                    "required": false,
+                                                    "binding": { "kind": "BodyXml" },
+                                                    "type": { "kind": "String" },
+                                                    "hot": false,
+                                                    "quirk_refs": []
+                                                  },
+                                                  {
+                                                    "name": "TopicArn",
+                                                    "wire_name": "Topic",
+                                                    "required": true,
+                                                    "binding": { "kind": "BodyXml" },
+                                                    "type": { "kind": "String" },
+                                                    "hot": false,
+                                                    "quirk_refs": []
+                                                  },
+                                                  {
+                                                    "name": "Events",
+                                                    "wire_name": "Event",
+                                                    "required": true,
+                                                    "binding": { "kind": "BodyXml" },
+                                                    "type": {
+                                                              "kind": "List",
+                                                              "member": {
+                                                                          "kind": "StringEnum",
+                                                                          "values": [
+                                                                                      "s3:ReducedRedundancyLostObject",
+                                                                                      "s3:ObjectCreated:*",
+                                                                                      "s3:ObjectCreated:Put",
+                                                                                      "s3:ObjectCreated:Post",
+                                                                                      "s3:ObjectCreated:Copy",
+                                                                                      "s3:ObjectCreated:CompleteMultipartUpload",
+                                                                                      "s3:ObjectRemoved:*",
+                                                                                      "s3:ObjectRemoved:Delete",
+                                                                                      "s3:ObjectRemoved:DeleteMarkerCreated",
+                                                                                      "s3:ObjectRestore:*",
+                                                                                      "s3:ObjectRestore:Post",
+                                                                                      "s3:ObjectRestore:Completed",
+                                                                                      "s3:Replication:*",
+                                                                                      "s3:Replication:OperationFailedReplication",
+                                                                                      "s3:Replication:OperationNotTracked",
+                                                                                      "s3:Replication:OperationMissedThreshold",
+                                                                                      "s3:Replication:OperationReplicatedAfterThreshold",
+                                                                                      "s3:ObjectRestore:Delete",
+                                                                                      "s3:LifecycleTransition",
+                                                                                      "s3:IntelligentTiering",
+                                                                                      "s3:ObjectAcl:Put",
+                                                                                      "s3:LifecycleExpiration:*",
+                                                                                      "s3:LifecycleExpiration:Delete",
+                                                                                      "s3:LifecycleExpiration:DeleteMarkerCreated",
+                                                                                      "s3:ObjectTagging:*",
+                                                                                      "s3:ObjectTagging:Put",
+                                                                                      "s3:ObjectTagging:Delete",
+                                                                                      "s3:ObjectAnnotation:*",
+                                                                                      "s3:ObjectAnnotation:Put",
+                                                                                      "s3:ObjectAnnotation:Delete"
+                                                                                    ]
+                                                                        },
+                                                              "flattened": true,
+                                                              "wrapper_name": null
+                                                            },
+                                                    "hot": false,
+                                                    "quirk_refs": []
+                                                  },
+                                                  {
+                                                    "name": "Filter",
+                                                    "wire_name": "Filter",
+                                                    "required": false,
+                                                    "binding": { "kind": "BodyXml" },
+                                                    "type": {
+                                                              "kind": "Structure",
+                                                              "shape": "NotificationConfigurationFilter"
+                                                            },
+                                                    "hot": false,
+                                                    "quirk_refs": []
+                                                  }
+                                                ],
+                                      "xml": {
+                                               "element_order": ["Id", "TopicArn", "Events", "Filter"],
+                                               "empty_value_policy": {
+                                                                       "Id": "omit",
+                                                                       "TopicArn": "emit",
+                                                                       "Events": "emit",
+                                                                       "Filter": "omit"
+                                                                     },
+                                               "attributes": []
+                                             }
+                                    }
+            },
+  "xml": {
+           "request_root": null,
+           "request_root_aliases": [],
+           "response_root": "NotificationConfiguration",
+           "xmlns": "emit",
+           "unwrapped_output": false,
+           "element_order": [
+                              "TopicConfigurations",
+                              "QueueConfigurations",
+                              "LambdaFunctionConfigurations",
+                              "EventBridgeConfiguration"
+                            ],
+           "empty_value_policy": {
+                                   "TopicConfigurations": "omit",
+                                   "QueueConfigurations": "omit",
+                                   "LambdaFunctionConfigurations": "omit",
+                                   "EventBridgeConfiguration": "omit"
+                                 },
+           "url_encoded_fields": [],
+           "attributes": [],
+           "body_literal": false
+         },
+  "errors": { "not_configured": null, "allows_error_after_200": false, "codes": ["NoSuchBucket", "AccessDenied"] },
+  "derived_resources": [],
+  "head_mirrors": null,
+  "quirk_refs": ["q-ntf-0001", "q-ntf-0002"],
+  "quirks": [
+              {
+                "id": "q-ntf-0001",
+                "kind": "not_configured_error",
+                "target": "GetBucketNotificationConfiguration",
+                "summary": "A bucket that delivers no events answers 200 with an empty NotificationConfiguration element rather than a 404, so a client reads no subscriptions rather than a missing resource.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketNotificationConfiguration.html",
+                                "summary": "The operation documents an empty configuration element as the response for a bucket with no notifications and lists no not-found error for it."
+                              },
+                              {
+                                "kind": "s3s-pr",
+                                "ref": "https://github.com/s3s-project/s3s/pull/193",
+                                "summary": "Upstream had to correct the shape of this response, and the empty-configuration case was part of what was wrong."
+                              }
+                            ],
+                "cases": ["c-bucketconfig-0024", "c-bucketconfig-0011"]
+              },
+              {
+                "id": "q-ntf-0002",
+                "kind": "flattened_list",
+                "target": "NotificationConfiguration",
+                "summary": "All three destination lists and the Event list inside each of them repeat as sibling elements directly under their parent with no wrapper, which is the opposite of the website family's wrapped routing rules.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketNotificationConfiguration.html",
+                                "summary": "The documented request syntax shows the topic, queue and function configurations as direct children of the root with no intermediate element, and the event names likewise inside each of them."
+                              }
+                            ],
+                "cases": ["c-bucketconfig-0011", "c-bucketconfig-0010"]
+              }
+            ],
+  "ext_points": []
+}

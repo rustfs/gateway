@@ -1,0 +1,58 @@
+[case]
+id = "c-replication-0007"
+schema_version = 1
+title = "An AccessControlTranslation with Owner Destination round-trips intact"
+rationale = """
+The cross-account ownership handover: AccessControlTranslation names who owns the replicas, and its Owner member's one documented value is Destination. The member is carried as a string rather than a generated enum — the dto generator names enumerations after the member, and an enum named Owner would collide with the Owner structure every listing exports — so this round-trip is what pins the value's preservation now that no type does."""
+polarity = "positive"
+operation = "PutBucketReplication"
+tags = ["replication", "xml", "wire-bytes"]
+timeout_ms = 10000
+quirks = ["q-repl-0011"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_AccessControlTranslation.html"
+summary = "The Owner member is documented with the single valid value Destination, required inside AccessControlTranslation."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/replication-add-config.html"
+summary = "The replica-ownership walkthrough pairs the Account member with an AccessControlTranslation of Owner Destination."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "conf-replication"
+[[exchanges]]
+name = "put"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-replication?replication"
+headers = { "content-type" = "application/xml", "content-md5" = "TfDuHS4F1lYMCP8z8MiQcA==" }
+body = { utf8 = '<ReplicationConfiguration><Role>arn:aws:iam::111122223333:role/replication-role</Role><Rule><Priority>1</Priority><Filter><Prefix>shared/</Prefix></Filter><Status>Enabled</Status><Destination><Bucket>arn:aws:s3:::replica-bucket</Bucket><Account>111122223333</Account><AccessControlTranslation><Owner>Destination</Owner></AccessControlTranslation></Destination><DeleteMarkerReplication><Status>Disabled</Status></DeleteMarkerReplication></Rule></ReplicationConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[[exchanges]]
+name = "read-back"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-replication?replication"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.headers_present]
+"content-type" = "application/xml"
+
+[exchanges.expect.body]
+golden = "goldens/c-replication-0007.xml"

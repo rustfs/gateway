@@ -1,0 +1,54 @@
+[case]
+id = "c-cors-0031"
+schema_version = 1
+title = "The first matching rule decides, and its own Max-Age is the one answered"
+rationale = """
+Document order is the operator's statement of precedence. A matcher that scanned for the most specific rule, or that
+took the origin from one rule and the max age from another, would answer a policy nobody wrote — and because every
+such answer is still a valid CORS response, nothing downstream would notice. The second rule's distinctive max age
+is the witness."""
+polarity = "positive"
+tags = ["cors", "preflight"]
+timeout_ms = 10000
+quirks = ["q-cors-0013"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/cors.html"
+summary = "S3 answers a bucket preflight out of that bucket's stored CORS document and refuses an unmatched one with 403."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CORSRule.html"
+summary = "The rule members a preflight answer is built from: allowed methods, allowed headers, expose headers and max age."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "conf-cors-rt"
+
+[[exchanges]]
+# Setup traffic: the document the preflight below is answered from. Not under test.
+[exchanges.request]
+method = "PUT"
+target = "/conf-cors-rt?cors"
+headers = { "content-type" = "application/xml", "content-md5" = "Wm57jcGGaFeAquqkj5LFDQ==" }
+body = { utf8 = "<CORSConfiguration><CORSRule><AllowedMethod>GET</AllowedMethod><AllowedOrigin>https://a.example.com</AllowedOrigin><MaxAgeSeconds>10</MaxAgeSeconds></CORSRule><CORSRule><AllowedMethod>PUT</AllowedMethod><AllowedOrigin>https://b.example.com</AllowedOrigin><MaxAgeSeconds>77</MaxAgeSeconds></CORSRule></CORSConfiguration>" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+
+[[exchanges]]
+[exchanges.request]
+method = "OPTIONS"
+target = "/conf-cors-rt/key.txt"
+headers = { "origin" = "https://b.example.com", "access-control-request-method" = "PUT" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+
+[exchanges.expect.headers_present]
+"access-control-allow-origin" = "https://b.example.com"
+"access-control-allow-methods" = "PUT"
+"access-control-max-age" = "77"

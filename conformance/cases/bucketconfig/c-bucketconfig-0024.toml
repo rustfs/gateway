@@ -1,0 +1,32 @@
+[case]
+id = "c-bucketconfig-0024"
+schema_version = 1
+title = "A bucket with no notifications answers 200 with an empty document"
+rationale = """
+Not a 404: a bucket that delivers no events is not a bucket missing a resource. The empty root is what an SDK parses into an empty subscription list, and an error would make every client treat notification teardown as a failure."""
+polarity = "negative"
+operation = "GetBucketNotificationConfiguration"
+tags = ["bucketconfig", "xml", "wire-bytes", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-ntf-0001"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketNotificationConfiguration.html"
+summary = "The read reference shows an empty configuration element for a bucket with no notifications."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "conf-bucketconfig"
+[request]
+method = "GET"
+target = "/conf-bucketconfig?notification"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[expect.body]
+golden = "goldens/c-bucketconfig-0024.xml"

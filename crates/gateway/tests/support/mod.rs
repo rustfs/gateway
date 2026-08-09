@@ -31,7 +31,7 @@
 #![allow(dead_code, unreachable_pub, clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
 use bytes::Bytes;
 use rustfs_gateway::dto::{Bucket, ListBuckets, ListBucketsOutput};
@@ -77,6 +77,13 @@ impl Operation for Ping {
 
     type Input = PingInput;
     type Output = PingOutput;
+    type DerivedResources = rustfs_gateway_core::NoDerived;
+
+    fn derive_resources(_input: &Self::Input) -> Result<Self::DerivedResources, rustfs_gateway_core::DerivedResourceError> {
+        Ok(rustfs_gateway_core::NoDerived)
+    }
+
+    fn seal_derived_input(_input: &mut Self::Input) {}
 
     fn spec() -> &'static OperationSpec {
         &PING_SPEC
@@ -169,6 +176,13 @@ impl Operation for HeadPing {
 
     type Input = HeadPingInput;
     type Output = PingOutput;
+    type DerivedResources = rustfs_gateway_core::NoDerived;
+
+    fn derive_resources(_input: &Self::Input) -> Result<Self::DerivedResources, rustfs_gateway_core::DerivedResourceError> {
+        Ok(rustfs_gateway_core::NoDerived)
+    }
+
+    fn seal_derived_input(_input: &mut Self::Input) {}
 
     fn spec() -> &'static OperationSpec {
         &HEAD_PING_SPEC
@@ -246,6 +260,13 @@ impl Operation for ContentPing {
 
     type Input = HeadPingInput;
     type Output = PingOutput;
+    type DerivedResources = rustfs_gateway_core::NoDerived;
+
+    fn derive_resources(_input: &Self::Input) -> Result<Self::DerivedResources, rustfs_gateway_core::DerivedResourceError> {
+        Ok(rustfs_gateway_core::NoDerived)
+    }
+
+    fn seal_derived_input(_input: &mut Self::Input) {}
 
     fn spec() -> &'static OperationSpec {
         &CONTENT_PING_SPEC
@@ -256,13 +277,24 @@ impl Operation for ContentPing {
     }
 }
 
+/// The header `ContentPing`'s encoder echoes the request's `Content-Length` into.
+///
+/// It exists so that "a stage filter's rewrite reached the decoder" is an observation and not a
+/// claim: the value comes from the `MetaView` the pipeline built, so a filter that did not run
+/// leaves the header off entirely.
+pub const LENGTH_ECHO: &str = "x-length-seen";
+
 impl OperationCodec for ContentPing {
     fn decode(request: &MetaView<'_>, body: RequestBody) -> Result<HeadPingInput, CodecError> {
         HeadPing::decode(request, body)
     }
 
     fn encode(output: PingOutput, request: &MetaView<'_>, status: u16) -> Result<EncodedResponse, CodecError> {
-        HeadPing::encode(output, request, status)
+        let mut encoded = HeadPing::encode(output, request, status)?;
+        if let Some(declared) = request.header("content-length") {
+            encoded.set_header(LENGTH_ECHO, declared.as_ref());
+        }
+        Ok(encoded)
     }
 }
 
@@ -346,6 +378,13 @@ impl Operation for Unnamespaced {
 
     type Input = PingInput;
     type Output = PingOutput;
+    type DerivedResources = rustfs_gateway_core::NoDerived;
+
+    fn derive_resources(_input: &Self::Input) -> Result<Self::DerivedResources, rustfs_gateway_core::DerivedResourceError> {
+        Ok(rustfs_gateway_core::NoDerived)
+    }
+
+    fn seal_derived_input(_input: &mut Self::Input) {}
 
     fn spec() -> &'static OperationSpec {
         &UNNAMESPACED_SPEC
@@ -384,6 +423,13 @@ impl Operation for Impostor {
 
     type Input = PingInput;
     type Output = PingOutput;
+    type DerivedResources = rustfs_gateway_core::NoDerived;
+
+    fn derive_resources(_input: &Self::Input) -> Result<Self::DerivedResources, rustfs_gateway_core::DerivedResourceError> {
+        Ok(rustfs_gateway_core::NoDerived)
+    }
+
+    fn seal_derived_input(_input: &mut Self::Input) {}
 
     fn spec() -> &'static OperationSpec {
         &IMPOSTOR_SPEC
@@ -422,6 +468,11 @@ impl Handler<ListBuckets> for Backend {
         Ok(Resp::new(ListBucketsOutput {
             buckets: vec![Bucket {
                 name: BucketName::new("alpha").expect("a valid bucket name"),
+                // A real instant, not the default: `CreationDate` is bound to an ISO-8601
+                // rendering, and the zero value has none — so a fixture that left it default
+                // answered `500 InternalError` the first time anything managed to sign a request
+                // and reach the encoder.
+                creation_date: rustfs_gateway::Timestamp::from_secs(SIGNED_AT_UNIX_SECONDS),
                 ..Bucket::default()
             }],
             ..ListBucketsOutput::default()
@@ -439,6 +490,30 @@ impl Handler<Unnamespaced> for Backend {
 
 impl Handler<Impostor> for Backend {
     async fn call(&self, _request: Req<Impostor>) -> HandlerResult<Impostor> {
+        Ok(Resp::new(PingOutput {
+            message: "pong".to_owned(),
+        }))
+    }
+}
+
+/// A backend that counts the requests that reached it, so "the handler never ran" is a
+/// measurement.
+pub struct CountingBackend {
+    reached: Arc<AtomicUsize>,
+}
+
+impl CountingBackend {
+    #[must_use]
+    pub fn new(reached: &Arc<AtomicUsize>) -> Self {
+        Self {
+            reached: Arc::clone(reached),
+        }
+    }
+}
+
+impl Handler<Ping> for CountingBackend {
+    async fn call(&self, _request: Req<Ping>) -> HandlerResult<Ping> {
+        self.reached.fetch_add(1, Ordering::SeqCst);
         Ok(Resp::new(PingOutput {
             message: "pong".to_owned(),
         }))
@@ -608,4 +683,139 @@ pub fn plain(method: http::Method, uri: &str) -> http::Request<Bytes> {
         .header("host", "s3.example.com")
         .body(Bytes::new())
         .expect("a valid request")
+}
+
+// ── signing, so that "the signature survived" is a measurement ──────────────────────────────────
+
+/// The instant every signed fixture is built at, in the two spellings that must agree: the seconds
+/// the service's clock is fixed to, and the `x-amz-date` stamp the signature is scoped by.
+///
+/// One constant pair rather than two derivations, because a signer and a verifier disagreeing about
+/// the day is a `403` that looks exactly like the refusal a negative case is asserting.
+pub const SIGNED_AT_UNIX_SECONDS: i64 = 1_767_323_045;
+/// The `x-amz-date` spelling of [`SIGNED_AT_UNIX_SECONDS`].
+pub const SIGNED_AT_STAMP: &str = "20260102T030405Z";
+
+/// The clock a service must be built with to answer a request from [`signed`].
+#[must_use]
+pub fn fixed_clock() -> rustfs_gateway::FixedClock {
+    rustfs_gateway::FixedClock::at_unix_seconds(SIGNED_AT_UNIX_SECONDS)
+}
+
+/// One correctly signed, body-less request against the fixture's credentials.
+///
+/// `extra` headers are signed along with the rest, which is what lets a case assert that a filter
+/// rewriting a **signed** header still leaves the verdict alone.
+#[must_use]
+pub fn signed_with(method: http::Method, target: &str, extra: &[(&str, &str)]) -> http::Request<Bytes> {
+    use rustfs_gateway::sig::{AmzDate, PayloadMode, SigService, SigV4Signer, SigningCredentials, SigningRequest, SigningScope};
+
+    let (path, query) = target.split_once('?').map_or((target, ""), |(path, query)| (path, query));
+
+    let mut map = http::HeaderMap::new();
+    map.insert(http::header::HOST, http::HeaderValue::from_static("s3.example.com"));
+    for (name, value) in extra {
+        let name: http::HeaderName = name.parse().expect("a header name");
+        map.insert(name, http::HeaderValue::from_str(value).expect("a header value"));
+    }
+
+    // The canonical request needs the host in the byte-exact form acceptance settles on, and
+    // `WireRequest` is the only way to obtain one. A bare probe is used rather than the real head:
+    // the real one may be deliberately malformed by the case, and acceptance would refuse it here
+    // instead of where the case is looking.
+    let probe = http::Request::builder()
+        .method(http::Method::GET)
+        .uri("/")
+        .header("host", "s3.example.com")
+        .body(Bytes::new())
+        .expect("a valid request");
+    let accepted = rustfs_gateway::WireRequest::accept(probe, &rustfs_gateway::Limits::default()).expect("an acceptable host");
+
+    let credentials = SigningCredentials::new("AKIDEXAMPLE", b"secret").expect("valid credentials");
+    let stamp = AmzDate::parse(SIGNED_AT_STAMP).expect("a SigV4 stamp");
+    let scope = SigningScope::new(stamp.day(), "us-east-1", SigService::S3).expect("a well-formed scope");
+    let mut signer = SigV4Signer::new(credentials, scope);
+    let signing = SigningRequest::new(&method, path, query, &map, accepted.host().raw_for_signing(), PayloadMode::Empty, stamp)
+        .with_wire_content_length(0);
+    let signed = signer.sign_headers(&signing).expect("a signable request");
+
+    let mut builder = http::Request::builder().method(method).uri(target);
+    for (name, value) in signed.headers() {
+        builder = builder.header(name, value);
+    }
+    builder.body(Bytes::new()).expect("a valid request")
+}
+
+/// [`signed_with`] with no extra headers.
+#[must_use]
+pub fn signed(method: http::Method, target: &str) -> http::Request<Bytes> {
+    signed_with(method, target, &[])
+}
+
+/// A builder whose authorizer denies everything, for the assertions about what runs after it.
+#[must_use]
+pub fn wired_denying() -> ServiceBuilder {
+    let credentials =
+        Arc::new(StaticCredentials::new().with(Credentials::new("AKIDEXAMPLE", b"secret").expect("a valid access key id")));
+    ServiceBuilder::new()
+        .authenticator(SigV4Authenticator::new(credentials, RegionSet::new(["us-east-1"]).expect("non-empty")))
+        .authorizer(allow_when(|_| false))
+}
+
+// ── the GetObjectAttributes fixture, for the OpLayer demonstration ─────────────────────────────
+
+/// What the backend answers, so a rewrite by a layer is visible as a difference from it.
+pub const BACKEND_ETAG: &str = "backend-etag";
+/// What the demonstration layer writes instead.
+pub const LAYER_ETAG: &str = "rewritten-by-a-layer";
+
+/// A backend that answers `GetObjectAttributes` with one entity tag and nothing else.
+pub struct Attributes;
+
+impl Handler<rustfs_gateway::dto::GetObjectAttributes> for Attributes {
+    async fn call(
+        &self,
+        _request: Req<rustfs_gateway::dto::GetObjectAttributes>,
+    ) -> HandlerResult<rustfs_gateway::dto::GetObjectAttributes> {
+        Ok(Resp::new(rustfs_gateway::dto::GetObjectAttributesOutput {
+            e_tag: Some(rustfs_gateway::ETag::new(BACKEND_ETAG).expect("a valid entity tag")),
+            ..rustfs_gateway::dto::GetObjectAttributesOutput::default()
+        }))
+    }
+}
+
+/// A service over `GetObjectAttributes`, optionally with the demonstration layer installed.
+///
+/// The layer's body is the three statements the landing table promises, against the one today's
+/// tower layer needs a whole XML round trip for.
+#[must_use]
+pub fn attributes_service(with_layer: bool) -> S3Service {
+    use rustfs_gateway::dto::GetObjectAttributes;
+    use rustfs_gateway::{BoxFuture, Next, op_layer};
+
+    let builder = wired()
+        .clock(fixed_clock())
+        .register::<GetObjectAttributes, _>(Arc::new(Attributes));
+    let builder = if with_layer {
+        builder.op_layer::<GetObjectAttributes, _>(op_layer(
+            |request: Req<GetObjectAttributes>, next: Next<'_, GetObjectAttributes>| {
+                Box::pin(async move {
+                    let mut response = next.run(request).await?;
+                    if let Some(output) = response.output_mut() {
+                        output.e_tag = Some(rustfs_gateway::ETag::new(LAYER_ETAG).expect("a valid entity tag"));
+                    }
+                    Ok(response)
+                }) as BoxFuture<'_, HandlerResult<GetObjectAttributes>>
+            },
+        ))
+    } else {
+        builder
+    };
+    builder.build().expect("a complete assembly")
+}
+
+/// The signed `GetObjectAttributes` request both halves of the demonstration send.
+#[must_use]
+pub fn attributes_request() -> http::Request<Bytes> {
+    signed_with(http::Method::GET, "/bucket/key?attributes", &[("x-amz-object-attributes", "ETag")])
 }

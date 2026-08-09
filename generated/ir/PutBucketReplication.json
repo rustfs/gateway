@@ -1,0 +1,921 @@
+{
+  "ir_version": "1",
+  "operation": "PutBucketReplication",
+  "http": {
+            "method": "PUT",
+            "target": "Bucket",
+            "precedence": 395,
+            "predicates": [
+                            { "kind": "Method", "method": "PUT" },
+                            { "kind": "Target", "target": "Bucket" },
+                            { "kind": "QueryPresent", "key": "replication" }
+                          ],
+            "success_status": 200,
+            "alt_success_statuses": [],
+            "path_shape": "/{Bucket}"
+          },
+  "auth": {
+            "requirement": "Required",
+            "action": "s3:PutReplicationConfiguration",
+            "presigned_allowed": true,
+            "service": "s3"
+          },
+  "payload": {
+               "request": { "kind": "XmlBody", "buffering": "Full", "max_bytes": 2097152 },
+               "response": { "kind": "None", "buffering": "None", "max_bytes": null }
+             },
+  "checksum": {
+                "http_checksum_required": true,
+                "request_algorithms": ["CRC32", "CRC32C", "CRC64NVME", "SHA1", "SHA256"],
+                "response_algorithms": []
+              },
+  "input": {
+             "fields": [
+                         {
+                           "name": "Bucket",
+                           "wire_name": "Bucket",
+                           "required": true,
+                           "binding": { "kind": "UriLabel", "greedy": false },
+                           "type": { "kind": "BucketName" },
+                           "hot": true,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "ContentMD5",
+                           "wire_name": "content-md5",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "String" },
+                           "hot": false,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "ChecksumAlgorithm",
+                           "wire_name": "x-amz-sdk-checksum-algorithm",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": {
+                                     "kind": "StringEnum",
+                                     "values": [
+                                                 "CRC32",
+                                                 "CRC32C",
+                                                 "SHA1",
+                                                 "SHA256",
+                                                 "CRC64NVME",
+                                                 "SHA512",
+                                                 "MD5",
+                                                 "XXHASH64",
+                                                 "XXHASH3",
+                                                 "XXHASH128"
+                                               ]
+                                   },
+                           "hot": false,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "ReplicationConfiguration",
+                           "wire_name": null,
+                           "required": true,
+                           "binding": { "kind": "Payload" },
+                           "type": { "kind": "Structure", "shape": "ReplicationConfiguration" },
+                           "hot": true,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "Token",
+                           "wire_name": "x-amz-bucket-object-lock-token",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "String" },
+                           "hot": false,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "ExpectedBucketOwner",
+                           "wire_name": "x-amz-expected-bucket-owner",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "String" },
+                           "hot": false,
+                           "quirk_refs": []
+                         }
+                       ]
+           },
+  "output": { "fields": [] },
+  "shapes": {
+              "AccessControlTranslation": {
+                                            "kind": "Structure",
+                                            "fields": [
+                                                        {
+                                                          "name": "Owner",
+                                                          "wire_name": "Owner",
+                                                          "required": true,
+                                                          "binding": { "kind": "BodyXml" },
+                                                          "type": { "kind": "String" },
+                                                          "hot": false,
+                                                          "quirk_refs": []
+                                                        }
+                                                      ],
+                                            "xml": {
+                                                     "element_order": ["Owner"],
+                                                     "empty_value_policy": { "Owner": "emit" },
+                                                     "attributes": []
+                                                   }
+                                          },
+              "DeleteMarkerReplication": {
+                                           "kind": "Structure",
+                                           "fields": [
+                                                       {
+                                                         "name": "Status",
+                                                         "wire_name": "Status",
+                                                         "required": false,
+                                                         "binding": { "kind": "BodyXml" },
+                                                         "type": {
+                                                                   "kind": "StringEnum",
+                                                                   "values": ["Enabled", "Disabled"]
+                                                                 },
+                                                         "hot": false,
+                                                         "quirk_refs": []
+                                                       }
+                                                     ],
+                                           "xml": {
+                                                    "element_order": ["Status"],
+                                                    "empty_value_policy": { "Status": "omit" },
+                                                    "attributes": []
+                                                  }
+                                         },
+              "Destination": {
+                               "kind": "Structure",
+                               "fields": [
+                                           {
+                                             "name": "Bucket",
+                                             "wire_name": "Bucket",
+                                             "required": true,
+                                             "binding": { "kind": "BodyXml" },
+                                             "type": { "kind": "String" },
+                                             "hot": false,
+                                             "quirk_refs": ["q-repl-0011"]
+                                           },
+                                           {
+                                             "name": "Account",
+                                             "wire_name": "Account",
+                                             "required": false,
+                                             "binding": { "kind": "BodyXml" },
+                                             "type": { "kind": "String" },
+                                             "hot": false,
+                                             "quirk_refs": []
+                                           },
+                                           {
+                                             "name": "StorageClass",
+                                             "wire_name": "StorageClass",
+                                             "required": false,
+                                             "binding": { "kind": "BodyXml" },
+                                             "type": {
+                                                       "kind": "StringEnum",
+                                                       "values": [
+                                                                   "STANDARD",
+                                                                   "REDUCED_REDUNDANCY",
+                                                                   "STANDARD_IA",
+                                                                   "ONEZONE_IA",
+                                                                   "INTELLIGENT_TIERING",
+                                                                   "GLACIER",
+                                                                   "DEEP_ARCHIVE",
+                                                                   "OUTPOSTS",
+                                                                   "GLACIER_IR",
+                                                                   "SNOW",
+                                                                   "EXPRESS_ONEZONE",
+                                                                   "FSX_OPENZFS",
+                                                                   "FSX_ONTAP"
+                                                                 ]
+                                                     },
+                                             "hot": false,
+                                             "quirk_refs": []
+                                           },
+                                           {
+                                             "name": "AccessControlTranslation",
+                                             "wire_name": "AccessControlTranslation",
+                                             "required": false,
+                                             "binding": { "kind": "BodyXml" },
+                                             "type": { "kind": "Structure", "shape": "AccessControlTranslation" },
+                                             "hot": false,
+                                             "quirk_refs": []
+                                           },
+                                           {
+                                             "name": "EncryptionConfiguration",
+                                             "wire_name": "EncryptionConfiguration",
+                                             "required": false,
+                                             "binding": { "kind": "BodyXml" },
+                                             "type": { "kind": "Structure", "shape": "EncryptionConfiguration" },
+                                             "hot": false,
+                                             "quirk_refs": []
+                                           },
+                                           {
+                                             "name": "ReplicationTime",
+                                             "wire_name": "ReplicationTime",
+                                             "required": false,
+                                             "binding": { "kind": "BodyXml" },
+                                             "type": { "kind": "Structure", "shape": "ReplicationTime" },
+                                             "hot": false,
+                                             "quirk_refs": []
+                                           },
+                                           {
+                                             "name": "Metrics",
+                                             "wire_name": "Metrics",
+                                             "required": false,
+                                             "binding": { "kind": "BodyXml" },
+                                             "type": { "kind": "Structure", "shape": "Metrics" },
+                                             "hot": false,
+                                             "quirk_refs": []
+                                           }
+                                         ],
+                               "xml": {
+                                        "element_order": [
+                                                           "Bucket",
+                                                           "Account",
+                                                           "StorageClass",
+                                                           "AccessControlTranslation",
+                                                           "EncryptionConfiguration",
+                                                           "ReplicationTime",
+                                                           "Metrics"
+                                                         ],
+                                        "empty_value_policy": {
+                                                                "Bucket": "emit",
+                                                                "Account": "omit",
+                                                                "StorageClass": "omit",
+                                                                "AccessControlTranslation": "omit",
+                                                                "EncryptionConfiguration": "omit",
+                                                                "ReplicationTime": "omit",
+                                                                "Metrics": "omit"
+                                                              },
+                                        "attributes": []
+                                      }
+                             },
+              "EncryptionConfiguration": {
+                                           "kind": "Structure",
+                                           "fields": [
+                                                       {
+                                                         "name": "ReplicaKmsKeyID",
+                                                         "wire_name": "ReplicaKmsKeyID",
+                                                         "required": false,
+                                                         "binding": { "kind": "BodyXml" },
+                                                         "type": { "kind": "String" },
+                                                         "hot": false,
+                                                         "quirk_refs": []
+                                                       }
+                                                     ],
+                                           "xml": {
+                                                    "element_order": ["ReplicaKmsKeyID"],
+                                                    "empty_value_policy": { "ReplicaKmsKeyID": "omit" },
+                                                    "attributes": []
+                                                  }
+                                         },
+              "ExistingObjectReplication": {
+                                             "kind": "Structure",
+                                             "fields": [
+                                                         {
+                                                           "name": "Status",
+                                                           "wire_name": "Status",
+                                                           "required": true,
+                                                           "binding": { "kind": "BodyXml" },
+                                                           "type": {
+                                                                     "kind": "StringEnum",
+                                                                     "values": ["Enabled", "Disabled"]
+                                                                   },
+                                                           "hot": false,
+                                                           "quirk_refs": []
+                                                         }
+                                                       ],
+                                             "xml": {
+                                                      "element_order": ["Status"],
+                                                      "empty_value_policy": { "Status": "emit" },
+                                                      "attributes": []
+                                                    }
+                                           },
+              "Metrics": {
+                           "kind": "Structure",
+                           "fields": [
+                                       {
+                                         "name": "Status",
+                                         "wire_name": "Status",
+                                         "required": true,
+                                         "binding": { "kind": "BodyXml" },
+                                         "type": { "kind": "StringEnum", "values": ["Enabled", "Disabled"] },
+                                         "hot": false,
+                                         "quirk_refs": []
+                                       },
+                                       {
+                                         "name": "EventThreshold",
+                                         "wire_name": "EventThreshold",
+                                         "required": false,
+                                         "binding": { "kind": "BodyXml" },
+                                         "type": { "kind": "Structure", "shape": "ReplicationTimeValue" },
+                                         "hot": false,
+                                         "quirk_refs": []
+                                       }
+                                     ],
+                           "xml": {
+                                    "element_order": ["Status", "EventThreshold"],
+                                    "empty_value_policy": { "Status": "emit", "EventThreshold": "omit" },
+                                    "attributes": []
+                                  }
+                         },
+              "ReplicaModifications": {
+                                        "kind": "Structure",
+                                        "fields": [
+                                                    {
+                                                      "name": "Status",
+                                                      "wire_name": "Status",
+                                                      "required": true,
+                                                      "binding": { "kind": "BodyXml" },
+                                                      "type": {
+                                                                "kind": "StringEnum",
+                                                                "values": ["Enabled", "Disabled"]
+                                                              },
+                                                      "hot": false,
+                                                      "quirk_refs": []
+                                                    }
+                                                  ],
+                                        "xml": {
+                                                 "element_order": ["Status"],
+                                                 "empty_value_policy": { "Status": "emit" },
+                                                 "attributes": []
+                                               }
+                                      },
+              "ReplicationConfiguration": {
+                                            "kind": "Structure",
+                                            "fields": [
+                                                        {
+                                                          "name": "Role",
+                                                          "wire_name": "Role",
+                                                          "required": true,
+                                                          "binding": { "kind": "BodyXml" },
+                                                          "type": { "kind": "String" },
+                                                          "hot": false,
+                                                          "quirk_refs": []
+                                                        },
+                                                        {
+                                                          "name": "Rules",
+                                                          "wire_name": "Rule",
+                                                          "required": true,
+                                                          "binding": { "kind": "BodyXml" },
+                                                          "type": {
+                                                                    "kind": "List",
+                                                                    "member": {
+                                                                                "kind": "Structure",
+                                                                                "shape": "ReplicationRule"
+                                                                              },
+                                                                    "flattened": true,
+                                                                    "wrapper_name": null
+                                                                  },
+                                                          "hot": true,
+                                                          "quirk_refs": []
+                                                        }
+                                                      ],
+                                            "xml": {
+                                                     "element_order": ["Role", "Rules"],
+                                                     "empty_value_policy": { "Role": "emit", "Rules": "emit" },
+                                                     "attributes": []
+                                                   }
+                                          },
+              "ReplicationRule": {
+                                   "kind": "Structure",
+                                   "fields": [
+                                               {
+                                                 "name": "ID",
+                                                 "wire_name": "ID",
+                                                 "required": false,
+                                                 "binding": { "kind": "BodyXml" },
+                                                 "type": { "kind": "String" },
+                                                 "hot": false,
+                                                 "quirk_refs": []
+                                               },
+                                               {
+                                                 "name": "Priority",
+                                                 "wire_name": "Priority",
+                                                 "required": false,
+                                                 "binding": { "kind": "BodyXml" },
+                                                 "type": { "kind": "Integer" },
+                                                 "hot": false,
+                                                 "quirk_refs": []
+                                               },
+                                               {
+                                                 "name": "Prefix",
+                                                 "wire_name": "Prefix",
+                                                 "required": false,
+                                                 "binding": { "kind": "BodyXml" },
+                                                 "type": { "kind": "String" },
+                                                 "hot": false,
+                                                 "quirk_refs": []
+                                               },
+                                               {
+                                                 "name": "Filter",
+                                                 "wire_name": "Filter",
+                                                 "required": false,
+                                                 "binding": { "kind": "BodyXml" },
+                                                 "type": { "kind": "Structure", "shape": "ReplicationRuleFilter" },
+                                                 "hot": false,
+                                                 "quirk_refs": []
+                                               },
+                                               {
+                                                 "name": "Status",
+                                                 "wire_name": "Status",
+                                                 "required": true,
+                                                 "binding": { "kind": "BodyXml" },
+                                                 "type": { "kind": "StringEnum", "values": ["Enabled", "Disabled"] },
+                                                 "hot": false,
+                                                 "quirk_refs": []
+                                               },
+                                               {
+                                                 "name": "SourceSelectionCriteria",
+                                                 "wire_name": "SourceSelectionCriteria",
+                                                 "required": false,
+                                                 "binding": { "kind": "BodyXml" },
+                                                 "type": { "kind": "Structure", "shape": "SourceSelectionCriteria" },
+                                                 "hot": false,
+                                                 "quirk_refs": []
+                                               },
+                                               {
+                                                 "name": "ExistingObjectReplication",
+                                                 "wire_name": "ExistingObjectReplication",
+                                                 "required": false,
+                                                 "binding": { "kind": "BodyXml" },
+                                                 "type": { "kind": "Structure", "shape": "ExistingObjectReplication" },
+                                                 "hot": false,
+                                                 "quirk_refs": []
+                                               },
+                                               {
+                                                 "name": "Destination",
+                                                 "wire_name": "Destination",
+                                                 "required": true,
+                                                 "binding": { "kind": "BodyXml" },
+                                                 "type": { "kind": "Structure", "shape": "Destination" },
+                                                 "hot": false,
+                                                 "quirk_refs": []
+                                               },
+                                               {
+                                                 "name": "DeleteMarkerReplication",
+                                                 "wire_name": "DeleteMarkerReplication",
+                                                 "required": false,
+                                                 "binding": { "kind": "BodyXml" },
+                                                 "type": { "kind": "Structure", "shape": "DeleteMarkerReplication" },
+                                                 "hot": false,
+                                                 "quirk_refs": []
+                                               }
+                                             ],
+                                   "xml": {
+                                            "element_order": [
+                                                               "ID",
+                                                               "Priority",
+                                                               "Prefix",
+                                                               "Filter",
+                                                               "Status",
+                                                               "SourceSelectionCriteria",
+                                                               "ExistingObjectReplication",
+                                                               "Destination",
+                                                               "DeleteMarkerReplication"
+                                                             ],
+                                            "empty_value_policy": {
+                                                                    "ID": "omit",
+                                                                    "Priority": "omit",
+                                                                    "Prefix": "omit",
+                                                                    "Filter": "omit",
+                                                                    "Status": "emit",
+                                                                    "SourceSelectionCriteria": "omit",
+                                                                    "ExistingObjectReplication": "omit",
+                                                                    "Destination": "emit",
+                                                                    "DeleteMarkerReplication": "omit"
+                                                                  },
+                                            "attributes": []
+                                          }
+                                 },
+              "ReplicationRuleAndOperator": {
+                                              "kind": "Structure",
+                                              "fields": [
+                                                          {
+                                                            "name": "Prefix",
+                                                            "wire_name": "Prefix",
+                                                            "required": false,
+                                                            "binding": { "kind": "BodyXml" },
+                                                            "type": { "kind": "String" },
+                                                            "hot": false,
+                                                            "quirk_refs": []
+                                                          },
+                                                          {
+                                                            "name": "Tags",
+                                                            "wire_name": "Tag",
+                                                            "required": false,
+                                                            "binding": { "kind": "BodyXml" },
+                                                            "type": {
+                                                                      "kind": "List",
+                                                                      "member": { "kind": "Structure", "shape": "Tag" },
+                                                                      "flattened": true,
+                                                                      "wrapper_name": null
+                                                                    },
+                                                            "hot": false,
+                                                            "quirk_refs": []
+                                                          }
+                                                        ],
+                                              "xml": {
+                                                       "element_order": ["Prefix", "Tags"],
+                                                       "empty_value_policy": { "Prefix": "omit", "Tags": "omit" },
+                                                       "attributes": []
+                                                     }
+                                            },
+              "ReplicationRuleFilter": {
+                                         "kind": "Structure",
+                                         "fields": [
+                                                     {
+                                                       "name": "Prefix",
+                                                       "wire_name": "Prefix",
+                                                       "required": false,
+                                                       "binding": { "kind": "BodyXml" },
+                                                       "type": { "kind": "String" },
+                                                       "hot": false,
+                                                       "quirk_refs": []
+                                                     },
+                                                     {
+                                                       "name": "Tag",
+                                                       "wire_name": "Tag",
+                                                       "required": false,
+                                                       "binding": { "kind": "BodyXml" },
+                                                       "type": { "kind": "Structure", "shape": "Tag" },
+                                                       "hot": false,
+                                                       "quirk_refs": []
+                                                     },
+                                                     {
+                                                       "name": "And",
+                                                       "wire_name": "And",
+                                                       "required": false,
+                                                       "binding": { "kind": "BodyXml" },
+                                                       "type": {
+                                                                 "kind": "Structure",
+                                                                 "shape": "ReplicationRuleAndOperator"
+                                                               },
+                                                       "hot": false,
+                                                       "quirk_refs": []
+                                                     }
+                                                   ],
+                                         "xml": {
+                                                  "element_order": ["Prefix", "Tag", "And"],
+                                                  "empty_value_policy": {
+                                                                          "Prefix": "omit",
+                                                                          "Tag": "omit",
+                                                                          "And": "omit"
+                                                                        },
+                                                  "attributes": []
+                                                }
+                                       },
+              "ReplicationTime": {
+                                   "kind": "Structure",
+                                   "fields": [
+                                               {
+                                                 "name": "Status",
+                                                 "wire_name": "Status",
+                                                 "required": true,
+                                                 "binding": { "kind": "BodyXml" },
+                                                 "type": { "kind": "StringEnum", "values": ["Enabled", "Disabled"] },
+                                                 "hot": false,
+                                                 "quirk_refs": []
+                                               },
+                                               {
+                                                 "name": "Time",
+                                                 "wire_name": "Time",
+                                                 "required": true,
+                                                 "binding": { "kind": "BodyXml" },
+                                                 "type": { "kind": "Structure", "shape": "ReplicationTimeValue" },
+                                                 "hot": false,
+                                                 "quirk_refs": []
+                                               }
+                                             ],
+                                   "xml": {
+                                            "element_order": ["Status", "Time"],
+                                            "empty_value_policy": { "Status": "emit", "Time": "emit" },
+                                            "attributes": []
+                                          }
+                                 },
+              "ReplicationTimeValue": {
+                                        "kind": "Structure",
+                                        "fields": [
+                                                    {
+                                                      "name": "Minutes",
+                                                      "wire_name": "Minutes",
+                                                      "required": false,
+                                                      "binding": { "kind": "BodyXml" },
+                                                      "type": { "kind": "Integer" },
+                                                      "hot": false,
+                                                      "quirk_refs": []
+                                                    }
+                                                  ],
+                                        "xml": {
+                                                 "element_order": ["Minutes"],
+                                                 "empty_value_policy": { "Minutes": "omit" },
+                                                 "attributes": []
+                                               }
+                                      },
+              "SourceSelectionCriteria": {
+                                           "kind": "Structure",
+                                           "fields": [
+                                                       {
+                                                         "name": "SseKmsEncryptedObjects",
+                                                         "wire_name": "SseKmsEncryptedObjects",
+                                                         "required": false,
+                                                         "binding": { "kind": "BodyXml" },
+                                                         "type": {
+                                                                   "kind": "Structure",
+                                                                   "shape": "SseKmsEncryptedObjects"
+                                                                 },
+                                                         "hot": false,
+                                                         "quirk_refs": []
+                                                       },
+                                                       {
+                                                         "name": "ReplicaModifications",
+                                                         "wire_name": "ReplicaModifications",
+                                                         "required": false,
+                                                         "binding": { "kind": "BodyXml" },
+                                                         "type": {
+                                                                   "kind": "Structure",
+                                                                   "shape": "ReplicaModifications"
+                                                                 },
+                                                         "hot": false,
+                                                         "quirk_refs": []
+                                                       }
+                                                     ],
+                                           "xml": {
+                                                    "element_order": ["SseKmsEncryptedObjects", "ReplicaModifications"],
+                                                    "empty_value_policy": {
+                                                                            "SseKmsEncryptedObjects": "omit",
+                                                                            "ReplicaModifications": "omit"
+                                                                          },
+                                                    "attributes": []
+                                                  }
+                                         },
+              "SseKmsEncryptedObjects": {
+                                          "kind": "Structure",
+                                          "fields": [
+                                                      {
+                                                        "name": "Status",
+                                                        "wire_name": "Status",
+                                                        "required": true,
+                                                        "binding": { "kind": "BodyXml" },
+                                                        "type": {
+                                                                  "kind": "StringEnum",
+                                                                  "values": ["Enabled", "Disabled"]
+                                                                },
+                                                        "hot": false,
+                                                        "quirk_refs": []
+                                                      }
+                                                    ],
+                                          "xml": {
+                                                   "element_order": ["Status"],
+                                                   "empty_value_policy": { "Status": "emit" },
+                                                   "attributes": []
+                                                 }
+                                        },
+              "Tag": {
+                       "kind": "Structure",
+                       "fields": [
+                                   {
+                                     "name": "Key",
+                                     "wire_name": "Key",
+                                     "required": true,
+                                     "binding": { "kind": "BodyXml" },
+                                     "type": { "kind": "ObjectKey" },
+                                     "hot": true,
+                                     "quirk_refs": []
+                                   },
+                                   {
+                                     "name": "Value",
+                                     "wire_name": "Value",
+                                     "required": true,
+                                     "binding": { "kind": "BodyXml" },
+                                     "type": { "kind": "String" },
+                                     "hot": true,
+                                     "quirk_refs": []
+                                   }
+                                 ],
+                       "xml": {
+                                "element_order": ["Key", "Value"],
+                                "empty_value_policy": { "Key": "emit", "Value": "emit" },
+                                "attributes": []
+                              }
+                     }
+            },
+  "xml": {
+           "request_root": null,
+           "request_root_aliases": [],
+           "response_root": null,
+           "xmlns": "emit",
+           "unwrapped_output": false,
+           "element_order": [],
+           "empty_value_policy": {},
+           "url_encoded_fields": [],
+           "attributes": [],
+           "body_literal": false
+         },
+  "errors": {
+              "not_configured": null,
+              "allows_error_after_200": false,
+              "codes": [
+                         "NoSuchBucket",
+                         "AccessDenied",
+                         "MalformedXML",
+                         "InvalidRequest",
+                         "InvalidArgument",
+                         "BadDigest"
+                       ]
+            },
+  "derived_resources": [],
+  "head_mirrors": null,
+  "quirk_refs": [
+                  "q-repl-0004",
+                  "q-repl-0005",
+                  "q-repl-0006",
+                  "q-repl-0007",
+                  "q-repl-0008",
+                  "q-repl-0009",
+                  "q-repl-0010",
+                  "q-repl-0011",
+                  "q-repl-0012",
+                  "q-repl-0013"
+                ],
+  "quirks": [
+              {
+                "id": "q-repl-0004",
+                "kind": "checksum_required",
+                "target": "PutBucketReplication",
+                "summary": "The write demands an integrity claim on the body, so a request with neither Content-MD5 nor an x-amz-checksum header is refused with 400 before the document is parsed.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketReplication.html",
+                                "summary": "The request documents Content-MD5 as the base64 digest of the configuration, which the pinned model spells as a request checksum requirement."
+                              }
+                            ],
+                "cases": ["c-replication-0015", "c-replication-0001"]
+              },
+              {
+                "id": "q-repl-0005",
+                "kind": "lenient_unknown_elements",
+                "target": "PutBucketReplication",
+                "summary": "Unknown elements inside the request document are skipped rather than refused — and the stakes are higher here than in any sibling family, because RustFS parses the stored replication document fail-closed: a decoder that got stricter on the next release would not silently switch replication off, it would make the bucket unusable.",
+                "evidence": [
+                              {
+                                "kind": "s3s-issue",
+                                "ref": "https://github.com/s3s-project/s3s/issues/613",
+                                "summary": "AWS ignores unknown elements in request XML, and upstream had to relax its decoder to match after strict parsing broke real clients."
+                              },
+                              {
+                                "kind": "s3s-pr",
+                                "ref": "https://github.com/s3s-project/s3s/pull/617",
+                                "summary": "The upstream fix that makes unknown request elements a skip rather than an error, which is the behaviour this decoder generates by construction."
+                              }
+                            ],
+                "cases": ["c-replication-0019"]
+              },
+              {
+                "id": "q-repl-0006",
+                "kind": "schema_version_exclusive",
+                "target": "ReplicationRule",
+                "summary": "A rule is either V2 — a Filter, which then demands Priority and DeleteMarkerReplication beside it — or V1 — a bare rule-level Prefix, which carries neither; a rule mixing the two schema versions is refused with 400 InvalidRequest, because the version of a stored configuration is decided by exactly this distinction.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketReplication.html",
+                                "summary": "The operation documents that a configuration adding the Filter element must also add DeleteMarkerReplication, Status and Priority."
+                              },
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/userguide/replication-add-config.html",
+                                "summary": "The backward-compatibility section defines V2 as the format whose rules carry Filter and V1 as the format whose rules carry a direct Prefix child, with delete-marker handling implicit in V1 rather than spelled."
+                              }
+                            ],
+                "cases": [
+                           "c-replication-0005",
+                           "c-replication-0020",
+                           "c-replication-0021",
+                           "c-replication-0022",
+                           "c-replication-0023",
+                           "c-replication-0034"
+                         ]
+              },
+              {
+                "id": "q-repl-0007",
+                "kind": "filter_grammar",
+                "target": "ReplicationRuleFilter",
+                "summary": "A Filter takes at most one direct child — Prefix, Tag or And — and several conditions must nest inside one And, which exists only to combine and therefore needs at least two; two direct siblings are refused as MalformedXML. An empty Filter passes: it is the documented spelling for a rule that applies to every object.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ReplicationRuleFilter.html",
+                                "summary": "The type documents that a Filter must specify exactly one Prefix, Tag or And child element, and that combined conditions are wrapped in an And."
+                              },
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/userguide/replication-add-config.html",
+                                "summary": "The filter walkthrough shows an empty Filter applying the rule to all objects, and every multi-condition example wrapped in a single And."
+                              }
+                            ],
+                "cases": ["c-replication-0004", "c-replication-0024", "c-replication-0025"]
+              },
+              {
+                "id": "q-repl-0008",
+                "kind": "value_constraint",
+                "target": "ReplicationRule.ID",
+                "summary": "A rule ID is bounded at 255 characters and must be unique within the configuration, and the document as a whole is bounded at 1000 rules; an ID over the cap or duplicated is refused with 400 InvalidArgument, the rule-count overflow with 400 InvalidRequest.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ReplicationRule.html",
+                                "summary": "The ID member is documented as a unique identifier for the rule with a maximum of 255 characters."
+                              },
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/userguide/replication-add-config.html",
+                                "summary": "The guide documents the per-bucket cap of 1000 replication rules and states the limit is not adjustable."
+                              }
+                            ],
+                "cases": ["c-replication-0027", "c-replication-0028"]
+              },
+              {
+                "id": "q-repl-0009",
+                "kind": "lenient_duplicates",
+                "target": "ReplicationRule.Priority",
+                "summary": "Two rules carrying the same Priority are stored and echoed rather than refused: AWS documents no uniqueness requirement, only how the engine resolves a conflict between overlapping rules by taking the highest number — so refusing duplicates would invent a rule a stored document could already be breaking, under the one configuration RustFS parses fail-closed.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ReplicationRule.html",
+                                "summary": "The Priority member documents only precedence between conflicting rules — the higher number wins — and states no uniqueness constraint the codec could enforce."
+                              }
+                            ],
+                "cases": ["c-replication-0026"]
+              },
+              {
+                "id": "q-repl-0010",
+                "kind": "secret_hygiene",
+                "target": "EncryptionConfiguration.ReplicaKmsKeyID",
+                "summary": "The replica KMS key id and the destination account id are configuration secrets: the stored document echoes them on the read — that is the documented GET behaviour — but every refusal message is a constant that never carries them, so a rejected write cannot leak a key id or an account id into an error body or a log line.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketReplication.html",
+                                "summary": "The documented response echoes the stored destination configuration including the ReplicaKmsKeyID and Account members, which pins the echo as read behaviour rather than error behaviour."
+                              },
+                              {
+                                "kind": "s3s-pr",
+                                "ref": "https://github.com/s3s-project/s3s/pull/319",
+                                "summary": "Upstream's secret-handling fixes are the record of how easily key material reaches unintended surfaces once it is carried as a plain string."
+                              }
+                            ],
+                "cases": ["c-replication-0008", "c-replication-0029"]
+              },
+              {
+                "id": "q-repl-0011",
+                "kind": "arn_valued_member",
+                "target": "Destination.Bucket",
+                "summary": "The destination Bucket member is typed as a bucket name in the model but carries an ARN on the wire — arn:aws:s3:::bucket — so it is decoded as a plain string and neither the bucket-name grammar nor any ARN grammar is enforced on it: the model's type is unenforceable and a stricter grammar would be this project's invention.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_Destination.html",
+                                "summary": "The Bucket member is documented as the Amazon Resource Name of the destination bucket, a value the S3 bucket-name grammar itself would refuse."
+                              }
+                            ],
+                "cases": ["c-replication-0006", "c-replication-0007"]
+              },
+              {
+                "id": "q-repl-0012",
+                "kind": "lenient_value_set",
+                "target": "ReplicationRule.Status",
+                "summary": "A Status outside the documented Enabled/Disabled pair is stored and echoed rather than refused: the stored document is re-parsed by every future release, RustFS parses this one configuration fail-closed, and a spelling refused tomorrow that was accepted yesterday would make the bucket unusable rather than merely switch a feature off.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ReplicationRule.html",
+                                "summary": "The Status member documents Enabled and Disabled as its value set; passing out-of-set spellings through is this project's recorded fail-open decision."
+                              },
+                              {
+                                "kind": "s3s-issue",
+                                "ref": "https://github.com/s3s-project/s3s/issues/428",
+                                "summary": "Upstream's replication configuration types could not round-trip stored documents, the failure a strict enum decode reintroduces."
+                              }
+                            ],
+                "cases": ["c-replication-0030"]
+              },
+              {
+                "id": "q-repl-0013",
+                "kind": "header_passthrough",
+                "target": "PutBucketReplication.Token",
+                "summary": "The x-amz-bucket-object-lock-token request header is parsed into the input and passed through to the backend untouched: whether the token actually permits enabling Object Lock on the source bucket is the storage backend's semantic question, and the codec neither requires nor validates the header.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketReplication.html",
+                                "summary": "The request documents the optional x-amz-bucket-object-lock-token header as a token allowing Object Lock to be enabled for an existing bucket."
+                              }
+                            ],
+                "cases": ["c-replication-0011"]
+              }
+            ],
+  "ext_points": []
+}

@@ -1,0 +1,40 @@
+[case]
+id = "c-select-restore-0018"
+schema_version = 1
+title = "The versionId selector reaches the handler and is not discarded"
+rationale = """
+A parameter that is decoded and then dropped answers exactly like one that arrived, which is why this is asserted against a backend that refuses the versioned form rather than against a success. Both directions are in the case: with the selector the answer is the refusal, and c-select-restore-0001 sends the same request without it and is accepted. A binding that lost the value would make the two identical."""
+polarity = "negative"
+operation = "RestoreObject"
+tags = ["restore", "routing"]
+timeout_ms = 10000
+quirks = ["q-restore-0008"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_RestoreObject.html"
+summary = "The operation documents versionId as the query parameter selecting which version is retrieved."
+kind = "aws-doc"
+[[setup.buckets]]
+name = "conf-restore"
+
+[[setup.objects]]
+bucket = "conf-restore"
+key = "cold.txt"
+body = { utf8 = "archived payload" }
+storage_class = "GLACIER"
+
+[request]
+method = "POST"
+target = "/conf-restore/cold.txt?restore&versionId=v1"
+headers = { "content-type" = "application/xml" }
+body = { utf8 = '<RestoreRequest><Days>1</Days></RestoreRequest>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 501
+connection_after = "open"
+
+[expect.error]
+code = "NotImplemented"
+request_id_present = true

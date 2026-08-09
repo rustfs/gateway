@@ -142,6 +142,21 @@ pub fn render(ir: &OperationIr) -> String {
                 let _ = writeln!(out, "{member} = {}", quote(policy.as_str()));
             }
         }
+        for attribute in &shape.xml.attributes {
+            let _ = writeln!(out, "\n[[shape.{name}.attribute]]");
+            let _ = writeln!(out, "element = {}", quote(&attribute.element));
+            let _ = writeln!(out, "name = {}", quote(&attribute.name));
+            match &attribute.source {
+                AttributeSource::Field(member) => {
+                    let _ = writeln!(out, "source = \"field\"");
+                    let _ = writeln!(out, "field = {}", quote(member));
+                }
+                AttributeSource::Constant(literal) => {
+                    let _ = writeln!(out, "source = \"constant\"");
+                    let _ = writeln!(out, "value = {}", quote(literal));
+                }
+            }
+        }
         for field in &shape.fields {
             let _ = writeln!(out, "\n[[shape.{name}.field]]");
             render_field(&mut out, field);

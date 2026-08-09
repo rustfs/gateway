@@ -1,0 +1,42 @@
+[case]
+id = "c-select-restore-0003"
+schema_version = 1
+title = "The select-on-restore form is decoded whole and answers x-amz-restore-output-path"
+rationale = """
+The legacy form is still in the pinned model and is not deprecated there, so a request carrying Type SELECT with its two required members has to reach the handler with the nested query intact. The output path is the observable that says the OutputLocation arrived: a decoder that dropped the element would answer the same 202 without it, which is a success carrying no way to find the answer."""
+polarity = "positive"
+operation = "RestoreObject"
+tags = ["restore", "select"]
+timeout_ms = 10000
+quirks = ["q-restore-0004"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_RestoreObject.html"
+summary = "The operation documents a SELECT type carrying SelectParameters and an OutputLocation, and an x-amz-restore-output-path response header."
+kind = "aws-doc"
+[[setup.buckets]]
+name = "conf-restore"
+
+[[setup.objects]]
+bucket = "conf-restore"
+key = "cold.txt"
+body = { utf8 = "archived payload" }
+storage_class = "GLACIER"
+
+[request]
+method = "POST"
+target = "/conf-restore/cold.txt?restore"
+headers = { "content-type" = "application/xml" }
+body = { utf8 = '<RestoreRequest><Type>SELECT</Type><SelectParameters><InputSerialization><CSV><FileHeaderInfo>USE</FileHeaderInfo></CSV></InputSerialization><ExpressionType>SQL</ExpressionType><Expression>SELECT * FROM S3Object</Expression><OutputSerialization><CSV></CSV></OutputSerialization></SelectParameters><OutputLocation><S3><BucketName>conf-results</BucketName><Prefix>out/</Prefix></S3></OutputLocation></RestoreRequest>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 202
+connection_after = "open"
+
+[expect.headers_present]
+"x-amz-restore-output-path" = "conf-results/out/"
+
+[expect.body]
+size = 0

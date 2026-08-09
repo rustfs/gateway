@@ -1,0 +1,185 @@
+{
+  "ir_version": "1",
+  "operation": "PutBucketPolicy",
+  "http": {
+            "method": "PUT",
+            "target": "Bucket",
+            "precedence": 216,
+            "predicates": [
+                            { "kind": "Method", "method": "PUT" },
+                            { "kind": "Target", "target": "Bucket" },
+                            { "kind": "QueryPresent", "key": "policy" }
+                          ],
+            "success_status": 200,
+            "alt_success_statuses": [],
+            "path_shape": "/{Bucket}"
+          },
+  "auth": { "requirement": "Required", "action": "s3:PutBucketPolicy", "presigned_allowed": true, "service": "s3" },
+  "payload": {
+               "request": { "kind": "XmlBody", "buffering": "Full", "max_bytes": 20480 },
+               "response": { "kind": "None", "buffering": "None", "max_bytes": null }
+             },
+  "checksum": {
+                "http_checksum_required": true,
+                "request_algorithms": ["CRC32", "CRC32C", "CRC64NVME", "SHA1", "SHA256"],
+                "response_algorithms": []
+              },
+  "input": {
+             "fields": [
+                         {
+                           "name": "Bucket",
+                           "wire_name": "Bucket",
+                           "required": true,
+                           "binding": { "kind": "UriLabel", "greedy": false },
+                           "type": { "kind": "BucketName" },
+                           "hot": true,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "ContentMD5",
+                           "wire_name": "content-md5",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "String" },
+                           "hot": false,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "ChecksumAlgorithm",
+                           "wire_name": "x-amz-sdk-checksum-algorithm",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": {
+                                     "kind": "StringEnum",
+                                     "values": [
+                                                 "CRC32",
+                                                 "CRC32C",
+                                                 "SHA1",
+                                                 "SHA256",
+                                                 "CRC64NVME",
+                                                 "SHA512",
+                                                 "MD5",
+                                                 "XXHASH64",
+                                                 "XXHASH3",
+                                                 "XXHASH128"
+                                               ]
+                                   },
+                           "hot": false,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "ConfirmRemoveSelfBucketAccess",
+                           "wire_name": "x-amz-confirm-remove-self-bucket-access",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "Boolean" },
+                           "hot": false,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "Policy",
+                           "wire_name": null,
+                           "required": true,
+                           "binding": { "kind": "Payload" },
+                           "type": { "kind": "String" },
+                           "hot": true,
+                           "quirk_refs": ["q-pol-0001"]
+                         },
+                         {
+                           "name": "ExpectedBucketOwner",
+                           "wire_name": "x-amz-expected-bucket-owner",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "String" },
+                           "hot": false,
+                           "quirk_refs": []
+                         }
+                       ]
+           },
+  "output": { "fields": [] },
+  "shapes": {},
+  "xml": {
+           "request_root": null,
+           "request_root_aliases": [],
+           "response_root": null,
+           "xmlns": "emit",
+           "unwrapped_output": false,
+           "element_order": [],
+           "empty_value_policy": {},
+           "url_encoded_fields": [],
+           "attributes": [],
+           "body_literal": false
+         },
+  "errors": {
+              "not_configured": null,
+              "allows_error_after_200": false,
+              "codes": ["NoSuchBucket", "AccessDenied", "MalformedPolicy", "InvalidPolicyDocument", "BadDigest"]
+            },
+  "derived_resources": [],
+  "head_mirrors": null,
+  "quirk_refs": ["q-pol-0001", "q-pol-0006", "q-pol-0007", "q-pol-0008"],
+  "quirks": [
+              {
+                "id": "q-pol-0001",
+                "kind": "media_type",
+                "target": "GetBucketPolicy.Policy",
+                "summary": "The bucket policy body is JSON on both the read and the write, the only success body in the S3 surface that is not XML, and the read answers Content-Type application/json with the stored document byte for byte.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketPolicy.html",
+                                "summary": "The documented response syntax for the policy read is a bare JSON policy document rather than an XML element tree."
+                              },
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketPolicy.html",
+                                "summary": "The documented request syntax for the policy write is a bare JSON policy document sent as the whole body."
+                              }
+                            ],
+                "cases": ["c-bucketconfig-0017", "c-bucketconfig-0016"]
+              },
+              {
+                "id": "q-pol-0006",
+                "kind": "checksum_required",
+                "target": "PutBucketPolicy",
+                "summary": "The policy write demands an integrity claim on the body, so a request with neither Content-MD5 nor an x-amz-checksum header is refused with 400 before an access-control document is read at all.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketPolicy.html",
+                                "summary": "The request documents Content-MD5 as the base64 digest of the policy, which the pinned model spells as a request checksum requirement the lowering does not read."
+                              }
+                            ],
+                "cases": ["c-bucketconfig-0039", "c-bucketconfig-0016"]
+              },
+              {
+                "id": "q-pol-0007",
+                "kind": "bounded_input",
+                "target": "PutBucketPolicy",
+                "summary": "A policy is capped at 20 KB and at a nesting depth this parser will follow, both checked before anything interprets the document, and the depth check counts in a loop rather than recursing so that the limit is a refusal instead of a stack overflow.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/userguide/bucket-policies.html",
+                                "summary": "The bucket-policy guide states a 20 KB size limit for a bucket policy document."
+                              }
+                            ],
+                "cases": ["c-bucketconfig-0052", "c-bucketconfig-0053"]
+              },
+              {
+                "id": "q-pol-0008",
+                "kind": "value_constraint",
+                "target": "PutBucketPolicy",
+                "summary": "The framework checks that a policy is UTF-8, is syntactically JSON and is an object, and evaluates none of its meaning; the refusal is MalformedPolicy with a constant message that never repeats the document, because a policy names principals and account identifiers.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketPolicy.html",
+                                "summary": "The operation documents MalformedPolicy as the error for a policy document the service cannot use, without distinguishing the reason in the code."
+                              }
+                            ],
+                "cases": ["c-bucketconfig-0051", "c-bucketconfig-0054"]
+              }
+            ],
+  "ext_points": []
+}

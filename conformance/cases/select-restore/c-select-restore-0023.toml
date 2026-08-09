@@ -1,0 +1,48 @@
+[case]
+id = "c-select-restore-0023"
+schema_version = 1
+title = "An empty expression is refused rather than read as select everything"
+rationale = """
+A query that selects nothing is not a default, and the alternative reading — that an empty expression means every row — is the expensive one to guess wrong. The element is present and empty, which is a different shape from an omitted one and has to be refused on its own."""
+polarity = "negative"
+operation = "SelectObjectContent"
+tags = ["select", "xml"]
+timeout_ms = 10000
+quirks = ["q-select-0002"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_SelectObjectContent.html"
+summary = "The Expression member documents the SQL a query runs and publishes no empty form."
+kind = "aws-doc"
+[[setup.buckets]]
+name = "conf-select"
+
+[[setup.objects]]
+bucket = "conf-select"
+key = "rows.csv"
+body = { utf8 = "a,b\n1,2\n" }
+
+[request]
+method = "POST"
+target = "/conf-select/rows.csv?select&select-type=2"
+headers = { "content-type" = "application/xml" }
+body = { utf8 = '<SelectObjectContentRequest><Expression></Expression><ExpressionType>SQL</ExpressionType><InputSerialization><CSV><FileHeaderInfo>USE</FileHeaderInfo><FieldDelimiter>,</FieldDelimiter><QuoteCharacter>"</QuoteCharacter></CSV><CompressionType>NONE</CompressionType></InputSerialization><OutputSerialization><CSV><RecordDelimiter>\n</RecordDelimiter></CSV></OutputSerialization></SelectObjectContentRequest>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+code = "MalformedXML"
+request_id_present = true
+
+[expect.headers_present]
+"content-type" = "application/xml"
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>MalformedXML</Code><Message>Expression must not be empty</Message><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''

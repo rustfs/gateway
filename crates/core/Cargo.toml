@@ -32,9 +32,17 @@ rustfs-gateway-stream = { workspace = true }
 bytes = { workspace = true }
 http = { workspace = true }
 percent-encoding = { workspace = true }
+# The SSE-C key digest. MD5 is not a choice this crate makes: it is the digest
+# `x-amz-server-side-encryption-customer-key-MD5` is defined over.
+md-5 = { workspace = true }
+# The constant-time comparison of a value derived from key material; see `src/sse/key.rs`.
+subtle = { workspace = true }
+# Wipes the decoded customer key when the stack frame that hashed it returns.
+zeroize = { workspace = true }
 
 [dev-dependencies]
 # Differential testing between the readable route table and its compiled form. The compiled
 # router is only allowed to exist because a generator can be pointed at both and told to find a
 # request they disagree about.
 proptest = { workspace = true }
+trybuild = { workspace = true }

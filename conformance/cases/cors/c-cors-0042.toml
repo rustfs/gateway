@@ -1,0 +1,60 @@
+[case]
+id = "c-cors-0042"
+schema_version = 1
+title = "No preflight answer ever carries Access-Control-Allow-Credentials beside a wildcard origin"
+rationale = """
+GHSA-x5xv-223c-8vm7 as a regression test. A reflected origin plus a credentials allowance is a standing invitation
+for any site to read this user's objects with this user's session, and the combination is the default of several
+popular CORS layers — so it is the thing most likely to come back in a later refactor. Both wildcard forms are
+covered: the literal star here, the reflected concrete origin in c-cors-0030.
+
+What this case asserts about the answer is `access-control-allow-methods`, not the allow-origin value: the harness
+reads `*` in `headers_present` as "present with any value" (conformance/README.md), so pinning the star here would
+pin nothing. The methods line is a concrete string and it is what proves the preflight was allowed rather than
+refused, which is the precondition the credentials assertion needs. The literal `*` value is pinned exactly in
+`crates/gateway/tests/cors_runtime.rs`."""
+polarity = "negative"
+tags = ["cors", "preflight", "security"]
+timeout_ms = 10000
+quirks = ["q-cors-0010"]
+
+[[case.evidence]]
+url = "https://github.com/rustfs/rustfs/security/advisories/GHSA-x5xv-223c-8vm7"
+summary = "RustFS reflected an arbitrary Origin alongside a credentials allowance, which lets any site read a user's data."
+kind = "other"
+
+[[case.evidence]]
+url = "https://fetch.spec.whatwg.org/#http-cors-protocol"
+summary = "The preflight and its answer are defined here, including which response header a browser reads from which response."
+kind = "rfc"
+
+[[setup.buckets]]
+name = "conf-cors-rt"
+
+[[exchanges]]
+# Setup traffic: the document the preflight below is answered from. Not under test.
+[exchanges.request]
+method = "PUT"
+target = "/conf-cors-rt?cors"
+headers = { "content-type" = "application/xml", "content-md5" = "JwjOZkFs+i5vAUZUg/9fsw==" }
+body = { utf8 = "<CORSConfiguration><CORSRule><AllowedMethod>PUT</AllowedMethod><AllowedOrigin>*</AllowedOrigin><AllowedHeader>x-amz-*</AllowedHeader></CORSRule></CORSConfiguration>" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+
+[[exchanges]]
+[exchanges.request]
+method = "OPTIONS"
+target = "/conf-cors-rt/key.txt"
+headers = { "origin" = "https://evil.invalid", "access-control-request-method" = "PUT" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+headers_absent = ["access-control-allow-credentials"]
+
+[exchanges.expect.headers_present]
+"access-control-allow-methods" = "PUT"
+"vary" = "origin"

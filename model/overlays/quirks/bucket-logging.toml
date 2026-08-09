@@ -1,0 +1,68 @@
+# Copyright 2026 RustFS Team
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Quirks of the server access-logging configuration.
+#
+# One [[quirk]] per behaviour the pinned Smithy model does not state, or states in a trait the
+# lowering would otherwise lose. `summary` and every `evidence.summary` are written by this
+# project; upstream issue and documentation prose stays under its author's copyright and is never
+# pasted here.
+
+[[quirk]]
+id      = "q-log-0001"
+kind    = "not_configured_error"
+target  = "GetBucketLogging"
+summary = "A bucket that is not logging answers 200 with an empty BucketLoggingStatus element rather than a 404, so the absence of a LoggingEnabled child is the whole answer."
+cases   = ["c-bucketconfig-0026", "c-bucketconfig-0009"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketLogging.html"
+  summary = "The operation documents no not-found error for a bucket with no logging configuration and describes the logging element as absent when logging is off."
+
+[[quirk]]
+id      = "q-log-0002"
+kind    = "required_body"
+target  = "PutBucketLogging"
+summary = "An empty BucketLoggingStatus document is the documented way to stop logging and is accepted rather than refused, because this subresource has no delete operation to say it any other way."
+cases   = ["c-bucketconfig-0047"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketLogging.html"
+  summary = "The request reference describes omitting the logging element as the way to disable logging on a bucket, and the pinned model declares no delete operation for the subresource."
+
+[[quirk]]
+id      = "q-log-0003"
+kind    = "element_name"
+target  = "LoggingEnabled.TargetGrants"
+summary = "The grant list is wrapped in a TargetGrants element whose entries are spelled Grant rather than TargetGrant, so a reader looking for the member name on the wire will not find it."
+cases   = ["c-bucketconfig-0009", "c-bucketconfig-0008"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketLogging.html"
+  summary = "The documented request syntax shows Grant elements nested inside a TargetGrants wrapper, which is the wrapped shape rather than the flattened one the notification family uses."
+
+[[quirk]]
+id      = "q-log-0004"
+kind    = "checksum_required"
+target  = "PutBucketLogging"
+summary = "The logging write demands an integrity claim on the body, so a request with neither Content-MD5 nor an x-amz-checksum header is refused with 400 before the document is parsed."
+cases   = ["c-bucketconfig-0037", "c-bucketconfig-0008"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketLogging.html"
+  summary = "The request documents Content-MD5 as the base64 digest of the configuration, which the pinned model spells as a request checksum requirement the lowering does not read."

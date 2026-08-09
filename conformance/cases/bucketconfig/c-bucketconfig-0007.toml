@@ -1,0 +1,51 @@
+[case]
+id = "c-bucketconfig-0007"
+schema_version = 1
+title = "A requester-pays bucket reads back Payer Requester"
+rationale = """
+The configured answer has to be distinguishable from the default answer an unswitched bucket gives, which is c-bucketconfig-0027. Both are a 200 with a Payer element, so only the value and the bytes around it separate them."""
+polarity = "positive"
+operation = "GetBucketRequestPayment"
+tags = ["bucketconfig", "xml", "wire-bytes"]
+timeout_ms = 10000
+quirks = ["q-rqp-0001"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketRequestPayment.html"
+summary = "The read reference shows the payer element as always present, defaulting to the bucket owner."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "conf-bucketconfig"
+[[exchanges]]
+name = "write"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-bucketconfig?requestPayment"
+headers = { "content-md5" = "nY7aajIaZ01yv5qN1p0uvQ==", "content-type" = "application/xml" }
+body = { utf8 = '<RequestPaymentConfiguration><Payer>Requester</Payer></RequestPaymentConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[[exchanges]]
+name = "read-back"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-bucketconfig?requestPayment"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.body]
+golden = "goldens/c-bucketconfig-0007.xml"
+

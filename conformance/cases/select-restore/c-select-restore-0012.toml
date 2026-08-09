@@ -1,0 +1,49 @@
+[case]
+id = "c-select-restore-0012"
+schema_version = 1
+title = "A zero-day retrieval is refused rather than given a lifetime nobody asked for"
+rationale = """
+A copy that lapses at the instant it appears is not a retrieval, and the alternative to refusing is inventing a duration — which the caller then pays for and cannot see. The floor is one day and the member documents it."""
+polarity = "negative"
+operation = "RestoreObject"
+tags = ["restore", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-restore-0004"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_RestoreRequest.html"
+summary = "The Days member documents a minimum value of one."
+kind = "aws-doc"
+[[setup.buckets]]
+name = "conf-restore"
+
+[[setup.objects]]
+bucket = "conf-restore"
+key = "cold.txt"
+body = { utf8 = "archived payload" }
+storage_class = "GLACIER"
+
+[request]
+method = "POST"
+target = "/conf-restore/cold.txt?restore"
+headers = { "content-type" = "application/xml" }
+body = { utf8 = '<RestoreRequest><Days>0</Days></RestoreRequest>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+code = "InvalidArgument"
+request_id_present = true
+
+[expect.headers_present]
+"content-type" = "application/xml"
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>InvalidArgument</Code><Message>Days must be at least 1</Message><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''

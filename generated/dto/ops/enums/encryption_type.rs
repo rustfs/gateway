@@ -23,7 +23,7 @@
 
 use std::borrow::Cow;
 
-/// The `EncryptionType` string enumeration. Bound by: GetBucketEncryption, PutBucketEncryption.
+/// The `EncryptionType` string enumeration. Bound by: GetBucketEncryption, PutBucketEncryption, RestoreObject.
 ///
 /// An open set: compare against the associated constants, and build a value the pinned
 /// model does not declare with [`EncryptionType::custom`]. Adding a constant is a minor version
@@ -36,9 +36,17 @@ impl EncryptionType {
     pub const NONE: Self = Self(Cow::Borrowed("NONE"));
     /// `SSE-C`
     pub const SSE_C: Self = Self(Cow::Borrowed("SSE-C"));
+    /// `AES256`
+    pub const AES256: Self = Self(Cow::Borrowed("AES256"));
+    /// `aws:fsx`
+    pub const AWS_FSX: Self = Self(Cow::Borrowed("aws:fsx"));
+    /// `aws:kms`
+    pub const AWS_KMS: Self = Self(Cow::Borrowed("aws:kms"));
+    /// `aws:kms:dsse`
+    pub const AWS_KMS_DSSE: Self = Self(Cow::Borrowed("aws:kms:dsse"));
 
     /// Every value the pinned model declares, in model order.
-    pub const VALUES: &'static [&'static str] = &["NONE", "SSE-C"];
+    pub const VALUES: &'static [&'static str] = &["NONE", "SSE-C", "AES256", "aws:fsx", "aws:kms", "aws:kms:dsse"];
 
     /// Wraps a value this build has no constant for.
     #[must_use]

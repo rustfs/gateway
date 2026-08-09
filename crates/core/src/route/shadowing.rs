@@ -16,7 +16,7 @@
 //!
 //! Responsible for: [`ShadowingDecl`] (winner, shadowed, reason, evidence), the collection type
 //! the table consults, [`ShadowingPolicy`] — how much of the overlap surface must be declared —
-//! and the pairing of the table's two halves (`shadowing_bucket.rs`, `shadowing_object.rs`) into
+//! and the pairing of the table's five files into
 //! the one ordered sequence consumers read.
 //! NOT responsible for: computing overlap (`lattice`), or the same-precedence case, which is never
 //! a declaration and always a build failure (`table`).
@@ -29,6 +29,12 @@
 //! file scope, so [`PROVISIONAL_SHADOWING`] carries the declarations the generated table needs
 //! today, in the same four fields the overlay will use, with the loader left to P4-06. It is one
 //! declaration; the type, not the storage, is what the rest of the crate depends on.
+//!
+//! A dialect's declarations do not live here at all: they arrive with the
+//! [`crate::dialect::Dialect`] a deployment installs, are appended by [`ShadowingDecls::and`], and
+//! are checked by the same [`super::table::RouteTable::build`] that checks these ones.
+
+use std::borrow::Cow;
 
 /// One reviewed decision: this operation wins over that one, and here is why.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -72,43 +78,51 @@ pub enum ShadowingPolicy {
 
 /// The declarations a table is checked against.
 ///
-/// Two slices rather than one, because the in-tree table is written in two files and a
-/// compile-time concatenation of them would need either an indexing loop or a placeholder
-/// element that is never a real declaration. Callers never see the seam: [`ShadowingDecls::iter`]
-/// reads them end to end in source order, which is the only order anything here depends on.
-#[derive(Clone, Copy, Debug, Default)]
+/// A slice of groups rather than one flat slice, because the in-tree table is written in several
+/// files and a compile-time concatenation of them would need either an indexing loop or a
+/// placeholder element that is never a real declaration. Callers never see the seams:
+/// [`ShadowingDecls::iter`] reads every group end to end in source order, which is the only order
+/// anything here depends on.
+///
+/// The group list is a [`Cow`] rather than a plain slice because a dialect's declarations arrive at
+/// assembly time, one group per dialect, and the count is not known until then — see
+/// [`ShadowingDecls::and`]. Every declaration inside a group is still `&'static`: what varies is
+/// how many groups there are, not where any of them lives.
+#[derive(Clone, Debug, Default)]
 pub struct ShadowingDecls {
-    first: &'static [ShadowingDecl],
-    second: &'static [ShadowingDecl],
+    groups: Cow<'static, [&'static [ShadowingDecl]]>,
     policy: ShadowingPolicy,
 }
 
 impl ShadowingDecls {
     /// An empty set: every cross-precedence overlap will be reported as undeclared.
     pub const NONE: Self = Self {
-        first: &[],
-        second: &[],
+        groups: Cow::Borrowed(&[]),
         policy: ShadowingPolicy::EveryOverlap,
     };
 
-    /// Wraps a static declaration list.
+    /// Wraps the groups a table's declarations are written in, read one after the other.
+    ///
+    /// One group is the ordinary case for a caller outside this module — `over(&[DECLS])` — and
+    /// the in-tree table passes one group per file.
     #[must_use]
-    pub const fn new(decls: &'static [ShadowingDecl]) -> Self {
+    pub const fn over(groups: &'static [&'static [ShadowingDecl]]) -> Self {
         Self {
-            first: decls,
-            second: &[],
+            groups: Cow::Borrowed(groups),
             policy: ShadowingPolicy::EveryOverlap,
         }
     }
 
-    /// Wraps two lists read one after the other, which is how the in-tree table is stored.
+    /// The same declarations plus one more group.
+    ///
+    /// How a dialect's declarations reach the table: [`crate::registry::RouterBuilder::build`]
+    /// folds one group per installed dialect onto [`PROVISIONAL_SHADOWING`]. Appending rather than
+    /// replacing is the point — a dialect can declare the overlaps its own row creates and cannot
+    /// touch the reviewed record for the generated table.
     #[must_use]
-    pub const fn joined(first: &'static [ShadowingDecl], second: &'static [ShadowingDecl]) -> Self {
-        Self {
-            first,
-            second,
-            policy: ShadowingPolicy::EveryOverlap,
-        }
+    pub fn and(mut self, group: &'static [ShadowingDecl]) -> Self {
+        self.groups.to_mut().push(group);
+        self
     }
 
     /// The same declarations under a different policy. See [`ShadowingPolicy`].
@@ -124,9 +138,9 @@ impl ShadowingDecls {
         self.policy
     }
 
-    /// Every declaration, in source order, both halves.
+    /// Every declaration, in source order, every group.
     pub fn iter(&self) -> impl Iterator<Item = &'static ShadowingDecl> {
-        self.first.iter().chain(self.second.iter())
+        self.groups.iter().copied().flat_map(<[ShadowingDecl]>::iter)
     }
 
     /// The declaration covering this ordered pair, if there is one.
@@ -146,13 +160,31 @@ impl ShadowingDecls {
 /// therefore overlaps every other bucket-level `GET` in the table. It is last in the band for
 /// exactly that reason, and the rows below are what "last" is allowed to mean.
 ///
-/// # Why the table lives in two files
+/// # Why the table lives in several files
 ///
 /// The declarations outgrew the 800-line file ceiling, and the split follows the one seam the
-/// table already has: which target the overlapping selectors address. Bucket-target pairs live
-/// in `shadowing_bucket.rs`, object-target pairs in `shadowing_object.rs`, and
-/// [`ShadowingDecls::joined`] reads the two end to end — so every consumer still sees one
+/// table already has: which target the overlapping selectors address. Bucket-target pairs live in
+/// `shadowing_bucket.rs`, object-target pairs in `shadowing_object.rs`, and
+/// [`ShadowingDecls::over`] reads the groups end to end — so every consumer still sees one
 /// ordered sequence, and a declaration added to the wrong half is a review comment rather than a
 /// behaviour change.
-pub const PROVISIONAL_SHADOWING: ShadowingDecls =
-    ShadowingDecls::joined(super::shadowing_bucket::DECLS, super::shadowing_object::DECLS);
+///
+/// The bucket half is four files now, and each split had the same cause. The `?acl` band sits
+/// ahead of every other bucket subresource, so it wins a pair against each of them and against
+/// each listing, and those seventeen declarations pushed `shadowing_bucket.rs` over the ceiling on
+/// their own. The `?accelerate`-to-`?website` configuration band at 200-249 is the same arithmetic
+/// an order of magnitude up: nine `GET` rows arriving in front of twelve is a hundred and
+/// forty-four pairs before the band is compared with itself, and two hundred and forty-six in all,
+/// so it needed two groups rather than one — `shadowing_bucket_config.rs` for the reads and
+/// `shadowing_bucket_config_write.rs` for the writes and deletes.
+///
+/// None of them is a second way of grouping: same seam, same declaration type, one more element in
+/// the list. That is why the field is a list and no longer a pair, and why the next band that
+/// overflows costs a file and nothing else.
+pub const PROVISIONAL_SHADOWING: ShadowingDecls = ShadowingDecls::over(&[
+    super::shadowing_bucket::DECLS,
+    super::shadowing_bucket_acl::DECLS,
+    super::shadowing_bucket_config::DECLS,
+    super::shadowing_bucket_config_write::DECLS,
+    super::shadowing_object::DECLS,
+]);

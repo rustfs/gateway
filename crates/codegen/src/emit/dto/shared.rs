@@ -34,7 +34,7 @@ use std::fmt::Write as _;
 use rustfs_gateway_model::ir::ShapeKind;
 
 use super::registry::{EnumDef, Registry, ShapeDef};
-use super::{DtoReport, LICENSE, debug_impl, derives, field_decl, naming, registry};
+use super::{DtoReport, LICENSE, MAX_WIDTH, debug_impl, derives, field_decl, naming, registry};
 
 /// Renders `ops/enums/mod.rs` plus one file per string enumeration.
 pub fn enums(registry: &Registry, report: &mut DtoReport) -> Vec<(String, String)> {
@@ -62,13 +62,13 @@ pub fn enums(registry: &Registry, report: &mut DtoReport) -> Vec<(String, String
     );
     for def in registry.enums.values() {
         let module = naming::module_name(&def.name);
-        let _ = writeln!(facade, "mod {module};");
+        let _ = writeln!(facade, "mod {};", naming::module_ident(&def.name));
         files.push((format!("{module}.rs"), string_enum(def)));
         report.string_enums += 1;
     }
     facade.push('\n');
     for def in registry.enums.values() {
-        let _ = writeln!(facade, "pub use self::{}::{};", naming::module_name(&def.name), def.name);
+        let _ = writeln!(facade, "pub use self::{}::{};", naming::module_ident(&def.name), def.name);
     }
     files.push(("mod.rs".to_owned(), facade));
     files
@@ -97,11 +97,20 @@ fn string_enum(def: &EnumDef) -> String {
          impl {name} {{\n"
     );
     for value in &def.values {
-        let _ = write!(
-            out,
-            "    /// `{value}`\n    pub const {}: Self = Self(Cow::Borrowed(\"{value}\"));\n",
-            naming::const_name(value)
-        );
+        let constant = naming::const_name(value);
+        let single = format!("    pub const {constant}: Self = Self(Cow::Borrowed(\"{value}\"));");
+        let _ = writeln!(out, "    /// `{value}`");
+        // rustfmt's normal form: the initialiser moves to its own line once the declaration
+        // crosses `max_width`. Two of the notification event names are long enough to reach it —
+        // `s3:Replication:OperationReplicatedAfterThreshold` first — and a generated file that
+        // is not what `cargo fmt` would write fails `cargo xtask spec verify` the moment
+        // somebody formats the tree.
+        if single.len() <= MAX_WIDTH {
+            let _ = writeln!(out, "{single}");
+        } else {
+            let _ = writeln!(out, "    pub const {constant}: Self =");
+            let _ = writeln!(out, "        Self(Cow::Borrowed(\"{value}\"));");
+        }
     }
     let values = super::slice_literal(
         &def.values.iter().map(|v| format!("\"{v}\"")).collect::<Vec<_>>(),
@@ -167,7 +176,7 @@ pub fn shapes(registry: &Registry, report: &mut DtoReport) -> Vec<(String, Strin
     );
     for def in registry.shapes.values() {
         let module = naming::module_name(&def.name);
-        let _ = writeln!(facade, "mod {module};");
+        let _ = writeln!(facade, "mod {};", naming::module_ident(&def.name));
         let body = match def.kind {
             ShapeKind::Structure => {
                 report.structs += 1;
@@ -182,7 +191,7 @@ pub fn shapes(registry: &Registry, report: &mut DtoReport) -> Vec<(String, Strin
     }
     facade.push('\n');
     for def in registry.shapes.values() {
-        let _ = writeln!(facade, "pub use self::{}::{};", naming::module_name(&def.name), def.name);
+        let _ = writeln!(facade, "pub use self::{}::{};", naming::module_ident(&def.name), def.name);
     }
     files.push(("mod.rs".to_owned(), facade));
     files
@@ -217,11 +226,20 @@ fn structure(def: &ShapeDef, registry: &Registry, report: &mut DtoReport) -> Str
          /// [`{name}::check_required`] refuses to let off the decode path.\n"
     );
     out.push_str(&derives(clonable, has_secret));
-    let _ = writeln!(out, "pub struct {name} {{");
-    for field in &def.fields {
-        out.push_str(&field_decl(field));
+    if def.fields.is_empty() {
+        // rustfmt collapses a braces-only body onto the declaration line. Three shapes reach it:
+        // `ParquetInput`, which says "this object is Parquet" and nothing more, and the
+        // notification family's `EventBridgeConfiguration` and `SimplePrefix`, which each say
+        // "this element is present". All three stay distinct types rather than booleans, because
+        // the wire distinguishes an absent element from a present one.
+        let _ = writeln!(out, "pub struct {name} {{}}\n");
+    } else {
+        let _ = writeln!(out, "pub struct {name} {{");
+        for field in &def.fields {
+            out.push_str(&field_decl(field));
+        }
+        out.push_str("}\n\n");
     }
-    out.push_str("}\n\n");
     out.push_str(&super::check_required_impl(name, name, &def.fields));
     if has_secret {
         out.push('\n');

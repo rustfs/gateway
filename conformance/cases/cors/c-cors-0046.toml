@@ -1,0 +1,72 @@
+[case]
+id = "c-cors-0046"
+schema_version = 1
+title = "A preflight whose Origin carries a space is refused before anything is echoed"
+rationale = """
+The allow-origin header is the one place this runtime writes caller-supplied bytes into a response, so the value has
+to be bounded and free of anything that could end a header line. A space is the mildest such byte and the one an
+over-eager URL builder actually produces; refusing it here is what keeps the echo from being a header-injection
+surface at all, rather than relying on the HTTP writer to notice."""
+polarity = "negative"
+tags = ["cors", "preflight", "security", "wire-bytes"]
+timeout_ms = 10000
+quirks = ["q-cors-0015"]
+
+[[case.evidence]]
+url = "https://fetch.spec.whatwg.org/#http-cors-protocol"
+summary = "The preflight and its answer are defined here, including which response header a browser reads from which response."
+kind = "rfc"
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9110#section-12.5.5"
+summary = "A response whose content varies with a request header must name that header in Vary or a shared cache will mix them up."
+kind = "rfc"
+
+[[setup.buckets]]
+name = "conf-cors-rt"
+
+[[exchanges]]
+# Setup traffic: the document the preflight below is answered from. Not under test.
+[exchanges.request]
+method = "PUT"
+target = "/conf-cors-rt?cors"
+headers = { "content-type" = "application/xml", "content-md5" = "JwjOZkFs+i5vAUZUg/9fsw==" }
+body = { utf8 = "<CORSConfiguration><CORSRule><AllowedMethod>PUT</AllowedMethod><AllowedOrigin>*</AllowedOrigin><AllowedHeader>x-amz-*</AllowedHeader></CORSRule></CORSConfiguration>" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+
+[[exchanges]]
+[exchanges.request]
+method = "OPTIONS"
+target = "/conf-cors-rt/key.txt"
+headers = { "origin" = "https://app.example.com evil", "access-control-request-method" = "PUT" }
+
+[exchanges.expect]
+kind = "response"
+status = 403
+connection_after = "open"
+headers_absent = [
+  "access-control-allow-origin",
+  "access-control-allow-methods",
+  "access-control-allow-headers",
+  "access-control-allow-credentials",
+  "access-control-max-age",
+  "access-control-expose-headers",
+]
+
+[exchanges.expect.error]
+code = "AccessForbidden"
+request_id_present = true
+
+[exchanges.expect.headers_present]
+"content-type" = "application/xml"
+"vary" = "origin"
+
+[exchanges.expect.body]
+redact = ["RequestId", "HostId"]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>AccessForbidden</Code><Message>CORSResponse: no CORS rule allows this request</Message><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''

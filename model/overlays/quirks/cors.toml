@@ -19,13 +19,12 @@
 # project; upstream issue and documentation prose stays under its author's copyright and is never
 # pasted here.
 #
-# One quirk of the issue's list is deliberately absent: the "OPTIONS against a bucket with no CORS
-# configuration answers 403 AccessForbidden with a Message opening `CORSResponse:`" behaviour
-# belongs to the preflight runtime (P6 scope). A quirk must reference at least one conformance
-# case that would notice its flip, and no codec-only case can observe an OPTIONS response — so it
-# is recorded with that task rather than registered here as a claim nothing checks. The
-# `AccessForbidden -> 403` status mapping that behaviour will need is already pinned by
-# `crates/types/src/scalar/error_code.rs`.
+# The file has two halves. `q-cors-0001` to `q-cors-0008` are the configuration codec's: what a
+# stored document may say. `q-cors-0009` onwards are the runtime's: what the gateway does with one
+# when a browser asks. The split is not organisational — the runtime half could not be registered
+# until the conformance harness could send an `OPTIONS` and read the response back, because a
+# quirk must reference a case that would notice its flip and no codec-only case can observe a
+# preflight. `q-cors-0009` is the behaviour P5-14 recorded as deferred for exactly that reason.
 
 [[quirk]]
 id      = "q-cors-0001"
@@ -137,3 +136,136 @@ cases   = ["c-cors-0014"]
   kind    = "aws-doc"
   ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketCors.html"
   summary = "The request syntax documents Content-MD5 as required for this operation, which the model spells as a request checksum requirement."
+
+# ── the runtime (P6-07) ───────────────────────────────────────────────────────────────────────
+#
+# Everything above is the configuration codec: what a stored document may say. Everything below is
+# what the gateway does with one when a browser asks. The two halves were separated because a
+# quirk must reference a conformance case that would notice its flip, and until the harness could
+# send an OPTIONS and read the response back, none of these could.
+
+[[quirk]]
+id      = "q-cors-0009"
+kind    = "preflight_answer"
+target  = "CORSConfiguration"
+summary = "An OPTIONS carrying Origin and Access-Control-Request-Method is answered from the addressed bucket's stored document instead of being routed to an operation, and a bucket with no document answers 403 AccessForbidden with a Message opening CORSResponse:."
+cases   = ["c-cors-0027", "c-cors-0028", "c-cors-0034", "c-cors-0048"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/cors.html"
+  summary = "A bucket preflight is served from that bucket's own CORS document, and a bucket without one is refused rather than served a default allowance."
+
+  [[quirk.evidence]]
+  kind    = "rfc"
+  ref     = "https://fetch.spec.whatwg.org/#http-cors-protocol"
+  summary = "The preflight is defined as a request the server answers on its own, before and instead of the request it describes."
+
+[[quirk]]
+id      = "q-cors-0010"
+kind    = "reflected_origin"
+target  = "CORSRule.AllowedOrigins"
+summary = "A bare * answers the literal *, a partial wildcard answers the requesting Origin verbatim rather than *, and neither form is ever accompanied by Access-Control-Allow-Credentials."
+cases   = ["c-cors-0030", "c-cors-0042"]
+
+  [[quirk.evidence]]
+  kind    = "other"
+  ref     = "https://github.com/rustfs/rustfs/security/advisories/GHSA-x5xv-223c-8vm7"
+  summary = "RustFS reflected an arbitrary Origin next to a credentials allowance, which lets any site read a user's objects with that user's session."
+
+  [[quirk.evidence]]
+  kind    = "rfc"
+  ref     = "https://fetch.spec.whatwg.org/#http-cors-protocol"
+  summary = "A browser refuses a credentialed response whose allow-origin is the literal star, so answering the star is the form that cannot be combined with credentials at either end."
+
+[[quirk]]
+id      = "q-cors-0011"
+kind    = "actual_response_headers"
+target  = "CORSConfiguration"
+summary = "An ordinary request carrying an Origin is served normally and its response is decorated with the allow-origin, expose-headers and Vary: Origin lines; an Origin no rule admits is served with no Access-Control header at all."
+cases   = ["c-cors-0027", "c-cors-0032", "c-cors-0044"]
+
+  [[quirk.evidence]]
+  kind    = "rfc"
+  ref     = "https://www.rfc-editor.org/rfc/rfc9110#section-12.5.5"
+  summary = "A response that varies with a request header must name that header in Vary, or a shared cache hands one origin the allowance granted to another."
+
+  [[quirk.evidence]]
+  kind    = "rfc"
+  ref     = "https://fetch.spec.whatwg.org/#http-cors-protocol"
+  summary = "A browser reads expose-headers from the actual response and allow-methods and max-age from the preflight, so the two responses carry different sets."
+
+[[quirk]]
+id      = "q-cors-0012"
+kind    = "wildcard_syntax"
+target  = "CORSRule.AllowedHeaders"
+summary = "AllowedHeader is matched case-insensitively with at most one wildcard, and every name in Access-Control-Request-Headers must match or the whole preflight is refused; there is no partial allowance."
+cases   = ["c-cors-0029", "c-cors-0040"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CORSRule.html"
+  summary = "AllowedHeader is documented as admitting a wildcard, and the requested headers are checked against the list as a whole."
+
+  [[quirk.evidence]]
+  kind    = "rfc"
+  ref     = "https://www.rfc-editor.org/rfc/rfc9110#section-5.1"
+  summary = "Field names are case-insensitive, so a rule written in lower case has to admit the spelling a browser happens to send."
+
+[[quirk]]
+id      = "q-cors-0013"
+kind    = "first_match"
+target  = "CORSConfiguration.CORSRules"
+summary = "Rules are evaluated in document order and the first one satisfying origin, method and headers together decides the whole answer, including which MaxAgeSeconds and ExposeHeader values are returned."
+cases   = ["c-cors-0031"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/cors.html"
+  summary = "The rules are an ordered list and the first rule that matches the request is the one applied."
+
+[[quirk]]
+id      = "q-cors-0014"
+kind    = "headers_on_error"
+target  = "CORSConfiguration"
+summary = "A request that failed after authorisation still carries its CORS headers, because a browser withholds a response with no allow-origin line from the page and the script sees an opaque network error instead of the status."
+cases   = ["c-cors-0033"]
+
+  [[quirk.evidence]]
+  kind    = "rfc"
+  ref     = "https://fetch.spec.whatwg.org/#http-cors-protocol"
+  summary = "The CORS check is applied to the response regardless of its status, so an error without the headers is unreadable to the page."
+
+[[quirk]]
+id      = "q-cors-0015"
+kind    = "indistinguishable_refusal"
+target  = "CORSConfiguration"
+summary = "Every preflight refusal is the same response byte for byte apart from the request identifiers: no document, no bucket, an illegal bucket name, an unmatched origin, method or header, and an unusable Origin all answer one 403 AccessForbidden with one constant message."
+cases   = ["c-cors-0034", "c-cors-0035", "c-cors-0036", "c-cors-0037", "c-cors-0038", "c-cors-0039", "c-cors-0040", "c-cors-0041", "c-cors-0046", "c-cors-0047", "c-cors-0049"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/cors.html"
+  summary = "A preflight S3 will not serve is refused with 403 rather than with a not-found, so the answer does not report whether the bucket is there."
+
+  [[quirk.evidence]]
+  kind    = "other"
+  ref     = "https://github.com/rustfs/rustfs/security/advisories/GHSA-x5xv-223c-8vm7"
+  summary = "The advisory's setting is an unauthenticated cross-origin surface, which is what makes a distinguishable refusal here a private-bucket enumeration oracle."
+
+[[quirk]]
+id      = "q-cors-0016"
+kind    = "preflight_scope"
+target  = "CORSConfiguration"
+summary = "An OPTIONS without both CORS request headers is not a preflight and is routed like any other request, and an allowed preflight grants nothing to the request it described: that request is still authenticated and authorised on its own."
+cases   = ["c-cors-0043", "c-cors-0045"]
+
+  [[quirk.evidence]]
+  kind    = "rfc"
+  ref     = "https://fetch.spec.whatwg.org/#http-cors-protocol"
+  summary = "A preflight is identified by Origin together with Access-Control-Request-Method, and its answer is about what the browser may send, never about who the caller is."
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/cors.html"
+  summary = "CORS configuration is described as controlling browser access to a bucket, alongside and not instead of the bucket's own access controls."

@@ -92,17 +92,30 @@ pub type HandlerResult<O> = Result<Resp<O>, HandlerError>;
 /// signature change in every handler that exists.
 pub struct Req<O: Operation> {
     input: O::Input,
+    resources: O::DerivedResources,
+    read: crate::AuthorizedRead,
 }
 
 impl<O: Operation> Req<O> {
-    /// Wraps a decoded input.
-    pub const fn new(input: O::Input) -> Self {
-        Self { input }
+    /// Converts the framework's authorization proof into a handler request.
+    pub(crate) fn from_authorized(authorized: crate::Authorized<O>) -> Self {
+        let (input, resources, read) = authorized.into_parts();
+        Self { input, resources, read }
     }
 
     /// The decoded input.
     pub const fn input(&self) -> &O::Input {
         &self.input
+    }
+
+    /// Resources derived from this exact input and allowed by the input authorization pass.
+    pub const fn resources(&self) -> &O::DerivedResources {
+        &self.resources
+    }
+
+    /// Proof that every resource in [`Self::resources`] was allowed.
+    pub const fn read_proof(&self) -> &crate::AuthorizedRead {
+        &self.read
     }
 
     /// The decoded input, mutably.
@@ -119,6 +132,25 @@ impl<O: Operation> Req<O> {
     #[must_use]
     pub const fn operation_name(&self) -> &'static str {
         O::NAME
+    }
+}
+
+impl<O> Req<O>
+where
+    O: Operation<DerivedResources = crate::NoDerived>,
+{
+    /// Builds a request for direct handler and middleware tests of an operation that explicitly
+    /// derives no second-stage resources.
+    ///
+    /// Registry and wire dispatch still require [`crate::Authorized<O>`]; this constructor cannot
+    /// be used for copy, batch-delete, or any future operation with derived resources.
+    #[must_use]
+    pub const fn new(input: O::Input) -> Self {
+        Self {
+            input,
+            resources: crate::NoDerived,
+            read: crate::AuthorizedRead::empty(),
+        }
     }
 }
 
@@ -241,6 +273,24 @@ impl<O: Operation> Resp<O> {
     /// say so would have to invent one.
     pub const fn output(&self) -> Option<&O::Output> {
         match &self.answer {
+            Answer::Settled(output) => Some(output),
+            Answer::Committed(_) => None,
+        }
+    }
+
+    /// The output, mutably, when there already is one.
+    ///
+    /// This is what makes a per-operation middleware (`rustfs_gateway::OpLayer`) three statements
+    /// instead of a tower layer that parses the response XML, edits an element and serialises it
+    /// back. `None` for a committed answer, whose output does not exist yet — and a caller that
+    /// treats the `None` as "nothing to change" is correct: a committed response's content is
+    /// decided inside its own continuation, where no layer of this kind can reach it.
+    ///
+    /// The status is deliberately not settable through this: it belongs to the constructor that
+    /// chose it, and a middleware that could change it after the fact would be able to contradict a
+    /// head that has already gone out.
+    pub const fn output_mut(&mut self) -> Option<&mut O::Output> {
+        match &mut self.answer {
             Answer::Settled(output) => Some(output),
             Answer::Committed(_) => None,
         }

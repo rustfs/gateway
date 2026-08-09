@@ -1,0 +1,44 @@
+# c-naming-0014 — GET // is decided by target resolution, one stage above naming
+#
+[case]
+id = "c-naming-0014"
+schema_version = 1
+title = "GET // is classified as the service root and answers ListBuckets"
+rationale = """
+Recorded as a divergence, not as a guarantee. Under the AWS slash semantics this gateway defaults to, the first label of `//` is the empty string, the empty string is not a bucket name, and the naming rules would answer 400 InvalidBucketName; folding the run and answering ListBuckets is the collapse policy's behaviour and it turns a request for a bucket into a request for the account. What happens is the second one, and it never reaches the naming rules: target resolution classifies an empty first label as the service root — `target_of_path`, whose own tests pin `//` and `//key` as Service on the stated grounds that a doubled leading slash names no bucket, so it must not be classified as one. That decision belongs to the resolver and is asserted there; this case is the wire-level record of what it produces, so that the day the two stages are reconciled it arrives as a diff rather than as a surprise. It is deliberately a whole-response assertion and not a status check: a status alone would stay green if `//` began listing somebody else's buckets."""
+polarity = "positive"
+operation = "ListBuckets"
+tags = ["naming", "routing", "known-divergence"]
+timeout_ms = 10000
+quirks = ["q-naming-0005"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/bucketnamingrules.html"
+summary = "The general-purpose rules give the length bounds, the character set, the address-shaped exclusion and the reserved affixes."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/issues/569"
+summary = "Upstream recorded that AWS keeps an empty path segment in the key while MinIO folds it away."
+kind = "s3s-issue"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-naming"
+
+[request]
+method = "GET"
+target = "//"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+contains_utf8 = ["<ListAllMyBucketsResult", "<Name>conf-naming</Name>"]
+not_contains_utf8 = ["<Error>"]

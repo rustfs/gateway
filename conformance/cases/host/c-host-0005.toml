@@ -1,0 +1,63 @@
+# c-host-0005 — [S] the label boundary. `evils3.example.com` is not a subdomain of
+# `s3.example.com`, and a bucket read out of it is a bucket the client never named.
+
+[case]
+id = "c-host-0005"
+schema_version = 1
+title = "A host that merely ends with the base domain names no bucket, so the request is read from its path"
+rationale = """
+This is the family's reason for existing. With `s3.example.com` configured, `evils3.example.com` \
+satisfies a suffix test, and the four characters in front of the suffix are chosen by whoever \
+registered the domain -- here `evil`, which is a legal bucket name. SigV4 covers the Host header and \
+says nothing about which part of it is the bucket, so a perfectly signed request lands on a bucket the \
+client never wrote down. The fixture stores an object in `evil` exactly so the wrong answer is visible: \
+with the boundary check this is a listing of a bucket called `secret.txt` that does not exist, and \
+without it, it is a successful read of somebody else's object."""
+polarity = "negative"
+operation = "ListObjects"
+tags = ["vhost", "routing", "security"]
+timeout_ms = 10000
+# Empty on purpose. A quirk in `model/overlays/quirks/` is scoped to an operation or a shape, and
+# host resolution is neither: it happens before an operation has been chosen. The whole family is
+# therefore held by `crates/gateway/tests/vhost_resolution.rs` and by the negative cases beside
+# this one, not by the quirk mutation gate.
+quirks = []
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/issues/648"
+summary = "Upstream matches a configured base domain with a suffix test and no label-boundary check, so a look-alike domain resolves a bucket out of the characters in front of the suffix."
+kind = "s3s-issue"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/VirtualHosting.html"
+summary = "Virtual-hosted-style addressing puts the bucket in the host name, leaving the entire path to be the object key."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "evil"
+
+[[setup.objects]]
+bucket = "evil"
+key = "secret.txt"
+content_type = "text/plain; charset=utf-8"
+body = { utf8 = "not yours" }
+
+[request]
+method = "GET"
+target = "/secret.txt"
+host = "evils3.example.com"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 404
+connection_after = "open"
+
+[expect.error]
+code = "NoSuchBucket"
+request_id_present = true
+
+# The bytes a boundary-blind resolver would have served instead.
+[expect.body]
+not_contains_utf8 = ["not yours"]
