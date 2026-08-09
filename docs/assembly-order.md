@@ -14,12 +14,14 @@ that follow them.
 | 5 | `Authenticator::authenticate` | 0 or 1 | Once for a sealed signed request; zero for anonymous admission |
 | 6 | `PolicySource::snapshot` | 1 | After authentication and before authorization |
 | 7 | `Authorizer::authorize_route` | 1 | Before CORS lookup, body read, and decoding |
-| 8 | `CorsSource::get` | 0 or 1 | Once when an authorized request has one usable `Origin` and bucket |
-| 9 | `Authorizer::authorize_input` | 1 | After decoding and resource derivation |
-| 10 | `OpLayer::call` | 1 | After both authorization stages, outside the handler |
-| 11 | `Handler::call` | 1 | Innermost dispatch |
-| 12 | `StageFilter::on_response` | 1 | For every response, including an early refusal |
-| 13 | `Observer::on_response` | 1 | Last, after invariants and framework headers |
+| 8 | `AuthzAuditSink::on_decision` | 1 | Records the route decision without changing it |
+| 9 | `CorsSource::load` | 0 or 1 | Once on a cache miss when an authorized request has one usable `Origin` and bucket |
+| 10 | `Authorizer::authorize_input` | 1 | After decoding and resource derivation |
+| 11 | `AuthzAuditSink::on_decision` | 1 | Records the input decision without changing it |
+| 12 | `OpLayer::wrap` | 1 | After both authorization stages, outside the handler |
+| 13 | `Handler::call` | 1 | Innermost dispatch |
+| 14 | `StageFilter::on_response` | 1 | For every response, including an early refusal |
+| 15 | `Observer::on_response` | 1 | Last, after invariants and framework headers |
 
 An accepted CORS preflight is a separate path: it calls the wire filter, host
 resolver, governor, CORS source, response filter, and observer once each. It

@@ -40,9 +40,10 @@ fn an_empty_registry_is_refused() {
     assert_eq!(error.rule(), RuleRef::EMPTY_REGISTRY);
 }
 
-/// c-azc-0019. Negative — no authorizer, no service. There is no default allow and no default deny.
+/// a-asm-0009/a-asm-0010. Negative — this implementation chooses the design's fallible-build
+/// alternative to typestate: no authorizer means no service, with no default allow or default deny.
 #[test]
-fn a_missing_authorizer_is_refused() {
+fn a_asm_0009_and_0010_missing_authorizer_is_refused_at_build() {
     let credentials = Arc::new(
         rustfs_gateway::StaticCredentials::new().with(rustfs_gateway::Credentials::new("AKIDEXAMPLE", b"secret").expect("valid")),
     );
