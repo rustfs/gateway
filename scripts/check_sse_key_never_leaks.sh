@@ -146,7 +146,9 @@ else
     done
 fi
 
-if ! strip_comments "$INVARIANTS_FILE" | grep -q 'NEVER_IN_A_RESPONSE'; then
+# Do not use `grep -q` here: on Linux it can close the pipe after the first match, making awk exit
+# with SIGPIPE under `pipefail` and turning a real match into a failed guard.
+if ! strip_comments "$INVARIANTS_FILE" | grep 'NEVER_IN_A_RESPONSE' >/dev/null; then
     report "${INVARIANTS_FILE} does not consume NEVER_IN_A_RESPONSE; the one place every response passes through no longer strips the customer-key headers, so a backend that sets one puts it on the wire"
 fi
 

@@ -57,20 +57,25 @@ export CARGO_TARGET_DIR="$GUARD_TARGET_DIR"
 
 make_sandbox() {
     if [[ -n "$SANDBOX" ]]; then
-        local changed
+        local changed untracked
         changed="$(mktemp "${TMPDIR:-/tmp}/gateway-guard-changed.XXXXXX")"
+        untracked="$(mktemp "${TMPDIR:-/tmp}/gateway-guard-untracked.XXXXXX")"
         (
             cd "$SANDBOX"
-            git reset -q HEAD -- . >/dev/null 2>&1
-            git clean -fdq >/dev/null 2>&1 || true
-            # Resetting the index turns staged additions back into untracked files; clean removes
-            # those before this list is built, so every remaining path is known to HEAD.
+            git diff --name-only -z HEAD -- >"$changed"
+            if [[ -s "$changed" ]]; then
+                xargs -0 git reset -q HEAD -- <"$changed" >/dev/null 2>&1
+            fi
+            git ls-files --others --exclude-standard -z >"$untracked"
+            if [[ -s "$untracked" ]]; then
+                xargs -0 git clean -fdq -- <"$untracked" >/dev/null 2>&1
+            fi
             git diff --name-only -z HEAD -- >"$changed"
             if [[ -s "$changed" ]]; then
                 xargs -0 git checkout -f HEAD -- <"$changed" >/dev/null 2>&1
             fi
         )
-        rm -f "$changed"
+        rm -f "$changed" "$untracked"
         return
     fi
 
