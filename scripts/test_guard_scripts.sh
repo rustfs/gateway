@@ -2015,6 +2015,51 @@ PYEOF
 expect_fail check_config_load_once.sh \
     'a second hot-configuration read through UFCS load' mut_ufcs_config_load
 
+mut_import_aliased_config_load_full() {
+    python3 - <<'PYEOF'
+import pathlib
+path = pathlib.Path("crates/gateway/src/service.rs")
+text = path.read_text().replace(
+    "let config = self.inner.config.load_full();",
+    "let config = self.inner.config.load_full();\n        use arc_swap::ArcSwapAny as Swap;\n        let _torn = Swap::load_full(self.inner.config.as_ref());",
+    1,
+)
+path.write_text(text)
+PYEOF
+}
+expect_fail check_config_load_once.sh \
+    'a second hot-configuration read through an imported type alias' mut_import_aliased_config_load_full
+
+mut_type_aliased_config_load() {
+    python3 - <<'PYEOF'
+import pathlib
+path = pathlib.Path("crates/gateway/src/service.rs")
+text = path.read_text().replace(
+    "let config = self.inner.config.load_full();",
+    "let config = self.inner.config.load_full();\n        type ConfigStoreAlias = arc_swap::ArcSwapAny<Arc<ServiceConfig>>;\n        let _torn = ConfigStoreAlias::load(self.inner.config.as_ref());",
+    1,
+)
+path.write_text(text)
+PYEOF
+}
+expect_fail check_config_load_once.sh \
+    'a second hot-configuration read through a type alias' mut_type_aliased_config_load
+
+mut_config_load_function_item() {
+    python3 - <<'PYEOF'
+import pathlib
+path = pathlib.Path("crates/gateway/src/service.rs")
+text = path.read_text().replace(
+    "let config = self.inner.config.load_full();",
+    "let config = self.inner.config.load_full();\n        use arc_swap::ArcSwapAny as Swap;\n        let read = Swap::load_full;\n        let _torn = read(self.inner.config.as_ref());",
+    1,
+)
+path.write_text(text)
+PYEOF
+}
+expect_fail check_config_load_once.sh \
+    'a second hot-configuration read through a function item' mut_config_load_function_item
+
 mut_config_load_allowlist_deleted() {
     rm -f scripts/config_load_allowlist.txt
 }
