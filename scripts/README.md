@@ -61,6 +61,10 @@ fixed now so that the same check does not get written twice under two names.
 | `check_no_minio_source.sh` | Clean-room provenance: no AGPL licence text outside `scripts/allowances/clean-room-allowances.txt`, no comment claiming a port from MinIO or Garage, no vendored server tree or Go source, no `minio/minio` submodule or dependency. Rules 2-4 are not exemptable | P6-08 |
 | `check_sse_key_never_leaks.sh` | The SSE-C customer key never leaves: no operation *output* binds a key header, the response invariant still strips both spellings, `KeyText::expose` has one call site, the SSE module has one `subtle::Choice`-to-`bool` conversion, and no formatting or logging macro names a customer key | P6-06 |
 | `check_authz_consumption.sh` | Dispatch accepts only `Authorized<O>`; the authorization proof types have no public constructor; every operation explicitly declares derived resources | P4-05 |
+| `check_authz_fail_closed.sh` | Authorization has exactly three decisions; only core settles them; denial is always AccessDenied; audit sinks cannot answer; examples contain no allow-all shortcut | P6-02 |
+| `check_policy_snapshot_once.sh` | The service reads policy exactly once before either mandatory authorization stage | P6-02 |
+| `check_authz_no_default_impl.sh` | Both `Authorizer` stages exist and neither has a default method body | P6-02 |
+| `check_no_allow_all_in_examples.sh` | Rust examples contain no unconditional allow authorizer | P6-02 |
 | `test_guard_scripts.sh` | Not a guard: runs every guard on the tree and asserts each one fails on an injected violation | P0 |
 
 ### Registered, not yet implemented (TODO)

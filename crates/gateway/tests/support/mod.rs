@@ -30,6 +30,8 @@
 // re-exports it. Both are properties of a shared test fixture rather than of the code under test.
 #![allow(dead_code, unreachable_pub, clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 
+pub mod vhost_stub;
+
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 

@@ -1,0 +1,18 @@
+error[E0432]: unresolved import `rustfs_gateway::AllowAllAuthorizer`
+  --> tests/compile_fail/azc_0021_allow_all.rs:17:5
+   |
+17 | use rustfs_gateway::AllowAllAuthorizer;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ no `AllowAllAuthorizer` in the root
+   |
+note: found an item that was configured out
+  --> src/lib.rs
+   |
+   | #[cfg(feature = "dangerous-allow-all-authorizer")]
+   |       ------------------------------------------ the item is gated behind the `dangerous-allow-all-authorizer` feature
+   | pub use crate::ext::{AllowAllAuthorizer, DangerAck};
+   |                      ^^^^^^^^^^^^^^^^^^
+help: a similar name exists in the module
+   |
+17 - use rustfs_gateway::AllowAllAuthorizer;
+17 + use rustfs_gateway::DenyAllAuthorizer;
+   |

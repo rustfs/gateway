@@ -86,9 +86,9 @@ use rustfs_gateway::sig::{
 };
 use rustfs_gateway::{
     Authorizer, AuthzRequest, BoxFuture, BucketName, CorsSource, CorsSourceError, Credentials, Decision, FixedClock,
-    HandlerResult, Limits, Next, ObservedBody, PolicyError, PolicySnapshot, RegionSet, Req, RequestContext, S3Service,
-    ServiceBuilder, SigV4Authenticator, SnapshotId, StaticCredentials, VirtualHostStyle, WireRequest, allow_when, collect, dto,
-    op_layer, policy_from,
+    HandlerResult, InputAuthzRequest, InputDecisions, Limits, Next, ObservedBody, PolicyError, PolicySnapshot, RegionSet, Req,
+    RequestContext, S3Service, ServiceBuilder, SigV4Authenticator, SnapshotId, StaticCredentials, VirtualHostStyle, WireRequest,
+    allow_when, collect, dto, op_layer, policy_from,
 };
 
 use crate::exec::block_on;
@@ -126,8 +126,21 @@ pub const REGION: &str = "us-east-1";
 struct FixedDecision(Decision);
 
 impl Authorizer for FixedDecision {
-    fn authorize<'a>(&'a self, _context: &'a RequestContext<'a>, _request: &'a AuthzRequest<'a>) -> BoxFuture<'a, Decision> {
+    fn authorize_route<'a>(
+        &'a self,
+        _context: &'a RequestContext<'a>,
+        _request: &'a AuthzRequest<'a>,
+    ) -> BoxFuture<'a, Decision> {
         Box::pin(async move { self.0 })
+    }
+
+    fn authorize_input<'a>(
+        &'a self,
+        _context: &'a RequestContext<'a>,
+        request: &'a InputAuthzRequest<'a>,
+    ) -> BoxFuture<'a, InputDecisions> {
+        let decisions = request.decide_all(self.0, |_| self.0);
+        Box::pin(async move { decisions })
     }
 }
 
@@ -135,10 +148,10 @@ struct SameSnapshot {
     first: Mutex<Option<(SnapshotId, i64)>>,
 }
 
-impl Authorizer for SameSnapshot {
-    fn authorize<'a>(&'a self, context: &'a RequestContext<'a>, _request: &'a AuthzRequest<'a>) -> BoxFuture<'a, Decision> {
+impl SameSnapshot {
+    fn decide(&self, context: &RequestContext<'_>) -> Decision {
         let observed = (context.policy().id(), context.now().unix_seconds());
-        let decision = match self.first.lock() {
+        match self.first.lock() {
             Ok(mut first) => match *first {
                 None => {
                     *first = Some(observed);
@@ -148,8 +161,24 @@ impl Authorizer for SameSnapshot {
                 Some(_) => Decision::Deny,
             },
             Err(_) => Decision::Indeterminate,
-        };
+        }
+    }
+}
+
+impl Authorizer for SameSnapshot {
+    fn authorize_route<'a>(&'a self, context: &'a RequestContext<'a>, _request: &'a AuthzRequest<'a>) -> BoxFuture<'a, Decision> {
+        let decision = self.decide(context);
         Box::pin(async move { decision })
+    }
+
+    fn authorize_input<'a>(
+        &'a self,
+        context: &'a RequestContext<'a>,
+        request: &'a InputAuthzRequest<'a>,
+    ) -> BoxFuture<'a, InputDecisions> {
+        let stage = self.decide(context);
+        let decisions = request.decide_all(stage, |_| self.decide(context));
+        Box::pin(async move { decisions })
     }
 }
 
@@ -157,10 +186,9 @@ struct HotUpdate {
     current: Arc<AtomicUsize>,
 }
 
-impl Authorizer for HotUpdate {
-    fn authorize<'a>(&'a self, context: &'a RequestContext<'a>, request: &'a AuthzRequest<'a>) -> BoxFuture<'a, Decision> {
-        let version = context.policy().get::<usize>().copied();
-        let decision = match version {
+impl HotUpdate {
+    fn decide(&self, context: &RequestContext<'_>, request: &AuthzRequest<'_>) -> Decision {
+        match context.policy().get::<usize>().copied() {
             Some(1) => {
                 if request.action == "s3:PutObject" {
                     self.current.store(2, Ordering::SeqCst);
@@ -169,8 +197,24 @@ impl Authorizer for HotUpdate {
             }
             Some(2) => Decision::Deny,
             _ => Decision::Indeterminate,
-        };
+        }
+    }
+}
+
+impl Authorizer for HotUpdate {
+    fn authorize_route<'a>(&'a self, context: &'a RequestContext<'a>, request: &'a AuthzRequest<'a>) -> BoxFuture<'a, Decision> {
+        let decision = self.decide(context, request);
         Box::pin(async move { decision })
+    }
+
+    fn authorize_input<'a>(
+        &'a self,
+        context: &'a RequestContext<'a>,
+        request: &'a InputAuthzRequest<'a>,
+    ) -> BoxFuture<'a, InputDecisions> {
+        let stage = self.decide(context, request.route());
+        let decisions = request.decide_all(stage, |resource| self.decide(context, resource));
+        Box::pin(async move { decisions })
     }
 }
 

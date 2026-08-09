@@ -151,6 +151,70 @@ the same customer-key headers its `CreateMultipartUpload` carried. The compariso
 `rustfs_gateway_core::sse::check_part`, which returns a `Result` you cannot silently discard, but
 the binding itself is yours to store, because this framework holds no upload state.
 
+## Authorization: your responsibilities
+
+The framework does not evaluate policy. It calls `Authorizer`, and everything behind that call is
+yours. What the framework does own is the *shape* of the call, and that shape is where the known
+failures of this area have been designed out.
+
+The framework's half:
+
+- **The verdict has three states, and two of them refuse.** `Decision::Allow` continues;
+  `Decision::Deny` and `Decision::Indeterminate` both become `403 AccessDenied`. There is no
+  `Result` for an authorizer to `?` a storage error through, so a policy store that cannot answer
+  cannot become a `500` — and a `5xx` is the status a front end retries and, in some deployments,
+  passes through. `Decision::settle` is the only place in the workspace that reads a verdict, it
+  is exhaustive over all three states with no wildcard arm, and
+  `scripts/check_authz_fail_closed.sh` keeps it the only one.
+- **The refusal cannot choose its code.** `Denial` is a unit struct: no fields, no constructor
+  taking an `ErrorCode`. A bucket you may not read and a bucket that does not exist are the same
+  response, because a deployment that answered `404` for the first and `403` for the second would
+  have built a private-bucket enumeration oracle out of the difference.
+- **Policy is read once per request.** `PolicySource::snapshot` is called after the caller's
+  identity is known and before the authorizer, and the resulting `PolicySnapshot` is handed to
+  every reader through the server-derived authorization context. Client request extensions are a
+  different type and are not exposed to an authorizer. Two readings inside one request are a
+  window whose timing the caller chooses. `scripts/check_policy_snapshot_once.sh` asserts the
+  single call site.
+- **A failed reading is a refusal, not an error.** `PolicySource` returning `Err` produces
+  `Indeterminate`, and the authorizer is not consulted at all — an implementation handed an empty
+  snapshot cannot tell "the store is down" from "this deployment installed no source". The one
+  read has a hard timeout: 250 ms by default, configurable to a non-zero value no greater than five
+  seconds. A timeout follows the same `Indeterminate` path.
+- **The audit event is the framework's, and the sink cannot answer back.** `AuthzAuditSink` takes
+  shared references and returns `()`, and it is called after the outcome has been settled. The
+  event carries the principal, authentication scheme, operation, action, every resource judged,
+  **where the target's name came from** (`Host` or path), the snapshot identifier, stage, elapsed
+  time, and which of the three states was reached — including the distinction the wire collapses.
+  A sink panic is caught, reported as an error, and cannot change the response.
+- **There is no default `Authorizer`.** `ServiceBuilder::build` returns
+  `AssemblyError::MissingAuthorizer`. `DenyAllAuthorizer` is shipped and must be chosen; there is
+  no allow-all type in a normal build, and no example contains an unconditional allow. The
+  `dangerous-allow-all-authorizer` feature exposes one only behind a deliberately verbose
+  `DangerAck`; a service assembled with it prints a named start-up warning.
+
+Four things are **yours**:
+
+1. **The policy language and its semantics.** Wildcard expansion, condition keys, `Deny`
+   precedence, resource ARNs, the whole of it. `PolicySnapshot` is opaque to the framework.
+2. **Answering `Indeterminate` when you mean it.** The framework cannot tell a considered `Deny`
+   from a swallowed error; only your code knows which one it reached. Every `Ok(false)` that is
+   really "the record did not load" is a rustfs `GHSA-j548-9grx-fh4f` waiting to happen.
+3. **Not panicking.** A panic in an authorizer is isolated and answered as `500`, never as allow.
+   That keeps the authorization boundary fail closed, but retries can still amplify a panicking
+   policy implementation.
+4. **The timing of your own evaluation.** The framework does not equalise it. A policy engine
+   whose evaluation time depends on how many statements matched leaks something about the policy
+   to a caller who can measure it; see "Timing side channels" above for what the framework does
+   equalise and what it does not.
+
+### Accepted risks
+
+- **Policy-evaluation timing is not equalised above the failure floor.** Every denied or
+  indeterminate authorization pays the same minimum-latency floor, but the framework does not hide
+  differences beyond that floor. An engine whose evaluation time varies with statement count can
+  therefore still leak coarse policy shape.
+
 ## Where the boundary sits
 
 This framework verifies signatures, enforces presigned constraints, frames payloads, and rejects
