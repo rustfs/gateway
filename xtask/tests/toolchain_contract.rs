@@ -82,14 +82,13 @@ fn a_failed_verification_has_the_diagnostic_triplet() {
 }
 
 #[test]
-fn every_assembly_rule_can_be_looked_up() {
+fn every_assembly_rule_reports_its_real_test_coverage() {
     for rule in rustfs_gateway::RuleRef::ALL {
         let output = xtask(&["why", rule.as_str()]);
-        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
         let stdout = String::from_utf8_lossy(&output.stdout);
         assert!(stdout.contains(rule.as_str()), "{stdout}");
-        assert!(stdout.contains("every_rule_explains_itself"), "{stdout}");
-        assert!(!stdout.contains("CASES     NONE"), "{stdout}");
+        let has_direct_case = !stdout.contains("CASES     NONE");
+        assert_eq!(output.status.success(), has_direct_case, "{stdout}");
     }
 }
 

@@ -491,7 +491,7 @@ fn load_rule_tests(root: &Path) -> Result<Vec<RuleTestRecord>, String> {
             };
             let mut matched = Vec::new();
             if chunk.contains("RuleRef::ALL") {
-                matched.extend(constants.iter().map(|(_, id)| id.clone()));
+                continue;
             } else {
                 for (constant, id) in &constants {
                     if chunk.contains(&format!("RuleRef::{constant}")) {

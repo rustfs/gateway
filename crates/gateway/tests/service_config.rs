@@ -84,7 +84,7 @@ async fn a_hot_update_does_not_tear_an_inflight_request() {
     assert_eq!(second.status(), http::StatusCode::OK);
 }
 
-/// a-asm-0007. Reconfiguring a builder does not detach a handle already handed to the caller.
+/// Regression: reconfiguring a builder does not detach a handle already handed to the caller.
 #[tokio::test]
 async fn an_earlier_handle_still_updates_after_config_is_called_again() {
     let (builder, first_handle) = wired().config(ServiceConfig::new(8));

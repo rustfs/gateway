@@ -1970,6 +1970,21 @@ PYEOF
 expect_fail check_config_load_once.sh \
     'a second hot-configuration read through Arc::as_ref' mut_as_ref_second_config_load
 
+mut_guarded_config_load() {
+    python3 - <<'PYEOF'
+import pathlib
+path = pathlib.Path("crates/gateway/src/service.rs")
+text = path.read_text().replace(
+    "let config = self.inner.config.load_full();",
+    "let config = self.inner.config.load_full();\n        let _torn = self.inner.config.load();",
+    1,
+)
+path.write_text(text)
+PYEOF
+}
+expect_fail check_config_load_once.sh \
+    'a second hot-configuration read through ArcSwap::load' mut_guarded_config_load
+
 mut_config_load_allowlist_deleted() {
     rm -f scripts/config_load_allowlist.txt
 }
