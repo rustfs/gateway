@@ -50,36 +50,23 @@ import re
 import sys
 
 root = pathlib.Path(sys.argv[1])
+pattern = re.compile(
+    r"#\s*\[\s*derive\s*\((?P<traits>[^)]*)\)\s*\]\s*"
+    r"pub\s+(?:struct|enum)\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)",
+    re.DOTALL,
+)
 for path in sorted(root.rglob("*.rs")):
-    lines = path.read_text().splitlines()
-    index = 0
-    while index < len(lines):
-        if not re.match(r"\s*#\s*\[\s*derive\s*\(", lines[index]):
-            index += 1
+    source = path.read_text()
+    for match in pattern.finditer(source):
+        if not re.search(r"(?:^|,)\s*Default\s*(?:,|$)", match.group("traits")):
             continue
-        start = index
-        attribute = lines[index]
-        while "]" not in attribute and index + 1 < len(lines):
-            index += 1
-            attribute += lines[index]
-        if not re.search(r"(?:\(|,)\s*Default\s*(?:,|\))", attribute):
-            index += 1
-            continue
-        item = index + 1
-        while item < len(lines) and (not lines[item].strip() or lines[item].lstrip().startswith("#[")):
-            item += 1
-        match = re.match(r"\s*pub\s+(?:struct|enum)\s+([A-Za-z_][A-Za-z0-9_]*)", lines[item]) if item < len(lines) else None
-        if match is None:
-            index += 1
-            continue
-        doc = start - 1
+        prefix = source[:match.start()].splitlines()
         docs = []
-        while doc >= 0 and lines[doc].lstrip().startswith("///"):
-            docs.append(lines[doc])
-            doc -= 1
+        while prefix and prefix[-1].lstrip().startswith("///"):
+            docs.append(prefix.pop())
         documented = "yes" if any("/// # Security" in line for line in docs) else "no"
-        print(f"{path.relative_to(root)}|{match.group(1)}|{item + 1}|{documented}")
-        index = item + 1
+        line = source.count("\n", 0, match.start("name")) + 1
+        print(f"{path.relative_to(root)}|{match.group('name')}|{line}|{documented}")
 PYEOF
 )
 

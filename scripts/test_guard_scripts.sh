@@ -1985,6 +1985,36 @@ PYEOF
 expect_fail check_config_load_once.sh \
     'a second hot-configuration read through ArcSwap::load' mut_guarded_config_load
 
+mut_ufcs_config_load_full() {
+    python3 - <<'PYEOF'
+import pathlib
+path = pathlib.Path("crates/gateway/src/service.rs")
+text = path.read_text().replace(
+    "let config = self.inner.config.load_full();",
+    "let config = self.inner.config.load_full();\n        let _torn = arc_swap::ArcSwapAny::load_full(self.inner.config.as_ref());",
+    1,
+)
+path.write_text(text)
+PYEOF
+}
+expect_fail check_config_load_once.sh \
+    'a second hot-configuration read through UFCS load_full' mut_ufcs_config_load_full
+
+mut_ufcs_config_load() {
+    python3 - <<'PYEOF'
+import pathlib
+path = pathlib.Path("crates/gateway/src/service.rs")
+text = path.read_text().replace(
+    "let config = self.inner.config.load_full();",
+    "let config = self.inner.config.load_full();\n        let _torn = arc_swap::ArcSwapAny::load(self.inner.config.as_ref());",
+    1,
+)
+path.write_text(text)
+PYEOF
+}
+expect_fail check_config_load_once.sh \
+    'a second hot-configuration read through UFCS load' mut_ufcs_config_load
+
 mut_config_load_allowlist_deleted() {
     rm -f scripts/config_load_allowlist.txt
 }
@@ -2024,6 +2054,18 @@ PYEOF
 }
 expect_fail check_default_doc.sh \
     'a newly derived extension default without security documentation' mut_undocumented_derived_default_added
+
+mut_inline_undocumented_derived_default_added() {
+    python3 - <<'PYEOF'
+import pathlib
+path = pathlib.Path("crates/gateway/src/ext/observer.rs")
+text = path.read_text()
+text += "\n#[derive(Default)] pub struct InlineUndocumentedDefault;\n"
+path.write_text(text)
+PYEOF
+}
+expect_fail check_default_doc.sh \
+    'an inline derived extension default without security documentation' mut_inline_undocumented_derived_default_added
 
 mut_default_doc_subject_deleted() {
     rm -f crates/gateway/src/ext/policy.rs
