@@ -43,9 +43,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use bytes::Bytes;
 use rustfs_gateway::{
     Authorizer, AuthzRequest, AwsNameValidator, BoxFuture, BucketName, Credentials, Decision, ErrorCode, Handler, HandlerResult,
-    Limits, MetaView, NamePolicy, NameRejection, NameValidator, ObjectKey, OperationCodec, RegionSet, Req, RequestBody,
-    RequestContext, Resp, S3Service, ServiceBuilder, SigV4Authenticator, SlashPolicy, StaticCredentials, Stricter, TargetKind,
-    WireRequest, dto,
+    InputAuthzRequest, InputDecisions, Limits, MetaView, NamePolicy, NameRejection, NameValidator, ObjectKey, OperationCodec,
+    RegionSet, Req, RequestBody, RequestContext, Resp, S3Service, ServiceBuilder, SigV4Authenticator, SlashPolicy,
+    StaticCredentials, Stricter, TargetKind, WireRequest, dto,
 };
 
 // ── validators ─────────────────────────────────────────────────────────────────────────────────
@@ -288,9 +288,23 @@ impl Counter {
 struct CountingAuthorizer(Arc<Counter>);
 
 impl Authorizer for CountingAuthorizer {
-    fn authorize<'a>(&'a self, _context: &'a RequestContext<'a>, _request: &'a AuthzRequest<'a>) -> BoxFuture<'a, Decision> {
+    fn authorize_route<'a>(
+        &'a self,
+        _context: &'a RequestContext<'a>,
+        _request: &'a AuthzRequest<'a>,
+    ) -> BoxFuture<'a, Decision> {
         self.0.hit();
         Box::pin(async { Decision::Allow })
+    }
+
+    fn authorize_input<'a>(
+        &'a self,
+        _context: &'a RequestContext<'a>,
+        request: &'a InputAuthzRequest<'a>,
+    ) -> BoxFuture<'a, InputDecisions> {
+        self.0.hit();
+        let decisions = request.decide_all(Decision::Allow, |_| Decision::Allow);
+        Box::pin(async move { decisions })
     }
 }
 

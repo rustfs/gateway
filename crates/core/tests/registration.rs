@@ -491,7 +491,7 @@ fn a_third_party_may_not_take_an_aws_name_in_another_case() {
     );
 }
 
-/// Negative — an operation nobody can authorise cannot be registered.
+/// c-azc-0024. Negative — an operation nobody can authorise cannot be registered.
 ///
 /// The one that matters: this is the shape of rustfs/rustfs#4845 made unrepresentable.
 #[test]

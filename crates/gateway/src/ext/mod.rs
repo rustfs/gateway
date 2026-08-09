@@ -61,6 +61,7 @@
 
 mod authenticator;
 mod authorizer;
+mod authz_audit;
 mod cors;
 mod credentials;
 mod filter;
@@ -72,7 +73,14 @@ mod policy;
 mod vhost;
 
 pub use self::authenticator::{Authentication, Authenticator, ChunkSink, ChunkVerification, SigV4Authenticator, Unavailable};
-pub use self::authorizer::{Authorizer, AuthzRequest, Decision, Denial, RequestContext, allow_when};
+#[cfg(feature = "dangerous-allow-all-authorizer")]
+pub use self::authorizer::{AllowAllAuthorizer, DangerAck};
+pub use self::authorizer::{
+    AuthSchemeRef, Authorizer, AuthzRequest, Decision, Denial, DenyAllAuthorizer, InputAuthzRequest, InputDecisions,
+    RequestContext, ServerExtensions, allow_when, decide_with,
+};
+pub(crate) use self::authz_audit::emit_safely;
+pub use self::authz_audit::{AuthzAuditEvent, AuthzAuditSink, AuthzStage, NoAuthzAudit};
 pub use self::cors::{CORS_PREFLIGHT, CachedCorsSource, CorsCacheConfig, CorsSource, CorsSourceError, NoCors};
 pub use self::credentials::{CredentialProvider, Credentials, CredentialsError, StaticCredentials};
 pub use self::filter::{
@@ -84,5 +92,8 @@ pub use self::host::{Addressing, HostQuery, HostResolver, PathStyleOnly, Resolve
 pub use self::observer::{NoObserver, Observer, RequestEvent};
 pub use self::oplayer::{Next, OpLayer, op_layer};
 pub(crate) use self::oplayer::{OpLayerSlot, Terminal};
-pub use self::policy::{NoPolicy, PolicyError, PolicySnapshot, PolicySource, SnapshotId, policy_from};
+pub use self::policy::{
+    DEFAULT_POLICY_SNAPSHOT_TIMEOUT, MAX_POLICY_SNAPSHOT_TIMEOUT, NoPolicy, PolicyError, PolicySnapshot, PolicySource,
+    PolicyTimeout, PolicyTimeoutError, SnapshotId, policy_from,
+};
 pub use self::vhost::{BaseDomain, DomainError, MAX_BASE_DOMAIN_BYTES, VirtualHostStyle};

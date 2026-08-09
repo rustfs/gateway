@@ -1040,5 +1040,177 @@ expect_fail check_sse_key_never_leaks.sh \
     "the guard's own subject deleted, which must fail rather than skip" mut_sse_headers_module_deleted
 
 
+# ── check_authz_fail_closed.sh (P6-02) ─────────────────────────────────────────
+
+mut_a_fourth_verdict_state() {
+    python3 - <<'AZPY'
+import pathlib
+p = pathlib.Path("crates/core/src/authz/mod.rs")
+s = p.read_text()
+s = s.replace("    Indeterminate,\n}", "    Indeterminate,\n    Unknown,\n}", 1)
+p.write_text(s)
+AZPY
+}
+expect_fail check_authz_fail_closed.sh \
+    'a fourth Decision state, which no interpretation site was written for' mut_a_fourth_verdict_state
+
+mut_decision_from_a_bool() {
+    cat >>crates/gateway/src/ext/mod.rs <<'AZEOF'
+
+impl Default for Decision {
+    fn default() -> Self {
+        Self::Allow
+    }
+}
+AZEOF
+}
+expect_fail check_authz_fail_closed.sh \
+    'a Default impl for Decision, so a verdict nobody reached becomes Allow' mut_decision_from_a_bool
+
+mut_a_second_interpretation_site() {
+    cat >>crates/gateway/src/service.rs <<'AZEOF'
+
+fn interpret(verdict: crate::ext::Decision) -> bool {
+    match verdict {
+        crate::ext::Decision::Allow => true,
+        crate::ext::Decision::Deny => false,
+        crate::ext::Decision::Indeterminate => true,
+    }
+}
+AZEOF
+}
+expect_fail check_authz_fail_closed.sh \
+    'a second place deciding what a verdict means, reading Indeterminate as allow' mut_a_second_interpretation_site
+
+mut_a_wildcard_in_settle() {
+    python3 - <<'AZPY'
+import pathlib
+p = pathlib.Path("crates/core/src/authz/mod.rs")
+s = p.read_text()
+s = s.replace("            Self::Deny | Self::Indeterminate => Err(Denied { decision: self }),",
+              "            _ => Err(Denied { decision: self }),", 1)
+p.write_text(s)
+AZPY
+}
+expect_fail check_authz_fail_closed.sh \
+    'a wildcard arm in settle, so a later state inherits a branch nobody chose for it' mut_a_wildcard_in_settle
+
+mut_a_denial_that_picks_its_code() {
+    python3 - <<'AZPY'
+import pathlib
+p = pathlib.Path("crates/core/src/authz/mod.rs")
+s = p.read_text()
+s = s.replace("impl Denied {\n", "impl Denied {\n    pub fn with_code(code: ErrorCode) -> Self {\n        let _ = code;\n        Self { decision: Decision::Deny }\n    }\n\n", 1)
+p.write_text(s)
+AZPY
+}
+expect_fail check_authz_fail_closed.sh \
+    'a Denial constructor taking an ErrorCode, which is a private-bucket enumeration oracle' mut_a_denial_that_picks_its_code
+
+mut_an_audit_sink_that_answers() {
+    python3 - <<'AZPY'
+import pathlib
+p = pathlib.Path("crates/gateway/src/ext/authz_audit.rs")
+s = p.read_text()
+s = s.replace("    fn on_decision(&self, event: &AuthzAuditEvent<'_>);",
+              "    fn on_decision(&self, event: &AuthzAuditEvent<'_>) -> Decision;", 1)
+p.write_text(s)
+AZPY
+}
+expect_fail check_authz_fail_closed.sh \
+    'an audit sink whose method returns a verdict, so the hook could overturn the decision' mut_an_audit_sink_that_answers
+
+mut_an_allow_all_example() {
+    cat >>crates/gateway/examples/minimal.rs <<'AZEOF'
+
+fn convenient() -> impl rustfs_gateway::Authorizer {
+    rustfs_gateway::allow_when(|_| true)
+}
+AZEOF
+}
+expect_fail check_authz_fail_closed.sh \
+    'a copy-pasteable allow-all in an example, which is API' mut_an_allow_all_example
+expect_fail check_no_allow_all_in_examples.sh \
+    'a copy-pasteable allow-all in an example' mut_an_allow_all_example
+
+mut_authorizer_module_deleted() {
+    rm -f crates/gateway/src/ext/authorizer.rs
+}
+expect_fail check_authz_fail_closed.sh \
+    "the guard's own subject deleted, which must fail rather than skip" mut_authorizer_module_deleted
+
+mut_an_authz_case_removed() {
+    python3 - <<'AZPY'
+import pathlib
+p = pathlib.Path("crates/gateway/tests/authz_contract.rs")
+p.write_text(p.read_text().replace("c-azc-0030", "removed-case", 1))
+AZPY
+}
+expect_fail check_authz_fail_closed.sh \
+    'one of the thirty executable authorization cases removed' mut_an_authz_case_removed
+
+# ── check_policy_snapshot_once.sh (P6-02) ──────────────────────────────────────
+
+mut_a_second_reading_in_the_pipeline() {
+    cat >>crates/gateway/src/service.rs <<'AZEOF'
+
+async fn reread(inner: &Inner) {
+    let _ = inner.policy_source.snapshot(None).await;
+}
+AZEOF
+}
+expect_fail check_policy_snapshot_once.sh \
+    'a second reading of policy inside the pipeline crate' mut_a_second_reading_in_the_pipeline
+
+mut_a_reading_outside_the_pipeline() {
+    cat >>crates/gateway/src/dispatch.rs <<'AZEOF'
+
+async fn own_view(source: &dyn crate::ext::PolicySource) {
+    let _ = source.snapshot(None).await;
+}
+AZEOF
+}
+expect_fail check_policy_snapshot_once.sh \
+    'a stage reading its own view of policy instead of the one it was handed' mut_a_reading_outside_the_pipeline
+
+mut_the_reading_taken_after_the_reader() {
+    python3 - <<'AZPY'
+import pathlib
+p = pathlib.Path("crates/gateway/src/service.rs")
+lines = p.read_text().splitlines(keepends=True)
+# An authorize call above the snapshot: the reading is then not the one the
+# reader used, whatever the response looks like.
+lines.insert(14, "fn early(a: &dyn crate::ext::Authorizer) { let _ = |c, r| a.authorize_route(c, r); }\n")
+p.write_text("".join(lines))
+AZPY
+}
+expect_fail check_policy_snapshot_once.sh \
+    'the policy reading taken after the authorizer has already run' mut_the_reading_taken_after_the_reader
+
+mut_policy_module_deleted() {
+    rm -f crates/gateway/src/ext/policy.rs
+}
+expect_fail check_policy_snapshot_once.sh \
+    "the guard's own subject deleted, which must fail rather than skip" mut_policy_module_deleted
+
+# ── check_authz_no_default_impl.sh (P6-02) ─────────────────────────────────────
+
+mut_authorize_route_default_body() {
+    python3 - <<'AZPY'
+import pathlib
+p = pathlib.Path("crates/gateway/src/ext/authorizer.rs")
+s = p.read_text()
+s = s.replace(
+    ") -> BoxFuture<'a, Decision>;",
+    ") -> BoxFuture<'a, Decision> { Box::pin(async { Decision::Deny }) }",
+    1,
+)
+p.write_text(s)
+AZPY
+}
+expect_fail check_authz_no_default_impl.sh \
+    'a default body on authorize_route' mut_authorize_route_default_body
+
+
 printf '\n%s case(s), %s failure(s)\n' "$cases" "$failures"
 [[ "$failures" -eq 0 ]]

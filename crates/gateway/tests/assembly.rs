@@ -40,7 +40,7 @@ fn an_empty_registry_is_refused() {
     assert_eq!(error.rule(), RuleRef::EMPTY_REGISTRY);
 }
 
-/// Negative — no authorizer, no service. There is no default allow and no default deny.
+/// c-azc-0019. Negative — no authorizer, no service. There is no default allow and no default deny.
 #[test]
 fn a_missing_authorizer_is_refused() {
     let credentials = Arc::new(

@@ -1,0 +1,5 @@
+error[E0432]: unresolved import `rustfs_gateway::ServiceConfig`
+  --> tests/compile_fail/azc_0020_service_config_default.rs:17:5
+   |
+17 | use rustfs_gateway::ServiceConfig;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ no `ServiceConfig` in the root

@@ -49,6 +49,16 @@ impl Decision {
             Self::Deny | Self::Indeterminate => Err(Denied { decision: self }),
         }
     }
+
+    /// A stable audit label.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Allow => "allow",
+            Self::Deny => "deny",
+            Self::Indeterminate => "indeterminate",
+        }
+    }
 }
 
 /// A refusal to create [`Authorized`].
@@ -61,9 +71,24 @@ pub struct Denied {
 }
 
 impl Denied {
+    /// A policy refusal with the only caller-visible code authorization may use.
+    #[must_use]
+    pub const fn access_denied() -> Self {
+        Self {
+            decision: Decision::Deny,
+        }
+    }
+
     /// The policy outcome that prevented authorization.
     pub const fn decision(self) -> Decision {
         self.decision
+    }
+
+    /// The only error code an authorization refusal renders as.
+    #[must_use]
+    pub fn code(&self) -> &ErrorCode {
+        static ACCESS_DENIED: ErrorCode = ErrorCode::ACCESS_DENIED;
+        &ACCESS_DENIED
     }
 
     /// A fail-closed refusal for an internal authorization-boundary mismatch.

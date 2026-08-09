@@ -43,7 +43,17 @@ pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
 // EVERY extension point looks like this — hand-written, dyn compatible:
 pub trait Authorizer: Send + Sync + 'static {
-    fn authorize(&self, req: &AuthzRequest<'_>) -> BoxFuture<'_, Result<(), AuthzError>>;
+    fn authorize_route<'a>(
+        &'a self,
+        ctx: &'a RequestContext<'a>,
+        req: &'a AuthzRequest<'a>,
+    ) -> BoxFuture<'a, Decision>;
+
+    fn authorize_input<'a>(
+        &'a self,
+        ctx: &'a RequestContext<'a>,
+        req: &'a InputAuthzRequest<'a>,
+    ) -> BoxFuture<'a, InputDecisions>;
 }
 
 // The ONLY two traits allowed to use RPITIT, because they are erased at
@@ -91,6 +101,15 @@ trait itself never appears behind `dyn`, so the E0038 rule is never reached.
 This is a property of the registration design, not a loophole — if a future
 change makes `Handler` reachable as a trait object, this exception must be
 revisited via a new ADR.
+
+**Generic operation input is erased at registration.** An extension method generic over
+`O: Operation` cannot itself be called through `dyn`. The registration closure must retain `O`,
+normalize the operation-specific input into an object-safe request, and bridge the extension's
+opaque result back into the typed pipeline. Authorization uses `InputAuthzRequest` as that erased
+request and `InputDecisions` as the unforgeable batch result; the assembled service therefore holds
+`Arc<dyn Authorizer>` without exposing a generic method or letting the caller construct an
+`Authorized<O>`. A future generic extension point must use the same registration-time erasure
+shape rather than weakening this ADR's dyn requirement.
 
 **Related measured result carried over from the dispatch decision:** the
 per-operation `Handler<O>` plus erased-registry variant rebuilds in 3.12 s and

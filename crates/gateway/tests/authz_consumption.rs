@@ -25,8 +25,8 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use rustfs_gateway::{
-    AuthzRequest, BoxFuture, Decision, Handler, HandlerResult, PolicyError, PolicySnapshot, Req, RequestContext, Resp, dto,
-    policy_from,
+    AuthzRequest, BoxFuture, Decision, Handler, HandlerResult, InputAuthzRequest, InputDecisions, PolicyError, PolicySnapshot,
+    Req, RequestContext, Resp, dto, policy_from,
 };
 
 use support::{exchange, fixed_clock, signed_with, wired};
@@ -34,7 +34,7 @@ use support::{exchange, fixed_clock, signed_with, wired};
 struct DestinationOnly;
 
 impl rustfs_gateway::Authorizer for DestinationOnly {
-    fn authorize<'a>(&'a self, _context: &'a RequestContext<'a>, request: &'a AuthzRequest<'a>) -> BoxFuture<'a, Decision> {
+    fn authorize_route<'a>(&'a self, _context: &'a RequestContext<'a>, request: &'a AuthzRequest<'a>) -> BoxFuture<'a, Decision> {
         let decision = if request.action == "s3:PutObject" {
             Decision::Allow
         } else {
@@ -42,30 +42,76 @@ impl rustfs_gateway::Authorizer for DestinationOnly {
         };
         Box::pin(async move { decision })
     }
+
+    fn authorize_input<'a>(
+        &'a self,
+        _context: &'a RequestContext<'a>,
+        request: &'a InputAuthzRequest<'a>,
+    ) -> BoxFuture<'a, InputDecisions> {
+        let decisions = request.decide_all(Decision::Allow, |resource| {
+            if resource.action == "s3:PutObject" {
+                Decision::Allow
+            } else {
+                Decision::Deny
+            }
+        });
+        Box::pin(async move { decisions })
+    }
 }
 
 struct DestinationSourceConstraint;
 
 impl rustfs_gateway::Authorizer for DestinationSourceConstraint {
-    fn authorize<'a>(&'a self, _context: &'a RequestContext<'a>, request: &'a AuthzRequest<'a>) -> BoxFuture<'a, Decision> {
-        let forbidden_pair = request.copy_source_identity.is_some()
-            && request.route_bucket.is_some_and(|bucket| bucket.as_str() == "destination")
-            && request.bucket.is_some_and(|bucket| bucket.as_str() == "source");
-        Box::pin(async move { if forbidden_pair { Decision::Deny } else { Decision::Allow } })
+    fn authorize_route<'a>(
+        &'a self,
+        _context: &'a RequestContext<'a>,
+        _request: &'a AuthzRequest<'a>,
+    ) -> BoxFuture<'a, Decision> {
+        Box::pin(async { Decision::Allow })
+    }
+
+    fn authorize_input<'a>(
+        &'a self,
+        _context: &'a RequestContext<'a>,
+        request: &'a InputAuthzRequest<'a>,
+    ) -> BoxFuture<'a, InputDecisions> {
+        let decisions = request.decide_all(Decision::Allow, |resource| {
+            let request = resource;
+            let forbidden_pair = request.copy_source_identity.is_some()
+                && request.route_bucket.is_some_and(|bucket| bucket.as_str() == "destination")
+                && request.bucket.is_some_and(|bucket| bucket.as_str() == "source");
+            if forbidden_pair { Decision::Deny } else { Decision::Allow }
+        });
+        Box::pin(async move { decisions })
     }
 }
 
 struct CopyBackend(Arc<AtomicUsize>);
 
-struct RecordingAuthorizer(Arc<Mutex<Vec<(u64, i64)>>>);
+struct RecordingAuthorizer(Arc<Mutex<Vec<(u64, i64, usize)>>>);
 
 impl rustfs_gateway::Authorizer for RecordingAuthorizer {
-    fn authorize<'a>(&'a self, context: &'a RequestContext<'a>, _request: &'a AuthzRequest<'a>) -> BoxFuture<'a, Decision> {
-        self.0
-            .lock()
-            .expect("recording lock")
-            .push((context.policy().id().get(), context.now().unix_seconds()));
+    fn authorize_route<'a>(&'a self, context: &'a RequestContext<'a>, _request: &'a AuthzRequest<'a>) -> BoxFuture<'a, Decision> {
+        self.0.lock().expect("recording lock").push((
+            context.policy().id().get(),
+            context.now().unix_seconds(),
+            std::ptr::from_ref(context.policy()) as usize,
+        ));
         Box::pin(async { Decision::Allow })
+    }
+
+    fn authorize_input<'a>(
+        &'a self,
+        context: &'a RequestContext<'a>,
+        request: &'a InputAuthzRequest<'a>,
+    ) -> BoxFuture<'a, InputDecisions> {
+        self.0.lock().expect("recording lock").push((
+            context.policy().id().get(),
+            context.now().unix_seconds(),
+            std::ptr::from_ref(context.policy()) as usize,
+        ));
+        let decisions = request.decide_all(Decision::Allow, |_| Decision::Allow);
+        Box::pin(async move { decisions })
     }
 }
 
@@ -87,6 +133,7 @@ impl Handler<dto::CopyObject> for CopyBackend {
     }
 }
 
+/// c-azc-0026: every normalized copy source is decided before the backend can run.
 #[tokio::test]
 async fn n_copy_source_denial_never_reaches_the_backend() {
     let reached = Arc::new(AtomicUsize::new(0));
@@ -127,6 +174,7 @@ async fn a_destination_policy_can_refuse_an_otherwise_readable_copy_source() {
     );
 }
 
+/// c-azc-0001: only an authorized, normalized operation input reaches dispatch.
 #[tokio::test]
 async fn an_authorized_handler_sees_only_the_normalized_copy_source() {
     let reached = Arc::new(AtomicUsize::new(0));
@@ -143,6 +191,7 @@ async fn an_authorized_handler_sees_only_the_normalized_copy_source() {
     assert_eq!(reached.load(Ordering::SeqCst), 1);
 }
 
+/// c-azc-0002, c-azc-0028, c-azc-0029: both stages use one policy pointer, clock, and authorizer.
 #[tokio::test]
 async fn both_authorization_stages_share_one_policy_and_clock_snapshot() {
     let reads = Arc::new(AtomicUsize::new(0));
@@ -168,6 +217,7 @@ async fn both_authorization_stages_share_one_policy_and_clock_snapshot() {
     let seen = seen.lock().expect("recording lock");
     assert_eq!(seen.len(), 2);
     assert_eq!(seen[0], seen[1]);
+    assert_eq!(seen[0].2, seen[1].2, "both stages must borrow the exact same snapshot allocation");
 }
 
 #[tokio::test]

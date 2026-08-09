@@ -40,6 +40,8 @@
 //! `build` is the only constructor, and it returns `Err` rather than a permissive default.
 
 use std::any::Any;
+#[cfg(feature = "dangerous-allow-all-authorizer")]
+use std::any::TypeId;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -52,8 +54,9 @@ use crate::assembly::{AssemblyError, RuleRef};
 use crate::clock::{Clock, system_clock};
 use crate::dispatch::{DispatchTable, OperationDispatch};
 use crate::ext::{
-    Authenticator, Authorizer, CachedCorsSource, CorsCacheConfig, CorsSource, Governor, HostResolver, NoCors, NoObserver,
-    NoPolicy, Observer, OpLayer, OpLayerSlot, PathStyleOnly, PolicySource, StageFilter, Unlimited,
+    Authenticator, Authorizer, AuthzAuditSink, CachedCorsSource, CorsCacheConfig, CorsSource, Governor, HostResolver,
+    NoAuthzAudit, NoCors, NoObserver, NoPolicy, Observer, OpLayer, OpLayerSlot, PathStyleOnly, PolicySource, PolicyTimeout,
+    StageFilter, Unlimited,
 };
 use crate::service::{Inner, S3Service};
 use crate::trace::{MintedTraces, TraceSource};
@@ -99,8 +102,11 @@ pub struct ServiceBuilder {
     names: NamePolicy,
     max_buffered_body_bytes: u64,
     authorizer: Option<Arc<dyn Authorizer>>,
+    dangerous_allow_all_authorizer: bool,
     authenticator: Option<Arc<dyn Authenticator>>,
     policy_source: Arc<dyn PolicySource>,
+    policy_timeout: PolicyTimeout,
+    authz_audit: Arc<dyn AuthzAuditSink>,
     host_resolver: Arc<dyn HostResolver>,
     governor: Arc<dyn Governor>,
     observer: Arc<dyn Observer>,
@@ -148,8 +154,11 @@ impl ServiceBuilder {
             names: NamePolicy::default(),
             max_buffered_body_bytes: DEFAULT_MAX_BUFFERED_BODY_BYTES,
             authorizer: None,
+            dangerous_allow_all_authorizer: false,
             authenticator: None,
             policy_source: Arc::new(NoPolicy),
+            policy_timeout: PolicyTimeout::default(),
+            authz_audit: Arc::new(NoAuthzAudit),
             host_resolver: Arc::new(PathStyleOnly),
             governor: Arc::new(Unlimited),
             observer: Arc::new(NoObserver),
@@ -258,7 +267,11 @@ impl ServiceBuilder {
 
     /// Installs the authorizer. Required: there is no default.
     #[must_use]
-    pub fn authorizer(mut self, authorizer: impl Authorizer) -> Self {
+    pub fn authorizer<A: Authorizer>(mut self, authorizer: A) -> Self {
+        #[cfg(feature = "dangerous-allow-all-authorizer")]
+        {
+            self.dangerous_allow_all_authorizer = TypeId::of::<A>() == TypeId::of::<crate::AllowAllAuthorizer>();
+        }
         self.authorizer = Some(Arc::new(authorizer));
         self
     }
@@ -274,6 +287,20 @@ impl ServiceBuilder {
     #[must_use]
     pub fn policy_source(mut self, source: impl PolicySource) -> Self {
         self.policy_source = Arc::new(source);
+        self
+    }
+
+    /// Sets the validated hard limit for the one policy read per request.
+    #[must_use]
+    pub const fn policy_timeout(mut self, timeout: PolicyTimeout) -> Self {
+        self.policy_timeout = timeout;
+        self
+    }
+
+    /// Installs the read-only authorization audit sink.
+    #[must_use]
+    pub fn authz_audit(mut self, sink: impl AuthzAuditSink) -> Self {
+        self.authz_audit = Arc::new(sink);
         self
     }
 
@@ -506,6 +533,10 @@ impl ServiceBuilder {
             }
         }
 
+        if self.dangerous_allow_all_authorizer {
+            eprintln!("WARN: dangerous allow-all authorizer disables authorization for every request");
+        }
+
         Ok(S3Service::from_inner(Inner {
             router,
             dispatch,
@@ -517,6 +548,8 @@ impl ServiceBuilder {
             authorizer,
             authenticator,
             policy_source: self.policy_source,
+            policy_timeout: self.policy_timeout,
+            authz_audit: self.authz_audit,
             host_resolver: self.host_resolver,
             governor: self.governor,
             observer: self.observer,
