@@ -88,8 +88,8 @@ fn every_assembly_rule_can_be_looked_up() {
         assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
         let stdout = String::from_utf8_lossy(&output.stdout);
         assert!(stdout.contains(rule.as_str()), "{stdout}");
-        assert!(stdout.contains(rule.acceptance()), "{stdout}");
-        assert!(stdout.contains("rustfs/backlog/issues/1738"), "{stdout}");
+        assert!(stdout.contains("every_rule_explains_itself"), "{stdout}");
+        assert!(!stdout.contains("CASES     NONE"), "{stdout}");
     }
 }
 

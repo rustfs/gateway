@@ -416,6 +416,11 @@ where
 /// What a test fixture and the conformance suite use. It is not a deployment tool: rotating a key
 /// means rebuilding the service, and there is deliberately no interior mutability to make that
 /// look easy.
+///
+/// # Security
+///
+/// The default set is empty, so every signed credential lookup is rejected as unknown. It never
+/// supplies a fallback key or identity.
 #[derive(Debug, Default)]
 pub struct StaticCredentials {
     entries: BTreeMap<String, Credentials>,

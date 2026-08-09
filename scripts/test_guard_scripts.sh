@@ -1940,6 +1940,36 @@ PYEOF
 expect_fail check_config_load_once.sh \
     'a second hot-configuration read in the request pipeline' mut_second_config_load
 
+mut_aliased_second_config_load() {
+    python3 - <<'PYEOF'
+import pathlib
+path = pathlib.Path("crates/gateway/src/service.rs")
+text = path.read_text().replace(
+    "let config = self.inner.config.load_full();",
+    "let config = self.inner.config.load_full();\n        let config_store = &self.inner.config;\n        let _torn = config_store.load_full();",
+    1,
+)
+path.write_text(text)
+PYEOF
+}
+expect_fail check_config_load_once.sh \
+    'a second hot-configuration read through an aliased store' mut_aliased_second_config_load
+
+mut_as_ref_second_config_load() {
+    python3 - <<'PYEOF'
+import pathlib
+path = pathlib.Path("crates/gateway/src/service.rs")
+text = path.read_text().replace(
+    "let config = self.inner.config.load_full();",
+    "let config = self.inner.config.load_full();\n        let _torn = self.inner.config.as_ref().load_full();",
+    1,
+)
+path.write_text(text)
+PYEOF
+}
+expect_fail check_config_load_once.sh \
+    'a second hot-configuration read through Arc::as_ref' mut_as_ref_second_config_load
+
 mut_config_load_allowlist_deleted() {
     rm -f scripts/config_load_allowlist.txt
 }
@@ -1967,6 +1997,18 @@ PYEOF
 }
 expect_fail check_default_doc.sh \
     'a derived extension default losing its security consequences' mut_derived_default_security_doc_deleted
+
+mut_undocumented_derived_default_added() {
+    python3 - <<'PYEOF'
+import pathlib
+path = pathlib.Path("crates/gateway/src/ext/observer.rs")
+text = path.read_text()
+text += "\n#[derive(Default)]\npub struct UndocumentedObserverDefault;\n"
+path.write_text(text)
+PYEOF
+}
+expect_fail check_default_doc.sh \
+    'a newly derived extension default without security documentation' mut_undocumented_derived_default_added
 
 mut_default_doc_subject_deleted() {
     rm -f crates/gateway/src/ext/policy.rs

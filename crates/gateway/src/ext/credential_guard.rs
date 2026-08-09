@@ -61,6 +61,11 @@ impl Default for CredentialGuardConfig {
 }
 
 /// A snapshot of provider outcomes useful to metrics exporters.
+///
+/// # Security
+///
+/// The default is an all-zero observation only. It neither resets the live counters nor changes
+/// lookup admission, caching, or timeout behaviour.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct ProviderMetrics {
     /// Backend errors observed.

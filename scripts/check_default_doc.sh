@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Every optional extension default states its security consequence at the implementation site.
+# Every public extension default states its security consequence at the implementation site.
 set -euo pipefail
 
 ROOT_DIR="${GATEWAY_CHECK_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
@@ -20,13 +20,6 @@ subjects=(
     'policy.rs:PolicyTimeout'
 )
 
-derived_subjects=(
-    'cors.rs:NoCors'
-    'governor.rs:Unlimited'
-    'host.rs:PathStyleOnly'
-    'observer.rs:NoObserver'
-)
-
 checked=0
 for subject in "${subjects[@]}"; do
     relative="${subject%%:*}"
@@ -44,21 +37,52 @@ done
 actual="$(grep -RhsE '^impl Default for [A-Za-z_][A-Za-z0-9_]*[[:space:]]*\{' "$EXT_DIR" --include='*.rs' | wc -l | tr -d '[:space:]')"
 [[ "$actual" == "$checked" ]] || fail "found ${actual} Default implementations but documented ${checked}"
 
-for subject in "${derived_subjects[@]}"; do
-    relative="${subject%%:*}"
-    type="${subject#*:}"
-    file="${EXT_DIR}/${relative}"
-    [[ -f "$file" ]] || fail "${relative} is missing"
-    line="$(grep -nE "^pub struct ${type}([[:space:];<{]|$)" "$file" | cut -d: -f1)"
-    [[ -n "$line" ]] || fail "${relative}: ${type} is missing"
-    start=$((line > 12 ? line - 12 : 1))
-    context="$(sed -n "${start},${line}p" "$file")"
-    grep -qE '#\[derive\([^]]*Default' <<<"$context" \
-        || fail "${relative}:${line}: ${type} no longer derives Default"
-    grep -qF '/// # Security' <<<"$context" \
-        || fail "${relative}:${line}: Default for ${type} has no # Security section"
+derived=0
+while IFS='|' read -r relative type line documented; do
+    [[ -n "$relative" ]] || continue
+    [[ "$documented" == yes ]] \
+        || fail "${relative}:${line}: derived Default for ${type} has no # Security section"
     checked=$((checked + 1))
-done
+    derived=$((derived + 1))
+done < <(python3 - "$EXT_DIR" <<'PYEOF'
+import pathlib
+import re
+import sys
 
-total=$((actual + ${#derived_subjects[@]}))
+root = pathlib.Path(sys.argv[1])
+for path in sorted(root.rglob("*.rs")):
+    lines = path.read_text().splitlines()
+    index = 0
+    while index < len(lines):
+        if not re.match(r"\s*#\s*\[\s*derive\s*\(", lines[index]):
+            index += 1
+            continue
+        start = index
+        attribute = lines[index]
+        while "]" not in attribute and index + 1 < len(lines):
+            index += 1
+            attribute += lines[index]
+        if not re.search(r"(?:\(|,)\s*Default\s*(?:,|\))", attribute):
+            index += 1
+            continue
+        item = index + 1
+        while item < len(lines) and (not lines[item].strip() or lines[item].lstrip().startswith("#[")):
+            item += 1
+        match = re.match(r"\s*pub\s+(?:struct|enum)\s+([A-Za-z_][A-Za-z0-9_]*)", lines[item]) if item < len(lines) else None
+        if match is None:
+            index += 1
+            continue
+        doc = start - 1
+        docs = []
+        while doc >= 0 and lines[doc].lstrip().startswith("///"):
+            docs.append(lines[doc])
+            doc -= 1
+        documented = "yes" if any("/// # Security" in line for line in docs) else "no"
+        print(f"{path.relative_to(root)}|{match.group(1)}|{item + 1}|{documented}")
+        index = item + 1
+PYEOF
+)
+
+[[ "$derived" -gt 0 ]] || fail 'no public derived Default subject was found'
+total=$((actual + derived))
 printf 'OK: %s/%s extension defaults document security consequences\n' "$checked" "$total"

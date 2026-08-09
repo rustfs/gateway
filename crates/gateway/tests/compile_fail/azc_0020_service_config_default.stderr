@@ -1,7 +1,7 @@
 error[E0599]: no associated function or constant named `default` found for struct `ServiceConfig` in the current scope
-  --> tests/compile_fail/azc_0020_service_config_default.rs:20:28
+  --> tests/compile_fail/azc_0020_service_config_default.rs:26:28
    |
-20 |     let _ = ServiceConfig::default();
+26 |     let _ = ServiceConfig::default();
    |                            ^^^^^^^ associated function or constant not found in `ServiceConfig`
    |
 note: if you're trying to build a new `ServiceConfig`, consider using `ServiceConfig::new` which returns `ServiceConfig`

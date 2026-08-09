@@ -487,8 +487,8 @@ impl ServiceBuilder {
     /// A request loads one immutable snapshot at entry. Calling [`ConfigHandle::store`] affects
     /// later requests and cannot change the settings an in-flight request already observes.
     #[must_use]
-    pub fn config(mut self, config: ServiceConfig) -> (Self, ConfigHandle) {
-        self.config = Arc::new(arc_swap::ArcSwap::from_pointee(config));
+    pub fn config(self, config: ServiceConfig) -> (Self, ConfigHandle) {
+        self.config.store(Arc::new(config));
         let handle = ConfigHandle::new(&self.config);
         (self, handle)
     }

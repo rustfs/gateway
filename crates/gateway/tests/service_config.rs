@@ -83,3 +83,25 @@ async fn a_hot_update_does_not_tear_an_inflight_request() {
     let second = service.call(second).await;
     assert_eq!(second.status(), http::StatusCode::OK);
 }
+
+/// a-asm-0007. Reconfiguring a builder does not detach a handle already handed to the caller.
+#[tokio::test]
+async fn an_earlier_handle_still_updates_after_config_is_called_again() {
+    let (builder, first_handle) = wired().config(ServiceConfig::new(8));
+    let (builder, _second_handle) = builder.config(ServiceConfig::new(16));
+    first_handle.store(ServiceConfig::new(32));
+    let service = builder
+        .register::<ContentPing, _>(Arc::new(Backend))
+        .route(content_ping_route())
+        .build()
+        .expect("a complete assembly");
+
+    let request = http::Request::builder()
+        .method(http::Method::PUT)
+        .uri("/")
+        .header("host", "s3.example.com")
+        .body(http_body_util::Full::new(Bytes::from_static(b"twenty-four-byte-payload")))
+        .expect("a valid request");
+    let response = service.call(request).await;
+    assert_eq!(response.status(), http::StatusCode::OK);
+}

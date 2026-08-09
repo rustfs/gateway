@@ -17,7 +17,7 @@ fail() {
 
 actual="$({
     cd "$ROOT_DIR"
-    grep -RInE '\.config\.load(_full)?\(' crates/gateway/src --include='*.rs' \
+    grep -RInE '\.load_full\(' crates/gateway/src --include='*.rs' \
         | cut -d: -f1,2 \
         | LC_ALL=C sort
 } || true)"

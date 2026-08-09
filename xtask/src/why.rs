@@ -82,6 +82,10 @@ struct AdrRecord {
     path: String,
 }
 
+struct RuleTestRecord {
+    rule: String,
+    line: CaseLine,
+}
 #[derive(Debug, Clone)]
 struct Answer {
     id: String,
@@ -98,6 +102,7 @@ struct Index {
     operations: Vec<OperationIr>,
     cases: Vec<CaseRecord>,
     adrs: Vec<AdrRecord>,
+    rule_tests: Vec<RuleTestRecord>,
     root: PathBuf,
 }
 
@@ -153,10 +158,12 @@ impl Index {
             .operations;
         let cases = load_cases(&root)?;
         let adrs = load_adrs(&root)?;
+        let rule_tests = load_rule_tests(&root)?;
         Ok(Self {
             operations,
             cases,
             adrs,
+            rule_tests,
             root,
         })
     }
@@ -364,20 +371,21 @@ impl Index {
     fn rule_answer(&self, id: &str) -> Answer {
         let rule = RuleRef::ALL.iter().find(|rule| rule.as_str() == id);
         let summary = rule.map_or("assembly rule", |rule| rule.explanation()).to_owned();
+        let cases: Vec<CaseLine> = self
+            .rule_tests
+            .iter()
+            .filter(|record| record.rule == id)
+            .map(|record| record.line.clone())
+            .collect();
         finish(Answer {
             id: id.to_owned(),
             summary,
             evidence: Vec::new(),
-            cases: self
-                .cases
-                .iter()
-                .filter(|case| case.source.contains(id))
-                .map(|case| case.line.clone())
-                .collect(),
+            cases: cases.clone(),
             adrs: Vec::new(),
             spec: vec!["crates/gateway/src/assembly.rs:RuleRef::ALL".to_owned()],
             related: Vec::new(),
-            complete: true,
+            complete: !cases.is_empty(),
         })
     }
 
@@ -442,7 +450,72 @@ fn parse_case(root: &Path, path: &Path) -> Result<CaseRecord, String> {
         source,
     })
 }
-
+fn load_rule_tests(root: &Path) -> Result<Vec<RuleTestRecord>, String> {
+    let assembly_path = root.join("crates/gateway/src/assembly.rs");
+    let assembly = fs::read_to_string(&assembly_path).map_err(|error| format!("{}: {error}", assembly_path.display()))?;
+    let mut constants = Vec::new();
+    let mut pending = None;
+    for line in assembly.lines() {
+        let trimmed = line.trim();
+        if let Some(rest) = trimmed.strip_prefix("pub const ")
+            && let Some((name, _)) = rest.split_once(':')
+        {
+            pending = Some(name.to_owned());
+        } else if let Some(rest) = trimmed.strip_prefix("id: \"")
+            && let Some(id) = rest.strip_suffix("\",")
+            && let Some(name) = pending.take()
+        {
+            constants.push((name, id.to_owned()));
+        }
+    }
+    let mut paths = vec![assembly_path];
+    collect_files(&root.join("crates/gateway/tests"), "rs", &mut paths)?;
+    paths.sort();
+    let mut records = Vec::new();
+    for path in paths {
+        let source = fs::read_to_string(&path).map_err(|error| format!("{}: {error}", path.display()))?;
+        let lines: Vec<&str> = source.lines().collect();
+        let starts: Vec<usize> = lines
+            .iter()
+            .enumerate()
+            .filter_map(|(index, line)| {
+                let trimmed = line.trim();
+                (trimmed == "#[test]" || trimmed == "#[tokio::test]").then_some(index)
+            })
+            .collect();
+        for (position, start) in starts.iter().copied().enumerate() {
+            let end = starts.get(position + 1).copied().unwrap_or(lines.len());
+            let chunk = lines[start..end].join("\n");
+            let Some(name) = lines[start..end].iter().find_map(|line| test_function_name(line)) else {
+                continue;
+            };
+            let mut matched = Vec::new();
+            if chunk.contains("RuleRef::ALL") {
+                matched.extend(constants.iter().map(|(_, id)| id.clone()));
+            } else {
+                for (constant, id) in &constants {
+                    if chunk.contains(&format!("RuleRef::{constant}")) {
+                        matched.push(id.clone());
+                    }
+                }
+            }
+            for rule in matched {
+                records.push(RuleTestRecord {
+                    rule,
+                    line: CaseLine {
+                        id: name.clone(),
+                        title: relative(root, &path),
+                    },
+                });
+            }
+        }
+    }
+    Ok(records)
+}
+fn test_function_name(line: &str) -> Option<String> {
+    let name = line.split_once("fn ")?.1.split_once('(')?.0.trim();
+    (!name.is_empty()).then(|| name.to_owned())
+}
 fn load_adrs(root: &Path) -> Result<Vec<AdrRecord>, String> {
     let base = root.join("docs/adr");
     let mut paths = Vec::new();

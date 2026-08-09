@@ -77,6 +77,11 @@ use super::credentials::{CredentialLookup, CredentialProvider};
 ///
 /// Distinct from every [`AuthError`] on purpose: those are statements about the request, and this
 /// is a statement about the deployment.
+///
+/// # Security
+///
+/// The default is the same opaque provider-failure marker; it carries no request text and cannot
+/// be interpreted as an authenticated identity.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Unavailable;
 
@@ -153,6 +158,11 @@ impl ChunkVerification {
 /// the reader has no way to choose between them. [`ChunkSink::publish`] silently keeps the first,
 /// because the alternative — a panic on a path an extension point controls — turns an
 /// implementation bug into an availability bug.
+///
+/// # Security
+///
+/// The default sink contains no chunk-verification material. It cannot make a streaming body
+/// verifiable until an authenticator explicitly publishes that material.
 #[derive(Default)]
 pub struct ChunkSink {
     slot: std::sync::OnceLock<ChunkVerification>,
