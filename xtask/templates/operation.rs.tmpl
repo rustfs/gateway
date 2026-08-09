@@ -1,0 +1,72 @@
+// Copyright 2026 RustFS Team
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+// SCAFFOLD: implement before merge
+//! `{{NAME}}`: an intentionally incomplete dialect operation.
+//!
+//! Responsible for: declaring the operation, its security floor, and its temporary handler.
+//! NOT responsible for: wire semantics; replace this scaffold from protocol evidence.
+//! Upstream: the dialect registry. Downstream: the backend implementation.
+//!
+//! Shares: none
+
+use rustfs_gateway_sig::{OperationFloor, SigService};
+
+use crate::handler::{Handler, HandlerResult, Req};
+use crate::op::{AuthRequirement, Operation, ResourceShape};
+use crate::registry::OperationSpec;
+
+/// The temporary operation marker type.
+pub struct {{NAME}};
+
+static SPEC: OperationSpec = OperationSpec {
+    name: "scaffold:{{NAME}}",
+    success_status: 200,
+    required_params: &[],
+    not_configured_error: None,
+    auth: Some(AuthRequirement::new("scaffold:{{NAME}}", ResourceShape::Object)),
+};
+
+static FLOOR: OperationFloor = OperationFloor::custom("scaffold:{{NAME}}", SigService::S3);
+
+impl Operation for {{NAME}} {
+    const NAME: &'static str = "scaffold:{{NAME}}";
+    type Input = ();
+    type Output = String;
+    type DerivedResources = crate::NoDerived;
+
+    fn derive_resources(_input: &Self::Input) -> Result<Self::DerivedResources, crate::DerivedResourceError> {
+        Ok(crate::NoDerived)
+    }
+
+    fn seal_derived_input(_input: &mut Self::Input) {}
+
+    fn spec() -> &'static OperationSpec {
+        &SPEC
+    }
+
+    fn floor() -> &'static OperationFloor {
+        &FLOOR
+    }
+}
+
+/// Temporary backend used only to prove the scaffold cannot pass verification.
+#[derive(Debug)]
+pub struct ScaffoldBackend;
+
+impl Handler<{{NAME}}> for ScaffoldBackend {
+    async fn call(&self, _request: Req<{{NAME}}>) -> HandlerResult<{{NAME}}> {
+        todo!("SCAFFOLD handler is not implemented")
+    }
+}

@@ -1,0 +1,66 @@
+// Copyright 2026 RustFS Team
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+// SCAFFOLD: implement before merge
+//! The must-red check for the `{{NAME}}` scaffold.
+//!
+//! Responsible for: registering and calling the scaffold handler so `todo!()` is observed.
+//! NOT responsible for: asserting completed operation behaviour.
+//! Upstream: `ops::{{SNAKE}}`. Downstream: `cargo xtask verify --op {{NAME}}`.
+
+use std::future::Future;
+use std::sync::Arc;
+use std::task::{Context, Poll, Wake, Waker};
+
+use rustfs_gateway_core::ops::{{SNAKE}}::{ScaffoldBackend, {{NAME}}};
+use rustfs_gateway_core::registry::RouterBuilder;
+
+const CASE: &str = include_str!("../../../conformance/cases/scaffold/{{SNAKE}}_smoke.toml");
+
+struct NoopWake;
+
+impl Wake for NoopWake {
+    fn wake(self: Arc<Self>) {}
+}
+
+fn block_on<F: Future>(future: F) -> F::Output {
+    let waker = Waker::from(Arc::new(NoopWake));
+    let mut context = Context::from_waker(&waker);
+    let mut future = std::pin::pin!(future);
+    loop {
+        match future.as_mut().poll(&mut context) {
+            Poll::Ready(output) => return output,
+            Poll::Pending => std::thread::yield_now(),
+        }
+    }
+}
+
+#[test]
+fn scaffold_must_be_red() {
+    let router = RouterBuilder::new()
+        .handle_without_codec::<{{NAME}}, _>(Arc::new(ScaffoldBackend))
+        .build()
+        .expect("the scaffold registry entry must compile before its handler is implemented");
+    let invocation = router
+        .registry()
+        .authorize_and_invoke_no_derived::<{{NAME}}>(())
+        .expect("the scaffold input must authorize")
+        .expect("the scaffold handler must be registered");
+    let response = block_on(invocation).expect("the scaffold handler must answer");
+    let expected_body = CASE
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("exact_utf8 = \"").and_then(|value| value.strip_suffix('"')))
+        .expect("the generated case must declare an exact response body");
+    assert_eq!(response.output().map(String::as_str), Some(expected_body));
+}

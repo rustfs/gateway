@@ -1,0 +1,69 @@
+// Copyright 2026 RustFS Team
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+//! Process-boundary contracts for repository automation.
+//!
+//! Responsible for: stable exit codes and the JSON route-explanation surface.
+//! NOT responsible for: generation semantics, which the codegen crate tests directly.
+//! Upstream: the xtask binary. Downstream: CI and agents invoking `cargo xtask`.
+
+use std::process::{Command, Output};
+
+fn xtask(args: &[&str]) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_xtask"))
+        .args(args)
+        .output()
+        .unwrap_or_else(|error| panic!("xtask must start: {error}"))
+}
+
+#[test]
+fn route_explain_json_names_the_selected_operation() {
+    let output = xtask(&["route", "explain", "--json", "GET /bucket?list-type=2&prefix=a"]);
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("\"selected\":\"ListObjectsV2\""), "{stdout}");
+    assert!(stdout.contains("\"candidates\":"), "{stdout}");
+    assert!(stdout.contains("\"predicates\":"), "{stdout}");
+}
+
+#[test]
+fn an_unknown_operation_is_a_usage_error_with_a_candidate() {
+    let output = xtask(&["verify", "--op", "GetObjekt"]);
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("GetObject"), "{stderr}");
+}
+
+#[test]
+fn a_standard_operation_cannot_be_scaffolded() {
+    let output = xtask(&["new-op", "GetObject"]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("NameCollision"));
+}
+
+#[test]
+fn usage_names_every_p7_command() {
+    let output = xtask(&[]);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    for command in ["verify --op", "verify --all", "route explain", "new-op", "bootstrap"] {
+        assert!(stderr.contains(command), "usage omitted {command}: {stderr}");
+    }
+}
+
+#[test]
+fn help_output_matches_its_golden() {
+    let output = xtask(&["--help"]);
+    assert!(output.status.success());
+    assert_eq!(String::from_utf8_lossy(&output.stdout), include_str!("golden/help.txt"));
+}

@@ -1,0 +1,20 @@
+usage: cargo xtask <command>
+
+use --json to request a machine-readable result
+
+commands:
+  verify --op <operation>   run the affected operation crates (<=30 seconds)
+  verify --crate <name>     run one crate's tests (<=30 seconds)
+  verify --all              run the workspace tests (<=10 minutes)
+  codegen                   regenerate spec/operations, OPERATIONS.md and generated/
+  codegen diff --semantic   print a semantic diff capped at 50 lines
+  codegen --check           fail when generated output or the verify map drifted
+  spec verify               fail when any generated artefact differs from a fresh run
+  why <target>              why a behaviour is the way it is: quirk id, operation, error code,
+                            header or query key
+  route explain [--json] 'METHOD /path?query'
+                            explain route selection and every predicate
+  new-op <Operation>        create an intentionally-red operation scaffold
+  bootstrap                 prepare a fresh checkout for work (<=5 minutes)
+  conformance <run|validate|baseline> [--filter <glob>] [--transport hyper|conn]
+              [--profile aws|minio|strict] [--baseline <f>] [--json <f>] [--junit <f>]

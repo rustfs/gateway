@@ -65,6 +65,9 @@ fixed now so that the same check does not get written twice under two names.
 | `check_policy_snapshot_once.sh` | The service reads policy exactly once before either mandatory authorization stage | P6-02 |
 | `check_authz_no_default_impl.sh` | Both `Authorizer` stages exist and neither has a default method body | P6-02 |
 | `check_no_allow_all_in_examples.sh` | Rust examples contain no unconditional allow authorizer | P6-02 |
+| `check_no_scaffold_on_main.sh` | No tracked or untracked `new-op` artefact retains the `SCAFFOLD: implement before merge` marker | P7-06 |
+| `check_verify_map_generated.sh` | The operation-to-test map is codegen-owned and byte-for-byte current, never hand-maintained | P7-06 |
+| `check_tool_versions_pinned.sh` | Six CI Cargo tools have one central exact version pin; no moving `latest` or `cargo-binstall` installer | P7-06 |
 | `test_guard_scripts.sh` | Not a guard: runs every guard on the tree and asserts each one fails on an injected violation | P0 |
 
 ### Registered, not yet implemented (TODO)
