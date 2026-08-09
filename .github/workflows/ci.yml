@@ -79,7 +79,11 @@ jobs:
     name: Static checks
     runs-on: ubuntu-latest
     steps:
+      # The baseline ratchet compares the pull-request merge commit with its
+      # first parent, so the static job needs that parent object locally.
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          fetch-depth: 2
       - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
       - run: cargo fmt --all --check
       # Pinned models must match their recorded checksums before anything is generated from them.
@@ -183,6 +187,8 @@ jobs:
     timeout-minutes: 9
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          fetch-depth: 2
       - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - name: Guard mutations (maximum 8 minutes after setup)

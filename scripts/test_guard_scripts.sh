@@ -628,6 +628,278 @@ expect_fail check_case_keys_honoured.sh \
     'a DECLARED entry naming a field the schema dropped' mut_declaration_for_a_dropped_field
 
 # -----------------------------------------------------------------------------
+# P8-01 freezes the case language and the baseline contract. These controls
+# remove one required dimension at a time, weaken evidence, add a regression to
+# the baseline, and replace the raw socket write with an HTTP client dependency.
+# A green guard without these mutations would only restate the intended policy.
+# -----------------------------------------------------------------------------
+
+mut_schema_chunk_timing() {
+    python3 - <<'PYEOF'
+import json, pathlib
+path = pathlib.Path("conformance/case.schema.json")
+schema = json.loads(path.read_text())
+del schema["$defs"]["dataChunk"]["properties"]["delay_ms"]
+path.write_text(json.dumps(schema, indent=2))
+PYEOF
+}
+expect_fail check_schema_dimensions.sh \
+    'the chunk arrival timing field removed from the frozen schema' mut_schema_chunk_timing
+
+mut_schema_abnormal_close() {
+    python3 - <<'PYEOF'
+import json, pathlib
+path = pathlib.Path("conformance/case.schema.json")
+schema = json.loads(path.read_text())
+schema["$defs"]["controlChunk"]["properties"]["action"]["enum"].remove("half_close")
+path.write_text(json.dumps(schema, indent=2))
+PYEOF
+}
+expect_fail check_schema_dimensions.sh \
+    'half-close removed from abnormal termination actions' mut_schema_abnormal_close
+
+mut_schema_stream_error() {
+    python3 - <<'PYEOF'
+import json, pathlib
+path = pathlib.Path("conformance/case.schema.json")
+schema = json.loads(path.read_text())
+del schema["$defs"]["expect"]["properties"]["body_bytes_before_error"]
+path.write_text(json.dumps(schema, indent=2))
+PYEOF
+}
+expect_fail check_schema_dimensions.sh \
+    'the mid-stream response byte counter removed' mut_schema_stream_error
+
+mut_schema_stream_error_optional() {
+    python3 - <<'PYEOF'
+import json, pathlib
+path = pathlib.Path("conformance/case.schema.json")
+schema = json.loads(path.read_text())
+for condition in schema["$defs"]["expect"]["allOf"]:
+    if condition.get("if", {}).get("properties", {}).get("kind", {}).get("const") == "stream_error":
+        condition["then"]["required"].remove("body_bytes_before_error")
+path.write_text(json.dumps(schema, indent=2))
+PYEOF
+}
+expect_fail check_schema_dimensions.sh \
+    'the mid-stream byte counter made optional' mut_schema_stream_error_optional
+
+mut_schema_clock() {
+    python3 - <<'PYEOF'
+import json, pathlib
+path = pathlib.Path("conformance/case.schema.json")
+schema = json.loads(path.read_text())
+del schema["$defs"]["clock"]["properties"]["fixed"]
+path.write_text(json.dumps(schema, indent=2))
+PYEOF
+}
+expect_fail check_schema_dimensions.sh \
+    'the fixed clock injection field removed' mut_schema_clock
+
+mut_schema_reuse() {
+    python3 - <<'PYEOF'
+import json, pathlib
+path = pathlib.Path("conformance/case.schema.json")
+schema = json.loads(path.read_text())
+del schema["$defs"]["connection"]["properties"]["reuse"]
+path.write_text(json.dumps(schema, indent=2))
+PYEOF
+}
+expect_fail check_schema_dimensions.sh \
+    'the connection reuse field removed' mut_schema_reuse
+
+mut_schema_events() {
+    python3 - <<'PYEOF'
+import json, pathlib
+path = pathlib.Path("conformance/case.schema.json")
+schema = json.loads(path.read_text())
+del schema["$defs"]["expect"]["properties"]["events"]
+path.write_text(json.dumps(schema, indent=2))
+PYEOF
+}
+expect_fail check_schema_dimensions.sh \
+    'the response event sequence removed' mut_schema_events
+
+mut_schema_events_optional() {
+    python3 - <<'PYEOF'
+import json, pathlib
+path = pathlib.Path("conformance/case.schema.json")
+schema = json.loads(path.read_text())
+for condition in schema["$defs"]["expect"]["allOf"]:
+    if condition.get("if", {}).get("properties", {}).get("kind", {}).get("const") == "event_stream":
+        condition["then"]["required"].remove("events")
+path.write_text(json.dumps(schema, indent=2))
+PYEOF
+}
+expect_fail check_schema_dimensions.sh \
+    'the event sequence made optional for an event-stream expectation' mut_schema_events_optional
+
+mut_schema_golden() {
+    python3 - <<'PYEOF'
+import json, pathlib
+path = pathlib.Path("conformance/case.schema.json")
+schema = json.loads(path.read_text())
+del schema["$defs"]["bodyExpectation"]["properties"]["golden"]
+path.write_text(json.dumps(schema, indent=2))
+PYEOF
+}
+expect_fail check_schema_dimensions.sh \
+    'the byte-exact golden field removed' mut_schema_golden
+
+mut_schema_header_absence() {
+    python3 - <<'PYEOF'
+import json, pathlib
+path = pathlib.Path("conformance/case.schema.json")
+schema = json.loads(path.read_text())
+del schema["$defs"]["expect"]["properties"]["headers_absent"]
+path.write_text(json.dumps(schema, indent=2))
+PYEOF
+}
+expect_fail check_schema_dimensions.sh \
+    'the absent-header assertion removed' mut_schema_header_absence
+
+mut_schema_transport_field() {
+    python3 - <<'PYEOF'
+import json, pathlib
+path = pathlib.Path("conformance/case.schema.json")
+schema = json.loads(path.read_text())
+schema["properties"]["transport"] = {"type": "string"}
+path.write_text(json.dumps(schema, indent=2))
+PYEOF
+}
+expect_fail check_schema_dimensions.sh \
+    'transport made case-selectable instead of runner-injected' mut_schema_transport_field
+
+mut_missing_evidence() {
+    python3 - <<'PYEOF'
+import pathlib
+path = pathlib.Path("conformance/cases/acl/c-acl-0002.toml")
+text = path.read_text()
+start = text.index("[[case.evidence]]")
+end = text.find("\n[", start + 2)
+path.write_text(text[:start] + (text[end + 1:] if end >= 0 else ""))
+PYEOF
+}
+expect_fail check_evidence_shape.sh \
+    'a case with its evidence removed' mut_missing_evidence
+
+mut_pasted_evidence() {
+    python3 - <<'PYEOF'
+import pathlib
+path = pathlib.Path("conformance/cases/acl/c-acl-0002.toml")
+text = path.read_text()
+needle = 'summary = "'
+at = text.index(needle) + len(needle)
+path.write_text(text[:at] + ("x" * 201) + text[at:])
+PYEOF
+}
+expect_fail check_evidence_shape.sh \
+    'an evidence summary longer than the compliance ceiling' mut_pasted_evidence
+
+mut_baseline_regression() {
+    python3 - <<'PYEOF'
+import json, pathlib
+path = pathlib.Path("conformance/baseline.json")
+baseline = json.loads(path.read_text())
+case = next(case for case, verdict in baseline["cases"].items() if verdict == "passed")
+baseline["cases"][case] = "failed"
+path.write_text(json.dumps(baseline, indent=2) + "\n")
+PYEOF
+}
+expect_fail check_baseline_ratchet.sh \
+    'a newly failing case added to the baseline' mut_baseline_regression
+
+mut_baseline_deleted() {
+    rm -f conformance/baseline.json
+}
+expect_fail check_baseline_ratchet.sh \
+    "the guard's baseline input deleted, which must fail rather than skip" mut_baseline_deleted
+
+mut_runner_sdk_dependency() {
+    printf 'aws-sdk-s3 = "1"\n' >>crates/conformance/Cargo.toml
+}
+expect_fail check_runner_raw_bytes.sh \
+    'an S3 SDK dependency added to the conformance runner' mut_runner_sdk_dependency
+
+mut_runner_raw_write_removed() {
+    sed 's/\.write_all(bytes)/.write_all(\&[])/' crates/conformance/src/socket.rs \
+        >crates/conformance/src/socket.rs.mut
+    mv crates/conformance/src/socket.rs.mut crates/conformance/src/socket.rs
+}
+expect_fail check_runner_raw_bytes.sh \
+    'the request bytes no longer written verbatim to the socket' mut_runner_raw_write_removed
+
+mut_runner_raw_write_hidden_in_comment() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("crates/conformance/src/socket.rs")
+text = path.read_text()
+old = "            .write_all(bytes)"
+new = "            .write_all(&[]) // .write_all(bytes)"
+if old not in text:
+    raise SystemExit("raw write call not found")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_runner_raw_bytes.sh \
+    'the raw-write marker surviving only inside a comment' mut_runner_raw_write_hidden_in_comment
+
+mut_runner_raw_write_hidden_in_string() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("crates/conformance/src/socket.rs")
+text = path.read_text()
+old = "            .write_all(bytes)"
+new = '            .write_all(&[])\n            .and(Ok({ let _marker = ".write_all(bytes)"; }))?'
+if old not in text:
+    raise SystemExit("raw write call not found")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_runner_raw_bytes.sh \
+    'the raw-write marker surviving only inside a string' mut_runner_raw_write_hidden_in_string
+
+mut_runner_conn_call_bypassed() {
+    sed 's/connection\.write(\&head\.bytes)/connection.write(\&[])/' crates/conformance/src/conn.rs \
+        >crates/conformance/src/conn.rs.mut
+    mv crates/conformance/src/conn.rs.mut crates/conformance/src/conn.rs
+}
+expect_fail check_runner_raw_bytes.sh \
+    'the conn transport bypassing the case head bytes' mut_runner_conn_call_bypassed
+
+mut_runner_body_write_bypassed() {
+    sed 's/self\.write(bytes)?/self.write(\&[])?/' crates/conformance/src/socket.rs \
+        >crates/conformance/src/socket.rs.mut
+    mv crates/conformance/src/socket.rs.mut crates/conformance/src/socket.rs
+}
+expect_fail check_runner_raw_bytes.sh \
+    'Connection::write_body dropping the declared chunk bytes' mut_runner_body_write_bypassed
+
+mut_runner_chunk_call_bypassed() {
+    sed 's/connection\.write_body(bytes)?/connection.write_body(\&[])?/' crates/conformance/src/conn.rs \
+        >crates/conformance/src/conn.rs.mut
+    mv crates/conformance/src/conn.rs.mut crates/conformance/src/conn.rs
+}
+expect_fail check_runner_raw_bytes.sh \
+    'the conn body loop dropping a declared data chunk' mut_runner_chunk_call_bypassed
+
+mut_runner_raw_connect_bypassed() {
+    sed 's/TcpStream::connect(addr)/TcpStream::connect("127.0.0.1:9")/' crates/conformance/src/socket.rs \
+        >crates/conformance/src/socket.rs.mut
+    mv crates/conformance/src/socket.rs.mut crates/conformance/src/socket.rs
+}
+expect_fail check_runner_raw_bytes.sh \
+    'Connection::open ignoring the selected raw socket address' mut_runner_raw_connect_bypassed
+
+mut_runner_unlisted_client_dependency() {
+    printf 'ureq = "3"\n' >>crates/conformance/Cargo.toml
+}
+expect_fail check_runner_raw_bytes.sh \
+    'an unlisted HTTP client dependency bypassing a name deny-list' mut_runner_unlisted_client_dependency
+
+# -----------------------------------------------------------------------------
 # check_resolver_pure.sh has four rules and each gets its own control, because
 # three of them are regexes over source text and the fourth is an awk field
 # extractor — every one of which turns into a no-op from a single typo. The
@@ -1719,6 +1991,21 @@ mut_ci_guard_job_missing() {
 }
 expect_fail check_ci_test_split.sh \
     'the guard-self-test job being renamed away' mut_ci_guard_job_missing
+
+mut_ci_guard_parent_fetch_dropped() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path(".github/workflows/ci.yml")
+text = path.read_text()
+start = text.index("  guard-self-test:")
+old = "          fetch-depth: 2"
+position = text.index(old, start)
+path.write_text(text[:position] + text[position:].replace(old, "          fetch-depth: 1", 1))
+PYEOF
+}
+expect_fail check_ci_test_split.sh \
+    'the guard mutation job losing access to the baseline parent commit' mut_ci_guard_parent_fetch_dropped
 
 mut_ci_guard_command_dropped() {
     replace_ci_text 'timeout 480s bash scripts/test_guard_scripts.sh' 'timeout 480s true'
