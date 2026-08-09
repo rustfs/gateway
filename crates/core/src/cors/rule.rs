@@ -57,7 +57,7 @@ use super::request::RequestedHeaders;
 /// has to be echoed back.
 ///
 /// Only [`AllowOrigin::Exact`] may ever be paired with `Access-Control-Allow-Credentials`; see
-/// [`super::answer`], where that exclusion is a property of the code rather than a rule to
+/// the CORS answer builder, where that exclusion is a property of the code rather than a rule to
 /// remember.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AllowOrigin<'a> {

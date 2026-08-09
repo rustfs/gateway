@@ -64,8 +64,9 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use rustfs_gateway_core::{
-    Answer as CoreAnswer, AuthRequirement, BoxFuture, CodecError, EncodedResponse, Handler, HandlerError, MetaView,
-    OperationCodec, Req, RequestBody, Resp, RouteEntry, TargetKind,
+    Answer as CoreAnswer, AuthRequirement, BoxFuture, CodecError, Decision, Denied, EncodedResponse, ErasedCodec, ErasedDecoded,
+    ErasedRequest, Handler, HandlerError, MetaView, OperationCodec, OwnedResource, Req, RequestBody, Resp, RouteEntry,
+    TargetKind, erase_authorized_handler,
 };
 use rustfs_gateway_sig::OperationFloor;
 use rustfs_gateway_stream::ByteStream;
@@ -97,8 +98,8 @@ type Answer = Result<(ErasedAnswer, u16), HandlerError>;
 /// A backend call in flight.
 pub(crate) type Invocation = BoxFuture<'static, Answer>;
 
-/// Decode the wire, then call the backend.
-type Invoke = Arc<dyn Fn(&MetaView<'_>, Bytes) -> Result<Invocation, CodecError> + Send + Sync>;
+/// Call the backend with input that carries the authorization proof.
+type Invoke = Arc<dyn Fn(ErasedRequest) -> Result<Invocation, HandlerError> + Send + Sync>;
 
 /// Write the answer back to the wire.
 type Encode = Arc<dyn Fn(ErasedOutput, &MetaView<'_>, u16) -> Result<EncodedResponse, CodecError> + Send + Sync>;
@@ -106,6 +107,7 @@ type Encode = Arc<dyn Fn(ErasedOutput, &MetaView<'_>, u16) -> Result<EncodedResp
 /// Everything the service needs about one registered operation, with `O` erased.
 #[derive(Clone)]
 pub(crate) struct OperationDispatch {
+    codec: ErasedCodec,
     invoke: Invoke,
     encode: Encode,
     floor: &'static OperationFloor,
@@ -137,23 +139,23 @@ impl OperationDispatch {
         // existed.
         let layers: Option<Arc<[Arc<dyn OpLayer<O>>]>> = (!layers.is_empty()).then(|| Arc::from(layers));
 
-        let invoke: Invoke = Arc::new(move |meta: &MetaView<'_>, bytes: Bytes| {
-            let input = decode::<O>(meta, bytes)?;
-            let backend = Arc::clone(&backend);
-            let layers = layers.clone();
+        let codec = ErasedCodec::for_operation::<O>();
+
+        let handler = erase_authorized_handler::<O, _>(Arc::new(LayeredBackend {
+            backend,
+            layers,
+            operation: core::marker::PhantomData,
+        }));
+        let invoke: Invoke = Arc::new(move |request: ErasedRequest| {
+            let call = handler(request);
             Ok(Box::pin(async move {
-                let request = Req::<O>::new(input);
-                let response: Resp<O> = match layers {
-                    None => backend.call(request).await?,
-                    Some(layers) => run_layered::<O, B>(&backend, &layers, request).await?,
-                };
+                let response = call.await?;
+                let response = response
+                    .downcast::<Resp<O>>()
+                    .map_err(|_| HandlerError::internal_error("the registered dispatch received another operation's response"))?;
                 let (answer, status) = response.into_parts();
                 let answer = match answer {
                     CoreAnswer::Settled(output) => ErasedAnswer::Settled(Box::new(output) as ErasedOutput),
-                    // The continuation is re-boxed rather than driven here, because driving it is
-                    // what the head has already been committed against: this closure returns as
-                    // soon as the status is known, and the facade writes the head before awaiting
-                    // what is inside.
                     CoreAnswer::Committed(work) => {
                         ErasedAnswer::Committed(Box::pin(
                             async move { work.await.map(|output| Box::new(output) as ErasedOutput) },
@@ -161,7 +163,7 @@ impl OperationDispatch {
                     }
                 };
                 Ok((answer, status))
-            }) as Invocation)
+            }))
         });
 
         let encode: Encode = Arc::new(|output: ErasedOutput, meta: &MetaView<'_>, status: u16| {
@@ -177,6 +179,7 @@ impl OperationDispatch {
         });
 
         Self {
+            codec,
             invoke,
             encode,
             floor: O::floor(),
@@ -198,13 +201,33 @@ impl OperationDispatch {
         self.auth
     }
 
-    /// Decodes the request and calls the backend.
+    /// Decodes the request without making it dispatchable.
     ///
     /// # Errors
     ///
     /// [`CodecError`] when the request could not be read. A handler failure is inside the future.
-    pub(crate) fn invoke(&self, meta: &MetaView<'_>, body: Bytes) -> Result<Invocation, CodecError> {
-        (self.invoke)(meta, body)
+    pub(crate) fn decode(&self, meta: &MetaView<'_>, body: Bytes) -> Result<ErasedDecoded, CodecError> {
+        let streamed = RequestBody::Stream(ByteStream::from_bytes(body.clone()));
+        match self.codec.decode(meta, streamed) {
+            Ok(decoded) => Ok(decoded),
+            Err(error) if error.code() == &ErrorCode::INTERNAL_ERROR => self.codec.decode(meta, RequestBody::Buffered(body)),
+            Err(error) => Err(error),
+        }
+    }
+
+    /// The normalized resources that require the second authorization stage.
+    pub(crate) fn resources(&self, decoded: &ErasedDecoded) -> Result<Vec<OwnedResource>, CodecError> {
+        self.codec.derived_resources(decoded)
+    }
+
+    /// Consumes decoded input and produces the only payload dispatch accepts.
+    pub(crate) fn authorize(&self, decoded: ErasedDecoded, decisions: &[Decision]) -> Result<ErasedRequest, Denied> {
+        self.codec.authorize(decoded, decisions)
+    }
+
+    /// Calls the backend with authorized input.
+    pub(crate) fn invoke(&self, request: ErasedRequest) -> Result<Invocation, HandlerError> {
+        (self.invoke)(request)
     }
 
     /// Encodes the answer.
@@ -245,6 +268,30 @@ pub(crate) fn layered_invocations() -> u64 {
     LAYERED_INVOCATIONS.with(core::cell::Cell::get)
 }
 
+/// The typed backend registered behind core's opaque authorized dispatch.
+struct LayeredBackend<O, B>
+where
+    O: OperationCodec,
+    B: Handler<O>,
+{
+    backend: Arc<B>,
+    layers: Option<Arc<[Arc<dyn OpLayer<O>>]>>,
+    operation: core::marker::PhantomData<fn() -> O>,
+}
+
+impl<O, B> Handler<O> for LayeredBackend<O, B>
+where
+    O: OperationCodec,
+    B: Handler<O>,
+{
+    async fn call(&self, request: Req<O>) -> rustfs_gateway_core::HandlerResult<O> {
+        match &self.layers {
+            None => self.backend.call(request).await,
+            Some(layers) => run_layered::<O, B>(&self.backend, layers, request).await,
+        }
+    }
+}
+
 /// Runs one operation's layer chain, outermost first, with the backend as the terminal.
 ///
 /// Reached only when at least one layer is registered; see [`OperationDispatch::layered`].
@@ -275,20 +322,6 @@ where
 {
     fn call(&self, request: Req<O>) -> BoxFuture<'_, rustfs_gateway_core::HandlerResult<O>> {
         Box::pin(self.backend.call(request))
-    }
-}
-
-/// Decodes one operation's input, offering the body as a stream first.
-///
-/// See the module documentation for why the order is this way round and not the other.
-fn decode<O: OperationCodec>(meta: &MetaView<'_>, bytes: Bytes) -> Result<O::Input, CodecError> {
-    let streamed = RequestBody::Stream(ByteStream::from_bytes(bytes.clone()));
-    match O::decode(meta, streamed) {
-        Ok(input) => Ok(input),
-        // The one documented refusal `RequestBody::into_buffered` produces. Every other failure is
-        // a statement about the request and is returned untouched.
-        Err(error) if error.code() == &ErrorCode::INTERNAL_ERROR => O::decode(meta, RequestBody::Buffered(bytes)),
-        Err(error) => Err(error),
     }
 }
 
@@ -448,7 +481,11 @@ mod tests {
         let wire = rustfs_gateway_http::WireRequest::accept(request, &rustfs_gateway_http::Limits::default())
             .expect("an acceptable request");
         let meta = MetaView::of(&wire, TargetKind::Service).expect("a service-level view");
-        dispatch.invoke(&meta, Bytes::new()).expect("a decodable request").await
+        let decoded = dispatch.decode(&meta, Bytes::new()).expect("a decodable request");
+        let resources = dispatch.resources(&decoded).expect("derived resources");
+        let decisions = vec![Decision::Allow; resources.len()];
+        let authorized = dispatch.authorize(decoded, &decisions).expect("authorized");
+        dispatch.invoke(authorized).expect("dispatchable").await
     }
 
     struct NoBackend;

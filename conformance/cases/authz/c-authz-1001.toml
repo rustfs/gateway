@@ -1,0 +1,38 @@
+[case]
+id = "c-authz-1001"
+schema_version = 1
+title = "UploadPartCopy refuses a source the caller cannot read"
+rationale = "Destination write permission cannot substitute for source read permission on a multipart copy."
+polarity = "negative"
+operation = "UploadPartCopy"
+tags = ["security", "multipart"]
+timeout_ms = 10000
+quirks = ["q-copy-source-authz-0086"]
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UploadPartCopy.html"
+summary = "A part copy requires permission to read the named source and write the destination part."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "authz-destination"
+[[setup.buckets]]
+name = "authz-denied-source"
+[[setup.objects]]
+bucket = "authz-denied-source"
+key = "secret"
+body = { utf8 = "secret" }
+[[setup.multipart_uploads]]
+bucket = "authz-destination"
+key = "copy"
+capture_upload_id_as = "upload"
+
+[request]
+method = "PUT"
+target = "/authz-destination/copy?partNumber=1&uploadId=${capture.upload}"
+headers = { "x-amz-copy-source" = "/authz-denied-source/secret" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+[expect]
+kind = "response"
+status = 403
+[expect.error]
+code = "AccessDenied"

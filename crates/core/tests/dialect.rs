@@ -71,6 +71,13 @@ impl Operation for HeadObjectReport {
     const NAME: &'static str = "acme:HeadObjectReport";
     type Input = ();
     type Output = ();
+    type DerivedResources = rustfs_gateway_core::NoDerived;
+
+    fn derive_resources(_input: &Self::Input) -> Result<Self::DerivedResources, rustfs_gateway_core::DerivedResourceError> {
+        Ok(rustfs_gateway_core::NoDerived)
+    }
+
+    fn seal_derived_input(_input: &mut Self::Input) {}
 
     fn spec() -> &'static OperationSpec {
         &REPORT_SPEC
@@ -194,7 +201,8 @@ fn a_declared_dialect_operation_reaches_its_own_handler() {
     let answer = block_on(
         router
             .registry()
-            .invoke::<HeadObjectReport>(Req::new(()))
+            .authorize_and_invoke_no_derived::<HeadObjectReport>(())
+            .expect("input authorization succeeds")
             .expect("registered"),
     );
     assert!(answer.is_ok());
@@ -265,6 +273,15 @@ macro_rules! vendor_operation {
                 const NAME: &'static str = $name;
                 type Input = ();
                 type Output = ();
+                type DerivedResources = rustfs_gateway_core::NoDerived;
+
+                fn derive_resources(
+                    _input: &Self::Input,
+                ) -> Result<Self::DerivedResources, rustfs_gateway_core::DerivedResourceError> {
+                    Ok(rustfs_gateway_core::NoDerived)
+                }
+
+                fn seal_derived_input(_input: &mut Self::Input) {}
 
                 fn spec() -> &'static OperationSpec {
                     &SPEC

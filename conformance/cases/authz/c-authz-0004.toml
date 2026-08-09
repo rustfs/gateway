@@ -1,0 +1,31 @@
+[case]
+id = "c-authz-0004"
+schema_version = 1
+title = "An allowed CopySource resolves inside the handler"
+rationale = "The backend can copy only after the sealed source is paired with the proof for that same normalized resource."
+polarity = "positive"
+operation = "CopyObject"
+tags = ["security"]
+timeout_ms = 10000
+quirks = ["q-copy-source-authz-0086"]
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CopyObject.html"
+summary = "CopyObject requires source read permission in addition to destination write permission."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "authz-copy"
+[[setup.objects]]
+bucket = "authz-copy"
+key = "source"
+body = { utf8 = "secret" }
+
+[request]
+method = "PUT"
+target = "/authz-copy/destination"
+headers = { "x-amz-copy-source" = "/authz-copy/source" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200

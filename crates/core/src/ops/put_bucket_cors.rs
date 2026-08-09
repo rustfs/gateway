@@ -33,7 +33,7 @@
 //! configuration is re-parsed on every future release, and a decoder that got stricter would
 //! silently turn off cross-origin access with only a browser-side symptom and one server-side
 //! warn line (`q-cors-0007`). Semantic refusals — `PATCH` as a method, a second wildcard — are
-//! [`shared::cors::validate`](super::shared::cors::validate)'s to make, after decoding, with the
+//! [`shared::cors::validate_cors`](super::shared::cors::validate_cors)'s to make, after decoding, with the
 //! specific codes AWS answers.
 //!
 //! There is no partial update: the document replaces the configuration entirely. Clearing it is
@@ -67,6 +67,13 @@ impl Operation for PutBucketCors {
 
     type Input = PutBucketCorsInput;
     type Output = PutBucketCorsOutput;
+    type DerivedResources = crate::authz::NoDerived;
+
+    fn derive_resources(_input: &Self::Input) -> Result<Self::DerivedResources, crate::authz::DerivedResourceError> {
+        Ok(crate::authz::NoDerived)
+    }
+
+    fn seal_derived_input(_input: &mut Self::Input) {}
 
     fn spec() -> &'static OperationSpec {
         &SPEC

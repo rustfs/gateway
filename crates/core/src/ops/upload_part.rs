@@ -68,6 +68,13 @@ impl Operation for UploadPart {
 
     type Input = UploadPartInput;
     type Output = UploadPartOutput;
+    type DerivedResources = crate::authz::NoDerived;
+
+    fn derive_resources(_input: &Self::Input) -> Result<Self::DerivedResources, crate::authz::DerivedResourceError> {
+        Ok(crate::authz::NoDerived)
+    }
+
+    fn seal_derived_input(_input: &mut Self::Input) {}
 
     fn spec() -> &'static OperationSpec {
         &SPEC

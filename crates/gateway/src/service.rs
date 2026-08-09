@@ -118,7 +118,8 @@ use rustfs_gateway_core::cors::{
     answer_preflight, classify, preflight_refusal,
 };
 use rustfs_gateway_core::{
-    EncodedResponse, MetaView, ResponseBody, RouteRequestParts, Router, SseConfig, TargetKind, TransportSecurity,
+    Decision, EncodedResponse, MetaView, ResourceShape, ResponseBody, RouteRequestParts, Router, SseConfig, TargetKind,
+    TransportSecurity,
     dispatch::{NO_ROUTE_MESSAGE, NOT_REGISTERED_MESSAGE},
 };
 use rustfs_gateway_http::{Limits, WireRequest};
@@ -132,7 +133,8 @@ use crate::clock::Clock;
 use crate::dispatch::{DispatchTable, ErasedAnswer, target_of};
 use crate::ext::{
     Authentication, Authenticator, Authorizer, AuthzRequest, CORS_PREFLIGHT, CachedCorsSource, Governor, GovernorRequest,
-    HostQuery, HostResolver, Observer, RequestEvent, ResolvedHost, ResponseView, RoutedView, StageFilter, WireHead,
+    HostQuery, HostResolver, Observer, PolicySource, RequestContext, RequestEvent, ResolvedHost, ResponseView, RoutedView,
+    StageFilter, WireHead,
 };
 use crate::gate::{Authenticated, BodyCeilings, SealedBody};
 use crate::render::{S3Error, render};
@@ -152,6 +154,7 @@ pub(crate) struct Inner {
     pub(crate) max_buffered_body_bytes: u64,
     pub(crate) authorizer: Arc<dyn Authorizer>,
     pub(crate) authenticator: Arc<dyn Authenticator>,
+    pub(crate) policy_source: Arc<dyn PolicySource>,
     pub(crate) host_resolver: Arc<dyn HostResolver>,
     pub(crate) governor: Arc<dyn Governor>,
     pub(crate) observer: Arc<dyn Observer>,
@@ -526,20 +529,34 @@ impl S3Service {
             // permissive answer here looks like in production.
             return outcome.refuse(S3Error::new(ErrorCode::INTERNAL_ERROR, "this operation declares no authorisation action"));
         };
-        if let Err(denial) = self
+        let policy = match self.inner.policy_source.snapshot(verdict.identity()).await {
+            Ok(policy) => policy,
+            Err(_) => return outcome.refuse(S3Error::new(ErrorCode::ACCESS_DENIED, "access denied")),
+        };
+        let authz_context = RequestContext::new(now, &policy);
+        if self
             .inner
             .authorizer
-            .authorize(&AuthzRequest {
-                operation,
-                action: requirement.action,
-                resource: requirement.resource,
-                bucket: meta.bucket(),
-                key: meta.key(),
-                identity: verdict.identity(),
-            })
+            .authorize(
+                &authz_context,
+                &AuthzRequest {
+                    operation,
+                    action: requirement.action,
+                    resource: requirement.resource,
+                    bucket: meta.bucket(),
+                    key: meta.key(),
+                    copy_source_identity: None,
+                    version_id: None,
+                    route_action: requirement.action,
+                    route_bucket: meta.bucket(),
+                    route_key: meta.key(),
+                    identity: verdict.identity(),
+                },
+            )
             .await
+            != Decision::Allow
         {
-            return outcome.refuse(S3Error::from(denial));
+            return outcome.refuse(S3Error::new(ErrorCode::ACCESS_DENIED, "access denied"));
         }
 
         // Authorised, so the configuration read below is one an authenticated and permitted
@@ -622,7 +639,55 @@ impl S3Service {
             Err(error) => return outcome.refuse(error),
         };
 
-        let invocation = match op.invoke(&meta, body) {
+        let decoded = match op.decode(&meta, body) {
+            Ok(decoded) => decoded,
+            Err(error) => return outcome.refuse(S3Error::from(error)),
+        };
+        let resources = match op.resources(&decoded) {
+            Ok(resources) => resources,
+            Err(error) => return outcome.refuse(S3Error::from(error)),
+        };
+        let mut decisions = Vec::with_capacity(resources.len());
+        let mut refused = false;
+        for resource in &resources {
+            let shape = if resource.key().is_some() {
+                ResourceShape::Object
+            } else if resource.bucket().is_some() {
+                ResourceShape::Bucket
+            } else {
+                ResourceShape::Service
+            };
+            let decision = self
+                .inner
+                .authorizer
+                .authorize(
+                    &authz_context,
+                    &AuthzRequest {
+                        operation,
+                        action: resource.action(),
+                        resource: shape,
+                        bucket: resource.bucket().or_else(|| meta.bucket()),
+                        key: resource.key(),
+                        copy_source_identity: resource.identity(),
+                        version_id: resource.version_id(),
+                        route_action: requirement.action,
+                        route_bucket: meta.bucket(),
+                        route_key: meta.key(),
+                        identity: verdict.identity(),
+                    },
+                )
+                .await;
+            refused |= decision != Decision::Allow;
+            decisions.push(decision);
+        }
+        if refused {
+            return outcome.refuse(S3Error::new(ErrorCode::ACCESS_DENIED, "access denied"));
+        }
+        let authorized = match op.authorize(decoded, &decisions) {
+            Ok(authorized) => authorized,
+            Err(_) => return outcome.refuse(S3Error::new(ErrorCode::ACCESS_DENIED, "access denied")),
+        };
+        let invocation = match op.invoke(authorized) {
             Ok(invocation) => invocation,
             Err(error) => return outcome.refuse(S3Error::from(error)),
         };

@@ -296,6 +296,13 @@ impl Operation for QueryShaped {
 
     type Input = QueryShapedInput;
     type Output = QueryShapedOutput;
+    type DerivedResources = rustfs_gateway_core::NoDerived;
+
+    fn derive_resources(_input: &Self::Input) -> Result<Self::DerivedResources, rustfs_gateway_core::DerivedResourceError> {
+        Ok(rustfs_gateway_core::NoDerived)
+    }
+
+    fn seal_derived_input(_input: &mut Self::Input) {}
 
     fn spec() -> &'static OperationSpec {
         &QUERY_SHAPED_SPEC

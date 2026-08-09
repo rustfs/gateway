@@ -134,7 +134,10 @@ fn a_name_alone_carries_a_request_through_decode_handler_and_encode() {
     assert_eq!(entry.spec.name, "GetBucketLocation");
 
     let decoded = (entry.decode)(&view, RequestBody::None).expect("the erased decoder reads the request");
-    let answer = block_on((entry.handler)(decoded)).expect("the erased handler answers");
+    let resources = (entry.resources)(&decoded).expect("derived resources");
+    let decisions = vec![rustfs_gateway_core::Decision::Allow; resources.len()];
+    let authorized = (entry.authorize)(decoded, &decisions).expect("input authorization");
+    let answer = block_on((entry.handler)(authorized)).expect("the erased handler answers");
     let response = (entry.encode)(answer, &view).expect("the erased encoder writes the answer");
 
     assert_eq!(response.status, StatusCode::OK);
@@ -175,7 +178,10 @@ fn the_encoder_takes_the_status_from_the_answer_and_not_from_the_spec() {
     let entry = registry.wire("UploadPart").expect("registered with a codec");
 
     let decoded = (entry.decode)(&view, RequestBody::None).expect("decodes");
-    let answer = block_on((entry.handler)(decoded)).expect("answers");
+    let resources = (entry.resources)(&decoded).expect("derived resources");
+    let decisions = vec![rustfs_gateway_core::Decision::Allow; resources.len()];
+    let authorized = (entry.authorize)(decoded, &decisions).expect("input authorization");
+    let answer = block_on((entry.handler)(authorized)).expect("answers");
     let response = (entry.encode)(answer, &view).expect("encodes");
 
     assert_eq!(response.status, StatusCode::PARTIAL_CONTENT);

@@ -73,7 +73,8 @@ the one file that awaits, and it runs after the floor has admitted the request.
 | `src/ops/shared/bucket_policy.rs` | The three things a gateway may check about a bucket policy — 20 KB ceiling, JSON syntax, nesting depth — as `validate_policy`, plus `validate_public_access_block`. The depth is counted in a loop and never by recursion, so the limit is a refusal and not a stack overflow. **No policy is evaluated here**; that is the authorizer's, and no refusal ever repeats the document | A policy was accepted or refused wrongly, or somebody is about to add policy evaluation to the gateway |
 | `src/ops/shared/bucket_region.rs` | Where `x-amz-bucket-region` must appear, and the two redirects that carry it: the 301 for a bucket in another region and the 307 shape whose trigger this crate does not own | A redirect is missing the header an SDK needs to complete it |
 | `src/ops/shared/location_constraint.rs` | `LocationConstraint` parsing: the `EU` alias, the empty-element rule, the us-east-1 omission rule, and the strict match against the one `RegionSet` the signature scope also reads. `RegionMatchPolicy` is the configuration item | A creation was accepted or refused for the wrong region |
-| `src/ops/shared/copy_source.rs` | `x-amz-copy-source`: the three grammars, the split-before-decode order, the source-authorization type state, the self-copy classification and the stricter copy-range rule | You are touching anything a copy reads from, or asking why the source's bucket cannot be read without a proof |
+| `src/authz/mod.rs` | `Decoded<O> -> Authorized<O>`, three-state decisions, mandatory derived-resource sets, and the erased owned resource view | You are changing either authorization stage or adding an operation whose input names another resource |
+| `src/ops/shared/copy_source.rs` | `x-amz-copy-source`: one parse and normalization, the sealed `CopySourceResources`, proof-gated resolution, self-copy classification and the stricter copy-range rule | You are touching anything a copy reads from, or asking why the source's bucket cannot be read without a proof |
 | `src/ops/shared/etag.rs` | Which RFC 9110 comparison each conditional entity-tag header uses, and how its value is read | An entity-tag condition matched when it should not have, or the other way round |
 | `src/ops/shared/tagging.rs` | What a tag set may be, once for its two request channels: the `x-amz-tagging` header grammar, the per-scope count ceilings (10 object / 50 bucket), the 128/256-character limits, the documented character set, and the duplicate-key refusal | A tag was accepted or refused wrongly on either channel, or a tagging error carries the wrong code |
 | `src/ops/shared/precondition.rs` | The fixed precondition order, the two places S3 departs from RFC 9110, the 200/206/416 range decision, and six inline tests for the one validator shape `tests/precondition_range.rs` never builds — a representation that exists with no entity tag, where `*` must still hold | You are wiring a conditional or ranged operation, or a 304/412/416 came out wrong |
@@ -82,7 +83,7 @@ the one file that awaits, and it runs after the floor has admitted the request.
 | `src/registry/mod.rs` | `OperationSpec`, `RequiredParam`, `check_required`, `Registry`, `WireEntry` — and `register_handler`, the one call that installs a handler and a codec together | You are adding a required parameter, or looking an operation up by name |
 | `src/registry/reject.rs` | `RegistryError` and the seven rules an operation passes before it registers | A registration was refused |
 | `src/registry/handlers.rs` | The erasure closure, `HandlerTable` (handler **and** codec in one entry), `Invocation` — the only file here that awaits | You are wiring the pipeline to the handlers |
-| `src/registry/codecs.rs` | `ErasedDecode`, `ErasedEncode`, `ErasedCodec` — where the operation type disappears, so a `&str` reaches `decode` and `encode` | You are wiring the pipeline to the codecs |
+| `src/registry/codecs.rs` | `ErasedDecode`, `ErasedResources`, `ErasedAuthorize`, `ErasedEncode`, `ErasedCodec` — where the operation type disappears without erasing the authorization transition | You are wiring the pipeline to the codecs |
 | `src/registry/opset.rs` | `OperationSet`, `MissingHandlers` and its one-line message | You are asserting completeness |
 | `src/registry/builder.rs` | `RouterBuilder`: `handle`, `route`, `require`, `build`, and `BuildError` | You are assembling a service |
 | `src/error.rs` | `PreAuthError` and the closed pre-authentication status set | You are raising an error before authn |
@@ -317,14 +318,12 @@ the one file that awaits, and it runs after the floor has admitted the request.
   `ActualObjectSize` are pinned byte for byte by `c-cond-0001`, `c-cond-0023` and `c-range-0010`.
   The relative order of `Key` and `BucketName` follows AWS's `NoSuchKey` document and is asserted by
   nothing; a case that pins it would turn the guess into a fact.
-- **The copy family's second authorization stage lives in a type, not in `AuthRequirement`.**
-  `AuthRequirement` carries one action and one resource shape, so `CopyObject` and `UploadPartCopy`
-  declare only the destination's `s3:PutObject`. The source's `s3:GetObject` is enforced by
-  `ops/shared/copy_source.rs`: `CopySource` has no accessor for its bucket or key, and the only way
-  to a readable `ResolvedCopySource` is `resolve(&SourceAuthorized)`, whose argument only
-  `authorize_source` can produce. That makes the omission behind GHSA-mx42 / GHSA-wfxj a compile
-  error rather than a review miss, and it is deliberately *not* a second `AuthRequirement` field —
-  when P4-05 lands `DerivedResources`, the two should be joined and this note deleted.
+- **The copy family's second authorization stage is a consumed type transition.**
+  `CopyObject` and `UploadPartCopy` derive one version-aware read resource from the normalized
+  `CopySourceResources`. Its full path/access-point/outpost identity survives policy evaluation and
+  proof matching. Dispatch accepts only `Authorized<O>`, and a handler can reveal the source only
+  through the `AuthorizedRead` proof carried by its `Req<O>`. The source is parsed once before
+  authorization; the backend receives that same value rather than parsing the header again.
 - **The copy result structures are flattened by the overlay, because the encoder has no structure
   payload.** `CopyObjectOutput.CopyObjectResult` and `UploadPartCopyOutput.CopyPartResult` are
   `httpPayload` structures, and `emit/codec/encode.rs` accepts only a blob in payload position. The

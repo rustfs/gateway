@@ -286,6 +286,13 @@ mod tests {
         const ORIGIN: OperationOrigin = OperationOrigin::Standard(StandardOperation::TOKEN);
         type Input = ();
         type Output = ();
+        type DerivedResources = crate::NoDerived;
+
+        fn derive_resources(_input: &Self::Input) -> Result<Self::DerivedResources, crate::DerivedResourceError> {
+            Ok(crate::NoDerived)
+        }
+
+        fn seal_derived_input(_input: &mut Self::Input) {}
 
         fn spec() -> &'static OperationSpec {
             &SPEC

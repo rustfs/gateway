@@ -1,0 +1,26 @@
+[case]
+id = "c-authz-1012"
+schema_version = 1
+title = "An encoded traversal copy source is denied before storage"
+rationale = "Percent encoding cannot hide a dot-dot segment from the single normalization boundary."
+polarity = "negative"
+operation = "CopyObject"
+tags = ["security", "naming"]
+timeout_ms = 10000
+quirks = ["q-copy-source-authz-0086"]
+[[case.evidence]]
+url = "https://github.com/rustfs/rustfs/security/advisories/GHSA-8r6f-hmq2-28rg"
+summary = "Encoded traversal segments must be rejected before authorization and storage disagree."
+kind = "other"
+[[setup.buckets]]
+name = "authz-traversal"
+[request]
+method = "PUT"
+target = "/authz-traversal/destination"
+headers = { "x-amz-copy-source" = "/authz-traversal/%2e%2e/other/secret" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+[expect]
+kind = "response"
+status = 403
+[expect.error]
+code = "AccessDenied"

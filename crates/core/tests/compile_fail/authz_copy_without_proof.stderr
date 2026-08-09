@@ -1,0 +1,15 @@
+error[E0061]: this method takes 1 argument but 0 arguments were supplied
+  --> tests/compile_fail/authz_copy_without_proof.rs:18:20
+   |
+18 |     let _ = source.resolve();
+   |                    ^^^^^^^-- argument #1 of type `&AuthorizedRead` is missing
+   |
+note: method defined here
+  --> src/ops/shared/copy_source.rs
+   |
+   |     pub fn resolve(&self, proof: &crate::AuthorizedRead) -> Option<ResolvedCopySource> {
+   |            ^^^^^^^
+help: provide the argument
+   |
+18 |     let _ = source.resolve(/* &AuthorizedRead */);
+   |                            +++++++++++++++++++++

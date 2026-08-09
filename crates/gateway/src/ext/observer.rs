@@ -53,7 +53,7 @@ use crate::trace::RequestId;
 #[derive(Debug)]
 pub struct RequestEvent<'a> {
     /// The identifier this request was answered with, and the one the caller received. Minted by
-    /// the service, never read from the request; see [`crate::trace`].
+    /// the service, never read from the request; see the crate's trace module.
     pub request_id: &'a RequestId,
     /// The operation routing chose, when routing chose one. `None` when the request named none,
     /// which is the case an operator most often needs to see.

@@ -1,0 +1,41 @@
+[case]
+id = "c-authz-1013"
+schema_version = 1
+title = "The handler consumes the normalized source rather than reparsing the header"
+rationale = "An encoded slash is normalized once, authorized once, and read back from the copied destination."
+polarity = "negative"
+operation = "CopyObject"
+tags = ["security", "naming"]
+timeout_ms = 10000
+quirks = ["q-copy-source-split-0077", "q-copy-source-authz-0086"]
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/issues/462"
+summary = "A second copy-source parser can split and decode the same header in a different order."
+kind = "s3s-issue"
+[[setup.buckets]]
+name = "authz-normalized"
+[[setup.objects]]
+bucket = "authz-normalized"
+key = "dir/source"
+body = { utf8 = "normalized" }
+[[exchanges]]
+name = "copy-normalized-source"
+[exchanges.request]
+method = "PUT"
+target = "/authz-normalized/destination"
+headers = { "x-amz-copy-source" = "/authz-normalized/dir%2Fsource" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+[exchanges.expect]
+kind = "response"
+status = 200
+[[exchanges]]
+name = "read-destination"
+[exchanges.request]
+method = "GET"
+target = "/authz-normalized/destination"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+[exchanges.expect]
+kind = "response"
+status = 200
+[exchanges.expect.body]
+exact_utf8 = "normalized"

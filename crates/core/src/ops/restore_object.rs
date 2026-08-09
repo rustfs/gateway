@@ -42,7 +42,7 @@
 //! favourite number would break the poll loop while returning a status in the success family,
 //! which no status assertion of the ordinary kind catches.
 //!
-//! So the mapping is data, in [`shared::restore::RestoreState::status`], and this file declares
+//! So the mapping is data, in [`crate::ops::shared::restore::RestoreState::status`], and this file declares
 //! the alternative the mapping is allowed to reach. The pair is asserted in both directions by
 //! `tests/params_and_dispatch.rs`: every state the mapping can produce on success must be either
 //! `SPEC.success_status` or a member of [`ALT_SUCCESS_STATUSES`], and every member of
@@ -64,7 +64,7 @@ use rustfs_gateway_types::dto::{RestoreObject, RestoreObjectInput, RestoreObject
 use crate::op::{AuthRequirement, HasOperation, Operation, OperationOrigin, ResourceShape, StandardOperation};
 use crate::registry::OperationSpec;
 
-/// The success statuses this operation may answer that are not [`SPEC`]`.success_status`.
+/// The success statuses this operation may answer that are not the operation spec's `success_status`.
 ///
 /// Exactly one: the `200` a repeat request against an already-restored copy answers. `409` and
 /// `403` are refusals and are not here — a refusal never reaches an encoder.
@@ -94,6 +94,13 @@ impl Operation for RestoreObject {
 
     type Input = RestoreObjectInput;
     type Output = RestoreObjectOutput;
+    type DerivedResources = crate::authz::NoDerived;
+
+    fn derive_resources(_input: &Self::Input) -> Result<Self::DerivedResources, crate::authz::DerivedResourceError> {
+        Ok(crate::authz::NoDerived)
+    }
+
+    fn seal_derived_input(_input: &mut Self::Input) {}
 
     fn spec() -> &'static OperationSpec {
         &SPEC

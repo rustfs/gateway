@@ -104,11 +104,12 @@ pub use crate::clock::{Clock, FixedClock, system_clock};
 pub use crate::close::ConnectionIntent;
 pub use crate::ext::{
     Addressing, Authentication, Authenticator, Authorizer, AuthzRequest, BaseDomain, CORS_PREFLIGHT, CachedCorsSource, ChunkSink,
-    ChunkVerification, CorsCacheConfig, CorsSource, CorsSourceError, CredentialProvider, Credentials, CredentialsError, Denial,
-    DomainError, FROZEN_WIRE_HEADERS, FrozenHeader, Governor, GovernorRequest, HostQuery, HostResolver, Lease,
-    MAX_BASE_DOMAIN_BYTES, Next, NoCors, NoObserver, Observer, OpLayer, PathStyleOnly, RequestEvent, ResolvedHost, ResponseView,
-    RoutedView, SigV4Authenticator, StageFilter, StaticCredentials, TargetOrigin, Unavailable, Unlimited, VhostHint,
-    VirtualHostStyle, WireHead, op_layer, response_filter, routed_filter, wire_filter,
+    ChunkVerification, CorsCacheConfig, CorsSource, CorsSourceError, CredentialProvider, Credentials, CredentialsError, Decision,
+    Denial, DomainError, FROZEN_WIRE_HEADERS, FrozenHeader, Governor, GovernorRequest, HostQuery, HostResolver, Lease,
+    MAX_BASE_DOMAIN_BYTES, Next, NoCors, NoObserver, NoPolicy, Observer, OpLayer, PathStyleOnly, PolicyError, PolicySnapshot,
+    PolicySource, RequestContext, RequestEvent, ResolvedHost, ResponseView, RoutedView, SigV4Authenticator, SnapshotId,
+    StageFilter, StaticCredentials, TargetOrigin, Unavailable, Unlimited, VhostHint, VirtualHostStyle, WireHead, op_layer,
+    policy_from, response_filter, routed_filter, wire_filter,
 };
 pub use crate::probe::{BodyProgress, ObservedBody};
 pub use crate::render::{S3Error, connection_intent_of, declaration, document, document_body, render};
@@ -137,13 +138,14 @@ pub use rustfs_gateway_core::{
     Answer, ArnForm, AuthRequirement, BoxFuture, CodecError, CommitOutcome, CommitWork, ELEMENT_ORDER, EncodedResponse,
     ErrorDetail, ErrorHeader, Handler, HandlerError, HandlerResult, HostClass, MetaView, MissingHandlers, Operation,
     OperationCodec, OperationSet, OperationSpec, PRECONDITION_FAILED_MESSAGE, ParamKind, PreAuthError, Predicate,
-    RANGE_NOT_SATISFIABLE_MESSAGE, Req, RequestBody, RequiredParam, ResourceShape, Resp, ResponseBody, ResponseOverride,
-    RouteEntry, RouteSelector, TargetKind,
+    RANGE_NOT_SATISFIABLE_MESSAGE, Req, RequestBody, RequiredParam, ResourceIdentity, ResourceShape, Resp, ResponseBody,
+    ResponseOverride, RouteEntry, RouteSelector, TargetKind,
 };
 // The pagination contract. Found unreachable by check_shared_reachable.sh the moment that
 // guard existed — the fourth contract in a row written for backends and left where no
 // backend could see it. key_count is the KeyCount = Contents + CommonPrefixes rule that
 // made OpenDAL page forever when a listing got it wrong.
+pub use rustfs_gateway_core::ops::delete_objects::DeleteObjectResources;
 pub use rustfs_gateway_core::ops::shared::pagination::{CursorKind, CursorSpec, MAX_CURSOR_BYTES, key_count};
 
 // The conditional-request and entity-tag contracts, exported for the same reason as
@@ -163,15 +165,12 @@ pub use rustfs_gateway_core::ops::shared::precondition::{
     RequestKind, evaluate, evaluate_range,
 };
 
-// The copy-source contract. Exported because a backend cannot honour it otherwise: the
-// conformance fixture had to mirror `CopySource`, `authorize_source` and `classify_self_copy`
-// by hand, and every backend outside this workspace would have done the same. A type state
-// that only this workspace can reach is a type state that does not prevent the defect it was
-// written for — GHSA-mx42 and GHSA-wfxj were both a second implementation forgetting the
-// check the first one made.
+// The copy-source contract. A backend receives `CopySourceResources` through `Req::resources`
+// and can reveal the normalized source only with the proof on that same request. It never needs
+// to parse the raw header again.
 pub use rustfs_gateway_core::ops::shared::copy_source::{
-    CopyRange, CopySource, CopySourceForm, CopySourceRejection, ResolvedCopySource, SelfCopy, SourceAccess, SourceAuthorized,
-    SourceResource, authorize_source, classify_self_copy, resolve_copy_range,
+    CopyRange, CopySource, CopySourceForm, CopySourceRejection, CopySourceResources, ResolvedCopySource, SelfCopy,
+    classify_self_copy, resolve_copy_range,
 };
 // The CORS document contract. A backend stores what `PutBucketCors` hands it and the preflight
 // runtime later answers browsers out of that store, so the rules for what may be stored — the

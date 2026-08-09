@@ -57,20 +57,13 @@
 //! element of a v1 listing and of `ListAllMyBucketsResult`. [`OWNER_ID`] is that identity, fixed
 //! and shared, so the value is the same in every run and every golden redacts one thing.
 //!
-//! # The copy half, and the parser it had to write twice
+//! # The copy half and its consumed authorization proof
 //!
-//! `CopyObject` and `UploadPartCopy` name a *second* object the caller chose, so both go through
-//! [`parse_copy_source`], [`confirm_source_owner`] and [`read_copy_source`] — one set of functions,
-//! called from both, because the two published advisories on this family were a part copy that
-//! authorized the upload it wrote to and never the object it read from.
-//!
-//! Those three still mirror `crates/core/src/ops/shared/copy_source.rs` rather than calling it,
-//! and that is now a debt rather than a necessity: the facade *does* export `CopySource`,
-//! `authorize_source` and `classify_self_copy`, so the mirror is a second copy of a rule that has
-//! one owner. The copy **range** no longer is — [`resolve_copy_span`] is a call to the contract's
-//! `resolve_copy_range`, and the arithmetic and the opinion this file used to hold beside it are
-//! gone. The two had drifted apart in exactly the way the shared directory exists to prevent: this
-//! file trimmed an overlong span and the contract's doc comment said it refused one.
+//! `CopyObject` and `UploadPartCopy` name a second object. Their live handler path reads the
+//! framework's `CopySourceResources` and resolves it with the `AuthorizedRead` proof carried by
+//! the same `Req`; it never parses the header again. [`parse_copy_source`] remains only for focused
+//! fixture unit tests that exercise legacy edge cases directly. The copy range likewise delegates
+//! to the shared [`resolve_copy_range`] contract.
 //!
 //! Where a mirror is still here, it is faithful **including where it and the corpus disagree**, and
 //! each disagreement is recorded on the function that carries it. A stub that answered what a case
@@ -1919,16 +1912,14 @@ fn checksum_of(checksum: &UploadChecksum, bytes: &[u8]) -> Result<ChecksumSpec, 
 
 /// `x-amz-copy-source`, resolved to the object it names.
 ///
-/// # Why this parser is written again here
+/// # Why this parser remains here
 ///
 /// `crates/core/src/ops/shared/copy_source.rs` is this gateway's copy-source contract — the split
 /// rule, the two ARN grammars, the self-copy classification and the stricter range rule — and the
-/// parser below is still a hand-written mirror of the first two. It no longer has to be: the facade
-/// re-exports `CopySource`, `authorize_source` and `classify_self_copy`, so this mirror is a second
-/// copy of a rule that has an owner, and a rule two implementations hold separately is a rule they
-/// can hold differently. That is the shape of the two advisories the shared module was written to
-/// prevent, and replacing this parser with the contract's is the outstanding half of the job the
-/// range rule has already had done to it — see [`resolve_copy_span`].
+/// parser below remains for direct fixture unit tests. The live `Handler` implementations do not
+/// call it: they consume the normalized source from `Req::resources()` after the framework has
+/// authorized it. Keeping the test helper out of the service path prevents a second parser from
+/// deciding which object storage reads.
 ///
 /// The mirror is faithful, including where the shared module and the corpus disagree. Those
 /// disagreements are recorded on the functions that carry them; none of them is smoothed over here,
@@ -1944,11 +1935,22 @@ struct CopySource {
     version_id: Option<String>,
 }
 
+impl CopySource {
+    fn from_resolved(source: &rustfs_gateway::ResolvedCopySource) -> Self {
+        Self {
+            bucket: source.bucket().clone(),
+            key: source.key().clone(),
+            version_id: source.version_id().map(str::to_owned),
+        }
+    }
+}
+
 /// `InvalidArgument`, in AWS's own wording, for a copy source this fixture will not read.
 ///
 /// The explanation is a `&'static str` chosen from a fixed set, never assembled from the rejected
 /// value: this header carries a bucket name the caller may have no right to learn the existence of,
 /// and echoing it into an error document turns a refusal into an oracle.
+#[cfg(test)]
 fn bad_copy_source(reason: &'static str) -> HandlerError {
     HandlerError::new(ErrorCode::INVALID_ARGUMENT, reason)
 }
@@ -1958,6 +1960,7 @@ fn bad_copy_source(reason: &'static str) -> HandlerError {
 /// The order is the point: the optional `?versionId=` suffix is split off the **raw** value at its
 /// last `?`, and only then is each half percent-decoded. Decode first and `a%3Fb?versionId=v1`
 /// becomes `a?b?versionId=v1`, where no split rule recovers which `?` the client sent.
+#[cfg(test)]
 fn parse_copy_source(raw: &str) -> Result<CopySource, HandlerError> {
     if raw.is_empty() {
         return Err(bad_copy_source("x-amz-copy-source must name a source object"));
@@ -1981,6 +1984,7 @@ fn parse_copy_source(raw: &str) -> Result<CopySource, HandlerError> {
 /// `versionId=<value>`. A suffix that is anything else is refused instead of folded back into the
 /// key, because folding it back makes one header mean two things depending on whether the value
 /// happens to parse.
+#[cfg(test)]
 fn split_source_version(raw: &str) -> Result<(&str, Option<String>), HandlerError> {
     let Some((path, query)) = raw.rsplit_once('?') else {
         return Ok((raw, None));
@@ -1999,6 +2003,7 @@ fn split_source_version(raw: &str) -> Result<(&str, Option<String>), HandlerErro
 ///
 /// The two halves are separated on the still-encoded value, so a key containing `%2F` keeps it
 /// rather than being cut at a separator the client escaped on purpose.
+#[cfg(test)]
 fn parse_source_path(path: &str) -> Result<(String, String), HandlerError> {
     let path = path.strip_prefix('/').unwrap_or(path);
     let Some((bucket, key)) = path.split_once('/') else {
@@ -2012,6 +2017,7 @@ fn parse_source_path(path: &str) -> Result<(String, String), HandlerError> {
 /// An unrecognised ARN is never demoted to a bucket name. `arn:aws:iam::1:user/bob` would otherwise
 /// address a bucket literally called `arn:aws:iam::1:user`, and in a deployment where somebody has
 /// created one, every unrecognised ARN copy is silently redirected into it.
+#[cfg(test)]
 fn parse_source_arn(path: &str) -> Result<(String, String), HandlerError> {
     // arn : partition : service : region : account : resource…, where the resource half contains
     // colons in neither form, so five splits is the whole grammar.
@@ -2046,6 +2052,7 @@ fn parse_source_arn(path: &str) -> Result<(String, String), HandlerError> {
 }
 
 /// The one refusal every unrecognised ARN shares.
+#[cfg(test)]
 fn unknown_source_arn() -> HandlerError {
     bad_copy_source("x-amz-copy-source accepts an access point or Outposts ARN, or a bucket and key")
 }
@@ -2061,11 +2068,13 @@ fn unknown_source_arn() -> HandlerError {
 /// `GHSA-f4vq-9ffr-m8m3` has: a backend that re-reads a name the framework already read. It now
 /// calls [`rustfs_gateway::decode_once`], and `scripts/check_single_normalization.sh` refuses
 /// a third one.
+#[cfg(test)]
 fn decode_source(value: &str) -> Result<String, HandlerError> {
     rustfs_gateway::decode_once(value).map_err(|_| bad_copy_source("x-amz-copy-source is not valid UTF-8 once decoded"))
 }
 
 /// Validates the bucket half of a copy source, through the framework's floor and rules.
+#[cfg(test)]
 fn source_bucket(name: &str) -> Result<BucketName, HandlerError> {
     BucketName::materialize(name, &rustfs_gateway::NamePolicy::default())
         .map_err(|_| bad_copy_source("the bucket named by x-amz-copy-source is not a valid bucket name"))
@@ -2078,6 +2087,7 @@ fn source_bucket(name: &str) -> Result<BucketName, HandlerError> {
 /// that applied looser rules than the gateway would be the second normalisation the whole of
 /// P6-05 exists to prevent, and it would be the one on the storage side of the authorisation
 /// check.
+#[cfg(test)]
 fn source_key(key: &str) -> Result<ObjectKey, HandlerError> {
     ObjectKey::materialize_decoded(key, &rustfs_gateway::NamePolicy::default())
         .map_err(|rejection| bad_copy_source(rejection.reason()))
@@ -2392,7 +2402,10 @@ impl Handler<dto::HeadObject> for Stub {
 
 impl Handler<dto::CopyObject> for Stub {
     fn call(&self, request: Req<dto::CopyObject>) -> impl core::future::Future<Output = HandlerResult<dto::CopyObject>> + Send {
-        let outcome = self.copy_object(request.input());
+        let outcome = match request.resources().source().resolve(request.read_proof()) {
+            Some(resolved) => self.copy_object_with_source(request.input(), CopySource::from_resolved(&resolved)),
+            None => Err(HandlerError::internal_error("the copy-source authorization proof did not match")),
+        };
         async move { outcome }
     }
 }
@@ -2402,7 +2415,10 @@ impl Handler<dto::UploadPartCopy> for Stub {
         &self,
         request: Req<dto::UploadPartCopy>,
     ) -> impl core::future::Future<Output = HandlerResult<dto::UploadPartCopy>> + Send {
-        let outcome = self.upload_part_copy(request.input());
+        let outcome = match request.resources().source().resolve(request.read_proof()) {
+            Some(resolved) => self.upload_part_copy_with_source(request.input(), CopySource::from_resolved(&resolved)),
+            None => Err(HandlerError::internal_error("the copy-source authorization proof did not match")),
+        };
         async move { outcome }
     }
 }
@@ -2522,7 +2538,11 @@ impl Handler<dto::DeleteObjects> for Stub {
         &self,
         request: Req<dto::DeleteObjects>,
     ) -> impl core::future::Future<Output = HandlerResult<dto::DeleteObjects>> + Send {
-        let outcome = self.delete_objects(request.input());
+        let input = request.input();
+        let outcome = match request.resources().resolve(request.read_proof()) {
+            Some(objects) => self.delete_objects(&input.bucket, input.delete.quiet.unwrap_or(false), objects),
+            None => Err(HandlerError::internal_error("the batch-delete authorization proof did not match")),
+        };
         async move { outcome }
     }
 }
@@ -3300,8 +3320,13 @@ impl Stub {
     /// and evaluating both sets of conditions all happen before the copy action starts, so all of
     /// them keep their own status — which is what `c-copy-0026` and `c-copy-0034` assert, each a
     /// `404` for a source that is not there. What the commit covers is the copy itself.
+    #[cfg(test)]
     fn copy_object(&self, input: &dto::CopyObjectInput) -> HandlerResult<dto::CopyObject> {
         let source = parse_copy_source(&input.copy_source)?;
+        self.copy_object_with_source(input, source)
+    }
+
+    fn copy_object_with_source(&self, input: &dto::CopyObjectInput, source: CopySource) -> HandlerResult<dto::CopyObject> {
         let metadata_from = directive_of(
             input.metadata_directive.as_ref().map(dto::MetadataDirective::as_str),
             "Unknown metadata directive.",
@@ -3413,13 +3438,15 @@ impl Stub {
 
     /// One part of a multipart upload, copied out of an object rather than sent.
     ///
-    /// Shares [`parse_copy_source`] and [`confirm_source_owner`] with [`Stub::copy_object`], and
-    /// that sharing is the point: both advisories on this family were a part copy that authorized
-    /// the upload it was writing to and never the object it read from, so "both operations gate the
-    /// source the same way" has to be a fact about which function is called and not a claim in a
-    /// comment.
-    fn upload_part_copy(&self, input: &dto::UploadPartCopyInput) -> HandlerResult<dto::UploadPartCopy> {
-        let source = parse_copy_source(&input.copy_source)?;
+    /// Shares the framework's `CopySourceResources` and [`confirm_source_owner`] with
+    /// [`Stub::copy_object`]. Both advisories on this family were a part copy that authorized the
+    /// upload it wrote to and never the object it read from, so both operations must consume the
+    /// same proof-gated source type.
+    fn upload_part_copy_with_source(
+        &self,
+        input: &dto::UploadPartCopyInput,
+        source: CopySource,
+    ) -> HandlerResult<dto::UploadPartCopy> {
         confirm_source_owner(input.expected_source_bucket_owner.as_deref())?;
 
         let mut fixture = self.borrow()?;
@@ -3678,14 +3705,18 @@ impl Stub {
         Ok(Resp::new(dto::DeleteBucketTaggingOutput::default()))
     }
 
-    fn delete_objects(&self, input: &dto::DeleteObjectsInput) -> HandlerResult<dto::DeleteObjects> {
+    fn delete_objects<'a>(
+        &self,
+        bucket: &BucketName,
+        quiet: bool,
+        objects: impl IntoIterator<Item = (&'a ObjectKey, Option<&'a str>)>,
+    ) -> HandlerResult<dto::DeleteObjects> {
         let mut fixture = self.borrow()?;
-        require_bucket(&fixture, &input.bucket)?;
-        let quiet = input.delete.quiet.unwrap_or(false);
+        require_bucket(&fixture, bucket)?;
         let mut deleted = Vec::new();
         let mut errors = Vec::new();
-        let locked = fixture.has_object_lock(input.bucket.as_str());
-        for identifier in &input.delete.objects {
+        let locked = fixture.has_object_lock(bucket.as_str());
+        for (key, version_id) in objects {
             // Deleting a *version* is where `setup.buckets[].object_lock` becomes observable. On a
             // lock-enabled bucket removing a version needs `s3:BypassGovernanceRetention`, and the
             // refusal is an authorisation decision taken before the version is looked up — so the
@@ -3693,24 +3724,24 @@ impl Stub {
             // object lock the fixture keeps no version history, so the same request is a per-key
             // `NoSuchVersion`. Reporting either per key rather than failing the whole request is
             // the shape this operation is being measured for.
-            if let Some(version) = identifier.version_id.as_ref() {
+            if let Some(version) = version_id {
                 let (code, message) = if locked {
                     ("AccessDenied", "Access Denied")
                 } else {
                     ("NoSuchVersion", "The specified version does not exist.")
                 };
                 errors.push(dto::Error {
-                    key: Some(identifier.key.clone()),
-                    version_id: Some(version.clone()),
+                    key: Some(key.clone()),
+                    version_id: Some(version.to_owned()),
                     code: Some(code.to_owned()),
                     message: Some(message.to_owned()),
                 });
                 continue;
             }
-            fixture.remove_object(input.bucket.as_str(), identifier.key.as_str());
+            fixture.remove_object(bucket.as_str(), key.as_str());
             if !quiet {
                 deleted.push(dto::DeletedObject {
-                    key: Some(identifier.key.clone()),
+                    key: Some(key.clone()),
                     ..dto::DeletedObject::default()
                 });
             }
