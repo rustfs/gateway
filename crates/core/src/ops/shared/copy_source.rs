@@ -578,8 +578,8 @@ fn key_of(encoded: &str) -> Result<ObjectKey, CopySourceRejection> {
     }
     if unsafe_path {
         return Err(CopySourceRejection::new(
-            ErrorCode::ACCESS_DENIED,
-            "the key named by x-amz-copy-source is not authorized",
+            ErrorCode::INVALID_ARGUMENT,
+            "the key named by x-amz-copy-source is not a valid object key",
         ));
     }
     ObjectKey::new(decoded).map_err(|_| {

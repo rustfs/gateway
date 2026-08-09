@@ -258,11 +258,6 @@ impl From<AuthError> for S3Error {
         } else {
             Self::new(ErrorCode::custom(error.code()), error.message())
         };
-        let rendered = if error == AuthError::AuthorizationHeaderMalformed {
-            rendered.with_status(http::StatusCode::FORBIDDEN)
-        } else {
-            rendered
-        };
         rendered.closing(crate::close::after_auth_failure(&error))
     }
 }
@@ -467,12 +462,12 @@ mod tests {
         assert_eq!(unknown.status(), mismatch.status());
     }
 
-    /// Negative — malformed presented credentials are forbidden, never a 400 anonymous fallback.
+    /// Negative — a verifier's malformed scope is a bad request, not a policy denial.
     #[test]
-    fn malformed_presented_credentials_are_forbidden() {
+    fn a_malformed_scope_is_a_bad_request() {
         assert_eq!(
             S3Error::from(AuthError::AuthorizationHeaderMalformed).status(),
-            http::StatusCode::FORBIDDEN
+            http::StatusCode::BAD_REQUEST
         );
     }
 

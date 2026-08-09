@@ -131,7 +131,8 @@ use rustfs_gateway_core::{
 use rustfs_gateway_http::{Limits, WireRequest};
 use rustfs_gateway_sig::timing::FailureFloor;
 use rustfs_gateway_sig::{
-    Admission, PayloadMode, RawQuery, RequestNow, SecurityFloor, SigLocation, TrailerSet, Verdict, WireView, detect_credentials,
+    Admission, AuthError, PayloadMode, RawQuery, RequestNow, SecurityFloor, SigLocation, TrailerSet, Verdict, WireView,
+    detect_credentials,
 };
 use rustfs_gateway_stream::Body;
 use rustfs_gateway_types::{ErrorCode, NamePolicy};
@@ -591,7 +592,18 @@ impl S3Service {
                     "the security floor admitted this request in a way this assembly does not handle",
                 ));
             }
-            Err(error) => Verdict::reject(error),
+            // The floor rejects malformed credential surfaces before a verifier can recover a
+            // scope. Keep that fail-closed response distinct from a verifier's well-formed but
+            // unserved scope, which is `400 AuthorizationHeaderMalformed`.
+            Err(error) => {
+                let rendered = S3Error::from(error);
+                let rendered = if error == AuthError::AuthorizationHeaderMalformed {
+                    rendered.with_status(http::StatusCode::FORBIDDEN)
+                } else {
+                    rendered
+                };
+                return outcome.refuse(rendered);
+            }
         };
         // H4's run-time half: a receipt minted for another request cannot be attached to this one.
         let verdict = SecurityFloor::seal_verdict(verdict, presence);
