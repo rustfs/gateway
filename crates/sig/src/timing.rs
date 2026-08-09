@@ -44,8 +44,8 @@
 //!
 //! | # | Channel | Disposition |
 //! |---|---|---|
-//! | T1 | Access key lookup returns before any HMAC runs, so an unknown key answers faster than a known one — access key enumeration without ever knowing a secret, which is step one of CVE-2025-31489 | Closed by contract: the unknown-key path signs with [`placeholder_secret`] and runs the full four-step derivation and comparison, then answers `InvalidAccessKeyId`. The error codes stay distinct because S3 clients branch on them; latency parity plus rate limiting is the mitigation, error-code normalisation is not |
-//! | T2 | The credential provider is a remote async call on the *unauthenticated* path: cache hit and miss differ in latency, and every forged request costs one IAM or database round trip | Closed by contract: [`LookupBudget`] fixes a hard timeout and a jittered negative-cache TTL, so a miss neither hangs nor becomes an amplifier. Per-IP quota is `Governor` (P6-08) |
+//! | T1 | Access key lookup returns before any HMAC runs, so an unknown key answers faster than a known one — access key enumeration without ever knowing a secret, which is step one of CVE-2025-31489 | Closed by contract: the unknown-key path signs with [`placeholder_secret`], runs the full derivation and comparison, and receives the same wire answer as another unusable credential |
+//! | T2 | The credential provider is a remote async call on the *unauthenticated* path: cache hit and miss differ in latency, and every forged request costs one IAM or database round trip | Closed by the facade's mandatory guarded provider: a hard timeout and bounded jittered negative cache keep a miss from hanging or becoming an amplifier. [`LookupBudget`] remains the primitive policy vocabulary; per-IP quota is `Governor` (P6-08) |
 //! | T3 | A derived-signing-key cache keyed on `(secret, date, region, service)` leaks, on a hit, that this access key was used recently — and keeps secret-equivalent material alive past the request | Closed by omission: this crate implements no such cache. If one is ever added it must be opt-in, TTL-bounded, and zeroized on eviction, and the trade-off documented at the type |
 //! | T4 | Bucket existence: authentication that resolves the bucket before verifying answers faster for a bucket that does not exist, turning an unauthenticated probe into a namespace oracle | Deferred to P2-04 with the interface constrained here: a [`Verdict`](crate::Verdict) is computed from the request and its credentials alone. Nothing in this crate accepts a bucket, so the authentication stage cannot depend on one |
 //! | T5 | Policy evaluation time varies with statement count and match position, leaking policy shape and whether a principal matched | Accepted risk, recorded: it lives in `rustfs-gateway-core`'s authorization stage, after authentication has already succeeded, so it is reachable only by a caller holding valid credentials |
@@ -227,9 +227,8 @@ pub fn placeholder_secret() -> SecretBytes {
 ///
 /// The three outcomes are kept apart at the type level so that the caller cannot collapse
 /// "unknown" and "the provider is down" into one branch. They demand different answers:
-/// `Unknown` is a `403` after the full parity work, `Unavailable` is a `503` and must never be
-/// reported as an authentication failure, because doing so tells a client that its own credentials
-/// are wrong when they are not.
+/// `Unknown` runs the full parity work. `Unavailable` records an operational fault, is not cached,
+/// and still fails closed with the facade's uniform credential response.
 ///
 /// There is no `Debug`: the `Found` variant carries key material.
 #[non_exhaustive]
@@ -241,19 +240,18 @@ pub enum CredentialLookup {
     Unknown,
     /// The provider could not answer within [`LookupBudget::timeout`], or failed.
     ///
-    /// Fail closed: no verdict other than a rejection may follow, and the rejection is a service
-    /// error rather than an authentication error.
+    /// Fail closed: no verdict other than a rejection may follow.
     Unavailable,
 }
 
 impl CredentialLookup {
     /// Whether the caller must still run the full derivation for latency parity.
     ///
-    /// True for [`CredentialLookup::Unknown`]. False for [`CredentialLookup::Unavailable`], where
-    /// there is no answer to give and the request is failing for an unrelated reason.
+    /// True for both [`CredentialLookup::Unknown`] and [`CredentialLookup::Unavailable`]: the
+    /// public response is deliberately the same, so a backend fault cannot create a cheaper path.
     #[must_use]
     pub const fn requires_parity_work(&self) -> bool {
-        matches!(self, Self::Unknown)
+        matches!(self, Self::Unknown | Self::Unavailable)
     }
 }
 
@@ -267,8 +265,8 @@ impl CredentialLookup {
 ///   flood of provider round trips, and so the cache does not expire in lockstep and produce a
 ///   thundering herd.
 ///
-/// The jitter is subtracted, never added, so the effective TTL is `[ttl - jitter, ttl]` and a
-/// negative entry never outlives the configured maximum.
+/// The jitter is added to the base, so the effective TTL is `[ttl, ttl + jitter]`. The base is the
+/// minimum protection window and the spread prevents entries expiring in lockstep.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct LookupBudget {
     timeout: Duration,
@@ -277,17 +275,17 @@ pub struct LookupBudget {
 }
 
 impl LookupBudget {
-    /// A conservative default: 250 ms timeout, 5 s negative TTL, 1 s of jitter.
+    /// The framework default: one-second timeout, 30-second negative TTL and 0–30-second jitter.
     pub const DEFAULT: Self = Self {
-        timeout: Duration::from_millis(250),
-        negative_ttl: Duration::from_secs(5),
-        negative_ttl_jitter: Duration::from_secs(1),
+        timeout: Duration::from_secs(1),
+        negative_ttl: Duration::from_secs(30),
+        negative_ttl_jitter: Duration::from_secs(30),
     };
 
-    /// Builds a budget, clamping the jitter to the TTL.
+    /// Builds a budget, clamping the jitter to the base TTL.
     ///
-    /// Jitter larger than the TTL would allow a zero-length negative entry, which is the same as
-    /// having no negative cache at all — the failure mode this type exists to prevent.
+    /// This keeps the maximum lifetime at twice the configured base, so an accidental huge jitter
+    /// cannot retain a negative result indefinitely.
     #[must_use]
     pub const fn new(timeout: Duration, negative_ttl: Duration, negative_ttl_jitter: Duration) -> Self {
         let negative_ttl_jitter = if negative_ttl_jitter.as_nanos() > negative_ttl.as_nanos() {
@@ -314,7 +312,7 @@ impl LookupBudget {
         self.negative_ttl
     }
 
-    /// The maximum amount subtracted from [`LookupBudget::negative_ttl`] for one entry.
+    /// The maximum amount added to [`LookupBudget::negative_ttl`] for one entry.
     #[must_use]
     pub const fn negative_ttl_jitter(&self) -> Duration {
         self.negative_ttl_jitter
@@ -330,8 +328,8 @@ impl LookupBudget {
     #[must_use]
     pub fn jittered_negative_ttl(&self, fraction: f64) -> Duration {
         let fraction = if fraction.is_finite() { fraction.clamp(0.0, 1.0) } else { 0.0 };
-        let subtract = self.negative_ttl_jitter.mul_f64(fraction);
-        self.negative_ttl.saturating_sub(subtract)
+        let addition = self.negative_ttl_jitter.mul_f64(fraction);
+        self.negative_ttl.saturating_add(addition)
     }
 }
 
@@ -390,25 +388,25 @@ mod tests {
     #[test]
     fn unknown_keys_still_owe_the_parity_work() {
         assert!(CredentialLookup::Unknown.requires_parity_work());
-        assert!(!CredentialLookup::Unavailable.requires_parity_work());
+        assert!(CredentialLookup::Unavailable.requires_parity_work());
         assert!(!CredentialLookup::Found(placeholder_secret()).requires_parity_work());
     }
 
     #[test]
-    fn jitter_never_lengthens_a_negative_entry_and_never_empties_it() {
+    fn jitter_spreads_a_negative_entry_above_its_base() {
         let budget = LookupBudget::DEFAULT;
         assert_eq!(budget.jittered_negative_ttl(0.0), budget.negative_ttl());
-        assert_eq!(budget.jittered_negative_ttl(1.0), Duration::from_secs(4));
+        assert_eq!(budget.jittered_negative_ttl(1.0), Duration::from_secs(60));
         // Out-of-range fractions are clamped, never panic.
         assert_eq!(budget.jittered_negative_ttl(-5.0), budget.negative_ttl());
         assert_eq!(budget.jittered_negative_ttl(f64::NAN), budget.negative_ttl());
-        assert!(budget.jittered_negative_ttl(1.0) > Duration::ZERO);
+        assert!(budget.jittered_negative_ttl(1.0) > budget.negative_ttl());
     }
 
     #[test]
     fn jitter_larger_than_the_ttl_is_clamped() {
         let budget = LookupBudget::new(Duration::from_millis(50), Duration::from_secs(2), Duration::from_secs(30));
         assert_eq!(budget.negative_ttl_jitter(), Duration::from_secs(2));
-        assert_eq!(budget.jittered_negative_ttl(1.0), Duration::ZERO);
+        assert_eq!(budget.jittered_negative_ttl(1.0), Duration::from_secs(4));
     }
 }

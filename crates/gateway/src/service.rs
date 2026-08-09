@@ -131,7 +131,7 @@ use rustfs_gateway_core::{
 use rustfs_gateway_http::{Limits, WireRequest};
 use rustfs_gateway_sig::timing::FailureFloor;
 use rustfs_gateway_sig::{
-    Admission, PayloadMode, RawQuery, RequestNow, SecurityFloor, TrailerSet, Verdict, WireView, detect_credentials,
+    Admission, PayloadMode, RawQuery, RequestNow, SecurityFloor, SigLocation, TrailerSet, Verdict, WireView, detect_credentials,
 };
 use rustfs_gateway_stream::Body;
 use rustfs_gateway_types::{ErrorCode, NamePolicy};
@@ -140,9 +140,9 @@ use crate::clock::{Clock, ClockPosture, MonotonicClock, MonotonicNow};
 use crate::dispatch::{DispatchTable, ErasedAnswer, target_of};
 use crate::ext::{
     AuthSchemeRef, Authentication, Authenticator, Authorizer, AuthzAuditEvent, AuthzAuditSink, AuthzRequest, AuthzStage,
-    CORS_PREFLIGHT, CachedCorsSource, ClassKind, ClientAddr, Governor, GovernorRequest, HostQuery, HostResolver,
-    InputAuthzRequest, Observer, PolicyError, PolicySnapshot, PolicySource, PolicyTimeout, RequestContext, RequestEvent,
-    ResolvedHost, ResponseView, RoutedView, ServerExtensions, StageFilter, WireHead, emit_safely,
+    CORS_PREFLIGHT, CachedCorsSource, ClassKind, ClientAddr, CredentialGuardConfig, Governor, GovernorRequest, HostQuery,
+    HostResolver, InputAuthzRequest, Observer, PolicyError, PolicySnapshot, PolicySource, PolicyTimeout, Rate, RequestContext,
+    RequestEvent, ResolvedHost, ResponseView, RoutedView, ServerExtensions, StageFilter, WireHead, emit_safely,
 };
 use crate::gate::{Authenticated, BodyCeilings, SealedBody};
 use crate::render::{S3Error, render};
@@ -171,6 +171,7 @@ pub(crate) struct Inner {
     pub(crate) observer: Arc<dyn Observer>,
     pub(crate) clock: Arc<dyn Clock>,
     pub(crate) clock_posture: ClockPosture,
+    pub(crate) security_posture: SecurityPosture,
     pub(crate) traces: Arc<dyn TraceSource>,
     pub(crate) cors: Arc<CachedCorsSource>,
     pub(crate) cors_policy: CorsPolicy,
@@ -186,6 +187,59 @@ pub(crate) struct Inner {
 #[derive(Clone)]
 pub struct S3Service {
     inner: Arc<Inner>,
+}
+
+/// Security-sensitive assembly choices that a start-up report should expose.
+///
+/// This value reports configuration, not observed enforcement. Runtime counters belong to the
+/// credential provider and governor themselves.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SecurityPosture {
+    credential_guard: Option<CredentialGuardConfig>,
+    per_ip: Rate,
+}
+
+impl SecurityPosture {
+    pub(crate) const fn new(credential_guard: Option<CredentialGuardConfig>, per_ip: Rate) -> Self {
+        Self {
+            credential_guard,
+            per_ip,
+        }
+    }
+
+    /// The built-in credential guard settings, or `None` for an authenticator with no lookup.
+    #[must_use]
+    pub const fn credential_guard(self) -> Option<CredentialGuardConfig> {
+        self.credential_guard
+    }
+
+    /// The mandatory framework's per-client pre-authentication rate.
+    #[must_use]
+    pub const fn per_ip_rate(self) -> Rate {
+        self.per_ip
+    }
+}
+
+impl core::fmt::Display for SecurityPosture {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self.credential_guard {
+            Some(config) if config.negative_entries == 0 || config.budget.negative_ttl().is_zero() => {
+                f.write_str("credential negative cache: disabled")?;
+            }
+            Some(_) => f.write_str("credential negative cache: enabled")?,
+            None => f.write_str("credential negative cache: not applicable")?,
+        }
+        if self.per_ip.admits_nothing() {
+            f.write_str("; per-IP bucket: closed")
+        } else {
+            write!(
+                f,
+                "; per-IP bucket: bounded ({}/s, burst {})",
+                self.per_ip.per_second(),
+                self.per_ip.burst()
+            )
+        }
+    }
 }
 
 impl core::fmt::Debug for S3Service {
@@ -216,6 +270,12 @@ impl S3Service {
     #[must_use]
     pub fn clock_posture(&self) -> ClockPosture {
         self.inner.clock_posture
+    }
+
+    /// The credential-cache and pre-authentication per-client posture selected at assembly.
+    #[must_use]
+    pub fn security_posture(&self) -> SecurityPosture {
+        self.inner.security_posture
     }
 
     /// Answers one request.
@@ -485,7 +545,7 @@ impl S3Service {
         let verdict = match self.inner.floor.admit(view, op.floor(), now) {
             Ok(Admission::Anonymous(evidence)) => Verdict::anonymous(evidence),
             Ok(Admission::Sealed(sealed)) => {
-                let payload = match payload_mode(&headers) {
+                let payload = match payload_mode(&headers, sealed.marker().location()) {
                     Ok(payload) => payload,
                     Err(error) => return outcome.refuse(error),
                 };
@@ -1120,8 +1180,8 @@ impl<'a> Outcome<'a> {
 
 /// What `x-amz-content-sha256` said about the body.
 ///
-/// An absent header is [`PayloadMode::Empty`], whose canonical token is the digest of the empty
-/// payload — what SDKs sign for a body-less request.
+/// An absent header is [`PayloadMode::Unsigned`] for a presigned query and
+/// [`PayloadMode::Empty`] for a header signature. Those are the tokens each SigV4 form signs.
 ///
 /// The trailer set is read from `x-amz-trailer` and handed to `PayloadMode::parse` together with
 /// the digest value, because the two are only valid in specific combinations and a mode that could
@@ -1129,9 +1189,13 @@ impl<'a> Outcome<'a> {
 /// which refused every trailered upload here as an unreadable header — the wrong stage and the
 /// wrong sentence for a request that is well-formed and merely asks for something this assembly
 /// has not finished. `crate::chunked` is where that refusal now happens, as a `501`.
-fn payload_mode(headers: &http::HeaderMap) -> Result<PayloadMode, S3Error> {
+fn payload_mode(headers: &http::HeaderMap, location: SigLocation) -> Result<PayloadMode, S3Error> {
     let Some(value) = headers.get("x-amz-content-sha256") else {
-        return Ok(PayloadMode::Empty);
+        return Ok(if location.is_presigned() {
+            PayloadMode::Unsigned
+        } else {
+            PayloadMode::Empty
+        });
     };
     let Ok(text) = value.to_str() else {
         return Err(S3Error::new(
@@ -1229,7 +1293,14 @@ mod tests {
     /// it as unsigned would let a client drop the header to remove the body from the signature.
     #[test]
     fn an_absent_content_sha256_is_the_empty_payload() {
-        assert_eq!(payload_mode(&http::HeaderMap::new()).expect("no header"), PayloadMode::Empty);
+        assert_eq!(
+            payload_mode(&http::HeaderMap::new(), SigLocation::Header).expect("no header"),
+            PayloadMode::Empty
+        );
+        assert_eq!(
+            payload_mode(&http::HeaderMap::new(), SigLocation::Query).expect("no header"),
+            PayloadMode::Unsigned
+        );
     }
 
     /// Negative — a request nobody annotated is cleartext, so the customer-key gate is closed by
@@ -1260,6 +1331,6 @@ mod tests {
             http::HeaderName::from_static("x-amz-content-sha256"),
             http::HeaderValue::from_static("STREAMING-AWS4-HMAC-SHA256-PAYLOAD-TRAILER"),
         );
-        assert!(payload_mode(&headers).is_err());
+        assert!(payload_mode(&headers, SigLocation::Header).is_err());
     }
 }

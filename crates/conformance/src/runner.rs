@@ -186,43 +186,44 @@ fn run_case(
                 return outcome;
             }
         };
-        let plan = ExchangePlan {
-            case_id: &case.id,
-            index: exchange.index,
-            request,
-            clock: document.read("clock"),
-            connection: document.read("connection"),
-            timeout_ms,
-            transport: options.transport,
-            profile: options.profile,
-        };
-        let observed = match sut.exchange(&plan) {
-            Ok(observed) => observed,
-            Err(error) => return not_run(outcome, &error, notes),
-        };
-        // A transport that had to produce part of the record some way other than by measuring it
-        // says so here, and the case carries the warning. A green line whose assertion could not
-        // have failed is the defect this suite keeps regrowing; it is not fixed by hiding the fact
-        // in a module comment nobody reads while the report says `passed`.
-        for note in &observed.notes {
-            outcome.diagnostics.push(Diagnostic::warn(
-                "harness/by-construction",
-                &format!("{}/expect", exchange.pointer),
-                format!("exchange {}: {note}", exchange.label()),
-            ));
+        for attempt in 0..exchange.repeat {
+            let plan = ExchangePlan {
+                case_id: &case.id,
+                index: exchange.index,
+                request: request.clone(),
+                clock: document.read("clock"),
+                connection: document.read("connection"),
+                timeout_ms,
+                transport: options.transport,
+                profile: options.profile,
+            };
+            let observed = match sut.exchange(&plan) {
+                Ok(observed) => observed,
+                Err(error) => return not_run(outcome, &error, notes),
+            };
+            // A transport that had to produce part of the record some way other than by measuring
+            // it says so here, and the case carries the warning. A green line whose assertion
+            // could not have failed is the defect this suite keeps regrowing.
+            for note in &observed.notes {
+                outcome.diagnostics.push(Diagnostic::warn(
+                    "harness/by-construction",
+                    &format!("{}/expect", exchange.pointer),
+                    format!("exchange {}, attempt {}: {note}", exchange.label(), attempt + 1),
+                ));
+            }
+            let Some(expectation) = exchange.expect else { continue };
+            let judgement = expect::judge(expectation, &observed, &format!("{}/expect", exchange.pointer), goldens);
+            for mut diagnostic in judgement.diagnostics {
+                diagnostic.message = format!("exchange {}, attempt {}: {}", exchange.label(), attempt + 1, diagnostic.message);
+                outcome.diagnostics.push(diagnostic);
+            }
+            captures.extend(judgement.captures);
         }
-        let Some(expectation) = exchange.expect else { continue };
-        let judgement = expect::judge(expectation, &observed, &format!("{}/expect", exchange.pointer), goldens);
-        for mut diagnostic in judgement.diagnostics {
-            diagnostic.message = format!("exchange {}: {}", exchange.label(), diagnostic.message);
-            outcome.diagnostics.push(diagnostic);
-        }
-        captures.extend(judgement.captures);
     }
     if let Err(error) = sut.finish(&case.id) {
         outcome
             .diagnostics
-            .push(Diagnostic::warn("runner/cleanup", "", error.to_string()));
+            .push(Diagnostic::deny("runner/cleanup", "", error.to_string()));
     }
     // `case.timeout_ms` is a whole-case budget, and the schema says exceeding it is a case failure
     // of kind `hang` rather than an environment error. Enforced here rather than in a transport,

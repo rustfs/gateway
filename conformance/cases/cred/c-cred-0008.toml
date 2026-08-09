@@ -1,0 +1,86 @@
+# c-cred-0008 — an access key the credential provider has never heard of.
+#
+# Schema dimensions exercised: sign.credential = "unknown_access_key", and a byte-exact error body
+# with both minted identifiers redacted. The bytes are the assertion: c-cred-0020 pins the same
+# ones, which is how "an expired session is indistinguishable from an unknown key" is stated in a
+# form that a divergence in either one would break.
+
+[case]
+id = "c-cred-0008"
+schema_version = 1
+title = "An unknown access key is refused with a body that says nothing about which half was wrong"
+rationale = """
+An access key that does not exist must be refused without confirming that it does not exist. The \
+code is InvalidAccessKeyId because AWS returns that code and SDK credential-refresh logic branches \
+on it, but everything else — the status, the message, the header set, every byte of the document — \
+must be the same as for every other unusable credential. The message in particular says only that \
+the request was not authenticated: a message naming the access key, or naming the reason, is the \
+S3 form of the distinguishable-failure defect that GHSA-3p3x-734c-h5vx describes for FTPS, where \
+an invalid user and an invalid password were answered differently and the difference was an \
+enumeration oracle. Nothing derived from the signature appears either — no expected value, no \
+string-to-sign — because that is a signing oracle."""
+polarity = "negative"
+operation = "GetObject"
+tags = ["signature", "sigv4", "security", "error-shape", "timing"]
+timeout_ms = 10000
+quirks = []
+
+[[case.evidence]]
+url = "https://github.com/rustfs/rustfs/security/advisories/GHSA-3p3x-734c-h5vx"
+summary = "Distinguishable authentication failures let a caller learn which half of a credential was wrong; the fix is one answer for every failure plus rate limiting."
+kind = "other"
+
+[[case.evidence]]
+url = "https://github.com/rustfs/rustfs/security/advisories/GHSA-333v-68xh-8mmq"
+summary = "An invalid-signature diagnostic carried the HMAC key and the expected signature, which turns a rejection into a forgery aid."
+kind = "other"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/ErrorResponses.html"
+summary = "S3 answers an access key it does not recognise with 403 and the error code InvalidAccessKeyId."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+request_time = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-cred"
+
+[[setup.objects]]
+bucket = "conf-cred"
+key = "probe"
+body = { utf8 = "credential-probe" }
+
+[request]
+method = "GET"
+target = "/conf-cred/probe"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "unknown_access_key" }
+
+[expect]
+kind = "response"
+status = 403
+connection_after = "open"
+headers_absent = ["etag", "x-amz-version-id", "last-modified"]
+
+[expect.error]
+code = "InvalidAccessKeyId"
+request_id_present = true
+
+[expect.headers_present]
+"content-type" = "application/xml"
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+exact_utf8 = """
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>InvalidAccessKeyId</Code><Message>the request was not authenticated</Message><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>"""
+not_contains_utf8 = [
+    "AKIAI44QH8DHBEXAMPLE",
+    "wJalrXUtnFEMI",
+    "StringToSign",
+    "CanonicalRequest",
+    "SignatureProvided",
+    "does not exist",
+    "no such",
+]

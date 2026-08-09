@@ -225,6 +225,17 @@ impl SigningKey {
 /// ```
 pub struct SessionToken(SecretBytes);
 
+/// Proof that a presented session token equals the token issued with an access key.
+///
+/// Zero-sized and privately constructible. It has no formatting or equality traits because the
+/// only useful operation is obtaining it from [`SessionToken::ct_verify`].
+#[derive(Clone, Copy)]
+pub struct SessionTokenMatch(());
+
+/// A session token comparison did not match.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TokenMismatch;
+
 impl SessionToken {
     /// Validates and stores a session token.
     ///
@@ -251,6 +262,19 @@ impl SessionToken {
     #[must_use]
     pub fn clone_secret(&self) -> Self {
         Self(self.0.clone_secret())
+    }
+
+    /// Compares a presented token with this issuance in constant time.
+    ///
+    /// # Errors
+    ///
+    /// [`TokenMismatch`] when the byte strings differ.
+    pub fn ct_verify(&self, presented: &[u8]) -> Result<SessionTokenMatch, TokenMismatch> {
+        if crate::signature::ct_bytes_equal(self.expose(), presented) {
+            Ok(SessionTokenMatch(()))
+        } else {
+            Err(TokenMismatch)
+        }
     }
 
     /// Number of bytes in the token.
@@ -284,6 +308,14 @@ mod tests {
         assert_eq!(token.expose(), b"FQoGZXIvYXdzE");
         assert_eq!(token.len(), 13);
         assert!(!token.is_empty());
+    }
+
+    /// Negative — a different token does not produce the private match proof.
+    #[test]
+    fn a_session_token_only_matches_the_same_bytes() {
+        let token = SessionToken::new("issued-token").expect("non-empty");
+        assert!(token.ct_verify(b"issued-token").is_ok());
+        assert!(token.ct_verify(b"other-token").is_err());
     }
 
     #[test]

@@ -23,7 +23,7 @@
 //! `rustfs-gateway-sig`'s, and they take the snapshot as a parameter precisely so that this module
 //! cannot influence them.
 //! Upstream: `rustfs-gateway-sig`. Downstream: `crate::builder`, `crate::service`,
-//! `crate::ext::DefaultGovernor`.
+//! `crate::ext::DefaultGovernor`, `crate::ext::GuardedCredentialProvider`.
 //!
 //! # Two clocks, two types, and no conversion between them
 //!
@@ -237,8 +237,8 @@ impl MonotonicNow {
 ///
 /// Separate from [`Clock`] and separately injected, for the reason in this module's documentation:
 /// the two answer different questions and their readings are not interchangeable. A deployment
-/// installs at most one of these, into the limiter that measures with it, rather than into the
-/// service — nothing else in the pipeline measures a duration.
+/// installs one into each component that measures elapsed time rather than into the service.
+/// Today those components are the limiter and the credential negative cache.
 pub trait MonotonicClock: Send + Sync + 'static {
     /// Takes one reading.
     ///

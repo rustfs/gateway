@@ -192,6 +192,22 @@ impl OperationFloor {
         }
     }
 
+    /// A standard operation whose protocol specification explicitly permits presigned URLs.
+    #[must_use]
+    pub const fn builtin_presigned(name: &'static str, service: SigService) -> Self {
+        Self {
+            name,
+            service,
+            privileged: false,
+            allowed_schemes: AllowedSchemes {
+                header: true,
+                presigned: true,
+                post_policy: false,
+                anonymous: false,
+            },
+        }
+    }
+
     /// An operation registered by a third party: **privileged by default**, header signatures only.
     #[must_use]
     pub const fn custom(name: &'static str, service: SigService) -> Self {

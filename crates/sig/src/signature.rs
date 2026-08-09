@@ -130,6 +130,14 @@ pub enum VerifyRejection {
     Mismatch,
 }
 
+/// The crate's single conversion from a constant-time byte comparison to a branch.
+///
+/// Keeping this beside signature verification lets other secret-bearing types reuse the same
+/// audited escape hatch without adding another `Choice` conversion.
+pub(crate) fn ct_bytes_equal(left: &[u8], right: &[u8]) -> bool {
+    bool::from(left.ct_eq(right))
+}
+
 impl Signature {
     /// The single comparison entry point for signature material.
     ///
@@ -144,12 +152,12 @@ impl Signature {
     /// if the bytes differ.
     pub fn ct_verify(&self, expected: &Self) -> Result<SignatureMatch, VerifyRejection> {
         let equal = match (self, expected) {
-            (Self::HmacSha256(lhs), Self::HmacSha256(rhs)) => lhs.as_array().ct_eq(rhs.as_array()),
-            (Self::HmacSha1(lhs), Self::HmacSha1(rhs)) => lhs.as_array().ct_eq(rhs.as_array()),
-            (Self::EcdsaP256(lhs), Self::EcdsaP256(rhs)) => lhs.as_array().ct_eq(rhs.as_array()),
+            (Self::HmacSha256(lhs), Self::HmacSha256(rhs)) => ct_bytes_equal(lhs.as_array(), rhs.as_array()),
+            (Self::HmacSha1(lhs), Self::HmacSha1(rhs)) => ct_bytes_equal(lhs.as_array(), rhs.as_array()),
+            (Self::EcdsaP256(lhs), Self::EcdsaP256(rhs)) => ct_bytes_equal(lhs.as_array(), rhs.as_array()),
             _ => return Err(VerifyRejection::AlgorithmMismatch),
         };
-        if bool::from(equal) {
+        if equal {
             Ok(SignatureMatch(()))
         } else {
             Err(VerifyRejection::Mismatch)

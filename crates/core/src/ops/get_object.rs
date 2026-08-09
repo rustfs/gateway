@@ -75,8 +75,8 @@ static SPEC: OperationSpec = OperationSpec {
     auth: Some(AuthRequirement::new("s3:GetObject", ResourceShape::Object)),
 };
 
-/// Header signatures only, and not privileged.
-static FLOOR: OperationFloor = OperationFloor::builtin("GetObject", SigService::S3);
+/// Header and presigned signatures, matching `spec/operations/GetObject.toml`.
+static FLOOR: OperationFloor = OperationFloor::builtin_presigned("GetObject", SigService::S3);
 
 impl Operation for GetObject {
     const NAME: &'static str = "GetObject";
