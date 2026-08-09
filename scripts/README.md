@@ -76,6 +76,10 @@ fixed now so that the same check does not get written twice under two names.
 | `check_config_load_once.sh` | Every `.load()` / `.load_full()` call site is frozen so hot service configuration can be loaded only once at request entry | P7-01 |
 | `check_default_doc.sh` | Every public extension `Default` implementation states its security consequence; derived subjects are discovered rather than listed by hand | P7-01 |
 | `check_minimal_assembly_lines.sh` | The complete assembly in the minimal example stays within twenty effective Rust lines | P7-01 |
+| `check_schema_dimensions.sh` | The frozen conformance schema retains all nine P8-01 day-one expression dimensions | P8-01 |
+| `check_evidence_shape.sh` | Every case has compact HTTPS/URN-plus-summary evidence and cannot carry pasted upstream prose | P8-01 |
+| `check_baseline_ratchet.sh` | The conformance baseline failure set only shrinks | P8-01 |
+| `check_runner_raw_bytes.sh` | Case requests retain a raw TCP byte path and acquire no normalizing client dependency | P8-01 |
 | `test_guard_scripts.sh` | Not a guard: runs every guard on the tree and asserts each one fails on an injected violation | P0 |
 
 ### Registered, not yet implemented (TODO)

@@ -51,8 +51,6 @@ require_equal(guard.values_at("name", "runs-on", "timeout-minutes"),
 [workspace, guard].each do |job|
   steps = job.fetch("steps")
   require_equal(steps.length, 4, "a split worker changed its setup or command step count")
-  require_equal(steps.first(3).map(&:keys), [["uses"], ["uses"], ["uses"]],
-                "a split worker setup step gained executable control")
   expected_setup = [
     "actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10",
     "dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30",
@@ -62,6 +60,14 @@ require_equal(guard.values_at("name", "runs-on", "timeout-minutes"),
                 "a split worker setup action or pin changed")
   require_equal(steps.last.keys, ["name", "run"], "a split worker command can skip or hide failure")
 end
+
+require_equal(workspace.fetch("steps").first(3).map(&:keys), [["uses"], ["uses"], ["uses"]],
+              "workspace-tests setup gained executable control")
+guard_steps = guard.fetch("steps")
+require_equal(guard_steps.first(3).map(&:keys), [["uses", "with"], ["uses"], ["uses"]],
+              "guard-self-test setup changed its parent-fetch contract")
+require_equal(guard_steps.first.fetch("with"), {"fetch-depth" => 2},
+              "guard-self-test cannot read the baseline parent commit")
 
 workspace_run = <<~'RUN'
   started="$(date +%s)"
