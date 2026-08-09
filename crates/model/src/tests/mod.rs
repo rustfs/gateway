@@ -17,6 +17,7 @@
 //! Responsible for: the parsers, the canonical writer, and the overlay's self-consistency rules.
 //! NOT responsible for: end-to-end generation, which lives in `rustfs-gateway-codegen`'s tests because it
 //! needs the emitters as well.
+//! Upstream: the module's declared inputs. Downstream: its callers and regression tests.
 
 mod json_tests;
 mod lower_tests;

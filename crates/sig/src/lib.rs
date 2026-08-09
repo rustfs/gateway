@@ -81,6 +81,8 @@
 //!    [`timing::placeholder_secret`] for unknown keys — and rate limiting, which belongs to the
 //!    `Governor` extension point (P6-08). The full reasoning is the `T1` row of
 //!    [`timing::SIDE_CHANNELS`].
+#![doc = include_str!("../README.md")]
+#![deny(missing_docs)]
 #![forbid(unsafe_code)]
 
 mod canonical;

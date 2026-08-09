@@ -16,9 +16,9 @@
 //!
 //! Responsible for: one in-memory type per construct in `spec/ir.schema.json`, so that an IR
 //! document which cannot be represented cannot be emitted either.
-//! NOT responsible for: how an IR is built (that is [`crate::lower`]) or rendered as JSON (that is
+//! NOT responsible for: how an IR is built (that is [`mod@crate::lower`]) or rendered as JSON (that is
 //! [`emit`]).
-//! Upstream: [`crate::lower`]. Downstream: `rustfs-gateway-codegen`.
+//! Upstream: [`mod@crate::lower`]. Downstream: `rustfs-gateway-codegen`.
 //!
 //! Every closed set in the schema is a Rust enum here. That is the whole point: the schema's
 //! `additionalProperties: false` catches a leak at validation time, these types catch it at

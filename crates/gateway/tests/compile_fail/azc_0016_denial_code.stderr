@@ -1,7 +1,7 @@
 error[E0599]: no associated function or constant named `with_code` found for struct `Denial` in the current scope
-  --> tests/compile_fail/azc_0016_denial_code.rs:20:21
+  --> tests/compile_fail/azc_0016_denial_code.rs:26:21
    |
-20 |     let _ = Denial::with_code(ErrorCode::NO_SUCH_BUCKET);
+26 |     let _ = Denial::with_code(ErrorCode::NO_SUCH_BUCKET);
    |                     ^^^^^^^^^ associated function or constant not found in `Denial`
    |
 note: if you're trying to build a new `Denial` consider using one of the following associated functions:

@@ -1,7 +1,7 @@
 error[E0046]: not all trait items implemented, missing: `DerivedResources`
-  --> tests/compile_fail/authz_missing_resources.rs:21:1
+  --> tests/compile_fail/authz_missing_resources.rs:27:1
    |
-21 | impl Operation for MissingResources {
+27 | impl Operation for MissingResources {
    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ missing `DerivedResources` in implementation
    |
    = help: implement the missing item: `type DerivedResources = /* Type */;`

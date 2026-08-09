@@ -17,6 +17,7 @@
 //! Responsible for: the case schema, the runner, and baseline-aware reporting. Runnable against
 //! any S3 implementation, not just this one — hence its independent version number.
 //! NOT responsible for: being a unit-test harness for the framework internals.
+//! Upstream: the module's declared inputs. Downstream: its callers and regression tests.
 //!
 //! # How a case becomes a verdict
 //!
@@ -53,6 +54,8 @@
 //! ```
 //!
 //! Point it at another corpus with `--root`, or with `RUSTFS_GATEWAY_CONFORMANCE_ROOT`.
+#![doc = include_str!("../README.md")]
+#![deny(missing_docs)]
 #![forbid(unsafe_code)]
 
 pub mod cli;

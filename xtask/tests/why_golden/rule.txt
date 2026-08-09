@@ -1,0 +1,6 @@
+RULE      asm-missing-authorizer — no Authorizer was installed; there is no default allow and no default deny, because a default either fails open or makes every deployment look broken in the same way
+EVIDENCE  NONE
+CASES     NONE
+ADR       NONE
+SPEC      crates/gateway/src/assembly.rs:RuleRef::ALL
+RELATED   NONE

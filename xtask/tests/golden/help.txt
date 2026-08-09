@@ -10,8 +10,7 @@ commands:
   codegen diff --semantic   print a semantic diff capped at 50 lines
   codegen --check           fail when generated output or the verify map drifted
   spec verify               fail when any generated artefact differs from a fresh run
-  why <target>              why a behaviour is the way it is: quirk id, operation, error code,
-                            header or query key
+  why <target> [--json]     trace a quirk, operation, error code, header, ADR or assembly rule
   route explain [--json] 'METHOD /path?query'
                             explain route selection and every predicate
   new-op <Operation>        create an intentionally-red operation scaffold

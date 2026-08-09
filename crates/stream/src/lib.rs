@@ -49,6 +49,8 @@
 //! plus a named reason, and every adaptation returns an [`AdaptCost`] that is recorded in
 //! [`StreamMetrics`].
 
+#![doc = include_str!("../README.md")]
+#![deny(missing_docs)]
 #![forbid(unsafe_code)]
 
 mod adapt;

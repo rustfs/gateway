@@ -21,10 +21,12 @@
 //! Upstream: `rustfs-gateway-model`. Downstream: the checked-in generated sources and `xtask`.
 //!
 //! The whole pipeline is a pure function from `(model, overlays)` to a set of `(path, bytes)`
-//! pairs. [`generate`] produces that set without touching the filesystem; [`write`] puts it on
+//! pairs. [`generate`] produces that set without touching the filesystem; [`write()`] puts it on
 //! disk and [`verify`] compares it with what is already there. Zero-diff verification therefore
 //! never needs a temporary directory, and determinism is structural rather than something a test
 //! has to chase.
+#![doc = include_str!("../README.md")]
+#![deny(missing_docs)]
 #![forbid(unsafe_code)]
 
 pub mod emit;

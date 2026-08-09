@@ -12,6 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! Compile-fail fixture for session-token secrecy.
+//!
+//! Responsible for: proving session tokens cannot be compared or debug-printed.
+//! NOT responsible for: runtime token parsing or verification.
+//! Upstream: `rustfs-gateway`. Downstream: the credential trybuild contract.
+
 use rustfs_gateway::sig::SessionToken;
 
 fn main() {

@@ -19,6 +19,7 @@
 //! hand-off, and the ordering that makes a trailer section unreachable before end-of-stream.
 //! NOT responsible for: chunk syntax (`ingest_chunk_rules`) or the counters
 //! (`ingest_perf_gates`).
+//! Upstream: the module's declared inputs. Downstream: its callers and regression tests.
 //!
 //! 3 positive / 17 negative.
 

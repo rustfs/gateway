@@ -1,11 +1,11 @@
 error[E0599]: no method named `request_extensions` found for reference `&RequestContext<'_>` in the current scope
-  --> tests/compile_fail/azc_0025_request_extensions.rs:20:21
+  --> tests/compile_fail/azc_0025_request_extensions.rs:26:21
    |
-20 |     let _ = context.request_extensions();
+26 |     let _ = context.request_extensions();
    |                     ^^^^^^^^^^^^^^^^^^
    |
 help: there is a method `server_extensions` with a similar name
    |
-20 -     let _ = context.request_extensions();
-20 +     let _ = context.server_extensions();
+26 -     let _ = context.request_extensions();
+26 +     let _ = context.server_extensions();
    |

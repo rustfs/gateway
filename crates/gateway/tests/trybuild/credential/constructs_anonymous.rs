@@ -12,6 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! Compile-fail fixture for the private anonymous proof constructor.
+//!
+//! Responsible for: proving callers cannot construct `AnonymousAck` directly.
+//! NOT responsible for: runtime anonymous authentication.
+//! Upstream: `rustfs-gateway`. Downstream: the credential trybuild contract.
+
 use rustfs_gateway::sig::{AnonymousAck, Verdict};
 
 fn main() {

@@ -351,7 +351,7 @@ impl std::error::Error for CredentialsError {}
 /// Where an access key id is resolved to a secret.
 ///
 /// Held as `Arc<dyn CredentialProvider>`, so the async method is a hand-written [`BoxFuture`]
-/// (ADR-0002). A real deployment awaits an IAM store here; [`GuardedCredentialProvider`] adds the
+/// (ADR-0002). A real deployment awaits an IAM store here; [`crate::GuardedCredentialProvider`] adds the
 /// mandatory deadline and negative cache without caching a secret.
 pub trait CredentialProvider: Send + Sync + 'static {
     /// Resolves one access key id.

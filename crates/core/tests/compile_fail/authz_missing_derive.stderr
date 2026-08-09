@@ -1,7 +1,7 @@
 error[E0046]: not all trait items implemented, missing: `derive_resources`
-  --> tests/compile_fail/authz_missing_derive.rs:21:1
+  --> tests/compile_fail/authz_missing_derive.rs:27:1
    |
-21 | impl Operation for MissingDerive {
+27 | impl Operation for MissingDerive {
    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ missing `derive_resources` in implementation
    |
    = help: implement the missing item: `fn derive_resources(_: &<Self as Operation>::Input) -> Result<<Self as Operation>::DerivedResources, DerivedResourceError> { todo!() }`

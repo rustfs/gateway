@@ -15,7 +15,7 @@
 //! Compile-time boundaries around the credential-provider contract.
 //!
 //! Responsible for: proving a provider cannot return a verdict or bare secret, anonymous proof is
-//! private, and credential material cannot be printed or compared. NOT responsible for runtime
+//! private, and credential material cannot be printed or compared. NOT responsible for: runtime
 //! authentication. Upstream: `rustfs-gateway`. Downstream: none.
 
 #[test]

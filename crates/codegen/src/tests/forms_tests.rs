@@ -18,6 +18,7 @@
 //! the members that carry them and no others.
 //! NOT responsible for: what the refusals do to a request, which is `rustfs-gateway-core`'s codec
 //! suite.
+//! Upstream: the module's declared inputs. Downstream: its callers and regression tests.
 
 #![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 

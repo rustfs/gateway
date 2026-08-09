@@ -16,8 +16,8 @@
 //!
 //! Responsible for: loading `model/s3.json`, deleting the trait families that carry no wire
 //! meaning, and answering shape questions (members, targets, enum values, http bindings).
-//! NOT responsible for: deciding what any of it means for S3 (that is [`crate::lower`]).
-//! Upstream: [`crate::json`]. Downstream: [`crate::lower`].
+//! NOT responsible for: deciding what any of it means for S3 (that is [`mod@crate::lower`]).
+//! Upstream: [`crate::json`]. Downstream: [`mod@crate::lower`].
 //!
 //! The stripping happens in [`Model::load`], before any other code sees a shape, so a leaked
 //! documentation string cannot reach the IR by any route. See ADR-0001 and `model/PROVENANCE.md`.
