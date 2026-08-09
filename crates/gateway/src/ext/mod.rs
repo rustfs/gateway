@@ -37,15 +37,18 @@
 //! | [`Authorizer`] | none — [`crate::ServiceBuilder::build`] refuses | there is no safe default: allow-all is a hole, deny-all is a service nobody can use |
 //! | [`Authenticator`] | none — `build` refuses | the same asymmetry, one stage earlier |
 //! | [`HostResolver`] | [`PathStyleOnly`] | a virtual-hosted request is routed by its path, so `Host: bucket.example.com` addressing `/key` is not understood; install [`VirtualHostStyle`] to understand it |
-//! | [`Governor`] | [`Unlimited`] | no request is ever refused for load, in either the per-bucket or the per-identity dimension |
+//! | [`Governor`] | [`DefaultGovernor`] | aggregate, per-client, and three pre-authentication class ceilings are in force at [`GovernorRates::default`]; no per-identity quota, because this hook has no identity |
 //! | [`Observer`] | [`NoObserver`] | nothing is recorded; a rejection leaves no trace outside the response |
 //! | [`CorsSource`] | [`NoCors`] | no bucket has a CORS document, so no preflight is ever allowed and no `Access-Control-*` header is ever written |
 //! | [`StageFilter`] | none installed | the three seams run nothing, and the pipeline allocates nothing for them |
 //! | [`OpLayer`] | none installed | dispatch calls the backend directly, with no continuation and no chain |
 //!
-//! Every default above is safe in the sense that it cannot widen access. Two of them —
-//! [`Unlimited`] and [`NoObserver`] — remove a defence rather than open a door, and a deployment
-//! that ships with both has no rate limit and no audit trail.
+//! Every default above is safe in the sense that it cannot widen access. [`NoObserver`] is the
+//! one that removes a defence rather than opening a door: a deployment that ships with it has no
+//! audit trail. The [`Governor`] row used to be the second such default — it was [`Unlimited`] —
+//! and it is not any more, because the three unauthenticated paths this service exposes are
+//! amplifiers whose only mitigation is a limit that is already on. [`Unlimited`] still exists as
+//! a deployment governor that adds no quota, but it cannot remove the framework default.
 //!
 //! # The three middleware levels, and which requirement belongs to which
 //!
@@ -54,7 +57,7 @@
 //!
 //! | The shape of the requirement | The level |
 //! | --- | --- |
-//! | Connection or service-wide, no S3 semantics: panic capture, tracing, global rate limit | a tower `Layer` outside the whole service — nothing here |
+//! | Connection-wide, no S3 semantics: panic capture, tracing, accept back-pressure | a tower `Layer` outside the whole service — nothing here |
 //! | See or rewrite the HTTP shape, or a finished response; no typed input needed | [`StageFilter`] |
 //! | One operation, and it needs the decoded input or the typed output | [`OpLayer`] |
 //! | Only watching: logs, metrics, audit | [`Observer`], which is read-only and always will be |
@@ -79,7 +82,9 @@ pub use self::filter::{
     FROZEN_WIRE_HEADERS, FrozenHeader, ResponseView, RoutedView, StageFilter, WireHead, response_filter, routed_filter,
     wire_filter,
 };
-pub use self::governor::{Governor, GovernorRequest, Lease, Unlimited};
+pub use self::governor::{
+    ClassKind, ClientAddr, DefaultGovernor, Governor, GovernorRates, GovernorRequest, LayeredGovernor, Lease, Rate, Unlimited,
+};
 pub use self::host::{Addressing, HostQuery, HostResolver, PathStyleOnly, ResolvedHost, TargetOrigin, VhostHint};
 pub use self::observer::{NoObserver, Observer, RequestEvent};
 pub use self::oplayer::{Next, OpLayer, op_layer};

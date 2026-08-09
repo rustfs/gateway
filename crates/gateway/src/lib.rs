@@ -100,16 +100,20 @@ pub mod sig;
 pub use crate::adapt::ServiceFuture;
 pub use crate::assembly::{AssemblyError, RuleRef};
 pub use crate::builder::{DEFAULT_MAX_BUFFERED_BODY_BYTES, ServiceBuilder};
-pub use crate::clock::{Clock, FixedClock, system_clock};
+pub use crate::clock::{
+    Clock, ClockPosture, ClockSkewAck, FixedClock, MAX_CLOCK_SKEW_SECONDS, ManualMonotonic, MonotonicClock, MonotonicNow,
+    SystemMonotonic, system_clock,
+};
 pub use crate::close::ConnectionIntent;
 pub use crate::ext::{
     Addressing, Authentication, Authenticator, Authorizer, AuthzRequest, BaseDomain, CORS_PREFLIGHT, CachedCorsSource, ChunkSink,
-    ChunkVerification, CorsCacheConfig, CorsSource, CorsSourceError, CredentialProvider, Credentials, CredentialsError, Decision,
-    Denial, DomainError, FROZEN_WIRE_HEADERS, FrozenHeader, Governor, GovernorRequest, HostQuery, HostResolver, Lease,
-    MAX_BASE_DOMAIN_BYTES, Next, NoCors, NoObserver, NoPolicy, Observer, OpLayer, PathStyleOnly, PolicyError, PolicySnapshot,
-    PolicySource, RequestContext, RequestEvent, ResolvedHost, ResponseView, RoutedView, SigV4Authenticator, SnapshotId,
-    StageFilter, StaticCredentials, TargetOrigin, Unavailable, Unlimited, VhostHint, VirtualHostStyle, WireHead, op_layer,
-    policy_from, response_filter, routed_filter, wire_filter,
+    ChunkVerification, ClassKind, ClientAddr, CorsCacheConfig, CorsSource, CorsSourceError, CredentialProvider, Credentials,
+    CredentialsError, Decision, DefaultGovernor, Denial, DomainError, FROZEN_WIRE_HEADERS, FrozenHeader, Governor, GovernorRates,
+    GovernorRequest, HostQuery, HostResolver, LayeredGovernor, Lease, MAX_BASE_DOMAIN_BYTES, Next, NoCors, NoObserver, NoPolicy,
+    Observer, OpLayer, PathStyleOnly, PolicyError, PolicySnapshot, PolicySource, Rate, RequestContext, RequestEvent,
+    ResolvedHost, ResponseView, RoutedView, SigV4Authenticator, SnapshotId, StageFilter, StaticCredentials, TargetOrigin,
+    Unavailable, Unlimited, VhostHint, VirtualHostStyle, WireHead, op_layer, policy_from, response_filter, routed_filter,
+    wire_filter,
 };
 pub use crate::probe::{BodyProgress, ObservedBody};
 pub use crate::render::{S3Error, connection_intent_of, declaration, document, document_body, render};

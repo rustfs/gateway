@@ -561,7 +561,10 @@ async fn an_unsigned_request_to_an_aws_operation_never_has_its_body_read() {
 #[tokio::test]
 async fn a_mismatched_signature_is_refused_before_the_body_is_read() {
     let service = wired()
-        .clock(rustfs_gateway::FixedClock::at_unix_seconds(1_767_323_045))
+        .clock_with_skew_ack(
+            rustfs_gateway::FixedClock::at_unix_seconds(1_767_323_045),
+            rustfs_gateway::ClockSkewAck::i_understand_a_skewed_clock_can_disable_signature_expiry(),
+        )
         .register::<Ping, _>(Arc::new(Backend))
         .route(ping_route())
         .build()

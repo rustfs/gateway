@@ -214,3 +214,42 @@ fn a_vendor_operation_assembles_beside_the_aws_ones() {
         .expect("a complete assembly");
     assert_eq!(service.operations().collect::<Vec<_>>(), ["example:Ping"]);
 }
+
+/// Negative — a fixed wall clock far from the system clock cannot silently reach production.
+#[test]
+fn a_large_custom_clock_skew_is_refused_at_assembly() {
+    let error = wired()
+        .register::<Ping, _>(Arc::new(Backend))
+        .route(ping_route())
+        .clock(rustfs_gateway::FixedClock::at_unix_seconds(1))
+        .build()
+        .expect_err("the clock is decades away from the system clock");
+    assert_eq!(error.rule(), RuleRef::CLOCK_SKEW);
+}
+
+/// Negative — the escape hatch is explicit and remains visible in the assembled posture.
+#[test]
+fn an_acknowledged_custom_clock_is_named_in_the_posture() {
+    let service = wired()
+        .register::<Ping, _>(Arc::new(Backend))
+        .route(ping_route())
+        .clock_with_skew_ack(
+            rustfs_gateway::FixedClock::at_unix_seconds(1),
+            rustfs_gateway::ClockSkewAck::i_understand_a_skewed_clock_can_disable_signature_expiry(),
+        )
+        .build()
+        .expect("the skew was explicitly acknowledged");
+    assert_eq!(service.clock_posture(), rustfs_gateway::ClockPosture::CustomAcknowledged);
+}
+
+/// Negative — even a custom source within the allowed skew remains visible in the posture.
+#[test]
+fn a_checked_custom_clock_is_named_in_the_posture() {
+    let service = wired()
+        .register::<Ping, _>(Arc::new(Backend))
+        .route(ping_route())
+        .clock(rustfs_gateway::system_clock())
+        .build()
+        .expect("the custom source agrees with system time");
+    assert_eq!(service.clock_posture(), rustfs_gateway::ClockPosture::CustomChecked);
+}
