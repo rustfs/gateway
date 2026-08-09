@@ -92,7 +92,10 @@ async fn n_copy_source_denial_never_reaches_the_backend() {
     let reached = Arc::new(AtomicUsize::new(0));
     let service = wired()
         .authorizer(DestinationOnly)
-        .clock(fixed_clock())
+        .clock_with_skew_ack(
+            fixed_clock(),
+            rustfs_gateway::ClockSkewAck::i_understand_a_skewed_clock_can_disable_signature_expiry(),
+        )
         .register::<dto::CopyObject, _>(Arc::new(CopyBackend(Arc::clone(&reached))))
         .build()
         .expect("a complete assembly");
@@ -110,7 +113,10 @@ async fn a_destination_policy_can_refuse_an_otherwise_readable_copy_source() {
     let reached = Arc::new(AtomicUsize::new(0));
     let service = wired()
         .authorizer(DestinationSourceConstraint)
-        .clock(fixed_clock())
+        .clock_with_skew_ack(
+            fixed_clock(),
+            rustfs_gateway::ClockSkewAck::i_understand_a_skewed_clock_can_disable_signature_expiry(),
+        )
         .register::<dto::CopyObject, _>(Arc::new(CopyBackend(Arc::clone(&reached))))
         .build()
         .expect("a complete assembly");
@@ -131,7 +137,10 @@ async fn a_destination_policy_can_refuse_an_otherwise_readable_copy_source() {
 async fn an_authorized_handler_sees_only_the_normalized_copy_source() {
     let reached = Arc::new(AtomicUsize::new(0));
     let service = wired()
-        .clock(fixed_clock())
+        .clock_with_skew_ack(
+            fixed_clock(),
+            rustfs_gateway::ClockSkewAck::i_understand_a_skewed_clock_can_disable_signature_expiry(),
+        )
         .register::<dto::CopyObject, _>(Arc::new(CopyBackend(Arc::clone(&reached))))
         .build()
         .expect("a complete assembly");
@@ -155,7 +164,10 @@ async fn both_authorization_stages_share_one_policy_and_clock_snapshot() {
             Ok(PolicySnapshot::of(Arc::new("policy-v1")))
         }))
         .authorizer(RecordingAuthorizer(Arc::clone(&seen)))
-        .clock(fixed_clock())
+        .clock_with_skew_ack(
+            fixed_clock(),
+            rustfs_gateway::ClockSkewAck::i_understand_a_skewed_clock_can_disable_signature_expiry(),
+        )
         .register::<dto::CopyObject, _>(Arc::new(CopyBackend(reached)))
         .build()
         .expect("a complete assembly");
@@ -175,7 +187,10 @@ async fn an_unreadable_policy_is_a_403_and_never_reaches_the_backend() {
     let reached = Arc::new(AtomicUsize::new(0));
     let service = wired()
         .policy_source(policy_from(|_| Err(PolicyError::unavailable())))
-        .clock(fixed_clock())
+        .clock_with_skew_ack(
+            fixed_clock(),
+            rustfs_gateway::ClockSkewAck::i_understand_a_skewed_clock_can_disable_signature_expiry(),
+        )
         .register::<dto::CopyObject, _>(Arc::new(CopyBackend(Arc::clone(&reached))))
         .build()
         .expect("a complete assembly");

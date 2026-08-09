@@ -192,7 +192,7 @@ struct RefusingGovernor {
 impl Governor for RefusingGovernor {
     fn try_acquire<'a>(&'a self, request: &'a GovernorRequest<'a>) -> BoxFuture<'a, Result<Lease, ()>> {
         if let Ok(mut seen) = self.seen.lock() {
-            seen.push(request.operation.to_owned());
+            seen.push(request.operation().to_owned());
         }
         Box::pin(async { Err(()) })
     }
@@ -217,7 +217,10 @@ fn build(origins: &[&str], methods: &[&str], policy: CorsPolicy, governor: Optio
             RegionSet::new(["us-east-1"]).expect("non-empty"),
         ))
         .authorizer(allow_when(|_| true))
-        .clock(FixedClock::at_unix_seconds(1_767_225_600))
+        .clock_with_skew_ack(
+            FixedClock::at_unix_seconds(1_767_225_600),
+            rustfs_gateway::ClockSkewAck::i_understand_a_skewed_clock_can_disable_signature_expiry(),
+        )
         .cors_source(CountingSource::new(&reads, origins, methods))
         .cors_policy(policy);
     if let Some(governor) = governor {

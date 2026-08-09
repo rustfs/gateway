@@ -49,11 +49,12 @@ use rustfs_gateway_sig::SecurityFloor;
 use rustfs_gateway_types::{NamePolicy, NameValidator, SlashPolicy};
 
 use crate::assembly::{AssemblyError, RuleRef};
-use crate::clock::{Clock, system_clock};
+use crate::clock::{Clock, ClockPosture, ClockSkewAck, MAX_CLOCK_SKEW_SECONDS, skew_from_system, system_clock};
 use crate::dispatch::{DispatchTable, OperationDispatch};
 use crate::ext::{
-    Authenticator, Authorizer, CachedCorsSource, CorsCacheConfig, CorsSource, Governor, HostResolver, NoCors, NoObserver,
-    NoPolicy, Observer, OpLayer, OpLayerSlot, PathStyleOnly, PolicySource, StageFilter, Unlimited,
+    Authenticator, Authorizer, CachedCorsSource, CorsCacheConfig, CorsSource, DefaultGovernor, Governor, GovernorRates,
+    HostResolver, LayeredGovernor, NoCors, NoObserver, NoPolicy, Observer, OpLayer, OpLayerSlot, PathStyleOnly, PolicySource,
+    StageFilter,
 };
 use crate::service::{Inner, S3Service};
 use crate::trace::{MintedTraces, TraceSource};
@@ -102,9 +103,11 @@ pub struct ServiceBuilder {
     authenticator: Option<Arc<dyn Authenticator>>,
     policy_source: Arc<dyn PolicySource>,
     host_resolver: Arc<dyn HostResolver>,
-    governor: Arc<dyn Governor>,
+    governor_rates: GovernorRates,
+    governor: Option<Arc<dyn Governor>>,
     observer: Arc<dyn Observer>,
     clock: Arc<dyn Clock>,
+    clock_posture: ClockPosture,
     traces: Arc<dyn TraceSource>,
     cors_source: Arc<dyn CorsSource>,
     cors_cache: CorsCacheConfig,
@@ -151,9 +154,11 @@ impl ServiceBuilder {
             authenticator: None,
             policy_source: Arc::new(NoPolicy),
             host_resolver: Arc::new(PathStyleOnly),
-            governor: Arc::new(Unlimited),
+            governor_rates: GovernorRates::default(),
+            governor: None,
             observer: Arc::new(NoObserver),
             clock: Arc::new(system_clock()),
+            clock_posture: ClockPosture::System,
             traces: Arc::new(MintedTraces::new()),
             cors_source: Arc::new(NoCors),
             cors_cache: CorsCacheConfig::default(),
@@ -321,10 +326,26 @@ impl ServiceBuilder {
         self
     }
 
-    /// Installs a governor. Defaults to [`Unlimited`].
+    /// Tunes the mandatory framework governor.
+    #[must_use]
+    pub const fn framework_governor_rates(mut self, rates: GovernorRates) -> Self {
+        self.governor_rates = rates;
+        self
+    }
+
+    /// Installs a deployment governor after the mandatory framework governor.
+    ///
+    /// The default is [`DefaultGovernor`] at [`GovernorRates::default`](crate::GovernorRates), not
+    /// an unlimited one, and the difference matters: three of this service's paths — a preflight,
+    /// a credential lookup, and any request that reaches the body — do work for a caller who has
+    /// not authenticated, so a limit that has to be configured before it applies is a limit that
+    /// is missing from every deployment nobody has read the documentation for.
+    ///
+    /// Both must admit. Installing [`Unlimited`](crate::Unlimited) therefore means the deployment
+    /// adds no quota of its own; it does not remove the framework's pre-authentication limits.
     #[must_use]
     pub fn governor(mut self, governor: impl Governor) -> Self {
-        self.governor = Arc::new(governor);
+        self.governor = Some(Arc::new(governor));
         self
     }
 
@@ -392,6 +413,15 @@ impl ServiceBuilder {
     #[must_use]
     pub fn clock(mut self, clock: impl Clock) -> Self {
         self.clock = Arc::new(clock);
+        self.clock_posture = ClockPosture::CustomChecked;
+        self
+    }
+
+    /// Installs a deliberately skewed clock with an explicit replay-risk acknowledgement.
+    #[must_use]
+    pub fn clock_with_skew_ack(mut self, clock: impl Clock, _ack: ClockSkewAck) -> Self {
+        self.clock = Arc::new(clock);
+        self.clock_posture = ClockPosture::CustomAcknowledged;
         self
     }
 
@@ -465,6 +495,16 @@ impl ServiceBuilder {
             });
         };
 
+        if self.clock_posture == ClockPosture::CustomChecked {
+            let skew_seconds = skew_from_system(self.clock.as_ref());
+            if skew_seconds > MAX_CLOCK_SKEW_SECONDS {
+                return Err(AssemblyError::ClockSkew {
+                    skew_seconds,
+                    rule: RuleRef::CLOCK_SKEW,
+                });
+            }
+        }
+
         // Before the erasure, so the refusal names the operation the deployment asked for rather
         // than whatever the erasure happens to reach first.
         if let Some((operation, _)) = self
@@ -506,6 +546,12 @@ impl ServiceBuilder {
             }
         }
 
+        let framework_governor = DefaultGovernor::with_rates(self.governor_rates);
+        let governor: Arc<dyn Governor> = match self.governor {
+            Some(user) => Arc::new(LayeredGovernor::new(framework_governor, user)),
+            None => Arc::new(framework_governor),
+        };
+
         Ok(S3Service::from_inner(Inner {
             router,
             dispatch,
@@ -518,9 +564,10 @@ impl ServiceBuilder {
             authenticator,
             policy_source: self.policy_source,
             host_resolver: self.host_resolver,
-            governor: self.governor,
+            governor,
             observer: self.observer,
             clock: self.clock,
+            clock_posture: self.clock_posture,
             traces: self.traces,
             cors: Arc::new(CachedCorsSource::new(self.cors_source, self.cors_cache)),
             cors_policy: self.cors_policy,

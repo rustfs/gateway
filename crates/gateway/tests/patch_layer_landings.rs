@@ -117,7 +117,10 @@ async fn head_request_body_fix_is_the_response_invariant() {
 #[tokio::test]
 async fn double_slash_list_buckets_compat_is_the_route_table() {
     let service = wired()
-        .clock(fixed_clock())
+        .clock_with_skew_ack(
+            fixed_clock(),
+            rustfs_gateway::ClockSkewAck::i_understand_a_skewed_clock_can_disable_signature_expiry(),
+        )
         .register::<rustfs_gateway::dto::ListBuckets, _>(Arc::new(Backend))
         .build()
         .expect("a complete assembly");

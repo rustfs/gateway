@@ -15,7 +15,8 @@
 //! Whether this deployment will spend resources on this request at all.
 //!
 //! Responsible for: [`Governor`], the question it is asked ([`GovernorRequest`]), the permit it
-//! hands back ([`Lease`]), and the default [`Unlimited`].
+//! hands back ([`Lease`]), the limiter a deployment gets without asking ([`DefaultGovernor`], in
+//! `governor/default.rs`), and [`Unlimited`], which adds no deployment-specific limit.
 //! NOT responsible for: connection-level back-pressure and idle timeouts, which belong to the
 //! server (P7-02) and not here; authorisation, which is a different question with a different
 //! answer; or counting anything, which is the implementation's business.
@@ -25,9 +26,9 @@
 //!
 //! **After routing, before a single body byte is read.** Both halves are load-bearing.
 //!
-//! Earlier than routing, the call has no bucket and no operation, so the only limit expressible is
-//! per-connection or per-IP — which `tower`'s own rate-limit layer already does and which is not
-//! the dimension an object store needs.
+//! Earlier than routing, the call has no resolved bucket or operation. The framework waits for
+//! those authoritative routing results, but still keys the default per-client meter from a
+//! transport-supplied [`ClientAddr`] rather than re-deriving either fact from request text.
 //!
 //! Later than the first body byte, the request has already cost what it was going to cost: a
 //! gibibyte `PutObject` that is refused after its body has been read has been paid for in full.
@@ -40,9 +41,68 @@
 //! see the path, but "which bucket is this" is the [`crate::HostResolver`]'s answer and not the
 //! path's, and a layer that re-derived it would be a second component deciding the same question.
 
+mod default;
+mod meter;
+mod rates;
+
+pub use self::default::{DefaultGovernor, LayeredGovernor};
+pub use self::rates::{GovernorRates, Rate};
+
+use std::net::{IpAddr, Ipv6Addr};
+
 use rustfs_gateway_core::BoxFuture;
 use rustfs_gateway_sig::Identity;
 use rustfs_gateway_types::BucketName;
+
+/// The framework-owned pre-authentication class of one request.
+#[non_exhaustive]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ClassKind {
+    /// A request that presented credential material and can drive a credential lookup.
+    CredentialLookup,
+    /// A browser CORS preflight.
+    CorsPreflight,
+    /// A request that presented no credential material.
+    Unauthenticated,
+    /// A request whose caller is already known.
+    ///
+    /// The current pre-body hook cannot produce this variant. It remains part of the vocabulary
+    /// for deployments that reuse a governor after authentication; [`DefaultGovernor`] admits it
+    /// without charging the framework's pre-authentication buckets.
+    Authenticated,
+}
+
+/// The peer address supplied by the transport.
+///
+/// The service reads this value only from [`http::Request::extensions`]. It never parses
+/// `X-Forwarded-For` or another caller-controlled header, so a proxy must validate its trust
+/// boundary before inserting one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct ClientAddr(IpAddr);
+
+impl ClientAddr {
+    /// Records the address observed by the listener or a trusted-proxy adapter.
+    #[must_use]
+    pub const fn from_peer(address: IpAddr) -> Self {
+        Self(address)
+    }
+
+    /// The address as supplied by the transport.
+    #[must_use]
+    pub const fn ip(self) -> IpAddr {
+        self.0
+    }
+
+    pub(super) fn rate_key(self) -> IpAddr {
+        match self.0 {
+            IpAddr::V4(address) => IpAddr::V4(address),
+            IpAddr::V6(address) => {
+                let prefix = u128::from(address) & (u128::MAX << 64);
+                IpAddr::V6(Ipv6Addr::from(prefix))
+            }
+        }
+    }
+}
 
 /// What a [`Governor`] is asked about.
 ///
@@ -53,17 +113,77 @@ use rustfs_gateway_types::BucketName;
 #[derive(Debug)]
 pub struct GovernorRequest<'a> {
     /// The operation routing chose, by its `Operation::NAME`.
-    pub operation: &'a str,
+    operation: &'a str,
     /// The bucket the path addressed, when it addressed one.
-    pub bucket: Option<&'a BucketName>,
+    bucket: Option<&'a BucketName>,
     /// The body length the request head declared, when HTTP framing gave one.
     ///
     /// `None` for a chunked body. A limit that only fires on a declared length is a limit a client
     /// removes by switching to `Transfer-Encoding: chunked`, so an implementation that cares must
     /// handle the `None` case rather than admitting it.
-    pub declared_body_bytes: Option<u64>,
+    declared_body_bytes: Option<u64>,
     /// Always `None`. Reserved so that adding the identity later is not a signature change.
-    pub identity: Option<&'a Identity>,
+    identity: Option<&'a Identity>,
+    /// The peer address supplied by the transport, or `None` when the transport supplied none.
+    client_addr: Option<ClientAddr>,
+    /// The framework-owned pre-authentication class.
+    kind: ClassKind,
+}
+
+impl<'a> GovernorRequest<'a> {
+    pub(crate) const fn new(
+        operation: &'a str,
+        bucket: Option<&'a BucketName>,
+        declared_body_bytes: Option<u64>,
+        identity: Option<&'a Identity>,
+        client_addr: Option<ClientAddr>,
+        kind: ClassKind,
+    ) -> Self {
+        Self {
+            operation,
+            bucket,
+            declared_body_bytes,
+            identity,
+            client_addr,
+            kind,
+        }
+    }
+
+    /// The routed operation name.
+    #[must_use]
+    pub const fn operation(&self) -> &'a str {
+        self.operation
+    }
+
+    /// The bucket from the framework's resolved target.
+    #[must_use]
+    pub const fn bucket(&self) -> Option<&'a BucketName> {
+        self.bucket
+    }
+
+    /// The declared body length, when the framing supplied one.
+    #[must_use]
+    pub const fn declared_body_bytes(&self) -> Option<u64> {
+        self.declared_body_bytes
+    }
+
+    /// The authenticated identity, when this hook is reused after authentication.
+    #[must_use]
+    pub const fn identity(&self) -> Option<&'a Identity> {
+        self.identity
+    }
+
+    /// The transport-supplied peer address.
+    #[must_use]
+    pub const fn client_addr(&self) -> Option<ClientAddr> {
+        self.client_addr
+    }
+
+    /// The framework-owned class.
+    #[must_use]
+    pub const fn kind(&self) -> ClassKind {
+        self.kind
+    }
 }
 
 /// Permission to proceed.
@@ -104,14 +224,16 @@ impl<T: Governor + ?Sized> Governor for std::sync::Arc<T> {
     }
 }
 
-/// The default governor: every request is admitted.
+/// A deployment governor that adds no limit of its own.
+///
+/// **Not the framework default and not a bypass.** [`crate::ServiceBuilder`] installs
+/// [`DefaultGovernor`] first and ANDs a deployment governor after it. Installing this type leaves
+/// the mandatory aggregate, per-client, and per-class limits in force.
 ///
 /// # Security
 ///
-/// This default removes a defence rather than opening a door. Assembled with it, the service has
-/// no per-bucket and no per-operation quota, so a single caller can occupy every worker the server
-/// runs. Connection-level limits are the server's (P7-02) and do not substitute for this: a
-/// thousand cheap requests and one expensive one look the same to an accept loop.
+/// It is safe only in the narrow sense that it cannot remove the framework governor. It still
+/// means the deployment added no authenticated or tenant-specific quota.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Unlimited;
 
@@ -135,12 +257,7 @@ mod tests {
     }
 
     fn request() -> GovernorRequest<'static> {
-        GovernorRequest {
-            operation: "PutObject",
-            bucket: None,
-            declared_body_bytes: Some(1 << 30),
-            identity: None,
-        }
+        GovernorRequest::new("PutObject", None, Some(1 << 30), None, None, ClassKind::Unauthenticated)
     }
 
     /// Negative — a refusal is expressible, and it is the only failure shape there is.
@@ -153,7 +270,7 @@ mod tests {
     /// then silently see `None` for every caller.
     #[test]
     fn the_question_carries_no_identity() {
-        assert!(request().identity.is_none());
+        assert!(request().identity().is_none());
     }
 
     /// Negative — the trait is usable behind `Arc<dyn _>`; that is what ADR-0002's hand-written
@@ -164,9 +281,9 @@ mod tests {
         assert!(governor.try_acquire(&request()).await.is_ok());
     }
 
-    /// Positive — the default admits.
+    /// Positive — the governor named after admitting everything admits everything.
     #[tokio::test]
-    async fn the_default_admits() {
+    async fn the_unlimited_governor_admits() {
         assert!(Unlimited.try_acquire(&request()).await.is_ok());
     }
 }
