@@ -29,6 +29,7 @@ Agent entry point for operations, routing, codecs, authorization state and handl
 | `src/sse/` | Server-side encryption proof and rejection types. | SSE headers or key handling change. |
 | `tests/route_table.rs` | Route-table positive/negative matrix. | Any route row changes. |
 | `tests/params_and_dispatch.rs` | Dispatch and required-parameter matrix. | Registry or dispatch changes. |
+| `tests/configuration_error_declarations.rs` | Static unconfigured-error declarations for operation triples. | A configuration operation's missing-state error changes. |
 | `tests/registration.rs` | Registration rejection matrix. | Handler registration changes. |
 | `tests/precondition_range.rs` | Conditional/range behavior matrix. | Precondition logic changes. |
 | `tests/purity_guard.rs` | Source-shape guards for pre-auth code. | Add public/core routing code. |
