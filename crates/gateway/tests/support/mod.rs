@@ -796,7 +796,10 @@ pub fn attributes_service(with_layer: bool) -> S3Service {
     use rustfs_gateway::{BoxFuture, Next, op_layer};
 
     let builder = wired()
-        .clock(fixed_clock())
+        .clock_with_skew_ack(
+            fixed_clock(),
+            rustfs_gateway::ClockSkewAck::i_understand_a_skewed_clock_can_disable_signature_expiry(),
+        )
         .register::<GetObjectAttributes, _>(Arc::new(Attributes));
     let builder = if with_layer {
         builder.op_layer::<GetObjectAttributes, _>(op_layer(

@@ -100,18 +100,22 @@ pub mod sig;
 pub use crate::adapt::ServiceFuture;
 pub use crate::assembly::{AssemblyError, RuleRef};
 pub use crate::builder::{DEFAULT_MAX_BUFFERED_BODY_BYTES, ServiceBuilder};
-pub use crate::clock::{Clock, FixedClock, system_clock};
+pub use crate::clock::{
+    Clock, ClockPosture, ClockSkewAck, FixedClock, MAX_CLOCK_SKEW_SECONDS, ManualMonotonic, MonotonicClock, MonotonicNow,
+    SystemMonotonic, system_clock,
+};
 pub use crate::close::ConnectionIntent;
 pub use crate::ext::{
     Addressing, AuthSchemeRef, Authentication, Authenticator, Authorizer, AuthzAuditEvent, AuthzAuditSink, AuthzRequest,
-    AuthzStage, BaseDomain, CORS_PREFLIGHT, CachedCorsSource, ChunkSink, ChunkVerification, CorsCacheConfig, CorsSource,
-    CorsSourceError, CredentialProvider, Credentials, CredentialsError, DEFAULT_POLICY_SNAPSHOT_TIMEOUT, Decision, Denial,
-    DenyAllAuthorizer, DomainError, FROZEN_WIRE_HEADERS, FrozenHeader, Governor, GovernorRequest, HostQuery, HostResolver,
-    InputAuthzRequest, InputDecisions, Lease, MAX_BASE_DOMAIN_BYTES, MAX_POLICY_SNAPSHOT_TIMEOUT, Next, NoAuthzAudit, NoCors,
-    NoObserver, NoPolicy, Observer, OpLayer, PathStyleOnly, PolicyError, PolicySnapshot, PolicySource, PolicyTimeout,
-    PolicyTimeoutError, RequestContext, RequestEvent, ResolvedHost, ResponseView, RoutedView, ServerExtensions,
-    SigV4Authenticator, SnapshotId, StageFilter, StaticCredentials, TargetOrigin, Unavailable, Unlimited, VhostHint,
-    VirtualHostStyle, WireHead, allow_when, decide_with, op_layer, policy_from, response_filter, routed_filter, wire_filter,
+    AuthzStage, BaseDomain, CORS_PREFLIGHT, CachedCorsSource, ChunkSink, ChunkVerification, ClassKind, ClientAddr,
+    CorsCacheConfig, CorsSource, CorsSourceError, CredentialProvider, Credentials, CredentialsError,
+    DEFAULT_POLICY_SNAPSHOT_TIMEOUT, Decision, DefaultGovernor, Denial, DenyAllAuthorizer, DomainError, FROZEN_WIRE_HEADERS,
+    FrozenHeader, Governor, GovernorRates, GovernorRequest, HostQuery, HostResolver, InputAuthzRequest, InputDecisions,
+    LayeredGovernor, Lease, MAX_BASE_DOMAIN_BYTES, MAX_POLICY_SNAPSHOT_TIMEOUT, Next, NoAuthzAudit, NoCors, NoObserver, NoPolicy,
+    Observer, OpLayer, PathStyleOnly, PolicyError, PolicySnapshot, PolicySource, PolicyTimeout, PolicyTimeoutError, Rate,
+    RequestContext, RequestEvent, ResolvedHost, ResponseView, RoutedView, ServerExtensions, SigV4Authenticator, SnapshotId,
+    StageFilter, StaticCredentials, TargetOrigin, Unavailable, Unlimited, VhostHint, VirtualHostStyle, WireHead, allow_when,
+    decide_with, op_layer, policy_from, response_filter, routed_filter, wire_filter,
 };
 #[cfg(feature = "dangerous-allow-all-authorizer")]
 pub use crate::ext::{AllowAllAuthorizer, DangerAck};

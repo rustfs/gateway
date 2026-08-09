@@ -513,7 +513,10 @@ async fn a_wire_filter_cannot_forge_an_authorization_header() {
 async fn a_wire_filter_cannot_destroy_a_valid_signature() {
     let clock = support::fixed_clock();
     let service = wired()
-        .clock(clock)
+        .clock_with_skew_ack(
+            clock,
+            rustfs_gateway::ClockSkewAck::i_understand_a_skewed_clock_can_disable_signature_expiry(),
+        )
         .register::<ListBuckets, _>(Arc::new(Backend))
         .stage_filter(wire_filter(|head: &mut WireHead<'_>| {
             head.remove_header(&http::header::AUTHORIZATION)?;
@@ -534,7 +537,10 @@ async fn a_wire_filter_cannot_destroy_a_valid_signature() {
 #[tokio::test]
 async fn the_signed_request_is_answered_without_any_filter() {
     let service = wired()
-        .clock(support::fixed_clock())
+        .clock_with_skew_ack(
+            support::fixed_clock(),
+            rustfs_gateway::ClockSkewAck::i_understand_a_skewed_clock_can_disable_signature_expiry(),
+        )
         .register::<ListBuckets, _>(Arc::new(Backend))
         .build()
         .expect("a complete assembly");

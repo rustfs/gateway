@@ -378,7 +378,10 @@ impl InProcess {
                 VirtualHostStyle::new(BASE_DOMAINS)
                     .map_err(|error| SutError::Environment(format!("the base domains are not usable: {error}")))?,
             )
-            .clock(clock)
+            .clock_with_skew_ack(
+                clock,
+                rustfs_gateway::ClockSkewAck::i_understand_a_skewed_clock_can_disable_signature_expiry(),
+            )
             .limits(self.limits)
             .build()
             .map_err(|error| SutError::Environment(format!("the service could not be assembled: {error}")))

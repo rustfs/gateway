@@ -1039,6 +1039,140 @@ mut_sse_headers_module_deleted() {
 expect_fail check_sse_key_never_leaks.sh \
     "the guard's own subject deleted, which must fail rather than skip" mut_sse_headers_module_deleted
 
+mut_clock_second_wall_reading() {
+    python3 - <<'CLOCKPY'
+import pathlib
+path = pathlib.Path("crates/gateway/src/service.rs")
+# The shape this guard exists for: a second reading taken half way down the
+# pipeline, so the skew check and the expiry check judge two different presents.
+path.write_text(path.read_text() + """
+fn a_second_present() -> std::time::SystemTime {
+    std::time::SystemTime::now()
+}
+""")
+CLOCKPY
+}
+expect_fail check_clock_single_source.sh \
+    'a second wall-clock reading inside the pipeline' mut_clock_second_wall_reading
+
+mut_clock_stray_monotonic_reading() {
+    python3 - <<'CLOCKPY'
+import pathlib
+path = pathlib.Path("crates/core/src/lib.rs")
+path.write_text(path.read_text() + """
+fn a_stray_stopwatch() -> std::time::Instant {
+    std::time::Instant::now()
+}
+""")
+CLOCKPY
+}
+expect_fail check_clock_single_source.sh \
+    'a monotonic reading taken outside the monotonic source' mut_clock_stray_monotonic_reading
+
+mut_clock_wall_source_reads_the_monotonic_clock() {
+    python3 - <<'CLOCKPY'
+import pathlib
+path = pathlib.Path("crates/sig/src/clock.rs")
+# Mixing the two: signature expiry judged against a source with no absolute time.
+path.write_text(path.read_text() + """
+fn expiry_on_a_stopwatch() -> std::time::Instant {
+    std::time::Instant::now()
+}
+""")
+CLOCKPY
+}
+expect_fail check_clock_single_source.sh \
+    'the wall-clock source reading the monotonic clock' mut_clock_wall_source_reads_the_monotonic_clock
+
+mut_clock_monotonic_source_reads_the_wall_clock() {
+    python3 - <<'CLOCKPY'
+import pathlib
+path = pathlib.Path("crates/gateway/src/clock.rs")
+# The other direction: a rate limiter an NTP step can steer.
+path.write_text(path.read_text() + """
+fn refill_on_the_wall_clock() -> std::time::SystemTime {
+    std::time::SystemTime::now()
+}
+""")
+CLOCKPY
+}
+expect_fail check_clock_single_source.sh \
+    'the monotonic source reading the wall clock' mut_clock_monotonic_source_reads_the_wall_clock
+
+mut_clock_wall_source_stops_reading_the_clock() {
+    python3 - <<'CLOCKPY'
+import pathlib
+path = pathlib.Path("crates/sig/src/clock.rs")
+# The subject refactored away. The guard must fail rather than pass vacuously.
+path.write_text(path.read_text().replace("std::time::SystemTime::now()", "SOME_OTHER_SOURCE.read()"))
+CLOCKPY
+}
+expect_fail check_clock_single_source.sh \
+    "the guard's own subject refactored away, which must fail rather than skip" \
+    mut_clock_wall_source_stops_reading_the_clock
+
+mut_clock_monotonic_source_deleted() {
+    rm -f crates/gateway/src/clock.rs
+}
+expect_fail check_clock_single_source.sh \
+    "the monotonic source deleted, which must fail rather than skip" mut_clock_monotonic_source_deleted
+
+mut_governor_sync_path_allocates() {
+    python3 - <<'GOVPY'
+import pathlib
+path = pathlib.Path("crates/gateway/src/ext/governor/default.rs")
+text = path.read_text()
+needle = "    pub fn try_acquire_sync(&self, request: &GovernorRequest<'_>) -> Option<Lease> {"
+path.write_text(text.replace(needle, needle + "\n        let _allocation = Box::new(0_u8);", 1))
+GOVPY
+}
+expect_fail check_governor_fast_path.sh \
+    'an allocation added to the synchronous governor path' mut_governor_sync_path_allocates
+
+mut_governor_single_client_lock() {
+    python3 - <<'GOVPY'
+import pathlib
+path = pathlib.Path("crates/gateway/src/ext/governor/default.rs")
+path.write_text(path.read_text().replace("const CLIENT_SHARDS: usize = 32;", "const CLIENT_SHARDS: usize = 1;", 1))
+GOVPY
+}
+expect_fail check_governor_fast_path.sh \
+    'the address table collapsed to one lock' mut_governor_single_client_lock
+
+mut_governor_user_replaces_framework() {
+    python3 - <<'GOVPY'
+import pathlib
+path = pathlib.Path("crates/gateway/src/builder.rs")
+path.write_text(path.read_text().replace(
+    "Arc::new(LayeredGovernor::new(framework_governor, user))",
+    "user",
+    1,
+))
+GOVPY
+}
+expect_fail check_governor_fast_path.sh \
+    'a user governor replacing the framework governor' mut_governor_user_replaces_framework
+
+mut_governor_request_constructor_public() {
+    python3 - <<'GOVPY'
+import pathlib
+path = pathlib.Path("crates/gateway/src/ext/governor.rs")
+path.write_text(path.read_text().replace("pub(crate) const fn new(", "pub const fn new(", 1))
+GOVPY
+}
+expect_fail check_governor_fast_path.sh \
+    'GovernorRequest construction exposed to extensions' mut_governor_request_constructor_public
+
+mut_governor_client_map_allocates_on_demand() {
+    python3 - <<'GOVPY'
+import pathlib
+path = pathlib.Path("crates/gateway/src/ext/governor/default.rs")
+path.write_text(path.read_text().replace("HashMap::with_capacity(capacity)", "HashMap::new()", 1))
+GOVPY
+}
+expect_fail check_governor_fast_path.sh \
+    'client-map allocation moved into the decision path' mut_governor_client_map_allocates_on_demand
+
 
 # ── check_authz_fail_closed.sh (P6-02) ─────────────────────────────────────────
 

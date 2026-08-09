@@ -87,10 +87,12 @@ depend on, and a hand-rolled one on the pre-authentication path is where the nex
 live. The concurrency bound in the meantime is the `Governor`, which runs first. This is a gap,
 and it is written here rather than papered over.
 
-**What the defaults cost.** `NoCors` is the default source and `Unlimited` is the default
-governor. Assembled with both, no preflight is ever allowed — so there is nothing to amplify —
-but a deployment that installs a real source and leaves the governor alone has installed the read
-and not the bound.
+**What the defaults cost.** `NoCors` is the default source, so no preflight is ever allowed and
+there is nothing to amplify. The governor default is no longer `Unlimited`: `DefaultGovernor`
+meters preflights through aggregate, per-client, and CORS-class buckets — see
+`docs/capacity-planning.md` — so a deployment that installs a real source has a bound before it
+configures one. The client key must come from a listener or trusted-proxy adapter; no forwarding
+header is trusted here.
 
 ## The response matrix
 

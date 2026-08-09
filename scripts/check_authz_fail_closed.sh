@@ -144,7 +144,8 @@ fi
 # the declaration and would never see it.
 derived="$(code_of "$DECISION_FILE" | awk '
     /^#\[/ { attrs = attrs $0; next }
-    /^pub[ \t]+enum[ \t]+Decision[ \t]*[{]/ { print attrs; exit }
+    /^pub[ \t]+enum[ \t]+Decision[ \t]*[{]/ { if (!found) { print attrs; found = 1 }; next }
+    found { next }
     { attrs = "" }
 ')"
 if [[ "$(printf '%s' "$derived" | grep -cE 'Default' || true)" -gt 0 ]]; then

@@ -115,7 +115,7 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::task::Poll;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use bytes::Bytes;
 use http::{Request, Response, StatusCode};
@@ -136,13 +136,13 @@ use rustfs_gateway_sig::{
 use rustfs_gateway_stream::Body;
 use rustfs_gateway_types::{ErrorCode, NamePolicy};
 
-use crate::clock::Clock;
+use crate::clock::{Clock, ClockPosture, MonotonicClock, MonotonicNow};
 use crate::dispatch::{DispatchTable, ErasedAnswer, target_of};
 use crate::ext::{
     AuthSchemeRef, Authentication, Authenticator, Authorizer, AuthzAuditEvent, AuthzAuditSink, AuthzRequest, AuthzStage,
-    CORS_PREFLIGHT, CachedCorsSource, Governor, GovernorRequest, HostQuery, HostResolver, InputAuthzRequest, Observer,
-    PolicyError, PolicySnapshot, PolicySource, PolicyTimeout, RequestContext, RequestEvent, ResolvedHost, ResponseView,
-    RoutedView, ServerExtensions, StageFilter, WireHead, emit_safely,
+    CORS_PREFLIGHT, CachedCorsSource, ClassKind, ClientAddr, Governor, GovernorRequest, HostQuery, HostResolver,
+    InputAuthzRequest, Observer, PolicyError, PolicySnapshot, PolicySource, PolicyTimeout, RequestContext, RequestEvent,
+    ResolvedHost, ResponseView, RoutedView, ServerExtensions, StageFilter, WireHead, emit_safely,
 };
 use crate::gate::{Authenticated, BodyCeilings, SealedBody};
 use crate::render::{S3Error, render};
@@ -165,10 +165,12 @@ pub(crate) struct Inner {
     pub(crate) policy_source: Arc<dyn PolicySource>,
     pub(crate) policy_timeout: PolicyTimeout,
     pub(crate) authz_audit: Arc<dyn AuthzAuditSink>,
+    pub(crate) authz_clock: Arc<dyn MonotonicClock>,
     pub(crate) host_resolver: Arc<dyn HostResolver>,
     pub(crate) governor: Arc<dyn Governor>,
     pub(crate) observer: Arc<dyn Observer>,
     pub(crate) clock: Arc<dyn Clock>,
+    pub(crate) clock_posture: ClockPosture,
     pub(crate) traces: Arc<dyn TraceSource>,
     pub(crate) cors: Arc<CachedCorsSource>,
     pub(crate) cors_policy: CorsPolicy,
@@ -210,6 +212,12 @@ impl S3Service {
         &self.inner.limits
     }
 
+    /// Whether the service uses the system clock, a checked custom source, or an acknowledged one.
+    #[must_use]
+    pub fn clock_posture(&self) -> ClockPosture {
+        self.inner.clock_posture
+    }
+
     /// Answers one request.
     ///
     /// The entry point both assembly paths share. It never fails: every refusal is a response, for
@@ -235,8 +243,9 @@ impl S3Service {
         // cleartext, which is what makes the customer-key gate fail closed for a transport that
         // has not been taught to declare anything.
         let connection = connection_security(request.extensions());
+        let client_addr = request.extensions().get::<ClientAddr>().copied();
         let mut outcome = Outcome::new(&trace);
-        let mut response = self.run(request, &mut outcome, now, connection).await;
+        let mut response = self.run(request, &mut outcome, now, connection, client_addr).await;
         // The CORS decoration for an ordinary request, applied here because it belongs on
         // **every** answer the pipeline produced once authorisation was granted — the `404` and
         // the `500` included. A browser cannot read a response it was not granted access to, so
@@ -300,6 +309,7 @@ impl S3Service {
         outcome: &mut Outcome<'_>,
         now: RequestNow,
         connection: TransportSecurity,
+        client_addr: Option<ClientAddr>,
     ) -> Response<Body>
     where
         B: http_body::Body + Send + 'static,
@@ -362,7 +372,7 @@ impl S3Service {
             PreflightClass::Malformed => return outcome.refuse_preflight(),
             PreflightClass::Preflight(preflight) => {
                 return self
-                    .serve_preflight(wire.raw_path().as_str(), resolved, &preflight, outcome, now)
+                    .serve_preflight(wire.raw_path().as_str(), resolved, &preflight, outcome, now, client_addr)
                     .await;
             }
         }
@@ -442,21 +452,25 @@ impl S3Service {
             }
         }
 
-        // Routed, so there is a bucket to limit on; before the body, so a refusal costs the
-        // response and nothing else.
+        let query = RawQuery::new(wire.query().as_str());
+        let view = WireView::new(&headers, query);
+        let presence = detect_credentials(&view);
+        let class = if presence.any() {
+            ClassKind::CredentialLookup
+        } else {
+            ClassKind::Unauthenticated
+        };
+
+        // Routed, so there is a bucket to expose to a deployment governor; before the body and
+        // credential lookup, so either framework refusal prevents the work it limits.
         if self
             .inner
             .governor
-            .try_acquire(&GovernorRequest {
-                operation,
-                bucket: meta.bucket(),
-                declared_body_bytes: declared_length,
-                identity: None,
-            })
+            .try_acquire(&GovernorRequest::new(operation, meta.bucket(), declared_length, None, client_addr, class))
             .await
             .is_err()
         {
-            return outcome.refuse(S3Error::new(ErrorCode::SLOW_DOWN, "the service is not accepting this request right now"));
+            return outcome.refuse_for_load();
         }
 
         // Sealed here and read at the bottom. Between the two lies every stage that can refuse
@@ -464,9 +478,6 @@ impl S3Service {
         // `SealedBody::read` needs an `Authenticated`, which does not exist yet.
         let sealed = SealedBody::seal(pending, declared_length);
 
-        let query = RawQuery::new(wire.query().as_str());
-        let view = WireView::new(&headers, query);
-        let presence = detect_credentials(&view);
         let chunk_sink = crate::ext::ChunkSink::new();
         // Kept out of the `match` so the read at the bottom can consult it: for an anonymous or
         // custom admission there is no payload mode and therefore no framed body to decode.
@@ -540,7 +551,7 @@ impl S3Service {
             // permissive answer here looks like in production.
             return outcome.refuse(S3Error::new(ErrorCode::INTERNAL_ERROR, "this operation declares no authorisation action"));
         };
-        let authz_started = Instant::now();
+        let authz_started = self.inner.authz_clock.monotonic();
         let auth_scheme = if verdict.is_authenticated() {
             AuthSchemeRef::Authenticated
         } else {
@@ -586,16 +597,16 @@ impl S3Service {
                         target_origin,
                         policy_snapshot: None,
                         decision,
-                        elapsed: authz_started.elapsed(),
+                        elapsed: elapsed_since(self.inner.authz_clock.as_ref(), authz_started),
                     },
                 );
-                hold_failure_floor(self.inner.floor.failure_floor(), authz_started).await;
+                hold_failure_floor(self.inner.floor.failure_floor(), self.inner.authz_clock.as_ref(), authz_started).await;
                 return outcome.refuse(S3Error::from(rustfs_gateway_core::Denied::indeterminate()));
             }
         };
         let server_extensions = ServerExtensions::new();
         let authz_context = RequestContext::from_request(now, &policy, auth_scheme, &server_extensions);
-        let route_started = Instant::now();
+        let route_started = self.inner.authz_clock.monotonic();
         let route_decision =
             match catch_authorizer(|| self.inner.authorizer.authorize_route(&authz_context, &route_request)).await {
                 Ok(decision) => decision,
@@ -620,11 +631,11 @@ impl S3Service {
                 target_origin,
                 policy_snapshot: Some(policy.id()),
                 decision: route_decision,
-                elapsed: route_started.elapsed(),
+                elapsed: elapsed_since(self.inner.authz_clock.as_ref(), route_started),
             },
         );
         if let Err(denial) = settled {
-            hold_failure_floor(self.inner.floor.failure_floor(), authz_started).await;
+            hold_failure_floor(self.inner.floor.failure_floor(), self.inner.authz_clock.as_ref(), authz_started).await;
             return outcome.refuse(S3Error::from(denial));
         }
 
@@ -741,7 +752,7 @@ impl S3Service {
             });
         }
         let input_request = InputAuthzRequest::new(&route_request, &input_resources);
-        let input_started = Instant::now();
+        let input_started = self.inner.authz_clock.monotonic();
         let input_decisions =
             match catch_authorizer(|| self.inner.authorizer.authorize_input(&authz_context, &input_request)).await {
                 Ok(decisions) => decisions,
@@ -773,13 +784,13 @@ impl S3Service {
                 target_origin,
                 policy_snapshot: Some(policy.id()),
                 decision: input_decision,
-                elapsed: input_started.elapsed(),
+                elapsed: elapsed_since(self.inner.authz_clock.as_ref(), input_started),
             },
         );
         let authorized = match authorized {
             Ok(authorized) => authorized,
             Err(denial) => {
-                hold_failure_floor(self.inner.floor.failure_floor(), authz_started).await;
+                hold_failure_floor(self.inner.floor.failure_floor(), self.inner.authz_clock.as_ref(), authz_started).await;
                 return outcome.refuse(S3Error::from(denial));
             }
         };
@@ -832,21 +843,24 @@ impl S3Service {
         preflight: &PreflightRequest<'_>,
         outcome: &mut Outcome<'_>,
         now: RequestNow,
+        client_addr: Option<ClientAddr>,
     ) -> Response<Body> {
         let bucket = preflight_bucket(path, &resolved);
         if self
             .inner
             .governor
-            .try_acquire(&GovernorRequest {
-                operation: CORS_PREFLIGHT,
-                bucket: bucket.as_ref(),
-                declared_body_bytes: None,
-                identity: None,
-            })
+            .try_acquire(&GovernorRequest::new(
+                CORS_PREFLIGHT,
+                bucket.as_ref(),
+                None,
+                None,
+                client_addr,
+                ClassKind::CorsPreflight,
+            ))
             .await
             .is_err()
         {
-            return outcome.refuse(S3Error::new(ErrorCode::SLOW_DOWN, "the service is not accepting this request right now"));
+            return outcome.refuse_for_load();
         }
         let document = match bucket.as_ref() {
             Some(name) => self.inner.cors.get(name, now).await,
@@ -975,8 +989,12 @@ async fn wait_without_runtime(duration: Duration) {
     .await
 }
 
-async fn hold_failure_floor(floor: FailureFloor, started: Instant) {
-    if let Some(remaining) = floor.remaining(started.elapsed()) {
+fn elapsed_since(clock: &dyn MonotonicClock, started: MonotonicNow) -> Duration {
+    Duration::from_millis(clock.monotonic().saturating_millis_since(started))
+}
+
+async fn hold_failure_floor(floor: FailureFloor, clock: &dyn MonotonicClock, started: MonotonicNow) {
+    if let Some(remaining) = floor.remaining(elapsed_since(clock, started)) {
         wait_without_runtime(remaining).await;
     }
 }
@@ -1074,6 +1092,18 @@ impl<'a> Outcome<'a> {
         let mut response = render(&error, self.trace);
         response.headers_mut().insert(VARY, VARY_ORIGIN);
         response
+    }
+
+    /// The one refusal a governor can cause.
+    ///
+    /// Takes no argument, and there is deliberately nowhere to put one. Every reason a limiter
+    /// can have — the aggregate ceiling, one client, one class, a deployment's own
+    /// quota — renders the same bytes, because a refusal that named its reason would answer "which
+    /// of my buckets is nearly full" for anybody willing to send traffic and read the difference.
+    /// Nothing here is derived from the request, and no `Retry-After` is written: the exact time
+    /// the limiter recovers is the recovery rate, told to whoever asked.
+    fn refuse_for_load(&mut self) -> Response<Body> {
+        self.refuse(S3Error::new(ErrorCode::SLOW_DOWN, "the service is not accepting this request right now"))
     }
 
     /// The same, for a refusal that arrived after the head had gone out.

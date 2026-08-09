@@ -259,7 +259,10 @@ fn authenticator() -> SigV4Authenticator {
 fn base() -> ServiceBuilder {
     ServiceBuilder::new()
         .authenticator(authenticator())
-        .clock(support::fixed_clock())
+        .clock_with_skew_ack(
+            support::fixed_clock(),
+            rustfs_gateway::ClockSkewAck::i_understand_a_skewed_clock_can_disable_signature_expiry(),
+        )
         .register::<Ping, _>(Arc::new(Backend))
         .route(ping_route())
 }
