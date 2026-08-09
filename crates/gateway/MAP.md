@@ -57,6 +57,8 @@ the consumer surface. Ring 1: no rustfs crate dependency. Start at `src/lib.rs`;
 | --- | --- |
 | `tests/assembly.rs` | Assembly refusals, one-Arc service, required extensions |
 | `tests/assembly_order.rs` | Aggregate extension call order and counts |
+| `tests/service_clone_allocations.rs` | Zero-allocation connection clones |
+| `tests/service_concurrency.rs` | One hundred concurrent clones and requests |
 | `tests/service_config.rs` | Mid-request updates cannot tear a snapshot |
 | `tests/handler_panic.rs` | Handler panic becomes 500; next request still runs |
 | `tests/pipeline.rs` | End-to-end ordering, response shapes, body progress |

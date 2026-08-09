@@ -178,6 +178,32 @@ done
 # -----------------------------------------------------------------------------
 printf '\nNegative cases (guards must fail)\n'
 
+# ── check_minimal_assembly_lines.sh (P7-01) ───────────────────────────────────
+
+mut_minimal_assembly_exceeds_twenty_lines() {
+    python3 - <<'PY'
+from pathlib import Path
+
+path = Path("crates/gateway/examples/minimal.rs")
+text = path.read_text()
+extra = "".join(f"    let _extra_{index} = {index};\n" for index in range(21))
+path.write_text(text.replace("    // END MINIMAL ASSEMBLY", extra + "    // END MINIMAL ASSEMBLY", 1))
+PY
+}
+expect_fail check_minimal_assembly_lines.sh \
+    'the minimal ServiceBuilder assembly grows beyond twenty effective lines' mut_minimal_assembly_exceeds_twenty_lines
+
+mut_minimal_assembly_marker_removed() {
+    python3 - <<'PY'
+from pathlib import Path
+
+path = Path("crates/gateway/examples/minimal.rs")
+path.write_text(path.read_text().replace("    // BEGIN MINIMAL ASSEMBLY\n", "", 1))
+PY
+}
+expect_fail check_minimal_assembly_lines.sh \
+    'the assembly measurement loses its opening marker' mut_minimal_assembly_marker_removed
+
 # Prove the selective reset itself before relying on it for the remaining cases. The probe dirties
 # the index, a tracked file and an untracked file, then asks the next sandbox acquisition for the
 # same clean baseline every guard case expects.

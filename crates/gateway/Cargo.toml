@@ -46,6 +46,7 @@ hyper = { workspace = true }
 tower = { workspace = true }
 
 [dev-dependencies]
+dhat = { workspace = true }
 tokio.workspace = true
 trybuild = { workspace = true }
 

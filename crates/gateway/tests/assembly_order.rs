@@ -19,6 +19,8 @@
 //! NOT responsible for: each extension's local semantics, which its own integration suite covers.
 //! Upstream: `rustfs-gateway`. Downstream: `docs/assembly-order.md`.
 
+#[path = "assembly_order/host.rs"]
+mod order_host;
 mod support;
 
 use std::sync::{Arc, Mutex};
@@ -26,10 +28,10 @@ use std::sync::{Arc, Mutex};
 use rustfs_gateway::dto::GetObjectAttributes;
 use rustfs_gateway::{
     Authentication, Authenticator, Authorizer, AuthzAuditEvent, AuthzAuditSink, AuthzRequest, BoxFuture, CorsSource,
-    CorsSourceError, Credentials, Decision, Governor, GovernorRequest, Handler, HandlerResult, HostQuery, HostResolver,
-    InputAuthzRequest, InputDecisions, Lease, Next, NoAuthzAudit, NoCors, NoObserver, NoPolicy, Observer, PathStyleOnly,
-    PolicyError, PolicySnapshot, PolicySource, RegionSet, Req, RequestContext, RequestEvent, ResolvedHost, S3Error,
-    SigV4Authenticator, StageFilter, StaticCredentials, Unavailable, Unlimited, Verdict, WireHead, allow_when, op_layer,
+    CorsSourceError, Credentials, Decision, Governor, GovernorRequest, Handler, HandlerResult, InputAuthzRequest, InputDecisions,
+    Lease, Next, NoAuthzAudit, NoCors, NoObserver, NoPolicy, Observer, PolicyError, PolicySnapshot, PolicySource, RegionSet, Req,
+    RequestContext, RequestEvent, S3Error, SigV4Authenticator, StageFilter, StaticCredentials, Unavailable, Unlimited, Verdict,
+    WireHead, allow_when, op_layer,
 };
 use support::{Attributes, attributes_request, fixed_clock};
 
@@ -56,13 +58,6 @@ impl<T> Mark<T> {
 
     fn note(&self) {
         note(&self.trail, self.label);
-    }
-}
-
-impl<T: HostResolver> HostResolver for Mark<T> {
-    fn resolve(&self, query: &HostQuery<'_>) -> ResolvedHost {
-        self.note();
-        self.inner.resolve(query)
     }
 }
 
@@ -195,7 +190,7 @@ async fn one_request_has_one_aggregate_extension_order() {
         .authorizer(Mark::new(allow_when(|_| true), "authorizer", &trail))
         .policy_source(Mark::new(NoPolicy, "policy", &trail))
         .authz_audit(Mark::new(NoAuthzAudit, "audit", &trail))
-        .host_resolver(Mark::new(PathStyleOnly, "host", &trail))
+        .host_resolver(order_host::RecordingHost::new(&trail))
         .governor(Mark::new(Unlimited, "governor", &trail))
         .cors_source(Mark::new(NoCors, "cors", &trail))
         .observer(Mark::new(NoObserver, "observer", &trail))

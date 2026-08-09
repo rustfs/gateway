@@ -40,8 +40,9 @@ fn an_empty_registry_is_refused() {
     assert_eq!(error.rule(), RuleRef::EMPTY_REGISTRY);
 }
 
-/// a-asm-0009/a-asm-0010. Negative — this implementation chooses the design's fallible-build
-/// alternative to typestate: no authorizer means no service, with no default allow or default deny.
+/// c-azc-0019 and a-asm-0009/a-asm-0010. Negative — this implementation chooses the design's
+/// fallible-build alternative to typestate: no authorizer means no service, with no default allow
+/// or default deny.
 #[test]
 fn a_asm_0009_and_0010_missing_authorizer_is_refused_at_build() {
     let credentials = Arc::new(
