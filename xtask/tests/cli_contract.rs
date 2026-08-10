@@ -77,10 +77,48 @@ fn a_standard_operation_cannot_be_scaffolded() {
 }
 
 #[test]
+fn model_verify_runs_the_pinned_model_checker() {
+    let output = xtask(&["model", "verify"]);
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("upstream is the official aws/api-models-aws repository"), "{stdout}");
+    assert!(stdout.contains("ok in "), "{stdout}");
+}
+
+#[test]
+fn model_verify_rejects_extra_arguments() {
+    let output = xtask(&["model", "verify", "extra"]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("accepts no arguments"));
+}
+
+#[test]
+fn model_drift_forwards_the_candidate_path() {
+    let output = xtask(&["model", "drift", "--against", "model"]);
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(String::from_utf8_lossy(&output.stdout).contains("semantic diff is empty"));
+}
+
+#[test]
+fn model_drift_propagates_tool_failures() {
+    let output = xtask(&["model", "drift", "--against", "missing-model-candidate"]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(!output.stderr.is_empty());
+}
+
+#[test]
 fn usage_names_every_p7_command() {
     let output = xtask(&[]);
     let stderr = String::from_utf8_lossy(&output.stderr);
-    for command in ["verify --op", "verify --all", "route explain", "new-op", "bootstrap"] {
+    for command in [
+        "verify --op",
+        "verify --all",
+        "  model verify ",
+        "  model drift --against",
+        "route explain",
+        "new-op",
+        "bootstrap",
+    ] {
         assert!(stderr.contains(command), "usage omitted {command}: {stderr}");
     }
 }

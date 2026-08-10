@@ -22,6 +22,7 @@
 mod bootstrap;
 mod catalog;
 mod codegen;
+mod model;
 mod new_op;
 mod route;
 mod verify;
@@ -36,6 +37,7 @@ fn main() -> ExitCode {
     match first.as_deref() {
         Some("verify") => verify::verify(&rest),
         Some("codegen") => codegen::codegen(&rest),
+        Some("model") => model::model(&rest),
         Some("spec") => match rest.first().map(String::as_str) {
             Some("verify") => codegen::verify(&rest[1..]),
             other => {
@@ -76,6 +78,9 @@ commands:
   codegen diff --semantic   print a semantic diff capped at 50 lines
   codegen --check           fail when generated output or the verify map drifted
   spec verify               fail when any generated artefact differs from a fresh run
+  model verify              verify the vendored model against its provenance record
+  model drift --against <path>
+                            report wire-affecting differences in a candidate model
   why <target> [--json]     trace a quirk, operation, error code, header, ADR or assembly rule
   route explain [--json] 'METHOD /path?query'
                             explain route selection and every predicate
