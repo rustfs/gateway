@@ -21,6 +21,9 @@ the consumer surface. Ring 1: no rustfs crate dependency. Start at `src/lib.rs`;
 | `src/render.rs` | One S3 error renderer | Changing refusal bytes or headers |
 | `src/commit.rs` | 200-then-answer/error response shape | Work continues after the head commits |
 | `src/invariants.rs` | HEAD/bodyless and SSE-C response rules | A forbidden body or key reaches the wire |
+| `src/monomorphic.rs` | Concrete-backend service and type-level operation set | Building or auditing static dispatch |
+| `src/operation_mode.rs` | Dynamic/static adapters for the common pipeline | Auditing how a routed operation reaches its codec and handler |
+| `src/request_deadline.rs` | Runtime-independent policy and failure-floor deadlines | Editing timeout mechanics used by the request pipeline |
 | `src/stamp.rs` | Framework-owned response headers | A response lacks IDs, `Server`, or `Date` |
 | `src/trace.rs` | Request IDs and trace sources | Joining an answer to an audit record |
 | `src/clock.rs` | Wall and monotonic clock sources | A request reads time twice |

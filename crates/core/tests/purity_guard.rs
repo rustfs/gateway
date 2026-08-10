@@ -81,11 +81,18 @@ const STORE_WORDS: &[&str] = &[
 /// An entry naming a file that does not exist, or one that turns out not to await after all, fails
 /// [`the_off_path_allowance_says_what_is_true`]: a stale allowance reads as a reviewed decision
 /// about code that is no longer there.
-const OFF_THE_ROUTING_PATH: &[(&str, &str)] = &[(
-    "registry/handlers.rs",
-    "the erased handler call: it runs after the floor has admitted the request, and it is the one \
-     place in this crate that awaits",
-)];
+const OFF_THE_ROUTING_PATH: &[(&str, &str)] = &[
+    (
+        "registry/handlers.rs",
+        "the erased handler call: it runs after the floor has admitted the request, and it is the \
+         dynamic invocation path in this crate",
+    ),
+    (
+        "static_dispatch.rs",
+        "the sealed generic decode, authorization, handler and encode entry runs only after the \
+         facade security floor has admitted the request",
+    ),
+];
 
 /// Whether a file is one of the few allowed to await.
 fn is_off_the_routing_path(path: &Path) -> bool {
@@ -337,6 +344,7 @@ fn the_segmenter_splits_the_way_the_detector_needs() {
 #[test]
 fn the_off_path_check_matches_only_the_listed_files() {
     assert!(is_off_the_routing_path(&source_root().join("registry/handlers.rs")));
+    assert!(is_off_the_routing_path(&source_root().join("static_dispatch.rs")));
     assert!(!is_off_the_routing_path(&source_root().join("registry/mod.rs")));
     assert!(!is_off_the_routing_path(&source_root().join("route/table.rs")));
 }

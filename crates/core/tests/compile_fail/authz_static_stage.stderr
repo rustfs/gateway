@@ -1,0 +1,11 @@
+error[E0603]: module `static_dispatch` is private
+  --> tests/compile_fail/authz_static_stage.rs:21:26
+   |
+21 | use rustfs_gateway_core::static_dispatch::decode;
+   |                          ^^^^^^^^^^^^^^^ private module
+   |
+note: the module `static_dispatch` is defined here
+  --> src/lib.rs
+   |
+   | mod static_dispatch;
+   | ^^^^^^^^^^^^^^^^^^^

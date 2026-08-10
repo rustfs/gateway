@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# a-asm-0023: every extension default documents its security consequence.
 # Every public extension default states its security consequence at the implementation site.
 set -euo pipefail
 

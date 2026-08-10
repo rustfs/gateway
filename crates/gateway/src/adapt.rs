@@ -15,7 +15,8 @@
 //! How the assembled service is reached from `tower` and from `hyper`.
 //!
 //! Responsible for: the `tower::Service` and `hyper::service::Service` implementations for
-//! [`S3Service`], and [`ServiceFuture`], the boxed future both return.
+//! [`S3Service`] and [`crate::MonomorphicService`], and [`ServiceFuture`], the boxed future they
+//! return.
 //! NOT responsible for: any protocol decision. Both implementations forward to
 //! [`S3Service::call`] and add nothing; if a behaviour differs between the two paths, it is a
 //! defect in one of the two libraries or in this file, and never a policy.
@@ -45,6 +46,7 @@ use http::{Request, Response};
 use rustfs_gateway_stream::Body;
 
 use crate::service::S3Service;
+use crate::{MonomorphicOperationSet, MonomorphicService};
 
 /// The future both adapters return.
 pub type ServiceFuture = Pin<Box<dyn Future<Output = Result<Response<Body>, Infallible>> + Send>>;
@@ -116,12 +118,60 @@ where
     }
 }
 
+impl<B, H, Operations> tower::Service<Request<B>> for MonomorphicService<H, Operations>
+where
+    B: http_body::Body + Send + 'static,
+    B::Data: Send,
+    B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+    H: Send + Sync + 'static,
+    Operations: MonomorphicOperationSet<H>,
+{
+    type Response = Response<Body>;
+    type Error = Infallible;
+    type Future = ServiceFuture;
+
+    fn poll_ready(&mut self, _context: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn call(&mut self, request: Request<B>) -> Self::Future {
+        let service = self.clone();
+        Box::pin(async move {
+            let mut response = service.call(request).await;
+            announce_connection_verdict(&mut response);
+            Ok(response)
+        })
+    }
+}
+
+impl<B, H, Operations> hyper::service::Service<Request<B>> for MonomorphicService<H, Operations>
+where
+    B: http_body::Body + Send + 'static,
+    B::Data: Send,
+    B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+    H: Send + Sync + 'static,
+    Operations: MonomorphicOperationSet<H>,
+{
+    type Response = Response<Body>;
+    type Error = Infallible;
+    type Future = ServiceFuture;
+
+    fn call(&self, request: Request<B>) -> Self::Future {
+        let service = self.clone();
+        Box::pin(async move {
+            let mut response = service.call(request).await;
+            announce_connection_verdict(&mut response);
+            Ok(response)
+        })
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 mod tests {
     use super::*;
 
-    /// Negative — the error type is `Infallible`, so "return `Err` from `call`" is not a path that
+    /// a-asm-0020. Negative — the error type is `Infallible`, so "return `Err` from `call`" is not a path that
     /// exists rather than one nobody takes. This is a compile-time assertion.
     #[test]
     fn neither_adapter_can_return_an_error() {
@@ -131,6 +181,27 @@ mod tests {
         {
         }
         assert_infallible::<S3Service, Request<http_body_util::Full<bytes::Bytes>>>();
+    }
+
+    /// a-asm-0007. The monomorphic service is a drop-in tower and hyper service too.
+    #[test]
+    fn the_static_service_has_both_infallible_adapters() {
+        type Operations = crate::OperationSetNode<crate::dto::ListBuckets, crate::OperationSetEnd>;
+        type Service = crate::MonomorphicService<crate::tests::NoBackend, Operations>;
+        type Request = http::Request<http_body_util::Full<bytes::Bytes>>;
+
+        fn assert_tower<S>()
+        where
+            S: tower::Service<Request, Error = Infallible>,
+        {
+        }
+        fn assert_hyper<S>()
+        where
+            S: hyper::service::Service<Request, Error = Infallible>,
+        {
+        }
+        assert_tower::<Service>();
+        assert_hyper::<Service>();
     }
 
     /// Negative — `poll_ready` never reports pending, so a tower stack cannot mistake this service

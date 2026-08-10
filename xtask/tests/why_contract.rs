@@ -87,11 +87,14 @@ fn a_doc_0019_unknown_target_suggests_candidates_without_panicking() {
     assert!(!stderr.contains("panicked"), "{stderr}");
 }
 
+/// a-asm-0017. Every AssemblyError rule resolves through the real CLI and prints its explanation.
 #[test]
-fn rule_target_resolves() {
-    let output = why(&["asm-missing-authorizer"]);
-    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
-    assert!(String::from_utf8_lossy(&output.stdout).contains("no Authorizer was installed"));
+fn every_assembly_rule_has_a_why_answer() {
+    for rule in rustfs_gateway::RuleRef::ALL {
+        let output = why(&[rule.as_str()]);
+        assert!(output.status.success(), "{rule}: {}", String::from_utf8_lossy(&output.stderr));
+        assert!(String::from_utf8_lossy(&output.stdout).contains(rule.explanation()), "{rule}");
+    }
 }
 
 #[test]

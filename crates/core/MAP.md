@@ -21,6 +21,7 @@ Agent entry point for operations, routing, codecs, authorization state and handl
 | `src/codec/response.rs` | Encoded response/body allowance. | A response has the wrong body/status shape. |
 | `src/authz.rs` | Authorization type-state and derived resources. | A handler can run without the intended proof. |
 | `src/handler.rs` | Typed handler request/response contracts. | Implement a backend or represent a committed failure. |
+| `src/static_dispatch.rs` | Sealed generic codec and concrete-handler entry. | Build or audit the monomorphic facade path. |
 | `src/registry/` | Handler/codec registration and erasure. | Registration, completeness or dynamic dispatch fails. |
 | `src/dispatch.rs` | Route, registration and parameter refusal order. | A request fails in the wrong stage. |
 | `src/error.rs` | Closed pre-authentication errors. | A refusal before authentication has the wrong status. |
@@ -31,6 +32,7 @@ Agent entry point for operations, routing, codecs, authorization state and handl
 | `tests/params_and_dispatch.rs` | Dispatch and required-parameter matrix. | Registry or dispatch changes. |
 | `tests/configuration_error_declarations.rs` | Static unconfigured-error declarations for operation triples. | A configuration operation's missing-state error changes. |
 | `tests/registration.rs` | Registration rejection matrix. | Handler registration changes. |
+| `tests/static_dispatch.rs` | Static dispatch order and identity mismatch. | Change the monomorphic core boundary. |
 | `tests/precondition_range.rs` | Conditional/range behavior matrix. | Precondition logic changes. |
 | `tests/purity_guard.rs` | Source-shape guards for pre-auth code. | Add public/core routing code. |
 | `tests/golden/route-table.txt` | Protected ordered route table. | Never edit without the Breaking Change process. |

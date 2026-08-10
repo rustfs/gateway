@@ -1,0 +1,11 @@
+error[E0532]: cannot match against a tuple struct which contains private fields
+  --> tests/compile_fail/authz_erased_request_open.rs:24:9
+   |
+24 |     let ErasedRequest(_inner) = request;
+   |         ^^^^^^^^^^^^^
+   |
+note: constructor is not visible here due to private fields
+  --> tests/compile_fail/authz_erased_request_open.rs:24:23
+   |
+24 |     let ErasedRequest(_inner) = request;
+   |                       ^^^^^^ private field

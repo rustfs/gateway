@@ -198,6 +198,26 @@ expect_fail_and_missing_grep() {
     fi
 }
 
+# check_monomorphic_dispatch reads compiler output rather than repository source. Feed it a tiny
+# LLVM mutation directly so the negative control proves that an indirect handler call is rejected
+# without paying for a second release build.
+expect_monomorphic_ir_fail() {
+    local desc="$1" mutate="$2"
+    local sandbox ir rc=0
+    cases=$((cases + 1))
+    make_sandbox
+    sandbox="$SANDBOX"
+    (cd "$sandbox" && "$mutate" >/dev/null)
+    ir="$sandbox/scripts/monomorphic-indirect.ll"
+    GATEWAY_CHECK_ROOT="$sandbox" GATEWAY_MONOMORPHIC_IR="$ir" \
+        "${SCRIPT_DIR}/check_monomorphic_dispatch.sh" >/dev/null 2>&1 || rc=$?
+    if [[ "$rc" -ne 0 ]]; then
+        pass_msg "check_monomorphic_dispatch.sh catches: ${desc}"
+    else
+        fail_msg "check_monomorphic_dispatch.sh did NOT catch: ${desc}"
+    fi
+}
+
 # -----------------------------------------------------------------------------
 # Positive control: the repository as it stands must be clean.
 # -----------------------------------------------------------------------------
@@ -215,6 +235,36 @@ done
 # Negative cases
 # -----------------------------------------------------------------------------
 printf '\nNegative cases (guards must fail)\n'
+
+mut_assembly_case_id_deleted() {
+    python3 - <<'PYEOF'
+import pathlib
+path = pathlib.Path("scripts/check_monomorphic_dispatch.sh")
+path.write_text(path.read_text().replace("a-asm-0007", "removed-asm-0007", 1))
+PYEOF
+}
+expect_fail check_assembly_case_coverage.sh \
+    'the static-dispatch case losing its LLVM guard mapping' mut_assembly_case_id_deleted
+
+mut_monomorphic_handler_is_indirect() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+Path("scripts/monomorphic-indirect.ll").write_text("""\
+define internal void @_RNCINvMNtCstatic_dispatchStaticOperationmonomorphic7support4Ping8dispatch7Backend() {
+; <monomorphic::support::Backend as rustfs_gateway_core::handler::Handler<monomorphic::support::Ping>>::call
+  %result = call ptr %handler()
+}
+; rustfs_gateway_core::static_dispatch::decode::<monomorphic::support::Ping>
+define internal void @_Rdecode() {
+; <monomorphic::support::Ping as rustfs_gateway_core::codec::OperationCodec>::decode
+  call void @_Rcodec()
+}
+""")
+PYEOF
+}
+expect_monomorphic_ir_fail \
+    'the concrete Handler<Ping> call becoming indirect' mut_monomorphic_handler_is_indirect
 
 # ── check_minimal_assembly_lines.sh (P7-01) ───────────────────────────────────
 
@@ -2119,7 +2169,8 @@ expect_fail check_ci_test_split.sh \
     'the branch-protected Test check being renamed' mut_ci_required_name_changed
 
 mut_ci_aggregate_drops_guard() {
-    replace_ci_text 'needs: [workspace-tests, guard-self-test]' 'needs: [workspace-tests]'
+    replace_ci_text 'needs: [workspace-tests, guard-self-test, gateway-tsan]' \
+        'needs: [workspace-tests, gateway-tsan]'
 }
 expect_fail check_ci_test_split.sh \
     'the required Test check no longer waiting for guard mutations' mut_ci_aggregate_drops_guard
@@ -2137,8 +2188,8 @@ expect_fail check_ci_test_split.sh \
     'the aggregate check hiding a skipped condition behind a comment' mut_ci_aggregate_hides_always_in_comment
 
 mut_ci_aggregate_step_skips_failure() {
-    replace_ci_text '      - name: Require both test jobs' \
-        '      - name: Require both test jobs
+    replace_ci_text '      - name: Require test jobs' \
+        '      - name: Require test jobs
         if: ${{ needs.workspace-tests.result == '\''success'\'' && needs.guard-self-test.result == '\''success'\'' }}'
 }
 expect_fail check_ci_test_split.sh \
@@ -2147,12 +2198,12 @@ expect_fail check_ci_test_split.sh \
 mut_ci_aggregate_budget_widened() {
     replace_ci_text '  test:
     name: Test
-    needs: [workspace-tests, guard-self-test]
+    needs: [workspace-tests, guard-self-test, gateway-tsan]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 1' '  test:
     name: Test
-    needs: [workspace-tests, guard-self-test]
+    needs: [workspace-tests, guard-self-test, gateway-tsan]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 2'
@@ -2423,6 +2474,57 @@ mut_config_load_allowlist_deleted() {
 }
 expect_fail check_config_load_once.sh \
     'the config-load allowlist being absent' mut_config_load_allowlist_deleted
+
+mut_config_snapshot_stage_deleted() {
+    python3 - <<'PYEOF'
+import pathlib
+path = pathlib.Path("crates/gateway/src/service.rs")
+text = path.read_text().replace("let config = state.config.decoded();", "let config = state.config;", 1)
+path.write_text(text)
+PYEOF
+}
+expect_fail check_config_load_once.sh \
+    'a real request path dropping the decoded snapshot stage' mut_config_snapshot_stage_deleted
+
+mut_tsan_instrumentation_deleted() {
+    python3 - <<'PYEOF'
+import pathlib
+path = pathlib.Path("scripts/run_gateway_tsan.sh")
+path.write_text(path.read_text().replace("RUSTFLAGS='-Zsanitizer=thread'", "RUSTFLAGS=''", 1))
+PYEOF
+}
+expect_fail check_gateway_tsan_wiring.sh \
+    'the TSAN runner losing sanitizer instrumentation' mut_tsan_instrumentation_deleted
+
+mut_tsan_build_std_deleted() {
+    python3 - <<'PYEOF'
+import pathlib
+path = pathlib.Path("scripts/run_gateway_tsan.sh")
+path.write_text(path.read_text().replace(" test -Zbuild-std ", " test ", 1))
+PYEOF
+}
+expect_fail check_gateway_tsan_wiring.sh \
+    'the TSAN runner using an uninstrumented standard library' mut_tsan_build_std_deleted
+
+mut_tsan_thread_count_reduced() {
+    python3 - <<'PYEOF'
+import pathlib
+path = pathlib.Path("crates/gateway/tests/service_concurrency.rs")
+path.write_text(path.read_text().replace("const THREADS: usize = 100;", "const THREADS: usize = 99;", 1))
+PYEOF
+}
+expect_fail check_gateway_tsan_wiring.sh \
+    'the concurrency case being reduced to 99 OS threads' mut_tsan_thread_count_reduced
+
+mut_tsan_ci_call_deleted() {
+    python3 - <<'PYEOF'
+import pathlib
+path = pathlib.Path(".github/workflows/ci.yml")
+path.write_text(path.read_text().replace("scripts/run_gateway_tsan.sh", "cargo test -p rustfs-gateway", 1))
+PYEOF
+}
+expect_fail check_gateway_tsan_wiring.sh \
+    'CI no longer invoking the TSAN runner' mut_tsan_ci_call_deleted
 
 mut_default_security_doc_deleted() {
     python3 - <<'PYEOF'

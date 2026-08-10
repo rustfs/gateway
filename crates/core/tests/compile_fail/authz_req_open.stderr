@@ -1,0 +1,5 @@
+error[E0451]: field `input` of struct `Req` is private
+  --> tests/compile_fail/authz_req_open.rs:25:15
+   |
+25 |     let Req { input, .. } = request;
+   |               ^^^^^ private field

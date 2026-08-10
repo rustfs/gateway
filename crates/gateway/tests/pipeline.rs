@@ -29,10 +29,7 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
 use bytes::Bytes;
-use rustfs_gateway::{
-    BodyProgress, ByteStream, ClockSkewAck, EVENT_STREAM_CONTENT_TYPE, EventSequence, Handler, HandlerResult, ObservedBody, Req,
-    Resp, S3Service, ServiceBuilder, dto, stats_document,
-};
+use rustfs_gateway::{BodyProgress, ClockSkewAck, EVENT_STREAM_CONTENT_TYPE, ObservedBody, S3Service, ServiceBuilder, dto};
 use support::{Backend, CountingBody, Failing, Ping, Recorder, RefuseEverything, exchange, ping_route, plain, wired};
 
 /// Negative — a request that names no operation is answered with the `501` that tells an operator
@@ -107,7 +104,7 @@ async fn a_framing_ambiguity_is_refused_at_acceptance() {
     assert_eq!(status, http::StatusCode::BAD_REQUEST);
 }
 
-/// Negative — a refusing governor answers `503 SlowDown`, and the body is never read. The byte
+/// a-asm-0021. Negative — a refusing governor answers `503 SlowDown`, and the body is never read. The byte
 /// counter is what makes "before the body" a measurement rather than a claim: a governor placed
 /// after the read would have paid for the upload it refused.
 #[tokio::test]
@@ -195,7 +192,7 @@ async fn a_failing_handler_becomes_a_response() {
     assert!(body.contains("<Code>InternalError</Code>"), "{body}");
 }
 
-/// Negative — the tower adapter never returns `Err`, whatever the request was. A `tower` layer
+/// a-asm-0020. Negative — the tower adapter never returns `Err`, whatever the request was. A `tower` layer
 /// that saw an `Err` would drop the connection instead of relaying the status.
 #[tokio::test]
 async fn the_tower_adapter_never_returns_an_error() {
@@ -680,58 +677,6 @@ async fn an_accepted_request_has_its_body_read_to_the_end() {
     assert!(progress.is_exhausted());
 }
 
-struct SelectBackend;
-
-impl Handler<dto::SelectObjectContent> for SelectBackend {
-    async fn call(&self, _request: Req<dto::SelectObjectContent>) -> HandlerResult<dto::SelectObjectContent> {
-        let mut frames = Vec::new();
-        let mut sequence = EventSequence::new();
-        sequence.records(b"a,b\n1,2\n", &mut frames).expect("records first");
-        sequence.stats(&stats_document(8, 8, 8), &mut frames).expect("accounting");
-        sequence.end(&mut frames).expect("terminator");
-        Ok(Resp::event_stream(ByteStream::from_bytes(Bytes::from(frames))))
-    }
-}
-
-fn signed_select(body: Bytes) -> http::Request<Bytes> {
-    use rustfs_gateway::sig::{AmzDate, PayloadMode, SigService, SigV4Signer, SigningCredentials, SigningRequest, SigningScope};
-
-    let target = "/bucket/rows.csv?select&select-type=2";
-    let mut headers = http::HeaderMap::new();
-    headers.insert(http::header::HOST, http::HeaderValue::from_static("s3.example.com"));
-    headers.insert(http::header::CONTENT_TYPE, http::HeaderValue::from_static("application/xml"));
-    headers.insert(
-        http::header::CONTENT_LENGTH,
-        http::HeaderValue::from_str(&body.len().to_string()).expect("a content length"),
-    );
-    let probe = http::Request::builder()
-        .uri("/")
-        .header("host", "s3.example.com")
-        .body(Bytes::new())
-        .expect("a valid request");
-    let accepted = rustfs_gateway::WireRequest::accept(probe, &rustfs_gateway::Limits::default()).expect("an acceptable host");
-    let stamp = AmzDate::parse(support::SIGNED_AT_STAMP).expect("a SigV4 stamp");
-    let scope = SigningScope::new(stamp.day(), "us-east-1", SigService::S3).expect("a scope");
-    let credentials = SigningCredentials::new("AKIDEXAMPLE", b"secret").expect("valid credentials");
-    let mut signer = SigV4Signer::new(credentials, scope);
-    let signing = SigningRequest::new(
-        &http::Method::POST,
-        "/bucket/rows.csv",
-        "select&select-type=2",
-        &headers,
-        accepted.host().raw_for_signing(),
-        PayloadMode::Unsigned,
-        stamp,
-    )
-    .with_wire_content_length(body.len() as u64);
-    let signed = signer.sign_headers(&signing).expect("a signable request");
-    let mut builder = http::Request::builder().method(http::Method::POST).uri(target);
-    for (name, value) in signed.headers() {
-        builder = builder.header(name, value);
-    }
-    builder.body(body).expect("a valid request")
-}
-
 /// a-asm-0008. Positive — Select's framed stream and an ordinary encoded document leave through
 /// the same non-generic service. A separate service path for streams would make middleware and
 /// authorization coverage depend on the response shape.
@@ -743,7 +688,7 @@ async fn an_event_stream_and_a_document_share_one_service_exit() {
             ClockSkewAck::i_understand_a_skewed_clock_can_disable_signature_expiry(),
         )
         .register::<Ping, _>(Arc::new(Backend))
-        .register::<dto::SelectObjectContent, _>(Arc::new(SelectBackend))
+        .register::<dto::SelectObjectContent, _>(Arc::new(support::select::SelectBackend))
         .route(ping_route())
         .build()
         .expect("a complete assembly");
@@ -753,7 +698,7 @@ async fn an_event_stream_and_a_document_share_one_service_exit() {
           <OutputSerialization><CSV/></OutputSerialization></SelectObjectContentRequest>",
     );
 
-    let stream = rustfs_gateway::collect(service.call_bytes(signed_select(select_body)).await)
+    let stream = rustfs_gateway::collect(service.call_bytes(support::select::signed_select(select_body)).await)
         .await
         .expect("a complete event stream");
     assert_eq!(stream.status(), http::StatusCode::OK);

@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// a-asm-0003: this complete assembly is compiled and line-counted by its guard.
+
 //! The smallest backend that proves the assembly path carries a request end to end.
 //!
 //! Responsible for: showing what a deployment writes — a handler, a builder, one request — and

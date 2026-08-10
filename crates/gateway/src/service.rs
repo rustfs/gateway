@@ -113,9 +113,7 @@ use std::future::poll_fn;
 use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::task::Poll;
-use std::time::Duration;
 
 use bytes::Bytes;
 use http::{Request, Response, StatusCode};
@@ -124,12 +122,11 @@ use rustfs_gateway_core::cors::{
     answer_preflight, classify, preflight_refusal,
 };
 use rustfs_gateway_core::{
-    BoxFuture, Decision, EncodedResponse, MetaView, ResourceShape, ResponseBody, RouteRequestParts, Router, SseConfig,
-    TargetKind, TransportSecurity,
+    BoxFuture, Decision, EncodedResponse, MetaView, OwnedResource, ResourceShape, ResponseBody, RouteRequestParts, Router,
+    SseConfig, StaticCommittedError, StaticDispatchError, StaticDispatchOutcome, TargetKind, TransportSecurity,
     dispatch::{NO_ROUTE_MESSAGE, NOT_REGISTERED_MESSAGE},
 };
 use rustfs_gateway_http::{Limits, WireRequest};
-use rustfs_gateway_sig::timing::FailureFloor;
 use rustfs_gateway_sig::{
     Admission, AuthError, PayloadMode, RawQuery, RequestNow, SecurityFloor, SigLocation, TrailerSet, Verdict, WireView,
     detect_credentials,
@@ -137,17 +134,21 @@ use rustfs_gateway_sig::{
 use rustfs_gateway_stream::Body;
 use rustfs_gateway_types::{ErrorCode, NamePolicy};
 
-use crate::clock::{Clock, ClockPosture, MonotonicClock, MonotonicNow};
-use crate::config::{ConfigSnapshot, ConfigStore};
-use crate::dispatch::{DispatchTable, ErasedAnswer, target_of};
+use crate::clock::{Clock, ClockPosture, MonotonicClock};
+use crate::config::ConfigStore;
+use crate::dispatch::{DispatchTable, target_of};
 use crate::ext::{
     AuthSchemeRef, Authentication, Authenticator, Authorizer, AuthzAuditEvent, AuthzAuditSink, AuthzRequest, AuthzStage,
     CORS_PREFLIGHT, CachedCorsSource, ClassKind, ClientAddr, CredentialGuardConfig, Governor, GovernorRequest, HostQuery,
-    HostResolver, InputAuthzRequest, Observer, PolicyError, PolicySnapshot, PolicySource, PolicyTimeout, Rate, RequestContext,
-    RequestEvent, ResolvedHost, ResponseView, RoutedView, ServerExtensions, StageFilter, WireHead, emit_safely,
+    HostResolver, InputAuthzRequest, Observer, PolicySnapshot, PolicySource, PolicyTimeout, Rate, RequestContext, RequestEvent,
+    ResolvedHost, ResponseView, RoutedView, ServerExtensions, StageFilter, WireHead, emit_safely,
 };
 use crate::gate::{Authenticated, BodyCeilings, SealedBody};
+use crate::monomorphic::sealed::Set as StaticSet;
+use crate::operation_mode::{DynamicMode, MonomorphicMode, OperationMode};
 use crate::render::{S3Error, render};
+use crate::request_config::{BodyRead, Entered, RequestConfig, RouteAuthorized};
+use crate::request_deadline::{elapsed_since, hold_failure_floor, policy_snapshot_with_timeout};
 use crate::trace::{RequestTrace, TraceSource};
 
 /// Everything an assembled service holds. Behind one `Arc`, so cloning the service is one
@@ -178,6 +179,22 @@ pub(crate) struct Inner {
     pub(crate) cors: Arc<CachedCorsSource>,
     pub(crate) cors_policy: CorsPolicy,
     pub(crate) sse: SseConfig,
+}
+
+struct AuthorizedRoute {
+    policy: Arc<PolicySnapshot>,
+    config: RequestConfig<RouteAuthorized>,
+}
+
+struct ReadForDecode {
+    policy: Arc<PolicySnapshot>,
+    config: RequestConfig<BodyRead>,
+}
+
+struct RequestEntryContext {
+    now: RequestNow,
+    connection: TransportSecurity,
+    client_addr: Option<ClientAddr>,
 }
 
 /// An assembled S3 service.
@@ -290,6 +307,34 @@ impl S3Service {
         B::Data: Send,
         B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
     {
+        let mode = DynamicMode {
+            dispatch: &self.inner.dispatch,
+        };
+        self.call_with_mode(request, mode).await
+    }
+
+    pub(crate) async fn call_monomorphic<B, H, Operations>(&self, request: Request<B>, backend: Arc<H>) -> Response<Body>
+    where
+        B: http_body::Body + Send + 'static,
+        B::Data: Send,
+        B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+        H: Send + Sync + 'static,
+        Operations: StaticSet<H>,
+    {
+        let mode: MonomorphicMode<H, Operations> = MonomorphicMode {
+            backend,
+            operations: core::marker::PhantomData,
+        };
+        self.call_with_mode(request, mode).await
+    }
+
+    async fn call_with_mode<B, M>(&self, request: Request<B>, mode: M) -> Response<Body>
+    where
+        B: http_body::Body + Send + 'static,
+        B::Data: Send,
+        B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+        M: OperationMode,
+    {
         // One minting and one reading of the clock, at the top, side by side. Everything below is
         // handed both values; nothing below holds either source, so neither a second identifier nor
         // a second instant can be produced — which is what lets the `Date` header and the skew
@@ -297,6 +342,7 @@ impl S3Service {
         // Exactly one load per request. The snapshot is passed down rather than the store, so no
         // later stage can observe a replacement made while this request is in flight.
         let config = self.inner.config.load_full();
+        let config = RequestConfig::enter(config);
         let trace = self.inner.traces.mint();
         let now = self.inner.clock.now();
         // Read before the request is consumed, and the only thing kept out of it: the RFC 9110 body
@@ -310,7 +356,19 @@ impl S3Service {
         let connection = connection_security(request.extensions());
         let client_addr = request.extensions().get::<ClientAddr>().copied();
         let mut outcome = Outcome::new(&trace);
-        let mut response = self.run(request, &mut outcome, &config, now, connection, client_addr).await;
+        let mut response = self
+            .run(
+                request,
+                &mut outcome,
+                config,
+                RequestEntryContext {
+                    now,
+                    connection,
+                    client_addr,
+                },
+                &mode,
+            )
+            .await;
         // The CORS decoration for an ordinary request, applied here because it belongs on
         // **every** answer the pipeline produced once authorisation was granted — the `404` and
         // the `500` included. A browser cannot read a response it was not granted access to, so
@@ -368,20 +426,25 @@ impl S3Service {
         self.call(Request::from_parts(parts, http_body_util::Full::new(body))).await
     }
 
-    async fn run<B>(
+    async fn run<B, M>(
         &self,
         request: Request<B>,
         outcome: &mut Outcome<'_>,
-        config: &ConfigSnapshot,
-        now: RequestNow,
-        connection: TransportSecurity,
-        client_addr: Option<ClientAddr>,
+        config: RequestConfig<Entered>,
+        context: RequestEntryContext,
+        mode: &M,
     ) -> Response<Body>
     where
         B: http_body::Body + Send + 'static,
         B::Data: Send,
         B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+        M: OperationMode,
     {
+        let RequestEntryContext {
+            now,
+            connection,
+            client_addr,
+        } = context;
         // `WireRequest` publishes no way back to the header map — that is the boundary it exists to
         // draw — while `SecurityFloor` and the canonical request are defined over the raw map. The
         // copy is taken before acceptance and used only after it has succeeded, so what is held is
@@ -410,6 +473,7 @@ impl S3Service {
             Ok(wire) => wire,
             Err(reject) => return outcome.refuse(S3Error::from(reject)),
         };
+        let config = config.accepted();
 
         let resolved = self.inner.host_resolver.resolve(&HostQuery {
             host: wire.host(),
@@ -473,12 +537,11 @@ impl S3Service {
         let target = target_of(dispatched.entry);
         outcome.operation = Some(operation);
 
-        let Some(op) = self.inner.dispatch.get(operation) else {
+        let Some(op) = mode.entry(operation) else {
             // Unreachable through `build`, which refuses an operation the router knows and this
             // crate has no codec for. Answered rather than panicked.
             return outcome.refuse(S3Error::new(ErrorCode::NOT_IMPLEMENTED, NOT_REGISTERED_MESSAGE));
         };
-        let op = op.clone();
         let declared_length = wire.framing().declared_length();
 
         // The body is taken out before anything borrows the head, so the head can be read across
@@ -495,6 +558,7 @@ impl S3Service {
             Ok(meta) => meta,
             Err(error) => return outcome.refuse(S3Error::from(error)),
         };
+        let config = config.routed();
 
         // The routed seam. Read-only, and this is the position that makes it so: the operation, the
         // bucket and the key are all decided by the line above, and the whole point of the single
@@ -538,6 +602,7 @@ impl S3Service {
         {
             return outcome.refuse_for_load();
         }
+        let config = config.governed();
 
         // Sealed here and read at the bottom. Between the two lies every stage that can refuse
         // this request for a reason decidable from its head, and none of them can reach the bytes:
@@ -548,7 +613,7 @@ impl S3Service {
         // Kept out of the `match` so the read at the bottom can consult it: for an anonymous or
         // custom admission there is no payload mode and therefore no framed body to decode.
         let mut framing_mode: Option<PayloadMode> = None;
-        let verdict = match self.inner.floor.admit(view, op.floor(), now) {
+        let verdict = match self.inner.floor.admit(view, M::floor(&op), now) {
             Ok(Admission::Anonymous(evidence)) => Verdict::anonymous(evidence),
             Ok(Admission::Sealed(sealed)) => {
                 let payload = match payload_mode(&headers, sealed.marker().location()) {
@@ -620,9 +685,10 @@ impl S3Service {
                 "the request could not be shown to have been authenticated",
             ));
         };
+        let config = config.authenticated();
         outcome.identity = verdict.identity().cloned();
 
-        let Some(requirement) = op.auth() else {
+        let Some(requirement) = M::auth(&op) else {
             // Registration refuses an operation with no authorisation action, so this is a defect
             // rather than a configuration. Refused, never permitted: rustfs/rustfs#4845 is what a
             // permissive answer here looks like in production.
@@ -634,282 +700,325 @@ impl S3Service {
         } else {
             AuthSchemeRef::Anonymous
         };
-        let route_request = AuthzRequest {
-            operation,
-            action: requirement.action,
-            resource: requirement.resource,
-            bucket: meta.bucket(),
-            key: meta.key(),
-            copy_source_identity: None,
-            version_id: None,
-            route_action: requirement.action,
-            route_bucket: meta.bucket(),
-            route_key: meta.key(),
-            identity: verdict.identity(),
-            target_origin,
-        };
-        let policy = match policy_snapshot_with_timeout(
-            self.inner.policy_source.as_ref(),
-            verdict.identity(),
-            self.inner.policy_timeout.get(),
-        )
-        .await
-        {
-            Some(Ok(policy)) => policy,
-            Some(Err(_)) | None => {
-                let decision = Decision::Indeterminate;
-                emit_safely(
-                    self.inner.authz_audit.as_ref(),
-                    &AuthzAuditEvent {
-                        request_id: outcome.trace.request_id(),
-                        stage: AuthzStage::Route,
-                        operation,
-                        action: requirement.action,
-                        resource: requirement.resource,
-                        bucket: meta.bucket(),
-                        key: meta.key(),
-                        resources: std::slice::from_ref(&route_request),
-                        auth_scheme,
-                        identity: verdict.identity(),
-                        target_origin,
-                        policy_snapshot: None,
-                        decision,
-                        elapsed: elapsed_since(self.inner.authz_clock.as_ref(), authz_started),
-                    },
-                );
-                hold_failure_floor(self.inner.floor.failure_floor(), self.inner.authz_clock.as_ref(), authz_started).await;
-                return outcome.refuse(S3Error::from(rustfs_gateway_core::Denied::indeterminate()));
-            }
-        };
+        let request_id = outcome.trace.request_id();
         let server_extensions = ServerExtensions::new();
-        let authz_context = RequestContext::from_request(now, &policy, auth_scheme, &server_extensions);
-        let route_started = self.inner.authz_clock.monotonic();
-        let route_decision =
-            match catch_boxed_future(|| self.inner.authorizer.authorize_route(&authz_context, &route_request)).await {
-                Ok(decision) => decision,
-                Err(()) => {
-                    return outcome.refuse(S3Error::new(ErrorCode::INTERNAL_ERROR, "the authorizer failed"));
-                }
-            };
-        let settled = route_decision.settle();
-        emit_safely(
-            self.inner.authz_audit.as_ref(),
-            &AuthzAuditEvent {
-                request_id: outcome.trace.request_id(),
-                stage: AuthzStage::Route,
+
+        let route_service = self;
+        let route_meta = &meta;
+        let route_headers = &headers;
+        let route_wire = &wire;
+        let route_verdict = &verdict;
+        let route_server_extensions = &server_extensions;
+        let cors_slot = Mutex::new(None);
+        let route_cors = &cors_slot;
+        let authorize_route = move || async move {
+            let route_request = AuthzRequest {
                 operation,
                 action: requirement.action,
                 resource: requirement.resource,
-                bucket: meta.bucket(),
-                key: meta.key(),
-                resources: std::slice::from_ref(&route_request),
-                auth_scheme,
-                identity: verdict.identity(),
-                target_origin,
-                policy_snapshot: Some(policy.id()),
-                decision: route_decision,
-                elapsed: elapsed_since(self.inner.authz_clock.as_ref(), route_started),
-            },
-        );
-        if let Err(denial) = settled {
-            hold_failure_floor(self.inner.floor.failure_floor(), self.inner.authz_clock.as_ref(), authz_started).await;
-            return outcome.refuse(S3Error::from(denial));
-        }
-
-        // Authorised, so the configuration read below is one an authenticated and permitted
-        // caller paid for — which is what keeps an ordinary `GET` carrying an `Origin` from
-        // becoming a second unauthenticated path to the store. Everything from here on carries
-        // the headers, including every refusal: `crate::S3Service::call` applies them.
-        outcome.cors = self.actual_cors(&headers, meta.bucket(), wire.method(), now).await;
-
-        // Head-decidable and body-free: two different `x-amz-checksum-*` headers are two integrity
-        // claims, and no body byte can settle which one the caller meant. `checksum_spec` is the
-        // one place that rule lives — the generated decoders call the same function — and this is
-        // the earliest position from which it can be applied to every operation at once, which is
-        // what keeps a rejected upload from costing the whole transfer.
-        if let Err(error) = rustfs_gateway_core::codec::value::refuse_contradictory_checksums(&meta) {
-            return outcome.refuse(S3Error::from(error));
-        }
-
-        // The server-side-encryption family, on the same terms and in the same position, and for
-        // **every** operation rather than the ones whose model happens to bind the headers. Three
-        // reasons this is here and not in a codec:
-        //
-        // *Head-decidable*, so it costs the response and never the transfer — a customer-provided
-        // key on a cleartext connection is refused before a byte of the object is read.
-        // *Unconditional*, so a backend cannot decline the gate by not implementing it; the
-        // refusal is the framework's, exactly as the checksum contradiction above is.
-        // *Before the key can be handed anywhere*, which is the whole of the hygiene argument: once
-        // a decoded input carrying the key exists, keeping it out of a log is somebody else's care.
-        //
-        // **Stated over `meta`, which is the head the wire seam produced — not the snapshot.**
-        // There are two heads from `StageFilter::on_wire` onwards, and the choice is load-bearing
-        // in both directions. Reading the snapshot would let a filter that *adds* the trio hand a
-        // key to a handler over cleartext that this gate never looked at; it would also refuse a
-        // request whose key a filter had *removed*, which is a wrong answer rather than a
-        // protection. The invariant is that the gate and every consumer of the key read one head,
-        // with no window between them — the decoder builds its input from this same `meta`.
-        // `tests/sse_runtime.rs` pins both directions with a filter that adds the trio and one
-        // that removes it. The signature is the deliberate exception and reads the pre-seam
-        // `headers` snapshot, which is P6-01's isolation property and is not this rule's business.
-        //
-        // `SseEnforced` is dropped here. `Req<O>` carries a decoded input and nothing else, so
-        // there is no seat on it for a proof — see the module docs of
-        // `rustfs_gateway_core::sse` and the note in `crates/gateway/MAP.md`. A backend that needs
-        // the fingerprint calls `rustfs_gateway_core::sse::presented_customer_key` from its own
-        // decoder, which has the `MetaView`; it is the same code path this gate ran.
-        if let Err(rejection) = rustfs_gateway_core::sse::enforce(&meta, connection, &self.inner.sse) {
-            return outcome.refuse(S3Error::from(rejection));
-        }
-
-        // Whether the `aws-chunked` parser runs, decided from `x-amz-content-sha256` and from
-        // nothing else, and decided here — after the verifier, because a signed chunk chain is
-        // seeded by the request signature, and before the read, because every check it performs is
-        // one the head already answers.
-        let ingest = match framing_mode.as_ref() {
-            Some(payload) => {
-                let seed = crate::chunked::presented_signature_hex(&headers, wire.query().as_str());
-                match crate::chunked::ChunkIngest::prepare(
-                    payload,
-                    &headers,
-                    wire.framing(),
-                    &chunk_sink,
-                    seed.as_deref(),
-                    // The documented defaults. `Limits` carries no `ChunkLimits` today, so there
-                    // is no assembly-level knob to read; the defaults are the ones
-                    // `rustfs_gateway_http::ChunkLimits` argues for, and a deployment that needs
-                    // to move them needs a builder field first.
-                    rustfs_gateway_http::ChunkLimits::default(),
-                ) {
-                    Ok(ingest) => ingest,
-                    Err(error) => return outcome.refuse(error),
-                }
-            }
-            None => None,
-        };
-
-        // The bytes, at last, and only now. Two ceilings, both enforced as the body arrives, and
-        // both counted on the wire bytes rather than the decoded ones.
-        let ceilings = BodyCeilings::of(operation, config.max_buffered_body_bytes());
-        let body = match sealed.read(&authenticated, ceilings, ingest).await {
-            Ok(body) => body,
-            Err(error) => return outcome.refuse(error),
-        };
-
-        let decoded = match op.decode(&meta, body) {
-            Ok(decoded) => decoded,
-            Err(error) => return outcome.refuse(S3Error::from(error)),
-        };
-        let resources = match op.resources(&decoded) {
-            Ok(resources) => resources,
-            Err(error) => return outcome.refuse(S3Error::from(error)),
-        };
-        let mut input_resources = Vec::with_capacity(resources.len());
-        for resource in &resources {
-            let shape = if resource.key().is_some() {
-                ResourceShape::Object
-            } else if resource.bucket().is_some() {
-                ResourceShape::Bucket
-            } else {
-                ResourceShape::Service
-            };
-            input_resources.push(AuthzRequest {
-                operation,
-                action: resource.action(),
-                resource: shape,
-                bucket: resource.bucket().or_else(|| meta.bucket()),
-                key: resource.key(),
-                copy_source_identity: resource.identity(),
-                version_id: resource.version_id(),
+                bucket: route_meta.bucket(),
+                key: route_meta.key(),
+                copy_source_identity: None,
+                version_id: None,
                 route_action: requirement.action,
-                route_bucket: meta.bucket(),
-                route_key: meta.key(),
-                identity: verdict.identity(),
+                route_bucket: route_meta.bucket(),
+                route_key: route_meta.key(),
+                identity: route_verdict.identity(),
                 target_origin,
-            });
-        }
-        let input_request = InputAuthzRequest::new(&route_request, &input_resources);
-        let input_started = self.inner.authz_clock.monotonic();
-        let input_decisions =
-            match catch_boxed_future(|| self.inner.authorizer.authorize_input(&authz_context, &input_request)).await {
-                Ok(decisions) => decisions,
-                Err(()) => {
-                    return outcome.refuse(S3Error::new(ErrorCode::INTERNAL_ERROR, "the authorizer failed"));
+            };
+            let policy = match policy_snapshot_with_timeout(
+                route_service.inner.policy_source.as_ref(),
+                route_verdict.identity(),
+                route_service.inner.policy_timeout.get(),
+            )
+            .await
+            {
+                Some(Ok(policy)) => policy,
+                Some(Err(_)) | None => {
+                    let decision = Decision::Indeterminate;
+                    emit_safely(
+                        route_service.inner.authz_audit.as_ref(),
+                        &AuthzAuditEvent {
+                            request_id,
+                            stage: AuthzStage::Route,
+                            operation,
+                            action: requirement.action,
+                            resource: requirement.resource,
+                            bucket: route_meta.bucket(),
+                            key: route_meta.key(),
+                            resources: std::slice::from_ref(&route_request),
+                            auth_scheme,
+                            identity: route_verdict.identity(),
+                            target_origin,
+                            policy_snapshot: None,
+                            decision,
+                            elapsed: elapsed_since(route_service.inner.authz_clock.as_ref(), authz_started),
+                        },
+                    );
+                    hold_failure_floor(
+                        route_service.inner.floor.failure_floor(),
+                        route_service.inner.authz_clock.as_ref(),
+                        authz_started,
+                    )
+                    .await;
+                    return Err(S3Error::from(rustfs_gateway_core::Denied::indeterminate()));
                 }
             };
-        let authorized = match input_decisions.stage().settle() {
-            Ok(()) => op.authorize(decoded, input_decisions.as_slice()),
-            Err(denial) => Err(denial),
+            let policy = Arc::new(policy);
+            let authz_context = RequestContext::from_request(now, policy.as_ref(), auth_scheme, route_server_extensions);
+            let route_started = route_service.inner.authz_clock.monotonic();
+            let route_decision =
+                match catch_boxed_future(|| route_service.inner.authorizer.authorize_route(&authz_context, &route_request)).await
+                {
+                    Ok(decision) => decision,
+                    Err(()) => {
+                        return Err(S3Error::new(ErrorCode::INTERNAL_ERROR, "the authorizer failed"));
+                    }
+                };
+            let settled = route_decision.settle();
+            emit_safely(
+                route_service.inner.authz_audit.as_ref(),
+                &AuthzAuditEvent {
+                    request_id,
+                    stage: AuthzStage::Route,
+                    operation,
+                    action: requirement.action,
+                    resource: requirement.resource,
+                    bucket: route_meta.bucket(),
+                    key: route_meta.key(),
+                    resources: std::slice::from_ref(&route_request),
+                    auth_scheme,
+                    identity: route_verdict.identity(),
+                    target_origin,
+                    policy_snapshot: Some(policy.id()),
+                    decision: route_decision,
+                    elapsed: elapsed_since(route_service.inner.authz_clock.as_ref(), route_started),
+                },
+            );
+            if let Err(denial) = settled {
+                hold_failure_floor(
+                    route_service.inner.floor.failure_floor(),
+                    route_service.inner.authz_clock.as_ref(),
+                    authz_started,
+                )
+                .await;
+                return Err(S3Error::from(denial));
+            }
+
+            let cors = route_service
+                .actual_cors(route_headers, route_meta.bucket(), route_wire.method(), now)
+                .await;
+            let mut stored = route_cors
+                .lock()
+                .map_err(|_| S3Error::new(ErrorCode::INTERNAL_ERROR, "the request configuration state failed"))?;
+            *stored = cors;
+            Ok(AuthorizedRoute {
+                policy,
+                config: config.route_authorized(),
+            })
         };
-        let input_decision = authorized.as_ref().err().map_or(Decision::Allow, |denial| denial.decision());
-        let mut audited_resources = Vec::with_capacity(input_resources.len().saturating_add(1));
-        audited_resources.push(route_request);
-        audited_resources.extend(input_resources.iter().copied());
-        emit_safely(
-            self.inner.authz_audit.as_ref(),
-            &AuthzAuditEvent {
-                request_id: outcome.trace.request_id(),
-                stage: AuthzStage::Input,
+
+        let body_service = self;
+        let body_meta = &meta;
+        let body_headers = &headers;
+        let body_wire = &wire;
+        let read_body = move |state: AuthorizedRoute| async move {
+            if let Err(error) = rustfs_gateway_core::codec::value::refuse_contradictory_checksums(body_meta) {
+                return Err(S3Error::from(error));
+            }
+            if let Err(rejection) = rustfs_gateway_core::sse::enforce(body_meta, connection, &body_service.inner.sse) {
+                return Err(S3Error::from(rejection));
+            }
+
+            let ingest = match framing_mode.as_ref() {
+                Some(payload) => {
+                    let seed = crate::chunked::presented_signature_hex(body_headers, body_wire.query().as_str());
+                    match crate::chunked::ChunkIngest::prepare(
+                        payload,
+                        body_headers,
+                        body_wire.framing(),
+                        &chunk_sink,
+                        seed.as_deref(),
+                        rustfs_gateway_http::ChunkLimits::default(),
+                    ) {
+                        Ok(ingest) => ingest,
+                        Err(error) => return Err(error),
+                    }
+                }
+                None => None,
+            };
+
+            let ceilings = BodyCeilings::of(operation, state.config.config().max_buffered_body_bytes());
+            let body = sealed.read(&authenticated, ceilings, ingest).await?;
+            Ok((
+                ReadForDecode {
+                    policy: state.policy,
+                    config: state.config.body_read(),
+                },
+                body,
+            ))
+        };
+
+        let input_service = self;
+        let input_meta = &meta;
+        let input_verdict = &verdict;
+        let input_server_extensions = &server_extensions;
+        let authorize_input = move |state: ReadForDecode, resources: Vec<OwnedResource>| async move {
+            let config = state.config.decoded();
+            let route_request = AuthzRequest {
                 operation,
                 action: requirement.action,
                 resource: requirement.resource,
-                bucket: meta.bucket(),
-                key: meta.key(),
-                resources: &audited_resources,
-                auth_scheme,
-                identity: verdict.identity(),
+                bucket: input_meta.bucket(),
+                key: input_meta.key(),
+                copy_source_identity: None,
+                version_id: None,
+                route_action: requirement.action,
+                route_bucket: input_meta.bucket(),
+                route_key: input_meta.key(),
+                identity: input_verdict.identity(),
                 target_origin,
-                policy_snapshot: Some(policy.id()),
-                decision: input_decision,
-                elapsed: elapsed_since(self.inner.authz_clock.as_ref(), input_started),
-            },
-        );
-        let authorized = match authorized {
-            Ok(authorized) => authorized,
-            Err(denial) => {
+            };
+            let mut input_resources = Vec::with_capacity(resources.len());
+            for resource in &resources {
+                let shape = if resource.key().is_some() {
+                    ResourceShape::Object
+                } else if resource.bucket().is_some() {
+                    ResourceShape::Bucket
+                } else {
+                    ResourceShape::Service
+                };
+                input_resources.push(AuthzRequest {
+                    operation,
+                    action: resource.action(),
+                    resource: shape,
+                    bucket: resource.bucket().or_else(|| input_meta.bucket()),
+                    key: resource.key(),
+                    copy_source_identity: resource.identity(),
+                    version_id: resource.version_id(),
+                    route_action: requirement.action,
+                    route_bucket: input_meta.bucket(),
+                    route_key: input_meta.key(),
+                    identity: input_verdict.identity(),
+                    target_origin,
+                });
+            }
+            let input_request = InputAuthzRequest::new(&route_request, &input_resources);
+            let authz_context = RequestContext::from_request(now, state.policy.as_ref(), auth_scheme, input_server_extensions);
+            let input_started = input_service.inner.authz_clock.monotonic();
+            let input_decisions =
+                match catch_boxed_future(|| input_service.inner.authorizer.authorize_input(&authz_context, &input_request)).await
+                {
+                    Ok(decisions) => decisions,
+                    Err(()) => {
+                        return Err(S3Error::new(ErrorCode::INTERNAL_ERROR, "the authorizer failed"));
+                    }
+                };
+            let decisions = input_decisions.as_slice().to_vec();
+            let stage = input_decisions.stage();
+            let input_decision = if stage != Decision::Allow {
+                stage
+            } else {
+                decisions
+                    .iter()
+                    .copied()
+                    .find(|decision| *decision != Decision::Allow)
+                    .unwrap_or(Decision::Allow)
+            };
+            let mut audited_resources = Vec::with_capacity(input_resources.len().saturating_add(1));
+            audited_resources.push(route_request);
+            audited_resources.extend(input_resources.iter().copied());
+            emit_safely(
+                input_service.inner.authz_audit.as_ref(),
+                &AuthzAuditEvent {
+                    request_id,
+                    stage: AuthzStage::Input,
+                    operation,
+                    action: requirement.action,
+                    resource: requirement.resource,
+                    bucket: input_meta.bucket(),
+                    key: input_meta.key(),
+                    resources: &audited_resources,
+                    auth_scheme,
+                    identity: input_verdict.identity(),
+                    target_origin,
+                    policy_snapshot: Some(state.policy.id()),
+                    decision: input_decision,
+                    elapsed: elapsed_since(input_service.inner.authz_clock.as_ref(), input_started),
+                },
+            );
+            if let Err(denial) = stage.settle() {
+                hold_failure_floor(
+                    input_service.inner.floor.failure_floor(),
+                    input_service.inner.authz_clock.as_ref(),
+                    authz_started,
+                )
+                .await;
+                return Err(S3Error::from(denial));
+            }
+            Ok((decisions, config.input_authorized()))
+        };
+
+        let execution = match std::panic::catch_unwind(AssertUnwindSafe(|| {
+            mode.dispatch(op, operation, &meta, authorize_route, read_body, authorize_input)
+        })) {
+            Ok(execution) => execution,
+            Err(_) => {
+                return outcome.refuse(S3Error::new(ErrorCode::INTERNAL_ERROR, "the handler failed"));
+            }
+        };
+        let dispatched = match catch_boxed_future(|| execution).await {
+            Ok(result) => result,
+            Err(()) => {
+                return outcome.refuse(S3Error::new(ErrorCode::INTERNAL_ERROR, "the handler failed"));
+            }
+        };
+        outcome.cors = match cors_slot.lock() {
+            Ok(mut stored) => stored.take(),
+            Err(_) => {
+                return outcome.refuse(S3Error::new(ErrorCode::INTERNAL_ERROR, "the request configuration state failed"));
+            }
+        };
+        let dispatched = match dispatched {
+            Ok(dispatched) => dispatched,
+            Err(StaticDispatchError::OperationMismatch { .. }) => {
+                return outcome.refuse(S3Error::new(
+                    ErrorCode::INTERNAL_ERROR,
+                    "the static operation set did not match the routed operation",
+                ));
+            }
+            Err(StaticDispatchError::Route(error))
+            | Err(StaticDispatchError::Body(error))
+            | Err(StaticDispatchError::Input(error)) => return outcome.refuse(error),
+            Err(StaticDispatchError::Codec(error)) => {
+                return outcome.refuse(S3Error::from(error));
+            }
+            Err(StaticDispatchError::Denied(denial)) => {
                 hold_failure_floor(self.inner.floor.failure_floor(), self.inner.authz_clock.as_ref(), authz_started).await;
                 return outcome.refuse(S3Error::from(denial));
             }
-        };
-        let invocation = match std::panic::catch_unwind(AssertUnwindSafe(|| op.invoke(authorized))) {
-            Ok(Ok(invocation)) => invocation,
-            Ok(Err(error)) => return outcome.refuse(S3Error::from(error)),
-            Err(_) => return outcome.refuse(S3Error::new(ErrorCode::INTERNAL_ERROR, "the handler failed")),
-        };
-        let (answer, status) = match catch_boxed_future(|| invocation).await {
-            Ok(Ok(answer)) => answer,
-            Ok(Err(error)) => return outcome.refuse(S3Error::from(error)),
-            Err(()) => return outcome.refuse(S3Error::new(ErrorCode::INTERNAL_ERROR, "the handler failed")),
-        };
-        let output = match answer {
-            ErasedAnswer::Settled(output) => output,
-            // The head is committed from here on. Every exit below answers `status`, and none of
-            // them can answer anything else: the continuation's `Err` is a `HandlerError`, which
-            // carries a code and a message and no status of its own.
-            ErasedAnswer::Committed(work) => {
-                let committed = StatusCode::from_u16(status).unwrap_or(StatusCode::OK);
-                return match catch_boxed_future(|| work).await {
-                    Ok(Ok(output)) => match op.encode(output, &meta, status) {
-                        Ok(encoded) => crate::commit::answered(encoded, committed),
-                        Err(error) => outcome.refuse_after_commit(S3Error::from(error), committed),
-                    },
-                    Ok(Err(error)) => outcome.refuse_after_commit(S3Error::from(error), committed),
-                    Err(()) => {
-                        outcome.refuse_after_commit(S3Error::new(ErrorCode::INTERNAL_ERROR, "the handler failed"), committed)
-                    }
-                };
+            Err(StaticDispatchError::Handler(error)) => {
+                return outcome.refuse(S3Error::from(error));
             }
-            ErasedAnswer::EventStream(stream) => {
+        };
+
+        match dispatched {
+            StaticDispatchOutcome::Settled(encoded) => into_response(encoded),
+            StaticDispatchOutcome::Committed { status, result } => {
+                let committed = StatusCode::from_u16(status).unwrap_or(StatusCode::OK);
+                match result {
+                    Ok(encoded) => crate::commit::answered(encoded, committed),
+                    Err(StaticCommittedError::Handler(error)) => outcome.refuse_after_commit(S3Error::from(error), committed),
+                    Err(StaticCommittedError::Codec(error)) => outcome.refuse_after_commit(S3Error::from(error), committed),
+                }
+            }
+            StaticDispatchOutcome::EventStream { status, stream } => {
                 let mut encoded = EncodedResponse::of(status);
                 encoded.set_header("content-type", crate::EVENT_STREAM_CONTENT_TYPE);
                 encoded.body = ResponseBody::Stream(stream);
                 encoded.enforce_http_invariants(meta.method());
-                return into_response(encoded);
+                into_response(encoded)
             }
-        };
-        match op.encode(output, &meta, status) {
-            Ok(encoded) => into_response(encoded),
-            Err(error) => outcome.refuse(S3Error::from(error)),
         }
     }
 
@@ -1002,90 +1111,6 @@ where
         },
     )
     .await
-}
-
-async fn policy_snapshot_with_timeout<'a>(
-    source: &'a dyn PolicySource,
-    identity: Option<&'a rustfs_gateway_sig::Identity>,
-    timeout: Duration,
-) -> Option<Result<PolicySnapshot, PolicyError>> {
-    let mut snapshot = source.snapshot(identity);
-    let mut deadline = Box::pin(wait_without_runtime(timeout));
-    let mut first_poll = true;
-    poll_fn(move |context| {
-        if first_poll {
-            first_poll = false;
-            if let Poll::Ready(result) = snapshot.as_mut().poll(context) {
-                return Poll::Ready(Some(result));
-            }
-            if deadline.as_mut().poll(context).is_ready() {
-                return Poll::Ready(None);
-            }
-            return Poll::Pending;
-        }
-        if deadline.as_mut().poll(context).is_ready() {
-            return Poll::Ready(None);
-        }
-        if let Poll::Ready(result) = snapshot.as_mut().poll(context) {
-            return Poll::Ready(Some(result));
-        }
-        Poll::Pending
-    })
-    .await
-}
-
-async fn wait_without_runtime(duration: Duration) {
-    struct Signal {
-        fired: AtomicBool,
-        waker: Mutex<Option<std::task::Waker>>,
-    }
-
-    let signal = Arc::new(Signal {
-        fired: AtomicBool::new(false),
-        waker: Mutex::new(None),
-    });
-    let sleeper = Arc::clone(&signal);
-    if std::thread::Builder::new()
-        .name(String::from("gateway-deadline"))
-        .spawn(move || {
-            std::thread::sleep(duration);
-            sleeper.fired.store(true, Ordering::Release);
-            if let Ok(mut slot) = sleeper.waker.lock()
-                && let Some(waker) = slot.take()
-            {
-                waker.wake();
-            }
-        })
-        .is_err()
-    {
-        return;
-    }
-
-    poll_fn(move |context| {
-        if signal.fired.load(Ordering::Acquire) {
-            return Poll::Ready(());
-        }
-        let Ok(mut slot) = signal.waker.lock() else {
-            return Poll::Ready(());
-        };
-        *slot = Some(context.waker().clone());
-        if signal.fired.load(Ordering::Acquire) {
-            Poll::Ready(())
-        } else {
-            Poll::Pending
-        }
-    })
-    .await
-}
-
-fn elapsed_since(clock: &dyn MonotonicClock, started: MonotonicNow) -> Duration {
-    Duration::from_millis(clock.monotonic().saturating_millis_since(started))
-}
-
-async fn hold_failure_floor(floor: FailureFloor, clock: &dyn MonotonicClock, started: MonotonicNow) {
-    if let Some(remaining) = floor.remaining(elapsed_since(clock, started)) {
-        wait_without_runtime(remaining).await;
-    }
 }
 
 /// The bucket a preflight addresses, from the host when the host named one and from the path

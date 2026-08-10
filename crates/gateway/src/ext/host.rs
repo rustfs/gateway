@@ -383,7 +383,7 @@ mod tests {
         assert_eq!(resolve("/bucket/a/b/c"), TargetKind::Object);
     }
 
-    /// Negative — the default ignores the host, which is the documented gap rather than a bug to
+    /// a-asm-0005. Negative — the default ignores the host, which is the documented gap rather than a bug to
     /// be discovered later. A virtual-hosted spelling classifies by its path.
     #[test]
     fn the_default_resolver_does_not_read_the_host() {

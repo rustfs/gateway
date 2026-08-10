@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# a-asm-0018: a second hot configuration load or a missing real pipeline stage is a violation.
 # One ArcSwap load at request entry keeps hot configuration coherent for the whole request.
 set -euo pipefail
 
@@ -28,7 +29,13 @@ expected="$(grep -Ev '^[[:space:]]*(#|$)' "$ALLOWLIST" | LC_ALL=C sort)"
     printf 'check_config_load_once: expected:\n%s\nactual:\n%s\n' "$expected" "$actual" >&2
     exit 1
 }
-[[ "$(grep -c '^crates/gateway/src/service.rs:299$' <<<"$expected")" == 1 ]] \
+[[ "$(grep -c '^crates/gateway/src/service.rs:344$' <<<"$expected")" == 1 ]] \
     || fail 'the one request-entry configuration load is not allowlisted exactly once'
 
-printf 'OK: all load/load_full sites are frozen; one is the request-entry configuration load\n'
+stages="$(grep -oE '\.(accepted|routed|governed|authenticated|route_authorized|body_read|decoded|input_authorized)\(' \
+    "${SOURCE_ROOT}/service.rs" | tr -d '.(')"
+expected_stages="$(printf '%s\n' accepted routed governed authenticated route_authorized body_read decoded input_authorized)"
+[[ "$stages" == "$expected_stages" ]] \
+    || fail 'the real S3Service path no longer consumes the snapshot through all eight stages in order'
+
+printf 'OK: one request-entry load feeds all eight ordered S3Service stages\n'
