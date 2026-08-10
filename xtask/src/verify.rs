@@ -18,9 +18,13 @@
 //! budget. NOT responsible for: defining crate-local tests.
 //! Upstream: the `verify` command. Downstream: Cargo and the operation catalog.
 
+use std::collections::HashSet;
+use std::fmt;
 use std::path::Path;
 use std::process::{Command, ExitCode, Output, Stdio};
 use std::time::{Duration, Instant};
+
+use serde::Deserialize;
 
 use crate::catalog;
 use crate::codegen;
@@ -37,7 +41,16 @@ pub(crate) fn verify(args: &[String]) -> ExitCode {
         ),
         [flag] if flag == "--all" => run_all(json),
         [flag, name] if flag == "--crate" => {
-            let package = package_name(name);
+            let package = match resolve_workspace_package(name) {
+                Ok(package) => package,
+                Err(error) => {
+                    if json {
+                        println!("{}", package_resolution_failure_json(name, &error));
+                        return ExitCode::FAILURE;
+                    }
+                    return diagnostic("workspace package could not be resolved", &format!("crate {name}"), &error.to_string());
+                }
+            };
             let mut steps = vec![
                 vec!["test".to_owned(), "-p".to_owned(), package.clone()],
                 vec![
@@ -237,6 +250,103 @@ fn package_name(name: &str) -> String {
     } else {
         format!("rustfs-gateway-{name}")
     }
+}
+
+#[derive(Debug, Eq, PartialEq)]
+enum PackageResolutionError {
+    Metadata(String),
+    Missing { requested: String, compatible: String },
+    Ambiguous { requested: String, matches: Vec<String> },
+}
+
+impl fmt::Display for PackageResolutionError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Metadata(error) => formatter.write_str(error),
+            Self::Missing { requested, compatible } => write!(
+                formatter,
+                "no exact workspace package `{requested}` and no compatible package `{compatible}`"
+            ),
+            Self::Ambiguous { requested, matches } => {
+                write!(
+                    formatter,
+                    "workspace package `{requested}` matched more than once: {}",
+                    matches.join(", ")
+                )
+            }
+        }
+    }
+}
+
+fn resolve_workspace_package(name: &str) -> Result<String, PackageResolutionError> {
+    let packages = workspace_package_names().map_err(PackageResolutionError::Metadata)?;
+    resolve_package_name(name, &packages)
+}
+
+fn package_resolution_failure_json(name: &str, _error: &PackageResolutionError) -> String {
+    json_failure_line("workspace package could not be resolved", &format!("crate {name}"))
+}
+
+fn resolve_package_name(name: &str, packages: &[String]) -> Result<String, PackageResolutionError> {
+    let exact = matching_packages(name, packages);
+    match exact.as_slice() {
+        [package] => return Ok(package.clone()),
+        [] => {}
+        _ => {
+            return Err(PackageResolutionError::Ambiguous {
+                requested: name.to_owned(),
+                matches: exact,
+            });
+        }
+    }
+
+    let compatible = package_name(name);
+    let matches = matching_packages(&compatible, packages);
+    match matches.as_slice() {
+        [package] => Ok(package.clone()),
+        [] => Err(PackageResolutionError::Missing {
+            requested: name.to_owned(),
+            compatible,
+        }),
+        _ => Err(PackageResolutionError::Ambiguous {
+            requested: name.to_owned(),
+            matches,
+        }),
+    }
+}
+
+fn matching_packages(name: &str, packages: &[String]) -> Vec<String> {
+    packages.iter().filter(|package| package.as_str() == name).cloned().collect()
+}
+
+#[derive(Deserialize)]
+struct CargoMetadata {
+    packages: Vec<CargoPackage>,
+    workspace_members: HashSet<String>,
+}
+
+#[derive(Deserialize)]
+struct CargoPackage {
+    id: String,
+    name: String,
+}
+
+fn workspace_package_names() -> Result<Vec<String>, String> {
+    let output = Command::new(env!("CARGO"))
+        .args(["metadata", "--no-deps", "--format-version", "1"])
+        .output()
+        .map_err(|error| format!("cargo metadata could not start: {error}"))?;
+    if !output.status.success() {
+        return Err(format!("cargo metadata exited with {}", output.status));
+    }
+    let metadata: CargoMetadata =
+        serde_json::from_slice(&output.stdout).map_err(|error| format!("cargo metadata returned invalid JSON: {error}"))?;
+    Ok(metadata
+        .packages
+        .into_iter()
+        .filter(|package| metadata.workspace_members.contains(&package.id))
+        .map(|package| package.name)
+        .collect())
 }
 
 fn snake_case(name: &str) -> String {
@@ -469,12 +579,16 @@ fn print_success(subject: &str, elapsed: Duration, json: bool, operation_cases: 
 
 fn print_json_failure(json: bool, what: &str, where_: &str) {
     if json {
-        println!(
-            "{{\"command\":\"verify\",\"ok\":false,\"what\":\"{}\",\"where\":\"{}\"}}",
-            escape(what),
-            escape(where_)
-        );
+        println!("{}", json_failure_line(what, where_));
     }
+}
+
+fn json_failure_line(what: &str, where_: &str) -> String {
+    format!(
+        "{{\"command\":\"verify\",\"ok\":false,\"what\":\"{}\",\"where\":\"{}\"}}",
+        escape(what),
+        escape(where_)
+    )
 }
 
 fn escape(value: &str) -> String {
@@ -550,5 +664,52 @@ mod tests {
     fn the_facade_accepts_its_current_and_legacy_crate_names() {
         assert_eq!(package_name("rustfs-gateway"), "rustfs-gateway");
         assert_eq!(package_name("s3gate"), "rustfs-gateway");
+    }
+
+    #[test]
+    fn an_exact_workspace_package_wins_before_prefix_compatibility() {
+        let packages = vec!["ext-field-spike".to_owned(), "rustfs-gateway-ext-field-spike".to_owned()];
+
+        assert_eq!(resolve_package_name("ext-field-spike", &packages), Ok("ext-field-spike".to_owned()));
+    }
+
+    #[test]
+    fn a_missing_workspace_package_is_not_passed_to_cargo() {
+        assert_eq!(
+            resolve_package_name("absent", &["rustfs-gateway-core".to_owned()]),
+            Err(PackageResolutionError::Missing {
+                requested: "absent".to_owned(),
+                compatible: "rustfs-gateway-absent".to_owned(),
+            })
+        );
+    }
+
+    #[test]
+    fn an_ambiguous_workspace_package_is_rejected() {
+        let packages = vec!["duplicate".to_owned(), "duplicate".to_owned()];
+
+        let error = PackageResolutionError::Ambiguous {
+            requested: "duplicate".to_owned(),
+            matches: vec!["duplicate".to_owned(), "duplicate".to_owned()],
+        };
+        assert_eq!(resolve_package_name("duplicate", &packages), Err(error));
+        assert_eq!(
+            package_resolution_failure_json(
+                "duplicate",
+                &PackageResolutionError::Ambiguous {
+                    requested: "duplicate".to_owned(),
+                    matches: vec!["duplicate".to_owned(), "duplicate".to_owned()],
+                }
+            ),
+            "{\"command\":\"verify\",\"ok\":false,\"what\":\"workspace package could not be resolved\",\"where\":\"crate duplicate\"}"
+        );
+    }
+
+    #[test]
+    fn a_legacy_short_name_still_resolves_to_the_prefixed_package() {
+        assert_eq!(
+            resolve_package_name("core", &["rustfs-gateway-core".to_owned()]),
+            Ok("rustfs-gateway-core".to_owned())
+        );
     }
 }

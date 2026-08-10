@@ -46,6 +46,30 @@ fn an_unknown_operation_is_a_usage_error_with_a_candidate() {
 }
 
 #[test]
+fn a_missing_crate_json_failure_uses_only_the_json_channel() {
+    let output = xtask(&["verify", "--json", "--crate", "not-a-real-crate"]);
+
+    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout),
+        "{\"command\":\"verify\",\"ok\":false,\"what\":\"workspace package could not be resolved\",\"where\":\"crate not-a-real-crate\"}\n"
+    );
+    assert!(output.stderr.is_empty(), "{}", String::from_utf8_lossy(&output.stderr));
+}
+
+#[test]
+fn a_missing_crate_plain_failure_stays_on_stderr() {
+    let output = xtask(&["verify", "--crate", "not-a-real-crate"]);
+
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stdout.is_empty(), "{}", String::from_utf8_lossy(&output.stdout));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("what: workspace package could not be resolved"), "{stderr}");
+    assert!(stderr.contains("where: crate not-a-real-crate"), "{stderr}");
+    assert!(stderr.contains("no exact workspace package `not-a-real-crate`"), "{stderr}");
+}
+
+#[test]
 fn a_standard_operation_cannot_be_scaffolded() {
     let output = xtask(&["new-op", "GetObject"]);
     assert_eq!(output.status.code(), Some(2));

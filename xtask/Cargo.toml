@@ -14,6 +14,8 @@ rustfs-gateway-conformance = { workspace = true }
 rustfs-gateway-core = { workspace = true }
 rustfs-gateway-model = { workspace = true }
 http = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
 
 [package.metadata.docs.rs]
 all-features = true

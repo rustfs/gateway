@@ -1925,6 +1925,8 @@ dependencies = [
  "rustfs-gateway-conformance",
  "rustfs-gateway-core",
  "rustfs-gateway-model",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
