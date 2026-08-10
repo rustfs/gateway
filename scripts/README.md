@@ -57,6 +57,7 @@ fixed now so that the same check does not get written twice under two names.
 | `check_no_global_registry_deps.sh` | No `inventory` / `linkme` / `ctor` dependency in any `Cargo.toml` (ADR-0003) | P0-07 |
 | `check_ct_eq.sh` | Secret-bearing types (`Signature`, `Secret`, `SigningKey`, …) derive no `PartialEq` / `Eq` / `Debug`; comparison must go through `ct_eq`. No-ops with an explanation until `crates/sig` lands | P0 (before P2) |
 | `check_license_headers.sh` | Every tracked `.rs` file opens with the Apache-2.0 licence header (ADR-0001 provenance boundary) | P0 |
+| `check_guard_grep_pipelines.sh` | The license and secret-hygiene guards contain no quiet grep option token, including in comments or strings; their grep checks must read input fully under `pipefail` | P0 |
 | `check_english_only.sh` | No tracked file contains CJK text. `rustfs/backlog` is the one repository in the organisation where Chinese is allowed; this is not it. Matches by codepoint in Python — a grep bracket range is read by locale collation and flags an em dash | P0 |
 | `check_generated_dto_packaged.sh` | Every `#[path]` under `crates/*/src` stays inside its crate, reaching the generated dto through the `crates/types/generated` symlink | P1-06 |
 | `check_no_dto_non_exhaustive.sh` | No generated dto struct carries `#[non_exhaustive]`; it forbids `..Default::default()` (E0639), which is the very syntax that keeps a new field minor (ADR-0004 P1) | P1-06 |
@@ -86,6 +87,7 @@ fixed now so that the same check does not get written twice under two names.
 | `check_evidence_shape.sh` | Every case has compact HTTPS/URN-plus-summary evidence and cannot carry pasted upstream prose | P8-01 |
 | `check_baseline_ratchet.sh` | The conformance baseline failure set only shrinks | P8-01 |
 | `check_runner_raw_bytes.sh` | Case requests retain a raw TCP byte path and acquire no normalizing client dependency | P8-01 |
+| `check_guard_sandbox_archive.sh` | Guard sandboxes use a temporary archive file; archive creation and extraction fail closed and clean partial state | P0 |
 | `check_no_host_normalize.sh` | Ring-1 server source never mutates Host or URI authority | P7-02 |
 | `check_timeout_layer_ownership.sh` | Server owns four connection timeouts and never the body/handler layers | P7-02 |
 | `check_tuning_doc.sh` | Every server tuning field documents both directions of its tradeoff | P7-02 |

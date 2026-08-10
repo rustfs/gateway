@@ -79,7 +79,7 @@ make_sandbox() {
         return
     fi
 
-    local dir list
+    local dir list archive
     dir="$(mktemp -d "${TMPDIR:-/tmp}/gateway-guard-test.XXXXXX")"
     # `tar --null -T -` is GNU-only; BSD tar (macOS) rejects it, and letting the failing
     # call write to the pipe before the fallback produces a spurious "tar: Write error"
@@ -90,18 +90,50 @@ make_sandbox() {
     # its own self-test while reporting success — so the sandbox now carries the
     # whole tree. One sandbox is built per run and reset between cases, so the
     # 3.2 MB is paid once.
-    list="$(mktemp "${TMPDIR:-/tmp}/gateway-guard-files.XXXXXX")"
+    list="${dir}.files"
+    archive="${dir}.tar"
     # Include new, unignored files: a guard introduced in the same change must be able to test its
     # own inputs before the author stages them.
-    (cd "$REPO_ROOT" && { git ls-files; git ls-files --others --exclude-standard; } | sort -u) >"$list"
-    (cd "$REPO_ROOT" && tar -cf - -T "$list") | (cd "$dir" && tar -xf -)
-    rm -f "$list"
-    (
-        cd "$dir"
-        git init -q .
-        git add -A >/dev/null 2>&1
-        git -c user.name=t -c user.email=t@t commit -qm base >/dev/null 2>&1
-    )
+    if ! (
+        cd "$REPO_ROOT" &&
+            git ls-files >"$list" &&
+            git ls-files --others --exclude-standard >>"$list" &&
+            sort -u -o "$list" "$list"
+    ); then
+        rm -f "$list" "$archive" || true
+        rm -rf "$dir" || true
+        return 1
+    fi
+    if ! (cd "$REPO_ROOT" && tar -cf "$archive" -T "$list"); then
+        rm -f "$list" "$archive" || true
+        rm -rf "$dir" || true
+        return 1
+    fi
+    if ! (cd "$dir" && tar -xf "$archive"); then
+        rm -f "$list" "$archive" || true
+        rm -rf "$dir" || true
+        return 1
+    fi
+    if ! rm -f "$list" "$archive"; then
+        rm -f "$list" "$archive" || true
+        rm -rf "$dir" || true
+        return 1
+    fi
+    if ! (cd "$dir" && git init -q .); then
+        rm -f "$list" "$archive" || true
+        rm -rf "$dir" || true
+        return 1
+    fi
+    if ! (cd "$dir" && git add -A >/dev/null 2>&1); then
+        rm -f "$list" "$archive" || true
+        rm -rf "$dir" || true
+        return 1
+    fi
+    if ! (cd "$dir" && git -c user.name=t -c user.email=t@t commit -qm base >/dev/null 2>&1); then
+        rm -f "$list" "$archive" || true
+        rm -rf "$dir" || true
+        return 1
+    fi
     SANDBOX="$dir"
 }
 
@@ -471,6 +503,211 @@ mut_strip_header() {
 }
 expect_fail check_license_headers.sh \
     'a Rust file with the licence header removed' mut_strip_header
+
+mut_restore_license_grep_q_pipeline() {
+    python3 - <<'PY'
+from pathlib import Path
+
+path = Path("scripts/check_license_headers.sh")
+text = path.read_text().replace(
+    'head -n "$HEADER_WINDOW" "$file" | grep -F "$HEADER_MARKER" >/dev/null',
+    'head -n "$HEADER_WINDOW" "$file" | grep -qF "$HEADER_MARKER"',
+    1,
+)
+path.write_text(text)
+PY
+}
+expect_fail check_guard_grep_pipelines.sh \
+    'the license guard restoring an early-exit grep pipeline' mut_restore_license_grep_q_pipeline
+
+mut_restore_secret_grep_q_pipeline() {
+    python3 - <<'PY'
+from pathlib import Path
+
+path = Path("scripts/check_secret_hygiene.sh")
+text = path.read_text().replace(
+    "grep -E '^impl ([a-z_:]+)?fmt::Debug for Credentials \\{' >/dev/null",
+    "grep -qE '^impl ([a-z_:]+)?fmt::Debug for Credentials \\{'",
+    1,
+)
+path.write_text(text)
+PY
+}
+expect_fail check_guard_grep_pipelines.sh \
+    'the secret guard restoring an early-exit grep pipeline' mut_restore_secret_grep_q_pipeline
+
+mut_restore_multiline_combined_grep_q_pipeline() {
+    python3 - <<'PY'
+from pathlib import Path
+
+path = Path("scripts/check_license_headers.sh")
+text = path.read_text().replace(
+    'head -n "$HEADER_WINDOW" "$file" | grep -F "$HEADER_MARKER" >/dev/null',
+    'head -n "$HEADER_WINDOW" "$file" |\n        grep -Fqi "$HEADER_MARKER"',
+    1,
+)
+path.write_text(text)
+PY
+}
+expect_fail check_guard_grep_pipelines.sh \
+    'a multiline pipeline restoring combined quiet grep flags' mut_restore_multiline_combined_grep_q_pipeline
+
+mut_restore_multiline_long_quiet_pipeline() {
+    python3 - <<'PY'
+from pathlib import Path
+
+path = Path("scripts/check_secret_hygiene.sh")
+text = path.read_text().replace(
+    "printf '%s\\n' \"$credentials_code\" | grep -E '^impl ([a-z_:]+)?fmt::Debug for Credentials \\{' >/dev/null",
+    "printf '%s\\n' \"$credentials_code\" |\\n    grep --quiet -E '^impl ([a-z_:]+)?fmt::Debug for Credentials \\{'",
+    1,
+)
+path.write_text(text)
+PY
+}
+expect_fail check_guard_grep_pipelines.sh \
+    'a multiline pipeline restoring the long quiet option' mut_restore_multiline_long_quiet_pipeline
+
+mut_quiet_grep_in_command_substitution() {
+    python3 - <<'PY'
+from pathlib import Path
+
+path = Path("scripts/check_license_headers.sh")
+text = path.read_text().replace(
+    'checked=0',
+    'status="$(head -n 1 "$0" | grep -qF marker)"\nchecked=0',
+    1,
+)
+path.write_text(text)
+PY
+}
+expect_fail check_guard_grep_pipelines.sh \
+    'a quiet grep inside command substitution' mut_quiet_grep_in_command_substitution
+
+mut_split_grep_and_quiet_flag() {
+    python3 - <<'PY'
+from pathlib import Path
+
+path = Path("scripts/check_secret_hygiene.sh")
+text = path.read_text().replace(
+    "grep -E '^impl ([a-z_:]+)?fmt::Debug for Credentials \\{' >/dev/null",
+    "grep \\\n+        -qiE '^impl ([a-z_:]+)?fmt::Debug for Credentials \\{'",
+    1,
+)
+path.write_text(text)
+PY
+}
+expect_fail check_guard_grep_pipelines.sh \
+    'grep and its combined quiet flag split across lines' mut_split_grep_and_quiet_flag
+
+mut_grep_e_and_quiet_combined() {
+    python3 - <<'PY'
+from pathlib import Path
+
+path = Path("scripts/check_license_headers.sh")
+text = path.read_text().replace(
+    'checked=0',
+    'grep -eq pattern input\nchecked=0',
+    1,
+)
+path.write_text(text)
+PY
+}
+expect_fail check_guard_grep_pipelines.sh \
+    'grep combining the expression and quiet flags' mut_grep_e_and_quiet_combined
+
+mut_multiline_grep_e_and_quiet_combined() {
+    python3 - <<'PY'
+from pathlib import Path
+
+path = Path("scripts/check_license_headers.sh")
+text = path.read_text().replace(
+    'checked=0',
+    'grep \\\n+    -eq pattern input\nchecked=0',
+    1,
+)
+path.write_text(text)
+PY
+}
+expect_fail check_guard_grep_pipelines.sh \
+    'multiline grep combining the expression and quiet flags' mut_multiline_grep_e_and_quiet_combined
+
+probe_guard_grep_policy_allows_shell_eq() {
+    local sandbox rc=0
+    cases=$((cases + 1))
+    make_sandbox
+    sandbox="$SANDBOX"
+    printf '\n[[ 1 -eq 1 ]]\n' >>"${sandbox}/scripts/check_license_headers.sh"
+    GATEWAY_CHECK_ROOT="$sandbox" "${SCRIPT_DIR}/check_guard_grep_pipelines.sh" \
+        >/dev/null 2>&1 || rc=$?
+    if [[ "$rc" -eq 0 ]]; then
+        pass_msg 'check_guard_grep_pipelines.sh allows the shell -eq operator'
+    else
+        fail_msg 'check_guard_grep_pipelines.sh mistook the shell -eq operator for quiet grep'
+    fi
+}
+probe_guard_grep_policy_allows_shell_eq
+
+probe_guard_grep_policy_missing_grep() {
+    local sandbox tool_path output rc=0
+    cases=$((cases + 1))
+    make_sandbox
+    sandbox="$SANDBOX"
+    tool_path="$(mktemp -d "${TMPDIR:-/tmp}/gateway-guard-path.XXXXXX")"
+    ln -s "$(command -v dirname)" "${tool_path}/dirname"
+    ln -s "$(command -v mktemp)" "${tool_path}/mktemp"
+    output="$(GATEWAY_CHECK_ROOT="$sandbox" PATH="$tool_path" /bin/bash \
+        "${SCRIPT_DIR}/check_guard_grep_pipelines.sh" 2>&1)" || rc=$?
+    rm -rf "$tool_path"
+    if [[ "$rc" -ne 0 && "$output" == *'required command is missing: grep'* ]]; then
+        pass_msg 'check_guard_grep_pipelines.sh fails closed without grep'
+    else
+        fail_msg 'check_guard_grep_pipelines.sh reported green without grep'
+    fi
+}
+probe_guard_grep_policy_missing_grep
+
+probe_guard_grep_policy_missing_awk() {
+    local sandbox tool_path output rc=0
+    cases=$((cases + 1))
+    make_sandbox
+    sandbox="$SANDBOX"
+    tool_path="$(mktemp -d "${TMPDIR:-/tmp}/gateway-guard-path.XXXXXX")"
+    ln -s "$(command -v dirname)" "${tool_path}/dirname"
+    ln -s "$(command -v grep)" "${tool_path}/grep"
+    output="$(GATEWAY_CHECK_ROOT="$sandbox" PATH="$tool_path" /bin/bash \
+        "${SCRIPT_DIR}/check_guard_grep_pipelines.sh" 2>&1)" || rc=$?
+    rm -rf "$tool_path"
+    if [[ "$rc" -ne 0 && "$output" == *'required command is missing: awk'* ]]; then
+        pass_msg 'check_guard_grep_pipelines.sh fails closed without awk'
+    else
+        fail_msg 'check_guard_grep_pipelines.sh reported green without awk'
+    fi
+}
+probe_guard_grep_policy_missing_awk
+
+probe_guard_grep_policy_awk_error() {
+    local sandbox tool_path output rc=0
+    cases=$((cases + 1))
+    make_sandbox
+    sandbox="$SANDBOX"
+    tool_path="$(mktemp -d "${TMPDIR:-/tmp}/gateway-guard-path.XXXXXX")"
+    ln -s "$(command -v dirname)" "${tool_path}/dirname"
+    ln -s "$(command -v grep)" "${tool_path}/grep"
+    ln -s "$(command -v mktemp)" "${tool_path}/mktemp"
+    ln -s "$(command -v rm)" "${tool_path}/rm"
+    printf '#!/bin/sh\nexit 75\n' >"${tool_path}/awk"
+    chmod +x "${tool_path}/awk"
+    output="$(GATEWAY_CHECK_ROOT="$sandbox" PATH="$tool_path" /bin/bash \
+        "${SCRIPT_DIR}/check_guard_grep_pipelines.sh" 2>&1)" || rc=$?
+    rm -rf "$tool_path"
+    if [[ "$rc" -ne 0 ]]; then
+        pass_msg 'check_guard_grep_pipelines.sh fails closed on an awk processing error'
+    else
+        fail_msg 'check_guard_grep_pipelines.sh reported green after an awk processing error'
+    fi
+}
+probe_guard_grep_policy_awk_error
 
 
 # -----------------------------------------------------------------------------
@@ -2577,6 +2814,204 @@ mut_default_doc_subject_deleted() {
 }
 expect_fail check_default_doc.sh \
     "a documented Default implementation's source being absent" mut_default_doc_subject_deleted
+
+# Fault-inject the real make_sandbox function. Each mode must fail without publishing a sandbox or
+# leaving its derived list, archive, or partially initialized directory behind.
+expect_sandbox_setup_failure() {
+    local mode="$1" probe_root rc=0
+    cases=$((cases + 1))
+    probe_root="$(mktemp -d "${TMPDIR:-/tmp}/gateway-guard-fault.XXXXXX")"
+    mkdir -p "$probe_root/repo" "$probe_root/tmp"
+    (
+        cd "$probe_root/repo"
+        git init -q .
+        printf 'sandbox fault probe\n' >tracked.txt
+        git add tracked.txt
+        git -c user.name=t -c user.email=t@t commit -qm base
+    )
+    (
+        local real_git real_tar sandbox_rc=0
+        real_git="$(command -v git)"
+        real_tar="$(command -v tar)"
+        REPO_ROOT="$probe_root/repo"
+        TMPDIR="$probe_root/tmp"
+        SANDBOX=""
+
+        git() {
+            local argument
+            if [[ "$mode" == list-failure && "$1" == ls-files ]]; then
+                return 71
+            fi
+            if [[ "$mode" == commit-failure ]]; then
+                for argument in "$@"; do
+                    if [[ "$argument" == commit ]]; then
+                        return 72
+                    fi
+                done
+            fi
+            command "$real_git" "$@"
+        }
+        tar() {
+            if [[ "$mode" == create-failure && "$1" == -cf ]]; then
+                return 73
+            fi
+            if [[ "$mode" == extract-failure && "$1" == -xf ]]; then
+                return 74
+            fi
+            command "$real_tar" "$@"
+        }
+
+        make_sandbox || sandbox_rc=$?
+        [[ "$sandbox_rc" -ne 0 && -z "$SANDBOX" ]] || exit 1
+        shopt -s nullglob dotglob
+        leftovers=("$TMPDIR"/*)
+        [[ "${#leftovers[@]}" -eq 0 ]]
+    ) || rc=$?
+    rm -rf "$probe_root"
+    if [[ "$rc" -eq 0 ]]; then
+        pass_msg "make_sandbox fails closed and cleans up: ${mode}"
+    else
+        fail_msg "make_sandbox leaked state or reported success: ${mode}"
+    fi
+}
+
+expect_sandbox_setup_failure list-failure
+expect_sandbox_setup_failure create-failure
+expect_sandbox_setup_failure extract-failure
+expect_sandbox_setup_failure commit-failure
+
+mut_guard_sandbox_archive_restored_to_stream() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("scripts/test_guard_scripts.sh")
+text = path.read_text()
+start = text.index('    list="${dir}.files"')
+end = text.index('    if ! (cd "$dir" && git init -q .); then', start)
+stream = '''    (cd "$REPO_ROOT" && tar -cf - -T "$list") | (cd "$dir" && tar -xf -)
+    rm -f "$list"
+'''
+path.write_text(text[:start] + stream + text[end:])
+PYEOF
+}
+expect_fail check_guard_sandbox_archive.sh \
+    'make_sandbox restoring the streaming tar pipeline' mut_guard_sandbox_archive_restored_to_stream
+
+mut_guard_sandbox_archive_not_derived_from_unique_dir() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("scripts/test_guard_scripts.sh")
+text = path.read_text()
+old = '    archive="${dir}.tar"\n'
+path.write_text(text.replace(old, '    archive="${TMPDIR:-/tmp}/gateway-guard-archive.tar"\n', 1))
+PYEOF
+}
+expect_fail check_guard_sandbox_archive.sh \
+    'make_sandbox using a fixed archive path' mut_guard_sandbox_archive_not_derived_from_unique_dir
+
+mut_guard_sandbox_archive_list_not_fail_closed() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("scripts/test_guard_scripts.sh")
+text = path.read_text()
+old = '''    if ! (
+        cd "$REPO_ROOT" &&
+            git ls-files >"$list" &&
+            git ls-files --others --exclude-standard >>"$list" &&
+            sort -u -o "$list" "$list"
+    ); then
+        rm -f "$list" "$archive" || true
+        rm -rf "$dir" || true
+        return 1
+    fi
+'''
+new = '''    (
+        cd "$REPO_ROOT" &&
+            git ls-files >"$list" &&
+            git ls-files --others --exclude-standard >>"$list" &&
+            sort -u -o "$list" "$list"
+    ) || true
+'''
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_guard_sandbox_archive.sh \
+    'file-list creation ignoring a producer failure' mut_guard_sandbox_archive_list_not_fail_closed
+
+mut_guard_sandbox_archive_create_not_fail_closed() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("scripts/test_guard_scripts.sh")
+text = path.read_text()
+old = '''    if ! (cd "$REPO_ROOT" && tar -cf "$archive" -T "$list"); then
+        rm -f "$list" "$archive" || true
+        rm -rf "$dir" || true
+        return 1
+    fi
+'''
+path.write_text(text.replace(old, '    (cd "$REPO_ROOT" && tar -cf "$archive" -T "$list") || true\n', 1))
+PYEOF
+}
+expect_fail check_guard_sandbox_archive.sh \
+    'archive creation ignoring a producer failure' mut_guard_sandbox_archive_create_not_fail_closed
+
+mut_guard_sandbox_archive_extract_leaks_partial_state() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("scripts/test_guard_scripts.sh")
+text = path.read_text()
+old = '''    if ! (cd "$dir" && tar -xf "$archive"); then
+        rm -f "$list" "$archive" || true
+        rm -rf "$dir" || true
+        return 1
+    fi
+'''
+new = '''    if ! (cd "$dir" && tar -xf "$archive"); then
+        return 1
+    fi
+'''
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_guard_sandbox_archive.sh \
+    'archive extraction leaking partial state' mut_guard_sandbox_archive_extract_leaks_partial_state
+
+mut_guard_sandbox_archive_cleanup_commented_out() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("scripts/test_guard_scripts.sh")
+text = path.read_text()
+old = '        rm -f "$list" "$archive" || true\n'
+new = '        # rm -f "$list" "$archive" || true\n'
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_guard_sandbox_archive.sh \
+    'a cleanup command being replaced by a comment' mut_guard_sandbox_archive_cleanup_commented_out
+
+mut_guard_sandbox_archive_commit_not_fail_closed() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("scripts/test_guard_scripts.sh")
+text = path.read_text()
+old = '''    if ! (cd "$dir" && git -c user.name=t -c user.email=t@t commit -qm base >/dev/null 2>&1); then
+        rm -f "$list" "$archive" || true
+        rm -rf "$dir" || true
+        return 1
+    fi
+'''
+new = '    (cd "$dir" && git -c user.name=t -c user.email=t@t commit -qm base >/dev/null 2>&1) || true\n'
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_guard_sandbox_archive.sh \
+    'sandbox base commit ignoring failure' mut_guard_sandbox_archive_commit_not_fail_closed
 
 printf '\n%s case(s), %s failure(s)\n' "$cases" "$failures"
 [[ "$failures" -eq 0 ]]

@@ -119,7 +119,7 @@ strip_comments() {
 # -----------------------------------------------------------------------------
 credentials_code="$(strip_comments "$CREDENTIALS_FILE")"
 
-if ! printf '%s\n' "$credentials_code" | grep -qE '^impl ([a-z_:]+)?fmt::Debug for Credentials \{'; then
+if ! printf '%s\n' "$credentials_code" | grep -E '^impl ([a-z_:]+)?fmt::Debug for Credentials \{' >/dev/null; then
     report "${CREDENTIALS_FILE}: no hand-written 'impl fmt::Debug for Credentials'; the redacting Debug is the only reason a credential may appear in a diagnostic at all"
 fi
 
@@ -137,14 +137,14 @@ derived_on_credentials="$(printf '%s\n' "$credentials_code" | awk '
         flush_pending()
     }
 ')"
-if printf '%s' "$derived_on_credentials" | grep -qE '\b(Debug|Serialize|Deserialize|PartialEq|Eq|Clone)\b'; then
+if printf '%s' "$derived_on_credentials" | grep -E '\b(Debug|Serialize|Deserialize|PartialEq|Eq|Clone)\b' >/dev/null; then
     report "${CREDENTIALS_FILE}: 'struct Credentials' derives a trait that prints, compares, serializes or silently copies key material: ${derived_on_credentials}"
 fi
 
 # -----------------------------------------------------------------------------
 # Rule 3 — no Display for Credentials.
 # -----------------------------------------------------------------------------
-if printf '%s\n' "$credentials_code" | grep -qE '^impl ([a-z_:]+)?Display for Credentials\b'; then
+if printf '%s\n' "$credentials_code" | grep -E '^impl ([a-z_:]+)?Display for Credentials\b' >/dev/null; then
     report "${CREDENTIALS_FILE}: Display is implemented for Credentials; a value that renders itself for a human is a value that ends up in a log"
 fi
 
@@ -180,7 +180,7 @@ for file in "${sources[@]}"; do
     # Rule 4b — the refusal reason does not travel. Named rather than inferred is the whole
     # signal: `admit(..).err()` yields the reason without ever spelling the type, so a file that
     # spells it is a file doing something with it.
-    if printf '%s\n' "$code" | grep -q 'CredentialRefusal'; then
+    if printf '%s\n' "$code" | grep 'CredentialRefusal' >/dev/null; then
         allowed=0
         for permitted in "${REFUSAL_MAY_APPEAR_IN[@]}"; do
             [[ "$file" == "$permitted" ]] && allowed=1

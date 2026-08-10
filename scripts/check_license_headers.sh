@@ -73,7 +73,7 @@ fi
 
 is_allowed() {
     [[ -z "$ALLOWANCES" ]] && return 1
-    printf '%s' "$ALLOWANCES" | grep -qxF "$1"
+    printf '%s' "$ALLOWANCES" | grep -xF "$1" >/dev/null
 }
 
 checked=0
@@ -84,7 +84,7 @@ while IFS= read -r file; do
         continue
     fi
     checked=$((checked + 1))
-    if ! head -n "$HEADER_WINDOW" "$file" | grep -qF "$HEADER_MARKER"; then
+    if ! head -n "$HEADER_WINDOW" "$file" | grep -F "$HEADER_MARKER" >/dev/null; then
         printf '%s: missing the Apache-2.0 licence header in the first %s lines\n' \
             "$file" "$HEADER_WINDOW" >&2
         status=1
