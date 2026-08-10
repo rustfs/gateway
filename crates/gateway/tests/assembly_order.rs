@@ -165,7 +165,8 @@ impl StageFilter for Filter {
     }
 }
 
-/// a-asm-0004. One request calls every installed extension exactly as the documented order says.
+/// a-asm-0004/a-asm-0022. One request calls every installed extension exactly as the documented
+/// order says, including host/routed before governor and governor before body/authentication.
 #[tokio::test]
 async fn one_request_has_one_aggregate_extension_order() {
     let trail = Arc::new(Mutex::new(Vec::new()));

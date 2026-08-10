@@ -1498,7 +1498,7 @@ fn n_the_object_band_is_unchanged_by_the_restore_and_select_rows() {
     }
 }
 
-/// c-route-1001 — two subresources at one precedence, reachable together.
+/// a-asm-0011 / c-route-1001 — two subresources at one precedence, reachable together.
 #[test]
 fn two_subresources_at_one_precedence_are_a_conflict() {
     let entries = vec![

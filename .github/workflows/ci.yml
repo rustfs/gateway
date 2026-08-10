@@ -181,6 +181,20 @@ jobs:
           elapsed="$(( $(date +%s) - started ))"
           echo "workspace tests completed in ${elapsed}s"
 
+  gateway-tsan:
+    name: Gateway ThreadSanitizer
+    runs-on: ubuntu-latest
+    timeout-minutes: 9
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
+        with:
+          toolchain: nightly-2026-06-18
+          components: rust-src
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: One hundred OS threads under TSAN
+        run: timeout 480s scripts/run_gateway_tsan.sh
+
   guard-self-test:
     name: Guard self-test
     runs-on: ubuntu-latest
@@ -198,19 +212,21 @@ jobs:
           elapsed="$(( $(date +%s) - started ))"
           echo "guard mutations completed in ${elapsed}s"
 
-  # Branch protection requires this exact check name. It aggregates both parallel jobs and must
+  # Branch protection requires this exact check name. It aggregates all three parallel jobs and must
   # run even after a dependency fails, otherwise a skipped required check could hide the failure.
   test:
     name: Test
-    needs: [workspace-tests, guard-self-test]
+    needs: [workspace-tests, guard-self-test, gateway-tsan]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 1
     steps:
-      - name: Require both test jobs
+      - name: Require test jobs
         env:
           WORKSPACE_RESULT: ${{ needs.workspace-tests.result }}
           GUARD_RESULT: ${{ needs.guard-self-test.result }}
+          TSAN_RESULT: ${{ needs.gateway-tsan.result }}
         run: |
           test "$WORKSPACE_RESULT" = success
           test "$GUARD_RESULT" = success
+          test "$TSAN_RESULT" = success

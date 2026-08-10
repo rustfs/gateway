@@ -9,6 +9,9 @@ scripts/check_layer_dependencies.sh
 scripts/test_guard_scripts.sh          # runs every guard, plus its negative cases
 ```
 
+`run_gateway_tsan.sh` is the pinned-nightly a-asm-0024 execution command; it is a CI test rather
+than a stable architecture guard.
+
 ## Conventions
 
 These are binding for every script added here (rustfs/backlog#1723).
@@ -48,6 +51,7 @@ fixed now so that the same check does not get written twice under two names.
 | Script | Checks | Phase |
 |---|---|---|
 | `check_layer_dependencies.sh` | Internal crate dependency direction is one-way; the allow matrix is a DAG; `rustfs-gateway-conformance` may only use the `rustfs-gateway` facade | P0 (Week-1, before P1) |
+| `check_assembly_case_coverage.sh` | All 24 P7-01 acceptance ids map in order to a named executable test or deterministic guard | P7-01 |
 | `check_ring_boundaries.sh` | Ring 0/1 (`rustfs-gateway*`) depends on no `rustfs-*` crate and no ring-2 `rustfs-gateway-*` crate; `s3s` only via `rustfs-gateway-types`' `compat-s3s` feature, which must keep its `# DELETE BY` marker | P0 (Week-1) |
 | `check_no_planning_docs.sh` | Agent notes and planning documents are not tracked by git (closes the `git add -f` hole that `.gitignore` leaves open) | P0 |
 | `check_no_global_registry_deps.sh` | No `inventory` / `linkme` / `ctor` dependency in any `Cargo.toml` (ADR-0003) | P0-07 |
@@ -76,6 +80,8 @@ fixed now so that the same check does not get written twice under two names.
 | `check_config_load_once.sh` | Every `.load()` / `.load_full()` call site is frozen so hot service configuration can be loaded only once at request entry | P7-01 |
 | `check_default_doc.sh` | Every public extension `Default` implementation states its security consequence; derived subjects are discovered rather than listed by hand | P7-01 |
 | `check_minimal_assembly_lines.sh` | The complete assembly in the minimal example stays within twenty effective Rust lines | P7-01 |
+| `check_gateway_tsan_wiring.sh` | The TSAN job keeps sanitizer/build-std flags, runs in required CI, and drives exactly 100 completed OS threads | P7-01 |
+| `check_monomorphic_dispatch.sh` | The public static assembly emits direct operation codec and concrete handler calls, with no erased dispatch callback in that call chain | P7-01 |
 | `check_schema_dimensions.sh` | The frozen conformance schema retains all nine P8-01 day-one expression dimensions | P8-01 |
 | `check_evidence_shape.sh` | Every case has compact HTTPS/URN-plus-summary evidence and cannot carry pasted upstream prose | P8-01 |
 | `check_baseline_ratchet.sh` | The conformance baseline failure set only shrinks | P8-01 |

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# a-asm-0003: the buildable minimal assembly stays within twenty effective lines.
 set -euo pipefail
 
 # =============================================================================

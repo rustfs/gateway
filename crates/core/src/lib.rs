@@ -108,6 +108,7 @@ pub mod ops;
 pub mod registry;
 pub mod route;
 pub mod sse;
+mod static_dispatch;
 
 pub use crate::authz::{
     Authorized, AuthorizedRead, Decision, Denied, DerivedResourceError, DerivedResourceSet, NoDerived, OwnedResource,
@@ -141,3 +142,4 @@ pub use crate::route::{
 pub use crate::sse::{
     KeyFingerprint, KeySide, PartRejection, PlaintextCustomerKeyAck, SseConfig, SseEnforced, SseRejection, TransportSecurity,
 };
+pub use crate::static_dispatch::{StaticCommittedError, StaticDispatchError, StaticDispatchOutcome, StaticOperation};

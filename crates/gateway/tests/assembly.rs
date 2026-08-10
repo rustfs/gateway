@@ -31,7 +31,7 @@ use rustfs_gateway::dto::ListBuckets;
 use rustfs_gateway::{AssemblyError, OperationSet, RouteEntry, RouteSelector, RuleRef, ServiceBuilder};
 use support::{Backend, Impostor, Ping, Unnamespaced, ping_route, wired};
 
-/// Negative — an assembly with no operation is refused. A service that answers every request with
+/// a-asm-0016. Negative — an assembly with no operation is refused. A service that answers every request with
 /// `501` is a configuration mistake, and starting it hides the mistake until traffic arrives.
 #[test]
 fn an_empty_registry_is_refused() {
@@ -95,7 +95,7 @@ fn a_duplicate_registration_is_refused() {
     assert!(error.to_string().contains("ListBuckets"), "{error}");
 }
 
-/// Negative — a third-party operation whose name has no namespace is refused. Without the rule,
+/// a-asm-0014. Negative — a third-party operation whose name has no namespace is refused. Without the rule,
 /// a vendor operation can occupy a name AWS has not defined yet.
 #[test]
 fn a_third_party_name_without_a_namespace_is_refused() {
@@ -106,7 +106,7 @@ fn a_third_party_name_without_a_namespace_is_refused() {
     assert_eq!(error.rule(), RuleRef::REGISTRATION);
 }
 
-/// Negative — a third-party operation wearing an AWS name is refused, so requests AWS defines
+/// a-asm-0013. Negative — a third-party operation wearing an AWS name is refused, so requests AWS defines
 /// cannot be answered by a handler nobody reviewed.
 #[test]
 fn a_third_party_name_colliding_with_an_aws_one_is_refused() {
@@ -135,7 +135,7 @@ fn a_route_entry_claiming_an_aws_name_is_refused() {
     assert!(error.to_string().contains("GetObject"), "{error}");
 }
 
-/// Negative — a third-party entry that stands in front of a standard operation is refused unless
+/// a-asm-0015. Negative — a third-party entry that stands in front of a standard operation is refused unless
 /// the shadowing is declared. This is the check that stops a vendor route from quietly taking over
 /// `ListBuckets`.
 #[test]
@@ -168,7 +168,7 @@ fn requiring_an_unregistered_operation_is_refused() {
     assert!(missing.to_string().contains("GetObject"), "{missing}");
 }
 
-/// Negative — every refusal carries a rule reference in the `asm-` namespace, and the rendered
+/// a-asm-0017. Negative — every refusal carries a rule reference in the `asm-` namespace, and the rendered
 /// message leads with it. A refusal a reader cannot look up is a refusal they cannot act on.
 #[test]
 fn every_refusal_is_greppable_by_its_rule() {
@@ -187,7 +187,7 @@ fn every_refusal_is_greppable_by_its_rule() {
     }
 }
 
-/// Positive — the smallest complete assembly builds, and the service reports what it answers.
+/// a-asm-0001. Positive — the smallest complete assembly builds, and the service reports what it answers.
 #[test]
 fn a_complete_assembly_builds() {
     let service = support::service();
@@ -195,7 +195,7 @@ fn a_complete_assembly_builds() {
     assert_eq!(operations, ["ListBuckets", "example:ContentPing", "example:HeadPing", "example:Ping"]);
 }
 
-/// Positive — cloning a service is one pointer's worth of work, which is what makes cloning it per
+/// a-asm-0001. Positive — cloning a service is one pointer's worth of work, which is what makes cloning it per
 /// connection the right thing for a server to do.
 #[test]
 fn the_service_is_one_arc_wide_and_cheap_to_clone() {

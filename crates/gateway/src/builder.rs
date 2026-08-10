@@ -61,6 +61,7 @@ use crate::ext::{
 };
 use crate::service::{Inner, S3Service, SecurityPosture};
 use crate::trace::{MintedTraces, TraceSource};
+use crate::{MonomorphicOperationSet, MonomorphicService};
 use rustfs_gateway_core::cors::CorsPolicy;
 
 /// One registered layer, with its operation type forgotten.
@@ -620,5 +621,47 @@ impl ServiceBuilder {
             cors_policy: self.cors_policy,
             sse: self.sse,
         }))
+    }
+
+    /// Builds a service that selects operation codecs and one concrete backend statically.
+    ///
+    /// `Operations` must name exactly the operations registered on this builder. Operation layers
+    /// are refused because their dynamic continuation chain would contradict this path's dispatch
+    /// contract; stage-level extension points remain the object-safe forms required by ADR-0002.
+    ///
+    /// # Errors
+    ///
+    /// [`AssemblyError`] when ordinary assembly fails, the type-level operation set differs from
+    /// registration, or an operation layer was installed.
+    pub fn build_monomorphic<H, Operations>(self, backend: Arc<H>) -> Result<MonomorphicService<H, Operations>, AssemblyError>
+    where
+        H: Send + Sync + 'static,
+        Operations: MonomorphicOperationSet<H>,
+    {
+        if !self.op_layers.is_empty() {
+            return Err(AssemblyError::MonomorphicSet {
+                reason: "operation layers require dynamic per-operation continuations".to_owned(),
+                rule: RuleRef::MONOMORPHIC_SET,
+            });
+        }
+
+        let registered: Vec<&'static str> = self.pending.keys().copied().collect();
+        let mut declared = Vec::new();
+        <Operations as crate::monomorphic::sealed::Set<H>>::names(&mut declared);
+        declared.sort_unstable();
+        declared.dedup();
+        if registered != declared {
+            return Err(AssemblyError::MonomorphicSet {
+                reason: format!("registered operations {registered:?} differ from declared static operations {declared:?}"),
+                rule: RuleRef::MONOMORPHIC_SET,
+            });
+        }
+
+        let service = self.build()?;
+        Ok(MonomorphicService {
+            service,
+            backend,
+            operations: core::marker::PhantomData,
+        })
     }
 }

@@ -15,23 +15,29 @@
 //! Concurrent clone-and-request coverage for the assembled service.
 //!
 //! Responsible for: driving one shared service from one hundred operating-system threads.
-//! NOT responsible for: running ThreadSanitizer, which is an external nightly tool invocation.
-//! Upstream: `rustfs-gateway`. Downstream: P7 connection handling and the documented TSAN command.
+//! NOT responsible for: installing nightly; `scripts/run_gateway_tsan.sh` owns the sanitizer
+//! invocation and CI installs its pinned toolchain.
+//! Upstream: `rustfs-gateway`. Downstream: P7 connection handling and the TSAN CI job.
 
 mod support;
 
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Barrier};
+
+const THREADS: usize = 100;
 
 /// a-asm-0024. One hundred connection-style clones can answer requests concurrently.
 #[test]
 fn one_hundred_clones_answer_concurrently() {
     let service = support::service();
-    let start = Arc::new(Barrier::new(100));
-    let mut workers = Vec::with_capacity(100);
+    let start = Arc::new(Barrier::new(THREADS));
+    let completed = Arc::new(AtomicUsize::new(0));
+    let mut workers = Vec::with_capacity(THREADS);
 
-    for _ in 0..100 {
+    for _ in 0..THREADS {
         let service = service.clone();
         let start = Arc::clone(&start);
+        let completed = Arc::clone(&completed);
         workers.push(std::thread::spawn(move || {
             let runtime = tokio::runtime::Builder::new_current_thread()
                 .build()
@@ -41,10 +47,12 @@ fn one_hundred_clones_answer_concurrently() {
                 let (status, _) = support::exchange(&service, support::plain(http::Method::POST, "/")).await;
                 assert_eq!(status, http::StatusCode::OK);
             });
+            completed.fetch_add(1, Ordering::SeqCst);
         }));
     }
 
     for worker in workers {
         worker.join().expect("a request thread must not panic");
     }
+    assert_eq!(completed.load(Ordering::SeqCst), 100, "not every OS request thread completed");
 }

@@ -73,6 +73,7 @@ use rustfs_gateway_stream::ByteStream;
 use rustfs_gateway_types::ErrorCode;
 
 use crate::ext::{Next, OpLayer, Terminal};
+use crate::request_config::{InputAuthorized, RequestConfig};
 
 /// A `Resp<O>`'s output whose `O` this table has forgotten.
 type ErasedOutput = Box<dyn std::any::Any + Send>;
@@ -101,7 +102,7 @@ type Answer = Result<(ErasedAnswer, u16), HandlerError>;
 pub(crate) type Invocation = BoxFuture<'static, Answer>;
 
 /// Call the backend with input that carries the authorization proof.
-type Invoke = Arc<dyn Fn(ErasedRequest) -> Result<Invocation, HandlerError> + Send + Sync>;
+type Invoke = Arc<dyn Fn(ErasedRequest, RequestConfig<InputAuthorized>) -> Result<Invocation, HandlerError> + Send + Sync>;
 
 /// Write the answer back to the wire.
 type Encode = Arc<dyn Fn(ErasedOutput, &MetaView<'_>, u16) -> Result<EncodedResponse, CodecError> + Send + Sync>;
@@ -148,9 +149,12 @@ impl OperationDispatch {
             layers,
             operation: core::marker::PhantomData,
         }));
-        let invoke: Invoke = Arc::new(move |request: ErasedRequest| {
+        let invoke: Invoke = Arc::new(move |request: ErasedRequest, request_config: RequestConfig<InputAuthorized>| {
             let call = handler(request);
             Ok(Box::pin(async move {
+                // Keep the request's one configuration snapshot alive through the backend call.
+                // No dispatch implementation can load or substitute another snapshot.
+                let _request_config = request_config;
                 let response = call.await?;
                 let response = response
                     .downcast::<Resp<O>>()
@@ -229,8 +233,12 @@ impl OperationDispatch {
     }
 
     /// Calls the backend with authorized input.
-    pub(crate) fn invoke(&self, request: ErasedRequest) -> Result<Invocation, HandlerError> {
-        (self.invoke)(request)
+    pub(crate) fn invoke(
+        &self,
+        request: ErasedRequest,
+        config: RequestConfig<InputAuthorized>,
+    ) -> Result<Invocation, HandlerError> {
+        (self.invoke)(request, config)
     }
 
     /// Encodes the answer.
@@ -488,7 +496,16 @@ mod tests {
         let resources = dispatch.resources(&decoded).expect("derived resources");
         let decisions = vec![Decision::Allow; resources.len()];
         let authorized = dispatch.authorize(decoded, &decisions).expect("authorized");
-        dispatch.invoke(authorized).expect("dispatchable").await
+        let config = RequestConfig::enter(Arc::new(crate::ServiceConfig::new(1)))
+            .accepted()
+            .routed()
+            .governed()
+            .authenticated()
+            .route_authorized()
+            .body_read()
+            .decoded()
+            .input_authorized();
+        dispatch.invoke(authorized, config).expect("dispatchable").await
     }
 
     struct NoBackend;

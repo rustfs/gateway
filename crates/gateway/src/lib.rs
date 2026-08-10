@@ -90,8 +90,12 @@ mod dispatch;
 mod ext;
 mod gate;
 mod invariants;
+mod monomorphic;
+mod operation_mode;
 mod probe;
 mod render;
+mod request_config;
+mod request_deadline;
 mod service;
 mod stamp;
 mod trace;
@@ -125,6 +129,7 @@ pub use crate::ext::{
 };
 #[cfg(feature = "dangerous-allow-all-authorizer")]
 pub use crate::ext::{AllowAllAuthorizer, DangerAck};
+pub use crate::monomorphic::{MonomorphicOperationSet, MonomorphicService, OperationSetEnd, OperationSetNode};
 pub use crate::probe::{BodyProgress, ObservedBody};
 pub use crate::render::{S3Error, connection_intent_of, declaration, document, document_body, render};
 pub use crate::service::{S3Service, SecurityPosture};

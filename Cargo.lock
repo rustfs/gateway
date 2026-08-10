@@ -1048,6 +1048,7 @@ dependencies = [
  "rustfs-gateway-types",
  "rustfs-gateway-xml",
  "subtle",
+ "tokio",
  "trybuild",
  "zeroize",
 ]

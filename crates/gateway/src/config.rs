@@ -78,3 +78,44 @@ impl core::fmt::Debug for ConfigHandle {
         f.debug_struct("ConfigHandle").finish_non_exhaustive()
     }
 }
+
+#[cfg(test)]
+#[allow(clippy::expect_used)]
+mod tests {
+    use super::*;
+    use crate::request_config::RequestConfig;
+
+    /// a-asm-0006. Every real pipeline stage consumes the same request snapshot; replacing the
+    /// store after entry must not create a second `Arc` anywhere in that chain.
+    #[test]
+    fn all_eight_pipeline_stages_share_one_arc() {
+        let store = Arc::new(ArcSwap::from_pointee(ServiceConfig::new(8)));
+        let handle = ConfigHandle::new(&store);
+        let entry = store.load_full();
+        let mut seen = Vec::new();
+
+        let accepted = RequestConfig::enter(Arc::clone(&entry)).accepted();
+        seen.push(Arc::clone(accepted.config()));
+        let routed = accepted.routed();
+        seen.push(Arc::clone(routed.config()));
+        let governed = routed.governed();
+        seen.push(Arc::clone(governed.config()));
+        handle.store(ServiceConfig::new(16));
+        assert!(!Arc::ptr_eq(&entry, &store.load_full()), "the mid-request replacement did not happen");
+        let authenticated = governed.authenticated();
+        seen.push(Arc::clone(authenticated.config()));
+        let route_authorized = authenticated.route_authorized();
+        seen.push(Arc::clone(route_authorized.config()));
+        let body_read = route_authorized.body_read();
+        seen.push(Arc::clone(body_read.config()));
+        let decoded = body_read.decoded();
+        seen.push(Arc::clone(decoded.config()));
+        let input_authorized = decoded.input_authorized();
+        seen.push(Arc::clone(input_authorized.config()));
+
+        assert_eq!(seen.len(), 8);
+        for snapshot in seen {
+            assert!(Arc::ptr_eq(&entry, &snapshot));
+        }
+    }
+}

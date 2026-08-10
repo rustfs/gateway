@@ -49,6 +49,7 @@ cd "$ROOT_DIR"
 # repository has produced seven times.
 TRAIT_FILE='crates/gateway/src/ext/policy.rs'
 PIPELINE_FILE='crates/gateway/src/service.rs'
+READER_FILE='crates/gateway/src/request_deadline.rs'
 # The field the pipeline holds the source behind.
 FIELD='policy_source'
 
@@ -59,7 +60,7 @@ report() {
     status=1
 }
 
-for file in "$TRAIT_FILE" "$PIPELINE_FILE"; do
+for file in "$TRAIT_FILE" "$PIPELINE_FILE" "$READER_FILE"; do
     if [[ ! -f "$file" ]]; then
         report "check_policy_snapshot_once: ${file} does not exist; the guard cannot find the surface it is written about"
         exit 1
@@ -114,7 +115,7 @@ if ! matches "$TRAIT_FILE" 'fn[ \t]+snapshot[ \t]*<'; then
 fi
 
 # -----------------------------------------------------------------------------
-# Rule 2 — exactly one call site, and it is the pipeline's.
+# Rule 2 — exactly one call site, in the timeout helper invoked by the pipeline.
 #
 # The trait file itself is excluded: it holds the declaration, the blanket
 # `Arc<T>` forward, and the default implementation, none of which is a reading
@@ -127,10 +128,10 @@ for file in "${sources[@]}"; do
     hits="$(code_of "$file" | grep -cE "$CALL_RE" || true)"
     [[ "$hits" -eq 0 ]] && continue
     call_sites=$((call_sites + hits))
-    if [[ "$file" != "$PIPELINE_FILE" ]]; then
-        report "${file}: reads a policy snapshot; the one reading per request is taken in ${PIPELINE_FILE} and handed to every reader, because two readings are a window a caller chooses the timing of"
+    if [[ "$file" != "$READER_FILE" ]]; then
+        report "${file}: reads a policy snapshot; the one reading per request is taken in ${READER_FILE} and handed to every reader, because two readings are a window a caller chooses the timing of"
     elif [[ "$hits" -ne 1 ]]; then
-        report "${PIPELINE_FILE}: ${hits} readings of policy in one request; there must be exactly one, and every reader must be handed it"
+        report "${READER_FILE}: ${hits} readings of policy in one request; there must be exactly one, and every reader must be handed it"
     fi
 done
 
@@ -174,6 +175,6 @@ EOF
     exit "$status"
 fi
 
-printf 'OK: policy is read once per request, in %s (line %s), before the authorizer (line %s)\n' \
-    "$PIPELINE_FILE" "$snapshot_line" "$authorize_line"
+printf 'OK: policy is read once per request in %s, invoked by %s (line %s), before the authorizer (line %s)\n' \
+    "$READER_FILE" "$PIPELINE_FILE" "$snapshot_line" "$authorize_line"
 exit 0

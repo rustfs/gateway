@@ -2,8 +2,9 @@
 set -euo pipefail
 
 # WHAT THIS CHECKS
-#   Workspace tests and guard mutations run on separate CI runners, while the branch-protected
-#   Test check waits for both. This keeps the gate wall time below ten minutes as coverage grows.
+#   Workspace tests, guard mutations and TSAN run on separate CI runners, while the
+#   branch-protected Test check waits for all three. This keeps the gate wall time below ten
+#   minutes as coverage grows.
 
 ROOT="${GATEWAY_CHECK_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 WORKFLOW="$ROOT/.github/workflows/ci.yml"
@@ -89,24 +90,26 @@ require_equal(guard.fetch("steps").last.fetch("run"), guard_run,
 aggregate_keys = ["name", "needs", "if", "runs-on", "timeout-minutes", "steps"]
 require_equal(aggregate.keys, aggregate_keys, "the Test job changed its dependency, failure, or budget contract")
 require_equal(aggregate.values_at("name", "needs", "if", "runs-on", "timeout-minutes"),
-              ["Test", ["workspace-tests", "guard-self-test"], "always()", "ubuntu-latest", 1],
-              "the Test job no longer aggregates both workers within the budget")
+              ["Test", ["workspace-tests", "guard-self-test", "gateway-tsan"], "always()", "ubuntu-latest", 1],
+              "the Test job no longer aggregates all three workers within the budget")
 steps = aggregate.fetch("steps")
 require_equal(steps.length, 1, "the Test job must have exactly one result-checking step")
 require_equal(steps.first.keys, ["name", "env", "run"], "the Test comparison step can be skipped or hidden")
 expected_env = {
   "WORKSPACE_RESULT" => "${{ needs.workspace-tests.result }}",
-  "GUARD_RESULT" => "${{ needs.guard-self-test.result }}"
+  "GUARD_RESULT" => "${{ needs.guard-self-test.result }}",
+  "TSAN_RESULT" => "${{ needs.gateway-tsan.result }}"
 }
-require_equal(steps.first.fetch("env"), expected_env, "the Test step does not bind both worker results")
+require_equal(steps.first.fetch("env"), expected_env, "the Test step does not bind all worker results")
 expected_run = <<~'RUN'
   test "$WORKSPACE_RESULT" = success
   test "$GUARD_RESULT" = success
+  test "$TSAN_RESULT" = success
 RUN
-require_equal(steps.first.fetch("run"), expected_run, "the Test step does not execute both comparisons")
+require_equal(steps.first.fetch("run"), expected_run, "the Test step does not execute all comparisons")
 RUBY
 if grep -F 'cargo xtask verify --all' "$WORKFLOW" >/dev/null; then
     fail 'CI still serializes workspace tests and guard mutations through verify --all'
 fi
 
-printf 'OK: workspace tests and guard mutations are parallel behind the required Test check\n'
+printf 'OK: workspace tests, guard mutations and TSAN are parallel behind the required Test check\n'

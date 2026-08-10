@@ -1,0 +1,11 @@
+error[E0603]: struct `Decoded` is private
+  --> tests/compile_fail/authz_decoded_private.rs:21:33
+   |
+21 | use rustfs_gateway_core::authz::Decoded;
+   |                                 ^^^^^^^ private struct
+   |
+note: the struct `Decoded` is defined here
+  --> src/authz/mod.rs
+   |
+   | pub(crate) struct Decoded<O: Operation> {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
