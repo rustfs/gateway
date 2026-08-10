@@ -48,6 +48,10 @@ use crate::listener::Listener;
 use crate::shutdown::{MetricsInner, RunningServer, ServerMetrics, ShutdownCommand, ShutdownReport, ShutdownTrigger};
 use crate::tls::TlsHandle;
 
+#[cfg(test)]
+#[allow(clippy::expect_used)] // Test-only synchronization failures terminate the scenario; no value comes from external input.
+mod deadline_test;
+
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
 /// Generic HTTP server runtime for a cloneable tower service.
@@ -55,6 +59,8 @@ pub struct Server<S> {
     config: ServerConfig,
     service: S,
     tls: Option<TlsHandle>,
+    #[cfg(test)]
+    deadline_observer: Option<deadline_test::DeadlineArmObserver>,
 }
 
 /// Transport facts observed at accept and inserted into every request's extensions.
@@ -102,6 +108,8 @@ impl<S> Server<S> {
             config,
             service,
             tls: None,
+            #[cfg(test)]
+            deadline_observer: None,
         }
     }
 
@@ -109,6 +117,12 @@ impl<S> Server<S> {
     #[must_use]
     pub fn with_tls(mut self, tls: TlsHandle) -> Self {
         self.tls = Some(tls);
+        self
+    }
+
+    #[cfg(test)]
+    fn observe_deadline_arm(mut self, observer: deadline_test::DeadlineArmObserver) -> Self {
+        self.deadline_observer = Some(observer);
         self
     }
 }
@@ -135,7 +149,16 @@ where
         let metrics = ServerMetrics::default();
         let (command_sender, command_receiver) = oneshot::channel();
         let task_metrics = metrics.clone();
-        let task = tokio::spawn(run_server(listener, self.config, self.service, self.tls, task_metrics, command_receiver));
+        let task = tokio::spawn(run_server(
+            listener,
+            self.config,
+            self.service,
+            self.tls,
+            task_metrics,
+            #[cfg(test)]
+            self.deadline_observer,
+            command_receiver,
+        ));
         Ok(RunningServer {
             local_addr,
             task,
@@ -162,6 +185,7 @@ async fn run_server<S, B>(
     service: S,
     tls: Option<TlsHandle>,
     metrics: ServerMetrics,
+    #[cfg(test)] deadline_observer: Option<deadline_test::DeadlineArmObserver>,
     command_receiver: oneshot::Receiver<ShutdownCommand>,
 ) -> Result<(), ServerError>
 where
@@ -219,6 +243,9 @@ where
         };
         let (stream, peer) = accepted;
         let header_deadline = deadline_after(config.header_read_timeout);
+        #[cfg(test)]
+        let accepted_ordinal = metrics.inner.accepted.fetch_add(1, Ordering::Relaxed) + 1;
+        #[cfg(not(test))]
         metrics.inner.accepted.fetch_add(1, Ordering::Relaxed);
         let Some(ip_lease) = ip_counts.try_acquire(peer.ip()) else {
             metrics.inner.per_ip_rejected.fetch_add(1, Ordering::Relaxed);
@@ -242,6 +269,11 @@ where
                 shutdown: shutdown_sender.subscribe(),
                 request_stats: Arc::clone(&request_stats),
                 header_deadline,
+                #[cfg(test)]
+                deadline_observer: deadline_observer
+                    .as_ref()
+                    .filter(|observer| observer.target_accepted() == accepted_ordinal)
+                    .cloned(),
                 _active: active,
             },
             service.clone(),
@@ -286,6 +318,8 @@ struct ConnectionState {
     shutdown: watch::Receiver<bool>,
     request_stats: Arc<RequestStats>,
     header_deadline: tokio::time::Instant,
+    #[cfg(test)]
+    deadline_observer: Option<deadline_test::DeadlineArmObserver>,
     _active: ActiveConnection,
 }
 
@@ -305,6 +339,8 @@ where
         mut shutdown,
         request_stats,
         header_deadline,
+        #[cfg(test)]
+        deadline_observer,
         _active,
     } = state;
     if stream.set_nodelay(config.tcp_nodelay).is_err() {
@@ -350,6 +386,11 @@ where
         config.keep_alive_idle,
         config.write_progress_timeout,
     );
+    #[cfg(test)]
+    let io = match &deadline_observer {
+        Some(observer) => io.observe_header_pending(observer.progress_callback()),
+        None => io,
+    };
     let io = TokioIo::new(io);
     let tracked = TrackedService::new(CatchPanic::new(service), request_stats, per_connection);
     let service = TowerToHyper {
@@ -362,9 +403,21 @@ where
         request_seen,
     };
     let mut builder = auto::Builder::new(TokioExecutor::new());
+    #[cfg(test)]
+    match &deadline_observer {
+        Some(observer) => {
+            builder
+                .http1()
+                .timer(deadline_test::ObservedTimer::new(observer.hyper_pending()));
+        }
+        None => {
+            builder.http1().timer(TokioTimer::new());
+        }
+    }
+    #[cfg(not(test))]
+    builder.http1().timer(TokioTimer::new());
     builder
         .http1()
-        .timer(TokioTimer::new())
         .header_read_timeout(deadline_remaining(header_deadline))
         .max_buf_size(config.h1_max_buf_size)
         .keep_alive(config.h1_keep_alive)
