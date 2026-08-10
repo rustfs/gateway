@@ -270,52 +270,6 @@ async fn a_srv_0008_one_thousand_connections_stay_inside_the_rss_budget() {
     assert!(task.await.expect("server task joins").is_ok());
 }
 
-#[tokio::test(start_paused = true)]
-async fn a_srv_0010_half_header_is_closed_after_header_timeout() {
-    const CHILD_MARKER: &str = "RUSTFS_GATEWAY_SERVER_RSS_CHILD";
-    if std::env::var_os(CHILD_MARKER).is_none() {
-        let status = Command::new(std::env::current_exe().expect("test executable path is available"))
-            .args(["--exact", "a_srv_0010_half_header_is_closed_after_header_timeout"])
-            .env(CHILD_MARKER, "1")
-            .status()
-            .expect("isolated RSS test starts");
-        assert!(status.success(), "isolated RSS test failed");
-        return;
-    }
-    let RunningServer {
-        local_addr,
-        task,
-        shutdown,
-        ..
-    } = echo_server(plaintext_config());
-    assert!(get(local_addr).await.starts_with(b"HTTP/1.1 200"));
-    let before_rss = rss_bytes();
-    let mut stream = TcpStream::connect(local_addr).await.expect("connect succeeds");
-    stream
-        .write_all(b"GET / HTTP/1.1\r\nHost:")
-        .await
-        .expect("partial header writes");
-    for _ in 0..10 {
-        tokio::task::yield_now().await;
-    }
-    let started = tokio::time::Instant::now();
-    tokio::time::advance(Duration::from_millis(101)).await;
-    let mut byte = [0_u8; 1];
-    assert_eq!(stream.read(&mut byte).await.expect("close is observable"), 0);
-    assert!(
-        started.elapsed() < Duration::from_millis(150),
-        "the header deadline, rather than the longer keep-alive timer, closed the socket"
-    );
-    if let (Some(before), Some(after)) = (before_rss, rss_bytes()) {
-        assert!(
-            after.saturating_sub(before) < 1024 * 1024,
-            "one partial header grew RSS by at least 1 MiB"
-        );
-    }
-    let _ = shutdown.trigger(Duration::from_secs(1)).await;
-    assert!(task.await.expect("server task joins").is_ok());
-}
-
 #[tokio::test]
 async fn a_srv_0011_a_one_byte_slow_reader_triggers_the_write_progress_timeout() {
     const BODY_LEN: usize = 100 * 1024 * 1024;

@@ -43,6 +43,14 @@ impl<T> Transport for T where T: AsyncRead + AsyncWrite + Send + Unpin {}
 
 pub(crate) type BoxTransport = Box<dyn Transport>;
 
+#[cfg(test)]
+pub(crate) type HeaderPendingObserver = Arc<dyn Fn() + Send + Sync>;
+
+#[cfg(test)]
+pub(crate) fn test_deadline_now() -> Instant {
+    Instant::now()
+}
+
 pub(crate) struct ProgressIo<I> {
     inner: I,
     in_flight: Arc<AtomicUsize>,
@@ -53,6 +61,8 @@ pub(crate) struct ProgressIo<I> {
     write_sleep: Pin<Box<Sleep>>,
     write_waiting: bool,
     first_request_observed: bool,
+    #[cfg(test)]
+    header_pending_observer: Option<HeaderPendingObserver>,
 }
 
 impl<I> ProgressIo<I> {
@@ -74,7 +84,15 @@ impl<I> ProgressIo<I> {
             write_sleep: Box::pin(sleep(write_timeout)),
             write_waiting: false,
             first_request_observed: false,
+            #[cfg(test)]
+            header_pending_observer: None,
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn observe_header_pending(mut self, observer: HeaderPendingObserver) -> Self {
+        self.header_pending_observer = Some(observer);
+        self
     }
 
     fn reset_idle(&mut self) {
@@ -88,7 +106,14 @@ impl<I> ProgressIo<I> {
 
     fn check_idle(&mut self, context: &mut Context<'_>) -> io::Result<()> {
         if !self.request_seen.load(Ordering::Acquire) {
-            if self.idle_sleep.as_mut().poll(context).is_ready() {
+            let deadline = self.idle_sleep.as_mut().poll(context);
+            #[cfg(test)]
+            if deadline.is_pending()
+                && let Some(observer) = self.header_pending_observer.take()
+            {
+                observer();
+            }
+            if deadline.is_ready() {
                 return Err(io::Error::new(io::ErrorKind::TimedOut, "request header timeout"));
             }
             return Ok(());
