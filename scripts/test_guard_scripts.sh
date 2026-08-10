@@ -160,6 +160,44 @@ expect_fail() {
     fi
 }
 
+# expect_fail_and_missing_grep <guard> <description> <mutation-fn>
+# Proves both the policy mutation and the dependency-missing path while keeping them one guard case.
+expect_fail_and_missing_grep() {
+    local guard="$1" desc="$2" mutate="$3"
+    local sandbox mutation_rc=0 missing_rc=0 missing_output tool_path clean=1
+    cases=$((cases + 1))
+    if [[ ! -x "${SCRIPT_DIR}/${guard}" ]]; then
+        fail_msg "${guard} is missing or not executable; cannot test: ${desc}"
+        return
+    fi
+    make_sandbox
+    sandbox="$SANDBOX"
+    (cd "$sandbox" && "$mutate" >/dev/null)
+    (cd "$sandbox" && git add -A >/dev/null 2>&1)
+    GATEWAY_CHECK_ROOT="$sandbox" "${SCRIPT_DIR}/${guard}" >/dev/null 2>&1 || mutation_rc=$?
+
+    make_sandbox
+    sandbox="$SANDBOX"
+    if ! (
+        cd "$sandbox"
+        git diff --quiet HEAD -- &&
+            git diff --cached --quiet HEAD -- &&
+            [[ -z "$(git ls-files --others --exclude-standard)" ]]
+    ); then
+        clean=0
+    fi
+    tool_path="$(mktemp -d "${TMPDIR:-/tmp}/gateway-guard-path.XXXXXX")"
+    ln -s "$(command -v dirname)" "${tool_path}/dirname"
+    missing_output="$(GATEWAY_CHECK_ROOT="$sandbox" PATH="$tool_path" /bin/bash "${SCRIPT_DIR}/${guard}" 2>&1)" || missing_rc=$?
+    rm -rf "$tool_path"
+
+    if [[ "$mutation_rc" -ne 0 && "$clean" -eq 1 && "$missing_rc" -ne 0 && "$missing_output" == *'required command is missing: grep'* ]]; then
+        pass_msg "${guard} catches: ${desc}; missing grep also fails closed"
+    else
+        fail_msg "${guard} did not catch its mutation or reported green without grep: ${desc}"
+    fi
+}
+
 # -----------------------------------------------------------------------------
 # Positive control: the repository as it stands must be clean.
 # -----------------------------------------------------------------------------
@@ -299,13 +337,13 @@ expect_fail check_ring_boundaries.sh \
 mut_server_host_write() {
     printf '\nfn normalize_host(request: &mut http::Request<()>) { request.headers_mut().insert(http::header::HOST, http::HeaderValue::from_static("x")); }\n' >>crates/server/src/conn.rs
 }
-expect_fail check_no_host_normalize.sh \
+expect_fail_and_missing_grep check_no_host_normalize.sh \
     'ring-1 server writing the Host header' mut_server_host_write
 
 mut_server_handler_timeout() {
     printf '\nconst HANDLER_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);\n' >>crates/server/src/config.rs
 }
-expect_fail check_timeout_layer_ownership.sh \
+expect_fail_and_missing_grep check_timeout_layer_ownership.sh \
     'ring-1 server claiming the handler timeout layer' mut_server_handler_timeout
 
 mut_server_tuning_doc() {

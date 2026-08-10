@@ -15,15 +15,20 @@ if [[ ! -f "$CONFIG" ]]; then
     exit 1
 fi
 
+if ! command -v grep >/dev/null 2>&1; then
+    printf 'check_timeout_layer_ownership: required command is missing: grep\n' >&2
+    exit 1
+fi
+
 required=(header_read_timeout write_progress_timeout keep_alive_idle connection_lifetime)
 for field in "${required[@]}"; do
-    if ! rg -q "pub ${field}:" "$CONFIG"; then
+    if ! grep -q -E "pub ${field}:" "$CONFIG"; then
         printf 'check_timeout_layer_ownership: missing transport timeout field %s\n' "$field" >&2
         exit 1
     fi
 done
 
-if rg -ni '(body_read_(timeout|interval)|handler(_progress)?_timeout)' "$SOURCE_DIR"; then
+if grep -R -n -i -E --include='*.rs' '(body_read_(timeout|interval)|handler(_progress)?_timeout)' "$SOURCE_DIR"; then
     printf 'check_timeout_layer_ownership: body-read and handler-progress timeouts belong to the core\n' >&2
     exit 1
 fi

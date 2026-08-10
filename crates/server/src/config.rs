@@ -23,9 +23,14 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use tokio::sync::Semaphore;
 
 /// Hyper's measured macro-load budget per open connection.
 const ESTIMATED_BYTES_PER_CONNECTION: usize = 408 * 1024;
+/// Hyper's minimum accepted HTTP/1 parser buffer ceiling.
+const H1_MINIMUM_MAX_BUFFER_SIZE: usize = 8 * 1024;
+/// RFC 9113's largest flow-control window.
+const HTTP2_MAX_WINDOW_SIZE: u32 = (1 << 31) - 1;
 
 /// Returns the conservative resident-memory budget for `connections` open connections.
 #[must_use]
@@ -56,7 +61,7 @@ pub struct ServerConfig {
     pub plaintext: bool,
     /// Accept IPv4-mapped connections on an IPv6 listener. Enabling broadens reach; disabling isolates IPv6.
     pub dual_stack: bool,
-    /// TCP keepalive probe interval. Increasing tolerates longer outages; decreasing detects dead peers sooner.
+    /// TCP keepalive probe interval. Increasing tolerates longer outages; decreasing detects dead peers sooner. Zero is invalid.
     pub tcp_keepalive: Option<Duration>,
     /// Disable Nagle. Enabling lowers small-response latency; disabling may reduce packet count.
     pub tcp_nodelay: bool,
@@ -69,6 +74,7 @@ pub struct ServerConfig {
     /// Allow local-address reuse. Enabling eases restarts; disabling narrows accidental duplicate binds.
     pub reuse_address: bool,
     /// Global open-connection ceiling. Increasing raises capacity and memory; decreasing applies earlier backpressure.
+    /// Values above the runtime semaphore maximum are invalid.
     pub max_connections: usize,
     /// Optional per-IP open-connection ceiling. Increasing permits more NAT fan-in; decreasing limits single-source load.
     pub max_connections_per_ip: Option<usize>,
@@ -78,9 +84,9 @@ pub struct ServerConfig {
     pub write_progress_timeout: Duration,
     /// Maximum no-I/O gap between requests. Increasing preserves reuse; decreasing releases idle connections sooner.
     pub keep_alive_idle: Duration,
-    /// Optional total connection lifetime. Increasing permits longer sessions; decreasing bounds leaked connections sooner.
+    /// Optional total connection lifetime. Increasing permits longer sessions; decreasing bounds leaked connections sooner. Zero is invalid.
     pub connection_lifetime: Option<Duration>,
-    /// HTTP/1 parser buffer ceiling. Increasing admits larger heads; decreasing caps connection memory more tightly.
+    /// HTTP/1 parser buffer ceiling. Increasing admits larger heads; decreasing caps connection memory more tightly. The minimum is 8192.
     pub h1_max_buf_size: usize,
     /// Permit HTTP/1 reuse. Enabling avoids handshakes; disabling releases connections after one request.
     pub h1_keep_alive: bool,
@@ -88,15 +94,17 @@ pub struct ServerConfig {
     pub h1_pipeline_flush: bool,
     /// Vectored-write policy. Enabling can reduce syscalls; disabling helps transports with poor writev support.
     pub write_strategy: WriteStrategy,
-    /// HTTP/2 concurrent-stream ceiling. Increasing raises multiplexing and memory; decreasing limits per-connection work.
+    /// HTTP/2 concurrent-stream ceiling. Increasing raises multiplexing and memory; decreasing limits per-connection work. Zero is invalid.
     pub h2_max_concurrent_streams: u32,
     /// HTTP/2 initial stream window bytes. Increasing raises throughput and memory; decreasing applies stream backpressure sooner.
+    /// Values above 2147483647 violate the protocol limit.
     pub h2_initial_stream_window_size: u32,
     /// HTTP/2 initial connection window bytes. Increasing raises aggregate throughput; decreasing bounds buffered connection data.
+    /// Values above 2147483647 violate the protocol limit.
     pub h2_initial_connection_window_size: u32,
     /// HTTP/2 frame ceiling. Increasing reduces framing overhead; decreasing limits each allocation.
     pub h2_max_frame_size: u32,
-    /// HTTP/2 ping interval. Increasing lowers ping traffic; decreasing detects dead peers sooner.
+    /// HTTP/2 ping interval. Increasing lowers ping traffic; decreasing detects dead peers sooner. Zero is invalid.
     pub h2_keep_alive_interval: Option<Duration>,
     /// HTTP/2 ping acknowledgement timeout. Increasing tolerates jitter; decreasing releases dead peers sooner.
     pub h2_keep_alive_timeout: Duration,
@@ -146,8 +154,8 @@ impl ServerConfig {
     ///
     /// # Errors
     ///
-    /// Returns [`ConfigError`] for a zero ceiling, an invalid HTTP/2 frame size, or an implicit
-    /// cleartext transport.
+    /// Returns [`ConfigError`] for a zero ceiling, a dependency-invalid bound, an invalid HTTP/2
+    /// frame size, or an implicit cleartext transport.
     pub fn validate(&self, tls_configured: bool) -> Result<(), ConfigError> {
         self.validate_transport(tls_configured)?;
         if self.backlog == 0 {
@@ -156,8 +164,17 @@ impl ServerConfig {
         if self.max_connections == 0 {
             return Err(ConfigError::Zero("max_connections"));
         }
+        if self.max_connections > Semaphore::MAX_PERMITS {
+            return Err(ConfigError::MaxConnections {
+                configured: self.max_connections,
+                maximum: Semaphore::MAX_PERMITS,
+            });
+        }
         if self.max_connections_per_ip == Some(0) {
             return Err(ConfigError::Zero("max_connections_per_ip"));
+        }
+        if self.h2_max_concurrent_streams == 0 {
+            return Err(ConfigError::Zero("h2_max_concurrent_streams"));
         }
         for (name, duration) in [
             ("header_read_timeout", self.header_read_timeout),
@@ -167,6 +184,26 @@ impl ServerConfig {
         ] {
             if duration.is_zero() {
                 return Err(ConfigError::Zero(name));
+            }
+        }
+        for (name, duration) in [
+            ("tcp_keepalive", self.tcp_keepalive),
+            ("connection_lifetime", self.connection_lifetime),
+            ("h2_keep_alive_interval", self.h2_keep_alive_interval),
+        ] {
+            if duration.is_some_and(|duration| duration.is_zero()) {
+                return Err(ConfigError::Zero(name));
+            }
+        }
+        if self.h1_max_buf_size < H1_MINIMUM_MAX_BUFFER_SIZE {
+            return Err(ConfigError::Http1BufferSize(self.h1_max_buf_size));
+        }
+        for (field, configured) in [
+            ("h2_initial_stream_window_size", self.h2_initial_stream_window_size),
+            ("h2_initial_connection_window_size", self.h2_initial_connection_window_size),
+        ] {
+            if configured > HTTP2_MAX_WINDOW_SIZE {
+                return Err(ConfigError::Http2WindowSize { field, configured });
             }
         }
         if !(16_384..=16_777_215).contains(&self.h2_max_frame_size) {
@@ -198,6 +235,25 @@ pub enum ConfigError {
     /// A ceiling or timeout that must be positive was zero.
     #[error("{0} must be greater than zero")]
     Zero(&'static str),
+    /// The global limit exceeds Tokio's semaphore representation.
+    #[error("max_connections {configured} exceeds the supported maximum {maximum}")]
+    MaxConnections {
+        /// Configured connection ceiling.
+        configured: usize,
+        /// Largest ceiling Tokio's semaphore accepts.
+        maximum: usize,
+    },
+    /// Hyper rejects HTTP/1 parser buffers below eight KiB.
+    #[error("HTTP/1 max buffer size {0} is below 8192")]
+    Http1BufferSize(usize),
+    /// An HTTP/2 flow-control window exceeds the protocol maximum.
+    #[error("HTTP/2 {field} {configured} exceeds 2147483647")]
+    Http2WindowSize {
+        /// Name of the invalid window setting.
+        field: &'static str,
+        /// Configured window size.
+        configured: u32,
+    },
     /// HTTP/2 permits frame sizes only in its defined range.
     #[error("HTTP/2 max frame size {0} is outside 16384..=16777215")]
     Http2FrameSize(u32),

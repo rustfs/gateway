@@ -14,7 +14,13 @@ if [[ ! -d "$SOURCE_DIR" ]]; then
     exit 1
 fi
 
-if rg -n '(headers_mut\(\).*HOST|header::HOST.*insert|uri_mut\(\).*authority|set_authority|normalize_host)' "$SOURCE_DIR"; then
+if ! command -v grep >/dev/null 2>&1; then
+    printf 'check_no_host_normalize: required command is missing: grep\n' >&2
+    exit 1
+fi
+
+if grep -R -n -E --include='*.rs' \
+    '(headers_mut\(\).*HOST|header::HOST.*insert|uri_mut\(\).*authority|set_authority|normalize_host)' "$SOURCE_DIR"; then
     printf 'check_no_host_normalize: ring 1 must not mutate Host or URI authority\n' >&2
     exit 1
 fi

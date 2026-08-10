@@ -20,10 +20,10 @@
 
 use std::future::Future;
 use std::pin::Pin;
-use std::task::{Context, Poll, ready};
+use std::task::{Context, Poll};
 
 use http::Request;
-use tower::Service;
+use tower::{Service, ServiceExt};
 
 /// A tower service that selects a route by raw URI path prefix.
 #[derive(Clone, Debug)]
@@ -42,31 +42,32 @@ impl<S, F> PrefixDispatch<S, F> {
 
 impl<S, F, B> Service<Request<B>> for PrefixDispatch<S, F>
 where
-    S: Service<Request<B>>,
-    F: Service<Request<B>, Response = S::Response, Error = S::Error>,
+    S: Service<Request<B>> + Clone + Send + 'static,
+    F: Service<Request<B>, Response = S::Response, Error = S::Error> + Clone + Send + 'static,
     S::Future: Send + 'static,
     F::Future: Send + 'static,
+    S::Error: Send + 'static,
+    B: Send + 'static,
 {
     type Response = S::Response;
     type Error = S::Error;
     type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
 
-    fn poll_ready(&mut self, context: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        for (_, service) in &mut self.routes {
-            ready!(service.poll_ready(context))?;
-        }
-        self.fallback.poll_ready(context)
+    fn poll_ready(&mut self, _context: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
     }
 
     fn call(&mut self, request: Request<B>) -> Self::Future {
         if let Some((_, service)) = self
             .routes
-            .iter_mut()
+            .iter()
             .find(|(prefix, _)| request.uri().path().starts_with(prefix))
         {
-            Box::pin(service.call(request))
+            let mut service = service.clone();
+            Box::pin(async move { service.ready().await?.call(request).await })
         } else {
-            Box::pin(self.fallback.call(request))
+            let mut fallback = self.fallback.clone();
+            Box::pin(async move { fallback.ready().await?.call(request).await })
         }
     }
 }
