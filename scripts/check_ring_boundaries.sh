@@ -110,6 +110,16 @@ is_local_crate() {
     printf '%s' "$LOCAL_CRATES" | grep -qxF "$1"
 }
 
+ring1_server_dep_allowed() {
+    case "$1" in
+    arc-swap | bytes | http | http-body | http-body-util | hyper | hyper-util | pin-project-lite | \
+        rcgen | rustls | serde | socket2 | thiserror | tokio | tokio-rustls | tower | tower-http | tracing)
+        return 0
+        ;;
+    *) return 1 ;;
+    esac
+}
+
 manifests=()
 while IFS= read -r manifest; do
     [[ -n "$manifest" ]] && manifests+=("$manifest")
@@ -129,6 +139,11 @@ for manifest in "${manifests[@]}"; do
 
     while IFS=$'\t' read -r kind dep; do
         [[ -z "${dep:-}" ]] && continue
+
+        if [[ "$manifest" == "crates/server/Cargo.toml" ]] && ! is_local_crate "$dep" && ! ring1_server_dep_allowed "$dep"; then
+            fail "${manifest}: ring-1 server dependency '${dep}' (${kind}) is outside its reviewed allowlist"
+            continue
+        fi
 
         case "$dep" in
         rustfs | rustfs-* | rustfs_*)

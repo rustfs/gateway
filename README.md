@@ -19,7 +19,7 @@ change whenever it suits RustFS.
 | Ring                | Crates                                                                                | Rule                              |
 |---------------------|---------------------------------------------------------------------------------------|-----------------------------------|
 | 0 — protocol kernel | `rustfs-gateway-types`, `-xml`, `-stream`, `-http`, `-sig`, `-model`, `-codegen`      | No dependency on any rustfs crate |
-| 1 — service runtime | `rustfs-gateway-core`, `rustfs-gateway`, `-conformance`                               | No dependency on any rustfs crate |
+| 1 — service runtime | `rustfs-gateway-core`, `rustfs-gateway`, `-server`, `-conformance`                    | No dependency on any rustfs crate |
 | 2 — RustFS edge     | `rustfs-gateway-admin`, `-console`, `-sts`, `-metadata-ext`, `-rpc` (not created yet) | May depend on rustfs crates       |
 
 The rule survives the narrowed scope because it is not about reuse: `rustfs-gateway-types` is consumed by
@@ -27,6 +27,10 @@ The rule survives the narrowed scope because it is not about reuse: `rustfs-gate
 turn. **One ring-0 edge back into rustfs closes that cycle.** Membership is declared per crate in
 `[package.metadata.gateway]` — after the rename the crate name says nothing — and `scripts/check_ring_boundaries.sh`
 enforces it in CI.
+
+`rustfs-gateway-server` is the generic transport boundary inside that repository scope: it can
+host any compatible tower service and contains no RustFS business dependency. The facade and
+deployment adapters remain RustFS-focused.
 
 ## Scope fence
 

@@ -287,6 +287,9 @@ closes the cycle.
 
   build-time only, never present in a runtime dependency tree:
         rustfs-gateway-codegen ──▶ rustfs-gateway-model   codegen emits generated/**, spec/, OPERATIONS.md
+
+  runtime host, with no internal crate dependency:
+        rustfs-gateway-server                    listener, TLS, hyper, admission, shutdown
         xtask ──▶ codegen + gateway/core + conformance   generation plus runtime diagnostics; build-time only
 ```
 

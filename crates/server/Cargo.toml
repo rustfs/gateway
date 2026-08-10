@@ -1,0 +1,48 @@
+# RING 1 — general purpose, zero rustfs business dependencies.
+[package]
+name = "rustfs-gateway-server"
+description = "General-purpose HTTP server runtime for rustfs-gateway"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
+
+[package.metadata.gateway]
+ring = 1
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[features]
+default = []
+
+[lints]
+workspace = true
+
+[dependencies]
+arc-swap = { workspace = true }
+bytes = { workspace = true }
+http = { workspace = true }
+http-body = { workspace = true }
+http-body-util = { workspace = true }
+hyper = { workspace = true, features = ["http1", "http2", "server"] }
+hyper-util = { workspace = true, features = ["http1", "http2", "server-auto", "server-graceful", "tokio"] }
+pin-project-lite = { workspace = true }
+rustls = { workspace = true }
+serde = { workspace = true }
+socket2 = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["io-util", "net", "rt-multi-thread", "sync", "time"] }
+tokio-rustls = { workspace = true }
+tower = { workspace = true, features = ["util"] }
+tower-http = { workspace = true, features = ["catch-panic", "compression-gzip", "request-id", "trace"] }
+tracing = { workspace = true }
+
+[dev-dependencies]
+hyper = { workspace = true, features = ["client", "http2"] }
+rcgen = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util"] }
