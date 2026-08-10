@@ -57,57 +57,89 @@ ALLOWANCE_FILE="${ROOT_DIR}/scripts/allowances/percent-decode-allowances.txt"
 
 cd "$ROOT_DIR"
 
+for required in git awk grep cut sort mktemp; do
+    if ! command -v "$required" >/dev/null 2>&1; then
+        printf 'single-normalisation: required command is missing: %s\n' "$required" >&2
+        exit 1
+    fi
+done
+
 # The one file allowed to hold the normalisation and the floor.
 NORMALISER='crates/types/src/scalar/naming.rs'
 SCALAR_DIR='crates/types/src/scalar'
 
 status=0
-
 fail() {
     printf '%s\n' "$1" >&2
     status=1
 }
 
-# Every non-generated Rust source file in the workspace, tests included: a second
-# normalisation written "only for a test fixture" is still a second normalisation, and the
-# conformance fixture is where the last one was found.
-sources() {
-    git ls-files --cached --others --exclude-standard -- 'crates/*.rs' 'xtask/*.rs' 2>/dev/null |
-        grep -v '^crates/types/generated/' |
-        grep -v '^generated/' || true
+source_list="$(mktemp "${TMPDIR:-/tmp}/gateway-normalization-sources.XXXXXX")"
+code_snapshot="$(mktemp "${TMPDIR:-/tmp}/gateway-normalization-code.XXXXXX")"
+cleanup() { rm -f "$source_list" "$code_snapshot"; }
+trap cleanup EXIT
+
+if ! git ls-files --cached --others --exclude-standard -- 'crates/*.rs' 'xtask/*.rs' >"$source_list"; then
+    printf 'single-normalisation: cannot list source files\n' >&2
+    exit 1
+fi
+
+sources=()
+while IFS= read -r file; do
+    [[ -n "$file" ]] || continue
+    case "$file" in
+    crates/types/generated/* | generated/*) continue ;;
+    esac
+    sources+=("$file")
+done <"$source_list"
+if [[ "${#sources[@]}" -eq 0 ]]; then
+    printf 'single-normalisation: no Rust sources found; the guard could not read the tree\n' >&2
+    exit 1
+fi
+
+# Read every source once and retain its path beside each non-comment line. All later rules scan
+# this one snapshot instead of starting a producer and grep process for every source file.
+if ! awk '!/^[[:space:]]*\/\// { print FILENAME "\t" $0 }' "${sources[@]}" >"$code_snapshot"; then
+    printf 'single-normalisation: cannot read every source file\n' >&2
+    exit 1
+fi
+
+matching_files() {
+    local matches rc=0
+    if matches="$(grep -E $'\t.*'"$1" "$code_snapshot")"; then
+        :
+    else
+        rc=$?
+    fi
+    if [[ "$rc" -eq 1 ]]; then
+        return
+    elif [[ "$rc" -ne 0 ]]; then
+        printf 'single-normalisation: snapshot scan failed\n' >&2
+        return "$rc"
+    fi
+    printf '%s\n' "$matches" | cut -f1 | sort -u
 }
 
-# Strips `//` line comments and blank lines so a rule never fires on the prose explaining it.
-code_lines() {
-    grep -vE '^[[:space:]]*//' "$1" 2>/dev/null || true
-}
-
-# ---------------------------------------------------------------------------
 # Rule 1 — one definition each, in the sanctioned file.
-# ---------------------------------------------------------------------------
-
 for symbol in normalize_key floor_check_key floor_check_bucket; do
-    hits=""
-    while IFS= read -r file; do
-        [[ -z "$file" ]] && continue
-        if code_lines "$file" | grep -qE "fn[[:space:]]+${symbol}[[:space:]]*\("; then
-            hits="${hits}${file}
-"
-        fi
-    done < <(sources)
-    count="$(printf '%s' "$hits" | grep -c . || true)"
+    hits="$(matching_files "fn[[:space:]]+${symbol}[[:space:]]*\\(")"
+    count=0
+    if [[ -n "$hits" ]]; then
+        while IFS= read -r hit; do
+            [[ -n "$hit" ]] && count=$((count + 1))
+        done <<<"$hits"
+    fi
     if [[ "$count" -ne 1 ]]; then
         fail "single-normalisation: \`fn ${symbol}\` is defined ${count} time(s); it must be defined exactly once"
-        printf '%s' "$hits" | sed 's/^/    /' >&2
-    elif [[ "$(printf '%s' "$hits" | tr -d '\n')" != "$NORMALISER" ]]; then
-        fail "single-normalisation: \`fn ${symbol}\` is defined in $(printf '%s' "$hits" | tr -d '\n'), not in ${NORMALISER}"
+        while IFS= read -r hit; do
+            [[ -n "$hit" ]] && printf '    %s\n' "$hit" >&2
+        done <<<"$hits"
+    elif [[ "$hits" != "$NORMALISER" ]]; then
+        fail "single-normalisation: \`fn ${symbol}\` is defined in ${hits}, not in ${NORMALISER}"
     fi
 done
 
-# ---------------------------------------------------------------------------
 # Rule 2 — percent-decoding only where it is allowed.
-# ---------------------------------------------------------------------------
-
 ALLOWANCES=""
 if [[ -f "$ALLOWANCE_FILE" ]]; then
     while IFS= read -r line; do
@@ -122,53 +154,42 @@ else
 fi
 
 is_allowed() {
-    [[ -z "$ALLOWANCES" ]] && return 1
-    printf '%s' "$ALLOWANCES" | grep -qxF "$1"
+    [[ -n "$ALLOWANCES" ]] && printf '%s' "$ALLOWANCES" | grep -qxF "$1"
 }
 
+percent_hits="$(matching_files 'percent_decode_str[[:space:]]*\(|percent_decode[[:space:]]*\(')"
 while IFS= read -r file; do
-    [[ -z "$file" ]] && continue
-    if code_lines "$file" | grep -qE 'percent_decode_str[[:space:]]*\(|percent_decode[[:space:]]*\('; then
-        if ! is_allowed "$file"; then
-            fail "single-normalisation: ${file} percent-decodes, and is not in scripts/allowances/percent-decode-allowances.txt"
-        fi
+    [[ -n "$file" ]] || continue
+    if ! is_allowed "$file"; then
+        fail "single-normalisation: ${file} percent-decodes, and is not in scripts/allowances/percent-decode-allowances.txt"
     fi
-done < <(sources)
+done <<<"$percent_hits"
 
-# ---------------------------------------------------------------------------
 # Rule 3 — ObjectKey publishes no way back to a &str it could be rebuilt from.
-# ---------------------------------------------------------------------------
+report_bypass() {
+    local pattern="$1" message="$2" file files
+    files="$(matching_files "$pattern")"
+    while IFS= read -r file; do
+        [[ -n "$file" ]] || continue
+        fail "single-normalisation: ${file} ${message}"
+    done <<<"$files"
+}
+report_bypass 'impl[[:space:]]+(std::ops::)?Deref[[:space:]]+for[[:space:]]+ObjectKey' \
+    'implements Deref for ObjectKey; a key that derefs to &str is a key the storage layer re-parses'
+report_bypass 'impl[[:space:]]+AsRef<str>[[:space:]]+for[[:space:]]+ObjectKey' \
+    'implements AsRef<str> for ObjectKey; same hole as Deref, different spelling'
+report_bypass 'impl[[:space:]]+From<(String|&str)>[[:space:]]+for[[:space:]]+ObjectKey' \
+    'implements From<String> for ObjectKey; an infallible constructor skips the floor entirely'
+report_bypass 'new_unchecked' 'names new_unchecked; there is no unchecked way to build a name'
 
-while IFS= read -r file; do
-    [[ -z "$file" ]] && continue
-    if code_lines "$file" | grep -qE 'impl[[:space:]]+(std::ops::)?Deref[[:space:]]+for[[:space:]]+ObjectKey'; then
-        fail "single-normalisation: ${file} implements Deref for ObjectKey; a key that derefs to &str is a key the storage layer re-parses"
-    fi
-    if code_lines "$file" | grep -qE 'impl[[:space:]]+AsRef<str>[[:space:]]+for[[:space:]]+ObjectKey'; then
-        fail "single-normalisation: ${file} implements AsRef<str> for ObjectKey; same hole as Deref, different spelling"
-    fi
-    if code_lines "$file" | grep -qE 'impl[[:space:]]+From<(String|&str)>[[:space:]]+for[[:space:]]+ObjectKey'; then
-        fail "single-normalisation: ${file} implements From<String> for ObjectKey; an infallible constructor skips the floor entirely"
-    fi
-    if code_lines "$file" | grep -q 'new_unchecked'; then
-        fail "single-normalisation: ${file} names new_unchecked; there is no unchecked way to build a name"
-    fi
-done < <(sources)
-
-# ---------------------------------------------------------------------------
 # Rule 4 — the scalar vocabulary never repairs bad bytes.
-# ---------------------------------------------------------------------------
-
+lossy_hits="$(matching_files 'from_utf8_lossy|decode_utf8_lossy')"
 while IFS= read -r file; do
-    [[ -z "$file" ]] && continue
+    [[ -n "$file" ]] || continue
     case "$file" in
-    "$SCALAR_DIR"/*) ;;
-    *) continue ;;
+    "$SCALAR_DIR"/*) fail "single-normalisation: ${file} decodes lossily; U+FFFD collapses two client inputs onto one name" ;;
     esac
-    if code_lines "$file" | grep -qE 'from_utf8_lossy|decode_utf8_lossy'; then
-        fail "single-normalisation: ${file} decodes lossily; U+FFFD collapses two client inputs onto one name"
-    fi
-done < <(sources)
+done <<<"$lossy_hits"
 
 if [[ "$status" -ne 0 ]]; then
     cat >&2 <<'EOF'

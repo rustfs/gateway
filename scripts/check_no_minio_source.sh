@@ -60,29 +60,73 @@ ALLOWANCE_FILE="${ROOT_DIR}/scripts/allowances/clean-room-allowances.txt"
 
 cd "$ROOT_DIR"
 
+for required in git grep mktemp; do
+    if ! command -v "$required" >/dev/null 2>&1; then
+        printf 'check_no_minio_source: required command is missing: %s\n' "$required" >&2
+        exit 1
+    fi
+done
+
 status=0
+fail() {
+    printf '%s\n' "$1" >&2
+    status=1
+}
 
 # This script states the patterns it looks for, so it matches itself on every rule. Its own path
-# and the allowance file are skipped unconditionally rather than through the allowance list: a
-# guard that could be silenced by being listed in the file it reads is not a guard.
+# and the allowance file are skipped unconditionally rather than through the allowance list.
 SELF="scripts/check_no_minio_source.sh"
 ALLOWANCE_PATH="scripts/allowances/clean-room-allowances.txt"
 
-# `--cached --others --exclude-standard` rather than a bare `git ls-files`: the bare form lists
-# only tracked files, so a newly added file stays invisible until the commit that adds it has
-# already happened. Binary files are filtered per rule with `grep -I`.
+file_list="$(mktemp "${TMPDIR:-/tmp}/gateway-clean-room-files.XXXXXX")"
+tracked_list="$(mktemp "${TMPDIR:-/tmp}/gateway-clean-room-tracked.XXXXXX")"
+untracked_list="$(mktemp "${TMPDIR:-/tmp}/gateway-clean-room-untracked.XXXXXX")"
+hits="$(mktemp "${TMPDIR:-/tmp}/gateway-clean-room-hits.XXXXXX")"
+cleanup() { rm -f "$file_list" "$tracked_list" "$untracked_list" "$hits"; }
+trap cleanup EXIT
+
+if ! git ls-files --cached --others --exclude-standard >"$file_list"; then
+    printf 'check_no_minio_source: cannot list working-tree files\n' >&2
+    exit 1
+fi
+if ! git ls-files --others --exclude-standard >"$untracked_list"; then
+    printf 'check_no_minio_source: cannot list untracked files\n' >&2
+    exit 1
+fi
+if ! git ls-files --cached >"$tracked_list"; then
+    printf 'check_no_minio_source: cannot list tracked files\n' >&2
+    exit 1
+fi
+
 files=()
+content_files=()
+untracked_files=()
+tracked_symlink_files=()
+manifests=()
 while IFS= read -r file; do
     [[ -n "$file" ]] || continue
-    [[ "$file" == "$SELF" ]] && continue
-    [[ "$file" == "$ALLOWANCE_PATH" ]] && continue
+    case "$file" in
+    Cargo.toml | */Cargo.toml) manifests+=("$file") ;;
+    esac
+    [[ "$file" == "$SELF" || "$file" == "$ALLOWANCE_PATH" ]] && continue
     files+=("$file")
-done < <(git ls-files --cached --others --exclude-standard 2>/dev/null || true)
-
-# A guard whose input is missing must fail, not skip. This one always has input: the repository is
-# never empty, so an empty list means `git ls-files` did not run, and reporting success on that is
-# how a green line comes to mean nothing.
-if [[ "${#files[@]}" -eq 0 ]]; then
+    [[ -f "$file" ]] && content_files+=("$file")
+done <"$file_list"
+while IFS= read -r file; do
+    [[ -n "$file" && -f "$file" ]] || continue
+    [[ "$file" == "$SELF" || "$file" == "$ALLOWANCE_PATH" ]] && continue
+    untracked_files+=("$file")
+done <"$untracked_list"
+while IFS= read -r file; do
+    [[ -n "$file" && -L "$file" ]] || continue
+    [[ "$file" == "$SELF" || "$file" == "$ALLOWANCE_PATH" ]] && continue
+    if [[ ! -e "$file" ]]; then
+        fail "${file}: tracked symlink is broken; the guard cannot inspect its target"
+        continue
+    fi
+    [[ -f "$file" ]] && tracked_symlink_files+=("$file")
+done <"$tracked_list"
+if [[ "${#files[@]}" -eq 0 || "${#content_files[@]}" -eq 0 ]]; then
     printf 'check_no_minio_source: no files found under %s; the guard could not read the tree\n' "$ROOT_DIR" >&2
     exit 1
 fi
@@ -98,81 +142,130 @@ if [[ -f "$ALLOWANCE_FILE" ]]; then
         ALLOWANCES="${ALLOWANCES}${line}
 "
     done <"$ALLOWANCE_FILE"
+else
+    printf 'check_no_minio_source: %s is missing; the allowlist cannot be skipped\n' "$ALLOWANCE_FILE" >&2
+    exit 1
 fi
 
 is_allowed() {
-    [[ -z "$ALLOWANCES" ]] && return 1
-    printf '%s' "$ALLOWANCES" | grep -qxF "$1"
+    local candidate="$1" allowed
+    while IFS= read -r allowed; do
+        [[ "$allowed" == "$candidate" ]] && return 0
+    done <<<"$ALLOWANCES"
+    return 1
 }
 
-# ---------------------------------------------------------------------------
-# Rule 1 — no AGPL licence header, and nothing claiming the AGPL as its licence.
-# ---------------------------------------------------------------------------
-AGPL_PATTERN='GNU AFFERO GENERAL PUBLIC LICENSE|AGPL-3\.0|Affero General Public License'
+# A no-match exit is expected; an unreadable input or other grep error fails closed.
+scan_files() {
+    local rc=0
+    if grep "$@" >"$hits"; then
+        return
+    else
+        rc=$?
+    fi
+    if [[ "$rc" -ne 1 ]]; then
+        fail "check_no_minio_source: batch scan failed"
+    fi
+    : >"$hits"
+}
 
-for file in "${files[@]}"; do
-    [[ -f "$file" ]] || continue
-    if grep -IEqi "$AGPL_PATTERN" "$file" 2>/dev/null; then
-        if is_allowed "$file"; then
-            continue
+scan_tree() {
+    local pattern="$1" rc=0
+    local -a extra_files=()
+    local offset
+    if [[ "${#untracked_files[@]}" -gt 0 ]]; then
+        extra_files+=("${untracked_files[@]}")
+    fi
+    if [[ "${#tracked_symlink_files[@]}" -gt 0 ]]; then
+        extra_files+=("${tracked_symlink_files[@]}")
+    fi
+    : >"$hits"
+    if git grep -IlEi -- "$pattern" -- >>"$hits"; then
+        :
+    else
+        rc=$?
+        if [[ "$rc" -ne 1 ]]; then
+            fail "check_no_minio_source: tracked-tree scan failed"
         fi
-        printf '%s: names the AGPL; every file in this repository is Apache-2.0, and AGPL text here means AGPL source here\n' \
-            "$file" >&2
-        status=1
     fi
-done
+    # git grep deliberately does not follow tracked symlinks. Scan their ordinary-file targets,
+    # together with untracked files, in bounded batches so neither class can evade provenance
+    # checks and a large tree cannot exceed the process argument limit.
+    for ((offset = 0; offset < ${#extra_files[@]}; offset += 64)); do
+        if grep -IlEi -- "$pattern" "${extra_files[@]:offset:64}" >>"$hits"; then
+            :
+        else
+            rc=$?
+            if [[ "$rc" -ne 1 ]]; then
+                fail "check_no_minio_source: extra-file batch scan failed"
+            fi
+        fi
+    done
+}
 
-# ---------------------------------------------------------------------------
-# Rule 2 — no provenance comment claiming a port from an AGPL implementation.
-# ---------------------------------------------------------------------------
-# The verbs are the ones a person writes when they are being honest about what they did. The window
-# between the verb and the project name is bounded so that a sentence mentioning both in unrelated
-# clauses does not match.
+# Rules 1 and 2 share one tree read. Only the small set of matching files is inspected again to
+# distinguish an allowlisted licence mention from a forbidden provenance statement.
+AGPL_PATTERN='GNU AFFERO GENERAL PUBLIC LICENSE|AGPL-3\.0|Affero General Public License'
 PORT_PATTERN='(ported|adapted|translated|transcribed|transliterated|copied|derived|lifted|taken|based)[[:space:]]+(from|on)[[:space:]]+[^.]{0,60}(minio|garage)'
+scan_tree "${AGPL_PATTERN}|${PORT_PATTERN}"
+matched_files=()
+while IFS= read -r file; do
+    [[ -n "$file" ]] || continue
+    [[ "$file" == "$SELF" || "$file" == "$ALLOWANCE_PATH" ]] && continue
+    matched_files+=("$file")
+done <"$hits"
 
-for file in "${files[@]}"; do
-    [[ -f "$file" ]] || continue
-    if grep -IEqi "$PORT_PATTERN" "$file" 2>/dev/null; then
-        printf '%s: claims its contents came from an AGPL implementation; a port is a derivative work, not inspiration\n' \
-            "$file" >&2
-        grep -IEni "$PORT_PATTERN" "$file" 2>/dev/null | head -3 >&2
-        status=1
-    fi
-done
+if [[ "${#matched_files[@]}" -gt 0 ]]; then
+    scan_files -IlEi -- "$AGPL_PATTERN" "${matched_files[@]}"
+    while IFS= read -r file; do
+        [[ -n "$file" ]] || continue
+        if ! is_allowed "$file"; then
+            fail "${file}: names the AGPL; every file in this repository is Apache-2.0, and AGPL text here means AGPL source here"
+        fi
+    done <"$hits"
 
-# ---------------------------------------------------------------------------
+    scan_files -IHEni -- "$PORT_PATTERN" "${matched_files[@]}"
+    last_file=""
+    diagnostic_count=0
+    while IFS= read -r line; do
+        [[ -n "$line" ]] || continue
+        file="${line%%:*}"
+        if [[ "$file" != "$last_file" ]]; then
+            fail "${file}: claims its contents came from an AGPL implementation; a port is a derivative work, not inspiration"
+            last_file="$file"
+            diagnostic_count=0
+        fi
+        if [[ "$diagnostic_count" -lt 3 ]]; then
+            printf '%s\n' "$line" >&2
+            diagnostic_count=$((diagnostic_count + 1))
+        fi
+    done <"$hits"
+fi
+
 # Rule 3 — no vendored server source.
-# ---------------------------------------------------------------------------
 for file in "${files[@]}"; do
     case "$file" in
-        *.go)
-            printf '%s: a Go source file; the MinIO server is Go, and this project has no Go in it\n' "$file" >&2
-            status=1
-            ;;
-        */minio/minio/* | minio/minio/* | */minio/cmd/* | minio/cmd/* | */minio/internal/* | minio/internal/*)
-            printf '%s: sits under a vendored MinIO server tree\n' "$file" >&2
-            status=1
-            ;;
+    *.go) fail "${file}: a Go source file; the MinIO server is Go, and this project has no Go in it" ;;
+    */minio/minio/* | minio/minio/* | */minio/cmd/* | minio/cmd/* | */minio/internal/* | minio/internal/*)
+        fail "${file}: sits under a vendored MinIO server tree"
+        ;;
     esac
 done
 
-# ---------------------------------------------------------------------------
 # Rule 4 — no submodule or dependency edge onto the server repository.
-# ---------------------------------------------------------------------------
-if [[ -f .gitmodules ]] && grep -Eqi 'minio/minio(\.git)?' .gitmodules; then
-    printf '.gitmodules: declares the MinIO server repository as a submodule\n' >&2
-    status=1
+if [[ -f .gitmodules ]]; then
+    scan_files -IlEi -- 'minio/minio(\.git)?' .gitmodules
+    [[ ! -s "$hits" ]] || fail '.gitmodules: declares the MinIO server repository as a submodule'
 fi
-
-while IFS= read -r manifest; do
-    [[ -n "$manifest" ]] || continue
-    [[ -f "$manifest" ]] || continue
-    if grep -Eqi '^[[:space:]]*minio[[:space:]]*=' "$manifest"; then
-        printf '%s: declares a `minio` dependency; the client library is `minio-go` and is not a Rust crate\n' \
-            "$manifest" >&2
-        status=1
-    fi
-done < <(git ls-files --cached --others --exclude-standard -- 'Cargo.toml' '*/Cargo.toml' 2>/dev/null || true)
+if [[ "${#manifests[@]}" -gt 0 ]]; then
+    # Do not use grep -I here: Cargo manifests are required text inputs, and treating a NUL-bearing
+    # manifest as a harmless binary would silently skip a forbidden dependency after the NUL.
+    scan_files -alEi -- '^[[:space:]]*minio[[:space:]]*=' "${manifests[@]}"
+    while IFS= read -r manifest; do
+        [[ -n "$manifest" ]] || continue
+        fail "${manifest}: declares a \`minio\` dependency; the client library is \`minio-go\` and is not a Rust crate"
+    done <"$hits"
+fi
 
 if [[ "$status" -ne 0 ]]; then
     cat >&2 <<'EOF'
