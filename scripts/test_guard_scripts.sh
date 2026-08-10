@@ -1552,6 +1552,229 @@ mut_clean_room_allowance_widened() {
 }
 expect_fail check_no_minio_source.sh \
     'an allowance list widened to a glob, which is not a path' mut_clean_room_allowance_widened
+
+mut_tracked_symlink_to_ignored_agpl() {
+    mkdir -p ignored-provenance crates/core/src/dialect
+    printf 'ignored-provenance/\n' >>.gitignore
+    printf '// GNU \x41FFERO GENERAL PUBLIC LICENSE Version 3\n' \
+        >ignored-provenance/hidden.rs
+    ln -s ../../../../ignored-provenance/hidden.rs crates/core/src/dialect/tracked-link.rs
+}
+expect_fail check_no_minio_source.sh \
+    'a tracked Rust symlink resolving to ignored AGPL source' mut_tracked_symlink_to_ignored_agpl
+
+mut_broken_tracked_source_symlink() {
+    ln -s missing-provenance.rs crates/core/src/dialect/broken-source-link.rs
+}
+expect_fail check_no_minio_source.sh \
+    'a broken tracked source symlink whose content cannot be inspected' mut_broken_tracked_source_symlink
+
+mut_binary_tracked_manifest() {
+    mkdir -p crates/binary-manifest
+    printf '[package]\nname = "binary-manifest"\n\0\nminio = "forbidden"\n' \
+        >crates/binary-manifest/Cargo.toml
+}
+expect_fail check_no_minio_source.sh \
+    'a tracked NUL-bearing Cargo.toml hiding a minio dependency' mut_binary_tracked_manifest
+
+mut_binary_untracked_manifest() {
+    mkdir -p untracked-binary-manifest
+    printf '[package]\nname = "binary-manifest"\n\0\nminio = "forbidden"\n' \
+        >untracked-binary-manifest/Cargo.toml
+}
+expect_fail_unstaged check_no_minio_source.sh \
+    'an untracked NUL-bearing Cargo.toml hiding a minio dependency' mut_binary_untracked_manifest
+
+SCANNER_TOOLS=(grep rg awk sed perl find git)
+
+write_scanner_shim() {
+    local shim_dir="$1" scanner="$2" real dispatch
+    real="$(command -v "$scanner" 2>/dev/null)" || real=""
+    [[ -z "$real" || -x "$real" ]] || return 1
+    if [[ -n "$real" ]]; then
+        dispatch="exec \"${real}\" \"\$@\""
+    else
+        dispatch='exit 127'
+    fi
+    printf '%s\n' \
+        '#!/bin/sh' \
+        'set -eu' \
+        ': "${GATEWAY_SCANNER_COUNT_DIR:?}"' \
+        "printf '.\\n' >>\"\${GATEWAY_SCANNER_COUNT_DIR}/${scanner}\"" \
+        "$dispatch" >"${shim_dir}/${scanner}"
+    chmod +x "${shim_dir}/${scanner}"
+}
+
+prepare_scanner_shims() {
+    local shim_dir="$1" scanner
+    for scanner in "${SCANNER_TOOLS[@]}"; do
+        write_scanner_shim "$shim_dir" "$scanner" || return 1
+    done
+}
+
+validate_scanner_shims() {
+    local shim_dir="$1" count_dir="$2" scanner
+    for scanner in "${SCANNER_TOOLS[@]}"; do
+        rm -f "${count_dir}/${scanner}"
+        PATH="${shim_dir}:${PATH}" GATEWAY_SCANNER_COUNT_DIR="$count_dir" \
+            "${shim_dir}/${scanner}" </dev/null >/dev/null 2>&1 || true
+        [[ -s "${count_dir}/${scanner}" ]] || return 1
+        : >"${count_dir}/${scanner}"
+    done
+}
+
+scanner_process_count() {
+    local count_dir="$1" scanner line total=0
+    for scanner in "${SCANNER_TOOLS[@]}"; do
+        while IFS= read -r line; do
+            total=$((total + 1))
+        done <"${count_dir}/${scanner}"
+    done
+    printf '%s\n' "$total"
+}
+
+scanner_budget_case() {
+    local guard="$1" ceiling="$2" expectation="$3" desc="$4" mutate="${5:-}"
+    local sandbox shim_dir count_dir rc=0 observed
+    cases=$((cases + 1))
+    make_sandbox
+    sandbox="$SANDBOX"
+    if [[ -n "$mutate" ]]; then
+        (cd "$sandbox" && "$mutate" >/dev/null)
+    fi
+    shim_dir="$(mktemp -d "${TMPDIR:-/tmp}/gateway-scanner-shims.XXXXXX")"
+    count_dir="$(mktemp -d "${TMPDIR:-/tmp}/gateway-scanner-counts.XXXXXX")"
+    if ! prepare_scanner_shims "$shim_dir" || ! validate_scanner_shims "$shim_dir" "$count_dir"; then
+        fail_msg "scanner process harness could not validate every shim: ${desc}"
+        rm -rf "$shim_dir" "$count_dir"
+        return
+    fi
+    GATEWAY_CHECK_ROOT="$sandbox" PATH="${shim_dir}:${PATH}" GATEWAY_SCANNER_COUNT_DIR="$count_dir" \
+        "$sandbox/scripts/$guard" >/dev/null 2>&1 || rc=$?
+    observed="$(scanner_process_count "$count_dir")"
+    rm -rf "$shim_dir" "$count_dir"
+
+    if [[ "$rc" -ne 0 ]]; then
+        fail_msg "${guard} failed for the wrong reason while measuring scanner processes: ${desc}"
+    elif [[ "$expectation" == within && "$observed" -le "$ceiling" ]]; then
+        pass_msg "${guard} uses ${observed}/${ceiling} scanner processes: ${desc}"
+    elif [[ "$expectation" == over && "$observed" -gt "$ceiling" ]]; then
+        pass_msg "${guard} exceeds ${ceiling} scanner processes after mutation (${observed}): ${desc}"
+    else
+        fail_msg "${guard} scanner process count ${observed} did not satisfy ${expectation} ceiling ${ceiling}: ${desc}"
+    fi
+}
+
+insert_guard_probe() {
+    local path="$1" probe="$2"
+    python3 - "$path" "$probe" <<'PYEOF'
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+probe = sys.argv[2]
+text = path.read_text()
+marker = '\nexit "$status"\n'
+if text.count(marker) != 1:
+    raise SystemExit("guard exit marker is missing or ambiguous")
+path.write_text(text.replace(marker, f"\n{probe}\nexit \"$status\"\n"))
+PYEOF
+}
+
+mut_single_per_candidate_scan() {
+    insert_guard_probe scripts/check_single_normalization.sh $'for candidate in "${sources[@]}"; do\n    grep -E "never-match" "$candidate" >/dev/null || true\ndone'
+}
+
+mut_no_minio_candidate_slice_scan() {
+    insert_guard_probe scripts/check_no_minio_source.sh $'for candidate in "${content_files[@]:0:64}"; do\n    git grep -E "never-match" -- "$candidate" >/dev/null || true\ndone'
+}
+
+mut_no_minio_wrapper_alias_scan() {
+    insert_guard_probe scripts/check_no_minio_source.sh $'GREP=grep\nscan_candidate() { "${GREP}" -E "never-match" "$1" >/dev/null || true; }\nfor candidate in "${content_files[@]:0:64}"; do\n    scan_candidate "$candidate"\ndone'
+}
+
+mut_no_minio_rg_scan() {
+    insert_guard_probe scripts/check_no_minio_source.sh $'for candidate in "${content_files[@]:0:64}"; do\n    rg "never-match" "$candidate" >/dev/null || true\ndone'
+}
+
+absolute_scanner_path_case() {
+    local expectation="$1" desc="$2" mutate="${3:-}" sandbox hits rc=0
+    cases=$((cases + 1))
+    make_sandbox
+    sandbox="$SANDBOX"
+    if [[ -n "$mutate" ]]; then
+        (cd "$sandbox" && "$mutate" >/dev/null)
+    fi
+    hits="$(mktemp "${TMPDIR:-/tmp}/gateway-absolute-scanner-hits.XXXXXX")"
+    if grep -nE '/[^[:space:]]*/(grep|rg|awk|sed|perl|find|git)([^[:alnum:]_.-]|$)' \
+        "$sandbox/scripts/check_single_normalization.sh" \
+        "$sandbox/scripts/check_no_minio_source.sh" >"$hits"; then
+        rc=0
+    else
+        rc=$?
+    fi
+    if [[ "$rc" -gt 1 ]]; then
+        fail_msg "absolute scanner path check could not inspect both target guards: ${desc}"
+    elif [[ "$expectation" == clean && "$rc" -eq 1 ]]; then
+        pass_msg "target guards contain no literal absolute scanner path: ${desc}"
+    elif [[ "$expectation" == caught && "$rc" -eq 0 ]]; then
+        pass_msg "target guards reject a literal absolute scanner path: ${desc}"
+    else
+        fail_msg "absolute scanner path check did not satisfy ${expectation}: ${desc}"
+    fi
+    rm -f "$hits"
+}
+
+mut_absolute_scanner_path() {
+    insert_guard_probe scripts/check_no_minio_source.sh $'for candidate in "${content_files[@]:0:64}"; do\n    /usr/bin/grep -E "never-match" "$candidate" >/dev/null || true\ndone'
+}
+
+scanner_budget_case check_single_normalization.sh 21 within \
+    'the repository-wide source corpus is scanned in constant process count'
+scanner_budget_case check_no_minio_source.sh 12 within \
+    'tracked, untracked, symlink and manifest scans stay batched'
+scanner_budget_case check_single_normalization.sh 21 over \
+    'a scanner process restored for every source candidate' mut_single_per_candidate_scan
+scanner_budget_case check_no_minio_source.sh 12 over \
+    'a per-candidate loop hidden behind an array slice' mut_no_minio_candidate_slice_scan
+scanner_budget_case check_no_minio_source.sh 12 over \
+    'a per-candidate scanner hidden behind a wrapper and command alias' mut_no_minio_wrapper_alias_scan
+scanner_budget_case check_no_minio_source.sh 12 over \
+    'a per-candidate scanner switched from grep to rg' mut_no_minio_rg_scan
+absolute_scanner_path_case clean \
+    'PATH shims remain the only scanner resolution path'
+absolute_scanner_path_case caught \
+    'an absolute grep path cannot bypass the process counter' mut_absolute_scanner_path
+
+cases=$((cases + 1))
+missing_shim_dir="$(mktemp -d "${TMPDIR:-/tmp}/gateway-scanner-missing.XXXXXX")"
+missing_count_dir="$(mktemp -d "${TMPDIR:-/tmp}/gateway-scanner-missing-count.XXXXXX")"
+if prepare_scanner_shims "$missing_shim_dir"; then
+    rm -f "${missing_shim_dir}/grep"
+fi
+if validate_scanner_shims "$missing_shim_dir" "$missing_count_dir"; then
+    fail_msg 'scanner process harness reported green with a missing grep shim'
+else
+    pass_msg 'scanner process harness fails closed when a shim is missing'
+fi
+rm -rf "$missing_shim_dir" "$missing_count_dir"
+
+cases=$((cases + 1))
+missing_tool_dir="$(mktemp -d "${TMPDIR:-/tmp}/gateway-scanner-missing-tool.XXXXXX")"
+missing_tool_count_dir="$(mktemp -d "${TMPDIR:-/tmp}/gateway-scanner-missing-tool-count.XXXXXX")"
+missing_tool_rc=0
+if write_scanner_shim "$missing_tool_dir" gateway-scanner-tool-that-does-not-exist; then
+    GATEWAY_SCANNER_COUNT_DIR="$missing_tool_count_dir" \
+        "$missing_tool_dir/gateway-scanner-tool-that-does-not-exist" \
+        >/dev/null 2>&1 || missing_tool_rc=$?
+fi
+if [[ "$missing_tool_rc" -ne 0 \
+    && -s "$missing_tool_count_dir/gateway-scanner-tool-that-does-not-exist" ]]; then
+    pass_msg 'scanner process harness counts a missing scanner tool and fails closed'
+else
+    fail_msg 'scanner process harness reported green or did not count a missing scanner tool'
+fi
+rm -rf "$missing_tool_dir" "$missing_tool_count_dir"
 # check_stage_filter_sync.sh has four rules and each one gets its own negative
 # control, for the reason check_resolver_pure.sh's do: two of the three seams
 # run before the request has been authenticated, so "it cannot await", "it holds
