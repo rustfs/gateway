@@ -1,0 +1,1 @@
+{"case_id":"c-ir-n007","base":"GetBucketLocation.json","mutation":{"op":"replace","path":"/quirk_refs/0","value":"q-nope-9999"},"expect":{"at":"/quirk_refs/0","rule":"q-nope-9999"}}

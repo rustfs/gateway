@@ -9,6 +9,8 @@ commands:
   codegen                   regenerate spec/operations, OPERATIONS.md and generated/
   codegen diff --semantic   print a semantic diff capped at 50 lines
   codegen --check           fail when generated output or the verify map drifted
+  ir validate [--expect-fail <dir>]
+                            validate the frozen IR schema and its samples
   spec verify               fail when any generated artefact differs from a fresh run
   model verify              verify the vendored model against its provenance record
   model drift --against <path>

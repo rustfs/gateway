@@ -1,0 +1,1 @@
+{"case_id":"c-ir-n003","base":"GetBucketLocation.json","mutation":{"op":"remove","path":"/input/fields/1/wire_name"},"expect":{"at":"/input/fields/1","rule":"schema:#/$defs/field/required"}}

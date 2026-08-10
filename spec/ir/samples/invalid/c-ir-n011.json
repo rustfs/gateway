@@ -1,0 +1,1 @@
+{"case_id":"c-ir-n011","base":"ListObjectsV2.json","mutation":{"op":"remove","path":"/xml/element_order/11"},"expect":{"at":"/xml/element_order","rule":"semantic/element-order"}}

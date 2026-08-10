@@ -1,0 +1,1 @@
+{"case_id":"c-ir-n009","base":"PutObject.json","mutation":{"op":"copy","from":"/input/fields/2","path":"/input/fields/-"},"expect":{"at":"/input/fields","rule":"semantic/single-payload"}}

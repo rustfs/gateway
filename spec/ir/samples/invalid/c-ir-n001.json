@@ -1,0 +1,1 @@
+{"case_id":"c-ir-n001","base":"GetBucketLocation.json","mutation":{"op":"remove","path":"/http/precedence"},"expect":{"at":"/http","rule":"schema:#/$defs/http/required"}}

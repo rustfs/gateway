@@ -1,0 +1,1 @@
+{"case_id":"c-ir-n002","base":"GetBucketLocation.json","mutation":{"op":"add","path":"/http/predicates/-","value":{"kind":"QueryAbsent","key":"location"}},"expect":{"at":"/http/predicates","rule":"semantic/query-predicate-conflict"}}

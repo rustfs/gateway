@@ -1,0 +1,1 @@
+{"case_id":"c-ir-n008","base":"GetBucketLocation.json","mutation":{"op":"replace","path":"/http/success_status","value":299},"expect":{"at":"/http/success_status","rule":"schema:#/$defs/http/properties/success_status/enum"}}

@@ -39,7 +39,7 @@ Top level, all keys required: `ir_version`, `operation`, `http`, `auth`, `payloa
 
 Three rules do the load-bearing work:
 
-1. **`additionalProperties: false` on every object** (60 object nodes, zero exceptions).
+1. **`additionalProperties: false` on every object** (zero exceptions).
    A leaked `smithy.api#documentation` trait fails validation instead of quietly entering
    the wire contract and drowning every future `grep`.
 2. **No defaults on anything that renders.** `Timestamp` must state its `format`, `ETag`

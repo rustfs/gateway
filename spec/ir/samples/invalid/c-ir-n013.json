@@ -1,0 +1,1 @@
+{"case_id":"c-ir-n013","base":"GetBucketLocation.json","mutation":{"op":"replace","path":"/auth/action","value":""},"expect":{"at":"/auth/action","rule":"schema:#/$defs/auth/properties/action/pattern"}}

@@ -7,7 +7,12 @@ rust-version.workspace = true
 license.workspace = true
 publish = false
 
+[features]
+default = ["ir-validation"]
+ir-validation = ["dep:jsonschema"]
+
 [dependencies]
+jsonschema = { workspace = true, optional = true }
 rustfs-gateway = { workspace = true }
 rustfs-gateway-codegen = { workspace = true }
 rustfs-gateway-conformance = { workspace = true }

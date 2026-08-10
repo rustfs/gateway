@@ -21,6 +21,7 @@
 use std::process::{Command, Output};
 
 const BOOTSTRAP_SOURCE: &str = include_str!("../src/bootstrap.rs");
+const VERIFY_MAP_GUARD: &str = include_str!("../../scripts/check_verify_map_generated.sh");
 
 fn xtask(args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_xtask"))
@@ -101,4 +102,12 @@ fn bootstrap_checks_drift_before_it_can_regenerate() {
         .find("codegen::regenerate()")
         .expect("bootstrap must regenerate output");
     assert!(verify < regenerate);
+}
+
+#[test]
+fn generated_map_guard_does_not_build_the_ir_validator() {
+    assert!(
+        VERIFY_MAP_GUARD.contains("run --quiet --package xtask --no-default-features -- codegen --check"),
+        "the generated-map guard must compile only its codegen path"
+    );
 }
