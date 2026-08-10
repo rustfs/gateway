@@ -1,0 +1,676 @@
+// Copyright 2026 RustFS Team
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+//! Live socket acceptance contracts for connection admission and shutdown.
+//!
+//! Responsible for: observable listener, connection limit, panic containment and three-phase
+//! shutdown behaviour. NOT responsible for: TLS certificate replacement, covered separately.
+//! Upstream: rustfs/backlog#1739. Downstream: the public server API.
+
+#![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
+
+use std::convert::Infallible;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::process::Command;
+use std::time::Duration;
+
+use bytes::Bytes;
+use http::{Request, Response, StatusCode};
+use http_body_util::Full;
+use rustfs_gateway_server::{ConnectionInfo, Listener, RunningServer, Server, ServerConfig, ShutdownReport};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpStream;
+use tower::service_fn;
+
+fn plaintext_config() -> ServerConfig {
+    ServerConfig {
+        bind_addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),
+        plaintext: true,
+        header_read_timeout: Duration::from_millis(100),
+        keep_alive_idle: Duration::from_millis(250),
+        ..ServerConfig::default()
+    }
+}
+
+fn echo_server(config: ServerConfig) -> RunningServer {
+    let service = service_fn(|_request: Request<hyper::body::Incoming>| async {
+        Ok::<_, Infallible>(Response::new(Full::new(Bytes::from_static(b"ok"))))
+    });
+    Server::new(config, service).serve().expect("server starts")
+}
+
+async fn get(addr: SocketAddr) -> Vec<u8> {
+    let mut stream = TcpStream::connect(addr).await.expect("connect succeeds");
+    stream
+        .write_all(b"GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+        .await
+        .expect("request writes");
+    let mut response = Vec::new();
+    stream.read_to_end(&mut response).await.expect("response reads");
+    response
+}
+
+#[cfg(target_os = "linux")]
+fn linux_listener_backlog(addr: SocketAddr) -> usize {
+    let output = Command::new("ss").arg("-ltn").output().expect("Linux acceptance requires ss");
+    assert!(output.status.success(), "ss -ltn must report listening sockets");
+    let text = String::from_utf8(output.stdout).expect("ss output is UTF-8");
+    let port = format!(":{}", addr.port());
+    let fields = text
+        .lines()
+        .map(|line| line.split_whitespace().collect::<Vec<_>>())
+        .find(|fields| fields.get(3).is_some_and(|local| local.ends_with(&port)))
+        .expect("ss reports the test listener");
+    fields[2].parse().expect("ss Send-Q is the effective listen backlog")
+}
+
+#[tokio::test]
+async fn a_srv_0001_serves_one_hundred_concurrent_requests() {
+    let RunningServer {
+        local_addr,
+        task,
+        shutdown,
+        ..
+    } = echo_server(plaintext_config());
+    let mut clients = tokio::task::JoinSet::new();
+    for _ in 0..100 {
+        clients.spawn(get(local_addr));
+    }
+    while let Some(result) = clients.join_next().await {
+        let response = result.expect("client task completes");
+        assert!(response.starts_with(b"HTTP/1.1 200"));
+    }
+    assert_eq!(shutdown.trigger(Duration::from_secs(1)).await, ShutdownReport { drained: 0, aborted: 0 });
+    assert!(task.await.expect("server task joins").is_ok());
+}
+
+#[tokio::test]
+async fn a_srv_0002_dual_stack_listener_accepts_v4_and_v6() {
+    let mut config = ServerConfig {
+        bind_addr: "[::]:0".parse().expect("fixture address"),
+        plaintext: true,
+        dual_stack: true,
+        ..ServerConfig::default()
+    };
+    config.header_read_timeout = Duration::from_secs(1);
+    let running = match std::panic::catch_unwind(|| echo_server(config)) {
+        Ok(running) => running,
+        Err(_) => {
+            eprintln!("SKIP a-srv-0002: this runner has no dual-stack IPv6 listener");
+            return;
+        }
+    };
+    let RunningServer {
+        local_addr,
+        task,
+        shutdown,
+        ..
+    } = running;
+    let port = local_addr.port();
+    let v6 = get(SocketAddr::new(IpAddr::V6(std::net::Ipv6Addr::LOCALHOST), port));
+    let v4 = get(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port));
+    let (v6, v4) = tokio::join!(v6, v4);
+    assert!(v6.starts_with(b"HTTP/1.1 200"));
+    assert!(v4.starts_with(b"HTTP/1.1 200"));
+    let _ = shutdown.trigger(Duration::from_secs(1)).await;
+    assert!(task.await.expect("server task joins").is_ok());
+}
+
+#[tokio::test]
+async fn a_srv_0003_listener_options_are_read_back_from_the_socket() {
+    let config = ServerConfig {
+        bind_addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),
+        plaintext: true,
+        so_rcvbuf: Some(64 * 1024),
+        so_sndbuf: Some(64 * 1024),
+        tcp_nodelay: true,
+        backlog: 32,
+        reuse_address: true,
+        ..ServerConfig::default()
+    };
+    let listener = Listener::bind(&config).expect("listener binds");
+    let observed = listener.options();
+    assert!(observed.reuse_address);
+    assert!(observed.keepalive);
+    assert!(observed.tcp_nodelay);
+    assert!(
+        observed.recv_buffer_size >= 64 * 1024,
+        "kernel must not lower the requested receive buffer"
+    );
+    assert!(observed.send_buffer_size >= 64 * 1024, "kernel must not lower the requested send buffer");
+    #[cfg(target_os = "linux")]
+    assert_eq!(
+        linux_listener_backlog(listener.local_addr().expect("listener address")),
+        config.backlog as usize
+    );
+    #[cfg(not(target_os = "linux"))]
+    eprintln!("SKIP backlog read-back: ss -ltn is a Linux-only observation");
+    drop(listener);
+
+    let (nodelay_sender, nodelay_receiver) = tokio::sync::oneshot::channel();
+    let nodelay_sender = std::sync::Arc::new(std::sync::Mutex::new(Some(nodelay_sender)));
+    let service = service_fn(move |request: Request<hyper::body::Incoming>| {
+        let nodelay_sender = std::sync::Arc::clone(&nodelay_sender);
+        async move {
+            let observed = request
+                .extensions()
+                .get::<ConnectionInfo>()
+                .expect("connection facts are inserted");
+            if let Some(sender) = nodelay_sender.lock().expect("fixture lock").take() {
+                let _ = sender.send(observed.tcp_nodelay());
+            }
+            Ok::<_, Infallible>(Response::new(Full::new(Bytes::from_static(b"ok"))))
+        }
+    });
+    let RunningServer {
+        local_addr,
+        task,
+        shutdown,
+        ..
+    } = Server::new(config, service).serve().expect("server starts");
+    assert!(get(local_addr).await.starts_with(b"HTTP/1.1 200"));
+    assert!(nodelay_receiver.await.expect("handler observes the accepted socket"));
+    let _ = shutdown.trigger(Duration::from_secs(1)).await;
+    assert!(task.await.expect("server task joins").is_ok());
+}
+
+#[tokio::test]
+async fn a_srv_0006_in_flight_request_drains_before_grace() {
+    const EXPECTED_BODY_LEN: usize = 100 * 1024 * 1024;
+    let service = service_fn(|_request: Request<hyper::body::Incoming>| async {
+        tokio::time::sleep(Duration::from_millis(40)).await;
+        Ok::<_, Infallible>(Response::new(Full::new(Bytes::from(vec![b'x'; 100 * 1024 * 1024]))))
+    });
+    let RunningServer {
+        local_addr,
+        task,
+        shutdown,
+        ..
+    } = Server::new(plaintext_config(), service).serve().expect("server starts");
+    let client = tokio::spawn(get(local_addr));
+    tokio::time::sleep(Duration::from_millis(10)).await;
+    let report = shutdown.trigger(Duration::from_secs(2)).await;
+    assert_eq!(report, ShutdownReport { drained: 1, aborted: 0 });
+    let response = client.await.expect("client task completes");
+    let body_start = response
+        .windows(4)
+        .position(|window| window == b"\r\n\r\n")
+        .map(|index| index + 4)
+        .expect("response has a complete HTTP head");
+    assert!(response[..body_start].starts_with(b"HTTP/1.1 200"));
+    let body = &response[body_start..];
+    assert_eq!(body.len(), EXPECTED_BODY_LEN, "graceful shutdown drains the complete response body");
+    assert!(body.iter().all(|byte| *byte == b'x'));
+    assert!(task.await.expect("server task joins").is_ok());
+}
+
+fn rss_bytes() -> Option<usize> {
+    let output = Command::new("ps")
+        .args(["-o", "rss=", "-p", &std::process::id().to_string()])
+        .output()
+        .ok()?;
+    let kibibytes = String::from_utf8(output.stdout).ok()?.trim().parse::<usize>().ok()?;
+    kibibytes.checked_mul(1024)
+}
+
+#[tokio::test]
+async fn a_srv_0008_one_thousand_connections_stay_inside_the_rss_budget() {
+    let RunningServer {
+        local_addr,
+        metrics,
+        task,
+        shutdown,
+    } = echo_server(plaintext_config());
+    let Some(before) = rss_bytes() else {
+        eprintln!("SKIP a-srv-0008: this runner cannot report RSS through ps");
+        let _ = shutdown.trigger(Duration::from_secs(1)).await;
+        let _ = task.await;
+        return;
+    };
+    let mut connections = Vec::with_capacity(1_000);
+    for index in 0..1_000 {
+        let mut stream = TcpStream::connect(local_addr).await.expect("connection succeeds");
+        if index % 10 == 0 {
+            stream
+                .write_all(b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n")
+                .await
+                .expect("mixed-load request writes");
+        } else if index % 10 == 1 {
+            stream
+                .write_all(b"GET / HTTP/1.1\r\nHost:")
+                .await
+                .expect("mixed slow header writes");
+        }
+        connections.push(stream);
+    }
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while metrics.accepted_connections() < 1_000 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("all connections are accepted");
+    let after = rss_bytes().expect("RSS remains readable");
+    let growth = after.saturating_sub(before);
+    let budget = rustfs_gateway_server::conn_memory_budget(1_000);
+    assert!(growth <= budget + budget / 2, "RSS growth {growth} exceeded the 1.5x budget");
+    drop(connections);
+    let _ = shutdown.trigger(Duration::from_secs(1)).await;
+    assert!(task.await.expect("server task joins").is_ok());
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_srv_0010_half_header_is_closed_after_header_timeout() {
+    const CHILD_MARKER: &str = "RUSTFS_GATEWAY_SERVER_RSS_CHILD";
+    if std::env::var_os(CHILD_MARKER).is_none() {
+        let status = Command::new(std::env::current_exe().expect("test executable path is available"))
+            .args(["--exact", "a_srv_0010_half_header_is_closed_after_header_timeout"])
+            .env(CHILD_MARKER, "1")
+            .status()
+            .expect("isolated RSS test starts");
+        assert!(status.success(), "isolated RSS test failed");
+        return;
+    }
+    let RunningServer {
+        local_addr,
+        task,
+        shutdown,
+        ..
+    } = echo_server(plaintext_config());
+    assert!(get(local_addr).await.starts_with(b"HTTP/1.1 200"));
+    let before_rss = rss_bytes();
+    let mut stream = TcpStream::connect(local_addr).await.expect("connect succeeds");
+    stream
+        .write_all(b"GET / HTTP/1.1\r\nHost:")
+        .await
+        .expect("partial header writes");
+    for _ in 0..10 {
+        tokio::task::yield_now().await;
+    }
+    let started = tokio::time::Instant::now();
+    tokio::time::advance(Duration::from_millis(101)).await;
+    let mut byte = [0_u8; 1];
+    assert_eq!(stream.read(&mut byte).await.expect("close is observable"), 0);
+    assert!(
+        started.elapsed() < Duration::from_millis(150),
+        "the header deadline, rather than the longer keep-alive timer, closed the socket"
+    );
+    if let (Some(before), Some(after)) = (before_rss, rss_bytes()) {
+        assert!(
+            after.saturating_sub(before) < 1024 * 1024,
+            "one partial header grew RSS by at least 1 MiB"
+        );
+    }
+    let _ = shutdown.trigger(Duration::from_secs(1)).await;
+    assert!(task.await.expect("server task joins").is_ok());
+}
+
+#[tokio::test]
+async fn a_srv_0011_a_one_byte_slow_reader_triggers_the_write_progress_timeout() {
+    const BODY_LEN: usize = 100 * 1024 * 1024;
+    let mut config = plaintext_config();
+    config.so_sndbuf = Some(4 * 1024);
+    config.keep_alive_idle = Duration::from_secs(60);
+    config.write_progress_timeout = Duration::from_millis(20);
+    let service = service_fn(|_request: Request<hyper::body::Incoming>| async {
+        Ok::<_, Infallible>(Response::new(Full::new(Bytes::from(vec![b'x'; BODY_LEN]))))
+    });
+    let RunningServer {
+        local_addr,
+        metrics,
+        task,
+        shutdown,
+    } = Server::new(config, service).serve().expect("server starts");
+    let mut stream = TcpStream::connect(local_addr).await.expect("connect succeeds");
+    stream
+        .write_all(b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n")
+        .await
+        .expect("request writes");
+    tokio::time::timeout(Duration::from_secs(1), async {
+        while metrics.active_connections() != 1 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("the slow reader owns one admitted connection");
+    let bytes_read = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let slow_reader = tokio::spawn({
+        let bytes_read = std::sync::Arc::clone(&bytes_read);
+        async move {
+            let mut byte = [0_u8; 1];
+            loop {
+                match stream.read(&mut byte).await {
+                    Ok(0) | Err(_) => break,
+                    Ok(read) => {
+                        bytes_read.fetch_add(read, std::sync::atomic::Ordering::Relaxed);
+                        tokio::time::sleep(Duration::from_secs(1)).await;
+                    }
+                }
+            }
+        }
+    });
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while metrics.active_connections() != 0 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("the one-byte-per-second reader stalls the 100 MiB response");
+    assert!(bytes_read.load(std::sync::atomic::Ordering::Relaxed) <= 2);
+    slow_reader.abort();
+    let _ = slow_reader.await;
+    let _ = shutdown.trigger(Duration::from_secs(1)).await;
+    assert!(task.await.expect("server task joins").is_ok());
+}
+
+#[tokio::test]
+async fn a_srv_0014_global_limit_pauses_accept_before_the_next_socket() {
+    let mut config = plaintext_config();
+    config.max_connections = 1;
+    let RunningServer {
+        local_addr,
+        metrics,
+        task,
+        shutdown,
+    } = echo_server(config);
+    let first = TcpStream::connect(local_addr).await.expect("first connection succeeds");
+    tokio::time::timeout(Duration::from_secs(1), async {
+        while metrics.active_connections() != 1 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("the first connection owns the only admission permit");
+    let mut second = TcpStream::connect(local_addr)
+        .await
+        .expect("the kernel completes the second TCP handshake");
+    second
+        .write_all(b"GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+        .await
+        .expect("the queued connection accepts request bytes");
+    let accepted_early = tokio::time::timeout(Duration::from_millis(50), async {
+        while metrics.accepted_connections() == 1 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await;
+    assert!(accepted_early.is_err(), "the listener must wait for a permit before accept");
+    assert_eq!(metrics.accepted_connections(), 1, "the second socket was not accepted then reset");
+    let mut probe = [0_u8; 1];
+    let error = second
+        .try_read(&mut probe)
+        .expect_err("the queued socket has neither a response nor EOF/RST");
+    assert_eq!(error.kind(), std::io::ErrorKind::WouldBlock);
+
+    drop(first);
+    tokio::time::timeout(Duration::from_secs(1), async {
+        while metrics.accepted_connections() != 2 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("releasing the permit lets the accept loop take the queued socket");
+    let mut response = Vec::new();
+    second
+        .read_to_end(&mut response)
+        .await
+        .expect("the same queued socket receives a response");
+    assert!(response.starts_with(b"HTTP/1.1 200"));
+    let _ = shutdown.trigger(Duration::from_millis(100)).await;
+    assert!(task.await.expect("server task joins").is_ok());
+}
+
+#[tokio::test]
+async fn a_srv_0013_slow_headers_do_not_block_a_healthy_connection() {
+    let RunningServer {
+        local_addr,
+        metrics,
+        task,
+        shutdown,
+    } = echo_server(plaintext_config());
+    let mut slow = Vec::new();
+    for _ in 0..100 {
+        let mut stream = TcpStream::connect(local_addr).await.expect("slow connection succeeds");
+        stream
+            .write_all(b"GET / HTTP/1.1\r\nHost:")
+            .await
+            .expect("partial header writes");
+        slow.push(stream);
+    }
+    tokio::time::timeout(Duration::from_secs(1), async {
+        while metrics.active_connections() != 100 || metrics.accepted_connections() != 100 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("all one hundred slow headers are independently admitted");
+    let healthy = tokio::time::timeout(Duration::from_secs(1), get(local_addr))
+        .await
+        .expect("healthy connection is independently scheduled");
+    assert!(healthy.starts_with(b"HTTP/1.1 200"));
+    assert_eq!(metrics.accepted_connections(), 101);
+    drop(slow);
+    let _ = shutdown.trigger(Duration::from_secs(1)).await;
+    assert!(task.await.expect("server task joins").is_ok());
+}
+
+#[tokio::test]
+async fn a_srv_0016_expired_grace_reports_one_aborted_request() {
+    let (started_sender, started_receiver) = tokio::sync::oneshot::channel();
+    let started_sender = std::sync::Arc::new(std::sync::Mutex::new(Some(started_sender)));
+    let service = service_fn(move |_request: Request<hyper::body::Incoming>| {
+        let started_sender = std::sync::Arc::clone(&started_sender);
+        async move {
+            if let Some(sender) = started_sender.lock().expect("fixture lock").take() {
+                let _ = sender.send(());
+            }
+            std::future::pending::<Result<Response<Full<Bytes>>, Infallible>>().await
+        }
+    });
+    let RunningServer {
+        local_addr,
+        task,
+        shutdown,
+        ..
+    } = Server::new(plaintext_config(), service).serve().expect("server starts");
+    let client = tokio::spawn(get(local_addr));
+    started_receiver.await.expect("handler is in flight before shutdown");
+    let report = shutdown.trigger(Duration::from_millis(20)).await;
+    assert_eq!(report, ShutdownReport { drained: 0, aborted: 1 });
+    assert!(task.await.expect("server task joins").is_ok());
+    let _ = client.await;
+}
+
+#[tokio::test]
+async fn a_srv_0017_shutdown_closes_the_listener_before_new_connections() {
+    let entered = std::sync::Arc::new(tokio::sync::Barrier::new(2));
+    let release = std::sync::Arc::new(tokio::sync::Barrier::new(2));
+    let service = service_fn({
+        let entered = std::sync::Arc::clone(&entered);
+        let release = std::sync::Arc::clone(&release);
+        move |_request: Request<hyper::body::Incoming>| {
+            let entered = std::sync::Arc::clone(&entered);
+            let release = std::sync::Arc::clone(&release);
+            async move {
+                entered.wait().await;
+                release.wait().await;
+                Ok::<_, Infallible>(Response::new(Full::new(Bytes::from_static(b"ok"))))
+            }
+        }
+    });
+    let RunningServer {
+        local_addr,
+        task,
+        shutdown,
+        ..
+    } = Server::new(plaintext_config(), service).serve().expect("server starts");
+    let client = tokio::spawn(get(local_addr));
+    entered.wait().await;
+    let shutdown_task = tokio::spawn(shutdown.trigger(Duration::from_secs(5)));
+    tokio::time::timeout(Duration::from_secs(1), async {
+        loop {
+            match TcpStream::connect(local_addr).await {
+                Ok(stream) => drop(stream),
+                Err(_) => break,
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("listener closes while the in-flight handler remains blocked");
+    assert!(!shutdown_task.is_finished(), "shutdown waits for the in-flight handler");
+    assert!(!client.is_finished(), "the in-flight response has not completed");
+
+    release.wait().await;
+    let report = shutdown_task.await.expect("shutdown task joins");
+    assert_eq!(report, ShutdownReport { drained: 1, aborted: 0 });
+    assert!(client.await.expect("client task joins").starts_with(b"HTTP/1.1 200"));
+    assert!(task.await.expect("server task joins").is_ok());
+}
+
+#[tokio::test]
+async fn dropping_the_trigger_does_not_become_an_implicit_shutdown_path() {
+    let RunningServer {
+        local_addr,
+        task,
+        shutdown,
+        ..
+    } = echo_server(plaintext_config());
+    drop(shutdown);
+    tokio::task::yield_now().await;
+    assert!(get(local_addr).await.starts_with(b"HTTP/1.1 200"));
+    task.abort();
+    let _ = task.await;
+}
+
+#[tokio::test]
+async fn a_srv_0018_shutdown_announces_close_on_an_established_h1_connection() {
+    let entered = std::sync::Arc::new(tokio::sync::Barrier::new(2));
+    let release = std::sync::Arc::new(tokio::sync::Barrier::new(2));
+    let service = service_fn({
+        let entered = std::sync::Arc::clone(&entered);
+        let release = std::sync::Arc::clone(&release);
+        move |_request: Request<hyper::body::Incoming>| {
+            let entered = std::sync::Arc::clone(&entered);
+            let release = std::sync::Arc::clone(&release);
+            async move {
+                entered.wait().await;
+                release.wait().await;
+                Ok::<_, Infallible>(Response::new(Full::new(Bytes::from_static(b"ok"))))
+            }
+        }
+    });
+    let RunningServer {
+        local_addr,
+        task,
+        shutdown,
+        ..
+    } = Server::new(plaintext_config(), service).serve().expect("server starts");
+    let mut stream = TcpStream::connect(local_addr).await.expect("connect succeeds");
+    stream
+        .write_all(b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n")
+        .await
+        .expect("request writes");
+    entered.wait().await;
+    let shutdown_task = tokio::spawn(shutdown.trigger(Duration::from_secs(5)));
+    tokio::time::timeout(Duration::from_secs(1), async {
+        loop {
+            match TcpStream::connect(local_addr).await {
+                Ok(stream) => drop(stream),
+                Err(_) => break,
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("shutdown has stopped accept before the handler is released");
+    assert!(!shutdown_task.is_finished(), "shutdown is still draining the established request");
+    release.wait().await;
+    let mut response = Vec::new();
+    stream.read_to_end(&mut response).await.expect("draining response reads");
+    let lower = String::from_utf8_lossy(&response).to_ascii_lowercase();
+    assert!(lower.contains("connection: close"));
+    assert_eq!(
+        shutdown_task.await.expect("shutdown task joins"),
+        ShutdownReport { drained: 1, aborted: 0 }
+    );
+    assert!(task.await.expect("server task joins").is_ok());
+}
+
+#[tokio::test]
+async fn a_srv_0019_client_reset_releases_the_connection_permit() {
+    let RunningServer {
+        local_addr,
+        metrics,
+        task,
+        shutdown,
+    } = echo_server(plaintext_config());
+    let mut stream = TcpStream::connect(local_addr).await.expect("connect succeeds");
+    tokio::time::timeout(Duration::from_secs(1), async {
+        while metrics.active_connections() != 1 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("the connection owns one admission permit before reset");
+    stream
+        .write_all(b"POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length: 1000000\r\n\r\nx")
+        .await
+        .expect("partial body writes");
+    let socket = socket2::Socket::from(stream.into_std().expect("stream converts"));
+    socket.set_linger(Some(Duration::ZERO)).expect("RST linger configures");
+    drop(socket);
+    tokio::time::timeout(Duration::from_secs(1), async {
+        while metrics.active_connections() != 0 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("connection permit is released");
+    let _ = shutdown.trigger(Duration::from_secs(1)).await;
+    assert!(task.await.expect("server task joins").is_ok());
+}
+
+#[tokio::test]
+async fn a_srv_0020_panicking_handler_returns_500_and_server_survives() {
+    let service = service_fn(|request: Request<hyper::body::Incoming>| async move {
+        if request.uri().path() == "/panic" {
+            panic!("fixture panic");
+        }
+        Ok::<_, Infallible>(Response::new(Full::new(Bytes::from_static(b"ok"))))
+    });
+    let RunningServer {
+        local_addr,
+        task,
+        shutdown,
+        ..
+    } = Server::new(plaintext_config(), service).serve().expect("server starts");
+    let mut stream = TcpStream::connect(local_addr).await.expect("connect succeeds");
+    stream
+        .write_all(b"GET /panic HTTP/1.1\r\nHost: localhost\r\n\r\n")
+        .await
+        .expect("panic request writes");
+    let mut response = [0_u8; 256];
+    let read = stream.read(&mut response).await.expect("panic response reads");
+    assert!(response[..read].starts_with(format!("HTTP/1.1 {}", StatusCode::INTERNAL_SERVER_ERROR.as_u16()).as_bytes()));
+    stream
+        .write_all(b"GET /ok HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+        .await
+        .expect("second request writes");
+    let mut response = Vec::new();
+    stream.read_to_end(&mut response).await.expect("second response reads");
+    assert!(response.starts_with(b"HTTP/1.1 200"));
+    let _ = shutdown.trigger(Duration::from_secs(1)).await;
+    assert!(task.await.expect("server task joins").is_ok());
+}

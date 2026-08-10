@@ -9,7 +9,8 @@ set -euo pipefail
 #   do not read each other's:
 #
 #     crates/sig/src/clock.rs      the ONLY SystemTime::now() — the wall clock
-#     crates/gateway/src/clock.rs  the ONLY Instant::now()    — the monotonic clock
+#     crates/gateway/src/clock.rs  the protocol-path Instant::now() — the monotonic request clock
+#     crates/server/src/io.rs      transport I/O deadlines; never visible to protocol decisions
 #
 #   Three assertions, all of which must hold:
 #
@@ -62,6 +63,7 @@ WALL_SOURCE='crates/sig/src/clock.rs'
 WALL_CALL='SystemTime::now'
 MONOTONIC_SOURCE='crates/gateway/src/clock.rs'
 MONOTONIC_CALL='Instant::now'
+TRANSPORT_TIMER_SOURCE='crates/server/src/io.rs'
 
 status=0
 
@@ -86,6 +88,12 @@ for pair in "${WALL_SOURCE}|${WALL_CALL}" "${MONOTONIC_SOURCE}|${MONOTONIC_CALL}
     fi
 done
 
+if [[ ! -f "$TRANSPORT_TIMER_SOURCE" ]]; then
+    fail "${TRANSPORT_TIMER_SOURCE} does not exist; the transport timer allowance is checking nothing"
+elif ! grep -q 'struct ProgressIo' "$TRANSPORT_TIMER_SOURCE" || ! grep -qF "${MONOTONIC_CALL}(" "$TRANSPORT_TIMER_SOURCE"; then
+    fail "${TRANSPORT_TIMER_SOURCE} no longer contains the transport progress timer this allowance names"
+fi
+
 # --- 2. Neither source reads the other's clock. ------------------------------
 if [[ -f "$WALL_SOURCE" ]] && grep -qF "${MONOTONIC_CALL}(" "$WALL_SOURCE"; then
     fail "${WALL_SOURCE} reads the monotonic clock; the wall source must not, or expiry and rate limiting share a clock"
@@ -99,7 +107,7 @@ while IFS= read -r file; do
     [[ -z "$file" ]] && continue
     case "$file" in
         crates/conformance/*) continue ;;
-        "$WALL_SOURCE" | "$MONOTONIC_SOURCE") continue ;;
+        "$WALL_SOURCE" | "$MONOTONIC_SOURCE" | "$TRANSPORT_TIMER_SOURCE") continue ;;
     esac
     while IFS= read -r hit; do
         [[ -z "$hit" ]] && continue

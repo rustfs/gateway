@@ -78,6 +78,7 @@ LAYERS=(
     "rustfs-gateway-macros|"
     "rustfs-gateway-model|"
     "rustfs-gateway-stream|"
+    "rustfs-gateway-server|"
     "rustfs-gateway-xml|"
     "rustfs-gateway-codegen|rustfs-gateway-model"
     "rustfs-gateway-types|rustfs-gateway-xml rustfs-gateway-stream"

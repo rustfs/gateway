@@ -290,6 +290,39 @@ mut_drop_delete_by() {
 expect_fail check_ring_boundaries.sh \
     'compat-s3s losing its "# DELETE BY" expiry marker' mut_drop_delete_by
 
+mut_server_unreviewed_dep() {
+    printf 'reqwest = "0.12"\n' >>crates/server/Cargo.toml
+}
+expect_fail check_ring_boundaries.sh \
+    'ring-1 server gaining a dependency outside its allowlist' mut_server_unreviewed_dep
+
+mut_server_host_write() {
+    printf '\nfn normalize_host(request: &mut http::Request<()>) { request.headers_mut().insert(http::header::HOST, http::HeaderValue::from_static("x")); }\n' >>crates/server/src/conn.rs
+}
+expect_fail check_no_host_normalize.sh \
+    'ring-1 server writing the Host header' mut_server_host_write
+
+mut_server_handler_timeout() {
+    printf '\nconst HANDLER_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);\n' >>crates/server/src/config.rs
+}
+expect_fail check_timeout_layer_ownership.sh \
+    'ring-1 server claiming the handler timeout layer' mut_server_handler_timeout
+
+mut_server_tuning_doc() {
+    python3 - <<'PYEOF'
+import pathlib
+path = pathlib.Path("crates/server/src/config.rs")
+text = path.read_text().replace(
+    "/// Global open-connection ceiling. Increasing raises capacity and memory; decreasing applies earlier backpressure.\n",
+    "/// Global open-connection ceiling.\n",
+    1,
+)
+path.write_text(text)
+PYEOF
+}
+expect_fail check_tuning_doc.sh \
+    'a server tuning field losing both tradeoff directions' mut_server_tuning_doc
+
 mut_planning_dir() {
     mkdir -p docs/plans
     printf '# scratch\n' >docs/plans/codegen-rollout.md

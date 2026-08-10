@@ -21,6 +21,7 @@ rustfs-gateway-http = { path = "crates/http", version = "0.1.0" }
 rustfs-gateway-macros = { path = "crates/macros", version = "0.1.0" }
 rustfs-gateway-model = { path = "crates/model", version = "0.1.0" }
 rustfs-gateway-sig = { path = "crates/sig", version = "0.1.0" }
+rustfs-gateway-server = { path = "crates/server", version = "0.1.0" }
 rustfs-gateway-stream = { path = "crates/stream", version = "0.1.0" }
 rustfs-gateway-types = { path = "crates/types", version = "0.1.0" }
 rustfs-gateway-xml = { path = "crates/xml", version = "0.1.0" }
@@ -45,6 +46,7 @@ http-body-util = "0.1"                              # `Limited` and `collect`; t
 # default-features off: the facade only implements `hyper::service::Service`. It listens on
 # nothing and speaks no protocol version itself, so http1/http2/client/server belong to P7-02.
 hyper = { version = "1.11", default-features = false }
+hyper-util = { version = "0.1.19", default-features = false }
 md-5 = "0.11"                                       # entity tags, single-part and multipart alike
 memchr = "2.8"
 percent-encoding = "2.3"
@@ -52,16 +54,22 @@ pin-project-lite = "0.2"
 proc-macro2 = "1.0"
 quick-xml = "0.41"                                  # never expands entities; DOCTYPE must be rejected by us
 quote = "1.0"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+serde = { version = "1.0", features = ["derive"] }
 sha1 = "0.11"                                       # one of the five S3 checksum algorithms
 sha2 = "0.11"
 smallvec = "1.15"
+socket2 = "0.6"
 subtle = "2.6"                                      # constant-time comparison
 syn = { version = "3.0", features = ["full", "extra-traits"] }
 thiserror = "2.0"
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
 # default-features off: `tower::Service` and nothing else. The middleware stack is P6's and the
 # server is P7-02's; pulling in the full `util` feature here would put layers on the facade's
 # public surface before anything has decided what they are.
 tower = { version = "0.5", default-features = false }
+tower-http = { version = "0.6", default-features = false }
+tracing = "0.1"
 zeroize = { version = "1.9", features = ["zeroize_derive"] }
 
 # Dev-only.
@@ -71,6 +79,7 @@ prettyplease = "0.3"                                # renders the macro expansio
 proptest = "1.11"
 tokio = { version = "1.53", default-features = false, features = ["macros", "rt"] }
 trybuild = "1.0"
+rcgen = { version = "0.14", default-features = false, features = ["crypto", "ring"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

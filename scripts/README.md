@@ -80,6 +80,9 @@ fixed now so that the same check does not get written twice under two names.
 | `check_evidence_shape.sh` | Every case has compact HTTPS/URN-plus-summary evidence and cannot carry pasted upstream prose | P8-01 |
 | `check_baseline_ratchet.sh` | The conformance baseline failure set only shrinks | P8-01 |
 | `check_runner_raw_bytes.sh` | Case requests retain a raw TCP byte path and acquire no normalizing client dependency | P8-01 |
+| `check_no_host_normalize.sh` | Ring-1 server source never mutates Host or URI authority | P7-02 |
+| `check_timeout_layer_ownership.sh` | Server owns four connection timeouts and never the body/handler layers | P7-02 |
+| `check_tuning_doc.sh` | Every server tuning field documents both directions of its tradeoff | P7-02 |
 | `test_guard_scripts.sh` | Not a guard: runs every guard on the tree and asserts each one fails on an injected violation | P0 |
 
 ### Registered, not yet implemented (TODO)
