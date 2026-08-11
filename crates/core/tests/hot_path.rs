@@ -31,7 +31,7 @@
 //! id, every buffer it touches reports whether it stayed inline, and the evaluation counter proves
 //! the loop it would have allocated for never ran.
 
-mod support;
+use crate::support;
 
 use http::Method;
 use proptest::prelude::*;

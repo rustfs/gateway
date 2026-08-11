@@ -31,7 +31,7 @@
 //! Regenerate deliberately, never reflexively:
 //!
 //! ```bash
-//! UPDATE_GOLDEN=1 cargo test -p rustfs-gateway-core --test golden
+//! UPDATE_GOLDEN=1 cargo test -p rustfs-gateway-core --test integration golden::the_rendered_route_table_matches_the_golden -- --exact
 //! ```
 
 use std::fs;

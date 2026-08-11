@@ -30,7 +30,7 @@
 //! Written against the public API only, so everything here is also a worked example of what a P5
 //! operation family has to do.
 
-mod support;
+use crate::support;
 
 use std::future::Future;
 use std::sync::Arc;
