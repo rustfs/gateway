@@ -1,0 +1,2 @@
+# Format: dependency|reason and removal trigger|evidence URL
+crc-fast|external SIMD implementation; remove when crc-fast is removed|https://crates.io/crates/crc-fast

@@ -423,6 +423,7 @@ async fn a_not_modified_refusal_carries_neither_content_nor_a_framing_header() {
         assert_eq!(response.body().len(), 0, "{method}: a 304 carried content");
         assert_eq!(response.header("content-length"), None, "{method}: a 304 announced content");
         assert_eq!(response.header("transfer-encoding"), None, "{method}");
+        assert_eq!(response.header("etag"), Some("\"head-ping\""), "{method}: a 304 lost its validator");
     }
 }
 

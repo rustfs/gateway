@@ -92,6 +92,7 @@ mod gate;
 mod invariants;
 mod monomorphic;
 mod operation_mode;
+mod payload_header;
 mod probe;
 mod render;
 mod request_config;
@@ -114,8 +115,8 @@ pub use crate::clock::{
 pub use crate::close::ConnectionIntent;
 pub use crate::config::{ConfigHandle, ConfigSnapshot, ServiceConfig};
 pub use crate::ext::{
-    Addressing, AuthSchemeRef, Authentication, Authenticator, Authorizer, AuthzAuditEvent, AuthzAuditSink, AuthzRequest,
-    AuthzStage, BaseDomain, CORS_PREFLIGHT, CachedCorsSource, ChunkSink, ChunkVerification, ClassKind, ClientAddr,
+    Addressing, AuthSchemeRef, Authentication, AuthenticationOutcome, Authenticator, Authorizer, AuthzAuditEvent, AuthzAuditSink,
+    AuthzRequest, AuthzStage, BaseDomain, CORS_PREFLIGHT, CachedCorsSource, ChunkSink, ChunkVerification, ClassKind, ClientAddr,
     CorsCacheConfig, CorsSource, CorsSourceError, Credential, CredentialGuardConfig, CredentialLookup, CredentialProvider,
     CredentialRefusal, Credentials, CredentialsError, DEFAULT_POLICY_SNAPSHOT_TIMEOUT, Decision, DefaultGovernor, Denial,
     DenyAllAuthorizer, DomainError, FROZEN_WIRE_HEADERS, FrozenHeader, Governor, GovernorRates, GovernorRequest,
@@ -154,11 +155,12 @@ pub use rustfs_gateway_types::dto;
 // one, and cannot match on what `into_parts` gives back. An exported constructor whose argument
 // type is unnameable is the same defect as an unexported contract, one step further along.
 pub use rustfs_gateway_core::{
-    Answer, ArnForm, AuthRequirement, Authorized, BoxFuture, CodecError, CommitOutcome, CommitWork, DerivedResourceError,
-    ELEMENT_ORDER, EncodedResponse, ErrorDetail, ErrorHeader, Handler, HandlerError, HandlerResult, HostClass, MetaView,
-    MissingHandlers, NoDerived, Operation, OperationCodec, OperationSet, OperationSpec, PRECONDITION_FAILED_MESSAGE, ParamKind,
-    PreAuthError, Predicate, RANGE_NOT_SATISFIABLE_MESSAGE, Req, RequestBody, RequiredParam, ResourceIdentity, ResourceShape,
-    Resp, ResponseBody, ResponseOverride, RouteEntry, RouteSelector, TargetKind,
+    Answer, ArnForm, AuthRequirement, Authorized, BodyPolicy, BoxFuture, CodecError, CommitOutcome, CommitWork,
+    DerivedResourceError, ELEMENT_ORDER, EncodedResponse, ErrorContext, ErrorDetail, ErrorHeader, ErrorResolution, Handler,
+    HandlerError, HandlerErrorContext, HandlerResult, HostClass, InvalidErrorContext, MetaView, MissingHandlers, MissingObject,
+    NoDerived, Operation, OperationCodec, OperationSet, OperationSpec, PRECONDITION_FAILED_MESSAGE, ParamKind, PreAuthError,
+    Predicate, RANGE_NOT_SATISFIABLE_MESSAGE, Req, RequestBody, RequiredParam, ResourceIdentity, ResourceShape,
+    ResourceVisibility, Resp, ResponseBody, ResponseKind, ResponseOverride, RouteEntry, RouteSelector, TargetKind, resolve,
 };
 // The pagination contract. Found unreachable by check_shared_reachable.sh the moment that
 // guard existed — the fourth contract in a row written for backends and left where no

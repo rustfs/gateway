@@ -34,11 +34,10 @@
 //! place makes the header structurally inseparable from the status — a caller cannot spell the 301
 //! through this module and forget the region, because the region is the argument.
 
-use std::borrow::Cow;
+use rustfs_gateway_types::BucketName;
 
-use rustfs_gateway_types::ErrorCode;
-
-use crate::fault::{ErrorDetail, ErrorHeader, RedirectTarget, RegionLabel};
+use crate::error_resolution::HandlerErrorContext;
+use crate::fault::{RedirectTarget, RegionLabel};
 use crate::handler::HandlerError;
 
 /// The message every permanent redirect this module builds carries. One spelling, wire format.
@@ -72,9 +71,7 @@ pub enum RegionHeaderDuty {
 /// is the only one a `HEAD` response can carry, and the `<Region>` element of the error document.
 #[must_use]
 pub fn permanent_redirect(region: RegionLabel) -> HandlerError {
-    HandlerError::new(ErrorCode::PERMANENT_REDIRECT, PERMANENT_REDIRECT_MESSAGE)
-        .with_header(ErrorHeader::BucketRegion { region: region.clone() })
-        .with_detail(ErrorDetail::Region(region))
+    HandlerErrorContext::permanent_redirect(region).into()
 }
 
 /// The same refusal, also naming the bucket in the document.
@@ -83,8 +80,8 @@ pub fn permanent_redirect(region: RegionLabel) -> HandlerError {
 /// authenticated and the name has passed the bucket-name validation, so echoing it back is an
 /// answer to somebody entitled to it.
 #[must_use]
-pub fn permanent_redirect_for(bucket: impl Into<Cow<'static, str>>, region: RegionLabel) -> HandlerError {
-    permanent_redirect(region).with_detail(ErrorDetail::BucketName(bucket.into()))
+pub fn permanent_redirect_for(bucket: BucketName, region: RegionLabel) -> HandlerError {
+    HandlerErrorContext::permanent_redirect_for(bucket, region).into()
 }
 
 /// The `307 TemporaryRedirect` shape: a `Location` to retry against, and the region beside it.
@@ -94,19 +91,23 @@ pub fn permanent_redirect_for(bucket: impl Into<Cow<'static, str>>, region: Regi
 /// here decides *when* to answer this; a backend that knows, can.
 #[must_use]
 pub fn temporary_redirect(target: RedirectTarget, region: RegionLabel) -> HandlerError {
-    HandlerError::new(ErrorCode::TEMPORARY_REDIRECT, TEMPORARY_REDIRECT_MESSAGE)
-        .with_header(ErrorHeader::RedirectLocation { target })
-        .with_header(ErrorHeader::BucketRegion { region: region.clone() })
-        .with_detail(ErrorDetail::Region(region))
+    HandlerErrorContext::temporary_redirect(region, target).into()
 }
 
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::panic, clippy::unwrap_used, clippy::indexing_slicing)]
 mod tests {
     use super::*;
+    use rustfs_gateway_types::ErrorCode;
+
+    use crate::fault::ErrorDetail;
 
     fn region(name: &str) -> RegionLabel {
         RegionLabel::new(name).expect("a valid region")
+    }
+
+    fn bucket(name: &str) -> BucketName {
+        BucketName::new(name).expect("a valid bucket")
     }
 
     /// Positive — the 301 carries the region in its head and in its document, and answers 301.
@@ -115,7 +116,7 @@ mod tests {
     fn the_permanent_redirect_carries_the_region_in_head_and_document() {
         let error = permanent_redirect(region("eu-west-1"));
         assert_eq!(*error.code(), ErrorCode::PERMANENT_REDIRECT);
-        assert_eq!(error.status(), http::StatusCode::MOVED_PERMANENTLY);
+        assert_eq!(error.code().default_status(), http::StatusCode::MOVED_PERMANENTLY);
         assert_eq!(error.headers().len(), 1);
         assert_eq!(error.headers()[0].name().as_str(), "x-amz-bucket-region");
         assert_eq!(error.headers()[0].value(), "eu-west-1");
@@ -128,7 +129,7 @@ mod tests {
     /// element order rather than the call order.
     #[test]
     fn the_named_form_states_the_bucket_before_the_region() {
-        let error = permanent_redirect_for("b", region("eu-west-1"));
+        let error = permanent_redirect_for(bucket("bucket-one"), region("eu-west-1"));
         let elements: Vec<&str> = error.details().iter().map(ErrorDetail::element).collect();
         assert_eq!(elements, ["BucketName", "Region"]);
     }
@@ -140,7 +141,7 @@ mod tests {
         let target = RedirectTarget::new("https://b.s3.eu-west-1.example.com").expect("a valid target");
         let error = temporary_redirect(target, region("eu-west-1"));
         assert_eq!(*error.code(), ErrorCode::TEMPORARY_REDIRECT);
-        assert_eq!(error.status(), http::StatusCode::TEMPORARY_REDIRECT);
+        assert_eq!(error.code().default_status(), http::StatusCode::TEMPORARY_REDIRECT);
         let names: Vec<String> = error
             .headers()
             .iter()
@@ -157,7 +158,7 @@ mod tests {
     fn n_no_redirect_this_module_builds_lacks_the_region_header() {
         let redirects = [
             permanent_redirect(region("us-west-2")),
-            permanent_redirect_for("b", region("us-west-2")),
+            permanent_redirect_for(bucket("bucket-one"), region("us-west-2")),
             temporary_redirect(RedirectTarget::new("https://example.com").expect("a valid target"), region("us-west-2")),
         ];
         for error in redirects {

@@ -18,7 +18,7 @@
 //! violated. The rule reference is mandatory rather than decorative: a diagnostic that cannot be
 //! traced back to an RFC section or an AWS document is a diagnostic nobody can act on, and the
 //! conformance suite asserts on it.
-//! NOT responsible for: HTTP status selection (that is `error_status::status_of`) and error body
+//! NOT responsible for: HTTP status selection (that is `ErrorCode::default_status`) and error body
 //! rendering (`rustfs-gateway-xml`). A `ParseError` never reaches a client as-is.
 //! Upstream: none. Downstream: every module in `scalar`, and the P3 ingest pipeline, which maps a
 //! `ParseError` to an `ErrorCode` at the point where it knows which field was being parsed.

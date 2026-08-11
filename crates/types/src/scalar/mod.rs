@@ -35,7 +35,6 @@
 mod base64;
 mod checksum;
 mod error_code;
-mod error_status;
 mod etag;
 mod name;
 mod naming;
@@ -51,7 +50,6 @@ pub use self::checksum::{
     ChecksumAlgorithm, ChecksumDigest, ChecksumError, ChecksumSpec, ChecksumType, Checksummer, ContentMd5, parse_request_checksum,
 };
 pub use self::error_code::ErrorCode;
-pub use self::error_status::{ErrorContext, mask_for_authorization, status_of};
 pub use self::etag::{ETag, EtagRender};
 pub use self::name::{BucketName, ObjectKey, is_xml_representable, validate_bucket_name, validate_object_key};
 pub use self::naming::{

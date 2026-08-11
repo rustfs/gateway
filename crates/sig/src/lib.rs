@@ -145,7 +145,7 @@ pub use rustfs_gateway_http::{EffectiveHost, HostError, HostSource, MAX_HOST_BYT
 pub use scheme::{
     ALGORITHM_SIGV2_PREFIX, ALGORITHM_SIGV4, ALGORITHM_SIGV4A, AuthScheme, SigFamily, SigIdentity, SigLocation, SigService,
 };
-pub use scope::{ExpectedScope, RegionSet, enforce_scope};
+pub use scope::{ExpectedScope, RegionSet, ScopeRegion, ScopeRejection, enforce_scope};
 pub use secret::{SafeToLog, SecretBytes, SessionToken, SigningKey, assert_safe_to_log};
 pub use signature::{CtBytes, Signature, SignatureMatch, VerifyRejection};
 pub use signed_headers::{AMZ_HEADER_PREFIX, SignedHeaderSet, UNSIGNED_HEADER_EXEMPTIONS};

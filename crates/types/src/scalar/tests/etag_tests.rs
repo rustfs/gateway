@@ -26,7 +26,7 @@ use crate::scalar::{ETag, EtagRender};
 const EMPTY_MD5: &str = "d41d8cd98f00b204e9800998ecf8427e";
 
 #[test]
-fn c_etag_0001_header_rendering_is_always_quoted() {
+fn c_etag_0101_header_rendering_is_always_quoted() {
     let tag = ETag::new(EMPTY_MD5).expect("a hex digest is a valid opaque tag");
     assert_eq!(tag.render(EtagRender::HeaderQuoted), format!("\"{EMPTY_MD5}\""));
 }

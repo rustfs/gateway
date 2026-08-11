@@ -107,7 +107,8 @@ fn verify(signed: &SignedRequest, now: RequestNow) -> Result<(), AuthError> {
     }
 
     let regions = RegionSet::new(["us-east-1"]).expect("a non-empty region set");
-    let verified = enforce_scope(&scope, clock, &ExpectedScope::new(SigService::S3, &regions))?;
+    let verified = enforce_scope(&scope, clock, &ExpectedScope::new(SigService::S3, &regions))
+        .map_err(|_| AuthError::AuthorizationHeaderMalformed)?;
     let set = SignedHeaderSet::parse_and_enforce(&list, signed.headers(), None)?;
     let payload = match signed.headers().get(X_AMZ_CONTENT_SHA256_HEADER_NAME) {
         Some(value) => {

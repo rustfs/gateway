@@ -41,8 +41,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use bytes::Bytes;
 use rustfs_gateway::dto::{ListBuckets, ListBucketsOutput};
 use rustfs_gateway::{
-    BoxFuture, ETag, HandlerResult, Next, OpLayer, Req, Resp, ResponseView, RoutedView, S3Error, StageFilter, WireHead, op_layer,
-    response_filter, wire_filter,
+    BoxFuture, ETag, HandlerError, HandlerResult, Next, OpLayer, Req, Resp, ResponseView, RoutedView, StageFilter, WireHead,
+    op_layer, response_filter, wire_filter,
 };
 use support::{Backend, ContentPing, Ping, content_ping_route, exchange, exchange_wire, ping_route, plain, service, wired};
 
@@ -73,17 +73,21 @@ impl Trail {
 }
 
 impl StageFilter for Trail {
-    fn on_wire(&self, _head: &mut WireHead<'_>) -> Result<(), S3Error> {
+    fn on_wire(&self, _head: &mut WireHead<'_>) -> Result<(), HandlerError> {
         self.note("wire");
         Ok(())
     }
 
-    fn on_routed(&self, routed: &RoutedView<'_>) -> Result<(), S3Error> {
+    fn on_routed(&self, routed: &RoutedView<'_>) -> Result<(), HandlerError> {
         self.note(routed.operation());
         Ok(())
     }
 
-    fn on_response(&self, _view: &ResponseView<'_>, _response: &mut http::Response<rustfs_gateway::Body>) -> Result<(), S3Error> {
+    fn on_response(
+        &self,
+        _view: &ResponseView<'_>,
+        _response: &mut http::Response<rustfs_gateway::Body>,
+    ) -> Result<(), HandlerError> {
         self.note("response");
         Ok(())
     }
@@ -175,7 +179,7 @@ async fn a_wire_filter_refusal_ends_the_request() {
     let service = counting_service(
         &reached,
         wire_filter(|_head: &mut WireHead<'_>| {
-            Err(S3Error::new(
+            Err(HandlerError::new(
                 rustfs_gateway::ErrorCode::INVALID_REQUEST,
                 "this deployment refuses the request at the wire seam",
             ))
@@ -211,7 +215,7 @@ async fn a_routed_filter_may_refuse_one_operation_by_name() {
         .route(ping_route())
         .stage_filter(rustfs_gateway::routed_filter(|routed: &RoutedView<'_>| {
             if routed.operation() == "example:Ping" {
-                return Err(S3Error::new(
+                return Err(HandlerError::new(
                     rustfs_gateway::ErrorCode::NOT_IMPLEMENTED,
                     "this deployment has switched that operation off",
                 ));
@@ -237,7 +241,7 @@ async fn a_routed_filter_passes_the_operation_it_does_not_name() {
         .route(ping_route())
         .stage_filter(rustfs_gateway::routed_filter(|routed: &RoutedView<'_>| {
             if routed.operation() == "example:SomethingElse" {
-                return Err(S3Error::new(rustfs_gateway::ErrorCode::NOT_IMPLEMENTED, "off"));
+                return Err(HandlerError::new(rustfs_gateway::ErrorCode::NOT_IMPLEMENTED, "off"));
             }
             Ok(())
         }))
@@ -383,7 +387,7 @@ async fn a_response_filter_refusal_replaces_the_response_and_stops_the_rest() {
         .route(ping_route())
         .stage_filter(response_filter(
             |_view: &ResponseView<'_>, _response: &mut http::Response<rustfs_gateway::Body>| {
-                Err(S3Error::new(
+                Err(HandlerError::new(
                     rustfs_gateway::ErrorCode::INTERNAL_ERROR,
                     "this deployment rejected its own answer",
                 ))

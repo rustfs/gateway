@@ -1,0 +1,11 @@
+error[E0599]: no method named `closing` found for struct `S3Error` in the current scope
+  --> tests/compile_fail/error_resolution_s3_closing.rs:25:19
+   |
+25 |     let _ = error.closing(ConnectionIntent::Close);
+   |                   ^^^^^^^
+   |
+help: there is a method `clone` with a similar name, but with different arguments
+  --> $RUST/core/src/clone.rs
+   |
+   |     fn clone(&self) -> Self;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^

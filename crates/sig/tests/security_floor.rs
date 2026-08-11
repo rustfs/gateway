@@ -29,7 +29,8 @@ use core::time::Duration;
 use http::header::HeaderMap;
 use rustfs_gateway_sig::{
     Admission, AuthError, CredentialScope, ExpectedScope, MAX_PRESIGNED_EXPIRY_SECONDS, OperationFloor, RawQuery, RegionSet,
-    RequestClock, RequestNow, SecurityFloor, SigService, SkewWindow, SystemClock, WireView, enforce_scope,
+    RequestClock, RequestNow, ScopeRegion, ScopeRejection, SecurityFloor, SigService, SkewWindow, SystemClock, WireView,
+    enforce_scope,
 };
 
 use security_floor_fixtures::*;
@@ -331,7 +332,7 @@ fn c_sig_0335_a_presigned_url_without_an_expiry_is_refused() {
 // Negative — H5 scope cross-check
 // ---------------------------------------------------------------------------
 
-fn scope_rejection(credential: &str, expected_service: SigService) -> Option<AuthError> {
+fn scope_rejection(credential: &str, expected_service: SigService) -> Option<ScopeRejection> {
     let headers = signed_headers(SIGNED_AT);
     let view = WireView::new(&headers, RawQuery::new(""));
     let operation = OperationFloor::builtin("Any", expected_service);
@@ -350,32 +351,28 @@ fn scope_rejection(credential: &str, expected_service: SigService) -> Option<Aut
 /// must not verify against an S3 operation.
 #[test]
 fn c_sig_0340_and_0341_a_scope_for_another_service_is_refused() {
-    assert_eq!(
-        scope_rejection("AKIDEXAMPLE/20150830/us-east-1/sts/aws4_request", SigService::S3),
-        Some(AuthError::AuthorizationHeaderMalformed)
-    );
-    assert_eq!(
-        scope_rejection("AKIDEXAMPLE/20150830/us-east-1/s3/aws4_request", SigService::Sts),
-        Some(AuthError::AuthorizationHeaderMalformed)
-    );
+    let s3_rejection =
+        scope_rejection("AKIDEXAMPLE/20150830/us-east-1/sts/aws4_request", SigService::S3).expect("the service disagrees");
+    assert_eq!(s3_rejection.expected_region(), None);
+    let sts_rejection =
+        scope_rejection("AKIDEXAMPLE/20150830/us-east-1/s3/aws4_request", SigService::Sts).expect("the service disagrees");
+    assert_eq!(sts_rejection.expected_region(), None);
 }
 
 /// Negative — c-sig-0342: a region outside the configured set is refused.
 #[test]
 fn c_sig_0342_an_unconfigured_region_is_refused() {
-    assert_eq!(
-        scope_rejection("AKIDEXAMPLE/20150830/ap-south-1/s3/aws4_request", SigService::S3),
-        Some(AuthError::AuthorizationHeaderMalformed)
-    );
+    let rejection =
+        scope_rejection("AKIDEXAMPLE/20150830/ap-south-1/s3/aws4_request", SigService::S3).expect("the region is not configured");
+    assert_eq!(rejection.expected_region().map(ScopeRegion::as_str), Some("eu-west-1"));
 }
 
 /// Negative — c-sig-0343: a scope date that is not the day of the signed timestamp is refused.
 #[test]
 fn c_sig_0343_a_scope_date_from_another_day_is_refused() {
-    assert_eq!(
-        scope_rejection("AKIDEXAMPLE/20150831/us-east-1/s3/aws4_request", SigService::S3),
-        Some(AuthError::AuthorizationHeaderMalformed)
-    );
+    let rejection =
+        scope_rejection("AKIDEXAMPLE/20150831/us-east-1/s3/aws4_request", SigService::S3).expect("the date disagrees");
+    assert_eq!(rejection.expected_region(), None);
 }
 
 /// Negative — c-sig-0344: the terminator is fixed, and a scope that does not end in it never

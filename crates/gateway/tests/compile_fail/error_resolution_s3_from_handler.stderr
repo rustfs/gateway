@@ -1,0 +1,13 @@
+error[E0277]: the trait bound `S3Error: From<HandlerError>` is not satisfied
+  --> tests/compile_fail/error_resolution_s3_from_handler.rs:24:13
+   |
+24 |     let _ = S3Error::from(HandlerError::internal_error("failed"));
+   |             ^^^^^^^ the trait `From<HandlerError>` is not implemented for `S3Error`
+   |
+help: the trait `From<HandlerError>` is not implemented for `S3Error`
+      but trait `From<ErrorResolution>` is implemented for it
+  --> src/render.rs
+   |
+   | impl From<ErrorResolution> for S3Error {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   = help: for that trait implementation, expected `ErrorResolution`, found `HandlerError`

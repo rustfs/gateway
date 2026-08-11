@@ -76,6 +76,16 @@ PYEOF
 }
 expect_fail 'core harness omission is rejected' mut_core_registration_omitted
 
+mut_core_error_resolution_registration_omitted() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/core/tests/integration.rs")
+text = path.read_text()
+path.write_text(text.replace('#[path = "error_resolution.rs"]\nmod error_resolution;\n', '', 1))
+PYEOF
+}
+expect_fail 'the core error-resolution integration module omission is rejected' mut_core_error_resolution_registration_omitted
+
 mut_core_registration_duplicated() {
     python3 - <<'PYEOF'
 from pathlib import Path
@@ -146,8 +156,11 @@ mut_core_error_resolution_pair_is_registered() {
 from pathlib import Path
 path = Path("crates/core/tests/compile_fail.rs")
 text = path.read_text()
-needle = '    cases.compile_fail("tests/compile_fail/c_sig_0018_*.rs");\n'
-path.write_text(text.replace(needle, needle + '    cases.compile_fail("tests/compile_fail/error_resolution_*.rs");\n', 1))
+pattern = '    cases.compile_fail("tests/compile_fail/error_resolution_*.rs");\n'
+if pattern not in text:
+    anchor = '    cases.compile_fail("tests/compile_fail/c_sig_0018_*.rs");\n'
+    text = text.replace(anchor, anchor + pattern, 1)
+path.write_text(text)
 PYEOF
 }
 expect_pass 'a paired core error-resolution fixture is registered in the shared batch' mut_core_error_resolution_pair_is_registered
@@ -157,6 +170,13 @@ mut_core_error_resolution_pattern_omitted() {
         crates/core/tests/compile_fail/error_resolution_probe.rs
     cp crates/core/tests/compile_fail/c_sig_0018_session_token_serialize.stderr \
         crates/core/tests/compile_fail/error_resolution_probe.stderr
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/core/tests/compile_fail.rs")
+text = path.read_text()
+pattern = '    cases.compile_fail("tests/compile_fail/error_resolution_*.rs");\n'
+path.write_text(text.replace(pattern, "", 1))
+PYEOF
 }
 expect_fail 'an existing core error-resolution pair cannot lose its harness pattern' mut_core_error_resolution_pattern_omitted
 
@@ -229,6 +249,17 @@ PYEOF
 }
 expect_fail 'gateway integration harness omission is rejected' mut_gateway_registration_omitted
 
+mut_gateway_error_context_filters_registration_omitted() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/gateway/tests/integration.rs")
+text = path.read_text()
+entry = '#[path = "error_context_filters.rs"]\nmod error_context_filters;\n'
+path.write_text(text.replace(entry, '', 1))
+PYEOF
+}
+expect_fail 'the error-context filter tests cannot leave the consolidated target' mut_gateway_error_context_filters_registration_omitted
+
 mut_gateway_registration_duplicated() {
     python3 - <<'PYEOF'
 from pathlib import Path
@@ -279,6 +310,39 @@ path.write_text(text.replace('    cases.compile_fail("tests/compile_fail/azc_*.r
 PYEOF
 }
 expect_fail 'gateway trybuild pattern omission is rejected' mut_gateway_pattern_omitted
+
+mut_gateway_error_resolution_pair_is_registered() {
+    cp crates/gateway/tests/compile_fail/azc_0014_missing_input.rs \
+        crates/gateway/tests/compile_fail/error_resolution_probe.rs
+    cp crates/gateway/tests/compile_fail/azc_0014_missing_input.stderr \
+        crates/gateway/tests/compile_fail/error_resolution_probe.stderr
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/gateway/tests/compile_fail.rs")
+text = path.read_text()
+pattern = '    cases.compile_fail("tests/compile_fail/error_resolution_*.rs");\n'
+if pattern not in text:
+    anchor = '    cases.compile_fail("tests/compile_fail/azc_*.rs");\n'
+    text = text.replace(anchor, anchor + pattern, 1)
+path.write_text(text)
+PYEOF
+}
+expect_pass 'gateway AZC and error-resolution fixtures share one registered batch' mut_gateway_error_resolution_pair_is_registered
+
+mut_gateway_error_resolution_pattern_omitted() {
+    cp crates/gateway/tests/compile_fail/azc_0014_missing_input.rs \
+        crates/gateway/tests/compile_fail/error_resolution_probe.rs
+    cp crates/gateway/tests/compile_fail/azc_0014_missing_input.stderr \
+        crates/gateway/tests/compile_fail/error_resolution_probe.stderr
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/gateway/tests/compile_fail.rs")
+text = path.read_text()
+pattern = '    cases.compile_fail("tests/compile_fail/error_resolution_*.rs");\n'
+path.write_text(text.replace(pattern, "", 1))
+PYEOF
+}
+expect_fail 'gateway error-resolution pairs cannot lose their shared-batch pattern' mut_gateway_error_resolution_pattern_omitted
 
 mut_gateway_batch_duplicated() {
     python3 - <<'PYEOF'

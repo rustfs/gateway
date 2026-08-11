@@ -14,9 +14,9 @@
 
 //! Who the caller is, decided for a request the security floor has already admitted.
 //!
-//! Responsible for: [`Authenticator`] — the extension point that turns an admitted request into a
-//! [`Verdict`] — the request it is handed ([`Authentication`]), the one non-verdict outcome
-//! ([`Unavailable`]), and [`SigV4Authenticator`], the implementation assembled from
+//! Responsible for: [`Authenticator`] — the extension point that turns an admitted request into an
+//! [`AuthenticationOutcome`] — the request it is handed ([`Authentication`]), the one unavailable
+//! outcome ([`Unavailable`]), and [`SigV4Authenticator`], the implementation assembled from
 //! `rustfs-gateway-sig`'s public primitives.
 //! NOT responsible for: any rule the security floor enforces. H1 to H6 have already run in
 //! `SecurityFloor::admit` before this is called, and nothing here can skip them. It is also not
@@ -65,9 +65,9 @@ use http::Method;
 use rustfs_gateway_core::BoxFuture;
 use rustfs_gateway_sig::{
     AUTHORIZATION_HEADER, AmzDate, AuthError, AuthScheme, CanonicalRequestSpec, CredentialScope, ExpectedScope, PayloadMode,
-    PresignedParams, RawHost, RegionSet, SealedAws, SigIdentity, SigLocation, SigV4Authorization, Signature, SignatureMatch,
-    SignedHeaderSet, UriPathCandidates, Verdict, X_AMZ_SECURITY_TOKEN, X_AMZ_SECURITY_TOKEN_HEADER, calculate_signature,
-    enforce_scope, signing_key, timing,
+    PresignedParams, RawHost, RegionSet, ScopeRejection, SealedAws, SigIdentity, SigLocation, SigV4Authorization, Signature,
+    SignatureMatch, SignedHeaderSet, UriPathCandidates, Verdict, X_AMZ_SECURITY_TOKEN, X_AMZ_SECURITY_TOKEN_HEADER,
+    calculate_signature, enforce_scope, signing_key, timing,
 };
 
 use super::credential_guard::{CredentialGuardConfig, GuardedCredentialProvider};
@@ -92,6 +92,65 @@ impl core::fmt::Display for Unavailable {
 }
 
 impl std::error::Error for Unavailable {}
+
+/// The authentication verdict and any framework-owned proof needed to render its rejection.
+///
+/// Custom authenticators construct only ordinary outcomes. Scope rejection proofs remain private
+/// to the built-in verifier and cannot be paired with a caller-selected verdict.
+///
+/// ```compile_fail,E0451
+/// use rustfs_gateway::AuthenticationOutcome;
+/// use rustfs_gateway_sig::{AuthError, Verdict};
+/// let verdict = Verdict::reject(AuthError::AuthorizationHeaderMalformed);
+/// let _ = AuthenticationOutcome { verdict, scope_rejection: None };
+/// ```
+///
+/// ```compile_fail,E0624
+/// use rustfs_gateway::AuthenticationOutcome;
+/// use rustfs_gateway_sig::ScopeRejection;
+/// fn attach(rejection: ScopeRejection) {
+///     let _ = AuthenticationOutcome::scope_rejected(rejection);
+/// }
+/// ```
+///
+/// ```compile_fail,E0624
+/// use rustfs_gateway::AuthenticationOutcome;
+/// fn consume(outcome: AuthenticationOutcome) {
+///     let _ = outcome.into_parts();
+/// }
+/// ```
+pub struct AuthenticationOutcome {
+    verdict: Verdict,
+    scope_rejection: Option<ScopeRejection>,
+}
+
+impl AuthenticationOutcome {
+    /// Wraps an existing verdict without contextual response authority.
+    #[must_use]
+    pub const fn ordinary(verdict: Verdict) -> Self {
+        Self {
+            verdict,
+            scope_rejection: None,
+        }
+    }
+
+    /// Borrows the exact verdict produced by the authenticator.
+    #[must_use]
+    pub const fn verdict(&self) -> &Verdict {
+        &self.verdict
+    }
+
+    fn scope_rejected(scope_rejection: ScopeRejection) -> Self {
+        Self {
+            verdict: Verdict::reject(AuthError::AuthorizationHeaderMalformed),
+            scope_rejection: Some(scope_rejection),
+        }
+    }
+
+    pub(crate) fn into_parts(self) -> (Verdict, Option<ScopeRejection>) {
+        (self.verdict, self.scope_rejection)
+    }
+}
 
 /// The material a `STREAMING-AWS4-HMAC-SHA256-PAYLOAD` body's per-chunk signatures are checked
 /// against.
@@ -301,13 +360,14 @@ impl<'a> Authentication<'a> {
 /// without one: the two things a default could do are authenticate everything and authenticate
 /// nothing, and a deployment that got the wrong one discovers it in production either way.
 pub trait Authenticator: Send + Sync + 'static {
-    /// Produces a verdict for one admitted request.
+    /// Produces an authentication outcome for one admitted request.
     ///
     /// [`Verdict`]'s widening variants each require a receipt this trait cannot manufacture:
     /// `Authenticated` needs a `SignatureMatch` that only a constant-time comparison produces, and
     /// `Anonymous` needs an `AnonymousAck` that only a request which presented nothing can yield.
-    /// So an implementation can decide, and cannot invent.
-    fn authenticate<'a>(&'a self, request: &'a Authentication<'a>) -> BoxFuture<'a, Result<Verdict, Unavailable>>;
+    /// So an implementation can decide, and cannot invent. Custom implementations wrap that
+    /// verdict with [`AuthenticationOutcome::ordinary`].
+    fn authenticate<'a>(&'a self, request: &'a Authentication<'a>) -> BoxFuture<'a, Result<AuthenticationOutcome, Unavailable>>;
 
     /// The credential-lookup protection this authenticator contributes to the assembled service.
     ///
@@ -320,7 +380,7 @@ pub trait Authenticator: Send + Sync + 'static {
 }
 
 impl<T: Authenticator + ?Sized> Authenticator for Arc<T> {
-    fn authenticate<'a>(&'a self, request: &'a Authentication<'a>) -> BoxFuture<'a, Result<Verdict, Unavailable>> {
+    fn authenticate<'a>(&'a self, request: &'a Authentication<'a>) -> BoxFuture<'a, Result<AuthenticationOutcome, Unavailable>> {
         (**self).authenticate(request)
     }
 
@@ -378,16 +438,17 @@ impl SigV4Authenticator {
         }
     }
 
-    async fn verify(&self, request: &Authentication<'_>) -> Result<Verdict, Unavailable> {
+    async fn verify(&self, request: &Authentication<'_>) -> Result<AuthenticationOutcome, Unavailable> {
         match self.try_verify(request).await {
-            Ok(Some(verdict)) => Ok(verdict),
+            Ok(Some(verdict)) => Ok(AuthenticationOutcome::ordinary(verdict)),
             Ok(None) => Err(Unavailable),
-            Err(error) => Ok(Verdict::reject(error)),
+            Err(VerificationFailure::Ordinary(error)) => Ok(AuthenticationOutcome::ordinary(Verdict::reject(error))),
+            Err(VerificationFailure::Scope(scope_rejection)) => Ok(AuthenticationOutcome::scope_rejected(scope_rejection)),
         }
     }
 
     /// `Ok(None)` is the store outage; every other outcome is a verdict or a rejection.
-    async fn try_verify(&self, request: &Authentication<'_>) -> Result<Option<Verdict>, AuthError> {
+    async fn try_verify(&self, request: &Authentication<'_>) -> Result<Option<Verdict>, VerificationFailure> {
         let sealed = request.sealed();
         let view = sealed.view();
         let location = sealed.marker().location();
@@ -399,7 +460,7 @@ impl SigV4Authenticator {
         // H5, and the only public producer of the `VerifiedScope` the derivation takes. A scope
         // the client chose therefore cannot seed a signing key.
         let expected = ExpectedScope::new(sealed.expected_service(), &self.regions);
-        let verified = enforce_scope(presented.scope(), sealed.clock(), &expected)?;
+        let verified = enforce_scope(presented.scope(), sealed.clock(), &expected).map_err(VerificationFailure::Scope)?;
 
         let resolved = self
             .credentials
@@ -460,10 +521,10 @@ impl SigV4Authenticator {
         // The unknown-key branch has now paid for the same derivation a known key does. Only after
         // that is the uniform credential rejection answered.
         let Ok(CredentialLookup::Found(credentials)) = resolved else {
-            return Err(AuthError::InvalidAccessKeyId);
+            return Err(AuthError::InvalidAccessKeyId.into());
         };
         let Some(proof) = proof else {
-            return Err(AuthError::InvalidAccessKeyId);
+            return Err(AuthError::InvalidAccessKeyId.into());
         };
         // A credential that exists, is correctly signed for, and is still not usable: switched
         // off, expired, or presented without the token it is bound to. Answered as
@@ -471,7 +532,7 @@ impl SigV4Authenticator {
         // gets — because "this key exists but you may not use it this way" confirms the key exists
         // to whoever is guessing. GHSA-3p3x-734c-h5vx is the FTPS version of that confirmation.
         if refusal.is_some() {
-            return Err(AuthError::InvalidAccessKeyId);
+            return Err(AuthError::InvalidAccessKeyId.into());
         }
 
         let identity_axis = match credentials.session_token() {
@@ -504,12 +565,23 @@ impl SigV4Authenticator {
 }
 
 impl Authenticator for SigV4Authenticator {
-    fn authenticate<'a>(&'a self, request: &'a Authentication<'a>) -> BoxFuture<'a, Result<Verdict, Unavailable>> {
+    fn authenticate<'a>(&'a self, request: &'a Authentication<'a>) -> BoxFuture<'a, Result<AuthenticationOutcome, Unavailable>> {
         Box::pin(self.verify(request))
     }
 
     fn credential_guard_config(&self) -> Option<CredentialGuardConfig> {
         Some(*self.credentials.config())
+    }
+}
+
+enum VerificationFailure {
+    Ordinary(AuthError),
+    Scope(ScopeRejection),
+}
+
+impl From<AuthError> for VerificationFailure {
+    fn from(error: AuthError) -> Self {
+        Self::Ordinary(error)
     }
 }
 
@@ -577,6 +649,7 @@ impl Presented {
 mod tests {
     use super::*;
     use crate::ext::credentials::{Credentials, StaticCredentials};
+    use rustfs_gateway_sig::{RequestNow, SigService, SkewWindow, enforce_clock_skew};
 
     fn authenticator() -> SigV4Authenticator {
         SigV4Authenticator::new(
@@ -605,5 +678,34 @@ mod tests {
     #[test]
     fn a_store_outage_is_not_a_credential_rejection() {
         assert_eq!(Unavailable.to_string(), "the credential store could not answer");
+    }
+
+    #[test]
+    fn an_ordinary_outcome_borrows_the_exact_verdict() {
+        let outcome = AuthenticationOutcome::ordinary(Verdict::reject(AuthError::AuthorizationHeaderMalformed));
+        assert_eq!(outcome.verdict().rejection(), Some(AuthError::AuthorizationHeaderMalformed));
+        assert!(outcome.scope_rejection.is_none());
+    }
+
+    #[test]
+    fn a_scope_outcome_fixes_the_public_verdict() {
+        let signed_at = AmzDate::parse("20150830T123600Z").expect("valid timestamp");
+        let clock = enforce_clock_skew(&signed_at, RequestNow::from_unix_seconds(1_440_938_160), SkewWindow::DEFAULT)
+            .expect("inside the window");
+        let regions = RegionSet::new(["us-east-1"]).expect("valid region");
+        let expected = ExpectedScope::new(SigService::S3, &regions);
+        let presented = CredentialScope::parse("AKID/20150830/eu-west-1/s3/aws4_request").expect("valid scope");
+        let rejection = enforce_scope(&presented, clock, &expected).expect_err("region is not configured");
+        let outcome = AuthenticationOutcome::scope_rejected(rejection);
+
+        assert_eq!(outcome.verdict().rejection(), Some(AuthError::AuthorizationHeaderMalformed));
+        assert_eq!(
+            outcome
+                .scope_rejection
+                .as_ref()
+                .and_then(ScopeRejection::expected_region)
+                .map(rustfs_gateway_sig::ScopeRegion::as_str),
+            Some("us-east-1")
+        );
     }
 }

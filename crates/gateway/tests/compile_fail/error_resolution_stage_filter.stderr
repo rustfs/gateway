@@ -1,0 +1,13 @@
+error[E0053]: method `on_wire` has an incompatible type for trait
+  --> tests/compile_fail/error_resolution_stage_filter.rs:26:52
+   |
+26 |     fn on_wire(&self, _head: &mut WireHead<'_>) -> Result<(), S3Error> {
+   |                                                    ^^^^^^^^^^^^^^^^^^^ expected `HandlerError`, found `S3Error`
+   |
+   = note: expected signature `fn(&RenderedFilter, &mut WireHead<'_>) -> Result<(), HandlerError>`
+              found signature `fn(&RenderedFilter, &mut WireHead<'_>) -> Result<(), S3Error>`
+help: change the output type to match the trait
+   |
+26 -     fn on_wire(&self, _head: &mut WireHead<'_>) -> Result<(), S3Error> {
+26 +     fn on_wire(&self, _head: &mut WireHead<'_>) -> Result<(), HandlerError> {
+   |

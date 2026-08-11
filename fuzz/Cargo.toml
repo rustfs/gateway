@@ -12,6 +12,7 @@ bytes = "1"
 libfuzzer-sys = "0.4"
 rustfs-gateway-sig = { path = "../crates/sig" }
 rustfs-gateway-stream = { path = "../crates/stream" }
+rustfs-gateway-types = { path = "../crates/types" }
 
 [workspace]
 members = ["."]
@@ -26,6 +27,20 @@ bench = false
 [[bin]]
 name = "chunked_eof"
 path = "fuzz_targets/chunked_eof.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "etag_parse"
+path = "fuzz_targets/etag_parse.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "range_parse"
+path = "fuzz_targets/range_parse.rs"
 test = false
 doc = false
 bench = false

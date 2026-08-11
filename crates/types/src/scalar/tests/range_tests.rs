@@ -51,7 +51,7 @@ fn the_three_forms_parse() {
 }
 
 #[test]
-fn an_overlong_range_is_clamped_rather_than_rejected() {
+fn c_rng_n001_an_overlong_range_is_clamped_rather_than_rejected() {
     // Resumable downloads routinely ask for more than is there; a 416 here breaks them.
     assert_eq!(
         one("bytes=5-100").resolve(50),
@@ -78,15 +78,27 @@ fn an_overlong_range_is_clamped_rather_than_rejected() {
 }
 
 #[test]
-fn a_range_that_starts_past_the_end_is_unsatisfiable() {
+fn c_rng_n002_a_suffix_longer_than_the_object_selects_the_whole_object() {
+    assert_eq!(
+        one("bytes=-5").resolve(3),
+        RangeOutcome::Satisfied {
+            start: 0,
+            end_inclusive: 2
+        }
+    );
+}
+
+#[test]
+fn c_rng_n004_a_range_starting_past_the_end_reports_the_actual_size() {
     assert_eq!(one("bytes=100-200").resolve(50), RangeOutcome::Unsatisfiable { actual: 50 });
     assert_eq!(one("bytes=50-").resolve(50), RangeOutcome::Unsatisfiable { actual: 50 });
     assert_eq!(one("bytes=-0").resolve(50), RangeOutcome::Unsatisfiable { actual: 50 });
     assert_eq!(one("bytes=0-9").resolve(0), RangeOutcome::Unsatisfiable { actual: 0 });
+    assert_eq!(one("bytes=100-").resolve(20).content_range(20).as_deref(), Some("bytes */20"));
 }
 
 #[test]
-fn a_syntactically_invalid_range_is_ignored_not_rejected() {
+fn c_rng_n005_a_syntactically_invalid_range_is_ignored_not_rejected() {
     // RFC 9110 requires an unparseable Range to be ignored. Returning 400 breaks clients whose
     // proxy rewrote the header.
     for header in [
@@ -106,7 +118,13 @@ fn a_syntactically_invalid_range_is_ignored_not_rejected() {
 }
 
 #[test]
-fn a_multi_range_request_yields_the_whole_object() {
+fn c_rng_n006_a_descending_range_is_ignored_without_panicking() {
+    assert_eq!(RangeParse::parse("bytes=10-5"), RangeParse::Ignore);
+    assert_eq!(RangeParse::parse("bytes=10-5").resolve(20), RangeOutcome::Full);
+}
+
+#[test]
+fn c_rng_n003_a_multi_range_request_yields_the_whole_object() {
     // S3 does not implement multipart/byteranges; it answers 200 with everything.
     assert_eq!(RangeParse::parse("bytes=0-1,5-6"), RangeParse::MultiRange);
     assert_eq!(RangeParse::parse("bytes=0-1,5-6").resolve(100), RangeOutcome::Full);
@@ -114,6 +132,17 @@ fn a_multi_range_request_yields_the_whole_object() {
     // A malformed member makes the whole header malformed, not a multi-range.
     assert_eq!(RangeParse::parse("bytes=0-1,,"), RangeParse::Ignore);
     assert_eq!(RangeParse::parse("bytes=0-1,junk"), RangeParse::Ignore);
+}
+
+#[test]
+fn c_rng_n008_the_largest_u64_endpoint_does_not_overflow() {
+    assert_eq!(
+        one("bytes=0-18446744073709551615").resolve(20),
+        RangeOutcome::Satisfied {
+            start: 0,
+            end_inclusive: 19
+        }
+    );
 }
 
 #[test]

@@ -101,6 +101,7 @@ pub mod cors;
 pub mod dialect;
 pub mod dispatch;
 pub mod error;
+mod error_resolution;
 pub mod fault;
 pub mod handler;
 pub mod op;
@@ -121,6 +122,10 @@ pub use crate::codec::{
 pub use crate::dialect::{Dialect, DialectBuilder, DialectError, DialectOperation, DialectOverlay, DialectRoute, OverlayRow};
 pub use crate::dispatch::{Dispatch, Router, RouterBuildError};
 pub use crate::error::{DisallowedPreAuthCode, PRE_AUTH_STATUSES, PreAuthError};
+pub use crate::error_resolution::{
+    BodyPolicy, ErrorContext, ErrorResolution, HandlerErrorContext, InvalidErrorContext, MissingObject, ResourceVisibility,
+    ResponseKind, resolve,
+};
 pub use crate::fault::{
     ELEMENT_ORDER, ErrorDetail, ErrorHeader, InvalidWireLabel, PRECONDITION_FAILED_MESSAGE, RANGE_NOT_SATISFIABLE_MESSAGE,
     RedirectTarget, RegionLabel,

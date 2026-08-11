@@ -27,10 +27,10 @@ use std::sync::{Arc, Mutex};
 
 use rustfs_gateway::dto::GetObjectAttributes;
 use rustfs_gateway::{
-    Authentication, Authenticator, Authorizer, AuthzAuditEvent, AuthzAuditSink, AuthzRequest, BoxFuture, CorsSource,
-    CorsSourceError, Credentials, Decision, Governor, GovernorRequest, Handler, HandlerResult, InputAuthzRequest, InputDecisions,
-    Lease, Next, NoAuthzAudit, NoCors, NoObserver, NoPolicy, Observer, PolicyError, PolicySnapshot, PolicySource, RegionSet, Req,
-    RequestContext, RequestEvent, S3Error, SigV4Authenticator, StageFilter, StaticCredentials, Unavailable, Unlimited, Verdict,
+    Authentication, AuthenticationOutcome, Authenticator, Authorizer, AuthzAuditEvent, AuthzAuditSink, AuthzRequest, BoxFuture,
+    CorsSource, CorsSourceError, Credentials, Decision, Governor, GovernorRequest, Handler, HandlerResult, InputAuthzRequest,
+    InputDecisions, Lease, Next, NoAuthzAudit, NoCors, NoObserver, NoPolicy, Observer, PolicyError, PolicySnapshot, PolicySource,
+    RegionSet, Req, RequestContext, RequestEvent, SigV4Authenticator, StageFilter, StaticCredentials, Unavailable, Unlimited,
     WireHead, allow_when, op_layer,
 };
 use support::{Attributes, attributes_request, fixed_clock};
@@ -69,7 +69,7 @@ impl<T: Governor> Governor for Mark<T> {
 }
 
 impl<T: Authenticator> Authenticator for Mark<T> {
-    fn authenticate<'a>(&'a self, request: &'a Authentication<'a>) -> BoxFuture<'a, Result<Verdict, Unavailable>> {
+    fn authenticate<'a>(&'a self, request: &'a Authentication<'a>) -> BoxFuture<'a, Result<AuthenticationOutcome, Unavailable>> {
         self.note();
         self.inner.authenticate(request)
     }
@@ -145,12 +145,12 @@ where
 struct Filter(Trail);
 
 impl StageFilter for Filter {
-    fn on_wire(&self, _head: &mut WireHead<'_>) -> Result<(), S3Error> {
+    fn on_wire(&self, _head: &mut WireHead<'_>) -> Result<(), rustfs_gateway::HandlerError> {
         note(&self.0, "filter_wire");
         Ok(())
     }
 
-    fn on_routed(&self, _routed: &rustfs_gateway::RoutedView<'_>) -> Result<(), S3Error> {
+    fn on_routed(&self, _routed: &rustfs_gateway::RoutedView<'_>) -> Result<(), rustfs_gateway::HandlerError> {
         note(&self.0, "filter_routed");
         Ok(())
     }
@@ -159,7 +159,7 @@ impl StageFilter for Filter {
         &self,
         _view: &rustfs_gateway::ResponseView<'_>,
         _response: &mut http::Response<rustfs_gateway::Body>,
-    ) -> Result<(), S3Error> {
+    ) -> Result<(), rustfs_gateway::HandlerError> {
         note(&self.0, "filter_response");
         Ok(())
     }

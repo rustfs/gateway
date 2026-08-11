@@ -26,4 +26,5 @@ fn compile_time_contracts_are_not_openable() {
     cases.compile_fail("tests/compile_fail/authz_*.rs");
     cases.pass("tests/compile_pass/authz_authorized.rs");
     cases.compile_fail("tests/compile_fail/c_sig_0018_*.rs");
+    cases.compile_fail("tests/compile_fail/error_resolution_*.rs");
 }

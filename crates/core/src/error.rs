@@ -16,8 +16,8 @@
 //!
 //! Responsible for: [`PreAuthError`] — a code, a static message, and optionally a static operation
 //! name — and the closed set of statuses it is allowed to carry.
-//! NOT responsible for: the code-to-status table (`rustfs-gateway-types::ErrorCode`), the
-//! context-sensitive status rules (`rustfs-gateway-types::status_of`), rendering XML, or any error
+//! NOT responsible for: the code-to-status table (`rustfs-gateway-types::ErrorCode`), contextual
+//! resolution (`crate::resolve`), rendering XML, or any error
 //! raised after authentication, which may say as much as it likes.
 //! Upstream: `rustfs-gateway-types`. Downstream: `crate::registry`, `crate::dispatch`.
 //!
@@ -44,7 +44,7 @@
 //! so the code chosen with care never reaches the operator reading the logs.
 
 use http::StatusCode;
-use rustfs_gateway_types::{ErrorCode, ErrorContext, status_of};
+use rustfs_gateway_types::ErrorCode;
 
 /// The statuses an error raised before authentication may carry.
 pub const PRE_AUTH_STATUSES: [StatusCode; 3] = [StatusCode::BAD_REQUEST, StatusCode::FORBIDDEN, StatusCode::NOT_IMPLEMENTED];
@@ -132,7 +132,7 @@ impl PreAuthError {
     /// that build a table of codes should call this at build time, not per request — see
     /// [`crate::registry::Registry::register`], which does exactly that.
     pub fn with_code(code: ErrorCode, message: &'static str) -> Result<Self, DisallowedPreAuthCode> {
-        let status = status_of(&code, &ErrorContext::default());
+        let status = code.default_status();
         if !PRE_AUTH_STATUSES.contains(&status) {
             return Err(DisallowedPreAuthCode { code, status });
         }
@@ -175,7 +175,7 @@ impl PreAuthError {
     /// The status this error goes out with.
     #[must_use]
     pub fn status(&self) -> StatusCode {
-        status_of(&self.code, &ErrorContext::default())
+        self.code.default_status()
     }
 }
 

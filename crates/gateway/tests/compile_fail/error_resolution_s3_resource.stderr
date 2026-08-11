@@ -1,0 +1,5 @@
+error[E0599]: no method named `about_resource` found for struct `S3Error` in the current scope
+  --> tests/compile_fail/error_resolution_s3_resource.rs:25:19
+   |
+25 |     let _ = error.about_resource("Bucket");
+   |                   ^^^^^^^^^^^^^^ method not found in `S3Error`

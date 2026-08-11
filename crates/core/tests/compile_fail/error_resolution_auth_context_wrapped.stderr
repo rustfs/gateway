@@ -1,0 +1,26 @@
+error[E0423]: cannot initialize a tuple struct which contains private fields
+  --> tests/compile_fail/error_resolution_auth_context_wrapped.rs:25:20
+   |
+25 |     let _wrapped = HandlerErrorContext(context);
+   |                    ^^^^^^^^^^^^^^^^^^^
+   |
+note: constructor is not visible here due to private fields
+  --> src/error_resolution.rs
+   |
+   | pub struct HandlerErrorContext(ErrorContext);
+   |                                ^^^^^^^^^^^^ private field
+help: you might have meant to use an associated function to build this type
+   |
+25 -     let _wrapped = HandlerErrorContext(context);
+25 +     let _wrapped = HandlerErrorContext::missing_object(_, _);
+   |
+25 -     let _wrapped = HandlerErrorContext(context);
+25 +     let _wrapped = HandlerErrorContext::missing_object_for(_, _, _);
+   |
+25 -     let _wrapped = HandlerErrorContext(context);
+25 +     let _wrapped = HandlerErrorContext::delete_missing_key();
+   |
+25 -     let _wrapped = HandlerErrorContext(context);
+25 +     let _wrapped = HandlerErrorContext::missing_bucket();
+   |
+   = and 6 other candidates

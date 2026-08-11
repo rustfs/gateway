@@ -39,10 +39,11 @@ use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use bytes::Bytes;
 use rustfs_gateway::dto::{Bucket, ListBuckets, ListBucketsOutput};
 use rustfs_gateway::{
-    AuthRequirement, BoxFuture, BucketName, CodecError, Credentials, EncodedResponse, Governor, GovernorRequest, Handler,
-    HandlerError, HandlerResult, Lease, MetaView, Observer, Operation, OperationCodec, OperationFloor, OperationSpec, Predicate,
-    RegionSet, Req, RequestBody, RequestEvent, ResourceShape, Resp, ResponseBody, RouteEntry, RouteSelector, S3Service,
-    ServiceBuilder, SigService, SigV4Authenticator, StaticCredentials, TargetKind, allow_when,
+    AuthRequirement, BoxFuture, BucketName, CodecError, Credentials, ETag, EncodedResponse, Governor, GovernorRequest, Handler,
+    HandlerError, HandlerErrorContext, HandlerResult, Lease, MetaView, MissingObject, Observer, Operation, OperationCodec,
+    OperationFloor, OperationSpec, Predicate, RegionSet, Req, RequestBody, RequestEvent, ResourceShape, ResourceVisibility, Resp,
+    ResponseBody, RouteEntry, RouteSelector, S3Service, ServiceBuilder, SigService, SigV4Authenticator, StaticCredentials,
+    TargetKind, allow_when,
 };
 
 // ── a vendor operation, anonymously reachable ──────────────────────────────────────────────────
@@ -338,10 +339,9 @@ where
             message: "hello".to_owned(),
         })),
         HeadPingInput::Refuse => Err(HandlerError::precondition_failed("If-Match")),
-        HeadPingInput::NotModified => Err(HandlerError::new(
-            rustfs_gateway::ErrorCode::NOT_MODIFIED,
-            "the representation has not changed",
-        )),
+        HeadPingInput::NotModified => {
+            Err(HandlerErrorContext::not_modified(ETag::new("head-ping").expect("a valid entity tag")).into())
+        }
         // The head goes out here. What follows can no longer choose a status: the continuation's
         // output type is `Result<O::Output, HandlerError>` and neither arm carries one.
         HeadPingInput::CommitThenAnswer => Ok(Resp::commit(Box::pin(async {
@@ -350,7 +350,7 @@ where
             })
         }))),
         HeadPingInput::CommitThenFail => Ok(Resp::commit(Box::pin(async {
-            Err(HandlerError::new(rustfs_gateway::ErrorCode::NO_SUCH_KEY, "the source is gone"))
+            Err(HandlerErrorContext::missing_object(MissingObject::Key, ResourceVisibility::Visible).into())
         }))),
     }
 }

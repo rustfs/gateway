@@ -168,7 +168,7 @@ mod tests {
         let regions = serving(&["us-east-1"]);
         let error = resolve(Some("us-east-1"), &regions, RegionMatchPolicy::Strict).expect_err("refused");
         assert_eq!(*error.code(), ErrorCode::INVALID_LOCATION_CONSTRAINT);
-        assert_eq!(error.status(), http::StatusCode::BAD_REQUEST);
+        assert_eq!(error.code().default_status(), http::StatusCode::BAD_REQUEST);
     }
 
     /// Negative — a valid region the deployment does not serve is refused with the same code.

@@ -12,22 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Error-code cases: the table, the fallback that is not a 500, and the context-sensitive rules.
+//! Error-code cases: the context-free table and the fallback that is not a 500.
 //!
 //! Responsible for: the surprising status mappings, the table's internal consistency, the
-//! existence-hiding rule, and the property that no input produces a 500.
-//! NOT responsible for: which code an operation chooses.
-//! Upstream: [`crate::scalar::error_code`], [`crate::scalar::error_status`]. Downstream: nothing.
+//! counterintuitive rows and the property that no table miss produces a 500.
+//! NOT responsible for: contextual selection, which belongs to `rustfs-gateway-core`.
+//! Upstream: [`crate::scalar::error_code`]. Downstream: nothing.
 
-use http::{Method, StatusCode};
+use http::StatusCode;
 use proptest::prelude::*;
 
-use crate::scalar::{ErrorCode, ErrorContext, mask_for_authorization, status_of};
+use crate::scalar::ErrorCode;
 
 #[test]
 fn c_err_0001_a_missing_bucket_is_404() {
     assert_eq!(ErrorCode::NO_SUCH_BUCKET.default_status(), StatusCode::NOT_FOUND);
-    assert_eq!(status_of(&ErrorCode::NO_SUCH_BUCKET, &ErrorContext::default()), StatusCode::NOT_FOUND);
 }
 
 #[test]
@@ -63,7 +62,6 @@ fn an_unknown_code_falls_back_to_400_and_never_to_500() {
     let custom = ErrorCode::custom("RustFsTierBackendUnreachable".to_owned());
     assert!(!custom.is_known());
     assert_eq!(custom.default_status(), StatusCode::BAD_REQUEST);
-    assert_eq!(status_of(&custom, &ErrorContext::default()), StatusCode::BAD_REQUEST);
     assert_eq!(custom.as_str(), "RustFsTierBackendUnreachable");
     assert_eq!(custom.to_string(), "RustFsTierBackendUnreachable");
 }
@@ -98,71 +96,6 @@ fn the_table_has_no_duplicate_rows() {
 }
 
 #[test]
-fn a_missing_key_is_hidden_from_a_caller_who_may_not_list() {
-    // Without s3:ListBucket the existence of the key is itself privileged information.
-    let blind = ErrorContext::default();
-    assert_eq!(mask_for_authorization(ErrorCode::NO_SUCH_KEY, &blind), ErrorCode::ACCESS_DENIED);
-    assert_eq!(mask_for_authorization(ErrorCode::NO_SUCH_VERSION, &blind), ErrorCode::ACCESS_DENIED);
-    assert_eq!(
-        status_of(&mask_for_authorization(ErrorCode::NO_SUCH_KEY, &blind), &blind),
-        StatusCode::FORBIDDEN
-    );
-
-    let permitted = ErrorContext {
-        has_list_bucket_permission: true,
-        ..ErrorContext::default()
-    };
-    assert_eq!(mask_for_authorization(ErrorCode::NO_SUCH_KEY, &permitted), ErrorCode::NO_SUCH_KEY);
-    assert_eq!(status_of(&ErrorCode::NO_SUCH_KEY, &permitted), StatusCode::NOT_FOUND);
-}
-
-#[test]
-fn a_bucket_owned_by_another_account_is_not_reported_as_missing() {
-    let ctx = ErrorContext {
-        owned_by_other_account: true,
-        has_list_bucket_permission: true,
-        ..ErrorContext::default()
-    };
-    assert_eq!(mask_for_authorization(ErrorCode::NO_SUCH_BUCKET, &ctx), ErrorCode::ACCESS_DENIED);
-}
-
-#[test]
-fn a_bucket_in_another_region_redirects_instead_of_failing() {
-    let moved = ErrorContext {
-        region_mismatch: true,
-        ..ErrorContext::default()
-    };
-    assert_eq!(status_of(&ErrorCode::NO_SUCH_BUCKET, &moved), StatusCode::MOVED_PERMANENTLY);
-
-    let fresh = ErrorContext {
-        dns_not_propagated: true,
-        ..ErrorContext::default()
-    };
-    assert_eq!(status_of(&ErrorCode::NO_SUCH_BUCKET, &fresh), StatusCode::TEMPORARY_REDIRECT);
-}
-
-#[test]
-fn a_head_response_reports_that_it_may_not_carry_a_body() {
-    let head = ErrorContext {
-        is_head: true,
-        ..ErrorContext::default()
-    };
-    assert!(!head.body_allowed());
-    assert_eq!(
-        status_of(&ErrorCode::NO_SUCH_KEY, &head),
-        StatusCode::NOT_FOUND,
-        "the status is unchanged; only the body is dropped"
-    );
-
-    let by_method = ErrorContext {
-        method: Some(Method::HEAD),
-        ..ErrorContext::default()
-    };
-    assert!(!by_method.body_allowed());
-    assert!(ErrorContext::default().body_allowed());
-}
-
-#[test]
 fn known_codes_are_recognised_as_known() {
     assert!(ErrorCode::NO_SUCH_BUCKET.is_known());
     assert!(ErrorCode::from("NoSuchKey").is_known());
@@ -174,8 +107,7 @@ proptest! {
     #[test]
     fn no_arbitrary_code_maps_to_a_server_error(code in "[A-Za-z0-9]{0,40}") {
         let error = ErrorCode::custom(code);
-        let ctx = ErrorContext::default();
         prop_assume!(!error.is_known());
-        prop_assert!(!status_of(&error, &ctx).is_server_error());
+        prop_assert!(!error.default_status().is_server_error());
     }
 }

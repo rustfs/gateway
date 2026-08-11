@@ -288,6 +288,831 @@ done
 # -----------------------------------------------------------------------------
 printf '\nNegative cases (guards must fail)\n'
 
+mut_scalar_duplicate_acceptance_id() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("scripts/check_scalar_case_coverage.sh")
+text = path.read_text()
+old = "for n in 001 002 003 004 005 006 007 008 009 010; do"
+new = "for n in 001 002 003 004 005 006 007 008 009 009; do"
+if old not in text:
+    raise SystemExit("scalar acceptance id loop is missing")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail_self_mutation check_scalar_case_coverage.sh \
+    'one acceptance id replacing another while the total stays 71' mut_scalar_duplicate_acceptance_id
+
+mut_scalar_test_replaced_by_comment_and_string() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/types/src/scalar/tests/name_tests.rs")
+text = path.read_text()
+old = "#[test]\nfn c_name_n009_a_dotted_bucket_is_legal_but_not_vhost_safe()"
+new = '''// #[test]
+// fn c_name_n009_a_dotted_bucket_is_legal_but_not_vhost_safe() {}
+const DECOY: &str = "fn c_name_n009_a_";
+#[test]
+fn removed_name_n009_a_dotted_bucket_is_legal_but_not_vhost_safe()'''
+if old not in text:
+    raise SystemExit("scalar test mutation subject is missing")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_scalar_case_coverage.sh \
+    'comments and strings replacing a mapped scalar test' mut_scalar_test_replaced_by_comment_and_string
+
+mut_scalar_id_maps_to_two_active_tests() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/types/src/scalar/tests/name_tests.rs")
+text = path.read_text()
+text += "\n#[test]\nfn c_name_n009_duplicate_atomic_evidence() {}\n"
+path.write_text(text)
+PYEOF
+}
+expect_fail check_scalar_case_coverage.sh \
+    'one scalar id mapping to two active tests' mut_scalar_id_maps_to_two_active_tests
+
+mut_scalar_test_disabled_by_cfg() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/types/src/scalar/tests/timestamp_corpus_tests.rs")
+text = path.read_text()
+old = "#[test]\nfn c_ts_0001_complete_smithy_timestamp_corpus_matches_gateway_codec()"
+new = "#[cfg(any())]\n#[test]\nfn c_ts_0001_complete_smithy_timestamp_corpus_matches_gateway_codec()"
+if old not in text:
+    raise SystemExit("timestamp corpus test mutation subject is missing")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_scalar_case_coverage.sh \
+    'a cfg-disabled scalar test being counted as executable evidence' mut_scalar_test_disabled_by_cfg
+
+mut_scalar_test_module_unwired() {
+    perl -0pi -e 's/^mod timestamp_corpus_tests;\n//m' crates/types/src/scalar/tests/mod.rs
+}
+expect_fail check_scalar_case_coverage.sh \
+    'a scalar test file no longer wired into its parent module' mut_scalar_test_module_unwired
+
+mut_scalar_test_file_disabled_by_cfg() {
+    perl -0pi -e 's/^(\/\/ Copyright 2026 RustFS Team)/#![cfg(any())]\n$1/' \
+        crates/types/src/scalar/tests/timestamp_corpus_tests.rs
+}
+expect_fail check_scalar_case_coverage.sh \
+    'a file-level cfg disabling mapped scalar tests' mut_scalar_test_file_disabled_by_cfg
+
+mut_scalar_test_file_disabled_by_cfg_attr() {
+    perl -0pi -e 's/^(\/\/ Copyright 2026 RustFS Team)/#![cfg_attr(all(), cfg(any()))]\n$1/' \
+        crates/types/src/scalar/tests/timestamp_corpus_tests.rs
+}
+expect_fail check_scalar_case_coverage.sh \
+    'a file-level cfg_attr disabling mapped scalar tests' mut_scalar_test_file_disabled_by_cfg_attr
+
+mut_scalar_test_replaced_by_macro_body() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/types/src/scalar/tests/range_tests.rs")
+text = path.read_text()
+old = "#[test]\nfn c_rng_0001_a_closed_range_resolves_to_itself()"
+new = '''macro_rules! decoy_scalar_test {
+    () => {
+        #[test]
+        fn c_rng_0001_a_closed_range_resolves_to_itself() {}
+    };
+}
+#[test]
+fn removed_rng_0001_a_closed_range_resolves_to_itself()'''
+if old not in text:
+    raise SystemExit("range test mutation subject is missing")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_scalar_case_coverage.sh \
+    'a test name surviving only inside an unexpanded macro body' mut_scalar_test_replaced_by_macro_body
+
+mut_scalar_case_id_replaced_by_comment() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("conformance/cases/range/c-range-0015.toml")
+text = path.read_text()
+old = 'id = "c-range-0015"'
+new = '# id = "c-range-0015"\nid = "removed-range-0015"'
+if old not in text:
+    raise SystemExit("range case id mutation subject is missing")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_scalar_case_coverage.sh \
+    'a commented TOML id replacing the active conformance case id' mut_scalar_case_id_replaced_by_comment
+
+probe_scalar_case_guard_missing_python() {
+    local output rc=0 tool_path
+    cases=$((cases + 1))
+    tool_path="$(mktemp -d "${TMPDIR:-/tmp}/gateway-scalar-guard-path.XXXXXX")"
+    ln -s "$(command -v dirname)" "${tool_path}/dirname"
+    output="$(GATEWAY_CHECK_ROOT="$REPO_ROOT" PATH="$tool_path" /bin/bash \
+        "${SCRIPT_DIR}/check_scalar_case_coverage.sh" 2>&1)" || rc=$?
+    rm -rf "$tool_path"
+    if [[ "$rc" -ne 0 && "$output" == *'required command is missing: python3'* ]]; then
+        pass_msg 'check_scalar_case_coverage.sh fails closed without python3'
+    else
+        fail_msg 'check_scalar_case_coverage.sh reported green without python3'
+    fi
+}
+probe_scalar_case_guard_missing_python
+
+mut_etag_display_added() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/types/src/scalar/etag.rs")
+path.write_text(path.read_text() + "\nimpl std::fmt::Display for ETag { fn fmt(&self, _: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { Ok(()) } }\n")
+PYEOF
+}
+expect_fail check_etag_render.sh \
+    'ETag acquiring a default Display rendering' mut_etag_display_added
+
+mut_etag_into_string_added() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/types/src/scalar/etag.rs")
+path.write_text(path.read_text() + "\nimpl From<ETag> for String { fn from(_: ETag) -> Self { String::new() } }\n")
+PYEOF
+}
+expect_fail check_etag_render.sh \
+    'ETag acquiring a default String conversion' mut_etag_into_string_added
+
+mut_etag_contextual_render_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/types/src/scalar/etag.rs")
+text = path.read_text()
+path.write_text(text.replace("pub fn render(&self, ctx: EtagRender)", "pub fn render_default(&self, ctx: EtagRender)", 1))
+PYEOF
+}
+expect_fail check_etag_render.sh \
+    'the sole contextual ETag render entry being removed' mut_etag_contextual_render_removed
+
+mut_opaque_date_parser_added() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/types/src/scalar/opaque_string.rs")
+text = path.read_text()
+path.write_text(text.replace("impl OpaqueString {", "impl OpaqueString {\n    pub fn parse_as_date(&self) {}", 1))
+PYEOF
+}
+expect_fail check_opaque_string.sh \
+    'OpaqueString acquiring a date parser' mut_opaque_date_parser_added
+
+mut_checksum_default_features_enabled() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("Cargo.toml")
+text = path.read_text()
+path.write_text(text.replace("default-features = false, features = [\"std\"]", "default-features = true, features = [\"std\"]", 1))
+PYEOF
+}
+expect_fail check_checksum_dependencies.sh \
+    'crc-fast default features being enabled' mut_checksum_default_features_enabled
+
+mut_checksum_workspace_inheritance_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/types/Cargo.toml")
+text = path.read_text()
+path.write_text(text.replace("crc-fast = { workspace = true }", "crc-fast = { version = \"1.10\" }", 1))
+PYEOF
+}
+expect_fail check_checksum_dependencies.sh \
+    'the types crate bypassing the reviewed crc-fast declaration' mut_checksum_workspace_inheritance_removed
+
+mut_crc_fast_unsafe_record_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("scripts/allowances/unsafe-code-allowances.txt")
+text = path.read_text()
+path.write_text("\n".join(line for line in text.splitlines() if not line.startswith("crc-fast|")) + "\n")
+PYEOF
+}
+expect_fail check_unsafe_code_allowances.sh \
+    'the crc-fast external unsafe record being removed' mut_crc_fast_unsafe_record_removed
+
+mut_local_unsafe_added() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("fuzz/fuzz_targets/etag_parse.rs")
+path.write_text(path.read_text() + "\nunsafe fn mutation_only() {}\n")
+PYEOF
+}
+expect_fail check_unsafe_code_allowances.sh \
+    'a local Rust file acquiring unsafe code' mut_local_unsafe_added
+
+mut_second_s3_error_bridge() {
+    printf '\nimpl From<rustfs_gateway_core::HandlerError> for S3Error {\n    fn from(_: rustfs_gateway_core::HandlerError) -> Self { todo!() }\n}\n' \
+        >>crates/gateway/src/render.rs
+}
+expect_fail check_error_resolution_surface.sh \
+    'a second public bridge constructing S3Error before resolution' mut_second_s3_error_bridge
+
+mut_multiline_nested_s3_error_bridge() {
+    printf '\nimpl\n    From<Option<ErrorResolution>> for S3Error\n{\n    fn from(_: Option<ErrorResolution>) -> Self { todo!() }\n}\n' \
+        >>crates/gateway/src/render.rs
+}
+expect_fail check_error_resolution_surface.sh \
+    'a multiline nested-generic From bridge constructing S3Error' mut_multiline_nested_s3_error_bridge
+
+mut_s3_error_bridge_takes_handler() {
+    perl -0pi -e 's/impl From<ErrorResolution> for S3Error/impl From<HandlerError> for S3Error/' \
+        crates/gateway/src/render.rs
+}
+expect_fail check_error_resolution_surface.sh \
+    'the sole S3Error bridge accepting an unresolved HandlerError' mut_s3_error_bridge_takes_handler
+
+mut_s3_error_resource_writer() {
+    perl -0pi -e 's/impl S3Error \{/impl S3Error {\n    pub fn about_resource(self, _: String) -> Self { self }/' \
+        crates/gateway/src/render.rs
+}
+expect_fail check_error_resolution_surface.sh \
+    'S3Error regaining a post-resolution resource writer' mut_s3_error_resource_writer
+
+mut_handler_status_authority() {
+    perl -0pi -e 's/impl HandlerError \{/impl HandlerError {\n    pub fn status(\&self) -> StatusCode { StatusCode::BAD_REQUEST }/' \
+        crates/core/src/handler.rs
+}
+expect_fail check_error_resolution_surface.sh \
+    'HandlerError regaining a status authority before resolution' mut_handler_status_authority
+
+mut_stage_filter_resolves_error() {
+    perl -0pi -e 's/(fn on_wire\([^\n]+Result<\(\), )HandlerError>/$1S3Error>/' \
+        crates/gateway/src/ext/filter.rs
+}
+expect_fail check_error_resolution_surface.sh \
+    'a StageFilter seam returning an already-resolved S3Error' mut_stage_filter_resolves_error
+
+mut_stage_filter_seam_removed() {
+    perl -0pi -e 's/    fn on_response\([^\n]+\n        Ok\(\(\)\)\n    \}\n//' crates/gateway/src/ext/filter.rs
+}
+expect_fail check_error_resolution_surface.sh \
+    'the closed StageFilter seam set losing its response seam' mut_stage_filter_seam_removed
+
+mut_typed_writer_made_public() {
+    perl -0pi -e 's/pub\(crate\) fn from_wire_reject/pub fn from_wire_reject/' crates/gateway/src/render.rs
+}
+expect_fail check_error_resolution_surface.sh \
+    'a typed S3Error converter becoming public' mut_typed_writer_made_public
+
+mut_context_carrier_bridge_removed() {
+    perl -0pi -e 's/impl From<HandlerErrorContext> for HandlerError/impl From<ErrorContext> for HandlerError/' \
+        crates/core/src/handler.rs
+}
+expect_fail check_error_resolution_surface.sh \
+    'HandlerError regaining an arbitrary ErrorContext carrier bridge' mut_context_carrier_bridge_removed
+
+mut_handler_context_field_public() {
+    perl -0pi -e 's/pub struct HandlerErrorContext\(ErrorContext\);/pub struct HandlerErrorContext(pub ErrorContext);/' \
+        crates/core/src/error_resolution.rs
+}
+expect_fail check_error_resolution_surface.sh \
+    'HandlerErrorContext exposing its arbitrary ErrorContext field' mut_handler_context_field_public
+
+mut_handler_context_generic_factory() {
+    perl -0pi -e 's/impl HandlerErrorContext \{/impl HandlerErrorContext {\n    pub fn new(context: ErrorContext) -> Self { Self(context) }/' \
+        crates/core/src/error_resolution.rs
+}
+expect_fail check_error_resolution_surface.sh \
+    'HandlerErrorContext gaining a generic ErrorContext factory' mut_handler_context_generic_factory
+
+mut_handler_context_async_factory() {
+    perl -0pi -e 's/impl HandlerErrorContext \{/impl HandlerErrorContext {\n    pub async fn new(context: ErrorContext) -> Self { Self(context) }/' \
+        crates/core/src/error_resolution.rs
+}
+expect_fail check_error_resolution_surface.sh \
+    'HandlerErrorContext gaining an async generic ErrorContext factory' mut_handler_context_async_factory
+
+mut_handler_context_auth_factory() {
+    perl -0pi -e 's/impl HandlerErrorContext \{/impl HandlerErrorContext {\n    pub fn authorization_scope_malformed() -> Self { Self(ErrorContext::authorization_scope_malformed()) }/' \
+        crates/core/src/error_resolution.rs
+}
+expect_fail check_error_resolution_surface.sh \
+    'HandlerErrorContext gaining an authorization-scope factory' mut_handler_context_auth_factory
+
+mut_handler_context_multiline_from_impl() {
+    printf '\nimpl\n    From<ErrorContext> for HandlerErrorContext {\n    fn from(context: ErrorContext) -> Self { Self(context) }\n}\n' \
+        >>crates/core/src/error_resolution.rs
+}
+expect_fail check_error_resolution_surface.sh \
+    'HandlerErrorContext gaining a multiline From<ErrorContext> bridge' mut_handler_context_multiline_from_impl
+
+mut_handler_context_macro_generated_from_impl() {
+    printf '\nmacro_rules! reopen {\n    () => {\n        impl From<ErrorContext> for HandlerErrorContext {\n            fn from(context: ErrorContext) -> Self { Self(context) }\n        }\n    };\n}\nreopen!();\n' \
+        >>crates/core/src/error_resolution.rs
+}
+expect_fail check_error_resolution_surface.sh \
+    'HandlerErrorContext gaining a macro-generated From<ErrorContext> bridge' mut_handler_context_macro_generated_from_impl
+
+mut_handler_context_paren_macro_generated_from_impl() {
+    printf '\nmacro_rules! reopen (\n    () => {\n        impl From<ErrorContext> for HandlerErrorContext {\n            fn from(context: ErrorContext) -> Self { Self(context) }\n        }\n    };\n);\nreopen!();\n' \
+        >>crates/core/src/error_resolution.rs
+}
+expect_fail check_error_resolution_surface.sh \
+    'HandlerErrorContext gaining a parenthesized macro-generated From bridge' mut_handler_context_paren_macro_generated_from_impl
+
+mut_handler_context_bracket_macro_generated_from_impl() {
+    printf '\nmacro_rules! reopen [\n    () => {\n        impl From<ErrorContext> for HandlerErrorContext {\n            fn from(context: ErrorContext) -> Self { Self(context) }\n        }\n    };\n];\nreopen!();\n' \
+        >>crates/core/src/error_resolution.rs
+}
+expect_fail check_error_resolution_surface.sh \
+    'HandlerErrorContext gaining a bracketed macro-generated From bridge' mut_handler_context_bracket_macro_generated_from_impl
+
+mut_resolver_entry_renamed() {
+    perl -0pi -e 's/pub fn resolve\(context: ErrorContext, response: ResponseKind\)/pub fn resolve_unchecked(context: ErrorContext, response: ResponseKind)/' \
+        crates/core/src/error_resolution.rs
+}
+expect_fail check_error_resolution_surface.sh \
+    'core losing the sole public resolution entry' mut_resolver_entry_renamed
+
+mut_resolution_source_removed() {
+    rm -f crates/core/src/error_resolution.rs
+}
+expect_fail check_error_resolution_surface.sh \
+    'the required resolution source disappearing' mut_resolution_source_removed
+
+mut_owned_bucket_context_takes_a_region() {
+    perl -0pi -e 's/pub const fn owned_bucket_recreation\(\) -> Self/pub fn owned_bucket_recreation(_: RegionLabel) -> Self/' \
+        crates/core/src/error_resolution.rs
+}
+expect_fail check_error_resolution_surface.sh \
+    'the owned-bucket refusal context regaining a region-selected success path' mut_owned_bucket_context_takes_a_region
+
+mut_owned_bucket_success_enters_the_resolver() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/core/src/error_resolution.rs")
+text = path.read_text()
+old = '''        ErrorCase::OwnedBucketRecreation => ordinary_parts(
+            ErrorCode::BUCKET_ALREADY_OWNED_BY_YOU,
+            Cow::Borrowed("Your previous request to create the named bucket succeeded and you already own it."),
+            Vec::new(),
+            Vec::new(),
+            None,
+        ),'''
+new = "        ErrorCase::OwnedBucketRecreation => success(StatusCode::OK),"
+if old not in text:
+    raise SystemExit("owned-bucket conflict arm is missing")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_error_resolution_surface.sh \
+    'the us-east-1 owned-bucket success entering ErrorContext' mut_owned_bucket_success_enters_the_resolver
+
+mut_core_error_trybuild_harness_disabled() {
+    perl -0pi -e 's/^(\/\/ Copyright 2026 RustFS Team)/#![cfg_attr(all(), cfg(any()))]\n$1/' \
+        crates/core/tests/compile_fail.rs
+}
+expect_fail check_error_resolution_surface.sh \
+    'the core error-resolution trybuild harness disabled by file-level cfg_attr' mut_core_error_trybuild_harness_disabled
+
+mut_gateway_error_trybuild_harness_disabled() {
+    perl -0pi -e 's/^(\/\/ Copyright 2026 RustFS Team)/#![cfg(any())]\n$1/' \
+        crates/gateway/tests/compile_fail.rs
+}
+expect_fail check_error_resolution_surface.sh \
+    'the gateway error-resolution trybuild harness disabled by file-level cfg' mut_gateway_error_trybuild_harness_disabled
+
+mut_gateway_consolidated_harness_disabled() {
+    perl -0pi -e 's/^(\/\/ Copyright 2026 RustFS Team)/#![cfg_attr(all(), cfg(any()))]\n$1/' \
+        crates/gateway/tests/integration.rs
+}
+expect_fail check_error_resolution_surface.sh \
+    'the consolidated gateway harness disabled by file-level cfg_attr' mut_gateway_consolidated_harness_disabled
+
+mut_gateway_consolidated_registration_decoys() {
+    cat >>crates/gateway/tests/integration.rs <<'RSEOF'
+
+// #[path = "compile_fail.rs"]
+// mod compile_fail;
+const COMPILE_FAIL_REGISTRATION_DECOY: &str = r#"#[path = "compile_fail.rs"]
+mod compile_fail;"#;
+RSEOF
+}
+
+probe_gateway_consolidated_registration_decoys() {
+    local sandbox rc=0
+    cases=$((cases + 1))
+    make_sandbox
+    sandbox="$SANDBOX"
+    (cd "$sandbox" && mut_gateway_consolidated_registration_decoys >/dev/null)
+    GATEWAY_CHECK_ROOT="$sandbox" "${SCRIPT_DIR}/check_error_resolution_surface.sh" >/dev/null 2>&1 || rc=$?
+    if [[ "$rc" -eq 0 ]]; then
+        pass_msg 'check_error_resolution_surface.sh ignores consolidated registration comment and raw-string decoys'
+    else
+        fail_msg 'check_error_resolution_surface.sh rejected consolidated registration comment or raw-string decoys'
+    fi
+}
+probe_gateway_consolidated_registration_decoys
+
+mut_gateway_trybuild_harness_split() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/gateway/tests/compile_fail.rs")
+text = path.read_text()
+call = '    cases.compile_fail("tests/trybuild/credential/*.rs");\n'
+if text.count(call) != 1:
+    raise SystemExit("gateway credential trybuild call is missing")
+path.write_text(text.replace(call, "", 1))
+Path("crates/gateway/tests/trybuild_credential.rs").write_text(
+    "#[test]\n"
+    "fn credential_contract() {\n"
+    "    let cases = trybuild::TestCases::new();\n"
+    f"{call}"
+    "}\n"
+)
+PYEOF
+}
+expect_fail check_error_resolution_surface.sh \
+    'the gateway trybuild fixtures being split across synthetic projects' mut_gateway_trybuild_harness_split
+
+mut_gateway_extra_trybuild_harness_added() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+Path("crates/gateway/tests/extra_compile.rs").write_text(
+    "#[test]\n"
+    "fn extra_compile_fail_contract() {\n"
+    "    let cases = trybuild::TestCases::new();\n"
+    "    cases.compile_fail(\"tests/compile_fail/azc_*.rs\");\n"
+    "}\n"
+)
+PYEOF
+}
+expect_fail check_error_resolution_surface.sh \
+    'an extra gateway trybuild entry point creating a second synthetic project' mut_gateway_extra_trybuild_harness_added
+
+mut_gateway_trybuild_harness_reused_by_path() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+Path("crates/gateway/tests/extra_compile.rs").write_text(
+    '#[path = "compile_fail.rs"]\nmod duplicate;\n'
+)
+PYEOF
+}
+expect_fail check_error_resolution_surface.sh \
+    'a second integration target reusing the unified trybuild harness by path' mut_gateway_trybuild_harness_reused_by_path
+
+mut_gateway_trybuild_harness_reused_by_cfg_attr_path() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+Path("crates/gateway/tests/extra_compile.rs").write_text(
+    '#[cfg_attr(all(), path = "compile_fail.rs")]\nmod duplicate;\n'
+)
+PYEOF
+}
+expect_fail check_error_resolution_surface.sh \
+    'a second integration target reusing the unified trybuild harness through cfg_attr' mut_gateway_trybuild_harness_reused_by_cfg_attr_path
+
+mut_gateway_lib_reuses_trybuild_harness() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/gateway/src/lib.rs")
+text = path.read_text()
+text += '''
+#[cfg(test)]
+#[path = "../tests/compile_fail.rs"]
+mod duplicate_compile_fail;
+'''
+path.write_text(text)
+PYEOF
+}
+expect_fail check_error_resolution_surface.sh \
+    'the gateway library test target reusing the unified trybuild harness' mut_gateway_lib_reuses_trybuild_harness
+
+mut_gateway_manifest_reuses_trybuild_harness() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/gateway/Cargo.toml")
+text = path.read_text()
+text += '''
+[[example]]
+name = "duplicate-compile-fail"
+path = "tests/compile_fail.rs"
+test = true
+'''
+path.write_text(text)
+PYEOF
+}
+expect_fail check_error_resolution_surface.sh \
+    'a testable Cargo example reusing the unified trybuild harness' mut_gateway_manifest_reuses_trybuild_harness
+
+mut_gateway_consolidated_harness_omits_trybuild_module() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/gateway/tests/integration.rs")
+text = path.read_text()
+entry = '#[path = "compile_fail.rs"]\nmod compile_fail;\n'
+if text.count(entry) != 1:
+    raise SystemExit("gateway compile-fail module registration is missing")
+path.write_text(text.replace(entry, "", 1))
+PYEOF
+}
+expect_fail check_error_resolution_surface.sh \
+    'the consolidated gateway target omitting its unified trybuild module' mut_gateway_consolidated_harness_omits_trybuild_module
+
+mut_gateway_manifest_disables_consolidated_target() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/gateway/Cargo.toml")
+text = path.read_text()
+anchor = 'path = "tests/integration.rs"\n'
+if text.count(anchor) != 1:
+    raise SystemExit("gateway integration target is missing")
+path.write_text(text.replace(anchor, anchor + "test = false\n", 1))
+PYEOF
+}
+expect_fail check_error_resolution_surface.sh \
+    'the consolidated gateway target disabling its test harness' mut_gateway_manifest_disables_consolidated_target
+
+mut_gateway_manifest_gates_consolidated_target() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/gateway/Cargo.toml")
+text = path.read_text()
+anchor = 'path = "tests/integration.rs"\n'
+if text.count(anchor) != 1:
+    raise SystemExit("gateway integration target is missing")
+path.write_text(text.replace(anchor, anchor + 'required-features = ["compat-s3s"]\n', 1))
+PYEOF
+}
+expect_fail check_error_resolution_surface.sh \
+    'the consolidated gateway target requiring a non-default feature' mut_gateway_manifest_gates_consolidated_target
+
+mut_gateway_manifest_duplicates_consolidated_target() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/gateway/Cargo.toml")
+text = path.read_text()
+text += '''
+[[test]]
+name = "duplicate_integration"
+path = "tests/integration.rs"
+'''
+path.write_text(text)
+PYEOF
+}
+expect_fail check_error_resolution_surface.sh \
+    'a second Cargo target duplicating the consolidated gateway harness' mut_gateway_manifest_duplicates_consolidated_target
+
+mut_gateway_manifest_redirects_consolidated_target() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/gateway/Cargo.toml")
+text = path.read_text()
+old = 'path = "tests/integration.rs"'
+if text.count(old) != 1:
+    raise SystemExit("gateway integration target is missing")
+path.write_text(text.replace(old, 'path = "tests/facade_probe.rs"', 1))
+PYEOF
+}
+expect_fail check_error_resolution_surface.sh \
+    'the consolidated gateway target being redirected to another path' mut_gateway_manifest_redirects_consolidated_target
+
+mut_gateway_trybuild_receiver_shadowed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/gateway/tests/compile_fail.rs")
+text = path.read_text()
+old = "    let cases = trybuild::TestCases::new();\n"
+new = old + "    let cases = FakeCases::new();\n"
+if text.count(old) != 1:
+    raise SystemExit("gateway trybuild constructor is missing")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_error_resolution_surface.sh \
+    'the gateway trybuild receiver being shadowed after construction' mut_gateway_trybuild_receiver_shadowed
+
+mut_gateway_credential_fixture_pair_removed() {
+    rm crates/gateway/tests/trybuild/credential/provider_returns_secret.rs
+    rm crates/gateway/tests/trybuild/credential/provider_returns_secret.stderr
+}
+expect_fail check_error_resolution_surface.sh \
+    'a gateway credential source and golden being removed together' mut_gateway_credential_fixture_pair_removed
+
+mut_core_error_trybuild_call_replaced_by_string() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/core/tests/compile_fail.rs")
+text = path.read_text()
+old = '    cases.compile_fail("tests/compile_fail/error_resolution_*.rs");'
+new = '    let _ = r#"cases.compile_fail(\\"tests/compile_fail/error_resolution_*.rs\\");"#;'
+if old not in text:
+    raise SystemExit("core error-resolution trybuild call is missing")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_error_resolution_surface.sh \
+    'the core error-resolution trybuild call replaced by a string decoy' mut_core_error_trybuild_call_replaced_by_string
+
+mut_gateway_error_trybuild_call_replaced_by_comment() {
+    perl -0pi -e 's/    cases\.compile_fail\("tests\/compile_fail\/error_resolution_\*\.rs"\);/    \/\/ cases.compile_fail("tests\/compile_fail\/error_resolution_*.rs");/' \
+        crates/gateway/tests/compile_fail.rs
+}
+expect_fail check_error_resolution_surface.sh \
+    'the gateway error-resolution trybuild call replaced by a comment decoy' mut_gateway_error_trybuild_call_replaced_by_comment
+
+mut_error_trybuild_fixture_disabled() {
+    perl -0pi -e 's/^(\/\/ Copyright 2026 RustFS Team)/#![cfg_attr(all(), cfg(any()))]\n$1/' \
+        crates/core/tests/compile_fail/error_resolution_context_fields.rs
+}
+expect_fail check_error_resolution_surface.sh \
+    'an error-resolution compile-fail fixture disabled by cfg_attr' mut_error_trybuild_fixture_disabled
+
+mut_error_trybuild_fixture_replaced_by_string() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/core/tests/compile_fail/error_resolution_context_fields.rs")
+text = path.read_text()
+old = "    let ErrorContext(_case) = context;"
+new = '    let _ = "let ErrorContext(_case) = context;";'
+if old not in text:
+    raise SystemExit("error-resolution fixture evidence is missing")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_error_resolution_surface.sh \
+    'an error-resolution compile-fail expression replaced by a string decoy' mut_error_trybuild_fixture_replaced_by_string
+
+mut_error_trybuild_golden_removed() {
+    rm crates/core/tests/compile_fail/error_resolution_context_fields.stderr
+}
+expect_fail check_error_resolution_surface.sh \
+    'an error-resolution compile-fail golden removed' mut_error_trybuild_golden_removed
+
+mut_error_trybuild_golden_loses_diagnostic() {
+    perl -0pi -e 's/cannot match against a tuple struct which contains private fields/forged generic diagnostic/' \
+        crates/core/tests/compile_fail/error_resolution_context_fields.stderr
+}
+expect_fail check_error_resolution_surface.sh \
+    'an error-resolution compile-fail golden losing its case-specific diagnostic' mut_error_trybuild_golden_loses_diagnostic
+
+mut_scope_region_opened() {
+    perl -0pi -e 's/pub struct ScopeRegion\(Box<str>\);/pub struct ScopeRegion(pub Box<str>);/' crates/sig/src/scope.rs
+}
+expect_fail check_scope_rejection_surface.sh \
+    'ScopeRegion gaining a public field' mut_scope_region_opened
+
+mut_scope_rejection_opened() {
+    perl -0pi -e 's/pub struct ScopeRejection\(Option<ScopeRegion>\);/pub struct ScopeRejection(pub Option<ScopeRegion>);/' \
+        crates/sig/src/scope.rs
+}
+expect_fail check_scope_rejection_surface.sh \
+    'ScopeRejection gaining a public field' mut_scope_rejection_opened
+
+mut_scope_return_erased() {
+    perl -0pi -e 's/Result<VerifiedScope, ScopeRejection>/Result<VerifiedScope, AuthError>/' crates/sig/src/scope.rs
+}
+expect_fail check_scope_rejection_surface.sh \
+    'enforce_scope erasing the typed rejection' mut_scope_return_erased
+
+mut_scope_date_carries_region() {
+    perl -0pi -e 's/return Err\(ScopeRejection\(None\)\);/return Err(ScopeRejection(expected.regions().regions.first().cloned()));/' \
+        crates/sig/src/scope.rs
+}
+expect_fail check_scope_rejection_surface.sh \
+    'a date mismatch carrying a remediation region' mut_scope_date_carries_region
+
+mut_scope_region_loses_remediation() {
+    perl -0pi -e 's/ScopeRejection\(expected\.regions\(\)\.regions\.first\(\)\.cloned\(\)\)/ScopeRejection(None)/' \
+        crates/sig/src/scope.rs
+}
+expect_fail check_scope_rejection_surface.sh \
+    'a region mismatch losing its configured remediation' mut_scope_region_loses_remediation
+
+mut_scope_sort_removed() {
+    perl -0pi -e 's/regions\.sort_by\(/regions.sort_by_key(/' crates/sig/src/scope.rs
+}
+expect_fail check_scope_rejection_surface.sh \
+    'configured remediation order no longer using the canonical byte sort' mut_scope_sort_removed
+
+mut_scope_dedup_removed() {
+    perl -0pi -e 's/regions\.dedup\(\);/\/\/ mutation removed deduplication/' crates/sig/src/scope.rs
+}
+expect_fail check_scope_rejection_surface.sh \
+    'configured regions no longer being deduplicated' mut_scope_dedup_removed
+
+mut_scope_alphabet_widened() {
+    perl -0pi -e 's/byte\.is_ascii_lowercase\(\)/byte.is_ascii_alphabetic()/' crates/sig/src/scope.rs
+}
+expect_fail check_scope_rejection_surface.sh \
+    'configured regions accepting uppercase request text' mut_scope_alphabet_widened
+
+mut_authentication_outcome_field_public() {
+    perl -0pi -e 's/    scope_rejection: Option<ScopeRejection>,/    pub scope_rejection: Option<ScopeRejection>,/' \
+        crates/gateway/src/ext/authenticator.rs
+}
+expect_fail check_scope_rejection_surface.sh \
+    'the facade carrier exposing its scope proof field' mut_authentication_outcome_field_public
+
+mut_scope_rejection_trait_bridge() {
+    printf '\nimpl From<ScopeRejection> for AuthenticationOutcome {\n    fn from(rejection: ScopeRejection) -> Self { Self::scope_rejected(rejection) }\n}\n' \
+        >>crates/gateway/src/ext/authenticator.rs
+}
+expect_fail check_scope_rejection_surface.sh \
+    'ScopeRejection gaining a public trait bridge into AuthenticationOutcome' mut_scope_rejection_trait_bridge
+
+mut_ordinary_outcome_gets_proof() {
+    perl -0pi -e 's/scope_rejection: None,/scope_rejection: Some(todo!()),/' crates/gateway/src/ext/authenticator.rs
+}
+expect_fail check_scope_rejection_surface.sh \
+    'an ordinary custom-authenticator outcome receiving contextual proof' mut_ordinary_outcome_gets_proof
+
+mut_verdict_accessor_rewrites() {
+    perl -0pi -e 's/        &self\.verdict\n/        todo!()\n/' crates/gateway/src/ext/authenticator.rs
+}
+expect_fail check_scope_rejection_surface.sh \
+    'the public verdict accessor no longer borrowing the stored verdict' mut_verdict_accessor_rewrites
+
+mut_scope_verdict_replaced() {
+    perl -0pi -e 's/verdict: Verdict::reject\(AuthError::AuthorizationHeaderMalformed\)/verdict: Verdict::reject(AuthError::AccessDenied)/' \
+        crates/gateway/src/ext/authenticator.rs
+}
+expect_fail check_scope_rejection_surface.sh \
+    'the private scope carrier replacing the fixed public verdict' mut_scope_verdict_replaced
+
+mut_scope_split_public() {
+    perl -0pi -e 's/pub\(crate\) fn into_parts/pub fn into_parts/' crates/gateway/src/ext/authenticator.rs
+}
+expect_fail check_scope_rejection_surface.sh \
+    'the contextual carrier gaining a public consuming split' mut_scope_split_public
+
+mut_authenticator_returns_bare_verdict() {
+    perl -0pi -e 's/Result<AuthenticationOutcome, Unavailable>/Result<Verdict, Unavailable>/' \
+        crates/gateway/src/ext/authenticator.rs
+}
+expect_fail check_scope_rejection_surface.sh \
+    'Authenticator returning the old bare verdict' mut_authenticator_returns_bare_verdict
+
+mut_service_drops_scope_proof() {
+    perl -0pi -e 's/scope_rejection\.and_then\(\|rejection\| rejection\.expected_region\(\)\.cloned\(\)\)/None/' \
+        crates/gateway/src/service.rs
+}
+expect_fail check_scope_rejection_surface.sh \
+    'the service dropping the trusted scope proof' mut_service_drops_scope_proof
+
+mut_service_region_context_swapped() {
+    perl -0pi -e 's/ErrorContext::authorization_region_mismatch\(region\)/ErrorContext::authorization_scope_malformed()/' \
+        crates/gateway/src/service.rs
+}
+expect_fail check_scope_rejection_surface.sh \
+    'a trusted region mismatch losing its Region detail' mut_service_region_context_swapped
+
+mut_service_no_detail_context_swapped() {
+    perl -0pi -e 's/None => ErrorContext::authorization_scope_malformed\(\)/None => ErrorContext::authorization_region_mismatch(todo!())/' \
+        crates/gateway/src/service.rs
+}
+expect_fail check_scope_rejection_surface.sh \
+    'a date or service mismatch gaining a Region detail' mut_service_no_detail_context_swapped
+
+mut_core_scope_context_removed() {
+    perl -0pi -e 's/pub const fn authorization_scope_malformed/pub const fn removed_scope_malformed/' \
+        crates/core/src/error_resolution.rs
+}
+expect_fail check_scope_rejection_surface.sh \
+    'core losing the closed no-detail scope context' mut_core_scope_context_removed
+
+mut_scope_source_removed() {
+    rm -f crates/sig/src/scope.rs
+}
+expect_fail check_scope_rejection_surface.sh \
+    'the required typed scope source disappearing' mut_scope_source_removed
+
 mut_assembly_case_id_deleted() {
     python3 - <<'PYEOF'
 import pathlib

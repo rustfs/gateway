@@ -25,6 +25,7 @@ Agent entry point for operations, routing, codecs, authorization state and handl
 | `src/registry/` | Handler/codec registration and erasure. | Registration, completeness or dynamic dispatch fails. |
 | `src/dispatch.rs` | Route, registration and parameter refusal order. | A request fails in the wrong stage. |
 | `src/error.rs` | Closed pre-authentication errors. | A refusal before authentication has the wrong status. |
+| `src/error_resolution.rs` | Closed contextual error resolution and body policy. | A contextual refusal has the wrong code, status, extras or body policy. |
 | `src/fault.rs` | Closed error headers/details. | An error document needs a reviewed field. |
 | `src/cors/` | CORS rule and response primitives. | CORS semantics change. |
 | `src/sse/` | Server-side encryption proof and rejection types. | SSE headers or key handling change. |
@@ -34,5 +35,6 @@ Agent entry point for operations, routing, codecs, authorization state and handl
 | `tests/registration.rs` | Registration rejection matrix. | Handler registration changes. |
 | `tests/static_dispatch.rs` | Static dispatch order and identity mismatch. | Change the monomorphic core boundary. |
 | `tests/precondition_range.rs` | Conditional/range behavior matrix. | Precondition logic changes. |
+| `tests/error_resolution.rs` | P1-04 contextual error outcome matrix. | Change error masking, status, extras or body suppression. |
 | `tests/purity_guard.rs` | Source-shape guards for pre-auth code. | Add public/core routing code. |
 | `tests/golden/route-table.txt` | Protected ordered route table. | Never edit without the Breaking Change process. |
