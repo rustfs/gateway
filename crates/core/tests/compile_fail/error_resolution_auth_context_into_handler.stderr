@@ -1,0 +1,14 @@
+error[E0277]: the trait bound `HandlerError: From<ErrorContext>` is not satisfied
+  --> tests/compile_fail/error_resolution_auth_context_into_handler.rs:25:40
+   |
+25 |     let _error: HandlerError = context.into();
+   |                                        ^^^^ the trait `From<ErrorContext>` is not implemented for `HandlerError`
+   |
+help: the trait `From<ErrorContext>` is not implemented for `HandlerError`
+      but trait `From<HandlerErrorContext>` is implemented for it
+  --> src/handler.rs
+   |
+   | impl From<HandlerErrorContext> for HandlerError {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   = help: for that trait implementation, expected `HandlerErrorContext`, found `ErrorContext`
+   = note: required for `ErrorContext` to implement `Into<HandlerError>`

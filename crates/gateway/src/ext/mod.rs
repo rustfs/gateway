@@ -76,7 +76,9 @@ mod oplayer;
 mod policy;
 mod vhost;
 
-pub use self::authenticator::{Authentication, Authenticator, ChunkSink, ChunkVerification, SigV4Authenticator, Unavailable};
+pub use self::authenticator::{
+    Authentication, AuthenticationOutcome, Authenticator, ChunkSink, ChunkVerification, SigV4Authenticator, Unavailable,
+};
 #[cfg(feature = "dangerous-allow-all-authorizer")]
 pub use self::authorizer::{AllowAllAuthorizer, DangerAck};
 pub use self::authorizer::{

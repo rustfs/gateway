@@ -111,15 +111,16 @@ use std::sync::{Arc, Mutex};
 use rustfs_gateway::dto;
 use rustfs_gateway::{
     AclHeaders, AclInput, AclRejection, AclTarget, BucketName, ByteStream, ChecksumAlgorithm, ChecksumSpec, ConditionalOutcome,
-    CopyRange, CopySourceRejection, CursorSpec, ETag, ErrorCode, ErrorDetail, EventSequence, GranteeType, Handler, HandlerError,
-    HandlerResult, IfRange, ObjectKey, ObjectValidators, PRECONDITION_FAILED_MESSAGE, PreconditionRejection, Preconditions,
-    REGION_MATCH_POLICY, RangeDecision, RangeSelectors, RegionLabel, RegionSet, Req, RequestKind, Resp, RestoreState,
-    RestoreStatus, TagScope, TaggingRejection, Timestamp, collect, evaluate, evaluate_range, format_restore_status,
-    parse_conditional_etag, parse_tagging_header, permanent_redirect_for, resolve_copy_range, resolve_grantee_type,
-    resolve_input as resolve_acl_input, resolve_location_constraint, stats_document, validate_accelerate, validate_cors,
-    validate_encryption, validate_legal_hold, validate_lifecycle, validate_lock_configuration, validate_logging,
-    validate_notification, validate_policy, validate_public_access_block, validate_replication, validate_request_payment,
-    validate_restore, validate_retention, validate_select, validate_tag_set, validate_versioning, validate_website,
+    CopyRange, CopySourceRejection, CursorSpec, ETag, ErrorCode, EventSequence, GranteeType, Handler, HandlerError,
+    HandlerErrorContext, HandlerResult, IfRange, MissingObject, ObjectKey, ObjectValidators, PRECONDITION_FAILED_MESSAGE,
+    PreconditionRejection, Preconditions, REGION_MATCH_POLICY, RangeDecision, RangeSelectors, RegionLabel, RegionSet, Req,
+    RequestKind, ResourceVisibility, Resp, RestoreState, RestoreStatus, TagScope, TaggingRejection, Timestamp, collect, evaluate,
+    evaluate_range, format_restore_status, parse_conditional_etag, parse_tagging_header, permanent_redirect_for,
+    resolve_copy_range, resolve_grantee_type, resolve_input as resolve_acl_input, resolve_location_constraint, stats_document,
+    validate_accelerate, validate_cors, validate_encryption, validate_legal_hold, validate_lifecycle,
+    validate_lock_configuration, validate_logging, validate_notification, validate_policy, validate_public_access_block,
+    validate_replication, validate_request_payment, validate_restore, validate_retention, validate_select, validate_tag_set,
+    validate_versioning, validate_website,
 };
 
 /// The canonical user id every listing reports as the owner.
@@ -1261,14 +1262,16 @@ fn redirect_if_elsewhere(fixture: &Fixture, bucket: &str) -> Result<(), HandlerE
     }
     let label = RegionLabel::new(region)
         .map_err(|_| HandlerError::internal_error("a fixture bucket's region is not a valid region label"))?;
-    Err(permanent_redirect_for(bucket.to_owned(), label))
+    let bucket =
+        BucketName::new(bucket.to_owned()).map_err(|_| HandlerError::internal_error("a fixture bucket name is not valid"))?;
+    Err(permanent_redirect_for(bucket, label))
 }
 
 fn require_bucket(fixture: &Fixture, bucket: &BucketName) -> Result<(), HandlerError> {
     if fixture.has_bucket(bucket.as_str()) {
         return Ok(());
     }
-    Err(HandlerError::new(ErrorCode::NO_SUCH_BUCKET, "The specified bucket does not exist"))
+    Err(HandlerErrorContext::missing_bucket().into())
 }
 
 /// AWS's own wording for an upload id that names nothing this caller may act on.
@@ -1684,8 +1687,10 @@ fn refuse_versioned_lock_state(version_id: Option<&str>) -> Result<(), HandlerEr
 }
 
 fn no_such_key(key: &str) -> HandlerError {
-    HandlerError::new(ErrorCode::NO_SUCH_KEY, "The specified key does not exist.")
-        .with_detail(ErrorDetail::Key(key.to_owned().into()))
+    match ObjectKey::new(key.to_owned()) {
+        Ok(key) => HandlerErrorContext::missing_object_for(key, MissingObject::Key, ResourceVisibility::Visible).into(),
+        Err(_) => HandlerError::internal_error("a fixture object key is not valid"),
+    }
 }
 
 /// AWS's own wording for a version id that names nothing.
@@ -1693,7 +1698,7 @@ fn no_such_key(key: &str) -> HandlerError {
 /// The message never repeats the id: a caller who can tell a mistyped id from one that belongs to
 /// somebody else's object apart by the `<Message>` element has been told the id is genuine.
 fn no_such_version() -> HandlerError {
-    HandlerError::new(ErrorCode::NO_SUCH_VERSION, "The specified version does not exist.")
+    HandlerErrorContext::missing_object(MissingObject::Version, ResourceVisibility::Visible).into()
 }
 
 /// A resolved range: the window to send, and the `Content-Range` value that describes it.
@@ -2322,7 +2327,7 @@ fn policy_of(resolved: AclInput) -> dto::AccessControlPolicy {
 fn read_copy_source(fixture: &Fixture, source: &CopySource) -> Result<(StoredObject, Option<String>), HandlerError> {
     let (bucket, key) = (source.bucket.as_str(), source.key.as_str());
     if !fixture.has_bucket(bucket) {
-        return Err(HandlerError::new(ErrorCode::NO_SUCH_BUCKET, "The specified bucket does not exist"));
+        return Err(HandlerErrorContext::missing_bucket().into());
     }
     let Some(requested) = source.version_id.as_deref() else {
         // The key named is the *source's*, which is the whole reason the element is worth carrying
@@ -2338,14 +2343,13 @@ fn read_copy_source(fixture: &Fixture, source: &CopySource) -> Result<(StoredObj
             .flatten();
         return Ok((object, reported));
     };
-    let version = fixture
-        .version(bucket, key, requested)
-        .ok_or_else(|| HandlerError::new(ErrorCode::NO_SUCH_VERSION, "The specified version does not exist."))?;
+    let version = fixture.version(bucket, key, requested).ok_or_else(|| {
+        HandlerError::from(HandlerErrorContext::missing_object(MissingObject::Version, ResourceVisibility::Visible))
+    })?;
     let object = version.object.as_ref().ok_or_else(|| {
-        HandlerError::new(
-            ErrorCode::METHOD_NOT_ALLOWED,
-            "The specified method is not allowed against this resource.",
-        )
+        HandlerErrorContext::versioned_delete_marker(requested)
+            .map(HandlerError::from)
+            .unwrap_or_else(|_| HandlerError::internal_error("a fixture version id is not valid"))
     })?;
     Ok((object.clone(), Some(requested.to_owned())))
 }
@@ -3826,14 +3830,13 @@ impl Stub {
                      system. Please select a different name and try again.",
                 ));
             }
-            let owned_in_home = fixture.bucket_region(&name).is_none_or(|region| region == home);
-            if !owned_in_home || home != "us-east-1" {
-                return Err(HandlerError::new(
-                    ErrorCode::BUCKET_ALREADY_OWNED_BY_YOU,
-                    "Your previous request to create the named bucket succeeded and you already own it.",
-                ));
+            let owned_region = fixture.bucket_region(&name);
+            if owned_region.is_none_or(|region| region == home) && home == "us-east-1" {
+                return Ok(Resp::new(dto::CreateBucketOutput {
+                    location: Some(format!("/{name}")),
+                }));
             }
-            // us-east-1's historical behaviour: re-creating your own bucket is a 200.
+            return Err(HandlerErrorContext::owned_bucket_recreation().into());
         } else {
             fixture.declare_bucket(&name, false);
         }

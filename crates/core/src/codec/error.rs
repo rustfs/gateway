@@ -35,7 +35,7 @@
 use std::fmt;
 
 use http::StatusCode;
-use rustfs_gateway_types::{ErrorCode, ErrorContext, status_of};
+use rustfs_gateway_types::ErrorCode;
 
 /// Why a request could not be decoded, or a response could not be encoded.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -114,7 +114,7 @@ impl CodecError {
     /// The status this error goes out with.
     #[must_use]
     pub fn status(&self) -> StatusCode {
-        status_of(&self.code, &ErrorContext::default())
+        self.code.default_status()
     }
 }
 

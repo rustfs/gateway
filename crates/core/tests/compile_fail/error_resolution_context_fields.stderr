@@ -1,0 +1,11 @@
+error[E0532]: cannot match against a tuple struct which contains private fields
+  --> tests/compile_fail/error_resolution_context_fields.rs:25:9
+   |
+25 |     let ErrorContext(_case) = context;
+   |         ^^^^^^^^^^^^
+   |
+note: constructor is not visible here due to private fields
+  --> tests/compile_fail/error_resolution_context_fields.rs:25:22
+   |
+25 |     let ErrorContext(_case) = context;
+   |                      ^^^^^ private field

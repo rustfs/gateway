@@ -76,10 +76,10 @@ use std::fmt;
 use std::future::Future;
 use std::pin::Pin;
 
-use http::StatusCode;
 use rustfs_gateway_stream::ByteStream;
-use rustfs_gateway_types::{ErrorCode, ErrorContext, status_of};
+use rustfs_gateway_types::ErrorCode;
 
+use crate::error_resolution::{ErrorContext, HandlerErrorContext, ResponseKind, resolve};
 use crate::fault::{ErrorDetail, ErrorHeader, PRECONDITION_FAILED_MESSAGE, RANGE_NOT_SATISFIABLE_MESSAGE};
 use crate::op::Operation;
 
@@ -390,6 +390,7 @@ pub struct HandlerError {
     message: Cow<'static, str>,
     headers: Vec<ErrorHeader>,
     details: Vec<ErrorDetail>,
+    context: Option<Box<HandlerErrorContext>>,
 }
 
 impl HandlerError {
@@ -401,6 +402,7 @@ impl HandlerError {
             message: message.into(),
             headers: Vec::new(),
             details: Vec::new(),
+            context: None,
         }
     }
 
@@ -449,6 +451,9 @@ impl HandlerError {
     /// response head already follows.
     #[must_use]
     pub fn with_header(mut self, header: ErrorHeader) -> Self {
+        if self.context.is_some() {
+            return self;
+        }
         let name = header.name();
         self.headers.retain(|existing| existing.name() != name);
         self.headers.push(header);
@@ -462,6 +467,9 @@ impl HandlerError {
     /// cannot produce a document whose elements are in an order no case asserted.
     #[must_use]
     pub fn with_detail(mut self, detail: ErrorDetail) -> Self {
+        if self.context.is_some() {
+            return self;
+        }
         let element = detail.element();
         self.details.retain(|existing| existing.element() != element);
         self.details.push(detail);
@@ -493,10 +501,28 @@ impl HandlerError {
         &self.message
     }
 
-    /// The status this error goes out with, in the default context.
-    #[must_use]
-    pub fn status(&self) -> StatusCode {
-        status_of(&self.code, &ErrorContext::default())
+    pub(crate) fn into_context(mut self) -> Result<ErrorContext, Self> {
+        match self.context.take() {
+            Some(context) => Ok(context.into_error_context()),
+            None => Err(self),
+        }
+    }
+}
+
+impl From<HandlerErrorContext> for HandlerError {
+    fn from(context: HandlerErrorContext) -> Self {
+        let resolution = resolve(context.clone().into_error_context(), ResponseKind::Other);
+        Self {
+            code: resolution.code().cloned().unwrap_or(ErrorCode::INTERNAL_ERROR),
+            message: resolution
+                .message()
+                .map_or(Cow::Borrowed("the operation completed without an error document"), |message| {
+                    Cow::Owned(message.to_owned())
+                }),
+            headers: resolution.headers().to_vec(),
+            details: resolution.details().to_vec(),
+            context: Some(Box::new(context)),
+        }
     }
 }
 
@@ -536,6 +562,7 @@ pub trait Handler<O: Operation>: Send + Sync + 'static {
 mod tests {
     use super::*;
     use bytes::Bytes;
+    use http::StatusCode;
     use rustfs_gateway_stream::ByteStream;
     use rustfs_gateway_types::dto::SelectObjectContent;
 
@@ -611,7 +638,7 @@ mod tests {
     #[test]
     fn the_range_refusal_states_one_length_in_both_places() {
         let error = HandlerError::unsatisfiable_range("bytes=20-30", 10);
-        assert_eq!(error.status(), StatusCode::RANGE_NOT_SATISFIABLE);
+        assert_eq!(error.code().default_status(), StatusCode::RANGE_NOT_SATISFIABLE);
         assert_eq!(error.headers(), [ErrorHeader::UnsatisfiedRange { complete_length: 10 }]);
         assert_eq!(error.headers()[0].value(), "bytes */10");
         let sizes: Vec<String> = error
@@ -646,7 +673,7 @@ mod tests {
     #[test]
     fn the_precondition_refusal_names_the_header_that_failed() {
         let error = HandlerError::precondition_failed("If-None-Match");
-        assert_eq!(error.status(), StatusCode::PRECONDITION_FAILED);
+        assert_eq!(error.code().default_status(), StatusCode::PRECONDITION_FAILED);
         assert_eq!(error.message(), PRECONDITION_FAILED_MESSAGE);
         assert!(error.headers().is_empty());
         assert_eq!(error.details()[0].element(), "Condition");

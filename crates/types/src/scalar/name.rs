@@ -186,7 +186,12 @@ impl ObjectKey {
 /// representable and are the writer's business, not this predicate's.
 #[must_use]
 pub fn is_xml_representable(value: &str) -> bool {
-    !value.chars().any(|c| c.is_control() && !matches!(c, '\t' | '\n' | '\r'))
+    value.chars().all(|character| {
+        matches!(
+            character,
+            '\t' | '\n' | '\r' | '\u{20}'..='\u{d7ff}' | '\u{e000}'..='\u{fffd}' | '\u{10000}'..='\u{10ffff}'
+        )
+    })
 }
 
 impl Default for ObjectKey {

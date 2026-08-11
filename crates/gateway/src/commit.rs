@@ -121,7 +121,7 @@ pub(crate) fn answered(encoded: EncodedResponse, status: StatusCode) -> Response
 #[allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 mod tests {
     use super::*;
-    use rustfs_gateway_core::HandlerError;
+    use rustfs_gateway_core::{ErrorContext, HandlerError, MissingObject, ResourceVisibility, ResponseKind, resolve};
     use rustfs_gateway_types::ErrorCode;
 
     fn trace() -> RequestTrace {
@@ -133,11 +133,18 @@ mod tests {
         String::from_utf8(collected.body().to_vec()).expect("utf-8")
     }
 
+    fn missing_key() -> S3Error {
+        S3Error::from(resolve(
+            ErrorContext::missing_object(MissingObject::Key, ResourceVisibility::Visible),
+            ResponseKind::Other,
+        ))
+    }
+
     /// Negative — the status is the committed one, not the refusal's. A refusal that could still
     /// change the status line is the defect this whole seam exists to make unwritable.
     #[tokio::test]
     async fn a_committed_refusal_keeps_the_status_the_head_went_out_with() {
-        let error = S3Error::from(HandlerError::new(ErrorCode::NO_SUCH_KEY, "the source is gone"));
+        let error = missing_key();
         assert_eq!(error.status(), StatusCode::NOT_FOUND);
         let response = refused(&error, &trace(), StatusCode::OK);
         assert_eq!(response.status(), StatusCode::OK);
@@ -148,7 +155,11 @@ mod tests {
     /// the refusal that actually happened.
     #[tokio::test]
     async fn a_committed_refusal_carries_one_declaration_and_then_the_document() {
-        let error = S3Error::from(HandlerError::new(ErrorCode::INVALID_PART, "no such part"));
+        let error = crate::render::from_handler(
+            HandlerError::new(ErrorCode::INVALID_PART, "no such part"),
+            ResponseKind::Other,
+            crate::ConnectionIntent::MayKeepAlive,
+        );
         let body = body_of(refused(&error, &trace(), StatusCode::OK)).await;
         assert!(body.starts_with(PROLOGUE), "{body}");
         assert_eq!(body.matches("<?xml").count(), 1, "{body}");
@@ -160,7 +171,7 @@ mod tests {
     /// promises made after the head that carries them had already gone out.
     #[tokio::test]
     async fn a_committed_refusal_announces_neither_a_length_nor_a_trailer_section() {
-        let error = S3Error::from(HandlerError::new(ErrorCode::NO_SUCH_KEY, "gone"));
+        let error = missing_key();
         let response = refused(&error, &trace(), StatusCode::OK);
         assert_eq!(response.headers().get(CONTENT_LENGTH), None);
         assert_eq!(response.headers().get(http::header::TRAILER), None);
@@ -174,7 +185,7 @@ mod tests {
     /// on a response that failed is the byte a client stores and then cannot read back.
     #[tokio::test]
     async fn a_committed_refusal_carries_no_answer_headers() {
-        let error = S3Error::from(HandlerError::new(ErrorCode::NO_SUCH_KEY, "gone"));
+        let error = missing_key();
         let response = refused(&error, &trace(), StatusCode::OK);
         for name in ["etag", "x-amz-version-id", "x-amz-copy-source-version-id"] {
             assert!(response.headers().get(name).is_none(), "{name}");

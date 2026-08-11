@@ -1,0 +1,15 @@
+error[E0451]: fields `code`, `message`, `headers`, `details` and `context` of struct `HandlerError` are private
+  --> tests/compile_fail/error_resolution_handler_payload.rs:26:9
+   |
+25 |     let _error = HandlerError {
+   |                  ------------ in this type
+26 |         code: ErrorCode::NO_SUCH_BUCKET,
+   |         ^^^^ private field
+27 |         message: "forged".into(),
+   |         ^^^^^^^ private field
+28 |         headers: Vec::new(),
+   |         ^^^^^^^ private field
+29 |         details: Vec::new(),
+   |         ^^^^^^^ private field
+30 |         context: Some(Box::new(ErrorContext::missing_bucket())),
+   |         ^^^^^^^ private field

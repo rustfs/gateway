@@ -38,6 +38,9 @@ mod configuration_error_declarations;
 #[path = "dialect.rs"]
 mod dialect;
 
+#[path = "error_resolution.rs"]
+mod error_resolution;
+
 #[path = "golden.rs"]
 mod golden;
 

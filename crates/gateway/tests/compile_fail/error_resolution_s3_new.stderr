@@ -1,0 +1,11 @@
+error[E0599]: no associated function or constant named `new` found for struct `S3Error` in the current scope
+  --> tests/compile_fail/error_resolution_s3_new.rs:24:22
+   |
+24 |     let _ = S3Error::new(ErrorCode::ACCESS_DENIED, "denied");
+   |                      ^^^ associated function or constant not found in `S3Error`
+   |
+help: there is a method `ne` with a similar name, but with different arguments
+  --> $RUST/core/src/cmp.rs
+   |
+   |     fn ne(&self, other: &Rhs) -> bool {
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

@@ -1,0 +1,11 @@
+error[E0599]: no method named `with_status` found for struct `S3Error` in the current scope
+  --> tests/compile_fail/error_resolution_s3_status.rs:25:19
+   |
+25 |     let _ = error.with_status(http::StatusCode::OK);
+   |                   ^^^^^^^^^^^
+   |
+help: there is a method `status` with a similar name, but with different arguments
+  --> src/render.rs
+   |
+   |     pub const fn status(&self) -> StatusCode {
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

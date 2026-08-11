@@ -90,13 +90,15 @@ fn c_name_n004_control_characters_force_url_encoding() {
 }
 
 #[test]
-fn c_name_n006_xml_representability_is_about_the_bytes_not_the_escaping() {
+fn xml_representability_is_about_the_bytes_not_the_escaping() {
     use crate::scalar::is_xml_representable;
 
     assert!(is_xml_representable("ordinary/key.txt"));
     assert!(is_xml_representable("a&b<c>d\"e\t\n\r"), "everything here has an XML spelling");
     assert!(!is_xml_representable("ctrl\u{1}key.txt"));
     assert!(!is_xml_representable("\u{b}"), "a vertical tab is excluded like the rest of C0");
+    assert!(!is_xml_representable("\u{fffe}"), "XML 1.0 excludes the final two BMP code points");
+    assert!(!is_xml_representable("\u{ffff}"), "XML 1.0 excludes the final two BMP code points");
 }
 
 #[test]
@@ -136,17 +138,27 @@ fn c_name_n006_the_length_bounds_are_enforced() {
 #[test]
 fn the_bucket_character_set_and_edges_are_enforced() {
     for name in [
-        "MyBucket",   // uppercase
-        "my_bucket",  // underscore
-        "-bucket",    // leading hyphen
-        "bucket-",    // trailing hyphen
-        ".bucket",    // leading dot
-        "bucket.",    // trailing dot
-        "my..bucket", // consecutive dots
-        "my bucket",  // space
+        "my_bucket", // underscore
+        "-bucket",   // leading hyphen
+        "bucket-",   // trailing hyphen
+        ".bucket",   // leading dot
+        "bucket.",   // trailing dot
+        "my bucket", // space
     ] {
         assert!(BucketName::new(name).is_err(), "{name} must be rejected");
     }
+}
+
+#[test]
+fn c_name_n007_uppercase_bucket_names_are_rejected() {
+    assert!(BucketName::new("My-Bucket").is_err());
+    assert!(BucketName::new("MY-BUCKET").is_err());
+}
+
+#[test]
+fn c_name_n008_consecutive_dots_are_rejected() {
+    assert!(BucketName::new("a..b").is_err());
+    assert!(BucketName::new("my..bucket").is_err());
 }
 
 #[test]
@@ -158,7 +170,7 @@ fn reserved_prefixes_and_suffixes_are_rejected() {
 }
 
 #[test]
-fn a_dotted_bucket_name_is_legal_but_not_vhost_safe() {
+fn c_name_n009_a_dotted_bucket_is_legal_but_not_vhost_safe() {
     // Rejecting these would make existing data unreachable; the routing layer needs the predicate
     // to fall back to path style instead.
     let bucket = BucketName::new("my.bucket").expect("dotted names are legal");

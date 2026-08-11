@@ -18,6 +18,7 @@ the consumer surface. Ring 1: no rustfs crate dependency. Start at `src/lib.rs`;
 | `src/gate.rs` | Authentication proof, sealed body, body ceilings | Moving work around the body read |
 | `src/probe.rs` | Observable request-body progress | Testing whether a refusal read bytes |
 | `src/chunked.rs` | `aws-chunked` ingest selection and execution | A framed upload stores wrong bytes |
+| `src/payload_header.rs` | Signed payload and trailer declaration parsing | A request head selects the wrong payload mode |
 | `src/render.rs` | One S3 error renderer | Changing refusal bytes or headers |
 | `src/commit.rs` | 200-then-answer/error response shape | Work continues after the head commits |
 | `src/invariants.rs` | HEAD/bodyless and SSE-C response rules | A forbidden body or key reaches the wire |

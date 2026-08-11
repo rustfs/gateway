@@ -35,7 +35,55 @@ use crate::derive::VerifiedScope;
 use crate::operation::FloorConfigError;
 use crate::parse::CredentialScope;
 use crate::scheme::SigService;
-use crate::verdict::AuthError;
+
+/// A bounded configured region that is safe to carry as remediation metadata.
+///
+/// Only [`RegionSet::new`] constructs this type. In particular, a region parsed from a request
+/// cannot be converted into one.
+///
+/// ```compile_fail,E0423
+/// use rustfs_gateway_sig::ScopeRegion;
+/// let _ = ScopeRegion("attacker-region".into());
+/// ```
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct ScopeRegion(Box<str>);
+
+impl ScopeRegion {
+    /// The largest admitted configured region.
+    pub const MAX_LEN: usize = 64;
+
+    /// The configured region spelling.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// A scope disagreement, optionally carrying the trusted configured remediation region.
+///
+/// ```compile_fail,E0423
+/// use rustfs_gateway_sig::ScopeRejection;
+/// let _ = ScopeRejection(None);
+/// ```
+///
+/// ```compile_fail,E0532
+/// use rustfs_gateway_sig::ScopeRejection;
+/// fn open(rejection: ScopeRejection) {
+///     let ScopeRejection(_) = rejection;
+/// }
+/// ```
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ScopeRejection(Option<ScopeRegion>);
+
+impl ScopeRejection {
+    /// The configured remediation region for a region mismatch.
+    ///
+    /// Date and service mismatches deliberately return `None`.
+    #[must_use]
+    pub const fn expected_region(&self) -> Option<&ScopeRegion> {
+        self.0.as_ref()
+    }
+}
 
 /// The regions this deployment serves.
 ///
@@ -44,7 +92,7 @@ use crate::verdict::AuthError;
 /// another region then replays here.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RegionSet {
-    regions: Box<[Box<str>]>,
+    regions: Box<[ScopeRegion]>,
 }
 
 impl RegionSet {
@@ -53,39 +101,48 @@ impl RegionSet {
     /// # Errors
     ///
     /// [`FloorConfigError::InvalidRegionSet`] if the set is empty, or if a name is empty, longer
-    /// than [`CredentialScope::MAX_REGION_LEN`], or not ASCII-graphic — the same rule the parser
-    /// applies to the presented value, so a configured name that could never be matched is refused
-    /// where it is written rather than where it fails.
+    /// than [`ScopeRegion::MAX_LEN`], or contains anything other than lowercase ASCII letters,
+    /// digits or `-`.
     pub fn new<I, S>(regions: I) -> Result<Self, FloorConfigError>
     where
         I: IntoIterator<Item = S>,
         S: AsRef<str>,
     {
-        let regions: Box<[Box<str>]> = regions.into_iter().map(|region| Box::from(region.as_ref())).collect();
+        let mut regions: Vec<ScopeRegion> = regions
+            .into_iter()
+            .map(|region| ScopeRegion(Box::from(region.as_ref())))
+            .collect();
         if regions.is_empty() {
             return Err(FloorConfigError::InvalidRegionSet);
         }
         let ok = regions.iter().all(|region| {
-            !region.is_empty()
-                && region.len() <= CredentialScope::MAX_REGION_LEN
-                && region.bytes().all(|byte| byte.is_ascii_graphic())
+            !region.as_str().is_empty()
+                && region.as_str().len() <= ScopeRegion::MAX_LEN
+                && region
+                    .as_str()
+                    .bytes()
+                    .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
         });
         if !ok {
             return Err(FloorConfigError::InvalidRegionSet);
         }
-        Ok(Self { regions })
+        regions.sort_by(|left, right| left.as_str().as_bytes().cmp(right.as_str().as_bytes()));
+        regions.dedup();
+        Ok(Self {
+            regions: regions.into_boxed_slice(),
+        })
     }
 
     /// Whether a presented region name is one this deployment serves. Byte-exact: the region is a
     /// signed string, so a case-insensitive match would accept a signature over different bytes.
     #[must_use]
     pub fn contains(&self, region: &str) -> bool {
-        self.regions.iter().any(|known| &**known == region)
+        self.regions.iter().any(|known| known.as_str() == region)
     }
 
     /// The configured names, for the startup security-posture report.
     pub fn names(&self) -> impl Iterator<Item = &str> {
-        self.regions.iter().map(|region| &**region)
+        self.regions.iter().map(ScopeRegion::as_str)
     }
 }
 
@@ -136,9 +193,8 @@ impl<'a> ExpectedScope<'a> {
 ///
 /// # Errors
 ///
-/// [`AuthError::AuthorizationHeaderMalformed`] for any disagreement. One code for all four, and no
-/// detail field: "the region is wrong; expecting eu-west-1" is a deployment-topology oracle handed
-/// to an unauthenticated caller.
+/// [`ScopeRejection`] for any disagreement. Only a region mismatch carries a configured
+/// remediation region; date and service mismatches carry no detail.
 ///
 /// # Why this is the constructor
 ///
@@ -158,15 +214,15 @@ pub fn enforce_scope(
     presented: &CredentialScope,
     clock: ClockChecked,
     expected: &ExpectedScope<'_>,
-) -> Result<VerifiedScope, AuthError> {
+) -> Result<VerifiedScope, ScopeRejection> {
     if presented.date() != clock.signed_at().day() {
-        return Err(AuthError::AuthorizationHeaderMalformed);
+        return Err(ScopeRejection(None));
     }
     if !expected.regions().contains(presented.region()) {
-        return Err(AuthError::AuthorizationHeaderMalformed);
+        return Err(ScopeRejection(expected.regions().regions.first().cloned()));
     }
     if presented.service() != expected.service() {
-        return Err(AuthError::AuthorizationHeaderMalformed);
+        return Err(ScopeRejection(None));
     }
     Ok(VerifiedScope::from_checked_parts(
         presented.date(),
@@ -187,24 +243,24 @@ mod tests {
             .expect("inside the window")
     }
 
-    /// Negative — the scope cross-check answers one code for all four disagreements, so the
-    /// rejection is not a probe for the deployment's region or service topology.
+    /// Negative — only a region mismatch carries the canonical configured remediation region.
     #[test]
-    fn every_scope_disagreement_answers_the_same_code() {
-        let regions = RegionSet::new(["us-east-1"]).expect("non-empty");
+    fn only_region_disagreement_carries_the_expected_region() {
+        let regions = RegionSet::new(["us-east-1", "eu-west-1"]).expect("non-empty");
         let expected = ExpectedScope::new(SigService::S3, &regions);
-        for bad in [
-            "AKID/20150831/us-east-1/s3/aws4_request",
-            "AKID/20150830/eu-west-1/s3/aws4_request",
-            "AKID/20150830/us-east-1/sts/aws4_request",
-        ] {
-            let presented = CredentialScope::parse(bad).expect("well formed");
-            assert_eq!(
-                enforce_scope(&presented, clock(), &expected).err(),
-                Some(AuthError::AuthorizationHeaderMalformed),
-                "must refuse {bad}"
-            );
-        }
+        let bad_date = CredentialScope::parse("AKID/20150831/us-east-1/s3/aws4_request").expect("well formed");
+        let bad_region = CredentialScope::parse("AKID/20150830/ap-south-1/s3/aws4_request").expect("well formed");
+        let bad_service = CredentialScope::parse("AKID/20150830/us-east-1/sts/aws4_request").expect("well formed");
+
+        assert_eq!(enforce_scope(&bad_date, clock(), &expected).unwrap_err().expected_region(), None);
+        assert_eq!(
+            enforce_scope(&bad_region, clock(), &expected)
+                .unwrap_err()
+                .expected_region()
+                .map(ScopeRegion::as_str),
+            Some("eu-west-1")
+        );
+        assert_eq!(enforce_scope(&bad_service, clock(), &expected).unwrap_err().expected_region(), None);
     }
 
     /// Positive — an agreeing scope keeps the wire spelling of every field it was signed with.
@@ -226,6 +282,12 @@ mod tests {
         assert_eq!(RegionSet::new::<[&str; 0], &str>([]).err(), Some(FloorConfigError::InvalidRegionSet));
         assert_eq!(RegionSet::new([""]).err(), Some(FloorConfigError::InvalidRegionSet));
         assert_eq!(RegionSet::new(["us east 1"]).err(), Some(FloorConfigError::InvalidRegionSet));
-        assert!(RegionSet::new(["us-east-1", "eu-west-1"]).is_ok());
+        assert_eq!(RegionSet::new(["US-EAST-1"]).err(), Some(FloorConfigError::InvalidRegionSet));
+        let regions = RegionSet::new(["us-east-1", "eu-west-1", "us-east-1"]).expect("valid regions");
+        assert_eq!(regions.names().collect::<Vec<_>>(), ["eu-west-1", "us-east-1"]);
+        let reversed = RegionSet::new(["eu-west-1", "us-east-1"]).expect("valid regions");
+        assert_eq!(reversed.names().collect::<Vec<_>>(), ["eu-west-1", "us-east-1"]);
+        let unordered = RegionSet::new(std::collections::HashSet::from(["us-east-1", "eu-west-1"])).expect("valid regions");
+        assert_eq!(unordered.names().collect::<Vec<_>>(), ["eu-west-1", "us-east-1"]);
     }
 }

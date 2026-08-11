@@ -25,7 +25,7 @@ use std::sync::Arc;
 use std::sync::Mutex;
 
 use bytes::Bytes;
-use rustfs_gateway::{ConfigHandle, S3Error, ServiceConfig, StageFilter, WireHead};
+use rustfs_gateway::{ConfigHandle, HandlerError, ServiceConfig, StageFilter, WireHead};
 use support::{Backend, ContentPing, content_ping_route, wired};
 
 /// A wire filter that updates the service configuration after request entry.
@@ -45,7 +45,7 @@ impl UpdatingFilter {
 }
 
 impl StageFilter for UpdatingFilter {
-    fn on_wire(&self, _head: &mut WireHead<'_>) -> Result<(), S3Error> {
+    fn on_wire(&self, _head: &mut WireHead<'_>) -> Result<(), HandlerError> {
         if let Some((handle, config)) = self.update.lock().expect("not poisoned").take() {
             handle.store(config);
         }

@@ -57,13 +57,16 @@
 //! of [`render`]. What it will additionally need — a `HandlerResult` that can say "committed, then
 //! failed" — is not here; it is a change to the handler contract, not to this file.
 
-use http::header::{CONTENT_LENGTH, CONTENT_TYPE};
+use http::header::{CONTENT_LENGTH, CONTENT_TYPE, ETAG};
 use http::{Response, StatusCode};
-use rustfs_gateway_core::{CodecError, ErrorDetail, ErrorHeader, HandlerError, PreAuthError};
+use rustfs_gateway_core::{
+    BodyPolicy, CodecError, ErrorContext, ErrorDetail, ErrorHeader, ErrorResolution, HandlerError, PreAuthError, ResponseKind,
+    resolve,
+};
 use rustfs_gateway_http::WireReject;
 use rustfs_gateway_sig::AuthError;
 use rustfs_gateway_stream::Body;
-use rustfs_gateway_types::{ErrorCode, ErrorContext, status_of};
+use rustfs_gateway_types::{ETag, ErrorCode, EtagRender};
 use rustfs_gateway_xml::{DECLARATION, XmlWriter};
 
 use crate::close::ConnectionIntent;
@@ -85,10 +88,12 @@ struct Extras {
 /// A refusal, in the shape the renderer needs.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct S3Error {
-    code: ErrorCode,
+    code: Option<ErrorCode>,
     status: StatusCode,
-    message: std::borrow::Cow<'static, str>,
+    body_policy: BodyPolicy,
+    message: Option<std::borrow::Cow<'static, str>>,
     resource: Option<String>,
+    etag: Option<ETag>,
     connection: ConnectionIntent,
     extras: Option<Box<Extras>>,
 }
@@ -99,33 +104,6 @@ const NO_HEADERS: &[ErrorHeader] = &[];
 const NO_DETAILS: &[ErrorDetail] = &[];
 
 impl S3Error {
-    /// A refusal with a code, taking the status the code maps to.
-    #[must_use]
-    pub fn new(code: ErrorCode, message: impl Into<std::borrow::Cow<'static, str>>) -> Self {
-        let status = status_of(&code, &ErrorContext::default());
-        Self {
-            code,
-            status,
-            message: message.into(),
-            resource: None,
-            // The permissive default is deliberate: closing is the exception that has to be
-            // argued for, and `crate::close` is where every argument for one is written down.
-            connection: ConnectionIntent::MayKeepAlive,
-            extras: None,
-        }
-    }
-
-    /// Records what this refusal does to the connection it arrived on.
-    ///
-    /// The intent is never derived here. It comes from [`crate::close`], which is the one place
-    /// the RFC 9112 §9.3 rule and its three judgement calls are stated; a `match` on a code in
-    /// this file would be a second, silently diverging copy of that table.
-    #[must_use]
-    pub fn closing(mut self, connection: ConnectionIntent) -> Self {
-        self.connection = self.connection.and(connection);
-        self
-    }
-
     /// What this refusal does to the connection.
     ///
     /// A transport that keeps a connection this returns [`ConnectionIntent::Close`] for has left
@@ -147,28 +125,10 @@ impl S3Error {
         self.connection.must_close()
     }
 
-    /// A refusal whose status the stage decided rather than the code table.
-    ///
-    /// Needed because `WireReject` answers `413` and `431` for limits that have no distinct S3
-    /// code, and folding those into the table's status would change the code's meaning everywhere
-    /// else it is used.
-    #[must_use]
-    pub fn with_status(mut self, status: StatusCode) -> Self {
-        self.status = status;
-        self
-    }
-
-    /// Names the resource the refusal is about — a bucket, or a bucket and key.
-    #[must_use]
-    pub fn about_resource(mut self, resource: impl Into<String>) -> Self {
-        self.resource = Some(resource.into());
-        self
-    }
-
     /// The S3 error code.
     #[must_use]
-    pub const fn code(&self) -> &ErrorCode {
-        &self.code
+    pub const fn code(&self) -> Option<&ErrorCode> {
+        self.code.as_ref()
     }
 
     /// The status this refusal goes out with.
@@ -179,8 +139,8 @@ impl S3Error {
 
     /// The message.
     #[must_use]
-    pub fn message(&self) -> &str {
-        &self.message
+    pub fn message(&self) -> Option<&str> {
+        self.message.as_deref()
     }
 
     /// The headers the refusing stage attached, before the reserved ones are filtered out.
@@ -199,123 +159,192 @@ impl S3Error {
     }
 }
 
-impl From<WireReject> for S3Error {
-    fn from(reject: WireReject) -> Self {
-        // The status comes from the reject, not from the code table: `LimitExceeded` maps to
-        // several statuses depending on which ceiling was hit, and only the reject knows which.
-        // `message()`, never `label()`. This is the one place a refusal becomes bytes a client
-        // reads, and the two strings exist precisely because they have different audiences: the
-        // label is an operator's identifier and belongs in a log. There used to be a third name,
-        // `as_str()`, which delegated here — it was removed because a habit-reached name that
-        // happens to be right is not a guarantee, and a reviewer who sees `label()` on this line
-        // can tell it is wrong, which is the property worth having.
-        Self::new(reject.error_code(), reject.message())
-            .with_status(reject.to_status())
-            // The flag the acceptance layer has always carried, finally read. Before this line it
-            // was computed and dropped on the floor here, which is issue #20's second finding.
-            .closing(crate::close::after_wire_reject(&reject))
-    }
-}
-
-impl From<rustfs_gateway_http::ChunkReject> for S3Error {
-    fn from(reject: rustfs_gateway_http::ChunkReject) -> Self {
-        // `ChunkReject` carries no client-facing sentence of its own — it is an operator's label —
-        // so the message is the one this crate writes for the code, and the label stays in the log.
-        let message: &'static str = match reject.error_code() {
-            code if code == ErrorCode::SIGNATURE_DOES_NOT_MATCH => "the request was not authenticated",
-            code if code == ErrorCode::INCOMPLETE_BODY => {
-                "You did not provide the number of bytes specified by the Content-Length HTTP header."
-            }
-            code if code == ErrorCode::INVALID_CHUNK_SIZE => {
-                "The chunk size of the request body is not one this service accepts."
-            }
-            _ => "The chunked encoding of the request body is not one this service can read.",
-        };
-        Self::new(reject.error_code(), message)
-            .with_status(reject.to_status())
-            .closing(crate::close::after_chunk_reject(&reject))
-    }
-}
-
-impl From<PreAuthError> for S3Error {
-    fn from(error: PreAuthError) -> Self {
-        let status = error.status();
-        Self::new(error.code().clone(), error.message()).with_status(status)
-    }
-}
-
-impl From<AuthError> for S3Error {
-    fn from(error: AuthError) -> Self {
-        // A comparison failure is deliberately collapsed into the unknown-key response. Keeping
-        // the internal variants distinct lets the verifier test its state machine without making
-        // the access-key store observable on the wire.
-        //
-        // The third leg issue #20 asks for: an authentication failure is neither a `WireReject` nor
-        // a `ChunkReject`, so neither flag could ever have reached `c-sig-0001`. The reasoning for
-        // the verdict is `crate::close::after_auth_failure`, and it is a policy row, not an RFC one.
-        let rendered = if error == AuthError::SignatureDoesNotMatch {
-            Self::new(ErrorCode::INVALID_ACCESS_KEY_ID, AuthError::InvalidAccessKeyId.message())
+impl From<ErrorResolution> for S3Error {
+    fn from(resolution: ErrorResolution) -> Self {
+        let extras = if resolution.headers().is_empty() && resolution.details().is_empty() {
+            None
         } else {
-            Self::new(ErrorCode::custom(error.code()), error.message())
+            Some(Box::new(Extras {
+                headers: resolution.headers().to_vec(),
+                details: resolution.details().to_vec(),
+            }))
         };
-        rendered.closing(crate::close::after_auth_failure(&error))
-    }
-}
-
-impl From<Denial> for S3Error {
-    fn from(denial: Denial) -> Self {
-        // One sentence for every denial. A message that named the failing condition would let an
-        // authenticated caller map the policy one request at a time.
-        //
-        // The connection survives: the caller is known, so none of the reasoning that closes on an
-        // authentication failure applies. `c-copy-0019` asserts exactly this, and it is the case
-        // that stops "every 403 closes" from being written here.
-        Self::new(denial.code().clone(), "the request is not allowed").closing(crate::close::after_denial())
-    }
-}
-
-impl From<rustfs_gateway_core::SseRejection> for S3Error {
-    fn from(rejection: rustfs_gateway_core::SseRejection) -> Self {
-        // `reason()` is a constant sentence per variant and `code()` is one of two codes. Nothing
-        // from the request reaches either, which is the property `crates/core`'s
-        // `n_no_refusal_sentence_carries_a_key_a_digest_or_a_key_id` pins: a refusal about a key
-        // must not quote the key, the digest, the expected digest, or a KMS key id.
-        //
-        // The status comes from the shared table rather than being written here, so that
-        // `InvalidRequest` means the same thing in a `400` from this stage as it does anywhere
-        // else. The connection survives: the caller is authenticated by this point and the
-        // request head was fully readable, so none of RFC 9112 §9.3's reasoning applies.
-        let code = rejection.code();
-        let status = code.default_status();
-        Self::new(code, rejection.reason()).with_status(status)
-    }
-}
-
-impl From<CodecError> for S3Error {
-    fn from(error: CodecError) -> Self {
-        let status = error.status();
-        let refusal = Self::new(error.code().clone(), error.message()).with_status(status);
-        match error.member() {
-            Some(member) => refusal.about_resource(member),
-            None => refusal,
+        Self {
+            code: resolution.code().cloned(),
+            status: resolution.status(),
+            body_policy: resolution.body_policy(),
+            message: resolution
+                .message()
+                .map(|message| std::borrow::Cow::Owned(message.to_owned())),
+            resource: resolution.resource().map(str::to_owned),
+            etag: resolution.etag().cloned(),
+            connection: ConnectionIntent::MayKeepAlive,
+            extras,
         }
     }
 }
 
-impl From<HandlerError> for S3Error {
-    fn from(error: HandlerError) -> Self {
-        let status = error.status();
-        let mut refusal = Self::new(error.code().clone(), error.message().to_owned()).with_status(status);
-        if !error.headers().is_empty() || !error.details().is_empty() {
-            // Carried over wholesale rather than filtered here: both lists are already closed sets,
-            // and the one filter that exists — the reserved header names — belongs at the write
-            // site, where it is the last word.
-            refusal.extras = Some(Box::new(Extras {
-                headers: error.headers().to_vec(),
-                details: error.details().to_vec(),
-            }));
+pub(crate) fn from_wire_reject(reject: WireReject) -> S3Error {
+    // The status comes from the reject, not from the code table: `LimitExceeded` maps to
+    // several statuses depending on which ceiling was hit, and only the reject knows which.
+    // `message()`, never `label()`. This is the one place a refusal becomes bytes a client
+    // reads, and the two strings exist precisely because they have different audiences: the
+    // label is an operator's identifier and belongs in a log. There used to be a third name,
+    // `as_str()`, which delegated here — it was removed because a habit-reached name that
+    // happens to be right is not a guarantee, and a reviewer who sees `label()` on this line
+    // can tell it is wrong, which is the property worth having.
+    typed_refusal(
+        reject.error_code(),
+        reject.message(),
+        reject.to_status(),
+        crate::close::after_wire_reject(&reject),
+    )
+}
+
+pub(crate) fn from_chunk_reject(reject: rustfs_gateway_http::ChunkReject) -> S3Error {
+    // `ChunkReject` carries no client-facing sentence of its own — it is an operator's label —
+    // so the message is the one this crate writes for the code, and the label stays in the log.
+    let message: &'static str = match reject.error_code() {
+        code if code == ErrorCode::SIGNATURE_DOES_NOT_MATCH => "the request was not authenticated",
+        code if code == ErrorCode::INCOMPLETE_BODY => {
+            "You did not provide the number of bytes specified by the Content-Length HTTP header."
         }
-        refusal
+        code if code == ErrorCode::INVALID_CHUNK_SIZE => "The chunk size of the request body is not one this service accepts.",
+        _ => "The chunked encoding of the request body is not one this service can read.",
+    };
+    typed_refusal(
+        reject.error_code(),
+        message,
+        reject.to_status(),
+        crate::close::after_chunk_reject(&reject),
+    )
+}
+
+pub(crate) fn from_pre_auth(error: PreAuthError, response: ResponseKind) -> S3Error {
+    from_handler(
+        HandlerError::new(error.code().clone(), error.message()),
+        response,
+        ConnectionIntent::MayKeepAlive,
+    )
+}
+
+pub(crate) fn from_auth(error: AuthError, response: ResponseKind) -> S3Error {
+    // A comparison failure is deliberately collapsed into the unknown-key response. Keeping
+    // the internal variants distinct lets the verifier test its state machine without making
+    // the access-key store observable on the wire.
+    //
+    // The third leg issue #20 asks for: an authentication failure is neither a `WireReject` nor
+    // a `ChunkReject`, so neither flag could ever have reached `c-sig-0001`. The reasoning for
+    // the verdict is `crate::close::after_auth_failure`, and it is a policy row, not an RFC one.
+    let (code, message) = if error == AuthError::SignatureDoesNotMatch {
+        (ErrorCode::INVALID_ACCESS_KEY_ID, AuthError::InvalidAccessKeyId.message())
+    } else if error == AuthError::AuthorizationHeaderMalformed {
+        (ErrorCode::ACCESS_DENIED, "the request was not authenticated")
+    } else {
+        (ErrorCode::custom(error.code()), error.message())
+    };
+    from_handler(HandlerError::new(code, message), response, crate::close::after_auth_failure(&error))
+}
+
+pub(crate) fn from_auth_context(error: AuthError, context: ErrorContext, response: ResponseKind) -> S3Error {
+    let mut rendered = from_resolution(resolve(context, response), response);
+    rendered.connection = crate::close::after_auth_failure(&error);
+    rendered
+}
+
+pub(crate) fn from_denial(denial: Denial, response: ResponseKind) -> S3Error {
+    // One sentence for every denial. A message that named the failing condition would let an
+    // authenticated caller map the policy one request at a time.
+    //
+    // The connection survives: the caller is known, so none of the reasoning that closes on an
+    // authentication failure applies. `c-copy-0019` asserts exactly this, and it is the case
+    // that stops "every 403 closes" from being written here.
+    from_handler(
+        HandlerError::new(denial.code().clone(), "the request is not allowed"),
+        response,
+        crate::close::after_denial(),
+    )
+}
+
+pub(crate) fn from_sse(rejection: rustfs_gateway_core::SseRejection, response: ResponseKind) -> S3Error {
+    // `reason()` is a constant sentence per variant and `code()` is one of two codes. Nothing
+    // from the request reaches either, which is the property `crates/core`'s
+    // `n_no_refusal_sentence_carries_a_key_a_digest_or_a_key_id` pins: a refusal about a key
+    // must not quote the key, the digest, the expected digest, or a KMS key id.
+    //
+    // The status comes from the shared table rather than being written here, so that
+    // `InvalidRequest` means the same thing in a `400` from this stage as it does anywhere
+    // else. The connection survives: the caller is authenticated by this point and the
+    // request head was fully readable, so none of RFC 9112 §9.3's reasoning applies.
+    let code = rejection.code();
+    from_handler(HandlerError::new(code, rejection.reason()), response, ConnectionIntent::MayKeepAlive)
+}
+
+pub(crate) fn from_codec(error: CodecError, response: ResponseKind) -> S3Error {
+    let context = match ErrorContext::codec(error) {
+        Ok(context) => context,
+        Err(_) => return internal_resolution(response),
+    };
+    from_resolution(resolve(context, response), response)
+}
+
+pub(crate) fn from_handler(error: HandlerError, response: ResponseKind, connection: ConnectionIntent) -> S3Error {
+    let context = match ErrorContext::ordinary(error) {
+        Ok(context) => context,
+        Err(_) => return with_connection(internal_resolution(response), connection),
+    };
+    with_connection(from_resolution(resolve(context, response), response), connection)
+}
+
+pub(crate) fn from_transport_limit(error: HandlerError, status: StatusCode, connection: ConnectionIntent) -> S3Error {
+    let mut refusal = from_handler(error, ResponseKind::Other, connection);
+    refusal.status = status;
+    refusal
+}
+
+fn typed_refusal(code: ErrorCode, message: &'static str, status: StatusCode, connection: ConnectionIntent) -> S3Error {
+    let mut refusal = from_handler(HandlerError::new(code, message), ResponseKind::Other, connection);
+    refusal.status = status;
+    refusal
+}
+
+fn with_connection(mut refusal: S3Error, connection: ConnectionIntent) -> S3Error {
+    refusal.connection = refusal.connection.and(connection);
+    refusal
+}
+
+fn from_resolution(resolution: ErrorResolution, response: ResponseKind) -> S3Error {
+    let mut refusal = S3Error::from(resolution);
+    // Core reports that HEAD may not carry the document. The facade still has to materialize that
+    // representation long enough to measure its Content-Length; the single response invariant
+    // removes only the bytes immediately before the response leaves the service.
+    if response == ResponseKind::Head && refusal.body_policy == BodyPolicy::None && refusal.message.is_some() {
+        refusal.body_policy = BodyPolicy::ErrorDocument;
+    }
+    refusal
+}
+
+fn internal_resolution(response: ResponseKind) -> S3Error {
+    let error = HandlerError::internal_error("the request could not be completed");
+    match ErrorContext::ordinary(error) {
+        Ok(context) => from_resolution(resolve(context, response), response),
+        Err(_) => unreachable_internal_resolution(),
+    }
+}
+
+fn unreachable_internal_resolution() -> S3Error {
+    // This fallback is private and static. It is reachable only if the resolver rejects its own
+    // context-free InternalError invariant, in which case returning a bounded 500 is safer than
+    // panicking at the service boundary.
+    S3Error {
+        code: Some(ErrorCode::INTERNAL_ERROR),
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        body_policy: BodyPolicy::ErrorDocument,
+        message: Some(std::borrow::Cow::Borrowed("the request could not be completed")),
+        resource: None,
+        etag: None,
+        connection: ConnectionIntent::MayKeepAlive,
+        extras: None,
     }
 }
 
@@ -342,8 +371,12 @@ pub fn document(error: &S3Error, trace: &RequestTrace) -> String {
 pub fn document_body(error: &S3Error, trace: &RequestTrace) -> String {
     let mut xml = XmlWriter::fragment();
     xml.open("Error", None);
-    xml.element("Code", error.code.as_str());
-    xml.element("Message", &error.message);
+    if let Some(code) = &error.code {
+        xml.element("Code", code.as_str());
+    }
+    if let Some(message) = &error.message {
+        xml.element("Message", message);
+    }
     if let Some(resource) = &error.resource {
         xml.element("Resource", resource);
     }
@@ -371,9 +404,14 @@ pub fn document_body(error: &S3Error, trace: &RequestTrace) -> String {
 /// afterwards and win. Two locks, because the first one is a list somebody has to keep correct.
 #[must_use]
 pub fn render(error: &S3Error, trace: &RequestTrace) -> Response<Body> {
-    let body = document(error, trace);
-    let length = body.len();
-    let mut response = Response::new(Body::from(body.into_bytes()));
+    let body = match error.body_policy {
+        BodyPolicy::None => None,
+        BodyPolicy::ErrorDocument => Some(document(error, trace)),
+    };
+    let mut response = Response::new(match body {
+        Some(ref body) => Body::from(body.clone().into_bytes()),
+        None => Body::empty(),
+    });
     *response.status_mut() = error.status;
     let headers = response.headers_mut();
     for header in error.headers() {
@@ -385,9 +423,16 @@ pub fn render(error: &S3Error, trace: &RequestTrace) -> Response<Body> {
             headers.insert(name, value);
         }
     }
-    headers.insert(CONTENT_TYPE, http::HeaderValue::from_static("application/xml"));
-    if let Ok(value) = http::HeaderValue::from_str(&length.to_string()) {
-        headers.insert(CONTENT_LENGTH, value);
+    if let Some(body) = body {
+        headers.insert(CONTENT_TYPE, http::HeaderValue::from_static("application/xml"));
+        if let Ok(value) = http::HeaderValue::from_str(&body.len().to_string()) {
+            headers.insert(CONTENT_LENGTH, value);
+        }
+    }
+    if let Some(etag) = &error.etag
+        && let Ok(value) = http::HeaderValue::from_str(&etag.render(EtagRender::HeaderQuoted))
+    {
+        headers.insert(ETAG, value);
     }
     trace.apply(headers);
     // The connection verdict travels in the response's extensions, not in its headers.
@@ -428,6 +473,10 @@ pub const fn declaration() -> &'static str {
 }
 
 #[cfg(test)]
+#[path = "render_compat_tests.rs"]
+mod compatibility_tests;
+
+#[cfg(test)]
 #[allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 mod tests {
     use super::*;
@@ -437,12 +486,20 @@ mod tests {
         RequestTrace::from_bits(0x0123_4567_89AB_CDEF, 0)
     }
 
+    fn handler(error: HandlerError) -> S3Error {
+        from_handler(error, ResponseKind::Other, ConnectionIntent::MayKeepAlive)
+    }
+
+    fn ordinary(code: ErrorCode, message: &'static str) -> S3Error {
+        handler(HandlerError::new(code, message))
+    }
+
     /// Negative — a comparison rejection carries the uniform credential code and message and
     /// nothing else. This is the
     /// assertion that stops a future edit from adding the request path "for debuggability".
     #[tokio::test]
     async fn a_rendered_refusal_echoes_nothing_from_the_request() {
-        let error = S3Error::from(AuthError::SignatureDoesNotMatch);
+        let error = from_auth(AuthError::SignatureDoesNotMatch, ResponseKind::Other);
         let collected = crate::wire::collect(render(&error, &trace()))
             .await
             .expect("an in-memory body");
@@ -455,26 +512,30 @@ mod tests {
     /// Negative — a wrong signature and unknown key have one rendered response.
     #[test]
     fn the_two_credential_rejections_are_indistinguishable() {
-        let unknown = S3Error::from(AuthError::InvalidAccessKeyId);
-        let mismatch = S3Error::from(AuthError::SignatureDoesNotMatch);
+        let unknown = from_auth(AuthError::InvalidAccessKeyId, ResponseKind::Other);
+        let mismatch = from_auth(AuthError::SignatureDoesNotMatch, ResponseKind::Other);
         assert_eq!(unknown.code(), mismatch.code());
         assert_eq!(unknown.message(), mismatch.message());
         assert_eq!(unknown.status(), mismatch.status());
     }
 
-    /// Negative — a verifier's malformed scope is a bad request, not a policy denial.
+    /// Negative — malformed authentication without a validated expected region cannot enter the
+    /// contextual region-mismatch response.
     #[test]
     fn a_malformed_scope_is_a_bad_request() {
         assert_eq!(
-            S3Error::from(AuthError::AuthorizationHeaderMalformed).status(),
-            http::StatusCode::BAD_REQUEST
+            from_auth(AuthError::AuthorizationHeaderMalformed, ResponseKind::Other).status(),
+            http::StatusCode::FORBIDDEN
         );
     }
 
     /// Negative — a denial says nothing about which policy condition failed.
     #[test]
     fn a_denial_renders_one_sentence() {
-        assert_eq!(S3Error::from(Denial::access_denied()).message(), "the request is not allowed");
+        assert_eq!(
+            from_denial(Denial::access_denied(), ResponseKind::Other).message(),
+            Some("the request is not allowed")
+        );
     }
 
     /// Negative — a wire rejection keeps the status the wire layer chose, not the one the code
@@ -483,13 +544,13 @@ mod tests {
     fn a_wire_rejection_keeps_its_own_status() {
         let reject = WireReject::MalformedRequestTarget;
         let status = reject.to_status();
-        assert_eq!(S3Error::from(reject).status(), status);
+        assert_eq!(from_wire_reject(reject).status(), status);
     }
 
     /// Positive — the document is well-formed and opens with the declaration a client expects.
     #[tokio::test]
     async fn the_document_opens_with_the_xml_declaration() {
-        let error = S3Error::new(ErrorCode::ACCESS_DENIED, "the request is not allowed");
+        let error = ordinary(ErrorCode::ACCESS_DENIED, "the request is not allowed");
         let collected = crate::wire::collect(render(&error, &trace()))
             .await
             .expect("an in-memory body");
@@ -502,7 +563,7 @@ mod tests {
     /// formatting sites that agree today are two that can drift apart tomorrow.
     #[tokio::test]
     async fn the_header_and_the_document_carry_one_identifier() {
-        let error = S3Error::new(ErrorCode::ACCESS_DENIED, "the request is not allowed");
+        let error = ordinary(ErrorCode::ACCESS_DENIED, "the request is not allowed");
         let collected = crate::wire::collect(render(&error, &trace()))
             .await
             .expect("an in-memory body");
@@ -517,7 +578,10 @@ mod tests {
     /// client that reads the document positionally sees the order S3 emits.
     #[tokio::test]
     async fn the_identifiers_are_the_last_two_elements() {
-        let error = S3Error::new(ErrorCode::ACCESS_DENIED, "the request is not allowed").about_resource("Bucket");
+        let error = from_codec(
+            CodecError::new(ErrorCode::INVALID_ARGUMENT, "invalid member").about("Bucket"),
+            ResponseKind::Other,
+        );
         let collected = crate::wire::collect(render(&error, &trace()))
             .await
             .expect("an in-memory body");
@@ -535,7 +599,7 @@ mod tests {
     /// 9110 §14.4 requires, and the two elements, in the order `c-range-0010` pins.
     #[tokio::test]
     async fn an_unsatisfiable_range_renders_its_header_and_its_two_elements() {
-        let error = S3Error::from(HandlerError::unsatisfiable_range("bytes=20-30", 10));
+        let error = handler(HandlerError::unsatisfiable_range("bytes=20-30", 10));
         let collected = crate::wire::collect(render(&error, &trace()))
             .await
             .expect("an in-memory body");
@@ -558,7 +622,7 @@ mod tests {
     /// and `c-cond-0023` pin, and adds no header.
     #[tokio::test]
     async fn a_precondition_failure_renders_its_condition_element() {
-        let error = S3Error::from(HandlerError::precondition_failed("If-None-Match"));
+        let error = handler(HandlerError::precondition_failed("If-None-Match"));
         let collected = crate::wire::collect(render(&error, &trace()))
             .await
             .expect("an in-memory body");
@@ -575,31 +639,29 @@ mod tests {
     /// that reads the document positionally would otherwise stop before the ones support asks for.
     #[tokio::test]
     async fn the_identifiers_stay_last_behind_every_extra_element() {
-        let error = S3Error::from(
-            HandlerError::internal_error("no")
-                .with_detail(ErrorDetail::ActualObjectSize(10))
-                .with_detail(ErrorDetail::Key(std::borrow::Cow::Borrowed("k")))
-                .with_detail(ErrorDetail::BucketName(std::borrow::Cow::Borrowed("b")))
-                .with_detail(ErrorDetail::Condition(std::borrow::Cow::Borrowed("If-Match")))
-                .with_detail(ErrorDetail::RangeRequested(std::borrow::Cow::Borrowed("bytes=0-1")))
-                .with_detail(ErrorDetail::Region(
-                    rustfs_gateway_core::RegionLabel::new("eu-west-1").expect("a valid region"),
-                )),
-        )
-        .about_resource("Bucket");
-        let body = document(&error, &trace());
-        let order: Vec<&str> = ["Code", "Message", "Resource"]
-            .into_iter()
-            .chain(rustfs_gateway_core::ELEMENT_ORDER)
-            .chain(["RequestId", "HostId"])
-            .collect();
-        let mut cursor = 0;
-        for element in order {
-            let at = body
-                .find(&format!("<{element}>"))
-                .unwrap_or_else(|| panic!("{element} in {body}"));
-            assert!(at >= cursor, "{element} is out of order in {body}");
-            cursor = at;
+        let cases = [
+            (
+                from_codec(
+                    CodecError::new(ErrorCode::INVALID_ARGUMENT, "invalid member").about("Bucket"),
+                    ResponseKind::Other,
+                ),
+                vec!["Code", "Message", "Resource", "RequestId", "HostId"],
+            ),
+            (
+                handler(HandlerError::unsatisfiable_range("bytes=0-1", 10)),
+                vec!["Code", "Message", "RangeRequested", "ActualObjectSize", "RequestId", "HostId"],
+            ),
+        ];
+        for (error, order) in cases {
+            let body = document(&error, &trace());
+            let mut cursor = 0;
+            for element in order {
+                let at = body
+                    .find(&format!("<{element}>"))
+                    .unwrap_or_else(|| panic!("{element} in {body}"));
+                assert!(at >= cursor, "{element} is out of order in {body}");
+                cursor = at;
+            }
         }
     }
 
@@ -608,8 +670,8 @@ mod tests {
     /// text is the one part of the document derived from what the caller sent.
     #[tokio::test]
     async fn an_extra_element_cannot_break_out_of_its_own_element() {
-        let error = S3Error::from(
-            HandlerError::internal_error("no")
+        let error = handler(
+            HandlerError::new(ErrorCode::INVALID_OBJECT_STATE, "not readable")
                 .with_detail(ErrorDetail::Key(std::borrow::Cow::Borrowed("</Key><Code>AccessDenied</Code><Key>"))),
         );
         let body = document(&error, &trace());
@@ -621,7 +683,7 @@ mod tests {
     /// this capability existed. Adding an empty list must not add an empty element.
     #[tokio::test]
     async fn a_refusal_with_no_extras_renders_the_document_it_always_did() {
-        let error = S3Error::new(ErrorCode::ACCESS_DENIED, "the request is not allowed");
+        let error = ordinary(ErrorCode::ACCESS_DENIED, "the request is not allowed");
         assert_eq!(
             document(&error, &trace()),
             format!(
@@ -639,10 +701,12 @@ mod tests {
     /// are written after the refusal's headers rather than before.
     #[tokio::test]
     async fn a_header_of_the_refusals_own_does_not_disturb_what_the_framework_writes() {
-        let plain = render(&S3Error::from(HandlerError::internal_error("no")), &trace());
+        let plain = render(&handler(HandlerError::new(ErrorCode::SERVICE_UNAVAILABLE, "unavailable")), &trace());
         let expected_length = plain.headers().get(CONTENT_LENGTH).cloned();
 
-        let carrying = S3Error::from(HandlerError::internal_error("no").with_header(ErrorHeader::RetryAfter { seconds: 5 }));
+        let carrying = handler(
+            HandlerError::new(ErrorCode::SERVICE_UNAVAILABLE, "unavailable").with_header(ErrorHeader::RetryAfter { seconds: 5 }),
+        );
         let response = render(&carrying, &trace());
         assert_eq!(response.headers().get(CONTENT_LENGTH), expected_length.as_ref());
         assert_eq!(
@@ -670,7 +734,7 @@ mod tests {
     /// through its predicate and through the write order: the framework writes last.
     #[tokio::test]
     async fn a_reserved_name_would_be_dropped_and_the_framework_writes_last() {
-        let error = S3Error::from(HandlerError::unsatisfiable_range("bytes=20-30", 10));
+        let error = handler(HandlerError::unsatisfiable_range("bytes=20-30", 10));
         let response = render(&error, &trace());
         // Every name that survived is one a backend is allowed to have written.
         for name in response.headers().keys() {

@@ -18,8 +18,8 @@
 //! for codes it does not know, and mapping a code to a status — the whole table in one place, so
 //! that "which status does this code get?" has exactly one answer.
 //! NOT responsible for: choosing *which* code an operation returns (that is per-operation), the
-//! error body's XML shape (`rustfs-gateway-xml`), and the context-sensitive rules, which live next door in
-//! [`super::error_status`] because they need request context this type does not have.
+//! error body's XML shape (`rustfs-gateway-xml`), or contextual resolution, which belongs to
+//! `rustfs-gateway-core` because it needs operation and authorization facts.
 //! Upstream: `http`. Downstream: every operation, the error serialiser, and the conformance suite.
 //!
 //! # A newtype, not an `enum`
@@ -70,8 +70,8 @@ impl ErrorCode {
     ///
     /// Unknown codes get `400 Bad Request`, never a 5xx: a server error tells the client to retry
     /// something that will fail again, and some clients discard the body of a 5xx entirely, so the
-    /// code the operator carefully chose never reaches the user. See
-    /// [`super::error_status::status_of`] for the context-sensitive form.
+    /// code the operator carefully chose never reaches the user. Contextual outcomes are resolved
+    /// by `rustfs-gateway-core`.
     #[must_use]
     pub fn default_status(&self) -> StatusCode {
         CODE_TABLE

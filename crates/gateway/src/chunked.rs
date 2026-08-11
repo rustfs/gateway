@@ -73,6 +73,7 @@
 
 use bytes::{Bytes, BytesMut};
 use http::HeaderMap;
+use rustfs_gateway_core::{HandlerError, ResponseKind};
 use rustfs_gateway_http::{
     ChunkFraming, ChunkLimits, ChunkReject, ChunkScope, ChunkSeed, ChunkSigner, DecodedLength, Framing, IngestPipeline,
     IngestPolicy, PayloadFramingSource, validate_decoded_length,
@@ -83,7 +84,7 @@ use rustfs_gateway_types::ErrorCode;
 
 use crate::close::ConnectionIntent;
 use crate::ext::ChunkSink;
-use crate::render::S3Error;
+use crate::render::{S3Error, from_chunk_reject, from_handler};
 
 /// The header carrying the decoded length of a framed body.
 const DECODED_LENGTH_HEADER: &str = "x-amz-decoded-content-length";
@@ -146,7 +147,7 @@ impl ChunkIngest {
         seed: Option<&str>,
         limits: ChunkLimits,
     ) -> Result<Option<Self>, S3Error> {
-        let framing = ChunkFraming::derive(&FramingOf(payload)).map_err(S3Error::from)?;
+        let framing = ChunkFraming::derive(&FramingOf(payload)).map_err(from_chunk_reject)?;
         if !framing.is_framed() {
             return Ok(None);
         }
@@ -156,8 +157,10 @@ impl ChunkIngest {
 
         let header = headers.get(DECODED_LENGTH_HEADER).and_then(|value| value.to_str().ok());
         let declared = validate_decoded_length(&framing, header, wire)
-            .map_err(S3Error::from)?
-            .ok_or_else(|| S3Error::from(ChunkReject::ModeConfusion(rustfs_gateway_http::ModeConfusion::DecodedLengthMissing)))?;
+            .map_err(from_chunk_reject)?
+            .ok_or_else(|| {
+                from_chunk_reject(ChunkReject::ModeConfusion(rustfs_gateway_http::ModeConfusion::DecodedLengthMissing))
+            })?;
 
         let signer = if framing.has_chunk_signatures() {
             Some(build_signer(sink, seed)?)
@@ -199,7 +202,7 @@ impl ChunkIngest {
             self.limits,
             IngestPolicy::verify_before_deliver(),
         )
-        .map_err(S3Error::from)?;
+        .map_err(from_chunk_reject)?;
 
         let mut decoded = BytesMut::new();
         let mut buffer = vec![0_u8; DRAIN_BUFFER_BYTES];
@@ -213,7 +216,7 @@ impl ChunkIngest {
                 // The reject is the reason; the `StreamError` is only its carrier, and recovering
                 // it by downcast would be a negotiation with no contract. `IngestPipeline::reject`
                 // exists so the status and the code come from the rule that fired.
-                Err(_) => return Err(pipeline.reject().map_or_else(chunk_stream_failed, S3Error::from)),
+                Err(_) => return Err(pipeline.reject().map_or_else(chunk_stream_failed, from_chunk_reject)),
                 Ok(ReadProgress::Filled(0)) => continue,
                 Ok(ReadProgress::Filled(written)) => match buffer.get(..written) {
                     Some(run) => decoded.extend_from_slice(run),
@@ -249,10 +252,10 @@ fn build_signer(sink: &ChunkSink, seed: Option<&str>) -> Result<ChunkSigner, S3E
     let Some(key) = material.chunk_signing_key() else {
         return Err(chunk_signatures_unavailable());
     };
-    let scope = ChunkScope::new(material.scope_line(), material.amz_date()).map_err(S3Error::from)?;
+    let scope = ChunkScope::new(material.scope_line(), material.amz_date()).map_err(from_chunk_reject)?;
     let seed = seed
         .ok_or_else(chunk_signatures_unavailable)
-        .and_then(|hex| ChunkSeed::from_hex(hex).map_err(S3Error::from))?;
+        .and_then(|hex| ChunkSeed::from_hex(hex).map_err(from_chunk_reject))?;
     Ok(ChunkSigner::new(key, scope, seed))
 }
 
@@ -261,12 +264,15 @@ fn build_signer(sink: &ChunkSink, seed: Option<&str>) -> Result<ChunkSigner, S3E
 /// `501` and not `400`: the request is well-formed and it is this service that is incomplete.
 /// Answering `400` would tell a correct client to change a correct request.
 fn trailers_not_verified() -> S3Error {
-    S3Error::new(
-        ErrorCode::NOT_IMPLEMENTED,
-        "this service does not yet verify the trailer this upload declared",
+    from_handler(
+        HandlerError::new(
+            ErrorCode::NOT_IMPLEMENTED,
+            "this service does not yet verify the trailer this upload declared",
+        ),
+        ResponseKind::Other,
+        // The body was not read to its end, so RFC 9112 §9.3 leaves no choice.
+        ConnectionIntent::Close,
     )
-    // The body was not read to its end, so RFC 9112 §9.3 leaves no choice.
-    .closing(ConnectionIntent::Close)
 }
 
 /// The refusal for a signed framed body with no verification material.
@@ -275,16 +281,23 @@ fn trailers_not_verified() -> S3Error {
 /// alternative is decoding a signed body without checking any of its signatures, which is the
 /// framing-confusion shape the ingest layer exists to prevent.
 fn chunk_signatures_unavailable() -> S3Error {
-    S3Error::new(
-        ErrorCode::NOT_IMPLEMENTED,
-        "this deployment cannot verify the per-chunk signatures this upload declared",
+    from_handler(
+        HandlerError::new(
+            ErrorCode::NOT_IMPLEMENTED,
+            "this deployment cannot verify the per-chunk signatures this upload declared",
+        ),
+        ResponseKind::Other,
+        ConnectionIntent::Close,
     )
-    .closing(ConnectionIntent::Close)
 }
 
 /// The refusal for a pipeline that failed without naming a rule.
 fn chunk_stream_failed() -> S3Error {
-    S3Error::new(ErrorCode::INCOMPLETE_BODY, "the request body did not arrive as it was framed").closing(ConnectionIntent::Close)
+    from_handler(
+        HandlerError::new(ErrorCode::INCOMPLETE_BODY, "the request body did not arrive as it was framed"),
+        ResponseKind::Other,
+        ConnectionIntent::Close,
+    )
 }
 
 /// The presented request signature, as the lowercase hex the chunk seed is spelled in.

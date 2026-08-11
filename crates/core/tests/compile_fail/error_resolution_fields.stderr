@@ -1,0 +1,21 @@
+error[E0451]: fields `status`, `code`, `body_policy`, `message`, `headers`, `details`, `etag` and `resource` of struct `ErrorResolution` are private
+  --> tests/compile_fail/error_resolution_fields.rs:26:9
+   |
+25 |     let _resolution = ErrorResolution {
+   |                       --------------- in this type
+26 |         status: StatusCode::OK,
+   |         ^^^^^^ private field
+27 |         code: None,
+   |         ^^^^ private field
+28 |         body_policy: BodyPolicy::None,
+   |         ^^^^^^^^^^^ private field
+29 |         message: None,
+   |         ^^^^^^^ private field
+30 |         headers: Vec::new(),
+   |         ^^^^^^^ private field
+31 |         details: Vec::new(),
+   |         ^^^^^^^ private field
+32 |         etag: None,
+   |         ^^^^ private field
+33 |         resource: None,
+   |         ^^^^^^^^ private field

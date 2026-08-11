@@ -57,10 +57,11 @@
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use http::StatusCode;
 use http_body_util::BodyExt;
+use rustfs_gateway_core::{HandlerError, ResponseKind};
 use rustfs_gateway_sig::Verdict;
 use rustfs_gateway_types::ErrorCode;
 
-use crate::render::S3Error;
+use crate::render::{S3Error, from_handler, from_transport_limit};
 
 /// Evidence that a request's signature reached a verdict and the verdict was not a rejection.
 ///
@@ -235,18 +236,23 @@ pub(crate) const MAX_DELETE_OBJECTS_BODY_BYTES: u64 = 2 * 1024 * 1024;
 /// refusal exists to avoid — `crate::close::after_body_ceiling` is where that judgement is
 /// written down. `c-object-0015` is the case.
 fn past_declared_cap() -> S3Error {
-    S3Error::new(ErrorCode::INVALID_REQUEST, "the request body is larger than this operation permits")
-        .closing(crate::close::after_body_ceiling())
+    from_handler(
+        HandlerError::new(ErrorCode::INVALID_REQUEST, "the request body is larger than this operation permits"),
+        ResponseKind::Other,
+        crate::close::after_body_ceiling(),
+    )
 }
 
 /// The refusal for a body larger than this assembly will hold.
 fn past_buffered_ceiling() -> S3Error {
-    S3Error::new(
-        ErrorCode::ENTITY_TOO_LARGE,
-        "the declared request body is larger than this service will hold",
+    from_transport_limit(
+        HandlerError::new(
+            ErrorCode::ENTITY_TOO_LARGE,
+            "the declared request body is larger than this service will hold",
+        ),
+        StatusCode::PAYLOAD_TOO_LARGE,
+        crate::close::after_body_ceiling(),
     )
-    .with_status(StatusCode::PAYLOAD_TOO_LARGE)
-    .closing(crate::close::after_body_ceiling())
 }
 
 /// The refusal for a body that stopped early or ran on: both mean the body that arrived is not the
@@ -256,8 +262,11 @@ fn incomplete() -> S3Error {
     // Closes, for the reason `ChunkReject::TruncatedStream` does: the transport reported the body
     // did not arrive as framed, so there is no well-defined remainder to drain and no
     // synchronisation point to resume from. RFC 9112 §6.3 and §9.3.
-    S3Error::new(ErrorCode::INCOMPLETE_BODY, "the request body did not arrive as it was framed")
-        .closing(crate::close::ConnectionIntent::Close)
+    from_handler(
+        HandlerError::new(ErrorCode::INCOMPLETE_BODY, "the request body did not arrive as it was framed"),
+        ResponseKind::Other,
+        crate::close::ConnectionIntent::Close,
+    )
 }
 
 #[cfg(test)]
@@ -318,7 +327,7 @@ mod tests {
             .await
             .expect_err("over the ceiling");
         assert_eq!(error.status(), StatusCode::PAYLOAD_TOO_LARGE);
-        assert_eq!(error.code(), &ErrorCode::ENTITY_TOO_LARGE);
+        assert_eq!(error.code(), Some(&ErrorCode::ENTITY_TOO_LARGE));
         assert_eq!(read.bytes_read(), 0, "not one frame was polled");
     }
 
@@ -336,7 +345,7 @@ mod tests {
             .read(&proof, ceilings, None)
             .await
             .expect_err("over the ceiling");
-        assert_eq!(error.code(), &ErrorCode::ENTITY_TOO_LARGE);
+        assert_eq!(error.code(), Some(&ErrorCode::ENTITY_TOO_LARGE));
     }
 
     /// Negative — the operation's own cap is refused **while the body is still arriving**: the
@@ -356,7 +365,7 @@ mod tests {
             .read(&proof, ceilings, None)
             .await
             .expect_err("past the operation's cap");
-        assert_eq!(error.code(), &ErrorCode::INVALID_REQUEST);
+        assert_eq!(error.code(), Some(&ErrorCode::INVALID_REQUEST));
         assert_eq!(error.status(), StatusCode::BAD_REQUEST);
         // Three frames of 64 bytes is the first total past 128, and nothing after it was asked for.
         assert_eq!(read.bytes_read(), 192);
@@ -377,7 +386,7 @@ mod tests {
             .read(&proof, ceilings, None)
             .await
             .expect_err("past the operation's cap");
-        assert_eq!(error.code(), &ErrorCode::INVALID_REQUEST);
+        assert_eq!(error.code(), Some(&ErrorCode::INVALID_REQUEST));
         assert_eq!(read.bytes_read(), 0);
     }
 

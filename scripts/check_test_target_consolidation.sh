@@ -161,6 +161,7 @@ core_modules = (
     "compile_fail",
     "configuration_error_declarations",
     "dialect",
+    "error_resolution",
     "golden",
     "hot_path",
     "limit_layering",
@@ -366,6 +367,7 @@ gateway_modules = (
     "connection_teardown",
     "cors_runtime",
     "credential_runtime",
+    "error_context_filters",
     "facade_probe",
     "governor_runtime",
     "handler_panic",
@@ -505,25 +507,25 @@ for source_path in gateway_root.rglob("*.rs"):
             fail(f"{source_path.relative_to(root)} includes the consolidated gateway integration harness")
 
 fixture_sets = {
-    root / "crates/gateway/tests/compile_fail": {
+    root / "crates/gateway/tests/compile_fail": ("azc_*", {
         "azc_0014_missing_input",
         "azc_0015_forge_authorized",
         "azc_0016_denial_code",
         "azc_0020_service_config_default",
         "azc_0021_allow_all",
         "azc_0025_request_extensions",
-    },
-    root / "crates/gateway/tests/trybuild/credential": {
+    }),
+    root / "crates/gateway/tests/trybuild/credential": ("*", {
         "constructs_anonymous",
         "prints_and_compares_token",
         "provider_returns_secret",
         "provider_returns_verdict",
-    },
+    }),
 }
-for directory, expected_stems in fixture_sets.items():
+for directory, (pattern, expected_stems) in fixture_sets.items():
     try:
-        sources = {path.stem for path in directory.glob("*.rs")}
-        goldens = {path.stem for path in directory.glob("*.stderr")}
+        sources = {path.stem for path in directory.glob(f"{pattern}.rs")}
+        goldens = {path.stem for path in directory.glob(f"{pattern}.stderr")}
     except OSError as error:
         fail(f"cannot inspect {directory.relative_to(root)}: {error}")
     if sources != expected_stems or goldens != expected_stems:

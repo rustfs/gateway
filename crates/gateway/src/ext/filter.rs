@@ -20,7 +20,7 @@
 //! NOT responsible for: calling them — the seams live in `crate::service`, which is the one file
 //! that knows where a stage ends; deciding any protocol behaviour; or per-operation middleware,
 //! which is [`crate::OpLayer`] one level in.
-//! Upstream: `crate::render::S3Error`, `rustfs-gateway-core`. Downstream: `crate::builder`,
+//! Upstream: `rustfs-gateway-core`. Downstream: `crate::builder`,
 //! `crate::service`.
 //!
 //! # Which level absorbs which requirement
@@ -76,11 +76,10 @@
 //! implementation detail.
 
 use http::{HeaderName, HeaderValue, Method, Response, Version};
-use rustfs_gateway_core::{OperationSpec, TargetKind};
+use rustfs_gateway_core::{HandlerError, OperationSpec, TargetKind};
 use rustfs_gateway_stream::Body;
 use rustfs_gateway_types::{BucketName, ErrorCode, ObjectKey};
 
-use crate::render::S3Error;
 use crate::trace::RequestId;
 
 /// The header fields a [`StageFilter::on_wire`] may not write, lowercase.
@@ -123,17 +122,13 @@ impl core::fmt::Display for FrozenHeader {
 
 impl std::error::Error for FrozenHeader {}
 
-impl From<FrozenHeader> for S3Error {
+impl From<FrozenHeader> for HandlerError {
     /// A refused write becomes a `500`, not a `400`: the caller did nothing wrong, the deployment's
     /// filter asked for something the framework does not permit.
     fn from(_refusal: FrozenHeader) -> Self {
         // The header name stays out of the response. Nothing a caller sends reaches this path, but
         // the rule about what an error body may echo does not have exceptions for that.
-        Self::new(ErrorCode::INTERNAL_ERROR, "this deployment's request filter is misconfigured").closing(
-            // The refusal is about the deployment's own code and the request is otherwise fine, so
-            // nothing about the connection changes.
-            crate::close::ConnectionIntent::MayKeepAlive,
-        )
+        Self::new(ErrorCode::INTERNAL_ERROR, "this deployment's request filter is misconfigured")
     }
 }
 
@@ -345,8 +340,8 @@ pub trait StageFilter: Send + Sync + 'static {
     ///
     /// # Errors
     ///
-    /// Any [`S3Error`]. It is rendered by the one renderer and the pipeline stops.
-    fn on_wire(&self, _head: &mut WireHead<'_>) -> Result<(), S3Error> {
+    /// Any [`HandlerError`]. It is validated by the closed resolver and the pipeline stops.
+    fn on_wire(&self, _head: &mut WireHead<'_>) -> Result<(), HandlerError> {
         Ok(())
     }
 
@@ -358,8 +353,8 @@ pub trait StageFilter: Send + Sync + 'static {
     ///
     /// # Errors
     ///
-    /// Any [`S3Error`]. It is rendered by the one renderer and the pipeline stops.
-    fn on_routed(&self, _routed: &RoutedView<'_>) -> Result<(), S3Error> {
+    /// Any [`HandlerError`]. It is validated by the closed resolver and the pipeline stops.
+    fn on_routed(&self, _routed: &RoutedView<'_>) -> Result<(), HandlerError> {
         Ok(())
     }
 
@@ -370,22 +365,22 @@ pub trait StageFilter: Send + Sync + 'static {
     ///
     /// # Errors
     ///
-    /// Any [`S3Error`]. The response is replaced by the rendered refusal and no later filter runs.
-    fn on_response(&self, _view: &ResponseView<'_>, _response: &mut Response<Body>) -> Result<(), S3Error> {
+    /// Any [`HandlerError`]. The response is replaced by the rendered refusal and no later filter runs.
+    fn on_response(&self, _view: &ResponseView<'_>, _response: &mut Response<Body>) -> Result<(), HandlerError> {
         Ok(())
     }
 }
 
 impl<T: StageFilter + ?Sized> StageFilter for std::sync::Arc<T> {
-    fn on_wire(&self, head: &mut WireHead<'_>) -> Result<(), S3Error> {
+    fn on_wire(&self, head: &mut WireHead<'_>) -> Result<(), HandlerError> {
         (**self).on_wire(head)
     }
 
-    fn on_routed(&self, routed: &RoutedView<'_>) -> Result<(), S3Error> {
+    fn on_routed(&self, routed: &RoutedView<'_>) -> Result<(), HandlerError> {
         (**self).on_routed(routed)
     }
 
-    fn on_response(&self, view: &ResponseView<'_>, response: &mut Response<Body>) -> Result<(), S3Error> {
+    fn on_response(&self, view: &ResponseView<'_>, response: &mut Response<Body>) -> Result<(), HandlerError> {
         (**self).on_response(view, response)
     }
 }
@@ -396,15 +391,15 @@ impl<T: StageFilter + ?Sized> StageFilter for std::sync::Arc<T> {
 /// function without declaring a struct for it.
 pub fn wire_filter<F>(f: F) -> impl StageFilter
 where
-    F: Fn(&mut WireHead<'_>) -> Result<(), S3Error> + Send + Sync + 'static,
+    F: Fn(&mut WireHead<'_>) -> Result<(), HandlerError> + Send + Sync + 'static,
 {
     struct WireOnly<F>(F);
 
     impl<F> StageFilter for WireOnly<F>
     where
-        F: Fn(&mut WireHead<'_>) -> Result<(), S3Error> + Send + Sync + 'static,
+        F: Fn(&mut WireHead<'_>) -> Result<(), HandlerError> + Send + Sync + 'static,
     {
-        fn on_wire(&self, head: &mut WireHead<'_>) -> Result<(), S3Error> {
+        fn on_wire(&self, head: &mut WireHead<'_>) -> Result<(), HandlerError> {
             (self.0)(head)
         }
     }
@@ -415,15 +410,15 @@ where
 /// A filter that implements only [`StageFilter::on_routed`].
 pub fn routed_filter<F>(f: F) -> impl StageFilter
 where
-    F: Fn(&RoutedView<'_>) -> Result<(), S3Error> + Send + Sync + 'static,
+    F: Fn(&RoutedView<'_>) -> Result<(), HandlerError> + Send + Sync + 'static,
 {
     struct RoutedOnly<F>(F);
 
     impl<F> StageFilter for RoutedOnly<F>
     where
-        F: Fn(&RoutedView<'_>) -> Result<(), S3Error> + Send + Sync + 'static,
+        F: Fn(&RoutedView<'_>) -> Result<(), HandlerError> + Send + Sync + 'static,
     {
-        fn on_routed(&self, routed: &RoutedView<'_>) -> Result<(), S3Error> {
+        fn on_routed(&self, routed: &RoutedView<'_>) -> Result<(), HandlerError> {
             (self.0)(routed)
         }
     }
@@ -434,15 +429,15 @@ where
 /// A filter that implements only [`StageFilter::on_response`].
 pub fn response_filter<F>(f: F) -> impl StageFilter
 where
-    F: Fn(&ResponseView<'_>, &mut Response<Body>) -> Result<(), S3Error> + Send + Sync + 'static,
+    F: Fn(&ResponseView<'_>, &mut Response<Body>) -> Result<(), HandlerError> + Send + Sync + 'static,
 {
     struct ResponseOnly<F>(F);
 
     impl<F> StageFilter for ResponseOnly<F>
     where
-        F: Fn(&ResponseView<'_>, &mut Response<Body>) -> Result<(), S3Error> + Send + Sync + 'static,
+        F: Fn(&ResponseView<'_>, &mut Response<Body>) -> Result<(), HandlerError> + Send + Sync + 'static,
     {
-        fn on_response(&self, view: &ResponseView<'_>, response: &mut Response<Body>) -> Result<(), S3Error> {
+        fn on_response(&self, view: &ResponseView<'_>, response: &mut Response<Body>) -> Result<(), HandlerError> {
             (self.0)(view, response)
         }
     }

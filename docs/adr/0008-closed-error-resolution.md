@@ -1,4 +1,4 @@
-# ADR-0008: Closed error resolution across the types, core and facade boundary
+# ADR-0008: Closed error resolution across the types, signature, core and facade boundary
 
 - Status: Accepted
 - Date: 2026-08-11
@@ -28,7 +28,7 @@ and body:
 | `c-err-n004` | A versioned read of a delete marker is `405 MethodNotAllowed` |
 | `c-err-n005` | `MissingContentLength` is `411`, not `400` |
 | `c-err-n006` | `EntityTooLarge` is `400`, not `413` |
-| `c-err-n007` | Every HEAD refusal preserves its status and headers but has no body or body framing |
+| `c-err-n007` | Every HEAD refusal has no body but preserves its status and would-be representation headers, including `Content-Length` |
 | `c-err-n008` | Not Modified is `304`, carries the ETag, and has neither body nor `Content-Length` |
 | `c-err-n009` | A signing-region mismatch is `400 AuthorizationHeaderMalformed` with one bounded `Region` detail |
 | `c-err-n010` | A refused preflight is `403 AccessForbidden` with the canonical, static CORSResponse message pinned by `c-cors-0034` |
@@ -86,16 +86,25 @@ impl ErrorContext {
     pub fn ordinary(error: HandlerError) -> Result<Self, InvalidErrorContext>;
     pub fn codec(error: CodecError) -> Result<Self, InvalidErrorContext>;
     pub fn missing_object(kind: MissingObject, visibility: ResourceVisibility) -> Self;
+    pub fn missing_object_for(key: ObjectKey, kind: MissingObject, visibility: ResourceVisibility) -> Self;
     pub fn delete_missing_key() -> Self;
     pub fn missing_bucket() -> Self;
     pub fn foreign_bucket() -> Self;
     pub fn permanent_redirect(region: RegionLabel) -> Self;
+    pub fn permanent_redirect_for(bucket: BucketName, region: RegionLabel) -> Self;
     pub fn temporary_redirect(region: RegionLabel, target: RedirectTarget) -> Self;
-    pub fn owned_bucket_recreation(region: RegionLabel) -> Self;
+    pub const fn owned_bucket_recreation() -> Self;
     pub fn versioned_delete_marker(version_id: &str) -> Result<Self, InvalidErrorContext>;
+    pub fn authorization_scope_malformed() -> Self;
     pub fn authorization_region_mismatch(region: RegionLabel) -> Self;
     pub fn not_modified(etag: ETag) -> Self;
     pub fn cors_forbidden() -> Self;
+}
+
+pub struct HandlerErrorContext(ErrorContext); // private field
+
+impl HandlerErrorContext {
+    // Only the named operation-handler contexts above; no authorization or CORS constructor.
 }
 
 pub fn resolve(context: ErrorContext, response: ResponseKind) -> ErrorResolution;
@@ -112,10 +121,20 @@ impl ErrorResolution {
 }
 ```
 
-`missing_object` selects `NoSuchKey` or `NoSuchVersion`. Both become `AccessDenied` when visibility
-is `Hidden`; both retain their precise `404` code when it is `Visible`. `delete_missing_key` means
+`missing_object` selects `NoSuchKey` or `NoSuchVersion`. `missing_object_for` additionally retains
+an already validated and XML-representable `ObjectKey` for the existing optional `<Key>` detail.
+Both become `AccessDenied` when visibility is `Hidden`; both retain their precise `404` code when
+it is `Visible`. `delete_missing_key` means
 the bucket has already been found and therefore cannot carry `NoSuchBucket`. The
-`versioned_delete_marker` constructor refuses an empty or over-1024-byte version id; the id proves
+`permanent_redirect_for` is the closed form of the existing bucket-naming helper: it preserves the
+validated `<BucketName>` that clients already observe without reopening a string setter. A hidden
+`missing_object_for` drops its key before resolution becomes observable, so the optional detail
+cannot undo masking. A visible object key that is valid for S3 but not XML 1.0 text retains the
+precise `NoSuchKey` or `NoSuchVersion` code while the optional typed detail is wholly omitted before
+resolution. It is never percent-encoded, replaced or truncated because the error document has no
+`encoding-type=url` negotiation. Mutations independently prove that a safe key is retained, an
+unsafe key is omitted and a hidden key cannot leak. The `versioned_delete_marker` constructor
+refuses an empty or over-1024-byte version id; the id proves
 that the lookup was version-specific but is not retained or rendered. Constructors for redirects,
 authorization-region errors and Not Modified require the existing bounded `RegionLabel`,
 `RedirectTarget` and `ETag` values. Special constructors choose their code, status, message,
@@ -137,7 +156,10 @@ over-128-byte, punctuated or control-character-bearing custom code returns
 `InvalidErrorContext::InvalidCode`; it is never copied into an `InternalError`.
 
 An ordinary message and every dynamic XML detail (`Key`, `BucketName`, `Condition` and
-`RangeRequested`) must be valid XML 1.0 text. Valid text is exactly tab, line feed, carriage return,
+`RangeRequested`) must be valid XML 1.0 text. A named constructor may wholly omit an optional typed
+detail before resolution when the underlying protocol value cannot be represented in XML; this is
+distinct from an invalid ordinary detail, which resolves only through the static `InternalError`
+fallback. Valid text is exactly tab, line feed, carriage return,
 `U+0020..U+D7FF`, `U+E000..U+FFFD` or `U+10000..U+10FFFF`; every other control character is rejected
 before compatibility or rendering. The message and `Key` are each at most 1,024 UTF-8 bytes,
 `BucketName` is at most 63 bytes, `Condition` is one of `If-Match`, `If-None-Match`,
@@ -158,7 +180,7 @@ after validating text and before constructing `ErrorContext`; an absent row is f
 | `RetryAfter` | only `SlowDown` or `ServiceUnavailable` |
 | `Key` | only `NoSuchKey`, `NoSuchVersion` or `InvalidObjectState` |
 | `BucketName` | only `NoSuchBucket`, `PermanentRedirect` or `BucketAlreadyOwnedByYou` |
-| `AuthorizationHeaderMalformed` | requires exactly one `Region`; forbids `BucketRegion`, `RedirectLocation` and `BucketName` |
+| `AuthorizationHeaderMalformed` | the scope-malformed constructor permits no extras; the region-mismatch constructor requires exactly one `Region`; both forbid `BucketRegion`, `RedirectLocation` and `BucketName` |
 | `PermanentRedirect` | requires one `Region` and one `BucketRegion` carrying the same `RegionLabel`; permits one validated `BucketName`; forbids `RedirectLocation` |
 | `TemporaryRedirect` | requires one `Region`, one matching `BucketRegion` and one `RedirectLocation`; forbids `BucketName` |
 
@@ -170,8 +192,9 @@ predicate; injecting `U+0001` into each dynamic detail is a separate red case. T
 rows each have missing-required, forbidden-extra and swapped-row mutations, plus a mutation that
 makes the body and header region values disagree.
 
-`ResponseKind::Head` is orthogonal and monotonic: it may only remove a body and its framing, never
-change a code or status. Core owns `ErrorResolution`; it is opaque and exposes read-only accessors
+`ResponseKind::Head` is orthogonal and monotonic: it may only remove the body bytes, never change a
+code, status or would-be representation headers. In particular, `Content-Length` still reports the
+length a corresponding GET refusal would carry. Core owns `ErrorResolution`; it is opaque and exposes read-only accessors
 for the status, optional public error code, body policy, optional message, ETag, bucket-region
 value, redirect location and Region document detail. Its code is `None` for the successful `204`
 outcome. Its header/detail accessors return the existing closed `ErrorHeader` and `ErrorDetail`
@@ -183,10 +206,18 @@ Resolution runs in one fixed order:
 2. resource-visibility masking chooses the public code, so a hidden key is already
    `AccessDenied` before any status or document is selected;
 3. the context-free table selects ordinary statuses, with its existing `400` fallback, while the
-   closed special cases select `204`, `301`, `304`, `307`, `405` or the us-east-1 `200`;
+   closed special cases select `204`, `301`, `304`, `307`, `405` or `409`;
 4. the special case supplies its required static message and typed headers/details;
-5. `ResponseKind::Head`, successful `204`, and `304` force `BodyPolicy::None` and forbid
-   `Content-Length` and `Content-Type`; all other refusals use `BodyPolicy::ErrorDocument`.
+5. `ResponseKind::Head` suppresses the body while the facade preserves the would-be representation
+   headers, including `Content-Length`; successful `204` and `304` force `BodyPolicy::None` and
+   remove body framing; all other refusals use `BodyPolicy::ErrorDocument`.
+
+The us-east-1 owned-bucket `200` remains on the operation's normal successful
+`CreateBucketOutput` path and never enters `ErrorContext`. In particular, the conformance fixture
+preserves its existing `Location: /{bucket}` header rather than routing a success through
+`HandlerError`. Other regions use the parameter-free contextual carrier and resolve only to `409
+BucketAlreadyOwnedByYou`. Mutating either branch to one status everywhere fails the existing
+two-direction region evidence.
 
 The facade consumes one `ErrorResolution` when it builds the response. Existing closed
 `ErrorHeader` and `ErrorDetail` values carried by an authorized handler are merged by core before
@@ -231,6 +262,21 @@ therefore exposes a context-free answer for a value that may require masking or 
 Callers migrate to `resolve(context, response).status()`. `HandlerError::code`, `message`, `headers`
 and `details` remain inspection APIs; none can produce an HTTP response without successful
 `ErrorContext` construction and resolution.
+
+`HandlerResult` and `StaticDispatchError` keep their existing public `HandlerError` carrier. To
+carry a named contextual outcome through that unchanged signature, `HandlerError` gains one
+private sealed payload slot. The opaque `HandlerErrorContext(ErrorContext)` wrapper is the sole
+public write bridge into that slot, and it exposes only the named contexts an authenticated
+operation handler may return. It has no public field, generic constructor, conversion from
+`ErrorContext`, setter, dereference or authorization/CORS factory. In particular, an arbitrary
+`AuthorizationHeaderMalformed` from a `StageFilter` cannot acquire the built-in verifier's trusted
+`Region` detail. `HandlerError::new` and every ordinary builder always leave the slot empty, and no
+public reader or discriminator exposes it. At resolution, `ErrorContext::ordinary` recovers an
+existing legal handler payload unchanged; otherwise it validates the ordinary code, message and
+extras as above. This does not add a second resolver or a public `OperationError`. External
+compile-fail tests pin both forbidden authorization conversions. Mutations prove that removing the
+recovery, accepting a forged second authority, or letting `with_header`/`with_detail` alter a
+contextual payload all fail.
 
 The canonical no-CORS message is `CORSResponse: no CORS rule allows this request`, matching the
 current byte-exact `c-cors-0034` contract. This supersedes the older wording in the original
@@ -362,10 +408,13 @@ context-free table; the same facts are selected again in core or the facade.
 
 **Inferred:** making `ErrorContext` opaque breaks downstream field literals immediately rather
 than silently changing their meaning. That is intentional: retaining the literals while adding
-more booleans would preserve source syntax and permit contradictory states. ADR-0004 already
-classifies public API breaks during `0.x` as minor-version events; the implementation therefore
-moves the three affected crates to their next minor versions together:
-`rustfs-gateway-types` from `0.1.0+aws.2026-08-04` to `0.2.0+aws.2026-08-04`,
+more booleans would preserve source syntax and permit contradictory states. Returning
+`ScopeRejection` from `enforce_scope` also makes the trusted configured-region proof explicit,
+while the stricter `RegionSet` constructor rejects configuration spellings that cannot be emitted
+as bounded lowercase region metadata. ADR-0004 already classifies public API breaks during `0.x`
+as minor-version events; the implementation therefore moves the four affected crates to their
+next minor versions together: `rustfs-gateway-types` from `0.1.1+aws.2026-08-04` to
+`0.2.0+aws.2026-08-04`, `rustfs-gateway-sig` from `0.1.1` to `0.2.0`,
 `rustfs-gateway-core` from `0.2.0` to `0.3.0`, and `rustfs-gateway` from `0.4.0` to `0.5.0`.
 The implementation PR states `BREAKING` and includes the migration.
 
@@ -393,8 +442,8 @@ The implementation PR states `BREAKING` and includes the migration.
 
 ## Consequences
 
-- The implementation is a coordinated public API change in `types`, `core` and the facade. It is
-  released as the three next-minor versions listed in Evidence, and the implementation PR contains
+- The implementation is a coordinated public API change in `types`, `sig`, `core` and the facade.
+  It is released as the four next-minor versions listed in Evidence, and the implementation PR contains
   `BREAKING` plus this migration table:
 
   | Removed public spelling | Replacement |
@@ -405,26 +454,31 @@ The implementation PR states `BREAKING` and includes the migration.
   | the nine current `From<X> for S3Error` implementations | only `From<ErrorResolution> for S3Error`; `FrozenHeader` converts to `HandlerError`, and the other typed paths are private |
   | `StageFilter` and filter closures returning `Result<(), S3Error>` | return `Result<(), HandlerError>`; the service validates and resolves with the real request method |
   | `HandlerError::status` | `resolve(context, response).status()` |
+  | contextual `HandlerError` construction by code and extras | a named `HandlerErrorContext` constructor followed by `HandlerError::from(context)`; authorization and CORS remain service-owned `ErrorContext` paths |
   | codec conversion followed by `about_resource(member)` | `ErrorContext::codec(error)`, whose resulting resolution owns the checked resource |
+  | `enforce_scope` returning `AuthError` | handle `ScopeRejection` explicitly; integrations that do not render the trusted configured region may map it to `AuthError::AuthorizationHeaderMalformed` |
+  | `RegionSet` entries using mixed case or punctuation other than `-` | configure non-empty region names of at most 64 bytes using only lowercase ASCII letters, digits and `-` |
 - The context-free `ErrorCode` table and its unknown-code `400` fallback remain. The implementation
   does not change the frozen IR, generated dto, model or overlays.
 - External compile-fail tests prove that downstream code cannot construct or destructure
-  `ErrorContext`, construct `ErrorResolution`, set a status/body/header field, or call an
-  individual mask/status stage. They also prove that a `StageFilter` returning `S3Error`, a call to
-  any removed `S3Error` writer, and a direct `S3Error::from(HandlerError)` no longer compile. A
-  public accessor never returns a mutable collection.
+  `ErrorContext`, wrap an authorization context as `HandlerErrorContext`, convert it into
+  `HandlerError`, construct `ErrorResolution`, set a status/body/header field, or call an individual
+  mask/status stage. They also prove that a `StageFilter` returning `S3Error`, a call to any removed
+  `S3Error` writer, and a direct `S3Error::from(HandlerError)` no longer compile. A public accessor
+  never returns a mutable collection.
 - Dynamic tests cover all eleven P1-04 cases. Negative cases include a missing key without
   ListBucket, DeleteObject with a missing bucket, a delete marker without a version id, a `304`
-  plan offered a body, a HEAD plan offered framing, an invalid or overlong region, and an attempt
+  plan offered a body, a HEAD refusal that loses its would-be `Content-Length`, an invalid or
+  overlong region, and an attempt
   to override the canonical CORS message. Extra validation separately covers a control character
   in each dynamic XML detail, every disallowed code-to-extra pair, an incomplete range triple and
   unequal `UnsatisfiedRange`/`ActualObjectSize` lengths. Custom-code tests accept the unknown
   `VendorSpecific` control and reject empty, punctuated, over-128-byte and `U+0001` values. Resource
   tests reject over-128-byte, XML-invalid and non-identifier model-member text.
 - Parity tests feed the same resolution through core and the facade and compare status, headers
-  and body bytes. Each assertion is mutation-tested, including reversal of masking order and
-  insertion of `Content-Length` into `204`, `304` and HEAD.
-- A deterministic `check_error_resolution_closed.sh` guard requires private fields, one public
+  and body bytes. Each assertion is mutation-tested, including reversal of masking order, removal
+  of the would-be `Content-Length` from HEAD, and insertion of `Content-Length` into `204` or `304`.
+- A deterministic `check_error_resolution_surface.sh` guard requires private fields, one public
   `resolve` entry, the contextual-code deny set, the complete code-to-extra matrix, no public
   `HandlerError::status`, semantic `S3Error` constructor, `closing` or `about_resource`, the full
   workspace-wide writer/return/re-export inventory above, exactly one public

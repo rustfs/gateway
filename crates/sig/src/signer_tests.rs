@@ -169,7 +169,7 @@ fn verify(signed: &SignedRequest, secret: &SecretBytes, now: RequestNow) -> Resu
         return Err(AuthError::InvalidAccessKeyId);
     }
     let clock = enforce_clock_skew(&date, now, SkewWindow::DEFAULT)?;
-    let verified = enforce_scope(&presented_scope, clock, &expected)?;
+    let verified = enforce_scope(&presented_scope, clock, &expected).map_err(|_| AuthError::AuthorizationHeaderMalformed)?;
     let set = SignedHeaderSet::parse_and_enforce(&signed_list, signed.headers(), None)?;
     let paths = UriPathCandidates::new(signed.path())?;
     let spec = CanonicalRequestSpec::new(

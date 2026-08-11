@@ -55,6 +55,13 @@ fixed now so that the same check does not get written twice under two names.
 | `check_no_as_any.sh` | Stream payloads expose no `as_any` or runtime downcast escape hatch | P1-05 |
 | `check_stream_vocabulary.sh` | The stream kernel contains no S3 protocol vocabulary in source or comments | P1-05 |
 | `check_pipeline_stage_shape.sh` | The real `RequestConfig` carrier owns its state and every state in its transition closure is a lifetime-free marker | P1-05 |
+| `check_scalar_case_coverage.sh` | All 71 corrected P1-04 acceptance ids map to one atomic executable test or deterministic guard; the collided header-render case uses `c-etag-0101` | P1-04 |
+| `check_etag_render.sh` | `ETag` has one contextual `render` entry and no `Display`, `From<ETag> for String` or `Into<String>` escape | P1-04 |
+| `check_opaque_string.sh` | `OpaqueString` exposes no date/timestamp parsing convenience | P1-04 |
+| `check_checksum_dependencies.sh` | `crc-fast` keeps default features off, enables only `std`, and is inherited by the types crate | P1-04 |
+| `check_unsafe_code_allowances.sh` | The external crc-fast unsafe boundary has a reason/removal trigger and local Rust contains no unsafe token | P1-04 |
+| `check_error_resolution_surface.sh` | ADR-0008 keeps one contextual HandlerError carrier, one ErrorResolution-to-S3Error bridge, no pre-resolution status writer, and HandlerError-only StageFilter seams | P1-04 |
+| `check_scope_rejection_surface.sh` | ADR-0009 keeps configured scope remediation typed, canonically ordered, facade-private and separate from custom authenticator verdicts | P1-04 |
 | `check_assembly_case_coverage.sh` | All 24 P7-01 acceptance ids map in order to a named executable test or deterministic guard | P7-01 |
 | `check_ring_boundaries.sh` | Ring 0/1 (`rustfs-gateway*`) depends on no `rustfs-*` crate and no ring-2 `rustfs-gateway-*` crate; `s3s` only via `rustfs-gateway-types`' `compat-s3s` feature, which must keep its `# DELETE BY` marker | P0 (Week-1) |
 | `check_no_planning_docs.sh` | Agent notes and planning documents are not tracked by git (closes the `git add -f` hole that `.gitignore` leaves open) | P0 |
@@ -116,3 +123,8 @@ fixed now so that the same check does not get written twice under two names.
 | `check_no_header_unwrap.sh` | Header parsing never `unwrap`s | P3 |
 | `check_no_duplicate_fuzz_targets.sh` | Fuzz targets are not duplicated between P2-07 and P8-07 | P8-07 |
 | `check_agents_no_dup.sh` | Scoped `AGENTS.md` files do not restate root rules | Deferred until layered `AGENTS.md` files exist |
+
+## Scalar fuzz entry points
+
+P1-04 registers `etag_parse` and `range_parse` in `fuzz/Cargo.toml`. Their acceptance run is
+`cargo fuzz run <target> -- -runs=200000`; registration alone is not recorded as a completed run.

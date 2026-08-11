@@ -42,7 +42,7 @@ use rustfs_gateway::dto::{CorsConfiguration, CorsRule};
 use rustfs_gateway::{
     AuthRequirement, BoxFuture, BucketName, CodecError, CorsSource, CorsSourceError, EncodedResponse, Handler, HandlerResult,
     MetaView, Operation, OperationCodec, OperationFloor, OperationSpec, Predicate, Req, RequestBody, ResourceShape, Resp,
-    ResponseBody, ResponseView, RouteEntry, RouteSelector, S3Error, SigService, TargetKind, VirtualHostStyle, response_filter,
+    ResponseBody, ResponseView, RouteEntry, RouteSelector, SigService, TargetKind, VirtualHostStyle, response_filter,
     wire_filter,
 };
 use support::{
@@ -227,7 +227,7 @@ async fn s3_error_message_compat_is_a_stage_filter() {
                         b"<Error><Message>as MinIO says it</Message></Error>",
                     ));
                 }
-                Ok::<(), S3Error>(())
+                Ok::<(), rustfs_gateway::HandlerError>(())
             },
         ))
         .build()
