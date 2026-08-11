@@ -46,6 +46,7 @@ zeroize = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true }
+serde_json = { workspace = true }
 # Differential testing between the readable route table and its compiled form. The compiled
 # router is only allowed to exist because a generator can be pointed at both and told to find a
 # request they disagree about.
