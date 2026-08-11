@@ -7,7 +7,7 @@ set -euo pipefail
 # WHAT THIS CHECKS
 #   Every internal (`rustfs-gateway` / `rustfs-gateway-*`) dependency edge declared in
 #   `crates/*/Cargo.toml` and `xtask/Cargo.toml`, against the allow matrix
-#   below. Three rules in one pass:
+#   below. Four rules in one pass:
 #
 #     1. Direction  — a crate may only depend on the crates its own row lists.
 #                     A reverse edge (e.g. `rustfs-gateway-xml` depending on
@@ -21,6 +21,9 @@ set -euo pipefail
 #                     and nothing else internal. It is a product other S3
 #                     implementations run against themselves, so it must
 #                     exercise the public API, not internal crates.
+#     4. Stream leaf — `rustfs-gateway-stream` may use only its reviewed external
+#                     primitive dependencies. A new external edge must be an
+#                     explicit architecture decision rather than a silent leak.
 #
 #   Registration is mandatory: a crate directory that is not in the matrix
 #   fails the check. Adding a crate is a deliberate architectural act.
@@ -90,6 +93,11 @@ LAYERS=(
     "xtask|rustfs-gateway-codegen rustfs-gateway-model rustfs-gateway-core rustfs-gateway-conformance rustfs-gateway"
 )
 
+# rustfs/backlog#1707 freezes the stream kernel below every protocol crate. Dev dependencies are
+# excluded for the same reason they are excluded from the internal DAG below: they do not enter a
+# normal dependency tree. `bitflags` was added by the issue's recorded follow-up decision.
+STREAM_EXTERNAL_DEPS="bitflags bytes futures-core http http-body pin-project-lite tokio"
+
 status=0
 
 fail() {
@@ -122,6 +130,14 @@ allowed_of() {
 
 is_internal() {
     [[ "$1" == "rustfs-gateway" || "$1" == rustfs-gateway-* ]]
+}
+
+is_stream_external() {
+    local want="$1" candidate
+    for candidate in $STREAM_EXTERNAL_DEPS; do
+        [[ "$candidate" == "$want" ]] && return 0
+    done
+    return 1
 }
 
 # -----------------------------------------------------------------------------
@@ -199,6 +215,14 @@ for manifest in "${manifests[@]}"; do
 
     while IFS=$'\t' read -r kind dep; do
         [[ -z "${dep:-}" ]] && continue
+
+        if [[ "$crate" == "rustfs-gateway-stream" && "$kind" != "dev-dependencies" ]] && ! is_internal "$dep"; then
+            if ! is_stream_external "$dep"; then
+                fail "${manifest}: '${crate}' depends on unapproved external crate '${dep}' (${kind}); allowed: ${STREAM_EXTERNAL_DEPS}"
+            fi
+            continue
+        fi
+
         is_internal "$dep" || continue
 
         # A dev-dependency on a higher layer is not a cycle. Cargo builds dev-deps only for

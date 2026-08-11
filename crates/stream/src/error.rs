@@ -51,7 +51,7 @@ pub enum StreamErrorKind {
         /// The number of body bytes actually observed.
         observed: u64,
     },
-    /// The stream was polled again after it had already reported end-of-stream.
+    /// The stream was polled again after it had already reported end-of-stream or an error.
     ///
     /// A terminated stream never produces another chunk; polling one is a consumer bug, and
     /// this variant makes it loud instead of letting a fresh chunk appear after the end.

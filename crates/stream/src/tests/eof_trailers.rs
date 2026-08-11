@@ -70,6 +70,21 @@ fn a_declared_trailer_field_is_readable_at_end_of_stream() {
     assert_eq!(trailer_value(&trailers, "x-trailer-value").as_deref(), Some("AAAAAA=="));
 }
 
+/// c-stream-n009: the end-of-stream field is a concrete trailer map, not an option whose
+/// absence could mean either "not finished" or "finished without trailers".
+#[test]
+fn eof_trailers_field_is_not_optional() {
+    let event = PayloadRead::Eof {
+        trailers: TrailingHeaders::empty(),
+    };
+    let trailers: TrailingHeaders = match event {
+        PayloadRead::Eof { trailers } => trailers,
+        PayloadRead::Chunk(_) => panic!("constructed EOF must remain EOF"),
+    };
+
+    assert!(trailers.is_empty());
+}
+
 /// c-stream-n014: a zero-byte body with a trailer goes straight to end-of-stream; an empty
 /// chunk would make "there is more coming" indistinguishable from "the body is over".
 #[test]
@@ -108,6 +123,132 @@ fn a_truncated_body_still_fails_after_adapting_to_the_pull_model() {
 
     assert!(matches!(err.kind(), StreamErrorKind::IncompleteBody));
     assert_eq!(err.bytes_before_error(), 9);
+}
+
+/// A push-to-pull adapter must become terminal after forwarding an error. An invalid producer
+/// that reports EOF afterwards cannot turn the failed body back into a successful one.
+#[test]
+fn push_to_pull_error_then_eof_stays_terminal() {
+    let inner = ScriptedStream::new([
+        Step::Fail(StreamErrorKind::IncompleteBody),
+        Step::Eof(TrailingHeaders::empty()),
+    ])
+    .boxed();
+    let mut reader: crate::read::BoxPayloadReader = Box::pin(StreamToReader::new(inner));
+    let mut buf = [0u8; 8];
+
+    let first = poll_reader_once(&mut reader, &mut buf);
+    assert!(matches!(
+        first,
+        core::task::Poll::Ready(Err(ref err)) if matches!(err.kind(), StreamErrorKind::IncompleteBody)
+    ));
+    let second = poll_reader_once(&mut reader, &mut buf);
+    assert!(matches!(
+        second,
+        core::task::Poll::Ready(Err(ref err)) if matches!(err.kind(), StreamErrorKind::PolledAfterEof)
+    ));
+}
+
+/// A push-to-pull adapter must not expose a chunk that its producer emits after an error.
+#[test]
+fn push_to_pull_error_then_chunk_stays_terminal() {
+    let inner = ScriptedStream::new([Step::Fail(StreamErrorKind::IncompleteBody), Step::Chunk("leak")]).boxed();
+    let mut reader: crate::read::BoxPayloadReader = Box::pin(StreamToReader::new(inner));
+    let mut buf = [0u8; 8];
+
+    let first = poll_reader_once(&mut reader, &mut buf);
+    assert!(matches!(
+        first,
+        core::task::Poll::Ready(Err(ref err)) if matches!(err.kind(), StreamErrorKind::IncompleteBody)
+    ));
+    let second = poll_reader_once(&mut reader, &mut buf);
+    assert!(matches!(
+        second,
+        core::task::Poll::Ready(Err(ref err)) if matches!(err.kind(), StreamErrorKind::PolledAfterEof)
+    ));
+}
+
+/// A pull-to-push adapter must become terminal after forwarding an error. An invalid producer
+/// that reports EOF afterwards cannot turn the failed body back into a successful one.
+#[test]
+fn pull_to_push_error_then_eof_stays_terminal() {
+    let inner = ScriptedReader::new([
+        Step::Fail(StreamErrorKind::IncompleteBody),
+        Step::Eof(TrailingHeaders::empty()),
+    ])
+    .boxed();
+    let mut stream: crate::stream::BoxPayloadStream = Box::pin(ReaderToStream::new(inner));
+
+    let first = poll_stream_once(&mut stream);
+    assert!(matches!(
+        first,
+        core::task::Poll::Ready(Err(ref err)) if matches!(err.kind(), StreamErrorKind::IncompleteBody)
+    ));
+    let second = poll_stream_once(&mut stream);
+    assert!(matches!(
+        second,
+        core::task::Poll::Ready(Err(ref err)) if matches!(err.kind(), StreamErrorKind::PolledAfterEof)
+    ));
+}
+
+/// A pull-to-push adapter must not expose a chunk that its producer emits after an error.
+#[test]
+fn pull_to_push_error_then_chunk_stays_terminal() {
+    let inner = ScriptedReader::new([Step::Fail(StreamErrorKind::IncompleteBody), Step::Chunk("leak")]).boxed();
+    let mut stream: crate::stream::BoxPayloadStream = Box::pin(ReaderToStream::new(inner));
+
+    let first = poll_stream_once(&mut stream);
+    assert!(matches!(
+        first,
+        core::task::Poll::Ready(Err(ref err)) if matches!(err.kind(), StreamErrorKind::IncompleteBody)
+    ));
+    let second = poll_stream_once(&mut stream);
+    assert!(matches!(
+        second,
+        core::task::Poll::Ready(Err(ref err)) if matches!(err.kind(), StreamErrorKind::PolledAfterEof)
+    ));
+}
+
+/// The length-checking wrapper must stop polling its producer after forwarding an error.
+#[test]
+fn byte_stream_error_then_eof_stays_terminal() {
+    let inner = ScriptedStream::new([
+        Step::Fail(StreamErrorKind::IncompleteBody),
+        Step::Eof(TrailingHeaders::empty()),
+    ])
+    .boxed();
+    let mut stream: crate::stream::BoxPayloadStream =
+        Box::pin(crate::byte_stream::ByteStream::new(inner).expect("the default capabilities are consistent"));
+
+    let first = poll_stream_once(&mut stream);
+    assert!(matches!(
+        first,
+        core::task::Poll::Ready(Err(ref err)) if matches!(err.kind(), StreamErrorKind::IncompleteBody)
+    ));
+    let second = poll_stream_once(&mut stream);
+    assert!(matches!(
+        second,
+        core::task::Poll::Ready(Err(ref err)) if matches!(err.kind(), StreamErrorKind::PolledAfterEof)
+    ));
+}
+
+/// The length-checking wrapper must not expose a chunk emitted after an upstream error.
+#[test]
+fn byte_stream_error_then_chunk_stays_terminal() {
+    let inner = ScriptedStream::new([Step::Fail(StreamErrorKind::IncompleteBody), Step::Chunk("leak")]).boxed();
+    let mut stream: crate::stream::BoxPayloadStream =
+        Box::pin(crate::byte_stream::ByteStream::new(inner).expect("the default capabilities are consistent"));
+
+    let first = poll_stream_once(&mut stream);
+    assert!(matches!(
+        first,
+        core::task::Poll::Ready(Err(ref err)) if matches!(err.kind(), StreamErrorKind::IncompleteBody)
+    ));
+    let second = poll_stream_once(&mut stream);
+    assert!(matches!(
+        second,
+        core::task::Poll::Ready(Err(ref err)) if matches!(err.kind(), StreamErrorKind::PolledAfterEof)
+    ));
 }
 
 /// c-stream-n002: once a body has reported end-of-stream, polling it again is an error and

@@ -83,9 +83,9 @@ impl PayloadRead {
 ///
 /// # Contract
 ///
-/// * `poll_read` returns [`PayloadRead::Eof`] exactly once, as the final event.
-/// * After `Eof`, any further poll returns [`StreamErrorKind::PolledAfterEof`]; it must never
-///   return another chunk.
+/// * `poll_read` returns [`PayloadRead::Eof`] exactly once, as the final successful event.
+/// * After `Eof` or an error, any further poll returns [`StreamErrorKind::PolledAfterEof`]; it
+///   must never return another chunk.
 /// * A stream that cannot reach the end of the body fails; it never substitutes `Eof`.
 /// * `caps()` and `len_hint()` must satisfy [`validate_caps`].
 ///

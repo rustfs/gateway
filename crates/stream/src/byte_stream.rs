@@ -139,7 +139,10 @@ impl PayloadStream for ByteStream {
         }
         match this.inner.as_mut().poll_read(cx) {
             Poll::Pending => Poll::Pending,
-            Poll::Ready(Err(err)) => Poll::Ready(Err(err.or_bytes_before_error(this.observed))),
+            Poll::Ready(Err(err)) => {
+                this.ended = true;
+                Poll::Ready(Err(err.or_bytes_before_error(this.observed)))
+            }
             Poll::Ready(Ok(PayloadRead::Chunk(chunk))) => {
                 this.observed = this.observed.saturating_add(chunk.len() as u64);
                 if let Some(declared) = this.declared

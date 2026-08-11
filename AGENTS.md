@@ -299,6 +299,10 @@ Three annotations you must not lose:
   `rustfs-gateway-types` and `rustfs-gateway-http` mutually dependent. `rustfs-gateway-stream` holds `Body`, `ByteStream`,
   `Payload`, and trailing-header typing, and **no S3 semantics whatsoever**. Do not put an S3 type
   in it.
+- **Pipeline stage state is owned and `'static`.** The request carrier and its stage markers must
+  not take lifetime parameters; borrowing a wire request across async stages creates a
+  self-reference. Narrow proof and view values that are consumed within one stage are not stage
+  state and may borrow their input.
 - **`rustfs-gateway-sig` freezes `PayloadMode` before `rustfs-gateway-http` decodes chunked framing.** The framing
   mode is derived from the signature, not sniffed from the body. This is why the signature phase
   (P2) is numbered before the wire phase (P3).

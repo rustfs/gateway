@@ -26,6 +26,7 @@
 
 mod adapt_cost;
 mod body;
+mod cancellation;
 mod caps_matrix;
 mod eof_trailers;
 #[cfg(unix)]

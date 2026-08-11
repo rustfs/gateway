@@ -371,6 +371,401 @@ mut_unregistered_crate() {
 expect_fail check_layer_dependencies.sh \
     'a new crate that is not registered in the allow matrix' mut_unregistered_crate
 
+mut_stream_unapproved_external_dependency() {
+    printf '\nserde = "1"\n' >>crates/stream/Cargo.toml
+}
+expect_fail check_layer_dependencies.sh \
+    'the stream kernel adding an external dependency outside its whitelist' \
+    mut_stream_unapproved_external_dependency
+
+mut_stream_shared_trailer_slot() {
+    printf '\nstruct SharedTrailers(std::sync::Mutex<Option<crate::TrailingHeaders>>);\n' \
+        >>crates/stream/src/trailers.rs
+}
+expect_fail check_no_shared_trailers.sh \
+    'stream trailers returning to a shared mutable slot' mut_stream_shared_trailer_slot
+
+mut_stream_rwlock_trailer_slot() {
+    printf '\nstruct SharedTrailers(std::sync::RwLock<Option<crate::TrailingHeaders>>);\n' \
+        >>crates/stream/src/trailers.rs
+}
+expect_fail check_no_shared_trailers.sh \
+    'stream trailers returning to a shared rwlock slot' mut_stream_rwlock_trailer_slot
+
+mut_stream_once_cell_trailers() {
+    printf '\nstruct SharedTrailers(std::cell::OnceCell<crate::TrailingHeaders>);\n' \
+        >>crates/stream/src/trailers.rs
+}
+expect_fail check_no_shared_trailers.sh \
+    'stream trailers returning to a once-cell slot' mut_stream_once_cell_trailers
+
+mut_stream_once_lock_trailers() {
+    printf '\nstruct SharedTrailers(std::sync::OnceLock<crate::TrailingHeaders>);\n' \
+        >>crates/stream/src/trailers.rs
+}
+expect_fail check_no_shared_trailers.sh \
+    'stream trailers returning to a once-lock slot' mut_stream_once_lock_trailers
+
+mut_stream_aliased_shared_trailer_slot() {
+    cat >>crates/stream/src/trailers.rs <<'RUST'
+
+type SharedTrailerSlot = Option<crate::TrailingHeaders>;
+struct SharedTrailers(std::sync::Mutex<SharedTrailerSlot>);
+RUST
+}
+expect_fail check_no_shared_trailers.sh \
+    'stream trailers returning to a shared slot hidden behind an alias' \
+    mut_stream_aliased_shared_trailer_slot
+
+mut_stream_transitively_aliased_once_lock() {
+    cat >>crates/stream/src/trailers.rs <<'RUST'
+
+type TrailerMap = crate::TrailingHeaders;
+type TrailerMapAlias = TrailerMap;
+struct SharedTrailers(std::sync::OnceLock<TrailerMapAlias>);
+RUST
+}
+expect_fail check_no_shared_trailers.sh \
+    'stream trailers returning to a once-lock hidden behind transitive aliases' \
+    mut_stream_transitively_aliased_once_lock
+
+mut_stream_generic_wrapper_alias() {
+    cat >>crates/stream/src/trailers.rs <<'RUST'
+
+type Lock<T> = std::sync::Mutex<T>;
+type SharedTrailerSlot = Option<crate::TrailingHeaders>;
+struct SharedTrailers(Lock<SharedTrailerSlot>);
+RUST
+}
+expect_fail check_no_shared_trailers.sh \
+    'stream trailers returning through a generic lock alias' \
+    mut_stream_generic_wrapper_alias
+
+mut_stream_defaulted_generic_wrapper_alias() {
+    cat >>crates/stream/src/trailers.rs <<'RUST'
+
+type Lock<T = ()> = std::sync::Mutex<T>;
+type SharedTrailerSlot = Option<crate::TrailingHeaders>;
+struct SharedTrailers(Lock<SharedTrailerSlot>);
+RUST
+}
+expect_fail check_no_shared_trailers.sh \
+    'stream trailers returning through a defaulted generic lock alias' \
+    mut_stream_defaulted_generic_wrapper_alias
+
+mut_stream_extra_defaulted_wrapper_parameter() {
+    cat >>crates/stream/src/trailers.rs <<'RUST'
+
+type Lock<T, Marker = ()> = std::sync::Mutex<T>;
+struct SharedTrailers(Lock<Option<crate::TrailingHeaders>>);
+RUST
+}
+expect_fail check_no_shared_trailers.sh \
+    'stream trailers returning through a lock alias with an extra defaulted parameter' \
+    mut_stream_extra_defaulted_wrapper_parameter
+
+mut_stream_imported_wrapper_alias() {
+    cat >>crates/stream/src/trailers.rs <<'RUST'
+
+use std::sync::Mutex as Lock;
+type SharedTrailerSlot = Option<crate::TrailingHeaders>;
+struct SharedTrailers(Lock<SharedTrailerSlot>);
+RUST
+}
+expect_fail check_no_shared_trailers.sh \
+    'stream trailers returning through an imported lock alias' \
+    mut_stream_imported_wrapper_alias
+
+mut_stream_as_any_escape_hatch() {
+    printf '\ntrait EscapeHatch { fn as_any(&self) -> &dyn std::any::Any; }\n' \
+        >>crates/stream/src/payload.rs
+}
+expect_fail check_no_as_any.sh \
+    'stream payload exposing an as_any escape hatch' mut_stream_as_any_escape_hatch
+
+mut_stream_downcast_ref_escape_hatch() {
+    printf '\nfn escape(value: &dyn std::any::Any) { let _ = value.downcast_ref::<u8>(); }\n' \
+        >>crates/stream/src/payload.rs
+}
+expect_fail check_no_as_any.sh \
+    'stream payload using downcast_ref for negotiation' mut_stream_downcast_ref_escape_hatch
+
+mut_stream_downcast_mut_escape_hatch() {
+    printf '\nfn escape(value: &mut dyn std::any::Any) { let _ = value.downcast_mut::<u8>(); }\n' \
+        >>crates/stream/src/payload.rs
+}
+expect_fail check_no_as_any.sh \
+    'stream payload using downcast_mut for negotiation' mut_stream_downcast_mut_escape_hatch
+
+mut_stream_generic_downcast_escape_hatch() {
+    printf '\nfn escape(value: Box<dyn std::any::Any>) { let _ = value.downcast::<u8>(); }\n' \
+        >>crates/stream/src/payload.rs
+}
+expect_fail check_no_as_any.sh \
+    'stream payload using owned Any downcast for negotiation' mut_stream_generic_downcast_escape_hatch
+
+mut_stream_protocol_vocabulary() {
+    printf '\n// Checksum belongs above the stream kernel.\n' >>crates/stream/src/stream.rs
+}
+expect_fail check_stream_vocabulary.sh \
+    'protocol vocabulary entering the stream kernel' mut_stream_protocol_vocabulary
+
+mut_stream_etag_vocabulary() {
+    printf '\n// ETag belongs above the stream kernel.\n' >>crates/stream/src/stream.rs
+}
+expect_fail check_stream_vocabulary.sh \
+    'ETag vocabulary entering the stream kernel' mut_stream_etag_vocabulary
+
+mut_stream_bucket_vocabulary() {
+    printf '\n// Bucket belongs above the stream kernel.\n' >>crates/stream/src/stream.rs
+}
+expect_fail check_stream_vocabulary.sh \
+    'bucket vocabulary entering the stream kernel' mut_stream_bucket_vocabulary
+
+mut_stream_multipart_vocabulary() {
+    printf '\n// Multipart belongs above the stream kernel.\n' >>crates/stream/src/stream.rs
+}
+expect_fail check_stream_vocabulary.sh \
+    'multipart vocabulary entering the stream kernel' mut_stream_multipart_vocabulary
+
+mut_stream_object_key_vocabulary() {
+    printf '\n// ObjectKey belongs above the stream kernel.\n' >>crates/stream/src/stream.rs
+}
+expect_fail check_stream_vocabulary.sh \
+    'object-key vocabulary entering the stream kernel' mut_stream_object_key_vocabulary
+
+mut_stream_hyphenated_object_key_vocabulary() {
+    printf '\n// Object-key belongs above the stream kernel.\n' >>crates/stream/src/stream.rs
+}
+expect_fail check_stream_vocabulary.sh \
+    'hyphenated object-key vocabulary entering the stream kernel' mut_stream_hyphenated_object_key_vocabulary
+
+probe_stream_vocabulary_allows_plain_object() {
+    local sandbox rc=0
+    cases=$((cases + 1))
+    make_sandbox
+    sandbox="$SANDBOX"
+    printf '\n// A trait object is ordinary stream-kernel vocabulary.\n' >>"${sandbox}/crates/stream/src/stream.rs"
+    GATEWAY_CHECK_ROOT="$sandbox" "${SCRIPT_DIR}/check_stream_vocabulary.sh" >/dev/null 2>&1 || rc=$?
+    if [[ "$rc" -eq 0 ]]; then
+        pass_msg 'check_stream_vocabulary.sh permits ordinary object vocabulary'
+    else
+        fail_msg 'check_stream_vocabulary.sh overfits ordinary object vocabulary'
+    fi
+}
+probe_stream_vocabulary_allows_plain_object
+
+probe_pipeline_borrowed_view_allowed() {
+    local sandbox rc=0
+    cases=$((cases + 1))
+    make_sandbox
+    sandbox="$SANDBOX"
+    cat >>"${sandbox}/crates/stream/src/read.rs" <<'RUST'
+
+pub struct BorrowedView<'a>(&'a [u8]);
+RUST
+    GATEWAY_CHECK_ROOT="$sandbox" "${SCRIPT_DIR}/check_pipeline_stage_shape.sh" >/dev/null 2>&1 || rc=$?
+    if [[ "$rc" -eq 0 ]]; then
+        pass_msg 'check_pipeline_stage_shape.sh permits a non-stage borrowed view'
+    else
+        fail_msg 'check_pipeline_stage_shape.sh rejects a non-stage borrowed view'
+    fi
+}
+probe_pipeline_borrowed_view_allowed
+
+mut_pipeline_new_stage_has_lifetime() {
+    python3 - <<'PY'
+from pathlib import Path
+
+path = Path("crates/gateway/src/request_config.rs")
+path.write_text(path.read_text() + """
+pub(crate) struct BorrowedStage<'a>(&'a [u8]);
+impl RequestConfig<InputAuthorized> {
+    pub(crate) fn borrowed<'a>(self) -> RequestConfig<BorrowedStage<'a>> { self.advance() }
+}
+""")
+PY
+}
+expect_fail check_pipeline_stage_shape.sh \
+    'a newly added real request stage carrying a lifetime' mut_pipeline_new_stage_has_lifetime
+
+probe_pipeline_non_unit_stage_allowed() {
+    local sandbox rc=0
+    cases=$((cases + 1))
+    make_sandbox
+    sandbox="$SANDBOX"
+    GATEWAY_SANDBOX="$sandbox" python3 - <<'PY'
+import os
+from pathlib import Path
+
+path = Path(os.environ["GATEWAY_SANDBOX"]) / "crates/gateway/src/request_config.rs"
+text = path.read_text().replace(
+    "pub(crate) struct Entered;",
+    "pub(crate) struct Entered { marker: core::marker::PhantomData<()> }",
+    1,
+)
+path.write_text(text)
+PY
+    GATEWAY_CHECK_ROOT="$sandbox" "${SCRIPT_DIR}/check_pipeline_stage_shape.sh" >/dev/null 2>&1 || rc=$?
+    if [[ "$rc" -eq 0 ]]; then
+        pass_msg 'check_pipeline_stage_shape.sh permits a non-unit stage'
+    else
+        fail_msg 'check_pipeline_stage_shape.sh requires unit stage markers'
+    fi
+}
+probe_pipeline_non_unit_stage_allowed
+
+probe_pipeline_multiple_roots_allowed() {
+    local sandbox rc=0
+    cases=$((cases + 1))
+    make_sandbox
+    sandbox="$SANDBOX"
+    GATEWAY_SANDBOX="$sandbox" python3 - <<'PY'
+import os
+from pathlib import Path
+
+path = Path(os.environ["GATEWAY_SANDBOX"]) / "crates/gateway/src/request_config.rs"
+path.write_text(path.read_text() + """
+pub(crate) struct Alternative;
+impl RequestConfig<Alternative> {
+    pub(crate) fn input_authorized(self) -> RequestConfig<InputAuthorized> { self.advance() }
+}
+""")
+PY
+    GATEWAY_CHECK_ROOT="$sandbox" "${SCRIPT_DIR}/check_pipeline_stage_shape.sh" >/dev/null 2>&1 || rc=$?
+    if [[ "$rc" -eq 0 ]]; then
+        pass_msg 'check_pipeline_stage_shape.sh permits multiple transition roots'
+    else
+        fail_msg 'check_pipeline_stage_shape.sh requires one exact transition chain'
+    fi
+}
+probe_pipeline_multiple_roots_allowed
+
+mut_pipeline_stage_borrows_request() {
+    python3 - <<'PY'
+from pathlib import Path
+
+path = Path("crates/gateway/src/request_config.rs")
+text = path.read_text().replace(
+    "pub(crate) struct RequestConfig<S> {",
+    "pub(crate) struct RequestConfig<'a, S> {\n    wire: &'a rustfs_gateway_http::OwnedWireRequest,",
+    1,
+)
+path.write_text(text)
+PY
+}
+expect_fail check_pipeline_stage_shape.sh \
+    'the request stage carrier borrowing its wire request' mut_pipeline_stage_borrows_request
+
+mut_pipeline_stage_uses_borrowed_alias() {
+    python3 - <<'PY'
+from pathlib import Path
+
+path = Path("crates/gateway/src/request_config.rs")
+text = path.read_text().replace(
+    "pub(crate) struct RequestConfig<S> {",
+    "type BorrowedWire<'a> = &'a rustfs_gateway_http::OwnedWireRequest;\n"
+    "pub(crate) struct RequestConfig<S> {\n    wire: BorrowedWire<'static>,",
+    1,
+)
+path.write_text(text)
+PY
+}
+expect_fail check_pipeline_stage_shape.sh \
+    'the request stage carrier hiding a borrowed wire behind a type alias' \
+    mut_pipeline_stage_uses_borrowed_alias
+
+mut_pipeline_stage_uses_borrowed_newtype() {
+    python3 - <<'PY'
+from pathlib import Path
+
+path = Path("crates/gateway/src/request_config.rs")
+text = path.read_text().replace(
+    "pub(crate) struct RequestConfig<S> {",
+    "struct BorrowedWire(&'static rustfs_gateway_http::OwnedWireRequest);\n"
+    "pub(crate) struct RequestConfig<S> {\n    wire: BorrowedWire,",
+    1,
+)
+path.write_text(text)
+PY
+}
+expect_fail check_pipeline_stage_shape.sh \
+    'the request stage carrier hiding a borrowed wire behind a newtype' \
+    mut_pipeline_stage_uses_borrowed_newtype
+
+mut_pipeline_stage_uses_borrowed_enum() {
+    python3 - <<'PY'
+from pathlib import Path
+
+path = Path("crates/gateway/src/request_config.rs")
+text = path.read_text().replace(
+    "pub(crate) struct RequestConfig<S> {",
+    "enum BorrowedWire { Value(&'static rustfs_gateway_http::OwnedWireRequest) }\n"
+    "pub(crate) struct RequestConfig<S> {\n    wire: BorrowedWire,",
+    1,
+)
+path.write_text(text)
+PY
+}
+expect_fail check_pipeline_stage_shape.sh \
+    'the request stage carrier hiding a borrowed wire behind an enum variant' \
+    mut_pipeline_stage_uses_borrowed_enum
+
+mut_pipeline_stage_marker_has_lifetime() {
+    python3 - <<'PY'
+from pathlib import Path
+
+path = Path("crates/gateway/src/request_config.rs")
+text = path.read_text().replace(
+    "pub(crate) struct Entered;",
+    "pub(crate) struct Entered<'a>;",
+    1,
+)
+path.write_text(text)
+PY
+}
+expect_fail check_pipeline_stage_shape.sh \
+    'a request stage marker carrying a lifetime' mut_pipeline_stage_marker_has_lifetime
+
+probe_stream_guards_fail_closed() {
+    local guard output rc tool_path empty_root
+    local guards=(
+        check_no_shared_trailers.sh
+        check_no_as_any.sh
+        check_stream_vocabulary.sh
+        check_pipeline_stage_shape.sh
+    )
+
+    tool_path="$(mktemp -d "${TMPDIR:-/tmp}/gateway-stream-guard-path.XXXXXX")"
+    ln -s "$(command -v dirname)" "${tool_path}/dirname"
+    for guard in "${guards[@]}"; do
+        cases=$((cases + 1))
+        rc=0
+        output="$(GATEWAY_CHECK_ROOT="$REPO_ROOT" PATH="$tool_path" /bin/bash \
+            "${SCRIPT_DIR}/${guard}" 2>&1)" || rc=$?
+        if [[ "$rc" -ne 0 && "$output" == *'required command is missing: python3'* ]]; then
+            pass_msg "${guard} fails closed without python3"
+        else
+            fail_msg "${guard} reported green without python3"
+        fi
+    done
+    rm -rf "$tool_path"
+
+    empty_root="$(mktemp -d "${TMPDIR:-/tmp}/gateway-stream-guard-empty.XXXXXX")"
+    for guard in "${guards[@]}"; do
+        cases=$((cases + 1))
+        rc=0
+        GATEWAY_CHECK_ROOT="$empty_root" "${SCRIPT_DIR}/${guard}" >/dev/null 2>&1 || rc=$?
+        if [[ "$rc" -ne 0 ]]; then
+            pass_msg "${guard} fails closed without its required source"
+        else
+            fail_msg "${guard} reported green without its required source"
+        fi
+    done
+    rm -rf "$empty_root"
+}
+probe_stream_guards_fail_closed
+
 mut_rustfs_dep() {
     printf 'rustfs-ecstore = "0.1"\n' >>crates/core/Cargo.toml
 }
