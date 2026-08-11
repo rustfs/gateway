@@ -27,4 +27,5 @@ mod etag_tests;
 mod name_tests;
 mod naming_tests;
 mod range_tests;
+mod timestamp_corpus_tests;
 mod timestamp_tests;

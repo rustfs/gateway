@@ -398,7 +398,7 @@ dependencies = [
 
 [[package]]
 name = "ext-field-spike"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "quick-xml",
  "rustfs-gateway-core",
@@ -1421,7 +1421,7 @@ dependencies = [
 
 [[package]]
 name = "rustfs-gateway-codegen"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "rustfs-gateway-model",
  "thiserror",
@@ -1459,7 +1459,7 @@ dependencies = [
 
 [[package]]
 name = "rustfs-gateway-http"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "hmac",
  "http",
@@ -1473,7 +1473,7 @@ dependencies = [
 
 [[package]]
 name = "rustfs-gateway-macros"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "prettyplease",
  "proc-macro2",
@@ -1485,14 +1485,14 @@ dependencies = [
 
 [[package]]
 name = "rustfs-gateway-model"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "thiserror",
 ]
 
 [[package]]
 name = "rustfs-gateway-server"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "arc-swap",
  "bytes",
@@ -1516,7 +1516,7 @@ dependencies = [
 
 [[package]]
 name = "rustfs-gateway-sig"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "hmac",
  "http",
@@ -1529,7 +1529,7 @@ dependencies = [
 
 [[package]]
 name = "rustfs-gateway-stream"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "bitflags",
  "bytes",
@@ -1538,7 +1538,7 @@ dependencies = [
 
 [[package]]
 name = "rustfs-gateway-types"
-version = "0.1.0+aws.2026-08-04"
+version = "0.1.1+aws.2026-08-04"
 dependencies = [
  "bytes",
  "crc-fast",
@@ -1549,13 +1549,14 @@ dependencies = [
  "proptest",
  "rustfs-gateway-stream",
  "rustfs-gateway-xml",
+ "serde_json",
  "sha1",
  "sha2",
 ]
 
 [[package]]
 name = "rustfs-gateway-xml"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "quick-xml",
 ]
@@ -2422,7 +2423,7 @@ dependencies = [
 
 [[package]]
 name = "xtask"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "http",
  "jsonschema",

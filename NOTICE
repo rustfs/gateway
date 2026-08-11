@@ -36,6 +36,21 @@ Third-party material
             attribution comment naming the upstream file and revision.
             TODO(P1): record the upstream revision here when the port lands.
 
+3. Smithy timestamp format test suite
+   Source:  https://github.com/smithy-lang/smithy-rs
+   License: Apache-2.0
+   Commit:  2744eb413935073aa43800e58e36268cd90b3a83
+   Path:    rust-runtime/aws-smithy-types/test_data/date_time_format_test_suite.json
+   SHA-256: 95adad86782f37c5eff4601cccaeb76b5ef827121ad7b2f7030224d231a746bd
+   Bytes:   152448
+   Notes:   Vendored byte-for-byte as compatibility test data. No smithy-rs
+            source code is copied and no runtime dependency is added.
+
+   Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+
+   The vendored file is:
+     crates/types/tests/data/date_time_format_test_suite.json
+
 -------------------------------------------------------------------------------
 Acknowledgements
 -------------------------------------------------------------------------------
