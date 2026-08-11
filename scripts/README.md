@@ -50,7 +50,11 @@ fixed now so that the same check does not get written twice under two names.
 
 | Script | Checks | Phase |
 |---|---|---|
-| `check_layer_dependencies.sh` | Internal crate dependency direction is one-way; the allow matrix is a DAG; `rustfs-gateway-conformance` may only use the `rustfs-gateway` facade | P0 (Week-1, before P1) |
+| `check_layer_dependencies.sh` | Internal crate dependency direction is one-way; the allow matrix is a DAG; `rustfs-gateway-conformance` may only use the facade; the stream kernel's normal/build dependencies stay on its reviewed external whitelist | P0 (Week-1, before P1) |
+| `check_no_shared_trailers.sh` | Stream trailers are never stored behind a shared mutable optional slot; only EOF owns them | P1-05 |
+| `check_no_as_any.sh` | Stream payloads expose no `as_any` or runtime downcast escape hatch | P1-05 |
+| `check_stream_vocabulary.sh` | The stream kernel contains no S3 protocol vocabulary in source or comments | P1-05 |
+| `check_pipeline_stage_shape.sh` | The real `RequestConfig` carrier owns its state and every state in its transition closure is a lifetime-free marker | P1-05 |
 | `check_assembly_case_coverage.sh` | All 24 P7-01 acceptance ids map in order to a named executable test or deterministic guard | P7-01 |
 | `check_ring_boundaries.sh` | Ring 0/1 (`rustfs-gateway*`) depends on no `rustfs-*` crate and no ring-2 `rustfs-gateway-*` crate; `s3s` only via `rustfs-gateway-types`' `compat-s3s` feature, which must keep its `# DELETE BY` marker | P0 (Week-1) |
 | `check_no_planning_docs.sh` | Agent notes and planning documents are not tracked by git (closes the `git add -f` hole that `.gitignore` leaves open) | P0 |
@@ -104,8 +108,6 @@ fixed now so that the same check does not get written twice under two names.
 | `check_quirks_evidence.sh` | Every quirk has ≥1 evidence and ≥1 case referencing it, consistent in both directions | P1 |
 | `check_error_has_rule_ref.sh` | Diagnostic errors carry a rule reference (quirk id / RFC section / spec field path) | P2 |
 | `check_wire_boundary.sh` | Wire-layer boundary constraints | P3 |
-| `check_no_as_any.sh` | No `as_any()`-style runtime downcast escape hatch | P3 |
-| `check_no_trailer_mutex.sh` | No `Arc<Mutex<Option<_>>>` trailer timing contract — the ordering must be encoded in the type | P3 |
 | `check_multer_constraints.sh` | multipart parsing sets explicit limits (multer defaults to `u64::MAX`) | P3 |
 | `check_governor_position.sh` | `Governor::try_acquire` is called after routing and before the body is read | P3 |
 | `check_no_header_unwrap.sh` | Header parsing never `unwrap`s | P3 |

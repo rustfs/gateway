@@ -37,7 +37,7 @@ shape. Three dependencies (`bytes`, `http`, `bitflags`), zero internal ones.
 | `src/trailers.rs` | `TrailingHeaders` | Building a trailer section at the end of a decoded body |
 | `src/error.rs` | `StreamError` + `StreamErrorKind`, and `bytes_before_error` | Deciding what an aborted transfer may still commit |
 | `src/file_region.rs` | `FileRegion` (unix): owned fd + offset + len, overflow refused at construction | Adding a kernel-side transfer path |
-| `src/tests/` | `eof_trailers` (ordering), `caps_matrix` (shape × model), `adapt_cost` (cost + counters), `zero_copy` (the four refusals and their order), `observer` (single-pass accounting), `body`, `trailers`, `file_region`, `support` (scripted producers) | Changing any behaviour above |
+| `src/tests/` | `eof_trailers` (ordering and concrete EOF shape), `cancellation` (drop ownership), `caps_matrix` (shape × model), `adapt_cost` (cost + counters), `zero_copy` (the four refusals and their order), `observer` (single-pass accounting), `body`, `trailers`, `file_region`, `support` (scripted producers) | Changing any behaviour above |
 
 ## Boundaries
 
@@ -57,7 +57,7 @@ shape. Three dependencies (`bytes`, `http`, `bitflags`), zero internal ones.
 ## Verify
 
 ```bash
-cargo test -p rustfs-gateway-stream            # 73 tests
+cargo test -p rustfs-gateway-stream            # 75 tests
 cargo clippy -p rustfs-gateway-stream --all-targets -- -D warnings
 bash scripts/check_layer_dependencies.sh
 ```

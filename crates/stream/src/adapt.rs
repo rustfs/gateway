@@ -44,7 +44,7 @@ const DEFAULT_CHUNK_SIZE: usize = 64 * 1024;
 ///
 /// Three levels, not a boolean, because "needs an owned buffer" and "copies every byte twice"
 /// are different problems: the first costs an allocation per chunk, the second costs memory
-/// bandwidth proportional to the object size and is the one worth failing a gate over.
+/// bandwidth proportional to the payload size and is the one worth failing a gate over.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AdaptCost {
     /// The payload is consumed in its native model; no adapter sits in the path.
@@ -281,6 +281,7 @@ impl AsyncPayloadRead for StreamToReader {
             match this.inner.as_mut().poll_read(cx) {
                 Poll::Pending => return Poll::Pending,
                 Poll::Ready(Err(err)) => {
+                    this.ended = true;
                     return Poll::Ready(Err(err.or_bytes_before_error(this.copied)));
                 }
                 Poll::Ready(Ok(PayloadRead::Chunk(chunk))) => {
@@ -376,10 +377,16 @@ impl PayloadStream for ReaderToStream {
         let mut buf = vec![0u8; this.next_capacity()];
         match this.inner.as_mut().poll_fill(cx, &mut buf) {
             Poll::Pending => Poll::Pending,
-            Poll::Ready(Err(err)) => Poll::Ready(Err(err.or_bytes_before_error(this.produced))),
-            Poll::Ready(Ok(ReadProgress::Filled(0))) => Poll::Ready(Err(
-                StreamError::upstream(Box::new(FillContractViolation)).with_bytes_before_error(this.produced)
-            )),
+            Poll::Ready(Err(err)) => {
+                this.ended = true;
+                Poll::Ready(Err(err.or_bytes_before_error(this.produced)))
+            }
+            Poll::Ready(Ok(ReadProgress::Filled(0))) => {
+                this.ended = true;
+                Poll::Ready(Err(
+                    StreamError::upstream(Box::new(FillContractViolation)).with_bytes_before_error(this.produced)
+                ))
+            }
             Poll::Ready(Ok(ReadProgress::Filled(n))) => {
                 buf.truncate(n);
                 this.produced = this.produced.saturating_add(n as u64);

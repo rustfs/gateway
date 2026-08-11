@@ -25,7 +25,7 @@
 //!
 //! # Why a trait and not a stack of streams
 //!
-//! The obvious shape is one stream per concern — decode, then checksum, then hash — and it costs
+//! The obvious shape is one stream per concern — decode, then one integrity pass, then another — and it costs
 //! a poll, a waker hand-off and usually a re-slice per layer per chunk, on top of walking the
 //! same bytes once per layer. With four digests over a 1 GiB upload that is four extra passes
 //! through memory. An observer is called with a slice that is *already* in L1 because the layer

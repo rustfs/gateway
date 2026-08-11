@@ -69,8 +69,8 @@ impl ReadProgress {
 ///
 /// # Contract
 ///
-/// * `poll_fill` returns [`ReadProgress::Eof`] exactly once, as the final outcome.
-/// * After `Eof`, any further poll returns [`StreamErrorKind::PolledAfterEof`].
+/// * `poll_fill` returns [`ReadProgress::Eof`] exactly once, as the final successful outcome.
+/// * After `Eof` or an error, any further poll returns [`StreamErrorKind::PolledAfterEof`].
 /// * A body that cannot be read to its end fails; it never substitutes `Eof`.
 /// * `caps()` and `len_hint()` must satisfy [`validate_caps`].
 ///

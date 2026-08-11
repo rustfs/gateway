@@ -233,15 +233,23 @@ fn an_adapted_body_advertises_the_model_it_now_speaks() {
 /// because an empty chunk would be indistinguishable from the end of the body.
 #[test]
 fn a_zero_progress_pull_producer_is_rejected_by_the_adapter() {
-    struct ZeroProgress;
+    struct ZeroThenChunk {
+        returned_zero: bool,
+    }
 
-    impl crate::read::AsyncPayloadRead for ZeroProgress {
+    impl crate::read::AsyncPayloadRead for ZeroThenChunk {
         fn poll_fill(
             self: core::pin::Pin<&mut Self>,
             _cx: &mut core::task::Context<'_>,
-            _buf: &mut [u8],
+            buf: &mut [u8],
         ) -> core::task::Poll<Result<crate::read::ReadProgress, crate::error::StreamError>> {
-            core::task::Poll::Ready(Ok(crate::read::ReadProgress::Filled(0)))
+            let this = self.get_mut();
+            if !this.returned_zero {
+                this.returned_zero = true;
+                return core::task::Poll::Ready(Ok(crate::read::ReadProgress::Filled(0)));
+            }
+            buf[..4].copy_from_slice(b"leak");
+            core::task::Poll::Ready(Ok(crate::read::ReadProgress::Filled(4)))
         }
 
         fn caps(&self) -> PayloadCaps {
@@ -253,8 +261,20 @@ fn a_zero_progress_pull_producer_is_rejected_by_the_adapter() {
         }
     }
 
-    let stream = Box::pin(ReaderToStream::new(Box::pin(ZeroProgress)).with_chunk_size(8));
-    let err = drain_stream(stream).expect_err("a producer that never progresses must fail");
+    let mut stream: crate::stream::BoxPayloadStream =
+        Box::pin(ReaderToStream::new(Box::pin(ZeroThenChunk { returned_zero: false })).with_chunk_size(8));
+    let first = crate::tests::support::poll_stream_once(&mut stream);
+    let err = match first {
+        core::task::Poll::Ready(Err(err)) => err,
+        other => panic!("a producer that made zero progress must fail, got {other:?}"),
+    };
 
     assert!(matches!(err.kind(), crate::error::StreamErrorKind::Upstream(_)));
+
+    let second = crate::tests::support::poll_stream_once(&mut stream);
+    assert!(matches!(
+        second,
+        core::task::Poll::Ready(Err(ref err))
+            if matches!(err.kind(), crate::error::StreamErrorKind::PolledAfterEof)
+    ));
 }
