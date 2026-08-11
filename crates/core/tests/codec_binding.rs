@@ -35,7 +35,7 @@
 // code from the rule, and this is where that exemption is spelled.
 #![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 
-mod support;
+use crate::support;
 
 use std::future::Future;
 use std::sync::Arc;

@@ -32,7 +32,7 @@
 //! every pairwise-equality "ambiguity check" passes them. One of them is unreachable. If this test
 //! goes green while that one goes red, the overlap decision has been replaced by a comparison.
 
-mod support;
+use crate::support;
 
 use http::Method;
 use rustfs_gateway_core::route::{

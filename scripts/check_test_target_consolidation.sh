@@ -1,0 +1,447 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# WHAT THIS CHECKS
+#   Core's integration suite is one explicit Cargo target with every legacy test source registered
+#   exactly once, and gateway's compile-fail cases share one trybuild TestCases batch.
+# WHY
+#   rustfs/gateway#60 measured separate integration targets and trybuild batches rebuilding the
+#   same test products until the 30-second verification budget expired.
+# HOW TO EXEMPT
+#   There are no exemptions. Add or remove a test by updating the source inventory and its single
+#   harness registration together.
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="${GATEWAY_CHECK_ROOT:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
+
+command -v python3 >/dev/null 2>&1 || {
+    printf '%s\n' 'required command is missing: python3' >&2
+    exit 1
+}
+
+python3 - "$REPO_ROOT" <<'PYEOF'
+from pathlib import Path
+import re
+import sys
+import tomllib
+
+
+root = Path(sys.argv[1]).resolve()
+
+
+def fail(message: str) -> None:
+    raise SystemExit(f"test-target consolidation violation: {message}")
+
+
+def rust_views(source: str, path: Path) -> tuple[str, str]:
+    """Return comment-free source and code with comments/literals masked."""
+    comment_free = list(source)
+    code_only = list(source)
+    index = 0
+    length = len(source)
+
+    def mask(start: int, end: int, *, comments: bool) -> None:
+        for position in range(start, end):
+            if source[position] != "\n":
+                code_only[position] = " "
+                if comments:
+                    comment_free[position] = " "
+
+    while index < length:
+        if source.startswith("//", index):
+            end = source.find("\n", index)
+            end = length if end < 0 else end
+            mask(index, end, comments=True)
+            index = end
+            continue
+        if source.startswith("/*", index):
+            depth = 1
+            end = index + 2
+            while end < length and depth:
+                if source.startswith("/*", end):
+                    depth += 1
+                    end += 2
+                elif source.startswith("*/", end):
+                    depth -= 1
+                    end += 2
+                else:
+                    end += 1
+            if depth:
+                fail(f"{path.relative_to(root)} has an unterminated block comment")
+            mask(index, end, comments=True)
+            index = end
+            continue
+
+        raw = re.match(r'(?:b)?r(#{0,255})"', source[index:])
+        if raw:
+            delimiter = '"' + raw.group(1)
+            body_start = index + raw.end()
+            close = source.find(delimiter, body_start)
+            if close < 0:
+                fail(f"{path.relative_to(root)} has an unterminated raw string")
+            end = close + len(delimiter)
+            mask(index, end, comments=False)
+            index = end
+            continue
+
+        prefix = 2 if source.startswith('b"', index) else 1 if source[index] == '"' else 0
+        if prefix:
+            end = index + prefix
+            escaped = False
+            while end < length:
+                char = source[end]
+                end += 1
+                if escaped:
+                    escaped = False
+                elif char == "\\":
+                    escaped = True
+                elif char == '"':
+                    break
+            else:
+                fail(f"{path.relative_to(root)} has an unterminated string")
+            mask(index, end, comments=False)
+            index = end
+            continue
+
+        char_literal = re.match(r"(?:b)?'(?:\\.|[^'\\\n])+'", source[index:])
+        if char_literal:
+            end = index + char_literal.end()
+            mask(index, end, comments=False)
+            index = end
+            continue
+        index += 1
+    return "".join(comment_free), "".join(code_only)
+
+
+def balanced_end(code: str, opening: int, path: Path) -> int:
+    pairs = {"(": ")", "[": "]", "{": "}"}
+    stack = [code[opening]]
+    position = opening + 1
+    while position < len(code) and stack:
+        char = code[position]
+        if char in pairs:
+            stack.append(char)
+        elif char in pairs.values():
+            if pairs[stack[-1]] != char:
+                fail(f"{path.relative_to(root)} has mismatched Rust delimiters")
+            stack.pop()
+        position += 1
+    if stack:
+        fail(f"{path.relative_to(root)} has an unterminated Rust delimiter")
+    return position
+
+
+def inside(path: Path, directory: Path) -> bool:
+    try:
+        path.relative_to(directory)
+    except ValueError:
+        return False
+    return True
+
+
+license_header = """// Copyright 2026 RustFS Team
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+"""
+
+core_modules = (
+    "acl_contract",
+    "authz_consumption",
+    "codec_binding",
+    "compile_fail",
+    "configuration_error_declarations",
+    "dialect",
+    "golden",
+    "hot_path",
+    "limit_layering",
+    "params_and_dispatch",
+    "precondition_range",
+    "purity_guard",
+    "registration",
+    "route_table",
+    "static_dispatch",
+    "tagging_contract",
+    "tolerant_conditions",
+)
+core_tests = root / "crates/core/tests"
+actual_core_sources = tuple(
+    sorted(path.stem for path in core_tests.glob("*.rs") if path.name != "integration.rs")
+)
+if actual_core_sources != core_modules:
+    fail("core test source inventory does not match the consolidated module suite")
+
+resolved_core_sources: dict[Path, str] = {}
+for module in core_modules:
+    source_path = core_tests / f"{module}.rs"
+    if source_path.is_symlink():
+        fail(f"{source_path.relative_to(root)} may not be a symlink")
+    try:
+        resolved_source = source_path.resolve(strict=True)
+        source = source_path.read_text()
+    except OSError as error:
+        fail(f"cannot read {source_path.relative_to(root)}: {error}")
+    if not inside(resolved_source, core_tests.resolve()):
+        fail(f"{source_path.relative_to(root)} resolves outside the core test directory")
+    previous = resolved_core_sources.get(resolved_source)
+    if previous is not None:
+        fail(f"core test sources {previous} and {module} resolve to the same file")
+    resolved_core_sources[resolved_source] = module
+    _, code_only = rust_views(source, source_path)
+    if re.search(r"#!\s*\[\s*(?:cfg|cfg_attr)\b", code_only):
+        fail(f"{source_path.relative_to(root)} may not disable its registered module with a file-level cfg")
+
+core_manifest_path = root / "crates/core/Cargo.toml"
+try:
+    core_manifest = tomllib.loads(core_manifest_path.read_text())
+except (OSError, tomllib.TOMLDecodeError) as error:
+    fail(f"cannot parse crates/core/Cargo.toml: {error}")
+package = core_manifest.get("package")
+if not isinstance(package, dict) or package.get("autotests") is not False:
+    fail("crates/core must set package.autotests = false")
+targets = core_manifest.get("test")
+if not isinstance(targets, list) or len(targets) != 1 or not isinstance(targets[0], dict):
+    fail("crates/core must declare exactly one explicit [[test]] target")
+target = targets[0]
+if target.get("name") != "integration" or target.get("path") != "tests/integration.rs":
+    fail("crates/core explicit test target must be integration at tests/integration.rs")
+if target.get("test", True) is not True or target.get("harness", True) is not True:
+    fail("crates/core integration target must use the active Rust test harness")
+required_features = target.get("required-features", [])
+if not isinstance(required_features, list) or required_features:
+    fail("crates/core integration target must run without required features")
+
+core_harness = license_header + """
+//! Consolidated integration-test entry point for `rustfs-gateway-core`.
+//!
+//! Responsible for: registering every core integration-test source in one Cargo target.
+//! NOT responsible for: test behavior or production implementation.
+//! Upstream: the core integration-test modules. Downstream: Cargo's test harness.
+
+mod support;
+
+""" + "\n".join(f'#[path = "{module}.rs"]\nmod {module};\n' for module in core_modules)
+core_harness_path = core_tests / "integration.rs"
+try:
+    actual_core_harness = core_harness_path.read_text()
+except OSError as error:
+    fail(f"cannot read crates/core/tests/integration.rs: {error}")
+if actual_core_harness != core_harness:
+    fail("core integration harness must register each frozen source exactly once")
+
+core_compile_harness_path = core_tests / "compile_fail.rs"
+core_compile_source = core_compile_harness_path.read_text()
+core_compile_comments_removed, _ = rust_views(core_compile_source, core_compile_harness_path)
+core_compile_code = "".join(core_compile_comments_removed.split())
+core_compile_dir = core_tests / "compile_fail"
+core_error_sources = {path.stem for path in core_compile_dir.glob("error_resolution_*.rs")}
+core_error_goldens = {path.stem for path in core_compile_dir.glob("error_resolution_*.stderr")}
+if core_error_sources != core_error_goldens:
+    fail("core error-resolution trybuild sources and goldens must remain paired")
+core_calls = [
+    'cases.compile_fail("tests/compile_fail/authz_*.rs");',
+    'cases.pass("tests/compile_pass/authz_authorized.rs");',
+    'cases.compile_fail("tests/compile_fail/c_sig_0018_*.rs");',
+]
+if core_error_sources:
+    core_calls.append('cases.compile_fail("tests/compile_fail/error_resolution_*.rs");')
+expected_core_compile_code = "".join(
+    (
+        "#[test]fn compile_time_contracts_are_not_openable(){"
+        "let cases=trybuild::TestCases::new();"
+        + "".join(core_calls)
+        + "}"
+    ).split()
+)
+if core_compile_code != expected_core_compile_code:
+    fail("core compile-fail contracts must use one TestCases batch and the ordered fixture patterns")
+
+golden_path = core_tests / "golden.rs"
+golden_source = golden_path.read_text()
+golden_command = (
+    "//! UPDATE_GOLDEN=1 cargo test -p rustfs-gateway-core --test integration "
+    "golden::the_rendered_route_table_matches_the_golden -- --exact"
+)
+if golden_source.count(golden_command) != 1 or "--test golden" in golden_source:
+    fail("core route-table golden must document the exact consolidated-target restore command")
+
+gateway_harness_path = root / "crates/gateway/tests/compile_fail.rs"
+try:
+    actual_gateway_harness = gateway_harness_path.read_text()
+except OSError as error:
+    fail(f"cannot read crates/gateway/tests/compile_fail.rs: {error}")
+gateway_compile_dir = root / "crates/gateway/tests/compile_fail"
+error_sources = {path.stem for path in gateway_compile_dir.glob("error_resolution_*.rs")}
+error_goldens = {path.stem for path in gateway_compile_dir.glob("error_resolution_*.stderr")}
+if error_sources != error_goldens:
+    fail("gateway error-resolution trybuild sources and goldens must remain paired")
+gateway_calls = ['cases.compile_fail("tests/compile_fail/azc_*.rs");']
+if error_sources:
+    gateway_calls.append('cases.compile_fail("tests/compile_fail/error_resolution_*.rs");')
+gateway_calls.append('cases.compile_fail("tests/trybuild/credential/*.rs");')
+expected_gateway_code = "".join(
+    (
+        "#[test]fn gateway_compile_fail_contracts_are_enforced(){"
+        "let cases=trybuild::TestCases::new();"
+        + "".join(gateway_calls)
+        + "}"
+    ).split()
+)
+gateway_comments_removed, _ = rust_views(actual_gateway_harness, gateway_harness_path)
+if "".join(gateway_comments_removed.split()) != expected_gateway_code:
+    fail("gateway compile-fail harness must use one exact TestCases batch and ordered fixture patterns")
+for legacy in (
+    root / "crates/gateway/tests/authz_compile.rs",
+    root / "crates/gateway/tests/trybuild_credential.rs",
+):
+    if legacy.exists():
+        fail(f"legacy gateway trybuild harness remains: {legacy.relative_to(root)}")
+
+gateway_root = root / "crates/gateway"
+gateway_manifest_path = gateway_root / "Cargo.toml"
+try:
+    gateway_manifest = tomllib.loads(gateway_manifest_path.read_text())
+except (OSError, tomllib.TOMLDecodeError) as error:
+    fail(f"cannot parse crates/gateway/Cargo.toml: {error}")
+gateway_package = gateway_manifest.get("package")
+if not isinstance(gateway_package, dict):
+    fail("crates/gateway/Cargo.toml has no package table")
+gateway_autotests = gateway_package.get("autotests", True)
+if not isinstance(gateway_autotests, bool):
+    fail("crates/gateway/Cargo.toml has an invalid package.autotests value")
+
+explicit_tests = gateway_manifest.get("test", [])
+if not isinstance(explicit_tests, list) or any(not isinstance(target, dict) for target in explicit_tests):
+    fail("crates/gateway/Cargo.toml has an invalid [[test]] inventory")
+explicit_harness_targets = []
+implicit_name_overridden = False
+for target in explicit_tests:
+    name = target.get("name")
+    if not isinstance(name, str):
+        fail("crates/gateway/Cargo.toml has an unresolvable [[test]] name")
+    if name == gateway_harness_path.stem:
+        implicit_name_overridden = True
+    target_path = target.get("path", f"tests/{name}.rs")
+    if not isinstance(target_path, str):
+        fail("crates/gateway/Cargo.toml has an unresolvable [[test]] path")
+    resolved_target = (gateway_root / target_path).resolve()
+    if not inside(resolved_target, gateway_root.resolve()):
+        fail("crates/gateway/Cargo.toml test targets may not escape the gateway crate")
+    if resolved_target == gateway_harness_path.resolve():
+        explicit_harness_targets.append(target)
+
+implicit_harness = gateway_autotests and not implicit_name_overridden
+active_harness_targets = int(implicit_harness)
+for target in explicit_harness_targets:
+    required_features = target.get("required-features", [])
+    if (
+        target.get("test", True) is not True
+        or not isinstance(required_features, list)
+        or any(not isinstance(feature, str) for feature in required_features)
+        or required_features
+    ):
+        fail("the explicit gateway trybuild target must always run without required features")
+    active_harness_targets += 1
+if active_harness_targets != 1:
+    fail(f"gateway unified trybuild harness has {active_harness_targets} active Cargo test targets, expected 1")
+
+for kind, default_test in (("lib", True), ("bin", True), ("example", False), ("bench", False)):
+    raw_targets = gateway_manifest.get(kind, [] if kind != "lib" else None)
+    if kind == "lib":
+        targets = [] if raw_targets is None else [raw_targets]
+    else:
+        targets = raw_targets
+    if not isinstance(targets, list) or any(not isinstance(target, dict) for target in targets):
+        fail(f"crates/gateway/Cargo.toml has an invalid {kind} target inventory")
+    for target in targets:
+        enabled = target.get("test", default_test)
+        target_path = target.get("path")
+        if not isinstance(enabled, bool) or (target_path is not None and not isinstance(target_path, str)):
+            fail(f"crates/gateway/Cargo.toml has an unresolvable {kind} target")
+        if target_path is not None:
+            resolved_target = (gateway_root / target_path).resolve()
+            if not inside(resolved_target, gateway_root.resolve()):
+                fail(f"crates/gateway/Cargo.toml {kind} targets may not escape the gateway crate")
+            if resolved_target == gateway_harness_path.resolve():
+                fail(f"crates/gateway/Cargo.toml reuses the unified trybuild harness as a {kind} target")
+
+for source_path in gateway_root.rglob("*.rs"):
+    try:
+        resolved = source_path.resolve(strict=True)
+    except OSError as error:
+        fail(f"cannot resolve gateway Rust entry {source_path.relative_to(root)}: {error}")
+    if resolved == gateway_harness_path.resolve():
+        if source_path != gateway_harness_path:
+            fail(f"{source_path.relative_to(root)} aliases the unified gateway trybuild harness")
+        continue
+    try:
+        source = source_path.read_text()
+    except OSError as error:
+        fail(f"cannot read {source_path.relative_to(root)}: {error}")
+    comments_removed, code_only = rust_views(source, source_path)
+    if re.search(r"\btrybuild\b", code_only):
+        fail(f"{source_path.relative_to(root)} creates an additional gateway trybuild entry")
+    for attribute in re.finditer(r"#\s*!?\s*\[", code_only):
+        opening = code_only.find("[", attribute.start(), attribute.end())
+        end = balanced_end(code_only, opening, source_path)
+        attribute_code = code_only[opening + 1 : end - 1]
+        for path_meta in re.finditer(r"\bpath\s*=", attribute_code):
+            value_start = opening + 1 + path_meta.end()
+            literal = re.match(r'\s*"([^"\n]+)"', comments_removed[value_start:])
+            if literal is None:
+                fail(f"{source_path.relative_to(root)} has a path attribute the guard cannot resolve")
+            target = (source_path.parent / literal.group(1)).resolve()
+            if not inside(target, gateway_root.resolve()):
+                fail(f"{source_path.relative_to(root)} has a path attribute escaping the gateway crate")
+            if target == gateway_harness_path.resolve():
+                fail(f"{source_path.relative_to(root)} reuses the unified gateway trybuild harness through #[path]")
+
+    for include in re.finditer(r"\binclude\s*!\s*([({\[])", code_only):
+        opening = include.end() - 1
+        end = balanced_end(code_only, opening, source_path)
+        arguments = comments_removed[opening + 1 : end - 1]
+        literal = re.fullmatch(r'\s*"([^"\n]+)"\s*', arguments)
+        if literal is None:
+            fail(f"{source_path.relative_to(root)} has a non-literal include the guard cannot resolve")
+        target = (source_path.parent / literal.group(1)).resolve()
+        if not inside(target, gateway_root.resolve()):
+            fail(f"{source_path.relative_to(root)} includes Rust code from outside the gateway crate")
+        if target == gateway_harness_path.resolve():
+            fail(f"{source_path.relative_to(root)} includes the unified gateway trybuild harness")
+
+fixture_sets = {
+    root / "crates/gateway/tests/compile_fail": {
+        "azc_0014_missing_input",
+        "azc_0015_forge_authorized",
+        "azc_0016_denial_code",
+        "azc_0020_service_config_default",
+        "azc_0021_allow_all",
+        "azc_0025_request_extensions",
+    },
+    root / "crates/gateway/tests/trybuild/credential": {
+        "constructs_anonymous",
+        "prints_and_compares_token",
+        "provider_returns_secret",
+        "provider_returns_verdict",
+    },
+}
+for directory, expected_stems in fixture_sets.items():
+    try:
+        sources = {path.stem for path in directory.glob("*.rs")}
+        goldens = {path.stem for path in directory.glob("*.stderr")}
+    except OSError as error:
+        fail(f"cannot inspect {directory.relative_to(root)}: {error}")
+    if sources != expected_stems or goldens != expected_stems:
+        fail(f"{directory.relative_to(root)} must retain exact source/golden pairs")
+
+print("test-target consolidation guard passed")
+PYEOF

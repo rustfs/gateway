@@ -328,7 +328,7 @@ done
 manifest="${ROOT}/crates/sig/Cargo.toml"
 harness="${ROOT}/crates/sig/tests/compile_fail.rs"
 core_manifest="${ROOT}/crates/core/Cargo.toml"
-core_harness="${ROOT}/crates/core/tests/sig_compile_fail.rs"
+core_harness="${ROOT}/crates/core/tests/compile_fail.rs"
 grep -Fq 'trybuild = { workspace = true }' "$manifest" || {
     printf 'check_sig_case_coverage: sig manifest does not enable trybuild\n' >&2
     exit 1
@@ -388,7 +388,7 @@ PYEOF
     exit 1
 }
 validate_rust_evidence "$core_harness" harness \
-    session_tokens_are_not_serializable \
+    compile_time_contracts_are_not_openable \
     'cases.compile_fail("tests/compile_fail/c_sig_0018_*.rs")' || {
     printf 'check_sig_case_coverage: core harness does not execute c-sig-0018\n' >&2
     exit 1

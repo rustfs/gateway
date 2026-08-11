@@ -28,7 +28,7 @@
 //! the operation — so the client disables the feature instead of fixing its request, and the
 //! operator goes looking for a handler that is not missing.
 
-mod support;
+use crate::support;
 
 use http::{Method, StatusCode};
 use rustfs_gateway_core::dispatch::{NO_ROUTE_MESSAGE, NOT_REGISTERED_MESSAGE, Router};

@@ -30,7 +30,7 @@
 //! every field cross-check deleted but one. Each test below names the variant, so deleting one
 //! check turns exactly one test red.
 
-mod support;
+use crate::support;
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};

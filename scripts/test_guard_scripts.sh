@@ -889,7 +889,16 @@ probe_smithy_timestamp_guard_missing_python() {
 probe_smithy_timestamp_guard_missing_python
 
 mut_rustfs_dep() {
-    printf 'rustfs-ecstore = "0.1"\n' >>crates/core/Cargo.toml
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/core/Cargo.toml")
+text = path.read_text()
+anchor = "[dependencies]\n"
+if text.count(anchor) != 1:
+    raise SystemExit("core dependencies table is missing or ambiguous")
+path.write_text(text.replace(anchor, anchor + 'rustfs-ecstore = "0.1"\n', 1))
+PYEOF
 }
 expect_fail check_ring_boundaries.sh \
     'ring-0 crate depending on a rustfs crate' mut_rustfs_dep
@@ -974,7 +983,16 @@ expect_fail check_no_planning_docs.sh \
     'a root-level MIGRATION_PLAN.md' mut_planning_name
 
 mut_inventory() {
-    printf 'inventory = "0.3"\n' >>crates/core/Cargo.toml
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/core/Cargo.toml")
+text = path.read_text()
+anchor = "[dependencies]\n"
+if text.count(anchor) != 1:
+    raise SystemExit("core dependencies table is missing or ambiguous")
+path.write_text(text.replace(anchor, anchor + 'inventory = "0.3"\n', 1))
+PYEOF
 }
 expect_fail check_no_global_registry_deps.sh \
     'an `inventory` dependency' mut_inventory
@@ -1816,7 +1834,7 @@ expect_fail check_sig_case_coverage.sh \
     'the real serde_json dev dependency being removed' mut_sig_real_serde_dependency_removed
 
 mut_sig_core_harness_removed() {
-    rm crates/core/tests/sig_compile_fail.rs
+    rm crates/core/tests/compile_fail.rs
 }
 expect_fail check_sig_case_coverage.sh \
     'the c-sig-0018 real-serde harness being deleted' mut_sig_core_harness_removed
@@ -1824,19 +1842,17 @@ expect_fail check_sig_case_coverage.sh \
 mut_sig_core_harness_comment_string_decoy() {
     python3 - <<'PYEOF'
 from pathlib import Path
-path = Path("crates/core/tests/sig_compile_fail.rs")
+path = Path("crates/core/tests/compile_fail.rs")
 text = path.read_text()
 old = '''#[test]
-fn session_tokens_are_not_serializable() {
-    let cases = trybuild::TestCases::new();
-    cases.compile_fail("tests/compile_fail/c_sig_0018_*.rs");
-}'''
+fn compile_time_contracts_are_not_openable() {'''
 new = '''// #[test]
-// fn session_tokens_are_not_serializable() {}
+// fn compile_time_contracts_are_not_openable() {}
 const DECOY: &str = r#"#[test]
-fn session_tokens_are_not_serializable() {
+fn compile_time_contracts_are_not_openable() {
     cases.compile_fail("tests/compile_fail/c_sig_0018_*.rs");
-}"#;'''
+}"#;
+fn removed_compile_time_contracts_are_not_openable() {'''
 if old not in text:
     raise SystemExit("missing core harness decoy mutation subject")
 path.write_text(text.replace(old, new, 1))
@@ -1848,7 +1864,7 @@ expect_fail check_sig_case_coverage.sh \
 mut_sig_core_glob_removed() {
     python3 - <<'PYEOF'
 from pathlib import Path
-path = Path("crates/core/tests/sig_compile_fail.rs")
+path = Path("crates/core/tests/compile_fail.rs")
 text = path.read_text()
 old = 'cases.compile_fail("tests/compile_fail/c_sig_0018_*.rs")'
 if old not in text:
@@ -4375,6 +4391,13 @@ PYEOF
 }
 expect_fail check_guard_sandbox_archive.sh \
     'sandbox base commit ignoring failure' mut_guard_sandbox_archive_commit_not_fail_closed
+
+cases=$((cases + 1))
+if "${SCRIPT_DIR}/test_test_target_consolidation.sh"; then
+    pass_msg 'test-target consolidation mutations'
+else
+    fail_msg 'test-target consolidation mutations'
+fi
 
 printf '\n%s case(s), %s failure(s)\n' "$cases" "$failures"
 [[ "$failures" -eq 0 ]]

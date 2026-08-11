@@ -12,15 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Compile-time authorization boundaries.
+//! Compile-time authorization and signature-secret boundaries.
 //!
-//! Responsible for: proving omitted resource declarations and forged proofs do not compile.
-//! NOT responsible for: runtime policy outcomes.
-//! Upstream: `rustfs_gateway_core::authz`. Downstream: public extension implementors.
+//! Responsible for: proving omitted resource declarations, forged proofs, and serialization of a
+//! signature session token do not compile, using one shared trybuild project.
+//! NOT responsible for: runtime policy outcomes or signature verification.
+//! Upstream: `rustfs_gateway_core::authz`, `rustfs_gateway_sig::SessionToken`. Downstream: public
+//! extension implementors and serialization callers.
 
 #[test]
-fn authorization_proofs_are_not_forgeable() {
+fn compile_time_contracts_are_not_openable() {
     let cases = trybuild::TestCases::new();
     cases.compile_fail("tests/compile_fail/authz_*.rs");
     cases.pass("tests/compile_pass/authz_authorized.rs");
+    cases.compile_fail("tests/compile_fail/c_sig_0018_*.rs");
 }
