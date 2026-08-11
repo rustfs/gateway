@@ -80,6 +80,10 @@ except ImportError as error:
     raise SystemExit("check_error_resolution_surface: Python tomllib is required") from error
 
 root = Path(sys.argv[1])
+RAW_STRING = re.compile(r'(?:br|r)(#{0,255})"')
+CHARACTER_LITERAL = re.compile(
+    r"(?:b)?'(?:\\(?:x[0-9A-Fa-f]{2}|u\{[0-9A-Fa-f_]+\}|.)|[^\\'\n])'"
+)
 
 
 def fail(message):
@@ -113,9 +117,9 @@ def rust_code(path, source=None):
             comment_depth = 1
             out.extend("  ")
             position += 2
-        elif raw := re.match(r'(?:br|r)(#{0,255})"', source[position:]):
+        elif raw := RAW_STRING.match(source, position):
             closing = '"' + raw.group(1)
-            end = source.find(closing, position + raw.end())
+            end = source.find(closing, raw.end())
             if end == -1:
                 fail(f"{path.relative_to(root)} has an unterminated raw string")
             end += len(closing)
@@ -136,8 +140,8 @@ def rust_code(path, source=None):
                 fail(f"{path.relative_to(root)} has an unterminated string")
             out.extend("\n" if char == "\n" else " " for char in source[position:end])
             position = end
-        elif character := re.match(r"(?:b)?'(?:\\(?:x[0-9A-Fa-f]{2}|u\{[0-9A-Fa-f_]+\}|.)|[^\\'\n])'", source[position:]):
-            end = position + character.end()
+        elif character := CHARACTER_LITERAL.match(source, position):
+            end = character.end()
             out.extend(" " for _ in source[position:end])
             position = end
         else:
@@ -471,7 +475,10 @@ if len(public_items) != len(allowed_items) or set(public_items) != allowed_items
 
 impl_headers = []
 for path in (root / "crates/core/src").rglob("*.rs"):
-    _, code = rust_code(path)
+    source = path.read_text()
+    if "HandlerErrorContext" not in source and "ErrorContext" not in source:
+        continue
+    _, code = rust_code(path, source)
     dense = re.sub(r"\s+", "", code)
     if re.search(r"type[A-Za-z0-9_]+=[^;]*HandlerErrorContext|HandlerErrorContextas[A-Za-z0-9_]", dense):
         fail(f"{path.relative_to(root)} aliases HandlerErrorContext")
