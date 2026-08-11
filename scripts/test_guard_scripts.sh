@@ -765,6 +765,108 @@ probe_stream_guards_fail_closed() {
     rm -rf "$empty_root"
 }
 probe_stream_guards_fail_closed
+mut_smithy_timestamp_digest_byte() {
+    python3 - <<'PY'
+from pathlib import Path
+
+path = Path("crates/types/tests/data/date_time_format_test_suite.json")
+text = path.read_text()
+old = '"smithy_format_value": "0001-01-25T11:23:19.123456Z"'
+new = '"smithy_format_value": "0001-01-25T11:23:19.123457Z"'
+if old not in text:
+    raise SystemExit("expected Smithy timestamp vector is missing")
+path.write_text(text.replace(old, new, 1))
+PY
+}
+expect_fail check_smithy_timestamp_corpus.sh \
+    'one vendored corpus byte changing its pinned digest' mut_smithy_timestamp_digest_byte
+
+mut_smithy_timestamp_case_count() {
+    python3 - <<'PY'
+import hashlib
+import json
+from pathlib import Path
+
+corpus_path = Path("crates/types/tests/data/date_time_format_test_suite.json")
+suite = json.loads(corpus_path.read_text())
+suite["parse_http_date"].pop()
+corpus_path.write_text(json.dumps(suite, indent=2) + "\n")
+corpus = corpus_path.read_bytes()
+
+guard_path = Path("scripts/check_smithy_timestamp_corpus.sh")
+guard = guard_path.read_text()
+guard = guard.replace("expected_bytes = 152_448", f"expected_bytes = {len(corpus)}", 1)
+guard = guard.replace(
+    'expected_sha256 = "95adad86782f37c5eff4601cccaeb76b5ef827121ad7b2f7030224d231a746bd"',
+    f'expected_sha256 = "{hashlib.sha256(corpus).hexdigest()}"',
+    1,
+)
+guard_path.write_text(guard)
+PY
+}
+expect_fail check_smithy_timestamp_corpus.sh \
+    'one section dropping a vector even after refreshing the byte pin' mut_smithy_timestamp_case_count
+
+mut_smithy_timestamp_notice_commit() {
+    python3 - <<'PY'
+from pathlib import Path
+
+path = Path("NOTICE")
+text = path.read_text()
+path.write_text(text.replace("2744eb413935073aa43800e58e36268cd90b3a83", "0" * 40, 1))
+PY
+}
+expect_fail check_smithy_timestamp_corpus.sh \
+    'the legal notice losing the pinned source commit' mut_smithy_timestamp_notice_commit
+
+mut_smithy_timestamp_mapping() {
+    python3 - <<'PY'
+from pathlib import Path
+
+path = Path("crates/types/tests/data/README.md")
+text = path.read_text()
+date_time = "| `date-time` | `TimestampFormat::Iso8601` |"
+epoch_seconds = "| `epoch-seconds` | `TimestampFormat::EpochSeconds` |"
+if date_time not in text or epoch_seconds not in text:
+    raise SystemExit("expected timestamp mapping rows are missing")
+text = text.replace(date_time, "__DATE_TIME_ROW__", 1)
+text = text.replace(epoch_seconds, "| `epoch-seconds` | `TimestampFormat::Iso8601` |", 1)
+path.write_text(text.replace("__DATE_TIME_ROW__", "| `date-time` | `TimestampFormat::EpochSeconds` |", 1))
+PY
+}
+expect_fail check_smithy_timestamp_corpus.sh \
+    'the upstream-to-gateway format mapping changing' mut_smithy_timestamp_mapping
+
+mut_smithy_timestamp_third_party_license() {
+    python3 - <<'PY'
+from pathlib import Path
+
+path = Path("THIRD-PARTY-NOTICES.md")
+text = path.read_text()
+old = "Apache License 2.0. The exact source revision and digest"
+if old not in text:
+    raise SystemExit("expected Smithy third-party license attribution is missing")
+path.write_text(text.replace(old, "the upstream license. The exact source revision and digest", 1))
+PY
+}
+expect_fail check_smithy_timestamp_corpus.sh \
+    'the third-party summary losing the Smithy license' mut_smithy_timestamp_third_party_license
+
+probe_smithy_timestamp_guard_missing_python() {
+    local output rc=0 tool_path
+    cases=$((cases + 1))
+    tool_path="$(mktemp -d "${TMPDIR:-/tmp}/gateway-smithy-guard-path.XXXXXX")"
+    ln -s "$(command -v dirname)" "${tool_path}/dirname"
+    output="$(GATEWAY_CHECK_ROOT="$REPO_ROOT" PATH="$tool_path" /bin/bash \
+        "${SCRIPT_DIR}/check_smithy_timestamp_corpus.sh" 2>&1)" || rc=$?
+    rm -rf "$tool_path"
+    if [[ "$rc" -ne 0 && "$output" == *'required command is missing: python3'* ]]; then
+        pass_msg 'check_smithy_timestamp_corpus.sh fails closed without python3'
+    else
+        fail_msg 'check_smithy_timestamp_corpus.sh reported green without python3'
+    fi
+}
+probe_smithy_timestamp_guard_missing_python
 
 mut_rustfs_dep() {
     printf 'rustfs-ecstore = "0.1"\n' >>crates/core/Cargo.toml
