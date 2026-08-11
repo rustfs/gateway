@@ -303,13 +303,13 @@ mut_monomorphic_handler_is_indirect() {
 from pathlib import Path
 
 Path("scripts/monomorphic-indirect.ll").write_text("""\
-define internal void @_RNCINvMNtCstatic_dispatchStaticOperationmonomorphic7support4Ping8dispatch7Backend() {
-; <monomorphic::support::Backend as rustfs_gateway_core::handler::Handler<monomorphic::support::Ping>>::call
+define internal void @_RNCINvMNtCstatic_dispatchStaticOperationintegration7support4Ping8dispatch7Backend() {
+; <integration::support::Backend as rustfs_gateway_core::handler::Handler<integration::support::Ping>>::call
   %result = call ptr %handler()
 }
-; rustfs_gateway_core::static_dispatch::decode::<monomorphic::support::Ping>
+; rustfs_gateway_core::static_dispatch::decode::<integration::support::Ping>
 define internal void @_Rdecode() {
-; <monomorphic::support::Ping as rustfs_gateway_core::codec::OperationCodec>::decode
+; <integration::support::Ping as rustfs_gateway_core::codec::OperationCodec>::decode
   call void @_Rcodec()
 }
 """)

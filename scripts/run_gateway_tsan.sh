@@ -12,4 +12,5 @@ cd "$ROOT"
 RUSTFLAGS='-Zsanitizer=thread' \
 RUSTDOCFLAGS='-Zsanitizer=thread' \
     cargo "+${TOOLCHAIN}" test -Zbuild-std --target "$TARGET" \
-        -p rustfs-gateway --test service_concurrency -- --test-threads=1
+        -p rustfs-gateway --test integration \
+        service_concurrency::one_hundred_clones_answer_concurrently -- --exact --test-threads=1

@@ -32,7 +32,7 @@
 //! survive a filter rewriting the header it was computed over. So this suite signs, through
 //! `support::signed`, and both halves are asserted against the same filter.
 
-mod support;
+use crate::support;
 
 use std::sync::Arc;
 use std::sync::Mutex;

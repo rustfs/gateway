@@ -21,7 +21,7 @@
 
 #![allow(clippy::panic)]
 
-mod support;
+use crate::support;
 
 use core::future::Future;
 use core::pin::Pin;

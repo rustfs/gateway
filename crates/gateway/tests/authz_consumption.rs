@@ -18,7 +18,7 @@
 //! NOT responsible for: policy evaluation or audit formatting.
 //! Upstream: `rustfs_gateway_core::authz`. Downstream: the facade service pipeline.
 
-mod support;
+use crate::support;
 
 use std::sync::Arc;
 use std::sync::Mutex;

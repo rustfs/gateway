@@ -23,7 +23,7 @@
 //! Negative cases outnumber positive ones. The positive path is one exchange; every other
 //! assertion here is about a request that must not reach the handler.
 
-mod support;
+use crate::support;
 
 use std::sync::Arc;
 use std::sync::atomic::Ordering;

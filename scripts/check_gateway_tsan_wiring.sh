@@ -22,7 +22,9 @@ fail() {
 
 grep -Fq "RUSTFLAGS='-Zsanitizer=thread'" "$RUNNER" || fail 'ThreadSanitizer instrumentation is missing'
 grep -Fq 'cargo "+${TOOLCHAIN}" test -Zbuild-std' "$RUNNER" || fail 'the instrumented standard-library build is missing'
-grep -Fq -- '-p rustfs-gateway --test service_concurrency -- --test-threads=1' "$RUNNER" \
+grep -Fq -- '-p rustfs-gateway --test integration' "$RUNNER" \
+    || fail 'the runner no longer executes the consolidated gateway integration target'
+grep -Fq 'service_concurrency::one_hundred_clones_answer_concurrently -- --exact --test-threads=1' "$RUNNER" \
     || fail 'the runner no longer executes the concurrency acceptance target'
 
 grep -Fq 'const THREADS: usize = 100;' "$CASE" || fail 'the case no longer starts exactly 100 OS threads'

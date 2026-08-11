@@ -21,7 +21,7 @@
 
 #[path = "assembly_order/host.rs"]
 mod order_host;
-mod support;
+use crate::support;
 
 use std::sync::{Arc, Mutex};
 

@@ -2,8 +2,8 @@
 set -euo pipefail
 # REQUIRES-BUILD
 
-# WHAT: Compiles the public monomorphic parity target to LLVM IR and follows the concrete Ping
-# codec/handler call chain through StaticOperation.
+# WHAT: Compiles the consolidated gateway integration target to LLVM IR and follows the concrete
+# monomorphic Ping codec/handler call chain through StaticOperation.
 # WHY: rustfs/backlog#1738 a-asm-0007 and ADR-0006 require operation dispatch without stored
 # Arc<dyn Fn> callbacks; source type names alone cannot prove the emitted call target.
 # HOW TO EXEMPT: There is no exemption. Change the probe only with the static dispatch contract.
@@ -15,11 +15,11 @@ if [[ -n "${GATEWAY_MONOMORPHIC_IR:-}" ]]; then
 else
     (
         cd "$ROOT"
-        cargo rustc -q -p rustfs-gateway --test monomorphic --release -- \
+        cargo rustc -q -p rustfs-gateway --test integration --release -- \
             --emit=llvm-ir -Cdebuginfo=1 -Copt-level=0
     )
     shopt -s nullglob
-    candidates=("${CARGO_TARGET_DIR:-${ROOT}/target}"/release/deps/monomorphic-*.ll)
+    candidates=("${CARGO_TARGET_DIR:-${ROOT}/target}"/release/deps/integration-*.ll)
     if (( ${#candidates[@]} == 0 )); then
         printf 'check_monomorphic_dispatch: cargo produced no LLVM IR\n' >&2
         exit 1
@@ -42,12 +42,12 @@ decoder="$(mktemp "${TMPDIR:-/tmp}/gateway-static-decoder.XXXXXX")"
 trap 'rm -f "$state" "$decoder"' EXIT
 
 awk '
-    /^define internal.*@_RNCINvMNt.*static_dispatch.*StaticOperation.*support4Ping.*8dispatch.*7Backend/ { take = 1 }
+    /^define internal.*@_RNCINvMNt.*static_dispatch.*StaticOperation.*integration7support4Ping.*8dispatch.*7Backend/ { take = 1 }
     take { print }
     take && /^}/ { exit }
 ' "$ir" >"$state"
 awk '
-    /^; rustfs_gateway_core::static_dispatch::decode::<monomorphic::support::Ping>$/ { take = 1 }
+    /^; rustfs_gateway_core::static_dispatch::decode::<integration::support::Ping>$/ { take = 1 }
     take { print }
     take && /^}/ { exit }
 ' "$ir" >"$decoder"
@@ -76,10 +76,10 @@ direct_after() {
 }
 
 direct_after "$state" \
-    '<monomorphic::support::Backend as rustfs_gateway_core::handler::Handler<monomorphic::support::Ping>>::call' \
+    '<integration::support::Backend as rustfs_gateway_core::handler::Handler<integration::support::Ping>>::call' \
     'concrete Handler<Ping>'
 direct_after "$decoder" \
-    '<monomorphic::support::Ping as rustfs_gateway_core::codec::OperationCodec>::decode' \
+    '<integration::support::Ping as rustfs_gateway_core::codec::OperationCodec>::decode' \
     'Ping OperationCodec::decode'
 
 printf 'OK: monomorphic Ping codec and handler calls are direct in LLVM IR\n'

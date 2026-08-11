@@ -44,7 +44,7 @@
 
 #![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 
-mod support;
+use crate::support;
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
