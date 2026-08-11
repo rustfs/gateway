@@ -12,6 +12,7 @@ default = ["ir-validation"]
 ir-validation = ["dep:jsonschema"]
 
 [dependencies]
+command-group = { workspace = true }
 jsonschema = { workspace = true, optional = true }
 rustfs-gateway = { workspace = true }
 rustfs-gateway-codegen = { workspace = true }
@@ -21,6 +22,7 @@ rustfs-gateway-model = { workspace = true }
 http = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+signal-hook = { workspace = true }
 
 [package.metadata.docs.rs]
 all-features = true
