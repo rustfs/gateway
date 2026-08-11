@@ -39,7 +39,9 @@ if [[ "$first_line" != "$EXPECTED" ]]; then
     exit 1
 fi
 
-if ! (cd "$ROOT_DIR" && "${CARGO:-cargo}" xtask codegen --check); then
+# IR validation deliberately carries a full draft 2020-12 implementation. This guard exercises
+# only codegen, so keep that unrelated dependency out of its cold CI build.
+if ! (cd "$ROOT_DIR" && "${CARGO:-cargo}" run --quiet --package xtask --no-default-features -- codegen --check); then
     printf 'check_verify_map_generated.sh: verify-map drifted; regenerate with `cargo xtask codegen`\n' >&2
     exit 1
 fi

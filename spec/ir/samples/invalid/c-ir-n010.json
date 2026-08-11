@@ -1,0 +1,1 @@
+{"case_id":"c-ir-n010","base":"GetBucketLocation.json","mutation":{"op":"add","path":"/documentation","value":"must not enter the IR"},"expect":{"at":"/documentation","rule":"schema:#/additionalProperties"}}

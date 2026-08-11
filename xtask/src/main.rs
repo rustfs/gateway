@@ -22,6 +22,8 @@
 mod bootstrap;
 mod catalog;
 mod codegen;
+#[cfg(feature = "ir-validation")]
+mod ir;
 mod model;
 mod new_op;
 mod route;
@@ -37,6 +39,13 @@ fn main() -> ExitCode {
     match first.as_deref() {
         Some("verify") => verify::verify(&rest),
         Some("codegen") => codegen::codegen(&rest),
+        #[cfg(feature = "ir-validation")]
+        Some("ir") => ir::command(&rest),
+        #[cfg(not(feature = "ir-validation"))]
+        Some("ir") => {
+            eprintln!("the `ir` command requires xtask's default `ir-validation` feature");
+            ExitCode::from(2)
+        }
         Some("model") => model::model(&rest),
         Some("spec") => match rest.first().map(String::as_str) {
             Some("verify") => codegen::verify(&rest[1..]),
@@ -77,6 +86,8 @@ commands:
   codegen                   regenerate spec/operations, OPERATIONS.md and generated/
   codegen diff --semantic   print a semantic diff capped at 50 lines
   codegen --check           fail when generated output or the verify map drifted
+  ir validate [--expect-fail <dir>]
+                            validate the frozen IR schema and its samples
   spec verify               fail when any generated artefact differs from a fresh run
   model verify              verify the vendored model against its provenance record
   model drift --against <path>

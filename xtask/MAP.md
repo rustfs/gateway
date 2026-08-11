@@ -8,6 +8,9 @@ Agent entry point for repository automation commands.
 | `src/bootstrap.rs` | Bounded fresh-checkout preparation. | Bootstrap is slow or misses a prerequisite. |
 | `src/catalog.rs` | Operation-to-crate verification map. | `verify --op` selects the wrong work. |
 | `src/codegen.rs` | Codegen/spec command process boundary. | Generated verification reports wrongly. |
+| `src/ir.rs` | Frozen IR validation command and shared schema diagnostics. | IR validation dispatch or positive goldens change. |
+| `src/ir/negative.rs` | Exact negative corpus manifest and mutation runner. | Negative IR cases or expected diagnostics change. |
+| `src/ir/semantic.rs` | Cross-field, shape, unwrapped-output, and quirk invariants. | A semantic IR rule changes. |
 | `src/new_op.rs` | Intentionally-red operation scaffold. | Scaffold contents or collision checks change. |
 | `src/route.rs` | Route explanation CLI rendering. | `route explain` output changes. |
 | `src/verify.rs` | Bounded verification command selection. | A crate/op/all verification command is wrong. |

@@ -1,0 +1,1 @@
+{"case_id":"c-ir-n012","base":"GetBucketLocation.json","mutation":{"op":"replace","path":"/head_mirrors","value":"MissingOperation"},"expect":{"at":"/head_mirrors","rule":"semantic/head-mirrors"}}

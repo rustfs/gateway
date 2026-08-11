@@ -1,0 +1,1 @@
+{"case_id":"c-ir-n006","base":"PutObject.json","mutation":{"op":"remove","path":"/output/fields/0/type/render"},"expect":{"at":"/output/fields/0/type","rule":"schema:#/$defs/type/oneOf"}}
