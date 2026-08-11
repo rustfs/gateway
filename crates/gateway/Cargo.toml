@@ -11,6 +11,7 @@ authors.workspace = true
 # consumed s3s. Publishing would buy nothing and cost a cross-repository version
 # lockstep on every change to a ring-0 type.
 publish = false
+autotests = false
 
 [package.metadata.gateway]
 ring = 1
@@ -49,6 +50,10 @@ tower = { workspace = true }
 dhat = { workspace = true }
 tokio.workspace = true
 trybuild = { workspace = true }
+
+[[test]]
+name = "integration"
+path = "tests/integration.rs"
 
 [[example]]
 name = "minimal"

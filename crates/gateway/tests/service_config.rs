@@ -19,7 +19,7 @@
 //! NOT responsible for: body-ceiling mechanics, which `crate::gate` tests directly.
 //! Upstream: `rustfs-gateway`. Downstream: nothing.
 
-mod support;
+use crate::support;
 
 use std::sync::Arc;
 use std::sync::Mutex;

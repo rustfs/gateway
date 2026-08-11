@@ -23,7 +23,7 @@
 //! Negative cases outnumber positive ones, and deliberately: every refusal here is a mistake that
 //! a service which started anyway would turn into a silent run-time behaviour.
 
-mod support;
+use crate::support;
 
 use std::sync::Arc;
 

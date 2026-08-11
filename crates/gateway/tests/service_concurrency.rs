@@ -19,7 +19,7 @@
 //! invocation and CI installs its pinned toolchain.
 //! Upstream: `rustfs-gateway`. Downstream: P7 connection handling and the TSAN CI job.
 
-mod support;
+use crate::support;
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Barrier};

@@ -2,8 +2,8 @@
 set -euo pipefail
 
 # WHAT THIS CHECKS
-#   Core's integration suite is one explicit Cargo target with every legacy test source registered
-#   exactly once, and gateway's compile-fail cases share one trybuild TestCases batch.
+#   Core and gateway integration suites each use one explicit Cargo target with every test source
+#   registered exactly once, and gateway's compile-fail cases share one trybuild TestCases batch.
 # WHY
 #   rustfs/gateway#60 measured separate integration targets and trybuild batches rebuilding the
 #   same test products until the 30-second verification budget expired.
@@ -274,6 +274,27 @@ golden_command = (
 if golden_source.count(golden_command) != 1 or "--test golden" in golden_source:
     fail("core route-table golden must document the exact consolidated-target restore command")
 
+monomorphic_guard_path = root / "scripts/check_monomorphic_dispatch.sh"
+monomorphic_guard = monomorphic_guard_path.read_text()
+monomorphic_command = "cargo rustc -q -p rustfs-gateway --test integration --release --"
+if monomorphic_guard.count(monomorphic_command) != 1 or "--test monomorphic" in monomorphic_guard:
+    fail("monomorphic LLVM guard must compile the consolidated gateway integration target")
+monomorphic_symbols = (
+    "integration7support4Ping",
+    "rustfs_gateway_core::static_dispatch::decode::<integration::support::Ping>",
+    "<integration::support::Backend as rustfs_gateway_core::handler::Handler<integration::support::Ping>>::call",
+    "<integration::support::Ping as rustfs_gateway_core::codec::OperationCodec>::decode",
+)
+if any(symbol not in monomorphic_guard for symbol in monomorphic_symbols) or "monomorphic::support" in monomorphic_guard:
+    fail("monomorphic LLVM guard must match the consolidated target's root support module")
+
+tsan_runner_path = root / "scripts/run_gateway_tsan.sh"
+tsan_runner = tsan_runner_path.read_text()
+tsan_target = "-p rustfs-gateway --test integration"
+tsan_filter = "service_concurrency::one_hundred_clones_answer_concurrently -- --exact --test-threads=1"
+if tsan_runner.count(tsan_target) != 1 or tsan_runner.count(tsan_filter) != 1 or "--test service_concurrency" in tsan_runner:
+    fail("gateway TSAN runner must use the consolidated target and exact concurrency test filter")
+
 gateway_harness_path = root / "crates/gateway/tests/compile_fail.rs"
 try:
     actual_gateway_harness = gateway_harness_path.read_text()
@@ -316,43 +337,100 @@ gateway_package = gateway_manifest.get("package")
 if not isinstance(gateway_package, dict):
     fail("crates/gateway/Cargo.toml has no package table")
 gateway_autotests = gateway_package.get("autotests", True)
-if not isinstance(gateway_autotests, bool):
-    fail("crates/gateway/Cargo.toml has an invalid package.autotests value")
+if gateway_autotests is not False:
+    fail("crates/gateway must set package.autotests = false")
 
 explicit_tests = gateway_manifest.get("test", [])
-if not isinstance(explicit_tests, list) or any(not isinstance(target, dict) for target in explicit_tests):
-    fail("crates/gateway/Cargo.toml has an invalid [[test]] inventory")
-explicit_harness_targets = []
-implicit_name_overridden = False
-for target in explicit_tests:
-    name = target.get("name")
-    if not isinstance(name, str):
-        fail("crates/gateway/Cargo.toml has an unresolvable [[test]] name")
-    if name == gateway_harness_path.stem:
-        implicit_name_overridden = True
-    target_path = target.get("path", f"tests/{name}.rs")
-    if not isinstance(target_path, str):
-        fail("crates/gateway/Cargo.toml has an unresolvable [[test]] path")
-    resolved_target = (gateway_root / target_path).resolve()
-    if not inside(resolved_target, gateway_root.resolve()):
-        fail("crates/gateway/Cargo.toml test targets may not escape the gateway crate")
-    if resolved_target == gateway_harness_path.resolve():
-        explicit_harness_targets.append(target)
+if not isinstance(explicit_tests, list) or len(explicit_tests) != 1 or not isinstance(explicit_tests[0], dict):
+    fail("crates/gateway must declare exactly one explicit [[test]] target")
+gateway_target = explicit_tests[0]
+if gateway_target.get("name") != "integration" or gateway_target.get("path") != "tests/integration.rs":
+    fail("crates/gateway explicit test target must be integration at tests/integration.rs")
+gateway_required_features = gateway_target.get("required-features", [])
+if (
+    gateway_target.get("test", True) is not True
+    or gateway_target.get("harness", True) is not True
+    or not isinstance(gateway_required_features, list)
+    or gateway_required_features
+):
+    fail("crates/gateway integration target must use the active harness without required features")
 
-implicit_harness = gateway_autotests and not implicit_name_overridden
-active_harness_targets = int(implicit_harness)
-for target in explicit_harness_targets:
-    required_features = target.get("required-features", [])
-    if (
-        target.get("test", True) is not True
-        or not isinstance(required_features, list)
-        or any(not isinstance(feature, str) for feature in required_features)
-        or required_features
-    ):
-        fail("the explicit gateway trybuild target must always run without required features")
-    active_harness_targets += 1
-if active_harness_targets != 1:
-    fail(f"gateway unified trybuild harness has {active_harness_targets} active Cargo test targets, expected 1")
+gateway_modules = (
+    "assembly",
+    "assembly_order",
+    "authz_consumption",
+    "authz_contract",
+    "authz_implementations",
+    "backend_reachability",
+    "compile_fail",
+    "connection_teardown",
+    "cors_runtime",
+    "credential_runtime",
+    "facade_probe",
+    "governor_runtime",
+    "handler_panic",
+    "middleware",
+    "monomorphic",
+    "naming_policy",
+    "object_lock_intent",
+    "patch_layer_landings",
+    "pipeline",
+    "refusal_order_guards",
+    "reject_rendering",
+    "replication_token",
+    "select_restore_intent",
+    "service_clone_allocations",
+    "service_concurrency",
+    "service_config",
+    "sse_runtime",
+    "vhost_resolution",
+)
+gateway_tests = gateway_root / "tests"
+actual_gateway_sources = tuple(
+    sorted(path.stem for path in gateway_tests.glob("*.rs") if path.name != "integration.rs")
+)
+if actual_gateway_sources != gateway_modules:
+    fail("gateway test source inventory does not match the consolidated module suite")
+
+resolved_gateway_sources: dict[Path, str] = {}
+for module in gateway_modules:
+    source_path = gateway_tests / f"{module}.rs"
+    if source_path.is_symlink():
+        fail(f"{source_path.relative_to(root)} may not be a symlink")
+    try:
+        resolved_source = source_path.resolve(strict=True)
+        source = source_path.read_text()
+    except OSError as error:
+        fail(f"cannot read {source_path.relative_to(root)}: {error}")
+    if not inside(resolved_source, gateway_tests.resolve()):
+        fail(f"{source_path.relative_to(root)} resolves outside the gateway test directory")
+    previous = resolved_gateway_sources.get(resolved_source)
+    if previous is not None:
+        fail(f"gateway test sources {previous} and {module} resolve to the same file")
+    resolved_gateway_sources[resolved_source] = module
+    _, code_only = rust_views(source, source_path)
+    if re.search(r"#!\s*\[\s*(?:cfg|cfg_attr)\b", code_only):
+        fail(f"{source_path.relative_to(root)} may not disable its registered module with a file-level cfg")
+    if re.search(r"\bmod\s+support\s*;", code_only):
+        fail(f"{source_path.relative_to(root)} must use the consolidated crate-root support module")
+
+gateway_integration_path = gateway_tests / "integration.rs"
+gateway_integration = license_header + """
+//! Consolidated integration-test entry point for `rustfs-gateway`.
+//!
+//! Responsible for: registering every gateway integration-test source in one Cargo target.
+//! NOT responsible for: test behavior or production implementation.
+//! Upstream: the gateway integration-test modules. Downstream: Cargo's test harness.
+
+mod support;
+
+""" + "\n".join(f'#[path = "{module}.rs"]\nmod {module};' for module in gateway_modules) + "\n"
+try:
+    actual_gateway_integration = gateway_integration_path.read_text()
+except OSError as error:
+    fail(f"cannot read crates/gateway/tests/integration.rs: {error}")
+if actual_gateway_integration != gateway_integration:
+    fail("gateway integration harness must register each frozen source exactly once")
 
 for kind, default_test in (("lib", True), ("bin", True), ("example", False), ("bench", False)):
     raw_targets = gateway_manifest.get(kind, [] if kind != "lib" else None)
@@ -373,6 +451,8 @@ for kind, default_test in (("lib", True), ("bin", True), ("example", False), ("b
                 fail(f"crates/gateway/Cargo.toml {kind} targets may not escape the gateway crate")
             if resolved_target == gateway_harness_path.resolve():
                 fail(f"crates/gateway/Cargo.toml reuses the unified trybuild harness as a {kind} target")
+            if resolved_target == gateway_integration_path.resolve():
+                fail(f"crates/gateway/Cargo.toml reuses the consolidated integration harness as a {kind} target")
 
 for source_path in gateway_root.rglob("*.rs"):
     try:
@@ -383,6 +463,8 @@ for source_path in gateway_root.rglob("*.rs"):
         if source_path != gateway_harness_path:
             fail(f"{source_path.relative_to(root)} aliases the unified gateway trybuild harness")
         continue
+    if resolved == gateway_integration_path.resolve() and source_path != gateway_integration_path:
+        fail(f"{source_path.relative_to(root)} aliases the consolidated gateway integration harness")
     try:
         source = source_path.read_text()
     except OSError as error:
@@ -402,8 +484,10 @@ for source_path in gateway_root.rglob("*.rs"):
             target = (source_path.parent / literal.group(1)).resolve()
             if not inside(target, gateway_root.resolve()):
                 fail(f"{source_path.relative_to(root)} has a path attribute escaping the gateway crate")
-            if target == gateway_harness_path.resolve():
+            if target == gateway_harness_path.resolve() and source_path != gateway_integration_path:
                 fail(f"{source_path.relative_to(root)} reuses the unified gateway trybuild harness through #[path]")
+            if target == gateway_integration_path.resolve():
+                fail(f"{source_path.relative_to(root)} reuses the consolidated gateway integration harness through #[path]")
 
     for include in re.finditer(r"\binclude\s*!\s*([({\[])", code_only):
         opening = include.end() - 1
@@ -417,6 +501,8 @@ for source_path in gateway_root.rglob("*.rs"):
             fail(f"{source_path.relative_to(root)} includes Rust code from outside the gateway crate")
         if target == gateway_harness_path.resolve():
             fail(f"{source_path.relative_to(root)} includes the unified gateway trybuild harness")
+        if target == gateway_integration_path.resolve():
+            fail(f"{source_path.relative_to(root)} includes the consolidated gateway integration harness")
 
 fixture_sets = {
     root / "crates/gateway/tests/compile_fail": {

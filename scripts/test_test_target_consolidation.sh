@@ -20,11 +20,14 @@ trap cleanup EXIT
 reset_sandbox() {
     cleanup
     SANDBOX="$(mktemp -d "${TMPDIR:-/tmp}/gateway-target-guard.XXXXXX")"
-    mkdir -p "$SANDBOX/scripts" "$SANDBOX/crates/core" "$SANDBOX/crates/gateway"
+    mkdir -p "$SANDBOX/scripts" "$SANDBOX/crates/core" "$SANDBOX/crates/gateway/src"
     cp "$REPO_ROOT/scripts/check_test_target_consolidation.sh" "$SANDBOX/scripts/"
+    cp "$REPO_ROOT/scripts/check_monomorphic_dispatch.sh" "$SANDBOX/scripts/"
+    cp "$REPO_ROOT/scripts/run_gateway_tsan.sh" "$SANDBOX/scripts/"
     cp "$REPO_ROOT/crates/core/Cargo.toml" "$SANDBOX/crates/core/"
     cp "$REPO_ROOT/crates/gateway/Cargo.toml" "$SANDBOX/crates/gateway/"
     cp -R "$REPO_ROOT/crates/core/tests" "$SANDBOX/crates/core/"
+    cp "$REPO_ROOT/crates/gateway/src/lib.rs" "$SANDBOX/crates/gateway/src/"
     cp -R "$REPO_ROOT/crates/gateway/tests" "$SANDBOX/crates/gateway/"
 }
 
@@ -174,6 +177,99 @@ PYEOF
 }
 expect_fail 'the route golden restore command returning to a removed target is rejected' mut_core_golden_restore_uses_legacy_target
 
+mut_monomorphic_guard_uses_legacy_target() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("scripts/check_monomorphic_dispatch.sh")
+text = path.read_text()
+path.write_text(text.replace("--test integration", "--test monomorphic", 1))
+PYEOF
+}
+expect_fail 'the monomorphic guard returning to a removed target is rejected' mut_monomorphic_guard_uses_legacy_target
+
+mut_monomorphic_guard_uses_legacy_symbol_path() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("scripts/check_monomorphic_dispatch.sh")
+text = path.read_text()
+text = text.replace("integration7support4Ping", "monomorphic7support4Ping")
+text = text.replace("integration::support", "monomorphic::support")
+path.write_text(text)
+PYEOF
+}
+expect_fail 'the monomorphic guard returning to the removed module path is rejected' mut_monomorphic_guard_uses_legacy_symbol_path
+
+mut_gateway_tsan_uses_legacy_target() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("scripts/run_gateway_tsan.sh")
+text = path.read_text()
+path.write_text(text.replace("--test integration", "--test service_concurrency", 1))
+PYEOF
+}
+expect_fail 'the gateway TSAN runner returning to a removed target is rejected' mut_gateway_tsan_uses_legacy_target
+
+mut_gateway_autotests_restored() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/gateway/Cargo.toml")
+text = path.read_text()
+path.write_text(text.replace("autotests = false\n", "autotests = true\n", 1))
+PYEOF
+}
+expect_fail 'restoring gateway implicit test discovery is rejected' mut_gateway_autotests_restored
+
+mut_gateway_registration_omitted() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/gateway/tests/integration.rs")
+text = path.read_text()
+path.write_text(text.replace('#[path = "assembly.rs"]\nmod assembly;\n', '', 1))
+PYEOF
+}
+expect_fail 'gateway integration harness omission is rejected' mut_gateway_registration_omitted
+
+mut_gateway_registration_duplicated() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/gateway/tests/integration.rs")
+text = path.read_text()
+entry = '#[path = "assembly.rs"]\nmod assembly;\n'
+path.write_text(text.replace(entry, entry + entry, 1))
+PYEOF
+}
+expect_fail 'gateway integration harness duplicate is rejected' mut_gateway_registration_duplicated
+
+mut_gateway_source_unregistered() {
+    cp crates/gateway/tests/facade_probe.rs crates/gateway/tests/unregistered_contract.rs
+}
+expect_fail 'a new unregistered gateway test source is rejected' mut_gateway_source_unregistered
+
+mut_gateway_source_disabled_by_cfg() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/gateway/tests/facade_probe.rs")
+path.write_text("#![cfg(any())]\n" + path.read_text())
+PYEOF
+}
+expect_fail 'a registered gateway source disabled by file-level cfg is rejected' mut_gateway_source_disabled_by_cfg
+
+mut_gateway_source_symlink_alias() {
+    rm crates/gateway/tests/assembly.rs
+    ln -s assembly_order.rs crates/gateway/tests/assembly.rs
+}
+expect_fail 'a registered gateway source symlink alias is rejected' mut_gateway_source_symlink_alias
+
+mut_gateway_nested_support_restored() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/gateway/tests/assembly.rs")
+text = path.read_text()
+path.write_text(text.replace("use crate::support;", "mod support;", 1))
+PYEOF
+}
+expect_fail 'a gateway source restoring its own support module is rejected' mut_gateway_nested_support_restored
+
 mut_gateway_pattern_omitted() {
     python3 - <<'PYEOF'
 from pathlib import Path
@@ -196,7 +292,8 @@ PYEOF
 expect_fail 'a second gateway TestCases batch is rejected' mut_gateway_batch_duplicated
 
 mut_gateway_extra_trybuild_entry() {
-    cat >crates/gateway/tests/duplicate_trybuild.rs <<'RSEOF'
+    cat >>crates/gateway/tests/facade_probe.rs <<'RSEOF'
+
 #[test]
 fn duplicate_trybuild() {
     let cases = trybuild::TestCases::new();
@@ -227,7 +324,8 @@ mut_gateway_dynamic_include_is_fail_closed() {
 expect_fail 'a dynamic gateway include is rejected fail-closed' mut_gateway_dynamic_include_is_fail_closed
 
 mut_gateway_symlink_reuses_harness() {
-    ln -s compile_fail.rs crates/gateway/tests/duplicate_compile_fail.rs
+    rm crates/gateway/tests/facade_probe.rs
+    ln -s compile_fail.rs crates/gateway/tests/facade_probe.rs
 }
 expect_fail 'a gateway symlink reuse of the unified harness is rejected' mut_gateway_symlink_reuses_harness
 
@@ -242,12 +340,64 @@ TOMLEOF
 }
 expect_fail 'a Cargo target reuse of the unified gateway harness is rejected' mut_gateway_target_reuses_harness
 
+mut_gateway_target_reuses_integration_harness() {
+    cat >>crates/gateway/Cargo.toml <<'TOMLEOF'
+
+[[example]]
+name = "duplicate-integration"
+path = "tests/integration.rs"
+test = true
+TOMLEOF
+}
+expect_fail 'a Cargo example cannot reuse the consolidated integration harness' mut_gateway_target_reuses_integration_harness
+
+mut_gateway_path_reuses_integration_harness() {
+    cat >>crates/gateway/src/lib.rs <<'RSEOF'
+
+#[cfg(test)]
+#[path = "../tests/integration.rs"]
+mod duplicate_integration;
+RSEOF
+}
+expect_fail 'gateway library code cannot reuse the integration harness through #[path]' mut_gateway_path_reuses_integration_harness
+
+mut_gateway_cfg_attr_path_reuses_integration_harness() {
+    cat >>crates/gateway/src/lib.rs <<'RSEOF'
+
+#[cfg_attr(all(), path = "../tests/integration.rs")]
+mod duplicate_integration;
+RSEOF
+}
+expect_fail 'gateway library code cannot reuse the integration harness through cfg_attr path' mut_gateway_cfg_attr_path_reuses_integration_harness
+
+mut_gateway_parenthesized_include_reuses_integration_harness() {
+    printf '\ninclude!("../tests/integration.rs");\n' >>crates/gateway/src/lib.rs
+}
+expect_fail 'a parenthesized include cannot reuse the integration harness' mut_gateway_parenthesized_include_reuses_integration_harness
+
+mut_gateway_bracketed_include_reuses_integration_harness() {
+    printf '\ninclude!["../tests/integration.rs"];\n' >>crates/gateway/src/lib.rs
+}
+expect_fail 'a bracketed include cannot reuse the integration harness' mut_gateway_bracketed_include_reuses_integration_harness
+
+mut_gateway_braced_include_reuses_integration_harness() {
+    printf '\ninclude! { "../tests/integration.rs" }\n' >>crates/gateway/src/lib.rs
+}
+expect_fail 'a braced include cannot reuse the integration harness' mut_gateway_braced_include_reuses_integration_harness
+
+mut_gateway_symlink_reuses_integration_harness() {
+    ln -s ../tests/integration.rs crates/gateway/src/duplicate_integration.rs
+}
+expect_fail 'a gateway Rust symlink cannot reuse the integration harness' mut_gateway_symlink_reuses_integration_harness
+
 mut_gateway_comment_and_string_decoys() {
     cat >>crates/gateway/tests/facade_probe.rs <<'RSEOF'
 
 // let cases = trybuild::TestCases::new();
 // #[path = "compile_fail.rs"] mod duplicate;
 const TARGET_CONSOLIDATION_DECOY: &str = r#"include!("compile_fail.rs");"#;
+// #[path = "../tests/integration.rs"] mod duplicate_integration;
+const INTEGRATION_HARNESS_DECOY: &str = r#"include!("../tests/integration.rs");"#;
 RSEOF
 }
 expect_pass 'gateway trybuild, path, and include comment/string decoys stay inert' mut_gateway_comment_and_string_decoys
