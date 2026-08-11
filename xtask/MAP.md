@@ -14,6 +14,7 @@ Agent entry point for repository automation commands.
 | `src/new_op.rs` | Intentionally-red operation scaffold. | Scaffold contents or collision checks change. |
 | `src/route.rs` | Route explanation CLI rendering. | `route explain` output changes. |
 | `src/verify.rs` | Bounded verification command selection. | A crate/op/all verification command is wrong. |
+| `src/verify/process.rs` | Deadline-aware child supervision and output capture. | Verification children block, leak, or report out of order. |
 | `src/why.rs` | Reverse trace and stable text/JSON rendering. | A `why` namespace or section changes. |
 | `tests/cli_contract.rs` | Shared CLI output/exit contracts. | Change help or general process behavior. |
 | `tests/why_contract.rs` | Six-namespace reverse-trace goldens. | Change `why` resolution or output. |

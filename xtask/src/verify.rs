@@ -18,10 +18,12 @@
 //! budget. NOT responsible for: defining crate-local tests.
 //! Upstream: the `verify` command. Downstream: Cargo and the operation catalog.
 
+mod process;
+
 use std::collections::HashSet;
 use std::fmt;
 use std::path::Path;
-use std::process::{Command, ExitCode, Output, Stdio};
+use std::process::{Command, ExitCode, Output};
 use std::time::{Duration, Instant};
 
 use serde::Deserialize;
@@ -394,8 +396,23 @@ fn run_steps(
     started: Option<Instant>,
 ) -> ExitCode {
     let started = started.unwrap_or_else(Instant::now);
-    for step in steps {
-        let output = Command::new(env!("CARGO")).args(step).output();
+    let commands = steps
+        .iter()
+        .enumerate()
+        .map(|(index, step)| (env!("CARGO").to_owned(), step.clone(), format!("{subject} step {}", index + 1)))
+        .collect::<Vec<_>>();
+    let batch = process::run(&commands, Path::new("."), Some(started + budget));
+    if batch.interrupted {
+        return diagnostic("verification interrupted", subject, rule);
+    }
+    if batch.timed_out {
+        return diagnostic(
+            "verification exceeded its feedback budget",
+            subject,
+            &format!("{rule}; observed {:.2}s", started.elapsed().as_secs_f64()),
+        );
+    }
+    for (_, output) in batch.results {
         match output {
             Ok(output) if output.status.success() => {}
             Ok(output) => {
@@ -492,23 +509,15 @@ fn run_setup_then_concurrently(setup: &GateCommand, commands: &[GateCommand], cu
 }
 
 fn run_commands_concurrently(commands: &[GateCommand], current_dir: &Path) -> Vec<GateResult> {
-    let children = commands
-        .iter()
-        .map(|(program, args, step)| {
-            let child = Command::new(program)
-                .args(args)
-                .current_dir(current_dir)
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .spawn();
-            (step.clone(), child)
-        })
-        .collect::<Vec<_>>();
-
-    children
-        .into_iter()
-        .map(|(step, child)| (step, child.and_then(|child| child.wait_with_output())))
-        .collect()
+    let batch = process::run(commands, current_dir, None);
+    if batch.interrupted {
+        vec![(
+            "verification interrupted".to_owned(),
+            Err(std::io::Error::new(std::io::ErrorKind::Interrupted, "verification interrupted")),
+        )]
+    } else {
+        batch.results
+    }
 }
 
 fn run(args: &[&str], budget: Duration, subject: &str, rule: &str, json: bool) -> ExitCode {

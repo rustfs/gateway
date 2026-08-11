@@ -33,6 +33,7 @@ rustfs-gateway-xml = { path = "crates/xml", version = "0.1.0" }
 arc-swap = "1.8"
 bitflags = "2.13"
 bytes = "1.12"
+command-group = "5.0.1"
 # default-features off: the crate's default pulls in optional backends we do not use. Declared
 # here rather than per-crate because a member cannot narrow features it inherits.
 crc-fast = { version = "1.10", default-features = false, features = ["std"] }   # crc32 / crc32c / crc64nvme, SIMD
@@ -60,6 +61,7 @@ quote = "1.0"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+signal-hook = "0.4.4"
 sha1 = "0.11"                                       # one of the five S3 checksum algorithms
 sha2 = "0.11"
 smallvec = "1.15"
