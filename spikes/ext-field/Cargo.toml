@@ -1,0 +1,19 @@
+[package]
+name = "ext-field-spike"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+quick-xml.workspace = true
+
+[dev-dependencies]
+rustfs-gateway-core.workspace = true
+rustfs-gateway-types.workspace = true
+syn = { workspace = true, features = ["visit"] }
+toml = "0.9"
+
+[lints]
+workspace = true

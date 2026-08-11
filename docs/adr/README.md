@@ -62,6 +62,7 @@ second copy is a second thing to keep in sync.
 | 0004 | SemVer policy for the public API and generated dto | Accepted |
 | 0005 | The generated dto crosses the package boundary by symlink | Accepted |
 | 0006 | Static operation dispatch across the core-facade boundary | Accepted |
+| 0007 | Runtime vtables for dialect XML fields | Accepted |
 | 0008 | Closed error resolution across the types, core and facade boundary | Accepted |
 | 0009 | Typed scope-region rejection across sig and gateway | Accepted |
 
