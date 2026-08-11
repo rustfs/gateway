@@ -1,0 +1,13 @@
+error[E0369]: binary operation `==` cannot be applied to type `CtBytes<32>`
+  --> tests/compile_fail/c_sig_0014_ctbytes_eq.rs:26:18
+   |
+26 |     let _ = left == right;
+   |             ---- ^^ ----- CtBytes<32>
+   |             |
+   |             CtBytes<32>
+   |
+note: `CtBytes<32>` does not implement `PartialEq`
+  --> src/signature.rs
+   |
+   | pub struct CtBytes<const N: usize>([u8; N]);
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `CtBytes<32>` is defined in another crate

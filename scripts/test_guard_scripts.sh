@@ -192,6 +192,26 @@ expect_fail() {
     fi
 }
 
+# expect_fail_self_mutation <guard> <description> <mutation-fn>
+# Runs the sandbox's copy of a guard when the mutation changes the guard policy itself. Calling
+# SCRIPT_DIR here would exercise the unmodified source-tree copy and make every such mutation a
+# false green.
+expect_fail_self_mutation() {
+    local guard="$1" desc="$2" mutate="$3"
+    local sandbox rc=0
+    cases=$((cases + 1))
+    make_sandbox
+    sandbox="$SANDBOX"
+    (cd "$sandbox" && "$mutate" >/dev/null)
+    (cd "$sandbox" && git add -A >/dev/null 2>&1)
+    GATEWAY_CHECK_ROOT="$sandbox" "$sandbox/scripts/$guard" >/dev/null 2>&1 || rc=$?
+    if [[ "$rc" -ne 0 ]]; then
+        pass_msg "${guard} catches its own mutation: ${desc}"
+    else
+        fail_msg "${guard} did NOT catch its own mutation: ${desc}"
+    fi
+}
+
 # expect_fail_and_missing_grep <guard> <description> <mutation-fn>
 # Proves both the policy mutation and the dependency-missing path while keeping them one guard case.
 expect_fail_and_missing_grep() {
@@ -1257,6 +1277,629 @@ mut_strip_negative_floor() {
 }
 expect_fail check_ct_eq.sh \
     'negative-case coverage dropping below its floor' mut_strip_negative_floor
+
+# P2-01 case coverage. Each failure mode has an independent mutation: a mapping can disappear,
+# lie about its polarity, point nowhere, name no case, point at no executable assertion, lose its
+# golden, reuse another fixture, or stop being wired into trybuild.
+mut_sig_case_mapping_deleted() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("scripts/check_sig_case_coverage.sh")
+text = path.read_text()
+line = "    'c-sig-0025|negative|crates/sig/tests/frozen_dimensions.rs|fn c_sig_0025_non_canonical_base64_is_rejected'\n"
+if line not in text:
+    raise SystemExit("missing mapping mutation subject")
+path.write_text(text.replace(line, "", 1))
+PYEOF
+}
+expect_fail_self_mutation check_sig_case_coverage.sh \
+    'one of the 25 acceptance mappings being deleted' mut_sig_case_mapping_deleted
+
+mut_sig_case_order_changed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("scripts/check_sig_case_coverage.sh")
+text = path.read_text()
+first = "    'c-sig-0001|positive|crates/sig/tests/frozen_dimensions.rs|fn c_sig_0001_empty_is_not_framed'"
+second = "    'c-sig-0002|positive|crates/sig/tests/frozen_dimensions.rs|fn c_sig_0002_hex_digest_keeps_its_signed_spelling'"
+if first not in text or second not in text:
+    raise SystemExit("missing order mutation subject")
+text = text.replace(first, "__FIRST__", 1).replace(second, first, 1).replace("__FIRST__", second, 1)
+path.write_text(text)
+PYEOF
+}
+expect_fail_self_mutation check_sig_case_coverage.sh \
+    'the acceptance mappings being reordered' mut_sig_case_order_changed
+
+mut_sig_case_polarity_unknown() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("scripts/check_sig_case_coverage.sh")
+text = path.read_text()
+old = "c-sig-0008|positive|"
+if old not in text:
+    raise SystemExit("missing polarity mutation subject")
+path.write_text(text.replace(old, "c-sig-0008|unknown|", 1))
+PYEOF
+}
+expect_fail_self_mutation check_sig_case_coverage.sh \
+    'a case mapping using an unknown polarity' mut_sig_case_polarity_unknown
+
+mut_sig_case_polarity_changed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("scripts/check_sig_case_coverage.sh")
+text = path.read_text()
+old = "c-sig-0008|positive|"
+if old not in text:
+    raise SystemExit("missing polarity mutation subject")
+path.write_text(text.replace(old, "c-sig-0008|negative|", 1))
+PYEOF
+}
+expect_fail_self_mutation check_sig_case_coverage.sh \
+    'the required 8 positive and 17 negative split changing' mut_sig_case_polarity_changed
+
+mut_sig_case_file_missing() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("scripts/check_sig_case_coverage.sh")
+text = path.read_text()
+old = "crates/sig/tests/frozen_dimensions.rs|fn c_sig_0025"
+if old not in text:
+    raise SystemExit("missing file mutation subject")
+path.write_text(text.replace(old, "crates/sig/tests/missing.rs|fn c_sig_0025", 1))
+PYEOF
+}
+expect_fail_self_mutation check_sig_case_coverage.sh \
+    'a case mapping pointing to a missing file' mut_sig_case_file_missing
+
+mut_sig_case_id_missing() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/sig/tests/frozen_dimensions.rs")
+text = path.read_text()
+if "c-sig-0025" not in text:
+    raise SystemExit("missing id mutation subject")
+path.write_text(text.replace("c-sig-0025", "removed-sig-0025"))
+PYEOF
+}
+expect_fail check_sig_case_coverage.sh \
+    'a mapped file no longer naming its acceptance id' mut_sig_case_id_missing
+
+mut_sig_case_evidence_missing() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/sig/tests/frozen_dimensions.rs")
+text = path.read_text()
+old = "fn c_sig_0025_non_canonical_base64_is_rejected"
+if old not in text:
+    raise SystemExit("missing evidence mutation subject")
+path.write_text(text.replace(old, "fn removed_sig_0025_non_canonical_base64_is_rejected", 1))
+PYEOF
+}
+expect_fail check_sig_case_coverage.sh \
+    'a mapping no longer reaching its named executable assertion' mut_sig_case_evidence_missing
+
+mut_sig_runtime_line_comment_decoy() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/sig/tests/frozen_dimensions.rs")
+text = path.read_text()
+old = "#[test]\nfn c_sig_0025_non_canonical_base64_is_rejected()"
+new = "// #[test]\n// fn c_sig_0025_non_canonical_base64_is_rejected()\nfn removed_sig_0025_non_canonical_base64_is_rejected()"
+if old not in text:
+    raise SystemExit("missing line-comment decoy mutation subject")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_sig_case_coverage.sh \
+    'a commented-out #[test] and function being used as runtime evidence' mut_sig_runtime_line_comment_decoy
+
+mut_sig_runtime_string_decoy() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/sig/tests/frozen_dimensions.rs")
+text = path.read_text()
+old = "#[test]\nfn c_sig_0025_non_canonical_base64_is_rejected()"
+new = 'const DECOY: &str = "#[test]\nfn c_sig_0025_non_canonical_base64_is_rejected(";\n#[test]\nfn removed_sig_0025_non_canonical_base64_is_rejected()'
+if old not in text:
+    raise SystemExit("missing runtime string decoy mutation subject")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_sig_case_coverage.sh \
+    'a string containing #[test] and a function name being used as runtime evidence' mut_sig_runtime_string_decoy
+
+mut_sig_runtime_disabled_by_cfg() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/sig/tests/frozen_dimensions.rs")
+text = path.read_text()
+old = "#[test]\nfn c_sig_0025_non_canonical_base64_is_rejected()"
+new = "#[cfg(\n    any()\n)]\n#[test]\nfn c_sig_0025_non_canonical_base64_is_rejected()"
+if old not in text:
+    raise SystemExit("missing disabled test mutation subject")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_sig_case_coverage.sh \
+    'a multiline cfg-disabled #[test] being counted as executable evidence' mut_sig_runtime_disabled_by_cfg
+
+mut_sig_runtime_macro_body_decoy() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/sig/tests/frozen_dimensions.rs")
+text = path.read_text()
+old = "#[test]\nfn c_sig_0025_non_canonical_base64_is_rejected()"
+new = """macro_rules! fake_test {
+    () => {
+        #[test]
+        fn c_sig_0025_non_canonical_base64_is_rejected() {}
+    };
+}
+#[test]
+fn removed_sig_0025_non_canonical_base64_is_rejected()"""
+if old not in text:
+    raise SystemExit("missing runtime macro decoy mutation subject")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_sig_case_coverage.sh \
+    'a #[test] function inside a macro body being accepted as runtime evidence' mut_sig_runtime_macro_body_decoy
+
+mut_sig_compile_fixture_not_executable() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/sig/tests/compile_fail/c_sig_0014_ctbytes_eq.rs")
+text = path.read_text()
+old = "fn main()"
+if old not in text:
+    raise SystemExit("missing executable mutation subject")
+path.write_text(text.replace(old, "fn removed_main()", 1))
+PYEOF
+}
+expect_fail check_sig_case_coverage.sh \
+    'a compile-fail fixture losing its executable entry' mut_sig_compile_fixture_not_executable
+
+mut_sig_compile_block_comment_decoy() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/sig/tests/compile_fail/c_sig_0014_ctbytes_eq.rs")
+text = path.read_text()
+old = "fn main()"
+new = "fn removed_main()\n/* fn main() {} */"
+if old not in text:
+    raise SystemExit("missing block-comment decoy mutation subject")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_sig_case_coverage.sh \
+    'a block-comment fn main decoy being accepted as executable evidence' mut_sig_compile_block_comment_decoy
+
+mut_sig_compile_string_decoy() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/sig/tests/compile_fail/c_sig_0014_ctbytes_eq.rs")
+text = path.read_text()
+old = "fn main()"
+new = 'const DECOY: &str = "fn main()";\nfn removed_main()'
+if old not in text:
+    raise SystemExit("missing compile string decoy mutation subject")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_sig_case_coverage.sh \
+    'a string containing fn main being accepted as an entry point' mut_sig_compile_string_decoy
+
+mut_sig_compile_main_disabled_by_cfg() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/sig/tests/compile_fail/c_sig_0014_ctbytes_eq.rs")
+text = path.read_text()
+old = "fn main()"
+new = "#[cfg(\n    any()\n)]\nfn main()"
+if old not in text:
+    raise SystemExit("missing disabled main mutation subject")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_sig_case_coverage.sh \
+    'a multiline cfg-disabled fn main being counted as an executable fixture' mut_sig_compile_main_disabled_by_cfg
+
+mut_sig_compile_macro_body_main_decoy() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/sig/tests/compile_fail/c_sig_0014_ctbytes_eq.rs")
+text = path.read_text()
+old = "fn main()"
+new = """macro_rules! fake_main {
+    () => { fn main() {} };
+}
+fn removed_main()"""
+if old not in text:
+    raise SystemExit("missing compile macro decoy mutation subject")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_sig_case_coverage.sh \
+    'a fn main inside a macro body being accepted as an entry point' mut_sig_compile_macro_body_main_decoy
+
+mut_sig_compile_evidence_disabled_by_cfg() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/sig/tests/compile_fail/c_sig_0014_ctbytes_eq.rs")
+text = path.read_text()
+old = "    let _ = left == right;"
+new = "    #[cfg(\n        any()\n    )]\n    let _ = left == right;"
+if old not in text:
+    raise SystemExit("missing disabled evidence mutation subject")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_sig_case_coverage.sh \
+    'mapped compile evidence being disabled inside an active main' mut_sig_compile_evidence_disabled_by_cfg
+
+mut_sig_serialize_evidence_disabled_by_cfg() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/core/tests/compile_fail/c_sig_0018_session_token_serialize.rs")
+text = path.read_text()
+old = "    let _ = serde_json::to_string(&token);"
+new = "    #[cfg(\n        any()\n    )]\n    let _ = serde_json::to_string(&token);"
+if old not in text:
+    raise SystemExit("missing disabled serialization evidence mutation subject")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_sig_case_coverage.sh \
+    'c-sig-0018 evidence being disabled at its statement boundary' mut_sig_serialize_evidence_disabled_by_cfg
+
+mut_sig_family_evidence_disabled_by_cfg() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/sig/tests/compile_fail/c_sig_0019_sig_family_exhaustive.rs")
+text = path.read_text()
+old = "    let _ = match family {"
+new = "    #[cfg(\n        any()\n    )]\n    let _ = match family {"
+if old not in text:
+    raise SystemExit("missing disabled family evidence mutation subject")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_sig_case_coverage.sh \
+    'c-sig-0019 evidence being disabled at its statement boundary' mut_sig_family_evidence_disabled_by_cfg
+
+mut_sig_compile_char_decoy() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+guard = Path("scripts/check_sig_case_coverage.sh")
+guard_text = guard.read_text()
+old = "c-sig-0014|negative|crates/sig/tests/compile_fail/c_sig_0014_ctbytes_eq.rs|let _ = left == right;"
+new = "c-sig-0014|negative|crates/sig/tests/compile_fail/c_sig_0014_ctbytes_eq.rs|u{10FFFD}"
+if old not in guard_text:
+    raise SystemExit("missing char-decoy mapping mutation subject")
+guard.write_text(guard_text.replace(old, new, 1))
+
+fixture = Path("crates/sig/tests/compile_fail/c_sig_0014_ctbytes_eq.rs")
+fixture_text = fixture.read_text()
+old = "    let _ = left == right;"
+new = "    let _ = (left, right);\n    const DECOY: char = '\\u{10FFFD}';\n    let _ = DECOY;"
+if old not in fixture_text:
+    raise SystemExit("missing char-decoy fixture mutation subject")
+fixture.write_text(fixture_text.replace(old, new, 1))
+PYEOF
+}
+expect_fail_self_mutation check_sig_case_coverage.sh \
+    'a character literal being accepted as compile evidence' mut_sig_compile_char_decoy
+
+mut_sig_compile_golden_missing() {
+    rm crates/sig/tests/compile_fail/c_sig_0014_ctbytes_eq.stderr
+}
+expect_fail check_sig_case_coverage.sh \
+    'a compile-fail fixture losing its stderr golden' mut_sig_compile_golden_missing
+
+mut_sig_compile_golden_hollow() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/sig/tests/compile_fail/c_sig_0014_ctbytes_eq.stderr")
+text = path.read_text()
+if "error[E" not in text:
+    raise SystemExit("missing diagnostic mutation subject")
+path.write_text(text.replace("error[E", "diagnostic[E", 1))
+PYEOF
+}
+expect_fail check_sig_case_coverage.sh \
+    'a compile-fail golden containing no rustc error' mut_sig_compile_golden_hollow
+
+mut_sig_compile_golden_unrelated_error() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/sig/tests/compile_fail/c_sig_0014_ctbytes_eq.stderr")
+path.write_text("error[E0425]: cannot find value `unrelated` in this scope\n")
+PYEOF
+}
+expect_fail check_sig_case_coverage.sh \
+    'a compile-fail golden retaining only an unrelated rustc error' mut_sig_compile_golden_unrelated_error
+
+mut_sig_compile_evidence_not_independent() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+guard = Path("scripts/check_sig_case_coverage.sh")
+text = guard.read_text()
+old = "c-sig-0014|negative|crates/sig/tests/compile_fail/c_sig_0014_ctbytes_eq.rs|let _ = left == right;"
+new = "c-sig-0014|negative|crates/sig/tests/frozen_dimensions.rs|fn secret_bearing_types_derive_nothing_that_compares_or_prints"
+if old not in text:
+    raise SystemExit("missing independence mutation subject")
+guard.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail_self_mutation check_sig_case_coverage.sh \
+    'one compile-time case being replaced by an unrelated runtime source guard' mut_sig_compile_evidence_not_independent
+
+mut_sig_compile_fixture_reused() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+guard = Path("scripts/check_sig_case_coverage.sh")
+text = guard.read_text()
+old = "c-sig-0015|negative|crates/sig/tests/compile_fail/c_sig_0015_ctbytes_debug.rs|println!"
+new = "c-sig-0015|negative|crates/sig/tests/compile_fail/c_sig_0014_ctbytes_eq.rs|println!"
+if old not in text:
+    raise SystemExit("missing distinct-fixture mutation subject")
+guard.write_text(text.replace(old, new, 1))
+fixture = Path("crates/sig/tests/compile_fail/c_sig_0014_ctbytes_eq.rs")
+fixture_text = fixture.read_text()
+old_fixture = "    let _ = left == right;"
+new_fixture = "    let _ = left == right;\n    let bytes = left;\n    println!(\"{bytes:?}\");"
+if old_fixture not in fixture_text:
+    raise SystemExit("missing fixture reuse insertion point")
+fixture.write_text(fixture_text.replace(old_fixture, new_fixture, 1) + "\n// c-sig-0015\n")
+PYEOF
+}
+expect_fail_self_mutation check_sig_case_coverage.sh \
+    'two compile-time cases reusing one fixture' mut_sig_compile_fixture_reused
+
+mut_sig_trybuild_dependency_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/sig/Cargo.toml")
+text = path.read_text()
+old = "trybuild = { workspace = true }\n"
+if old not in text:
+    raise SystemExit("missing dependency mutation subject")
+path.write_text(text.replace(old, "", 1))
+PYEOF
+}
+expect_fail check_sig_case_coverage.sh \
+    'the sig crate dropping its trybuild dependency' mut_sig_trybuild_dependency_removed
+
+mut_sig_trybuild_harness_removed() {
+    rm crates/sig/tests/compile_fail.rs
+}
+expect_fail check_sig_case_coverage.sh \
+    'the independent compile-fail harness being deleted' mut_sig_trybuild_harness_removed
+
+mut_sig_trybuild_harness_disabled() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/sig/tests/compile_fail.rs")
+text = path.read_text()
+old = "#[test]\nfn p2_01_compile_time_boundaries_are_not_openable()"
+new = "#[cfg(\n    any()\n)]\n#[test]\nfn p2_01_compile_time_boundaries_are_not_openable()"
+if old not in text:
+    raise SystemExit("missing disabled harness mutation subject")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_sig_case_coverage.sh \
+    'a multiline cfg-disabled sig trybuild harness being counted as active' mut_sig_trybuild_harness_disabled
+
+mut_sig_trybuild_call_outside_test() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/sig/tests/compile_fail.rs")
+text = path.read_text()
+old = '''    let cases = trybuild::TestCases::new();
+    cases.compile_fail("tests/compile_fail/c_sig_001[4-79]_*.rs");'''
+new = '''    run_cases();
+}
+
+fn run_cases() {
+    let cases = trybuild::TestCases::new();
+    cases.compile_fail("tests/compile_fail/c_sig_001[4-79]_*.rs");'''
+if old not in text:
+    raise SystemExit("missing harness body mutation subject")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_sig_case_coverage.sh \
+    'the sig compile_fail call moving outside its active test body' mut_sig_trybuild_call_outside_test
+
+mut_sig_trybuild_glob_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/sig/tests/compile_fail.rs")
+text = path.read_text()
+old = 'cases.compile_fail("tests/compile_fail/c_sig_001[4-79]_*.rs")'
+if old not in text:
+    raise SystemExit("missing harness mutation subject")
+path.write_text(text.replace(old, 'cases.compile_fail("tests/compile_fail/never_*.rs")', 1))
+PYEOF
+}
+expect_fail check_sig_case_coverage.sh \
+    'the harness no longer executing the P2-01 fixtures' mut_sig_trybuild_glob_removed
+
+mut_sig_manifest_gains_serde() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/sig/Cargo.toml")
+text = path.read_text()
+marker = "[dev-dependencies]\n"
+if marker not in text:
+    raise SystemExit("missing sig manifest mutation subject")
+path.write_text(text.replace(marker, "serde = { workspace = true }\n\n" + marker, 1))
+PYEOF
+}
+expect_fail check_sig_case_coverage.sh \
+    'the sig production manifest gaining serde' mut_sig_manifest_gains_serde
+
+mut_sig_manifest_gains_renamed_serde() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/sig/Cargo.toml")
+text = path.read_text()
+marker = "[dev-dependencies]\n"
+if marker not in text:
+    raise SystemExit("missing renamed serde mutation subject")
+dependency = 'hidden_codec = { package = "serde", version = "1" }\n\n'
+path.write_text(text.replace(marker, dependency + marker, 1))
+PYEOF
+}
+expect_fail check_sig_case_coverage.sh \
+    'the sig manifest hiding serde behind a renamed dependency' mut_sig_manifest_gains_renamed_serde
+
+mut_sig_target_manifest_gains_renamed_serde() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+manifest = Path("crates/sig/Cargo.toml")
+manifest.write_text(manifest.read_text() + '''
+[target.'cfg(target_os = "none")'.dependencies]
+hidden_codec = { package = "serde", version = "1" }
+''')
+PYEOF
+}
+expect_fail check_sig_case_coverage.sh \
+    'a target-specific sig dependency hiding serde behind a rename' mut_sig_target_manifest_gains_renamed_serde
+
+mut_sig_manifest_inherits_renamed_serde() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+workspace = Path("Cargo.toml")
+workspace_text = workspace.read_text()
+marker = "[workspace.dependencies]\n"
+if marker not in workspace_text:
+    raise SystemExit("missing workspace dependency mutation subject")
+workspace.write_text(workspace_text.replace(
+    marker,
+    marker + 'hidden_codec = { package = "serde", version = "1" }\n',
+    1,
+))
+
+manifest = Path("crates/sig/Cargo.toml")
+manifest_text = manifest.read_text()
+marker = "[dev-dependencies]\n"
+if marker not in manifest_text:
+    raise SystemExit("missing inherited serde mutation subject")
+manifest.write_text(manifest_text.replace(
+    marker,
+    'hidden_codec = { workspace = true }\n\n' + marker,
+    1,
+))
+PYEOF
+}
+expect_fail check_sig_case_coverage.sh \
+    'the sig manifest inheriting a workspace-renamed serde dependency' mut_sig_manifest_inherits_renamed_serde
+
+mut_sig_real_serde_dependency_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/core/Cargo.toml")
+text = path.read_text()
+old = "serde_json = { workspace = true }\n"
+if old not in text:
+    raise SystemExit("missing core serde_json dependency mutation subject")
+path.write_text(text.replace(old, "", 1))
+PYEOF
+}
+expect_fail check_sig_case_coverage.sh \
+    'the real serde_json dev dependency being removed' mut_sig_real_serde_dependency_removed
+
+mut_sig_core_harness_removed() {
+    rm crates/core/tests/sig_compile_fail.rs
+}
+expect_fail check_sig_case_coverage.sh \
+    'the c-sig-0018 real-serde harness being deleted' mut_sig_core_harness_removed
+
+mut_sig_core_harness_comment_string_decoy() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/core/tests/sig_compile_fail.rs")
+text = path.read_text()
+old = '''#[test]
+fn session_tokens_are_not_serializable() {
+    let cases = trybuild::TestCases::new();
+    cases.compile_fail("tests/compile_fail/c_sig_0018_*.rs");
+}'''
+new = '''// #[test]
+// fn session_tokens_are_not_serializable() {}
+const DECOY: &str = r#"#[test]
+fn session_tokens_are_not_serializable() {
+    cases.compile_fail("tests/compile_fail/c_sig_0018_*.rs");
+}"#;'''
+if old not in text:
+    raise SystemExit("missing core harness decoy mutation subject")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_sig_case_coverage.sh \
+    'comment and string decoys replacing the active core trybuild harness' mut_sig_core_harness_comment_string_decoy
+
+mut_sig_core_glob_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/core/tests/sig_compile_fail.rs")
+text = path.read_text()
+old = 'cases.compile_fail("tests/compile_fail/c_sig_0018_*.rs")'
+if old not in text:
+    raise SystemExit("missing core harness mutation subject")
+path.write_text(text.replace(old, 'cases.compile_fail("tests/compile_fail/never_*.rs")', 1))
+PYEOF
+}
+expect_fail check_sig_case_coverage.sh \
+    'the core harness no longer executing c-sig-0018' mut_sig_core_glob_removed
+
+mut_sig_serialize_trait_diagnostic_changed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/core/tests/compile_fail/c_sig_0018_session_token_serialize.stderr")
+text = path.read_text()
+old = 'error[E0277]: the trait bound `SessionToken: serde::Serialize` is not satisfied'
+if old not in text:
+    raise SystemExit("missing serialization diagnostic mutation subject")
+path.write_text(text.replace(old, 'the serialization diagnostic was weakened', 1))
+PYEOF
+}
+expect_fail check_sig_case_coverage.sh \
+    'c-sig-0018 losing the exact missing-Serialize diagnostic' mut_sig_serialize_trait_diagnostic_changed
+
+mut_sig_serialize_impl_diagnostic_changed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/core/tests/compile_fail/c_sig_0018_session_token_serialize.stderr")
+text = path.read_text()
+old = 'the trait `serde_core::ser::Serialize` is not implemented for `SessionToken`'
+if old not in text:
+    raise SystemExit("missing implementation diagnostic mutation subject")
+path.write_text(text.replace(old, 'the implementation diagnostic was weakened', 1))
+PYEOF
+}
+expect_fail check_sig_case_coverage.sh \
+    'c-sig-0018 losing the exact missing implementation diagnostic' mut_sig_serialize_impl_diagnostic_changed
+
+mut_sig_serialize_call_diagnostic_changed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/core/tests/compile_fail/c_sig_0018_session_token_serialize.stderr")
+text = path.read_text()
+old = 'required by a bound in `serde_json::to_string`'
+if old not in text:
+    raise SystemExit("missing serialization-bound diagnostic mutation subject")
+path.write_text(text.replace(old, 'required by another call', 1))
+PYEOF
+}
+expect_fail check_sig_case_coverage.sh \
+    'c-sig-0018 no longer diagnosing its serialization bound' mut_sig_serialize_call_diagnostic_changed
 
 # -----------------------------------------------------------------------------
 # ADR-0005. Each of the three mutations below is a way the generated dto silently

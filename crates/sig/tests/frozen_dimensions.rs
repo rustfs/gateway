@@ -16,10 +16,9 @@
 //!
 //! Responsible for: every case listed in the P2-01 task issue that can be expressed at runtime,
 //! plus the source-level guards that keep the two crate invariants true as the crate grows.
-//! NOT responsible for: the seven compile-time cases `c-sig-0014` .. `c-sig-0020` — those are
-//! `compile_fail` rustdoc examples on `CtBytes`, `Signature`, `SessionToken`, `SigFamily` and
-//! `TrailerSet`, and `cargo test` runs them as doctests. They live next to the types they
-//! constrain so that a maintainer removing a rule sees the test that forbids it.
+//! NOT responsible for: the six independent compile-time cases `c-sig-0014` .. `c-sig-0019` —
+//! those live under `tests/compile_fail`; colocated rustdoc examples retain the same boundaries
+//! beside the types they constrain. `c-sig-0020` has a runtime algorithm-mismatch verdict here.
 //! Upstream: the `rustfs-gateway-sig` public API. Downstream: none (test target).
 
 use rustfs_gateway_sig::codec::{decode_base64_sha256, decode_hex_lower, encode_base64_sha256, encode_hex_lower};

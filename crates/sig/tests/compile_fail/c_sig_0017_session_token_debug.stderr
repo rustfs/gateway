@@ -1,0 +1,8 @@
+error[E0277]: `SessionToken` doesn't implement `Debug`
+  --> tests/compile_fail/c_sig_0017_session_token_debug.rs:26:9
+   |
+24 |     #[derive(Debug)]
+   |              ----- in this derive macro expansion
+25 |     struct Claims {
+26 |         token: SessionToken,
+   |         ^^^^^^^^^^^^^^^^^^^ the trait `Debug` is not implemented for `SessionToken`
