@@ -19,7 +19,7 @@ fail() {
     exit 1
 }
 
-for required in rg awk python3; do
+for required in grep awk python3; do
     command -v "$required" >/dev/null 2>&1 \
         || fail "required command is missing: ${required}"
 done
@@ -27,17 +27,17 @@ for required in "$CORE_HANDLER" "$CORE_RESOLUTION" "$FACADE_RENDER" "$FILTER" "$
     [[ -f "$required" ]] || fail "required source is missing: ${required#"${ROOT}/"}"
 done
 
-if rg -n '^[[:space:]]*pub fn (new|with_status|closing|about_resource)\(' "$FACADE_RENDER" >/dev/null; then
+if grep -En '^[[:space:]]*pub fn (new|with_status|closing|about_resource)\(' "$FACADE_RENDER" >/dev/null; then
     fail 'S3Error regained a public semantic writer'
 fi
-if rg -n --glob '*.rs' --glob '!generated/**' --glob '!types/generated/**' \
+if grep -REn --include='*.rs' --exclude-dir=generated \
     'Result<[[:space:]]*\(\)[[:space:]]*,[[:space:]]*S3Error[[:space:]]*>' "${ROOT}/crates/gateway/src" >/dev/null; then
     fail 'a gateway extension point returns already-resolved S3Error'
 fi
-if rg -n '^[[:space:]]*pub fn status\(&self\)[[:space:]]*->[[:space:]]*StatusCode' "$CORE_HANDLER" >/dev/null; then
+if grep -En '^[[:space:]]*pub fn status\(&self\)[[:space:]]*->[[:space:]]*StatusCode' "$CORE_HANDLER" >/dev/null; then
     fail 'HandlerError regained a status authority before resolution'
 fi
-if rg -n '^[[:space:]]*pub fn from_(wire|chunk|pre_auth|auth|denial|sse|codec|handler|transport)' \
+if grep -En '^[[:space:]]*pub fn from_(wire|chunk|pre_auth|auth|denial|sse|codec|handler|transport)' \
     "$FACADE_RENDER" >/dev/null; then
     fail 'a typed facade conversion became a public S3Error writer'
 fi
@@ -52,23 +52,24 @@ trait_shape="$(awk '
 [[ "$trait_shape" == '3/3' ]] \
     || fail "StageFilter must expose exactly three HandlerError seams, found ${trait_shape}"
 
-[[ "$(rg -c '^pub struct HandlerErrorContext\(ErrorContext\);' "$CORE_RESOLUTION" || true)" -eq 1 ]] \
+[[ "$(grep -Ec '^pub struct HandlerErrorContext\(ErrorContext\);' "$CORE_RESOLUTION" || true)" -eq 1 ]] \
     || fail 'the handler carrier must be an opaque HandlerErrorContext wrapper'
-[[ "$(rg -c '^impl From<HandlerErrorContext> for HandlerError[[:space:]]*\{' "$CORE_HANDLER" || true)" -eq 1 ]] \
+[[ "$(grep -Ec '^impl From<HandlerErrorContext> for HandlerError[[:space:]]*\{' "$CORE_HANDLER" || true)" -eq 1 ]] \
     || fail 'HandlerError must have exactly one legal HandlerErrorContext carrier bridge'
-if rg -n '^impl (From<ErrorContext> for (HandlerError|HandlerErrorContext)|From<HandlerErrorContext> for ErrorContext|(Deref|DerefMut) for HandlerErrorContext|(AsRef|Borrow)<ErrorContext> for HandlerErrorContext)' \
+if grep -En '^impl (From<ErrorContext> for (HandlerError|HandlerErrorContext)|From<HandlerErrorContext> for ErrorContext|(Deref|DerefMut) for HandlerErrorContext|(AsRef|Borrow)<ErrorContext> for HandlerErrorContext)' \
     "$CORE_HANDLER" "$CORE_RESOLUTION" >/dev/null; then
     fail 'HandlerErrorContext exposes its arbitrary ErrorContext payload'
 fi
-[[ "$(rg -c '^pub fn resolve\(context: ErrorContext, response: ResponseKind\)' "$CORE_RESOLUTION" || true)" -eq 1 ]] \
+[[ "$(grep -Ec '^pub fn resolve\(context: ErrorContext, response: ResponseKind\)' "$CORE_RESOLUTION" || true)" -eq 1 ]] \
     || fail 'core must expose exactly one resolution entry'
-[[ "$(rg -c '^    pub const fn owned_bucket_recreation\(\) -> Self \{' "$CORE_RESOLUTION" || true)" -eq 2 ]] \
+[[ "$(grep -Ec '^    pub const fn owned_bucket_recreation\(\) -> Self \{' "$CORE_RESOLUTION" || true)" -eq 2 ]] \
     || fail 'owned-bucket recreation must be parameter-free in both legal context types'
-if rg -n 'success\(StatusCode::OK\)' "$CORE_RESOLUTION" >/dev/null; then
+if grep -En 'success\(StatusCode::OK\)' "$CORE_RESOLUTION" >/dev/null; then
     fail 'CreateBucket success must not enter the error resolver'
 fi
 
 python3 - "$ROOT" <<'PYEOF'
+import os
 import re
 import sys
 from pathlib import Path
@@ -85,8 +86,9 @@ def fail(message):
     raise SystemExit(f"check_error_resolution_surface: {message}")
 
 
-def rust_code(path):
-    source = path.read_text()
+def rust_code(path, source=None):
+    if source is None:
+        source = path.read_text()
     out = []
     position = 0
     comment_depth = 0
@@ -157,6 +159,38 @@ def delimiter_depth(code, end):
     return depth
 
 
+def top_level_matches(code, pattern, path):
+    depth = {"{": 0, "(": 0, "[": 0}
+    closing = {"}": "{", ")": "(", "]": "["}
+    position = 0
+    matches = []
+    for item in pattern.finditer(code):
+        for char in code[position : item.start()]:
+            if char in depth:
+                depth[char] += 1
+            elif char in closing:
+                depth[closing[char]] -= 1
+                if depth[closing[char]] < 0:
+                    fail(f"{path.relative_to(root)} has mismatched top-level delimiters")
+        if all(value == 0 for value in depth.values()):
+            matches.append(item)
+        position = item.end()
+    return matches
+
+
+def handwritten_rust_files(start):
+    files = []
+    for directory, names, filenames in os.walk(start, followlinks=False):
+        directory_path = Path(directory)
+        names[:] = [
+            name
+            for name in names
+            if name != "generated" and not (directory_path / name).is_symlink()
+        ]
+        files.extend(directory_path / name for name in filenames if name.endswith(".rs"))
+    return sorted(files)
+
+
 def balanced_end(code, opening, path, label):
     pairs = {"(": ")", "{": "}", "[": "]"}
     stack = [code[opening]]
@@ -205,13 +239,12 @@ def impl_header(code, item, path):
 
 
 s3_bridges = []
-for path in sorted((root / "crates").glob("*/**/*.rs")):
-    if "generated" in path.parts:
+for path in handwritten_rust_files(root / "crates"):
+    source = path.read_text()
+    if "S3Error" not in source:
         continue
-    _, code = rust_code(path)
-    for item in re.finditer(r"\bimpl\b", code):
-        if any(delimiter_depth(code, item.start()).values()):
-            continue
+    _, code = rust_code(path, source)
+    for item in top_level_matches(code, re.compile(r"\bimpl\b"), path):
         header = impl_header(code, item, path)
         if "From<" in header and re.search(r"for(?:[A-Za-z_][A-Za-z0-9_]*::)*S3Error(?:where|$)", header):
             s3_bridges.append((str(path.relative_to(root)), header))
@@ -456,9 +489,7 @@ for path in (root / "crates/core/src").rglob("*.rs"):
         arguments = code[opening + 1 : end - 1]
         if "HandlerErrorContext" in arguments:
             fail(f"{path.relative_to(root)} passes HandlerErrorContext through a token macro")
-    for match in re.finditer(r"\bimpl\b", code):
-        if any(delimiter_depth(code, match.start()).values()):
-            continue
+    for match in top_level_matches(code, re.compile(r"\bimpl\b"), path):
         brace = code.find("{", match.end())
         if brace == -1:
             fail(f"{path.relative_to(root)} has an unterminated impl")

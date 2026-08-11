@@ -16,57 +16,12 @@ fail() {
     exit 1
 }
 
-for required in rg awk python3; do
+for required in python3; do
     command -v "$required" >/dev/null 2>&1 || fail "required command is missing: ${required}"
 done
 for required in "$SIG_SCOPE" "$AUTHENTICATOR" "$SERVICE" "$CORE_RESOLUTION"; do
     [[ -f "$required" ]] || fail "required source is missing: ${required#"${ROOT}/"}"
 done
-
-[[ "$(rg -c '^pub struct ScopeRegion\(Box<str>\);$' "$SIG_SCOPE" || true)" -eq 1 ]] \
-    || fail 'ScopeRegion must remain a privately constructed bounded string'
-[[ "$(rg -c '^pub struct ScopeRejection\(Option<ScopeRegion>\);$' "$SIG_SCOPE" || true)" -eq 1 ]] \
-    || fail 'ScopeRejection must remain a private optional configured region'
-rg -U 'pub fn enforce_scope\([\s\S]*?\) -> Result<VerifiedScope, ScopeRejection>' "$SIG_SCOPE" >/dev/null \
-    || fail 'enforce_scope must return the typed rejection'
-[[ "$(rg -c 'return Err\(ScopeRejection\(None\)\);' "$SIG_SCOPE" || true)" -eq 2 ]] \
-    || fail 'date and service mismatches must carry no remediation region'
-[[ "$(rg -c 'ScopeRejection\(expected\.regions\(\)\.regions\.first\(\)\.cloned\(\)\)' "$SIG_SCOPE" || true)" -eq 1 ]] \
-    || fail 'only a region mismatch may carry the canonical configured region'
-rg -F 'regions.sort_by(|left, right| left.as_str().as_bytes().cmp(right.as_str().as_bytes()));' "$SIG_SCOPE" >/dev/null \
-    || fail 'configured regions must be sorted byte-lexicographically'
-rg -F 'regions.dedup();' "$SIG_SCOPE" >/dev/null \
-    || fail 'configured regions must be deduplicated'
-rg -F "byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-'" "$SIG_SCOPE" >/dev/null \
-    || fail 'configured regions must use the bounded RegionLabel-compatible alphabet'
-
-rg -U 'pub struct AuthenticationOutcome \{\n    verdict: Verdict,\n    scope_rejection: Option<ScopeRejection>,\n\}' \
-    "$AUTHENTICATOR" >/dev/null || fail 'AuthenticationOutcome fields must remain private and closed'
-rg -U 'pub const fn ordinary\(verdict: Verdict\) -> Self \{[\s\S]*?scope_rejection: None,' \
-    "$AUTHENTICATOR" >/dev/null || fail 'ordinary outcomes must carry no scope proof'
-rg -U 'pub const fn verdict\(&self\) -> &Verdict \{\n        &self\.verdict\n    \}' "$AUTHENTICATOR" >/dev/null \
-    || fail 'the public verdict accessor must borrow the exact stored verdict'
-rg -U '    fn scope_rejected\(scope_rejection: ScopeRejection\) -> Self \{\n        Self \{\n            verdict: Verdict::reject\(AuthError::AuthorizationHeaderMalformed\),\n            scope_rejection: Some\(scope_rejection\),\n        \}\n    \}' \
-    "$AUTHENTICATOR" >/dev/null || fail 'the private scope carrier must fix AuthorizationHeaderMalformed'
-if rg -n 'pub fn scope_rejected|pub fn into_parts|Result<Verdict, Unavailable>' "$AUTHENTICATOR" >/dev/null; then
-    fail 'the contextual constructor, consuming split or old bare-verdict trait surface became public'
-fi
-trait_outcomes="$(awk '
-    /^pub trait Authenticator[[:space:]]*:/ { inside = 1 }
-    /^impl<T: Authenticator/ { inside = 0 }
-    inside && /Result<AuthenticationOutcome, Unavailable>/ { count++ }
-    END { print count + 0 }
-' "$AUTHENTICATOR")"
-[[ "$trait_outcomes" -eq 1 ]] || fail 'Authenticator must return the closed outcome carrier'
-
-rg -F 'scope_rejection.and_then(|rejection| rejection.expected_region().cloned())' "$SERVICE" >/dev/null \
-    || fail 'the service must consume the typed scope proof'
-rg -F 'ErrorContext::authorization_region_mismatch(region)' "$SERVICE" >/dev/null \
-    || fail 'a trusted region mismatch must use the named region context'
-rg -F 'ErrorContext::authorization_scope_malformed()' "$SERVICE" >/dev/null \
-    || fail 'a no-region rejection must use the closed no-detail context'
-rg -F 'pub const fn authorization_scope_malformed() -> Self' "$CORE_RESOLUTION" >/dev/null \
-    || fail 'core must expose the closed no-detail context'
 
 python3 - "$ROOT" <<'PYEOF'
 import re
@@ -74,7 +29,10 @@ import sys
 from pathlib import Path
 
 root = Path(sys.argv[1])
-path = root / "crates/gateway/src/ext/authenticator.rs"
+scope_path = root / "crates/sig/src/scope.rs"
+auth_path = root / "crates/gateway/src/ext/authenticator.rs"
+service_path = root / "crates/gateway/src/service.rs"
+resolution_path = root / "crates/core/src/error_resolution.rs"
 
 
 def fail(message):
@@ -181,7 +139,87 @@ def impl_header(code, item):
     fail("authenticator.rs has an unterminated impl header")
 
 
-source = path.read_text()
+scope_source = scope_path.read_text()
+scope_code = rust_code(scope_source)
+auth_code = rust_code(auth_path.read_text())
+service_code = rust_code(service_path.read_text())
+resolution_code = rust_code(resolution_path.read_text())
+dense_scope = re.sub(r"\s+", "", scope_code)
+dense_auth = re.sub(r"\s+", "", auth_code)
+dense_service = re.sub(r"\s+", "", service_code)
+dense_resolution = re.sub(r"\s+", "", resolution_code)
+
+if scope_code.count("pub struct ScopeRegion(Box<str>);") != 1:
+    fail("ScopeRegion must remain a privately constructed bounded string")
+if scope_code.count("pub struct ScopeRejection(Option<ScopeRegion>);") != 1:
+    fail("ScopeRejection must remain a private optional configured region")
+if not re.search(
+    r"pub\s+fn\s+enforce_scope\s*\([\s\S]*?\)\s*->\s*Result<VerifiedScope,\s*ScopeRejection>",
+    scope_code,
+):
+    fail("enforce_scope must return the typed rejection")
+if scope_code.count("return Err(ScopeRejection(None));") != 2:
+    fail("date and service mismatches must carry no remediation region")
+if dense_scope.count("ScopeRejection(expected.regions().regions.first().cloned())") != 1:
+    fail("only a region mismatch may carry the canonical configured region")
+if "regions.sort_by(|left,right|left.as_str().as_bytes().cmp(right.as_str().as_bytes()));" not in dense_scope:
+    fail("configured regions must be sorted byte-lexicographically")
+if "regions.dedup();" not in dense_scope:
+    fail("configured regions must be deduplicated")
+alphabet = list(
+    re.finditer(
+        r"byte\.is_ascii_lowercase\(\)\s*\|\|\s*byte\.is_ascii_digit\(\)\s*\|\|\s*byte\s*==",
+        scope_code,
+    )
+)
+if len(alphabet) != 1 or re.match(r"\s*b'-'", scope_source[alphabet[0].end() :]) is None:
+    fail("configured regions must use the bounded RegionLabel-compatible alphabet")
+
+if dense_auth.count("pubstructAuthenticationOutcome{verdict:Verdict,scope_rejection:Option<ScopeRejection>,}") != 1:
+    fail("AuthenticationOutcome fields must remain private and closed")
+if "pubconstfnordinary(verdict:Verdict)->Self{Self{verdict,scope_rejection:None,}}" not in dense_auth:
+    fail("ordinary outcomes must carry no scope proof")
+if "pubconstfnverdict(&self)->&Verdict{&self.verdict}" not in dense_auth:
+    fail("the public verdict accessor must borrow the exact stored verdict")
+if (
+    "fnscope_rejected(scope_rejection:ScopeRejection)->Self{Self{"
+    "verdict:Verdict::reject(AuthError::AuthorizationHeaderMalformed),"
+    "scope_rejection:Some(scope_rejection),}}"
+    not in dense_auth
+):
+    fail("the private scope carrier must fix AuthorizationHeaderMalformed")
+
+trait = re.search(r"\bpub\s+trait\s+Authenticator\b[^\{]*\{", auth_code)
+if trait is None:
+    fail("Authenticator trait is missing")
+depth = 1
+position = trait.end()
+while position < len(auth_code) and depth:
+    if auth_code[position] == "{":
+        depth += 1
+    elif auth_code[position] == "}":
+        depth -= 1
+    position += 1
+if depth:
+    fail("Authenticator trait has an unterminated body")
+trait_body = re.sub(r"\s+", "", auth_code[trait.end() : position - 1])
+expected_authenticate = (
+    "fnauthenticate<'a>(&'aself,request:&'aAuthentication<'a>)"
+    "->BoxFuture<'a,Result<AuthenticationOutcome,Unavailable>>;"
+)
+if trait_body.count(expected_authenticate) != 1 or "Result<Verdict,Unavailable>" in trait_body:
+    fail("Authenticator must return the closed outcome carrier")
+
+if "scope_rejection.and_then(|rejection|rejection.expected_region().cloned())" not in dense_service:
+    fail("the service must consume the typed scope proof")
+if "ErrorContext::authorization_region_mismatch(region)" not in dense_service:
+    fail("a trusted region mismatch must use the named region context")
+if "ErrorContext::authorization_scope_malformed()" not in dense_service:
+    fail("a no-region rejection must use the closed no-detail context")
+if "pubconstfnauthorization_scope_malformed()->Self" not in dense_resolution:
+    fail("core must expose the closed no-detail context")
+
+source = auth_path.read_text()
 code = rust_code(source)
 outcome_impls = []
 inherent_opening = None

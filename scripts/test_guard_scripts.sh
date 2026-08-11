@@ -1113,6 +1113,49 @@ mut_scope_source_removed() {
 expect_fail check_scope_rejection_surface.sh \
     'the required typed scope source disappearing' mut_scope_source_removed
 
+probe_error_scope_guards_without_rg() {
+    local guard output rc tool_path
+    local guards=(check_error_resolution_surface.sh check_scope_rejection_surface.sh)
+
+    tool_path="$(mktemp -d "${TMPDIR:-/tmp}/gateway-error-scope-guard-path.XXXXXX")"
+    ln -s "$(command -v python3)" "${tool_path}/python3"
+    ln -s "$(command -v grep)" "${tool_path}/grep"
+    ln -s "$(command -v awk)" "${tool_path}/awk"
+    for guard in "${guards[@]}"; do
+        cases=$((cases + 1))
+        rc=0
+        output="$(GATEWAY_CHECK_ROOT="$REPO_ROOT" PATH="$tool_path" /bin/bash "${SCRIPT_DIR}/${guard}" 2>&1)" || rc=$?
+        if [[ "$rc" -eq 0 ]]; then
+            pass_msg "${guard} runs without ripgrep"
+        else
+            fail_msg "${guard} requires ripgrep: ${output}"
+        fi
+    done
+    rm -rf "$tool_path"
+}
+probe_error_scope_guards_without_rg
+
+probe_error_scope_guards_missing_python() {
+    local guard output rc tool_path
+    local guards=(check_error_resolution_surface.sh check_scope_rejection_surface.sh)
+
+    tool_path="$(mktemp -d "${TMPDIR:-/tmp}/gateway-error-scope-guard-path.XXXXXX")"
+    ln -s "$(command -v grep)" "${tool_path}/grep"
+    ln -s "$(command -v awk)" "${tool_path}/awk"
+    for guard in "${guards[@]}"; do
+        cases=$((cases + 1))
+        rc=0
+        output="$(GATEWAY_CHECK_ROOT="$REPO_ROOT" PATH="$tool_path" /bin/bash "${SCRIPT_DIR}/${guard}" 2>&1)" || rc=$?
+        if [[ "$rc" -ne 0 && "$output" == *'required command is missing: python3'* ]]; then
+            pass_msg "${guard} fails closed without python3"
+        else
+            fail_msg "${guard} reported green without python3"
+        fi
+    done
+    rm -rf "$tool_path"
+}
+probe_error_scope_guards_missing_python
+
 mut_assembly_case_id_deleted() {
     python3 - <<'PYEOF'
 import pathlib
