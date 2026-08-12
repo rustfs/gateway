@@ -17,7 +17,7 @@ polarity = "negative"
 operation = "CopyObject"
 tags = ["conditional", "preconditions", "error-shape"]
 timeout_ms = 10000
-quirks = ["q-cond-0046"]
+quirks = ["q-copy-source-if-match-miss-0113", "q-copy-source-guard-order-0114"]
 
 [[case.evidence]]
 url = "https://github.com/s3s-project/s3s/pull/577"

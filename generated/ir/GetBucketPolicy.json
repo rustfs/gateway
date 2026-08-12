@@ -94,7 +94,7 @@
                                 "summary": "The documented request syntax for the policy write is a bare JSON policy document sent as the whole body."
                               }
                             ],
-                "cases": ["c-bucketconfig-0017", "c-bucketconfig-0016"]
+                "cases": ["c-bucketconfig-0016", "c-bucketconfig-0017", "c-bucketconfig-0057"]
               },
               {
                 "id": "q-pol-0002",

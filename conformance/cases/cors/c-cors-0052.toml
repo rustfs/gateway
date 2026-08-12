@@ -1,0 +1,39 @@
+[case]
+id = "c-cors-0052"
+schema_version = 1
+title = "A preflight returns the matched rule's complete method list"
+rationale = "The requested method is only one member, so the second member proves Allow-Methods comes from the stored rule."
+polarity = "positive"
+tags = ["cors", "preflight"]
+timeout_ms = 10000
+quirks = ["q-cors-0021"]
+
+[[case.evidence]]
+url = "https://fetch.spec.whatwg.org/#http-cors-protocol"
+summary = "A preflight answer reports the methods allowed by the selected policy."
+kind = "rfc"
+
+[[setup.buckets]]
+name = "conf-cors-rt"
+
+[[exchanges]]
+[exchanges.request]
+method = "PUT"
+target = "/conf-cors-rt?cors"
+headers = { "content-type" = "application/xml", "content-md5" = "4OldDLRD9xdUSu9fzsVH+Q==" }
+body = { utf8 = "<CORSConfiguration><CORSRule><AllowedMethod>GET</AllowedMethod><AllowedMethod>PUT</AllowedMethod><AllowedOrigin>*</AllowedOrigin></CORSRule></CORSConfiguration>" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+[exchanges.expect]
+kind = "response"
+status = 200
+
+[[exchanges]]
+[exchanges.request]
+method = "OPTIONS"
+target = "/conf-cors-rt/key"
+headers = { "origin" = "https://app.example.com", "access-control-request-method" = "PUT" }
+[exchanges.expect]
+kind = "response"
+status = 200
+[exchanges.expect.headers_present]
+"access-control-allow-methods" = "GET, PUT"

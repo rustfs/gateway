@@ -78,7 +78,7 @@
                                 "summary": "The operation documents a 204 No Content success and lists no not-found error for a missing configuration."
                               }
                             ],
-                "cases": ["c-encryption-0013", "c-encryption-0006"]
+                "cases": ["c-encryption-0013", "c-encryption-0006", "c-encryption-0022"]
               }
             ],
   "ext_points": []

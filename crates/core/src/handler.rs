@@ -427,10 +427,18 @@ impl HandlerError {
     /// how long the object is. Here they cannot: they are the same argument.
     #[must_use]
     pub fn unsatisfiable_range(requested: impl Into<Cow<'static, str>>, complete_length: u64) -> Self {
-        Self::new(ErrorCode::INVALID_RANGE, RANGE_NOT_SATISFIABLE_MESSAGE)
+        let requested = requested.into();
+        let error = Self::new(ErrorCode::INVALID_RANGE, RANGE_NOT_SATISFIABLE_MESSAGE)
             .with_header(ErrorHeader::UnsatisfiedRange { complete_length })
-            .with_detail(ErrorDetail::RangeRequested(requested.into()))
-            .with_detail(ErrorDetail::ActualObjectSize(complete_length))
+            .with_detail(ErrorDetail::RangeRequested(requested));
+        if matches!(
+            crate::contracts::UNSATISFIABLE_ACTUAL_SIZE_DETAIL_POLICY,
+            crate::contracts::UnsatisfiableActualSizeDetailPolicy::Include
+        ) {
+            error.with_detail(ErrorDetail::ActualObjectSize(complete_length))
+        } else {
+            error
+        }
     }
 
     /// `412 PreconditionFailed`, naming the request header whose condition did not hold.
@@ -440,8 +448,12 @@ impl HandlerError {
     /// of the document that says which of four conditions failed.
     #[must_use]
     pub fn precondition_failed(condition: impl Into<Cow<'static, str>>) -> Self {
-        Self::new(ErrorCode::PRECONDITION_FAILED, PRECONDITION_FAILED_MESSAGE)
-            .with_detail(ErrorDetail::Condition(condition.into()))
+        let error = Self::new(ErrorCode::PRECONDITION_FAILED, PRECONDITION_FAILED_MESSAGE);
+        if crate::contracts::include_condition_failure_detail() {
+            error.with_detail(ErrorDetail::Condition(condition.into()))
+        } else {
+            error
+        }
     }
 
     /// Adds a header to the refusal's head, replacing any earlier one of the same name.

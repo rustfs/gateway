@@ -212,7 +212,7 @@
                                 "summary": "Upstream's missing CORS support is tracked here, and the flattened wire shape is what any implementation of it has to reproduce."
                               }
                             ],
-                "cases": ["c-cors-0002", "c-cors-0003"]
+                "cases": ["c-cors-0002", "c-cors-0003", "c-cors-0004", "c-cors-0009"]
               }
             ],
   "ext_points": []

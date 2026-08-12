@@ -22,9 +22,12 @@
 
 #![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 
-use rustfs_gateway_model::ir::{Binding, Evidence, Field, Quirk, Type};
+use std::collections::BTreeMap;
 
-use crate::emit::codec::forms::{self, FORM_KIND, Form};
+use rustfs_gateway_model::ir::{Binding, Field, Type};
+use rustfs_gateway_model::{CodecRule, CodecValue, MutationDimension, WireFormValue};
+
+use crate::emit::codec::forms::{self, Form};
 
 fn field(name: &str, ty: Type, quirks: &[&str]) -> Field {
     Field {
@@ -41,46 +44,37 @@ fn field(name: &str, ty: Type, quirks: &[&str]) -> Field {
     }
 }
 
-fn quirk(id: &str, kind: &str) -> Quirk {
-    Quirk {
-        id: id.to_owned(),
-        kind: kind.to_owned(),
-        target: "Fixture.Member".to_owned(),
-        summary: "a fixture quirk, long enough to satisfy the schema".to_owned(),
-        evidence: vec![Evidence {
-            kind: "observed".to_owned(),
-            reference: "fixture".to_owned(),
-            summary: "a fixture evidence entry, long enough".to_owned(),
-        }],
-        cases: vec!["c-fixture-0001".to_owned()],
+fn wire_form(current: WireFormValue) -> CodecRule {
+    CodecRule {
+        current: CodecValue::WireForm(current),
+        mutation_dimension: MutationDimension::WireForm,
     }
 }
 
 #[test]
 fn a_field_with_no_quirk_at_all_has_no_wire_form() {
-    let resolved = forms::of(&field("IfMatch", Type::String, &[]), &[], "Fixture").expect("resolves");
+    let resolved = forms::of(&field("IfMatch", Type::String, &[]), &BTreeMap::new(), "Fixture").expect("resolves");
     assert_eq!(resolved, None, "an ordinary string keeps the plain conversion");
 }
 
 #[test]
-fn a_quirk_of_another_kind_does_not_declare_a_form() {
-    let quirks = vec![quirk("q-cond-0046", "etag_compare")];
-    let resolved = forms::of(&field("IfMatch", Type::String, &["q-cond-0046"]), &quirks, "Fixture").expect("resolves");
-    assert_eq!(resolved, None, "only `{FORM_KIND}` declares a grammar");
+fn metadata_without_a_typed_rule_does_not_declare_a_form() {
+    let resolved = forms::of(&field("IfMatch", Type::String, &["q-cond-0046"]), &BTreeMap::new(), "Fixture").expect("resolves");
+    assert_eq!(resolved, None, "only the typed rule map declares a grammar");
 }
 
 #[test]
 fn the_declared_forms_reach_the_members_that_carry_them() {
-    let quirks = vec![
-        quirk("q-etag-form-0074", FORM_KIND),
-        quirk("q-token-form-0075", FORM_KIND),
-        quirk("q-marker-form-0076", FORM_KIND),
-    ];
-    let tag = forms::of(&field("IfMatch", Type::String, &["q-etag-form-0074"]), &quirks, "GetObject").expect("resolves");
+    let values = BTreeMap::from([
+        ("q-etag-form-0074".to_owned(), wire_form(WireFormValue::EntityTag)),
+        ("q-token-form-0075".to_owned(), wire_form(WireFormValue::OpaqueToken)),
+        ("q-marker-form-0076".to_owned(), wire_form(WireFormValue::OpaqueToken)),
+    ]);
+    let tag = forms::of(&field("IfMatch", Type::String, &["q-etag-form-0074"]), &values, "GetObject").expect("resolves");
     assert_eq!(tag, Some(Form::EntityTag));
     let cursor = forms::of(
         &field("ContinuationToken", Type::OpaqueString, &["q-token-form-0075"]),
-        &quirks,
+        &values,
         "ListObjectsV2",
     )
     .expect("resolves");
@@ -88,11 +82,21 @@ fn the_declared_forms_reach_the_members_that_carry_them() {
     // The same cursor grammar, reached through a member the model left as a plain string.
     let marker = forms::of(
         &field("UploadIdMarker", Type::String, &["q-marker-form-0076"]),
-        &quirks,
+        &values,
         "ListMultipartUploads",
     )
     .expect("resolves");
     assert_eq!(marker, Some(Form::OpaqueToken));
+}
+
+#[test]
+fn a_wire_form_comes_from_the_quirk_value_not_its_id() {
+    let values = BTreeMap::from([("q-invented-9999".to_owned(), wire_form(WireFormValue::EntityTag))]);
+
+    let resolved = forms::of(&field("IfMatch", Type::String, &["q-invented-9999"]), &values, "Fixture")
+        .expect("the overlay value, not a Rust id table, selects the grammar");
+
+    assert_eq!(resolved, Some(Form::EntityTag));
 }
 
 #[test]
@@ -108,29 +112,28 @@ fn the_storage_is_composed_around_one_checker_per_grammar() {
 }
 
 #[test]
-fn n_a_form_quirk_with_no_declared_grammar_fails_the_run() {
-    // The failure mode this prevents: an overlay claims a member has a wire form, nothing checks
-    // it, and the refusal quietly stops existing while its evidence keeps saying it does.
-    let quirks = vec![quirk("q-invented-9999", FORM_KIND)];
-    let error = forms::of(&field("IfMatch", Type::String, &["q-invented-9999"]), &quirks, "Fixture")
-        .expect_err("a form quirk with no grammar is an overlay mistake, not a no-op");
-    assert!(error.contains("q-invented-9999"), "{error}");
-    assert!(error.contains("forms.rs"), "the failure names where the row belongs: {error}");
+fn free_text_kind_is_not_a_codec_gate() {
+    let resolved = forms::of(&field("IfMatch", Type::String, &["q-invented-9999"]), &BTreeMap::new(), "Fixture")
+        .expect("metadata cannot control codec generation");
+    assert_eq!(resolved, None);
 }
 
 #[test]
 fn n_a_form_on_a_member_whose_type_it_cannot_read_fails_the_run() {
-    let quirks = vec![quirk("q-etag-form-0074", FORM_KIND)];
-    let error = forms::of(&field("MaxKeys", Type::Integer, &["q-etag-form-0074"]), &quirks, "Fixture")
+    let values = BTreeMap::from([("q-etag-form-0074".to_owned(), wire_form(WireFormValue::EntityTag))]);
+    let error = forms::of(&field("MaxKeys", Type::Integer, &["q-etag-form-0074"]), &values, "Fixture")
         .expect_err("an entity-tag grammar on an integer is a mistake, not a grammar");
     assert!(error.contains("MaxKeys"), "{error}");
 }
 
 #[test]
 fn n_two_form_quirks_disagreeing_on_one_member_fail_the_run() {
-    let quirks = vec![quirk("q-etag-form-0074", FORM_KIND), quirk("q-token-form-0075", FORM_KIND)];
+    let values = BTreeMap::from([
+        ("q-etag-form-0074".to_owned(), wire_form(WireFormValue::EntityTag)),
+        ("q-token-form-0075".to_owned(), wire_form(WireFormValue::OpaqueToken)),
+    ]);
     let member = field("Confused", Type::String, &["q-etag-form-0074", "q-token-form-0075"]);
-    let error = forms::of(&member, &quirks, "Fixture").expect_err("one member has one wire form");
+    let error = forms::of(&member, &values, "Fixture").expect_err("one member has one wire form");
     assert!(error.contains("Confused"), "{error}");
 }
 
@@ -143,7 +146,7 @@ fn the_declared_forms_reach_the_generated_decoders() {
             .iter()
             .find(|ir| ir.operation == name)
             .unwrap_or_else(|| panic!("{name} is generated"));
-        crate::emit::codec::decode::body(ir).expect("decodes")
+        crate::emit::codec::decode::body(ir, &artifacts.codec_rules).expect("decodes")
     };
     assert!(decoder("GetObject").contains("value::etag_form(raw, \"IfMatch\")?.to_owned()"));
     assert!(decoder("HeadObject").contains("value::etag_form(raw, \"IfNoneMatch\")?.to_owned()"));

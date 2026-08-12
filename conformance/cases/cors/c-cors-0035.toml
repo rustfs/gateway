@@ -10,7 +10,7 @@ probe at a time. The body here is the same string as c-cors-0034's, deliberately
 polarity = "negative"
 tags = ["cors", "preflight", "security"]
 timeout_ms = 10000
-quirks = ["q-cors-0015"]
+quirks = ["q-cors-0015", "q-cors-0038"]
 
 [[case.evidence]]
 url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/cors.html"

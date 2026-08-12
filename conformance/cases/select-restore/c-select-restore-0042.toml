@@ -1,0 +1,41 @@
+[case]
+id = "c-select-restore-0042"
+schema_version = 1
+title = "RestoreRequest Type is the closed SELECT value"
+rationale = """
+An unknown Type must not fall through to the ordinary Days form. Doing so reports a successful retrieval after ignoring the form selector the caller sent."""
+polarity = "negative"
+operation = "RestoreObject"
+tags = ["restore", "validation"]
+timeout_ms = 10000
+quirks = ["q-restore-type-set-0135"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_RestoreRequest.html"
+summary = "SELECT is the documented RestoreRequest Type value."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "conf-restore"
+
+[[setup.objects]]
+bucket = "conf-restore"
+key = "cold.txt"
+body = { utf8 = "archived payload" }
+storage_class = "GLACIER"
+
+[request]
+method = "POST"
+target = "/conf-restore/cold.txt?restore"
+headers = { "content-type" = "application/xml" }
+body = { utf8 = '<RestoreRequest><Days>1</Days><Type>ARCHIVE</Type></RestoreRequest>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+code = "InvalidArgument"
+request_id_present = true

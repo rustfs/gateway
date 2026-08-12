@@ -207,6 +207,24 @@ fn the_restore_state_mapping_is_reachable_from_outside_the_workspace() {
     );
 }
 
+/// c-rst-0014 — [S] the public restore-status parser rejects malformed peer input.
+///
+/// Missing quotes is the mutation control for `q-restore-header-parser-0128`; the other entries
+/// pin the same public boundary's separator, date, and size refusals.
+#[test]
+fn c_rst_0014_malformed_restore_header_is_rejected_through_public_api() {
+    let quirk = "q-restore-header-parser-0128";
+    let malformed = [
+        "ongoing-request=true".to_owned(),
+        "ongoing-request=\"false\",expiry-date=\"Fri, 21 Dec 2012 00:00:00 GMT\"".to_owned(),
+        "ongoing-request=\"false\", expiry-date=\"Sun, 31 Feb 2026 00:00:00 GMT\"".to_owned(),
+        format!("ongoing-request=\"false\", expiry-date=\"{}\"", "A".repeat(4096)),
+    ];
+    for value in malformed {
+        ::core::assert_eq!(parse_restore_status(&value), None, "{}: {value:?} must be refused", quirk);
+    }
+}
+
 // ── reading the frames back ──────────────────────────────────────────────────────────────────
 
 /// CRC-32/ISO-HDLC, written here rather than borrowed.

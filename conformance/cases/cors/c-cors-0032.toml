@@ -15,7 +15,7 @@ instead, where it can be compared exactly."""
 polarity = "positive"
 tags = ["cors"]
 timeout_ms = 10000
-quirks = ["q-cors-0011"]
+quirks = ["q-cors-0011", "q-cors-0029", "q-cors-0030", "q-cors-0031"]
 
 [[case.evidence]]
 url = "https://fetch.spec.whatwg.org/#http-cors-protocol"

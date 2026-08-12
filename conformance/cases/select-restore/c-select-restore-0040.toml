@@ -1,0 +1,41 @@
+[case]
+id = "c-select-restore-0040"
+schema_version = 1
+title = "Select members without Type SELECT are refused"
+rationale = """
+SelectParameters belongs to the SELECT form. Treating its presence as sufficient would let a document cross the ordinary and selection forms without naming which operation the backend must perform."""
+polarity = "negative"
+operation = "RestoreObject"
+tags = ["restore", "select", "validation"]
+timeout_ms = 10000
+quirks = ["q-restore-select-members-0131"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_RestoreRequest.html"
+summary = "SelectParameters and OutputLocation are members of the restore request's SELECT form."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "conf-restore"
+
+[[setup.objects]]
+bucket = "conf-restore"
+key = "cold.txt"
+body = { utf8 = "archived payload" }
+storage_class = "GLACIER"
+
+[request]
+method = "POST"
+target = "/conf-restore/cold.txt?restore"
+headers = { "content-type" = "application/xml" }
+body = { utf8 = '<RestoreRequest><Days>1</Days><SelectParameters><InputSerialization><CSV/></InputSerialization><ExpressionType>SQL</ExpressionType><Expression>SELECT 1</Expression><OutputSerialization><CSV/></OutputSerialization></SelectParameters></RestoreRequest>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+code = "InvalidRequest"
+request_id_present = true

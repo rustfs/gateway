@@ -54,12 +54,28 @@ use rustfs_gateway_types::ErrorCode;
 use rustfs_gateway_types::dto::{RestoreRequest, Tier, Type};
 
 use super::select::{SelectRejection, validate_select};
+use crate::contracts::{
+    RESTORE_ALREADY_RESTORED_OUTCOME, RESTORE_DAYS_MINIMUM, RESTORE_DAYS_SELECT_EXCLUSION, RESTORE_DIRECT_TIER_VALUE_SET,
+    RESTORE_FORM_PRESENCE, RESTORE_GLACIER_TIER_VALUE_SET, RESTORE_HEADER_ABSENCE, RESTORE_HEADER_ONGOING_FORM,
+    RESTORE_HEADER_PARSE_GRAMMAR, RESTORE_HEADER_RESTORED_FORM, RESTORE_IN_PROGRESS_OUTCOME, RESTORE_INITIATED_OUTCOME,
+    RESTORE_NESTED_SELECT_VALIDATION, RESTORE_NOT_ARCHIVED_OUTCOME, RESTORE_SELECT_MEMBERS_REQUIRE_TYPE,
+    RESTORE_SELECT_OUTPUT_REQUIRED, RESTORE_SELECT_PARAMETERS_REQUIRED, RESTORE_TYPE_VALUE_SET,
+    RestoreAlreadyRestoredOutcomePolicy, RestoreDaysMinimumPolicy, RestoreDaysSelectExclusionPolicy,
+    RestoreDirectTierValueSetPolicy, RestoreFormPresencePolicy, RestoreGlacierTierValueSetPolicy, RestoreHeaderAbsencePolicy,
+    RestoreHeaderOngoingFormPolicy, RestoreHeaderParseGrammarPolicy, RestoreHeaderRestoredFormPolicy,
+    RestoreInProgressOutcomePolicy, RestoreInitiatedOutcomePolicy, RestoreNestedSelectValidationPolicy,
+    RestoreNotArchivedOutcomePolicy, RestoreSelectMembersRequireTypePolicy, RestoreSelectOutputRequiredPolicy,
+    RestoreSelectParametersRequiredPolicy, RestoreTypeValueSetPolicy,
+};
 
 /// The number of days a restored copy may be asked to stay available, at minimum.
 ///
 /// One. A zero-day retrieval has no representable meaning: the copy would lapse at the instant
 /// it appeared.
-pub const MIN_RESTORE_DAYS: i32 = 1;
+pub const MIN_RESTORE_DAYS: i32 = match RESTORE_DAYS_MINIMUM {
+    RestoreDaysMinimumPolicy::Min1 => 1,
+    RestoreDaysMinimumPolicy::Min0 => 0,
+};
 
 /// The state a retrieval request found the object copy in.
 ///
@@ -88,9 +104,22 @@ impl RestoreState {
     #[must_use]
     pub const fn status(self) -> Option<u16> {
         match self {
-            Self::Initiated => Some(202),
-            Self::AlreadyRestored => Some(200),
-            Self::InProgress | Self::NotArchived => None,
+            Self::Initiated => match RESTORE_INITIATED_OUTCOME {
+                RestoreInitiatedOutcomePolicy::Success202 => Some(202),
+                RestoreInitiatedOutcomePolicy::Success200 => Some(200),
+            },
+            Self::AlreadyRestored => match RESTORE_ALREADY_RESTORED_OUTCOME {
+                RestoreAlreadyRestoredOutcomePolicy::Success200 => Some(200),
+                RestoreAlreadyRestoredOutcomePolicy::Success202 => Some(202),
+            },
+            Self::InProgress => match RESTORE_IN_PROGRESS_OUTCOME {
+                RestoreInProgressOutcomePolicy::RestoreAlreadyInProgress => None,
+                RestoreInProgressOutcomePolicy::Success202 => Some(202),
+            },
+            Self::NotArchived => match RESTORE_NOT_ARCHIVED_OUTCOME {
+                RestoreNotArchivedOutcomePolicy::InvalidObjectState => None,
+                RestoreNotArchivedOutcomePolicy::SuccessNoop => Some(200),
+            },
         }
     }
 
@@ -102,8 +131,14 @@ impl RestoreState {
     pub const fn error(self) -> Option<ErrorCode> {
         match self {
             Self::Initiated | Self::AlreadyRestored => None,
-            Self::InProgress => Some(ErrorCode::RESTORE_ALREADY_IN_PROGRESS),
-            Self::NotArchived => Some(ErrorCode::INVALID_OBJECT_STATE),
+            Self::InProgress => match RESTORE_IN_PROGRESS_OUTCOME {
+                RestoreInProgressOutcomePolicy::RestoreAlreadyInProgress => Some(ErrorCode::RESTORE_ALREADY_IN_PROGRESS),
+                RestoreInProgressOutcomePolicy::Success202 => None,
+            },
+            Self::NotArchived => match RESTORE_NOT_ARCHIVED_OUTCOME {
+                RestoreNotArchivedOutcomePolicy::InvalidObjectState => Some(ErrorCode::INVALID_OBJECT_STATE),
+                RestoreNotArchivedOutcomePolicy::SuccessNoop => None,
+            },
         }
     }
 
@@ -112,8 +147,16 @@ impl RestoreState {
     pub const fn reason(self) -> Option<&'static str> {
         match self {
             Self::Initiated | Self::AlreadyRestored => None,
-            Self::InProgress => Some("Object restore is already in progress"),
-            Self::NotArchived => Some("The operation is not valid for the storage class of this object"),
+            Self::InProgress => match RESTORE_IN_PROGRESS_OUTCOME {
+                RestoreInProgressOutcomePolicy::RestoreAlreadyInProgress => Some("Object restore is already in progress"),
+                RestoreInProgressOutcomePolicy::Success202 => None,
+            },
+            Self::NotArchived => match RESTORE_NOT_ARCHIVED_OUTCOME {
+                RestoreNotArchivedOutcomePolicy::InvalidObjectState => {
+                    Some("The operation is not valid for the storage class of this object")
+                }
+                RestoreNotArchivedOutcomePolicy::SuccessNoop => None,
+            },
         }
     }
 }
@@ -158,10 +201,41 @@ impl RestoreStatus {
 /// grammar, not formatting.
 #[must_use]
 pub fn format_restore_status(status: &RestoreStatus) -> String {
-    let ongoing = if status.ongoing { "true" } else { "false" };
     match &status.expiry_date {
-        Some(expiry) => format!("ongoing-request=\"{ongoing}\", expiry-date=\"{expiry}\""),
-        None => format!("ongoing-request=\"{ongoing}\""),
+        Some(expiry) => match RESTORE_HEADER_RESTORED_FORM {
+            RestoreHeaderRestoredFormPolicy::QuotedFalseCommaSpaceExpiry => {
+                format!("ongoing-request=\"false\", expiry-date=\"{expiry}\"")
+            }
+            RestoreHeaderRestoredFormPolicy::CommaWithoutSpace => {
+                format!("ongoing-request=\"false\",expiry-date=\"{expiry}\"")
+            }
+        },
+        None => match RESTORE_HEADER_ONGOING_FORM {
+            RestoreHeaderOngoingFormPolicy::QuotedTrue => {
+                let ongoing = if status.ongoing { "true" } else { "false" };
+                format!("ongoing-request=\"{ongoing}\"")
+            }
+            RestoreHeaderOngoingFormPolicy::UnquotedTrue => {
+                let ongoing = if status.ongoing { "true" } else { "false" };
+                format!("ongoing-request={ongoing}")
+            }
+        },
+    }
+}
+
+/// Renders the optional `x-amz-restore` header.
+///
+/// `None` means the object has no restore state and therefore no header. This function is the
+/// single consumer of that absence policy, so an adapter does not have to duplicate it.
+#[must_use]
+pub fn format_optional_restore_status(status: Option<&RestoreStatus>) -> Option<String> {
+    match (RESTORE_HEADER_ABSENCE, status) {
+        (_, Some(status)) => Some(format_restore_status(status)),
+        (RestoreHeaderAbsencePolicy::Omit, None) => None,
+        (RestoreHeaderAbsencePolicy::EmitDefault, None) => Some(format_restore_status(&RestoreStatus {
+            ongoing: false,
+            expiry_date: None,
+        })),
     }
 }
 
@@ -180,9 +254,27 @@ pub fn format_restore_status(status: &RestoreStatus) -> String {
 /// one.
 #[must_use]
 pub fn parse_restore_status(value: &str) -> Option<RestoreStatus> {
-    if value.len() > MAX_RESTORE_HEADER_BYTES {
+    if !restore_header_within_limit(value.len()) {
         return None;
     }
+    if matches!(RESTORE_HEADER_PARSE_GRAMMAR, RestoreHeaderParseGrammarPolicy::AcceptUnquoted) {
+        return match value {
+            "ongoing-request=true" => Some(RestoreStatus::ongoing()),
+            "ongoing-request=false" => Some(RestoreStatus {
+                ongoing: false,
+                expiry_date: None,
+            }),
+            _ => parse_strict_restore_status(value),
+        };
+    }
+    parse_strict_restore_status(value)
+}
+
+const fn restore_header_within_limit(length: usize) -> bool {
+    length <= MAX_RESTORE_HEADER_BYTES
+}
+
+fn parse_strict_restore_status(value: &str) -> Option<RestoreStatus> {
     let (ongoing, rest) = quoted_pair(value, "ongoing-request=")?;
     let ongoing = match ongoing {
         "true" => true,
@@ -206,10 +298,66 @@ pub fn parse_restore_status(value: &str) -> Option<RestoreStatus> {
     if ongoing {
         return None;
     }
+    if !is_imf_fixdate(expiry) {
+        return None;
+    }
     Some(RestoreStatus {
         ongoing,
         expiry_date: Some(expiry.to_owned()),
     })
+}
+
+/// Whether `value` is the IMF-fixdate spelling required by HTTP response headers.
+///
+/// This deliberately validates the calendar as well as the punctuation. Accepting a string that
+/// merely has commas in the expected places would turn an impossible expiry into a restored copy
+/// that no caller can schedule or compare.
+fn is_imf_fixdate(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    if bytes.len() != 29
+        || bytes.get(3) != Some(&b',')
+        || bytes.get(4) != Some(&b' ')
+        || bytes.get(7) != Some(&b' ')
+        || bytes.get(11) != Some(&b' ')
+        || bytes.get(16) != Some(&b' ')
+        || bytes.get(19) != Some(&b':')
+        || bytes.get(22) != Some(&b':')
+        || bytes.get(25) != Some(&b' ')
+        || bytes.get(26..) != Some(b"GMT")
+    {
+        return false;
+    }
+    let weekday = bytes.get(..3);
+    if !matches!(weekday, Some(b"Mon" | b"Tue" | b"Wed" | b"Thu" | b"Fri" | b"Sat" | b"Sun")) {
+        return false;
+    }
+    let Some(day) = decimal(bytes.get(5..7)) else { return false };
+    let Some(year) = decimal(bytes.get(12..16)) else { return false };
+    let Some(hour) = decimal(bytes.get(17..19)) else { return false };
+    let Some(minute) = decimal(bytes.get(20..22)) else { return false };
+    let Some(second) = decimal(bytes.get(23..25)) else { return false };
+    let month_days = match bytes.get(8..11) {
+        Some(b"Jan" | b"Mar" | b"May" | b"Jul" | b"Aug" | b"Oct" | b"Dec") => 31,
+        Some(b"Apr" | b"Jun" | b"Sep" | b"Nov") => 30,
+        Some(b"Feb") if is_leap_year(year) => 29,
+        Some(b"Feb") => 28,
+        _ => return false,
+    };
+    (1..=month_days).contains(&day) && hour < 24 && minute < 60 && second < 60
+}
+
+fn decimal(bytes: Option<&[u8]>) -> Option<u32> {
+    let bytes = bytes?;
+    if bytes.is_empty() || !bytes.iter().all(u8::is_ascii_digit) {
+        return None;
+    }
+    bytes
+        .iter()
+        .try_fold(0_u32, |value, digit| value.checked_mul(10)?.checked_add(u32::from(*digit - b'0')))
+}
+
+const fn is_leap_year(year: u32) -> bool {
+    year.is_multiple_of(4) && (!year.is_multiple_of(100) || year.is_multiple_of(400))
 }
 
 /// Reads `<name>"<value>"` off the front of `input`, returning the value and what follows.
@@ -246,6 +394,8 @@ pub enum RestoreRejection {
     SelectMembersWithoutSelectType,
     /// `Type SELECT` without the two members that form requires.
     SelectFormIncomplete,
+    /// A `Type` value other than the one documented select form.
+    TypeUnknown,
     /// A `Tier` outside the documented three-value set, on either spelling of the member.
     TierUnknown,
     /// The nested `SelectParameters` broke one of the query rules.
@@ -258,7 +408,7 @@ impl RestoreRejection {
     pub const fn code(&self) -> ErrorCode {
         match self {
             // Well-formed values that cannot describe a retrieval.
-            Self::DaysTooSmall | Self::TierUnknown => ErrorCode::INVALID_ARGUMENT,
+            Self::DaysTooSmall | Self::TierUnknown | Self::TypeUnknown => ErrorCode::INVALID_ARGUMENT,
             // A document that does not match either published shape.
             Self::FormMissing | Self::SelectFormIncomplete => ErrorCode::MALFORMED_XML,
             // Two shapes crossed: the members are individually legal and cannot appear together.
@@ -279,8 +429,18 @@ impl RestoreRejection {
             Self::DaysWithSelect => "Days must not be specified for a SELECT restore",
             Self::SelectMembersWithoutSelectType => "SelectParameters and OutputLocation require Type SELECT",
             Self::SelectFormIncomplete => "A SELECT restore requires both SelectParameters and OutputLocation",
+            Self::TypeUnknown => "Type must be SELECT when it is present",
             Self::TierUnknown => "Tier must be one of Expedited, Standard or Bulk",
             Self::Select(inner) => inner.reason(),
+        }
+    }
+
+    /// Renders the refusal while preserving the nested expression's secret-flow contract.
+    #[must_use]
+    pub fn reason_with_expression(&self, expression: Option<&str>) -> String {
+        match (self, expression) {
+            (Self::Select(inner), Some(expression)) => inner.reason_with_expression(expression),
+            _ => self.reason().to_owned(),
         }
     }
 }
@@ -301,44 +461,64 @@ pub fn validate_restore(request: &RestoreRequest) -> Result<(), RestoreRejection
     // Both spellings of the tier, checked before the form: an unusable tier is an unusable
     // retrieval whichever form asked for it.
     if let Some(tier) = &request.tier
+        && matches!(RESTORE_DIRECT_TIER_VALUE_SET, RestoreDirectTierValueSetPolicy::ExpeditedStandardBulk)
         && !is_known_tier(tier)
     {
         return Err(RestoreRejection::TierUnknown);
     }
     if let Some(parameters) = &request.glacier_job_parameters
+        && matches!(RESTORE_GLACIER_TIER_VALUE_SET, RestoreGlacierTierValueSetPolicy::ExpeditedStandardBulk)
         && !is_known_tier(&parameters.tier)
     {
         return Err(RestoreRejection::TierUnknown);
     }
 
     let select_form = request.r#type.as_ref().is_some_and(|kind| *kind == Type::SELECT);
+    if request.r#type.is_some() && !select_form && matches!(RESTORE_TYPE_VALUE_SET, RestoreTypeValueSetPolicy::SelectOnly) {
+        return Err(RestoreRejection::TypeUnknown);
+    }
     let select_members = request.select_parameters.is_some() || request.output_location.is_some();
 
     if select_form {
-        if request.days.is_some() {
+        if request.days.is_some() && matches!(RESTORE_DAYS_SELECT_EXCLUSION, RestoreDaysSelectExclusionPolicy::Reject) {
             return Err(RestoreRejection::DaysWithSelect);
         }
-        let (Some(parameters), Some(_)) = (&request.select_parameters, &request.output_location) else {
+        if request.select_parameters.is_none()
+            && matches!(RESTORE_SELECT_PARAMETERS_REQUIRED, RestoreSelectParametersRequiredPolicy::Require)
+        {
             return Err(RestoreRejection::SelectFormIncomplete);
-        };
+        }
+        if request.output_location.is_none()
+            && matches!(RESTORE_SELECT_OUTPUT_REQUIRED, RestoreSelectOutputRequiredPolicy::Require)
+        {
+            return Err(RestoreRejection::SelectFormIncomplete);
+        }
         // The nested query is the same four members a plain select carries, validated by the
         // same function — a select-on-restore that AWS would refuse is refused identically here,
         // and with the same code.
-        return validate_select(
-            &parameters.expression,
-            &parameters.expression_type,
-            &parameters.input_serialization,
-            &parameters.output_serialization,
-            None,
-        )
-        .map_err(RestoreRejection::Select);
+        if let Some(parameters) = request.select_parameters.as_ref()
+            && matches!(RESTORE_NESTED_SELECT_VALIDATION, RestoreNestedSelectValidationPolicy::Shared)
+        {
+            return validate_select(
+                &parameters.expression,
+                &parameters.expression_type,
+                &parameters.input_serialization,
+                &parameters.output_serialization,
+                None,
+            )
+            .map_err(RestoreRejection::Select);
+        }
+        return Ok(());
     }
 
-    if select_members {
+    if select_members && matches!(RESTORE_SELECT_MEMBERS_REQUIRE_TYPE, RestoreSelectMembersRequireTypePolicy::Reject) {
         return Err(RestoreRejection::SelectMembersWithoutSelectType);
     }
     match request.days {
-        None => Err(RestoreRejection::FormMissing),
+        None if matches!(RESTORE_FORM_PRESENCE, RestoreFormPresencePolicy::RequireDaysOrSelect) => {
+            Err(RestoreRejection::FormMissing)
+        }
+        None => Ok(()),
         Some(days) if days < MIN_RESTORE_DAYS => Err(RestoreRejection::DaysTooSmall),
         Some(_) => Ok(()),
     }

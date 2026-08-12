@@ -18,7 +18,7 @@ polarity = "negative"
 operation = "PutObject"
 tags = ["conditional", "preconditions", "error-shape"]
 timeout_ms = 10000
-quirks = ["q-cond-0046"]
+quirks = ["q-cond-if-match-absent-0109"]
 
 [[case.evidence]]
 url = "https://www.rfc-editor.org/rfc/rfc9110#section-13.1.1"

@@ -53,12 +53,27 @@
 use rustfs_gateway_types::ErrorCode;
 use rustfs_gateway_types::dto::{CompressionType, ExpressionType, InputSerialization, OutputSerialization, ScanRange};
 
+use crate::contracts::{
+    SELECT_COMPRESSION_VALUES, SELECT_EXPRESSION_ERROR_FLOW, SELECT_EXPRESSION_INSPECTION, SELECT_EXPRESSION_MAX_BYTES,
+    SELECT_EXPRESSION_PRESENCE, SELECT_EXPRESSION_TYPE_VALUES, SELECT_INPUT_MISSING, SELECT_INPUT_MULTIPLE,
+    SELECT_OUTPUT_MISSING, SELECT_OUTPUT_MULTIPLE, SELECT_RESPONSE_SHAPE, SELECT_SCAN_BOUNDED, SELECT_SCAN_END_ONLY,
+    SELECT_SCAN_RANGE_EMPTY, SELECT_SCAN_RANGE_ORDER, SELECT_SCAN_RANGE_SIGN, SELECT_SCAN_START_ONLY,
+    SelectCompressionValuesPolicy, SelectExpressionErrorFlowPolicy, SelectExpressionInspectionPolicy,
+    SelectExpressionMaxBytesPolicy, SelectExpressionPresencePolicy, SelectExpressionTypeValuesPolicy, SelectInputMissingPolicy,
+    SelectInputMultiplePolicy, SelectOutputMissingPolicy, SelectOutputMultiplePolicy, SelectResponseShapePolicy,
+    SelectScanBoundedPolicy, SelectScanEndOnlyPolicy, SelectScanRangeEmptyPolicy, SelectScanRangeOrderPolicy,
+    SelectScanRangeSignPolicy, SelectScanStartOnlyPolicy,
+};
+
 /// The documented ceiling on an expression, in bytes.
 ///
 /// 256 KiB, measured over the UTF-8 the wire carried rather than over characters: the wire is
 /// what the ceiling is about, and counting characters would let a multi-byte expression past a
 /// limit expressed in bytes.
-pub const MAX_EXPRESSION_BYTES: usize = 256 * 1024;
+pub const MAX_EXPRESSION_BYTES: usize = match SELECT_EXPRESSION_MAX_BYTES {
+    SelectExpressionMaxBytesPolicy::Max262144 => 256 * 1024,
+    SelectExpressionMaxBytesPolicy::Unbounded => usize::MAX,
+};
 
 /// Why a decoded select request was refused, with the code AWS answers.
 ///
@@ -125,6 +140,15 @@ impl SelectRejection {
             Self::ScanRangeInverted => "ScanRange End must not be less than Start, and neither may be negative",
         }
     }
+
+    /// Renders a refusal reason while enforcing the expression secret-flow policy.
+    #[must_use]
+    pub fn reason_with_expression(&self, expression: &str) -> String {
+        match SELECT_EXPRESSION_ERROR_FLOW {
+            SelectExpressionErrorFlowPolicy::Constant => self.reason().to_owned(),
+            SelectExpressionErrorFlowPolicy::EchoRejectedValue => format!("{}: {expression}", self.reason()),
+        }
+    }
 }
 
 /// Checks the four members that describe a query, first refusal wins.
@@ -147,14 +171,21 @@ pub fn validate_select(
     output: &OutputSerialization,
     scan_range: Option<&ScanRange>,
 ) -> Result<(), SelectRejection> {
-    if *expression_type != ExpressionType::SQL {
+    if matches!(SELECT_EXPRESSION_TYPE_VALUES, SelectExpressionTypeValuesPolicy::SqlOnly)
+        && *expression_type != ExpressionType::SQL
+    {
         return Err(SelectRejection::ExpressionTypeUnknown);
     }
-    if expression.is_empty() {
+    if expression.is_empty() && matches!(SELECT_EXPRESSION_PRESENCE, SelectExpressionPresencePolicy::Nonempty) {
         return Err(SelectRejection::ExpressionEmpty);
     }
     if expression.len() > MAX_EXPRESSION_BYTES {
         return Err(SelectRejection::ExpressionTooLong);
+    }
+    if matches!(SELECT_EXPRESSION_INSPECTION, SelectExpressionInspectionPolicy::ParseOrLog)
+        && !expression.trim_start().starts_with("SELECT")
+    {
+        return Err(SelectRejection::ExpressionTypeUnknown);
     }
     validate_input_serialization(input)?;
     validate_output_serialization(output)?;
@@ -171,14 +202,15 @@ pub fn validate_select(
 /// [`SelectRejection`] when the input names no format, more than one, or an unknown compression.
 pub fn validate_input_serialization(input: &InputSerialization) -> Result<(), SelectRejection> {
     let named = usize::from(input.csv.is_some()) + usize::from(input.json.is_some()) + usize::from(input.parquet.is_some());
-    if named > 1 {
+    if named > 1 && matches!(SELECT_INPUT_MULTIPLE, SelectInputMultiplePolicy::RejectConflict) {
         return Err(SelectRejection::InputSerializationAmbiguous);
     }
-    if named == 0 {
+    if named == 0 && matches!(SELECT_INPUT_MISSING, SelectInputMissingPolicy::RejectMalformed) {
         return Err(SelectRejection::InputSerializationMissing);
     }
     // Absent is the documented default, `NONE`; present and outside the set is not.
     if let Some(compression) = &input.compression_type
+        && matches!(SELECT_COMPRESSION_VALUES, SelectCompressionValuesPolicy::NoneGzipBzip2)
         && !is_known_compression(compression)
     {
         return Err(SelectRejection::CompressionUnknown);
@@ -193,8 +225,12 @@ pub fn validate_input_serialization(input: &InputSerialization) -> Result<(), Se
 /// [`SelectRejection`] when the output names neither format or both.
 pub fn validate_output_serialization(output: &OutputSerialization) -> Result<(), SelectRejection> {
     match (output.csv.is_some(), output.json.is_some()) {
-        (true, true) => Err(SelectRejection::OutputSerializationAmbiguous),
-        (false, false) => Err(SelectRejection::OutputSerializationMissing),
+        (true, true) if matches!(SELECT_OUTPUT_MULTIPLE, SelectOutputMultiplePolicy::RejectConflict) => {
+            Err(SelectRejection::OutputSerializationAmbiguous)
+        }
+        (false, false) if matches!(SELECT_OUTPUT_MISSING, SelectOutputMissingPolicy::RejectMalformed) => {
+            Err(SelectRejection::OutputSerializationMissing)
+        }
         _ => Ok(()),
     }
 }
@@ -213,21 +249,70 @@ pub fn validate_output_serialization(output: &OutputSerialization) -> Result<(),
 /// `Start` that is also present.
 pub fn validate_scan_range(range: &ScanRange) -> Result<(), SelectRejection> {
     match (range.start, range.end) {
-        (None, None) => Err(SelectRejection::ScanRangeEmpty),
+        (None, None) if matches!(SELECT_SCAN_RANGE_EMPTY, SelectScanRangeEmptyPolicy::Reject) => {
+            Err(SelectRejection::ScanRangeEmpty)
+        }
         (start, end) => {
-            if start.is_some_and(|value| value < 0) || end.is_some_and(|value| value < 0) {
+            if matches!(SELECT_SCAN_RANGE_SIGN, SelectScanRangeSignPolicy::Nonnegative)
+                && (start.is_some_and(|value| value < 0) || end.is_some_and(|value| value < 0))
+            {
                 return Err(SelectRejection::ScanRangeInverted);
             }
             // Only meaningful when both are present: with a `Start` alone there is no upper
             // bound to compare, and with an `End` alone the value is a suffix length.
             if let (Some(from), Some(to)) = (start, end)
                 && to < from
+                && matches!(SELECT_SCAN_RANGE_ORDER, SelectScanRangeOrderPolicy::EndGteStart)
             {
                 return Err(SelectRejection::ScanRangeInverted);
             }
             Ok(())
         }
     }
+}
+
+/// Selects the object bytes described by a validated `ScanRange`.
+///
+/// `None` selects the whole object. Bounds beyond the object are clamped, so this function is
+/// total after [`validate_scan_range`] has accepted the grammar.
+#[must_use]
+pub fn select_scan_bytes<'a>(range: Option<&ScanRange>, body: &'a [u8]) -> &'a [u8] {
+    let Some(range) = range else { return body };
+    match (range.start, range.end) {
+        (Some(start), Some(end)) => {
+            if matches!(SELECT_SCAN_BOUNDED, SelectScanBoundedPolicy::DropRange) {
+                return body;
+            }
+            let start = usize::try_from(start).unwrap_or(0).min(body.len());
+            let end = usize::try_from(end)
+                .ok()
+                .and_then(|value| value.checked_add(1))
+                .unwrap_or(body.len())
+                .min(body.len());
+            body.get(start..end.max(start)).unwrap_or_default()
+        }
+        (Some(start), None) => {
+            if matches!(SELECT_SCAN_START_ONLY, SelectScanStartOnlyPolicy::WholeObject) {
+                return body;
+            }
+            let start = usize::try_from(start).unwrap_or(0).min(body.len());
+            body.get(start..).unwrap_or_default()
+        }
+        (None, Some(end)) => {
+            let count = usize::try_from(end).unwrap_or(0).min(body.len());
+            match SELECT_SCAN_END_ONLY {
+                SelectScanEndOnlyPolicy::Suffix => body.get(body.len().saturating_sub(count)..).unwrap_or_default(),
+                SelectScanEndOnlyPolicy::Prefix => body.get(..count).unwrap_or_default(),
+            }
+        }
+        (None, None) => body,
+    }
+}
+
+/// Whether a SelectObjectContent handler must return the event-stream answer shape.
+#[must_use]
+pub const fn select_uses_event_stream() -> bool {
+    matches!(SELECT_RESPONSE_SHAPE, SelectResponseShapePolicy::EventStream)
 }
 
 /// The closed compression set, spelled out rather than asked of the generated enum.

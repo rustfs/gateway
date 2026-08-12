@@ -71,10 +71,12 @@ fn a_doc_0008_adr_json_matches_the_text_sections() {
 }
 
 #[test]
-fn a_doc_0017_quirk_without_a_case_is_a_failure() {
+fn a_doc_0017_quirk_has_its_repaired_case_backlink() {
     let output = why(&["q-attributes-root-0087"]);
-    assert!(!output.status.success());
-    assert!(String::from_utf8_lossy(&output.stdout).contains("CASES     NONE — this is a bug"));
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("CASES     c-etag-0001"), "{stdout}");
+    assert!(!stdout.contains("CASES     NONE — this is a bug"), "{stdout}");
 }
 
 #[test]

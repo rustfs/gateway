@@ -22,6 +22,9 @@
 [[quirk]]
 id      = "q-ver-0001"
 kind    = "not_configured_error"
+classification = "mutable"
+mutation_dimension = "optionality"
+mutation_sources = ["GetBucketVersioning.errors.not_configured"]
 target  = "GetBucketVersioning"
 summary = "A bucket that was never versioned answers 200 with an empty VersioningConfiguration element and no Status child at all, which is a different state from Suspended and is not a 404."
 cases   = ["c-bucketconfig-0023", "c-bucketconfig-0002"]
@@ -34,6 +37,7 @@ cases   = ["c-bucketconfig-0023", "c-bucketconfig-0002"]
 [[quirk]]
 id      = "q-ver-0002"
 kind    = "lenient_unknown_elements"
+classification = "contract"
 target  = "PutBucketVersioning"
 summary = "An element the decoder does not know is skipped and the rest of the document is stored, because a versioning document that stopped parsing would be degraded to no configuration and turn version retention off without any visible failure."
 cases   = ["c-bucketconfig-0046"]
@@ -51,6 +55,9 @@ cases   = ["c-bucketconfig-0046"]
 [[quirk]]
 id      = "q-ver-0003"
 kind    = "checksum_required"
+classification = "mutable"
+mutation_dimension = "optionality"
+mutation_sources = ["PutBucketVersioning.checksum.http_checksum_required"]
 target  = "PutBucketVersioning"
 summary = "The versioning write demands an integrity claim on the body, so a request with neither Content-MD5 nor an x-amz-checksum header is refused with 400 before the document is parsed."
 cases   = ["c-bucketconfig-0035", "c-bucketconfig-0001"]
@@ -63,6 +70,12 @@ cases   = ["c-bucketconfig-0035", "c-bucketconfig-0001"]
 [[quirk]]
 id      = "q-ver-0004"
 kind    = "element_name"
+classification = "mutable"
+mutation_dimension = "element_rename"
+mutation_sources = [
+  "GetBucketVersioning.output.MFADelete.wire_name",
+  "PutBucketVersioning.shapes.VersioningConfiguration.fields.MFADelete.wire_name",
+]
 target  = "VersioningConfiguration.MFADelete"
 summary = "The member the model calls MFADelete is spelled MfaDelete on the wire, and the pinned model gives the read and the write the same spelling, so no alternate-name rule is needed for it here."
 cases   = ["c-bucketconfig-0003"]
@@ -75,6 +88,9 @@ cases   = ["c-bucketconfig-0003"]
 [[quirk]]
 id      = "q-acc-0001"
 kind    = "not_configured_error"
+classification = "mutable"
+mutation_dimension = "optionality"
+mutation_sources = ["GetBucketAccelerateConfiguration.errors.not_configured"]
 target  = "GetBucketAccelerateConfiguration"
 summary = "A bucket with no acceleration document answers 200 with an empty AccelerateConfiguration element, not a 404, so a client reads acceleration as off rather than as an error."
 cases   = ["c-bucketconfig-0025", "c-bucketconfig-0005"]
@@ -87,6 +103,7 @@ cases   = ["c-bucketconfig-0025", "c-bucketconfig-0005"]
 [[quirk]]
 id      = "q-acc-0002"
 kind    = "closed_value_set"
+classification = "contract"
 target  = "AccelerateConfiguration.Status"
 summary = "The acceleration status is Enabled or Suspended and nothing else; the element is the whole document, so a value outside the pair leaves nothing meaningful to store."
 cases   = ["c-bucketconfig-0004", "c-bucketconfig-0044"]
@@ -99,9 +116,12 @@ cases   = ["c-bucketconfig-0004", "c-bucketconfig-0044"]
 [[quirk]]
 id      = "q-acc-0003"
 kind    = "checksum_required"
+classification = "mutable"
+mutation_dimension = "optionality"
+mutation_sources = ["PutBucketAccelerateConfiguration.checksum.http_checksum_required"]
 target  = "PutBucketAccelerateConfiguration"
 summary = "The acceleration write is one of two writes in this band that carry no integrity requirement, so a body with neither Content-MD5 nor an x-amz-checksum header is accepted."
-cases   = ["c-bucketconfig-0041"]
+cases   = ["c-bucketconfig-0004", "c-bucketconfig-0041"]
 
   [[quirk.evidence]]
   kind    = "aws-doc"
@@ -111,6 +131,9 @@ cases   = ["c-bucketconfig-0041"]
 [[quirk]]
 id      = "q-rqp-0001"
 kind    = "not_configured_error"
+classification = "mutable"
+mutation_dimension = "optionality"
+mutation_sources = ["GetBucketRequestPayment.errors.not_configured"]
 target  = "GetBucketRequestPayment"
 summary = "A bucket that was never switched to requester-pays answers 200 with the default payer BucketOwner rather than an empty document or a 404, because every bucket has a payer."
 cases   = ["c-bucketconfig-0027", "c-bucketconfig-0007"]
@@ -123,6 +146,7 @@ cases   = ["c-bucketconfig-0027", "c-bucketconfig-0007"]
 [[quirk]]
 id      = "q-rqp-0002"
 kind    = "closed_value_set"
+classification = "contract"
 target  = "RequestPaymentConfiguration.Payer"
 summary = "The payer is Requester or BucketOwner and nothing else, and the member is required, so an unknown value has no reading of the document to fall back to."
 cases   = ["c-bucketconfig-0006", "c-bucketconfig-0045"]
@@ -135,6 +159,9 @@ cases   = ["c-bucketconfig-0006", "c-bucketconfig-0045"]
 [[quirk]]
 id      = "q-rqp-0003"
 kind    = "checksum_required"
+classification = "mutable"
+mutation_dimension = "optionality"
+mutation_sources = ["PutBucketRequestPayment.checksum.http_checksum_required"]
 target  = "PutBucketRequestPayment"
 summary = "The request-payment write demands an integrity claim on the body, so a request with neither Content-MD5 nor an x-amz-checksum header is refused with 400 before the document is parsed."
 cases   = ["c-bucketconfig-0038", "c-bucketconfig-0006"]

@@ -26,6 +26,7 @@
 [[quirk]]
 id      = "q-mpu-etag-0028"
 kind    = "etag_composite"
+classification = "contract"
 target  = "CompleteMultipartUpload.ETag"
 summary = "The entity tag of a completed upload is a digest over the concatenated raw part digests followed by a hyphen and the part count, never a digest of the assembled object, and an empty part list is refused rather than digested."
 cases   = ["c-mpu-0002", "c-mpu-0003", "c-mpu-0019"]
@@ -48,6 +49,9 @@ cases   = ["c-mpu-0002", "c-mpu-0003", "c-mpu-0019"]
 [[quirk]]
 id      = "q-mpu-root-0029"
 kind    = "wire_root_name"
+classification = "mutable"
+mutation_dimension = "element_rename"
+mutation_sources = ["CreateMultipartUpload.xml.response_root"]
 target  = "CreateMultipartUpload"
 summary = "The response root element is the initiate spelling rather than the operation or shape name, so a generator that derived the root from either would produce a document no client parses."
 cases   = ["c-mpu-0004"]
@@ -60,9 +64,12 @@ cases   = ["c-mpu-0004"]
 [[quirk]]
 id      = "q-mpu-request-root-0030"
 kind    = "wire_root_name"
+classification = "mutable"
+mutation_dimension = "element_rename"
+mutation_sources = ["CompleteMultipartUpload.xml.request_root"]
 target  = "CompleteMultipartUpload.MultipartUpload"
 summary = "The accepted request root is the completion verb while the model shape is the completed-participle spelling, and the model carries the wire name on the member rather than on the shape, so the payload decoder cannot take the shape name."
-cases   = ["c-mpu-0005", "c-mpu-0033"]
+cases   = ["c-mpu-0005", "c-mpu-0033", "c-mpu-0034", "c-mpu-0035", "c-mpu-0036"]
 
   [[quirk.evidence]]
   kind    = "aws-doc"
@@ -77,9 +84,12 @@ cases   = ["c-mpu-0005", "c-mpu-0033"]
 [[quirk]]
 id      = "q-mpu-part-0031"
 kind    = "flattened_list"
+classification = "mutable"
+mutation_dimension = "wrap_strategy"
+mutation_sources = ["ListParts.output.Parts.list_flattened"]
 target  = "ListParts.Parts"
 summary = "Each part element repeats directly under the result root with no wrapper element around the sequence, so a wrapped rendering is a document every SDK reads as an empty page."
-cases   = ["c-mpu-0010"]
+cases   = ["c-mpu-0010", "c-mpu-0048"]
 
   [[quirk.evidence]]
   kind    = "aws-doc"
@@ -89,9 +99,12 @@ cases   = ["c-mpu-0010"]
 [[quirk]]
 id      = "q-mpu-upload-0032"
 kind    = "flattened_list"
+classification = "mutable"
+mutation_dimension = "wrap_strategy"
+mutation_sources = ["ListMultipartUploads.output.Uploads.list_flattened"]
 target  = "ListMultipartUploads.Uploads"
 summary = "Each upload element repeats directly under the result root with no wrapper, and the element name is not the member name, so both halves have to come from the model rather than from the member spelling."
-cases   = ["c-mpu-0011", "c-mpu-0012"]
+cases   = ["c-mpu-0011", "c-mpu-0012", "c-mpu-0013"]
 
   [[quirk.evidence]]
   kind    = "aws-doc"
@@ -101,6 +114,7 @@ cases   = ["c-mpu-0011", "c-mpu-0012"]
 [[quirk]]
 id      = "q-mpu-late-error-0033"
 kind    = "error_after_200"
+classification = "contract"
 target  = "CompleteMultipartUpload"
 summary = "The response head is committed before the outcome is known, so a failure arrives as an error document under a success status, and every header the operation can return has to be in that already-committed head."
 cases   = ["c-mpu-0001", "c-mpu-0015", "c-mpu-0016", "c-mpu-0017"]
@@ -123,6 +137,7 @@ cases   = ["c-mpu-0001", "c-mpu-0015", "c-mpu-0016", "c-mpu-0017"]
 [[quirk]]
 id      = "q-mpu-trailer-0034"
 kind    = "phantom_trailer"
+classification = "contract"
 target  = "CompleteMultipartUpload"
 summary = "A trailer field is announced only when a trailer will actually be sent; announcing one that never arrives leaves strict clients waiting for a section that does not exist."
 cases   = ["c-mpu-0037"]
@@ -140,6 +155,7 @@ cases   = ["c-mpu-0037"]
 [[quirk]]
 id      = "q-mpu-abort-0035"
 kind    = "non_idempotent_delete"
+classification = "contract"
 target  = "AbortMultipartUpload"
 summary = "Aborting succeeds with an empty no-content response and, unlike deleting an object, is not idempotent: an upload id that is unknown or already aborted answers the dedicated not-found code."
 cases   = ["c-mpu-0014", "c-mpu-0032"]
@@ -152,6 +168,9 @@ cases   = ["c-mpu-0014", "c-mpu-0032"]
 [[quirk]]
 id      = "q-mpu-attributes-etag-0036"
 kind    = "etag_render"
+classification = "mutable"
+mutation_dimension = "quote_strategy"
+mutation_sources = ["GetObjectAttributes.output.ETag.etag_render"]
 target  = "GetObjectAttributes.ETag"
 summary = "The object attributes response is the one place an entity tag is written without the surrounding quotes; it is registered with the multipart family because the value it renders is the composite tag this family produces, while the operation itself lands with its own family."
 cases   = ["c-mpu-0002", "c-mpu-0018"]
@@ -169,6 +188,7 @@ cases   = ["c-mpu-0002", "c-mpu-0018"]
 [[quirk]]
 id      = "q-mpu-upload-id-0037"
 kind    = "capability_token"
+classification = "contract"
 target  = "UploadPart.UploadId"
 summary = "An upload id is a server-minted capability, not a name the caller chose: it is resolved against the bucket and key of the request before anything is written, an unknown id answers the not-found code, and one belonging to another resource is refused rather than honoured."
 cases   = ["c-mpu-0028", "c-mpu-0029", "c-mpu-0030", "c-mpu-0031"]
@@ -186,6 +206,7 @@ cases   = ["c-mpu-0028", "c-mpu-0029", "c-mpu-0030", "c-mpu-0031"]
 [[quirk]]
 id      = "q-mpu-limits-0038"
 kind    = "bounded_input"
+classification = "contract"
 target  = "CompleteMultipartUpload.MultipartUpload"
 summary = "Part numbers run from one to ten thousand, every part except the last has a floor on its size, and the completion list must be strictly ascending with no repeats; each of the three has its own code so a client can tell them apart."
 cases   = ["c-mpu-0020", "c-mpu-0024", "c-mpu-0026", "c-mpu-0027"]
@@ -203,6 +224,7 @@ cases   = ["c-mpu-0020", "c-mpu-0024", "c-mpu-0026", "c-mpu-0027"]
 [[quirk]]
 id      = "q-mpu-metadata-0039"
 kind    = "deferred_metadata"
+classification = "contract"
 target  = "CreateMultipartUpload"
 summary = "User metadata, content type, storage class and the encryption settings are carried on the initiating request alone and take effect on the assembled object; a part upload carries none of them, so losing them at initiation loses them permanently."
 cases   = ["c-mpu-0006", "c-mpu-0007"]
@@ -220,6 +242,7 @@ cases   = ["c-mpu-0006", "c-mpu-0007"]
 [[quirk]]
 id      = "q-mpu-marker-0040"
 kind    = "pagination_cursor"
+classification = "contract"
 target  = "ListParts.NextPartNumberMarker"
 summary = "A truncated listing hands back a cursor that is valid as the next request's marker, the page-size limit is echoed as the caller sent it rather than as the server clamped it, and a listing of uploads needs both the key cursor and the upload-id cursor because one key can carry several uploads."
 cases   = ["c-mpu-0010", "c-mpu-0011", "c-mpu-0047", "c-mpu-0048"]
@@ -237,6 +260,9 @@ cases   = ["c-mpu-0010", "c-mpu-0011", "c-mpu-0047", "c-mpu-0048"]
 [[quirk]]
 id      = "q-marker-form-0076"
 kind    = "wire_form"
+classification = "mutable"
+codec_value = "opaque_token"
+mutation_dimension = "wire_form"
 target  = "ListMultipartUploads.UploadIdMarker"
 summary = "The upload-id cursor of an upload listing is a server-minted value that comes back through the query string, so one spelling a parent traversal — including the percent-encoded spelling, which is already decoded when the check runs — is refused before the listing reads anything."
 cases   = ["c-mpu-0047"]
@@ -254,6 +280,10 @@ cases   = ["c-mpu-0047"]
 [[quirk]]
 id      = "q-part-number-0072"
 kind    = "bounded_range"
+classification = "mutable"
+codec_min = 1
+codec_max = 10000
+mutation_dimension = "integer_range"
 target  = "UploadPart.PartNumber"
 summary = "A part number runs from one to ten thousand inclusive, and one outside that range is refused before any byte is stored, because a part above the ceiling can never be completed and no abort enumerates it."
 cases   = ["c-mpu-0024"]

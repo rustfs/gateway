@@ -148,7 +148,7 @@
                                 "summary": "The error code list documents NoSuchObjectLockConfiguration with HTTP status 404 for an object that has no object lock configuration."
                               }
                             ],
-                "cases": ["c-lock-0012"]
+                "cases": ["c-lock-0012", "c-lock-0028"]
               },
               {
                 "id": "q-lock-0004",
@@ -162,7 +162,7 @@
                                 "summary": "The documented request syntax roots the body at a Retention element, while the structure it carries is published as ObjectLockRetention."
                               }
                             ],
-                "cases": ["c-lock-0005", "c-lock-0030"]
+                "cases": ["c-lock-0005", "c-lock-0027", "c-lock-0030"]
               }
             ],
   "ext_points": []

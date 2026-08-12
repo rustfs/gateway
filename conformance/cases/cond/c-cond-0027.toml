@@ -18,7 +18,7 @@ polarity = "negative"
 operation = "CopyObject"
 tags = ["conditional", "preconditions", "error-shape"]
 timeout_ms = 10000
-quirks = ["q-cond-0046"]
+quirks = ["q-cond-copy-validator-scope-0107"]
 
 [[case.evidence]]
 url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CopyObject.html"
@@ -46,23 +46,6 @@ body = { utf8 = "hello" }
 bucket = "conf-cond"
 key = "sides/target"
 body = { utf8 = "original" }
-
-[[exchanges]]
-name = "source-condition-holds-target-condition-holds"
-
-[exchanges.request]
-method = "PUT"
-target = "/conf-cond/sides/target"
-headers = { "x-amz-copy-source" = "/conf-cond/sides/source", "x-amz-copy-source-if-match" = "\"5d41402abc4b2a76b9719d911017c592\"", "if-match" = "\"919c8b643b7133116b02fc0d9bb7df3f\"" }
-sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
-
-[exchanges.expect]
-kind = "response"
-status = 200
-connection_after = "open"
-
-[exchanges.expect.body]
-contains_utf8 = ["<CopyObjectResult"]
 
 [[exchanges]]
 name = "the-source-tag-is-not-accepted-on-the-target-condition"
@@ -97,3 +80,20 @@ connection_after = "open"
 
 [exchanges.expect.error]
 code = "PreconditionFailed"
+
+[[exchanges]]
+name = "source-condition-holds-target-condition-holds"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-cond/sides/target"
+headers = { "x-amz-copy-source" = "/conf-cond/sides/source", "x-amz-copy-source-if-match" = "\"5d41402abc4b2a76b9719d911017c592\"", "if-match" = "\"919c8b643b7133116b02fc0d9bb7df3f\"" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.body]
+contains_utf8 = ["<CopyObjectResult"]

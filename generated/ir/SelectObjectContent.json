@@ -532,7 +532,7 @@
                 "id": "q-select-0002",
                 "kind": "value_constraint",
                 "target": "SelectObjectContent.Expression",
-                "summary": "The expression is opaque to this crate — never parsed, never logged, never repeated into an error — and bounded at the documented 256 KiB, past which the request is refused 400 ExpressionTooLong before anything reads the text.",
+                "summary": "Expression is bounded at 262144 UTF-8 bytes.",
                 "evidence": [
                               {
                                 "kind": "aws-doc",
@@ -540,13 +540,13 @@
                                 "summary": "The Expression member documents a maximum length of 256 KB and the operation publishes ExpressionTooLong as the answer for exceeding it."
                               }
                             ],
-                "cases": ["c-select-restore-0022", "c-select-restore-0023"]
+                "cases": ["c-select-restore-0022"]
               },
               {
                 "id": "q-select-0003",
                 "kind": "exclusive_members",
                 "target": "SelectObjectContent.InputSerialization",
-                "summary": "An InputSerialization names exactly one of CSV, JSON and Parquet: two of them together is 400 ObjectSerializationConflict, and none of them is 400 MalformedXML, because a reader that picked one of two declared formats would parse the object as something the caller did not describe.",
+                "summary": "InputSerialization refuses multiple declared formats.",
                 "evidence": [
                               {
                                 "kind": "aws-doc",
@@ -554,13 +554,13 @@
                                 "summary": "The structure documents CSV, JSON and Parquet as alternative descriptions of one object's format, and the operation publishes ObjectSerializationConflict for a request that names more than one."
                               }
                             ],
-                "cases": ["c-select-restore-0024", "c-select-restore-0025"]
+                "cases": ["c-select-restore-0024"]
               },
               {
                 "id": "q-select-0004",
                 "kind": "exclusive_members",
                 "target": "SelectObjectContent.OutputSerialization",
-                "summary": "An OutputSerialization names exactly one of CSV and JSON, on the same rule as the input side: both together is 400 ObjectSerializationConflict and neither is 400 MalformedXML.",
+                "summary": "OutputSerialization refuses multiple declared formats.",
                 "evidence": [
                               {
                                 "kind": "aws-doc",
@@ -568,13 +568,13 @@
                                 "summary": "The structure documents CSV and JSON as alternative descriptions of how records are returned, one per request."
                               }
                             ],
-                "cases": ["c-select-restore-0026", "c-select-restore-0027"]
+                "cases": ["c-select-restore-0026"]
               },
               {
                 "id": "q-select-0005",
                 "kind": "exclusive_members",
                 "target": "SelectObjectContent.ScanRange",
-                "summary": "A ScanRange has two members and three documented forms — both bounds, a Start alone running to the end, an End alone meaning the suffix — so an element with neither bound is refused rather than read as the whole object, and so is an End below a Start or a negative bound: each of those names no window or two.",
+                "summary": "An empty ScanRange is refused rather than treated as the whole object.",
                 "evidence": [
                               {
                                 "kind": "aws-doc",
@@ -582,13 +582,13 @@
                                 "summary": "The structure documents Start and End as a byte window and describes the forms in which one of the two may be omitted, with the suffix form spelled as an End with no Start."
                               }
                             ],
-                "cases": ["c-select-restore-0008", "c-select-restore-0028", "c-select-restore-0029"]
+                "cases": ["c-select-restore-0028"]
               },
               {
                 "id": "q-select-0006",
                 "kind": "closed_value_set",
                 "target": "SelectObjectContent.ExpressionType",
-                "summary": "ExpressionType has exactly one documented value, SQL, and a request naming any other is 400 InvalidExpressionType; CompressionType is likewise closed at NONE, GZIP and BZIP2, refused as 400 InvalidCompressionFormat, because a compression this side cannot name is a stream nobody can read.",
+                "summary": "ExpressionType accepts exactly SQL.",
                 "evidence": [
                               {
                                 "kind": "aws-doc",
@@ -596,13 +596,13 @@
                                 "summary": "The operation documents SQL as the only expression type and publishes InvalidExpressionType and InvalidCompressionFormat as the answers for the two closed sets."
                               }
                             ],
-                "cases": ["c-select-restore-0030", "c-select-restore-0031"]
+                "cases": ["c-select-restore-0030"]
               },
               {
                 "id": "q-select-0007",
                 "kind": "lenient_unknown_elements",
-                "target": "SelectObjectContent",
-                "summary": "Unknown elements inside a SelectObjectContentRequest are skipped and a namespace on the root is ignored, the same leniency every other request document in this tree is decoded with.",
+                "target": "SelectObjectContent.SelectObjectContentRequest",
+                "summary": "Unknown elements inside a SelectObjectContentRequest are skipped.",
                 "evidence": [
                               {
                                 "kind": "s3s-issue",
@@ -630,7 +630,7 @@
                 "id": "q-select-0009",
                 "kind": "event_stream_response",
                 "target": "SelectObjectContent",
-                "summary": "A successful SelectObjectContent response is a third Answer shape: the handler supplies already framed messages, the shared facade writes status 200 and the event-stream content type without invoking the generated document encoder, and conformance independently validates both CRCs and the terminating sequence.",
+                "summary": "SelectObjectContent returns the event-stream answer shape and bypasses the document encoder.",
                 "evidence": [
                               {
                                 "kind": "aws-doc",

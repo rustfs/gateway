@@ -1,0 +1,47 @@
+# c-naming-0021 — object-key case is data
+#
+[case]
+id = "c-naming-0021"
+schema_version = 1
+title = "Object keys differing only in case remain distinct"
+rationale = """
+The bucket contains both `A.txt` and `a.txt` with different bodies. Reading the upper-case spelling must return only its body; lowercasing or case-folding the key would silently select the other object and this exact-body assertion would fail."""
+polarity = "positive"
+operation = "GetObject"
+tags = ["naming", "routing"]
+timeout_ms = 10000
+quirks = ["q-naming-case-folding-0121"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/object-keys.html"
+summary = "Object keys are case-sensitive identifiers, so changing case changes the object selected."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-naming"
+
+[[setup.objects]]
+bucket = "conf-naming"
+key = "A.txt"
+body = { utf8 = "upper" }
+
+[[setup.objects]]
+bucket = "conf-naming"
+key = "a.txt"
+body = { utf8 = "lower" }
+
+[request]
+method = "GET"
+target = "/conf-naming/A.txt"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[expect.body]
+exact_utf8 = "upper"

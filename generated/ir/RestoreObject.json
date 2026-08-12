@@ -430,7 +430,7 @@
                                                    "values": ["CanonicalUser", "AmazonCustomerByEmail", "Group"]
                                                  },
                                          "hot": false,
-                                         "quirk_refs": ["q-acl-0003", "q-acl-0004"]
+                                         "quirk_refs": ["q-acl-0003", "q-acl-0004", "q-acl-0014"]
                                        }
                                      ],
                            "xml": {
@@ -1014,7 +1014,7 @@
                 "id": "q-restore-0001",
                 "kind": "status_tri_state",
                 "target": "RestoreObject",
-                "summary": "A restore answers three different statuses for three different states — 202 when a retrieval starts, 200 when the copy is already restored, 409 RestoreAlreadyInProgress while one is running — so the number is decided by a mapping in this crate and declared as the operation's success status plus one alternative, never chosen by a handler.",
+                "summary": "Starting a new retrieval succeeds with 202.",
                 "evidence": [
                               {
                                 "kind": "aws-doc",
@@ -1027,13 +1027,13 @@
                                 "summary": "Upstream shipped a default status for error codes it did not know, which is the same failure one level over: a status nobody chose reads exactly like a status somebody did."
                               }
                             ],
-                "cases": ["c-select-restore-0001", "c-select-restore-0002", "c-select-restore-0011"]
+                "cases": ["c-select-restore-0001"]
               },
               {
                 "id": "q-restore-0002",
                 "kind": "structured_header",
                 "target": "RestoreObject.RestoreStatus",
-                "summary": "x-amz-restore is a structured header, not a word: an in-progress copy is ongoing-request=\"true\" and a finished one is ongoing-request=\"false\", expiry-date=\"<RFC 1123>\" — quotes around both values, a comma and exactly one space between the pairs — and it is produced and parsed in one place so the two spellings cannot drift.",
+                "summary": "An in-progress restore header renders ongoing-request=\"true\" with the boolean quoted.",
                 "evidence": [
                               {
                                 "kind": "aws-doc",
@@ -1046,7 +1046,7 @@
                                 "summary": "The date inside the header is the IMF-fixdate form HTTP fixes for every date it carries, which is what makes the embedded value byte-comparable at all."
                               }
                             ],
-                "cases": ["c-select-restore-0004", "c-select-restore-0005", "c-select-restore-0019"]
+                "cases": ["c-select-restore-0004"]
               },
               {
                 "id": "q-acl-0003",
@@ -1085,7 +1085,7 @@
                 "id": "q-acl-0004",
                 "kind": "aws_deviation",
                 "target": "Grantee.Type",
-                "summary": "On the way in the discriminator is derived from whichever of ID, URI or EmailAddress the grantee carries, because the XML reader this project ships exposes no attributes at all; for every document AWS accepts the two agree, and a document whose attribute contradicts its members is read by its members.",
+                "summary": "Type is optional in the decoded DTO because the XML reader exposes no attributes; making it required would reject every real Grantee before the runtime can derive its discriminator.",
                 "evidence": [
                               {
                                 "kind": "s3s-issue",
@@ -1098,13 +1098,13 @@
                                 "summary": "Each documented Type value pairs with exactly one identifying member, which is what makes the member a sound discriminator."
                               }
                             ],
-                "cases": ["c-acl-0005", "c-acl-0021", "c-acl-0022"]
+                "cases": ["c-acl-0005"]
               },
               {
                 "id": "q-restore-0004",
                 "kind": "value_constraint",
                 "target": "RestoreRequest",
-                "summary": "A RestoreRequest must name exactly one of the two documented forms: a Days count of at least one for an ordinary retrieval, or Type SELECT with both SelectParameters and OutputLocation and no Days at all — neither form's members may appear in the other, and a document with neither is refused rather than given a duration nobody asked for.",
+                "summary": "The Days form requires a value of at least one.",
                 "evidence": [
                               {
                                 "kind": "aws-doc",
@@ -1117,19 +1117,13 @@
                                 "summary": "The Days member documents a minimum value of one, so a zero-day or negative retrieval has no representable meaning."
                               }
                             ],
-                "cases": [
-                           "c-select-restore-0003",
-                           "c-select-restore-0012",
-                           "c-select-restore-0013",
-                           "c-select-restore-0014",
-                           "c-select-restore-0015"
-                         ]
+                "cases": ["c-select-restore-0012"]
               },
               {
                 "id": "q-restore-0005",
                 "kind": "closed_value_set",
                 "target": "GlacierJobParameters.Tier",
-                "summary": "A retrieval tier outside the documented three-value set — Expedited, Standard, Bulk, exactly in that spelling — is refused as InvalidArgument on both spellings of the member, because a tier nothing can schedule is a retrieval that silently never starts.",
+                "summary": "GlacierJobParameters.Tier accepts exactly Expedited, Standard and Bulk.",
                 "evidence": [
                               {
                                 "kind": "aws-doc",
@@ -1161,8 +1155,8 @@
               {
                 "id": "q-restore-0007",
                 "kind": "lenient_unknown_elements",
-                "target": "RestoreObject",
-                "summary": "Unknown elements inside a RestoreRequest are skipped rather than refused, and so is an XML namespace on the root: AWS adds elements to this document over time and a decoder that got stricter would refuse retrievals an SDK a version newer sends correctly.",
+                "target": "RestoreObject.RestoreRequest",
+                "summary": "Unknown elements inside a RestoreRequest are skipped rather than refused.",
                 "evidence": [
                               {
                                 "kind": "s3s-issue",
@@ -1204,6 +1198,25 @@
                               }
                             ],
                 "cases": ["c-acl-0012", "c-acl-0020"]
+              },
+              {
+                "id": "q-acl-0014",
+                "kind": "grantee_discriminator_policy",
+                "target": "Grantee.Type",
+                "summary": "On the way in the discriminator is derived from whichever of ID, URI or EmailAddress the grantee carries; when the unreadable attribute contradicts those members, the members decide the stored and returned type.",
+                "evidence": [
+                              {
+                                "kind": "s3s-issue",
+                                "ref": "https://github.com/s3s-project/s3s/issues/297",
+                                "summary": "The same missing XML-attribute capability upstream hit from the writing side; here it is the reading side that has no attribute access."
+                              },
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_Grantee.html",
+                                "summary": "Each documented Type value pairs with exactly one identifying member, which makes the identifying member a deterministic discriminator."
+                              }
+                            ],
+                "cases": ["c-acl-0005"]
               }
             ],
   "ext_points": []

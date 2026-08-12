@@ -610,7 +610,7 @@
                                 "summary": "Upstream shipped response roots without the S3 xmlns and strict clients refused them, which is why the root and its namespace are pinned byte for byte."
                               }
                             ],
-                "cases": ["c-lifecycle-0002", "c-lifecycle-0003"]
+                "cases": ["c-lifecycle-0002", "c-lifecycle-0003", "c-lifecycle-0006"]
               }
             ],
   "ext_points": []

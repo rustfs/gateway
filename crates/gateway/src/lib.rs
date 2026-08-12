@@ -183,8 +183,10 @@ pub use rustfs_gateway_core::ops::shared::pagination::{CursorKind, CursorSpec, M
 pub use rustfs_gateway_core::ops::shared::etag::{ConditionalHeader, EtagComparison, etag_matches, parse_conditional_etag};
 pub use rustfs_gateway_core::ops::shared::precondition::{
     ConditionalOutcome, IfRange, ObjectValidators, PreconditionRejection, Preconditions, RangeDecision, RangeSelectors,
-    RequestKind, evaluate, evaluate_range,
+    RequestKind, completion_failure_retains_upload, conditional_write_guards_before_mutation, copy_target_uses_source_validators,
+    evaluate, evaluate_range,
 };
+pub use rustfs_gateway_core::{copy_source_guards_before_target_write, copy_source_if_match_miss_proceeds};
 
 // The copy-source contract. A backend receives `CopySourceResources` through `Req::resources`
 // and can reveal the normalized source only with the proof on that same request. It never needs
@@ -200,7 +202,7 @@ pub use rustfs_gateway_core::ops::shared::copy_source::{
 // the first caller; a backend that skipped validation would store a document whose rules the
 // matcher can never satisfy, and the only symptom would be browser-side.
 pub use rustfs_gateway_core::ops::shared::cors::{
-    CORS_ALLOWED_METHODS, CorsRejection, MAX_CORS_ID_CHARS, MAX_CORS_RULES, validate_cors,
+    CORS_ALLOWED_METHODS, CorsRejection, MAX_CORS_ID_CHARS, MAX_CORS_RULES, cors_delete_absent_succeeds, validate_cors,
 };
 // The CORS **runtime**, exported for the reason the document contract above is: a deployment
 // installs a `CorsSource` and a `CorsPolicy`, and neither is nameable without these. `CorsOrigins`
@@ -244,7 +246,9 @@ pub use rustfs_gateway_core::ops::shared::lifecycle::{
 // constant on purpose: `KMSMasterKeyID` is a sensitive member, and a backend that composed its
 // own refusal from the document's bytes would copy a key identifier into an error body
 // (`q-enc-0009`).
-pub use rustfs_gateway_core::ops::shared::encryption::{EncryptionRejection, validate_encryption};
+pub use rustfs_gateway_core::ops::shared::encryption::{
+    EncryptionRejection, encryption_delete_absent_succeeds, validate_encryption,
+};
 
 // The **run-time** half of server-side encryption, which the document contract above deliberately
 // does not answer. Three of these are named by a deployment: `TransportSecurity` is what a
@@ -269,7 +273,8 @@ pub use rustfs_gateway_core::sse::{
 // overwrites of protected objects, the governance bypass — is deliberately not exported,
 // because it is deliberately not implemented here.
 pub use rustfs_gateway_core::ops::shared::object_lock::{
-    ObjectLockRejection, validate_legal_hold, validate_lock_configuration, validate_retention,
+    ObjectLockRejection, object_lock_requires_enabled_bucket, validate_legal_hold, validate_lock_configuration,
+    validate_retention,
 };
 
 // The replication document contract, exported for the same reason as the three above: what
@@ -291,8 +296,8 @@ pub use rustfs_gateway_core::ops::shared::replication::{
 // `RestoreRequest`'s `SelectParameters` — which is why the validator takes them as arguments
 // rather than as a request.
 pub use rustfs_gateway_core::ops::shared::select::{
-    MAX_EXPRESSION_BYTES, SelectRejection, validate_input_serialization, validate_output_serialization, validate_scan_range,
-    validate_select,
+    MAX_EXPRESSION_BYTES, SelectRejection, select_scan_bytes, select_uses_event_stream, validate_input_serialization,
+    validate_output_serialization, validate_scan_range, validate_select,
 };
 
 // The restore contract, and the one thing on this list a backend cannot afford to re-derive:
@@ -302,8 +307,8 @@ pub use rustfs_gateway_core::ops::shared::select::{
 // beside it because `x-amz-restore` is a structured header the read and head encoders will also
 // have to write, and two `format!`s spell a comma-and-a-space differently sooner or later.
 pub use rustfs_gateway_core::ops::shared::restore::{
-    MAX_RESTORE_HEADER_BYTES, MIN_RESTORE_DAYS, RestoreRejection, RestoreState, RestoreStatus, format_restore_status,
-    parse_restore_status, validate_restore,
+    MAX_RESTORE_HEADER_BYTES, MIN_RESTORE_DAYS, RestoreRejection, RestoreState, RestoreStatus, format_optional_restore_status,
+    format_restore_status, parse_restore_status, validate_restore,
 };
 
 // The event-stream framing used with `Resp::event_stream`. A CRC over the wrong range encodes,

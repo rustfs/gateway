@@ -21,7 +21,11 @@
 
 pub mod codec;
 pub mod dto;
+pub mod naming_contracts;
 pub mod operations_md;
+pub mod quirk_toml;
+pub mod range_contracts;
+pub mod runtime_contracts;
 pub mod rust_files;
 pub mod spec_toml;
 

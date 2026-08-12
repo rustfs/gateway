@@ -8,7 +8,7 @@ polarity = "positive"
 operation = "RestoreObject"
 tags = ["restore"]
 timeout_ms = 10000
-quirks = ["q-restore-0001"]
+quirks = ["q-restore-already-restored-0124"]
 
 [[case.evidence]]
 url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_RestoreObject.html"

@@ -16,7 +16,7 @@ polarity = "positive"
 operation = "GetObjectAttributes"
 tags = ["xml", "etag", "wire-bytes"]
 timeout_ms = 10000
-quirks = ["q-etag-0001", "q-etag-0002"]
+quirks = ["q-attributes-root-0087", "q-etag-0001", "q-etag-0002"]
 # GetObjectAttributes is not uniformly implemented outside AWS, so this case is scoped to the
 # profiles that claim it rather than being carried as a permanent baseline failure elsewhere.
 applies_to = { profiles = ["aws", "strict"] }

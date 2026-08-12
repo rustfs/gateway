@@ -27,9 +27,12 @@
 
 #![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 
-use rustfs_gateway_model::ir::{Binding, Evidence, Field, Quirk, TimestampFormat, Type};
+use std::collections::BTreeMap;
 
-use crate::emit::codec::tolerance::{self, TOLERANCE_KIND, Tolerance};
+use rustfs_gateway_model::ir::{Binding, Field, TimestampFormat, Type};
+use rustfs_gateway_model::{CodecRule, CodecValue, HeaderToleranceValue, MutationDimension};
+
+use crate::emit::codec::tolerance::{self, Tolerance};
 
 fn field(name: &str, ty: Type, binding: Binding, quirks: &[&str]) -> Field {
     Field {
@@ -46,18 +49,10 @@ fn field(name: &str, ty: Type, binding: Binding, quirks: &[&str]) -> Field {
     }
 }
 
-fn quirk(id: &str, kind: &str) -> Quirk {
-    Quirk {
-        id: id.to_owned(),
-        kind: kind.to_owned(),
-        target: "Fixture.Member".to_owned(),
-        summary: "a fixture quirk, long enough to satisfy the schema".to_owned(),
-        evidence: vec![Evidence {
-            kind: "observed".to_owned(),
-            reference: "fixture".to_owned(),
-            summary: "a fixture evidence entry, long enough".to_owned(),
-        }],
-        cases: vec!["c-fixture-0001".to_owned()],
+fn date_condition() -> CodecRule {
+    CodecRule {
+        current: CodecValue::HeaderTolerance(HeaderToleranceValue::DateCondition),
+        mutation_dimension: MutationDimension::HeaderTolerance,
     }
 }
 
@@ -69,39 +64,36 @@ fn date(quirks: &[&str]) -> Field {
 /// depends on.
 #[test]
 fn a_field_with_no_quirk_is_not_tolerated() {
-    let resolved = tolerance::of(&date(&[]), &[], "Fixture").expect("resolves");
+    let resolved = tolerance::of(&date(&[]), &BTreeMap::new(), "Fixture").expect("resolves");
     assert_eq!(resolved, None, "an ordinary timestamp keeps the refusing conversion");
 }
 
-/// Negative — a quirk of another kind on the same member declares nothing.
+/// Negative — metadata on the same member declares no codec behavior.
 ///
-/// `q-timestamp-0005` sits on timestamp members already; if kind were not consulted it would turn
-/// every one of them tolerant.
+/// `q-timestamp-0005` sits on timestamp members already; only a typed rule may make them tolerant.
 #[test]
-fn a_quirk_of_another_kind_declares_no_tolerance() {
-    let quirks = vec![quirk("q-timestamp-0005", "timestamp_format")];
-    let resolved = tolerance::of(&date(&["q-timestamp-0005"]), &quirks, "Fixture").expect("resolves");
-    assert_eq!(resolved, None, "only `{TOLERANCE_KIND}` declares a tolerance");
+fn metadata_without_a_typed_rule_declares_no_tolerance() {
+    let resolved = tolerance::of(&date(&["q-timestamp-0005"]), &BTreeMap::new(), "Fixture").expect("resolves");
+    assert_eq!(resolved, None, "only the typed rule map declares a tolerance");
 }
 
-/// Negative — a `header_tolerance` quirk with no row in the table fails the run.
+/// Negative — a free-text kind is not a codec gate.
 ///
-/// The alternative is a quirk that claims a tolerance nothing performs: the overlay says the
-/// header is ignored, the generated code refuses it, and only a conformance case notices.
+/// The typed rule map is the only codec input; a metadata label cannot claim a tolerance that
+/// generation does not perform.
 #[test]
-fn an_unknown_tolerance_quirk_fails_the_run() {
-    let quirks = vec![quirk("q-cond-9999", TOLERANCE_KIND)];
-    let error = tolerance::of(&date(&["q-cond-9999"]), &quirks, "GetObject").expect_err("no row for this id");
-    assert!(error.contains("q-cond-9999"), "{error}");
-    assert!(error.contains("tolerance.rs"), "{error}");
+fn free_text_kind_is_not_a_codec_gate() {
+    let resolved =
+        tolerance::of(&date(&["q-cond-9999"]), &BTreeMap::new(), "GetObject").expect("metadata cannot control codec generation");
+    assert_eq!(resolved, None);
 }
 
 /// Negative — a tolerance attached to a member whose type it has no reading for fails the run.
 #[test]
 fn a_tolerance_on_the_wrong_type_fails_the_run() {
-    let quirks = vec![quirk("q-cond-0050", TOLERANCE_KIND)];
+    let values = BTreeMap::from([("q-cond-0050".to_owned(), date_condition())]);
     let wrong = field("IfMatch", Type::String, Binding::Header, &["q-cond-0050"]);
-    let error = tolerance::of(&wrong, &quirks, "GetObject").expect_err("a string is not a date");
+    let error = tolerance::of(&wrong, &values, "GetObject").expect_err("a string is not a date");
     assert!(error.contains("header-bound timestamp"), "{error}");
 }
 
@@ -112,14 +104,14 @@ fn a_tolerance_on_the_wrong_type_fails_the_run() {
 /// get.
 #[test]
 fn a_tolerance_on_the_wrong_binding_fails_the_run() {
-    let quirks = vec![quirk("q-cond-0050", TOLERANCE_KIND)];
+    let values = BTreeMap::from([("q-cond-0050".to_owned(), date_condition())]);
     let wrong = field(
         "ResponseExpires",
         Type::Timestamp(TimestampFormat::HttpDate),
         Binding::Query,
         &["q-cond-0050"],
     );
-    let error = tolerance::of(&wrong, &quirks, "GetObject").expect_err("a query value is not a conditional header");
+    let error = tolerance::of(&wrong, &values, "GetObject").expect_err("a query value is not a conditional header");
     assert!(error.contains("header-bound timestamp"), "{error}");
 }
 
@@ -141,8 +133,8 @@ fn the_emitted_call_already_yields_the_stored_option() {
 /// Positive — the declared tolerance reaches the member that carries it.
 #[test]
 fn the_declared_tolerance_reaches_its_member() {
-    let quirks = vec![quirk("q-cond-0050", TOLERANCE_KIND)];
-    let resolved = tolerance::of(&date(&["q-cond-0050"]), &quirks, "GetObject").expect("resolves");
+    let values = BTreeMap::from([("q-cond-0050".to_owned(), date_condition())]);
+    let resolved = tolerance::of(&date(&["q-cond-0050"]), &values, "GetObject").expect("resolves");
     assert_eq!(resolved, Some(Tolerance::DateCondition));
 }
 

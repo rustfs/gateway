@@ -22,6 +22,9 @@
 [[quirk]]
 id      = "q-log-0001"
 kind    = "not_configured_error"
+classification = "mutable"
+mutation_dimension = "optionality"
+mutation_sources = ["GetBucketLogging.errors.not_configured"]
 target  = "GetBucketLogging"
 summary = "A bucket that is not logging answers 200 with an empty BucketLoggingStatus element rather than a 404, so the absence of a LoggingEnabled child is the whole answer."
 cases   = ["c-bucketconfig-0026", "c-bucketconfig-0009"]
@@ -34,6 +37,7 @@ cases   = ["c-bucketconfig-0026", "c-bucketconfig-0009"]
 [[quirk]]
 id      = "q-log-0002"
 kind    = "required_body"
+classification = "contract"
 target  = "PutBucketLogging"
 summary = "An empty BucketLoggingStatus document is the documented way to stop logging and is accepted rather than refused, because this subresource has no delete operation to say it any other way."
 cases   = ["c-bucketconfig-0047"]
@@ -46,6 +50,7 @@ cases   = ["c-bucketconfig-0047"]
 [[quirk]]
 id      = "q-log-0003"
 kind    = "element_name"
+classification = "contract"
 target  = "LoggingEnabled.TargetGrants"
 summary = "The grant list is wrapped in a TargetGrants element whose entries are spelled Grant rather than TargetGrant, so a reader looking for the member name on the wire will not find it."
 cases   = ["c-bucketconfig-0009", "c-bucketconfig-0008"]
@@ -58,6 +63,9 @@ cases   = ["c-bucketconfig-0009", "c-bucketconfig-0008"]
 [[quirk]]
 id      = "q-log-0004"
 kind    = "checksum_required"
+classification = "mutable"
+mutation_dimension = "optionality"
+mutation_sources = ["PutBucketLogging.checksum.http_checksum_required"]
 target  = "PutBucketLogging"
 summary = "The logging write demands an integrity claim on the body, so a request with neither Content-MD5 nor an x-amz-checksum header is refused with 400 before the document is parsed."
 cases   = ["c-bucketconfig-0037", "c-bucketconfig-0008"]

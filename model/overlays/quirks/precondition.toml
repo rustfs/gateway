@@ -28,9 +28,12 @@
 [[quirk]]
 id      = "q-cond-0041"
 kind    = "conditional_write"
+classification = "contract"
+mutation_dimension = "conditional_wildcard_write"
+contract_value = "compare_and_create"
 target  = "PutObject"
-summary = "An If-None-Match of asterisk is compare-and-create: the write is refused with 412 when the key already exists, and nothing is written before the condition is evaluated."
-cases   = ["c-cond-0001", "c-cond-0006", "c-cond-0024"]
+summary = "An If-None-Match of asterisk is compare-and-create: the write is refused with 412 when the key already exists."
+cases   = ["c-cond-0001", "c-cond-0006"]
 
   [[quirk.evidence]]
   kind    = "aws-doc"
@@ -45,6 +48,9 @@ cases   = ["c-cond-0001", "c-cond-0006", "c-cond-0024"]
 [[quirk]]
 id      = "q-cond-0042"
 kind    = "aws_deviation"
+classification = "contract"
+mutation_dimension = "if_match_date_precedence"
+contract_value = "suppress_modified_since"
 target  = "GetObject"
 summary = "A matching If-Match suppresses a failing If-Modified-Since and the object is served with 200, where RFC 9110 evaluation order would answer 304."
 cases   = ["c-cond-0016"]
@@ -62,6 +68,9 @@ cases   = ["c-cond-0016"]
 [[quirk]]
 id      = "q-cond-0043"
 kind    = "aws_deviation"
+classification = "contract"
+mutation_dimension = "if_none_date_precedence"
+contract_value = "not_modified"
 target  = "GetObject"
 summary = "An If-None-Match that does not match combined with an If-Unmodified-Since that does is answered with 304, where RFC 9110 would serve the representation."
 cases   = ["c-cond-0017"]
@@ -79,6 +88,9 @@ cases   = ["c-cond-0017"]
 [[quirk]]
 id      = "q-cond-0044"
 kind    = "error_code"
+classification = "contract"
+mutation_dimension = "condition_conflict_policy"
+contract_value = "reject"
 target  = "GetObject"
 summary = "If-Match and If-None-Match in one request are refused with 400 InvalidRequest rather than evaluated in some order that silently drops one of them."
 cases   = ["c-cond-0014", "c-cond-0028"]
@@ -96,6 +108,9 @@ cases   = ["c-cond-0014", "c-cond-0028"]
 [[quirk]]
 id      = "q-cond-0045"
 kind    = "etag_parse"
+classification = "contract"
+mutation_dimension = "conditional_wildcard_parse"
+contract_value = "accept"
 target  = "GetObject.IfNoneMatch"
 summary = "An asterisk is a value of the entity-tag conditional headers, not a malformed tag, and reading it as one turns every conditional create into a 400."
 cases   = ["c-cond-0001", "c-cond-0006", "c-cond-0015", "c-cond-0025"]
@@ -113,9 +128,12 @@ cases   = ["c-cond-0001", "c-cond-0006", "c-cond-0015", "c-cond-0025"]
 [[quirk]]
 id      = "q-cond-0046"
 kind    = "etag_compare"
+classification = "contract"
+mutation_dimension = "etag_comparison_strength"
+contract_value = "strong"
 target  = "GetObject.IfMatch"
-summary = "If-Match uses strong comparison so a weak validator never satisfies it, while If-None-Match on a read uses weak comparison; quoting differences never decide either."
-cases   = ["c-cond-0002", "c-cond-0003", "c-cond-0004", "c-cond-0005", "c-cond-0011", "c-cond-0012", "c-cond-0018", "c-cond-0019", "c-cond-0023", "c-cond-0026", "c-cond-0027", "c-cond-0028"]
+summary = "If-Match uses strong comparison, so a weak validator never satisfies it."
+cases   = ["c-cond-0002", "c-cond-0018"]
 
   [[quirk.evidence]]
   kind    = "rfc"
@@ -128,11 +146,34 @@ cases   = ["c-cond-0002", "c-cond-0003", "c-cond-0004", "c-cond-0005", "c-cond-0
   summary = "Comparing entity tags as plain strings made a quoted header value fail to match an unquoted stored tag."
 
 [[quirk]]
+id      = "q-cond-copy-validator-scope-0107"
+kind    = "copy_validator_scope"
+classification = "contract"
+mutation_dimension = "copy_validator_scope"
+contract_value = "separate_source_and_target"
+target  = "CopyObject"
+summary = "Copy-source conditions are evaluated against the source representation and ordinary conditional headers against the destination representation."
+cases   = ["c-cond-0027"]
+
+  [[quirk.evidence]]
+  kind    = "aws-docs"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CopyObject.html"
+  summary = "Documents a source-specific conditional-header set alongside the ordinary conditions applied to the destination write."
+
+  [[quirk.evidence]]
+  kind    = "s3s-pr"
+  ref     = "https://github.com/s3s-project/s3s/pull/577"
+  summary = "Adding source-side condition evaluation exposed the need to keep it separate from destination validation."
+
+[[quirk]]
 id      = "q-cond-0047"
 kind    = "response_shape"
+classification = "contract"
+mutation_dimension = "not_modified_etag_policy"
+contract_value = "include_selected"
 target  = "GetObject"
-summary = "A not-modified response carries the entity tag and nothing else: no body, and no content length announcing bytes that will never arrive."
-cases   = ["c-cond-0005", "c-cond-0007", "c-cond-0017", "c-cond-0022"]
+summary = "A not-modified response carries the selected representation's entity tag so a cache can update its validator."
+cases   = ["c-cond-0017", "c-cond-0022"]
 
   [[quirk.evidence]]
   kind    = "rfc"
@@ -147,9 +188,12 @@ cases   = ["c-cond-0005", "c-cond-0007", "c-cond-0017", "c-cond-0022"]
 [[quirk]]
 id      = "q-cond-0048"
 kind    = "conditional_write"
+classification = "contract"
+mutation_dimension = "completion_failure_upload_policy"
+contract_value = "retain"
 target  = "CompleteMultipartUpload"
 summary = "A precondition that fails on completion leaves the multipart upload intact, so the client can fix its condition and retry rather than re-uploading every part."
-cases   = ["c-cond-0024", "c-cond-0025"]
+cases   = ["c-cond-0024"]
 
   [[quirk.evidence]]
   kind    = "s3s-pr"
@@ -164,9 +208,12 @@ cases   = ["c-cond-0024", "c-cond-0025"]
 [[quirk]]
 id      = "q-cond-0049"
 kind    = "error_code"
+classification = "contract"
+mutation_dimension = "conditional_race_outcome"
+contract_value = "conflict"
 target  = "PutObject"
 summary = "A conditional write that held when it was evaluated and then lost a race is a retryable 409 ConditionalRequestConflict, not the 412 a client stops retrying."
-cases   = ["c-cond-0013"]
+cases   = ["c-cond-0029"]
 
   [[quirk.evidence]]
   kind    = "aws-doc"
@@ -176,6 +223,9 @@ cases   = ["c-cond-0013"]
 [[quirk]]
 id      = "q-cond-0050"
 kind    = "header_tolerance"
+classification = "mutable"
+codec_value = "date_condition"
+mutation_dimension = "header_tolerance"
 target  = "GetObject.IfModifiedSince"
 summary = "A date condition whose value is not a valid HTTP-date, or which points into the server's own future, is ignored rather than rejected or answered with a stale 304; the rule covers both date conditions and both read operations, so one header never gets two answers depending on the method."
 cases   = ["c-cond-0008", "c-cond-0009", "c-cond-0010", "c-cond-0020", "c-cond-0021"]
@@ -193,6 +243,9 @@ cases   = ["c-cond-0008", "c-cond-0009", "c-cond-0010", "c-cond-0020", "c-cond-0
 [[quirk]]
 id      = "q-range-0051"
 kind    = "range_resolution"
+classification = "contract"
+mutation_dimension = "multi_range_policy"
+contract_value = "serve_whole"
 target  = "GetObject.Range"
 summary = "A request for more than one range is answered with the whole object and 200: S3 emits no multipart byteranges body, and it is neither a partial content nor an unsatisfiable range."
 cases   = ["c-range-0008", "c-range-0017"]
@@ -205,9 +258,12 @@ cases   = ["c-range-0008", "c-range-0017"]
 [[quirk]]
 id      = "q-range-0052"
 kind    = "range_resolution"
+classification = "contract"
+mutation_dimension = "explicit_end_overflow_policy"
+contract_value = "clamp"
 target  = "GetObject.Range"
-summary = "A range whose end runs past the object is clamped to the last byte and answered with 206; only a range that starts past the end is unsatisfiable."
-cases   = ["c-range-0002", "c-range-0005", "c-range-0009", "c-range-0013", "c-range-0014"]
+summary = "A range whose end runs past the object is clamped to the last byte and answered with 206."
+cases   = ["c-range-0002"]
 
   [[quirk.evidence]]
   kind    = "rfc"
@@ -222,9 +278,12 @@ cases   = ["c-range-0002", "c-range-0005", "c-range-0009", "c-range-0013", "c-ra
 [[quirk]]
 id      = "q-range-0053"
 kind    = "range_form"
+classification = "contract"
+mutation_dimension = "suffix_range_policy"
+contract_value = "supported"
 target  = "GetObject.Range"
-summary = "The suffix and open-ended forms are both honoured, and a satisfied range carries end minus start plus one bytes — the off-by-one in the other direction truncates a ranged copy."
-cases   = ["c-range-0001", "c-range-0003", "c-range-0004", "c-range-0005", "c-range-0006"]
+summary = "A suffix range is parsed and served from the final requested bytes of the representation."
+cases   = ["c-range-0003"]
 
   [[quirk.evidence]]
   kind    = "rfc"
@@ -237,11 +296,29 @@ cases   = ["c-range-0001", "c-range-0003", "c-range-0004", "c-range-0005", "c-ra
   summary = "Upstream change adding the two missing range forms and correcting a copied range that was one byte short."
 
 [[quirk]]
+id      = "q-range-oversize-suffix-0122"
+kind    = "range_resolution"
+classification = "contract"
+mutation_dimension = "oversize_suffix_policy"
+contract_value = "clamp_to_whole_partial"
+target  = "GetObject.Range"
+summary = "A suffix longer than the representation selects every byte and remains a partial-content response."
+cases   = ["c-range-0005"]
+
+  [[quirk.evidence]]
+  kind    = "rfc"
+  ref     = "https://www.rfc-editor.org/rfc/rfc9110#section-14.1.2"
+  summary = "A suffix longer than the representation selects the entire representation rather than becoming unsatisfiable."
+
+[[quirk]]
 id      = "q-range-0054"
 kind    = "error_body"
+classification = "contract"
+mutation_dimension = "unsatisfiable_actual_size_detail"
+contract_value = "include"
 target  = "GetObject"
-summary = "The unsatisfiable-range error document carries two elements beyond the standard error shape, reporting the object's real size and the range that was asked for."
-cases   = ["c-range-0009", "c-range-0010", "c-range-0014"]
+summary = "The unsatisfiable-range error document reports the object's real size beyond the standard error shape."
+cases   = ["c-range-0009"]
 
   [[quirk.evidence]]
   kind    = "aws-doc"
@@ -251,6 +328,9 @@ cases   = ["c-range-0009", "c-range-0010", "c-range-0014"]
 [[quirk]]
 id      = "q-range-0055"
 kind    = "checksum_headers"
+classification = "contract"
+mutation_dimension = "partial_checksum_policy"
+contract_value = "suppress_whole_object"
 target  = "GetObject"
 summary = "A partial read must not carry the checksum of the whole object; an SDK that verifies checksums by default fails every ranged download when it does."
 cases   = ["c-range-0016"]
@@ -268,9 +348,12 @@ cases   = ["c-range-0016"]
 [[quirk]]
 id      = "q-range-0056"
 kind    = "cross_field"
+classification = "contract"
+mutation_dimension = "part_number_outcome"
+contract_value = "partial_content"
 target  = "GetObject.PartNumber"
-summary = "A part number alone is a 206 carrying the object's part count; a part number sent together with a range is refused with 400, because the two select bytes by different mechanisms."
-cases   = ["c-range-0007", "c-range-0015"]
+summary = "A part number alone is a partial-content selection and is answered with 206."
+cases   = ["c-range-0020"]
 
   [[quirk.evidence]]
   kind    = "aws-doc"
@@ -280,9 +363,12 @@ cases   = ["c-range-0007", "c-range-0015"]
 [[quirk]]
 id      = "q-range-0057"
 kind    = "header_tolerance"
+classification = "contract"
+mutation_dimension = "invalid_range_policy"
+contract_value = "serve_whole"
 target  = "GetObject.Range"
 summary = "A range header that cannot be parsed — a bad unit, a missing value, a descending span, a number beyond the addressable size — is ignored and the whole object is served."
-cases   = ["c-range-0011", "c-range-0012", "c-range-0013", "c-range-0017"]
+cases   = ["c-range-0011", "c-range-0012", "c-range-0013"]
 
   [[quirk.evidence]]
   kind    = "rfc"
@@ -297,6 +383,9 @@ cases   = ["c-range-0011", "c-range-0012", "c-range-0013", "c-range-0017"]
 [[quirk]]
 id      = "q-etag-form-0074"
 kind    = "wire_form"
+classification = "mutable"
+codec_value = "entity_tag"
+mutation_dimension = "wire_form"
 target  = "GetObject.IfMatch"
 summary = "A conditional header carries one entity tag and is checked against that grammar before anything compares it, so an unterminated quote is a bad request rather than a tag whose first character is a quote, and two field lines joined by a comma are refused rather than reduced to whichever one arrived first."
 cases   = ["c-cond-0019", "c-cond-0028"]
@@ -319,6 +408,9 @@ cases   = ["c-cond-0019", "c-cond-0028"]
 [[quirk]]
 id      = "q-range-0058"
 kind    = "range_resolution"
+classification = "contract"
+mutation_dimension = "if_range_miss_policy"
+contract_value = "serve_whole"
 target  = "GetObject.IfRange"
 summary = "An If-Range validator that no longer describes the object drops the range instead of failing it, so a resumed download receives the new object whole rather than a slice of two different ones."
 cases   = ["c-range-0018"]
@@ -327,3 +419,308 @@ cases   = ["c-range-0018"]
   kind    = "rfc"
   ref     = "https://www.rfc-editor.org/rfc/rfc9110#section-13.1.5"
   summary = "When the If-Range validator does not match, the server ignores the range header and returns the entire representation."
+
+[[quirk]]
+id      = "q-cond-write-order-0096"
+kind    = "conditional_write_order"
+classification = "contract"
+mutation_dimension = "conditional_write_order"
+contract_value = "guard_before_mutation"
+target  = "PutObject"
+summary = "A conditional write evaluates its guard before mutating storage, so a failed guard leaves the existing representation unchanged."
+cases   = ["c-cond-0001", "c-cond-0011"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/conditional-writes.html"
+  summary = "AWS describes a failed conditional write as a refusal of the attempted replacement, leaving the current object in place."
+
+[[quirk]]
+id      = "q-cond-none-weak-0097"
+kind    = "etag_compare"
+classification = "contract"
+mutation_dimension = "if_none_match_comparison_strength"
+contract_value = "weak"
+target  = "GetObject.IfNoneMatch"
+summary = "If-None-Match on a read uses weak comparison, so weakness does not prevent the same opaque tag from revalidating a cached representation."
+cases   = ["c-cond-0005"]
+
+  [[quirk.evidence]]
+  kind    = "rfc"
+  ref     = "https://www.rfc-editor.org/rfc/rfc9110#section-8.8.3.2"
+  summary = "Defines weak comparison as the comparison used for If-None-Match."
+
+[[quirk]]
+id      = "q-cond-etag-normalization-0098"
+kind    = "etag_parse"
+classification = "contract"
+mutation_dimension = "bare_conditional_etag_policy"
+contract_value = "accept_and_normalize"
+target  = "ConditionalEntityTag"
+summary = "A bare conditional entity tag is accepted and normalized to the same opaque tag as its quoted spelling."
+cases   = ["c-cond-0003", "c-cond-0004"]
+
+  [[quirk.evidence]]
+  kind    = "s3s-issue"
+  ref     = "https://github.com/s3s-project/s3s/issues/397"
+  summary = "Comparing the wire strings directly made a quoted request tag fail against the same stored opaque tag."
+
+[[quirk]]
+id      = "q-cond-304-body-0099"
+kind    = "response_shape"
+classification = "contract"
+mutation_dimension = "not_modified_body_policy"
+contract_value = "suppress"
+target  = "GetObject"
+summary = "A 304 response carries no body bytes."
+cases   = ["c-cond-0007"]
+
+  [[quirk.evidence]]
+  kind    = "rfc"
+  ref     = "https://www.rfc-editor.org/rfc/rfc9110#section-15.4.5"
+  summary = "Defines 304 as a response without content."
+
+[[quirk]]
+id      = "q-cond-304-length-0100"
+kind    = "response_shape"
+classification = "contract"
+mutation_dimension = "not_modified_framing_policy"
+contract_value = "omit"
+target  = "GetObject"
+summary = "A 304 response omits Content-Length rather than announcing representation bytes that will not follow."
+cases   = ["c-cond-0022"]
+
+  [[quirk.evidence]]
+  kind    = "rfc"
+  ref     = "https://www.rfc-editor.org/rfc/rfc9110#section-15.4.5"
+  summary = "Constrains metadata on a 304 response whose selected representation body is not transferred."
+
+[[quirk]]
+id      = "q-range-start-past-end-0101"
+kind    = "range_resolution"
+classification = "contract"
+mutation_dimension = "range_start_bound"
+contract_value = "at_or_beyond_unsatisfiable"
+target  = "GetObject.Range"
+summary = "A range whose first position is at or beyond the representation length is unsatisfiable and answered with 416."
+cases   = ["c-range-0014", "c-range-0019"]
+
+  [[quirk.evidence]]
+  kind    = "rfc"
+  ref     = "https://www.rfc-editor.org/rfc/rfc9110#section-14.1.2"
+  summary = "Defines a byte range with no overlap with the selected representation as unsatisfiable."
+
+[[quirk]]
+id      = "q-range-open-ended-0102"
+kind    = "range_form"
+classification = "contract"
+mutation_dimension = "open_ended_range_policy"
+contract_value = "through_last"
+target  = "GetObject.Range"
+summary = "An open-ended byte range runs from its first position through the final representation byte."
+cases   = ["c-range-0004"]
+
+  [[quirk.evidence]]
+  kind    = "rfc"
+  ref     = "https://www.rfc-editor.org/rfc/rfc9110#section-14.1.2"
+  summary = "Defines the byte-range form whose last position is omitted."
+
+[[quirk]]
+id      = "q-range-inclusive-length-0103"
+kind    = "range_resolution"
+classification = "contract"
+mutation_dimension = "read_range_length_arithmetic"
+contract_value = "inclusive"
+target  = "GetObject.Range"
+summary = "A satisfied inclusive range carries end minus start plus one bytes."
+cases   = ["c-range-0001"]
+
+  [[quirk.evidence]]
+  kind    = "rfc"
+  ref     = "https://www.rfc-editor.org/rfc/rfc9110#section-14.1.2"
+  summary = "Defines both byte positions as inclusive, making the selected length one greater than their difference."
+
+[[quirk]]
+id      = "q-copy-range-inclusive-length-0123"
+kind    = "range_resolution"
+classification = "contract"
+mutation_dimension = "copy_range_length_arithmetic"
+contract_value = "inclusive"
+target  = "UploadPartCopy.CopySourceRange"
+summary = "A resolved copy-source range carries end minus start plus one bytes."
+cases   = ["c-range-0006"]
+
+  [[quirk.evidence]]
+  kind    = "rfc"
+  ref     = "https://www.rfc-editor.org/rfc/rfc9110#section-14.1.2"
+  summary = "Defines both byte positions as inclusive, making the copied length one greater than their difference."
+
+[[quirk]]
+id      = "q-range-requested-0104"
+kind    = "error_body"
+classification = "contract"
+mutation_dimension = "range_requested_detail"
+contract_value = "verbatim"
+target  = "GetObject"
+summary = "The unsatisfiable-range error document reports the Range value the client sent verbatim."
+cases   = ["c-range-0010", "c-range-0022"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/ErrorResponses.html"
+  summary = "Shows RangeRequested as an additional element of the unsatisfiable-range error response."
+
+[[quirk]]
+id      = "q-range-part-count-0105"
+kind    = "response_header"
+classification = "contract"
+mutation_dimension = "part_count_header_policy"
+contract_value = "include_total"
+target  = "GetObject.PartNumber"
+summary = "A part-number read reports the completed object's part count in x-amz-mp-parts-count."
+cases   = ["c-range-0021"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObject.html"
+  summary = "Documents the response header that reports the number of parts when partNumber selects one part."
+
+[[quirk]]
+id      = "q-range-selector-conflict-0106"
+kind    = "cross_field"
+classification = "contract"
+mutation_dimension = "range_part_selector_conflict"
+contract_value = "reject"
+target  = "GetObject.PartNumber"
+summary = "A request carrying both Range and partNumber is refused with 400 because the selectors name bytes by different mechanisms."
+cases   = ["c-range-0015"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObject.html"
+  summary = "Documents Range and partNumber as alternative partial-read selectors rather than a combined selector."
+
+[[quirk]]
+id      = "q-cond-if-match-miss-0108"
+kind    = "if_match_outcome"
+classification = "contract"
+mutation_dimension = "if_match_miss_outcome"
+contract_value = "precondition_failed"
+target  = "PutObject.IfMatch"
+summary = "A named If-Match value that does not equal the current entity tag refuses the write with PreconditionFailed."
+cases   = ["c-cond-0011"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/conditional-writes.html"
+  summary = "AWS documents a mismatched If-Match on a write as a precondition failure."
+
+  [[quirk.evidence]]
+  kind    = "s3s-issue"
+  ref     = "https://github.com/s3s-project/s3s/issues/241"
+  summary = "Ignoring the entity-tag guard let conditional writes proceed when their validator did not match."
+
+[[quirk]]
+id      = "q-cond-if-match-absent-0109"
+kind    = "if_match_absent"
+classification = "contract"
+mutation_dimension = "if_match_absent_policy"
+contract_value = "precondition_failed"
+target  = "PutObject.IfMatch"
+summary = "If-Match against an absent representation fails the condition instead of turning the request into an unconditional create."
+cases   = ["c-cond-0012"]
+
+  [[quirk.evidence]]
+  kind    = "rfc"
+  ref     = "https://www.rfc-editor.org/rfc/rfc9110#section-13.1.1"
+  summary = "If-Match is false when no current representation exists."
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/conditional-writes.html"
+  summary = "AWS documents an unsatisfied If-Match write as a precondition failure."
+
+[[quirk]]
+id      = "q-error-root-unnamespaced-0110"
+kind    = "error_root_namespace"
+classification = "contract"
+mutation_dimension = "error_root_namespace"
+contract_value = "unnamespaced"
+target  = "Error"
+summary = "An S3 error document carries an unnamespaced Error root."
+cases   = ["c-cond-0023"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/ErrorResponses.html"
+  summary = "The error-response reference shows the Error document without an XML namespace declaration."
+
+[[quirk]]
+id      = "q-head-bodyless-0111"
+kind    = "head_body"
+classification = "contract"
+mutation_dimension = "head_body_policy"
+contract_value = "suppress"
+target  = "HeadObject"
+summary = "A HEAD response keeps the equivalent GET headers but carries no response body, including on failure."
+cases   = ["c-cond-0023"]
+
+  [[quirk.evidence]]
+  kind    = "rfc"
+  ref     = "https://www.rfc-editor.org/rfc/rfc9110#section-9.3.2"
+  summary = "A response to HEAD carries the same header fields as the equivalent GET response and no content."
+
+[[quirk]]
+id      = "q-cond-failure-detail-0112"
+kind    = "condition_error_detail"
+classification = "contract"
+mutation_dimension = "condition_failure_detail"
+contract_value = "include_condition"
+target  = "GetObject.IfMatch"
+summary = "A precondition failure document names the request condition that failed."
+cases   = ["c-cond-0023"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObject.html"
+  summary = "The operation reference names If-Match as the condition whose failed evaluation produces the 412 response."
+
+[[quirk]]
+id      = "q-copy-source-if-match-miss-0113"
+kind    = "copy_source_if_match_outcome"
+classification = "contract"
+mutation_dimension = "copy_source_if_match_miss"
+contract_value = "precondition_failed"
+target  = "CopyObject.CopySourceIfMatch"
+summary = "A copy-source If-Match value that misses the source entity tag refuses the copy with PreconditionFailed."
+cases   = ["c-cond-0026"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CopyObject.html"
+  summary = "The operation reference documents a failed copy-source If-Match condition as a 412 response."
+
+  [[quirk.evidence]]
+  kind    = "s3s-pr"
+  ref     = "https://github.com/s3s-project/s3s/pull/577"
+  summary = "The upstream change added evaluation for copy-source conditional headers that had previously been ignored."
+
+[[quirk]]
+id      = "q-copy-source-guard-order-0114"
+kind    = "copy_source_guard_order"
+classification = "contract"
+mutation_dimension = "copy_source_guard_order"
+contract_value = "guard_before_target_write"
+target  = "CopyObject"
+summary = "A copy evaluates source guards before writing the target, so a refused copy cannot leave a target object."
+cases   = ["c-cond-0026"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CopyObject.html"
+  summary = "The operation reference describes source-condition failure before the copy action succeeds."
+
+  [[quirk.evidence]]
+  kind    = "s3s-pr"
+  ref     = "https://github.com/s3s-project/s3s/pull/577"
+  summary = "The upstream change applies copy-source condition evaluation before performing the copy."

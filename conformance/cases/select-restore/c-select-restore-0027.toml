@@ -8,7 +8,7 @@ polarity = "negative"
 operation = "SelectObjectContent"
 tags = ["select", "xml"]
 timeout_ms = 10000
-quirks = ["q-select-0004"]
+quirks = ["q-select-output-missing-0142"]
 
 [[case.evidence]]
 url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_OutputSerialization.html"

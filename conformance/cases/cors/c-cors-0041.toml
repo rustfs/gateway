@@ -10,7 +10,7 @@ map happened to keep."""
 polarity = "negative"
 tags = ["cors", "preflight", "security", "wire-bytes"]
 timeout_ms = 10000
-quirks = ["q-cors-0015"]
+quirks = ["q-cors-0015", "q-cors-0043"]
 
 [[case.evidence]]
 url = "https://fetch.spec.whatwg.org/#http-cors-protocol"

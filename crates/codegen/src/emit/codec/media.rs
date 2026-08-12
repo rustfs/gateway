@@ -29,10 +29,9 @@
 //!
 //! What is data, and what is not:
 //!
-//! * **data** — *which* members are a non-XML text payload. The overlay attaches a `media_type`
-//!   quirk to a payload member, and every member carrying it is read and written as text with
-//!   the declared `Content-Type`.
-//! * **not data** — the media type behind each quirk, which is the table below.
+//! * **data** — *which* members are a non-XML text payload and the media type they carry. The
+//!   overlay attaches a typed codec rule to a payload member.
+//! * **not data** — the text-payload reader and writer.
 //!
 //! # Why the content type may not be inferred instead
 //!
@@ -42,25 +41,15 @@
 //! the substitution immediately. Inferring one from the other would put a protocol exception in
 //! the emitter, where `cargo xtask why` cannot reach it and no evidence URL is attached to it.
 //!
-//! Two guards keep the table honest: a `media_type` quirk with no entry here fails the run, and
-//! so does one attached to a member that is not a string payload. A string payload with *no*
-//! `media_type` quirk fails the run as well, in [`super::decode`] and [`super::encode`] — which
+//! A typed media rule attached to a member that is not a string payload fails the run. A string
+//! payload with *no* typed media rule fails the run as well, in [`super::decode`] and
+//! [`super::encode`] — which
 //! is the guard that matters most, because its absence is what would silently ship `text/plain`.
 
-use rustfs_gateway_model::ir::{Binding, Field, Quirk, Type};
+use std::collections::BTreeMap;
 
-/// The quirk category that marks a payload member as a non-XML text document.
-pub const MEDIA_KIND: &str = "media_type";
-
-/// The media types, by the quirk id that carries each one.
-///
-/// One row per quirk, never per field: `cargo xtask why <id>` resolves the row to its evidence
-/// and to the conformance cases that would fail if it moved.
-const MEDIA_TYPES: &[(&str, &str)] = &[
-    // A bucket policy is a JSON document on both the request and the response side — the one
-    // place in the S3 surface where a success body is not XML. Error bodies stay XML.
-    ("q-pol-0001", "application/json"),
-];
+use rustfs_gateway_model::ir::{Binding, Field, Type};
+use rustfs_gateway_model::{CodecRule, CodecValue};
 
 /// Whether this member is a payload carried as text rather than as XML or bytes.
 ///
@@ -75,26 +64,17 @@ pub fn is_text_payload(field: &Field) -> bool {
 ///
 /// # Errors
 ///
-/// A string naming the operation and member when a `media_type` quirk has no row in
-/// `MEDIA_TYPES`, when one is attached to a member that is not a string payload, or when two of
-/// them claim different types for one member. All three are overlay mistakes that would otherwise
-/// put the wrong `Content-Type` on a body, which no test that reads only the body would catch.
-pub fn of(field: &Field, quirks: &[Quirk], operation: &str) -> Result<Option<&'static str>, String> {
-    let mut found: Option<&'static str> = None;
+/// A string naming the operation and member when a typed media rule is attached to a member that
+/// is not a string payload, or when two typed media rules disagree on one member.
+pub fn of<'a>(field: &Field, rules: &'a BTreeMap<String, CodecRule>, operation: &str) -> Result<Option<&'a str>, String> {
+    let mut found: Option<&str> = None;
     for id in &field.quirk_refs {
-        let Some(quirk) = quirks.iter().find(|q| &q.id == id) else {
+        let Some(rule) = rules.get(id) else {
             continue;
         };
-        if quirk.kind != MEDIA_KIND {
-            continue;
-        }
-        let Some((_, media)) = MEDIA_TYPES.iter().find(|(known, _)| known == id) else {
-            return Err(format!(
-                "codec {operation}.{}: quirk `{id}` is a `{MEDIA_KIND}` with no type in \
-                 `crates/codegen/src/emit/codec/media.rs`. Add the row rather than letting the \
-                 quirk claim a content type nothing emits.",
-                field.name
-            ));
+        let media = match &rule.current {
+            CodecValue::MediaType(media) => media.as_str(),
+            _ => continue,
         };
         if !is_text_payload(field) {
             return Err(format!(
@@ -102,9 +82,9 @@ pub fn of(field: &Field, quirks: &[Quirk], operation: &str) -> Result<Option<&'s
                 field.name
             ));
         }
-        if found.is_some_and(|existing| existing != *media) {
+        if found.is_some_and(|existing| existing != media) {
             return Err(format!(
-                "codec {operation}.{}: two `{MEDIA_KIND}` quirks claim different types; one body has one content type.",
+                "codec {operation}.{}: two typed codec rules claim different media types; one body has one content type.",
                 field.name
             ));
         }
@@ -118,14 +98,14 @@ pub fn of(field: &Field, quirks: &[Quirk], operation: &str) -> Result<Option<&'s
 /// # Errors
 ///
 /// A string naming the operation and member when the member is a string payload with no
-/// `media_type` quirk. This is the guard the emitters call: without it a bare string payload
+/// typed media rule. This is the guard the emitters call: without it a bare string payload
 /// would be read and written with whatever content type the caller happened to send, which is
 /// exactly the "compiles and is wrong" outcome the codec surface refuses to emit.
-pub fn required(field: &Field, quirks: &[Quirk], operation: &str) -> Result<&'static str, String> {
-    of(field, quirks, operation)?.ok_or_else(|| {
+pub fn required<'a>(field: &Field, rules: &'a BTreeMap<String, CodecRule>, operation: &str) -> Result<&'a str, String> {
+    of(field, rules, operation)?.ok_or_else(|| {
         format!(
             "codec {operation}.{}: a string payload carries a content type, and this member declares no \
-             `{MEDIA_KIND}` quirk. Attach one in the overlay rather than defaulting the header.",
+             typed media rule. Attach one in the overlay rather than defaulting the header.",
             field.name
         )
     })

@@ -17,7 +17,7 @@ polarity = "negative"
 operation = "CompleteMultipartUpload"
 tags = ["conditional", "preconditions", "multipart", "error-shape"]
 timeout_ms = 10000
-quirks = ["q-cond-0045", "q-cond-0048"]
+quirks = ["q-cond-0045"]
 
 [[case.evidence]]
 url = "https://www.rfc-editor.org/rfc/rfc9110#section-13.1.1"

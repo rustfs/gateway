@@ -30,14 +30,12 @@
 //! may read this user's data with this user's cookies. The mitigation here is not a check.
 //!
 //! [`ACCESS_CONTROL_ALLOW_CREDENTIALS`] is named in exactly one function,
-//! [`credentials_header`], and that function takes an origin `&str` that only the
-//! `AllowOrigin::Exact` arm of [`credentials_for`] can supply — the arm whose value came out of
-//! the *stored rule*, never out of the request. The two wildcard arms return `None` without
-//! calling it. `scripts/check_cors_credentials_exclusive.sh` re-states that as a property of the
-//! text: no function in this file may name the credentials header and a wildcard `AllowOrigin`
-//! variant at the same time, and the file may not import the variants unqualified. Merging the
-//! two — the refactor that would reintroduce the advisory — fails the guard before it fails a
-//! test.
+//! [`credentials_header`]. The generated current policy makes both wildcard arms of
+//! [`credentials_for`] return `None`; its mutation alternative deliberately reaches the helper
+//! with the request origin, and `q-cors-0026`'s cases must turn red. The guard script separately
+//! forbids folding the header write into a function that also names a wildcard `AllowOrigin`
+//! variant, and forbids importing those variants unqualified, so the writer cannot bypass the
+//! typed source and its mutation control.
 //!
 //! On top of that, [`CorsPolicy::new`] refuses `CorsOrigins::Any` with credentials outright, so a
 //! deployment cannot even declare the posture, and an exact allow-list carrying a `*` is refused
@@ -69,6 +67,8 @@
 //! was never granted — RFC 9110 §12.5.5 is what makes the header the fix.
 
 use http::{HeaderName, HeaderValue};
+
+use crate::contracts;
 
 use super::request::RequestedHeaders;
 use super::rule::{AllowOrigin, RuleMatch};
@@ -260,24 +260,39 @@ pub struct UnrenderableRule;
 pub fn preflight_headers(
     policy: &CorsPolicy,
     matched: &RuleMatch<'_>,
+    requested_method: &str,
     requested: &RequestedHeaders<'_>,
 ) -> Result<CorsHeaders, UnrenderableRule> {
-    let mut pairs = vec![(ACCESS_CONTROL_ALLOW_ORIGIN, header_value(allow_origin_value(&matched.origin))?)];
-    if let Some(credentials) = credentials_for(policy, &matched.origin) {
+    let mut pairs = vec![(ACCESS_CONTROL_ALLOW_ORIGIN, header_value(allow_origin_value(matched))?)];
+    if let Some(credentials) = credentials_for(policy, matched) {
         pairs.push(credentials);
     }
-    pairs.push((ACCESS_CONTROL_ALLOW_METHODS, header_value(&join(&matched.rule.allowed_methods))?));
+    let methods = if contracts::cors_preflight_uses_matched_methods() {
+        join(&matched.rule.allowed_methods)
+    } else {
+        requested_method.to_owned()
+    };
+    pairs.push((ACCESS_CONTROL_ALLOW_METHODS, header_value(&methods)?));
     if !requested.is_empty() {
-        let echoed = requested.names().collect::<Vec<_>>().join(", ");
+        let echoed = if contracts::cors_allow_headers_echoes_request() {
+            requested.names().collect::<Vec<_>>().join(", ")
+        } else {
+            join(&matched.rule.allowed_headers)
+        };
         pairs.push((ACCESS_CONTROL_ALLOW_HEADERS, header_value(&echoed)?));
     }
-    if let Some(seconds) = matched.rule.max_age_seconds
+    if contracts::cors_preflight_includes_max_age()
+        && let Some(seconds) = matched.rule.max_age_seconds
         && seconds >= 0
     {
         pairs.push((ACCESS_CONTROL_MAX_AGE, header_value(&seconds.to_string())?));
     }
-    push_expose(&mut pairs, matched)?;
-    pairs.push((VARY, VARY_ORIGIN));
+    if contracts::cors_preflight_includes_expose() {
+        push_expose(&mut pairs, matched)?;
+    }
+    if contracts::cors_preflight_varies_on_origin() {
+        pairs.push((VARY, VARY_ORIGIN));
+    }
     Ok(CorsHeaders { pairs })
 }
 
@@ -287,13 +302,29 @@ pub fn preflight_headers(
 ///
 /// [`UnrenderableRule`], for the reason [`preflight_headers`] gives.
 pub fn actual_headers(policy: &CorsPolicy, matched: &RuleMatch<'_>) -> Result<CorsHeaders, UnrenderableRule> {
-    let mut pairs = vec![(ACCESS_CONTROL_ALLOW_ORIGIN, header_value(allow_origin_value(&matched.origin))?)];
-    if let Some(credentials) = credentials_for(policy, &matched.origin) {
+    let mut pairs = Vec::new();
+    if contracts::cors_actual_includes_allow_origin() {
+        pairs.push((ACCESS_CONTROL_ALLOW_ORIGIN, header_value(allow_origin_value(matched))?));
+    }
+    if let Some(credentials) = credentials_for(policy, matched) {
         pairs.push(credentials);
     }
-    push_expose(&mut pairs, matched)?;
-    pairs.push((VARY, VARY_ORIGIN));
+    if contracts::cors_actual_includes_expose() {
+        push_expose(&mut pairs, matched)?;
+    }
+    if !contracts::cors_actual_omits_preflight_headers() {
+        pairs.push((ACCESS_CONTROL_ALLOW_METHODS, header_value(&join(&matched.rule.allowed_methods))?));
+    }
+    if contracts::cors_actual_varies_on_origin() {
+        pairs.push((VARY, VARY_ORIGIN));
+    }
     Ok(CorsHeaders { pairs })
+}
+
+pub(super) fn unmatched_actual_headers(origin: &str) -> Result<CorsHeaders, UnrenderableRule> {
+    Ok(CorsHeaders {
+        pairs: vec![(ACCESS_CONTROL_ALLOW_ORIGIN, header_value(origin)?), (VARY, VARY_ORIGIN)],
+    })
 }
 
 /// The bytes that go into `Access-Control-Allow-Origin`.
@@ -301,29 +332,33 @@ pub fn actual_headers(policy: &CorsPolicy, matched: &RuleMatch<'_>) -> Result<Co
 /// The bare `*` answers `*`; every other match answers a concrete origin. Which of the two
 /// concrete forms it is decides whether credentials are available, and that decision is
 /// [`credentials_for`]'s, not this function's.
-fn allow_origin_value<'a>(origin: &AllowOrigin<'a>) -> &'a str {
-    match origin {
-        AllowOrigin::Wildcard => "*",
-        AllowOrigin::Exact(value) | AllowOrigin::Reflected(value) => value,
+fn allow_origin_value<'a>(matched: &'a RuleMatch<'a>) -> &'a str {
+    match matched.origin {
+        AllowOrigin::Wildcard if contracts::cors_bare_wildcard_is_literal() => "*",
+        AllowOrigin::Wildcard => matched.request_origin,
+        AllowOrigin::Exact(value) => value,
+        AllowOrigin::Reflected(value) if contracts::cors_partial_wildcard_reflects() => value,
+        AllowOrigin::Reflected(_) => "*",
     }
 }
 
 /// The credentials line, when the matched origin is one an operator enumerated.
 ///
-/// The two wildcard arms answer `None` and never reach [`credentials_header`]. This function is
-/// where the exclusion is a control-flow fact; the guard script is where it is a textual one.
-fn credentials_for(policy: &CorsPolicy, origin: &AllowOrigin<'_>) -> Option<(HeaderName, HeaderValue)> {
-    match origin {
+/// Under the generated current policy, the two wildcard arms answer `None`. The other branch is
+/// the mutation control for `q-cors-0026` and must be killed by its conformance cases.
+fn credentials_for(policy: &CorsPolicy, matched: &RuleMatch<'_>) -> Option<(HeaderName, HeaderValue)> {
+    match matched.origin {
         AllowOrigin::Exact(value) => credentials_header(policy, value),
-        AllowOrigin::Reflected(_) | AllowOrigin::Wildcard => None,
+        AllowOrigin::Reflected(_) | AllowOrigin::Wildcard if contracts::cors_wildcard_credentials_omitted() => None,
+        AllowOrigin::Reflected(_) | AllowOrigin::Wildcard => credentials_header(policy, matched.request_origin),
     }
 }
 
 /// The one function in this workspace that names [`ACCESS_CONTROL_ALLOW_CREDENTIALS`].
 ///
-/// `origin` is a value the *stored rule* named literally. It cannot be a request-supplied one:
-/// the only caller is the `AllowOrigin::Exact` arm above, and that variant is constructed from a
-/// rule's own `<AllowedOrigin>` text.
+/// Under the generated current policy, `origin` comes from the stored rule's
+/// `AllowOrigin::Exact` arm. The mutation-only wildcard branch supplies the request origin so its
+/// cases can prove that widening the policy changes the wire answer.
 fn credentials_header(policy: &CorsPolicy, origin: &str) -> Option<(HeaderName, HeaderValue)> {
     policy
         .permits_credentials(origin)
@@ -360,7 +395,16 @@ mod tests {
     }
 
     fn matched<'a>(rule: &'a CorsRule, origin: AllowOrigin<'a>) -> RuleMatch<'a> {
-        RuleMatch { index: 0, rule, origin }
+        let request_origin = match origin {
+            AllowOrigin::Wildcard => "https://wildcard.invalid",
+            AllowOrigin::Exact(value) | AllowOrigin::Reflected(value) => value,
+        };
+        RuleMatch {
+            index: 0,
+            rule,
+            origin,
+            request_origin,
+        }
     }
 
     fn exact_policy(origins: &[&str], credentials: bool) -> CorsPolicy {
@@ -378,6 +422,7 @@ mod tests {
         let headers = preflight_headers(
             &CorsPolicy::default(),
             &matched(&rule, AllowOrigin::Exact("https://a.invalid")),
+            "GET",
             &RequestedHeaders::empty(),
         )
         .expect("a renderable rule");
@@ -397,12 +442,18 @@ mod tests {
     #[test]
     fn the_two_wildcard_forms_answer_differently() {
         let rule = rule();
-        let star = preflight_headers(&CorsPolicy::default(), &matched(&rule, AllowOrigin::Wildcard), &RequestedHeaders::empty())
-            .expect("renderable");
+        let star = preflight_headers(
+            &CorsPolicy::default(),
+            &matched(&rule, AllowOrigin::Wildcard),
+            "GET",
+            &RequestedHeaders::empty(),
+        )
+        .expect("renderable");
         assert_eq!(star.get(&ACCESS_CONTROL_ALLOW_ORIGIN).map(HeaderValue::as_bytes), Some(&b"*"[..]));
         let reflected = preflight_headers(
             &CorsPolicy::default(),
             &matched(&rule, AllowOrigin::Reflected("https://app.example.com")),
+            "GET",
             &RequestedHeaders::empty(),
         )
         .expect("renderable");
@@ -420,8 +471,8 @@ mod tests {
         rule.max_age_seconds = Some(3000);
         rule.expose_headers = vec!["etag".to_owned(), "x-amz-request-id".to_owned()];
         let requested = RequestedHeaders::parse("x-amz-acl,x-amz-meta-a").expect("a readable list");
-        let headers =
-            preflight_headers(&CorsPolicy::default(), &matched(&rule, AllowOrigin::Wildcard), &requested).expect("renderable");
+        let headers = preflight_headers(&CorsPolicy::default(), &matched(&rule, AllowOrigin::Wildcard), "GET", &requested)
+            .expect("renderable");
         assert_eq!(
             headers.get(&ACCESS_CONTROL_ALLOW_HEADERS).map(HeaderValue::as_bytes),
             Some(&b"x-amz-acl, x-amz-meta-a"[..])
@@ -497,6 +548,7 @@ mod tests {
             preflight_headers(
                 &policy,
                 &matched(&rule, AllowOrigin::Reflected("https://app.example.com")),
+                "GET",
                 &RequestedHeaders::empty(),
             ),
             actual_headers(&policy, &matched(&rule, AllowOrigin::Reflected("https://app.example.com"))),
@@ -544,9 +596,13 @@ mod tests {
     #[test]
     fn n_no_requested_headers_means_no_allow_headers_line() {
         let rule = rule();
-        let headers =
-            preflight_headers(&CorsPolicy::default(), &matched(&rule, AllowOrigin::Wildcard), &RequestedHeaders::empty())
-                .expect("renderable");
+        let headers = preflight_headers(
+            &CorsPolicy::default(),
+            &matched(&rule, AllowOrigin::Wildcard),
+            "GET",
+            &RequestedHeaders::empty(),
+        )
+        .expect("renderable");
         assert_eq!(headers.get(&ACCESS_CONTROL_ALLOW_HEADERS), None);
     }
 
@@ -556,9 +612,13 @@ mod tests {
     fn n_a_negative_max_age_writes_no_header() {
         let mut rule = rule();
         rule.max_age_seconds = Some(-1);
-        let headers =
-            preflight_headers(&CorsPolicy::default(), &matched(&rule, AllowOrigin::Wildcard), &RequestedHeaders::empty())
-                .expect("renderable");
+        let headers = preflight_headers(
+            &CorsPolicy::default(),
+            &matched(&rule, AllowOrigin::Wildcard),
+            "GET",
+            &RequestedHeaders::empty(),
+        )
+        .expect("renderable");
         assert_eq!(headers.get(&ACCESS_CONTROL_MAX_AGE), None);
     }
 
@@ -569,7 +629,12 @@ mod tests {
         let mut rule = rule();
         rule.expose_headers = vec!["etag\nx-injected: 1".to_owned()];
         assert_eq!(
-            preflight_headers(&CorsPolicy::default(), &matched(&rule, AllowOrigin::Wildcard), &RequestedHeaders::empty()),
+            preflight_headers(
+                &CorsPolicy::default(),
+                &matched(&rule, AllowOrigin::Wildcard),
+                "GET",
+                &RequestedHeaders::empty()
+            ),
             Err(UnrenderableRule)
         );
         assert_eq!(
@@ -584,7 +649,12 @@ mod tests {
     fn n_vary_origin_is_never_omitted() {
         let rule = rule();
         for answer in [
-            preflight_headers(&CorsPolicy::default(), &matched(&rule, AllowOrigin::Wildcard), &RequestedHeaders::empty()),
+            preflight_headers(
+                &CorsPolicy::default(),
+                &matched(&rule, AllowOrigin::Wildcard),
+                "GET",
+                &RequestedHeaders::empty(),
+            ),
             actual_headers(&CorsPolicy::default(), &matched(&rule, AllowOrigin::Exact("https://a.invalid"))),
         ] {
             assert_eq!(answer.expect("renderable").get(&VARY), Some(&VARY_ORIGIN));

@@ -213,7 +213,7 @@ field = "Type"
 [[shape.Grantee.field]]
 name = "Type"
 required = false
-quirks = ["q-acl-0003", "q-acl-0004"]
+quirks = ["q-acl-0003", "q-acl-0004", "q-acl-0014"]
 
 # The grants are wrapped in `<AccessControlList>`, not flattened. Registered rather than
 # inherited because the neighbouring families flatten and a swap is invisible in a diff.

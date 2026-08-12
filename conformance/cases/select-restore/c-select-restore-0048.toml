@@ -1,0 +1,46 @@
+[case]
+id = "c-select-restore-0048"
+schema_version = 1
+title = "The gateway leaves the select expression opaque"
+rationale = """
+The protocol layer checks presence and length, then hands the expression to the backend. Rejecting an unfamiliar dialect here would make gateway compatibility depend on a parser the selected storage implementation never chose."""
+polarity = "positive"
+operation = "SelectObjectContent"
+tags = ["select", "boundary"]
+timeout_ms = 10000
+quirks = ["q-select-expression-opacity-0140"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_SelectObjectContent.html"
+summary = "The request supplies the expression to the selection implementation after protocol validation."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "conf-select"
+
+[[setup.objects]]
+bucket = "conf-select"
+key = "rows.csv"
+body = { utf8 = "a,b\n1,2\n" }
+
+[request]
+method = "POST"
+target = "/conf-select/rows.csv?select&select-type=2"
+headers = { "content-type" = "application/xml" }
+body = { utf8 = '<SelectObjectContentRequest><Expression>opaque backend dialect</Expression><ExpressionType>SQL</ExpressionType><InputSerialization><CSV/></InputSerialization><OutputSerialization><CSV/></OutputSerialization></SelectObjectContentRequest>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "event_stream"
+status = 200
+connection_after = "open"
+headers_present = { "content-type" = "application/vnd.amazon.event-stream" }
+
+[[expect.events]]
+type = "Records"
+min_count = 1
+
+[[expect.events]]
+type = "End"
+min_count = 1
+max_count = 1

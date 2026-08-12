@@ -51,7 +51,12 @@
 //! documented GET behaviour — but an error message never does.
 
 use rustfs_gateway_types::ErrorCode;
-use rustfs_gateway_types::dto::{ServerSideEncryptionConfiguration, SseAlgorithm};
+use rustfs_gateway_types::dto::ServerSideEncryptionConfiguration;
+
+use crate::contracts::{
+    DeleteAbsentPolicy, ENCRYPTION_ALGORITHMS, ENCRYPTION_DELETE_ABSENT_POLICY, ENCRYPTION_ERROR_SECRET_FLOW_POLICY,
+    ENCRYPTION_KMS_KEY_ALGORITHMS, ENCRYPTION_RULE_MAX, EncryptionErrorSecretFlowPolicy,
+};
 
 /// Why a decoded encryption document was refused, with the code AWS answers.
 ///
@@ -66,6 +71,10 @@ pub enum EncryptionRejection {
     /// A `KMSMasterKeyID` beside an algorithm that is not `aws:kms` or `aws:kms:dsse`: AWS
     /// documents the member as allowed if and only if the algorithm is one of those two.
     KmsKeyWithoutKmsAlgorithm,
+    /// Mutation-only form that carries the rejected KMS key id into the reason.
+    KmsKeyWithoutKmsAlgorithmWithValue(String),
+    /// The configuration carries more rules than the current contract permits.
+    TooManyRules,
 }
 
 impl EncryptionRejection {
@@ -76,21 +85,46 @@ impl EncryptionRejection {
             // A schema violation: the member's value set is closed and the document is outside it.
             EncryptionRejection::AlgorithmUnknown => ErrorCode::MALFORMED_XML,
             // A cross-member constraint on otherwise well-formed values.
-            EncryptionRejection::KmsKeyWithoutKmsAlgorithm => ErrorCode::INVALID_ARGUMENT,
+            EncryptionRejection::KmsKeyWithoutKmsAlgorithm
+            | EncryptionRejection::KmsKeyWithoutKmsAlgorithmWithValue(_)
+            | EncryptionRejection::TooManyRules => ErrorCode::INVALID_ARGUMENT,
         }
     }
 
     /// A constant explanation, never built from request bytes — and in particular never carrying
     /// the key id the document named (`q-enc-0009`).
     #[must_use]
-    pub const fn reason(&self) -> &'static str {
+    pub fn reason(&self) -> &str {
+        if let (
+            EncryptionErrorSecretFlowPolicy::EchoRejectedValue,
+            EncryptionRejection::KmsKeyWithoutKmsAlgorithmWithValue(value),
+        ) = (ENCRYPTION_ERROR_SECRET_FLOW_POLICY, self)
+        {
+            return value;
+        }
         match self {
             EncryptionRejection::AlgorithmUnknown => "SSEAlgorithm must be one of AES256, aws:fsx, aws:kms or aws:kms:dsse",
-            EncryptionRejection::KmsKeyWithoutKmsAlgorithm => {
+            EncryptionRejection::KmsKeyWithoutKmsAlgorithm | EncryptionRejection::KmsKeyWithoutKmsAlgorithmWithValue(_) => {
                 "KMSMasterKeyID can only be used when SSEAlgorithm is aws:kms or aws:kms:dsse"
+            }
+            EncryptionRejection::TooManyRules => "The encryption configuration carries too many rules",
+        }
+    }
+
+    fn kms_key_without_kms_algorithm(key_id: &str) -> Self {
+        match ENCRYPTION_ERROR_SECRET_FLOW_POLICY {
+            EncryptionErrorSecretFlowPolicy::ConstantReasons => EncryptionRejection::KmsKeyWithoutKmsAlgorithm,
+            EncryptionErrorSecretFlowPolicy::EchoRejectedValue => {
+                EncryptionRejection::KmsKeyWithoutKmsAlgorithmWithValue(key_id.to_owned())
             }
         }
     }
+}
+
+/// Whether deleting an already-absent encryption configuration is successful.
+#[must_use]
+pub const fn encryption_delete_absent_succeeds() -> bool {
+    matches!(ENCRYPTION_DELETE_ABSENT_POLICY, DeleteAbsentPolicy::Succeed)
 }
 
 /// Checks a decoded document against the family's semantic rules, first refusal wins.
@@ -105,14 +139,19 @@ impl EncryptionRejection {
 ///
 /// [`EncryptionRejection`] naming the first rule the document breaks.
 pub fn validate_encryption(configuration: &ServerSideEncryptionConfiguration) -> Result<(), EncryptionRejection> {
+    if ENCRYPTION_RULE_MAX.is_some_and(|max| configuration.rules.len() > max) {
+        return Err(EncryptionRejection::TooManyRules);
+    }
     for rule in &configuration.rules {
         if let Some(by_default) = &rule.apply_server_side_encryption_by_default {
-            if !by_default.sse_algorithm.is_known() {
+            if !ENCRYPTION_ALGORITHMS.contains(&by_default.sse_algorithm.as_str()) {
                 return Err(EncryptionRejection::AlgorithmUnknown);
             }
-            let kms = by_default.sse_algorithm == SseAlgorithm::AWS_KMS || by_default.sse_algorithm == SseAlgorithm::AWS_KMS_DSSE;
-            if by_default.kms_master_key_id.is_some() && !kms {
-                return Err(EncryptionRejection::KmsKeyWithoutKmsAlgorithm);
+            let kms = ENCRYPTION_KMS_KEY_ALGORITHMS.contains(&by_default.sse_algorithm.as_str());
+            if let Some(key_id) = &by_default.kms_master_key_id
+                && !kms
+            {
+                return Err(EncryptionRejection::kms_key_without_kms_algorithm(key_id));
             }
         }
     }
@@ -124,7 +163,7 @@ pub fn validate_encryption(configuration: &ServerSideEncryptionConfiguration) ->
 #[allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 mod tests {
     use super::*;
-    use rustfs_gateway_types::dto::{ServerSideEncryptionByDefault, ServerSideEncryptionRule};
+    use rustfs_gateway_types::dto::{ServerSideEncryptionByDefault, ServerSideEncryptionRule, SseAlgorithm};
 
     fn rule(algorithm: SseAlgorithm, key_id: Option<&str>) -> ServerSideEncryptionRule {
         ServerSideEncryptionRule {
@@ -244,6 +283,10 @@ mod tests {
             assert!(!rejection.reason().contains(KEY_ARN));
             assert!(!rejection.reason().contains("arn:"));
         }
+        let document = config(vec![rule(SseAlgorithm::AES256, Some(KEY_ARN))]);
+        let rejection = validate_encryption(&document).expect_err("a KMS key beside AES256 is refused");
+        assert!(!rejection.reason().contains(KEY_ARN));
+        assert!(!rejection.reason().contains("1234abcd"));
     }
 
     #[test]

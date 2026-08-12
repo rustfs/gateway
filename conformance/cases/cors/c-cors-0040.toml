@@ -10,7 +10,7 @@ same rule admits the requested names when all of them match, so this is not a ma
 polarity = "negative"
 tags = ["cors", "preflight", "security"]
 timeout_ms = 10000
-quirks = ["q-cors-0012", "q-cors-0015"]
+quirks = ["q-cors-0015", "q-cors-0034"]
 
 [[case.evidence]]
 url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CORSRule.html"

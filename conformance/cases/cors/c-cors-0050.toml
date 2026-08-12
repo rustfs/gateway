@@ -1,0 +1,39 @@
+[case]
+id = "c-cors-0050"
+schema_version = 1
+title = "An exact AllowedHeader match ignores ASCII case"
+rationale = "An exact header pattern has no wildcard to hide case handling: the differently cased request must still be admitted."
+polarity = "positive"
+tags = ["cors", "preflight"]
+timeout_ms = 10000
+quirks = ["q-cors-0012"]
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9110#section-5.1"
+summary = "HTTP field names are case-insensitive."
+kind = "rfc"
+
+[[setup.buckets]]
+name = "conf-cors-rt"
+
+[[exchanges]]
+[exchanges.request]
+method = "PUT"
+target = "/conf-cors-rt?cors"
+headers = { "content-type" = "application/xml", "content-md5" = "HAzSl5t/fJdoSF9uE3J1uA==" }
+body = { utf8 = "<CORSConfiguration><CORSRule><AllowedHeader>x-custom</AllowedHeader><AllowedMethod>PUT</AllowedMethod><AllowedOrigin>*</AllowedOrigin></CORSRule></CORSConfiguration>" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+[exchanges.expect]
+kind = "response"
+status = 200
+
+[[exchanges]]
+[exchanges.request]
+method = "OPTIONS"
+target = "/conf-cors-rt/key"
+headers = { "origin" = "https://app.example.com", "access-control-request-method" = "PUT", "access-control-request-headers" = "X-Custom" }
+[exchanges.expect]
+kind = "response"
+status = 200
+[exchanges.expect.headers_present]
+"access-control-allow-headers" = "X-Custom"

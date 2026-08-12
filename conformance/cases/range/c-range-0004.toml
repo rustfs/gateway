@@ -16,7 +16,7 @@ polarity = "positive"
 operation = "GetObject"
 tags = ["range", "read", "wire-bytes"]
 timeout_ms = 10000
-quirks = ["q-range-0053"]
+quirks = ["q-range-open-ended-0102"]
 
 [[case.evidence]]
 url = "https://github.com/s3s-project/s3s/pull/95"

@@ -17,7 +17,7 @@ polarity = "negative"
 operation = "GetObject"
 tags = ["conditional", "preconditions", "etag", "security", "error-shape"]
 timeout_ms = 10000
-quirks = ["q-cond-0046"]
+quirks = ["q-etag-form-0074"]
 
 [[case.evidence]]
 url = "https://www.rfc-editor.org/rfc/rfc9110#section-8.8.3"

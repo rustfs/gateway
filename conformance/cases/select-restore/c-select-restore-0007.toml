@@ -8,7 +8,7 @@ polarity = "positive"
 operation = "RestoreObject"
 tags = ["restore", "xml"]
 timeout_ms = 10000
-quirks = ["q-restore-0007"]
+quirks = ["q-restore-0007", "q-restore-root-namespace-0137"]
 
 [[case.evidence]]
 url = "https://github.com/s3s-project/s3s/issues/613"

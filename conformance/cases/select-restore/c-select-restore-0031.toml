@@ -8,7 +8,7 @@ polarity = "negative"
 operation = "SelectObjectContent"
 tags = ["select", "error-shape"]
 timeout_ms = 10000
-quirks = ["q-select-0006"]
+quirks = ["q-select-compression-0148"]
 
 [[case.evidence]]
 url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_SelectObjectContent.html"

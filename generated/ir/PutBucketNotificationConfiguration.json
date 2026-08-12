@@ -553,7 +553,7 @@
                                 "summary": "The request reference for the current notification write lists no Content-MD5 header, unlike the retired operation it replaced and unlike the six other writes in this band."
                               }
                             ],
-                "cases": ["c-bucketconfig-0042"]
+                "cases": ["c-bucketconfig-0010", "c-bucketconfig-0042"]
               },
               {
                 "id": "q-ntf-0004",

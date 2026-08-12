@@ -44,6 +44,7 @@ SANDBOX=""
 SANDBOX_RESET_TRACKED=""
 SANDBOX_RESET_UNTRACKED=""
 SANDBOX_RESET_READY=0
+QUIRK_LEDGER_PARSE_CACHE=""
 
 literalize_nul_paths() {
     local input="$1" output="$2" path
@@ -241,6 +242,9 @@ cleanup_sandbox() {
         rm -rf "$SANDBOX"
     fi
     rm -f "$SANDBOX_RESET_TRACKED" "$SANDBOX_RESET_UNTRACKED"
+    if [[ -n "$QUIRK_LEDGER_PARSE_CACHE" ]]; then
+        rm -f "$QUIRK_LEDGER_PARSE_CACHE"
+    fi
     return 0
 }
 trap cleanup_sandbox EXIT
@@ -316,7 +320,7 @@ expect_english_fail_minimal() {
 # Runs the mutation inside a sandbox, then asserts the guard exits non-zero.
 expect_fail() {
     local guard="$1" desc="$2" mutate="$3"
-    local sandbox rc=0
+    local sandbox output rc=0
     cases=$((cases + 1))
     if [[ ! -x "${SCRIPT_DIR}/${guard}" ]]; then
         fail_msg "${guard} is missing or not executable; cannot test: ${desc}"
@@ -326,9 +330,20 @@ expect_fail() {
     sandbox="$SANDBOX"
     (cd "$sandbox" && "$mutate" >/dev/null)
     stage_sandbox_changes "$sandbox" >/dev/null 2>&1
-    GATEWAY_CHECK_ROOT="$sandbox" "${SCRIPT_DIR}/${guard}" >/dev/null 2>&1 || rc=$?
-    if [[ "$rc" -ne 0 ]]; then
+    output="$(GATEWAY_CHECK_ROOT="$sandbox" "${SCRIPT_DIR}/${guard}" 2>&1)" || rc=$?
+    local expected_diagnostic="" diagnostic_helper diagnostic_fragment
+    if [[ "$guard" == check_quirk_ledger.sh ]]; then
+        while IFS=$'\t' read -r diagnostic_helper diagnostic_fragment; do
+            if [[ "$diagnostic_helper" == "$mutate" ]]; then
+                expected_diagnostic="$diagnostic_fragment"
+                break
+            fi
+        done <<<"$QUIRK_LEDGER_DIAGNOSTICS"
+    fi
+    if [[ "$rc" -ne 0 && ( "$guard" != check_quirk_ledger.sh || ( -n "$expected_diagnostic" && "$output" == *"$expected_diagnostic"* ) ) ]]; then
         pass_msg "${guard} catches: ${desc}"
+    elif [[ "$rc" -ne 0 ]]; then
+        fail_msg "${guard} failed without its policy diagnostic: ${desc}"
     else
         fail_msg "${guard} did NOT catch: ${desc}"
     fi
@@ -964,6 +979,25 @@ PYEOF
 }
 expect_fail check_scalar_case_coverage.sh \
     'comments and strings replacing a mapped scalar test' mut_scalar_test_replaced_by_comment_and_string
+
+mut_scalar_objectlock_case_does_not_replace_ts_n006() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/types/src/scalar/tests/timestamp_tests.rs")
+text = path.read_text()
+old = "#[test]\nfn c_ts_n006_the_object_lock_header_only_accepts_iso8601()"
+new = "#[test]\nfn removed_ts_n006_the_object_lock_header_only_accepts_iso8601()"
+if text.count(old) != 1:
+    raise SystemExit("c-ts-n006 scalar acceptance test is not unique")
+if text.count("fn c_objectlock_0001_the_object_lock_header_only_accepts_iso8601()") != 1:
+    raise SystemExit("c-objectlock-0001 quirk case must remain independently registered")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_scalar_case_coverage.sh \
+    'the object-lock quirk case replacing the independent c-ts-n006 acceptance id' \
+    mut_scalar_objectlock_case_does_not_replace_ts_n006
 
 mut_scalar_id_maps_to_two_active_tests() {
     python3 - <<'PYEOF'
@@ -4670,6 +4704,52 @@ mut_lossy_in_scalar() {
 expect_fail check_single_normalization.sh \
     'a lossy decode in the scalar vocabulary, which merges two client inputs' mut_lossy_in_scalar
 
+mut_decoded_utf8_current_is_lossy() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("model/overlays/quirks/naming.toml")
+text = path.read_text()
+old = 'mutation_dimension = "decoded_utf8"\ncontract_value = "strict"'
+new = 'mutation_dimension = "decoded_utf8"\ncontract_value = "lossy"'
+if text.count(old) != 1:
+    raise SystemExit("decoded_utf8 strict source is not unique")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_single_normalization.sh \
+    'the typed UTF-8 mutation arm becoming the overlay current' mut_decoded_utf8_current_is_lossy
+
+mut_decoded_utf8_source_is_duplicated() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("model/overlays/quirks/naming.toml")
+text = path.read_text()
+old = 'mutation_dimension = "default_slash_policy"'
+if text.count(old) != 1:
+    raise SystemExit("default slash source is not unique")
+path.write_text(text.replace(old, 'mutation_dimension = "decoded_utf8"', 1))
+PYEOF
+}
+expect_fail check_single_normalization.sh \
+    'a second overlay record claiming the decoded UTF-8 dimension' mut_decoded_utf8_source_is_duplicated
+
+mut_lossy_arm_line_drifts() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/types/src/scalar/naming.rs")
+text = path.read_text()
+old = "DecodedUtf8Policy::Lossy => Ok(percent_decode_str(value).decode_utf8_lossy().into_owned()),"
+if text.count(old) != 1:
+    raise SystemExit("lossy mutation arm is not unique")
+path.write_text(text.replace(old, old.replace("Lossy =>", "Lossy  =>"), 1))
+PYEOF
+}
+expect_fail check_single_normalization.sh \
+    'the one audited lossy mutation arm drifting from its exact spelling' mut_lossy_arm_line_drifts
+
 mut_drop_percent_decode_allowances() {
     rm -f scripts/allowances/percent-decode-allowances.txt
 }
@@ -4744,7 +4824,7 @@ text = path.read_text()
 # The refactor the guard exists to catch: the credentials writer folded into the function that
 # knows about the wildcard forms, with the reflected arm now able to reach it.
 text = text.replace(
-    "        AllowOrigin::Reflected(_) | AllowOrigin::Wildcard => None,",
+    "        AllowOrigin::Reflected(_) | AllowOrigin::Wildcard if contracts::cors_wildcard_credentials_omitted() => None,\n        AllowOrigin::Reflected(_) | AllowOrigin::Wildcard => credentials_header(policy, matched.request_origin),",
     "        AllowOrigin::Reflected(value) => Some((ACCESS_CONTROL_ALLOW_CREDENTIALS, HeaderValue::from_static(\"true\"))).filter(|_| !value.is_empty()),\n        AllowOrigin::Wildcard => None,",
 )
 path.write_text(text)
@@ -6822,6 +6902,560 @@ if "${SCRIPT_DIR}/test_test_target_consolidation.sh"; then
 else
     fail_msg 'test-target consolidation mutations'
 fi
+
+# The protected quirk ledger has independent negative controls for its counts, source union,
+# dimensions, capability exclusions, production consumers, bilateral backlinks and generated ID
+# sets. None of these controls runs codegen or Cargo.
+QUIRK_LEDGER_DIAGNOSTICS=$(cat <<'DIAGEOF'
+mut_quirk_ledger_classification_count	q-timestamp-0012: unknown classification
+mut_quirk_ledger_duplicate_source	q-restore-header-absence-0127: multiple typed sources
+mut_quirk_ledger_typed_contract_proof_removed	ledger typed_contracts: expected 157, found 156
+mut_quirk_ledger_dimension_count	ledger dimensions: expected 171, found 170
+mut_quirk_ledger_misbound_emitter_dimension	q-restore-header-absence-0127: expected one declared emitter binding, found 0
+mut_quirk_ledger_capability_exclusion	capability exclusions must remain typed contract sources
+mut_quirk_ledger_mutable_consumer	q-empty-0002: mutable source has no parsed operation consumer
+mut_quirk_ledger_runtime_consumer	q-restore-header-absence-0127: emitted constants lack one production consumer identity
+mut_quirk_ledger_cfg_disabled_consumer	q-restore-header-absence-0127: emitted constants lack one production consumer identity
+mut_quirk_ledger_cfg_attr_disabled_consumer	q-restore-header-absence-0127: emitted constants lack one production consumer identity
+mut_quirk_ledger_codegen_consumer_decoy	q-restore-root-namespace-0137: emitted constants lack one production consumer identity
+mut_quirk_ledger_direct_case_comment_decoy	q-restore-header-parser-0128 -> c-rst-0014: expected one executable direct-case backlink, found 0
+mut_quirk_ledger_direct_case_string_decoy	q-restore-header-parser-0128 -> c-rst-0014: expected one executable direct-case backlink, found 0
+mut_quirk_ledger_direct_case_cfg_disabled	q-restore-header-parser-0128 -> c-rst-0014: expected one executable direct-case backlink, found 0
+mut_quirk_ledger_direct_case_cfg_attr_disabled	q-restore-header-parser-0128 -> c-rst-0014: expected one executable direct-case backlink, found 0
+mut_quirk_ledger_direct_case_ignored	q-restore-header-parser-0128 -> c-rst-0014: expected one executable direct-case backlink, found 0
+mut_quirk_ledger_direct_case_cfg_attr_ignored	q-restore-header-parser-0128 -> c-rst-0014: expected one executable direct-case backlink, found 0
+mut_quirk_ledger_direct_case_should_panic	q-restore-header-parser-0128 -> c-rst-0014: expected one executable direct-case backlink, found 0
+mut_quirk_ledger_direct_case_inert_body_string	q-restore-header-parser-0128 -> c-rst-0014: expected one executable direct-case backlink, found 0
+mut_quirk_ledger_direct_case_ordinary_function	q-restore-header-parser-0128 -> c-rst-0014: expected one executable direct-case backlink, found 0
+mut_quirk_ledger_direct_case_shadowed_macro	q-restore-header-parser-0128 -> c-rst-0014: expected one executable direct-case backlink, found 0
+mut_quirk_ledger_forward_backlink	q-restore-header-absence-0127 -> c-select-restore-0019: missing unique backlink
+mut_quirk_ledger_reverse_backlink	c-select-restore-0040 -> q-restore-header-absence-0127: missing unique source backlink
+mut_quirk_ledger_spec_id_set	spec/quirks id set drifted:
+DIAGEOF
+)
+if ! python3 - "${GATEWAY_GUARD_SCRIPT_SOURCE:-$0}" <<'PYEOF'
+import pathlib
+import re
+import sys
+
+text = pathlib.Path(sys.argv[1]).read_text()
+entries = re.findall(r"expect_fail check_quirk_ledger\.sh \\\n\s+'([^']+)' ([a-z0-9_]+)", text)
+diagnostics = re.findall(r"^(mut_quirk_ledger_[a-z0-9_]+)\t([^\n]+)$", text, re.MULTILINE)
+helpers = [helper for _, helper in entries]
+if len(entries) != 24 or len(set(entries)) != 24 or len(diagnostics) != 24 or len(set(diagnostics)) != 24:
+    raise SystemExit("quirk-ledger mutation manifest must contain 24 unique description/helper pairs")
+if set(helpers) != {helper for helper, _ in diagnostics}:
+    raise SystemExit("quirk-ledger diagnostic manifest does not match the 24 mutation helpers")
+PYEOF
+then
+    fail_msg 'check_quirk_ledger.sh mutation manifest is missing or duplicated'
+fi
+QUIRK_LEDGER_PARSE_CACHE="$(mktemp "${TMPDIR:-/tmp}/gateway-quirk-ledger-cache.XXXXXX")"
+rm -f "$QUIRK_LEDGER_PARSE_CACHE"
+export GATEWAY_QUIRK_LEDGER_PARSE_CACHE="$QUIRK_LEDGER_PARSE_CACHE"
+make_sandbox
+if ! GATEWAY_CHECK_ROOT="$SANDBOX" "${SCRIPT_DIR}/check_quirk_ledger.sh" >/dev/null 2>&1; then
+    fail_msg 'check_quirk_ledger.sh parse-cache baseline failed'
+fi
+python3 - "$QUIRK_LEDGER_PARSE_CACHE" "$SANDBOX/model/overlays/quirks/object.toml" <<'PYEOF'
+import hashlib
+import pathlib
+import sqlite3
+import sys
+
+cache, subject = map(pathlib.Path, sys.argv[1:])
+digest = hashlib.sha256(subject.read_bytes()).hexdigest()
+with sqlite3.connect(cache) as connection:
+    connection.execute(
+        "UPDATE parse_cache SET value = 'not-json' WHERE kind = 'toml' AND hash = ?", (digest,)
+    )
+PYEOF
+if ! GATEWAY_CHECK_ROOT="$SANDBOX" "${SCRIPT_DIR}/check_quirk_ledger.sh" >/dev/null 2>&1; then
+    fail_msg 'check_quirk_ledger.sh did not repair a malformed cached row'
+fi
+if [[ ! -s "$QUIRK_LEDGER_PARSE_CACHE" ]]; then
+    fail_msg 'check_quirk_ledger.sh parse cache was not populated'
+fi
+printf 'not-json\n' >"$QUIRK_LEDGER_PARSE_CACHE"
+if ! GATEWAY_CHECK_ROOT="$SANDBOX" "${SCRIPT_DIR}/check_quirk_ledger.sh" >/dev/null 2>&1; then
+    fail_msg 'check_quirk_ledger.sh did not rebuild a corrupt parse cache'
+fi
+quirk_ledger_cases_before="$cases"
+mut_quirk_ledger_classification_count() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("model/overlays/quirks/object.toml")
+text = path.read_text()
+old = 'id      = "q-timestamp-0012"\nkind    = "structured_header"\nclassification = "contract"'
+new = 'id      = "q-timestamp-0012"\nkind    = "structured_header"\nclassification = "unknown"'
+if old not in text:
+    raise SystemExit("classification mutation subject is missing")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_quirk_ledger.sh \
+    'one protected record leaving the 96/157/88 classification ledger' mut_quirk_ledger_classification_count
+if ! python3 - "$QUIRK_LEDGER_PARSE_CACHE" "$SANDBOX/model/overlays/quirks/object.toml" <<'PYEOF'
+import hashlib
+import pathlib
+import sqlite3
+import sys
+
+cache, subject = map(pathlib.Path, sys.argv[1:])
+digest = hashlib.sha256(subject.read_bytes()).hexdigest()
+with sqlite3.connect(cache) as connection:
+    row = connection.execute(
+        "SELECT 1 FROM parse_cache WHERE kind = 'toml' AND hash = ?", (digest,)
+    ).fetchone()
+if row is None:
+    raise SystemExit("changed content did not create a content-hash cache miss")
+PYEOF
+then
+    fail_msg 'check_quirk_ledger.sh reused the baseline parse for changed content'
+fi
+
+mut_quirk_ledger_duplicate_source() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("model/overlays/quirks/select-restore.toml")
+text = path.read_text()
+old = 'mutation_dimension = "restore_header_absence"\ncontract_value = "omit"'
+new = 'mutation_dimension = "restore_header_absence"\ncodec_value = "entity_tag"\ncontract_value = "omit"'
+if old not in text:
+    raise SystemExit("typed-source mutation subject is missing")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_quirk_ledger.sh \
+    'one atom claiming two typed sources' mut_quirk_ledger_duplicate_source
+
+mut_quirk_ledger_typed_contract_proof_removed() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("model/overlays/quirks/select-restore.toml")
+text = path.read_text()
+old = 'mutation_dimension = "restore_header_absence"\ncontract_value = "omit"'
+if text.count(old) != 1:
+    raise SystemExit("typed-contract proof mutation subject is not unique")
+path.write_text(text.replace(old, "", 1))
+PYEOF
+}
+expect_fail check_quirk_ledger.sh \
+    'a typed contract losing its current value and mutation dimension' mut_quirk_ledger_typed_contract_proof_removed
+
+mut_quirk_ledger_dimension_count() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("model/overlays/quirks/select-restore.toml")
+text = path.read_text()
+old = 'mutation_dimension = "restore_header_absence"\ncontract_value = "omit"'
+new = 'mutation_dimension = "restore_header_parse_grammar"\ncontract_value = "omit"'
+if old not in text:
+    raise SystemExit("dimension mutation subject is missing")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_quirk_ledger.sh \
+    'the 171-dimension ledger collapsing one independent atom' mut_quirk_ledger_dimension_count
+
+mut_quirk_ledger_misbound_emitter_dimension() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("crates/codegen/src/emit/runtime_contracts/select_restore.rs")
+text = path.read_text()
+old = '''        RestoreHeaderAbsence,
+        RestoreHeaderAbsence,
+        RestoreHeaderAbsenceValue,'''
+new = '''        RestoreHeaderParseGrammar,
+        RestoreHeaderAbsence,
+        RestoreHeaderAbsenceValue,'''
+if text.count(old) != 1:
+    raise SystemExit("emitter-dimension mutation subject is not unique")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_quirk_ledger.sh \
+    'one typed source being bound to another atom dimension by its emitter' mut_quirk_ledger_misbound_emitter_dimension
+
+mut_quirk_ledger_capability_exclusion() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("model/overlays/quirks/cors.toml")
+text = path.read_text()
+old = 'id      = "q-cors-0006"'
+new = 'id      = "q-cors-9006"'
+if text.count(old) != 1:
+    raise SystemExit("capability exclusion mutation subject is not unique")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_quirk_ledger.sh \
+    'the explicit two-entry CORS capability exclusion drifting' mut_quirk_ledger_capability_exclusion
+
+mut_quirk_ledger_mutable_consumer() {
+    python3 - <<'PYEOF'
+import pathlib
+
+decoy_path = None
+for path in pathlib.Path("model/overlays/ops").glob("*.toml"):
+    text = path.read_text()
+    if '"q-empty-0002"' in text:
+        path.write_text(text.replace('"q-empty-0002"', '"q-region-0003"'))
+        decoy_path = path
+if decoy_path is None:
+    raise SystemExit("mutable-consumer mutation subject is missing")
+with decoy_path.open("a") as output:
+    output.write('\n# A raw TOML comment is not a consumer: "q-empty-0002"\n')
+    output.write('ledger_string_decoy = "q-empty-0002"\n')
+PYEOF
+}
+expect_fail check_quirk_ledger.sh \
+    'a TOML comment replacing every parsed mutable consumer' mut_quirk_ledger_mutable_consumer
+
+mut_quirk_ledger_runtime_consumer() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("crates/core/src/ops/shared/restore.rs")
+text = path.read_text()
+old = "RESTORE_HEADER_ABSENCE"
+if old not in text:
+    raise SystemExit("runtime-consumer mutation subject is missing")
+text = text.replace(old, "RESTORE_HEADER_ABSENCE_BROKEN")
+text += '\n// A comment is not a production consumer: RESTORE_HEADER_ABSENCE\n'
+text += 'const _LEDGER_STRING_DECOY: &str = "RESTORE_HEADER_ABSENCE";\n'
+path.write_text(text)
+PYEOF
+}
+expect_fail check_quirk_ledger.sh \
+    'comments and strings replacing an emitted constant production use' mut_quirk_ledger_runtime_consumer
+
+mut_quirk_ledger_cfg_disabled_consumer() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("crates/core/src/ops/shared/restore.rs")
+text = path.read_text()
+old = "RESTORE_HEADER_ABSENCE"
+if old not in text:
+    raise SystemExit("cfg-disabled consumer mutation subject is missing")
+text = text.replace(old, "RESTORE_HEADER_ABSENCE_BROKEN")
+text += '''
+#[cfg(any())]
+fn disabled_ledger_decoy() {
+    let _ = crate::contracts::RESTORE_HEADER_ABSENCE;
+}
+'''
+path.write_text(text)
+PYEOF
+}
+expect_fail check_quirk_ledger.sh \
+    'a cfg-disabled item replacing an emitted constant production use' mut_quirk_ledger_cfg_disabled_consumer
+
+mut_quirk_ledger_cfg_attr_disabled_consumer() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("crates/core/src/ops/shared/restore.rs")
+text = path.read_text()
+old = "RESTORE_HEADER_ABSENCE"
+if old not in text:
+    raise SystemExit("cfg_attr-disabled consumer mutation subject is missing")
+text = text.replace(old, "RESTORE_HEADER_ABSENCE_BROKEN")
+text += '''
+#[cfg_attr(all(), cfg(any()))]
+fn disabled_ledger_decoy() {
+    let _ = crate::contracts::RESTORE_HEADER_ABSENCE;
+}
+'''
+path.write_text(text)
+PYEOF
+}
+expect_fail check_quirk_ledger.sh \
+    'a cfg_attr-disabled item replacing an emitted constant production use' mut_quirk_ledger_cfg_attr_disabled_consumer
+
+mut_quirk_ledger_codegen_consumer_decoy() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("crates/codegen/src/emit/codec/decode.rs")
+text = path.read_text()
+old = '"crate::contracts::RESTORE_ROOT_NAMESPACE_POLICY, crate::contracts::RestoreRootNamespacePolicy::QualifiedName"'
+new = '"crate::contracts::RestoreRootNamespacePolicy::QualifiedName"'
+if text.count(old) != 1:
+    raise SystemExit("codegen-consumer mutation subject is not unique")
+text = text.replace(old, new, 1)
+text += '\n// An unrelated emitted-code string is not a live match-arm consumer.\n'
+text += 'const _LEDGER_CODEGEN_DECOY: &str = "crate::contracts::RESTORE_ROOT_NAMESPACE_POLICY";\n'
+path.write_text(text)
+PYEOF
+}
+expect_fail check_quirk_ledger.sh \
+    'an emitted-code policy leaving its active match arm for a string decoy' mut_quirk_ledger_codegen_consumer_decoy
+
+mut_quirk_ledger_direct_case_comment_decoy() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("crates/gateway/tests/select_restore_intent.rs")
+text = path.read_text()
+name = "c_rst_0014_malformed_restore_header_is_rejected_through_public_api"
+if text.count(f"fn {name}()") != 1:
+    raise SystemExit("direct-case comment mutation subject is not unique")
+text = text.replace(f"fn {name}()", f"fn disabled_{name}()", 1)
+text += f'\n// #[test]\n// fn {name}() {{ let quirk = "q-restore-header-parser-0128"; assert!(true, "{{}}", quirk); }}\n'
+path.write_text(text)
+PYEOF
+}
+expect_fail check_quirk_ledger.sh \
+    'a commented direct case replacing its active test function' mut_quirk_ledger_direct_case_comment_decoy
+
+mut_quirk_ledger_direct_case_string_decoy() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("crates/gateway/tests/select_restore_intent.rs")
+text = path.read_text()
+name = "c_rst_0014_malformed_restore_header_is_rejected_through_public_api"
+if text.count(f"fn {name}()") != 1:
+    raise SystemExit("direct-case string mutation subject is not unique")
+text = text.replace(f"fn {name}()", f"fn disabled_{name}()", 1)
+text += f'\nconst _DIRECT_CASE_DECOY: &str = r#"#[test] fn {name}() {{ let quirk = \\"q-restore-header-parser-0128\\"; assert!(true, \\"{{}}\\", quirk); }}"#;\n'
+path.write_text(text)
+PYEOF
+}
+expect_fail check_quirk_ledger.sh \
+    'a string direct-case decoy replacing its active test function' mut_quirk_ledger_direct_case_string_decoy
+
+mut_quirk_ledger_direct_case_cfg_disabled() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("crates/gateway/tests/select_restore_intent.rs")
+text = path.read_text()
+name = "c_rst_0014_malformed_restore_header_is_rejected_through_public_api"
+if text.count(f"fn {name}()") != 1:
+    raise SystemExit("cfg-disabled direct-case mutation subject is not unique")
+text = text.replace(f"fn {name}()", f"fn disabled_{name}()", 1)
+text += f'''\n#[cfg(any())]
+#[test]
+fn {name}() {{
+    let quirk = "q-restore-header-parser-0128";
+    assert!(true, "{{}}", quirk);
+}}
+'''
+path.write_text(text)
+PYEOF
+}
+expect_fail check_quirk_ledger.sh \
+    'a cfg-disabled direct case replacing its active test function' mut_quirk_ledger_direct_case_cfg_disabled
+
+mut_quirk_ledger_direct_case_cfg_attr_disabled() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("crates/gateway/tests/select_restore_intent.rs")
+text = path.read_text()
+name = "c_rst_0014_malformed_restore_header_is_rejected_through_public_api"
+if text.count(f"fn {name}()") != 1:
+    raise SystemExit("cfg_attr-disabled direct-case mutation subject is not unique")
+text = text.replace(f"fn {name}()", f"fn disabled_{name}()", 1)
+text += f'''\n#[cfg_attr(all(), cfg(any()))]
+#[test]
+fn {name}() {{
+    let quirk = "q-restore-header-parser-0128";
+    assert!(true, "{{}}", quirk);
+}}
+'''
+path.write_text(text)
+PYEOF
+}
+expect_fail check_quirk_ledger.sh \
+    'a cfg_attr-disabled direct case replacing its active test function' mut_quirk_ledger_direct_case_cfg_attr_disabled
+
+mut_quirk_ledger_direct_case_ignored() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("crates/gateway/tests/select_restore_intent.rs")
+text = path.read_text()
+name = "c_rst_0014_malformed_restore_header_is_rejected_through_public_api"
+if text.count(f"fn {name}()") != 1:
+    raise SystemExit("ignored direct-case mutation subject is not unique")
+text = text.replace(f"fn {name}()", f"fn disabled_{name}()", 1)
+text += f'''\n#[test]
+#[ignore]
+fn {name}() {{
+    let quirk = "q-restore-header-parser-0128";
+    assert!(true, "{{}}", quirk);
+}}
+'''
+path.write_text(text)
+PYEOF
+}
+expect_fail check_quirk_ledger.sh \
+    'an ignored direct case replacing its active test function' mut_quirk_ledger_direct_case_ignored
+
+mut_quirk_ledger_direct_case_cfg_attr_ignored() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("crates/gateway/tests/select_restore_intent.rs")
+text = path.read_text()
+name = "c_rst_0014_malformed_restore_header_is_rejected_through_public_api"
+if text.count(f"fn {name}()") != 1:
+    raise SystemExit("cfg_attr-ignored direct-case mutation subject is not unique")
+text = text.replace(f"fn {name}()", f"fn disabled_{name}()", 1)
+text += f'''\n#[test]
+#[cfg_attr(all(), ignore)]
+fn {name}() {{
+    let quirk = "q-restore-header-parser-0128";
+    assert!(true, "{{}}", quirk);
+}}
+'''
+path.write_text(text)
+PYEOF
+}
+expect_fail check_quirk_ledger.sh \
+    'a cfg_attr-ignored direct case replacing its active test function' mut_quirk_ledger_direct_case_cfg_attr_ignored
+
+mut_quirk_ledger_direct_case_should_panic() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("crates/gateway/tests/select_restore_intent.rs")
+text = path.read_text()
+name = "c_rst_0014_malformed_restore_header_is_rejected_through_public_api"
+if text.count(f"fn {name}()") != 1:
+    raise SystemExit("should-panic direct-case mutation subject is not unique")
+text = text.replace(f"fn {name}()", f"fn disabled_{name}()", 1)
+text += f'''\n#[test]
+#[should_panic]
+fn {name}() {{
+    let quirk = "q-restore-header-parser-0128";
+    panic!("{{}}", quirk);
+}}
+'''
+path.write_text(text)
+PYEOF
+}
+expect_fail check_quirk_ledger.sh \
+    'a should-panic direct case replacing its active test function' mut_quirk_ledger_direct_case_should_panic
+
+mut_quirk_ledger_direct_case_inert_body_string() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("crates/gateway/tests/select_restore_intent.rs")
+text = path.read_text()
+old_binding = '    let quirk = "q-restore-header-parser-0128";'
+old_assertion = '        ::core::assert_eq!(parse_restore_status(&value), None, "{}: {value:?} must be refused", quirk);'
+new_assertion = '        assert_eq!(parse_restore_status(&value), None, "{value:?} must be refused");'
+if text.count(old_binding) != 1 or text.count(old_assertion) != 1:
+    raise SystemExit("inert direct-case string mutation subject is not unique")
+text = text.replace(old_binding, '    let _ = "q-restore-header-parser-0128";', 1)
+text = text.replace(old_assertion, new_assertion, 1)
+path.write_text(text)
+PYEOF
+}
+expect_fail check_quirk_ledger.sh \
+    'an inert in-body string replacing an assertion-bound backlink' mut_quirk_ledger_direct_case_inert_body_string
+
+mut_quirk_ledger_direct_case_ordinary_function() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("crates/gateway/tests/select_restore_intent.rs")
+text = path.read_text()
+old_binding = '    let quirk = "q-restore-header-parser-0128";'
+new_binding = '''    let quirk = "q-restore-header-parser-0128";
+    fn assert_eq(_marker: &str) {}
+    assert_eq(quirk);'''
+old_assertion = '        ::core::assert_eq!(parse_restore_status(&value), None, "{}: {value:?} must be refused", quirk);'
+new_assertion = '        assert_eq!(parse_restore_status(&value), None, "{value:?} must be refused");'
+if text.count(old_binding) != 1 or text.count(old_assertion) != 1:
+    raise SystemExit("ordinary-function direct-case mutation subject is not unique")
+text = text.replace(old_binding, new_binding, 1)
+text = text.replace(old_assertion, new_assertion, 1)
+path.write_text(text)
+PYEOF
+}
+expect_fail check_quirk_ledger.sh \
+    'an ordinary function call replacing an assertion-macro backlink' mut_quirk_ledger_direct_case_ordinary_function
+
+mut_quirk_ledger_direct_case_shadowed_macro() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("crates/gateway/tests/select_restore_intent.rs")
+text = path.read_text()
+old_binding = '    let quirk = "q-restore-header-parser-0128";'
+new_binding = '''    let quirk = "q-restore-header-parser-0128";
+    macro_rules! assert_eq {
+        ($($token:tt)*) => {};
+    }'''
+old_assertion = '        ::core::assert_eq!(parse_restore_status(&value), None, "{}: {value:?} must be refused", quirk);'
+new_assertion = '        assert_eq!(parse_restore_status(&value), None, "{}: {value:?} must be refused", quirk);'
+if text.count(old_binding) != 1 or text.count(old_assertion) != 1:
+    raise SystemExit("shadowed-macro direct-case mutation subject is not unique")
+text = text.replace(old_binding, new_binding, 1)
+text = text.replace(old_assertion, new_assertion, 1)
+path.write_text(text)
+PYEOF
+}
+expect_fail check_quirk_ledger.sh \
+    'a local no-op macro replacing an absolute assertion backlink' mut_quirk_ledger_direct_case_shadowed_macro
+
+mut_quirk_ledger_forward_backlink() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("conformance/cases/select-restore/c-select-restore-0019.toml")
+text = path.read_text()
+old = 'quirks = ["q-restore-header-absence-0127"]'
+if old not in text:
+    raise SystemExit("forward-backlink mutation subject is missing")
+path.write_text(text.replace(old, 'quirks = []', 1))
+PYEOF
+}
+expect_fail check_quirk_ledger.sh \
+    'a source-to-case backlink being removed' mut_quirk_ledger_forward_backlink
+
+mut_quirk_ledger_reverse_backlink() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("conformance/cases/select-restore/c-select-restore-0040.toml")
+text = path.read_text()
+old = 'quirks = ["q-restore-select-members-0131"]'
+new = 'quirks = ["q-restore-header-absence-0127", "q-restore-select-members-0131"]'
+if old not in text:
+    raise SystemExit("reverse-backlink mutation subject is missing")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_quirk_ledger.sh \
+    'a case naming a typed source without the reverse source backlink' mut_quirk_ledger_reverse_backlink
+
+mut_quirk_ledger_spec_id_set() {
+    mv spec/quirks/q-empty-0002.toml spec/quirks/q-empty-0002.missing
+}
+expect_fail check_quirk_ledger.sh \
+    'one generated protected ID disappearing from the 96/157 typed set' mut_quirk_ledger_spec_id_set
+
+if [[ $((cases - quirk_ledger_cases_before)) -ne 24 ]]; then
+    fail_msg 'check_quirk_ledger.sh mutation census is not exactly 24 cases'
+fi
+
+unset GATEWAY_QUIRK_LEDGER_PARSE_CACHE
+rm -f "$QUIRK_LEDGER_PARSE_CACHE"
+QUIRK_LEDGER_PARSE_CACHE=""
 
 printf '\n%s case(s), %s failure(s)\n' "$cases" "$failures"
 [[ "$failures" -eq 0 ]]

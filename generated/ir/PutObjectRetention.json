@@ -218,7 +218,7 @@
                                 "summary": "The documented request syntax roots the body at a Retention element, while the structure it carries is published as ObjectLockRetention."
                               }
                             ],
-                "cases": ["c-lock-0005", "c-lock-0030"]
+                "cases": ["c-lock-0005", "c-lock-0027", "c-lock-0030"]
               },
               {
                 "id": "q-lock-0006",
@@ -232,7 +232,7 @@
                                 "summary": "The request documents Content-MD5 as required for the operation, which the pinned model spells as a request checksum requirement shared by the retention and legal-hold writes."
                               }
                             ],
-                "cases": ["c-lock-0014"]
+                "cases": ["c-lock-0004", "c-lock-0014"]
               },
               {
                 "id": "q-lock-0007",
@@ -265,7 +265,7 @@
                                 "summary": "MalformedXML is documented as the answer for a request body that does not validate against the published schema, which is what an out-of-set enum value is."
                               }
                             ],
-                "cases": ["c-lock-0016", "c-lock-0017", "c-lock-0008"]
+                "cases": ["c-lock-0002", "c-lock-0008", "c-lock-0016", "c-lock-0017"]
               },
               {
                 "id": "q-lock-0012",
@@ -293,7 +293,7 @@
                                 "summary": "A retention period protects an object version until a retain-until timestamp ahead of the moment the retention is applied, after which the protection lapses."
                               }
                             ],
-                "cases": ["c-lock-0024"]
+                "cases": ["c-lock-0005", "c-lock-0024"]
               },
               {
                 "id": "q-lock-0015",
@@ -307,7 +307,7 @@
                                 "summary": "Object lock settings can be applied only to objects in buckets that have object lock enabled, which is the configuration state the 400 reports."
                               }
                             ],
-                "cases": ["c-lock-0025", "c-lock-0026"]
+                "cases": ["c-lock-0005", "c-lock-0006", "c-lock-0025", "c-lock-0026"]
               }
             ],
   "ext_points": []

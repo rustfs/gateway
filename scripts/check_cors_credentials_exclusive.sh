@@ -34,12 +34,12 @@ set -euo pipefail
 #   internet that it may read this user's objects with this user's session. The
 #   browser enforces nothing here: it does exactly what the two headers say.
 #
-#   The primary defence is structural — `CorsPolicy::new` refuses
-#   `CorsOrigins::Any` with credentials, and `credentials_for` reaches the
-#   writer only from the `AllowOrigin::Exact` arm — but structure is a property
-#   of code somebody can rewrite in one sitting, and the rewrite that merges
-#   two small functions into one looks like tidying. This guard makes that
-#   rewrite fail before a reviewer has to notice it.
+#   `CorsPolicy::new` refuses `CorsOrigins::Any` with credentials, and the
+#   generated current contract makes wildcard origins return no credentials.
+#   The typed mutation alternative is intentionally present so its cases can
+#   kill the widening. This guard protects the writer boundary around both: a
+#   refactor that writes the header directly inside the wildcard match fails
+#   before a reviewer has to notice it.
 #
 # HOW TO EXEMPT
 #   There is no exemption. If the answer builder has to move, move it and

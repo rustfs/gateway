@@ -17,7 +17,7 @@ polarity = "positive"
 operation = "GetObject"
 tags = ["range", "read", "wire-bytes"]
 timeout_ms = 10000
-quirks = ["q-range-0053"]
+quirks = ["q-range-inclusive-length-0103"]
 
 [[case.evidence]]
 url = "https://github.com/s3s-project/s3s/issues/118"

@@ -67,7 +67,7 @@ impl Drop for Sandbox {
 /// One well-formed quirk, so that a collision test is not also an evidence test.
 fn quirk(id: &str, case: &str) -> String {
     format!(
-        "[[quirk]]\nid = \"{id}\"\nkind = \"test\"\ntarget = \"Alpha\"\n\
+        "[[quirk]]\nid = \"{id}\"\nkind = \"test\"\nclassification = \"contract\"\ntarget = \"Alpha\"\n\
          summary = \"A behaviour the model does not state at all.\"\ncases = [\"{case}\"]\n\n\
          [[quirk.evidence]]\nkind = \"observed\"\nref = \"https://example.invalid/a\"\n\
          summary = \"Written by the test, never pasted.\"\n"
@@ -176,6 +176,97 @@ fn refuses_one_quirk_id_declared_by_two_families() {
     let message = load_error(&sandbox);
     assert!(message.contains("quirks/alpha.toml") && message.contains("quirks/zeta.toml"), "{message}");
     assert!(message.contains("q-alpha-0001"), "{message}");
+}
+
+#[test]
+fn n_a_codec_value_without_a_mutation_dimension_is_not_a_mutable_rule() {
+    let sandbox = Sandbox::new("codec-without-mutation");
+    sandbox.write("ops/alpha.toml", "include = [\"Alpha\"]\n").write(
+        "quirks/codec.toml",
+        "[[quirk]]\nid = \"q-codec-0001\"\nkind = \"wire_form\"\nclassification = \"mutable\"\ncodec_value = \"entity_tag\"\n\
+             target = \"Alpha.Value\"\nsummary = \"The wire value has one grammar.\"\ncases = [\"c-codec-0001\"]\n\n\
+             [[quirk.evidence]]\nkind = \"observed\"\nref = \"https://example.invalid/codec\"\n\
+             summary = \"Written by the test, never pasted.\"\n",
+    );
+
+    let message = load_error(&sandbox);
+    assert!(message.contains("q-codec-0001") && message.contains("mutation_dimension"), "{message}");
+}
+
+#[test]
+fn n_a_mutation_dimension_without_a_codec_value_is_metadata_not_a_rule() {
+    let sandbox = Sandbox::new("mutation-without-codec");
+    sandbox.write("ops/alpha.toml", "include = [\"Alpha\"]\n").write(
+        "quirks/codec.toml",
+        "[[quirk]]\nid = \"q-codec-0002\"\nkind = \"wire_form\"\nclassification = \"mutable\"\nmutation_dimension = \"wire_form\"\n\
+             target = \"Alpha.Value\"\nsummary = \"The wire value has one grammar.\"\ncases = [\"c-codec-0002\"]\n\n\
+             [[quirk.evidence]]\nkind = \"observed\"\nref = \"https://example.invalid/codec\"\n\
+             summary = \"Written by the test, never pasted.\"\n",
+    );
+
+    let message = load_error(&sandbox);
+    assert!(message.contains("q-codec-0002") && message.contains("`codec_value`"), "{message}");
+}
+
+#[test]
+fn n_every_protocol_record_has_an_explicit_classification() {
+    let sandbox = Sandbox::new("missing-classification");
+    sandbox.write("ops/alpha.toml", "include = [\"Alpha\"]\n").write(
+        "quirks/unclear.toml",
+        &quirk("q-unclear-0001", "c-unclear-0001").replace("classification = \"contract\"\n", ""),
+    );
+
+    let message = load_error(&sandbox);
+    assert!(message.contains("q-unclear-0001") && message.contains("classification"), "{message}");
+}
+
+#[test]
+fn n_a_contract_cannot_carry_mutable_codec_input() {
+    let sandbox = Sandbox::new("contract-with-codec");
+    sandbox.write("ops/alpha.toml", "include = [\"Alpha\"]\n").write(
+        "quirks/contract.toml",
+        &quirk("q-contract-0001", "c-contract-0001").replace(
+            "classification = \"contract\"\n",
+            "classification = \"contract\"\ncodec_value = \"entity_tag\"\nmutation_dimension = \"wire_form\"\n",
+        ),
+    );
+
+    let message = load_error(&sandbox);
+    assert!(message.contains("q-contract-0001") && message.contains("contract"), "{message}");
+}
+
+#[test]
+fn n_a_mutable_record_cannot_lack_a_typed_rule() {
+    let sandbox = Sandbox::new("mutable-without-rule");
+    sandbox.write("ops/alpha.toml", "include = [\"Alpha\"]\n").write(
+        "quirks/mutable.toml",
+        &quirk("q-mutable-0001", "c-mutable-0001").replace("classification = \"contract\"", "classification = \"mutable\""),
+    );
+
+    let message = load_error(&sandbox);
+    assert!(message.contains("q-mutable-0001") && message.contains("typed rule"), "{message}");
+}
+
+#[test]
+fn a_mutable_source_rule_is_explicit_and_does_not_use_free_text_kind() {
+    let sandbox = Sandbox::new("mutable-source");
+    sandbox.write("ops/alpha.toml", "include = [\"Alpha\"]\n").write(
+        "quirks/source.toml",
+        &quirk("q-source-0001", "c-source-0001")
+            .replace("kind = \"test\"", "kind = \"unrelated_metadata\"")
+            .replace(
+                "classification = \"contract\"\n",
+                "classification = \"mutable\"\nmutation_dimension = \"element_order\"\n\
+                 mutation_sources = [\"Alpha.xml.element_order\"]\n",
+            ),
+    );
+
+    let overlay = Overlay::load(sandbox.path()).expect("an explicit source rule loads");
+    let rule = overlay
+        .source_rules
+        .get("q-source-0001")
+        .expect("the source rule is retained");
+    assert_eq!(rule.sources, vec!["Alpha.xml.element_order"]);
 }
 
 #[test]

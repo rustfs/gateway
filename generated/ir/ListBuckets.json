@@ -245,7 +245,7 @@
                                 "summary": "The documented response syntax fixes the sibling order the golden comparison pins."
                               }
                             ],
-                "cases": ["c-list-0018"]
+                "cases": ["c-list-0015", "c-list-0018", "c-list-0022"]
               },
               {
                 "id": "q-buckets-0071",

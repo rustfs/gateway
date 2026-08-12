@@ -143,6 +143,19 @@ fn c_ts_n006_the_object_lock_header_only_accepts_iso8601() {
 }
 
 #[test]
+fn c_objectlock_0001_the_object_lock_header_only_accepts_iso8601() {
+    // c-objectlock-0001 / q-timestamp-0011: this is the one header bound to ISO 8601. Feeding it an
+    // HTTP date must fail rather than be reinterpreted.
+    let quirk = "q-timestamp-0011";
+    ::core::assert!(
+        Timestamp::parse("Fri, 21 Dec 2012 00:00:00 GMT", TimestampFormat::Iso8601).is_err(),
+        "{}",
+        quirk
+    );
+    ::core::assert!(Timestamp::parse("2012-12-21T00:00:00Z", TimestampFormat::Iso8601).is_ok(), "{}", quirk);
+}
+
+#[test]
 fn c_ts_n007_out_of_range_values_are_rejected_not_wrapped() {
     assert!(Timestamp::parse("99999-01-01T00:00:00Z", TimestampFormat::Iso8601).is_err());
     assert!(Timestamp::parse("2015-13-01T00:00:00Z", TimestampFormat::Iso8601).is_err());

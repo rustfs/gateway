@@ -21,7 +21,19 @@ overlays/quirks/*.toml  ──┘
 | `src/json.rs` | Hand-written JSON reader plus the canonical writer (two-space indent, flat when it fits in 120 columns, one trailing newline). | An IR document's layout changed, or you are adding a value kind. |
 | `src/toml_lite.rs` | The overlay TOML subset: tables, arrays of tables, strings, integers, booleans, arrays. Everything else is a parse error on purpose. | An overlay entry is rejected and you want to know whether the grammar or the entry is wrong. |
 | `src/smithy.rs` | Loads the pinned Smithy 2.0 AST and **deletes the documentation and client-endpoint traits before anything else sees a shape**. Shape, member, trait and enum lookups. | You need a model fact, or you are checking that a trait really cannot leak. |
-| `src/overlay.rs` | The hand-written source, **merged from one file per operation family**: whitelist, deferred groups, scalar map, per-operation and per-shape overrides, quirk records. Self-consistency checks and every cross-file collision refusal live here. | Adding an overlay key, a quirk is rejected, or a load failed naming two family files. |
+| `src/overlay.rs` | The hand-written source, **merged from one file per operation family**: whitelist, deferred groups, scalar map, per-operation and per-shape overrides, quirk records, and typed codec rules paired with mutation dimensions. Self-consistency checks and every cross-file collision refusal live here. | Adding an overlay key, a quirk is rejected, or a load failed naming two family files. |
+| `src/overlay/codec.rs` | Typed codec/runtime values, lowered-IR mutation sources, and the strict runtime-contract parser. | Adding a codec value or diagnosing a mismatched runtime value and dimension. |
+| `src/overlay/codec_inputs.rs` | Strict parsers for mutable codec inputs and lowered-IR source paths. | A mutable record's codec value or source path is rejected. |
+| `src/overlay/contract_values.rs` | Closed runtime values selected by response, copy-adapter, and naming contract rules. | Adding a typed runtime-contract alternative. |
+| `src/overlay/cors_contract_values.rs` | Closed current/mutation values for bucket-CORS contracts. | Adding a CORS runtime policy. |
+| `src/overlay/cors_contract_inputs.rs` | Strict parser for typed bucket-CORS contract values. | A CORS contract value is rejected. |
+| `src/overlay/select_restore_contract_values.rs` | Closed current/mutation values for select and restore contracts. | Adding a SelectObjectContent or RestoreObject runtime policy. |
+| `src/overlay/select_restore_contract_inputs.rs` | Strict parser for typed select and restore contract values. | A select/restore contract value is rejected. |
+| `src/overlay/mutation_dimension.rs` | Exhaustive stable names for every mechanical mutation dimension. | Adding a mutation family or checking the protected dimension count. |
+| `src/overlay/naming_contract_inputs.rs` | Strict parser for typed naming contract values and their mutation dimensions. | A naming contract value is rejected or a new naming dimension is added. |
+| `src/overlay/precondition_contract_values.rs` | Closed conditional and byte-range current/mutation values. | Adding a precondition-family typed alternative. |
+| `src/overlay/precondition_contract_inputs.rs` | Strict parser for conditional and byte-range contract values. | A precondition contract value is rejected. |
+| `src/overlay/quirks.rs` | Exhaustive protocol-record loading and mutable/contract classification. | A record lacks one typed input or lands in the wrong generated table. |
 | `src/ir/mod.rs` | The IR document structure — one type per construct in `spec/ir.schema.json`. Also the quirk ordering rule and the query-key/header reverse lookups. | You are adding an IR construct, or you want to know what the IR can express. |
 | `src/ir/types.rs` | The scalar and composite type vocabulary: `Type`, timestamp and entity-tag rendering, `OmitWhen`. Nothing here has a default rendering. | You are binding a field and need to know which types exist. |
 | `src/ir/emit.rs` | IR → JSON value, in the schema's key order. | A generated IR document's key order looks wrong. |

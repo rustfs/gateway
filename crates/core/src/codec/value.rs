@@ -126,6 +126,21 @@ pub fn boolean(value: &str, member: &'static str) -> Result<bool, CodecError> {
     Err(unusable(member))
 }
 
+/// Parses a boolean using only lower-case wire spellings.
+///
+/// This is the mechanically distinct alternative selected by the boolean-spelling mutation gate.
+///
+/// # Errors
+///
+/// [`CodecError`] naming the member when the value is not exactly `true` or `false`.
+pub fn boolean_lowercase(value: &str, member: &'static str) -> Result<bool, CodecError> {
+    match value {
+        "true" => Ok(true),
+        "false" => Ok(false),
+        _ => Err(unusable(member)),
+    }
+}
+
 /// Parses a timestamp in the format the IR bound to this field.
 ///
 /// # Errors

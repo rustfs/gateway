@@ -671,7 +671,7 @@
                                 "summary": "The documented request syntax opens with a LifecycleConfiguration root element even though the payload member's shape is named BucketLifecycleConfiguration."
                               }
                             ],
-                "cases": ["c-lifecycle-0001", "c-lifecycle-0017"]
+                "cases": ["c-lifecycle-0001", "c-lifecycle-0002", "c-lifecycle-0017"]
               },
               {
                 "id": "q-lc-0005",

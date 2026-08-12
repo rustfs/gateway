@@ -17,18 +17,12 @@
 //! Responsible for: exercising the contract named by this file.
 //! NOT responsible for: implementing the production behavior under test.
 //! Upstream: the test harness and subject module. Downstream: the repository verification gate.
-
-//! End-to-end generation against the pinned model.
-//!
-//! Case ids from the P1-03 issue are in the test names, so a red test names the acceptance
-//! criterion it broke.
-
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use crate::{CodegenInput, CodegenOutput, generate, semantic, why};
 
-fn root() -> PathBuf {
+pub(super) fn root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .and_then(Path::parent)
@@ -87,6 +81,508 @@ fn c_cg_0003_operations_md_carries_three_reverse_indexes() {
     assert!(text.contains("| `list-type` | [ListObjectsV2](#listobjectsv2) |"));
     assert!(text.contains("| `MissingContentLength` | [PutObject](#putobject)"));
     assert!(text.contains("| `x-amz-checksum-` | [CompleteMultipartUpload](#completemultipartupload)"));
+}
+
+#[test]
+fn codec_quirks_are_emitted_as_reviewable_spec_data() {
+    let artifacts = artifacts();
+    let (_, quirk) = artifacts
+        .files
+        .iter()
+        .find(|(path, _)| path.to_string_lossy().ends_with("spec/quirks/q-etag-form-0074.toml"))
+        .expect("the typed quirk table is generated");
+
+    assert!(quirk.contains("codec_value = \"entity_tag\""), "{quirk}");
+    assert!(quirk.contains("mutation_dimension = \"wire_form\""), "{quirk}");
+}
+
+#[test]
+fn a_source_rule_emits_current_values_from_the_lowered_ir() {
+    let artifacts = artifacts();
+    let (_, quirk) = artifacts
+        .files
+        .iter()
+        .find(|(path, _)| path.to_string_lossy().ends_with("spec/quirks/q-order-0014.toml"))
+        .expect("the source-backed quirk table is generated");
+
+    assert!(quirk.contains("mutation_dimension = \"element_order\""), "{quirk}");
+    assert!(quirk.contains("path = \"ListObjectsV2.xml.element_order\""), "{quirk}");
+    assert!(quirk.contains("current = [\"Name\", \"Prefix\", \"KeyCount\""), "{quirk}");
+}
+
+#[test]
+fn element_rename_current_comes_from_the_lowered_root_name() {
+    let artifacts = artifacts();
+    let (_, quirk) = artifacts
+        .files
+        .iter()
+        .find(|(path, _)| path.to_string_lossy().ends_with("spec/quirks/q-root-0013.toml"))
+        .expect("the root-name quirk table is generated");
+
+    assert!(quirk.contains("mutation_dimension = \"element_rename\""), "{quirk}");
+    assert_eq!(quirk.matches("current = \"ListBucketResult\"").count(), 2, "{quirk}");
+}
+
+#[test]
+fn optionality_current_comes_from_each_lowered_field() {
+    let artifacts = artifacts();
+    let (_, quirk) = artifacts
+        .files
+        .iter()
+        .find(|(path, _)| path.to_string_lossy().ends_with("spec/quirks/q-empty-0016.toml"))
+        .expect("the optionality quirk table is generated");
+
+    assert!(
+        quirk.contains("path = \"ListObjectsV2.output.Prefix.required\"\ncurrent = true"),
+        "{quirk}"
+    );
+    assert!(
+        quirk.contains("path = \"ListObjectsV2.output.Delimiter.required\"\ncurrent = false"),
+        "{quirk}"
+    );
+}
+
+#[test]
+fn generated_source_tables_do_not_capture_root_metadata() {
+    let artifacts = artifacts();
+    let (_, quirk) = artifacts
+        .files
+        .iter()
+        .find(|(path, _)| path.to_string_lossy().ends_with("spec/quirks/q-order-0014.toml"))
+        .expect("the source-backed quirk table is generated");
+    let parsed = rustfs_gateway_model::toml_lite::parse("q-order-0014.toml", quirk).expect("generated TOML parses");
+
+    assert_eq!(
+        parsed.get("target").and_then(rustfs_gateway_model::toml_lite::Toml::as_str),
+        Some("ListObjectsV2")
+    );
+}
+
+#[test]
+fn list_family_source_dimensions_read_the_real_lowered_fields() {
+    let artifacts = artifacts();
+    let emitted = |id: &str| {
+        artifacts
+            .files
+            .iter()
+            .find(|(path, _)| path.to_string_lossy().ends_with(&format!("spec/quirks/{id}.toml")))
+            .map(|(_, body)| body.as_str())
+            .expect("the typed list-family quirk is generated")
+    };
+
+    assert!(emitted("q-etag-0020").contains("current = \"XmlQuoted\""));
+    assert!(emitted("q-flat-0019").contains("current = true"));
+    assert!(emitted("q-wrapped-0062").contains("current = false"));
+    assert!(emitted("q-version-0061").contains("current = \"Version\""));
+    assert!(emitted("q-owner-0017").contains("current = \"RequestField(FetchOwner==false)\""));
+    assert!(emitted("q-storageclass-0022").contains("current_absent = true"));
+    assert_eq!(
+        emitted("q-storageclass-0024")
+            .matches("current = \"ValueEquals(STANDARD)\"")
+            .count(),
+        2
+    );
+    assert!(emitted("q-encoding-0015").contains("current = [\"Prefix\", \"Delimiter\""));
+    assert_eq!(emitted("q-maxkeys-0068").matches("current = 1000").count(), 2);
+}
+
+#[test]
+fn protected_mutation_dimensions_read_distinct_lowered_ir_sources() {
+    let artifacts = artifacts();
+    let emitted = |id: &str| {
+        artifacts
+            .files
+            .iter()
+            .find(|(path, _)| path.to_string_lossy().ends_with(&format!("spec/quirks/{id}.toml")))
+            .map(|(_, body)| body.as_str())
+            .expect("the source-backed quirk is generated")
+    };
+
+    assert!(emitted("q-timestamp-0011").contains("mutation_dimension = \"time_format\""));
+    assert!(emitted("q-timestamp-0011").contains("current = \"Iso8601\""));
+    assert!(emitted("q-bkt-0001").contains("mutation_dimension = \"status_mapping\""));
+    assert!(emitted("q-bkt-0001").contains("current = 200"));
+    assert!(emitted("q-empty-0002").contains("mutation_dimension = \"empty_element_render\""));
+    assert!(emitted("q-empty-0002").contains("current = \"emit\""));
+    assert!(emitted("q-acl-0002").contains("mutation_dimension = \"attribute_rename\""));
+    assert!(emitted("q-acl-0002").contains("current = \"xmlns:xsi\""));
+    assert!(emitted("q-acl-0003").contains("current = \"xsi:type\""));
+}
+
+#[test]
+fn bucket_and_acl_wire_contracts_are_mutable_codegen_sources() {
+    let artifacts = artifacts();
+    let emitted = |id: &str| {
+        artifacts
+            .files
+            .iter()
+            .find(|(path, _)| path.to_string_lossy().ends_with(&format!("spec/quirks/{id}.toml")))
+            .map(|(_, body)| body.as_str())
+            .expect("the source-backed family quirk is generated")
+    };
+
+    assert!(emitted("q-bkt-0007").contains("current = 204"));
+    assert_eq!(emitted("q-acl-0001").matches("current = false").count(), 4);
+    assert_eq!(emitted("q-acl-0009").matches("current = true").count(), 2);
+}
+
+/// c-location-0001 / q-unwrapped-0001: the location response has no generic output wrapper.
+#[test]
+fn c_location_0001_the_location_output_is_unwrapped() {
+    let quirk = "q-unwrapped-0001";
+    let artifacts = artifacts();
+    let (_, emitted) = artifacts
+        .files
+        .iter()
+        .find(|(path, _)| path.to_string_lossy().ends_with("spec/quirks/q-unwrapped-0001.toml"))
+        .expect("the location wrapper source is generated");
+    ::core::assert!(emitted.contains("current = true"), "{}", quirk);
+}
+
+/// c-location-0002 / q-empty-0002: the empty us-east-1 location element is emitted.
+#[test]
+fn c_location_0002_the_empty_location_value_is_emitted() {
+    let quirk = "q-empty-0002";
+    let artifacts = artifacts();
+    let (_, emitted) = artifacts
+        .files
+        .iter()
+        .find(|(path, _)| path.to_string_lossy().ends_with("spec/quirks/q-empty-0002.toml"))
+        .expect("the empty location source is generated");
+    ::core::assert!(emitted.contains("current = \"emit\""), "{}", quirk);
+}
+
+#[test]
+fn checksum_requirement_family_reads_each_operation_current_value() {
+    let artifacts = artifacts();
+    let emitted = |id: &str| {
+        artifacts
+            .files
+            .iter()
+            .find(|(path, _)| path.to_string_lossy().ends_with(&format!("spec/quirks/{id}.toml")))
+            .map(|(_, body)| body.as_str())
+            .expect("the checksum requirement is generated as a mutable rule")
+    };
+
+    assert!(emitted("q-acc-0003").contains("current = false"));
+    assert!(emitted("q-ntf-0003").contains("current = false"));
+    assert!(emitted("q-ver-0003").contains("current = true"));
+    assert_eq!(emitted("q-lock-0006").matches("current = true").count(), 3);
+}
+
+#[test]
+fn flattened_collection_families_read_their_actual_list_shapes() {
+    let artifacts = artifacts();
+    let emitted = |id: &str| {
+        artifacts
+            .files
+            .iter()
+            .find(|(path, _)| path.to_string_lossy().ends_with(&format!("spec/quirks/{id}.toml")))
+            .map(|(_, body)| body.as_str())
+            .expect("the flattened collection is generated as a mutable rule")
+    };
+
+    assert_eq!(emitted("q-enc-0002").matches("current = true").count(), 2);
+    assert_eq!(emitted("q-repl-0002").matches("current = true").count(), 2);
+    assert_eq!(emitted("q-lc-0003").matches("current = true").count(), 2);
+    assert_eq!(emitted("q-cors-0002").matches("current = true").count(), 2);
+    assert_eq!(emitted("q-cors-0003").matches("current = true").count(), 8);
+    assert_eq!(emitted("q-ntf-0002").matches("current = true").count(), 12);
+    assert!(emitted("q-mpu-part-0031").contains("current = true"));
+    assert!(emitted("q-mpu-upload-0032").contains("current = true"));
+}
+
+#[test]
+fn root_and_element_names_are_not_inferred_from_quirk_ids() {
+    let artifacts = artifacts();
+    let emitted = |id: &str| {
+        artifacts
+            .files
+            .iter()
+            .find(|(path, _)| path.to_string_lossy().ends_with(&format!("spec/quirks/{id}.toml")))
+            .map(|(_, body)| body.as_str())
+            .expect("the source-backed name quirk is generated")
+    };
+
+    assert!(emitted("q-mpu-root-0029").contains("current = \"InitiateMultipartUploadResult\""));
+    assert!(emitted("q-mpu-request-root-0030").contains("current = \"CompleteMultipartUpload\""));
+    assert!(emitted("q-copy-part-root-0084").contains("current = \"CopyPartResult\""));
+    assert!(emitted("q-attributes-root-0087").contains("current = \"GetObjectAttributesOutput\""));
+    assert!(emitted("q-select-0008").contains("current = \"SelectObjectContentRequest\""));
+    assert_eq!(emitted("q-lock-0004").matches("current = \"Retention\"").count(), 2);
+    assert_eq!(emitted("q-lock-0005").matches("current = \"LegalHold\"").count(), 2);
+    assert!(emitted("q-lc-0002").contains("current = \"LifecycleConfiguration\""));
+    assert_eq!(emitted("q-ver-0004").matches("current = \"MfaDelete\"").count(), 2);
+    assert_eq!(emitted("q-ntf-0004").matches("current = ").count(), 10);
+}
+
+#[test]
+fn unconfigured_resource_behavior_reads_the_operation_error_surface() {
+    let artifacts = artifacts();
+    let emitted = |id: &str| {
+        artifacts
+            .files
+            .iter()
+            .find(|(path, _)| path.to_string_lossy().ends_with(&format!("spec/quirks/{id}.toml")))
+            .map(|(_, body)| body.as_str())
+            .expect("the unconfigured-resource rule is generated as mutable data")
+    };
+
+    for id in [
+        "q-ver-0001",
+        "q-acc-0001",
+        "q-rqp-0001",
+        "q-log-0001",
+        "q-ntf-0001",
+        "q-acl-0008",
+    ] {
+        assert!(emitted(id).contains("current_absent = true"), "{id}");
+    }
+    assert!(emitted("q-enc-0001").contains("current = \"ServerSideEncryptionConfigurationNotFoundError\""));
+    assert!(emitted("q-pol-0003").contains("current = \"NoSuchBucketPolicy\""));
+    assert!(emitted("q-cors-0001").contains("current = \"NoSuchCORSConfiguration\""));
+}
+
+#[test]
+fn content_type_default_is_read_from_each_lowered_field() {
+    let artifacts = artifacts();
+    let (_, quirk) = artifacts
+        .files
+        .iter()
+        .find(|(path, _)| path.to_string_lossy().ends_with("spec/quirks/q-content-0008.toml"))
+        .expect("the content-type default is generated as mutable data");
+
+    assert_eq!(quirk.matches("current = \"binary/octet-stream\"").count(), 4);
+}
+
+#[test]
+fn entity_tag_quote_rules_read_the_render_context() {
+    let artifacts = artifacts();
+    let emitted = |id: &str| {
+        artifacts
+            .files
+            .iter()
+            .find(|(path, _)| path.to_string_lossy().ends_with(&format!("spec/quirks/{id}.toml")))
+            .map(|(_, body)| body.as_str())
+            .expect("the entity-tag render rule is generated as mutable data")
+    };
+
+    assert_eq!(emitted("q-etag-0004").matches("current = \"HeaderQuoted\"").count(), 4);
+    assert_eq!(emitted("q-etag-0004").matches("current = \"XmlQuoted\"").count(), 2);
+    assert!(emitted("q-mpu-attributes-etag-0036").contains("current = \"XmlBare\""));
+}
+
+#[test]
+fn opaque_expiration_values_are_a_typed_codegen_decision() {
+    let artifacts = artifacts();
+    let (_, quirk) = artifacts
+        .files
+        .iter()
+        .find(|(path, _)| path.to_string_lossy().ends_with("spec/quirks/q-timestamp-0005.toml"))
+        .expect("the opaque expiration rule is generated as mutable data");
+
+    assert_eq!(quirk.matches("current = \"OpaqueString\"").count(), 5);
+}
+
+#[test]
+fn unknown_xml_element_policy_reaches_the_generated_reader() {
+    use rustfs_gateway_model::{CodecValue, UnknownElementPolicyValue};
+
+    let mut artifacts = artifacts();
+    for id in ["q-acl-0006", "q-enc-0006", "q-lock-0014"] {
+        let (_, quirk) = artifacts
+            .files
+            .iter()
+            .find(|(path, _)| path.to_string_lossy().ends_with(&format!("spec/quirks/{id}.toml")))
+            .expect("the unknown-element policy is generated as mutable data");
+        assert!(quirk.contains("codec_value = \"skip\""), "{id}");
+        artifacts.codec_rules.get_mut(id).expect("the codec rule exists").current =
+            CodecValue::UnknownElementPolicy(UnknownElementPolicyValue::Reject);
+    }
+
+    let files = crate::emit::codec::emit(&artifacts.operations, &artifacts.codec_rules, Path::new("generated"))
+        .expect("the mutated codec renders in memory");
+    let put_acl = files
+        .iter()
+        .find(|(path, _)| path.to_string_lossy().ends_with("codec/ops/put_bucket_acl.rs"))
+        .map(|(_, body)| body)
+        .expect("PutBucketAcl codec exists");
+    assert!(put_acl.contains("the body contains an unknown element"), "{put_acl}");
+}
+
+#[test]
+fn object_lock_payload_requiredness_reads_all_three_operations() {
+    let artifacts = artifacts();
+    let (_, quirk) = artifacts
+        .files
+        .iter()
+        .find(|(path, _)| path.to_string_lossy().ends_with("spec/quirks/q-lock-0007.toml"))
+        .expect("the required payload rule is generated as mutable data");
+
+    assert_eq!(quirk.matches("current = true").count(), 3);
+}
+
+#[test]
+fn acl_type_requiredness_is_separate_from_runtime_discrimination() {
+    use rustfs_gateway_model::{ContractValue, MutationDimension};
+
+    let artifacts = artifacts();
+    let (_, requiredness) = artifacts
+        .files
+        .iter()
+        .find(|(path, _)| path.to_string_lossy().ends_with("spec/quirks/q-acl-0004.toml"))
+        .expect("the ACL requiredness rule is mutable");
+    assert_eq!(requiredness.matches("current = false").count(), 2);
+    let (_, contract) = artifacts
+        .files
+        .iter()
+        .find(|(path, _)| path.to_string_lossy().ends_with("spec/contracts/q-acl-0014.toml"))
+        .expect("the runtime discriminator has a generated contract record");
+    assert!(contract.contains("contract_value = \"derive_from_identifying_member\""));
+    assert_eq!(
+        artifacts
+            .contract_rules
+            .values()
+            .filter(|rule| { rule.mutation_dimension == MutationDimension::GranteeDiscriminatorPolicy })
+            .count(),
+        1
+    );
+
+    let current =
+        crate::emit::runtime_contracts::render(&artifacts.contract_rules).expect("the current runtime contract renders");
+    assert!(current.contains("GranteeDiscriminatorPolicy::IdentifyingMember"));
+
+    let mut mutated = artifacts.contract_rules;
+    mutated
+        .values_mut()
+        .find(|rule| rule.mutation_dimension == MutationDimension::GranteeDiscriminatorPolicy)
+        .expect("the typed ACL contract exists")
+        .current = ContractValue::GranteeTypeLeaveUnset;
+    let mutant = crate::emit::runtime_contracts::render(&mutated).expect("the mutated runtime contract renders");
+    assert!(mutant.contains("GranteeDiscriminatorPolicy::LeaveUnset"));
+}
+
+#[test]
+fn acl_runtime_contracts_each_change_the_generated_consumer_input() {
+    use rustfs_gateway_model::{
+        AclChannelPolicyValue, AclOwnerPolicyValue, ContractValue, ErrorSecretFlowValue, MutationDimension,
+    };
+
+    let rules = artifacts().contract_rules;
+    for dimension in [
+        MutationDimension::GranteeDiscriminatorPolicy,
+        MutationDimension::TargetValueSets,
+        MutationDimension::AclChannelMatrix,
+        MutationDimension::GrantHeaderGrammar,
+        MutationDimension::PermissionValueSet,
+        MutationDimension::OwnerPolicy,
+    ] {
+        assert_eq!(
+            rules.values().filter(|rule| rule.mutation_dimension == dimension).count(),
+            1,
+            "{} must have exactly one typed source",
+            dimension.as_str()
+        );
+    }
+    assert_eq!(
+        rules
+            .values()
+            .filter(|rule| matches!(rule.current, ContractValue::AclErrorSecretFlow(_)))
+            .count(),
+        1,
+        "ACL error secret flow must have exactly one typed source"
+    );
+    let current = crate::emit::runtime_contracts::render(&rules).expect("the current ACL contracts render");
+
+    let mut target_sets = rules.clone();
+    let rule = target_sets
+        .values_mut()
+        .find(|rule| rule.mutation_dimension == MutationDimension::TargetValueSets)
+        .expect("the target value-set rule exists");
+    let ContractValue::AclTargetValueSets { bucket, .. } = &mut rule.current else {
+        panic!("the target value-set dimension carries its typed value");
+    };
+    bucket.retain(|value| value != "log-delivery-write");
+    let mutant = crate::emit::runtime_contracts::render(&target_sets).expect("the target-set mutant renders");
+    assert!(current.contains("log-delivery-write"));
+    assert!(!mutant.contains("log-delivery-write"));
+
+    let mut channel = rules.clone();
+    channel
+        .values_mut()
+        .find(|rule| rule.mutation_dimension == MutationDimension::AclChannelMatrix)
+        .expect("the channel rule exists")
+        .current = ContractValue::AclChannelPolicy(AclChannelPolicyValue::RejectMixedHeaders);
+    assert!(
+        crate::emit::runtime_contracts::render(&channel)
+            .expect("the channel mutant renders")
+            .contains("AclChannelPolicy::RejectMixedHeaders")
+    );
+
+    let mut secret = rules.clone();
+    secret
+        .values_mut()
+        .find(|rule| matches!(rule.current, ContractValue::AclErrorSecretFlow(_)))
+        .expect("the error secret-flow rule exists")
+        .current = ContractValue::AclErrorSecretFlow(ErrorSecretFlowValue::EchoRejectedValue);
+    assert!(
+        crate::emit::runtime_contracts::render(&secret)
+            .expect("the error secret-flow mutant renders")
+            .contains("AclErrorSecretFlowPolicy::EchoRejectedValue")
+    );
+
+    let mut grammar = rules.clone();
+    let rule = grammar
+        .values_mut()
+        .find(|rule| rule.mutation_dimension == MutationDimension::GrantHeaderGrammar)
+        .expect("the grant grammar rule exists");
+    let ContractValue::AclGrantHeaderGrammar { case_insensitive, .. } = &mut rule.current else {
+        panic!("the grant grammar dimension carries its typed value");
+    };
+    *case_insensitive = false;
+    assert!(
+        crate::emit::runtime_contracts::render(&grammar)
+            .expect("the grant grammar mutant renders")
+            .contains("ACL_GRANT_KEYS_CASE_INSENSITIVE: bool = false")
+    );
+
+    let mut permissions = rules.clone();
+    let rule = permissions
+        .values_mut()
+        .find(|rule| rule.mutation_dimension == MutationDimension::PermissionValueSet)
+        .expect("the permission rule exists");
+    let ContractValue::AclPermissionValueSet(values) = &mut rule.current else {
+        panic!("the permission dimension carries its typed value");
+    };
+    values.retain(|value| value != "READ_ACP");
+    let mutant = crate::emit::runtime_contracts::render(&permissions).expect("the permission mutant renders");
+    assert!(current.contains("READ_ACP"));
+    assert!(!mutant.contains("READ_ACP"));
+
+    let mut owner = rules;
+    owner
+        .values_mut()
+        .find(|rule| rule.mutation_dimension == MutationDimension::OwnerPolicy)
+        .expect("the owner policy exists")
+        .current = ContractValue::AclOwnerPolicy(AclOwnerPolicyValue::Drop);
+    assert!(
+        crate::emit::runtime_contracts::render(&owner)
+            .expect("the owner mutant renders")
+            .contains("AclOwnerPolicy::Drop")
+    );
+}
+
+#[test]
+fn required_body_rules_read_the_exact_field_that_enforces_them() {
+    let artifacts = artifacts();
+    for id in ["q-web-0004", "q-restore-0006"] {
+        let (_, quirk) = artifacts
+            .files
+            .iter()
+            .find(|(path, _)| path.to_string_lossy().ends_with(&format!("spec/quirks/{id}.toml")))
+            .expect("the required-body rule is generated as mutable data");
+        assert!(quirk.contains("current = true"), "{id}");
+    }
 }
 
 #[test]

@@ -577,7 +577,7 @@
                                 "summary": "Upstream had two conflicting quoting rules in different files, which is the reason the rendering context is a type parameter here."
                               }
                             ],
-                "cases": ["c-etag-0010"]
+                "cases": ["c-mpu-0018", "c-object-0001", "c-object-0002", "c-object-0009"]
               },
               {
                 "id": "q-timestamp-0005",
@@ -596,7 +596,7 @@
                                 "summary": "Recorded request where the header value is not a date, which a parsing implementation would reject or rewrite."
                               }
                             ],
-                "cases": ["c-expires-0001"]
+                "cases": ["c-object-0006"]
               },
               {
                 "id": "q-checksum-0006",
@@ -643,7 +643,7 @@
                                 "summary": "Documents the S3 specific default media type applied when the request omits the header."
                               }
                             ],
-                "cases": ["c-putobject-0002"]
+                "cases": ["c-object-0001", "c-object-0006"]
               },
               {
                 "id": "q-meta-0009",

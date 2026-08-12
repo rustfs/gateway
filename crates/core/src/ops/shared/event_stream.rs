@@ -53,8 +53,17 @@
 
 use rustfs_gateway_types::ChecksumAlgorithm;
 
+use crate::contracts::{
+    EVENT_CRC_ALGORITHM, EVENT_MESSAGE_CRC_COVERAGE, EVENT_PRELUDE_CRC_COVERAGE, EventCrcAlgorithmPolicy,
+    EventMessageCrcCoveragePolicy, EventPreludeCrcCoveragePolicy, SELECT_EVENT_MEDIA_TYPE, SELECT_EVENT_TERMINATION,
+    SelectEventMediaTypePolicy, SelectEventTerminationPolicy,
+};
+
 /// The response content type a select answer is framed in.
-pub const EVENT_STREAM_CONTENT_TYPE: &str = "application/vnd.amazon.event-stream";
+pub const EVENT_STREAM_CONTENT_TYPE: &str = match SELECT_EVENT_MEDIA_TYPE {
+    SelectEventMediaTypePolicy::ApplicationVndAmazonEventStream => "application/vnd.amazon.event-stream",
+    SelectEventMediaTypePolicy::OctetStream => "application/octet-stream",
+};
 
 /// The largest payload one message may carry, in bytes.
 ///
@@ -240,13 +249,23 @@ fn encode_message(headers: &[u8], payload: &[u8], out: &mut Vec<u8>) -> Result<(
     out.extend_from_slice(&headers_len.to_be_bytes());
     // The prelude CRC covers the eight bytes just written and nothing else. Widening it by one
     // byte produces a stream that this module would happily read back and no SDK accepts.
-    let prelude_crc = crc32(out.get(start..).unwrap_or_default());
+    let prelude_crc = match EVENT_PRELUDE_CRC_COVERAGE {
+        EventPreludeCrcCoveragePolicy::First8 => crc32(out.get(start..).unwrap_or_default()),
+        EventPreludeCrcCoveragePolicy::First12 => {
+            let mut wrong = out.get(start..).unwrap_or_default().to_vec();
+            wrong.extend_from_slice(&[0; 4]);
+            crc32(&wrong)
+        }
+    };
     out.extend_from_slice(&prelude_crc.to_be_bytes());
     out.extend_from_slice(headers);
     out.extend_from_slice(payload);
     // The message CRC covers everything from the first prelude byte up to but excluding itself,
     // which includes the prelude CRC.
-    let message_crc = crc32(out.get(start..).unwrap_or_default());
+    let message_crc = match EVENT_MESSAGE_CRC_COVERAGE {
+        EventMessageCrcCoveragePolicy::FrameWithoutCrc => crc32(out.get(start..).unwrap_or_default()),
+        EventMessageCrcCoveragePolicy::PayloadOnly => crc32(payload),
+    };
     out.extend_from_slice(&message_crc.to_be_bytes());
     Ok(())
 }
@@ -257,7 +276,11 @@ fn encode_message(headers: &[u8], payload: &[u8], out: &mut Vec<u8>) -> Result<(
 /// implementation of this polynomial in the workspace and it is the one with the published check
 /// vector behind it.
 fn crc32(data: &[u8]) -> u32 {
-    let mut digest = ChecksumAlgorithm::Crc32.checksummer();
+    let algorithm = match EVENT_CRC_ALGORITHM {
+        EventCrcAlgorithmPolicy::Crc32IsoHdlc => ChecksumAlgorithm::Crc32,
+        EventCrcAlgorithmPolicy::Crc32c => ChecksumAlgorithm::Crc32c,
+    };
+    let mut digest = algorithm.checksummer();
     digest.update(data);
     let bytes = digest.finalize();
     let mut wide = [0_u8; 4];
@@ -370,7 +393,9 @@ impl EventSequence {
         if self.phase != Phase::Counted {
             return Err(EventStreamError::OutOfOrder);
         }
-        encode_event(EventKind::End, &[], out)?;
+        if matches!(SELECT_EVENT_TERMINATION, SelectEventTerminationPolicy::RecordsStatsEnd) {
+            encode_event(EventKind::End, &[], out)?;
+        }
         self.phase = Phase::Terminated;
         Ok(())
     }

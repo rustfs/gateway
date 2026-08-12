@@ -19,7 +19,7 @@ polarity = "negative"
 operation = "PutObject"
 tags = ["conditional", "preconditions", "connection", "error-shape"]
 timeout_ms = 10000
-quirks = ["q-cond-0049"]
+quirks = []
 
 [[case.evidence]]
 url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/conditional-requests.html"

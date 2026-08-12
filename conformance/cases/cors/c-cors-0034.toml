@@ -10,7 +10,7 @@ that the three cases after this one can be compared against it."""
 polarity = "negative"
 tags = ["cors", "preflight", "security", "error-shape"]
 timeout_ms = 10000
-quirks = ["q-cors-0009", "q-cors-0015"]
+quirks = ["q-cors-0015", "q-cors-0038"]
 
 [[case.evidence]]
 url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/cors.html"

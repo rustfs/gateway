@@ -16,7 +16,7 @@ refused, which is the precondition the credentials assertion needs. The literal 
 polarity = "negative"
 tags = ["cors", "preflight", "security"]
 timeout_ms = 10000
-quirks = ["q-cors-0010"]
+quirks = ["q-cors-0010", "q-cors-0026"]
 
 [[case.evidence]]
 url = "https://github.com/rustfs/rustfs/security/advisories/GHSA-x5xv-223c-8vm7"

@@ -12,6 +12,7 @@ ADRs; this map only selects files.
 | `src/toml.rs` | Minimal TOML value parser used by the corpus. | Syntax parsing fails before schema validation. |
 | `src/runner.rs` | Case/exchange execution order and timeout coordination. | A case runs in the wrong order or never reaches a verdict. |
 | `src/expect.rs` | Expected observation matching. | A response, stream error or timing assertion is judged wrongly. |
+| `src/expect/events.rs` | Event-stream count and byte-exact payload matching. | An event payload expectation is ignored or misjudged. |
 | `src/inprocess.rs` | In-process facade transport. | Hyper-independent execution differs from the socket path. |
 | `src/observation.rs` | Response and event-stream observations, including frame validation. | An event-stream case is classified incorrectly. |
 | `src/socket.rs` | Real socket transport and connection observations. | A wire-level close/reuse fact is wrong. |

@@ -1,0 +1,42 @@
+# c-naming-0017 — percent decoding happens exactly once
+#
+[case]
+id = "c-naming-0017"
+schema_version = 1
+title = "A percent sign exposed by one decode is not decoded a second time"
+rationale = """
+The stored key is `v1%2e0`. Its request spelling encodes the percent sign, so exactly one decode selects that key while decoding repeatedly would turn it into `v1.0` and select a different object. A refusal-only traversal case cannot distinguish those implementations; this successful lookup does."""
+polarity = "positive"
+operation = "GetObject"
+tags = ["naming", "routing", "encoding"]
+timeout_ms = 10000
+quirks = ["q-naming-0002"]
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc3986#section-2.1"
+summary = "Percent-encoding carries one octet per triplet, so decoding a decoded value reads octets the sender never encoded."
+kind = "rfc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-naming"
+
+[[setup.objects]]
+bucket = "conf-naming"
+key = "v1%2e0"
+body = { utf8 = "decoded once" }
+
+[request]
+method = "GET"
+target = "/conf-naming/v1%252e0"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[expect.body]
+exact_utf8 = "decoded once"

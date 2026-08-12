@@ -296,7 +296,7 @@
                                 "summary": "Upstream had two conflicting quoting rules in different files, which is the reason the rendering context is a type parameter here."
                               }
                             ],
-                "cases": ["c-etag-0010"]
+                "cases": ["c-mpu-0018", "c-object-0001", "c-object-0002", "c-object-0009"]
               },
               {
                 "id": "q-checksum-0006",

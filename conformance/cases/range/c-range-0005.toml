@@ -17,7 +17,7 @@ polarity = "positive"
 operation = "GetObject"
 tags = ["range", "read", "wire-bytes"]
 timeout_ms = 10000
-quirks = ["q-range-0052", "q-range-0053"]
+quirks = ["q-range-oversize-suffix-0122"]
 
 [[case.evidence]]
 url = "https://www.rfc-editor.org/rfc/rfc9110#section-14.1.2"

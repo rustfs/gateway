@@ -10,7 +10,7 @@ polarity = "negative"
 operation = "GetObject"
 tags = ["naming", "routing", "security", "encoding"]
 timeout_ms = 10000
-quirks = ["q-naming-0002"]
+quirks = ["q-naming-0003"]
 
 [[case.evidence]]
 url = "https://www.rfc-editor.org/rfc/rfc3986#section-2.1"

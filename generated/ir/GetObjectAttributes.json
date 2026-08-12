@@ -644,7 +644,7 @@
                                 "summary": "The documented response syntax repeats the part element as a direct child of the result root."
                               }
                             ],
-                "cases": ["c-mpu-0010"]
+                "cases": ["c-mpu-0010", "c-mpu-0048"]
               },
               {
                 "id": "q-mpu-attributes-etag-0036",

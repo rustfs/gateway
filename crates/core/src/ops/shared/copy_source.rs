@@ -28,7 +28,6 @@
 //! any bytes.
 //! Upstream: `rustfs-gateway-types`' `BucketName`, `ObjectKey`, `RangeParse` and `ErrorCode`.
 //! Downstream: [`crate::ops::copy_object`] and [`crate::ops::upload_part_copy`].
-//!
 //! # Why the source is a type state rather than a check
 //!
 //! The copy source names a *second* resource, and the caller chose it. Authorizing the destination
@@ -42,7 +41,6 @@
 //! only [`crate::Authorized`], and [`CopySource::resolve`] requires the [`crate::AuthorizedRead`]
 //! proof carried by the resulting handler request. The normalized value policy saw is the value
 //! storage receives.
-//!
 //! # Why the version suffix is split before anything is decoded
 //!
 //! `bucket/a%3Fb?versionId=v1` names the key `a?b` in version `v1`. Decode first and the header
@@ -52,6 +50,8 @@
 
 use percent_encoding::percent_decode_str;
 use rustfs_gateway_types::{BucketName, ByteRange, ErrorCode, ObjectKey, RangeParse};
+
+use crate::contracts::{COPY_RANGE_LENGTH_ARITHMETIC, CopyRangeLengthArithmetic};
 
 /// Which of the three grammars a copy-source value was written in.
 ///
@@ -350,7 +350,10 @@ impl CopyRange {
     /// completes, and the corruption surfaces on a read rather than on the write that caused it.
     #[must_use]
     pub const fn len(&self) -> u64 {
-        self.end_inclusive.saturating_sub(self.start).saturating_add(1)
+        match COPY_RANGE_LENGTH_ARITHMETIC {
+            CopyRangeLengthArithmetic::Inclusive => self.end_inclusive.saturating_sub(self.start).saturating_add(1),
+            CopyRangeLengthArithmetic::Exclusive => self.end_inclusive.saturating_sub(self.start),
+        }
     }
 
     /// Whether the span carries no bytes. Never true for a resolved span; present because clippy

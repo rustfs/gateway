@@ -10,7 +10,7 @@ answer, and it is the one an implementation gets wrong by defaulting the header 
 polarity = "negative"
 tags = ["cors", "security"]
 timeout_ms = 10000
-quirks = ["q-cors-0011"]
+quirks = ["q-cors-0032"]
 
 [[case.evidence]]
 url = "https://fetch.spec.whatwg.org/#http-cors-protocol"

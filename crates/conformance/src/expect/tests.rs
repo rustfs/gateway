@@ -21,7 +21,7 @@
 //! Upstream: `super`. Downstream: nothing.
 
 use super::*;
-use crate::observation::{ConnectionState, Observation, Outcome, StreamTermination};
+use crate::observation::{ConnectionState, Observation, ObservedEvent, Outcome, StreamTermination};
 use crate::toml;
 
 struct Goldens(Vec<(&'static str, &'static [u8])>);
@@ -392,4 +392,32 @@ fn an_event_stream_frame_shortfall_is_reported() {
     let expect = expectation("kind = \"event_stream\"\n[[events]]\ntype = \"Records\"\nmin_count = 1\n");
     let judgement = judge(&expect, &observed, "/expect", &no_goldens());
     assert_eq!(rules(&judgement), vec!["expect/events.min_count"]);
+}
+
+#[test]
+fn an_event_payload_is_compared_as_body_bytes() {
+    let mut observed = ok_response();
+    observed.outcome = Outcome::EventStream;
+    observed.events.push(ObservedEvent {
+        event_type: "Records".to_owned(),
+        headers: Vec::new(),
+        payload: b"345".to_vec(),
+    });
+    let expect = expectation("kind = \"event_stream\"\n[[events]]\ntype = \"Records\"\n[events.payload]\nexact_utf8 = \"345\"\n");
+    let judgement = judge(&expect, &observed, "/expect", &no_goldens());
+    assert!(judgement.is_clean(), "{:?}", judgement.diagnostics);
+}
+
+#[test]
+fn n_a_different_event_payload_is_reported() {
+    let mut observed = ok_response();
+    observed.outcome = Outcome::EventStream;
+    observed.events.push(ObservedEvent {
+        event_type: "Records".to_owned(),
+        headers: Vec::new(),
+        payload: b"0123456789".to_vec(),
+    });
+    let expect = expectation("kind = \"event_stream\"\n[[events]]\ntype = \"Records\"\n[events.payload]\nexact_utf8 = \"345\"\n");
+    let judgement = judge(&expect, &observed, "/expect", &no_goldens());
+    assert_eq!(rules(&judgement), vec!["expect/body.exact_utf8"]);
 }

@@ -21,13 +21,14 @@
 //! decoder, and the storage race behind `Conflict`, which no pure function can observe.
 //! Upstream: `rustfs_gateway_core::ops::shared`. Downstream: nothing.
 
-use http::StatusCode;
+use http::{Method, StatusCode};
 use proptest::prelude::*;
 use rustfs_gateway_core::ops::shared::etag::{ConditionalHeader, EtagComparison, etag_matches, parse_conditional_etag};
 use rustfs_gateway_core::ops::shared::precondition::{
     ConditionalOutcome, IfRange, ObjectValidators, Preconditions, RangeDecision, RangeSelectors, RequestKind, evaluate,
     evaluate_range,
 };
+use rustfs_gateway_core::{BodyAllowance, body_allowance};
 use rustfs_gateway_types::{ETag, ErrorCode, Timestamp, TimestampFormat};
 
 fn tag(value: &'static str) -> ETag {
@@ -182,7 +183,11 @@ fn a_matching_if_none_match_read_is_a_304_with_no_body() {
     let outcome = evaluate(&conditions, &present(), RequestKind::Read).expect("well-formed request");
     assert_eq!(outcome, ConditionalOutcome::NotModified);
     assert_eq!(outcome.status(), Some(StatusCode::NOT_MODIFIED));
-    assert!(!outcome.body_allowed(), "a 304 carries no body and no Content-Length");
+    assert_eq!(
+        body_allowance(&Method::GET, outcome.status().expect("the not-modified outcome has a status")),
+        BodyAllowance::Bodyless,
+        "a 304 carries no body and no Content-Length"
+    );
     assert_eq!(outcome.error_code(), None, "a 304 is not an error and carries no error document");
 }
 
@@ -381,7 +386,10 @@ fn conditional_outcomes_carry_the_status_and_code_the_client_branches_on() {
         Some(StatusCode::CONFLICT),
         "the racing conditional write is a retryable 409, not a 412 the client will give up on"
     );
-    assert!(conflict.body_allowed());
+    assert_eq!(
+        body_allowance(&Method::PUT, conflict.status().expect("the conflict outcome has a status")),
+        BodyAllowance::Content
+    );
 }
 
 // ── ranges ──────────────────────────────────────────────────────────────────────────────────

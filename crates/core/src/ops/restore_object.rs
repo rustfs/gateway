@@ -61,6 +61,7 @@
 use rustfs_gateway_sig::{OperationFloor, SigService};
 use rustfs_gateway_types::dto::{RestoreObject, RestoreObjectInput, RestoreObjectOutput};
 
+use crate::contracts::{RESTORE_VERSION_SELECTOR, RestoreVersionSelectorPolicy};
 use crate::op::{AuthRequirement, HasOperation, Operation, OperationOrigin, ResourceShape, StandardOperation};
 use crate::registry::OperationSpec;
 
@@ -100,7 +101,11 @@ impl Operation for RestoreObject {
         Ok(crate::authz::NoDerived)
     }
 
-    fn seal_derived_input(_input: &mut Self::Input) {}
+    fn seal_derived_input(input: &mut Self::Input) {
+        if matches!(RESTORE_VERSION_SELECTOR, RestoreVersionSelectorPolicy::Drop) {
+            input.version_id = None;
+        }
+    }
 
     fn spec() -> &'static OperationSpec {
         &SPEC

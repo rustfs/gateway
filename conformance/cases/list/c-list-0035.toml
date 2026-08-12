@@ -12,7 +12,7 @@ polarity = "negative"
 operation = "ListObjectsV2"
 tags = ["list", "encoding", "xml"]
 timeout_ms = 15000
-quirks = ["q-encoding-0015", "q-encoding-0067"]
+quirks = ["q-encoding-0015", "q-encoding-0067", "q-naming-stored-legacy-control-0120"]
 
 [[case.evidence]]
 url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectsV2.html"

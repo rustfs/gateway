@@ -529,7 +529,7 @@
                                 "summary": "Recorded request where the header value is not a date, which a parsing implementation would reject or rewrite."
                               }
                             ],
-                "cases": ["c-expires-0001"]
+                "cases": ["c-object-0006"]
               },
               {
                 "id": "q-content-0008",
@@ -543,7 +543,7 @@
                                 "summary": "Documents the S3 specific default media type applied when the request omits the header."
                               }
                             ],
-                "cases": ["c-putobject-0002"]
+                "cases": ["c-object-0001", "c-object-0006"]
               },
               {
                 "id": "q-meta-0009",

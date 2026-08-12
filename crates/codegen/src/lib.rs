@@ -42,7 +42,7 @@ use std::path::{Path, PathBuf};
 
 use rustfs_gateway_model::ir::OperationIr;
 use rustfs_gateway_model::json;
-use rustfs_gateway_model::{Model, Overlay, lower};
+use rustfs_gateway_model::{CodecRule, ContractRule, Model, Overlay, RuleClassification, lower};
 
 /// Result alias for the generator.
 pub type Result<T> = std::result::Result<T, Error>;
@@ -134,6 +134,8 @@ impl CodegenOutput {
     fn owned_dirs(&self) -> Vec<PathBuf> {
         vec![
             self.spec_dir.clone(),
+            self.quirks_dir(),
+            self.contracts_dir(),
             self.generated_dir.join("ir"),
             self.generated_dir.join("codec").join("ops"),
             self.generated_dir.join("codec"),
@@ -143,6 +145,18 @@ impl CodegenOutput {
             self.generated_dir.join("dto"),
             self.generated_dir.clone(),
         ]
+    }
+
+    fn quirks_dir(&self) -> PathBuf {
+        self.spec_dir
+            .parent()
+            .map_or_else(|| PathBuf::from("spec/quirks"), |spec| spec.join("quirks"))
+    }
+
+    fn contracts_dir(&self) -> PathBuf {
+        self.spec_dir
+            .parent()
+            .map_or_else(|| PathBuf::from("spec/contracts"), |spec| spec.join("contracts"))
     }
 }
 
@@ -187,6 +201,12 @@ pub struct Artifacts {
     pub stripped_traits: usize,
     /// What the dto emitter produced.
     pub dto: emit::dto::DtoReport,
+    /// Typed quirk rules consumed by codec generation.
+    pub codec_rules: BTreeMap<String, CodecRule>,
+    /// Typed lowered-IR sources and their current values, keyed by mutable quirk id.
+    pub source_rules: BTreeMap<String, Vec<emit::quirk_toml::ResolvedSource>>,
+    /// Typed runtime contract inputs emitted for core consumers.
+    pub contract_rules: BTreeMap<String, ContractRule>,
 }
 
 /// Loads the model and the overlays, lowers, and renders every artefact in memory.
@@ -196,6 +216,33 @@ pub fn generate(input: &CodegenInput, out: &CodegenOutput) -> Result<Artifacts> 
     let lowered = lower(&model, &overlay)?;
 
     let mut files: Vec<(PathBuf, String)> = Vec::new();
+    let mut resolved_source_rules = BTreeMap::new();
+    for (id, rule) in &overlay.source_rules {
+        let resolved = emit::quirk_toml::resolve_sources(&lowered.operations, rule)
+            .map_err(|message| Error::Policy(format!("quirk `{id}`: {message}")))?;
+        resolved_source_rules.insert(id.clone(), resolved);
+    }
+    for (id, quirk) in &overlay.quirks {
+        let Some(classification) = overlay.classifications.get(id).copied() else {
+            return Err(Error::Policy(format!("protocol record `{id}` has no classification")));
+        };
+        let dir = match classification {
+            RuleClassification::Mutable => out.quirks_dir(),
+            RuleClassification::Contract if overlay.contract_rules.contains_key(id) => out.contracts_dir(),
+            RuleClassification::Contract => continue,
+        };
+        files.push((
+            dir.join(format!("{id}.toml")),
+            emit::quirk_toml::render(
+                quirk,
+                overlay.codec_rules.get(id),
+                overlay.source_rules.get(id),
+                overlay.contract_rules.get(id),
+                resolved_source_rules.get(id).map(Vec::as_slice).unwrap_or_default(),
+                classification,
+            ),
+        ));
+    }
     for ir in &lowered.operations {
         files.push((
             out.generated_dir.join("ir").join(format!("{}.json", ir.operation)),
@@ -209,12 +256,24 @@ pub fn generate(input: &CodegenInput, out: &CodegenOutput) -> Result<Artifacts> 
     ));
     files.push((out.generated_dir.join("routes.rs"), emit::rust_files::routes(&lowered.operations)));
     files.push((
+        out.generated_dir.join("naming_contracts.rs"),
+        emit::naming_contracts::render(&overlay.contract_rules).map_err(Error::Policy)?,
+    ));
+    files.push((
+        out.generated_dir.join("range_contracts.rs"),
+        emit::range_contracts::render(&overlay.contract_rules).map_err(Error::Policy)?,
+    ));
+    files.push((
+        out.generated_dir.join("contracts.rs"),
+        emit::runtime_contracts::render(&overlay.contract_rules).map_err(Error::Policy)?,
+    ));
+    files.push((
         out.generated_dir.join("error_codes.rs"),
         emit::rust_files::error_codes(&lowered.operations),
     ));
     let (dto_files, dto) = emit::dto::emit(&lowered.operations, &out.generated_dir).map_err(Error::Policy)?;
     files.extend(dto_files);
-    files.extend(emit::codec::emit(&lowered.operations, &out.generated_dir).map_err(Error::Policy)?);
+    files.extend(emit::codec::emit(&lowered.operations, &overlay.codec_rules, &out.generated_dir).map_err(Error::Policy)?);
     files.sort_by(|a, b| a.0.cmp(&b.0));
 
     Ok(Artifacts {
@@ -223,6 +282,9 @@ pub fn generate(input: &CodegenInput, out: &CodegenOutput) -> Result<Artifacts> 
         deferred: lowered.deferred,
         stripped_traits: model.stripped_trait_count(),
         dto,
+        codec_rules: overlay.codec_rules,
+        source_rules: resolved_source_rules,
+        contract_rules: overlay.contract_rules,
     })
 }
 

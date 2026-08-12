@@ -10,7 +10,7 @@ none of the headers is one the browser still refuses."""
 polarity = "positive"
 tags = ["cors", "preflight"]
 timeout_ms = 10000
-quirks = ["q-cors-0012"]
+quirks = ["q-cors-0033", "q-cors-0035"]
 
 [[case.evidence]]
 url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CORSRule.html"

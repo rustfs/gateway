@@ -1,0 +1,54 @@
+# c-range-0019 — the first byte just beyond the representation.
+#
+# Schema dimensions exercised: the exact `first == length` boundary.
+
+[case]
+id = "c-range-0019"
+schema_version = 1
+title = "A range starting exactly at the object length is unsatisfiable"
+rationale = """
+Byte positions are zero based, so a ten-byte object ends at position nine. Starting at position ten has no overlap and must be answered with 416. A comparison that rejects only positions strictly greater than the length admits an empty 206 at this boundary."""
+polarity = "negative"
+operation = "GetObject"
+tags = ["range", "boundary", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-range-start-past-end-0101"]
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9110#section-14.1.2"
+summary = "A byte range is unsatisfiable when its first position is at or beyond the selected representation length."
+kind = "rfc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-range"
+
+[[setup.objects]]
+bucket = "conf-range"
+key = "ten"
+body = { utf8 = "0123456789" }
+
+[request]
+method = "GET"
+target = "/conf-range/ten"
+headers = { "range" = "bytes=10-10" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 416
+connection_after = "open"
+
+[expect.error]
+code = "InvalidRange"
+message_present = true
+request_id_present = true
+
+[expect.headers_present]
+"content-range" = "bytes */10"
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+contains_utf8 = ["<ActualObjectSize>10</ActualObjectSize>", "<RangeRequested>bytes=10-10</RangeRequested>"]

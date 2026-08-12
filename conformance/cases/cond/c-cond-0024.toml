@@ -18,7 +18,7 @@ polarity = "negative"
 operation = "CompleteMultipartUpload"
 tags = ["conditional", "preconditions", "multipart", "error-shape"]
 timeout_ms = 10000
-quirks = ["q-cond-0041", "q-cond-0048"]
+quirks = ["q-cond-0048"]
 
 [[case.evidence]]
 url = "https://github.com/s3s-project/s3s/pull/560"

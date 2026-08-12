@@ -1,0 +1,41 @@
+[case]
+id = "c-select-restore-0043"
+schema_version = 1
+title = "The direct restore Tier uses the documented closed set"
+rationale = """
+The direct Tier spelling reaches the same scheduler as GlacierJobParameters. Accepting an unknown value here would bypass the closed set through the second wire spelling."""
+polarity = "negative"
+operation = "RestoreObject"
+tags = ["restore", "validation"]
+timeout_ms = 10000
+quirks = ["q-restore-direct-tier-0136"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_RestoreRequest.html"
+summary = "The direct Tier member uses the documented retrieval-tier vocabulary."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "conf-restore"
+
+[[setup.objects]]
+bucket = "conf-restore"
+key = "cold.txt"
+body = { utf8 = "archived payload" }
+storage_class = "GLACIER"
+
+[request]
+method = "POST"
+target = "/conf-restore/cold.txt?restore"
+headers = { "content-type" = "application/xml" }
+body = { utf8 = '<RestoreRequest><Days>1</Days><Tier>Instant</Tier></RestoreRequest>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+code = "InvalidArgument"
+request_id_present = true

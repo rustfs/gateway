@@ -74,9 +74,19 @@
 //! maintainer review".
 
 use http::StatusCode;
-use rustfs_gateway_types::{ETag, ErrorCode, RangeOutcome, RangeParse, Timestamp, TimestampFormat};
+use rustfs_gateway_types::{ByteRange, ETag, ErrorCode, RangeOutcome, RangeParse, Timestamp, TimestampFormat};
 
 use super::etag::{ConditionalHeader, etag_matches, parse_conditional_etag};
+use crate::contracts::{
+    CONDITION_CONFLICT_POLICY, CONDITIONAL_RACE_OUTCOME_POLICY, CONDITIONAL_WILDCARD_WRITE_POLICY, CONDITIONAL_WRITE_ORDER,
+    COPY_VALIDATOR_SCOPE_POLICY, ConditionConflictPolicy, ConditionalRaceOutcomePolicy, ConditionalWildcardWritePolicy,
+    ConditionalWriteOrderPolicy, CopyValidatorScopePolicy, IF_MATCH_ABSENT_POLICY, IF_MATCH_DATE_PRECEDENCE,
+    IF_MATCH_MISS_OUTCOME, IF_NONE_DATE_PRECEDENCE, IF_RANGE_MISS_POLICY, IfMatchAbsentPolicy, IfMatchDatePrecedence,
+    IfMatchMissOutcomePolicy, IfNoneDatePrecedence, IfRangeMissPolicy, NOT_MODIFIED_ETAG_POLICY, NotModifiedEtagPolicy,
+    PART_COUNT_HEADER_POLICY, PART_NUMBER_OUTCOME_POLICY, PARTIAL_CHECKSUM_POLICY, PartCountHeaderPolicy,
+    PartNumberOutcomePolicy, PartialChecksumPolicy, RANGE_PART_SELECTOR_CONFLICT_POLICY, RANGE_REQUESTED_DETAIL_POLICY,
+    READ_RANGE_LENGTH_ARITHMETIC, RangePartSelectorConflictPolicy, RangeRequestedDetailPolicy, ReadRangeLengthArithmetic,
+};
 
 /// The facts about the selected representation that a condition is evaluated against.
 ///
@@ -91,6 +101,34 @@ pub struct ObjectValidators {
     pub etag: Option<ETag>,
     /// Its last modification instant, truncated to the second the wire can carry.
     pub last_modified: Option<Timestamp>,
+}
+
+/// Whether a CopyObject adapter should evaluate destination conditions against the source.
+///
+/// The normal answer is false: source-prefixed conditions and ordinary conditional headers name
+/// different representations. The explicit answer lets adapter code consume the generated
+/// `copy_validator_scope` contract instead of silently choosing a representation itself.
+#[must_use]
+pub const fn copy_target_uses_source_validators() -> bool {
+    matches!(COPY_VALIDATOR_SCOPE_POLICY, CopyValidatorScopePolicy::TargetUsesSource)
+}
+
+/// Whether a conditional-write adapter must evaluate its guard before changing storage.
+///
+/// Adapters use this generated answer to place the same guard on either side of their mutation;
+/// the mutation alternative exists only to prove the follow-up read detects a write made too soon.
+#[must_use]
+pub const fn conditional_write_guards_before_mutation() -> bool {
+    matches!(CONDITIONAL_WRITE_ORDER, ConditionalWriteOrderPolicy::GuardBeforeMutation)
+}
+
+/// Whether a failed CompleteMultipartUpload guard leaves the upload retryable.
+#[must_use]
+pub const fn completion_failure_retains_upload() -> bool {
+    matches!(
+        crate::contracts::COMPLETION_FAILURE_UPLOAD_POLICY,
+        crate::contracts::CompletionFailureUploadPolicy::Retain
+    )
 }
 
 /// The conditional headers a request carried, already parsed.
@@ -179,6 +217,21 @@ impl PreconditionRejection {
 }
 
 impl ConditionalOutcome {
+    /// Outcome adapters use after a condition held but the storage compare-and-swap lost its race.
+    #[must_use]
+    pub const fn lost_race() -> Self {
+        match CONDITIONAL_RACE_OUTCOME_POLICY {
+            ConditionalRaceOutcomePolicy::Conflict => Self::Conflict,
+            ConditionalRaceOutcomePolicy::PreconditionFailed => Self::PreconditionFailed,
+        }
+    }
+
+    /// Whether a not-modified response includes the selected representation's entity tag.
+    #[must_use]
+    pub const fn includes_selected_etag(self) -> bool {
+        !matches!(self, Self::NotModified) || matches!(NOT_MODIFIED_ETAG_POLICY, NotModifiedEtagPolicy::IncludeSelected)
+    }
+
     /// The status this outcome puts on the wire, or `None` when the operation proceeds and chooses
     /// its own.
     #[must_use]
@@ -203,15 +256,6 @@ impl ConditionalOutcome {
             Self::Conflict => Some(ErrorCode::CONDITIONAL_REQUEST_CONFLICT),
         }
     }
-
-    /// Whether the response may carry a body.
-    ///
-    /// A `304` carries the entity tag and no body at all — no `Content-Length`, no error document.
-    /// A client that receives a length it will never be sent bytes for waits for them.
-    #[must_use]
-    pub const fn body_allowed(self) -> bool {
-        !matches!(self, Self::NotModified)
-    }
 }
 
 /// Evaluates a request's preconditions against the representation it selected.
@@ -230,18 +274,21 @@ pub fn evaluate(
     validators: &ObjectValidators,
     kind: RequestKind,
 ) -> Result<ConditionalOutcome, PreconditionRejection> {
-    if conditions.if_match.is_some() && conditions.if_none_match.is_some() {
+    let conflicting_etag_conditions = conditions.if_match.is_some() && conditions.if_none_match.is_some();
+    if conflicting_etag_conditions && matches!(CONDITION_CONFLICT_POLICY, ConditionConflictPolicy::Reject) {
         return Err(PreconditionRejection {
             code: ErrorCode::INVALID_REQUEST,
             reason: "If-Match and If-None-Match cannot be evaluated together",
         });
     }
+    let prefer_if_match =
+        conflicting_etag_conditions && matches!(CONDITION_CONFLICT_POLICY, ConditionConflictPolicy::PreferIfMatch);
 
     if !validators.exists {
         // With no representation, `If-Match` is false for every value including `*`, and
         // `If-None-Match` is true for every value including `*` — which is what makes
         // `If-None-Match: *` the create-if-absent primitive.
-        if conditions.if_match.is_some() {
+        if conditions.if_match.is_some() && matches!(IF_MATCH_ABSENT_POLICY, IfMatchAbsentPolicy::PreconditionFailed) {
             return Ok(ConditionalOutcome::PreconditionFailed);
         }
         return Ok(ConditionalOutcome::Proceed);
@@ -263,7 +310,9 @@ pub fn evaluate(
         }
         (Some(requested), Some(current)) => {
             let comparison = ConditionalHeader::IfMatch.comparison();
-            if !etag_matches(comparison, requested, current) {
+            if !etag_matches(comparison, requested, current)
+                && matches!(IF_MATCH_MISS_OUTCOME, IfMatchMissOutcomePolicy::PreconditionFailed)
+            {
                 return Ok(ConditionalOutcome::PreconditionFailed);
             }
             true
@@ -287,17 +336,21 @@ pub fn evaluate(
     };
 
     // Step 3: If-None-Match.
-    if let Some(requested) = &conditions.if_none_match {
+    if !prefer_if_match && let Some(requested) = &conditions.if_none_match {
         let comparison = ConditionalHeader::IfNoneMatch.comparison();
         // The same wildcard rule as step 1, and here it is the load-bearing one: `If-None-Match: *`
         // is the create-if-absent primitive, so a representation that exists must fail it whether
         // or not the backend reported an entity tag. Reading `*` through the tag would let a
         // conditional create silently overwrite exactly the objects a backend cannot digest.
-        let hit = requested.is_any()
-            || validators
-                .etag
-                .as_ref()
-                .is_some_and(|current| etag_matches(comparison, requested, current));
+        let wildcard_hit = requested.is_any()
+            && (kind == RequestKind::Read
+                || matches!(CONDITIONAL_WILDCARD_WRITE_POLICY, ConditionalWildcardWritePolicy::CompareAndCreate));
+        let hit = wildcard_hit
+            || (!requested.is_any()
+                && validators
+                    .etag
+                    .as_ref()
+                    .is_some_and(|current| etag_matches(comparison, requested, current)));
         if hit {
             return Ok(match kind {
                 RequestKind::Read => ConditionalOutcome::NotModified,
@@ -307,7 +360,10 @@ pub fn evaluate(
         // S3 deviation: a missed `If-None-Match` alongside a satisfied `If-Unmodified-Since` is a
         // 304, where RFC 9110 would serve the representation.
         if unmodified_since_hit && kind == RequestKind::Read {
-            return Ok(ConditionalOutcome::NotModified);
+            return Ok(match IF_NONE_DATE_PRECEDENCE {
+                IfNoneDatePrecedence::NotModified => ConditionalOutcome::NotModified,
+                IfNoneDatePrecedence::Proceed => ConditionalOutcome::Proceed,
+            });
         }
         return Ok(ConditionalOutcome::Proceed);
     }
@@ -315,7 +371,7 @@ pub fn evaluate(
     // Step 4: If-Modified-Since. Reads only — RFC 9110 requires the field to be ignored on any
     // other method, and S3 skips it entirely once `If-Match` has matched.
     if kind == RequestKind::Read
-        && !if_match_hit
+        && (!if_match_hit || matches!(IF_MATCH_DATE_PRECEDENCE, IfMatchDatePrecedence::EvaluateModifiedSince))
         && let Some(bound) = conditions.if_modified_since
         && !is_in_the_future(bound, conditions.observed_at)
         && let Some(modified) = validators.last_modified
@@ -434,7 +490,11 @@ impl RangeDecision {
     pub const fn status(&self) -> StatusCode {
         match self {
             Self::Whole => StatusCode::OK,
-            Self::Partial { .. } | Self::Part { .. } => StatusCode::PARTIAL_CONTENT,
+            Self::Partial { .. } => StatusCode::PARTIAL_CONTENT,
+            Self::Part { .. } => match PART_NUMBER_OUTCOME_POLICY {
+                PartNumberOutcomePolicy::PartialContent => StatusCode::PARTIAL_CONTENT,
+                PartNumberOutcomePolicy::ServeWhole => StatusCode::OK,
+            },
             Self::Unsatisfiable { .. } => StatusCode::RANGE_NOT_SATISFIABLE,
         }
     }
@@ -471,7 +531,10 @@ impl RangeDecision {
             Self::Whole | Self::Part { .. } => object_len,
             Self::Partial {
                 start, end_inclusive, ..
-            } => end_inclusive.saturating_sub(*start).saturating_add(1),
+            } => match READ_RANGE_LENGTH_ARITHMETIC {
+                ReadRangeLengthArithmetic::Inclusive => end_inclusive.saturating_sub(*start).saturating_add(1),
+                ReadRangeLengthArithmetic::Exclusive => end_inclusive.saturating_sub(*start),
+            },
             Self::Unsatisfiable { .. } => 0,
         }
     }
@@ -485,6 +548,16 @@ impl RangeDecision {
     #[must_use]
     pub const fn suppresses_object_checksum(&self) -> bool {
         matches!(self, Self::Partial { .. } | Self::Part { .. })
+            && matches!(PARTIAL_CHECKSUM_POLICY, PartialChecksumPolicy::SuppressWholeObject)
+    }
+
+    /// The total-part-count header value for a resolved part response.
+    #[must_use]
+    pub const fn part_count_header(&self, total: u32) -> Option<u32> {
+        match (self, PART_COUNT_HEADER_POLICY) {
+            (Self::Part { .. }, PartCountHeaderPolicy::IncludeTotal) => Some(total),
+            _ => None,
+        }
     }
 }
 
@@ -502,7 +575,10 @@ pub fn evaluate_range(
     validators: &ObjectValidators,
     object_len: u64,
 ) -> Result<RangeDecision, PreconditionRejection> {
-    if selectors.range.is_some() && selectors.part_number.is_some() {
+    if selectors.range.is_some()
+        && selectors.part_number.is_some()
+        && matches!(RANGE_PART_SELECTOR_CONFLICT_POLICY, RangePartSelectorConflictPolicy::Reject)
+    {
         return Err(PreconditionRejection {
             code: ErrorCode::INVALID_REQUEST,
             reason: "Range and partNumber select bytes by two mechanisms and cannot be combined",
@@ -521,11 +597,13 @@ pub fn evaluate_range(
     // the whole object is served with a 200. It never produces an error of its own.
     if let Some(if_range) = selectors.if_range
         && !if_range_matches(if_range, validators)
+        && matches!(IF_RANGE_MISS_POLICY, IfRangeMissPolicy::ServeWhole)
     {
         return Ok(RangeDecision::Whole);
     }
 
-    Ok(match RangeParse::parse(header).resolve(object_len) {
+    let parsed = RangeParse::parse(header);
+    Ok(match parsed.resolve(object_len) {
         RangeOutcome::Full => RangeDecision::Whole,
         RangeOutcome::Satisfied { start, end_inclusive } => RangeDecision::Partial {
             start,
@@ -534,12 +612,24 @@ pub fn evaluate_range(
         },
         RangeOutcome::Unsatisfiable { actual } => RangeDecision::Unsatisfiable {
             actual_object_size: actual,
-            // Verbatim, not trimmed. `<RangeRequested>` reports what the client sent; a server that
-            // tidies the value first is reporting its own reading back as though it were the
-            // request, which is the same mistake as re-spelling the range out of the parse.
-            range_requested: header.to_owned(),
+            range_requested: match RANGE_REQUESTED_DETAIL_POLICY {
+                // Verbatim, not trimmed. `<RangeRequested>` reports what the client sent; a server
+                // that tidies the value first is reporting its own reading back as though it were
+                // the request, which is the same mistake as re-spelling the range out of the parse.
+                RangeRequestedDetailPolicy::Verbatim => header.to_owned(),
+                RangeRequestedDetailPolicy::Normalized => normalized_range(parsed, header),
+            },
         },
     })
+}
+
+fn normalized_range(parsed: RangeParse, original: &str) -> String {
+    match parsed {
+        RangeParse::One(ByteRange::FromTo { first, last }) => format!("bytes={first}-{last}"),
+        RangeParse::One(ByteRange::From { first }) => format!("bytes={first}-"),
+        RangeParse::One(ByteRange::Suffix { length }) => format!("bytes=-{length}"),
+        RangeParse::Absent | RangeParse::Ignore | RangeParse::MultiRange => original.trim().to_owned(),
+    }
 }
 
 /// Whether an `If-Range` validator still describes the selected representation.

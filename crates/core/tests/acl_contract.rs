@@ -200,7 +200,9 @@ fn a_display_name_beside_an_id_is_not_a_second_identity() {
 
 #[test]
 fn every_permission_of_the_closed_set_is_accepted() {
-    for permission in PERMISSIONS {
+    let documented = ["FULL_CONTROL", "WRITE", "WRITE_ACP", "READ", "READ_ACP"];
+    assert_eq!(PERMISSIONS, documented);
+    for permission in documented {
         let mut document = policy(vec![grant(canonical_grantee(), permission)]);
         assert_eq!(canonicalize_policy(&mut document), Ok(()), "{permission} was refused");
     }
@@ -452,6 +454,17 @@ fn n_no_reason_carries_an_id_an_email_a_uri_or_any_request_bytes() {
         assert!(!reason.contains(EMAIL), "{reason}");
         assert!(!reason.contains('@'), "{reason}");
         assert!(!reason.contains("http://acs."), "{reason}");
+    }
+    for raw in [
+        format!("id={CANONICAL_ID}"),
+        format!("account=\"{EMAIL}\""),
+        format!("id=\"{}\"", "u".repeat(MAX_GRANT_HEADER_BYTES)),
+    ] {
+        let rejection = parse_grant_header(&raw).expect_err("the malformed or over-limit header is refused");
+        let reason = rejection.reason();
+        assert!(!reason.contains(CANONICAL_ID), "{reason}");
+        assert!(!reason.contains(EMAIL), "{reason}");
+        assert!(!reason.contains("uuuuuuuuuuuuuuuu"), "{reason}");
     }
 }
 

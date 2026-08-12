@@ -25,6 +25,7 @@
 
 use rustfs_gateway_model::ir::{ETagRender, TimestampFormat, Type};
 
+use super::boolean::BooleanSpelling;
 use super::bounds::Bound;
 use super::forms::Form;
 use crate::emit::dto::naming;
@@ -81,6 +82,7 @@ pub fn from_wire(
     in_xml: bool,
     bound: Option<Bound>,
     form: Option<Form>,
+    boolean_spelling: Option<BooleanSpelling>,
 ) -> Result<String, String> {
     if let Some(form) = form {
         return Ok(form.call(member, ty));
@@ -93,7 +95,10 @@ pub fn from_wire(
             None => format!("value::integer(raw, \"{member}\")?"),
         },
         Type::Long => format!("value::long(raw, \"{member}\")?"),
-        Type::Boolean => format!("value::boolean(raw, \"{member}\")?"),
+        Type::Boolean => match boolean_spelling.unwrap_or(BooleanSpelling::AsciiCaseInsensitive) {
+            BooleanSpelling::AsciiCaseInsensitive => format!("value::boolean(raw, \"{member}\")?"),
+            BooleanSpelling::LowercaseOnly => format!("value::boolean_lowercase(raw, \"{member}\")?"),
+        },
         Type::Timestamp(format) => {
             format!("value::timestamp(raw, TimestampFormat::{}, \"{member}\")?", timestamp_format(*format))
         }

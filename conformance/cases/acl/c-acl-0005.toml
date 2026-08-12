@@ -8,7 +8,7 @@ polarity = "positive"
 operation = "PutBucketAcl"
 tags = ["acl", "xml", "wire-bytes", "known-divergence"]
 timeout_ms = 10000
-quirks = ["q-acl-0004"]
+quirks = ["q-acl-0004", "q-acl-0014"]
 
 [[case.evidence]]
 url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_Grantee.html"

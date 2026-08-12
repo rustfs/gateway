@@ -49,5 +49,51 @@ mod tests;
 pub use error::{Error, Result};
 pub use ir::OperationIr;
 pub use lower::{Lowered, lower};
-pub use overlay::Overlay;
+pub use overlay::{
+    AbsoluteOrUncPolicyValue, AclChannelPolicyValue, AclOwnerPolicyValue, BooleanSpellingValue, BucketStatePreconditionValue,
+    CaseFoldingValue, ClientIngressForbiddenCodepointsValue, CodecRule, CodecValue, ConditionConflictValue,
+    ConditionFailureDetailValue, ConditionalWildcardParseValue, ConditionalWildcardWriteValue, ConditionalWriteOrderValue,
+    ContractRule, ContractValue, CopySourceGuardOrderValue, CopySourceIfMatchMissValue, CopyValidatorScopeValue,
+    DecodedUtf8Value, DefaultBucketValidatorValue, DefaultSlashPolicyValue, DeleteAbsentPolicyValue, ErrorRootNamespaceValue,
+    ErrorSecretFlowValue, EtagComparisonStrengthValue, HeadBodyPolicyValue, HeaderToleranceValue, IfMatchAbsentPolicyValue,
+    IfMatchDatePrecedenceValue, IfMatchMissOutcomeValue, IfNoneDatePrecedenceValue, MutationDimension, Overlay,
+    PercentDecodePassesValue, ResidualEncodedDangerousValue, RuleClassification, SourceRule, StoredLegacyControlPolicyValue,
+    TemporalRelationValue, TraversalSegmentDelimitersValue, UnicodeNormalizationValue, UnknownElementPolicyValue,
+    ValidatorAuthorityValue, ValidatorReplaceabilityValue, WireFormValue,
+};
+pub use overlay::{
+    ActualAllowOriginPolicyValue, ActualExposePolicyValue, ActualPreflightHeaderPolicyValue, ActualVaryPolicyValue,
+    AllowHeadersAnswerSourceValue, AllowedHeaderWildcardLimitValue, AllowedMethodCasePolicyValue, AllowedMethodValueSetValue,
+    BareOptionsPolicyValue, BareWildcardAnswerValue, CorsContractValue, CorsDeleteAbsentPolicyValue,
+    CorsInvalidTargetPolicyValue, CorsMatchedRuleValueSourceValue, CorsOriginCardinalityValue, CorsOriginCharacterPolicyValue,
+    CorsOriginEmptyPolicyValue, CorsOriginMaxBytesValue, CorsRequestHeadersCardinalityValue, CorsRequestMethodCardinalityValue,
+    CorsRuleDimensionJoinValue, CorsRuleOrderPolicyValue, CorsSourceAbsencePolicyValue, ExactOriginMatchValue,
+    ExposeHeaderWildcardLimitValue, HeadersOnPostAuthErrorValue, OriginWildcardLimitValue, OriginWildcardMatchValue,
+    PartialWildcardAnswerValue, PreflightAllowMethodsSourceValue, PreflightAuthorizationScopeValue, PreflightBucketSourceValue,
+    PreflightDispatchPolicyValue, PreflightExposePolicyValue, PreflightMaxAgePolicyValue, PreflightRefusalProfileValue,
+    PreflightRequiredHeaderPairValue, PreflightVaryPolicyValue, RequestedHeaderCasePolicyValue, RequestedHeaderQuantifierValue,
+    RequestedHeaderWildcardMatchValue, UnmatchedActualPolicyValue, WildcardCredentialsPolicyValue,
+};
+pub use overlay::{
+    BareConditionalEtagPolicyValue, CompletionFailureUploadPolicyValue, ConditionalRaceOutcomeValue,
+    CopyRangeLengthArithmeticValue, ExplicitEndOverflowPolicyValue, IfNoneMatchComparisonStrengthValue, IfRangeMissPolicyValue,
+    InvalidRangePolicyValue, MultiRangePolicyValue, NotModifiedBodyPolicyValue, NotModifiedEtagPolicyValue,
+    NotModifiedFramingPolicyValue, OpenEndedRangePolicyValue, OversizeSuffixPolicyValue, PartCountHeaderPolicyValue,
+    PartNumberOutcomeValue, PartialChecksumPolicyValue, RangePartSelectorConflictValue, RangeRequestedDetailValue,
+    RangeStartBoundValue, ReadRangeLengthArithmeticValue, SuffixRangePolicyValue, UnsatisfiableActualSizeDetailValue,
+};
+pub use overlay::{
+    EventCrcAlgorithmValue, EventMessageCrcCoverageValue, EventPreludeCrcCoverageValue, RestoreAlreadyRestoredOutcomeValue,
+    RestoreDaysMinimumValue, RestoreDaysSelectExclusionValue, RestoreFormPresenceValue, RestoreHeaderAbsenceValue,
+    RestoreHeaderOngoingFormValue, RestoreHeaderParseGrammarValue, RestoreHeaderRestoredFormValue, RestoreInProgressOutcomeValue,
+    RestoreInitiatedOutcomeValue, RestoreNestedSelectValidationValue, RestoreNotArchivedOutcomeValue,
+    RestoreRootNamespacePolicyValue, RestoreSelectMembersRequireTypeValue, RestoreSelectOutputRequiredValue,
+    RestoreSelectParametersRequiredValue, RestoreTierValueSetValue, RestoreTypeValueSetValue, RestoreVersionSelectorValue,
+    SelectCompressionValuesValue, SelectEventMediaTypeValue, SelectEventStatusValue, SelectEventTerminationValue,
+    SelectExpressionErrorFlowValue, SelectExpressionInspectionValue, SelectExpressionMaxBytesValue,
+    SelectExpressionPresenceValue, SelectExpressionTypeValuesValue, SelectInputMissingValue, SelectInputMultipleValue,
+    SelectOutputMissingValue, SelectOutputMultipleValue, SelectResponseShapeValue, SelectRestoreContractValue,
+    SelectRootNamespacePolicyValue, SelectScanBoundedValue, SelectScanEndOnlyValue, SelectScanRangeEmptyValue,
+    SelectScanRangeOrderValue, SelectScanRangeSignValue, SelectScanStartOnlyValue, SelectTypeRoutePredicateValue,
+};
 pub use smithy::Model;

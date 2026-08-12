@@ -567,6 +567,7 @@ gateway_modules = (
     "object_lock_intent",
     "patch_layer_landings",
     "pipeline",
+    "precondition_contract",
     "refusal_order_guards",
     "reject_rendering",
     "replication_token",

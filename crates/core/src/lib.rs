@@ -97,6 +97,7 @@
 
 pub mod authz;
 pub mod codec;
+mod contracts;
 pub mod cors;
 pub mod dialect;
 pub mod dispatch;
@@ -117,8 +118,9 @@ pub use crate::authz::{
 };
 pub use crate::codec::{
     BodyAllowance, CodecError, EncodedResponse, MetaView, OperationCodec, RequestBody, ResponseBody, ResponseOverride,
-    body_allowance,
+    body_allowance, response_body_allowed, response_framing_allowed,
 };
+pub use crate::contracts::{copy_source_guards_before_target_write, copy_source_if_match_miss_proceeds, error_root_namespace};
 pub use crate::dialect::{Dialect, DialectBuilder, DialectError, DialectOperation, DialectOverlay, DialectRoute, OverlayRow};
 pub use crate::dispatch::{Dispatch, Router, RouterBuildError};
 pub use crate::error::{DisallowedPreAuthCode, PRE_AUTH_STATUSES, PreAuthError};

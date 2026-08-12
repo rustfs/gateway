@@ -1,0 +1,4 @@
+# These enums describe whether rejected values may flow into error text. They carry no secret bytes.
+crates/core/src/contracts.rs:AclErrorSecretFlowPolicy
+crates/core/src/contracts.rs:EncryptionErrorSecretFlowPolicy
+crates/model/src/overlay/codec.rs:ErrorSecretFlowValue

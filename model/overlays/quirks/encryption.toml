@@ -28,6 +28,9 @@
 [[quirk]]
 id      = "q-enc-0001"
 kind    = "not_configured_error"
+classification = "mutable"
+mutation_dimension = "optionality"
+mutation_sources = ["GetBucketEncryption.errors.not_configured"]
 target  = "GetBucketEncryption"
 summary = "A bucket that never had an encryption document answers 404 with the operation-specific code ServerSideEncryptionConfigurationNotFoundError, not a generic not-found and not an empty 200."
 cases   = ["c-encryption-0012", "c-encryption-0006"]
@@ -40,6 +43,12 @@ cases   = ["c-encryption-0012", "c-encryption-0006"]
 [[quirk]]
 id      = "q-enc-0002"
 kind    = "flattened_list"
+classification = "mutable"
+mutation_dimension = "wrap_strategy"
+mutation_sources = [
+  "GetBucketEncryption.shapes.ServerSideEncryptionConfiguration.fields.Rules.list_flattened",
+  "PutBucketEncryption.shapes.ServerSideEncryptionConfiguration.fields.Rules.list_flattened",
+]
 target  = "ServerSideEncryptionConfiguration.Rules"
 summary = "The rules repeat as sibling Rule elements directly under the ServerSideEncryptionConfiguration root; a Rules wrapper element would make every SDK read zero rules."
 cases   = ["c-encryption-0002", "c-encryption-0010"]
@@ -57,9 +66,12 @@ cases   = ["c-encryption-0002", "c-encryption-0010"]
 [[quirk]]
 id      = "q-enc-0003"
 kind    = "idempotent_delete"
+classification = "contract"
+mutation_dimension = "delete_absent_policy"
+contract_value = "succeed_when_configuration_absent"
 target  = "DeleteBucketEncryption"
 summary = "The delete answers 204 with no body whether or not a configuration existed, so removing the encryption document of an unconfigured bucket is a success rather than a 404."
-cases   = ["c-encryption-0013", "c-encryption-0006"]
+cases   = ["c-encryption-0013", "c-encryption-0006", "c-encryption-0022"]
 
   [[quirk.evidence]]
   kind    = "aws-doc"
@@ -69,6 +81,9 @@ cases   = ["c-encryption-0013", "c-encryption-0006"]
 [[quirk]]
 id      = "q-enc-0004"
 kind    = "checksum_required"
+classification = "mutable"
+mutation_dimension = "optionality"
+mutation_sources = ["PutBucketEncryption.checksum.http_checksum_required"]
 target  = "PutBucketEncryption"
 summary = "The write demands an integrity claim on the body, so a request with neither Content-MD5 nor an x-amz-checksum header is refused with 400 before the document is parsed."
 cases   = ["c-encryption-0014", "c-encryption-0007"]
@@ -81,6 +96,10 @@ cases   = ["c-encryption-0014", "c-encryption-0007"]
 [[quirk]]
 id      = "q-enc-0005"
 kind    = "value_constraint"
+classification = "contract"
+mutation_dimension = "conditional_value_set"
+contract_value = "kms_key_algorithms"
+contract_values = ["aws:kms", "aws:kms:dsse"]
 target  = "ServerSideEncryptionByDefault.KMSMasterKeyID"
 summary = "A KMSMasterKeyID is allowed if and only if SSEAlgorithm is aws:kms or aws:kms:dsse; a document naming a key id beside AES256 or aws:fsx is refused with 400 InvalidArgument."
 cases   = ["c-encryption-0017", "c-encryption-0024"]
@@ -93,6 +112,9 @@ cases   = ["c-encryption-0017", "c-encryption-0024"]
 [[quirk]]
 id      = "q-enc-0006"
 kind    = "lenient_unknown_elements"
+classification = "mutable"
+mutation_dimension = "unknown_element_policy"
+codec_value = "skip"
 target  = "PutBucketEncryption"
 summary = "Unknown elements inside the request document are skipped rather than refused, because a stored configuration parsed more strictly on the next release silently turns default encryption off and nothing visible fails until objects land unencrypted."
 cases   = ["c-encryption-0009"]
@@ -110,6 +132,10 @@ cases   = ["c-encryption-0009"]
 [[quirk]]
 id      = "q-enc-0007"
 kind    = "closed_value_set"
+classification = "contract"
+mutation_dimension = "enum_strictness"
+contract_value = "closed_encryption_algorithms"
+contract_values = ["AES256", "aws:fsx", "aws:kms", "aws:kms:dsse"]
 target  = "ServerSideEncryptionByDefault.SSEAlgorithm"
 summary = "A write naming an SSEAlgorithm outside the documented set — AES256, aws:fsx, aws:kms, aws:kms:dsse — is refused as MalformedXML: a default-encryption algorithm nothing can apply is a configuration that silently protects nothing."
 cases   = ["c-encryption-0018", "c-encryption-0004", "c-encryption-0005"]
@@ -127,6 +153,9 @@ cases   = ["c-encryption-0018", "c-encryption-0004", "c-encryption-0005"]
 [[quirk]]
 id      = "q-enc-0008"
 kind    = "unbounded_list"
+classification = "contract"
+mutation_dimension = "list_max"
+contract_value = "unbounded_encryption_rules"
 target  = "ServerSideEncryptionConfiguration.Rules"
 summary = "Neither the pinned model nor the API reference bounds the rule list or names a single-rule requirement, so a multi-rule document is stored and echoed as sent rather than refused — which rule an object write applies is the encryption path's question, not the codec's."
 cases   = ["c-encryption-0010"]
@@ -139,6 +168,9 @@ cases   = ["c-encryption-0010"]
 [[quirk]]
 id      = "q-enc-0009"
 kind    = "secret_hygiene"
+classification = "contract"
+mutation_dimension = "error_secret_flow"
+contract_value = "constant_encryption_reasons"
 target  = "ServerSideEncryptionByDefault.KMSMasterKeyID"
 summary = "The model marks the KMS key id sensitive: the stored document echoes it on the read — that is the documented GET response — but a refusal message never carries it, so a rejected write cannot leak a key id into an error body or a log line."
 cases   = ["c-encryption-0017", "c-encryption-0003"]

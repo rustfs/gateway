@@ -7,7 +7,7 @@ This is the only case in the suite that proves an OPTIONS is answered at all. Ev
 polarity = "positive"
 tags = ["cors", "preflight", "security"]
 timeout_ms = 10000
-quirks = ["q-cors-0009", "q-cors-0011"]
+quirks = ["q-cors-0009", "q-cors-0024", "q-cors-0027"]
 
 [[case.evidence]]
 url = "https://fetch.spec.whatwg.org/#http-cors-protocol"

@@ -60,6 +60,7 @@
 use rustfs_gateway_sig::{OperationFloor, SigService};
 use rustfs_gateway_types::dto::{SelectObjectContent, SelectObjectContentInput, SelectObjectContentOutput};
 
+use crate::contracts::{SELECT_EVENT_STATUS, SelectEventStatusPolicy};
 use crate::op::{AuthRequirement, HasOperation, Operation, OperationOrigin, ResourceShape, StandardOperation};
 use crate::registry::OperationSpec;
 
@@ -71,7 +72,10 @@ use crate::registry::OperationSpec;
 /// the first frame exists — see the module note on why no frame follows it yet.
 static SPEC: OperationSpec = OperationSpec {
     name: "SelectObjectContent",
-    success_status: 200,
+    success_status: match SELECT_EVENT_STATUS {
+        SelectEventStatusPolicy::Success200 => 200,
+        SelectEventStatusPolicy::Success202 => 202,
+    },
     required_params: &[],
     not_configured_error: None,
     auth: Some(AuthRequirement::new("s3:GetObject", ResourceShape::Object)),

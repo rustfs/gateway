@@ -46,6 +46,8 @@
 
 use rustfs_gateway_types::dto::{CorsConfiguration, CorsRule};
 
+use crate::contracts;
+
 use super::request::RequestedHeaders;
 
 /// What goes into `Access-Control-Allow-Origin`, and whether credentials may join it.
@@ -87,6 +89,8 @@ pub struct RuleMatch<'a> {
     pub rule: &'a CorsRule,
     /// What `Access-Control-Allow-Origin` will carry.
     pub origin: AllowOrigin<'a>,
+    /// The request origin, retained even when a bare wildcard is the selected rule value.
+    pub request_origin: &'a str,
 }
 
 /// The first rule of `configuration` that admits this preflight, if any.
@@ -101,6 +105,9 @@ pub fn match_preflight<'a>(
     method: &str,
     headers: &RequestedHeaders<'_>,
 ) -> Option<RuleMatch<'a>> {
+    if !contracts::cors_match_dimensions_join_on_one_rule() {
+        return cross_rule_match(configuration, origin, method, headers);
+    }
     first_match(configuration, origin, method, Some(headers))
 }
 
@@ -121,24 +128,57 @@ fn first_match<'a>(
     method: &str,
     headers: Option<&RequestedHeaders<'_>>,
 ) -> Option<RuleMatch<'a>> {
-    for (index, rule) in configuration.cors_rules.iter().enumerate() {
-        if !method_allowed(rule, method) {
-            continue;
-        }
-        if let Some(requested) = headers
-            && !headers_allowed(rule, requested)
-        {
-            continue;
-        }
-        if let Some(allow) = origin_allowed(rule, origin) {
-            return Some(RuleMatch {
-                index,
-                rule,
-                origin: allow,
-            });
-        }
-    }
-    None
+    let matches = |rule: &CorsRule| {
+        method_allowed(rule, method)
+            && headers.is_none_or(|requested| headers_allowed(rule, requested))
+            && origin_allowed(rule, origin).is_some()
+    };
+    let index = if contracts::cors_first_matching_rule_wins() {
+        configuration.cors_rules.iter().position(matches)?
+    } else {
+        configuration.cors_rules.iter().rposition(matches)?
+    };
+    let rule = configuration.cors_rules.get(index)?;
+    let answer_rule = if contracts::cors_answer_uses_winning_rule() {
+        rule
+    } else {
+        configuration.cors_rules.first()?
+    };
+    Some(RuleMatch {
+        index,
+        rule: answer_rule,
+        origin: origin_allowed(rule, origin)?,
+        request_origin: origin,
+    })
+}
+
+fn cross_rule_match<'a>(
+    configuration: &'a CorsConfiguration,
+    origin: &'a str,
+    method: &str,
+    headers: &RequestedHeaders<'_>,
+) -> Option<RuleMatch<'a>> {
+    configuration
+        .cors_rules
+        .iter()
+        .any(|rule| method_allowed(rule, method))
+        .then_some(())?;
+    configuration
+        .cors_rules
+        .iter()
+        .any(|rule| headers_allowed(rule, headers))
+        .then_some(())?;
+    let (index, rule, allow) = configuration
+        .cors_rules
+        .iter()
+        .enumerate()
+        .find_map(|(index, rule)| origin_allowed(rule, origin).map(|allow| (index, rule, allow)))?;
+    Some(RuleMatch {
+        index,
+        rule,
+        origin: allow,
+        request_origin: origin,
+    })
 }
 
 /// Which `AllowedOrigin` of this rule admits `origin`, and in what form.
@@ -155,7 +195,7 @@ fn origin_allowed<'a>(rule: &'a CorsRule, origin: &'a str) -> Option<AllowOrigin
             if wildcard_match(allowed, origin) {
                 return Some(AllowOrigin::Reflected(origin));
             }
-        } else if allowed == origin {
+        } else if !contracts::cors_exact_origin_match_is_exact() || allowed == origin {
             return Some(AllowOrigin::Exact(allowed));
         }
     }
@@ -173,11 +213,16 @@ fn method_allowed(rule: &CorsRule, method: &str) -> bool {
 /// treats as permission for the whole request, and the header the rule did not name would go out
 /// anyway — so "allow the ones I recognise" is not a weaker answer, it is a wrong one.
 fn headers_allowed(rule: &CorsRule, requested: &RequestedHeaders<'_>) -> bool {
-    requested.names().all(|name| {
+    let mut matches = requested.names().map(|name| {
         rule.allowed_headers
             .iter()
             .any(|allowed| ascii_ci_wildcard_match(allowed, name))
-    })
+    });
+    if contracts::cors_all_requested_headers_must_match() {
+        matches.all(|matched| matched)
+    } else {
+        matches.any(|matched| matched)
+    }
 }
 
 /// Whether `value` satisfies a pattern carrying at most one `*`.
@@ -192,13 +237,25 @@ pub fn wildcard_match(pattern: &str, value: &str) -> bool {
     let Some((prefix, suffix)) = pattern.split_once('*') else {
         return pattern == value;
     };
-    value.len() >= prefix.len() + suffix.len() && value.starts_with(prefix) && value.ends_with(suffix)
+    value.len() >= prefix.len() + suffix.len()
+        && (!contracts::cors_origin_wildcard_checks_prefix() || value.starts_with(prefix))
+        && value.ends_with(suffix)
 }
 
 /// [`wildcard_match`] over ASCII-case-folded bytes, for header names.
 fn ascii_ci_wildcard_match(pattern: &str, value: &str) -> bool {
+    let equal = |left: &str, right: &str| {
+        if contracts::cors_requested_header_ignores_case() {
+            left.eq_ignore_ascii_case(right)
+        } else {
+            left == right
+        }
+    };
+    if !contracts::cors_requested_header_uses_wildcard() {
+        return equal(pattern, value);
+    }
     let Some((prefix, suffix)) = pattern.split_once('*') else {
-        return pattern.eq_ignore_ascii_case(value);
+        return equal(pattern, value);
     };
     if value.len() < prefix.len() + suffix.len() {
         return false;
@@ -206,7 +263,7 @@ fn ascii_ci_wildcard_match(pattern: &str, value: &str) -> bool {
     let head = value.get(..prefix.len());
     let tail = value.get(value.len() - suffix.len()..);
     match (head, tail) {
-        (Some(head), Some(tail)) => head.eq_ignore_ascii_case(prefix) && tail.eq_ignore_ascii_case(suffix),
+        (Some(head), Some(tail)) => equal(head, prefix) && equal(tail, suffix),
         // Unreachable for ASCII patterns and lengths checked above; a non-ASCII boundary is
         // answered as "no match" rather than by slicing across a code point.
         _ => false,

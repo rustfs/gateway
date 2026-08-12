@@ -4,8 +4,8 @@ crates/gateway/src/config.rs:104
 crates/gateway/src/ext/authz_audit.rs:230
 crates/gateway/src/ext/cors.rs:100
 crates/gateway/src/ext/cors.rs:206
-crates/gateway/src/ext/cors.rs:306
-crates/gateway/src/ext/cors.rs:398
+crates/gateway/src/ext/cors.rs:313
+crates/gateway/src/ext/cors.rs:405
 crates/gateway/src/ext/credential_guard.rs:143
 crates/gateway/src/ext/credential_guard.rs:144
 crates/gateway/src/ext/credential_guard.rs:145
@@ -21,4 +21,4 @@ crates/gateway/src/probe.rs:60
 crates/gateway/src/probe.rs:69
 crates/gateway/src/request_deadline.rs:92
 crates/gateway/src/request_deadline.rs:99
-crates/gateway/src/service.rs:350
+crates/gateway/src/service.rs:351

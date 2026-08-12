@@ -1,0 +1,40 @@
+[case]
+id = "c-cors-0057"
+schema_version = 1
+title = "A repeated requested-headers field is refused"
+rationale = "Selecting one of two lines would let an intermediary decide which requested headers are authorised."
+polarity = "negative"
+tags = ["cors", "preflight", "security"]
+timeout_ms = 10000
+quirks = ["q-cors-0045"]
+
+[[case.evidence]]
+url = "https://fetch.spec.whatwg.org/#http-cors-protocol"
+summary = "Requested header names are represented as one comma-separated field value."
+kind = "rfc"
+
+[[setup.buckets]]
+name = "conf-cors-rt"
+
+[[exchanges]]
+[exchanges.request]
+method = "PUT"
+target = "/conf-cors-rt?cors"
+headers = { "content-type" = "application/xml", "content-md5" = "JwjOZkFs+i5vAUZUg/9fsw==" }
+body = { utf8 = "<CORSConfiguration><CORSRule><AllowedHeader>x-amz-*</AllowedHeader><AllowedMethod>PUT</AllowedMethod><AllowedOrigin>*</AllowedOrigin></CORSRule></CORSConfiguration>" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+[exchanges.expect]
+kind = "response"
+status = 200
+
+[[exchanges]]
+[exchanges.request]
+method = "OPTIONS"
+target = "/conf-cors-rt/key"
+raw_headers = [["host", "s3.example.com"], ["origin", "https://app.example.com"], ["access-control-request-method", "PUT"], ["access-control-request-headers", "x-amz-a"], ["access-control-request-headers", "x-amz-b"]]
+[exchanges.expect]
+kind = "response"
+status = 403
+[exchanges.expect.error]
+code = "AccessForbidden"
+request_id_present = true

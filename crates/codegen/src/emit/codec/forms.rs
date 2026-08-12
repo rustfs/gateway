@@ -30,11 +30,9 @@
 //!
 //! What is data, and what is not:
 //!
-//! * **data** — *which* members carry a stricter wire form. The overlay attaches a `wire_form`
-//!   quirk to a field, and every field carrying it is checked, in every operation. Adding
-//!   `CopyObject.CopySourceIfMatch` to the set is an overlay edit and nothing else.
-//! * **not data** — the grammar behind each form, which is the table below plus the two functions
-//!   it names.
+//! * **data** — *which* members carry a stricter wire form and which form they carry. The overlay
+//!   attaches a typed codec rule to a field, and every field carrying it is checked.
+//! * **not data** — the checker implementation behind each form.
 //!
 //! # Why the type does not change instead
 //!
@@ -44,14 +42,13 @@
 //! consumers this workspace does not need in order to stop accepting a broken value. The form is
 //! the narrow half: it validates and hands the value back as it arrived.
 //!
-//! Two guards keep the table honest: a `wire_form` quirk with no entry here fails the run, and so
-//! does one attached to a member whose type the form has no grammar for. Neither can be reached by
-//! a silent drop.
+//! A typed form attached to a member whose type it cannot read fails the run. Free-text quirk
+//! metadata is never consulted here.
 
-use rustfs_gateway_model::ir::{Field, Quirk, Type};
+use std::collections::BTreeMap;
 
-/// The quirk category that marks a member as carrying a wire form stricter than its type.
-pub const FORM_KIND: &str = "wire_form";
+use rustfs_gateway_model::ir::{Field, Type};
+use rustfs_gateway_model::{CodecRule, CodecValue, WireFormValue};
 
 /// One wire grammar a string-typed member is checked against.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -101,46 +98,22 @@ impl Form {
     }
 }
 
-/// The forms, by the quirk id that carries each one.
-///
-/// One row per quirk, never per field: `cargo xtask why <id>` resolves the row to its evidence and
-/// to the conformance cases that would fail if it moved.
-const FORMS: &[(&str, Form)] = &[
-    // A conditional header carries one entity tag. An unterminated one is not a tag, and two
-    // field lines joined into one value are not a tag either.
-    ("q-etag-form-0074", Form::EntityTag),
-    // A listing cursor is a value this service produced, so bytes it could not have produced —
-    // non-text, oversized, or spelling a path — are malformed input.
-    ("q-token-form-0075", Form::OpaqueToken),
-    // The upload-id cursor of a multipart listing, which is the same rule reached through a
-    // different family's marker pair.
-    ("q-marker-form-0076", Form::OpaqueToken),
-];
-
 /// The wire form one field's quirks declare, if any.
 ///
 /// # Errors
 ///
-/// A string naming the operation and member when a `wire_form` quirk has no row in `FORMS`, when
-/// one is attached to a member whose type the form has no grammar for, or when two of them claim
-/// different forms for one member. All three are overlay mistakes that would otherwise disable a
-/// refusal silently, which is the failure a hand-written file can least afford.
-pub fn of(field: &Field, quirks: &[Quirk], operation: &str) -> Result<Option<Form>, String> {
+/// A string naming the operation and member when a typed form is attached to a member whose type
+/// it cannot read, or when two typed form rules disagree on one member.
+pub fn of(field: &Field, rules: &BTreeMap<String, CodecRule>, operation: &str) -> Result<Option<Form>, String> {
     let mut found: Option<Form> = None;
     for id in &field.quirk_refs {
-        let Some(quirk) = quirks.iter().find(|q| &q.id == id) else {
+        let Some(rule) = rules.get(id) else {
             continue;
         };
-        if quirk.kind != FORM_KIND {
-            continue;
-        }
-        let Some((_, form)) = FORMS.iter().find(|(known, _)| known == id) else {
-            return Err(format!(
-                "codec {operation}.{}: quirk `{id}` is a `{FORM_KIND}` with no grammar in \
-                 `crates/codegen/src/emit/codec/forms.rs`. Add the row rather than letting the \
-                 quirk claim a refusal nothing performs.",
-                field.name
-            ));
+        let form = match &rule.current {
+            CodecValue::WireForm(WireFormValue::EntityTag) => Form::EntityTag,
+            CodecValue::WireForm(WireFormValue::OpaqueToken) => Form::OpaqueToken,
+            _ => continue,
         };
         if !form.accepts(&field.ty) {
             return Err(format!(
@@ -149,13 +122,13 @@ pub fn of(field: &Field, quirks: &[Quirk], operation: &str) -> Result<Option<For
                 form.expects()
             ));
         }
-        if found.is_some_and(|existing| existing != *form) {
+        if found.is_some_and(|existing| existing != form) {
             return Err(format!(
-                "codec {operation}.{}: two `{FORM_KIND}` quirks claim different grammars; one member has one wire form.",
+                "codec {operation}.{}: two typed codec rules claim different grammars; one member has one wire form.",
                 field.name
             ));
         }
-        found = Some(*form);
+        found = Some(form);
     }
     Ok(found)
 }

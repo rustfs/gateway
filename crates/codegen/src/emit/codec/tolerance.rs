@@ -23,8 +23,8 @@
 //! # The third twin, and why it is not a decoder feature
 //!
 //! [`super::bounds`] and [`super::forms`] are the same shape as this module: the frozen IR cannot
-//! say "this integer has a range" or "this string has a grammar", so *which* members carry the
-//! rule is overlay data and the rule itself is a table here.
+//! say "this integer has a range" or "this string has a grammar", so the complete typed rule
+//! stays in the overlay.
 //!
 //! This one exists for a rule the decoder is structurally unable to express. A decoder may say
 //! "this is not the document" and nothing else — `MalformedXML` is the only code the parser owns,
@@ -38,16 +38,15 @@
 //! `Option` is one named call. See `rustfs_gateway_core::codec::value::DateCondition` for why the
 //! collapse is correct for a date condition and was the `if-range` defect for a range.
 //!
-//! Two guards keep the table honest: a `header_tolerance` quirk with no row here fails the run,
-//! and so does one attached to a member whose type or binding the tolerance has no reading for.
-//! Neither can be reached by a silent drop — which matters more here than in the twins, because
+//! A typed tolerance attached to a member whose type or binding it cannot read fails the run.
+//! Free-text quirk metadata is never consulted here — which matters more here than in the twins, because
 //! the failure mode of a *missing* tolerance is a refusal the RFC forbids, and it looks exactly
 //! like ordinary strictness.
 
-use rustfs_gateway_model::ir::{Binding, Field, Quirk, Type};
+use std::collections::BTreeMap;
 
-/// The quirk category that marks a binding as read tolerantly.
-pub const TOLERANCE_KIND: &str = "header_tolerance";
+use rustfs_gateway_model::ir::{Binding, Field, Type};
+use rustfs_gateway_model::{CodecRule, CodecValue, HeaderToleranceValue};
 
 /// One way of reading a value the specification says to ignore rather than refuse.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -94,42 +93,21 @@ impl Tolerance {
     }
 }
 
-/// The tolerances, by the quirk id that carries each one.
-///
-/// One row per quirk, never per field: `cargo xtask why <id>` resolves the row to its evidence and
-/// to the conformance cases that would fail if it moved.
-const TOLERANCES: &[(&str, Tolerance)] = &[
-    // A date condition that is not an HTTP-date is ignored and the object is served. Refusing it
-    // answers 400 for a header that carries no requirement once it cannot be read, and the client
-    // never learns its date format is the problem.
-    ("q-cond-0050", Tolerance::DateCondition),
-];
-
 /// The tolerance one field's quirks declare, if any.
 ///
 /// # Errors
 ///
-/// A string naming the operation and member when a `header_tolerance` quirk has no row in
-/// `TOLERANCES`, when one is attached to a member whose type or binding the reading has no form
-/// for, or when two of them claim different readings for one member. All three are overlay
-/// mistakes that would otherwise leave a member strict where the specification requires tolerance
-/// — a failure indistinguishable, from the outside, from a decoder simply doing its job.
-pub fn of(field: &Field, quirks: &[Quirk], operation: &str) -> Result<Option<Tolerance>, String> {
+/// A string naming the operation and member when a typed tolerance is attached to a member whose
+/// type or binding it cannot read, or when two typed tolerance rules disagree on one member.
+pub fn of(field: &Field, rules: &BTreeMap<String, CodecRule>, operation: &str) -> Result<Option<Tolerance>, String> {
     let mut found: Option<Tolerance> = None;
     for id in &field.quirk_refs {
-        let Some(quirk) = quirks.iter().find(|q| &q.id == id) else {
+        let Some(rule) = rules.get(id) else {
             continue;
         };
-        if quirk.kind != TOLERANCE_KIND {
-            continue;
-        }
-        let Some((_, tolerance)) = TOLERANCES.iter().find(|(known, _)| known == id) else {
-            return Err(format!(
-                "codec {operation}.{}: quirk `{id}` is a `{TOLERANCE_KIND}` with no reading in \
-                 `crates/codegen/src/emit/codec/tolerance.rs`. Add the row rather than letting the \
-                 quirk claim a tolerance nothing performs.",
-                field.name
-            ));
+        let tolerance = match &rule.current {
+            CodecValue::HeaderTolerance(HeaderToleranceValue::DateCondition) => Tolerance::DateCondition,
+            _ => continue,
         };
         if !tolerance.accepts(&field.ty, &field.binding) {
             return Err(format!(
@@ -138,13 +116,13 @@ pub fn of(field: &Field, quirks: &[Quirk], operation: &str) -> Result<Option<Tol
                 tolerance.expects()
             ));
         }
-        if found.is_some_and(|existing| existing != *tolerance) {
+        if found.is_some_and(|existing| existing != tolerance) {
             return Err(format!(
-                "codec {operation}.{}: two `{TOLERANCE_KIND}` quirks claim different readings; one member has one.",
+                "codec {operation}.{}: two typed codec rules claim different readings; one member has one.",
                 field.name
             ));
         }
-        found = Some(*tolerance);
+        found = Some(tolerance);
     }
     Ok(found)
 }

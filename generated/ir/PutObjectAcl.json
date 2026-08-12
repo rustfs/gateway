@@ -306,7 +306,7 @@
                                                    "values": ["CanonicalUser", "AmazonCustomerByEmail", "Group"]
                                                  },
                                          "hot": false,
-                                         "quirk_refs": ["q-acl-0003", "q-acl-0004"]
+                                         "quirk_refs": ["q-acl-0003", "q-acl-0004", "q-acl-0014"]
                                        }
                                      ],
                            "xml": {
@@ -417,7 +417,7 @@
                                 "summary": "The documented response syntax nests every Grant element inside a single AccessControlList element under the AccessControlPolicy root."
                               }
                             ],
-                "cases": ["c-acl-0001", "c-acl-0004"]
+                "cases": ["c-acl-0001", "c-acl-0004", "c-acl-0034"]
               },
               {
                 "id": "q-acl-0002",
@@ -461,7 +461,7 @@
                 "id": "q-acl-0004",
                 "kind": "aws_deviation",
                 "target": "Grantee.Type",
-                "summary": "On the way in the discriminator is derived from whichever of ID, URI or EmailAddress the grantee carries, because the XML reader this project ships exposes no attributes at all; for every document AWS accepts the two agree, and a document whose attribute contradicts its members is read by its members.",
+                "summary": "Type is optional in the decoded DTO because the XML reader exposes no attributes; making it required would reject every real Grantee before the runtime can derive its discriminator.",
                 "evidence": [
                               {
                                 "kind": "s3s-issue",
@@ -474,7 +474,7 @@
                                 "summary": "Each documented Type value pairs with exactly one identifying member, which is what makes the member a sound discriminator."
                               }
                             ],
-                "cases": ["c-acl-0005", "c-acl-0021", "c-acl-0022"]
+                "cases": ["c-acl-0005"]
               },
               {
                 "id": "q-acl-0005",
@@ -488,7 +488,7 @@
                                 "summary": "The canned-ACL table lists eight values and names, for each one, whether it applies to a bucket, an object or both."
                               }
                             ],
-                "cases": ["c-acl-0009", "c-acl-0010", "c-acl-0018", "c-acl-0019"]
+                "cases": ["c-acl-0009", "c-acl-0010", "c-acl-0018", "c-acl-0019", "c-acl-0031"]
               },
               {
                 "id": "q-acl-0006",
@@ -521,7 +521,7 @@
                                 "summary": "The request reference states that access permissions may be set with the request body or with the request headers, and not with both at once."
                               }
                             ],
-                "cases": ["c-acl-0013", "c-acl-0014", "c-acl-0024", "c-acl-0027"]
+                "cases": ["c-acl-0013", "c-acl-0014", "c-acl-0024", "c-acl-0027", "c-acl-0032"]
               },
               {
                 "id": "q-acl-0009",
@@ -592,6 +592,25 @@
                               }
                             ],
                 "cases": ["c-acl-0006", "c-acl-0030"]
+              },
+              {
+                "id": "q-acl-0014",
+                "kind": "grantee_discriminator_policy",
+                "target": "Grantee.Type",
+                "summary": "On the way in the discriminator is derived from whichever of ID, URI or EmailAddress the grantee carries; when the unreadable attribute contradicts those members, the members decide the stored and returned type.",
+                "evidence": [
+                              {
+                                "kind": "s3s-issue",
+                                "ref": "https://github.com/s3s-project/s3s/issues/297",
+                                "summary": "The same missing XML-attribute capability upstream hit from the writing side; here it is the reading side that has no attribute access."
+                              },
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_Grantee.html",
+                                "summary": "Each documented Type value pairs with exactly one identifying member, which makes the identifying member a deterministic discriminator."
+                              }
+                            ],
+                "cases": ["c-acl-0005"]
               }
             ],
   "ext_points": []

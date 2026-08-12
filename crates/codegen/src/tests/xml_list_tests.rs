@@ -90,7 +90,7 @@ fn a_wrapped_list_whose_model_names_no_member_falls_back_to_the_smithy_default()
 
 #[test]
 fn the_pinned_wrapped_list_writes_the_wrapper_outside_the_entries() {
-    let body = encode::body(&ir("ListBuckets")).expect("ListBuckets encodes");
+    let body = encode::body(&ir("ListBuckets"), &Default::default()).expect("ListBuckets encodes");
     let wrapper = at(&body, "writer.open(\"Buckets\", None);");
     let entry = at(&body, "writer.open(\"Bucket\", None);");
     assert!(
@@ -108,7 +108,7 @@ fn a_second_wrapped_list_of_structures_nests_the_same_way() {
         wrapper_name: Some("Entry".to_owned()),
     };
     retype_output(&mut ir, "Contents", "Entries", entries);
-    let body = encode::body(&ir).expect("the retyped operation encodes");
+    let body = encode::body(&ir, &Default::default()).expect("the retyped operation encodes");
     let wrapper = at(&body, "writer.open(\"Entries\", None);");
     let entry = at(&body, "writer.open(\"Entry\", None);");
     assert!(wrapper < entry, "the wrapper encloses the entries here too:\n{body}");
@@ -126,7 +126,7 @@ fn a_second_wrapped_list_of_scalars_nests_the_same_way() {
         wrapper_name: Some("Value".to_owned()),
     };
     retype_output(&mut ir, "Prefix", "Values", values);
-    let body = encode::body(&ir).expect("the retyped operation encodes");
+    let body = encode::body(&ir, &Default::default()).expect("the retyped operation encodes");
     let wrapper = at(&body, "writer.open(\"Values\", None);");
     let entry = at(&body, "writer.element(\"Value\", v.as_str());");
     assert!(wrapper < entry, "a scalar list is wrapped by the same rule:\n{body}");
@@ -136,7 +136,7 @@ fn a_second_wrapped_list_of_scalars_nests_the_same_way() {
 fn n_a_flattened_list_gains_no_wrapper_when_the_inversion_is_fixed() {
     // The over-correction this guards: swapping the two names at the call site instead of
     // resolving them would give every flattened list an enclosing element it must not have.
-    let body = encode::body(&ir("ListObjectsV2")).expect("ListObjectsV2 encodes");
+    let body = encode::body(&ir("ListObjectsV2"), &Default::default()).expect("ListObjectsV2 encodes");
     assert!(
         body.contains("writer.open(\"Contents\", None);"),
         "a flattened list repeats the field's own wire name:\n{body}"
@@ -164,7 +164,14 @@ fn the_reader_of_a_wrapped_list_descends_through_the_same_two_names() {
     field.wire_name = Some("Entries".to_owned());
     field.ty = objects;
     let shape = ir.shapes.get("Delete").expect("still there").clone();
-    let reader = decode::shape_reader("DeleteObjects", "Delete", &shape, &ir.quirks).expect("the shape reads");
+    let reader = decode::shape_reader(
+        &ir,
+        "Delete",
+        &shape,
+        &Default::default(),
+        rustfs_gateway_model::UnknownElementPolicyValue::Skip,
+    )
+    .expect("the shape reads");
     assert!(
         reader.contains("node.child(\"Entries\").into_iter().flat_map(|w| w.children_named(\"Entry\"))"),
         "the reader descends wrapper first, entry second — the same order the writer emits:\n{reader}"

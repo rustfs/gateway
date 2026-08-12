@@ -161,6 +161,18 @@ struct CountingSource {
     document: CorsConfiguration,
 }
 
+/// A source failure whose retries are visible at the assembled gateway boundary.
+struct FailingSource {
+    reads: Arc<AtomicUsize>,
+}
+
+impl CorsSource for FailingSource {
+    fn load<'a>(&'a self, _bucket: &'a BucketName) -> BoxFuture<'a, Result<Option<CorsConfiguration>, CorsSourceError>> {
+        self.reads.fetch_add(1, Ordering::SeqCst);
+        Box::pin(async { Err(CorsSourceError) })
+    }
+}
+
 impl CountingSource {
     fn new(reads: &Arc<AtomicUsize>, origins: &[&str], methods: &[&str]) -> Self {
         Self {
@@ -207,6 +219,15 @@ struct Built {
 
 fn build(origins: &[&str], methods: &[&str], policy: CorsPolicy, governor: Option<RefusingGovernor>) -> Built {
     let reads = Arc::new(AtomicUsize::new(0));
+    build_with_source(CountingSource::new(&reads, origins, methods), Arc::clone(&reads), policy, governor)
+}
+
+fn build_with_source(
+    source: impl CorsSource,
+    reads: Arc<AtomicUsize>,
+    policy: CorsPolicy,
+    governor: Option<RefusingGovernor>,
+) -> Built {
     let credentials = Credentials::new("AKIDEXAMPLE", b"secret").expect("a valid access key id");
     let mut builder = ServiceBuilder::new()
         .register::<BucketPing, _>(Arc::new(PingBackend))
@@ -221,7 +242,7 @@ fn build(origins: &[&str], methods: &[&str], policy: CorsPolicy, governor: Optio
             FixedClock::at_unix_seconds(1_767_225_600),
             rustfs_gateway::ClockSkewAck::i_understand_a_skewed_clock_can_disable_signature_expiry(),
         )
-        .cors_source(CountingSource::new(&reads, origins, methods))
+        .cors_source(source)
         .cors_policy(policy);
     if let Some(governor) = governor {
         builder = builder.governor(governor);
@@ -323,6 +344,33 @@ async fn a_repeated_preflight_for_an_unknown_bucket_reads_the_configuration_once
         assert_eq!(response.status().as_u16(), 403);
     }
     assert_eq!(built.reads.load(Ordering::SeqCst), 1);
+}
+
+/// Negative — a source failure is collapsed into the same cached absence as a missing document.
+/// The repeated wire request is important: a response-only assertion cannot distinguish a real
+/// collapse from a source that is retried and happens to fail the same way every time.
+#[tokio::test]
+async fn a_repeated_preflight_for_a_failing_source_reads_once() {
+    let reads = Arc::new(AtomicUsize::new(0));
+    let built = build_with_source(
+        FailingSource {
+            reads: Arc::clone(&reads),
+        },
+        Arc::clone(&reads),
+        CorsPolicy::default(),
+        None,
+    );
+    for _ in 0..2 {
+        let response = send(
+            &built.service,
+            "OPTIONS",
+            PREFLIGHT,
+            &[("origin", NAMED), ("access-control-request-method", "PUT")],
+        )
+        .await;
+        assert_eq!(response.status().as_u16(), 403);
+    }
+    assert_eq!(built.reads.load(Ordering::SeqCst), 1, "a failed source read was not collapsed");
 }
 
 /// Negative — the governor is consulted for a preflight, under its own name, and a refusal stops

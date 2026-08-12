@@ -13,7 +13,7 @@ what tells the client which of its parameters to fix."""
 polarity = "negative"
 operation = "UploadPart"
 tags = ["multipart", "limits", "boundary", "error-shape"]
-quirks = ["q-mpu-limits-0038"]
+quirks = ["q-mpu-limits-0038", "q-part-number-0072"]
 
 [[case.evidence]]
 url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/qfacts.html"

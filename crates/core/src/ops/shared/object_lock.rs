@@ -55,7 +55,13 @@
 //! untestable and would smuggle a side effect into a pure rule.
 
 use rustfs_gateway_types::ErrorCode;
-use rustfs_gateway_types::dto::{Mode, ObjectLockConfiguration, ObjectLockLegalHold, ObjectLockRetention, Status};
+use rustfs_gateway_types::dto::{Mode, ObjectLockConfiguration, ObjectLockLegalHold, ObjectLockRetention};
+
+use crate::contracts::{
+    OBJECT_LOCK_BUCKET_STATE_PRECONDITION, OBJECT_LOCK_DEFAULT_EXACTLY_ONE_PERIOD, OBJECT_LOCK_DEFAULT_MIN_PERIOD,
+    OBJECT_LOCK_DEFAULT_REQUIRE_MODE, OBJECT_LOCK_ENABLED_VALUES, OBJECT_LOCK_LEGAL_HOLD_VALUES, OBJECT_LOCK_MODE_VALUES,
+    OBJECT_LOCK_TEMPORAL_RELATION, ObjectLockBucketStatePrecondition, ObjectLockTemporalRelation,
+};
 
 /// Why a decoded object-lock document was refused, with the code AWS answers.
 ///
@@ -124,7 +130,16 @@ impl ObjectLockRejection {
 /// re-pin that adds a value to some other family's member would silently widen `is_known()` —
 /// and with it, what a lock document may say. The two constants cannot drift that way.
 fn mode_is_documented(mode: &Mode) -> bool {
-    *mode == Mode::GOVERNANCE || *mode == Mode::COMPLIANCE
+    OBJECT_LOCK_MODE_VALUES.contains(&mode.as_str())
+}
+
+/// Whether object-level lock writes require object lock to be enabled on the bucket.
+///
+/// Adapters call this before storing retention or legal-hold state; the answer is generated from
+/// the typed `bucket_state_precondition` contract rather than repeated in each backend.
+#[must_use]
+pub const fn object_lock_requires_enabled_bucket() -> bool {
+    matches!(OBJECT_LOCK_BUCKET_STATE_PRECONDITION, ObjectLockBucketStatePrecondition::RequireEnabled)
 }
 
 /// Checks a decoded bucket lock configuration, first refusal wins.
@@ -139,7 +154,7 @@ fn mode_is_documented(mode: &Mode) -> bool {
 /// [`ObjectLockRejection`] naming the first rule the document breaks.
 pub fn validate_lock_configuration(configuration: &ObjectLockConfiguration) -> Result<(), ObjectLockRejection> {
     if let Some(enabled) = &configuration.object_lock_enabled
-        && enabled.as_str() != "Enabled"
+        && !OBJECT_LOCK_ENABLED_VALUES.contains(&enabled.as_str())
     {
         return Err(ObjectLockRejection::EnabledUnknown);
     }
@@ -147,13 +162,16 @@ pub fn validate_lock_configuration(configuration: &ObjectLockConfiguration) -> R
         match &retention.mode {
             Some(mode) if !mode_is_documented(mode) => return Err(ObjectLockRejection::ModeUnknown),
             // AWS documents the default as requiring both a mode and a period.
-            None => return Err(ObjectLockRejection::PeriodOrModeMissing),
+            None if OBJECT_LOCK_DEFAULT_REQUIRE_MODE => return Err(ObjectLockRejection::PeriodOrModeMissing),
+            None => {}
             Some(_) => {}
         }
         match (retention.days, retention.years) {
-            (Some(_), Some(_)) => return Err(ObjectLockRejection::PeriodBoth),
-            (None, None) => return Err(ObjectLockRejection::PeriodOrModeMissing),
-            (Some(period), None) | (None, Some(period)) if period < 1 => {
+            (Some(_), Some(_)) if OBJECT_LOCK_DEFAULT_EXACTLY_ONE_PERIOD => return Err(ObjectLockRejection::PeriodBoth),
+            (None, None) if OBJECT_LOCK_DEFAULT_EXACTLY_ONE_PERIOD => {
+                return Err(ObjectLockRejection::PeriodOrModeMissing);
+            }
+            (Some(period), None) | (None, Some(period)) if period < OBJECT_LOCK_DEFAULT_MIN_PERIOD => {
                 return Err(ObjectLockRejection::PeriodOutOfRange);
             }
             _ => {}
@@ -181,7 +199,12 @@ pub fn validate_retention(retention: &ObjectLockRetention, now_unix_seconds: i64
     }
     if let Some(until) = &retention.retain_until_date {
         // Strictly after: an instant equal to "now" has already stopped protecting anything.
-        let future = until.secs() > now_unix_seconds || (until.secs() == now_unix_seconds && until.subsec_nanos() > 0);
+        let future = match OBJECT_LOCK_TEMPORAL_RELATION {
+            ObjectLockTemporalRelation::StrictlyFuture => {
+                until.secs() > now_unix_seconds || (until.secs() == now_unix_seconds && until.subsec_nanos() > 0)
+            }
+            ObjectLockTemporalRelation::AllowAny => true,
+        };
         if !future {
             return Err(ObjectLockRejection::RetainUntilNotInFuture);
         }
@@ -201,8 +224,7 @@ pub fn validate_retention(retention: &ObjectLockRetention, now_unix_seconds: i64
 /// [`ObjectLockRejection::StatusUnknown`] for a status outside {`ON`, `OFF`}.
 pub fn validate_legal_hold(legal_hold: &ObjectLockLegalHold) -> Result<(), ObjectLockRejection> {
     if let Some(status) = &legal_hold.status
-        && *status != Status::ON
-        && *status != Status::OFF
+        && !OBJECT_LOCK_LEGAL_HOLD_VALUES.contains(&status.as_str())
     {
         return Err(ObjectLockRejection::StatusUnknown);
     }
@@ -215,7 +237,7 @@ pub fn validate_legal_hold(legal_hold: &ObjectLockLegalHold) -> Result<(), Objec
 mod tests {
     use super::*;
     use rustfs_gateway_types::Timestamp;
-    use rustfs_gateway_types::dto::{DefaultRetention, ObjectLockEnabled, ObjectLockRule};
+    use rustfs_gateway_types::dto::{DefaultRetention, ObjectLockEnabled, ObjectLockRule, Status};
 
     /// A fixed "now" for the clock-dependent checks: 2026-01-01T00:00:00Z.
     const NOW: i64 = 1_767_225_600;

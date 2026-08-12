@@ -29,21 +29,19 @@
 //!
 //! What is data, and what is not:
 //!
-//! * **data** — *which* fields are bounded. The overlay attaches a `bounded_range` quirk to a
-//!   field, and every field carrying it is bounded, in every operation and every nested shape.
-//!   Adding `CompletedPart.PartNumber` to the set is an overlay edit and nothing else.
-//! * **not data** — the two numbers, which are the table below.
+//! * **data** — *which* fields are bounded and the two inclusive bounds. The overlay attaches a
+//!   typed codec rule to a field, and every field carrying it is bounded.
+//! * **not data** — the range-checker implementation.
 //!
 //! That is the seam this module is: the smallest surface that keeps the branch out of the
 //! handlers and out of the generated files, and the thing to delete the day the IR can express a
-//! range. Two guards keep the table honest: a `bounded_range` quirk with no entry here fails the
-//! run, and so does one attached to a field that is not an integer. Neither can be reached by a
-//! silent drop.
+//! range. A typed range attached to a field that is not an integer fails the run. Free-text quirk
+//! metadata is never consulted here.
 
-use rustfs_gateway_model::ir::{Field, Quirk, Type};
+use std::collections::BTreeMap;
 
-/// The quirk category that marks a field as carrying an inclusive integer range.
-pub const BOUNDED_KIND: &str = "bounded_range";
+use rustfs_gateway_model::ir::{Field, Type};
+use rustfs_gateway_model::{CodecRule, CodecValue};
 
 /// One inclusive integer range.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -54,42 +52,21 @@ pub struct Bound {
     pub max: i32,
 }
 
-/// The ranges, by the quirk id that carries each one.
-///
-/// One row per quirk, never per field: `cargo xtask why <id>` resolves the row to its evidence and
-/// to the conformance cases that would fail if it moved.
-const RANGES: &[(&str, Bound)] = &[
-    // Part numbers run from one to ten thousand inclusive. A part above the ceiling can never be
-    // completed and no abort enumerates it, so accepting one stores bytes nobody reclaims.
-    ("q-part-number-0072", Bound { min: 1, max: 10_000 }),
-    // A listing page holds at most a thousand keys, and asking for none is a legitimate probe.
-    ("q-max-keys-0073", Bound { min: 0, max: 1_000 }),
-];
-
 /// The range one field's quirks declare, if any.
 ///
 /// # Errors
 ///
-/// A string naming the operation and member when a `bounded_range` quirk has no row in `RANGES`,
-/// or when one is attached to a field whose type is not an integer. Both are overlay mistakes that
-/// would otherwise disable a refusal silently, which is the failure mode a hand-written file can
-/// least afford.
-pub fn of(field: &Field, quirks: &[Quirk], operation: &str) -> Result<Option<Bound>, String> {
+/// A string naming the operation and member when a typed range is attached to a field whose type
+/// is not an integer, or when two typed range rules disagree on one member.
+pub fn of(field: &Field, rules: &BTreeMap<String, CodecRule>, operation: &str) -> Result<Option<Bound>, String> {
     let mut found: Option<Bound> = None;
     for id in &field.quirk_refs {
-        let Some(quirk) = quirks.iter().find(|q| &q.id == id) else {
+        let Some(rule) = rules.get(id) else {
             continue;
         };
-        if quirk.kind != BOUNDED_KIND {
-            continue;
-        }
-        let Some((_, bound)) = RANGES.iter().find(|(known, _)| known == id) else {
-            return Err(format!(
-                "codec {operation}.{}: quirk `{id}` is a `{BOUNDED_KIND}` with no range in \
-                 `crates/codegen/src/emit/codec/bounds.rs`. Add the row rather than letting the \
-                 quirk claim a refusal nothing performs.",
-                field.name
-            ));
+        let bound = match &rule.current {
+            CodecValue::IntegerRange { min, max } => Bound { min: *min, max: *max },
+            _ => continue,
         };
         if !matches!(scalar_of(&field.ty), Type::Integer) {
             return Err(format!(
@@ -97,13 +74,13 @@ pub fn of(field: &Field, quirks: &[Quirk], operation: &str) -> Result<Option<Bou
                 field.name
             ));
         }
-        if found.is_some_and(|existing| existing != *bound) {
+        if found.is_some_and(|existing| existing != bound) {
             return Err(format!(
-                "codec {operation}.{}: two `{BOUNDED_KIND}` quirks claim different ranges; one member has one range.",
+                "codec {operation}.{}: two typed codec rules claim different ranges; one member has one range.",
                 field.name
             ));
         }
-        found = Some(*bound);
+        found = Some(bound);
     }
     Ok(found)
 }

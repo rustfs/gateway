@@ -10,7 +10,7 @@ headers at all."""
 polarity = "positive"
 tags = ["cors", "preflight"]
 timeout_ms = 10000
-quirks = ["q-cors-0009"]
+quirks = ["q-cors-0022", "q-cors-0023"]
 
 [[case.evidence]]
 url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CORSRule.html"

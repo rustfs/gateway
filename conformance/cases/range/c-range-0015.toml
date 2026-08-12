@@ -17,7 +17,7 @@ polarity = "negative"
 operation = "GetObject"
 tags = ["range", "multipart", "error-shape"]
 timeout_ms = 10000
-quirks = ["q-range-0056"]
+quirks = ["q-range-selector-conflict-0106"]
 
 [[case.evidence]]
 url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObject.html"

@@ -24,6 +24,9 @@
 [[quirk]]
 id      = "q-empty-0002"
 kind    = "empty_value"
+classification = "mutable"
+mutation_dimension = "empty_element_render"
+mutation_sources = ["GetBucketLocation.xml.empty_value.LocationConstraint"]
 target  = "GetBucketLocation.LocationConstraint"
 summary = "For us-east-1 the constraint is null and an empty element must still be written, so this member is emit rather than omit."
 cases   = ["c-location-0002"]
@@ -41,6 +44,7 @@ cases   = ["c-location-0002"]
 [[quirk]]
 id      = "q-region-0003"
 kind    = "legacy_alias"
+classification = "contract"
 target  = "GetBucketLocation.LocationConstraint"
 summary = "EU is a legacy alias that denotes eu-west-1 and must stay an accepted and returnable value of the enum."
 cases   = ["c-location-0003"]
@@ -53,6 +57,9 @@ cases   = ["c-location-0003"]
 [[quirk]]
 id      = "q-unwrapped-0001"
 kind    = "unwrapped_output"
+classification = "mutable"
+mutation_dimension = "wrap_strategy"
+mutation_sources = ["GetBucketLocation.xml.unwrapped_output"]
 target  = "GetBucketLocation"
 summary = "The response body is the single element LocationConstraint itself; the generic restXml output wrapper must not be written."
 cases   = ["c-location-0001"]
@@ -79,6 +86,9 @@ cases   = ["c-location-0001"]
 [[quirk]]
 id      = "q-bkt-0001"
 kind    = "status"
+classification = "mutable"
+mutation_dimension = "status_mapping"
+mutation_sources = ["CreateBucket.http.success_status"]
 target  = "CreateBucket"
 summary = "A successful bucket creation answers 200, never 201; SDKs and the upstream test suites assert the 200."
 cases   = ["c-bkt-0001", "c-bkt-0002", "c-bkt-0005", "c-bkt-0006", "c-bkt-0010", "c-bkt-0011", "c-bkt-0028"]
@@ -91,6 +101,7 @@ cases   = ["c-bkt-0001", "c-bkt-0002", "c-bkt-0005", "c-bkt-0006", "c-bkt-0010",
 [[quirk]]
 id      = "q-bkt-0002"
 kind    = "header"
+classification = "contract"
 target  = "CreateBucket.Location"
 summary = "The success response carries a Location header whose value is the path form of the new bucket."
 cases   = ["c-bkt-0001", "c-bkt-0010"]
@@ -103,6 +114,7 @@ cases   = ["c-bkt-0001", "c-bkt-0010"]
 [[quirk]]
 id      = "q-bkt-0003"
 kind    = "region"
+classification = "contract"
 target  = "CreateBucket.LocationConstraint"
 summary = "us-east-1 is the null constraint and must be omitted; writing it explicitly is a 400 InvalidLocationConstraint."
 cases   = ["c-bkt-0012", "c-bkt-0013", "c-bkt-0015", "c-bkt-0016", "c-bkt-0017", "c-bkt-0030"]
@@ -120,6 +132,7 @@ cases   = ["c-bkt-0012", "c-bkt-0013", "c-bkt-0015", "c-bkt-0016", "c-bkt-0017",
 [[quirk]]
 id      = "q-bkt-0004"
 kind    = "legacy_alias"
+classification = "contract"
 target  = "CreateBucket.LocationConstraint"
 summary = "EU is the historical spelling of eu-west-1 and must be accepted in a request constraint, normalised before comparison."
 cases   = ["c-bkt-0014"]
@@ -132,6 +145,7 @@ cases   = ["c-bkt-0014"]
 [[quirk]]
 id      = "q-bkt-0005"
 kind    = "status"
+classification = "contract"
 target  = "CreateBucket"
 summary = "Re-creating a bucket you already own is 200 in us-east-1 for historical reasons and 409 BucketAlreadyOwnedByYou everywhere else."
 cases   = ["c-bkt-0010"]
@@ -144,6 +158,7 @@ cases   = ["c-bkt-0010"]
 [[quirk]]
 id      = "q-bkt-0006"
 kind    = "error_code"
+classification = "contract"
 target  = "CreateBucket"
 summary = "A name held by another owner is BucketAlreadyExists and a name you hold yourself is BucketAlreadyOwnedByYou; the two 409s must stay distinct."
 cases   = ["c-bkt-0010"]
@@ -156,6 +171,9 @@ cases   = ["c-bkt-0010"]
 [[quirk]]
 id      = "q-bkt-0007"
 kind    = "status"
+classification = "mutable"
+mutation_dimension = "status_mapping"
+mutation_sources = ["DeleteBucket.http.success_status"]
 target  = "DeleteBucket"
 summary = "A successful bucket deletion is a 204 whose body is zero bytes; nothing may be rendered into it."
 cases   = ["c-bkt-0007", "c-bkt-0024", "c-bkt-0029"]
@@ -173,6 +191,7 @@ cases   = ["c-bkt-0007", "c-bkt-0024", "c-bkt-0029"]
 [[quirk]]
 id      = "q-bkt-0008"
 kind    = "error_code"
+classification = "contract"
 target  = "DeleteBucket"
 summary = "Deleting a bucket that still holds objects or uploads is refused with 409 BucketNotEmpty rather than performed."
 cases   = ["c-bkt-0022", "c-bkt-0023"]
@@ -185,6 +204,7 @@ cases   = ["c-bkt-0022", "c-bkt-0023"]
 [[quirk]]
 id      = "q-bkt-0009"
 kind    = "body"
+classification = "contract"
 target  = "HeadBucket"
 summary = "Every HeadBucket response has a zero-length body, including 403 and 404; an error document on a HEAD breaks h2 clients."
 cases   = ["c-bkt-0008", "c-bkt-0025", "c-bkt-0026"]
@@ -202,6 +222,7 @@ cases   = ["c-bkt-0008", "c-bkt-0025", "c-bkt-0026"]
 [[quirk]]
 id      = "q-bkt-0010"
 kind    = "header"
+classification = "contract"
 target  = "HeadBucket.BucketRegion"
 summary = "x-amz-bucket-region is mandatory on a HeadBucket success and on the 301 PermanentRedirect; without it SDKs cannot complete the redirect and fail outright."
 cases   = ["c-bkt-0008", "c-bkt-0009", "c-bkt-0011", "c-bkt-0026", "c-bkt-0027", "c-bkt-0033"]
@@ -219,6 +240,7 @@ cases   = ["c-bkt-0008", "c-bkt-0009", "c-bkt-0011", "c-bkt-0026", "c-bkt-0027",
 [[quirk]]
 id      = "q-bkt-0011"
 kind    = "empty_value"
+classification = "contract"
 target  = "CreateBucket.LocationConstraint"
 summary = "An empty constraint element or empty text is equivalent to omitting the constraint entirely, never an error."
 cases   = ["c-bkt-0002", "c-bkt-0003", "c-bkt-0004", "c-bkt-0018", "c-bkt-0019", "c-bkt-0020", "c-bkt-0021", "c-bkt-0032"]
@@ -236,6 +258,7 @@ cases   = ["c-bkt-0002", "c-bkt-0003", "c-bkt-0004", "c-bkt-0018", "c-bkt-0019",
 [[quirk]]
 id      = "q-bkt-0012"
 kind    = "error_code"
+classification = "contract"
 target  = "CreateBucket.Bucket"
 summary = "A name that breaks the bucket naming rules is InvalidBucketName, not the generic InvalidArgument every other bad parameter answers."
 cases   = ["c-bkt-0031"]

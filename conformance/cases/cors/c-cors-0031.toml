@@ -10,7 +10,7 @@ is the witness."""
 polarity = "positive"
 tags = ["cors", "preflight"]
 timeout_ms = 10000
-quirks = ["q-cors-0013"]
+quirks = ["q-cors-0037"]
 
 [[case.evidence]]
 url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/cors.html"
