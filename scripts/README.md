@@ -85,6 +85,7 @@ fixed now so that the same check does not get written twice under two names.
 | `check_no_scaffold_on_main.sh` | No tracked or untracked `new-op` artefact retains the `SCAFFOLD: implement before merge` marker | P7-06 |
 | `check_verify_map_generated.sh` | The operation-to-test map is codegen-owned and byte-for-byte current, never hand-maintained | P7-06 |
 | `check_tool_versions_pinned.sh` | Six CI Cargo tools have one central exact version pin; no moving `latest` or `cargo-binstall` installer | P7-06 |
+| `check_xtask_codegen_surface.sh` | `cargo xtask codegen` selects only model/codegen dependencies while every other command transparently retains the full xtask surface | #60 |
 | `check_map_files.sh` | Every workspace package has a bounded three-column MAP, docs.rs metadata and README-backed crate docs; maps never recommend forbidden inputs | P7-05 |
 | `check_module_doc.sh` | Every hand-written Rust file answers responsibility, non-responsibility and upstream/downstream in its opening docs | P7-05 |
 | `check_file_size.sh` | Hand-written Rust files stay within 800 lines or a reasoned, issue-linked allowance | P7-05 |

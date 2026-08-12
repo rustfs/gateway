@@ -51,9 +51,23 @@ command -v python3 >/dev/null 2>&1 || {
     exit 1
 }
 
+evidence_requests=()
+
 validate_rust_evidence() {
-    local file="$1" kind="$2" evidence="$3" required_call="${4:-}"
-    python3 - "$file" "$kind" "$evidence" "$required_call" <<'PYEOF'
+    local file="$1" kind="$2" evidence="$3" required_call="${4:-}" failure="$5"
+    evidence_requests+=("${file}"$'\x1f'"${kind}"$'\x1f'"${evidence}"$'\x1f'"${required_call}"$'\x1f'"${failure}")
+}
+
+run_evidence_validations() {
+    python3 - "$ROOT" "${evidence_requests[@]}" <<'PYEOF'
+import re
+import sys
+import tomllib
+from pathlib import Path
+
+root = Path(sys.argv[1])
+requests = sys.argv[2:]
+validator = r'''
 import re
 import sys
 from pathlib import Path
@@ -248,6 +262,86 @@ elif kind == "harness":
         raise SystemExit(f"{path}: compile-fail call is not active in the harness test body")
 else:
     raise SystemExit(f"unknown evidence kind: {kind}")
+'''
+
+marker = "def delimiter_depth(end):"
+suffix_at = validator.index(marker)
+full_validator = compile(validator, "<sig-evidence>", "exec")
+cached_validator = compile(validator[suffix_at:], "<sig-evidence-cached>", "exec")
+views = {}
+
+for request in requests:
+    fields = request.split("\x1f")
+    if len(fields) != 5:
+        raise SystemExit("check_sig_case_coverage: internal evidence request is malformed")
+    file, kind, evidence, required_call, failure = fields
+    sys.argv = ["<sig-evidence>", file, kind, evidence, required_call]
+    path = Path(file)
+    if path in views:
+        source, code = views[path]
+        namespace = {
+            "re": re,
+            "source": source,
+            "code": code,
+            "path": path,
+            "kind": kind,
+            "evidence": evidence,
+            "required_call": required_call,
+        }
+        program = cached_validator
+    else:
+        namespace = {}
+        program = full_validator
+    try:
+        exec(program, namespace)
+    except SystemExit as error:
+        if error.code not in (None, 0):
+            print(error.code, file=sys.stderr)
+        print(failure, file=sys.stderr)
+        raise SystemExit(1)
+    views.setdefault(path, (namespace["source"], namespace["code"]))
+
+sig = tomllib.loads((root / "crates/sig/Cargo.toml").read_text())
+core = tomllib.loads((root / "crates/core/Cargo.toml").read_text())
+workspace = tomllib.loads((root / "Cargo.toml").read_text())
+workspace_dependencies = workspace.get("workspace", {}).get("dependencies", {})
+
+
+def package_name(alias, specification):
+    if isinstance(specification, str):
+        return alias
+    if not isinstance(specification, dict):
+        raise SystemExit(f"check_sig_case_coverage: unsupported dependency specification for {alias}")
+    if specification.get("workspace") is True:
+        inherited = workspace_dependencies.get(alias)
+        if inherited is None:
+            raise SystemExit(f"check_sig_case_coverage: missing workspace dependency {alias}")
+        return package_name(alias, inherited)
+    return specification.get("package", alias)
+
+
+def dependency_tables(manifest):
+    sections = ("dependencies", "dev-dependencies", "build-dependencies")
+    for section in sections:
+        yield manifest.get(section, {})
+    for target in manifest.get("target", {}).values():
+        for section in sections:
+            yield target.get(section, {})
+
+
+for dependencies in dependency_tables(sig):
+    for name, spec in dependencies.items():
+        package = package_name(name, spec)
+        if package in {"serde", "serde_json"}:
+            raise SystemExit(
+                f"check_sig_case_coverage: sig manifest gains serialization dependency {package}"
+            )
+
+serde_json = core.get("dev-dependencies", {}).get("serde_json")
+if not isinstance(serde_json, dict) or serde_json.get("workspace") is not True:
+    raise SystemExit(
+        "check_sig_case_coverage: core dev tests do not enable real serde_json evidence"
+    )
 PYEOF
 }
 
@@ -277,10 +371,8 @@ for mapping in "${cases[@]}"; do
     }
     if [[ "$relative" == crates/*/tests/compile_fail/c_sig_*.rs ]]; then
         compile_fail_paths+=("$relative")
-        validate_rust_evidence "$file" compile "$evidence" || {
-            printf 'check_sig_case_coverage: %s is not an executable compile-fail fixture\n' "$relative" >&2
-            exit 1
-        }
+        validate_rust_evidence "$file" compile "$evidence" '' \
+            "check_sig_case_coverage: ${relative} is not an executable compile-fail fixture"
         stderr="${file%.rs}.stderr"
         [[ -f "$stderr" ]] || {
             printf 'check_sig_case_coverage: compile-fail golden is missing: %s.stderr\n' "${relative%.rs}" >&2
@@ -303,10 +395,8 @@ for mapping in "${cases[@]}"; do
             exit 1
         fi
     else
-        validate_rust_evidence "$file" runtime "$evidence" || {
-            printf 'check_sig_case_coverage: %s is not a named #[test] item in %s\n' "$id" "$relative" >&2
-            exit 1
-        }
+        validate_rust_evidence "$file" runtime "$evidence" '' \
+            "check_sig_case_coverage: ${id} is not a named #[test] item in ${relative}"
     fi
     expected=$((expected + 1))
 done
@@ -339,60 +429,18 @@ grep -Fq 'trybuild = { workspace = true }' "$manifest" || {
 }
 validate_rust_evidence "$harness" harness \
     p2_01_compile_time_boundaries_are_not_openable \
-    'cases.compile_fail("tests/compile_fail/c_sig_001[4-79]_*.rs")' || {
-    printf 'check_sig_case_coverage: compile-fail harness does not execute the P2-01 fixtures\n' >&2
-    exit 1
-}
-python3 - "$manifest" "$core_manifest" "${ROOT}/Cargo.toml" <<'PYEOF' || exit 1
-import sys
-import tomllib
-from pathlib import Path
-
-sig = tomllib.loads(Path(sys.argv[1]).read_text())
-core = tomllib.loads(Path(sys.argv[2]).read_text())
-workspace = tomllib.loads(Path(sys.argv[3]).read_text())
-workspace_dependencies = workspace.get("workspace", {}).get("dependencies", {})
-
-def package_name(alias, specification):
-    if isinstance(specification, str):
-        return alias
-    if not isinstance(specification, dict):
-        raise SystemExit(f"check_sig_case_coverage: unsupported dependency specification for {alias}")
-    if specification.get("workspace") is True:
-        inherited = workspace_dependencies.get(alias)
-        if inherited is None:
-            raise SystemExit(f"check_sig_case_coverage: missing workspace dependency {alias}")
-        return package_name(alias, inherited)
-    return specification.get("package", alias)
-
-def dependency_tables(manifest):
-    sections = ("dependencies", "dev-dependencies", "build-dependencies")
-    for section in sections:
-        yield manifest.get(section, {})
-    for target in manifest.get("target", {}).values():
-        for section in sections:
-            yield target.get(section, {})
-
-for dependencies in dependency_tables(sig):
-    for name, spec in dependencies.items():
-        package = package_name(name, spec)
-        if package in {"serde", "serde_json"}:
-            raise SystemExit(f"check_sig_case_coverage: sig manifest gains serialization dependency {package}")
-
-serde_json = core.get("dev-dependencies", {}).get("serde_json")
-if not isinstance(serde_json, dict) or serde_json.get("workspace") is not True:
-    raise SystemExit("check_sig_case_coverage: core dev tests do not enable real serde_json evidence")
-PYEOF
+    'cases.compile_fail("tests/compile_fail/c_sig_001[4-79]_*.rs")' \
+    'check_sig_case_coverage: compile-fail harness does not execute the P2-01 fixtures'
 [[ -f "$core_harness" ]] || {
     printf 'check_sig_case_coverage: core signature compile-fail harness is missing\n' >&2
     exit 1
 }
 validate_rust_evidence "$core_harness" harness \
     compile_time_contracts_are_not_openable \
-    'cases.compile_fail("tests/compile_fail/c_sig_0018_*.rs")' || {
-    printf 'check_sig_case_coverage: core harness does not execute c-sig-0018\n' >&2
-    exit 1
-}
+    'cases.compile_fail("tests/compile_fail/c_sig_0018_*.rs")' \
+    'check_sig_case_coverage: core harness does not execute c-sig-0018'
+
+run_evidence_validations
 
 serialize_golden="${ROOT}/crates/core/tests/compile_fail/c_sig_0018_session_token_serialize.stderr"
 grep -Fq 'error[E0277]: the trait bound `SessionToken: serde::Serialize` is not satisfied' "$serialize_golden" || {

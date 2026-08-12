@@ -1,4 +1,4 @@
 # `cargo xtask <cmd>` is the repository's single entry point for automation.
 # AGENTS.md points every task at it; without this alias that instruction is a dead end.
 [alias]
-xtask = "run --quiet --package xtask --"
+xtask = "run --quiet --package xtask --no-default-features --"

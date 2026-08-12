@@ -19,15 +19,21 @@
 //! NOT responsible for: any protocol logic.
 //! Upstream: the module's declared inputs. Downstream: its callers and regression tests.
 
+#[cfg(feature = "full")]
 mod bootstrap;
 mod catalog;
 mod codegen;
-#[cfg(feature = "ir-validation")]
+#[cfg(feature = "full")]
 mod ir;
+#[cfg(feature = "full")]
 mod model;
+#[cfg(feature = "full")]
 mod new_op;
+#[cfg(feature = "full")]
 mod route;
+#[cfg(feature = "full")]
 mod verify;
+#[cfg(feature = "full")]
 mod why;
 
 use std::process::ExitCode;
@@ -36,16 +42,15 @@ fn main() -> ExitCode {
     let mut args = std::env::args().skip(1);
     let first = args.next();
     let rest: Vec<String> = args.collect();
+    dispatch(first, rest)
+}
+
+#[cfg(feature = "full")]
+fn dispatch(first: Option<String>, rest: Vec<String>) -> ExitCode {
     match first.as_deref() {
         Some("verify") => verify::verify(&rest),
         Some("codegen") => codegen::codegen(&rest),
-        #[cfg(feature = "ir-validation")]
         Some("ir") => ir::command(&rest),
-        #[cfg(not(feature = "ir-validation"))]
-        Some("ir") => {
-            eprintln!("the `ir` command requires xtask's default `ir-validation` feature");
-            ExitCode::from(2)
-        }
         Some("model") => model::model(&rest),
         Some("spec") => match rest.first().map(String::as_str) {
             Some("verify") => codegen::verify(&rest[1..]),
@@ -74,6 +79,43 @@ fn main() -> ExitCode {
     }
 }
 
+#[cfg(not(feature = "full"))]
+fn dispatch(first: Option<String>, rest: Vec<String>) -> ExitCode {
+    match first.as_deref() {
+        Some("codegen") => codegen::codegen(&rest),
+        Some("spec") if rest.first().map(String::as_str) == Some("verify") => codegen::verify(&rest[1..]),
+        _ => run_full(first, &rest),
+    }
+}
+
+#[cfg(not(feature = "full"))]
+fn run_full(first: Option<String>, rest: &[String]) -> ExitCode {
+    let mut command = std::process::Command::new(env!("CARGO"));
+    command.args(["run", "--quiet", "--package", "xtask", "--features", "full", "--"]);
+    if let Some(first) = first {
+        command.arg(first);
+    }
+    command.args(rest);
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+
+        let error = command.exec();
+        eprintln!("failed to run full xtask: {error}");
+        ExitCode::FAILURE
+    }
+    #[cfg(not(unix))]
+    match command.status() {
+        Ok(status) => ExitCode::from(u8::try_from(status.code().unwrap_or(1)).unwrap_or(1)),
+        Err(error) => {
+            eprintln!("failed to run full xtask: {error}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+#[cfg(feature = "full")]
 const USAGE: &str = "\
 usage: cargo xtask <command>
 
@@ -105,6 +147,7 @@ commands:
 ///
 /// The suite remains a separate process so its exit classes and public-facade boundary are the
 /// same here as they are for an outside implementation.
+#[cfg(feature = "full")]
 fn conformance(args: Vec<String>) -> ExitCode {
     let mut cmd = std::process::Command::new(env!("CARGO"));
     cmd.args([
