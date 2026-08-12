@@ -20,15 +20,19 @@ trap cleanup EXIT
 reset_sandbox() {
     cleanup
     SANDBOX="$(mktemp -d "${TMPDIR:-/tmp}/gateway-target-guard.XXXXXX")"
-    mkdir -p "$SANDBOX/scripts" "$SANDBOX/crates/core" "$SANDBOX/crates/gateway/src"
+    mkdir -p "$SANDBOX/scripts" "$SANDBOX/crates/core" "$SANDBOX/crates/gateway/src" \
+        "$SANDBOX/crates/conformance/src"
     cp "$REPO_ROOT/scripts/check_test_target_consolidation.sh" "$SANDBOX/scripts/"
     cp "$REPO_ROOT/scripts/check_monomorphic_dispatch.sh" "$SANDBOX/scripts/"
     cp "$REPO_ROOT/scripts/run_gateway_tsan.sh" "$SANDBOX/scripts/"
     cp "$REPO_ROOT/crates/core/Cargo.toml" "$SANDBOX/crates/core/"
     cp "$REPO_ROOT/crates/gateway/Cargo.toml" "$SANDBOX/crates/gateway/"
+    cp "$REPO_ROOT/crates/conformance/Cargo.toml" "$SANDBOX/crates/conformance/"
+    cp "$REPO_ROOT/crates/conformance/src/lib.rs" "$SANDBOX/crates/conformance/src/"
     cp -R "$REPO_ROOT/crates/core/tests" "$SANDBOX/crates/core/"
     cp "$REPO_ROOT/crates/gateway/src/lib.rs" "$SANDBOX/crates/gateway/src/"
     cp -R "$REPO_ROOT/crates/gateway/tests" "$SANDBOX/crates/gateway/"
+    cp -R "$REPO_ROOT/crates/conformance/tests" "$SANDBOX/crates/conformance/"
 }
 
 expect_fail() {
@@ -135,6 +139,177 @@ mut_core_source_symlink_alias() {
     ln -s authz_consumption.rs crates/core/tests/acl_contract.rs
 }
 expect_fail 'a registered core source symlink alias is rejected' mut_core_source_symlink_alias
+
+mut_conformance_autotests_restored() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/conformance/Cargo.toml")
+text = path.read_text()
+path.write_text(text.replace("autotests = false\n", "autotests = true\n", 1))
+PYEOF
+}
+expect_fail 'restoring conformance implicit test discovery is rejected' mut_conformance_autotests_restored
+
+mut_conformance_registration_omitted() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/conformance/tests/integration.rs")
+text = path.read_text()
+path.write_text(text.replace('#[path = "corpus.rs"]\nmod corpus;\n', '', 1))
+PYEOF
+}
+expect_fail 'conformance harness omission is rejected' mut_conformance_registration_omitted
+
+mut_conformance_registration_duplicated() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/conformance/tests/integration.rs")
+text = path.read_text()
+entry = '#[path = "corpus.rs"]\nmod corpus;\n'
+path.write_text(text.replace(entry, entry + entry, 1))
+PYEOF
+}
+expect_fail 'conformance harness duplicate is rejected' mut_conformance_registration_duplicated
+
+mut_conformance_source_unregistered() {
+    cp crates/conformance/tests/corpus.rs crates/conformance/tests/unregistered_contract.rs
+}
+expect_fail 'a new unregistered conformance source is rejected' mut_conformance_source_unregistered
+
+mut_conformance_nested_source_unregistered() {
+    mkdir -p crates/conformance/tests/nested
+    cp crates/conformance/tests/corpus.rs crates/conformance/tests/nested/unregistered_contract.rs
+}
+expect_fail 'a nested unregistered conformance source is rejected' mut_conformance_nested_source_unregistered
+
+mut_conformance_source_disabled_by_cfg_attr() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/conformance/tests/corpus.rs")
+path.write_text("#![cfg_attr(all(), cfg(any()))]\n" + path.read_text())
+PYEOF
+}
+expect_fail 'a registered conformance source disabled by cfg_attr is rejected' mut_conformance_source_disabled_by_cfg_attr
+
+mut_conformance_source_symlink_alias() {
+    rm crates/conformance/tests/corpus.rs
+    ln -s tagging.rs crates/conformance/tests/corpus.rs
+}
+expect_fail 'a registered conformance source symlink alias is rejected' mut_conformance_source_symlink_alias
+
+mut_conformance_target_reuses_harness() {
+    cat >>crates/conformance/Cargo.toml <<'TOMLEOF'
+
+[[example]]
+name = "duplicate-integration"
+path = "tests/integration.rs"
+test = true
+TOMLEOF
+}
+expect_fail 'a Cargo target cannot reuse the conformance integration harness' mut_conformance_target_reuses_harness
+
+mut_conformance_testable_target_reuses_source() {
+    cat >>crates/conformance/Cargo.toml <<'TOMLEOF'
+
+[[example]]
+name = "duplicate-corpus"
+path = "tests/corpus.rs"
+test = true
+TOMLEOF
+}
+expect_fail 'a testable Cargo target cannot reuse a registered conformance source' mut_conformance_testable_target_reuses_source
+
+mut_conformance_non_test_target_reuses_source() {
+    cat >>crates/conformance/Cargo.toml <<'TOMLEOF'
+
+[[example]]
+name = "duplicate-corpus-disabled"
+path = "tests/corpus.rs"
+test = false
+TOMLEOF
+}
+expect_fail 'a non-test Cargo target cannot reuse a registered conformance source' mut_conformance_non_test_target_reuses_source
+
+mut_conformance_default_target_reuses_source() {
+    mkdir -p crates/conformance/examples
+    ln -s ../tests/corpus.rs crates/conformance/examples/duplicate-corpus.rs
+    cat >>crates/conformance/Cargo.toml <<'TOMLEOF'
+
+[[example]]
+name = "duplicate-corpus"
+test = false
+TOMLEOF
+}
+expect_fail 'a default-path Cargo target cannot alias a registered conformance source' mut_conformance_default_target_reuses_source
+
+mut_conformance_path_reuses_harness() {
+    printf '\n#[path = "integration.rs"]\nmod duplicate_integration;\n' >>crates/conformance/tests/corpus.rs
+}
+expect_fail 'a conformance #[path] cannot reuse the integration harness' mut_conformance_path_reuses_harness
+
+mut_conformance_cfg_attr_path_reuses_harness() {
+    printf '\n#[cfg_attr(all(), path = "integration.rs")]\nmod duplicate_integration;\n' \
+        >>crates/conformance/tests/corpus.rs
+}
+expect_fail 'a conformance cfg_attr path cannot reuse the integration harness' mut_conformance_cfg_attr_path_reuses_harness
+
+mut_conformance_include_reuses_harness() {
+    printf '\ninclude! { "integration.rs" }\n' >>crates/conformance/tests/corpus.rs
+}
+expect_fail 'a conformance include cannot reuse the integration harness' mut_conformance_include_reuses_harness
+
+mut_conformance_example_path_reuses_source() {
+    mkdir -p crates/conformance/examples
+    cat >crates/conformance/examples/duplicate.rs <<'RUSTEOF'
+#[path = "../tests/corpus.rs"]
+mod duplicate_corpus;
+
+fn main() {}
+RUSTEOF
+    cat >>crates/conformance/Cargo.toml <<'TOMLEOF'
+
+[[example]]
+name = "duplicate"
+path = "examples/duplicate.rs"
+test = true
+TOMLEOF
+}
+expect_fail 'a testable example cannot reuse a registered conformance source through #[path]' \
+    mut_conformance_example_path_reuses_source
+
+mut_conformance_library_path_reuses_source() {
+    cat >>crates/conformance/src/lib.rs <<'RUSTEOF'
+
+#[cfg(test)]
+#[path = "../tests/corpus.rs"]
+mod duplicate_corpus;
+RUSTEOF
+}
+expect_fail 'conformance library tests cannot reuse a registered source through #[path]' \
+    mut_conformance_library_path_reuses_source
+
+mut_conformance_escaped_path_reuses_source() {
+    cat >>crates/conformance/src/lib.rs <<'RUSTEOF'
+
+#[cfg(test)]
+#[path = "\x2e\x2e/tests/corpus.rs"]
+mod duplicate_corpus;
+RUSTEOF
+}
+expect_fail 'an escaped conformance path is rejected fail-closed' \
+    mut_conformance_escaped_path_reuses_source
+
+mut_conformance_escaped_include_reuses_source() {
+    cat >>crates/conformance/src/lib.rs <<'RUSTEOF'
+
+#[cfg(test)]
+mod duplicate_corpus {
+    include!("\x2e\x2e/tests/corpus.rs");
+}
+RUSTEOF
+}
+expect_fail 'an escaped conformance include is rejected fail-closed' \
+    mut_conformance_escaped_include_reuses_source
 
 mut_core_second_trybuild_batch() {
     python3 - <<'PYEOF'

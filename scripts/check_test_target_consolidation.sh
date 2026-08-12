@@ -2,8 +2,8 @@
 set -euo pipefail
 
 # WHAT THIS CHECKS
-#   Core and gateway integration suites each use one explicit Cargo target with every test source
-#   registered exactly once, and gateway's compile-fail cases share one trybuild TestCases batch.
+#   Core, gateway, and conformance integration suites each use one explicit Cargo target with every
+#   test source registered exactly once, and gateway's compile-fail cases share one trybuild batch.
 # WHY
 #   rustfs/gateway#60 measured separate integration targets and trybuild batches rebuilding the
 #   same test products until the 30-second verification budget expired.
@@ -238,6 +238,196 @@ except OSError as error:
     fail(f"cannot read crates/core/tests/integration.rs: {error}")
 if actual_core_harness != core_harness:
     fail("core integration harness must register each frozen source exactly once")
+
+conformance_modules = (
+    "bucket_lifecycle",
+    "corpus",
+    "tagging",
+    "wired",
+)
+conformance_root = root / "crates/conformance"
+conformance_tests = conformance_root / "tests"
+actual_conformance_sources = tuple(
+    sorted(
+        path.relative_to(conformance_tests).with_suffix("").as_posix()
+        for path in conformance_tests.rglob("*.rs")
+        if path != conformance_tests / "integration.rs"
+    )
+)
+if actual_conformance_sources != conformance_modules:
+    fail("conformance test source inventory does not match the consolidated module suite")
+
+resolved_conformance_sources: dict[Path, str] = {}
+for module in conformance_modules:
+    source_path = conformance_tests / f"{module}.rs"
+    if source_path.is_symlink():
+        fail(f"{source_path.relative_to(root)} may not be a symlink")
+    try:
+        resolved_source = source_path.resolve(strict=True)
+        source = source_path.read_text()
+    except OSError as error:
+        fail(f"cannot read {source_path.relative_to(root)}: {error}")
+    if not inside(resolved_source, conformance_tests.resolve()):
+        fail(f"{source_path.relative_to(root)} resolves outside the conformance test directory")
+    previous = resolved_conformance_sources.get(resolved_source)
+    if previous is not None:
+        fail(f"conformance test sources {previous} and {module} resolve to the same file")
+    resolved_conformance_sources[resolved_source] = module
+    _, code_only = rust_views(source, source_path)
+    if re.search(r"#!\s*\[\s*(?:cfg|cfg_attr)\b", code_only):
+        fail(f"{source_path.relative_to(root)} may not disable its registered module with a file-level cfg")
+
+conformance_manifest_path = conformance_root / "Cargo.toml"
+try:
+    conformance_manifest = tomllib.loads(conformance_manifest_path.read_text())
+except (OSError, tomllib.TOMLDecodeError) as error:
+    fail(f"cannot parse crates/conformance/Cargo.toml: {error}")
+conformance_package = conformance_manifest.get("package")
+if not isinstance(conformance_package, dict) or conformance_package.get("autotests") is not False:
+    fail("crates/conformance must set package.autotests = false")
+conformance_targets = conformance_manifest.get("test")
+if (
+    not isinstance(conformance_targets, list)
+    or len(conformance_targets) != 1
+    or not isinstance(conformance_targets[0], dict)
+):
+    fail("crates/conformance must declare exactly one explicit [[test]] target")
+conformance_target = conformance_targets[0]
+if conformance_target.get("name") != "integration" or conformance_target.get("path") != "tests/integration.rs":
+    fail("crates/conformance explicit test target must be integration at tests/integration.rs")
+conformance_required_features = conformance_target.get("required-features", [])
+if (
+    conformance_target.get("test", True) is not True
+    or conformance_target.get("harness", True) is not True
+    or not isinstance(conformance_required_features, list)
+    or conformance_required_features
+):
+    fail("crates/conformance integration target must use the active harness without required features")
+
+conformance_harness_path = conformance_tests / "integration.rs"
+conformance_harness = license_header + """
+//! Consolidated integration-test entry point for `rustfs-gateway-conformance`.
+//!
+//! Responsible for: registering every conformance integration-test source in one Cargo target.
+//! NOT responsible for: test behavior or production implementation.
+//! Upstream: the conformance integration-test modules. Downstream: Cargo's test harness.
+
+""" + "\n".join(f'#[path = "{module}.rs"]\nmod {module};' for module in conformance_modules) + "\n"
+try:
+    actual_conformance_harness = conformance_harness_path.read_text()
+except OSError as error:
+    fail(f"cannot read crates/conformance/tests/integration.rs: {error}")
+if actual_conformance_harness != conformance_harness:
+    fail("conformance integration harness must register each frozen source exactly once")
+
+
+def conformance_target_path(kind: str, target: dict[str, object]) -> Path:
+    target_path = target.get("path")
+    if target_path is not None:
+        if not isinstance(target_path, str) or not target_path:
+            fail(f"crates/conformance/Cargo.toml has an unresolvable {kind} target path")
+        try:
+            return (conformance_root / target_path).resolve(strict=True)
+        except OSError as error:
+            fail(f"cannot resolve crates/conformance {kind} target path: {error}")
+
+    if kind == "lib":
+        candidates = [conformance_root / "src/lib.rs"]
+    else:
+        name = target.get("name")
+        if not isinstance(name, str) or not name:
+            fail(f"crates/conformance/Cargo.toml has an unnamed {kind} target without a path")
+        if kind == "bin":
+            candidates = [
+                conformance_root / "src/bin" / f"{name}.rs",
+                conformance_root / "src/bin" / name / "main.rs",
+            ]
+            package_name = conformance_package.get("name")
+            if not isinstance(package_name, str):
+                fail("crates/conformance package name is not a string")
+            if name == package_name:
+                candidates.insert(0, conformance_root / "src/main.rs")
+        else:
+            directories = {"example": "examples", "bench": "benches", "test": "tests"}
+            directory = directories.get(kind)
+            if directory is None:
+                fail(f"crates/conformance has an unsupported explicit target kind: {kind}")
+            candidates = [
+                conformance_root / directory / f"{name}.rs",
+                conformance_root / directory / name / "main.rs",
+            ]
+    existing = [candidate for candidate in candidates if candidate.exists()]
+    if len(existing) != 1:
+        fail(f"crates/conformance {kind} target default path is missing or ambiguous")
+    try:
+        return existing[0].resolve(strict=True)
+    except OSError as error:
+        fail(f"cannot resolve crates/conformance {kind} target default path: {error}")
+
+
+for kind, default_test in (("lib", True), ("bin", True), ("example", False), ("bench", False)):
+    raw_targets = conformance_manifest.get(kind, [] if kind != "lib" else None)
+    if kind == "lib":
+        targets = [] if raw_targets is None else [raw_targets]
+    else:
+        targets = raw_targets
+    if not isinstance(targets, list) or any(not isinstance(target, dict) for target in targets):
+        fail(f"crates/conformance/Cargo.toml has an invalid {kind} target inventory")
+    for target in targets:
+        enabled = target.get("test", default_test)
+        if not isinstance(enabled, bool):
+            fail(f"crates/conformance/Cargo.toml has an unresolvable {kind} target")
+        resolved_target = conformance_target_path(kind, target)
+        if resolved_target in resolved_conformance_sources:
+            fail(f"crates/conformance/Cargo.toml reuses a registered test source as a {kind} target")
+        if resolved_target == conformance_harness_path.resolve():
+            fail(f"crates/conformance/Cargo.toml reuses the integration harness as a {kind} target")
+
+protected_conformance_entries = set(resolved_conformance_sources) | {conformance_harness_path.resolve()}
+registered_conformance_entries = {
+    conformance_tests / f"{module}.rs" for module in conformance_modules
+} | {conformance_harness_path}
+
+for source_path in conformance_root.rglob("*.rs"):
+    try:
+        resolved = source_path.resolve(strict=True)
+    except OSError as error:
+        fail(f"cannot resolve conformance Rust entry {source_path.relative_to(root)}: {error}")
+    if resolved in protected_conformance_entries and source_path not in registered_conformance_entries:
+        fail(f"{source_path.relative_to(root)} aliases a registered conformance test entry")
+    if source_path == conformance_harness_path:
+        continue
+    try:
+        source = source_path.read_text()
+    except OSError as error:
+        fail(f"cannot read {source_path.relative_to(root)}: {error}")
+    comments_removed, code_only = rust_views(source, source_path)
+    for attribute in re.finditer(r"#\s*!?\s*\[", code_only):
+        opening = code_only.find("[", attribute.start(), attribute.end())
+        end = balanced_end(code_only, opening, source_path)
+        attribute_code = code_only[opening + 1 : end - 1]
+        for path_meta in re.finditer(r"\bpath\s*=", attribute_code):
+            value_start = opening + 1 + path_meta.end()
+            literal = re.match(r'\s*"([^"\n]+)"', comments_removed[value_start:])
+            if literal is None:
+                fail(f"{source_path.relative_to(root)} has a path attribute the guard cannot resolve")
+            literal_path = literal.group(1)
+            if "\\" in literal_path:
+                fail(f"{source_path.relative_to(root)} has an escaped path attribute the guard cannot resolve")
+            if (source_path.parent / literal_path).resolve() in protected_conformance_entries:
+                fail(f"{source_path.relative_to(root)} reuses a registered conformance test entry through #[path]")
+    for include in re.finditer(r"\binclude\s*!\s*([({\[])", code_only):
+        opening = include.end() - 1
+        end = balanced_end(code_only, opening, source_path)
+        arguments = comments_removed[opening + 1 : end - 1]
+        literal = re.fullmatch(r'\s*"([^"\n]+)"\s*', arguments)
+        if literal is None:
+            fail(f"{source_path.relative_to(root)} has a non-literal include the guard cannot resolve")
+        literal_path = literal.group(1)
+        if "\\" in literal_path:
+            fail(f"{source_path.relative_to(root)} has an escaped include the guard cannot resolve")
+        if (source_path.parent / literal_path).resolve() in protected_conformance_entries:
+            fail(f"{source_path.relative_to(root)} includes a registered conformance test entry")
 
 core_compile_harness_path = core_tests / "compile_fail.rs"
 core_compile_source = core_compile_harness_path.read_text()
