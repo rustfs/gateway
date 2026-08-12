@@ -469,6 +469,236 @@ done
 # -----------------------------------------------------------------------------
 printf '\nNegative cases (guards must fail)\n'
 
+replace_template_text() {
+    python3 - "$1" "$2" "$3" <<'PYEOF'
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+old, new = sys.argv[2:]
+text = path.read_text()
+if old not in text:
+    raise SystemExit(f"missing template mutation subject in {path}: {old}")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+
+mut_template_pr_checklist_drift() {
+    replace_template_text .github/pull_request_template.md \
+        '- [ ] Every new assertion was mutated — the implementation was broken on purpose and the assertion
+      went red. The PR description names which ones
+' ''
+}
+expect_fail check_template_contract.sh \
+    'the PR checklist dropping the mutation evidence item from AGENTS.md' mut_template_pr_checklist_drift
+
+mut_template_task_heading_hidden_in_comment() {
+    replace_template_text .github/ISSUE_TEMPLATE/task.md \
+        '## 7. Full case list (exhaustive, negatives included)' \
+        '<!-- ## 7. Full case list (exhaustive, negatives included) -->'
+}
+expect_fail check_template_contract.sh \
+    'a task section heading surviving only inside an HTML comment' mut_template_task_heading_hidden_in_comment
+
+mut_template_task_heading_hidden_in_fence() {
+    replace_template_text .github/ISSUE_TEMPLATE/task.md \
+        '## 7. Full case list (exhaustive, negatives included)' \
+        '```markdown
+## 7. Full case list (exhaustive, negatives included)
+```'
+}
+expect_fail check_template_contract.sh \
+    'a task section heading surviving only inside a fenced block' mut_template_task_heading_hidden_in_fence
+
+mut_template_task_forbidden_input_comment_decoy() {
+    replace_template_text .github/ISSUE_TEMPLATE/task.md \
+        '- `Cargo.lock`' \
+        '<!-- `Cargo.lock` -->'
+}
+expect_fail check_template_contract.sh \
+    'a forbidden input surviving only inside an HTML comment' mut_template_task_forbidden_input_comment_decoy
+
+mut_template_task_parent_removed() {
+    replace_template_text .github/ISSUE_TEMPLATE/task.md \
+        '> Epic: rustfs/backlog#1677' '> Epic: unspecified'
+}
+expect_fail check_template_contract.sh \
+    'the implementation template losing Parent #1677' mut_template_task_parent_removed
+
+mut_template_task_negative_requirement_removed() {
+    replace_template_text .github/ISSUE_TEMPLATE/task.md \
+        'the number of negative cases MUST be >= the number of positive cases' \
+        'include representative cases'
+}
+expect_fail check_template_contract.sh \
+    'the task template losing its negative-case ratio' mut_template_task_negative_requirement_removed
+
+mut_template_task_handoff_comment_decoy() {
+    replace_template_text .github/ISSUE_TEMPLATE/task.md \
+        '    - Gotcha: ...' \
+        '    <!-- - Gotcha: ... -->'
+}
+expect_fail check_template_contract.sh \
+    'a Handoff field surviving only inside an HTML comment' mut_template_task_handoff_comment_decoy
+
+mut_template_task_front_matter_label_changed() {
+    replace_template_text .github/ISSUE_TEMPLATE/task.md 'labels: task' 'labels: enhancement'
+}
+expect_fail check_template_contract.sh \
+    'the implementation template losing its intended live label' mut_template_task_front_matter_label_changed
+
+mut_template_blank_issues_enabled() {
+    replace_template_text .github/ISSUE_TEMPLATE/config.yml \
+        'blank_issues_enabled: false' 'blank_issues_enabled: true'
+}
+expect_fail check_template_contract.sh \
+    'the web blank-issue entry being re-enabled' mut_template_blank_issues_enabled
+
+mut_template_disabled_discussion_link_returns() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path(".github/ISSUE_TEMPLATE/config.yml")
+path.write_text(path.read_text() + """\
+  - name: Question / discussion
+    url: https://github.com/rustfs/gateway/discussions
+    about: Ask questions here instead of opening an issue.
+""")
+PYEOF
+}
+expect_fail check_template_contract.sh \
+    'a contact link returning before Discussions is enabled' mut_template_disabled_discussion_link_returns
+
+mut_template_security_contact_changed() {
+    replace_template_text .github/ISSUE_TEMPLATE/config.yml \
+        'https://github.com/rustfs/gateway/security/advisories/new' \
+        'https://github.com/rustfs/gateway/issues/new'
+}
+expect_fail check_template_contract.sh \
+    'the private security contact being redirected to public issues' mut_template_security_contact_changed
+
+mut_template_protocol_wire_heading_comment_decoy() {
+    replace_template_text .github/ISSUE_TEMPLATE/protocol-mismatch.md \
+        '## 3. Wire evidence (MANDATORY — provide at least one, both is better)' \
+        '<!-- ## 3. Wire evidence (MANDATORY — provide at least one, both is better) -->'
+}
+expect_fail check_template_contract.sh \
+    'the mandatory wire-evidence section becoming a comment decoy' mut_template_protocol_wire_heading_comment_decoy
+
+mut_template_protocol_redaction_removed() {
+    replace_template_text .github/ISSUE_TEMPLATE/protocol-mismatch.md \
+        'REDACTION IS MANDATORY BEFORE PASTING.' \
+        'CAPTURE DETAILS FOLLOW.'
+}
+expect_fail check_template_contract.sh \
+    'the protocol report losing its redaction requirement' mut_template_protocol_redaction_removed
+
+mut_template_protocol_close_rule_removed() {
+    replace_template_text .github/ISSUE_TEMPLATE/protocol-mismatch.md \
+        'will be closed immediately' 'may need follow-up'
+}
+expect_fail check_template_contract.sh \
+    'the protocol template losing its no-evidence close rule' mut_template_protocol_close_rule_removed
+
+mut_template_protocol_debug_capture_removed() {
+    replace_template_text .github/ISSUE_TEMPLATE/protocol-mismatch.md \
+        'aws --debug' 'aws --no-debug'
+}
+expect_fail check_template_contract.sh \
+    'the protocol template losing one real debug capture instruction' mut_template_protocol_debug_capture_removed
+
+mut_template_bug_security_route_removed() {
+    replace_template_text .github/ISSUE_TEMPLATE/bug.md ' — see `SECURITY.md`.' '.'
+}
+expect_fail check_template_contract.sh \
+    'the bug template losing its private security route' mut_template_bug_security_route_removed
+
+mut_template_bug_rustc_version_removed() {
+    replace_template_text .github/ISSUE_TEMPLATE/bug.md \
+        '- `rustc -vV` output:' '- compiler version:'
+}
+expect_fail check_template_contract.sh \
+    'the bug template losing its compiler-version field' mut_template_bug_rustc_version_removed
+
+mut_template_operation_shares_contract_removed() {
+    replace_template_text .github/ISSUE_TEMPLATE/new-operation.md \
+        'is declared with a `//! Shares:` header.' \
+        'is declared in prose.'
+}
+expect_fail check_template_contract.sh \
+    'the new-operation template losing its shared-surface declaration' mut_template_operation_shares_contract_removed
+
+mut_template_operation_official_url_removed() {
+    replace_template_text .github/ISSUE_TEMPLATE/new-operation.md \
+        '- **AWS API documentation URL**:' '- **Documentation**:'
+}
+expect_fail check_template_contract.sh \
+    'the new-operation template losing its official API URL field' mut_template_operation_official_url_removed
+
+mut_template_pr_role_heading_comment_decoy() {
+    replace_template_text .github/pull_request_template.md \
+        '## Role Verdicts' '<!-- ## Role Verdicts -->'
+}
+expect_fail check_template_contract.sh \
+    'the PR role-verdict anchor surviving only inside a comment' mut_template_pr_role_heading_comment_decoy
+
+mut_template_pr_role_row_comment_decoy() {
+    replace_template_text .github/pull_request_template.md \
+        '- simplicity-adversary:' '<!-- - simplicity-adversary: -->'
+}
+expect_fail check_template_contract.sh \
+    'the PR role-verdict row surviving only inside a comment' mut_template_pr_role_row_comment_decoy
+
+mut_template_pr_closes_field_removed() {
+    replace_template_text .github/pull_request_template.md 'Closes #' 'Related issue:'
+}
+expect_fail check_template_contract.sh \
+    'the PR template losing its issue-closing field' mut_template_pr_closes_field_removed
+
+mut_template_pr_verification_command_weakened() {
+    replace_template_text .github/pull_request_template.md \
+        '$ cargo clippy --workspace --all-targets -- -D warnings' \
+        '$ cargo clippy --workspace'
+}
+expect_fail check_template_contract.sh \
+    'the PR template weakening one four-command gate instruction' mut_template_pr_verification_command_weakened
+
+mut_template_pr_breaking_checkbox_comment_decoy() {
+    replace_template_text .github/pull_request_template.md \
+        '- [ ] BREAKING — this PR touches a protected file or changes a public contract.' \
+        '<!-- - [ ] BREAKING — this PR touches a protected file or changes a public contract. -->'
+}
+expect_fail check_template_contract.sh \
+    'the PR BREAKING checkbox surviving only inside a comment' mut_template_pr_breaking_checkbox_comment_decoy
+
+mut_template_pr_migration_prompt_removed() {
+    replace_template_text .github/pull_request_template.md \
+        'describe the migration path here' 'describe the change here'
+}
+expect_fail check_template_contract.sh \
+    'the PR template losing its protected-file migration prompt' mut_template_pr_migration_prompt_removed
+
+mut_template_file_deleted() {
+    rm -f .github/ISSUE_TEMPLATE/new-operation.md
+}
+expect_fail check_template_contract.sh \
+    "one of the guard's six template inputs deleted, which must fail rather than skip" mut_template_file_deleted
+
+probe_template_guard_missing_ruby() {
+    local output rc=0 sandbox
+    cases=$((cases + 1))
+    make_sandbox
+    sandbox="$SANDBOX"
+    output="$(GATEWAY_CHECK_ROOT="$sandbox" PATH=/nonexistent /bin/bash \
+        "${SCRIPT_DIR}/check_template_contract.sh" 2>&1)" || rc=$?
+    if [[ "$rc" -ne 0 && "$output" == *'required command is missing: ruby'* ]]; then
+        pass_msg 'check_template_contract.sh fails closed without ruby'
+    else
+        fail_msg 'check_template_contract.sh reported green without ruby'
+    fi
+}
+probe_template_guard_missing_ruby
+
 # The codegen feedback loop must not rebuild product crates before generation starts.
 mut_xtask_codegen_alias_restores_full_defaults() {
     perl -0pi -e 's/ --no-default-features//' .cargo/config.toml

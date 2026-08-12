@@ -75,6 +75,7 @@ fixed now so that the same check does not get written twice under two names.
 | `check_guard_grep_pipelines.sh` | The license and secret-hygiene guards contain no quiet grep option token, including in comments or strings; their grep checks must read input fully under `pipefail` | P0 |
 | `check_english_only.sh` | No tracked file contains CJK text. `rustfs/backlog` is the one repository in the organisation where Chinese is allowed; this is not it. Matches by codepoint in Python — a grep bracket range is read by locale collation and flags an em dash | P0 |
 | `check_ci_time_gate.sh` | Every PR job has a timeout, every dependency path stays within ten minutes, and Static checks / Clippy / Test retain their exact branch-protected contract | P0-04 |
+| `check_template_contract.sh` | Four issue templates, their enabled contact configuration and the PR template retain structured headings, stable gate anchors and byte-matched AGENTS checklist items | P0-05 |
 | `check_generated_dto_packaged.sh` | Every `#[path]` under `crates/*/src` stays inside its crate, reaching the generated dto through the `crates/types/generated` symlink | P1-06 |
 | `check_no_dto_non_exhaustive.sh` | No generated dto struct carries `#[non_exhaustive]`; it forbids `..Default::default()` (E0639), which is the very syntax that keeps a new field minor (ADR-0004 P1) | P1-06 |
 | `check_no_exhaustive_destructuring.sh` | No hand-written code destructures a dto without a trailing `..`; that is the one pattern a new field breaks (ADR-0004 P3) | P1-06 |
