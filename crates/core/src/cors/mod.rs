@@ -51,6 +51,8 @@ mod answer;
 mod request;
 mod rule;
 
+use crate::contracts;
+
 pub use self::answer::{
     ACCESS_CONTROL_ALLOW_CREDENTIALS, ACCESS_CONTROL_ALLOW_HEADERS, ACCESS_CONTROL_ALLOW_METHODS, ACCESS_CONTROL_ALLOW_ORIGIN,
     ACCESS_CONTROL_EXPOSE_HEADERS, ACCESS_CONTROL_MAX_AGE, CorsHeaders, CorsOrigins, CorsPolicy, CorsPolicyError,
@@ -78,6 +80,59 @@ pub const PREFLIGHT_SUCCESS_STATUS: u16 = 200;
 /// times as they care to ask for it.
 pub const PREFLIGHT_REFUSAL_MESSAGE: &str = "CORSResponse: no CORS rule allows this request";
 
+/// The internal branch that reached a preflight refusal.
+///
+/// The current contract deliberately erases this value before rendering. It remains typed so the
+/// refusal-profile mutation can prove that every production call site is covered without ever
+/// carrying request-derived bytes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PreflightRefusalCause {
+    /// The preflight headers were incomplete or unreadable.
+    Malformed,
+    /// Host/path resolution did not produce a legal bucket target.
+    InvalidTarget,
+    /// The target had no readable CORS document.
+    MissingDocument,
+    /// A document existed but no rule admitted the request.
+    RuleMismatch,
+}
+
+/// Whether a recognised preflight bypasses the ordinary operation pipeline.
+#[must_use]
+pub const fn preflight_bypasses_pipeline() -> bool {
+    contracts::cors_preflight_bypasses_pipeline()
+}
+
+/// Whether host/path resolution supplies the bucket whose CORS document is read.
+#[must_use]
+pub const fn preflight_uses_resolved_target() -> bool {
+    contracts::cors_preflight_uses_resolved_target()
+}
+
+/// Whether post-authorisation error responses retain their computed CORS decoration.
+#[must_use]
+pub const fn headers_apply_to_post_auth_errors() -> bool {
+    contracts::cors_headers_apply_to_post_auth_errors()
+}
+
+/// Whether failures and absences from a CORS source are collapsed before answering.
+#[must_use]
+pub const fn source_absence_is_collapsed() -> bool {
+    contracts::cors_source_absence_is_collapsed()
+}
+
+/// Whether an invalid bucket target receives the uniform preflight refusal.
+#[must_use]
+pub const fn invalid_target_is_uniform_refusal() -> bool {
+    contracts::cors_invalid_target_is_uniform_refusal()
+}
+
+/// Whether a successful preflight grants no authorisation to a later request.
+#[must_use]
+pub const fn preflight_grants_no_authorization() -> bool {
+    contracts::cors_preflight_grants_no_authorization()
+}
+
 /// The one refusal a preflight can receive.
 ///
 /// `403 AccessForbidden`, always, with [`PREFLIGHT_REFUSAL_MESSAGE`]. Takes no arguments on
@@ -86,6 +141,24 @@ pub const PREFLIGHT_REFUSAL_MESSAGE: &str = "CORSResponse: no CORS rule allows t
 #[must_use]
 pub fn preflight_refusal() -> PreAuthError {
     PreAuthError::access_forbidden(PREFLIGHT_REFUSAL_MESSAGE)
+}
+
+/// Renders a refusal after deliberately applying the configured refusal profile.
+///
+/// The current profile delegates every cause to [`preflight_refusal`]. The alternative values are
+/// fixed strings, never request data; they exist only so the contract mutation can demonstrate
+/// that the production gateway would expose the cause if uniformity stopped being the source.
+#[must_use]
+pub fn preflight_refusal_for(cause: PreflightRefusalCause) -> PreAuthError {
+    if contracts::cors_preflight_refusal_is_uniform() {
+        return preflight_refusal();
+    }
+    match cause {
+        PreflightRefusalCause::Malformed => PreAuthError::invalid_request("CORSResponse: malformed preflight"),
+        PreflightRefusalCause::InvalidTarget => PreAuthError::invalid_argument("CORSResponse: invalid bucket target"),
+        PreflightRefusalCause::MissingDocument => PreAuthError::access_forbidden("CORSResponse: no CORS configuration"),
+        PreflightRefusalCause::RuleMismatch => PreAuthError::access_forbidden("CORSResponse: no matching CORS rule"),
+    }
 }
 
 /// What the pipeline should do with a preflight.
@@ -114,7 +187,7 @@ pub fn answer_preflight(
     let Some(matched) = match_preflight(configuration, request.origin, request.method, &request.headers) else {
         return PreflightOutcome::Refused;
     };
-    match preflight_headers(policy, &matched, &request.headers) {
+    match preflight_headers(policy, &matched, request.method, &request.headers) {
         Ok(headers) => PreflightOutcome::Allowed(headers),
         Err(UnrenderableRule) => PreflightOutcome::Refused,
     }
@@ -133,7 +206,11 @@ pub fn answer_actual(
     origin: &str,
     method: &str,
 ) -> Option<CorsHeaders> {
-    let matched = match_actual(configuration?, origin, method)?;
+    let Some(matched) = match_actual(configuration?, origin, method) else {
+        return (!contracts::cors_unmatched_actual_has_no_headers())
+            .then(|| answer::unmatched_actual_headers(origin).ok())
+            .flatten();
+    };
     actual_headers(policy, &matched).ok()
 }
 
@@ -226,6 +303,14 @@ mod tests {
         assert_eq!(refusal.operation(), None);
         // Two refusals are the same value: there is no per-call state that could differ.
         assert_eq!(preflight_refusal(), preflight_refusal());
+        for cause in [
+            PreflightRefusalCause::Malformed,
+            PreflightRefusalCause::InvalidTarget,
+            PreflightRefusalCause::MissingDocument,
+            PreflightRefusalCause::RuleMismatch,
+        ] {
+            assert_eq!(preflight_refusal_for(cause), refusal, "the refusal exposed {cause:?}");
+        }
     }
 
     /// Negative — an unmatched ordinary request gets no headers rather than an error. The request

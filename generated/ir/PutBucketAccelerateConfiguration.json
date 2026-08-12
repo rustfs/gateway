@@ -155,7 +155,7 @@
                                 "summary": "The request reference lists no Content-MD5 header, unlike the versioning, logging, request-payment, website, policy and public-access writes beside it."
                               }
                             ],
-                "cases": ["c-bucketconfig-0041"]
+                "cases": ["c-bucketconfig-0004", "c-bucketconfig-0041"]
               }
             ],
   "ext_points": []

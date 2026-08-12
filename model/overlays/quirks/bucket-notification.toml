@@ -22,6 +22,9 @@
 [[quirk]]
 id      = "q-ntf-0001"
 kind    = "not_configured_error"
+classification = "mutable"
+mutation_dimension = "optionality"
+mutation_sources = ["GetBucketNotificationConfiguration.errors.not_configured"]
 target  = "GetBucketNotificationConfiguration"
 summary = "A bucket that delivers no events answers 200 with an empty NotificationConfiguration element rather than a 404, so a client reads no subscriptions rather than a missing resource."
 cases   = ["c-bucketconfig-0024", "c-bucketconfig-0011"]
@@ -39,6 +42,22 @@ cases   = ["c-bucketconfig-0024", "c-bucketconfig-0011"]
 [[quirk]]
 id      = "q-ntf-0002"
 kind    = "flattened_list"
+classification = "mutable"
+mutation_dimension = "wrap_strategy"
+mutation_sources = [
+  "GetBucketNotificationConfiguration.output.TopicConfigurations.list_flattened",
+  "GetBucketNotificationConfiguration.output.QueueConfigurations.list_flattened",
+  "GetBucketNotificationConfiguration.output.LambdaFunctionConfigurations.list_flattened",
+  "GetBucketNotificationConfiguration.shapes.TopicConfiguration.fields.Events.list_flattened",
+  "GetBucketNotificationConfiguration.shapes.QueueConfiguration.fields.Events.list_flattened",
+  "GetBucketNotificationConfiguration.shapes.LambdaFunctionConfiguration.fields.Events.list_flattened",
+  "PutBucketNotificationConfiguration.shapes.NotificationConfiguration.fields.TopicConfigurations.list_flattened",
+  "PutBucketNotificationConfiguration.shapes.NotificationConfiguration.fields.QueueConfigurations.list_flattened",
+  "PutBucketNotificationConfiguration.shapes.NotificationConfiguration.fields.LambdaFunctionConfigurations.list_flattened",
+  "PutBucketNotificationConfiguration.shapes.TopicConfiguration.fields.Events.list_flattened",
+  "PutBucketNotificationConfiguration.shapes.QueueConfiguration.fields.Events.list_flattened",
+  "PutBucketNotificationConfiguration.shapes.LambdaFunctionConfiguration.fields.Events.list_flattened",
+]
 target  = "NotificationConfiguration"
 summary = "All three destination lists and the Event list inside each of them repeat as sibling elements directly under their parent with no wrapper, which is the opposite of the website family's wrapped routing rules."
 cases   = ["c-bucketconfig-0011", "c-bucketconfig-0010"]
@@ -51,9 +70,12 @@ cases   = ["c-bucketconfig-0011", "c-bucketconfig-0010"]
 [[quirk]]
 id      = "q-ntf-0003"
 kind    = "checksum_required"
+classification = "mutable"
+mutation_dimension = "optionality"
+mutation_sources = ["PutBucketNotificationConfiguration.checksum.http_checksum_required"]
 target  = "PutBucketNotificationConfiguration"
 summary = "The v2 notification write is the second of two writes in this band that carry no integrity requirement, so a body with neither Content-MD5 nor an x-amz-checksum header is accepted."
-cases   = ["c-bucketconfig-0042"]
+cases   = ["c-bucketconfig-0010", "c-bucketconfig-0042"]
 
   [[quirk.evidence]]
   kind    = "aws-doc"
@@ -63,6 +85,20 @@ cases   = ["c-bucketconfig-0042"]
 [[quirk]]
 id      = "q-ntf-0004"
 kind    = "element_name"
+classification = "mutable"
+mutation_dimension = "element_rename"
+mutation_sources = [
+  "GetBucketNotificationConfiguration.output.LambdaFunctionConfigurations.wire_name",
+  "GetBucketNotificationConfiguration.shapes.LambdaFunctionConfiguration.fields.LambdaFunctionArn.wire_name",
+  "GetBucketNotificationConfiguration.shapes.QueueConfiguration.fields.QueueArn.wire_name",
+  "GetBucketNotificationConfiguration.shapes.TopicConfiguration.fields.TopicArn.wire_name",
+  "GetBucketNotificationConfiguration.shapes.NotificationConfigurationFilter.fields.Key.wire_name",
+  "PutBucketNotificationConfiguration.shapes.NotificationConfiguration.fields.LambdaFunctionConfigurations.wire_name",
+  "PutBucketNotificationConfiguration.shapes.LambdaFunctionConfiguration.fields.LambdaFunctionArn.wire_name",
+  "PutBucketNotificationConfiguration.shapes.QueueConfiguration.fields.QueueArn.wire_name",
+  "PutBucketNotificationConfiguration.shapes.TopicConfiguration.fields.TopicArn.wire_name",
+  "PutBucketNotificationConfiguration.shapes.NotificationConfigurationFilter.fields.Key.wire_name",
+]
 target  = "NotificationConfiguration.LambdaFunctionConfigurations"
 summary = "Five members of this document are spelled differently on the wire than in the model: the function configuration is CloudFunctionConfiguration, its ARN is CloudFunction, the queue and topic ARNs are Queue and Topic, and the key filter is S3Key."
 cases   = ["c-bucketconfig-0011"]
@@ -75,6 +111,7 @@ cases   = ["c-bucketconfig-0011"]
 [[quirk]]
 id      = "q-ntf-0005"
 kind    = "lenient_enum"
+classification = "contract"
 target  = "NotificationConfiguration"
 summary = "An event name this build has no constant for is stored and echoed as sent rather than refused, because AWS adds event types continuously and a gateway that refused unknown ones would reject configurations AWS accepts until it was rebuilt."
 cases   = ["c-bucketconfig-0048"]

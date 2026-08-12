@@ -13,6 +13,7 @@ Agent entry point for handwritten protocol scalars and the mounted generated DTO
 | `src/scalar/tests/timestamp_corpus_tests.rs` | Complete data-driven Smithy timestamp compatibility check. | Timestamp parsing or exact rendering changes. |
 | `tests/data/` | Pinned Smithy timestamp corpus plus source, license, digest and format mapping. | Refreshing or auditing `c-ts-0001` evidence. |
 | `src/scalar/cursor.rs` | Server-minted pagination cursors. | Continuation tokens change. |
+| `src/scalar/range.rs` | Range parsing and length-dependent resolution, driven by generated typed range inputs. | A byte-range form or boundary changes. |
 | `src/error.rs` | Public S3 error-code vocabulary. | Add or map an error code. |
 | `src/compat.rs` | Temporary s3s conversion feature. | Work on the milestone-bounded compatibility seam. |
 | `src/tests/dto_tests.rs` | Generated DTO semantic contracts. | Codegen changes DTO shape. |

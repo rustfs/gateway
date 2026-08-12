@@ -146,10 +146,21 @@ fn collapsing_is_not_cleaning() {
     assert_eq!(key_of("/bucket/a/../b", &collapsing()), Err(ErrorCode::INVALID_ARGUMENT));
 }
 
+/// c-naming-0019 / q-naming-validator-replaceability-0118: a custom validator replaces the AWS
+/// layer rather than being ignored.
 #[test]
-fn a_permissive_validator_cannot_reopen_the_floor() {
-    // E-1: the framework runs the floor first and ANDs the two verdicts, so `NoOpinion` on every
-    // one of these changes nothing.
+fn c_naming_0019_a_custom_validator_may_widen_the_aws_layer() {
+    let quirk = "q-naming-validator-replaceability-0118";
+    let permissive = NamePolicy::default().with_validator(Arc::new(PermitEverything));
+    assert_eq!(key_of("/MyBucket/key.txt", &aws()), Err(ErrorCode::INVALID_BUCKET_NAME));
+    ::core::assert_eq!(key_of("/MyBucket/key.txt", &permissive), Ok("key.txt".to_owned()), "{}", quirk);
+}
+
+/// c-naming-0020 / q-naming-validator-authority-0119: the safety floor runs before a custom
+/// validator and cannot be reopened by it.
+#[test]
+fn c_naming_0020_a_permissive_validator_cannot_reopen_the_floor() {
+    let quirk = "q-naming-validator-authority-0119";
     let permissive = NamePolicy::default().with_validator(Arc::new(PermitEverything));
     for target in [
         "/bucket/../x",
@@ -162,17 +173,13 @@ fn a_permissive_validator_cannot_reopen_the_floor() {
         "/bucket/..%5Cx",
         "/bucket///server/share",
     ] {
-        assert_eq!(
+        ::core::assert_eq!(
             key_of(target, &permissive),
             Err(ErrorCode::INVALID_ARGUMENT),
-            "{target} was let through by a validator with no power to let it through"
+            "{}: {target} was let through by a validator with no power to let it through",
+            quirk
         );
     }
-
-    // The other direction. Without this the block above would pass against a validator that was
-    // never consulted at all: uppercase is a validator rule, and the permissive one does widen it.
-    assert_eq!(key_of("/MyBucket/key.txt", &aws()), Err(ErrorCode::INVALID_BUCKET_NAME));
-    assert_eq!(key_of("/MyBucket/key.txt", &permissive), Ok("key.txt".to_owned()));
 }
 
 #[test]
@@ -212,6 +219,15 @@ fn the_length_limit_is_bytes_and_the_boundary_is_inclusive() {
     // for an implementation that refused every multi-byte key.
     let just_under = "%E2%82%AC".repeat(341);
     assert!(key_of(&format!("/bucket/{just_under}"), &aws()).is_ok());
+}
+
+/// c-naming-0023 / q-naming-0004: 512 two-byte characters sit exactly on the 1024-byte boundary.
+#[test]
+fn c_naming_0023_a_multibyte_key_is_accepted_at_exactly_1024_utf8_bytes() {
+    let quirk = "q-naming-0004";
+    let encoded = "%C3%A9".repeat(512);
+    let decoded = "é".repeat(512);
+    ::core::assert_eq!(key_of(&format!("/bucket/{encoded}"), &aws()), Ok(decoded), "{}", quirk);
 }
 
 /// The key a decoder is handed when the *host* named the bucket, so the whole path is the key.
@@ -258,15 +274,20 @@ fn the_encoded_spelling_survives_for_the_signature() {
 
 /// A key materialised from the wire and one built for a *response* are different things, and the
 /// difference is deliberate.
+/// c-naming-0022 / q-naming-stored-legacy-control-0120: a non-NUL control remains representable
+/// when the backend already contains it, while client ingress still rejects it.
 #[test]
-fn a_backend_may_still_name_an_object_the_floor_would_not_let_a_client_choose() {
+fn c_naming_0022_a_backend_may_still_name_an_object_the_floor_would_not_let_a_client_choose()
+-> Result<(), Box<dyn std::error::Error>> {
+    let quirk = "q-naming-stored-legacy-control-0120";
     // `conformance/cases/list/c-list-0035` is an object stored under a key holding U+0001. The
     // floor refuses that key on the naming path, and a listing still has to be able to answer with
     // it — so the representation constructor keeps the wire-shape rules and nothing more. If this
     // starts failing, one badly named object has become unlistable.
-    let stored = ObjectKey::new("ctrl\u{1}key.txt").expect("a stored key may hold what a client may not choose");
-    assert!(stored.needs_url_encoding());
+    let stored = ObjectKey::new("ctrl\u{1}key.txt")?;
+    ::core::assert!(stored.needs_url_encoding(), "{}", quirk);
     assert_eq!(key_of("/bucket/ctrl%01key.txt", &aws()), Err(ErrorCode::INVALID_ARGUMENT));
+    Ok(())
 }
 
 // ── part B: the position of the refusal in the pipeline ────────────────────────────────────────

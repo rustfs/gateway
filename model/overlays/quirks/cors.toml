@@ -29,6 +29,9 @@
 [[quirk]]
 id      = "q-cors-0001"
 kind    = "not_configured_error"
+classification = "mutable"
+mutation_dimension = "optionality"
+mutation_sources = ["GetBucketCors.errors.not_configured"]
 target  = "GetBucketCors"
 summary = "A bucket that never had a CORS document answers 404 with the operation-specific code NoSuchCORSConfiguration, not a generic not-found and not an empty 200."
 cases   = ["c-cors-0012", "c-cors-0011"]
@@ -41,9 +44,15 @@ cases   = ["c-cors-0012", "c-cors-0011"]
 [[quirk]]
 id      = "q-cors-0002"
 kind    = "flattened_list"
+classification = "mutable"
+mutation_dimension = "wrap_strategy"
+mutation_sources = [
+  "GetBucketCors.output.CORSRules.list_flattened",
+  "PutBucketCors.shapes.CORSConfiguration.fields.CORSRules.list_flattened",
+]
 target  = "CORSConfiguration.CORSRules"
 summary = "The rules repeat as sibling CORSRule elements directly under the CORSConfiguration root; a CORSRules wrapper element would make every SDK read zero rules."
-cases   = ["c-cors-0002", "c-cors-0003"]
+cases   = ["c-cors-0002", "c-cors-0003", "c-cors-0004", "c-cors-0009"]
 
   [[quirk.evidence]]
   kind    = "aws-doc"
@@ -58,6 +67,18 @@ cases   = ["c-cors-0002", "c-cors-0003"]
 [[quirk]]
 id      = "q-cors-0003"
 kind    = "flattened_list"
+classification = "mutable"
+mutation_dimension = "wrap_strategy"
+mutation_sources = [
+  "GetBucketCors.shapes.CORSRule.fields.AllowedHeaders.list_flattened",
+  "GetBucketCors.shapes.CORSRule.fields.AllowedMethods.list_flattened",
+  "GetBucketCors.shapes.CORSRule.fields.AllowedOrigins.list_flattened",
+  "GetBucketCors.shapes.CORSRule.fields.ExposeHeaders.list_flattened",
+  "PutBucketCors.shapes.CORSRule.fields.AllowedHeaders.list_flattened",
+  "PutBucketCors.shapes.CORSRule.fields.AllowedMethods.list_flattened",
+  "PutBucketCors.shapes.CORSRule.fields.AllowedOrigins.list_flattened",
+  "PutBucketCors.shapes.CORSRule.fields.ExposeHeaders.list_flattened",
+]
 target  = "CORSRule"
 summary = "Inside one rule the four list members repeat as singular AllowedMethod, AllowedOrigin, AllowedHeader and ExposeHeader elements with no wrapper, so a round trip must preserve repeated siblings."
 cases   = ["c-cors-0003", "c-cors-0005"]
@@ -70,9 +91,12 @@ cases   = ["c-cors-0003", "c-cors-0005"]
 [[quirk]]
 id      = "q-cors-0004"
 kind    = "closed_value_set"
+classification = "contract"
+mutation_dimension = "cors_allowed_method_value_set"
+contract_value = "s3_five"
 target  = "CORSRule.AllowedMethods"
-summary = "AllowedMethod admits exactly GET, PUT, POST, DELETE and HEAD in upper case; any other spelling is refused with 400 InvalidRequest rather than stored and echoed."
-cases   = ["c-cors-0016", "c-cors-0017"]
+summary = "AllowedMethod admits exactly GET, PUT, POST, DELETE and HEAD; another method is refused rather than stored."
+cases   = ["c-cors-0005", "c-cors-0016"]
 
   [[quirk.evidence]]
   kind    = "aws-doc"
@@ -87,9 +111,12 @@ cases   = ["c-cors-0016", "c-cors-0017"]
 [[quirk]]
 id      = "q-cors-0005"
 kind    = "wildcard_syntax"
+classification = "contract"
+mutation_dimension = "cors_origin_wildcard_limit"
+contract_value = "one"
 target  = "CORSRule.AllowedOrigins"
-summary = "An origin or allowed header may carry at most one asterisk wildcard, an expose header none at all; a second asterisk is refused with 400 rather than matched literally."
-cases   = ["c-cors-0018", "c-cors-0019", "c-cors-0007"]
+summary = "An allowed origin may carry at most one asterisk wildcard; a second is refused rather than stored."
+cases   = ["c-cors-0006", "c-cors-0007", "c-cors-0018"]
 
   [[quirk.evidence]]
   kind    = "aws-doc"
@@ -99,6 +126,9 @@ cases   = ["c-cors-0018", "c-cors-0019", "c-cors-0007"]
 [[quirk]]
 id      = "q-cors-0006"
 kind    = "idempotent_delete"
+classification = "contract"
+mutation_dimension = "cors_delete_absent_policy"
+contract_value = "succeed"
 target  = "DeleteBucketCors"
 summary = "The delete answers 204 with no body whether or not a configuration existed, so removing the CORS document of an unconfigured bucket is a success rather than a 404."
 cases   = ["c-cors-0013", "c-cors-0011"]
@@ -111,7 +141,10 @@ cases   = ["c-cors-0013", "c-cors-0011"]
 [[quirk]]
 id      = "q-cors-0007"
 kind    = "lenient_unknown_elements"
-target  = "PutBucketCors"
+classification = "mutable"
+mutation_dimension = "unknown_element_policy"
+codec_value = "skip"
+target  = "PutBucketCors.CORSConfiguration"
 summary = "Unknown elements inside the request document are skipped rather than refused, because a stored configuration parsed more strictly on the next release silently turns off cross-origin access with only a browser-side symptom."
 cases   = ["c-cors-0022"]
 
@@ -128,6 +161,9 @@ cases   = ["c-cors-0022"]
 [[quirk]]
 id      = "q-cors-0008"
 kind    = "checksum_required"
+classification = "mutable"
+mutation_dimension = "optionality"
+mutation_sources = ["PutBucketCors.checksum.http_checksum_required"]
 target  = "PutBucketCors"
 summary = "The write demands an integrity claim on the body, so a request with neither Content-MD5 nor an x-amz-checksum header is refused with 400 before the document is parsed."
 cases   = ["c-cors-0014"]
@@ -147,9 +183,12 @@ cases   = ["c-cors-0014"]
 [[quirk]]
 id      = "q-cors-0009"
 kind    = "preflight_answer"
+classification = "contract"
+mutation_dimension = "cors_preflight_dispatch_policy"
+contract_value = "bypass_pipeline"
 target  = "CORSConfiguration"
-summary = "An OPTIONS carrying Origin and Access-Control-Request-Method is answered from the addressed bucket's stored document instead of being routed to an operation, and a bucket with no document answers 403 AccessForbidden with a Message opening CORSResponse:."
-cases   = ["c-cors-0027", "c-cors-0028", "c-cors-0034", "c-cors-0048"]
+summary = "A recognised preflight bypasses routing, authentication, authorisation and the operation handler."
+cases   = ["c-cors-0027"]
 
   [[quirk.evidence]]
   kind    = "aws-doc"
@@ -164,9 +203,12 @@ cases   = ["c-cors-0027", "c-cors-0028", "c-cors-0034", "c-cors-0048"]
 [[quirk]]
 id      = "q-cors-0010"
 kind    = "reflected_origin"
+classification = "contract"
+mutation_dimension = "cors_bare_wildcard_answer"
+contract_value = "literal_star"
 target  = "CORSRule.AllowedOrigins"
-summary = "A bare * answers the literal *, a partial wildcard answers the requesting Origin verbatim rather than *, and neither form is ever accompanied by Access-Control-Allow-Credentials."
-cases   = ["c-cors-0030", "c-cors-0042"]
+summary = "A bare asterisk allowed origin answers the literal asterisk rather than reflecting the request origin."
+cases   = ["c-cors-0042"]
 
   [[quirk.evidence]]
   kind    = "other"
@@ -181,9 +223,12 @@ cases   = ["c-cors-0030", "c-cors-0042"]
 [[quirk]]
 id      = "q-cors-0011"
 kind    = "actual_response_headers"
+classification = "contract"
+mutation_dimension = "cors_actual_allow_origin_policy"
+contract_value = "include"
 target  = "CORSConfiguration"
-summary = "An ordinary request carrying an Origin is served normally and its response is decorated with the allow-origin, expose-headers and Vary: Origin lines; an Origin no rule admits is served with no Access-Control header at all."
-cases   = ["c-cors-0027", "c-cors-0032", "c-cors-0044"]
+summary = "An ordinary response admitted by a rule carries Access-Control-Allow-Origin."
+cases   = ["c-cors-0032"]
 
   [[quirk.evidence]]
   kind    = "rfc"
@@ -198,9 +243,12 @@ cases   = ["c-cors-0027", "c-cors-0032", "c-cors-0044"]
 [[quirk]]
 id      = "q-cors-0012"
 kind    = "wildcard_syntax"
+classification = "contract"
+mutation_dimension = "cors_requested_header_case_policy"
+contract_value = "ascii_insensitive"
 target  = "CORSRule.AllowedHeaders"
-summary = "AllowedHeader is matched case-insensitively with at most one wildcard, and every name in Access-Control-Request-Headers must match or the whole preflight is refused; there is no partial allowance."
-cases   = ["c-cors-0029", "c-cors-0040"]
+summary = "A requested header name is matched against an exact AllowedHeader without ASCII case sensitivity."
+cases   = ["c-cors-0050"]
 
   [[quirk.evidence]]
   kind    = "aws-doc"
@@ -215,9 +263,12 @@ cases   = ["c-cors-0029", "c-cors-0040"]
 [[quirk]]
 id      = "q-cors-0013"
 kind    = "first_match"
+classification = "contract"
+mutation_dimension = "cors_rule_order_policy"
+contract_value = "first_matching"
 target  = "CORSConfiguration.CORSRules"
-summary = "Rules are evaluated in document order and the first one satisfying origin, method and headers together decides the whole answer, including which MaxAgeSeconds and ExposeHeader values are returned."
-cases   = ["c-cors-0031"]
+summary = "When multiple rules match, the first one in document order wins."
+cases   = ["c-cors-0051"]
 
   [[quirk.evidence]]
   kind    = "aws-doc"
@@ -227,6 +278,9 @@ cases   = ["c-cors-0031"]
 [[quirk]]
 id      = "q-cors-0014"
 kind    = "headers_on_error"
+classification = "contract"
+mutation_dimension = "cors_headers_on_post_auth_error"
+contract_value = "include"
 target  = "CORSConfiguration"
 summary = "A request that failed after authorisation still carries its CORS headers, because a browser withholds a response with no allow-origin line from the page and the script sees an opaque network error instead of the status."
 cases   = ["c-cors-0033"]
@@ -239,6 +293,9 @@ cases   = ["c-cors-0033"]
 [[quirk]]
 id      = "q-cors-0015"
 kind    = "indistinguishable_refusal"
+classification = "contract"
+mutation_dimension = "cors_preflight_refusal_profile"
+contract_value = "uniform"
 target  = "CORSConfiguration"
 summary = "Every preflight refusal is the same response byte for byte apart from the request identifiers: no document, no bucket, an illegal bucket name, an unmatched origin, method or header, and an unusable Origin all answer one 403 AccessForbidden with one constant message."
 cases   = ["c-cors-0034", "c-cors-0035", "c-cors-0036", "c-cors-0037", "c-cors-0038", "c-cors-0039", "c-cors-0040", "c-cors-0041", "c-cors-0046", "c-cors-0047", "c-cors-0049"]
@@ -256,9 +313,12 @@ cases   = ["c-cors-0034", "c-cors-0035", "c-cors-0036", "c-cors-0037", "c-cors-0
 [[quirk]]
 id      = "q-cors-0016"
 kind    = "preflight_scope"
+classification = "contract"
+mutation_dimension = "cors_bare_options_policy"
+contract_value = "route"
 target  = "CORSConfiguration"
-summary = "An OPTIONS without both CORS request headers is not a preflight and is routed like any other request, and an allowed preflight grants nothing to the request it described: that request is still authenticated and authorised on its own."
-cases   = ["c-cors-0043", "c-cors-0045"]
+summary = "A bare OPTIONS with neither CORS request header is routed as an ordinary request rather than refused as a preflight."
+cases   = ["c-cors-0043"]
 
   [[quirk.evidence]]
   kind    = "rfc"
@@ -269,3 +329,437 @@ cases   = ["c-cors-0043", "c-cors-0045"]
   kind    = "aws-doc"
   ref     = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/cors.html"
   summary = "CORS configuration is described as controlling browser access to a bucket, alongside and not instead of the bucket's own access controls."
+
+[[quirk]]
+id = "q-cors-0017"
+kind = "method_case_policy"
+classification = "contract"
+mutation_dimension = "cors_allowed_method_case_policy"
+contract_value = "exact"
+target = "CORSRule.AllowedMethods"
+summary = "AllowedMethod uses the documented upper-case spelling and is not case-folded on write."
+cases = ["c-cors-0017"]
+  [[quirk.evidence]]
+  kind = "aws-doc"
+  ref = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CORSRule.html"
+  summary = "The documented method values use exact upper-case spellings."
+
+[[quirk]]
+id = "q-cors-0018"
+kind = "wildcard_limit"
+classification = "contract"
+mutation_dimension = "cors_allowed_header_wildcard_limit"
+contract_value = "one"
+target = "CORSRule.AllowedHeaders"
+summary = "An allowed header may carry at most one asterisk wildcard."
+cases = ["c-cors-0008", "c-cors-0019"]
+  [[quirk.evidence]]
+  kind = "aws-doc"
+  ref = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CORSRule.html"
+  summary = "AllowedHeader documents a maximum of one wildcard character."
+
+[[quirk]]
+id = "q-cors-0019"
+kind = "wildcard_limit"
+classification = "contract"
+mutation_dimension = "cors_expose_header_wildcard_limit"
+contract_value = "none"
+target = "CORSRule.ExposeHeaders"
+summary = "An exposed header may not contain an asterisk wildcard."
+cases = ["c-cors-0019"]
+  [[quirk.evidence]]
+  kind = "aws-doc"
+  ref = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/ManageCorsUsing.html"
+  summary = "The configuration guide excludes wildcards from ExposeHeader values."
+
+[[quirk]]
+id = "q-cors-0020"
+kind = "preflight_bucket_source"
+classification = "contract"
+mutation_dimension = "cors_preflight_bucket_source"
+contract_value = "resolved_target"
+target = "CORSConfiguration"
+summary = "A preflight reads the bucket selected by host and path resolution, not a raw path label."
+cases = ["c-cors-0048", "c-cors-0049"]
+  [[quirk.evidence]]
+  kind = "aws-doc"
+  ref = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/cors.html"
+  summary = "A preflight is answered from the addressed bucket's CORS configuration."
+
+[[quirk]]
+id = "q-cors-0021"
+kind = "preflight_header_source"
+classification = "contract"
+mutation_dimension = "cors_preflight_allow_methods_source"
+contract_value = "matched_rule"
+target = "CORSRule.AllowedMethods"
+summary = "Access-Control-Allow-Methods is rendered from the complete method list of the matched rule."
+cases = ["c-cors-0052"]
+  [[quirk.evidence]]
+  kind = "rfc"
+  ref = "https://fetch.spec.whatwg.org/#http-cors-protocol"
+  summary = "The preflight response carries the methods the selected policy allows."
+
+[[quirk]]
+id = "q-cors-0022"
+kind = "preflight_header_policy"
+classification = "contract"
+mutation_dimension = "cors_preflight_max_age_policy"
+contract_value = "include"
+target = "CORSRule.MaxAgeSeconds"
+summary = "A matched rule's non-negative MaxAgeSeconds is emitted on the preflight response."
+cases = ["c-cors-0028"]
+  [[quirk.evidence]]
+  kind = "rfc"
+  ref = "https://fetch.spec.whatwg.org/#http-cors-protocol"
+  summary = "The CORS protocol defines the preflight max-age response field."
+
+[[quirk]]
+id = "q-cors-0023"
+kind = "preflight_header_policy"
+classification = "contract"
+mutation_dimension = "cors_preflight_expose_policy"
+contract_value = "include"
+target = "CORSRule.ExposeHeaders"
+summary = "A matched rule's exposed headers are emitted on this runtime's preflight response."
+cases = ["c-cors-0028"]
+  [[quirk.evidence]]
+  kind = "aws-doc"
+  ref = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CORSRule.html"
+  summary = "ExposeHeaders is a response member of the matched CORS rule."
+
+[[quirk]]
+id = "q-cors-0024"
+kind = "preflight_header_policy"
+classification = "contract"
+mutation_dimension = "cors_preflight_vary_policy"
+contract_value = "origin"
+target = "CORSConfiguration"
+summary = "A successful preflight carries Vary: Origin."
+cases = ["c-cors-0027"]
+  [[quirk.evidence]]
+  kind = "rfc"
+  ref = "https://www.rfc-editor.org/rfc/rfc9110#section-12.5.5"
+  summary = "A response selected by Origin must identify that field to shared caches."
+
+[[quirk]]
+id = "q-cors-0025"
+kind = "reflected_origin"
+classification = "contract"
+mutation_dimension = "cors_partial_wildcard_answer"
+contract_value = "reflect_origin"
+target = "CORSRule.AllowedOrigins"
+summary = "A partial wildcard match answers the concrete request Origin rather than a literal asterisk."
+cases = ["c-cors-0030"]
+  [[quirk.evidence]]
+  kind = "rfc"
+  ref = "https://fetch.spec.whatwg.org/#http-cors-protocol"
+  summary = "A narrowed origin allowance is represented by the concrete admitted origin."
+
+[[quirk]]
+id = "q-cors-0026"
+kind = "credentials_policy"
+classification = "contract"
+mutation_dimension = "cors_wildcard_credentials_policy"
+contract_value = "omit"
+target = "CORSRule.AllowedOrigins"
+summary = "Neither bare nor partial wildcard origin matches may carry Access-Control-Allow-Credentials."
+cases = ["c-cors-0030", "c-cors-0042"]
+  [[quirk.evidence]]
+  kind = "other"
+  ref = "https://github.com/rustfs/rustfs/security/advisories/GHSA-x5xv-223c-8vm7"
+  summary = "Reflecting wildcard origins beside credentials exposed authenticated data cross-origin."
+
+[[quirk]]
+id = "q-cors-0027"
+kind = "origin_match"
+classification = "contract"
+mutation_dimension = "cors_exact_origin_match"
+contract_value = "exact"
+target = "CORSRule.AllowedOrigins"
+summary = "An allowed origin without a wildcard admits only the same origin bytes."
+cases = ["c-cors-0027", "c-cors-0037"]
+  [[quirk.evidence]]
+  kind = "rfc"
+  ref = "https://fetch.spec.whatwg.org/#http-cors-protocol"
+  summary = "An origin allow-list admits the origin value it names."
+
+[[quirk]]
+id = "q-cors-0028"
+kind = "origin_match"
+classification = "contract"
+mutation_dimension = "cors_origin_wildcard_match"
+contract_value = "prefix_and_suffix"
+target = "CORSRule.AllowedOrigins"
+summary = "A partial wildcard origin match requires both its prefix and suffix."
+cases = ["c-cors-0030", "c-cors-0047"]
+  [[quirk.evidence]]
+  kind = "aws-doc"
+  ref = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/ManageCorsUsing.html"
+  summary = "The configuration guide permits a single wildcard inside an allowed origin pattern."
+
+[[quirk]]
+id = "q-cors-0029"
+kind = "actual_header_policy"
+classification = "contract"
+mutation_dimension = "cors_actual_expose_policy"
+contract_value = "include"
+target = "CORSRule.ExposeHeaders"
+summary = "An admitted ordinary response includes the matched rule's exposed headers."
+cases = ["c-cors-0032"]
+  [[quirk.evidence]]
+  kind = "rfc"
+  ref = "https://fetch.spec.whatwg.org/#http-cors-protocol"
+  summary = "Expose-Headers is read from the ordinary CORS response."
+
+[[quirk]]
+id = "q-cors-0030"
+kind = "actual_header_policy"
+classification = "contract"
+mutation_dimension = "cors_actual_vary_policy"
+contract_value = "origin"
+target = "CORSConfiguration"
+summary = "An admitted ordinary response carries Vary: Origin."
+cases = ["c-cors-0032"]
+  [[quirk.evidence]]
+  kind = "rfc"
+  ref = "https://www.rfc-editor.org/rfc/rfc9110#section-12.5.5"
+  summary = "A response selected by Origin must identify that field to shared caches."
+
+[[quirk]]
+id = "q-cors-0031"
+kind = "actual_header_policy"
+classification = "contract"
+mutation_dimension = "cors_actual_preflight_header_policy"
+contract_value = "omit"
+target = "CORSConfiguration"
+summary = "An ordinary response omits preflight-only allow-methods, allow-headers and max-age fields."
+cases = ["c-cors-0032"]
+  [[quirk.evidence]]
+  kind = "rfc"
+  ref = "https://fetch.spec.whatwg.org/#http-cors-protocol"
+  summary = "The protocol assigns allow-methods, allow-headers and max-age to preflight responses."
+
+[[quirk]]
+id = "q-cors-0032"
+kind = "unmatched_actual"
+classification = "contract"
+mutation_dimension = "cors_unmatched_actual_policy"
+contract_value = "serve_without_cors"
+target = "CORSConfiguration"
+summary = "An ordinary request from an unmatched origin is served with no Access-Control header."
+cases = ["c-cors-0044"]
+  [[quirk.evidence]]
+  kind = "rfc"
+  ref = "https://fetch.spec.whatwg.org/#http-cors-protocol"
+  summary = "The browser withholds an ordinary response that carries no matching CORS allowance."
+
+[[quirk]]
+id = "q-cors-0033"
+kind = "header_match"
+classification = "contract"
+mutation_dimension = "cors_requested_header_wildcard_match"
+contract_value = "prefix_and_suffix"
+target = "CORSRule.AllowedHeaders"
+summary = "A wildcard AllowedHeader matches the requested name's prefix and suffix."
+cases = ["c-cors-0029"]
+  [[quirk.evidence]]
+  kind = "aws-doc"
+  ref = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CORSRule.html"
+  summary = "AllowedHeader permits one wildcard in its header-name pattern."
+
+[[quirk]]
+id = "q-cors-0034"
+kind = "header_match"
+classification = "contract"
+mutation_dimension = "cors_requested_header_quantifier"
+contract_value = "all"
+target = "CORSRule.AllowedHeaders"
+summary = "Every requested header name must match or the whole preflight is refused."
+cases = ["c-cors-0040"]
+  [[quirk.evidence]]
+  kind = "aws-doc"
+  ref = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CORSRule.html"
+  summary = "The requested header list is evaluated against the rule's complete AllowedHeaders list."
+
+[[quirk]]
+id = "q-cors-0035"
+kind = "preflight_header_source"
+classification = "contract"
+mutation_dimension = "cors_allow_headers_answer_source"
+contract_value = "requested_headers"
+target = "CORSRule.AllowedHeaders"
+summary = "Access-Control-Allow-Headers echoes the admitted requested names rather than stored wildcard patterns."
+cases = ["c-cors-0029"]
+  [[quirk.evidence]]
+  kind = "rfc"
+  ref = "https://fetch.spec.whatwg.org/#http-cors-protocol"
+  summary = "A preflight response identifies the requested headers that were admitted."
+
+[[quirk]]
+id = "q-cors-0036"
+kind = "rule_match_join"
+classification = "contract"
+mutation_dimension = "cors_rule_dimension_join"
+contract_value = "same_rule"
+target = "CORSConfiguration.CORSRules"
+summary = "Origin, method and requested headers must all match the same stored rule."
+cases = ["c-cors-0053"]
+  [[quirk.evidence]]
+  kind = "aws-doc"
+  ref = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/cors.html"
+  summary = "A preflight is evaluated against each complete CORS rule."
+
+[[quirk]]
+id = "q-cors-0037"
+kind = "matched_rule_source"
+classification = "contract"
+mutation_dimension = "cors_matched_rule_value_source"
+contract_value = "winner"
+target = "CORSConfiguration.CORSRules"
+summary = "Answer values come from the rule that matched rather than another document entry."
+cases = ["c-cors-0031"]
+  [[quirk.evidence]]
+  kind = "aws-doc"
+  ref = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/cors.html"
+  summary = "The first rule that matches the request is the rule applied."
+
+[[quirk]]
+id = "q-cors-0038"
+kind = "source_absence_policy"
+classification = "contract"
+mutation_dimension = "cors_source_absence_policy"
+contract_value = "collapse"
+target = "CORSConfiguration"
+summary = "No document, no bucket and a source failure are collapsed before the preflight answer is built."
+cases = ["c-cors-0034", "c-cors-0035"]
+  [[quirk.evidence]]
+  kind = "other"
+  ref = "https://github.com/rustfs/rustfs/security/advisories/GHSA-x5xv-223c-8vm7"
+  summary = "The unauthenticated CORS path must not become a bucket-state oracle."
+
+[[quirk]]
+id = "q-cors-0039"
+kind = "invalid_target_policy"
+classification = "contract"
+mutation_dimension = "cors_invalid_target_policy"
+contract_value = "uniform_refusal"
+target = "CORSConfiguration"
+summary = "An illegal or absent bucket target is answered as a uniform preflight refusal."
+cases = ["c-cors-0036"]
+  [[quirk.evidence]]
+  kind = "aws-doc"
+  ref = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/cors.html"
+  summary = "A preflight S3 will not serve is refused rather than routed as an operation."
+
+[[quirk]]
+id = "q-cors-0040"
+kind = "origin_validation"
+classification = "contract"
+mutation_dimension = "cors_origin_character_policy"
+contract_value = "visible_ascii"
+target = "CORSConfiguration"
+summary = "An Origin considered for reflection contains visible ASCII only."
+cases = ["c-cors-0046"]
+  [[quirk.evidence]]
+  kind = "rfc"
+  ref = "https://fetch.spec.whatwg.org/#http-cors-protocol"
+  summary = "Origin is a single response-bound value and cannot contain header separators."
+
+[[quirk]]
+id = "q-cors-0041"
+kind = "origin_validation"
+classification = "contract"
+mutation_dimension = "cors_origin_empty_policy"
+contract_value = "reject"
+target = "CORSConfiguration"
+summary = "An empty Origin value is refused before matching or reflection."
+cases = ["c-cors-0054"]
+  [[quirk.evidence]]
+  kind = "rfc"
+  ref = "https://fetch.spec.whatwg.org/#http-cors-protocol"
+  summary = "A preflight carries an origin value rather than an empty placeholder."
+
+[[quirk]]
+id = "q-cors-0042"
+kind = "origin_validation"
+classification = "contract"
+mutation_dimension = "cors_origin_max_bytes"
+contract_value = "max_2048"
+target = "CORSConfiguration"
+summary = "An Origin longer than 2048 bytes is refused before matching or reflection."
+cases = ["c-cors-0055"]
+  [[quirk.evidence]]
+  kind = "other"
+  ref = "https://github.com/rustfs/rustfs/security/advisories/GHSA-x5xv-223c-8vm7"
+  summary = "The unauthenticated reflection surface is bounded before a value can reach a response."
+
+[[quirk]]
+id = "q-cors-0043"
+kind = "header_cardinality"
+classification = "contract"
+mutation_dimension = "cors_origin_cardinality"
+contract_value = "exactly_one"
+target = "CORSConfiguration"
+summary = "A preflight carries exactly one Origin field."
+cases = ["c-cors-0041"]
+  [[quirk.evidence]]
+  kind = "rfc"
+  ref = "https://fetch.spec.whatwg.org/#http-cors-protocol"
+  summary = "The CORS protocol defines one Origin field on a preflight."
+
+[[quirk]]
+id = "q-cors-0044"
+kind = "header_cardinality"
+classification = "contract"
+mutation_dimension = "cors_request_method_cardinality"
+contract_value = "exactly_one"
+target = "CORSConfiguration"
+summary = "A preflight carries exactly one Access-Control-Request-Method field."
+cases = ["c-cors-0056"]
+  [[quirk.evidence]]
+  kind = "rfc"
+  ref = "https://fetch.spec.whatwg.org/#http-cors-protocol"
+  summary = "The preflight identifies one method for the request it describes."
+
+[[quirk]]
+id = "q-cors-0045"
+kind = "header_cardinality"
+classification = "contract"
+mutation_dimension = "cors_request_headers_cardinality"
+contract_value = "at_most_one"
+target = "CORSConfiguration"
+summary = "A preflight carries at most one Access-Control-Request-Headers field."
+cases = ["c-cors-0057"]
+  [[quirk.evidence]]
+  kind = "rfc"
+  ref = "https://fetch.spec.whatwg.org/#http-cors-protocol"
+  summary = "Requested header names are represented as one comma-separated field value."
+
+[[quirk]]
+id = "q-cors-0046"
+kind = "preflight_scope"
+classification = "contract"
+mutation_dimension = "cors_preflight_required_header_pair"
+contract_value = "both"
+target = "CORSConfiguration"
+summary = "A preflight requires both Origin and Access-Control-Request-Method; a half-preflight is refused."
+cases = ["c-cors-0058"]
+  [[quirk.evidence]]
+  kind = "rfc"
+  ref = "https://fetch.spec.whatwg.org/#http-cors-protocol"
+  summary = "A browser preflight sends Origin together with Access-Control-Request-Method."
+
+[[quirk]]
+id = "q-cors-0047"
+kind = "authorization_scope"
+classification = "contract"
+mutation_dimension = "cors_preflight_authorization_scope"
+contract_value = "no_grant"
+target = "CORSConfiguration"
+summary = "A successful preflight does not authenticate or authorise the request it describes."
+cases = ["c-cors-0045"]
+  [[quirk.evidence]]
+  kind = "aws-doc"
+  ref = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/cors.html"
+  summary = "CORS controls browser access alongside rather than instead of bucket access controls."

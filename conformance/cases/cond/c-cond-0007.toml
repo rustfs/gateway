@@ -16,7 +16,7 @@ polarity = "positive"
 operation = "GetObject"
 tags = ["conditional", "preconditions", "etag"]
 timeout_ms = 10000
-quirks = ["q-cond-0047"]
+quirks = ["q-cond-304-body-0099"]
 
 [[case.evidence]]
 url = "https://www.rfc-editor.org/rfc/rfc9110#section-15.4.5"

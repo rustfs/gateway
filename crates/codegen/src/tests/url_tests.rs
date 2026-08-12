@@ -69,7 +69,7 @@ fn the_listing_families_encode_their_root_members_and_their_entry_keys() {
 
 #[test]
 fn the_generated_encoder_reads_the_decision_once_and_passes_it_down() {
-    let body = encode::body(&ir("ListObjectsV2")).expect("encodes");
+    let body = encode::body(&ir("ListObjectsV2"), &Default::default()).expect("encodes");
     assert_eq!(
         body.matches("value::url_encoding(request)").count(),
         1,
@@ -87,7 +87,7 @@ fn the_generated_encoder_reads_the_decision_once_and_passes_it_down() {
 
 #[test]
 fn n_an_operation_that_declares_nothing_reads_no_decision_at_all() {
-    let body = encode::body(&ir("ListBuckets")).expect("encodes");
+    let body = encode::body(&ir("ListBuckets"), &Default::default()).expect("encodes");
     assert!(
         !body.contains("url_encoding"),
         "a decision nothing consumes would not compile under -D warnings:\n{body}"
@@ -132,6 +132,6 @@ fn n_a_path_naming_a_scalar_as_a_container_fails_the_run() {
 fn n_a_member_whose_type_has_no_encoded_form_fails_the_run() {
     let mut ir = ir("ListObjectsV2");
     ir.xml.url_encoded_fields = vec!["MaxKeys".to_owned()];
-    let error = encode::body(&ir).expect_err("percent-encoding an integer is a path with no wire form");
+    let error = encode::body(&ir, &Default::default()).expect_err("percent-encoding an integer is a path with no wire form");
     assert!(error.contains("MaxKeys"), "{error}");
 }

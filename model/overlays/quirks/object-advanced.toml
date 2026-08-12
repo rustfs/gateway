@@ -17,6 +17,9 @@
 [[quirk]]
 id      = "q-attributes-root-0087"
 kind    = "root_name"
+classification = "mutable"
+mutation_dimension = "element_rename"
+mutation_sources = ["GetObjectAttributes.xml.response_root"]
 target  = "GetObjectAttributes"
 summary = "The attributes response is rooted at an element named after the output shape itself, not after the `xmlName` the model gives that shape, so the generated root has to be stated here instead of derived."
 cases   = ["c-etag-0001"]

@@ -370,7 +370,7 @@ pub fn document(error: &S3Error, trace: &RequestTrace) -> String {
 #[must_use]
 pub fn document_body(error: &S3Error, trace: &RequestTrace) -> String {
     let mut xml = XmlWriter::fragment();
-    xml.open("Error", None);
+    xml.open("Error", rustfs_gateway_core::error_root_namespace());
     if let Some(code) = &error.code {
         xml.element("Code", code.as_str());
     }

@@ -55,7 +55,10 @@ pub mod view;
 mod tests;
 
 pub use crate::codec::error::CodecError;
-pub use crate::codec::response::{BodyAllowance, EncodedResponse, ResponseBody, ResponseOverride, body_allowance, status_code};
+pub use crate::codec::response::{
+    BodyAllowance, EncodedResponse, ResponseBody, ResponseOverride, body_allowance, response_body_allowed,
+    response_framing_allowed, status_code,
+};
 pub use crate::codec::value::*;
 pub use crate::codec::view::{MetaView, RequestBody};
 

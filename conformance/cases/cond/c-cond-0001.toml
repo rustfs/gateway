@@ -18,7 +18,7 @@ polarity = "negative"
 operation = "PutObject"
 tags = ["conditional", "preconditions", "error-shape"]
 timeout_ms = 10000
-quirks = ["q-cond-0041", "q-cond-0045"]
+quirks = ["q-cond-0041", "q-cond-0045", "q-cond-write-order-0096"]
 
 [[case.evidence]]
 url = "https://github.com/s3s-project/s3s/issues/241"

@@ -45,6 +45,16 @@ impl OperationCodec for dto::RestoreObject {
         }
         // RestoreRequest — the XML request body, rooted at `RestoreRequest`.
         let raw_body = body.into_buffered()?;
+        if matches!(
+            crate::contracts::RESTORE_ROOT_NAMESPACE_POLICY,
+            crate::contracts::RestoreRootNamespacePolicy::QualifiedName
+        ) && raw_body
+            .as_ref()
+            .windows(6)
+            .any(|part| part == b"xmlns=" || part == b"xmlns:")
+        {
+            return Err(CodecError::malformed_xml("the request body has the wrong root namespace"));
+        }
         let root = rustfs_gateway_xml::parse(raw_body.as_ref())
             .map_err(|_| CodecError::malformed_xml("the request body is not the XML this operation accepts"))?;
         if !["RestoreRequest"].contains(&root.name.as_str()) {

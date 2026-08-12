@@ -25,6 +25,7 @@
 [[quirk]]
 id      = "q-checksum-0006"
 kind    = "checksum_headers"
+classification = "contract"
 target  = "PutObject"
 summary = "The eleven separate checksum members collapse into one packed spec, and more than one checksum header on a request is a hard error rather than a merge."
 cases   = ["c-checksum-0001", "c-checksum-0002"]
@@ -42,9 +43,17 @@ cases   = ["c-checksum-0001", "c-checksum-0002"]
 [[quirk]]
 id      = "q-content-0008"
 kind    = "default_value"
+classification = "mutable"
+mutation_dimension = "default_value"
+mutation_sources = [
+  "PutObject.input.ContentType.default_string",
+  "CreateMultipartUpload.input.ContentType.default_string",
+  "GetObject.output.ContentType.default_string",
+  "HeadObject.output.ContentType.default_string",
+]
 target  = "PutObject.ContentType"
 summary = "The default media type is the S3 specific binary form, not the IANA registered octet stream spelling."
-cases   = ["c-putobject-0002"]
+cases   = ["c-object-0001", "c-object-0006"]
 
   [[quirk.evidence]]
   kind    = "aws-doc"
@@ -54,9 +63,19 @@ cases   = ["c-putobject-0002"]
 [[quirk]]
 id      = "q-etag-0004"
 kind    = "etag_render"
+classification = "mutable"
+mutation_dimension = "quote_strategy"
+mutation_sources = [
+  "GetObject.output.ETag.etag_render",
+  "HeadObject.output.ETag.etag_render",
+  "PutObject.output.ETag.etag_render",
+  "UploadPart.output.ETag.etag_render",
+  "CopyObject.output.ETag.etag_render",
+  "UploadPartCopy.output.ETag.etag_render",
+]
 target  = "PutObject.ETag"
 summary = "In a header position the entity tag is always written with surrounding double quotes, unlike the bare form used by GetObjectAttributes."
-cases   = ["c-etag-0010"]
+cases   = ["c-mpu-0018", "c-object-0001", "c-object-0002", "c-object-0009"]
 
   [[quirk.evidence]]
   kind    = "aws-doc"
@@ -71,6 +90,7 @@ cases   = ["c-etag-0010"]
 [[quirk]]
 id      = "q-length-0007"
 kind    = "error_code"
+classification = "contract"
 target  = "PutObject.ContentLength"
 summary = "A PUT without a content length is rejected with a dedicated 411 code rather than a generic bad request."
 cases   = ["c-putobject-0001"]
@@ -83,6 +103,7 @@ cases   = ["c-putobject-0001"]
 [[quirk]]
 id      = "q-meta-0009"
 kind    = "prefix_headers"
+classification = "contract"
 target  = "PutObject.Metadata"
 summary = "User metadata keys are lowercased on return, non ASCII values use encoded word syntax, and the combined size is capped."
 cases   = ["c-meta-0001", "c-meta-0002"]
@@ -100,6 +121,7 @@ cases   = ["c-meta-0001", "c-meta-0002"]
 [[quirk]]
 id      = "q-sse-0010"
 kind    = "secret_hygiene"
+classification = "contract"
 target  = "PutObject"
 summary = "The customer key is never echoed back and never logged, while the algorithm and key digest must be echoed; customer keys over a plaintext connection are refused."
 cases   = ["c-ssec-0001", "c-ssec-0002"]
@@ -112,9 +134,18 @@ cases   = ["c-ssec-0001", "c-ssec-0002"]
 [[quirk]]
 id      = "q-timestamp-0005"
 kind    = "timestamp_format"
+classification = "mutable"
+mutation_dimension = "time_format"
+mutation_sources = [
+  "PutObject.input.Expires.wire_type",
+  "CreateMultipartUpload.input.Expires.wire_type",
+  "CopyObject.input.Expires.wire_type",
+  "GetObject.output.Expires.wire_type",
+  "HeadObject.output.Expires.wire_type",
+]
 target  = "PutObject.Expires"
 summary = "The value must be round tripped as an opaque string, because stored values are frequently not parseable dates at all."
-cases   = ["c-expires-0001"]
+cases   = ["c-object-0006"]
 
   [[quirk.evidence]]
   kind    = "aws-doc"
@@ -129,6 +160,9 @@ cases   = ["c-expires-0001"]
 [[quirk]]
 id      = "q-timestamp-0011"
 kind    = "timestamp_format"
+classification = "mutable"
+mutation_dimension = "time_format"
+mutation_sources = ["PutObject.input.ObjectLockRetainUntilDate.timestamp_format"]
 target  = "PutObject.ObjectLockRetainUntilDate"
 summary = "This is the only request header carrying the extended date time format instead of the HTTP date format."
 cases   = ["c-objectlock-0001"]
@@ -141,6 +175,7 @@ cases   = ["c-objectlock-0001"]
 [[quirk]]
 id      = "q-timestamp-0012"
 kind    = "structured_header"
+classification = "contract"
 target  = "PutObject.Expiration"
 summary = "The expiration header is a structured value whose quoted parameter embeds an HTTP date, so it must not be modelled as a timestamp."
 cases   = ["c-expiration-0001"]
@@ -153,6 +188,7 @@ cases   = ["c-expiration-0001"]
 [[quirk]]
 id      = "q-response-0023"
 kind    = "response_override"
+classification = "contract"
 target  = "GetObject"
 summary = "A fixed set of response- query parameters overwrites the corresponding response headers, and the overwrite is applied once at the end of encoding rather than inside each field binding."
 cases   = ["c-object-0005", "c-object-0016"]
@@ -170,9 +206,15 @@ cases   = ["c-object-0005", "c-object-0016"]
 [[quirk]]
 id      = "q-storageclass-0024"
 kind    = "omit_when"
+classification = "mutable"
+mutation_dimension = "omit_strategy"
+mutation_sources = [
+  "GetObject.output.StorageClass.omit_when",
+  "HeadObject.output.StorageClass.omit_when",
+]
 target  = "GetObject.StorageClass"
 summary = "The storage class response header is suppressed for the default class, which is the exact opposite of the listing body element that is always written."
-cases   = ["c-object-0012"]
+cases   = ["c-object-0001", "c-object-0012"]
 
   [[quirk.evidence]]
   kind    = "aws-doc"
@@ -182,6 +224,7 @@ cases   = ["c-object-0012"]
 [[quirk]]
 id      = "q-head-0025"
 kind    = "head_mirrors"
+classification = "contract"
 target  = "HeadObject"
 summary = "The head response carries exactly the header set of the corresponding get, and no body on any status, so the two header sets must be one derivation rather than two hand-written tables."
 cases   = ["c-object-0002", "c-object-0008"]
@@ -199,6 +242,7 @@ cases   = ["c-object-0002", "c-object-0008"]
 [[quirk]]
 id      = "q-delete-0026"
 kind    = "idempotent_delete"
+classification = "contract"
 target  = "DeleteObject"
 summary = "Deleting a key that does not exist is a success and answers the same empty 204 as deleting one that does; a not-found status here breaks every retrying client."
 cases   = ["c-object-0003"]
@@ -216,6 +260,7 @@ cases   = ["c-object-0003"]
 [[quirk]]
 id      = "q-deletes-0027"
 kind    = "result_completeness"
+classification = "contract"
 target  = "DeleteObjects"
 summary = "Every key in the request appears exactly once in the result, in either the deleted list or the error list, and the two lists together have the same length as the request."
 cases   = ["c-object-0004", "c-object-0011"]

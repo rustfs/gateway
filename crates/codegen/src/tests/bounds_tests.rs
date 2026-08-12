@@ -23,9 +23,12 @@
 
 #![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 
-use rustfs_gateway_model::ir::{Binding, Evidence, Field, Quirk, Type};
+use std::collections::BTreeMap;
 
-use crate::emit::codec::bounds::{self, BOUNDED_KIND, Bound};
+use rustfs_gateway_model::ir::{Binding, Field, Type};
+use rustfs_gateway_model::{CodecRule, CodecValue, MutationDimension};
+
+use crate::emit::codec::bounds::{self, Bound};
 
 fn field(name: &str, ty: Type, quirks: &[&str]) -> Field {
     Field {
@@ -42,55 +45,47 @@ fn field(name: &str, ty: Type, quirks: &[&str]) -> Field {
     }
 }
 
-fn quirk(id: &str, kind: &str) -> Quirk {
-    Quirk {
-        id: id.to_owned(),
-        kind: kind.to_owned(),
-        target: "Fixture.Member".to_owned(),
-        summary: "a fixture quirk, long enough to satisfy the schema".to_owned(),
-        evidence: vec![Evidence {
-            kind: "observed".to_owned(),
-            reference: "fixture".to_owned(),
-            summary: "a fixture evidence entry, long enough".to_owned(),
-        }],
-        cases: vec!["c-fixture-0001".to_owned()],
+fn range(min: i32, max: i32) -> CodecRule {
+    CodecRule {
+        current: CodecValue::IntegerRange { min, max },
+        mutation_dimension: MutationDimension::IntegerRange,
     }
 }
 
 #[test]
 fn a_field_with_no_quirk_at_all_is_unbounded() {
-    let resolved = bounds::of(&field("MaxKeys", Type::Integer, &[]), &[], "Fixture").expect("resolves");
+    let resolved = bounds::of(&field("MaxKeys", Type::Integer, &[]), &BTreeMap::new(), "Fixture").expect("resolves");
     assert_eq!(resolved, None, "an ordinary integer keeps the unbounded parser");
 }
 
 #[test]
-fn a_quirk_of_another_kind_does_not_bound_anything() {
-    let quirks = vec![quirk("q-maxkeys-0068", "computed_member")];
-    let resolved = bounds::of(&field("MaxKeys", Type::Integer, &["q-maxkeys-0068"]), &quirks, "Fixture").expect("resolves");
-    assert_eq!(resolved, None, "only `{BOUNDED_KIND}` declares a range");
+fn metadata_without_a_typed_rule_does_not_bound_anything() {
+    let resolved =
+        bounds::of(&field("MaxKeys", Type::Integer, &["q-maxkeys-0068"]), &BTreeMap::new(), "Fixture").expect("resolves");
+    assert_eq!(resolved, None, "only the typed rule map declares a range");
 }
 
 #[test]
 fn the_declared_ranges_reach_the_two_members_that_carry_them() {
-    let quirks = vec![
-        quirk("q-part-number-0072", BOUNDED_KIND),
-        quirk("q-max-keys-0073", BOUNDED_KIND),
-    ];
-    let part = bounds::of(&field("PartNumber", Type::Integer, &["q-part-number-0072"]), &quirks, "UploadPart").expect("resolves");
+    let values = BTreeMap::from([
+        ("q-part-number-0072".to_owned(), range(1, 10_000)),
+        ("q-max-keys-0073".to_owned(), range(0, 1_000)),
+    ]);
+    let part = bounds::of(&field("PartNumber", Type::Integer, &["q-part-number-0072"]), &values, "UploadPart").expect("resolves");
     assert_eq!(part, Some(Bound { min: 1, max: 10_000 }));
-    let keys = bounds::of(&field("MaxKeys", Type::Integer, &["q-max-keys-0073"]), &quirks, "ListObjectsV2").expect("resolves");
+    let keys = bounds::of(&field("MaxKeys", Type::Integer, &["q-max-keys-0073"]), &values, "ListObjectsV2").expect("resolves");
     assert_eq!(keys, Some(Bound { min: 0, max: 1_000 }));
 }
 
 #[test]
 fn a_list_of_bounded_integers_is_bounded_element_by_element() {
-    let quirks = vec![quirk("q-part-number-0072", BOUNDED_KIND)];
+    let values = BTreeMap::from([("q-part-number-0072".to_owned(), range(1, 10_000))]);
     let list = Type::List {
         member: Box::new(Type::Integer),
         flattened: true,
         wrapper_name: None,
     };
-    let resolved = bounds::of(&field("PartNumbers", list, &["q-part-number-0072"]), &quirks, "Fixture").expect("resolves");
+    let resolved = bounds::of(&field("PartNumbers", list, &["q-part-number-0072"]), &values, "Fixture").expect("resolves");
     assert_eq!(
         resolved,
         Some(Bound { min: 1, max: 10_000 }),
@@ -99,32 +94,28 @@ fn a_list_of_bounded_integers_is_bounded_element_by_element() {
 }
 
 #[test]
-fn n_a_bounded_quirk_with_no_declared_range_fails_the_run() {
-    // The failure mode this prevents: an overlay claims a member is bounded, nothing performs the
-    // check, and the refusal quietly stops existing while its evidence keeps saying it does.
-    let quirks = vec![quirk("q-invented-9999", BOUNDED_KIND)];
-    let error = bounds::of(&field("MaxKeys", Type::Integer, &["q-invented-9999"]), &quirks, "Fixture")
-        .expect_err("a bounded quirk with no range is an overlay mistake, not a no-op");
-    assert!(error.contains("q-invented-9999"), "{error}");
-    assert!(error.contains("bounds.rs"), "the failure names where the row belongs: {error}");
+fn free_text_kind_is_not_a_codec_gate() {
+    let resolved = bounds::of(&field("MaxKeys", Type::Integer, &["q-invented-9999"]), &BTreeMap::new(), "Fixture")
+        .expect("metadata cannot control codec generation");
+    assert_eq!(resolved, None);
 }
 
 #[test]
 fn n_a_bounded_quirk_on_a_member_that_is_not_an_integer_fails_the_run() {
-    let quirks = vec![quirk("q-max-keys-0073", BOUNDED_KIND)];
-    let error = bounds::of(&field("Prefix", Type::String, &["q-max-keys-0073"]), &quirks, "Fixture")
+    let values = BTreeMap::from([("q-max-keys-0073".to_owned(), range(0, 1_000))]);
+    let error = bounds::of(&field("Prefix", Type::String, &["q-max-keys-0073"]), &values, "Fixture")
         .expect_err("a range on a string is a mistake, not a range");
     assert!(error.contains("Prefix"), "{error}");
 }
 
 #[test]
 fn n_two_bounded_quirks_disagreeing_on_one_member_fail_the_run() {
-    let quirks = vec![
-        quirk("q-part-number-0072", BOUNDED_KIND),
-        quirk("q-max-keys-0073", BOUNDED_KIND),
-    ];
+    let values = BTreeMap::from([
+        ("q-part-number-0072".to_owned(), range(1, 10_000)),
+        ("q-max-keys-0073".to_owned(), range(0, 1_000)),
+    ]);
     let member = field("Confused", Type::Integer, &["q-part-number-0072", "q-max-keys-0073"]);
-    let error = bounds::of(&member, &quirks, "Fixture").expect_err("one member has one range");
+    let error = bounds::of(&member, &values, "Fixture").expect_err("one member has one range");
     assert!(error.contains("Confused"), "{error}");
 }
 
@@ -132,7 +123,8 @@ fn n_two_bounded_quirks_disagreeing_on_one_member_fail_the_run() {
 fn n_the_integrity_guard_is_generated_only_where_the_ir_asks_for_it() {
     let artifacts = super::codegen_tests::artifacts();
     for ir in &artifacts.operations {
-        let generated = crate::emit::codec::decode::body(ir).expect("every included operation has a decoder");
+        let generated =
+            crate::emit::codec::decode::body(ir, &artifacts.codec_rules).expect("every included operation has a decoder");
         assert_eq!(
             generated.contains("value::require_integrity(request)?"),
             ir.checksum.http_checksum_required,
@@ -156,7 +148,7 @@ fn the_two_bounded_members_reach_the_generated_decoders() {
             .iter()
             .find(|ir| ir.operation == name)
             .unwrap_or_else(|| panic!("{name} is generated"));
-        crate::emit::codec::decode::body(ir).expect("decodes")
+        crate::emit::codec::decode::body(ir, &artifacts.codec_rules).expect("decodes")
     };
     assert!(decoder("UploadPart").contains("value::integer_in_range(raw, \"PartNumber\", 1, 10000)?"));
     assert!(decoder("ListObjectsV2").contains("value::integer_in_range(raw, \"MaxKeys\", 0, 1000)?"));

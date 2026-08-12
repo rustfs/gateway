@@ -26,6 +26,9 @@
 [[quirk]]
 id      = "q-web-0001"
 kind    = "not_configured_error"
+classification = "mutable"
+mutation_dimension = "optionality"
+mutation_sources = ["GetBucketWebsite.errors.not_configured"]
 target  = "GetBucketWebsite"
 summary = "A bucket with no website document answers 404 with the subresource-specific code NoSuchWebsiteConfiguration, which is neither the policy code nor the public-access code nor an empty 200."
 cases   = ["c-bucketconfig-0028", "c-bucketconfig-0013"]
@@ -38,6 +41,7 @@ cases   = ["c-bucketconfig-0028", "c-bucketconfig-0013"]
 [[quirk]]
 id      = "q-web-0002"
 kind    = "element_name"
+classification = "contract"
 target  = "WebsiteConfiguration.RoutingRules"
 summary = "The routing rules are wrapped: the list sits inside a RoutingRules element with one RoutingRule per entry, where every list in the notification family is flattened, and a flattened rendering here is a document SDKs read as having no rules."
 cases   = ["c-bucketconfig-0013", "c-bucketconfig-0012"]
@@ -50,6 +54,7 @@ cases   = ["c-bucketconfig-0013", "c-bucketconfig-0012"]
 [[quirk]]
 id      = "q-web-0003"
 kind    = "exclusive_members"
+classification = "contract"
 target  = "WebsiteConfiguration"
 summary = "RedirectAllRequestsTo and the IndexDocument/ErrorDocument/RoutingRules group are alternatives: a document carrying both describes two different sites and there is no reading of it that serves anything predictable."
 cases   = ["c-bucketconfig-0049", "c-bucketconfig-0014"]
@@ -62,6 +67,9 @@ cases   = ["c-bucketconfig-0049", "c-bucketconfig-0014"]
 [[quirk]]
 id      = "q-web-0004"
 kind    = "required_body"
+classification = "mutable"
+mutation_dimension = "optionality"
+mutation_sources = ["PutBucketWebsite.shapes.RoutingRule.fields.Redirect.required"]
 target  = "RoutingRule.Redirect"
 summary = "A routing rule must carry a Redirect: a rule that says what to match and not what to do is refused by the decoder as MalformedXML, because the member is required in the pinned model."
 cases   = ["c-bucketconfig-0050"]
@@ -74,6 +82,7 @@ cases   = ["c-bucketconfig-0050"]
 [[quirk]]
 id      = "q-web-0005"
 kind    = "idempotent_delete"
+classification = "contract"
 target  = "DeleteBucketWebsite"
 summary = "The delete answers 204 whether or not a website document existed, even though the read of the same unconfigured bucket answers 404, so a retry after a lost response is a success rather than a failure."
 cases   = ["c-bucketconfig-0032", "c-bucketconfig-0015"]
@@ -86,6 +95,9 @@ cases   = ["c-bucketconfig-0032", "c-bucketconfig-0015"]
 [[quirk]]
 id      = "q-web-0006"
 kind    = "checksum_required"
+classification = "mutable"
+mutation_dimension = "optionality"
+mutation_sources = ["PutBucketWebsite.checksum.http_checksum_required"]
 target  = "PutBucketWebsite"
 summary = "The website write demands an integrity claim on the body, so a request with neither Content-MD5 nor an x-amz-checksum header is refused with 400 before the document is parsed."
 cases   = ["c-bucketconfig-0036", "c-bucketconfig-0012"]

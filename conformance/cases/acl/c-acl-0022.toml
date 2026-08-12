@@ -8,7 +8,7 @@ polarity = "negative"
 operation = "PutBucketAcl"
 tags = ["acl", "security", "error-shape"]
 timeout_ms = 10000
-quirks = ["q-acl-0004", "q-acl-0010", "q-acl-0011"]
+quirks = ["q-acl-0010", "q-acl-0011"]
 
 [[case.evidence]]
 url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketAcl.html"

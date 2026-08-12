@@ -17,7 +17,7 @@ polarity = "negative"
 operation = "GetObject"
 tags = ["range", "read", "error-shape"]
 timeout_ms = 10000
-quirks = ["q-range-0052", "q-range-0054"]
+quirks = ["q-range-0054"]
 
 [[case.evidence]]
 url = "https://www.rfc-editor.org/rfc/rfc9110#section-15.5.17"
@@ -57,6 +57,9 @@ request_id_present = true
 [expect.headers_present]
 "content-range" = "bytes */10"
 "content-type" = "application/xml"
+
+[expect.body]
+contains_utf8 = ["<ActualObjectSize>10</ActualObjectSize>"]
 
 [expect.timing]
 terminate_within_ms = 5000

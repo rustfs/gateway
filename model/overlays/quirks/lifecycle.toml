@@ -28,6 +28,9 @@
 [[quirk]]
 id      = "q-lc-0001"
 kind    = "not_configured_error"
+classification = "mutable"
+mutation_dimension = "optionality"
+mutation_sources = ["GetBucketLifecycleConfiguration.errors.not_configured"]
 target  = "GetBucketLifecycleConfiguration"
 summary = "A bucket that never had a lifecycle document answers 404 with the operation-specific code NoSuchLifecycleConfiguration, not a generic not-found and not an empty 200."
 cases   = ["c-lifecycle-0013", "c-lifecycle-0011"]
@@ -40,9 +43,12 @@ cases   = ["c-lifecycle-0013", "c-lifecycle-0011"]
 [[quirk]]
 id      = "q-lc-0002"
 kind    = "xml_root"
+classification = "mutable"
+mutation_dimension = "element_rename"
+mutation_sources = ["PutBucketLifecycleConfiguration.xml.request_root"]
 target  = "PutBucketLifecycleConfiguration"
 summary = "The request body's root element is LifecycleConfiguration while the model names the payload shape BucketLifecycleConfiguration; a decoder keyed on the shape name would refuse every document a real client sends."
-cases   = ["c-lifecycle-0001", "c-lifecycle-0017"]
+cases   = ["c-lifecycle-0001", "c-lifecycle-0002", "c-lifecycle-0017"]
 
   [[quirk.evidence]]
   kind    = "aws-doc"
@@ -52,9 +58,15 @@ cases   = ["c-lifecycle-0001", "c-lifecycle-0017"]
 [[quirk]]
 id      = "q-lc-0003"
 kind    = "flattened_list"
+classification = "mutable"
+mutation_dimension = "wrap_strategy"
+mutation_sources = [
+  "GetBucketLifecycleConfiguration.output.Rules.list_flattened",
+  "PutBucketLifecycleConfiguration.shapes.BucketLifecycleConfiguration.fields.Rules.list_flattened",
+]
 target  = "BucketLifecycleConfiguration.Rules"
 summary = "The rules repeat as sibling Rule elements directly under the LifecycleConfiguration root; a Rules wrapper element would make every SDK read zero rules."
-cases   = ["c-lifecycle-0002", "c-lifecycle-0003"]
+cases   = ["c-lifecycle-0002", "c-lifecycle-0003", "c-lifecycle-0006"]
 
   [[quirk.evidence]]
   kind    = "aws-doc"
@@ -69,6 +81,7 @@ cases   = ["c-lifecycle-0002", "c-lifecycle-0003"]
 [[quirk]]
 id      = "q-lc-0004"
 kind    = "idempotent_delete"
+classification = "contract"
 target  = "DeleteBucketLifecycle"
 summary = "The delete answers 204 with no body whether or not a configuration existed, so removing the lifecycle document of an unconfigured bucket is a success rather than a 404."
 cases   = ["c-lifecycle-0014", "c-lifecycle-0011"]
@@ -81,6 +94,9 @@ cases   = ["c-lifecycle-0014", "c-lifecycle-0011"]
 [[quirk]]
 id      = "q-lc-0005"
 kind    = "checksum_required"
+classification = "mutable"
+mutation_dimension = "optionality"
+mutation_sources = ["PutBucketLifecycleConfiguration.checksum.http_checksum_required"]
 target  = "PutBucketLifecycleConfiguration"
 summary = "The write demands an integrity claim on the body, so a request with neither Content-MD5 nor an x-amz-checksum header is refused with 400 before the document is parsed."
 cases   = ["c-lifecycle-0015"]
@@ -93,6 +109,7 @@ cases   = ["c-lifecycle-0015"]
 [[quirk]]
 id      = "q-lc-0006"
 kind    = "lenient_unknown_elements"
+classification = "contract"
 target  = "PutBucketLifecycleConfiguration"
 summary = "Unknown elements inside the request document are skipped rather than refused, because a stored configuration parsed more strictly on the next release silently turns lifecycle rules off and the first symptom is objects that stop expiring."
 cases   = ["c-lifecycle-0018"]
@@ -110,6 +127,7 @@ cases   = ["c-lifecycle-0018"]
 [[quirk]]
 id      = "q-lc-0007"
 kind    = "exclusive_members"
+classification = "contract"
 target  = "LifecycleRuleFilter"
 summary = "A Filter carries at most one direct child; several conditions must nest inside one And element, and an And with fewer than two conditions is refused as MalformedXML."
 cases   = ["c-lifecycle-0019", "c-lifecycle-0020", "c-lifecycle-0007"]
@@ -127,6 +145,7 @@ cases   = ["c-lifecycle-0019", "c-lifecycle-0020", "c-lifecycle-0007"]
 [[quirk]]
 id      = "q-lc-0008"
 kind    = "legacy_form"
+classification = "contract"
 target  = "LifecycleRule.Prefix"
 summary = "A rule may still scope itself with the deprecated rule-level Prefix element instead of a Filter, because configurations stored under the pre-Filter API revision must keep parsing; a rule carrying neither is refused as MalformedXML."
 cases   = ["c-lifecycle-0008", "c-lifecycle-0021"]
@@ -139,6 +158,7 @@ cases   = ["c-lifecycle-0008", "c-lifecycle-0021"]
 [[quirk]]
 id      = "q-lc-0009"
 kind    = "value_constraint"
+classification = "contract"
 target  = "LifecycleExpiration.Date"
 summary = "A Date value in an Expiration or Transition action must name midnight UTC; any other time of day is refused with 400 InvalidArgument rather than rounded."
 cases   = ["c-lifecycle-0022", "c-lifecycle-0004"]
@@ -156,6 +176,7 @@ cases   = ["c-lifecycle-0022", "c-lifecycle-0004"]
 [[quirk]]
 id      = "q-lc-0010"
 kind    = "exclusive_members"
+classification = "contract"
 target  = "LifecycleExpiration"
 summary = "Days, Date and ExpiredObjectDeleteMarker are mutually exclusive within one Expiration action; a document naming two of them is refused as MalformedXML."
 cases   = ["c-lifecycle-0023", "c-lifecycle-0005"]
@@ -168,6 +189,7 @@ cases   = ["c-lifecycle-0023", "c-lifecycle-0005"]
 [[quirk]]
 id      = "q-lc-0011"
 kind    = "bounded_range"
+classification = "contract"
 target  = "BucketLifecycleConfiguration.Rules"
 summary = "A configuration carries at most 1,000 rules; the 1,001st is refused with 400 rather than truncated or stored."
 cases   = ["c-lifecycle-0026", "c-lifecycle-0012"]
@@ -180,6 +202,7 @@ cases   = ["c-lifecycle-0026", "c-lifecycle-0012"]
 [[quirk]]
 id      = "q-lc-0012"
 kind    = "value_constraint"
+classification = "contract"
 target  = "LifecycleRule.ID"
 summary = "A rule id is at most 255 characters and unique across the configuration; a longer or duplicated id is refused with 400 InvalidArgument."
 cases   = ["c-lifecycle-0024", "c-lifecycle-0025"]
@@ -192,6 +215,7 @@ cases   = ["c-lifecycle-0024", "c-lifecycle-0025"]
 [[quirk]]
 id      = "q-lc-0013"
 kind    = "value_constraint"
+classification = "contract"
 target  = "LifecycleExpiration.Days"
 summary = "An expiration measured in days must be a positive integer; zero and negative values are refused with 400 InvalidArgument."
 cases   = ["c-lifecycle-0027"]
@@ -204,6 +228,7 @@ cases   = ["c-lifecycle-0027"]
 [[quirk]]
 id      = "q-lc-0014"
 kind    = "lenient_enum"
+classification = "contract"
 target  = "LifecycleRule.Status"
 summary = "A Status outside the documented Enabled/Disabled pair is stored and echoed rather than refused, because a stored configuration must survive reparse by a stricter release; the fail-open cost of refusing is silently disabled lifecycle rules."
 cases   = ["c-lifecycle-0028"]

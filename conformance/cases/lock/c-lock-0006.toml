@@ -8,7 +8,7 @@ polarity = "positive"
 operation = "PutObjectLegalHold"
 tags = ["object-lock", "xml", "wire-bytes"]
 timeout_ms = 10000
-quirks = ["q-lock-0005"]
+quirks = ["q-lock-0005", "q-lock-0015"]
 
 [[case.evidence]]
 url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObjectLegalHold.html"

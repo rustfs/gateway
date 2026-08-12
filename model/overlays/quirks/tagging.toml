@@ -19,6 +19,7 @@
 [[quirk]]
 id      = "q-tag-wrapped-0088"
 kind    = "wire_form"
+classification = "contract"
 target  = "GetBucketTagging"
 summary = "The tag collection is wrapped — `<TagSet>` encloses `<Tag>` members — where the listing families flatten `Contents` and `Rule` directly into their parent, so an encoder that reuses the flattened shape here silently drops the enclosing element."
 cases   = ["c-tagging-0001", "c-tagging-0004", "c-tagging-0005", "c-tagging-0018"]
@@ -31,6 +32,7 @@ cases   = ["c-tagging-0001", "c-tagging-0004", "c-tagging-0005", "c-tagging-0018
 [[quirk]]
 id      = "q-tag-bucket-unconfigured-0089"
 kind    = "error_code"
+classification = "contract"
 target  = "GetBucketTagging"
 summary = "A bucket that never had a tag set answers 404 with the dedicated code NoSuchTagSet — not a generic not-found and not a 200 with an empty set — so a client can distinguish an unlabelled bucket from a missing one."
 cases   = ["c-tagging-0002", "c-tagging-0006", "c-tagging-0012"]
@@ -43,6 +45,7 @@ cases   = ["c-tagging-0002", "c-tagging-0006", "c-tagging-0012"]
 [[quirk]]
 id      = "q-tag-object-unconfigured-0090"
 kind    = "error_code"
+classification = "contract"
 target  = "GetObjectTagging"
 summary = "An object with no tags answers 200 with an empty TagSet — the opposite of the bucket read's 404 NoSuchTagSet — so the two reads of one subresource name follow two different unconfigured rules."
 cases   = ["c-tagging-0004", "c-tagging-0007"]
@@ -55,6 +58,7 @@ cases   = ["c-tagging-0004", "c-tagging-0007"]
 [[quirk]]
 id      = "q-tag-delete-idempotent-0091"
 kind    = "idempotent_delete"
+classification = "contract"
 target  = "DeleteBucketTagging"
 summary = "Removing a tag set answers an unconditional 204: untagging a bucket or an object that carries no tags is a success, so the delete is idempotent where the bucket-scope GET on the same state is a 404."
 cases   = ["c-tagging-0002", "c-tagging-0004", "c-tagging-0010"]
@@ -72,6 +76,7 @@ cases   = ["c-tagging-0002", "c-tagging-0004", "c-tagging-0010"]
 [[quirk]]
 id      = "q-tag-md5-required-0092"
 kind    = "checksum_headers"
+classification = "contract"
 target  = "PutBucketTagging"
 summary = "The tagging writes are in the httpChecksumRequired operation set: a PUT with neither Content-MD5 nor an x-amz-checksum-* header is refused with 400 InvalidRequest before the document is read."
 cases   = ["c-tagging-0008", "c-tagging-0009"]
@@ -84,6 +89,7 @@ cases   = ["c-tagging-0008", "c-tagging-0009"]
 [[quirk]]
 id      = "q-tag-header-form-0093"
 kind    = "wire_form"
+classification = "contract"
 target  = "PutObject"
 summary = "The x-amz-tagging header on PutObject and CopyObject carries the tag set as URL query-string pairs, UTF-8 then URL-encoded, so `a%20b=c%2Bd` names the key `a b` and the value `c+d`, and a malformed spelling is a 400 before anything is stored."
 cases   = ["c-tagging-0003", "c-tagging-0016", "c-tagging-0017"]
@@ -96,6 +102,7 @@ cases   = ["c-tagging-0003", "c-tagging-0016", "c-tagging-0017"]
 [[quirk]]
 id      = "q-tag-count-omit-0095"
 kind    = "omit_when"
+classification = "contract"
 target  = "GetObject"
 summary = "The x-amz-tagging-count response header carries the object's tag count as an integer and is omitted entirely when the count would be zero — presence is the signal readers branch on, so a literal 0 is a wrong answer."
 cases   = ["c-tagging-0019", "c-tagging-0020"]
@@ -108,6 +115,7 @@ cases   = ["c-tagging-0019", "c-tagging-0020"]
 [[quirk]]
 id      = "q-tag-limits-0094"
 kind    = "bounded_input"
+classification = "contract"
 target  = "PutBucketTagging"
 summary = "A tag set is bounded by scope — ten tags on an object, fifty on a bucket — and by shape: keys up to 128 characters, values up to 256, characters limited to letters, numbers, space and +-=._:/@, keys unique; every violation is a 400 InvalidTag."
 cases   = ["c-tagging-0011", "c-tagging-0012", "c-tagging-0013", "c-tagging-0014", "c-tagging-0015"]

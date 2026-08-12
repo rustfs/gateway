@@ -18,7 +18,7 @@ polarity = "negative"
 operation = "GetObject"
 tags = ["conditional", "preconditions", "connection", "wire-bytes"]
 timeout_ms = 10000
-quirks = ["q-cond-0047"]
+quirks = ["q-cond-0047", "q-cond-304-length-0100"]
 
 [[case.evidence]]
 url = "https://www.rfc-editor.org/rfc/rfc9110#section-15.4.5"

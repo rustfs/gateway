@@ -584,7 +584,7 @@
                                 "summary": "Recorded response for a key containing characters that are illegal in XML, showing which members are encoded."
                               }
                             ],
-                "cases": ["c-list-0017", "c-list-0035", "c-list-0036"]
+                "cases": ["c-list-0017", "c-list-0023", "c-list-0031", "c-list-0035", "c-list-0036", "c-mpu-0013"]
               },
               {
                 "id": "q-empty-0016",
@@ -598,7 +598,7 @@
                                 "summary": "Recorded response showing an empty prefix element present and no delimiter element at all."
                               }
                             ],
-                "cases": ["c-list-0023", "c-list-0025", "c-list-0037"]
+                "cases": ["c-list-0023", "c-list-0025", "c-list-0037", "c-list-0039", "c-list-0043"]
               },
               {
                 "id": "q-owner-0017",
@@ -612,7 +612,7 @@
                                 "summary": "States that owner information is returned only when the fetch owner parameter is set."
                               }
                             ],
-                "cases": ["c-list-0009", "c-list-0024"]
+                "cases": ["c-list-0009", "c-list-0010", "c-list-0024"]
               },
               {
                 "id": "q-keycount-0018",
@@ -640,7 +640,7 @@
                                 "summary": "Defines the flattened list serialization that removes the wrapper element around repeated members."
                               }
                             ],
-                "cases": ["c-list-0003", "c-list-0004", "c-list-0038"]
+                "cases": ["c-list-0003", "c-list-0004", "c-list-0008", "c-list-0038", "c-list-0039", "c-mpu-0012"]
               },
               {
                 "id": "q-etag-0020",
@@ -687,7 +687,7 @@
                                 "summary": "States that the storage class response header is returned for every object except those in the default class."
                               }
                             ],
-                "cases": ["c-list-0018", "c-list-0019"]
+                "cases": ["c-list-0018", "c-list-0019", "c-object-0012"]
               },
               {
                 "id": "q-owner-0065",

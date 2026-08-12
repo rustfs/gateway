@@ -524,7 +524,7 @@
                                 "summary": "Recorded response for a key containing characters that are illegal in XML, showing which members are encoded."
                               }
                             ],
-                "cases": ["c-list-0017", "c-list-0035", "c-list-0036"]
+                "cases": ["c-list-0017", "c-list-0023", "c-list-0031", "c-list-0035", "c-list-0036", "c-mpu-0013"]
               },
               {
                 "id": "q-flat-0019",
@@ -538,7 +538,7 @@
                                 "summary": "Defines the flattened list serialization that removes the wrapper element around repeated members."
                               }
                             ],
-                "cases": ["c-list-0003", "c-list-0004", "c-list-0038"]
+                "cases": ["c-list-0003", "c-list-0004", "c-list-0008", "c-list-0038", "c-list-0039", "c-mpu-0012"]
               },
               {
                 "id": "q-mpu-upload-0032",
@@ -552,7 +552,7 @@
                                 "summary": "The documented response syntax repeats an upload element directly under the result root under a name that differs from the member name."
                               }
                             ],
-                "cases": ["c-mpu-0011", "c-mpu-0012"]
+                "cases": ["c-mpu-0011", "c-mpu-0012", "c-mpu-0013"]
               },
               {
                 "id": "q-mpu-upload-id-0037",

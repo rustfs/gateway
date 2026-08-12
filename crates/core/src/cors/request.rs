@@ -44,6 +44,8 @@
 use http::{HeaderName, Method};
 use rustfs_gateway_http::HeaderView;
 
+use crate::contracts;
+
 /// The header a browser puts the requesting origin in.
 pub const ORIGIN: HeaderName = HeaderName::from_static("origin");
 /// The preflight's statement of which method the real request will use.
@@ -165,11 +167,25 @@ pub fn classify<'a>(method: &Method, headers: &HeaderView<'a>) -> PreflightClass
     let origin_lines = headers.count(&ORIGIN);
     let method_lines = headers.count(&ACCESS_CONTROL_REQUEST_METHOD);
     if origin_lines == 0 && method_lines == 0 {
-        return PreflightClass::NotPreflight;
+        return if contracts::cors_bare_options_is_routed() {
+            PreflightClass::NotPreflight
+        } else {
+            PreflightClass::Malformed
+        };
     }
     // One of the two is present, so this is a preflight attempt and the answer is this runtime's
     // from here on. Everything below refuses rather than falling back to routing.
-    if origin_lines != 1 || method_lines != 1 || headers.count(&ACCESS_CONTROL_REQUEST_HEADERS) > 1 {
+    if origin_lines == 0 || method_lines == 0 {
+        return if contracts::cors_preflight_requires_both_headers() {
+            PreflightClass::Malformed
+        } else {
+            PreflightClass::NotPreflight
+        };
+    }
+    if contracts::cors_origin_requires_exactly_one() && origin_lines != 1
+        || contracts::cors_request_method_requires_exactly_one() && method_lines != 1
+        || contracts::cors_request_headers_allow_at_most_one() && headers.count(&ACCESS_CONTROL_REQUEST_HEADERS) > 1
+    {
         return PreflightClass::Malformed;
     }
     let (Some(origin), Some(requested_method)) = (headers.get_str(&ORIGIN), headers.get_str(&ACCESS_CONTROL_REQUEST_METHOD))
@@ -202,11 +218,9 @@ pub fn classify<'a>(method: &Method, headers: &HeaderView<'a>) -> PreflightClass
 /// origin a sandboxed document sends, and a rule may legitimately name it.
 #[must_use]
 pub fn is_plausible_origin(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= MAX_ORIGIN_BYTES
-        // Visible ASCII only: excludes CR, LF, NUL, tab and every space, so nothing here can
-        // split a header or hide in one.
-        && value.bytes().all(|byte| byte.is_ascii_graphic())
+    (!contracts::cors_origin_rejects_empty() || !value.is_empty())
+        && contracts::cors_origin_max_bytes().is_none_or(|max| value.len() <= max)
+        && (!contracts::cors_origin_requires_visible_ascii() || value.bytes().all(|byte| byte.is_ascii_graphic()))
 }
 
 /// Whether a value is an RFC 9110 method token.

@@ -118,8 +118,9 @@ use std::task::Poll;
 use bytes::Bytes;
 use http::{Method, Request, Response, StatusCode};
 use rustfs_gateway_core::cors::{
-    CorsHeaders, CorsPolicy, PreflightClass, PreflightOutcome, PreflightRequest, VARY, VARY_ORIGIN, answer_actual,
-    answer_preflight, classify,
+    CorsHeaders, CorsPolicy, PreflightClass, PreflightOutcome, PreflightRefusalCause, PreflightRequest, VARY, VARY_ORIGIN,
+    answer_actual, answer_preflight, classify, headers_apply_to_post_auth_errors, invalid_target_is_uniform_refusal,
+    preflight_bypasses_pipeline, preflight_refusal_for, preflight_uses_resolved_target,
 };
 use rustfs_gateway_core::{
     BoxFuture, Decision, EncodedResponse, ErrorContext, HandlerError, MetaView, OwnedResource, RegionLabel, ResourceShape,
@@ -381,7 +382,11 @@ impl S3Service {
         // an error without these headers reaches the page as an opaque network failure and the
         // status the operator is looking at is invisible to the client. Nothing is applied when
         // `run` never got as far as authorising: see `Outcome::cors`.
-        if let Some(cors) = outcome.cors.take() {
+        if let Some(cors) = outcome
+            .cors
+            .take()
+            .filter(|_| headers_apply_to_post_auth_errors() || response.status().is_success())
+        {
             let headers = response.headers_mut();
             for (name, value) in cors.iter() {
                 headers.insert(name, value.clone());
@@ -506,11 +511,14 @@ impl S3Service {
         // credentials on a preflight, so requiring a signature here would switch CORS off.
         match classify(wire.method(), &wire.headers()) {
             PreflightClass::NotPreflight => {}
-            PreflightClass::Malformed => return outcome.refuse_preflight(),
+            PreflightClass::Malformed => return outcome.refuse_preflight(PreflightRefusalCause::Malformed),
             PreflightClass::Preflight(preflight) => {
-                return self
-                    .serve_preflight(wire.raw_path().as_str(), resolved, &preflight, outcome, now, client_addr)
-                    .await;
+                let valid_target = preflight_bucket(wire.raw_path().as_str(), &resolved).is_some();
+                if preflight_bypasses_pipeline() && (invalid_target_is_uniform_refusal() || valid_target) {
+                    return self
+                        .serve_preflight(wire.raw_path().as_str(), resolved, &preflight, outcome, now, client_addr)
+                        .await;
+                }
             }
         }
 
@@ -1095,11 +1103,14 @@ impl S3Service {
             Some(name) => self.inner.cors.get(name, now).await,
             // An illegal bucket name, or a path that names no bucket at all. Answered exactly as
             // a bucket that does not exist is, and without a read.
-            None => None,
+            None => return outcome.refuse_preflight(PreflightRefusalCause::InvalidTarget),
         };
-        match answer_preflight(&self.inner.cors_policy, document.as_deref(), preflight) {
+        let Some(document) = document else {
+            return outcome.refuse_preflight(PreflightRefusalCause::MissingDocument);
+        };
+        match answer_preflight(&self.inner.cors_policy, Some(document.as_ref()), preflight) {
             PreflightOutcome::Allowed(headers) => preflight_response(&headers),
-            PreflightOutcome::Refused => outcome.refuse_preflight(),
+            PreflightOutcome::Refused => outcome.refuse_preflight(PreflightRefusalCause::RuleMismatch),
         }
     }
 
@@ -1165,11 +1176,13 @@ where
 ///
 /// [`Addressing::Path`]: crate::Addressing::Path
 fn preflight_bucket(path: &str, resolved: &ResolvedHost) -> Option<rustfs_gateway_types::BucketName> {
-    if let Some(bucket) = resolved.bucket() {
-        return Some(bucket.clone());
-    }
-    if !matches!(resolved.target, TargetKind::Bucket | TargetKind::Object) {
-        return None;
+    if preflight_uses_resolved_target() {
+        if let Some(bucket) = resolved.bucket() {
+            return Some(bucket.clone());
+        }
+        if !matches!(resolved.target, TargetKind::Bucket | TargetKind::Object) {
+            return None;
+        }
     }
     let trimmed = path.strip_prefix('/').unwrap_or(path);
     let first = trimmed.split('/').next().unwrap_or(trimmed);
@@ -1235,14 +1248,19 @@ impl<'a> Outcome<'a> {
 
     /// The one refusal a preflight can receive.
     ///
-    /// Built from `rustfs_gateway_core::cors::preflight_refusal`, which takes no arguments — so
-    /// the "no rule matched", "no document", "no bucket" and "illegal name" paths cannot render
-    /// different bytes, whatever a future edit does to any one of them. `Vary: Origin` rides
-    /// along because the refusal is still an answer that depends on the `Origin` header: a shared
-    /// cache that stored it under the URL alone would serve it to an origin that would have been
-    /// allowed.
-    fn refuse_preflight(&mut self) -> Response<Body> {
-        let error = S3Error::from(resolve(ErrorContext::cors_forbidden(), self.response_kind));
+    /// `preflight_refusal_for` erases the typed cause before rendering. The closed contextual
+    /// resolver remains the only authority for `AccessForbidden`; the non-contextual branch makes
+    /// the refusal-profile mutation observable without opening another public construction seam.
+    /// `Vary: Origin` rides along because the refusal is still
+    /// an answer that depends on the `Origin` header: a shared cache that stored it under the URL
+    /// alone would serve it to an origin that would have been allowed.
+    fn refuse_preflight(&mut self, cause: PreflightRefusalCause) -> Response<Body> {
+        let refusal = preflight_refusal_for(cause);
+        let error = if refusal.code() == &ErrorCode::ACCESS_FORBIDDEN {
+            S3Error::from(resolve(ErrorContext::cors_forbidden(), self.response_kind))
+        } else {
+            from_pre_auth(refusal, self.response_kind)
+        };
         self.error = error.code().cloned();
         let mut response = render(&error, self.trace);
         response.headers_mut().insert(VARY, VARY_ORIGIN);

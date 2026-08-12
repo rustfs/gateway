@@ -31,6 +31,12 @@ use rustfs_gateway_model::ir::{Evidence, OperationIr, Quirk};
 
 use crate::codegen::repo_root;
 
+mod distance;
+#[cfg(test)]
+mod tests;
+
+use distance::distance;
+
 /// The namespace in which a reverse-trace target was found.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum WhyTarget {
@@ -142,11 +148,15 @@ pub(crate) fn run(args: &[String]) -> ExitCode {
     } else {
         print!("{}", render_text(&answer));
     }
-    if answer.complete {
+    if answer_succeeds(&answer) {
         ExitCode::SUCCESS
     } else {
         ExitCode::FAILURE
     }
+}
+
+fn answer_succeeds(answer: &Answer) -> bool {
+    answer.complete
 }
 
 impl Index {
@@ -780,21 +790,4 @@ fn adr_line(id: &str, title: &str) -> AdrLine {
         id: id.to_owned(),
         title: title.to_owned(),
     }
-}
-
-fn distance(a: &str, b: &str) -> usize {
-    let a: Vec<char> = a.chars().collect();
-    let b: Vec<char> = b.chars().collect();
-    let mut previous: Vec<usize> = (0..=b.len()).collect();
-    for (row, left) in a.iter().enumerate() {
-        let mut current = vec![row + 1];
-        for (column, right) in b.iter().enumerate() {
-            let insert = current[column] + 1;
-            let delete = previous[column + 1] + 1;
-            let replace = previous[column] + usize::from(left != right);
-            current.push(insert.min(delete).min(replace));
-        }
-        previous = current;
-    }
-    previous.last().copied().unwrap_or(a.len())
 }

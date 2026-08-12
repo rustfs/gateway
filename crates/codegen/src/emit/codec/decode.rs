@@ -58,9 +58,10 @@
 
 use std::fmt::Write as _;
 
-use rustfs_gateway_model::ir::{Binding, Field, OperationIr, Quirk, Shape, Type};
+use rustfs_gateway_model::UnknownElementPolicyValue;
+use rustfs_gateway_model::ir::{Binding, Field, OperationIr, Shape, Type};
 
-use super::{attribute_name, bounds, carried_as_attribute, expr, forms, media, tolerance};
+use super::{CodecRules, attribute_name, bounds, carried_as_attribute, expr, forms, media, tolerance};
 use crate::emit::dto::naming;
 
 /// The default code for a required member the request did not carry.
@@ -150,7 +151,7 @@ fn push_stmt(indent: usize, target: &str, expression: &str) -> String {
 }
 
 /// Renders the body of one operation's `decode`.
-pub fn body(ir: &OperationIr) -> Result<String, String> {
+pub fn body(ir: &OperationIr, rules: &CodecRules) -> Result<String, String> {
     let mut out = String::new();
     // Functional-update syntax rather than `Input::default()`: the fields are filled in one at a
     // time from bindings that may or may not fire, and `clippy::field_reassign_with_default`
@@ -172,7 +173,7 @@ pub fn body(ir: &OperationIr) -> Result<String, String> {
     // that refuses on its head must not have buffered a body first.
     let first_body_member = ir.input.iter().position(|field| field.binding == Binding::BodyXml);
     for (index, field) in ir.input.iter().enumerate() {
-        out.push_str(&one_field(ir, field, first_body_member == Some(index))?);
+        out.push_str(&one_field(ir, field, first_body_member == Some(index), rules)?);
     }
     if !ir.input.iter().any(uses_body) {
         out.push_str("        let _ = body;\n");
@@ -189,7 +190,7 @@ fn uses_body(field: &Field) -> bool {
 ///
 /// `open_document` is true for the first operation-level [`Binding::BodyXml`] member, which is
 /// the one that parses the request body into the `root` node its siblings then read from.
-fn one_field(ir: &OperationIr, field: &Field, open_document: bool) -> Result<String, String> {
+fn one_field(ir: &OperationIr, field: &Field, open_document: bool, rules: &CodecRules) -> Result<String, String> {
     let op = &ir.operation;
     let member = &field.name;
     let target = format!("input.{}", naming::field_name(member));
@@ -210,7 +211,7 @@ fn one_field(ir: &OperationIr, field: &Field, open_document: bool) -> Result<Str
             // optimisation: the value it yields already distinguishes "arrived and unreadable"
             // from "did not arrive", and wrapping it in a second `Some` would put the two back
             // together — the `if-range` defect, one layer up.
-            let tolerated = tolerance::of(field, &ir.quirks, op)?;
+            let tolerated = tolerance::of(field, rules, op)?;
             let assignment = match tolerated {
                 Some(reading) => reading
                     .call(&field.ty)
@@ -222,8 +223,9 @@ fn one_field(ir: &OperationIr, field: &Field, open_document: bool) -> Result<Str
                         member,
                         op,
                         false,
-                        bounds::of(field, &ir.quirks, op)?,
-                        forms::of(field, &ir.quirks, op)?,
+                        bounds::of(field, rules, op)?,
+                        forms::of(field, rules, op)?,
+                        super::boolean::of(ir, field, rules)?,
                     )?,
                 ),
             };
@@ -246,8 +248,9 @@ fn one_field(ir: &OperationIr, field: &Field, open_document: bool) -> Result<Str
                 member,
                 op,
                 false,
-                bounds::of(field, &ir.quirks, op)?,
-                forms::of(field, &ir.quirks, op)?,
+                bounds::of(field, rules, op)?,
+                forms::of(field, rules, op)?,
+                super::boolean::of(ir, field, rules)?,
             )?;
             let _ = writeln!(out, "        // {member} — query `{wire}`, percent-decoded once.");
             let _ = writeln!(out, "        if let Some(raw) = request.query(\"{wire}\") {{");
@@ -302,6 +305,7 @@ fn one_field(ir: &OperationIr, field: &Field, open_document: bool) -> Result<Str
                     out.push_str("        } else {\n");
                     ("            ", "        }\n")
                 };
+                out.push_str(&root_namespace_guard(&ir.operation, indent));
                 let _ = writeln!(out, "{indent}let root = rustfs_gateway_xml::parse(raw_body.as_ref())");
                 let _ = writeln!(
                     out,
@@ -339,7 +343,7 @@ fn one_field(ir: &OperationIr, field: &Field, open_document: bool) -> Result<Str
             // owes. A bucket policy is the only member here today, and `MalformedPolicy` is not
             // a code any decoder can name.
             Type::String | Type::OpaqueString => {
-                let media = media::required(field, &ir.quirks, op)?;
+                let media = media::required(field, rules, op)?;
                 let _ = writeln!(out, "        // {member} — the buffered request body, `{media}`.");
                 out.push_str("        let raw_body = body.into_buffered()?;\n");
                 let read = format!("value::text_payload(raw_body.as_ref(), \"{member}\")?");
@@ -361,7 +365,7 @@ fn one_field(ir: &OperationIr, field: &Field, open_document: bool) -> Result<Str
             if open_document {
                 out.push_str(&open_request_document(ir)?);
             }
-            out.push_str(&xml_member(op, field, &target, &ir.quirks, "root", 8)?);
+            out.push_str(&xml_member(ir, field, &target, rules, "root", 8)?);
         }
         Binding::StatusCode => {
             return Err(expr::unsupported(op, member, "a status code is a response member"));
@@ -453,6 +457,7 @@ fn open_request_document(ir: &OperationIr) -> Result<String, String> {
     let mut out = String::new();
     let _ = writeln!(out, "        // The XML request body, rooted at `{root}`.");
     out.push_str("        let raw_body = body.into_buffered()?;\n");
+    out.push_str(&root_namespace_guard(&ir.operation, "        "));
     out.push_str("        let root = rustfs_gateway_xml::parse(raw_body.as_ref())\n");
     out.push_str(
         "            .map_err(|_| CodecError::malformed_xml(\"the request body is not the XML this operation accepts\"))?;\n",
@@ -463,6 +468,30 @@ fn open_request_document(ir: &OperationIr) -> Result<String, String> {
     Ok(out)
 }
 
+fn root_namespace_guard(operation: &str, indent: &str) -> String {
+    let policy = match operation {
+        "RestoreObject" => {
+            "crate::contracts::RESTORE_ROOT_NAMESPACE_POLICY, crate::contracts::RestoreRootNamespacePolicy::QualifiedName"
+        }
+        "SelectObjectContent" => {
+            "crate::contracts::SELECT_ROOT_NAMESPACE_POLICY, crate::contracts::SelectRootNamespacePolicy::QualifiedName"
+        }
+        _ => return String::new(),
+    };
+    let policy = policy.replacen(", ", &format!(",\n{indent}    "), 1);
+    format!(
+        "{indent}if matches!(\n\
+         {indent}    {policy}\n\
+         {indent}) && raw_body\n\
+         {indent}    .as_ref()\n\
+         {indent}    .windows(6)\n\
+         {indent}    .any(|part| part == b\"xmlns=\" || part == b\"xmlns:\")\n\
+         {indent}{{\n\
+         {indent}    return Err(CodecError::malformed_xml(\"the request body has the wrong root namespace\"));\n\
+         {indent}}}\n"
+    )
+}
+
 /// Renders the lines that read one XML member out of `node`, wherever that member lives.
 ///
 /// One copy, two callers: [`shape_reader`] reads a nested shape's members out of `node` at indent
@@ -470,13 +499,14 @@ fn open_request_document(ir: &OperationIr) -> Result<String, String> {
 /// were two copies for exactly as long as only one of them existed; a second copy is how the
 /// required-member refusal and the flattened-list rule would come to disagree.
 fn xml_member(
-    operation: &str,
+    ir: &OperationIr,
     field: &Field,
     target: &str,
-    quirks: &[Quirk],
+    rules: &CodecRules,
     node: &str,
     indent: usize,
 ) -> Result<String, String> {
+    let operation = &ir.operation;
     let member = &field.name;
     let wire = field.wire_name.clone().unwrap_or_else(|| member.clone());
     let pad = " ".repeat(indent);
@@ -493,8 +523,9 @@ fn xml_member(
                 member,
                 operation,
                 true,
-                bounds::of(field, quirks, operation)?,
-                forms::of(field, quirks, operation)?,
+                bounds::of(field, rules, operation)?,
+                forms::of(field, rules, operation)?,
+                super::boolean::of(ir, field, rules)?,
             )?;
             let links = list_source(*flattened, wrapper_name.as_deref(), &wire);
             out.push_str(&for_header(indent, node, &links));
@@ -545,8 +576,9 @@ fn xml_member(
                 member,
                 operation,
                 true,
-                bounds::of(field, quirks, operation)?,
-                forms::of(field, quirks, operation)?,
+                bounds::of(field, rules, operation)?,
+                forms::of(field, rules, operation)?,
+                super::boolean::of(ir, field, rules)?,
             )?;
             let _ = writeln!(out, "{pad}if let Some(raw) = {node}.child_text(\"{wire}\") {{");
             out.push_str(&assign(inner, target, &wrap(field, &conversion)));
@@ -561,7 +593,13 @@ fn xml_member(
 /// Takes the operation's resolved quirks because a bounded integer is bounded wherever it is read:
 /// `PartNumber` in a query and `PartNumber` in a completion body are the same wire contract, and a
 /// reader that consulted only the operation's own fields would enforce it in one of the two.
-pub fn shape_reader(operation: &str, name: &str, shape: &Shape, quirks: &[Quirk]) -> Result<String, String> {
+pub fn shape_reader(
+    ir: &OperationIr,
+    name: &str,
+    shape: &Shape,
+    rules: &CodecRules,
+    unknown_elements: UnknownElementPolicyValue,
+) -> Result<String, String> {
     let type_name = naming::type_name(name);
     let mut out = String::new();
     let _ = writeln!(
@@ -597,6 +635,23 @@ pub fn shape_reader(operation: &str, name: &str, shape: &Shape, quirks: &[Quirk]
     }
     let _ = writeln!(out, "    {construct}");
 
+    if unknown_elements == UnknownElementPolicyValue::Reject && !empty {
+        let names = shape
+            .fields
+            .iter()
+            .filter(|field| !carried_as_attribute(shape, &field.name))
+            .map(|field| field.wire_name.as_deref().unwrap_or(&field.name))
+            .map(|name| format!("\"{name}\""))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let _ = writeln!(
+            out,
+            "    if node.children.iter().any(|child| ![{names}].contains(&child.name.as_str())) {{"
+        );
+        out.push_str("        return Err(CodecError::malformed_xml(\"the body contains an unknown element\"));\n");
+        out.push_str("    }\n");
+    }
+
     for field in &shape.fields {
         // A member the IR carries as an XML attribute is not a child element, and the reader this
         // project ships hands attributes to nobody. Reading it as an element would accept a
@@ -613,7 +668,7 @@ pub fn shape_reader(operation: &str, name: &str, shape: &Shape, quirks: &[Quirk]
             continue;
         }
         let target = format!("shape.{}", naming::field_name(&field.name));
-        out.push_str(&xml_member(operation, field, &target, quirks, "node", 4)?);
+        out.push_str(&xml_member(ir, field, &target, rules, "node", 4)?);
     }
     out.push_str("    value::exit(shape.check_required())?;\n    Ok(shape)\n}\n");
     Ok(out)

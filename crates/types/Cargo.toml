@@ -39,6 +39,7 @@ hex = { workspace = true }
 http = { workspace = true }
 percent-encoding = { workspace = true }
 sha2 = { workspace = true }
+unicode-normalization = { workspace = true }
 
 # Pinned here rather than inherited, and each line states why. Hoisting them into
 # `[workspace.dependencies]` is a root-manifest change and belongs to whoever owns that file.

@@ -1,0 +1,60 @@
+# c-range-0022 — RangeRequested preserves a legal non-canonical byte-range spelling.
+
+[case]
+id = "c-range-0022"
+schema_version = 1
+title = "The 416 document preserves leading zeroes in the requested range"
+rationale = """
+The padded and unpadded range positions select the same offsets, but only the padded spelling is \
+what the client sent. Reconstructing RangeRequested from parsed numbers silently reports the \
+server's normalized interpretation instead of the request bytes that failed."""
+polarity = "negative"
+operation = "GetObject"
+tags = ["range", "error-shape", "wire-bytes", "xml"]
+timeout_ms = 10000
+quirks = ["q-range-requested-0104"]
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9110#section-14.1.2"
+summary = "The byte-range grammar permits decimal positions without imposing a canonical width."
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-range"
+
+[[setup.objects]]
+bucket = "conf-range"
+key = "ten"
+content_type = "text/plain"
+body = { utf8 = "0123456789" }
+
+[request]
+method = "GET"
+target = "/conf-range/ten"
+headers = { "range" = "bytes=020-030" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 416
+connection_after = "open"
+
+[expect.headers_present]
+"content-range" = "bytes */10"
+"content-type" = "application/xml"
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>InvalidRange</Code><Message>The requested range is not satisfiable</Message><RangeRequested>bytes=020-030</RangeRequested><ActualObjectSize>10</ActualObjectSize><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''
+
+[expect.body.xml]
+root = "Error"
+declaration = true
+element_order = ["Code", "Message", "RangeRequested", "ActualObjectSize", "RequestId", "HostId"]
+
+[expect.timing]
+terminate_within_ms = 5000

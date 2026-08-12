@@ -308,7 +308,7 @@ type = "StringEnum"
 required = false
 hot = false
 values = ["CanonicalUser", "AmazonCustomerByEmail", "Group"]
-quirks = ["q-acl-0003", "q-acl-0004"]
+quirks = ["q-acl-0003", "q-acl-0004", "q-acl-0014"]
 
 [shape.Owner]
 kind = "Structure"

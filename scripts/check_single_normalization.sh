@@ -19,9 +19,11 @@ set -euo pipefail
 #        `From<String>`, and nothing named `new_unchecked`. Any of those hands a
 #        caller a `&str` it can re-parse, join onto a path, or rebuild — which is
 #        how the second normalisation is born.
-#     4. No lossy UTF-8 conversion inside crates/types/src/scalar/. A lossy
-#        decode turns two different client inputs into one name, so the value
-#        authorisation sees is not the value the client sent.
+#     4. No effective lossy UTF-8 conversion inside crates/types/src/scalar/.
+#        The one typed mutation arm is allowed only at its exact audited line,
+#        and only while the unique overlay source selects `strict`. A lossy
+#        decode otherwise turns two different client inputs into one name, so
+#        the value authorisation sees is not the value the client sent.
 #
 #   Comment and doc-comment lines are skipped throughout: this repository
 #   explains these rules in prose directly above the code they govern, and a
@@ -54,6 +56,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="${GATEWAY_CHECK_ROOT:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
 ALLOWANCE_FILE="${ROOT_DIR}/scripts/allowances/percent-decode-allowances.txt"
+NAMING_OVERLAY="${ROOT_DIR}/model/overlays/quirks/naming.toml"
 
 cd "$ROOT_DIR"
 
@@ -182,12 +185,66 @@ report_bypass 'impl[[:space:]]+From<(String|&str)>[[:space:]]+for[[:space:]]+Obj
     'implements From<String> for ObjectKey; an infallible constructor skips the floor entirely'
 report_bypass 'new_unchecked' 'names new_unchecked; there is no unchecked way to build a name'
 
-# Rule 4 — the scalar vocabulary never repairs bad bytes.
+# ---------------------------------------------------------------------------
+# Rule 4 — the scalar vocabulary never effectively repairs bad bytes.
+#
+# The typed quirk table needs a real strict -> lossy mutation arm so its case can
+# prove the behavior. That arm is not a general allowance: it must be the one
+# exact arm in the one normalizer, selected by the one policy match, while the
+# unique overlay source still says `strict`. `codegen --check` separately makes
+# the generated constant agree with that source. Changing the current to lossy,
+# moving the call, or adding any second lossy conversion all fail here.
+# ---------------------------------------------------------------------------
+
+strict_utf8_mutant_is_contract_gated() {
+    local file="$1" lossy_lines policy_values
+    [[ "$file" == "$NORMALISER" ]] || return 1
+    [[ -f "$NAMING_OVERLAY" ]] || return 1
+
+    lossy_lines="$(awk -F '\t' -v path="$file" '
+        $1 == path && $0 ~ /(from_utf8_lossy|decode_utf8_lossy)/ {
+            sub(/^[^\t]*\t/, "")
+            sub(/^[[:space:]]*/, "")
+            print
+        }
+    ' "$code_snapshot")"
+    [[ "$lossy_lines" == 'DecodedUtf8Policy::Lossy => Ok(percent_decode_str(value).decode_utf8_lossy().into_owned()),' ]] || return 1
+    [[ "$(awk -F '\t' -v path="$file" '$1 == path && index($0, "match DECODED_UTF8_POLICY {") { count++ } END { print count + 0 }' "$code_snapshot")" -eq 1 ]] || return 1
+
+    policy_values="$(awk '
+        function emit() {
+            if (dimension == "decoded_utf8") print dimension "|" value
+        }
+        /^\[\[quirk\]\]/ {
+            emit()
+            dimension = ""
+            value = ""
+            next
+        }
+        /^[[:space:]]*mutation_dimension[[:space:]]*=/ {
+            dimension = $0
+            sub(/^[^=]*=[[:space:]]*"/, "", dimension)
+            sub(/"[[:space:]]*$/, "", dimension)
+        }
+        /^[[:space:]]*contract_value[[:space:]]*=/ {
+            value = $0
+            sub(/^[^=]*=[[:space:]]*"/, "", value)
+            sub(/"[[:space:]]*$/, "", value)
+        }
+        END { emit() }
+    ' "$NAMING_OVERLAY")"
+    [[ "$policy_values" == 'decoded_utf8|strict' ]]
+}
+
 lossy_hits="$(matching_files 'from_utf8_lossy|decode_utf8_lossy')"
 while IFS= read -r file; do
     [[ -n "$file" ]] || continue
     case "$file" in
-    "$SCALAR_DIR"/*) fail "single-normalisation: ${file} decodes lossily; U+FFFD collapses two client inputs onto one name" ;;
+    "$SCALAR_DIR"/*)
+        if ! strict_utf8_mutant_is_contract_gated "$file"; then
+            fail "single-normalisation: ${file} decodes lossily; U+FFFD collapses two client inputs onto one name"
+        fi
+        ;;
     esac
 done <<<"$lossy_hits"
 

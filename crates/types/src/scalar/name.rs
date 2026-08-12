@@ -50,7 +50,7 @@
 
 use super::naming::{
     MAX_KEY_BYTES, NamePolicy, NameRejection, aws_bucket_rules, check_bucket, check_decoded_key, floor_check_bucket,
-    normalize_key,
+    normalize_key, stored_key_rejects_control,
 };
 use super::parse_error::{ParseError, rules};
 use crate::placeholder::WirePlaceholder;
@@ -235,6 +235,9 @@ pub fn validate_object_key(key: &str) -> Result<(), ParseError> {
     }
     if key.contains('\0') {
         return Err(err("an object key must not contain a NUL byte"));
+    }
+    if stored_key_rejects_control(key) {
+        return Err(err("an object key must not contain a control character"));
     }
     Ok(())
 }

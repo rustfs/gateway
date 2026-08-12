@@ -1,0 +1,40 @@
+[case]
+id = "c-select-restore-0044"
+schema_version = 1
+title = "ScanRange bounds cannot be negative"
+rationale = """
+Byte positions have no negative representation. Letting one reach selection arithmetic risks turning it into a very large index or silently selecting the whole object."""
+polarity = "negative"
+operation = "SelectObjectContent"
+tags = ["select", "range", "validation"]
+timeout_ms = 10000
+quirks = ["q-select-scan-sign-0144"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ScanRange.html"
+summary = "ScanRange Start and End are byte positions."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "conf-select"
+
+[[setup.objects]]
+bucket = "conf-select"
+key = "rows.csv"
+body = { utf8 = "0123456789" }
+
+[request]
+method = "POST"
+target = "/conf-select/rows.csv?select&select-type=2"
+headers = { "content-type" = "application/xml" }
+body = { utf8 = '<SelectObjectContentRequest><Expression>SELECT 1</Expression><ExpressionType>SQL</ExpressionType><InputSerialization><CSV/></InputSerialization><OutputSerialization><CSV/></OutputSerialization><ScanRange><Start>-1</Start></ScanRange></SelectObjectContentRequest>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+code = "InvalidArgument"
+request_id_present = true

@@ -16,7 +16,7 @@ polarity = "negative"
 operation = "GetObject"
 tags = ["range", "read", "error-shape"]
 timeout_ms = 10000
-quirks = ["q-range-0052", "q-range-0054"]
+quirks = ["q-range-start-past-end-0101"]
 
 [[case.evidence]]
 url = "https://www.rfc-editor.org/rfc/rfc9110#section-14.1.1"

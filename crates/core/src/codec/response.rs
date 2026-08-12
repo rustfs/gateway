@@ -145,18 +145,16 @@ impl EncodedResponse {
 
     /// Applies the RFC 9110 body invariants, and is the last thing every encoder does.
     ///
-    /// The decision is [`body_allowance`]'s; this method is the half that knows how to drop a body
-    /// and a header off *this* type. The facade applies the same decision to a refusal, which never
-    /// reaches an encoder and therefore never reaches here.
+    /// The decisions are [`response_body_allowed`] and [`response_framing_allowed`]; this method is
+    /// the half that knows how to drop a body and a header off *this* type. The facade applies the
+    /// same decisions to a refusal, which never reaches an encoder and therefore never reaches here.
     pub fn enforce_http_invariants(&mut self, method: &Method) {
-        match body_allowance(method, self.status) {
-            BodyAllowance::Content => {}
-            BodyAllowance::HeadOfContent => self.body = ResponseBody::Empty,
-            BodyAllowance::Bodyless => {
-                self.body = ResponseBody::Empty;
-                self.headers.remove(http::header::CONTENT_LENGTH);
-                self.headers.remove(http::header::TRANSFER_ENCODING);
-            }
+        if !response_body_allowed(method, self.status) {
+            self.body = ResponseBody::Empty;
+        }
+        if !response_framing_allowed(method, self.status) {
+            self.headers.remove(http::header::CONTENT_LENGTH);
+            self.headers.remove(http::header::TRANSFER_ENCODING);
         }
     }
 }
@@ -187,14 +185,40 @@ pub enum BodyAllowance {
 /// the two overlap on a `304` answered to a `HEAD` and the stricter answer is the right one there.
 #[must_use]
 pub fn body_allowance(method: &Method, status: StatusCode) -> BodyAllowance {
+    match (response_body_allowed(method, status), response_framing_allowed(method, status)) {
+        (true, _) => BodyAllowance::Content,
+        (false, true) => BodyAllowance::HeadOfContent,
+        (false, false) => BodyAllowance::Bodyless,
+    }
+}
+
+/// Whether a response may carry content bytes after the final invariant pass.
+#[must_use]
+pub fn response_body_allowed(method: &Method, status: StatusCode) -> bool {
     let code = status.as_u16();
-    if status.is_informational() || code == 204 || code == 205 || code == 304 {
-        return BodyAllowance::Bodyless;
+    if code == 304 {
+        return matches!(
+            crate::contracts::NOT_MODIFIED_BODY_POLICY,
+            crate::contracts::NotModifiedBodyPolicy::Preserve
+        );
     }
-    if method == Method::HEAD {
-        return BodyAllowance::HeadOfContent;
+    if status.is_informational() || code == 204 || code == 205 {
+        return false;
     }
-    BodyAllowance::Content
+    method != Method::HEAD || !crate::contracts::suppress_head_body()
+}
+
+/// Whether a response may carry `Content-Length` or `Transfer-Encoding` after the final invariant pass.
+#[must_use]
+pub fn response_framing_allowed(_method: &Method, status: StatusCode) -> bool {
+    let code = status.as_u16();
+    if code == 304 {
+        return matches!(
+            crate::contracts::NOT_MODIFIED_FRAMING_POLICY,
+            crate::contracts::NotModifiedFramingPolicy::Preserve
+        );
+    }
+    !(status.is_informational() || code == 204 || code == 205)
 }
 
 /// One `response-<x>` query parameter and the response header it overwrites.

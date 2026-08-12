@@ -13,7 +13,7 @@ is refused and that no listing content came back with the refusal."""
 polarity = "negative"
 operation = "ListMultipartUploads"
 tags = ["multipart", "security", "pagination", "error-shape"]
-quirks = ["q-mpu-marker-0040", "q-mpu-upload-id-0037"]
+quirks = ["q-marker-form-0076", "q-mpu-marker-0040", "q-mpu-upload-id-0037"]
 
 [[case.evidence]]
 url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListMultipartUploads.html"

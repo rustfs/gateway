@@ -24,9 +24,12 @@
 [[quirk]]
 id      = "q-empty-0016"
 kind    = "empty_value"
+classification = "mutable"
+mutation_dimension = "optionality"
+mutation_sources = ["ListObjectsV2.output.Prefix.required", "ListObjectsV2.output.Delimiter.required"]
 target  = "ListObjectsV2"
 summary = "The prefix element is always written even when empty, while the delimiter element only appears when the request supplied one."
-cases   = ["c-list-0023", "c-list-0025", "c-list-0037"]
+cases   = ["c-list-0023", "c-list-0025", "c-list-0037", "c-list-0039", "c-list-0043"]
 
   [[quirk.evidence]]
   kind    = "capture"
@@ -36,9 +39,12 @@ cases   = ["c-list-0023", "c-list-0025", "c-list-0037"]
 [[quirk]]
 id      = "q-encoding-0015"
 kind    = "encoding_type"
+classification = "mutable"
+mutation_dimension = "element_encoding"
+mutation_sources = ["ListObjectsV2.xml.url_encoded_fields"]
 target  = "ListObjectsV2"
 summary = "When url encoding is requested, a fixed per operation set of members is percent encoded and the encoding type is echoed back; keys containing control characters are otherwise unparseable."
-cases   = ["c-list-0017", "c-list-0035", "c-list-0036"]
+cases   = ["c-list-0017", "c-list-0023", "c-list-0031", "c-list-0035", "c-list-0036", "c-mpu-0013"]
 
   [[quirk.evidence]]
   kind    = "aws-doc"
@@ -53,6 +59,13 @@ cases   = ["c-list-0017", "c-list-0035", "c-list-0036"]
 [[quirk]]
 id      = "q-etag-0020"
 kind    = "etag_render"
+classification = "mutable"
+mutation_dimension = "quote_strategy"
+mutation_sources = [
+  "ListObjectsV2.shapes.Object.fields.ETag.etag_render",
+  "ListObjects.shapes.Object.fields.ETag.etag_render",
+  "ListObjectVersions.shapes.ObjectVersion.fields.ETag.etag_render",
+]
 target  = "Object.ETag"
 summary = "Inside the listing body the entity tag keeps its surrounding quotes, in contrast with the bare form used by the object attributes operation."
 cases   = ["c-list-0021"]
@@ -65,9 +78,22 @@ cases   = ["c-list-0021"]
 [[quirk]]
 id      = "q-flat-0019"
 kind    = "flattened"
+classification = "mutable"
+mutation_dimension = "wrap_strategy"
+mutation_sources = [
+  "ListObjectsV2.output.Contents.list_flattened",
+  "ListObjectsV2.output.CommonPrefixes.list_flattened",
+  "ListObjects.output.Contents.list_flattened",
+  "ListObjects.output.CommonPrefixes.list_flattened",
+  "ListObjectVersions.output.Versions.list_flattened",
+  "ListObjectVersions.output.DeleteMarkers.list_flattened",
+  "ListObjectVersions.output.CommonPrefixes.list_flattened",
+  "ListMultipartUploads.output.Uploads.list_flattened",
+  "ListMultipartUploads.output.CommonPrefixes.list_flattened",
+]
 target  = "ListObjectsV2"
 summary = "Entry and common prefix lists repeat their element with no enclosing wrapper, unlike the wrapped lists used by tag sets and grant lists."
-cases   = ["c-list-0003", "c-list-0004", "c-list-0038"]
+cases   = ["c-list-0003", "c-list-0004", "c-list-0008", "c-list-0038", "c-list-0039", "c-mpu-0012"]
 
   [[quirk.evidence]]
   kind    = "smithy-spec"
@@ -77,6 +103,7 @@ cases   = ["c-list-0003", "c-list-0004", "c-list-0038"]
 [[quirk]]
 id      = "q-keycount-0018"
 kind    = "computed_member"
+classification = "contract"
 target  = "ListObjectsV2.KeyCount"
 summary = "The key count is the number of entries plus common prefixes actually returned, not the requested maximum, and is always written."
 cases   = ["c-list-0001", "c-list-0004", "c-list-0025"]
@@ -89,6 +116,9 @@ cases   = ["c-list-0001", "c-list-0004", "c-list-0025"]
 [[quirk]]
 id      = "q-order-0014"
 kind    = "element_order"
+classification = "mutable"
+mutation_dimension = "element_order"
+mutation_sources = ["ListObjectsV2.xml.element_order"]
 target  = "ListObjectsV2"
 summary = "Sibling order in the listing result is part of the wire contract; strict clients fail to parse when the bucket name follows the entry list."
 cases   = ["c-list-0001"]
@@ -106,9 +136,12 @@ cases   = ["c-list-0001"]
 [[quirk]]
 id      = "q-owner-0017"
 kind    = "omit_when"
+classification = "mutable"
+mutation_dimension = "omit_strategy"
+mutation_sources = ["ListObjectsV2.shapes.Object.fields.Owner.omit_when"]
 target  = "Object.Owner"
 summary = "Owner information is written only when the request asked for it, so emission depends on a request field rather than on the value itself."
-cases   = ["c-list-0009", "c-list-0024"]
+cases   = ["c-list-0009", "c-list-0010", "c-list-0024"]
 
   [[quirk.evidence]]
   kind    = "aws-doc"
@@ -118,6 +151,9 @@ cases   = ["c-list-0009", "c-list-0024"]
 [[quirk]]
 id      = "q-root-0013"
 kind    = "root_name"
+classification = "mutable"
+mutation_dimension = "element_rename"
+mutation_sources = ["ListObjectsV2.xml.response_root", "ListObjects.xml.response_root"]
 target  = "ListObjectsV2"
 summary = "The response root element is shared verbatim with the first version of the listing operation, so the root name cannot be derived from the operation or output shape name."
 cases   = ["c-list-0011"]
@@ -130,9 +166,16 @@ cases   = ["c-list-0011"]
 [[quirk]]
 id      = "q-storageclass-0022"
 kind    = "omit_when"
+classification = "mutable"
+mutation_dimension = "omit_strategy"
+mutation_sources = [
+  "ListObjectsV2.shapes.Object.fields.StorageClass.omit_when",
+  "ListObjects.shapes.Object.fields.StorageClass.omit_when",
+  "ListObjectVersions.shapes.ObjectVersion.fields.StorageClass.omit_when",
+]
 target  = "Object.StorageClass"
 summary = "The storage class element in a listing is always written including the default class, which is the opposite of the header form that is suppressed for the default class."
-cases   = ["c-list-0018", "c-list-0019"]
+cases   = ["c-list-0018", "c-list-0019", "c-object-0012"]
 
   [[quirk.evidence]]
   kind    = "aws-doc"
@@ -147,6 +190,7 @@ cases   = ["c-list-0018", "c-list-0019"]
 [[quirk]]
 id      = "q-token-0021"
 kind    = "opaque_token"
+classification = "contract"
 target  = "ListObjectsV2"
 summary = "Pagination tokens are attacker controlled opaque bytes; they are never parsed as keys or paths and must survive url encoding unchanged."
 cases   = ["c-list-0029", "c-list-0030", "c-list-0031", "c-list-0032"]
@@ -166,6 +210,9 @@ cases   = ["c-list-0029", "c-list-0030", "c-list-0031", "c-list-0032"]
 [[quirk]]
 id      = "q-root-0060"
 kind    = "root_name"
+classification = "mutable"
+mutation_dimension = "element_rename"
+mutation_sources = ["ListObjectVersions.xml.response_root"]
 target  = "ListObjectVersions"
 summary = "The version listing has a response root of its own, while the two key listings share theirs, so no rule derives a root name from the operation."
 cases   = ["c-list-0012"]
@@ -178,6 +225,12 @@ cases   = ["c-list-0012"]
 [[quirk]]
 id      = "q-version-0061"
 kind    = "element_name"
+classification = "mutable"
+mutation_dimension = "element_rename"
+mutation_sources = [
+  "ListObjectVersions.output.Versions.wire_name",
+  "ListObjectVersions.output.DeleteMarkers.wire_name",
+]
 target  = "ListObjectVersions"
 summary = "Version entries are written under an element named for a single version and deleted entries under a delete marker element; neither is named after the shape behind it."
 cases   = ["c-list-0012", "c-list-0013"]
@@ -195,6 +248,9 @@ cases   = ["c-list-0012", "c-list-0013"]
 [[quirk]]
 id      = "q-wrapped-0062"
 kind    = "flattened"
+classification = "mutable"
+mutation_dimension = "wrap_strategy"
+mutation_sources = ["ListBuckets.output.Buckets.list_flattened"]
 target  = "ListBuckets"
 summary = "The bucket listing wraps its entries in an enclosing element, the one listing in this family that is not flattened."
 cases   = ["c-list-0015"]
@@ -207,9 +263,12 @@ cases   = ["c-list-0015"]
 [[quirk]]
 id      = "q-empty-0063"
 kind    = "empty_value"
+classification = "mutable"
+mutation_dimension = "optionality"
+mutation_sources = ["ListObjects.output.Prefix.required", "ListObjects.output.Marker.required"]
 target  = "ListObjects"
 summary = "The first listing version writes both its prefix and its marker element even when neither was supplied, so an absent value is an empty element rather than no element."
-cases   = ["c-list-0022"]
+cases   = ["c-list-0002", "c-list-0003", "c-list-0018", "c-list-0022"]
 
   [[quirk.evidence]]
   kind    = "aws-doc"
@@ -224,6 +283,7 @@ cases   = ["c-list-0022"]
 [[quirk]]
 id      = "q-marker-0064"
 kind    = "computed_member"
+classification = "contract"
 target  = "ListObjects.NextMarker"
 summary = "The first listing version emits its next cursor only when the page was truncated, and must emit it when a delimiter is in play because the client cannot derive it from the last entry."
 cases   = ["c-list-0002", "c-list-0041", "c-list-0042"]
@@ -241,6 +301,9 @@ cases   = ["c-list-0002", "c-list-0041", "c-list-0042"]
 [[quirk]]
 id      = "q-owner-0065"
 kind    = "omit_when"
+classification = "mutable"
+mutation_dimension = "omit_strategy"
+mutation_sources = ["ListObjects.shapes.Object.fields.Owner.omit_when"]
 target  = "ListObjects.Object.Owner"
 summary = "The first listing version has no fetch owner parameter and writes owner information for every entry, so the suppression the entry shape carries applies to the second version alone."
 cases   = ["c-list-0010", "c-list-0024"]
@@ -258,9 +321,17 @@ cases   = ["c-list-0010", "c-list-0024"]
 [[quirk]]
 id      = "q-order-0066"
 kind    = "element_order"
+classification = "mutable"
+mutation_dimension = "element_order"
+mutation_sources = [
+  "ListObjects.xml.element_order",
+  "ListObjectVersions.xml.element_order",
+  "ListBuckets.xml.element_order",
+  "ListObjectVersions.shapes.ObjectVersion.xml.element_order",
+]
 target  = "ListObjects"
 summary = "Sibling order is a wire contract in every listing of this family and inside the version entry as well; the bucket name and the cursors precede the entry list."
-cases   = ["c-list-0018"]
+cases   = ["c-list-0015", "c-list-0018", "c-list-0022"]
 
   [[quirk.evidence]]
   kind    = "s3s-pr"
@@ -275,6 +346,12 @@ cases   = ["c-list-0018"]
 [[quirk]]
 id      = "q-encoding-0067"
 kind    = "encoding_type"
+classification = "mutable"
+mutation_dimension = "element_encoding"
+mutation_sources = [
+  "ListObjects.xml.url_encoded_fields",
+  "ListObjectVersions.xml.url_encoded_fields",
+]
 target  = "ListObjects"
 summary = "The set of members percent encoded under url encoding is defined per operation, so the first version encodes its marker pair and the version listing encodes its key marker pair instead."
 cases   = ["c-list-0017", "c-list-0035"]
@@ -292,9 +369,12 @@ cases   = ["c-list-0017", "c-list-0035"]
 [[quirk]]
 id      = "q-maxkeys-0068"
 kind    = "computed_member"
+classification = "mutable"
+mutation_dimension = "default_value"
+mutation_sources = ["ListObjects.input.MaxKeys.default_int", "ListObjectVersions.input.MaxKeys.default_int"]
 target  = "ListObjects.MaxKeys"
 summary = "Every listing echoes the page size the request asked for rather than the number of entries it returned, which is what lets a client tell a short page from a last page."
-cases   = ["c-list-0005", "c-list-0027", "c-list-0028"]
+cases   = ["c-list-0001", "c-list-0002", "c-list-0005", "c-list-0027", "c-list-0028", "c-list-0040"]
 
   [[quirk.evidence]]
   kind    = "s3s-issue"
@@ -309,6 +389,7 @@ cases   = ["c-list-0005", "c-list-0027", "c-list-0028"]
 [[quirk]]
 id      = "q-interleave-0069"
 kind    = "element_order"
+classification = "contract"
 target  = "ListObjectVersions"
 summary = "Version entries and delete marker entries are one sequence ordered by key and version, not two blocks, so the two element names alternate within a page."
 cases   = ["c-list-0013", "c-list-0014"]
@@ -321,6 +402,7 @@ cases   = ["c-list-0013", "c-list-0014"]
 [[quirk]]
 id      = "q-marker-0070"
 kind    = "opaque_token"
+classification = "contract"
 target  = "ListObjectVersions"
 summary = "The version listing has two cursors and they are ordered: the version cursor is meaningless without the key cursor, so it alone is a malformed request rather than a page one."
 cases   = ["c-list-0033", "c-list-0034"]
@@ -333,6 +415,7 @@ cases   = ["c-list-0033", "c-list-0034"]
 [[quirk]]
 id      = "q-buckets-0071"
 kind    = "pagination"
+classification = "contract"
 target  = "ListBuckets"
 summary = "The bucket listing gained a cursor, a page size, a prefix and a region filter long after the key listings, so a response carrying none of them is still a complete one."
 cases   = ["c-list-0016", "c-list-0044"]
@@ -345,6 +428,9 @@ cases   = ["c-list-0016", "c-list-0044"]
 [[quirk]]
 id      = "q-token-form-0075"
 kind    = "wire_form"
+classification = "mutable"
+codec_value = "opaque_token"
+mutation_dimension = "wire_form"
 target  = "ListObjectsV2.ContinuationToken"
 summary = "A cursor is a value this service minted, so one longer than anything it mints, one whose percent-decoded bytes are not text, and one spelling a parent traversal are all malformed input refused before the listing runs, rather than opaque bytes carried into whatever the listing does with them."
 cases   = ["c-list-0029", "c-list-0030", "c-list-0031"]
@@ -362,6 +448,10 @@ cases   = ["c-list-0029", "c-list-0030", "c-list-0031"]
 [[quirk]]
 id      = "q-max-keys-0073"
 kind    = "bounded_range"
+classification = "mutable"
+codec_min = 0
+codec_max = 1000
+mutation_dimension = "integer_range"
 target  = "ListObjectsV2.MaxKeys"
 summary = "A page size runs from zero to a thousand inclusive, and a value outside it is refused rather than clamped, because a client that asked for a hundred thousand and silently read a thousand concludes the bucket is small."
 cases   = ["c-list-0028"]

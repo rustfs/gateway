@@ -1,0 +1,50 @@
+[case]
+id = "c-select-restore-0045"
+schema_version = 1
+title = "A bounded ScanRange selects its inclusive byte window"
+rationale = """
+Decoding the bounds is not enough: the Records payload must be the selected window. A backend that ignores ScanRange returns the whole object under an otherwise valid event stream."""
+polarity = "positive"
+operation = "SelectObjectContent"
+tags = ["select", "range", "event-stream"]
+timeout_ms = 10000
+quirks = ["q-select-scan-bounded-0145"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ScanRange.html"
+summary = "Both bounds limit processing to the inclusive scan window."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "conf-select"
+
+[[setup.objects]]
+bucket = "conf-select"
+key = "rows.csv"
+body = { utf8 = "0123456789" }
+
+[request]
+method = "POST"
+target = "/conf-select/rows.csv?select&select-type=2"
+headers = { "content-type" = "application/xml" }
+body = { utf8 = '<SelectObjectContentRequest><Expression>SELECT 1</Expression><ExpressionType>SQL</ExpressionType><InputSerialization><CSV/></InputSerialization><OutputSerialization><CSV/></OutputSerialization><ScanRange><Start>3</Start><End>5</End></ScanRange></SelectObjectContentRequest>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "event_stream"
+status = 200
+connection_after = "open"
+headers_present = { "content-type" = "application/vnd.amazon.event-stream" }
+
+[[expect.events]]
+type = "Records"
+min_count = 1
+max_count = 1
+
+[expect.events.payload]
+exact_utf8 = "345"
+
+[[expect.events]]
+type = "End"
+min_count = 1
+max_count = 1

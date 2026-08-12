@@ -626,7 +626,7 @@
                                 "summary": "Recorded response for a key containing characters that are illegal in XML, showing which members are encoded."
                               }
                             ],
-                "cases": ["c-list-0017", "c-list-0035", "c-list-0036"]
+                "cases": ["c-list-0017", "c-list-0023", "c-list-0031", "c-list-0035", "c-list-0036", "c-mpu-0013"]
               },
               {
                 "id": "q-flat-0019",
@@ -640,7 +640,7 @@
                                 "summary": "Defines the flattened list serialization that removes the wrapper element around repeated members."
                               }
                             ],
-                "cases": ["c-list-0003", "c-list-0004", "c-list-0038"]
+                "cases": ["c-list-0003", "c-list-0004", "c-list-0008", "c-list-0038", "c-list-0039", "c-mpu-0012"]
               },
               {
                 "id": "q-etag-0020",
@@ -687,7 +687,7 @@
                                 "summary": "States that the storage class response header is returned for every object except those in the default class."
                               }
                             ],
-                "cases": ["c-list-0018", "c-list-0019"]
+                "cases": ["c-list-0018", "c-list-0019", "c-object-0012"]
               },
               {
                 "id": "q-root-0060",
@@ -739,7 +739,7 @@
                                 "summary": "The documented response syntax fixes the sibling order the golden comparison pins."
                               }
                             ],
-                "cases": ["c-list-0018"]
+                "cases": ["c-list-0015", "c-list-0018", "c-list-0022"]
               },
               {
                 "id": "q-encoding-0067",
@@ -777,7 +777,7 @@
                                 "summary": "Defines the element as the maximum number of keys the request asked to be returned."
                               }
                             ],
-                "cases": ["c-list-0005", "c-list-0027", "c-list-0028"]
+                "cases": ["c-list-0001", "c-list-0002", "c-list-0005", "c-list-0027", "c-list-0028", "c-list-0040"]
               },
               {
                 "id": "q-interleave-0069",

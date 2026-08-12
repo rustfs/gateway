@@ -29,9 +29,12 @@
 [[quirk]]
 id      = "q-restore-0001"
 kind    = "status_tri_state"
+classification = "contract"
+mutation_dimension = "restore_initiated_outcome"
+contract_value = "success_202"
 target  = "RestoreObject"
-summary = "A restore answers three different statuses for three different states — 202 when a retrieval starts, 200 when the copy is already restored, 409 RestoreAlreadyInProgress while one is running — so the number is decided by a mapping in this crate and declared as the operation's success status plus one alternative, never chosen by a handler."
-cases   = ["c-select-restore-0001", "c-select-restore-0002", "c-select-restore-0011"]
+summary = "Starting a new retrieval succeeds with 202."
+cases   = ["c-select-restore-0001"]
 
   [[quirk.evidence]]
   kind    = "aws-doc"
@@ -46,9 +49,12 @@ cases   = ["c-select-restore-0001", "c-select-restore-0002", "c-select-restore-0
 [[quirk]]
 id      = "q-restore-0002"
 kind    = "structured_header"
+classification = "contract"
+mutation_dimension = "restore_header_ongoing_form"
+contract_value = "quoted_true"
 target  = "RestoreObject.RestoreStatus"
-summary = "x-amz-restore is a structured header, not a word: an in-progress copy is ongoing-request=\"true\" and a finished one is ongoing-request=\"false\", expiry-date=\"<RFC 1123>\" — quotes around both values, a comma and exactly one space between the pairs — and it is produced and parsed in one place so the two spellings cannot drift."
-cases   = ["c-select-restore-0004", "c-select-restore-0005", "c-select-restore-0019"]
+summary = "An in-progress restore header renders ongoing-request=\"true\" with the boolean quoted."
+cases   = ["c-select-restore-0004"]
 
   [[quirk.evidence]]
   kind    = "aws-doc"
@@ -63,6 +69,9 @@ cases   = ["c-select-restore-0004", "c-select-restore-0005", "c-select-restore-0
 [[quirk]]
 id      = "q-restore-0003"
 kind    = "object_state_rule"
+classification = "contract"
+mutation_dimension = "restore_not_archived_outcome"
+contract_value = "invalid_object_state"
 target  = "RestoreObject"
 summary = "A restore of an object that is not in an archive storage class is refused 403 InvalidObjectState rather than accepted as a no-op: a caller that reads a success has no way to tell a retrieval it does not need from one that never happened."
 cases   = ["c-select-restore-0010"]
@@ -75,9 +84,12 @@ cases   = ["c-select-restore-0010"]
 [[quirk]]
 id      = "q-restore-0004"
 kind    = "value_constraint"
+classification = "contract"
+mutation_dimension = "restore_days_minimum"
+contract_value = "min_1"
 target  = "RestoreRequest"
-summary = "A RestoreRequest must name exactly one of the two documented forms: a Days count of at least one for an ordinary retrieval, or Type SELECT with both SelectParameters and OutputLocation and no Days at all — neither form's members may appear in the other, and a document with neither is refused rather than given a duration nobody asked for."
-cases   = ["c-select-restore-0003", "c-select-restore-0012", "c-select-restore-0013", "c-select-restore-0014", "c-select-restore-0015"]
+summary = "The Days form requires a value of at least one."
+cases   = ["c-select-restore-0012"]
 
   [[quirk.evidence]]
   kind    = "aws-doc"
@@ -92,8 +104,11 @@ cases   = ["c-select-restore-0003", "c-select-restore-0012", "c-select-restore-0
 [[quirk]]
 id      = "q-restore-0005"
 kind    = "closed_value_set"
+classification = "contract"
+mutation_dimension = "restore_glacier_tier_value_set"
+contract_value = "expedited_standard_bulk"
 target  = "GlacierJobParameters.Tier"
-summary = "A retrieval tier outside the documented three-value set — Expedited, Standard, Bulk, exactly in that spelling — is refused as InvalidArgument on both spellings of the member, because a tier nothing can schedule is a retrieval that silently never starts."
+summary = "GlacierJobParameters.Tier accepts exactly Expedited, Standard and Bulk."
 cases   = ["c-select-restore-0006", "c-select-restore-0016"]
 
   [[quirk.evidence]]
@@ -104,6 +119,9 @@ cases   = ["c-select-restore-0006", "c-select-restore-0016"]
 [[quirk]]
 id      = "q-restore-0006"
 kind    = "required_body"
+classification = "mutable"
+mutation_dimension = "optionality"
+mutation_sources = ["RestoreObject.input.RestoreRequest.required"]
 target  = "RestoreObject"
 summary = "The payload member is promoted to required, so a restore with an empty body is 400 MalformedXML rather than a retrieval with a duration this implementation invented: neither documented form of the request has a default, and Days in particular has none."
 cases   = ["c-select-restore-0017"]
@@ -121,8 +139,11 @@ cases   = ["c-select-restore-0017"]
 [[quirk]]
 id      = "q-restore-0007"
 kind    = "lenient_unknown_elements"
-target  = "RestoreObject"
-summary = "Unknown elements inside a RestoreRequest are skipped rather than refused, and so is an XML namespace on the root: AWS adds elements to this document over time and a decoder that got stricter would refuse retrievals an SDK a version newer sends correctly."
+classification = "mutable"
+mutation_dimension = "unknown_element_policy"
+codec_value = "skip"
+target  = "RestoreObject.RestoreRequest"
+summary = "Unknown elements inside a RestoreRequest are skipped rather than refused."
 cases   = ["c-select-restore-0007"]
 
   [[quirk.evidence]]
@@ -138,6 +159,9 @@ cases   = ["c-select-restore-0007"]
 [[quirk]]
 id      = "q-select-0001"
 kind    = "route_predicate"
+classification = "contract"
+mutation_dimension = "select_type_route_predicate"
+contract_value = "equals_2"
 target  = "SelectObjectContent"
 summary = "select-type=2 is half of the operation's route predicate and not decoration: the value names the version of the request grammar, so a request that omits it or sends any other value reaches no select row at all rather than being decoded by a version that has never validated it."
 cases   = ["c-select-restore-0020", "c-select-restore-0021"]
@@ -150,9 +174,12 @@ cases   = ["c-select-restore-0020", "c-select-restore-0021"]
 [[quirk]]
 id      = "q-select-0002"
 kind    = "value_constraint"
+classification = "contract"
+mutation_dimension = "select_expression_max_bytes"
+contract_value = "max_262144"
 target  = "SelectObjectContent.Expression"
-summary = "The expression is opaque to this crate — never parsed, never logged, never repeated into an error — and bounded at the documented 256 KiB, past which the request is refused 400 ExpressionTooLong before anything reads the text."
-cases   = ["c-select-restore-0022", "c-select-restore-0023"]
+summary = "Expression is bounded at 262144 UTF-8 bytes."
+cases   = ["c-select-restore-0022"]
 
   [[quirk.evidence]]
   kind    = "aws-doc"
@@ -162,9 +189,12 @@ cases   = ["c-select-restore-0022", "c-select-restore-0023"]
 [[quirk]]
 id      = "q-select-0003"
 kind    = "exclusive_members"
+classification = "contract"
+mutation_dimension = "select_input_multiple"
+contract_value = "reject_conflict"
 target  = "SelectObjectContent.InputSerialization"
-summary = "An InputSerialization names exactly one of CSV, JSON and Parquet: two of them together is 400 ObjectSerializationConflict, and none of them is 400 MalformedXML, because a reader that picked one of two declared formats would parse the object as something the caller did not describe."
-cases   = ["c-select-restore-0024", "c-select-restore-0025"]
+summary = "InputSerialization refuses multiple declared formats."
+cases   = ["c-select-restore-0024"]
 
   [[quirk.evidence]]
   kind    = "aws-doc"
@@ -174,9 +204,12 @@ cases   = ["c-select-restore-0024", "c-select-restore-0025"]
 [[quirk]]
 id      = "q-select-0004"
 kind    = "exclusive_members"
+classification = "contract"
+mutation_dimension = "select_output_multiple"
+contract_value = "reject_conflict"
 target  = "SelectObjectContent.OutputSerialization"
-summary = "An OutputSerialization names exactly one of CSV and JSON, on the same rule as the input side: both together is 400 ObjectSerializationConflict and neither is 400 MalformedXML."
-cases   = ["c-select-restore-0026", "c-select-restore-0027"]
+summary = "OutputSerialization refuses multiple declared formats."
+cases   = ["c-select-restore-0026"]
 
   [[quirk.evidence]]
   kind    = "aws-doc"
@@ -186,9 +219,12 @@ cases   = ["c-select-restore-0026", "c-select-restore-0027"]
 [[quirk]]
 id      = "q-select-0005"
 kind    = "exclusive_members"
+classification = "contract"
+mutation_dimension = "select_scan_range_empty"
+contract_value = "reject"
 target  = "SelectObjectContent.ScanRange"
-summary = "A ScanRange has two members and three documented forms — both bounds, a Start alone running to the end, an End alone meaning the suffix — so an element with neither bound is refused rather than read as the whole object, and so is an End below a Start or a negative bound: each of those names no window or two."
-cases   = ["c-select-restore-0008", "c-select-restore-0028", "c-select-restore-0029"]
+summary = "An empty ScanRange is refused rather than treated as the whole object."
+cases   = ["c-select-restore-0028"]
 
   [[quirk.evidence]]
   kind    = "aws-doc"
@@ -198,9 +234,12 @@ cases   = ["c-select-restore-0008", "c-select-restore-0028", "c-select-restore-0
 [[quirk]]
 id      = "q-select-0006"
 kind    = "closed_value_set"
+classification = "contract"
+mutation_dimension = "select_expression_type_values"
+contract_value = "sql_only"
 target  = "SelectObjectContent.ExpressionType"
-summary = "ExpressionType has exactly one documented value, SQL, and a request naming any other is 400 InvalidExpressionType; CompressionType is likewise closed at NONE, GZIP and BZIP2, refused as 400 InvalidCompressionFormat, because a compression this side cannot name is a stream nobody can read."
-cases   = ["c-select-restore-0030", "c-select-restore-0031"]
+summary = "ExpressionType accepts exactly SQL."
+cases   = ["c-select-restore-0030"]
 
   [[quirk.evidence]]
   kind    = "aws-doc"
@@ -210,8 +249,11 @@ cases   = ["c-select-restore-0030", "c-select-restore-0031"]
 [[quirk]]
 id      = "q-select-0007"
 kind    = "lenient_unknown_elements"
-target  = "SelectObjectContent"
-summary = "Unknown elements inside a SelectObjectContentRequest are skipped and a namespace on the root is ignored, the same leniency every other request document in this tree is decoded with."
+classification = "mutable"
+mutation_dimension = "unknown_element_policy"
+codec_value = "skip"
+target  = "SelectObjectContent.SelectObjectContentRequest"
+summary = "Unknown elements inside a SelectObjectContentRequest are skipped."
 cases   = ["c-select-restore-0009"]
 
   [[quirk.evidence]]
@@ -222,6 +264,9 @@ cases   = ["c-select-restore-0009"]
 [[quirk]]
 id      = "q-select-0008"
 kind    = "xml_root"
+classification = "mutable"
+mutation_dimension = "element_rename"
+mutation_sources = ["SelectObjectContent.xml.request_root"]
 target  = "SelectObjectContent"
 summary = "This is the only request in the supported surface whose XML members sit at operation level rather than inside a payload structure, so the body root is the input shape's own name, SelectObjectContentRequest, and a body rooted at anything else is 400 MalformedXML."
 cases   = ["c-select-restore-0032", "c-select-restore-0033", "c-select-restore-0034"]
@@ -234,8 +279,11 @@ cases   = ["c-select-restore-0032", "c-select-restore-0033", "c-select-restore-0
 [[quirk]]
 id      = "q-select-0009"
 kind    = "event_stream_response"
+classification = "contract"
+mutation_dimension = "select_response_shape"
+contract_value = "event_stream"
 target  = "SelectObjectContent"
-summary = "A successful SelectObjectContent response is a third Answer shape: the handler supplies already framed messages, the shared facade writes status 200 and the event-stream content type without invoking the generated document encoder, and conformance independently validates both CRCs and the terminating sequence."
+summary = "SelectObjectContent returns the event-stream answer shape and bypasses the document encoder."
 cases   = ["c-select-restore-0035"]
 
   [[quirk.evidence]]
@@ -256,6 +304,9 @@ cases   = ["c-select-restore-0035"]
 [[quirk]]
 id      = "q-restore-0008"
 kind    = "version_selector"
+classification = "contract"
+mutation_dimension = "restore_version_selector"
+contract_value = "preserve"
 target  = "RestoreObject.VersionId"
 summary = "versionId selects which version of the object is retrieved, so it is decoded and carried to the handler rather than dropped: a backend that ignored it would retrieve the current version and report success for a request about another one, which is indistinguishable from having honoured it."
 cases   = ["c-select-restore-0018"]
@@ -264,3 +315,454 @@ cases   = ["c-select-restore-0018"]
   kind    = "aws-doc"
   ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_RestoreObject.html"
   summary = "The operation documents versionId as the query parameter naming which version of the object the retrieval applies to."
+
+# Atomic rules split from the legacy composite records above. The original IDs retain the first
+# independently mutable statement; these IDs name the remaining production consumers.
+
+[[quirk]]
+id = "q-restore-already-restored-0124"
+kind = "restore_outcome"
+classification = "contract"
+mutation_dimension = "restore_already_restored_outcome"
+contract_value = "success_200"
+target = "RestoreObject"
+summary = "A request for an already restored copy succeeds with 200."
+cases = ["c-select-restore-0002"]
+  [[quirk.evidence]]
+  kind = "aws-doc"
+  ref = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_RestoreObject.html"
+  summary = "The operation distinguishes an already restored copy from a newly initiated retrieval."
+
+[[quirk]]
+id = "q-restore-in-progress-0125"
+kind = "restore_outcome"
+classification = "contract"
+mutation_dimension = "restore_in_progress_outcome"
+contract_value = "restore_already_in_progress"
+target = "RestoreObject"
+summary = "A second request while retrieval is running is RestoreAlreadyInProgress."
+cases = ["c-select-restore-0011"]
+  [[quirk.evidence]]
+  kind = "aws-doc"
+  ref = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_RestoreObject.html"
+  summary = "The operation publishes RestoreAlreadyInProgress for a retrieval already running."
+
+[[quirk]]
+id = "q-restore-header-restored-0126"
+kind = "restore_header_form"
+classification = "contract"
+mutation_dimension = "restore_header_restored_form"
+contract_value = "quoted_false_comma_space_expiry"
+target = "RestoreObject.RestoreStatus"
+summary = "A completed restore header quotes false and separates the quoted expiry with comma-space."
+cases = ["c-select-restore-0005"]
+  [[quirk.evidence]]
+  kind = "aws-doc"
+  ref = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_HeadObject.html#API_HeadObject_ResponseSyntax"
+  summary = "The response syntax shows the ongoing flag followed by a quoted expiry date."
+
+[[quirk]]
+id = "q-restore-header-absence-0127"
+kind = "restore_header_absence"
+classification = "contract"
+mutation_dimension = "restore_header_absence"
+contract_value = "omit"
+target = "RestoreObject.RestoreStatus"
+summary = "An object with no restore status omits x-amz-restore."
+cases = ["c-select-restore-0019"]
+  [[quirk.evidence]]
+  kind = "aws-doc"
+  ref = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_HeadObject.html#API_HeadObject_ResponseSyntax"
+  summary = "The restore response header is conditional state, not a default-valued field."
+
+[[quirk]]
+id = "q-restore-header-parser-0128"
+kind = "restore_header_parser"
+classification = "contract"
+mutation_dimension = "restore_header_parse_grammar"
+contract_value = "strict_quoted_pairs"
+target = "RestoreObject.RestoreStatus"
+summary = "The restore-status parser accepts only the quoted pair grammar emitted by the formatter."
+cases = ["c-rst-0014"]
+  [[quirk.evidence]]
+  kind = "rfc"
+  ref = "https://www.rfc-editor.org/rfc/rfc9110.html#section-5.6.7"
+  summary = "HTTP date fields use the fixed IMF-fixdate spelling embedded by this structured header."
+
+[[quirk]]
+id = "q-restore-form-required-0129"
+kind = "restore_form_presence"
+classification = "contract"
+mutation_dimension = "restore_form_presence"
+contract_value = "require_days_or_select"
+target = "RestoreRequest"
+summary = "A RestoreRequest must contain either the Days form or the SELECT form."
+cases = ["c-select-restore-0013"]
+  [[quirk.evidence]]
+  kind = "aws-doc"
+  ref = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_RestoreRequest.html"
+  summary = "The request documents ordinary and select retrieval forms and no default form."
+
+[[quirk]]
+id = "q-restore-days-select-0130"
+kind = "restore_form_exclusion"
+classification = "contract"
+mutation_dimension = "restore_days_select_exclusion"
+contract_value = "reject"
+target = "RestoreRequest"
+summary = "Days may not appear beside a SELECT restore."
+cases = ["c-select-restore-0015"]
+  [[quirk.evidence]]
+  kind = "aws-doc"
+  ref = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_RestoreRequest.html"
+  summary = "Days belongs to ordinary retrieval and is not applicable to the select form."
+
+[[quirk]]
+id = "q-restore-select-members-0131"
+kind = "restore_form_exclusion"
+classification = "contract"
+mutation_dimension = "restore_select_members_require_type"
+contract_value = "reject"
+target = "RestoreRequest"
+summary = "SelectParameters or OutputLocation without Type SELECT is refused."
+cases = ["c-select-restore-0040"]
+  [[quirk.evidence]]
+  kind = "aws-doc"
+  ref = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_RestoreRequest.html"
+  summary = "SelectParameters and OutputLocation are members of the SELECT request form."
+
+[[quirk]]
+id = "q-restore-select-output-required-0132"
+kind = "restore_form_presence"
+classification = "contract"
+mutation_dimension = "restore_select_output_required"
+contract_value = "require"
+target = "RestoreRequest.OutputLocation"
+summary = "A SELECT restore requires OutputLocation."
+cases = ["c-select-restore-0014"]
+  [[quirk.evidence]]
+  kind = "aws-doc"
+  ref = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_RestoreRequest.html"
+  summary = "The SELECT form carries an OutputLocation for its result."
+
+[[quirk]]
+id = "q-restore-select-parameters-required-0133"
+kind = "restore_form_presence"
+classification = "contract"
+mutation_dimension = "restore_select_parameters_required"
+contract_value = "require"
+target = "RestoreRequest.SelectParameters"
+summary = "A SELECT restore requires SelectParameters."
+cases = ["c-select-restore-0041"]
+  [[quirk.evidence]]
+  kind = "aws-doc"
+  ref = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_RestoreRequest.html"
+  summary = "The SELECT form carries SelectParameters describing the selection."
+
+[[quirk]]
+id = "q-restore-nested-select-0134"
+kind = "restore_nested_validation"
+classification = "contract"
+mutation_dimension = "restore_nested_select_validation"
+contract_value = "shared"
+target = "RestoreRequest.SelectParameters"
+summary = "Nested select members use the same validator as SelectObjectContent."
+cases = ["c-select-restore-0039"]
+  [[quirk.evidence]]
+  kind = "aws-doc"
+  ref = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_RestoreRequest.html"
+  summary = "SelectParameters carries the same expression and serialization vocabulary as object selection."
+
+[[quirk]]
+id = "q-restore-type-set-0135"
+kind = "closed_value_set"
+classification = "contract"
+mutation_dimension = "restore_type_value_set"
+contract_value = "select_only"
+target = "RestoreRequest.Type"
+summary = "RestoreRequest.Type accepts only SELECT."
+cases = ["c-select-restore-0042"]
+  [[quirk.evidence]]
+  kind = "aws-doc"
+  ref = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_RestoreRequest.html"
+  summary = "The request documents SELECT as the value selecting the alternate form."
+
+[[quirk]]
+id = "q-restore-direct-tier-0136"
+kind = "closed_value_set"
+classification = "contract"
+mutation_dimension = "restore_direct_tier_value_set"
+contract_value = "expedited_standard_bulk"
+target = "RestoreRequest.Tier"
+summary = "The direct Tier member accepts exactly Expedited, Standard and Bulk."
+cases = ["c-select-restore-0043"]
+  [[quirk.evidence]]
+  kind = "aws-doc"
+  ref = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_RestoreRequest.html"
+  summary = "The direct Tier member uses the documented retrieval tier vocabulary."
+
+[[quirk]]
+id = "q-restore-root-namespace-0137"
+kind = "xml_root_namespace_policy"
+classification = "contract"
+mutation_dimension = "restore_root_namespace_policy"
+contract_value = "local_name"
+target = "RestoreObject.RestoreRequest"
+summary = "The RestoreRequest root is matched by local name when a namespace is present."
+cases = ["c-select-restore-0007"]
+  [[quirk.evidence]]
+  kind = "s3s-issue"
+  ref = "https://github.com/s3s-project/s3s/issues/613"
+  summary = "Compatible request XML matching ignores namespace qualification on known element names."
+
+[[quirk]]
+id = "q-select-expression-nonempty-0138"
+kind = "value_constraint"
+classification = "contract"
+mutation_dimension = "select_expression_presence"
+contract_value = "nonempty"
+target = "SelectObjectContent.Expression"
+summary = "A select expression must not be empty."
+cases = ["c-select-restore-0023"]
+  [[quirk.evidence]]
+  kind = "aws-doc"
+  ref = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_SelectObjectContent.html"
+  summary = "The operation requires an expression describing the selection."
+
+[[quirk]]
+id = "q-select-expression-secret-0139"
+kind = "error_secret_flow"
+classification = "contract"
+mutation_dimension = "select_expression_error_flow"
+contract_value = "constant"
+target = "SelectObjectContent.Expression"
+summary = "A rejected expression is not echoed in the error response."
+cases = ["c-select-restore-0022"]
+  [[quirk.evidence]]
+  kind = "aws-doc"
+  ref = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_SelectObjectContent.html"
+  summary = "ExpressionTooLong identifies the field without requiring its content in the response."
+
+[[quirk]]
+id = "q-select-expression-opacity-0140"
+kind = "expression_inspection"
+classification = "contract"
+mutation_dimension = "select_expression_inspection"
+contract_value = "length_only"
+target = "SelectObjectContent.Expression"
+summary = "The framework validates only expression presence and byte length before handing it to the backend."
+cases = ["c-select-restore-0048"]
+  [[quirk.evidence]]
+  kind = "aws-doc"
+  ref = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_SelectObjectContent.html"
+  summary = "The request supplies the expression to the selection implementation after protocol validation."
+
+[[quirk]]
+id = "q-select-input-missing-0141"
+kind = "serialization_presence"
+classification = "contract"
+mutation_dimension = "select_input_missing"
+contract_value = "reject_malformed"
+target = "SelectObjectContent.InputSerialization"
+summary = "InputSerialization with no format is refused as malformed."
+cases = ["c-select-restore-0025"]
+  [[quirk.evidence]]
+  kind = "aws-doc"
+  ref = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_InputSerialization.html"
+  summary = "The structure describes one input format rather than a default format."
+
+[[quirk]]
+id = "q-select-output-missing-0142"
+kind = "serialization_presence"
+classification = "contract"
+mutation_dimension = "select_output_missing"
+contract_value = "reject_malformed"
+target = "SelectObjectContent.OutputSerialization"
+summary = "OutputSerialization with no format is refused as malformed."
+cases = ["c-select-restore-0027"]
+  [[quirk.evidence]]
+  kind = "aws-doc"
+  ref = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_OutputSerialization.html"
+  summary = "The structure describes one output format rather than a default format."
+
+[[quirk]]
+id = "q-select-scan-order-0143"
+kind = "range_constraint"
+classification = "contract"
+mutation_dimension = "select_scan_range_order"
+contract_value = "end_gte_start"
+target = "SelectObjectContent.ScanRange"
+summary = "A bounded ScanRange requires End to be at least Start."
+cases = ["c-select-restore-0029"]
+  [[quirk.evidence]]
+  kind = "aws-doc"
+  ref = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ScanRange.html"
+  summary = "Start and End describe an ordered inclusive byte window."
+
+[[quirk]]
+id = "q-select-scan-sign-0144"
+kind = "range_constraint"
+classification = "contract"
+mutation_dimension = "select_scan_range_sign"
+contract_value = "nonnegative"
+target = "SelectObjectContent.ScanRange"
+summary = "ScanRange bounds must be non-negative."
+cases = ["c-select-restore-0044"]
+  [[quirk.evidence]]
+  kind = "aws-doc"
+  ref = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ScanRange.html"
+  summary = "ScanRange bounds are byte positions and therefore do not admit negative values."
+
+[[quirk]]
+id = "q-select-scan-bounded-0145"
+kind = "range_selection"
+classification = "contract"
+mutation_dimension = "select_scan_bounded"
+contract_value = "inclusive_window"
+target = "SelectObjectContent.ScanRange"
+summary = "Both bounds select the inclusive byte window rather than the whole object."
+cases = ["c-select-restore-0045"]
+  [[quirk.evidence]]
+  kind = "aws-doc"
+  ref = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ScanRange.html"
+  summary = "A pair of bounds limits processing to the documented scan window."
+
+[[quirk]]
+id = "q-select-scan-start-0146"
+kind = "range_selection"
+classification = "contract"
+mutation_dimension = "select_scan_start_only"
+contract_value = "from_start_to_end"
+target = "SelectObjectContent.ScanRange"
+summary = "Start without End selects from Start through the end of the object."
+cases = ["c-select-restore-0046"]
+  [[quirk.evidence]]
+  kind = "aws-doc"
+  ref = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ScanRange.html"
+  summary = "The start-only form processes from the named byte to the end."
+
+[[quirk]]
+id = "q-select-scan-suffix-0147"
+kind = "range_selection"
+classification = "contract"
+mutation_dimension = "select_scan_end_only"
+contract_value = "suffix"
+target = "SelectObjectContent.ScanRange"
+summary = "End without Start selects a suffix of that many bytes."
+cases = ["c-select-restore-0047"]
+  [[quirk.evidence]]
+  kind = "aws-doc"
+  ref = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ScanRange.html"
+  summary = "The end-only form is the documented suffix form."
+
+[[quirk]]
+id = "q-select-compression-0148"
+kind = "closed_value_set"
+classification = "contract"
+mutation_dimension = "select_compression_values"
+contract_value = "none_gzip_bzip2"
+target = "SelectObjectContent.InputSerialization.CompressionType"
+summary = "CompressionType accepts exactly NONE, GZIP and BZIP2."
+cases = ["c-select-restore-0031"]
+  [[quirk.evidence]]
+  kind = "aws-doc"
+  ref = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_SelectObjectContent.html"
+  summary = "The operation documents the three supported input compression values."
+
+[[quirk]]
+id = "q-select-root-namespace-0149"
+kind = "xml_root_namespace_policy"
+classification = "contract"
+mutation_dimension = "select_root_namespace_policy"
+contract_value = "local_name"
+target = "SelectObjectContent.SelectObjectContentRequest"
+summary = "The select request root is matched by local name when a namespace is present."
+cases = ["c-select-restore-0009"]
+  [[quirk.evidence]]
+  kind = "s3s-issue"
+  ref = "https://github.com/s3s-project/s3s/issues/613"
+  summary = "Compatible request XML matching ignores namespace qualification on known element names."
+
+[[quirk]]
+id = "q-select-event-status-0150"
+kind = "event_stream_status"
+classification = "contract"
+mutation_dimension = "select_event_status"
+contract_value = "success_200"
+target = "SelectObjectContent"
+summary = "A successful select event stream uses status 200."
+cases = ["c-select-restore-0035"]
+  [[quirk.evidence]]
+  kind = "aws-doc"
+  ref = "https://docs.aws.amazon.com/AmazonS3/latest/API/RESTSelectObjectAppendix.html"
+  summary = "The operation streams framed events on its successful response."
+
+[[quirk]]
+id = "q-select-event-media-0151"
+kind = "event_stream_media_type"
+classification = "contract"
+mutation_dimension = "select_event_media_type"
+contract_value = "application_vnd_amazon_event_stream"
+target = "SelectObjectContent"
+summary = "The event stream uses application/vnd.amazon.eventstream."
+cases = ["c-select-restore-0035"]
+  [[quirk.evidence]]
+  kind = "aws-doc"
+  ref = "https://docs.aws.amazon.com/AmazonS3/latest/API/RESTSelectObjectAppendix.html"
+  summary = "The response is the Amazon event-stream wire format."
+
+[[quirk]]
+id = "q-select-prelude-crc-0152"
+kind = "event_stream_crc_coverage"
+classification = "contract"
+mutation_dimension = "event_prelude_crc_coverage"
+contract_value = "first_8"
+target = "SelectObjectContent"
+summary = "The prelude CRC covers the first eight bytes of the message."
+cases = ["c-select-restore-0035"]
+  [[quirk.evidence]]
+  kind = "aws-doc"
+  ref = "https://docs.aws.amazon.com/AmazonS3/latest/API/RESTSelectObjectAppendix.html"
+  summary = "The event-stream prelude has its own checksum before the header block."
+
+[[quirk]]
+id = "q-select-message-crc-0153"
+kind = "event_stream_crc_coverage"
+classification = "contract"
+mutation_dimension = "event_message_crc_coverage"
+contract_value = "frame_without_crc"
+target = "SelectObjectContent"
+summary = "The message CRC covers the whole frame except the checksum itself."
+cases = ["c-select-restore-0035"]
+  [[quirk.evidence]]
+  kind = "aws-doc"
+  ref = "https://docs.aws.amazon.com/AmazonS3/latest/API/RESTSelectObjectAppendix.html"
+  summary = "Each event-stream message terminates in a checksum over the preceding frame."
+
+[[quirk]]
+id = "q-select-crc-algorithm-0154"
+kind = "event_stream_crc_algorithm"
+classification = "contract"
+mutation_dimension = "event_crc_algorithm"
+contract_value = "crc32_iso_hdlc"
+target = "SelectObjectContent"
+summary = "Both event-stream checksums use CRC-32/ISO-HDLC."
+cases = ["c-select-restore-0035"]
+  [[quirk.evidence]]
+  kind = "rfc"
+  ref = "https://www.rfc-editor.org/rfc/rfc1952#section-8"
+  summary = "The published CRC-32 parameters pin the digest used by the event stream."
+
+[[quirk]]
+id = "q-select-termination-0155"
+kind = "event_stream_termination"
+classification = "contract"
+mutation_dimension = "select_event_termination"
+contract_value = "records_stats_end"
+target = "SelectObjectContent"
+summary = "A successful event sequence terminates Records, Stats, End in that order."
+cases = ["c-select-restore-0035"]
+  [[quirk.evidence]]
+  kind = "aws-doc"
+  ref = "https://docs.aws.amazon.com/AmazonS3/latest/API/RESTSelectObjectAppendix.html"
+  summary = "The documented stream ends with Stats and End after the records events."

@@ -11,7 +11,7 @@ limitation became a defect. This case is the fix, asserted where a browser would
 polarity = "positive"
 tags = ["cors", "preflight", "vhost", "security"]
 timeout_ms = 10000
-quirks = ["q-cors-0009"]
+quirks = ["q-cors-0020"]
 
 [[case.evidence]]
 url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/VirtualHosting.html"

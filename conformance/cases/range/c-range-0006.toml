@@ -17,7 +17,7 @@ polarity = "positive"
 operation = "UploadPartCopy"
 tags = ["range", "multipart", "wire-bytes"]
 timeout_ms = 10000
-quirks = ["q-range-0053"]
+quirks = ["q-copy-range-inclusive-length-0123"]
 
 [[case.evidence]]
 url = "https://github.com/s3s-project/s3s/pull/95"

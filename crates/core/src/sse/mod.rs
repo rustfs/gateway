@@ -272,8 +272,12 @@ const fn managed_reason(managed: &ManagedRejection) -> &'static str {
         ManagedRejection::Document(crate::ops::shared::encryption::EncryptionRejection::AlgorithmUnknown) => {
             "x-amz-server-side-encryption must be one of AES256, aws:fsx, aws:kms or aws:kms:dsse"
         }
-        ManagedRejection::Document(crate::ops::shared::encryption::EncryptionRejection::KmsKeyWithoutKmsAlgorithm) => {
-            "x-amz-server-side-encryption-aws-kms-key-id is only valid with aws:kms or aws:kms:dsse"
+        ManagedRejection::Document(
+            crate::ops::shared::encryption::EncryptionRejection::KmsKeyWithoutKmsAlgorithm
+            | crate::ops::shared::encryption::EncryptionRejection::KmsKeyWithoutKmsAlgorithmWithValue(_),
+        ) => "x-amz-server-side-encryption-aws-kms-key-id is only valid with aws:kms or aws:kms:dsse",
+        ManagedRejection::Document(crate::ops::shared::encryption::EncryptionRejection::TooManyRules) => {
+            "the encryption configuration carries too many rules"
         }
         ManagedRejection::KmsQualifierWithoutKmsAlgorithm => {
             "an encryption context or bucket-key switch is only valid with aws:kms or aws:kms:dsse"

@@ -31,6 +31,9 @@ use crate::sha256;
 use crate::value::Value;
 use crate::xml;
 
+mod events;
+use events::check_events;
+
 /// Headers the transport itself manages, excluded from `headers_exact`.
 ///
 /// Listed in `conformance/README.md`. A case that cares about one of these asserts it explicitly
@@ -82,7 +85,7 @@ pub fn judge(expect: &Value, observed: &Observation, pointer: &str, goldens: &dy
     check_counters(expect, observed, pointer, out);
     check_timing(expect, observed, pointer, out);
     check_connection(expect, observed, pointer, out);
-    check_events(expect, observed, pointer, out);
+    check_events(expect, observed, pointer, goldens, out);
     judgement.captures = collect_captures(expect, observed, pointer, out);
     judgement
 }
@@ -365,16 +368,20 @@ fn expected_values(value: &Value) -> Vec<&str> {
 fn check_body(expect: &Value, observed: &Observation, pointer: &str, goldens: &dyn GoldenSource, out: &mut Vec<Diagnostic>) {
     let Some(body) = expect.read("expect.body") else { return };
     let at = format!("{pointer}/body");
-    let raw_text = observed.body_text();
+    check_body_expectation(body, &observed.body, &at, goldens, out);
+}
+
+fn check_body_expectation(body: &Value, observed: &[u8], at: &str, goldens: &dyn GoldenSource, out: &mut Vec<Diagnostic>) {
+    let raw_text = String::from_utf8_lossy(observed).into_owned();
     let redactions: Vec<&str> = body.read_strings("bodyExpectation.redact").unwrap_or_default();
 
     if let Some(expected) = body.read("bodyExpectation.exact_utf8").and_then(Value::as_str) {
-        compare_exact(expected.as_bytes(), &observed.body, &redactions, &at, "exact_utf8", out);
+        compare_exact(expected.as_bytes(), observed, &redactions, at, "exact_utf8", out);
     }
     if let Some(expected) = body.read("bodyExpectation.exact_hex").and_then(Value::as_str) {
         match decode_hex(expected) {
-            Some(bytes) => compare_exact(&bytes, &observed.body, &redactions, &at, "exact_hex", out),
-            None => out.push(Diagnostic::deny("expect/body.exact_hex", &at, "the expectation is not valid hex")),
+            Some(bytes) => compare_exact(&bytes, observed, &redactions, at, "exact_hex", out),
+            None => out.push(Diagnostic::deny("expect/body.exact_hex", at, "the expectation is not valid hex")),
         }
     }
     if let Some(relative) = body.read("bodyExpectation.golden").and_then(Value::as_str) {
@@ -383,32 +390,32 @@ fn check_body(expect: &Value, observed: &Observation, pointer: &str, goldens: &d
             // significant.
             Ok(bytes) => {
                 let trimmed = strip_one_trailing_newline(&bytes);
-                compare_exact(trimmed, &observed.body, &redactions, &at, "golden", out);
+                compare_exact(trimmed, observed, &redactions, at, "golden", out);
             }
             Err(reason) => out.push(Diagnostic::deny(
                 "expect/body.golden",
-                &at,
+                at,
                 format!("golden `{relative}` could not be read: {reason}"),
             )),
         }
     }
     if let Some(expected) = body.read("bodyExpectation.sha256").and_then(Value::as_str) {
-        let actual = sha256::hex_digest(&observed.body);
+        let actual = sha256::hex_digest(observed);
         if actual != expected {
             out.push(Diagnostic::deny(
                 "expect/body.sha256",
-                &at,
-                format!("expected sha256 {expected}, observed {actual} over {} bytes", observed.body.len()),
+                at,
+                format!("expected sha256 {expected}, observed {actual} over {} bytes", observed.len()),
             ));
         }
     }
     if let Some(expected) = body.read("bodyExpectation.size").and_then(Value::as_integer)
-        && observed.body.len() as i64 != expected
+        && observed.len() as i64 != expected
     {
         out.push(Diagnostic::deny(
             "expect/body.size",
-            &at,
-            format!("expected a {expected}-byte body, observed {} bytes", observed.body.len()),
+            at,
+            format!("expected a {expected}-byte body, observed {} bytes", observed.len()),
         ));
     }
     // `redact` is what the schema says it is — the named text is replaced "in both the observed
@@ -433,7 +440,7 @@ fn check_body(expect: &Value, observed: &Observation, pointer: &str, goldens: &d
         if !searched.contains(expected.as_ref()) {
             out.push(Diagnostic::deny(
                 "expect/body.contains_utf8",
-                &at,
+                at,
                 format!("the body does not contain {needle:?}"),
             ));
         }
@@ -447,12 +454,12 @@ fn check_body(expect: &Value, observed: &Observation, pointer: &str, goldens: &d
         if let Some(offset) = raw_text.find(needle) {
             out.push(Diagnostic::deny(
                 "expect/body.not_contains_utf8",
-                &at,
+                at,
                 format!("the body must not contain {needle:?}, found at byte {offset}"),
             ));
         }
     }
-    check_body_xml(body, &raw_text, &at, out);
+    check_body_xml(body, &raw_text, at, out);
 }
 
 fn check_body_xml(body: &Value, text: &str, at: &str, out: &mut Vec<Diagnostic>) {
@@ -725,34 +732,6 @@ fn check_connection(expect: &Value, observed: &Observation, pointer: &str, out: 
                 actual.unwrap_or("unknown")
             ),
         ));
-    }
-}
-
-fn check_events(expect: &Value, observed: &Observation, pointer: &str, out: &mut Vec<Diagnostic>) {
-    let Some(Value::Array(events)) = expect.read("expect.events") else { return };
-    for (index, spec) in events.iter().enumerate() {
-        let at = format!("{pointer}/events/{index}");
-        let Some(event_type) = spec.read("expect.events[].type").and_then(Value::as_str) else { continue };
-        let count = observed.events.iter().filter(|event| event.event_type == event_type).count() as i64;
-        let minimum = spec
-            .read("expect.events[].min_count")
-            .and_then(Value::as_integer)
-            .unwrap_or(1);
-        let maximum = spec.read("expect.events[].max_count").and_then(Value::as_integer);
-        if count < minimum {
-            out.push(Diagnostic::deny(
-                "expect/events.min_count",
-                &at,
-                format!("expected at least {minimum} `{event_type}` frames, observed {count}"),
-            ));
-        }
-        if maximum.is_some_and(|limit| count > limit) {
-            out.push(Diagnostic::deny(
-                "expect/events.max_count",
-                &at,
-                format!("expected at most {} `{event_type}` frames, observed {count}", maximum.unwrap_or_default()),
-            ));
-        }
     }
 }
 

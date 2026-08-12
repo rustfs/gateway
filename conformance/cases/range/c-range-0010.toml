@@ -18,7 +18,7 @@ polarity = "negative"
 operation = "GetObject"
 tags = ["range", "error-shape", "wire-bytes", "xml"]
 timeout_ms = 10000
-quirks = ["q-range-0054"]
+quirks = ["q-range-requested-0104"]
 
 [[case.evidence]]
 url = "https://docs.aws.amazon.com/AmazonS3/latest/API/ErrorResponses.html"

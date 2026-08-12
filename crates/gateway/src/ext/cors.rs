@@ -203,7 +203,14 @@ impl CachedCorsSource {
         // The guard is dropped before this await, and taken again after it. A read that failed is
         // cached as a negative entry on purpose: a backend that is down must not become a way to
         // reach it once per request.
-        let loaded = self.inner.load(bucket).await.ok().flatten().map(Arc::new);
+        let loaded = match self.inner.load(bucket).await {
+            Ok(document) => document.map(Arc::new),
+            Err(_) if rustfs_gateway_core::cors::source_absence_is_collapsed() => None,
+            // The mutation keeps a failed read distinguishable from an ordinary negative entry
+            // by refusing to cache it. The next request therefore reaches the source again, which
+            // the gateway-level counter observes without exposing the distinction on the wire.
+            Err(_) => return None,
+        };
         self.store(bucket.as_str(), loaded.clone(), now);
         loaded
     }

@@ -255,7 +255,7 @@
                                 "summary": "The request documents Content-MD5 as required for the operation, which the pinned model spells as a request checksum requirement shared by the retention and legal-hold writes."
                               }
                             ],
-                "cases": ["c-lock-0014"]
+                "cases": ["c-lock-0004", "c-lock-0014"]
               },
               {
                 "id": "q-lock-0007",
@@ -288,7 +288,7 @@
                                 "summary": "MalformedXML is documented as the answer for a request body that does not validate against the published schema, which is what an out-of-set enum value is."
                               }
                             ],
-                "cases": ["c-lock-0016", "c-lock-0017", "c-lock-0008"]
+                "cases": ["c-lock-0002", "c-lock-0008", "c-lock-0016", "c-lock-0017"]
               },
               {
                 "id": "q-lock-0009",
@@ -302,7 +302,7 @@
                                 "summary": "The ObjectLockEnabled member documents Enabled as its only valid value."
                               }
                             ],
-                "cases": ["c-lock-0018"]
+                "cases": ["c-lock-0001", "c-lock-0018"]
               },
               {
                 "id": "q-lock-0010",
@@ -321,7 +321,7 @@
                                 "summary": "Both period members document a minimum value of one."
                               }
                             ],
-                "cases": ["c-lock-0019", "c-lock-0020", "c-lock-0021"]
+                "cases": ["c-lock-0003", "c-lock-0019", "c-lock-0020", "c-lock-0021"]
               },
               {
                 "id": "q-lock-0014",

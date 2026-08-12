@@ -1,0 +1,41 @@
+[case]
+id = "c-select-restore-0041"
+schema_version = 1
+title = "A SELECT restore requires SelectParameters"
+rationale = """
+OutputLocation says where a result would go but not what to select. Accepting it without SelectParameters starts work whose query the client never supplied."""
+polarity = "negative"
+operation = "RestoreObject"
+tags = ["restore", "select", "validation"]
+timeout_ms = 10000
+quirks = ["q-restore-select-parameters-required-0133"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_RestoreRequest.html"
+summary = "The SELECT form carries SelectParameters together with OutputLocation."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "conf-restore"
+
+[[setup.objects]]
+bucket = "conf-restore"
+key = "cold.txt"
+body = { utf8 = "archived payload" }
+storage_class = "GLACIER"
+
+[request]
+method = "POST"
+target = "/conf-restore/cold.txt?restore"
+headers = { "content-type" = "application/xml" }
+body = { utf8 = '<RestoreRequest><Type>SELECT</Type><OutputLocation><S3><BucketName>conf-results</BucketName><Prefix>out/</Prefix></S3></OutputLocation></RestoreRequest>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+code = "MalformedXML"
+request_id_present = true

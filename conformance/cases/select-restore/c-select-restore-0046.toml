@@ -1,0 +1,50 @@
+[case]
+id = "c-select-restore-0046"
+schema_version = 1
+title = "A start-only ScanRange selects through the object end"
+rationale = """
+Start without End is not an instruction to discard the range. The observed Records bytes begin at Start and include every remaining byte."""
+polarity = "positive"
+operation = "SelectObjectContent"
+tags = ["select", "range", "event-stream"]
+timeout_ms = 10000
+quirks = ["q-select-scan-start-0146"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ScanRange.html"
+summary = "The start-only form processes from the named byte through the end."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "conf-select"
+
+[[setup.objects]]
+bucket = "conf-select"
+key = "rows.csv"
+body = { utf8 = "0123456789" }
+
+[request]
+method = "POST"
+target = "/conf-select/rows.csv?select&select-type=2"
+headers = { "content-type" = "application/xml" }
+body = { utf8 = '<SelectObjectContentRequest><Expression>SELECT 1</Expression><ExpressionType>SQL</ExpressionType><InputSerialization><CSV/></InputSerialization><OutputSerialization><CSV/></OutputSerialization><ScanRange><Start>7</Start></ScanRange></SelectObjectContentRequest>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "event_stream"
+status = 200
+connection_after = "open"
+headers_present = { "content-type" = "application/vnd.amazon.event-stream" }
+
+[[expect.events]]
+type = "Records"
+min_count = 1
+max_count = 1
+
+[expect.events.payload]
+exact_utf8 = "789"
+
+[[expect.events]]
+type = "End"
+min_count = 1
+max_count = 1

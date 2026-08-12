@@ -114,13 +114,15 @@ use rustfs_gateway::{
     CopyRange, CopySourceRejection, CursorSpec, ETag, ErrorCode, EventSequence, GranteeType, Handler, HandlerError,
     HandlerErrorContext, HandlerResult, IfRange, MissingObject, ObjectKey, ObjectValidators, PRECONDITION_FAILED_MESSAGE,
     PreconditionRejection, Preconditions, REGION_MATCH_POLICY, RangeDecision, RangeSelectors, RegionLabel, RegionSet, Req,
-    RequestKind, ResourceVisibility, Resp, RestoreState, RestoreStatus, TagScope, TaggingRejection, Timestamp, collect, evaluate,
-    evaluate_range, format_restore_status, parse_conditional_etag, parse_tagging_header, permanent_redirect_for,
-    resolve_copy_range, resolve_grantee_type, resolve_input as resolve_acl_input, resolve_location_constraint, stats_document,
-    validate_accelerate, validate_cors, validate_encryption, validate_legal_hold, validate_lifecycle,
-    validate_lock_configuration, validate_logging, validate_notification, validate_policy, validate_public_access_block,
-    validate_replication, validate_request_payment, validate_restore, validate_retention, validate_select, validate_tag_set,
-    validate_versioning, validate_website,
+    RequestKind, ResourceVisibility, Resp, RestoreState, RestoreStatus, TagScope, TaggingRejection, Timestamp, collect,
+    completion_failure_retains_upload, conditional_write_guards_before_mutation, copy_source_guards_before_target_write,
+    copy_source_if_match_miss_proceeds, copy_target_uses_source_validators, encryption_delete_absent_succeeds, evaluate,
+    evaluate_range, format_optional_restore_status, object_lock_requires_enabled_bucket, parse_conditional_etag,
+    parse_tagging_header, permanent_redirect_for, resolve_copy_range, resolve_grantee_type, resolve_input as resolve_acl_input,
+    resolve_location_constraint, select_scan_bytes, select_uses_event_stream, stats_document, validate_accelerate, validate_cors,
+    validate_encryption, validate_legal_hold, validate_lifecycle, validate_lock_configuration, validate_logging,
+    validate_notification, validate_policy, validate_public_access_block, validate_replication, validate_request_payment,
+    validate_restore, validate_retention, validate_select, validate_tag_set, validate_versioning, validate_website,
 };
 
 /// The canonical user id every listing reports as the owner.
@@ -1497,7 +1499,14 @@ fn guard_copy_source(
             if_modified_since.is_some(),
         ],
     );
-    settle_write(Some(found), &conditions, named)
+    let result = settle_write(Some(found), &conditions, named);
+    let only_if_match =
+        if_match.is_some() && if_unmodified_since.is_none() && if_none_match.is_none() && if_modified_since.is_none();
+    if only_if_match && copy_source_if_match_miss_proceeds() {
+        Ok(())
+    } else {
+        result
+    }
 }
 
 /// Turns the contract's verdict on a write into this backend's answer.
@@ -1655,6 +1664,9 @@ fn no_such_lock_configuration() -> HandlerError {
 ///
 /// `InvalidRequest` when the bucket has no object lock, by either road.
 fn require_object_lock(fixture: &Fixture, bucket: &str) -> Result<(), HandlerError> {
+    if !object_lock_requires_enabled_bucket() {
+        return Ok(());
+    }
     if fixture.has_object_lock(bucket) {
         return Ok(());
     }
@@ -1707,6 +1719,7 @@ struct Slice {
     start: usize,
     end_exclusive: usize,
     content_range: Option<String>,
+    suppress_object_checksum: bool,
 }
 
 impl Slice {
@@ -1716,6 +1729,7 @@ impl Slice {
             start: 0,
             end_exclusive: length,
             content_range: None,
+            suppress_object_checksum: false,
         }
     }
 }
@@ -1757,17 +1771,19 @@ fn resolve_range(
     };
     let decision = evaluate_range(&selectors, &validators, length as u64).map_err(refused)?;
     let content_range = decision.content_range();
+    let served_len = decision.content_length(length as u64);
+    let suppress_object_checksum = decision.suppresses_object_checksum();
     match decision {
         RangeDecision::Whole => Ok(Slice::whole(length)),
-        RangeDecision::Partial {
-            start, end_inclusive, ..
-        } => {
+        RangeDecision::Partial { start, .. } => {
             let start = usize::try_from(start).unwrap_or(length).min(length);
-            let end_exclusive = usize::try_from(end_inclusive).unwrap_or(length).saturating_add(1).min(length);
+            let served_len = usize::try_from(served_len).unwrap_or(length);
+            let end_exclusive = start.saturating_add(served_len).min(length);
             Ok(Slice {
                 start,
                 end_exclusive,
                 content_range,
+                suppress_object_checksum,
             })
         }
         RangeDecision::Part { .. } => Err(HandlerError::not_implemented(
@@ -1855,13 +1871,13 @@ fn is_archived(object: &StoredObject) -> bool {
 
 /// The `x-amz-restore` value a read reports, or `None` when no retrieval was ever asked for.
 ///
-/// Rendered by [`format_restore_status`] rather than by a `format!` here, which is the whole
+/// Rendered by [`format_optional_restore_status`] rather than by a `format!` here, which is the whole
 /// point of that function existing: this header has internal structure — two quoted values, a
 /// comma, exactly one space — and a second renderer is how the two spellings drift. An object
 /// nobody restored carries no header at all, which is a different observation from a header
 /// saying the retrieval finished.
 fn restore_header(object: &StoredObject) -> Option<String> {
-    object.restore.as_ref().map(format_restore_status)
+    format_optional_restore_status(object.restore.as_ref())
 }
 
 /// The tag count an object read reports, which S3 omits when it would be zero.
@@ -2295,7 +2311,7 @@ fn acl_headers<'a>(
 
 /// The shared ACL contract's own refusal, rendered.
 fn refused_acl(rejection: AclRejection) -> HandlerError {
-    HandlerError::new(rejection.code(), rejection.reason())
+    HandlerError::new(rejection.code(), rejection.reason().to_owned())
 }
 
 /// The policy one resolved ACL write stores.
@@ -3101,7 +3117,10 @@ async fn put_object(state: &Arc<Mutex<Fixture>>, input: dto::PutObjectInput) -> 
     require_content_md5(input.content_md5.as_deref(), &bytes)?;
     let now = fixture.now;
     let existing = fixture.object(input.bucket.as_str(), input.key.as_str()).cloned();
-    guard_write(existing.as_ref(), input.if_match.as_deref(), input.if_none_match.as_deref(), now)?;
+    let guard_before_mutation = conditional_write_guards_before_mutation();
+    if guard_before_mutation {
+        guard_write(existing.as_ref(), input.if_match.as_deref(), input.if_none_match.as_deref(), now)?;
+    }
     let mut object = StoredObject::new(bytes, input.content_type.clone(), now);
     object.cache_control = input.cache_control.clone();
     object.content_disposition = input.content_disposition.clone();
@@ -3119,6 +3138,9 @@ async fn put_object(state: &Arc<Mutex<Fixture>>, input: dto::PutObjectInput) -> 
     let size = object.body.len() as i64;
     let etag = object.etag.clone();
     let written = fixture.put_object(input.bucket.as_str(), input.key.as_str(), object);
+    if !guard_before_mutation {
+        guard_write(existing.as_ref(), input.if_match.as_deref(), input.if_none_match.as_deref(), now)?;
+    }
     Ok(Resp::new(dto::PutObjectOutput {
         size: Some(size),
         // `ETag` is a *required* member of this output, so leaving it at its default did not omit
@@ -3176,9 +3198,16 @@ impl Stub {
         )?;
         let Some(object) = found else { return Err(no_such_key(input.key.as_str())) };
         if condition == ConditionalOutcome::NotModified {
+            let e_tag = if condition.includes_selected_etag() {
+                Some(entity_tag(&object.etag)?)
+            } else {
+                None
+            };
             return Ok(Resp::with_status(
                 dto::GetObjectOutput {
-                    e_tag: Some(entity_tag(&object.etag)?),
+                    e_tag,
+                    content_length: Some(object.body.len() as i64),
+                    body: Some(ByteStream::from_bytes(bytes::Bytes::copy_from_slice(&object.body))),
                     last_modified: Some(Timestamp::from_secs(object.last_modified)),
                     cache_control: object.cache_control.clone(),
                     expires: object.expires.clone().map(Into::into),
@@ -3211,7 +3240,7 @@ impl Stub {
                 // which is what makes a resumed download able to notice the object changed under it.
                 e_tag: Some(entity_tag(&object.etag)?),
                 last_modified: Some(Timestamp::from_secs(object.last_modified)),
-                checksum_crc32: read_checksum(input.checksum_mode.as_ref(), status == 206, &object.body),
+                checksum_crc32: read_checksum(input.checksum_mode.as_ref(), slice.suppress_object_checksum, &object.body),
                 cache_control: object.cache_control.clone(),
                 content_disposition: object.content_disposition.clone(),
                 content_encoding: object.content_encoding.clone(),
@@ -3248,9 +3277,14 @@ impl Stub {
         )?;
         let Some(object) = found else { return Err(no_such_key(input.key.as_str())) };
         if condition == ConditionalOutcome::NotModified {
+            let e_tag = if condition.includes_selected_etag() {
+                Some(entity_tag(&object.etag)?)
+            } else {
+                None
+            };
             return Ok(Resp::with_status(
                 dto::HeadObjectOutput {
-                    e_tag: Some(entity_tag(&object.etag)?),
+                    e_tag,
                     last_modified: Some(Timestamp::from_secs(object.last_modified)),
                     cache_control: object.cache_control.clone(),
                     expires: object.expires.clone().map(Into::into),
@@ -3276,7 +3310,7 @@ impl Stub {
                 last_modified: Some(Timestamp::from_secs(object.last_modified)),
                 // The same rule as `GetObject`'s, for the same reason: a `HEAD` carries the head a
                 // `GET` would, so the two would otherwise disagree about the object's integrity.
-                checksum_crc32: read_checksum(input.checksum_mode.as_ref(), status == 206, &object.body),
+                checksum_crc32: read_checksum(input.checksum_mode.as_ref(), slice.suppress_object_checksum, &object.body),
                 cache_control: object.cache_control.clone(),
                 content_disposition: object.content_disposition.clone(),
                 content_encoding: object.content_encoding.clone(),
@@ -3333,8 +3367,12 @@ impl Stub {
         )?;
         confirm_source_owner(input.expected_source_bucket_owner.as_deref())?;
 
-        let fixture = self.borrow()?;
+        let mut fixture = self.borrow()?;
         let (found, source_version) = read_copy_source(&fixture, &source)?;
+        if !copy_source_guards_before_target_write() {
+            require_bucket(&fixture, &input.bucket)?;
+            fixture.put_object(input.bucket.as_str(), input.key.as_str(), found.clone());
+        }
         guard_copy_source(
             &found,
             input.copy_source_if_match.as_deref(),
@@ -3366,7 +3404,12 @@ impl Stub {
         // both would overwrite an object the client guarded.
         let now = fixture.now;
         let existing = fixture.object(input.bucket.as_str(), input.key.as_str()).cloned();
-        guard_write(existing.as_ref(), input.if_match.as_deref(), input.if_none_match.as_deref(), now)?;
+        let guarded = if copy_target_uses_source_validators() {
+            Some(&found)
+        } else {
+            existing.as_ref()
+        };
+        guard_write(guarded, input.if_match.as_deref(), input.if_none_match.as_deref(), now)?;
 
         // Taken before `found` is consumed below, and applied after: the two directives are
         // independent, so a copy may replace the metadata and inherit the tags, or the reverse.
@@ -3968,7 +4011,8 @@ impl Stub {
         let mut fixture = self.borrow()?;
         require_bucket(&fixture, &input.bucket)?;
         let configuration = &input.server_side_encryption_configuration;
-        validate_encryption(configuration).map_err(|rejection| HandlerError::new(rejection.code(), rejection.reason()))?;
+        validate_encryption(configuration)
+            .map_err(|rejection| HandlerError::new(rejection.code(), rejection.reason().to_owned()))?;
         fixture.set_encryption(input.bucket.as_str(), configuration.clone());
         Ok(Resp::new(dto::PutBucketEncryptionOutput::default()))
     }
@@ -3982,6 +4026,9 @@ impl Stub {
     fn delete_bucket_encryption(&self, input: &dto::DeleteBucketEncryptionInput) -> HandlerResult<dto::DeleteBucketEncryption> {
         let mut fixture = self.borrow()?;
         require_bucket(&fixture, &input.bucket)?;
+        if fixture.encryption(input.bucket.as_str()).is_none() && !encryption_delete_absent_succeeds() {
+            return Err(no_such_encryption_configuration());
+        }
         fixture.clear_encryption(input.bucket.as_str());
         Ok(Resp::new(dto::DeleteBucketEncryptionOutput::default()))
     }
@@ -4477,7 +4524,17 @@ impl Stub {
         // The payload is a *required* member, so an empty body was already refused as
         // `MalformedXML` by the generated decoder and never reaches here (q-restore-0006).
         let document = &input.restore_request;
-        validate_restore(document).map_err(|rejection| HandlerError::new(rejection.code(), rejection.reason()))?;
+        validate_restore(document).map_err(|rejection| {
+            HandlerError::new(
+                rejection.code(),
+                rejection.reason_with_expression(
+                    document
+                        .select_parameters
+                        .as_ref()
+                        .map(|parameters| parameters.expression.as_str()),
+                ),
+            )
+        })?;
         require_bucket(&fixture, &input.bucket)?;
         refuse_versioned_restore(input.version_id.as_deref())?;
         let expedited = document.glacier_job_parameters.as_ref().map(|parameters| &parameters.tier)
@@ -4538,17 +4595,21 @@ impl Stub {
             &input.output_serialization,
             input.scan_range.as_ref(),
         )
-        .map_err(|rejection| HandlerError::new(rejection.code(), rejection.reason()))?;
+        .map_err(|rejection| HandlerError::new(rejection.code(), rejection.reason_with_expression(&input.expression)))?;
         let body = fixture
             .object(input.bucket.as_str(), input.key.as_str())
             .ok_or_else(|| no_such_key(input.key.as_str()))?
             .body
             .clone();
-        let count = body.len() as u64;
+        if !select_uses_event_stream() {
+            return Ok(Resp::new(dto::SelectObjectContentOutput::default()));
+        }
+        let selected = select_scan_bytes(input.scan_range.as_ref(), &body);
+        let count = selected.len() as u64;
         let mut frames = Vec::new();
         let mut sequence = EventSequence::new();
         sequence
-            .records(&body, &mut frames)
+            .records(selected, &mut frames)
             .map_err(|error| HandlerError::internal_error(error.message()))?;
         sequence
             .stats(&stats_document(count, count, count), &mut frames)
@@ -4625,7 +4686,7 @@ impl Stub {
         &self,
         input: &dto::CompleteMultipartUploadInput,
     ) -> HandlerResult<dto::CompleteMultipartUpload> {
-        let fixture = self.borrow()?;
+        let mut fixture = self.borrow()?;
         require_bucket(&fixture, &input.bucket)?;
         let upload = require_upload(&fixture, &input.upload_id, &input.bucket, &input.key)?.clone();
         let named = &input.multipart_upload.parts;
@@ -4647,7 +4708,13 @@ impl Stub {
         }
         // A completion is a write, and it carries the same two conditional headers a write does.
         let existing = fixture.object(upload.bucket.as_str(), upload.key.as_str()).cloned();
-        guard_write(existing.as_ref(), input.if_match.as_deref(), input.if_none_match.as_deref(), fixture.now)?;
+        if let Err(error) = guard_write(existing.as_ref(), input.if_match.as_deref(), input.if_none_match.as_deref(), fixture.now)
+        {
+            if !completion_failure_retains_upload() {
+                fixture.uploads.remove(&input.upload_id);
+            }
+            return Err(error);
+        }
         // Resolved, size-checked and digest-checked *before* the head is committed, and collected
         // in the order the request named them. Each of these three refusals carries its own status,
         // so each has to happen while a status is still choosable.

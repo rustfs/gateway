@@ -37,6 +37,7 @@
 //! except as a comment and a type. That is the property that makes fifteen more families a matter
 //! of writing overlay entries.
 
+pub mod boolean;
 pub mod bounds;
 pub mod decode;
 pub mod encode;
@@ -46,11 +47,12 @@ pub mod media;
 pub mod tolerance;
 pub mod url;
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
 use rustfs_gateway_model::ir::{AttributeSource, Binding, OperationIr, Shape, Type};
+use rustfs_gateway_model::{CodecRule, CodecValue, UnknownElementPolicyValue};
 
 use super::dto::{LICENSE, naming};
 
@@ -61,6 +63,9 @@ use super::dto::{LICENSE, naming};
 /// second place for that pairing to be written down and get it wrong.
 const RESPONSE_OVERRIDE_PREFIX: &str = "response-";
 
+/// Typed overlay rules keyed by quirk id.
+pub type CodecRules = BTreeMap<String, CodecRule>;
+
 /// Renders every codec artefact.
 ///
 /// # Errors
@@ -68,21 +73,21 @@ const RESPONSE_OVERRIDE_PREFIX: &str = "response-";
 /// A string naming the operation and member whose binding the codec surface has no form for.
 /// Failing is the point: an emitter that skipped the member would produce a codec that compiles,
 /// runs, and silently drops a wire value.
-pub fn emit(operations: &[OperationIr], generated_dir: &Path) -> Result<Vec<(PathBuf, String)>, String> {
+pub fn emit(operations: &[OperationIr], rules: &CodecRules, generated_dir: &Path) -> Result<Vec<(PathBuf, String)>, String> {
     let mut ordered: Vec<&OperationIr> = operations.iter().collect();
     ordered.sort_by(|a, b| a.operation.cmp(&b.operation));
 
     let ops_dir = generated_dir.join("codec").join("ops");
     let mut files: Vec<(PathBuf, String)> = Vec::new();
     for ir in &ordered {
-        files.push((ops_dir.join(format!("{}.rs", naming::module_name(&ir.operation))), operation(ir)?));
+        files.push((ops_dir.join(format!("{}.rs", naming::module_name(&ir.operation))), operation(ir, rules)?));
     }
     files.push((ops_dir.join("mod.rs"), ops_mod(&ordered)));
     Ok(files)
 }
 
 /// Renders one operation's codec module.
-fn operation(ir: &OperationIr) -> Result<String, String> {
+fn operation(ir: &OperationIr, rules: &CodecRules) -> Result<String, String> {
     let op = &ir.operation;
     let marker = naming::type_name(op);
     let module = naming::module_name(op);
@@ -105,8 +110,8 @@ fn operation(ir: &OperationIr) -> Result<String, String> {
     // The bodies are rendered first: which imports a file needs is a fact about the code that was
     // generated, and `-D warnings` refuses an import the generated file does not use.
     let overrides = response_overrides(ir);
-    let decoded = decode::body(ir)?;
-    let encoded = encode::body(ir)?;
+    let decoded = decode::body(ir, rules)?;
+    let encoded = encode::body(ir, rules)?;
     let uses = |needle: &str| decoded.contains(needle) || encoded.contains(needle);
 
     // rustfmt's order for one crate's imports, uppercase before lowercase. `cargo fmt` follows
@@ -146,7 +151,7 @@ fn operation(ir: &OperationIr) -> Result<String, String> {
     for (name, shape) in &ir.shapes {
         if reachable_from(ir, name, Side::Input) {
             out.push('\n');
-            out.push_str(&decode::shape_reader(op, name, shape, &ir.quirks)?);
+            out.push_str(&decode::shape_reader(ir, name, shape, rules, unknown_element_policy(ir, rules)?)?);
         }
         if reachable_from(ir, name, Side::Output) {
             out.push('\n');
@@ -154,6 +159,28 @@ fn operation(ir: &OperationIr) -> Result<String, String> {
         }
     }
     Ok(out)
+}
+
+#[cfg(test)]
+pub(crate) fn operation_for_test(ir: &OperationIr, rules: &CodecRules) -> Result<String, String> {
+    operation(ir, rules)
+}
+
+fn unknown_element_policy(ir: &OperationIr, rules: &CodecRules) -> Result<UnknownElementPolicyValue, String> {
+    let mut found = None;
+    for quirk in &ir.quirks {
+        let Some(rule) = rules.get(&quirk.id) else {
+            continue;
+        };
+        let CodecValue::UnknownElementPolicy(policy) = rule.current else {
+            continue;
+        };
+        if found.is_some_and(|current| current != policy) {
+            return Err(format!("codec {}: unknown-element policies disagree", ir.operation));
+        }
+        found = Some(policy);
+    }
+    Ok(found.unwrap_or(UnknownElementPolicyValue::Skip))
 }
 
 /// Whether a shape member is carried by an XML attribute rather than by a child element.

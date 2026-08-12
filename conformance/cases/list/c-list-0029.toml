@@ -12,7 +12,7 @@ polarity = "negative"
 operation = "ListObjectsV2"
 tags = ["list", "security", "pagination"]
 timeout_ms = 15000
-quirks = ["q-token-0021"]
+quirks = ["q-token-0021", "q-token-form-0075"]
 
 [[case.evidence]]
 url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectsV2.html"

@@ -55,6 +55,12 @@
 
 use rustfs_gateway_types::{ETag, ParseError, rules};
 
+use crate::contracts::{
+    BARE_CONDITIONAL_ETAG_POLICY, BareConditionalEtagPolicy, CONDITIONAL_WILDCARD_PARSE_POLICY, ConditionalWildcardParsePolicy,
+    EtagComparisonStrengthPolicy, IF_MATCH_COMPARISON_STRENGTH, IF_NONE_MATCH_COMPARISON_STRENGTH,
+    IfNoneMatchComparisonStrengthPolicy,
+};
+
 /// One of the four conditional entity-tag headers a request may carry.
 ///
 /// The copy-source pair is listed because it is evaluated against a *different* representation —
@@ -102,8 +108,14 @@ impl ConditionalHeader {
     #[must_use]
     pub const fn comparison(self) -> EtagComparison {
         match self {
-            Self::IfMatch | Self::CopySourceIfMatch => EtagComparison::Strong,
-            Self::IfNoneMatch | Self::CopySourceIfNoneMatch => EtagComparison::Weak,
+            Self::IfMatch | Self::CopySourceIfMatch => match IF_MATCH_COMPARISON_STRENGTH {
+                EtagComparisonStrengthPolicy::Strong => EtagComparison::Strong,
+                EtagComparisonStrengthPolicy::Weak => EtagComparison::Weak,
+            },
+            Self::IfNoneMatch | Self::CopySourceIfNoneMatch => match IF_NONE_MATCH_COMPARISON_STRENGTH {
+                IfNoneMatchComparisonStrengthPolicy::Weak => EtagComparison::Weak,
+                IfNoneMatchComparisonStrengthPolicy::Strong => EtagComparison::Strong,
+            },
         }
     }
 
@@ -135,6 +147,24 @@ pub fn parse_conditional_etag(value: &str) -> Result<ETag, ParseError> {
             "ETag",
             rules::RFC9110_ENTITY_TAG,
             "a conditional header carries one entity tag; the list form is not evaluated",
+        ));
+    }
+    if trimmed == "*" && matches!(CONDITIONAL_WILDCARD_PARSE_POLICY, ConditionalWildcardParsePolicy::Reject) {
+        return Err(ParseError::new(
+            "ETag",
+            rules::RFC9110_ENTITY_TAG,
+            "the conditional wildcard is not accepted",
+        ));
+    }
+    if !trimmed.starts_with('"')
+        && !trimmed.starts_with("W/\"")
+        && trimmed != "*"
+        && matches!(BARE_CONDITIONAL_ETAG_POLICY, BareConditionalEtagPolicy::Reject)
+    {
+        return Err(ParseError::new(
+            "ETag",
+            rules::RFC9110_ENTITY_TAG,
+            "a bare conditional entity tag is not accepted",
         ));
     }
     ETag::parse_http_header(trimmed)

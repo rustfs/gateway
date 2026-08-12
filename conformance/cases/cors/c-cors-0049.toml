@@ -11,7 +11,7 @@ so this is not a case that passes because nothing is ever allowed."""
 polarity = "negative"
 tags = ["cors", "preflight", "vhost", "security"]
 timeout_ms = 10000
-quirks = ["q-cors-0015"]
+quirks = ["q-cors-0015", "q-cors-0020"]
 
 [[case.evidence]]
 url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/VirtualHosting.html"

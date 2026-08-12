@@ -10,6 +10,8 @@ overlays/**.toml       hand-written; you edit here
 generated/ir/*.json    IR documents (do-not-read list)
 generated/codec/**     per-operation decode/encode (do-not-read list)
 spec/operations/*.toml field bindings
+spec/quirks/*.toml     typed mutable protocol rules
+spec/contracts/*.toml  typed non-codec rules with independent consumer mutation coverage
 OPERATIONS.md          wire reverse index
 generated/*.rs         route table, error-code index
 ```
@@ -107,6 +109,9 @@ operations it applies to.
 [[quirk]]
 id      = "q-etag-0020"          # q-<slug>-NNNN, allocated in discovery order
 kind    = "etag_render"          # free-form category; new behaviour must not need a schema bump
+classification = "mutable"       # mutable | contract; always explicit, never inferred from kind
+mutation_dimension = "wire_form"
+codec_value = "entity_tag"       # typed current value consumed by codegen
 target  = "Object.ETag"          # Operation, Shape, Shape.Member or Operation.Field
 summary = "…"                    # your own sentence, at least 16 characters
 cases   = ["c-etag-0011"]        # conformance cases that would fail if the quirk were flipped
@@ -119,6 +124,11 @@ cases   = ["c-etag-0011"]        # conformance cases that would fail if the quir
 
 Rules, all enforced by codegen:
 
+- every record is classified; a mutable record needs exactly one typed codec rule or lowered-IR
+  source rule, while a generated contract must bind to an independently mutable runtime or emitter
+  consumer; an untyped contract remains a deferred overlay fact and is not emitted or counted as
+  proved, wired, or complete;
+- `kind` remains searchable metadata and never selects a codec, source, or mutation;
 - at least one `evidence` entry and at least one `cases` entry per quirk;
 - a quirk that nothing references is dead weight, and a reference to an undeclared quirk fails
   the run;

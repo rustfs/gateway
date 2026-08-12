@@ -8,7 +8,7 @@ polarity = "negative"
 operation = "HeadObject"
 tags = ["restore", "wire-bytes"]
 timeout_ms = 10000
-quirks = ["q-restore-0002"]
+quirks = ["q-restore-header-absence-0127"]
 
 [[case.evidence]]
 url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_HeadObject.html#API_HeadObject_ResponseSyntax"

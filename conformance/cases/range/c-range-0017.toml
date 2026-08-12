@@ -17,7 +17,7 @@ polarity = "negative"
 operation = "GetObject"
 tags = ["range", "security", "wire-bytes"]
 timeout_ms = 10000
-quirks = ["q-range-0051", "q-range-0057"]
+quirks = ["q-range-0051"]
 
 [[case.evidence]]
 url = "https://www.rfc-editor.org/rfc/rfc9110#section-5.3"

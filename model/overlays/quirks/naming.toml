@@ -26,6 +26,9 @@
 [[quirk]]
 id      = "q-naming-0001"
 kind    = "slash_policy_default"
+classification = "contract"
+mutation_dimension = "default_slash_policy"
+contract_value = "aws_preserve"
 target  = "GetObject"
 summary = "An empty path segment is part of the key: `GET /bucket//key` addresses the object named `/key`, and the run of slashes is never folded under the default policy."
 cases   = ["c-naming-0001"]
@@ -43,9 +46,12 @@ cases   = ["c-naming-0001"]
 [[quirk]]
 id      = "q-naming-0002"
 kind    = "single_decode"
+classification = "contract"
+mutation_dimension = "percent_decode_passes"
+contract_value = "once"
 target  = "GetObject"
-summary = "A key label is percent-decoded exactly once, and a value that still spells a separator or a dot-dot in percent-encoding after that one decode is refused rather than stored as a literal."
-cases   = ["c-naming-0006", "c-naming-0007", "c-naming-0010"]
+summary = "A key label is percent-decoded exactly once rather than repeatedly until the value becomes stable."
+cases   = ["c-naming-0017"]
 
   [[quirk.evidence]]
   kind    = "rfc"
@@ -60,9 +66,12 @@ cases   = ["c-naming-0006", "c-naming-0007", "c-naming-0010"]
 [[quirk]]
 id      = "q-naming-0003"
 kind    = "divergence"
+classification = "contract"
+mutation_dimension = "traversal_segment_delimiters"
+contract_value = "slash_and_backslash"
 target  = "GetObject"
 summary = "A dot-dot path segment, delimited by either a forward slash or a backslash, is refused at the naming floor; AWS accepts one as ordinary key text, so this is deliberately stricter than the service being emulated."
-cases   = ["c-naming-0003", "c-naming-0005", "c-naming-0012", "c-naming-0013", "c-naming-0016", "c-copy-0026"]
+cases   = ["c-naming-0003", "c-naming-0005", "c-naming-0006", "c-naming-0012", "c-naming-0016", "c-copy-0026"]
 
   [[quirk.evidence]]
   kind    = "advisory"
@@ -77,9 +86,12 @@ cases   = ["c-naming-0003", "c-naming-0005", "c-naming-0012", "c-naming-0013", "
 [[quirk]]
 id      = "q-naming-0004"
 kind    = "length_limit"
+classification = "contract"
+mutation_dimension = "max_utf8_bytes"
+contract_value = "1024"
 target  = "GetObject"
 summary = "An object key is limited to 1024 UTF-8 bytes and not to 1024 characters, so a key of 342 three-byte characters is over the limit while one of 1024 ASCII characters is exactly at it."
-cases   = ["c-naming-0002", "c-naming-0011"]
+cases   = ["c-naming-0002", "c-naming-0011", "c-naming-0018", "c-naming-0023"]
 
   [[quirk.evidence]]
   kind    = "aws-doc"
@@ -89,9 +101,12 @@ cases   = ["c-naming-0002", "c-naming-0011"]
 [[quirk]]
 id      = "q-naming-0005"
 kind    = "replaceable_rules"
+classification = "contract"
+mutation_dimension = "default_bucket_validator"
+contract_value = "aws"
 target  = "CreateBucket"
-summary = "The AWS bucket naming rules are the default validator and may be replaced by a looser one, while the floor beneath them — length, no separator, no control byte, no percent sign — is not replaceable by anything."
-cases   = ["c-naming-0014", "c-naming-0015"]
+summary = "The AWS general-purpose bucket naming rules are the default validator."
+cases   = ["c-naming-0015"]
 
   [[quirk.evidence]]
   kind    = "aws-doc"
@@ -106,8 +121,11 @@ cases   = ["c-naming-0014", "c-naming-0015"]
 [[quirk]]
 id      = "q-naming-0006"
 kind    = "divergence"
+classification = "contract"
+mutation_dimension = "client_ingress_forbidden_codepoints"
+contract_value = "nul_c0_del"
 target  = "GetObject"
-summary = "A control character or a NUL in a key a client is choosing is refused, although AWS admits both; a key already stored under one stays listable, because the refusal is on the naming path and not on the representation."
+summary = "A client-supplied key containing NUL, a C0 control, or DEL is refused even though AWS admits these codepoints."
 cases   = ["c-naming-0008", "c-naming-0009"]
 
   [[quirk.evidence]]
@@ -123,11 +141,119 @@ cases   = ["c-naming-0008", "c-naming-0009"]
 [[quirk]]
 id      = "q-naming-0007"
 kind    = "no_unicode_normalisation"
+classification = "contract"
+mutation_dimension = "unicode_normalization"
+contract_value = "none"
 target  = "GetObject"
-summary = "A key is not NFC-normalised and not case-folded, so the composed and decomposed spellings of the same accented text are two different objects, exactly as they are on AWS."
+summary = "A key is not NFC-normalised, so composed and decomposed spellings of the same accented text remain different objects."
 cases   = ["c-naming-0004"]
 
   [[quirk.evidence]]
   kind    = "aws-doc"
   ref     = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/object-keys.html"
   summary = "A key is a sequence of Unicode characters that the service stores and returns unchanged, which leaves two spellings of the same glyph distinguishable."
+
+[[quirk]]
+id      = "q-naming-decoded-utf8-0115"
+kind    = "decoded_utf8"
+classification = "contract"
+mutation_dimension = "decoded_utf8"
+contract_value = "strict"
+target  = "GetObject"
+summary = "Percent-decoded octets must be valid UTF-8; invalid bytes are refused rather than replaced lossily."
+cases   = ["c-naming-0010"]
+
+  [[quirk.evidence]]
+  kind    = "rfc"
+  ref     = "https://www.rfc-editor.org/rfc/rfc3986#section-2.1"
+  summary = "Percent-encoding carries octets, so replacing an invalid decoded octet would invent a different object key."
+
+[[quirk]]
+id      = "q-naming-residual-encoded-danger-0116"
+kind    = "residual_encoded_danger"
+classification = "contract"
+mutation_dimension = "residual_encoded_dangerous"
+contract_value = "reject"
+target  = "GetObject"
+summary = "After the single decode, residual encodings of slash, backslash, or dot-dot are refused rather than admitted as literal key text."
+cases   = ["c-naming-0007"]
+
+  [[quirk.evidence]]
+  kind    = "advisory"
+  ref     = "https://github.com/rustfs/rustfs/security/advisories/GHSA-8r6f-hmq2-28rg"
+  summary = "An object key carrying a traversal sequence reached the filesystem mapping and read outside the bucket."
+
+[[quirk]]
+id      = "q-naming-absolute-or-unc-0117"
+kind    = "absolute_or_unc"
+classification = "contract"
+mutation_dimension = "absolute_or_unc_policy"
+contract_value = "reject"
+target  = "GetObject"
+summary = "A key shaped as an absolute drive path or UNC location is refused independently of traversal-segment detection."
+cases   = ["c-naming-0013"]
+
+  [[quirk.evidence]]
+  kind    = "s3s-issue"
+  ref     = "https://github.com/s3s-project/s3s/issues/102"
+  summary = "Upstream observed that a platform separator in a key can reach a layer that interprets it as path syntax."
+
+[[quirk]]
+id      = "q-naming-validator-replaceability-0118"
+kind    = "validator_replaceability"
+classification = "contract"
+mutation_dimension = "validator_replaceability"
+contract_value = "custom_may_widen_aws_layer"
+target  = "CreateBucket"
+summary = "A caller-supplied name validator replaces the AWS validation layer and may admit labels that layer rejects."
+cases   = ["c-naming-0019"]
+
+  [[quirk.evidence]]
+  kind    = "s3s-issue"
+  ref     = "https://github.com/s3s-project/s3s/issues/143"
+  summary = "Upstream found hard-coded AWS rules unusable for stores containing buckets created under looser rules."
+
+[[quirk]]
+id      = "q-naming-validator-authority-0119"
+kind    = "validator_authority"
+classification = "contract"
+mutation_dimension = "validator_authority"
+contract_value = "narrow_only_after_floor"
+target  = "GetObject"
+summary = "A custom validator runs only after the safety floor and can narrow its answer but cannot reopen a rejected key."
+cases   = ["c-naming-0020"]
+
+  [[quirk.evidence]]
+  kind    = "advisory"
+  ref     = "https://github.com/rustfs/rustfs/security/advisories/GHSA-f4vq-9ffr-m8m3"
+  summary = "A source containing parent traversal was authorised as one key and then consumed as a different path."
+
+[[quirk]]
+id      = "q-naming-stored-legacy-control-0120"
+kind    = "stored_legacy_control"
+classification = "contract"
+mutation_dimension = "stored_legacy_control_policy"
+contract_value = "allow_non_nul_and_escape_on_xml_list"
+target  = "ListObjectsV2"
+summary = "An already-stored key may retain a non-NUL control character and remains listable through XML-safe encoding; NUL is still unrepresentable and rejected."
+cases   = ["c-list-0035", "c-naming-0022"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectsV2.html"
+  summary = "The listing API recommends URL encoding for keys containing characters that an XML response cannot represent directly."
+
+[[quirk]]
+id      = "q-naming-case-folding-0121"
+kind    = "case_folding"
+classification = "contract"
+mutation_dimension = "case_folding"
+contract_value = "none"
+target  = "GetObject"
+summary = "Object-key case is preserved, so `A.txt` and `a.txt` address distinct objects."
+cases   = ["c-naming-0021"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/object-keys.html"
+  summary = "Object keys are case-sensitive identifiers, so changing case changes the object selected."

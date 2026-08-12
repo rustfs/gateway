@@ -8,7 +8,7 @@ polarity = "negative"
 operation = "PutBucketCors"
 tags = ["cors", "error-shape"]
 timeout_ms = 10000
-quirks = ["q-cors-0004"]
+quirks = ["q-cors-0017"]
 
 [[case.evidence]]
 url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CORSRule.html"

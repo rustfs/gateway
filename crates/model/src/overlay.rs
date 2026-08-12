@@ -41,8 +41,49 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 use crate::error::{Error, Result};
-use crate::ir::{ChecksumAlgo, EmptyValue, Evidence, Quirk};
+use crate::ir::{ChecksumAlgo, EmptyValue, Quirk};
 use crate::toml_lite::{self, Toml};
+
+mod codec;
+mod codec_inputs;
+mod contract_values;
+mod cors_contract_inputs;
+mod cors_contract_values;
+mod mutation_dimension;
+mod naming_contract_inputs;
+mod precondition_contract_inputs;
+mod precondition_contract_values;
+mod quirks;
+mod select_restore_contract_inputs;
+mod select_restore_contract_values;
+
+pub use codec::{
+    AclChannelPolicyValue, AclOwnerPolicyValue, BooleanSpellingValue, BucketStatePreconditionValue, CodecRule, CodecValue,
+    ConditionConflictValue, ConditionalWildcardParseValue, ConditionalWildcardWriteValue, ConditionalWriteOrderValue,
+    CopyValidatorScopeValue, DeleteAbsentPolicyValue, ErrorSecretFlowValue, EtagComparisonStrengthValue, HeaderToleranceValue,
+    IfMatchAbsentPolicyValue, IfMatchDatePrecedenceValue, IfMatchMissOutcomeValue, IfNoneDatePrecedenceValue, SourceRule,
+    TemporalRelationValue, UnknownElementPolicyValue, WireFormValue,
+};
+pub use contract_values::{
+    AbsoluteOrUncPolicyValue, CaseFoldingValue, ClientIngressForbiddenCodepointsValue, ConditionFailureDetailValue, ContractRule,
+    ContractValue, CopySourceGuardOrderValue, CopySourceIfMatchMissValue, DecodedUtf8Value, DefaultBucketValidatorValue,
+    DefaultSlashPolicyValue, ErrorRootNamespaceValue, HeadBodyPolicyValue, PercentDecodePassesValue,
+    ResidualEncodedDangerousValue, StoredLegacyControlPolicyValue, TraversalSegmentDelimitersValue, UnicodeNormalizationValue,
+    ValidatorAuthorityValue, ValidatorReplaceabilityValue,
+};
+pub use cors_contract_values::*;
+pub use mutation_dimension::MutationDimension;
+pub use precondition_contract_values::*;
+pub use select_restore_contract_values::*;
+
+/// Whether a protocol record is a mechanically mutable quirk or a non-mutable contract.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuleClassification {
+    /// A typed rule whose value is consumed by generation and may be changed in memory.
+    Mutable,
+    /// A case-covered protocol contract that is not an input to generation.
+    Contract,
+}
 
 /// Everything the overlay files declare.
 #[derive(Debug, Default)]
@@ -59,6 +100,14 @@ pub struct Overlay {
     pub shapes: BTreeMap<String, ShapeOverlay>,
     /// Quirk records, keyed by id.
     pub quirks: BTreeMap<String, Quirk>,
+    /// Typed quirk rules that directly control codec generation, keyed by quirk id.
+    pub codec_rules: BTreeMap<String, CodecRule>,
+    /// Typed mutation sources whose current values come from lowered operation IR.
+    pub source_rules: BTreeMap<String, SourceRule>,
+    /// Typed runtime contract inputs consumed by generated core code.
+    pub contract_rules: BTreeMap<String, ContractRule>,
+    /// Exhaustive classification for every protocol record, keyed by stable id.
+    pub classifications: BTreeMap<String, RuleClassification>,
 }
 
 /// Per-operation overrides. Every field is optional; absent means "take the model's answer".
@@ -250,7 +299,7 @@ pub enum Side {
 }
 
 /// Which file first declared a name, so a second declaration can name both.
-type Origins = BTreeMap<String, String>;
+pub(super) type Origins = BTreeMap<String, String>;
 
 /// The one cross-family file: the Smithy shape name to IR scalar vocabulary.
 const SCALARS_FILE: &str = "scalars.toml";
@@ -378,37 +427,6 @@ impl Overlay {
         Ok(())
     }
 
-    fn read_quirks(&mut self, path: &Path, quirk_origin: &mut Origins) -> Result<()> {
-        let file = label(path);
-        let text = read(path)?;
-        let doc = toml_lite::parse(&path.display().to_string(), &text)?;
-        for entry in array_of_tables(&doc, "quirk") {
-            let id = required_str(entry, "id", "quirk")?;
-            let mut evidence = Vec::new();
-            for e in array_of_tables(entry, "evidence") {
-                evidence.push(Evidence {
-                    kind: required_str(e, "kind", &format!("quirk `{id}` evidence"))?,
-                    reference: required_str(e, "ref", &format!("quirk `{id}` evidence"))?,
-                    summary: required_str(e, "summary", &format!("quirk `{id}` evidence"))?,
-                });
-            }
-            let quirk = Quirk {
-                id: id.clone(),
-                kind: required_str(entry, "kind", &format!("quirk `{id}`"))?,
-                target: required_str(entry, "target", &format!("quirk `{id}`"))?,
-                summary: required_str(entry, "summary", &format!("quirk `{id}`"))?,
-                evidence,
-                cases: entry
-                    .get("cases")
-                    .ok_or_else(|| Error::Overlay(format!("quirk `{id}` has no `cases`")))?
-                    .string_array(&format!("quirk `{id}` cases"))?,
-            };
-            claim(quirk_origin, &id, &file, "declared as `[[quirk]]`")?;
-            self.quirks.insert(id.clone(), quirk);
-        }
-        Ok(())
-    }
-
     /// Checks the overlay against itself: id shapes, evidence presence, and no operation listed
     /// both as included and deferred.
     fn check(&self, include_origin: &Origins, deferred_origin: &Origins) -> Result<()> {
@@ -470,7 +488,7 @@ fn matches_id(id: &str, prefix: &str) -> bool {
     slug_ok && number_ok
 }
 
-fn read(path: &Path) -> Result<String> {
+pub(super) fn read(path: &Path) -> Result<String> {
     std::fs::read_to_string(path).map_err(|e| Error::io(path.display().to_string(), e))
 }
 
@@ -478,7 +496,7 @@ fn read(path: &Path) -> Result<String> {
 ///
 /// A collision message has to be pasteable into an editor and comparable between two machines, and
 /// an absolute path under somebody's home directory is neither.
-fn label(path: &Path) -> String {
+pub(super) fn label(path: &Path) -> String {
     let file = path.file_name().map(|n| n.to_string_lossy().into_owned());
     let parent = path
         .parent()
@@ -518,7 +536,7 @@ fn family_files(dir: &Path, sub: &str) -> Result<Vec<std::path::PathBuf>> {
 }
 
 /// Records that `file` declares `name`, or fails naming the file that already did.
-fn claim(origins: &mut Origins, name: &str, file: &str, what: &str) -> Result<()> {
+pub(super) fn claim(origins: &mut Origins, name: &str, file: &str, what: &str) -> Result<()> {
     if let Some(first) = origins.get(name) {
         return Err(Error::Overlay(format!(
             "`{name}` is {what} by both `{first}` and `{file}`; one family owns it, and merging the \
@@ -529,14 +547,14 @@ fn claim(origins: &mut Origins, name: &str, file: &str, what: &str) -> Result<()
     Ok(())
 }
 
-fn array_of_tables<'a>(doc: &'a Toml, key: &str) -> Vec<&'a Toml> {
+pub(super) fn array_of_tables<'a>(doc: &'a Toml, key: &str) -> Vec<&'a Toml> {
     doc.get(key)
         .and_then(Toml::as_array)
         .map(|items| items.iter().collect())
         .unwrap_or_default()
 }
 
-fn required_str(table: &Toml, key: &str, what: &str) -> Result<String> {
+pub(super) fn required_str(table: &Toml, key: &str, what: &str) -> Result<String> {
     table
         .get(key)
         .and_then(Toml::as_str)

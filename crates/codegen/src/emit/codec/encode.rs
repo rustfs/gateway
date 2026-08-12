@@ -35,11 +35,11 @@ use std::fmt::Write as _;
 
 use rustfs_gateway_model::ir::{AttributeSource, Binding, ETagRender, EmptyValue, Field, OmitWhen, OperationIr, Shape, Type};
 
-use super::{attribute_name, carried_as_attribute, expr, media, url};
+use super::{CodecRules, attribute_name, carried_as_attribute, expr, media, url};
 use crate::emit::dto::naming;
 
 /// Renders the body of one operation's `encode`.
-pub fn body(ir: &OperationIr) -> Result<String, String> {
+pub fn body(ir: &OperationIr, rules: &CodecRules) -> Result<String, String> {
     let mut out = String::new();
     out.push_str("        let mut response = EncodedResponse::of(status);\n");
     out.push_str("        response.status = status_code(status)?;\n");
@@ -51,7 +51,7 @@ pub fn body(ir: &OperationIr) -> Result<String, String> {
         out.push_str("        let _ = output;\n");
     }
     for field in &ir.output {
-        out.push_str(&one_field(ir, field)?);
+        out.push_str(&one_field(ir, field, rules)?);
     }
     out.push_str(&xml_body(ir)?);
 
@@ -66,7 +66,7 @@ pub fn body(ir: &OperationIr) -> Result<String, String> {
 }
 
 /// Renders the lines that write one output field.
-fn one_field(ir: &OperationIr, field: &Field) -> Result<String, String> {
+fn one_field(ir: &OperationIr, field: &Field, rules: &CodecRules) -> Result<String, String> {
     let op = &ir.operation;
     let member = &field.name;
     let source = format!("output.{}", naming::field_name(member));
@@ -164,7 +164,7 @@ fn one_field(ir: &OperationIr, field: &Field) -> Result<String, String> {
             // only one today is a bucket policy, whose body is JSON while its *errors* stay XML
             // — so the header is written here, on the success path, and nowhere else.
             Type::String | Type::OpaqueString => {
-                let media = media::required(field, &ir.quirks, op)?;
+                let media = media::required(field, rules, op)?;
                 let _ = writeln!(out, "        // {member} — the complete response body, `{media}`.");
                 if field.required {
                     let _ = writeln!(out, "        {{");

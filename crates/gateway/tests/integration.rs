@@ -60,6 +60,8 @@ mod object_lock_intent;
 mod patch_layer_landings;
 #[path = "pipeline.rs"]
 mod pipeline;
+#[path = "precondition_contract.rs"]
+mod precondition_contract;
 #[path = "refusal_order_guards.rs"]
 mod refusal_order_guards;
 #[path = "reject_rendering.rs"]

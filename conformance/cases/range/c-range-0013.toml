@@ -18,7 +18,7 @@ polarity = "negative"
 operation = "GetObject"
 tags = ["range", "security", "dos", "timing"]
 timeout_ms = 10000
-quirks = ["q-range-0052", "q-range-0057"]
+quirks = ["q-range-0057"]
 
 [[case.evidence]]
 url = "https://www.rfc-editor.org/rfc/rfc9110#section-14.1.1"

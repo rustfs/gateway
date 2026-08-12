@@ -8,7 +8,7 @@ polarity = "negative"
 operation = "SelectObjectContent"
 tags = ["select", "dos", "security"]
 timeout_ms = 10000
-quirks = ["q-select-0002"]
+quirks = ["q-select-0002", "q-select-expression-secret-0139"]
 
 [[case.evidence]]
 url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_SelectObjectContent.html"

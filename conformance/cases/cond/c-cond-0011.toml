@@ -17,7 +17,7 @@ polarity = "negative"
 operation = "PutObject"
 tags = ["conditional", "preconditions", "error-shape"]
 timeout_ms = 10000
-quirks = ["q-cond-0046"]
+quirks = ["q-cond-if-match-miss-0108", "q-cond-write-order-0096"]
 
 [[case.evidence]]
 url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/conditional-writes.html"

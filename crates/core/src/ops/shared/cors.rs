@@ -46,6 +46,8 @@
 use rustfs_gateway_types::ErrorCode;
 use rustfs_gateway_types::dto::{CorsConfiguration, CorsRule};
 
+use crate::contracts;
+
 /// The most rules one bucket's configuration may carry: AWS's published cap.
 pub const MAX_CORS_RULES: usize = 100;
 
@@ -57,6 +59,15 @@ pub const MAX_CORS_ID_CHARS: usize = 255;
 /// `PATCH`, `OPTIONS` and lower-case spellings are all refusals: the set is AWS's, and a stored
 /// value outside it would make the preflight runtime answer for a method S3 never serves.
 pub const CORS_ALLOWED_METHODS: &[&str] = &["GET", "PUT", "POST", "DELETE", "HEAD"];
+
+/// Whether a delete adapter must treat an already-absent CORS configuration as success.
+///
+/// This is the generated contract input for adapters that own CORS persistence. An adapter must
+/// consult it at the point where its store reports absence rather than recreating the policy.
+#[must_use]
+pub const fn cors_delete_absent_succeeds() -> bool {
+    contracts::cors_delete_absent_succeeds()
+}
 
 /// Why a decoded CORS document was refused, with the code AWS answers.
 ///
@@ -158,22 +169,22 @@ fn validate_rule(rule: &CorsRule) -> Result<(), CorsRejection> {
     for method in &rule.allowed_methods {
         // Case-sensitive on purpose: AWS stores and matches the upper-case spellings only, and a
         // stored `get` would be a rule the preflight runtime can never satisfy.
-        if !CORS_ALLOWED_METHODS.contains(&method.as_str()) {
+        if !contracts::cors_allowed_method_known(method) || !contracts::cors_allowed_method_case_valid(method) {
             return Err(CorsRejection::UnsupportedMethod);
         }
     }
     for origin in &rule.allowed_origins {
-        if wildcards(origin) > 1 {
+        if wildcards(origin) > contracts::cors_origin_wildcard_limit() {
             return Err(CorsRejection::OriginWildcards);
         }
     }
     for header in &rule.allowed_headers {
-        if wildcards(header) > 1 {
+        if wildcards(header) > contracts::cors_allowed_header_wildcard_limit() {
             return Err(CorsRejection::HeaderWildcards);
         }
     }
     for header in &rule.expose_headers {
-        if wildcards(header) > 0 {
+        if wildcards(header) > contracts::cors_expose_header_wildcard_limit() {
             return Err(CorsRejection::ExposeHeaderWildcard);
         }
     }

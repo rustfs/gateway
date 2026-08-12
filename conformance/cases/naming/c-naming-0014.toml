@@ -10,7 +10,7 @@ polarity = "positive"
 operation = "ListBuckets"
 tags = ["naming", "routing", "known-divergence"]
 timeout_ms = 10000
-quirks = ["q-naming-0005"]
+quirks = []
 
 [[case.evidence]]
 url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/bucketnamingrules.html"

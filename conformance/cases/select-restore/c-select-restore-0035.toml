@@ -8,7 +8,7 @@ polarity = "positive"
 operation = "SelectObjectContent"
 tags = ["select", "event-stream"]
 timeout_ms = 10000
-quirks = ["q-select-0009"]
+quirks = ["q-select-0009", "q-select-event-status-0150", "q-select-event-media-0151", "q-select-prelude-crc-0152", "q-select-message-crc-0153", "q-select-crc-algorithm-0154", "q-select-termination-0155"]
 
 [[case.evidence]]
 url = "https://docs.aws.amazon.com/AmazonS3/latest/API/RESTSelectObjectAppendix.html"

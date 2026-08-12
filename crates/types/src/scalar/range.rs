@@ -93,6 +93,57 @@ pub enum RangeParse {
     One(ByteRange),
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code, reason = "unused variants are selected by the range contract mutation gate")]
+enum MultiRangePolicy {
+    ServeWhole,
+    Reject,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code, reason = "unused variants are selected by the range contract mutation gate")]
+enum ExplicitEndOverflowPolicy {
+    Clamp,
+    Unsatisfiable,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code, reason = "unused variants are selected by the range contract mutation gate")]
+enum SuffixRangePolicy {
+    Supported,
+    Ignore,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code, reason = "unused variants are selected by the range contract mutation gate")]
+enum OversizeSuffixPolicy {
+    ClampToWholePartial,
+    Unsatisfiable,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code, reason = "unused variants are selected by the range contract mutation gate")]
+enum InvalidRangePolicy {
+    ServeWhole,
+    Reject,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code, reason = "unused variants are selected by the range contract mutation gate")]
+enum RangeStartBoundPolicy {
+    AtOrBeyondUnsatisfiable,
+    PastEndOnly,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code, reason = "unused variants are selected by the range contract mutation gate")]
+enum OpenEndedRangePolicy {
+    ThroughLast,
+    EmptyAtLast,
+}
+
+include!("../../../../generated/range_contracts.rs");
+
 /// The result of resolving a range against a known object length.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum RangeOutcome {
@@ -245,7 +296,15 @@ impl RangeParse {
     pub fn resolve(&self, object_len: u64) -> RangeOutcome {
         match self {
             Self::One(range) => range.resolve(object_len),
-            _ => RangeOutcome::Full,
+            Self::MultiRange => match MULTI_RANGE_POLICY {
+                MultiRangePolicy::ServeWhole => RangeOutcome::Full,
+                MultiRangePolicy::Reject => RangeOutcome::Unsatisfiable { actual: object_len },
+            },
+            Self::Ignore => match INVALID_RANGE_POLICY {
+                InvalidRangePolicy::ServeWhole => RangeOutcome::Full,
+                InvalidRangePolicy::Reject => RangeOutcome::Unsatisfiable { actual: object_len },
+            },
+            Self::Absent => RangeOutcome::Full,
         }
     }
 }
@@ -265,7 +324,14 @@ impl ByteRange {
         let last_byte = object_len - 1;
         match *self {
             Self::FromTo { first, last } => {
-                if first > last_byte {
+                let starts_outside = match RANGE_START_BOUND {
+                    RangeStartBoundPolicy::AtOrBeyondUnsatisfiable => first >= object_len,
+                    RangeStartBoundPolicy::PastEndOnly => first > object_len,
+                };
+                if starts_outside {
+                    return RangeOutcome::Unsatisfiable { actual: object_len };
+                }
+                if last > last_byte && matches!(EXPLICIT_END_OVERFLOW_POLICY, ExplicitEndOverflowPolicy::Unsatisfiable) {
                     return RangeOutcome::Unsatisfiable { actual: object_len };
                 }
                 RangeOutcome::Satisfied {
@@ -274,16 +340,26 @@ impl ByteRange {
                 }
             }
             Self::From { first } => {
-                if first > last_byte {
+                let starts_outside = match RANGE_START_BOUND {
+                    RangeStartBoundPolicy::AtOrBeyondUnsatisfiable => first >= object_len,
+                    RangeStartBoundPolicy::PastEndOnly => first > object_len,
+                };
+                if starts_outside {
                     return RangeOutcome::Unsatisfiable { actual: object_len };
                 }
                 RangeOutcome::Satisfied {
                     start: first,
-                    end_inclusive: last_byte,
+                    end_inclusive: match OPEN_ENDED_RANGE_POLICY {
+                        OpenEndedRangePolicy::ThroughLast => last_byte,
+                        OpenEndedRangePolicy::EmptyAtLast => first.saturating_sub(1),
+                    },
                 }
             }
             Self::Suffix { length } => {
                 if length == 0 {
+                    return RangeOutcome::Unsatisfiable { actual: object_len };
+                }
+                if length > object_len && matches!(OVERSIZE_SUFFIX_POLICY, OversizeSuffixPolicy::Unsatisfiable) {
                     return RangeOutcome::Unsatisfiable { actual: object_len };
                 }
                 RangeOutcome::Satisfied {
@@ -303,6 +379,9 @@ fn parse_one(spec: &str) -> Option<ByteRange> {
     let last = last.trim_start();
 
     if first.is_empty() {
+        if matches!(SUFFIX_RANGE_POLICY, SuffixRangePolicy::Ignore) {
+            return None;
+        }
         let length = parse_u64(last)?;
         return Some(ByteRange::Suffix { length });
     }

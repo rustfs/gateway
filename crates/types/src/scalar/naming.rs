@@ -50,14 +50,106 @@
 use std::sync::Arc;
 
 use percent_encoding::percent_decode_str;
+use unicode_normalization::UnicodeNormalization as _;
 
 use super::error_code::ErrorCode;
 
-/// Maximum object key length, in UTF-8 bytes.
-pub(crate) const MAX_KEY_BYTES: usize = 1024;
 /// Bucket name length bounds, in bytes.
 pub(crate) const MIN_BUCKET_BYTES: usize = 3;
 pub(crate) const MAX_BUCKET_BYTES: usize = 63;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code, reason = "unused variants are selected by the naming contract mutation gate")]
+enum ContractSlashPolicy {
+    AwsPreserve,
+    Collapse,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code, reason = "unused variants are selected by the naming contract mutation gate")]
+enum PercentDecodePassesPolicy {
+    Once,
+    UntilStable,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code, reason = "unused variants are selected by the naming contract mutation gate")]
+enum DecodedUtf8Policy {
+    Strict,
+    Lossy,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code, reason = "unused variants are selected by the naming contract mutation gate")]
+enum ResidualEncodedDangerPolicy {
+    Reject,
+    Allow,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code, reason = "unused variants are selected by the naming contract mutation gate")]
+enum TraversalDelimitersPolicy {
+    SlashAndBackslash,
+    SlashOnly,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code, reason = "unused variants are selected by the naming contract mutation gate")]
+enum AbsoluteOrUncPolicy {
+    Reject,
+    Allow,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code, reason = "unused variants are selected by the naming contract mutation gate")]
+enum DefaultValidatorPolicy {
+    Aws,
+    Permissive,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code, reason = "unused variants are selected by the naming contract mutation gate")]
+enum ValidatorReplaceabilityPolicy {
+    CustomMayWidenAwsLayer,
+    IgnoreCustom,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code, reason = "unused variants are selected by the naming contract mutation gate")]
+enum ValidatorAuthorityPolicy {
+    NarrowOnlyAfterFloor,
+    CustomMayBypassFloor,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code, reason = "unused variants are selected by the naming contract mutation gate")]
+enum ClientIngressCodepointPolicy {
+    NulC0AndDel,
+    NulOnly,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code, reason = "unused variants are selected by the naming contract mutation gate")]
+enum StoredLegacyControlPolicy {
+    AllowNonNulAndEscapeOnXmlList,
+    RejectAllControls,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code, reason = "unused variants are selected by the naming contract mutation gate")]
+enum UnicodeNormalizationPolicy {
+    None,
+    Nfc,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code, reason = "unused variants are selected by the naming contract mutation gate")]
+enum CaseFoldingPolicy {
+    None,
+    Lowercase,
+}
+
+include!("../../../../generated/naming_contracts.rs");
 
 /// What happens to a run of consecutive slashes in a key.
 ///
@@ -263,6 +355,19 @@ impl NameValidator for AwsNameValidator {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default)]
+struct PermissiveNameValidator;
+
+impl NameValidator for PermissiveNameValidator {
+    fn check_bucket(&self, _name: &str) -> Stricter {
+        Stricter::NoOpinion
+    }
+
+    fn check_key(&self, _key: &str) -> Stricter {
+        Stricter::NoOpinion
+    }
+}
+
 /// The slash policy and the validator, together: everything the single normalisation point needs.
 ///
 /// Cloning is one enum copy and one refcount bump, which is what lets the request path hold it by
@@ -289,7 +394,10 @@ impl NamePolicy {
     /// The same policy with a different validator.
     #[must_use]
     pub fn with_validator(self, validator: Arc<dyn NameValidator>) -> Self {
-        Self { validator, ..self }
+        match VALIDATOR_REPLACEABILITY {
+            ValidatorReplaceabilityPolicy::CustomMayWidenAwsLayer => Self { validator, ..self },
+            ValidatorReplaceabilityPolicy::IgnoreCustom => self,
+        }
     }
 
     /// The slash rule in force.
@@ -308,10 +416,15 @@ impl NamePolicy {
 impl Default for NamePolicy {
     /// AWS slash semantics and the AWS bucket naming rules.
     fn default() -> Self {
-        Self {
-            slash: SlashPolicy::AwsPreserve,
-            validator: Arc::new(AwsNameValidator),
-        }
+        let slash = match DEFAULT_SLASH_POLICY {
+            ContractSlashPolicy::AwsPreserve => SlashPolicy::AwsPreserve,
+            ContractSlashPolicy::Collapse => SlashPolicy::Collapse,
+        };
+        let validator: Arc<dyn NameValidator> = match DEFAULT_BUCKET_VALIDATOR {
+            DefaultValidatorPolicy::Aws => Arc::new(AwsNameValidator),
+            DefaultValidatorPolicy::Permissive => Arc::new(PermissiveNameValidator),
+        };
+        Self { slash, validator }
     }
 }
 
@@ -334,10 +447,24 @@ impl std::fmt::Debug for NamePolicy {
 /// [`NameRejection::InvalidUtf8`] when the decoded bytes are not UTF-8. Never lossy: replacing a
 /// bad byte with U+FFFD invents a key the client did not send.
 pub fn decode_once(encoded: &str) -> Result<String, NameRejection> {
-    percent_decode_str(encoded)
-        .decode_utf8()
-        .map(std::borrow::Cow::into_owned)
-        .map_err(|_| NameRejection::InvalidUtf8)
+    let decode = |value: &str| match DECODED_UTF8_POLICY {
+        DecodedUtf8Policy::Strict => percent_decode_str(value)
+            .decode_utf8()
+            .map(std::borrow::Cow::into_owned)
+            .map_err(|_| NameRejection::InvalidUtf8),
+        DecodedUtf8Policy::Lossy => Ok(percent_decode_str(value).decode_utf8_lossy().into_owned()),
+    };
+    let mut decoded = decode(encoded)?;
+    if PERCENT_DECODE_PASSES == PercentDecodePassesPolicy::UntilStable {
+        loop {
+            let next = decode(&decoded)?;
+            if next == decoded {
+                break;
+            }
+            decoded = next;
+        }
+    }
+    Ok(decoded)
 }
 
 /// Whether a once-decoded value still spells a separator or a traversal in percent-encoding.
@@ -347,6 +474,9 @@ pub fn decode_once(encoded: &str) -> Result<String, NameRejection> {
 /// is one careless helper away. Only the separator spellings are refused: `%25` on its own is an
 /// ordinary key byte and `100%done` stays a legal key.
 fn has_encoded_separator(decoded: &str) -> bool {
+    if RESIDUAL_ENCODED_DANGER_POLICY == ResidualEncodedDangerPolicy::Allow {
+        return false;
+    }
     let lower = decoded.to_ascii_lowercase();
     lower.contains("%2f") || lower.contains("%5c") || lower.contains("%2e%2e")
 }
@@ -395,17 +525,23 @@ pub fn floor_check_key(key: &str) -> Result<(), NameRejection> {
     // this gateway does not, because a key holding one is a key no log line, no XML document and
     // no shell pipeline can carry unambiguously. Recorded as a divergence in
     // `model/overlays/quirks/naming.toml`.
-    if key.chars().any(|c| c.is_control()) {
+    if CLIENT_INGRESS_FORBIDDEN_CODEPOINTS == ClientIngressCodepointPolicy::NulC0AndDel && key.chars().any(|c| c.is_control()) {
         return Err(NameRejection::ControlCharacter);
     }
     // Two or more leading slashes is the UNC spelling; exactly one is the AWS `//key` spelling and
     // is legal. A drive letter is a location on the platform the storage layer may be running on.
-    if key.starts_with("//") || key.starts_with('\\') || is_drive_rooted(key) {
+    if ABSOLUTE_OR_UNC_POLICY == AbsoluteOrUncPolicy::Reject
+        && (key.starts_with("//") || key.starts_with('\\') || is_drive_rooted(key))
+    {
         return Err(NameRejection::AbsoluteOrUnc);
     }
     // Split on both separators: on Windows a backslash delimits a segment, so `a\..\b` is the same
     // traversal as `a/../b` and refusing only one of the two spellings refuses neither.
-    if key.split(['/', '\\']).any(|segment| segment == "..") {
+    let has_traversal = match TRAVERSAL_DELIMITERS {
+        TraversalDelimitersPolicy::SlashAndBackslash => key.split(['/', '\\']).any(|segment| segment == ".."),
+        TraversalDelimitersPolicy::SlashOnly => key.split('/').any(|segment| segment == ".."),
+    };
+    if has_traversal {
         return Err(NameRejection::TraversalSegment);
     }
     Ok(())
@@ -534,14 +670,21 @@ pub(crate) fn normalize_key(encoded: &str, policy: &NamePolicy) -> Result<String
     if has_encoded_separator(&decoded) {
         return Err(NameRejection::EncodedSeparator);
     }
-    let normalised = match policy.slash_policy() {
+    let slashes = match policy.slash_policy() {
         SlashPolicy::AwsPreserve => decoded,
         SlashPolicy::Collapse => collapse_slashes(&decoded),
     };
+    let unicode = match UNICODE_NORMALIZATION {
+        UnicodeNormalizationPolicy::None => slashes,
+        UnicodeNormalizationPolicy::Nfc => slashes.nfc().collect(),
+    };
+    let normalised = match CASE_FOLDING {
+        CaseFoldingPolicy::None => unicode,
+        CaseFoldingPolicy::Lowercase => unicode.to_lowercase(),
+    };
     // Floor first, validator second, and the two are AND-ed: a validator has no way to reach a
     // value the floor already refused, because the floor returned before it was consulted.
-    floor_check_key(&normalised)?;
-    policy.validator().check_key(&normalised).into_result()?;
+    check_key_policy(&normalised, policy)?;
     Ok(normalised)
 }
 
@@ -555,8 +698,7 @@ pub(crate) fn normalize_key(encoded: &str, policy: &NamePolicy) -> Result<String
 ///
 /// The [`NameRejection`] naming the rule that refused it.
 pub(crate) fn check_decoded_key(decoded: &str, policy: &NamePolicy) -> Result<(), NameRejection> {
-    floor_check_key(decoded)?;
-    policy.validator().check_key(decoded).into_result()
+    check_key_policy(decoded, policy)
 }
 
 /// The single normalisation for a bucket label: floor, then validator.
@@ -568,6 +710,25 @@ pub(crate) fn check_decoded_key(decoded: &str, policy: &NamePolicy) -> Result<()
 ///
 /// The [`NameRejection`] naming the rule that refused it.
 pub(crate) fn check_bucket(name: &str, policy: &NamePolicy) -> Result<(), NameRejection> {
-    floor_check_bucket(name)?;
-    policy.validator().check_bucket(name).into_result()
+    match VALIDATOR_AUTHORITY {
+        ValidatorAuthorityPolicy::NarrowOnlyAfterFloor => {
+            floor_check_bucket(name)?;
+            policy.validator().check_bucket(name).into_result()
+        }
+        ValidatorAuthorityPolicy::CustomMayBypassFloor => policy.validator().check_bucket(name).into_result(),
+    }
+}
+
+fn check_key_policy(key: &str, policy: &NamePolicy) -> Result<(), NameRejection> {
+    match VALIDATOR_AUTHORITY {
+        ValidatorAuthorityPolicy::NarrowOnlyAfterFloor => {
+            floor_check_key(key)?;
+            policy.validator().check_key(key).into_result()
+        }
+        ValidatorAuthorityPolicy::CustomMayBypassFloor => policy.validator().check_key(key).into_result(),
+    }
+}
+
+pub(crate) fn stored_key_rejects_control(key: &str) -> bool {
+    STORED_LEGACY_CONTROL_POLICY == StoredLegacyControlPolicy::RejectAllControls && key.chars().any(char::is_control)
 }

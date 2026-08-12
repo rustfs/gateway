@@ -18,7 +18,7 @@ polarity = "negative"
 operation = "GetObject"
 tags = ["conditional", "preconditions", "error-shape", "wire-bytes", "xml"]
 timeout_ms = 10000
-quirks = ["q-cond-0046"]
+quirks = ["q-error-root-unnamespaced-0110", "q-head-bodyless-0111", "q-cond-failure-detail-0112"]
 
 [[case.evidence]]
 url = "https://docs.aws.amazon.com/AmazonS3/latest/API/ErrorResponses.html"

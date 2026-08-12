@@ -28,6 +28,9 @@
 [[quirk]]
 id      = "q-lock-0001"
 kind    = "not_configured_error"
+classification = "mutable"
+mutation_dimension = "optionality"
+mutation_sources = ["GetObjectLockConfiguration.errors.not_configured"]
 target  = "GetObjectLockConfiguration"
 summary = "A bucket that never enabled object lock answers 404 with the bucket-level code ObjectLockConfigurationNotFoundError, not a generic not-found and not an empty 200."
 cases   = ["c-lock-0011", "c-lock-0029"]
@@ -40,9 +43,12 @@ cases   = ["c-lock-0011", "c-lock-0029"]
 [[quirk]]
 id      = "q-lock-0002"
 kind    = "not_configured_error"
+classification = "mutable"
+mutation_dimension = "optionality"
+mutation_sources = ["GetObjectRetention.errors.not_configured"]
 target  = "GetObjectRetention"
 summary = "An object with no retention answers 404 with the object-level code NoSuchObjectLockConfiguration — a different code from the bucket read's 404, and clients branch on the difference."
-cases   = ["c-lock-0012"]
+cases   = ["c-lock-0012", "c-lock-0028"]
 
   [[quirk.evidence]]
   kind    = "aws-doc"
@@ -52,6 +58,9 @@ cases   = ["c-lock-0012"]
 [[quirk]]
 id      = "q-lock-0003"
 kind    = "not_configured_error"
+classification = "mutable"
+mutation_dimension = "optionality"
+mutation_sources = ["GetObjectLegalHold.errors.not_configured"]
 target  = "GetObjectLegalHold"
 summary = "An object with no legal hold answers the same object-level 404 as the retention read, NoSuchObjectLockConfiguration, never an empty 200 that a compliance audit would read as an OFF hold that exists."
 cases   = ["c-lock-0013"]
@@ -64,9 +73,15 @@ cases   = ["c-lock-0013"]
 [[quirk]]
 id      = "q-lock-0004"
 kind    = "xml_root"
+classification = "mutable"
+mutation_dimension = "element_rename"
+mutation_sources = [
+  "GetObjectRetention.xml.response_root",
+  "PutObjectRetention.xml.request_root",
+]
 target  = "PutObjectRetention"
 summary = "The wire root of a retention document is Retention, not the shape name ObjectLockRetention, in both the request and the response; a decoder keyed to the shape name would refuse every real client's document."
-cases   = ["c-lock-0005", "c-lock-0030"]
+cases   = ["c-lock-0005", "c-lock-0027", "c-lock-0030"]
 
   [[quirk.evidence]]
   kind    = "aws-doc"
@@ -76,6 +91,12 @@ cases   = ["c-lock-0005", "c-lock-0030"]
 [[quirk]]
 id      = "q-lock-0005"
 kind    = "xml_root"
+classification = "mutable"
+mutation_dimension = "element_rename"
+mutation_sources = [
+  "GetObjectLegalHold.xml.response_root",
+  "PutObjectLegalHold.xml.request_root",
+]
 target  = "PutObjectLegalHold"
 summary = "The wire root of a legal-hold document is LegalHold, not the shape name ObjectLockLegalHold, in both the request and the response."
 cases   = ["c-lock-0006"]
@@ -88,9 +109,16 @@ cases   = ["c-lock-0006"]
 [[quirk]]
 id      = "q-lock-0006"
 kind    = "checksum_required"
+classification = "mutable"
+mutation_dimension = "optionality"
+mutation_sources = [
+  "PutObjectLegalHold.checksum.http_checksum_required",
+  "PutObjectLockConfiguration.checksum.http_checksum_required",
+  "PutObjectRetention.checksum.http_checksum_required",
+]
 target  = "PutObjectLockConfiguration"
 summary = "All three writes in this family demand an integrity claim on the body, so a request with neither Content-MD5 nor an x-amz-checksum header is refused with 400 before the document is parsed."
-cases   = ["c-lock-0014"]
+cases   = ["c-lock-0004", "c-lock-0014"]
 
   [[quirk.evidence]]
   kind    = "aws-doc"
@@ -100,6 +128,13 @@ cases   = ["c-lock-0014"]
 [[quirk]]
 id      = "q-lock-0007"
 kind    = "required_body"
+classification = "mutable"
+mutation_dimension = "optionality"
+mutation_sources = [
+  "PutObjectLockConfiguration.input.ObjectLockConfiguration.required",
+  "PutObjectRetention.input.Retention.required",
+  "PutObjectLegalHold.input.LegalHold.required",
+]
 target  = "PutObjectRetention"
 summary = "The payload member of all three writes is promoted to required, so an empty body is refused as 400 MalformedXML rather than read as a defaulted document — a silently-accepted empty body is how a legal hold gets set to a value nobody sent."
 cases   = ["c-lock-0015"]
@@ -112,9 +147,13 @@ cases   = ["c-lock-0015"]
 [[quirk]]
 id      = "q-lock-0008"
 kind    = "closed_value_set"
+classification = "contract"
+mutation_dimension = "enum_strictness"
+contract_value = "closed_object_lock_modes"
+contract_values = ["GOVERNANCE", "COMPLIANCE"]
 target  = "DefaultRetention.Mode"
 summary = "A retention mode outside the documented two-value set — GOVERNANCE, COMPLIANCE, exactly in that spelling — is refused as MalformedXML: the values are case-sensitive, so a lowercase governance is out of the set, and a mode nothing can enforce is a lock that protects nothing."
-cases   = ["c-lock-0016", "c-lock-0017", "c-lock-0008"]
+cases   = ["c-lock-0002", "c-lock-0008", "c-lock-0016", "c-lock-0017"]
 
   [[quirk.evidence]]
   kind    = "aws-doc"
@@ -129,9 +168,13 @@ cases   = ["c-lock-0016", "c-lock-0017", "c-lock-0008"]
 [[quirk]]
 id      = "q-lock-0009"
 kind    = "closed_value_set"
+classification = "contract"
+mutation_dimension = "enum_strictness"
+contract_value = "closed_object_lock_enabled_values"
+contract_values = ["Enabled"]
 target  = "ObjectLockConfiguration.ObjectLockEnabled"
 summary = "ObjectLockEnabled has exactly one documented value, Enabled: AWS defines no Disabled spelling because object lock, once on, cannot be turned off, so any other value is refused as MalformedXML rather than read as an off switch."
-cases   = ["c-lock-0018"]
+cases   = ["c-lock-0001", "c-lock-0018"]
 
   [[quirk.evidence]]
   kind    = "aws-doc"
@@ -141,9 +184,15 @@ cases   = ["c-lock-0018"]
 [[quirk]]
 id      = "q-lock-0010"
 kind    = "value_constraint"
+classification = "contract"
+mutation_dimension = "member_constraint"
+contract_value = "default_retention"
+contract_require_mode = true
+contract_exactly_one_period = true
+contract_min_period = 1
 target  = "DefaultRetention"
 summary = "A DefaultRetention must carry a mode and exactly one period: Days and Years together are refused as MalformedXML, a mode with neither period likewise, and a period under one — Days 0, Years -1 — is refused as InvalidArgument."
-cases   = ["c-lock-0019", "c-lock-0020", "c-lock-0021"]
+cases   = ["c-lock-0003", "c-lock-0019", "c-lock-0020", "c-lock-0021"]
 
   [[quirk.evidence]]
   kind    = "aws-doc"
@@ -158,6 +207,10 @@ cases   = ["c-lock-0019", "c-lock-0020", "c-lock-0021"]
 [[quirk]]
 id      = "q-lock-0011"
 kind    = "closed_value_set"
+classification = "contract"
+mutation_dimension = "enum_strictness"
+contract_value = "closed_legal_hold_statuses"
+contract_values = ["ON", "OFF"]
 target  = "ObjectLockLegalHold.Status"
 summary = "A legal-hold status outside the documented two-value set — ON, OFF, exactly in that spelling — is refused as MalformedXML; a lowercase on is out of the set, and an unrecognised status stored today is a hold nobody can lift or trust tomorrow."
 cases   = ["c-lock-0022", "c-lock-0007"]
@@ -170,6 +223,9 @@ cases   = ["c-lock-0022", "c-lock-0007"]
 [[quirk]]
 id      = "q-lock-0012"
 kind    = "boolean_header"
+classification = "mutable"
+mutation_dimension = "boolean_spelling_policy"
+codec_value = "ascii_case_insensitive"
 target  = "PutObjectRetention.BypassGovernanceRetention"
 summary = "x-amz-bypass-governance-retention is parsed ASCII-case-insensitively — True and TRUE are true, False is false — and any other value is refused as 400 InvalidArgument, never defaulted: this header is the one switch that weakens GOVERNANCE protection, so an unreadable value must fail closed rather than be guessed true."
 cases   = ["c-lock-0009", "c-lock-0023"]
@@ -182,9 +238,12 @@ cases   = ["c-lock-0009", "c-lock-0023"]
 [[quirk]]
 id      = "q-lock-0013"
 kind    = "value_constraint"
+classification = "contract"
+mutation_dimension = "temporal_relation"
+contract_value = "strictly_future"
 target  = "ObjectLockRetention.RetainUntilDate"
 summary = "A retention write whose RetainUntilDate is not in the future is refused as 400 InvalidArgument: a retain-until instant that has already passed protects nothing, and the comparison is made against an injectable clock so the rule is testable."
-cases   = ["c-lock-0024"]
+cases   = ["c-lock-0005", "c-lock-0024"]
 
   [[quirk.evidence]]
   kind    = "aws-doc"
@@ -194,6 +253,9 @@ cases   = ["c-lock-0024"]
 [[quirk]]
 id      = "q-lock-0014"
 kind    = "lenient_unknown_elements"
+classification = "mutable"
+mutation_dimension = "unknown_element_policy"
+codec_value = "skip"
 target  = "PutObjectLockConfiguration"
 summary = "Unknown elements inside a lock document are skipped rather than refused, on all three writes: a stored WORM configuration is re-parsed by every future release, and a decoder that got stricter would downgrade the document to none — silently unlocking data — which is a worse failure than tolerating an element AWS added."
 cases   = ["c-lock-0010"]
@@ -211,9 +273,12 @@ cases   = ["c-lock-0010"]
 [[quirk]]
 id      = "q-lock-0015"
 kind    = "bucket_state_rule"
+classification = "contract"
+mutation_dimension = "bucket_state_precondition"
+contract_value = "require_object_lock_enabled"
 target  = "PutObjectRetention"
 summary = "A retention or legal-hold write against a bucket that never enabled object lock is refused as 400 InvalidRequest: per-object lock state exists only inside a lock-enabled bucket, so accepting the write would store a protection promise no enforcement path will ever read."
-cases   = ["c-lock-0025", "c-lock-0026"]
+cases   = ["c-lock-0005", "c-lock-0006", "c-lock-0025", "c-lock-0026"]
 
   [[quirk.evidence]]
   kind    = "aws-doc"

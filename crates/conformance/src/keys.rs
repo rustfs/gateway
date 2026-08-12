@@ -269,12 +269,6 @@ pub const DECLARED: &[(&str, Disposition, &str)] = &[
         "per-frame headers of an observed event stream. Both transports decode and record them, \
          but the event matcher currently counts frames by `type` and never compares these values",
     ),
-    (
-        "expect.events[].payload",
-        Disposition::Unhonoured,
-        "per-frame payload of an observed event stream, judged as a body expectation. Both \
-         transports record it, but the event matcher does not compare it",
-    ),
     // -- Unreachable behind a refusal -------------------------------------------------------------
     (
         "connection.tls.enabled",

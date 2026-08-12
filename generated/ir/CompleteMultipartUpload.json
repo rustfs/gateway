@@ -677,7 +677,7 @@
                                 "summary": "Upstream rejected ordinary SDK traffic because it matched the request body against the shape name instead of the wire name."
                               }
                             ],
-                "cases": ["c-mpu-0005", "c-mpu-0033"]
+                "cases": ["c-mpu-0005", "c-mpu-0033", "c-mpu-0034", "c-mpu-0035", "c-mpu-0036"]
               },
               {
                 "id": "q-mpu-late-error-0033",

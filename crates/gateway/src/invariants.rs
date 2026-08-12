@@ -71,7 +71,7 @@
 //! headers and not an encoder's, which is the half of the surface that matters here.
 
 use http::{HeaderName, Method, Response};
-use rustfs_gateway_core::{BodyAllowance, body_allowance};
+use rustfs_gateway_core::{response_body_allowed, response_framing_allowed};
 use rustfs_gateway_stream::Body;
 
 /// Drops whatever content and whichever headers this response is forbidden to carry, and corrects
@@ -82,15 +82,17 @@ use rustfs_gateway_stream::Body;
 /// holding two copies of the rule.
 pub(crate) fn enforce(response: &mut Response<Body>, method: &Method) {
     strip_customer_keys(response.headers_mut());
-    match body_allowance(method, response.status()) {
-        BodyAllowance::Content => reconcile_length(response),
-        BodyAllowance::HeadOfContent => *response.body_mut() = Body::empty(),
-        BodyAllowance::Bodyless => {
-            *response.body_mut() = Body::empty();
-            let headers = response.headers_mut();
-            headers.remove(http::header::CONTENT_LENGTH);
-            headers.remove(http::header::TRANSFER_ENCODING);
-        }
+    let body_allowed = response_body_allowed(method, response.status());
+    let framing_allowed = response_framing_allowed(method, response.status());
+    if !body_allowed {
+        *response.body_mut() = Body::empty();
+    }
+    if !framing_allowed {
+        let headers = response.headers_mut();
+        headers.remove(http::header::CONTENT_LENGTH);
+        headers.remove(http::header::TRANSFER_ENCODING);
+    } else if body_allowed {
+        reconcile_length(response);
     }
 }
 

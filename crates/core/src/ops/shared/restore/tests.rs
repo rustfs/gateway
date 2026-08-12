@@ -195,6 +195,7 @@ fn n_a_malformed_restore_header_is_refused() {
         "ongoing-request=\"false\",expiry-date=\"Fri, 21 Dec 2012 00:00:00 GMT\"",
         "ongoing-request=\"false\",  expiry-date=\"Fri, 21 Dec 2012 00:00:00 GMT\"",
         "ongoing-request=\"false\", expiry-date=Fri, 21 Dec 2012 00:00:00 GMT",
+        "ongoing-request=\"false\", expiry-date=\"Sun, 31 Feb 2026 00:00:00 GMT\"",
         "ongoing-request=\"false\", expires=\"Fri, 21 Dec 2012 00:00:00 GMT\"",
         "ongoing-request=\"true\", expiry-date=\"Fri, 21 Dec 2012 00:00:00 GMT\"",
         "ongoing-request=\"false\", expiry-date=\"a\", tier=\"Bulk\"",
@@ -211,11 +212,16 @@ fn n_an_oversized_restore_header_is_refused() {
     let huge = format!("ongoing-request=\"false\", expiry-date=\"{}\"", "A".repeat(4096));
     assert!(huge.len() > MAX_RESTORE_HEADER_BYTES);
     assert_eq!(parse_restore_status(&huge), None);
-    // The other direction of the bound: a value at the ceiling is still parsed.
-    let inner = MAX_RESTORE_HEADER_BYTES - "ongoing-request=\"false\", expiry-date=\"\"".len();
-    let at_limit = format!("ongoing-request=\"false\", expiry-date=\"{}\"", "A".repeat(inner));
+
+    let at_limit = "A".repeat(MAX_RESTORE_HEADER_BYTES);
+    let over_limit = "A".repeat(MAX_RESTORE_HEADER_BYTES + 1);
     assert_eq!(at_limit.len(), MAX_RESTORE_HEADER_BYTES);
-    assert!(parse_restore_status(&at_limit).is_some());
+    assert_eq!(over_limit.len(), MAX_RESTORE_HEADER_BYTES + 1);
+    assert!(restore_header_within_limit(at_limit.len()));
+    assert!(!restore_header_within_limit(over_limit.len()));
+    // A value at the ceiling reaches the grammar and is still refused when malformed.
+    assert_eq!(parse_restore_status(&at_limit), None);
+    assert_eq!(parse_restore_status(&over_limit), None);
 }
 
 // ── the request document ─────────────────────────────────────────────────────────────────────

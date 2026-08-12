@@ -16,7 +16,7 @@ polarity = "positive"
 operation = "CopyObject"
 tags = ["conditional", "preconditions", "etag"]
 timeout_ms = 10000
-quirks = ["q-cond-0046"]
+quirks = ["q-cond-etag-normalization-0098"]
 
 [[case.evidence]]
 url = "https://github.com/s3s-project/s3s/issues/448"

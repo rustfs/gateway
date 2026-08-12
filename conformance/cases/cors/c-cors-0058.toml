@@ -1,0 +1,41 @@
+[case]
+id = "c-cors-0058"
+schema_version = 1
+title = "A half-preflight is refused rather than routed"
+rationale = "Either CORS request header alone marks a malformed preflight attempt; accepting either or routing it would answer a different question."
+polarity = "negative"
+tags = ["cors", "preflight", "security"]
+timeout_ms = 10000
+quirks = ["q-cors-0046"]
+
+[[case.evidence]]
+url = "https://fetch.spec.whatwg.org/#http-cors-protocol"
+summary = "A browser preflight sends Origin together with Access-Control-Request-Method."
+kind = "rfc"
+
+[[setup.buckets]]
+name = "conf-cors-rt"
+
+[[exchanges]]
+[exchanges.request]
+method = "OPTIONS"
+target = "/conf-cors-rt/key"
+headers = { "origin" = "https://app.example.com" }
+[exchanges.expect]
+kind = "response"
+status = 403
+[exchanges.expect.error]
+code = "AccessForbidden"
+request_id_present = true
+
+[[exchanges]]
+[exchanges.request]
+method = "OPTIONS"
+target = "/conf-cors-rt/key"
+headers = { "access-control-request-method" = "PUT" }
+[exchanges.expect]
+kind = "response"
+status = 403
+[exchanges.expect.error]
+code = "AccessForbidden"
+request_id_present = true

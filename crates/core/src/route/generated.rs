@@ -46,6 +46,7 @@
 use http::Method;
 
 use super::selector::{Predicate, RouteEntry, RouteSelector, TargetKind};
+use crate::contracts::{SELECT_TYPE_ROUTE_PREDICATE, SelectTypeRoutePredicatePolicy};
 
 /// One row of the generated route table.
 ///
@@ -173,6 +174,11 @@ impl RouteRow {
                     Predicate::Target(target)
                 }
                 RoutePredicate::QueryPresent(key) => Predicate::QueryPresent(key),
+                RoutePredicate::QueryEquals("select-type", _)
+                    if matches!(SELECT_TYPE_ROUTE_PREDICATE, SelectTypeRoutePredicatePolicy::PresentAnyValue) =>
+                {
+                    Predicate::QueryPresent("select-type")
+                }
                 RoutePredicate::QueryEquals(key, value) => Predicate::QueryEquals(key, value),
                 RoutePredicate::QueryAbsent(key) => Predicate::QueryAbsent(key),
                 RoutePredicate::HeaderPresent(header, negated) => Predicate::HeaderPresent { header, negated },

@@ -15,12 +15,12 @@ authors = ["RustFS Team"]
 # Internal crates. Path only: nothing here is published, so the version double-write
 # that crates.io would require is just another thing to keep in sync.
 rustfs-gateway = { path = "crates/gateway", version = "0.5.0" }
-rustfs-gateway-codegen = { path = "crates/codegen", version = "0.1.0" }
+rustfs-gateway-codegen = { path = "crates/codegen", version = "0.2.0" }
 rustfs-gateway-conformance = { path = "crates/conformance", version = "0.3.0" }
 rustfs-gateway-core = { path = "crates/core", version = "0.3.0" }
 rustfs-gateway-http = { path = "crates/http", version = "0.1.0" }
 rustfs-gateway-macros = { path = "crates/macros", version = "0.1.0" }
-rustfs-gateway-model = { path = "crates/model", version = "0.1.0" }
+rustfs-gateway-model = { path = "crates/model", version = "0.2.0" }
 rustfs-gateway-sig = { path = "crates/sig", version = "0.2.0" }
 rustfs-gateway-server = { path = "crates/server", version = "0.1.0" }
 rustfs-gateway-stream = { path = "crates/stream", version = "0.1.0" }
@@ -70,6 +70,7 @@ subtle = "2.6"                                      # constant-time comparison
 syn = { version = "3.0", features = ["full", "extra-traits"] }
 thiserror = "2.0"
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
+unicode-normalization = "0.1"
 # default-features off: `tower::Service` and nothing else. The middleware stack is P6's and the
 # server is P7-02's; pulling in the full `util` feature here would put layers on the facade's
 # public surface before anything has decided what they are.

@@ -10,7 +10,7 @@ branch started admitting the request it described."""
 polarity = "negative"
 tags = ["cors", "preflight", "security"]
 timeout_ms = 10000
-quirks = ["q-cors-0016"]
+quirks = ["q-cors-0047"]
 
 [[case.evidence]]
 url = "https://fetch.spec.whatwg.org/#http-cors-protocol"

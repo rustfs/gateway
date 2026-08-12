@@ -1,0 +1,39 @@
+[case]
+id = "c-cors-0051"
+schema_version = 1
+title = "The first of two matching CORS rules wins"
+rationale = "Both rules match, so their different max ages distinguish first-match order from a last-match mutation."
+polarity = "positive"
+tags = ["cors", "preflight"]
+timeout_ms = 10000
+quirks = ["q-cors-0013"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/cors.html"
+summary = "The first rule that matches the request is applied."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "conf-cors-rt"
+
+[[exchanges]]
+[exchanges.request]
+method = "PUT"
+target = "/conf-cors-rt?cors"
+headers = { "content-type" = "application/xml", "content-md5" = "zsqYy5nEhugSJCtlyojPQA==" }
+body = { utf8 = "<CORSConfiguration><CORSRule><AllowedMethod>PUT</AllowedMethod><AllowedOrigin>*</AllowedOrigin><MaxAgeSeconds>11</MaxAgeSeconds></CORSRule><CORSRule><AllowedMethod>PUT</AllowedMethod><AllowedOrigin>*</AllowedOrigin><MaxAgeSeconds>22</MaxAgeSeconds></CORSRule></CORSConfiguration>" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+[exchanges.expect]
+kind = "response"
+status = 200
+
+[[exchanges]]
+[exchanges.request]
+method = "OPTIONS"
+target = "/conf-cors-rt/key"
+headers = { "origin" = "https://app.example.com", "access-control-request-method" = "PUT" }
+[exchanges.expect]
+kind = "response"
+status = 200
+[exchanges.expect.headers_present]
+"access-control-max-age" = "11"

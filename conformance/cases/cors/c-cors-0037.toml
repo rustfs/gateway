@@ -10,7 +10,7 @@ matcher that returned the first rule unconditionally would pass every positive c
 polarity = "negative"
 tags = ["cors", "preflight", "security"]
 timeout_ms = 10000
-quirks = ["q-cors-0015"]
+quirks = ["q-cors-0015", "q-cors-0027"]
 
 [[case.evidence]]
 url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/cors.html"
