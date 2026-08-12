@@ -46,6 +46,8 @@ $ cargo xtask verify --crate <the crate you changed>
 - [ ] The four-command gate passed (fmt, clippy, test, `cargo xtask verify`)
 - [ ] New or changed public API has rustdoc
 - [ ] Negative test cases outnumber positive ones
+- [ ] Every new assertion was mutated — the implementation was broken on purpose and the assertion
+      went red. The PR description names which ones
 - [ ] No Protected File touched; if one was, the PR description contains `BREAKING` and a migration path
 - [ ] No `unsafe` introduced
 - [ ] No `inventory` / `linkme` introduced
