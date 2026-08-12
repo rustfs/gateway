@@ -74,6 +74,7 @@ fixed now so that the same check does not get written twice under two names.
 | `check_smithy_timestamp_corpus.sh` | The vendored Smithy timestamp corpus matches its pinned bytes, case counts, license attribution, and format mapping | P1-04 |
 | `check_guard_grep_pipelines.sh` | The license and secret-hygiene guards contain no quiet grep option token, including in comments or strings; their grep checks must read input fully under `pipefail` | P0 |
 | `check_english_only.sh` | No tracked file contains CJK text. `rustfs/backlog` is the one repository in the organisation where Chinese is allowed; this is not it. Matches by codepoint in Python — a grep bracket range is read by locale collation and flags an em dash | P0 |
+| `check_ci_time_gate.sh` | Every PR job has a timeout, every dependency path stays within ten minutes, and Static checks / Clippy / Test retain their exact branch-protected contract | P0-04 |
 | `check_generated_dto_packaged.sh` | Every `#[path]` under `crates/*/src` stays inside its crate, reaching the generated dto through the `crates/types/generated` symlink | P1-06 |
 | `check_no_dto_non_exhaustive.sh` | No generated dto struct carries `#[non_exhaustive]`; it forbids `..Default::default()` (E0639), which is the very syntax that keeps a new field minor (ADR-0004 P1) | P1-06 |
 | `check_no_exhaustive_destructuring.sh` | No hand-written code destructures a dto without a trailing `..`; that is the one pattern a new field breaks (ADR-0004 P3) | P1-06 |
@@ -118,7 +119,6 @@ fixed now so that the same check does not get written twice under two names.
 | Script | Checks | Phase |
 |---|---|---|
 | `check_dto_fields.sh` | DTO public field count only grows (the `non_exhaustive` and destructuring halves are now implemented separately, see above) | P0-08 |
-| `check_ci_time_gate.sh` | Total PR gate wall time stays inside the 10-minute budget | P0-04 |
 | `check_role_verdicts.sh` | High-risk PR descriptions carry the required expert-role verdicts (PR-only job; needs the `## Role Verdicts` anchor from the PR template) | P0-10 |
 | `check_op_file_shape.sh` | One operation per file; `//! Shares:` declaration agrees with the actual `use` graph; 800-line ceiling | P1 |
 | `check_quirks_evidence.sh` | Every quirk has ≥1 evidence and ≥1 case referencing it, consistent in both directions | P1 |

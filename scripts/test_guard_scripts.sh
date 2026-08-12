@@ -6489,6 +6489,279 @@ path.write_text(text.replace(old, new, 1))
 PYEOF
 }
 
+mut_ci_time_static_command_weakened() {
+    replace_ci_text 'cargo fmt --all --check' 'cargo fmt --check'
+}
+expect_fail check_ci_time_gate.sh \
+    'the required Static checks job weakening the exact fmt command' mut_ci_time_static_command_weakened
+
+mut_ci_time_clippy_command_weakened() {
+    replace_ci_text 'cargo clippy --workspace --all-targets -- -D warnings' \
+        'cargo clippy --workspace -- -D warnings'
+}
+expect_fail check_ci_time_gate.sh \
+    'the required Clippy job dropping all-target coverage' mut_ci_time_clippy_command_weakened
+
+mut_ci_time_static_failure_swallowed() {
+    replace_ci_text '      - run: cargo fmt --all --check' \
+        '      - run: cargo fmt --all --check || true'
+}
+expect_fail check_ci_time_gate.sh \
+    'the required Static checks job swallowing fmt failure' mut_ci_time_static_failure_swallowed
+
+mut_ci_time_clippy_continues_on_error() {
+    replace_ci_text '      - run: cargo clippy --workspace --all-targets -- -D warnings' \
+        '      - run: cargo clippy --workspace --all-targets -- -D warnings
+        continue-on-error: true'
+}
+expect_fail check_ci_time_gate.sh \
+    'the required Clippy step being allowed to fail' mut_ci_time_clippy_continues_on_error
+
+mut_ci_time_static_name_changed() {
+    replace_ci_text '    name: Static checks' '    name: Static check'
+}
+expect_fail check_ci_time_gate.sh \
+    'the branch-protected Static checks context being renamed' mut_ci_time_static_name_changed
+
+mut_ci_time_duplicate_required_name() {
+    replace_ci_text '  clippy:
+    name: Clippy' '  static-decoy:
+    name: Static checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      - run: true
+
+  clippy:
+    name: Clippy'
+}
+expect_fail check_ci_time_gate.sh \
+    'a second job impersonating a branch-protected check name' mut_ci_time_duplicate_required_name
+
+mut_ci_time_static_timeout_removed() {
+    replace_ci_text '  static:
+    name: Static checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 9' '  static:
+    name: Static checks
+    runs-on: ubuntu-latest'
+}
+expect_fail check_ci_time_gate.sh \
+    'the required Static checks job becoming unbounded' mut_ci_time_static_timeout_removed
+
+mut_ci_time_feedback_timeout_removed() {
+    replace_ci_text '  feedback-loop:
+    name: Operation feedback loop
+    runs-on: ubuntu-latest
+    timeout-minutes: 9' '  feedback-loop:
+    name: Operation feedback loop
+    runs-on: ubuntu-latest'
+}
+expect_fail check_ci_time_gate.sh \
+    'a non-required pull-request job becoming unbounded' mut_ci_time_feedback_timeout_removed
+
+mut_ci_time_msrv_timeout_removed() {
+    replace_ci_text '  msrv:
+    name: MSRV
+    runs-on: ubuntu-latest
+    timeout-minutes: 9' '  msrv:
+    name: MSRV
+    runs-on: ubuntu-latest'
+}
+expect_fail check_ci_time_gate.sh \
+    'the MSRV job becoming unbounded' mut_ci_time_msrv_timeout_removed
+
+mut_ci_time_dependency_path_exceeds_budget() {
+    replace_ci_text '  feedback-loop:
+    name: Operation feedback loop' '  feedback-loop:
+    name: Operation feedback loop
+    needs: bootstrap'
+}
+expect_fail check_ci_time_gate.sh \
+    'serial jobs permitting a fifteen-minute dependency path' mut_ci_time_dependency_path_exceeds_budget
+
+mut_ci_time_docs_job_removed() {
+    replace_ci_text '  docs:' '  docs-removed:'
+}
+expect_fail check_ci_time_gate.sh \
+    'an accepted pull-request job being renamed away' mut_ci_time_docs_job_removed
+
+mut_ci_time_permissions_widened() {
+    replace_ci_text 'permissions:
+  contents: read' 'permissions:
+  contents: write'
+}
+expect_fail check_ci_time_gate.sh \
+    'workflow permissions being widened' mut_ci_time_permissions_widened
+
+mut_ci_time_action_pin_replaced_by_tag() {
+    replace_ci_text 'actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10' \
+        'actions/checkout@v6'
+}
+expect_fail check_ci_time_gate.sh \
+    'an action pin being replaced by a movable tag' mut_ci_time_action_pin_replaced_by_tag
+
+mut_ci_time_job_permissions_override() {
+    replace_ci_text '  docs:
+    name: Documentation' '  docs:
+    name: Documentation
+    permissions:
+      contents: write'
+}
+expect_fail check_ci_time_gate.sh \
+    'a job overriding the workflow minimum permissions' mut_ci_time_job_permissions_override
+
+mut_ci_time_required_step_skips() {
+    replace_ci_text '      - run: cargo clippy --workspace --all-targets -- -D warnings' \
+        '      - run: cargo clippy --workspace --all-targets -- -D warnings
+        if: ${{ false }}'
+}
+expect_fail check_ci_time_gate.sh \
+    'the required Clippy command being conditionally skipped' mut_ci_time_required_step_skips
+
+mut_ci_time_job_concurrency_serializes() {
+    replace_ci_text '  docs:
+    name: Documentation' '  docs:
+    name: Documentation
+    concurrency: pull-request-gate'
+}
+expect_fail check_ci_time_gate.sh \
+    'a job-level concurrency lane invalidating the dependency budget' mut_ci_time_job_concurrency_serializes
+
+mut_ci_time_workflow_defaults_hide_failure() {
+    replace_ci_text 'permissions:
+  contents: read' 'defaults:
+  run:
+    shell: bash {0}
+
+permissions:
+  contents: read'
+}
+expect_fail check_ci_time_gate.sh \
+    'workflow defaults disabling fail-fast shell behavior' mut_ci_time_workflow_defaults_hide_failure
+
+mut_ci_time_workflow_env_overrides_cargo() {
+    replace_ci_text 'env:
+  CARGO_TERM_COLOR: always' 'env:
+  PATH: scripts/fake-bin
+  CARGO_TERM_COLOR: always'
+}
+expect_fail check_ci_time_gate.sh \
+    'the workflow environment overriding the required command path' mut_ci_time_workflow_env_overrides_cargo
+
+mut_ci_time_concurrency_cancel_disabled() {
+    replace_ci_text '  cancel-in-progress: true' '  cancel-in-progress: false'
+}
+expect_fail check_ci_time_gate.sh \
+    'superseded branch runs no longer being cancelled' mut_ci_time_concurrency_cancel_disabled
+
+mut_ci_time_static_parent_fetch_dropped() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path(".github/workflows/ci.yml")
+text = path.read_text()
+start = text.index("  static:")
+position = text.index("          fetch-depth: 2", start)
+path.write_text(text[:position] + text[position:].replace("          fetch-depth: 2", "          fetch-depth: 1", 1))
+PYEOF
+}
+expect_fail check_ci_time_gate.sh \
+    'the Static checks job losing access to the baseline parent commit' mut_ci_time_static_parent_fetch_dropped
+
+mut_ci_time_clippy_setup_action_replaced() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path(".github/workflows/ci.yml")
+text = path.read_text()
+start = text.index("  clippy:")
+old = "      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2"
+position = text.index(old, start)
+new = "      - uses: example/environment-injector@0000000000000000000000000000000000000000"
+path.write_text(text[:position] + text[position:].replace(old, new, 1))
+PYEOF
+}
+expect_fail check_ci_time_gate.sh \
+    'a fully pinned action replacing the expected Clippy setup' mut_ci_time_clippy_setup_action_replaced
+
+mut_ci_time_duplicate_fmt_execution() {
+    replace_ci_text '  clippy:
+    name: Clippy' '  fmt-decoy:
+    name: Format duplicate
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      - run: cargo fmt --all --check
+
+  clippy:
+    name: Clippy'
+}
+expect_fail check_ci_time_gate.sh \
+    'a second CI job duplicating the authoritative fmt execution' mut_ci_time_duplicate_fmt_execution
+
+mut_ci_time_matrix_serializes_job() {
+    replace_ci_text '  docs:
+    name: Documentation' '  docs:
+    name: Documentation
+    strategy:
+      max-parallel: 1
+      matrix:
+        shard: [one, two]'
+}
+expect_fail check_ci_time_gate.sh \
+    'a serial matrix invalidating the one-job timeout budget' mut_ci_time_matrix_serializes_job
+
+mut_ci_time_nonrequired_job_skips() {
+    replace_ci_text '  docs:
+    name: Documentation' '  docs:
+    name: Documentation
+    if: ${{ false }}'
+}
+expect_fail check_ci_time_gate.sh \
+    'a pull-request job being conditionally skipped' mut_ci_time_nonrequired_job_skips
+
+mut_ci_time_dependency_cycle() {
+    replace_ci_text '  docs:
+    name: Documentation' '  docs:
+    name: Documentation
+    needs: feedback-loop'
+    replace_ci_text '  feedback-loop:
+    name: Operation feedback loop' '  feedback-loop:
+    name: Operation feedback loop
+    needs: docs'
+}
+expect_fail check_ci_time_gate.sh \
+    'a cycle making the CI dependency budget undefined' mut_ci_time_dependency_cycle
+
+mut_ci_time_required_shell_override() {
+    replace_ci_text '      - run: cargo clippy --workspace --all-targets -- -D warnings' \
+        '      - run: cargo clippy --workspace --all-targets -- -D warnings
+        shell: bash {0}'
+}
+expect_fail check_ci_time_gate.sh \
+    'the required Clippy command overriding fail-fast shell behavior' mut_ci_time_required_shell_override
+
+mut_ci_time_required_runner_replaced() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path(".github/workflows/ci.yml")
+text = path.read_text()
+start = text.index("  clippy:")
+position = text.index("    runs-on: ubuntu-latest", start)
+path.write_text(text[:position] + text[position:].replace("    runs-on: ubuntu-latest", "    runs-on: self-hosted", 1))
+PYEOF
+}
+expect_fail check_ci_time_gate.sh \
+    'the required Clippy command moving to an unexpected runner' mut_ci_time_required_runner_replaced
+
+mut_ci_time_workflow_deleted() {
+    rm -f .github/workflows/ci.yml
+}
+expect_fail check_ci_time_gate.sh \
+    "the guard's own workflow input deleted, which must fail rather than skip" mut_ci_time_workflow_deleted
+
 mut_ci_workspace_job_missing() {
     replace_ci_text '  workspace-tests:' '  workspace-testz:'
 }
