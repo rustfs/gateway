@@ -26,15 +26,17 @@ Third-party material
    See model/PROVENANCE.md for the pinned upstream commit and checksums.
 
 2. aws-sigv4 (AWS SDK for Rust)
-   Source:  https://github.com/awslabs/aws-sdk-rust
-   Crate:   aws-sigv4
+   Source:  https://github.com/smithy-lang/smithy-rs
+   Crate:   aws-sigv4 1.5.1
    License: Apache License 2.0
-   Notes:   rustfs-gateway does not depend on this crate. Two pure helper functions
-            required for SigV4 canonicalisation are ported into
-            `crates/sig` instead, so that this repository can keep only the
-            small pure helpers it needs (see docs/msrv.md). Ported code carries an in-file
-            attribution comment naming the upstream file and revision.
-            TODO(P1): record the upstream revision here when the port lands.
+   Commit:  2880e0785db4cf2ceb086cfeba86a4cbdeb14176
+   Path:    aws/rust-runtime/aws-sigv4/src/sign/v4.rs
+   Notes:   rustfs-gateway does not depend on this crate. `signing_key` adapted from `generate_signing_key`;
+            `calculate_signature` adapted from the upstream function of the same name. The local
+            versions move key material through this crate's zeroizing containers and accept only a
+            server-verified scope. See docs/msrv.md and the in-file attribution for details.
+
+   Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 
 3. Smithy timestamp format test suite
    Source:  https://github.com/smithy-lang/smithy-rs
@@ -67,4 +69,8 @@ Any source file in this repository that is copied or adapted from another
 project must be registered below with its upstream project, upstream revision,
 license, and the paths of the affected files in this repository.
 
-  (empty)
+  Local path:        crates/sig/src/derive.rs
+  Upstream project:  https://github.com/smithy-lang/smithy-rs
+  Upstream revision: 2880e0785db4cf2ceb086cfeba86a4cbdeb14176
+  Upstream path:     aws/rust-runtime/aws-sigv4/src/sign/v4.rs
+  License:           Apache-2.0

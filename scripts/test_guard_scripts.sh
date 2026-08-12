@@ -3082,6 +3082,327 @@ probe_smithy_timestamp_guard_missing_python() {
 }
 probe_smithy_timestamp_guard_missing_python
 
+mut_governance_relationship_removed() {
+    python3 - <<'PY'
+from pathlib import Path
+
+path = Path("README.md")
+text = path.read_text()
+path.write_text(text.replace("repository is not a fork", "repository has a separate history", 1))
+PY
+}
+expect_fail check_governance_attribution.sh \
+    'the README no longer saying this repository is not a fork' mut_governance_relationship_removed
+
+mut_governance_relationship_hidden_in_comment() {
+    python3 - <<'PY'
+from pathlib import Path
+
+path = Path("README.md")
+text = path.read_text()
+text = text.replace("repository is not a fork", "repository has a separate history", 1)
+text = text.replace(
+    "## Relationship to s3s\n",
+    "## Relationship to s3s\n\n<!-- repository is not a fork -->",
+    1,
+)
+path.write_text(text)
+PY
+}
+expect_fail check_governance_attribution.sh \
+    'the README relationship surviving only in an HTML comment' mut_governance_relationship_hidden_in_comment
+
+mut_governance_relationship_hidden_in_fence() {
+    python3 - <<'PY'
+from pathlib import Path
+
+path = Path("README.md")
+text = path.read_text()
+text = text.replace("repository is not a fork", "repository has a separate history", 1)
+text = text.replace(
+    "## Relationship to s3s\n",
+    "## Relationship to s3s\n\n```text\nrepository is not a fork\n```",
+    1,
+)
+path.write_text(text)
+PY
+}
+expect_fail check_governance_attribution.sh \
+    'the README relationship surviving only in a fenced block' mut_governance_relationship_hidden_in_fence
+
+mut_governance_relationship_hidden_in_blockquote_fence() {
+    python3 - <<'PY'
+from pathlib import Path
+
+path = Path("README.md")
+text = path.read_text()
+text = text.replace("repository is not a fork", "repository has a separate history", 1)
+text = text.replace(
+    "## Relationship to s3s\n",
+    "## Relationship to s3s\n\n> ```text\n> repository is not a fork\n> ```",
+    1,
+)
+path.write_text(text)
+PY
+}
+expect_fail check_governance_attribution.sh \
+    'the README relationship surviving only in a blockquote fenced block' mut_governance_relationship_hidden_in_blockquote_fence
+
+mut_governance_relationship_hidden_in_list_fence() {
+    python3 - <<'PY'
+from pathlib import Path
+
+path = Path("README.md")
+text = path.read_text()
+text = text.replace("repository is not a fork", "repository has a separate history", 1)
+text = text.replace(
+    "## Relationship to s3s\n",
+    "## Relationship to s3s\n\n- ```text\n  repository is not a fork\n  ```",
+    1,
+)
+path.write_text(text)
+PY
+}
+expect_fail check_governance_attribution.sh \
+    'the README relationship surviving only in a list fenced block' mut_governance_relationship_hidden_in_list_fence
+
+mut_governance_relationship_hidden_in_space_indented_code() {
+    python3 - <<'PY'
+from pathlib import Path
+
+path = Path("README.md")
+text = path.read_text()
+text = text.replace("repository is not a fork", "repository has a separate history", 1)
+text = text.replace(
+    "## Relationship to s3s\n",
+    "## Relationship to s3s\n\n    repository is not a fork",
+    1,
+)
+path.write_text(text)
+PY
+}
+expect_fail check_governance_attribution.sh \
+    'the README relationship surviving only in four-space indented code' mut_governance_relationship_hidden_in_space_indented_code
+
+mut_governance_relationship_hidden_in_tab_indented_code() {
+    python3 - <<'PY'
+from pathlib import Path
+
+path = Path("README.md")
+text = path.read_text()
+text = text.replace("repository is not a fork", "repository has a separate history", 1)
+text = text.replace(
+    "## Relationship to s3s\n",
+    "## Relationship to s3s\n\n\trepository is not a fork",
+    1,
+)
+path.write_text(text)
+PY
+}
+expect_fail check_governance_attribution.sh \
+    'the README relationship surviving only in tab-indented code' mut_governance_relationship_hidden_in_tab_indented_code
+
+mut_governance_notice_revision_changed() {
+    python3 - <<'PY'
+from pathlib import Path
+
+path = Path("NOTICE")
+text = path.read_text()
+path.write_text(text.replace("2880e0785db4cf2ceb086cfeba86a4cbdeb14176", "0" * 40, 1))
+PY
+}
+expect_fail check_governance_attribution.sh \
+    'the aws-sigv4 NOTICE revision drifting from its source snapshot' mut_governance_notice_revision_changed
+
+mut_governance_notice_commit_survives_only_in_notes() {
+    python3 - <<'PY'
+from pathlib import Path
+
+path = Path("NOTICE")
+text = path.read_text()
+revision = "2880e0785db4cf2ceb086cfeba86a4cbdeb14176"
+text = text.replace(f"   Commit:  {revision}", "   Commit:  " + "0" * 40, 1)
+text = text.replace(
+    "   Notes:   rustfs-gateway",
+    f"   Notes:   Commit:  {revision}\n            rustfs-gateway",
+    1,
+)
+path.write_text(text)
+PY
+}
+expect_fail check_governance_attribution.sh \
+    'the NOTICE commit surviving only inside Notes' mut_governance_notice_commit_survives_only_in_notes
+
+mut_governance_notice_source_field_duplicated() {
+    python3 - <<'PY'
+from pathlib import Path
+
+path = Path("NOTICE")
+text = path.read_text()
+source = "   Source:  https://github.com/smithy-lang/smithy-rs\n"
+if text.count(source) < 2:
+    raise SystemExit("smithy-rs NOTICE source fields are missing")
+path.write_text(text.replace(source, source + source, 1))
+PY
+}
+expect_fail check_governance_attribution.sh \
+    'the NOTICE aws-sigv4 entry repeating a formal source field' mut_governance_notice_source_field_duplicated
+
+mut_governance_registry_entry_removed() {
+    python3 - <<'PY'
+from pathlib import Path
+
+path = Path("NOTICE")
+text = path.read_text()
+path.write_text(text.replace("crates/sig/src/derive.rs", "crates/sig/src/missing.rs", 1))
+PY
+}
+expect_fail check_governance_attribution.sh \
+    'the adapted source disappearing from the copied-code registry' mut_governance_registry_entry_removed
+
+mut_governance_registry_revision_in_notes() {
+    python3 - <<'PY'
+from pathlib import Path
+
+path = Path("NOTICE")
+text = path.read_text()
+old = "  Upstream revision: 2880e0785db4cf2ceb086cfeba86a4cbdeb14176"
+new = "  Upstream revision: " + "0" * 40 + "\n  Notes:             2880e0785db4cf2ceb086cfeba86a4cbdeb14176"
+path.write_text(text.replace(old, new, 1))
+PY
+}
+expect_fail check_governance_attribution.sh \
+    'the registry revision surviving only in Notes' mut_governance_registry_revision_in_notes
+
+mut_governance_registry_facts_split_across_entries() {
+    python3 - <<'PY'
+from pathlib import Path
+
+path = Path("NOTICE")
+text = path.read_text()
+text = text.replace(
+    "  Upstream revision: 2880e0785db4cf2ceb086cfeba86a4cbdeb14176",
+    "  Upstream revision: " + "0" * 40,
+    1,
+)
+text += """
+
+  Local path:        crates/sig/src/other.rs
+  Upstream project:  https://github.com/smithy-lang/smithy-rs
+  Upstream revision: 2880e0785db4cf2ceb086cfeba86a4cbdeb14176
+  Upstream path:     aws/rust-runtime/aws-sigv4/src/sign/v4.rs
+  License:           Apache-2.0
+"""
+path.write_text(text)
+PY
+}
+expect_fail check_governance_attribution.sh \
+    'the registry facts being split across different entries' mut_governance_registry_facts_split_across_entries
+
+mut_governance_registry_path_changed() {
+    python3 - <<'PY'
+from pathlib import Path
+
+path = Path("NOTICE")
+text = path.read_text()
+old = "  Upstream path:     aws/rust-runtime/aws-sigv4/src/sign/v4.rs"
+path.write_text(text.replace(old, "  Upstream path:     aws/rust-runtime/aws-sigv4/src/sign/other.rs", 1))
+PY
+}
+expect_fail check_governance_attribution.sh \
+    'the copied-code registry losing the exact upstream path' mut_governance_registry_path_changed
+
+mut_governance_registry_license_in_notes() {
+    python3 - <<'PY'
+from pathlib import Path
+
+path = Path("NOTICE")
+text = path.read_text()
+old = "  License:           Apache-2.0"
+new = "  License:           MIT\n  Notes:             Apache-2.0"
+path.write_text(text.replace(old, new, 1))
+PY
+}
+expect_fail check_governance_attribution.sh \
+    'the registry license surviving only in Notes' mut_governance_registry_license_in_notes
+
+mut_governance_notice_copyright_changed() {
+    python3 - <<'PY'
+from pathlib import Path
+
+path = Path("NOTICE")
+text = path.read_text()
+old = "   Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved."
+new = "   Copyright attribution omitted."
+path.write_text(text.replace(old, new, 1))
+PY
+}
+expect_fail check_governance_attribution.sh \
+    'the aws-sigv4 NOTICE entry losing its copyright attribution' mut_governance_notice_copyright_changed
+
+mut_governance_source_revision_removed() {
+    python3 - <<'PY'
+from pathlib import Path
+
+path = Path("crates/sig/src/derive.rs")
+text = path.read_text()
+path.write_text(text.replace("2880e0785db4cf2ceb086cfeba86a4cbdeb14176", "revision omitted", 1))
+PY
+}
+expect_fail check_governance_attribution.sh \
+    'the in-file attribution losing the reviewed upstream revision' mut_governance_source_revision_removed
+
+mut_governance_source_revision_survives_only_outside_attribution() {
+    python3 - <<'PY'
+from pathlib import Path
+
+path = Path("crates/sig/src/derive.rs")
+text = path.read_text()
+revision = "2880e0785db4cf2ceb086cfeba86a4cbdeb14176"
+old = f"//     Revision: {revision} (aws-sigv4 1.5.1)"
+new = "//     Revision: " + "0" * 40 + " (aws-sigv4 1.5.1)"
+text = text.replace(old, new, 1)
+text = text.replace(
+    "// ---------------------------------------------------------------------------\n\n//!",
+    f"// ---------------------------------------------------------------------------\n// Decoy revision outside ATTRIBUTION: {revision}\n\n//!",
+    1,
+)
+path.write_text(text)
+PY
+}
+expect_fail check_governance_attribution.sh \
+    'the source revision surviving only outside ATTRIBUTION' mut_governance_source_revision_survives_only_outside_attribution
+
+mut_governance_source_attribution_block_duplicated() {
+    python3 - <<'PY'
+from pathlib import Path
+
+path = Path("crates/sig/src/derive.rs")
+text = path.read_text()
+divider = "// ---------------------------------------------------------------------------\n"
+start = text.index(divider + "// ATTRIBUTION\n")
+end = text.index(divider, start + len(divider)) + len(divider)
+block = text[start:end]
+path.write_text(text.replace("//! The SigV4", block + "\n//! The SigV4", 1))
+PY
+}
+expect_fail check_governance_attribution.sh \
+    'derive.rs containing more than one ATTRIBUTION block' mut_governance_source_attribution_block_duplicated
+
+mut_governance_source_function_mapping_changed() {
+    python3 - <<'PY'
+from pathlib import Path
+
+path = Path("crates/sig/src/derive.rs")
+text = path.read_text()
+old = "//     Function mapping: signing_key <- generate_signing_key"
+new = "//     Function mapping: signing_key <- unrelated_function"
+path.write_text(text.replace(old, new, 1))
+PY
+}
+expect_fail check_governance_attribution.sh \
+    'derive.rs changing a reviewed function mapping' mut_governance_source_function_mapping_changed
+
 mut_rustfs_dep() {
     python3 - <<'PYEOF'
 from pathlib import Path
@@ -6122,6 +6443,71 @@ mut_ci_guard_serialized() {
 expect_fail check_ci_test_split.sh \
     'the guard mutation job waiting for workspace tests' mut_ci_guard_serialized
 
+mut_ci_target_job_missing() {
+    replace_ci_text '  target-consolidation-self-test:' '  target-consolidation-self-tesx:'
+}
+expect_fail check_ci_test_split.sh \
+    'the target-consolidation-self-test job being renamed away' mut_ci_target_job_missing
+
+mut_ci_target_command_dropped() {
+    replace_ci_text 'timeout 120s bash scripts/test_test_target_consolidation.sh' \
+        'timeout 120s true'
+}
+expect_fail check_ci_test_split.sh \
+    'the target-consolidation mutation suite being replaced with a no-op' mut_ci_target_command_dropped
+
+mut_ci_target_failure_swallowed() {
+    replace_ci_text '          timeout 120s bash scripts/test_test_target_consolidation.sh' \
+        '          timeout 120s bash scripts/test_test_target_consolidation.sh || true'
+}
+expect_fail check_ci_test_split.sh \
+    'the target-consolidation job swallowing a failure or timeout' mut_ci_target_failure_swallowed
+
+mut_ci_target_budget_widened() {
+    replace_ci_text '  target-consolidation-self-test:
+    name: Target consolidation self-test
+    runs-on: ubuntu-latest
+    timeout-minutes: 3' '  target-consolidation-self-test:
+    name: Target consolidation self-test
+    runs-on: ubuntu-latest
+    timeout-minutes: 4'
+}
+expect_fail check_ci_test_split.sh \
+    'the target-consolidation job widening its three-minute budget' mut_ci_target_budget_widened
+
+mut_ci_target_setup_action_replaced() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path(".github/workflows/ci.yml")
+text = path.read_text()
+start = text.index("  target-consolidation-self-test:")
+old = "      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6"
+position = text.index(old, start)
+new = "      - uses: example/environment-injector@0000000000000000000000000000000000000000"
+path.write_text(text[:position] + text[position:].replace(old, new, 1))
+PYEOF
+}
+expect_fail check_ci_test_split.sh \
+    'the target-consolidation checkout being replaced by an environment injector' \
+    mut_ci_target_setup_action_replaced
+
+mut_ci_target_serialized() {
+    replace_ci_text '  target-consolidation-self-test:
+    name: Target consolidation self-test' '  target-consolidation-self-test:
+    needs: guard-self-test
+    name: Target consolidation self-test'
+}
+expect_fail check_ci_test_split.sh \
+    'the target-consolidation job waiting for guard mutations' mut_ci_target_serialized
+
+mut_ci_target_serialized_in_guard() {
+    printf '%s\n' 'if "${SCRIPT_DIR}/test_test_target_consolidation.sh"; then' \
+        >>scripts/test_guard_scripts.sh
+}
+expect_fail check_ci_test_split.sh \
+    'the guard job serializing target-consolidation mutations again' mut_ci_target_serialized_in_guard
+
 mut_ci_required_name_changed() {
     replace_ci_text '    name: Test' '    name: Tests'
 }
@@ -6129,11 +6515,19 @@ expect_fail check_ci_test_split.sh \
     'the branch-protected Test check being renamed' mut_ci_required_name_changed
 
 mut_ci_aggregate_drops_guard() {
-    replace_ci_text 'needs: [workspace-tests, guard-self-test, gateway-tsan]' \
-        'needs: [workspace-tests, gateway-tsan]'
+    replace_ci_text 'needs: [workspace-tests, guard-self-test, target-consolidation-self-test, gateway-tsan]' \
+        'needs: [workspace-tests, target-consolidation-self-test, gateway-tsan]'
 }
 expect_fail check_ci_test_split.sh \
     'the required Test check no longer waiting for guard mutations' mut_ci_aggregate_drops_guard
+
+mut_ci_aggregate_drops_target() {
+    replace_ci_text 'needs: [workspace-tests, guard-self-test, target-consolidation-self-test, gateway-tsan]' \
+        'needs: [workspace-tests, guard-self-test, gateway-tsan]'
+}
+expect_fail check_ci_test_split.sh \
+    'the required Test check no longer waiting for target-consolidation mutations' \
+    mut_ci_aggregate_drops_target
 
 mut_ci_aggregate_skips_on_failure() {
     replace_ci_text 'if: always()' 'if: success()'
@@ -6158,12 +6552,12 @@ expect_fail check_ci_test_split.sh \
 mut_ci_aggregate_budget_widened() {
     replace_ci_text '  test:
     name: Test
-    needs: [workspace-tests, guard-self-test, gateway-tsan]
+    needs: [workspace-tests, guard-self-test, target-consolidation-self-test, gateway-tsan]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 1' '  test:
     name: Test
-    needs: [workspace-tests, guard-self-test, gateway-tsan]
+    needs: [workspace-tests, guard-self-test, target-consolidation-self-test, gateway-tsan]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 2'
@@ -6183,6 +6577,13 @@ mut_ci_guard_result_ignored() {
 expect_fail check_ci_test_split.sh \
     'the aggregate check ignoring the guard mutation result' mut_ci_guard_result_ignored
 
+mut_ci_target_result_ignored() {
+    replace_ci_text 'TARGET_CONSOLIDATION_RESULT: ${{ needs.target-consolidation-self-test.result }}' \
+        'TARGET_CONSOLIDATION_RESULT: success'
+}
+expect_fail check_ci_test_split.sh \
+    'the aggregate check ignoring the target-consolidation result' mut_ci_target_result_ignored
+
 mut_ci_workspace_comparison_dropped() {
     replace_ci_text '          test "$WORKSPACE_RESULT" = success' '          true'
 }
@@ -6194,6 +6595,13 @@ mut_ci_guard_comparison_dropped() {
 }
 expect_fail check_ci_test_split.sh \
     'the aggregate check not executing the guard result comparison' mut_ci_guard_comparison_dropped
+
+mut_ci_target_comparison_dropped() {
+    replace_ci_text '          test "$TARGET_CONSOLIDATION_RESULT" = success' '          true'
+}
+expect_fail check_ci_test_split.sh \
+    'the aggregate check not executing the target-consolidation result comparison' \
+    mut_ci_target_comparison_dropped
 
 mut_ci_workers_share_concurrency_lane() {
     replace_ci_text '  workspace-tests:
@@ -6895,13 +7303,6 @@ RUSTEOF
 }
 expect_fail check_xtask_test_target_consolidation.sh \
     'the default build target including an xtask test source' mut_xtask_default_build_includes_source
-
-cases=$((cases + 1))
-if "${SCRIPT_DIR}/test_test_target_consolidation.sh"; then
-    pass_msg 'test-target consolidation mutations'
-else
-    fail_msg 'test-target consolidation mutations'
-fi
 
 # The protected quirk ledger has independent negative controls for its counts, source union,
 # dimensions, capability exclusions, production consumers, bilateral backlinks and generated ID

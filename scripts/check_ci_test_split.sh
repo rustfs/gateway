@@ -2,12 +2,13 @@
 set -euo pipefail
 
 # WHAT THIS CHECKS
-#   Workspace tests, guard mutations and TSAN run on separate CI runners, while the
-#   branch-protected Test check waits for all three. This keeps the gate wall time below ten
+#   Workspace tests, guard mutations, target-consolidation mutations and TSAN run on separate CI
+#   runners, while the branch-protected Test check waits for all four. This keeps the gate wall time below ten
 #   minutes as coverage grows.
 
 ROOT="${GATEWAY_CHECK_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 WORKFLOW="$ROOT/.github/workflows/ci.yml"
+GUARD_SELF_TEST="$ROOT/scripts/test_guard_scripts.sh"
 
 fail() {
     printf 'ERROR: %s\n' "$*" >&2
@@ -15,6 +16,7 @@ fail() {
 }
 
 [[ -f "$WORKFLOW" ]] || fail '.github/workflows/ci.yml is missing'
+[[ -f "$GUARD_SELF_TEST" ]] || fail 'scripts/test_guard_scripts.sh is missing'
 
 ruby -ryaml - "$WORKFLOW" <<'RUBY' || exit 1
 workflow = YAML.load_file(ARGV.fetch(0))
@@ -39,6 +41,7 @@ require_equal(workflow.fetch("env", {}).keys, workflow_env_keys,
 
 workspace = jobs.fetch("workspace-tests")
 guard = jobs.fetch("guard-self-test")
+target = jobs.fetch("target-consolidation-self-test")
 aggregate = jobs.fetch("test")
 
 worker_keys = ["name", "runs-on", "timeout-minutes", "steps"]
@@ -48,6 +51,11 @@ require_equal(workspace.values_at("name", "runs-on", "timeout-minutes"),
               ["Workspace tests", "ubuntu-latest", 9], "workspace-tests identity or budget changed")
 require_equal(guard.values_at("name", "runs-on", "timeout-minutes"),
               ["Guard self-test", "ubuntu-latest", 9], "guard-self-test identity or budget changed")
+require_equal(target.keys, worker_keys,
+              "target-consolidation-self-test changed its parallel three-minute contract")
+require_equal(target.values_at("name", "runs-on", "timeout-minutes"),
+              ["Target consolidation self-test", "ubuntu-latest", 3],
+              "target-consolidation-self-test identity or budget changed")
 
 [workspace, guard].each do |job|
   steps = job.fetch("steps")
@@ -69,6 +77,14 @@ require_equal(guard_steps.first(3).map(&:keys), [["uses", "with"], ["uses"], ["u
               "guard-self-test setup changed its parent-fetch contract")
 require_equal(guard_steps.first.fetch("with"), {"fetch-depth" => 2},
               "guard-self-test cannot read the baseline parent commit")
+target_steps = target.fetch("steps")
+require_equal(target_steps.length, 2,
+              "target-consolidation-self-test changed its setup or command step count")
+require_equal(target_steps.first,
+              {"uses" => "actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10"},
+              "target-consolidation-self-test checkout action or pin changed")
+require_equal(target_steps.last.keys, ["name", "run"],
+              "target-consolidation-self-test command can skip or hide failure")
 
 workspace_run = <<~'RUN'
   started="$(date +%s)"
@@ -82,28 +98,38 @@ guard_run = <<~'RUN'
   elapsed="$(( $(date +%s) - started ))"
   echo "guard mutations completed in ${elapsed}s"
 RUN
+target_run = <<~'RUN'
+  started="$(date +%s)"
+  timeout 120s bash scripts/test_test_target_consolidation.sh
+  elapsed="$(( $(date +%s) - started ))"
+  echo "target consolidation self-test completed in ${elapsed}s"
+RUN
 require_equal(workspace.fetch("steps").last.fetch("run"), workspace_run,
               "workspace-tests command changed or can hide a failure")
 require_equal(guard.fetch("steps").last.fetch("run"), guard_run,
               "guard-self-test command changed or can hide a failure")
+require_equal(target.fetch("steps").last.fetch("run"), target_run,
+              "target-consolidation-self-test command changed or can hide a failure")
 
 aggregate_keys = ["name", "needs", "if", "runs-on", "timeout-minutes", "steps"]
 require_equal(aggregate.keys, aggregate_keys, "the Test job changed its dependency, failure, or budget contract")
 require_equal(aggregate.values_at("name", "needs", "if", "runs-on", "timeout-minutes"),
-              ["Test", ["workspace-tests", "guard-self-test", "gateway-tsan"], "always()", "ubuntu-latest", 1],
-              "the Test job no longer aggregates all three workers within the budget")
+              ["Test", ["workspace-tests", "guard-self-test", "target-consolidation-self-test", "gateway-tsan"], "always()", "ubuntu-latest", 1],
+              "the Test job no longer aggregates all four workers within the budget")
 steps = aggregate.fetch("steps")
 require_equal(steps.length, 1, "the Test job must have exactly one result-checking step")
 require_equal(steps.first.keys, ["name", "env", "run"], "the Test comparison step can be skipped or hidden")
 expected_env = {
   "WORKSPACE_RESULT" => "${{ needs.workspace-tests.result }}",
   "GUARD_RESULT" => "${{ needs.guard-self-test.result }}",
+  "TARGET_CONSOLIDATION_RESULT" => "${{ needs.target-consolidation-self-test.result }}",
   "TSAN_RESULT" => "${{ needs.gateway-tsan.result }}"
 }
 require_equal(steps.first.fetch("env"), expected_env, "the Test step does not bind all worker results")
 expected_run = <<~'RUN'
   test "$WORKSPACE_RESULT" = success
   test "$GUARD_RESULT" = success
+  test "$TARGET_CONSOLIDATION_RESULT" = success
   test "$TSAN_RESULT" = success
 RUN
 require_equal(steps.first.fetch("run"), expected_run, "the Test step does not execute all comparisons")
@@ -111,5 +137,9 @@ RUBY
 if grep -F 'cargo xtask verify --all' "$WORKFLOW" >/dev/null; then
     fail 'CI still serializes workspace tests and guard mutations through verify --all'
 fi
+if grep -E '^if "\$\{SCRIPT_DIR\}/test_test_target_consolidation\.sh"; then$' \
+    "$GUARD_SELF_TEST" >/dev/null; then
+    fail 'guard-self-test still serializes target-consolidation mutations'
+fi
 
-printf 'OK: workspace tests, guard mutations and TSAN are parallel behind the required Test check\n'
+printf 'OK: workspace, guard, target-consolidation and TSAN workers are parallel behind Test\n'

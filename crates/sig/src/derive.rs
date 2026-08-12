@@ -15,21 +15,23 @@
 // ---------------------------------------------------------------------------
 // ATTRIBUTION
 //
-// `signing_key` and `calculate_signature` below are a port of `generate_signing_key` and
-// `calculate_signature` from the `aws-sigv4` crate of smithy-rs:
+// These fields bind each local function to the exact reviewed upstream source:
 //
-//     Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
-//     SPDX-License-Identifier: Apache-2.0
-//     https://github.com/smithy-lang/smithy-rs — aws/rust-runtime/aws-sigv4/src/sign/v4.rs
+//     Function mapping: signing_key <- generate_signing_key
+//     Function mapping: calculate_signature <- calculate_signature
+//     Upstream URL: https://github.com/smithy-lang/smithy-rs
+//     Upstream path: aws/rust-runtime/aws-sigv4/src/sign/v4.rs
+//     Revision: 2880e0785db4cf2ceb086cfeba86a4cbdeb14176 (aws-sigv4 1.5.1)
+//     License: Apache-2.0
+//     Copyright: Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 //
 // Both are small pure functions with no reasonable alternative spelling: SigV4 fixes the four
 // derivation steps and the final HMAC exactly. ADR-0001 permits this one form of code reuse, and
 // requires the attribution to appear here and in `NOTICE`.
 //
-// What was changed, and why the crate is not simply depended on: the key material moves through
-// this crate's zeroizing containers rather than through `[u8; 32]` locals; the scope is a type
-// this crate refuses to let a client supply; and depending on all of `aws-sigv4` would bring
-// server-side verification behavior this workspace deliberately rejects (docs/msrv.md).
+// What changed, and why the crate is not simply depended on: key material moves through this
+// crate's zeroizing containers rather than `[u8; 32]` locals; the scope cannot be supplied by a
+// client; and `aws-sigv4` includes server behavior this workspace rejects (docs/msrv.md).
 // ---------------------------------------------------------------------------
 
 //! The SigV4 key derivation chain, and the scope that is allowed to seed it.
