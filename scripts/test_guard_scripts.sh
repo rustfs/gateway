@@ -334,6 +334,24 @@ expect_fail() {
     fi
 }
 
+# expect_guard_pass <guard> <description> <mutation-fn>
+# Proves token decoys stay ignored while the same syntax in active Rust is rejected separately.
+expect_guard_pass() {
+    local guard="$1" desc="$2" mutate="$3"
+    local sandbox rc=0
+    cases=$((cases + 1))
+    make_sandbox
+    sandbox="$SANDBOX"
+    (cd "$sandbox" && "$mutate" >/dev/null)
+    stage_sandbox_changes "$sandbox" >/dev/null 2>&1
+    GATEWAY_CHECK_ROOT="$sandbox" "${SCRIPT_DIR}/${guard}" >/dev/null 2>&1 || rc=$?
+    if [[ "$rc" -eq 0 ]]; then
+        pass_msg "${guard} accepts: ${desc}"
+    else
+        fail_msg "${guard} rejected its positive control: ${desc}"
+    fi
+}
+
 # expect_fail_self_mutation <guard> <description> <mutation-fn>
 # Runs the sandbox's copy of a guard when the mutation changes the guard policy itself. Calling
 # SCRIPT_DIR here would exercise the unmodified source-tree copy and make every such mutation a
@@ -6637,6 +6655,166 @@ PYEOF
 }
 expect_fail check_guard_sandbox_archive.sh \
     'sandbox base commit ignoring failure' mut_guard_sandbox_archive_commit_not_fail_closed
+
+mut_xtask_autotests_restored() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("xtask/Cargo.toml")
+text = path.read_text()
+path.write_text(text.replace("autotests = false\n", "autotests = true\n", 1))
+PYEOF
+}
+expect_fail check_xtask_test_target_consolidation.sh \
+    'restoring xtask implicit test discovery' mut_xtask_autotests_restored
+
+mut_xtask_registration_omitted() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("xtask/tests/integration.rs")
+text = path.read_text()
+path.write_text(text.replace('#[path = "cli_contract.rs"]\nmod cli_contract;\n', '', 1))
+PYEOF
+}
+expect_fail check_xtask_test_target_consolidation.sh \
+    'an omitted xtask integration registration' mut_xtask_registration_omitted
+
+mut_xtask_registration_duplicated() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("xtask/tests/integration.rs")
+text = path.read_text()
+entry = '#[path = "cli_contract.rs"]\nmod cli_contract;\n'
+path.write_text(text.replace(entry, entry + entry, 1))
+PYEOF
+}
+expect_fail check_xtask_test_target_consolidation.sh \
+    'a duplicated xtask integration registration' mut_xtask_registration_duplicated
+
+mut_xtask_source_unregistered() {
+    cp xtask/tests/cli_contract.rs xtask/tests/unregistered_contract.rs
+}
+expect_fail check_xtask_test_target_consolidation.sh \
+    'a new unregistered xtask integration source' mut_xtask_source_unregistered
+
+mut_xtask_source_disabled() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("xtask/tests/cli_contract.rs")
+path.write_text("#![cfg(any())]\n" + path.read_text())
+PYEOF
+}
+expect_fail check_xtask_test_target_consolidation.sh \
+    'a registered xtask source disabled by file cfg' mut_xtask_source_disabled
+
+mut_xtask_source_symlinked() {
+    rm xtask/tests/cli_contract.rs
+    ln -s why_contract.rs xtask/tests/cli_contract.rs
+}
+expect_fail check_xtask_test_target_consolidation.sh \
+    'a registered xtask source replaced by a symlink' mut_xtask_source_symlinked
+
+mut_xtask_extra_test_target() {
+    cat >>xtask/Cargo.toml <<'TOMLEOF'
+
+[[test]]
+name = "duplicate"
+path = "tests/integration.rs"
+TOMLEOF
+}
+expect_fail check_xtask_test_target_consolidation.sh \
+    'a second explicit xtask test target' mut_xtask_extra_test_target
+
+mut_xtask_example_reuses_source() {
+    cat >>xtask/Cargo.toml <<'TOMLEOF'
+
+[[example]]
+name = "duplicate-contract"
+path = "tests/cli_contract.rs"
+test = true
+TOMLEOF
+}
+expect_fail check_xtask_test_target_consolidation.sh \
+    'an example target reusing an xtask test source' mut_xtask_example_reuses_source
+
+mut_xtask_path_reuses_source() {
+    cat >>xtask/src/main.rs <<'RUSTEOF'
+
+#[cfg(test)]
+#[path = "../tests/cli_contract.rs"]
+mod duplicate_contract;
+RUSTEOF
+}
+expect_fail check_xtask_test_target_consolidation.sh \
+    'a path attribute reusing an xtask test source' mut_xtask_path_reuses_source
+
+mut_xtask_include_reuses_source() {
+    cat >>xtask/src/main.rs <<'RUSTEOF'
+
+#[cfg(test)]
+mod duplicate_contract {
+    include!("../tests/cli_contract.rs");
+}
+RUSTEOF
+}
+expect_fail check_xtask_test_target_consolidation.sh \
+    'an include reusing an xtask test source' mut_xtask_include_reuses_source
+
+mut_xtask_lifetimes_surround_path_reuse() {
+    cat >>xtask/src/main.rs <<'RUSTEOF'
+
+fn before_path<'a>() {} #[cfg(test)] #[path = "../tests/cli_contract.rs"] mod duplicate_contract; fn after_path<'b>() {}
+RUSTEOF
+}
+expect_fail check_xtask_test_target_consolidation.sh \
+    'lifetimes surrounding an active path reuse' mut_xtask_lifetimes_surround_path_reuse
+
+mut_xtask_lifetimes_surround_include_reuse() {
+    cat >>xtask/src/main.rs <<'RUSTEOF'
+
+fn before_include<'a>() {} #[cfg(test)] mod duplicate_contract { include!("../tests/cli_contract.rs"); } fn after_include<'b>() {}
+RUSTEOF
+}
+expect_fail check_xtask_test_target_consolidation.sh \
+    'lifetimes surrounding an active include reuse' mut_xtask_lifetimes_surround_include_reuse
+
+mut_xtask_path_include_token_decoys() {
+    cat >>xtask/src/main.rs <<'RUSTEOF'
+
+// #[path = "../tests/cli_contract.rs"]
+const PATH_DECOY: &str = "#[path = \"../tests/cli_contract.rs\"]";
+const INCLUDE_DECOY: &str = "include!(\"../tests/cli_contract.rs\")";
+const CHAR_DECOY: char = '#';
+const BYTE_CHAR_DECOY: u8 = b'!';
+fn lifetime_control<'a>(value: &'a str) -> &'a str { value }
+RUSTEOF
+}
+expect_guard_pass check_xtask_test_target_consolidation.sh \
+    'comment, string, char, byte-char, and lifetime token decoys' mut_xtask_path_include_token_decoys
+
+mut_xtask_explicit_build_reuses_source() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("xtask/Cargo.toml")
+text = path.read_text()
+path.write_text(text.replace("publish = false\n", 'publish = false\nbuild = "tests/cli_contract.rs"\n', 1))
+PYEOF
+}
+expect_fail check_xtask_test_target_consolidation.sh \
+    'an explicit build target reusing an xtask test source' mut_xtask_explicit_build_reuses_source
+
+mut_xtask_default_build_symlink_reuses_source() {
+    ln -s tests/cli_contract.rs xtask/build.rs
+}
+expect_fail check_xtask_test_target_consolidation.sh \
+    'the default build target symlinking an xtask test source' mut_xtask_default_build_symlink_reuses_source
+
+mut_xtask_default_build_includes_source() {
+    cat >xtask/build.rs <<'RUSTEOF'
+include!("tests/cli_contract.rs");
+RUSTEOF
+}
+expect_fail check_xtask_test_target_consolidation.sh \
+    'the default build target including an xtask test source' mut_xtask_default_build_includes_source
 
 cases=$((cases + 1))
 if "${SCRIPT_DIR}/test_test_target_consolidation.sh"; then
