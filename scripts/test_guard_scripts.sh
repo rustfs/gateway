@@ -1473,6 +1473,159 @@ mut_unregistered_crate() {
 expect_fail check_layer_dependencies.sh \
     'a new crate that is not registered in the allow matrix' mut_unregistered_crate
 
+mut_xtask_dispatch_layer_registration_deleted() {
+    sed '/    "rustfs-gateway-xtask-dispatch|"/d' scripts/check_layer_dependencies.sh \
+        >scripts/check_layer_dependencies.sh.mut
+    mv scripts/check_layer_dependencies.sh.mut scripts/check_layer_dependencies.sh
+}
+expect_fail_self_mutation check_layer_dependencies.sh \
+    'the std-only xtask dispatcher losing its pre-registered layer row' \
+    mut_xtask_dispatch_layer_registration_deleted
+
+mut_xtask_dispatch_layer_allows_dependency() {
+    perl -0pi -e 's/rustfs-gateway-xtask-dispatch\|"/rustfs-gateway-xtask-dispatch|rustfs-gateway-model"/' \
+        scripts/check_layer_dependencies.sh
+}
+expect_fail_self_mutation check_layer_dependencies.sh \
+    'the std-only xtask dispatcher layer row allowing a dependency' \
+    mut_xtask_dispatch_layer_allows_dependency
+
+mut_xtask_dispatch_audit_exits_without_output() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("scripts/check_layer_dependencies.sh")
+text = path.read_text()
+old = "raise SystemExit(bool(errors))"
+if text.count(old) != 1:
+    raise SystemExit("dispatcher audit exit mutation subject is not exact")
+path.write_text(text.replace(old, "raise SystemExit(1)", 1))
+PYEOF
+}
+expect_fail_self_mutation check_layer_dependencies.sh \
+    'the structured dispatcher audit failing without diagnostic output' \
+    mut_xtask_dispatch_audit_exits_without_output
+
+mut_xtask_dispatch_agents_registration_deleted() {
+    sed '/rustfs-gateway-xtask-dispatch.*std-only cargo xtask process selection/d' AGENTS.md >AGENTS.md.mut
+    mv AGENTS.md.mut AGENTS.md
+}
+expect_fail check_layer_dependencies.sh \
+    'the std-only xtask dispatcher leaving the AGENTS dependency graph' \
+    mut_xtask_dispatch_agents_registration_deleted
+
+write_future_xtask_dispatch_manifest() {
+    mkdir -p crates/xtask-dispatch
+    cat >crates/xtask-dispatch/Cargo.toml <<'TOMLEOF'
+[package]
+name = "rustfs-gateway-xtask-dispatch"
+version = "0.1.1"
+edition = "2024"
+
+[package.metadata.gateway]
+ring = 0
+TOMLEOF
+}
+
+probe_xtask_dispatch_manifest_without_dependencies() {
+    local sandbox layer_rc=0 ring_rc=0
+    cases=$((cases + 1))
+    make_sandbox
+    sandbox="$SANDBOX"
+    (cd "$sandbox" && write_future_xtask_dispatch_manifest)
+    GATEWAY_CHECK_ROOT="$sandbox" "${SCRIPT_DIR}/check_layer_dependencies.sh" >/dev/null 2>&1 || layer_rc=$?
+    GATEWAY_CHECK_ROOT="$sandbox" "${SCRIPT_DIR}/check_ring_boundaries.sh" >/dev/null 2>&1 || ring_rc=$?
+    if [[ "$layer_rc" -eq 0 && "$ring_rc" -eq 0 ]]; then
+        pass_msg 'layer and ring guards accept the canonical std-only dispatcher manifest'
+    else
+        fail_msg 'a dependency guard rejected the canonical std-only dispatcher manifest'
+    fi
+}
+probe_xtask_dispatch_manifest_without_dependencies
+
+probe_xtask_dispatch_guard_missing_python() {
+    local output rc=0 tool_path
+    cases=$((cases + 1))
+    tool_path="$(mktemp -d "${TMPDIR:-/tmp}/gateway-dispatch-guard-path.XXXXXX")"
+    ln -s "$(command -v dirname)" "${tool_path}/dirname"
+    output="$(GATEWAY_CHECK_ROOT="$REPO_ROOT" PATH="$tool_path" /bin/bash \
+        "${SCRIPT_DIR}/check_layer_dependencies.sh" 2>&1)" || rc=$?
+    rm -rf "$tool_path"
+    if [[ "$rc" -ne 0 && "$output" == *'required command is missing: python3'* ]]; then
+        pass_msg 'check_layer_dependencies.sh fails closed without python3'
+    else
+        fail_msg 'check_layer_dependencies.sh reported green without python3'
+    fi
+}
+probe_xtask_dispatch_guard_missing_python
+
+mut_xtask_dispatch_normal_dependency() {
+    write_future_xtask_dispatch_manifest
+    printf '\n[dependencies]\nserde = "1"\n' >>crates/xtask-dispatch/Cargo.toml
+}
+expect_fail check_layer_dependencies.sh \
+    'the std-only dispatcher declaring a normal dependency' \
+    mut_xtask_dispatch_normal_dependency
+
+mut_xtask_dispatch_target_dependency() {
+    write_future_xtask_dispatch_manifest
+    printf '\n[target.'\''cfg(unix)'\''.dependencies]\nserde = "1"\n' \
+        >>crates/xtask-dispatch/Cargo.toml
+}
+expect_fail check_layer_dependencies.sh \
+    'the std-only dispatcher declaring a target dependency' \
+    mut_xtask_dispatch_target_dependency
+
+mut_xtask_dispatch_dev_dependency() {
+    write_future_xtask_dispatch_manifest
+    printf '\n[dev-dependencies]\nserde = "1"\n' >>crates/xtask-dispatch/Cargo.toml
+}
+expect_fail check_layer_dependencies.sh \
+    'the std-only dispatcher declaring a dev dependency' \
+    mut_xtask_dispatch_dev_dependency
+
+mut_xtask_dispatch_build_dependency() {
+    write_future_xtask_dispatch_manifest
+    printf '\n[build-dependencies]\nserde = "1"\n' >>crates/xtask-dispatch/Cargo.toml
+}
+expect_fail check_layer_dependencies.sh \
+    'the std-only dispatcher declaring a build dependency' \
+    mut_xtask_dispatch_build_dependency
+
+mut_xtask_dispatch_wrong_manifest_path() {
+    mkdir -p tools/dispatcher-shadow
+    cat >tools/dispatcher-shadow/Cargo.toml <<'TOMLEOF'
+[package]
+name = "rustfs-gateway-xtask-dispatch"
+version = "0.1.1"
+edition = "2024"
+TOMLEOF
+}
+expect_fail check_layer_dependencies.sh \
+    'the dispatcher package appearing outside its canonical manifest path' \
+    mut_xtask_dispatch_wrong_manifest_path
+
+mut_xtask_dispatch_indented_dependency() {
+    write_future_xtask_dispatch_manifest
+    printf '\n[dependencies]\n    serde = "1"\n' >>crates/xtask-dispatch/Cargo.toml
+}
+expect_fail check_layer_dependencies.sh \
+    'the dispatcher hiding an indented normal dependency' \
+    mut_xtask_dispatch_indented_dependency
+
+mut_xtask_dispatch_indented_wrong_manifest_name() {
+    mkdir -p tools/dispatcher-shadow
+    cat >tools/dispatcher-shadow/Cargo.toml <<'TOMLEOF'
+[package]
+    name = "rustfs-gateway-xtask-dispatch"
+version = "0.1.1"
+edition = "2024"
+TOMLEOF
+}
+expect_fail check_layer_dependencies.sh \
+    'the dispatcher hiding an indented package name outside its canonical path' \
+    mut_xtask_dispatch_indented_wrong_manifest_name
+
 mut_stream_unapproved_external_dependency() {
     printf '\nserde = "1"\n' >>crates/stream/Cargo.toml
 }
