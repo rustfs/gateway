@@ -170,6 +170,51 @@ expect_fail_unstaged() {
     fi
 }
 
+# expect_english_fail_minimal <description> <mutation-fn> <path> <tracked|untracked>
+# The English-only guard needs Git metadata but not the workspace. Keeping these controls in tiny,
+# independent repositories preserves the tracked/untracked contract without copying the full tree.
+expect_english_fail_minimal() {
+    local desc="$1" mutate="$2" path="$3" mode="$4"
+    local sandbox output rc=0
+    cases=$((cases + 1))
+    sandbox="$(mktemp -d "${TMPDIR:-/tmp}/gateway-english-test.XXXXXX")"
+    mkdir -p "$sandbox/$(dirname "$path")" "$sandbox/scripts/allowances"
+    printf 'Visible English — middle · dot.\n' >"$sandbox/visible-control.txt"
+    if [[ "$mode" == tracked ]]; then
+        printf 'Visible English — middle · dot.\n' >"$sandbox/$path"
+    elif [[ "$mode" != untracked ]]; then
+        rm -rf "$sandbox"
+        fail_msg "check_english_only.sh has an unsupported minimal-test mode: ${mode}"
+        return
+    fi
+    (
+        cd "$sandbox"
+        git init -q .
+        git add -A
+        git -c user.name=t -c user.email=t@t commit -qm base
+    )
+    if ! GATEWAY_CHECK_ROOT="$sandbox" "${SCRIPT_DIR}/check_english_only.sh" >/dev/null 2>&1; then
+        rm -rf "$sandbox"
+        fail_msg "check_english_only.sh rejects its visible English, em-dash, or middle-dot control: ${desc}"
+        return
+    fi
+    (cd "$sandbox" && "$mutate" >/dev/null)
+    if [[ "$mode" == tracked ]]; then
+        (cd "$sandbox" && git add -A >/dev/null 2>&1)
+    fi
+    output="$(GATEWAY_CHECK_ROOT="$sandbox" "${SCRIPT_DIR}/check_english_only.sh" 2>&1)" || rc=$?
+    rm -rf "$sandbox"
+    if [[ "$rc" -ne 0 && "$output" == *"${path}: contains CJK text"* ]]; then
+        if [[ "$mode" == tracked ]]; then
+            pass_msg "check_english_only.sh catches: ${desc}"
+        else
+            pass_msg "check_english_only.sh catches (unstaged): ${desc}"
+        fi
+    else
+        fail_msg "check_english_only.sh did not reject the CJK mutation at ${path}: ${desc}"
+    fi
+}
+
 # expect_fail <guard> <description> <mutation-fn>
 # Runs the mutation inside a sandbox, then asserts the guard exits non-zero.
 expect_fail() {
@@ -287,6 +332,175 @@ done
 # Negative cases
 # -----------------------------------------------------------------------------
 printf '\nNegative cases (guards must fail)\n'
+
+# The codegen feedback loop must not rebuild product crates before generation starts.
+mut_xtask_codegen_alias_restores_full_defaults() {
+    perl -0pi -e 's/ --no-default-features//' .cargo/config.toml
+}
+expect_fail check_xtask_codegen_surface.sh \
+    'the cargo xtask alias restoring full default features for codegen' \
+    mut_xtask_codegen_alias_restores_full_defaults
+
+mut_xtask_codegen_gateway_becomes_nonoptional() {
+    perl -0pi -e 's/rustfs-gateway = \{ workspace = true, optional = true \}/rustfs-gateway = { workspace = true }/' \
+        xtask/Cargo.toml
+}
+expect_fail check_xtask_codegen_surface.sh \
+    'the light codegen runner regaining the facade dependency' \
+    mut_xtask_codegen_gateway_becomes_nonoptional
+
+mut_xtask_full_forgets_conformance() {
+    perl -0pi -e 's/    "dep:rustfs-gateway-conformance",\n//' xtask/Cargo.toml
+}
+expect_fail check_xtask_codegen_surface.sh \
+    'the full xtask feature dropping a full-only dependency edge' \
+    mut_xtask_full_forgets_conformance
+
+mut_xtask_codegen_reexecutes_full_runner() {
+    perl -0pi -e 's/Some\("codegen"\) => codegen::codegen\(&rest\)/Some("codegen") => run_full(first.clone(), \&rest)/g' \
+        xtask/src/main.rs
+}
+expect_fail check_xtask_codegen_surface.sh \
+    'the codegen command re-entering the full dependency surface' \
+    mut_xtask_codegen_reexecutes_full_runner
+
+mut_xtask_codegen_comment_decoy_reexec() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("xtask/src/main.rs")
+text = path.read_text()
+old = 'Some("codegen") => codegen::codegen(&rest),'
+positions = [index for index in range(len(text)) if text.startswith(old, index)]
+if len(positions) != 2:
+    raise SystemExit("expected exactly two codegen dispatch arms")
+index = positions[1]
+new = 'Some("codegen") => run_full(first.clone(), &rest), // Some("codegen") => codegen::codegen(&rest),'
+path.write_text(text[:index] + new + text[index + len(old):])
+PYEOF
+}
+expect_fail check_xtask_codegen_surface.sh \
+    'a comment decoy hiding light codegen re-execution' \
+    mut_xtask_codegen_comment_decoy_reexec
+
+mut_xtask_codegen_target_dependency() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("xtask/Cargo.toml")
+text = path.read_text()
+text += '''
+[target.'cfg(unix)'.dependencies]
+hidden_gateway = { package = "rustfs-gateway", path = "../crates/gateway" }
+'''
+path.write_text(text)
+PYEOF
+}
+expect_fail check_xtask_codegen_surface.sh \
+    'a target-specific dependency restoring the facade on the light runner' \
+    mut_xtask_codegen_target_dependency
+
+mut_xtask_full_runner_drops_rest() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("xtask/src/main.rs")
+text = path.read_text()
+old = "    command.args(rest);"
+new = "    let _ = rest; // command.args(rest);"
+if text.count(old) != 1:
+    raise SystemExit("full runner rest forwarding is missing")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_xtask_codegen_surface.sh \
+    'the full runner dropping the remaining arguments' \
+    mut_xtask_full_runner_drops_rest
+
+mut_xtask_nonunix_runner_hides_failure() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("xtask/src/main.rs")
+text = path.read_text()
+old = "        Ok(status) => ExitCode::from(u8::try_from(status.code().unwrap_or(1)).unwrap_or(1)),"
+new = "        Ok(_) => ExitCode::SUCCESS, // " + old.strip()
+if text.count(old) != 1:
+    raise SystemExit("non-Unix status propagation is missing")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_xtask_codegen_surface.sh \
+    'the non-Unix bridge reporting a failing child as success' \
+    mut_xtask_nonunix_runner_hides_failure
+
+mut_xtask_codegen_string_token_changes() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("xtask/src/main.rs")
+text = path.read_text()
+old = 'Some("codegen") => codegen::codegen(&rest),'
+positions = [index for index in range(len(text)) if text.startswith(old, index)]
+if len(positions) != 2:
+    raise SystemExit("expected exactly two codegen dispatch arms")
+index = positions[1]
+new = 'Some("code gen") => codegen::codegen(&rest),'
+path.write_text(text[:index] + new + text[index + len(old):])
+PYEOF
+}
+expect_fail check_xtask_codegen_surface.sh \
+    'whitespace changing the light codegen command token' \
+    mut_xtask_codegen_string_token_changes
+
+mut_xtask_full_feature_string_token_changes() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("xtask/src/main.rs")
+text = path.read_text()
+old = 'command.args(["run", "--quiet", "--package", "xtask", "--features", "full", "--"]);'
+new = 'command.args(["run", "--quiet", "--package", "xtask", "--features", "f ull", "--"]);'
+if text.count(old) != 1:
+    raise SystemExit("full feature runner arguments are missing")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_xtask_codegen_surface.sh \
+    'whitespace changing the full-runner feature token' \
+    mut_xtask_full_feature_string_token_changes
+
+mut_xtask_light_builds_full_catalog_helper() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("xtask/src/catalog.rs")
+text = path.read_text()
+old = '#[cfg(feature = "full")]\npub(crate) fn nearest'
+if text.count(old) != 1:
+    raise SystemExit("full-only catalog helper is missing")
+path.write_text(text.replace(old, "pub(crate) fn nearest", 1))
+PYEOF
+}
+expect_fail check_xtask_codegen_surface.sh \
+    'the light runner compiling a full-only catalog helper' \
+    mut_xtask_light_builds_full_catalog_helper
+
+mut_xtask_light_builds_full_usage() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("xtask/src/main.rs")
+text = path.read_text()
+old = '#[cfg(feature = "full")]\nconst USAGE: &str'
+if text.count(old) != 1:
+    raise SystemExit("full-only usage declaration is missing")
+path.write_text(text.replace(old, "const USAGE: &str", 1))
+PYEOF
+}
+expect_fail check_xtask_codegen_surface.sh \
+    'the light runner compiling the full-only usage text' \
+    mut_xtask_light_builds_full_usage
 
 mut_scalar_duplicate_acceptance_id() {
     python3 - <<'PYEOF'
@@ -2865,14 +3079,16 @@ expect_fail check_no_exhaustive_destructuring.sh \
 mut_chinese_comment() {
     printf '\n// \xe4\xb8\xad\xe6\x96\x87\n' >>crates/core/src/lib.rs
 }
-expect_fail check_english_only.sh \
-    'a Chinese comment in a source file' mut_chinese_comment
+expect_english_fail_minimal \
+    'a Chinese comment in a source file' mut_chinese_comment \
+    crates/core/src/lib.rs tracked
 
 mut_chinese_markdown() {
     printf '\n\xe4\xb8\xad\xe6\x96\x87\n' >>docs/msrv.md
 }
-expect_fail check_english_only.sh \
-    'a Chinese paragraph in a Markdown document' mut_chinese_markdown
+expect_english_fail_minimal \
+    'a Chinese paragraph in a Markdown document' mut_chinese_markdown \
+    docs/msrv.md tracked
 
 
 # -----------------------------------------------------------------------------
@@ -2889,8 +3105,9 @@ mut_untracked_chinese_source() {
     # bytes so this file stays ASCII and does not trip the guard it is testing.
     printf '// \xe4\xb8\xad\xe6\x96\x87\n' >crates/core/src/brand_new_file.rs
 }
-expect_fail_unstaged check_english_only.sh \
-    'CJK in a file that has never been added to the index' mut_untracked_chinese_source
+expect_english_fail_minimal \
+    'CJK in a file that has never been added to the index' mut_untracked_chinese_source \
+    crates/core/src/brand_new_file.rs untracked
 
 mut_untracked_missing_header() {
     printf '//! No licence header.\npub fn f() {}\n' >crates/core/src/no_header_yet.rs

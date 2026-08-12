@@ -34,6 +34,7 @@ pub(crate) fn operations() -> Result<Vec<OperationIr>, String> {
         .map_err(|error| error.to_string())
 }
 
+#[cfg(feature = "full")]
 pub(crate) fn nearest(operations: &[OperationIr], needle: &str) -> Option<String> {
     operations
         .iter()
@@ -68,6 +69,7 @@ pub(crate) fn render_verify_map(operations: &[OperationIr]) -> Result<String, St
     Ok(out)
 }
 
+#[cfg(feature = "full")]
 pub(crate) fn verify_entry(name: &str) -> Result<VerifyEntry, String> {
     let body = fs::read_to_string(verify_map_path()).map_err(|error| format!("verify map could not be read: {error}"))?;
     parse_verify_map(&body)
@@ -76,6 +78,7 @@ pub(crate) fn verify_entry(name: &str) -> Result<VerifyEntry, String> {
         .ok_or_else(|| format!("verify map has no entry for {name}; run `cargo xtask codegen`"))
 }
 
+#[cfg(feature = "full")]
 pub(crate) fn scaffold_entry(name: &str) -> Result<Option<ScaffoldEntry>, String> {
     let root = repo_root().join("xtask/scaffolds");
     let entries = match fs::read_dir(&root) {
@@ -100,16 +103,19 @@ pub(crate) fn scaffold_entry(name: &str) -> Result<Option<ScaffoldEntry>, String
     Ok(None)
 }
 
+#[cfg(feature = "full")]
 pub(crate) struct VerifyEntry {
     pub(crate) name: String,
     pub(crate) cases: Vec<String>,
 }
 
+#[cfg(feature = "full")]
 pub(crate) struct ScaffoldEntry {
     pub(crate) name: String,
     pub(crate) test: String,
 }
 
+#[cfg(feature = "full")]
 fn parse_verify_map(body: &str) -> Vec<VerifyEntry> {
     let mut entries = Vec::new();
     let mut name: Option<String> = None;
@@ -133,6 +139,7 @@ fn parse_verify_map(body: &str) -> Vec<VerifyEntry> {
     entries
 }
 
+#[cfg(feature = "full")]
 fn split_cases(value: &str) -> Vec<String> {
     value.split(',').filter(|case| !case.is_empty()).map(str::to_owned).collect()
 }
@@ -144,6 +151,7 @@ fn quoted_value(line: &str, prefix: &str) -> Option<String> {
         .map(str::to_owned)
 }
 
+#[cfg(feature = "full")]
 fn quoted_field(body: &str, prefix: &str) -> Option<String> {
     body.lines().find_map(|line| quoted_value(line.trim(), prefix))
 }
@@ -176,6 +184,7 @@ fn collect_toml(root: &Path, paths: &mut Vec<PathBuf>) -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(feature = "full")]
 fn distance(left: &str, right: &str) -> usize {
     let left: Vec<char> = left.chars().collect();
     let right: Vec<char> = right.chars().collect();
