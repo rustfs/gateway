@@ -2,8 +2,9 @@
 set -euo pipefail
 
 # WHAT THIS CHECKS
-#   Workspace tests, guard mutations, target-consolidation mutations and TSAN run on separate CI
-#   runners, while the branch-protected Test check waits for all four. This keeps the gate wall time below ten
+#   Workspace tests, guard mutations, target-consolidation mutations, quirk-ledger mutations and
+#   TSAN run on separate CI runners, while the branch-protected Test check waits for all five. This
+#   keeps the gate wall time below ten
 #   minutes as coverage grows.
 
 ROOT="${GATEWAY_CHECK_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
@@ -42,6 +43,7 @@ require_equal(workflow.fetch("env", {}).keys, workflow_env_keys,
 workspace = jobs.fetch("workspace-tests")
 guard = jobs.fetch("guard-self-test")
 target = jobs.fetch("target-consolidation-self-test")
+quirk_ledger = jobs.fetch("quirk-ledger-self-test")
 aggregate = jobs.fetch("test")
 
 worker_keys = ["name", "runs-on", "timeout-minutes", "steps"]
@@ -56,6 +58,11 @@ require_equal(target.keys, worker_keys,
 require_equal(target.values_at("name", "runs-on", "timeout-minutes"),
               ["Target consolidation self-test", "ubuntu-latest", 3],
               "target-consolidation-self-test identity or budget changed")
+require_equal(quirk_ledger.keys, worker_keys,
+              "quirk-ledger-self-test changed its parallel two-minute contract")
+require_equal(quirk_ledger.values_at("name", "runs-on", "timeout-minutes"),
+              ["Quirk ledger self-test", "ubuntu-latest", 2],
+              "quirk-ledger-self-test identity or budget changed")
 
 [workspace, guard].each do |job|
   steps = job.fetch("steps")
@@ -85,6 +92,14 @@ require_equal(target_steps.first,
               "target-consolidation-self-test checkout action or pin changed")
 require_equal(target_steps.last.keys, ["name", "run"],
               "target-consolidation-self-test command can skip or hide failure")
+quirk_ledger_steps = quirk_ledger.fetch("steps")
+require_equal(quirk_ledger_steps.length, 2,
+              "quirk-ledger-self-test changed its setup or command step count")
+require_equal(quirk_ledger_steps.first,
+              {"uses" => "actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10"},
+              "quirk-ledger-self-test checkout action or pin changed")
+require_equal(quirk_ledger_steps.last.keys, ["name", "run"],
+              "quirk-ledger-self-test command can skip or hide failure")
 
 workspace_run = <<~'RUN'
   started="$(date +%s)"
@@ -104,18 +119,26 @@ target_run = <<~'RUN'
   elapsed="$(( $(date +%s) - started ))"
   echo "target consolidation self-test completed in ${elapsed}s"
 RUN
+quirk_ledger_run = <<~'RUN'
+  started="$(date +%s)"
+  timeout 60s env GATEWAY_GUARD_QUIRK_LEDGER_ONLY=1 bash scripts/test_guard_scripts.sh
+  elapsed="$(( $(date +%s) - started ))"
+  echo "quirk ledger self-test completed in ${elapsed}s"
+RUN
 require_equal(workspace.fetch("steps").last.fetch("run"), workspace_run,
               "workspace-tests command changed or can hide a failure")
 require_equal(guard.fetch("steps").last.fetch("run"), guard_run,
               "guard-self-test command changed or can hide a failure")
 require_equal(target.fetch("steps").last.fetch("run"), target_run,
               "target-consolidation-self-test command changed or can hide a failure")
+require_equal(quirk_ledger.fetch("steps").last.fetch("run"), quirk_ledger_run,
+              "quirk-ledger-self-test command changed or can hide a failure")
 
 aggregate_keys = ["name", "needs", "if", "runs-on", "timeout-minutes", "steps"]
 require_equal(aggregate.keys, aggregate_keys, "the Test job changed its dependency, failure, or budget contract")
 require_equal(aggregate.values_at("name", "needs", "if", "runs-on", "timeout-minutes"),
-              ["Test", ["workspace-tests", "guard-self-test", "target-consolidation-self-test", "gateway-tsan"], "always()", "ubuntu-latest", 1],
-              "the Test job no longer aggregates all four workers within the budget")
+              ["Test", ["workspace-tests", "guard-self-test", "target-consolidation-self-test", "quirk-ledger-self-test", "gateway-tsan"], "always()", "ubuntu-latest", 1],
+              "the Test job no longer aggregates all five workers within the budget")
 steps = aggregate.fetch("steps")
 require_equal(steps.length, 1, "the Test job must have exactly one result-checking step")
 require_equal(steps.first.keys, ["name", "env", "run"], "the Test comparison step can be skipped or hidden")
@@ -123,6 +146,7 @@ expected_env = {
   "WORKSPACE_RESULT" => "${{ needs.workspace-tests.result }}",
   "GUARD_RESULT" => "${{ needs.guard-self-test.result }}",
   "TARGET_CONSOLIDATION_RESULT" => "${{ needs.target-consolidation-self-test.result }}",
+  "QUIRK_LEDGER_RESULT" => "${{ needs.quirk-ledger-self-test.result }}",
   "TSAN_RESULT" => "${{ needs.gateway-tsan.result }}"
 }
 require_equal(steps.first.fetch("env"), expected_env, "the Test step does not bind all worker results")
@@ -130,6 +154,7 @@ expected_run = <<~'RUN'
   test "$WORKSPACE_RESULT" = success
   test "$GUARD_RESULT" = success
   test "$TARGET_CONSOLIDATION_RESULT" = success
+  test "$QUIRK_LEDGER_RESULT" = success
   test "$TSAN_RESULT" = success
 RUN
 require_equal(steps.first.fetch("run"), expected_run, "the Test step does not execute all comparisons")
@@ -141,5 +166,16 @@ if grep -E '^if "\$\{SCRIPT_DIR\}/test_test_target_consolidation\.sh"; then$' \
     "$GUARD_SELF_TEST" >/dev/null; then
     fail 'guard-self-test still serializes target-consolidation mutations'
 fi
+python3 - "$GUARD_SELF_TEST" <<'PY' || exit 1
+from pathlib import Path
+import sys
 
-printf 'OK: workspace, guard, target-consolidation and TSAN workers are parallel behind Test\n'
+text = Path(sys.argv[1]).read_text()
+start = text.find('if [[ "$QUIRK_LEDGER_ONLY" == 1 ]]; then')
+first_case = text.find("expect_fail check_quirk_ledger.sh")
+end = text.find("\nfi\n\nprintf '\\n%s case(s), %s failure(s)\\n'", first_case)
+if start < 0 or first_case < start or end < first_case:
+    raise SystemExit("ERROR: guard-self-test still serializes or omits quirk-ledger mutations")
+PY
+
+printf 'OK: workspace, guard, target-consolidation, quirk-ledger and TSAN workers are parallel behind Test\n'
