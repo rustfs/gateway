@@ -29,6 +29,11 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 failures=0
 cases=0
+QUIRK_LEDGER_ONLY="${GATEWAY_GUARD_QUIRK_LEDGER_ONLY:-0}"
+if [[ "$QUIRK_LEDGER_ONLY" != 0 && "$QUIRK_LEDGER_ONLY" != 1 ]]; then
+    printf 'test_guard_scripts: GATEWAY_GUARD_QUIRK_LEDGER_ONLY must be 0 or 1\n' >&2
+    exit 1
+fi
 
 pass_msg() { printf '  ok   %s\n' "$*"; }
 fail_msg() {
@@ -448,6 +453,7 @@ expect_monomorphic_ir_fail() {
 # -----------------------------------------------------------------------------
 # Positive control: the repository as it stands must be clean.
 # -----------------------------------------------------------------------------
+if [[ "$QUIRK_LEDGER_ONLY" == 0 ]]; then
 printf 'Positive control (repository must be clean)\n'
 for guard in "${SCRIPT_DIR}"/check_*.sh; do
     cases=$((cases + 1))
@@ -3081,6 +3087,157 @@ probe_smithy_timestamp_guard_missing_python() {
     fi
 }
 probe_smithy_timestamp_guard_missing_python
+
+mut_rust_toolchain_moving_channel() {
+    python3 - <<'PY'
+from pathlib import Path
+
+path = Path("rust-toolchain.toml")
+path.write_text(path.read_text().replace('channel = "1.97.1"', 'channel = "stable"', 1))
+PY
+}
+expect_fail check_rust_toolchain_msrv.sh \
+    'the development compiler becoming a moving stable channel' mut_rust_toolchain_moving_channel
+
+mut_rust_toolchain_cargo_floor_drift() {
+    python3 - <<'PY'
+from pathlib import Path
+
+path = Path("Cargo.toml")
+path.write_text(path.read_text().replace('rust-version = "1.97.1"', 'rust-version = "1.97.2"', 1))
+PY
+}
+expect_fail check_rust_toolchain_msrv.sh \
+    'the Cargo compiler floor drifting from the pinned toolchain' mut_rust_toolchain_cargo_floor_drift
+
+mut_rust_toolchain_component_removed() {
+    python3 - <<'PY'
+from pathlib import Path
+
+path = Path("rust-toolchain.toml")
+path.write_text(path.read_text().replace(', "rust-analyzer"', '', 1))
+PY
+}
+expect_fail check_rust_toolchain_msrv.sh \
+    'one required development component disappearing' mut_rust_toolchain_component_removed
+
+mut_rust_toolchain_readme_drift() {
+    python3 - <<'PY'
+from pathlib import Path
+
+path = Path("README.md")
+path.write_text(path.read_text().replace('**Development toolchain: 1.97.1**', '**Development toolchain: stable**', 1))
+PY
+}
+expect_fail check_rust_toolchain_msrv.sh \
+    'the README claiming a different development compiler' mut_rust_toolchain_readme_drift
+
+mut_rust_toolchain_msrv_doc_drift() {
+    python3 - <<'PY'
+from pathlib import Path
+
+path = Path("docs/msrv.md")
+path.write_text(path.read_text().replace('**MSRV = 1.97.1**', '**MSRV = 1.97.0**', 1))
+PY
+}
+expect_fail check_rust_toolchain_msrv.sh \
+    'the MSRV policy naming a different compiler floor' mut_rust_toolchain_msrv_doc_drift
+
+mut_rust_toolchain_ci_version_drift() {
+    python3 - <<'PY'
+from pathlib import Path
+
+path = Path(".github/workflows/ci.yml")
+text = path.read_text()
+start = text.index("  msrv:")
+end = text.index("\n  clippy:", start)
+block = text[start:end].replace("toolchain: 1.97.1", "toolchain: stable", 1)
+path.write_text(text[:start] + block + text[end:])
+PY
+}
+expect_fail check_rust_toolchain_msrv.sh \
+    'the MSRV CI job installing a moving compiler' mut_rust_toolchain_ci_version_drift
+
+mut_rust_toolchain_ci_workspace_check_removed() {
+    python3 - <<'PY'
+from pathlib import Path
+
+path = Path(".github/workflows/ci.yml")
+path.write_text(path.read_text().replace("cargo check --workspace --all-targets", "cargo check -p xtask", 1))
+PY
+}
+expect_fail check_rust_toolchain_msrv.sh \
+    'the MSRV CI job no longer compiling the whole workspace' mut_rust_toolchain_ci_workspace_check_removed
+
+mut_rust_toolchain_ci_job_disabled() {
+    python3 - <<'PY'
+from pathlib import Path
+
+path = Path(".github/workflows/ci.yml")
+text = path.read_text()
+start = text.index("  msrv:")
+end = text.index("\n  clippy:", start)
+block = text[start:end]
+anchor = "    runs-on: ubuntu-latest\n"
+if block.count(anchor) != 1:
+    raise SystemExit("MSRV job runner is missing or ambiguous")
+block = block.replace(anchor, anchor + "    if: false\n", 1)
+path.write_text(text[:start] + block + text[end:])
+PY
+}
+expect_fail check_rust_toolchain_msrv.sh \
+    'the entire MSRV CI job being disabled with a boolean if' mut_rust_toolchain_ci_job_disabled
+
+mut_rust_toolchain_ci_check_allowed_to_fail() {
+    python3 - <<'PY'
+from pathlib import Path
+
+path = Path(".github/workflows/ci.yml")
+text = path.read_text()
+old = "      - run: cargo check --workspace --all-targets\n"
+new = old + '        continue-on-error: "true"\n'
+if text.count(old) != 1:
+    raise SystemExit("MSRV workspace check step is missing or ambiguous")
+path.write_text(text.replace(old, new, 1))
+PY
+}
+expect_fail check_rust_toolchain_msrv.sh \
+    'the MSRV workspace check being allowed to fail with a string boolean' mut_rust_toolchain_ci_check_allowed_to_fail
+
+mut_rust_toolchain_ci_job_disabled_with_quoted_key() {
+    python3 - <<'PY'
+from pathlib import Path
+
+path = Path(".github/workflows/ci.yml")
+text = path.read_text()
+start = text.index("  msrv:")
+end = text.index("\n  clippy:", start)
+block = text[start:end]
+anchor = "    runs-on: ubuntu-latest\n"
+if block.count(anchor) != 1:
+    raise SystemExit("MSRV job runner is missing or ambiguous")
+block = block.replace(anchor, anchor + '    "if": false\n', 1)
+path.write_text(text[:start] + block + text[end:])
+PY
+}
+expect_fail check_rust_toolchain_msrv.sh \
+    'a double-quoted YAML key disabling the entire MSRV job' mut_rust_toolchain_ci_job_disabled_with_quoted_key
+
+mut_rust_toolchain_ci_check_allowed_to_fail_with_quoted_key() {
+    python3 - <<'PY'
+from pathlib import Path
+
+path = Path(".github/workflows/ci.yml")
+text = path.read_text()
+old = "      - run: cargo check --workspace --all-targets\n"
+new = old + "        'continue-on-error': true\n"
+if text.count(old) != 1:
+    raise SystemExit("MSRV workspace check step is missing or ambiguous")
+path.write_text(text.replace(old, new, 1))
+PY
+}
+expect_fail check_rust_toolchain_msrv.sh \
+    'a single-quoted YAML key allowing the MSRV check to fail' mut_rust_toolchain_ci_check_allowed_to_fail_with_quoted_key
 
 mut_governance_relationship_removed() {
     python3 - <<'PY'
@@ -6501,6 +6658,64 @@ mut_ci_target_serialized() {
 expect_fail check_ci_test_split.sh \
     'the target-consolidation job waiting for guard mutations' mut_ci_target_serialized
 
+mut_ci_quirk_ledger_job_missing() {
+    replace_ci_text '  quirk-ledger-self-test:' '  quirk-ledger-self-tesx:'
+}
+expect_fail check_ci_test_split.sh \
+    'the quirk-ledger-self-test job being renamed away' mut_ci_quirk_ledger_job_missing
+
+mut_ci_quirk_ledger_command_dropped() {
+    replace_ci_text 'timeout 60s env GATEWAY_GUARD_QUIRK_LEDGER_ONLY=1 bash scripts/test_guard_scripts.sh' \
+        'timeout 60s true'
+}
+expect_fail check_ci_test_split.sh \
+    'the quirk-ledger mutation suite being replaced with a no-op' mut_ci_quirk_ledger_command_dropped
+
+mut_ci_quirk_ledger_failure_swallowed() {
+    replace_ci_text '          timeout 60s env GATEWAY_GUARD_QUIRK_LEDGER_ONLY=1 bash scripts/test_guard_scripts.sh' \
+        '          timeout 60s env GATEWAY_GUARD_QUIRK_LEDGER_ONLY=1 bash scripts/test_guard_scripts.sh || true'
+}
+expect_fail check_ci_test_split.sh \
+    'the quirk-ledger job swallowing a failure or timeout' mut_ci_quirk_ledger_failure_swallowed
+
+mut_ci_quirk_ledger_budget_widened() {
+    replace_ci_text '  quirk-ledger-self-test:
+    name: Quirk ledger self-test
+    runs-on: ubuntu-latest
+    timeout-minutes: 2' '  quirk-ledger-self-test:
+    name: Quirk ledger self-test
+    runs-on: ubuntu-latest
+    timeout-minutes: 3'
+}
+expect_fail check_ci_test_split.sh \
+    'the quirk-ledger job widening its two-minute budget' mut_ci_quirk_ledger_budget_widened
+
+mut_ci_quirk_ledger_setup_action_replaced() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path(".github/workflows/ci.yml")
+text = path.read_text()
+start = text.index("  quirk-ledger-self-test:")
+old = "      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6"
+position = text.index(old, start)
+new = "      - uses: example/environment-injector@0000000000000000000000000000000000000000"
+path.write_text(text[:position] + text[position:].replace(old, new, 1))
+PYEOF
+}
+expect_fail check_ci_test_split.sh \
+    'the quirk-ledger checkout being replaced by an environment injector' \
+    mut_ci_quirk_ledger_setup_action_replaced
+
+mut_ci_quirk_ledger_serialized() {
+    replace_ci_text '  quirk-ledger-self-test:
+    name: Quirk ledger self-test' '  quirk-ledger-self-test:
+    needs: guard-self-test
+    name: Quirk ledger self-test'
+}
+expect_fail check_ci_test_split.sh \
+    'the quirk-ledger job waiting for guard mutations' mut_ci_quirk_ledger_serialized
+
 mut_ci_target_serialized_in_guard() {
     printf '%s\n' 'if "${SCRIPT_DIR}/test_test_target_consolidation.sh"; then' \
         >>scripts/test_guard_scripts.sh
@@ -6515,19 +6730,27 @@ expect_fail check_ci_test_split.sh \
     'the branch-protected Test check being renamed' mut_ci_required_name_changed
 
 mut_ci_aggregate_drops_guard() {
-    replace_ci_text 'needs: [workspace-tests, guard-self-test, target-consolidation-self-test, gateway-tsan]' \
-        'needs: [workspace-tests, target-consolidation-self-test, gateway-tsan]'
+    replace_ci_text 'needs: [workspace-tests, guard-self-test, target-consolidation-self-test, quirk-ledger-self-test, gateway-tsan]' \
+        'needs: [workspace-tests, target-consolidation-self-test, quirk-ledger-self-test, gateway-tsan]'
 }
 expect_fail check_ci_test_split.sh \
     'the required Test check no longer waiting for guard mutations' mut_ci_aggregate_drops_guard
 
 mut_ci_aggregate_drops_target() {
-    replace_ci_text 'needs: [workspace-tests, guard-self-test, target-consolidation-self-test, gateway-tsan]' \
-        'needs: [workspace-tests, guard-self-test, gateway-tsan]'
+    replace_ci_text 'needs: [workspace-tests, guard-self-test, target-consolidation-self-test, quirk-ledger-self-test, gateway-tsan]' \
+        'needs: [workspace-tests, guard-self-test, quirk-ledger-self-test, gateway-tsan]'
 }
 expect_fail check_ci_test_split.sh \
     'the required Test check no longer waiting for target-consolidation mutations' \
     mut_ci_aggregate_drops_target
+
+mut_ci_aggregate_drops_quirk_ledger() {
+    replace_ci_text 'needs: [workspace-tests, guard-self-test, target-consolidation-self-test, quirk-ledger-self-test, gateway-tsan]' \
+        'needs: [workspace-tests, guard-self-test, target-consolidation-self-test, gateway-tsan]'
+}
+expect_fail check_ci_test_split.sh \
+    'the required Test check no longer waiting for quirk-ledger mutations' \
+    mut_ci_aggregate_drops_quirk_ledger
 
 mut_ci_aggregate_skips_on_failure() {
     replace_ci_text 'if: always()' 'if: success()'
@@ -6552,12 +6775,12 @@ expect_fail check_ci_test_split.sh \
 mut_ci_aggregate_budget_widened() {
     replace_ci_text '  test:
     name: Test
-    needs: [workspace-tests, guard-self-test, target-consolidation-self-test, gateway-tsan]
+    needs: [workspace-tests, guard-self-test, target-consolidation-self-test, quirk-ledger-self-test, gateway-tsan]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 1' '  test:
     name: Test
-    needs: [workspace-tests, guard-self-test, target-consolidation-self-test, gateway-tsan]
+    needs: [workspace-tests, guard-self-test, target-consolidation-self-test, quirk-ledger-self-test, gateway-tsan]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 2'
@@ -6584,6 +6807,13 @@ mut_ci_target_result_ignored() {
 expect_fail check_ci_test_split.sh \
     'the aggregate check ignoring the target-consolidation result' mut_ci_target_result_ignored
 
+mut_ci_quirk_ledger_result_ignored() {
+    replace_ci_text 'QUIRK_LEDGER_RESULT: ${{ needs.quirk-ledger-self-test.result }}' \
+        'QUIRK_LEDGER_RESULT: success'
+}
+expect_fail check_ci_test_split.sh \
+    'the aggregate check ignoring the quirk-ledger result' mut_ci_quirk_ledger_result_ignored
+
 mut_ci_workspace_comparison_dropped() {
     replace_ci_text '          test "$WORKSPACE_RESULT" = success' '          true'
 }
@@ -6602,6 +6832,13 @@ mut_ci_target_comparison_dropped() {
 expect_fail check_ci_test_split.sh \
     'the aggregate check not executing the target-consolidation result comparison' \
     mut_ci_target_comparison_dropped
+
+mut_ci_quirk_ledger_comparison_dropped() {
+    replace_ci_text '          test "$QUIRK_LEDGER_RESULT" = success' '          true'
+}
+expect_fail check_ci_test_split.sh \
+    'the aggregate check not executing the quirk-ledger result comparison' \
+    mut_ci_quirk_ledger_comparison_dropped
 
 mut_ci_workers_share_concurrency_lane() {
     replace_ci_text '  workspace-tests:
@@ -7304,6 +7541,10 @@ RUSTEOF
 expect_fail check_xtask_test_target_consolidation.sh \
     'the default build target including an xtask test source' mut_xtask_default_build_includes_source
 
+fi
+
+if [[ "$QUIRK_LEDGER_ONLY" == 1 ]]; then
+
 # The protected quirk ledger has independent negative controls for its counts, source union,
 # dimensions, capability exclusions, production consumers, bilateral backlinks and generated ID
 # sets. None of these controls runs codegen or Cargo.
@@ -7857,6 +8098,8 @@ fi
 unset GATEWAY_QUIRK_LEDGER_PARSE_CACHE
 rm -f "$QUIRK_LEDGER_PARSE_CACHE"
 QUIRK_LEDGER_PARSE_CACHE=""
+
+fi
 
 printf '\n%s case(s), %s failure(s)\n' "$cases" "$failures"
 [[ "$failures" -eq 0 ]]
