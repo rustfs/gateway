@@ -31,7 +31,6 @@ mod model;
 mod new_op;
 #[cfg(feature = "full")]
 mod route;
-#[cfg(feature = "full")]
 mod verify;
 #[cfg(feature = "full")]
 mod why;
@@ -84,6 +83,7 @@ fn dispatch(first: Option<String>, rest: Vec<String>) -> ExitCode {
     match first.as_deref() {
         Some("codegen") => codegen::codegen(&rest),
         Some("spec") if rest.first().map(String::as_str) == Some("verify") => codegen::verify(&rest[1..]),
+        Some("verify") if verify::is_crate_request(&rest) => verify::verify(&rest),
         _ => run_full(first, &rest),
     }
 }
@@ -107,10 +107,10 @@ fn run_full(first: Option<String>, rest: &[String]) -> ExitCode {
     }
     #[cfg(not(unix))]
     match command.status() {
-        Ok(status) => ExitCode::from(u8::try_from(status.code().unwrap_or(1)).unwrap_or(1)),
+        Ok(status) => std::process::exit(status.code().unwrap_or(1)),
         Err(error) => {
             eprintln!("failed to run full xtask: {error}");
-            ExitCode::FAILURE
+            std::process::exit(1)
         }
     }
 }

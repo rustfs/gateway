@@ -17,8 +17,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-reset_sandbox() {
-    cleanup
+initialize_sandbox() {
     SANDBOX="$(mktemp -d "${TMPDIR:-/tmp}/gateway-target-guard.XXXXXX")"
     mkdir -p "$SANDBOX/scripts" "$SANDBOX/crates/core" "$SANDBOX/crates/gateway/src" \
         "$SANDBOX/crates/conformance/src"
@@ -33,6 +32,47 @@ reset_sandbox() {
     cp "$REPO_ROOT/crates/gateway/src/lib.rs" "$SANDBOX/crates/gateway/src/"
     cp -R "$REPO_ROOT/crates/gateway/tests" "$SANDBOX/crates/gateway/"
     cp -R "$REPO_ROOT/crates/conformance/tests" "$SANDBOX/crates/conformance/"
+    git -C "$SANDBOX" init -q
+    git -C "$SANDBOX" add -A
+    git -C "$SANDBOX" \
+        -c user.name='Target Guard' \
+        -c user.email='target-guard@example.invalid' \
+        -c commit.gpgsign=false \
+        commit -qm baseline
+}
+
+reset_sandbox() {
+    if [[ -z "$SANDBOX" ]]; then
+        initialize_sandbox
+        return
+    fi
+    git -C "$SANDBOX" reset --hard -q HEAD
+    git -C "$SANDBOX" clean -fdq
+}
+
+verify_restore_control() {
+    local original_sandbox
+
+    reset_sandbox
+    original_sandbox="$SANDBOX"
+    printf '%s\n' '# tracked modification' >>"$SANDBOX/crates/core/Cargo.toml"
+    rm "$SANDBOX/crates/conformance/src/lib.rs"
+    printf '%s\n' 'untracked' >"$SANDBOX/untracked.txt"
+    printf '%s\n' 'magic' >"$SANDBOX/:(glob)decoy[1].txt"
+    reset_sandbox
+
+    if [[ "$SANDBOX" != "$original_sandbox" ]]; then
+        printf '%s\n' 'sandbox restore control rebuilt the sandbox' >&2
+        return 1
+    fi
+    if [[ -n "$(git -C "$SANDBOX" status --porcelain=v1 --untracked-files=all)" ]]; then
+        printf '%s\n' 'sandbox restore control left tracked or untracked changes' >&2
+        return 1
+    fi
+    [[ -f "$SANDBOX/crates/conformance/src/lib.rs" ]]
+    [[ ! -e "$SANDBOX/untracked.txt" ]]
+    [[ ! -e "$SANDBOX/:(glob)decoy[1].txt" ]]
+    printf '%s\n' '  ok   sandbox restore handles tracked, untracked, and magic paths'
 }
 
 expect_fail() {
@@ -43,6 +83,7 @@ expect_fail() {
     (cd "$SANDBOX" && "$mutation")
     GATEWAY_CHECK_ROOT="$SANDBOX" bash "$SANDBOX/scripts/check_test_target_consolidation.sh" \
         >/dev/null 2>&1 || rc=$?
+    reset_sandbox
     if [[ "$rc" -ne 0 ]]; then
         printf '  ok   %s\n' "$description"
     else
@@ -53,11 +94,14 @@ expect_fail() {
 
 expect_pass() {
     local description="$1" mutation="$2"
+    local rc=0
     cases=$((cases + 1))
     reset_sandbox
     (cd "$SANDBOX" && "$mutation")
-    if GATEWAY_CHECK_ROOT="$SANDBOX" bash "$SANDBOX/scripts/check_test_target_consolidation.sh" \
-        >/dev/null 2>&1; then
+    GATEWAY_CHECK_ROOT="$SANDBOX" bash "$SANDBOX/scripts/check_test_target_consolidation.sh" \
+        >/dev/null 2>&1 || rc=$?
+    reset_sandbox
+    if [[ "$rc" -eq 0 ]]; then
         printf '  ok   %s\n' "$description"
     else
         printf '  FAIL %s\n' "$description" >&2
@@ -69,6 +113,8 @@ if ! bash "$REPO_ROOT/scripts/check_test_target_consolidation.sh" >/dev/null; th
     printf '%s\n' 'target-consolidation positive control failed' >&2
     exit 1
 fi
+
+verify_restore_control
 
 mut_core_registration_omitted() {
     python3 - <<'PYEOF'

@@ -10,20 +10,16 @@ publish = false
 [features]
 default = ["full"]
 full = [
-    "dep:command-group",
     "dep:http",
     "dep:rustfs-gateway",
     "dep:rustfs-gateway-conformance",
     "dep:rustfs-gateway-core",
-    "dep:serde",
-    "dep:serde_json",
-    "dep:signal-hook",
     "ir-validation",
 ]
 ir-validation = ["dep:jsonschema"]
 
 [dependencies]
-command-group = { workspace = true, optional = true }
+command-group.workspace = true
 jsonschema = { workspace = true, optional = true }
 rustfs-gateway = { workspace = true, optional = true }
 rustfs-gateway-codegen = { workspace = true }
@@ -31,9 +27,9 @@ rustfs-gateway-conformance = { workspace = true, optional = true }
 rustfs-gateway-core = { workspace = true, optional = true }
 rustfs-gateway-model = { workspace = true }
 http = { workspace = true, optional = true }
-serde = { workspace = true, optional = true }
-serde_json = { workspace = true, optional = true }
-signal-hook = { workspace = true, optional = true }
+serde.workspace = true
+serde_json.workspace = true
+signal-hook.workspace = true
 
 [package.metadata.docs.rs]
 all-features = true

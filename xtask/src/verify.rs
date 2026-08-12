@@ -28,12 +28,84 @@ use std::time::{Duration, Instant};
 
 use serde::Deserialize;
 
-use crate::catalog;
-use crate::codegen;
+#[cfg(feature = "full")]
+use crate::{catalog, codegen};
+
+#[cfg(not(feature = "full"))]
+pub(crate) fn is_crate_request(args: &[String]) -> bool {
+    let (args, _) = take_json(args);
+    matches!(args.as_slice(), [flag, _] if flag == "--crate")
+}
 
 pub(crate) fn verify(args: &[String]) -> ExitCode {
     let (args, json) = take_json(args);
     match args.as_slice() {
+        [flag, name] if flag == "--crate" => return verify_crate(name, json),
+        _ => {}
+    }
+    #[cfg(feature = "full")]
+    {
+        verify_full(&args, json)
+    }
+    #[cfg(not(feature = "full"))]
+    {
+        usage()
+    }
+}
+
+fn verify_crate(name: &str, json: bool) -> ExitCode {
+    let package = match resolve_workspace_package(name) {
+        Ok(package) => package,
+        Err(error) => {
+            if json {
+                println!("{}", package_resolution_failure_json(name, &error));
+                return ExitCode::FAILURE;
+            }
+            return diagnostic("workspace package could not be resolved", &format!("crate {name}"), &error.to_string());
+        }
+    };
+    let mut test_step = vec!["test".to_owned(), "-p".to_owned(), package.clone()];
+    if package == "rustfs-gateway-core" {
+        test_step.extend([
+            "--".to_owned(),
+            "--skip".to_owned(),
+            "compile_fail::compile_time_contracts_are_not_openable".to_owned(),
+        ]);
+    }
+    let mut steps = vec![
+        test_step,
+        vec![
+            "clippy".to_owned(),
+            "-p".to_owned(),
+            package.clone(),
+            "--all-targets".to_owned(),
+            "--".to_owned(),
+            "-D".to_owned(),
+            "warnings".to_owned(),
+        ],
+    ];
+    if let Some(case) = crate_case(&package) {
+        steps.push(conformance_step("validate", case));
+    }
+    let subject = if package == "rustfs-gateway-core" {
+        format!("crate {package} runtime scope; compile-time contracts remain in cargo test --workspace")
+    } else {
+        format!("crate {package}")
+    };
+    run_steps(
+        &steps,
+        Duration::from_secs(30),
+        &subject,
+        "a crate verification loop must finish within 30 seconds",
+        json,
+        None,
+        None,
+    )
+}
+
+#[cfg(feature = "full")]
+fn verify_full(args: &[String], json: bool) -> ExitCode {
+    match args {
         [] => run(
             &["test", "--workspace"],
             Duration::from_secs(600),
@@ -42,47 +114,12 @@ pub(crate) fn verify(args: &[String]) -> ExitCode {
             json,
         ),
         [flag] if flag == "--all" => run_all(json),
-        [flag, name] if flag == "--crate" => {
-            let package = match resolve_workspace_package(name) {
-                Ok(package) => package,
-                Err(error) => {
-                    if json {
-                        println!("{}", package_resolution_failure_json(name, &error));
-                        return ExitCode::FAILURE;
-                    }
-                    return diagnostic("workspace package could not be resolved", &format!("crate {name}"), &error.to_string());
-                }
-            };
-            let mut steps = vec![
-                vec!["test".to_owned(), "-p".to_owned(), package.clone()],
-                vec![
-                    "clippy".to_owned(),
-                    "-p".to_owned(),
-                    package.clone(),
-                    "--all-targets".to_owned(),
-                    "--".to_owned(),
-                    "-D".to_owned(),
-                    "warnings".to_owned(),
-                ],
-            ];
-            if let Some(case) = crate_case(&package) {
-                steps.push(conformance_step("validate", case));
-            }
-            run_steps(
-                &steps,
-                Duration::from_secs(30),
-                &format!("crate {package}"),
-                "a crate verification loop must finish within 30 seconds",
-                json,
-                None,
-                None,
-            )
-        }
         [flag, name] if flag == "--op" => verify_operation(name, json),
         _ => usage(),
     }
 }
 
+#[cfg(feature = "full")]
 fn verify_operation(name: &str, json: bool) -> ExitCode {
     let started = Instant::now();
     let operations = match catalog::operations() {
@@ -132,6 +169,7 @@ fn verify_operation(name: &str, json: bool) -> ExitCode {
     )
 }
 
+#[cfg(feature = "full")]
 fn run_representative_case(name: &str, cases: &[String], json: bool) -> Result<Option<String>, ExitCode> {
     for case in cases {
         let output = Command::new(env!("CARGO")).args(conformance_step("run", case)).output();
@@ -167,6 +205,7 @@ fn run_representative_case(name: &str, cases: &[String], json: bool) -> Result<O
     ))
 }
 
+#[cfg(feature = "full")]
 fn run_operation_contract(name: &str) -> Result<(), String> {
     let output = Command::new(env!("CARGO"))
         .env("RUSTFS_GATEWAY_VERIFY_OPERATION", name)
@@ -193,6 +232,7 @@ fn run_operation_contract(name: &str) -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(feature = "full")]
 fn verify_scaffold(entry: &catalog::ScaffoldEntry, json: bool) -> ExitCode {
     let snake = snake_case(&entry.name);
     let output = Command::new(env!("CARGO"))
@@ -351,6 +391,7 @@ fn workspace_package_names() -> Result<Vec<String>, String> {
         .collect())
 }
 
+#[cfg(feature = "full")]
 fn snake_case(name: &str) -> String {
     let mut out = String::new();
     for (index, byte) in name.bytes().enumerate() {
@@ -396,7 +437,7 @@ fn run_steps(
     started: Option<Instant>,
 ) -> ExitCode {
     let started = started.unwrap_or_else(Instant::now);
-    let commands = steps
+    let commands: Vec<GateCommand> = steps
         .iter()
         .enumerate()
         .map(|(index, step)| (env!("CARGO").to_owned(), step.clone(), format!("{subject} step {}", index + 1)))
@@ -412,7 +453,8 @@ fn run_steps(
             &format!("{rule}; observed {:.2}s", started.elapsed().as_secs_f64()),
         );
     }
-    for (_, output) in batch.results {
+    let results: Vec<GateResult> = batch.results;
+    for (_, output) in results {
         match output {
             Ok(output) if output.status.success() => {}
             Ok(output) => {
@@ -439,6 +481,7 @@ fn run_steps(
     ExitCode::SUCCESS
 }
 
+#[cfg(feature = "full")]
 fn run_all(json: bool) -> ExitCode {
     let root = codegen::repo_root();
     let scripts = root.join("scripts");
@@ -497,6 +540,7 @@ fn run_all(json: bool) -> ExitCode {
 type GateCommand = (String, Vec<String>, String);
 type GateResult = (String, std::io::Result<Output>);
 
+#[cfg(feature = "full")]
 fn run_setup_then_concurrently(setup: &GateCommand, commands: &[GateCommand], current_dir: &Path) -> Vec<GateResult> {
     let (program, args, step) = setup;
     let output = Command::new(program).args(args).current_dir(current_dir).output();
@@ -508,6 +552,7 @@ fn run_setup_then_concurrently(setup: &GateCommand, commands: &[GateCommand], cu
     outputs
 }
 
+#[cfg(feature = "full")]
 fn run_commands_concurrently(commands: &[GateCommand], current_dir: &Path) -> Vec<GateResult> {
     let batch = process::run(commands, current_dir, None);
     if batch.interrupted {
@@ -520,6 +565,7 @@ fn run_commands_concurrently(commands: &[GateCommand], current_dir: &Path) -> Ve
     }
 }
 
+#[cfg(feature = "full")]
 fn run(args: &[&str], budget: Duration, subject: &str, rule: &str, json: bool) -> ExitCode {
     let started = Instant::now();
     let status = Command::new(env!("CARGO")).args(args).output();
@@ -604,7 +650,7 @@ fn escape(value: &str) -> String {
     value.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
-fn print_cargo_failure(output: &std::process::Output) {
+fn print_cargo_failure(output: &Output) {
     eprint!("{}", String::from_utf8_lossy(&output.stdout));
     eprint!("{}", String::from_utf8_lossy(&output.stderr));
 }
@@ -621,7 +667,7 @@ fn diagnostic(what: &str, where_: &str, rule: &str) -> ExitCode {
     ExitCode::FAILURE
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "full"))]
 mod tests {
     use std::fs;
 

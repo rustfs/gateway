@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# WHAT: Keeps `cargo xtask codegen` on the light model/codegen dependency surface.
+# WHAT: Keeps codegen and exact crate verification on a bounded xtask dependency surface.
 # WHY: Cargo builds every normal xtask dependency before dispatch, so one heavy dependency makes
 # code generation pay for the facade, core and conformance crates before generation can start.
 # HOW TO EXEMPT: There is no exemption. Keep the command and split new full-only work behind `full`.
@@ -14,7 +14,7 @@ fail() {
 }
 
 command -v python3 >/dev/null 2>&1 || fail 'python3 is required'
-for required in .cargo/config.toml Cargo.toml xtask/Cargo.toml xtask/src/main.rs xtask/src/catalog.rs; do
+for required in .cargo/config.toml Cargo.toml xtask/Cargo.toml xtask/src/main.rs xtask/src/catalog.rs xtask/src/verify.rs; do
     [[ -f "${ROOT}/${required}" ]] || fail "required input is missing: ${required}"
 done
 
@@ -62,13 +62,23 @@ def dependency(alias_name, local):
         return alias_name, False
     if not isinstance(local, dict):
         fail(f"xtask dependency {alias_name} has an unsupported shape")
+    if "features" in local or "default-features" in local:
+        fail(f"xtask dependency {alias_name} may not alter dependency feature policy locally")
     inherited = {}
     if local.get("workspace") is True:
-        inherited = workspace_dependencies.get(alias_name, {})
+        if alias_name not in workspace_dependencies:
+            fail(f"xtask dependency {alias_name} is missing from workspace dependencies")
+        inherited = workspace_dependencies[alias_name]
         if isinstance(inherited, str):
             inherited = {}
         if not isinstance(inherited, dict):
             fail(f"workspace dependency {alias_name} has an unsupported shape")
+        expected_features = ["derive"] if alias_name == "serde" else None
+        expected_default_features = False if alias_name == "jsonschema" else None
+        actual_features = inherited.get("features")
+        actual_default_features = inherited.get("default-features")
+        if actual_features != expected_features or actual_default_features != expected_default_features:
+            fail(f"workspace dependency {alias_name} changed its inherited feature policy")
     package = local.get("package", inherited.get("package", alias_name))
     optional = local.get("optional", inherited.get("optional", False))
     if not isinstance(package, str) or not isinstance(optional, bool):
@@ -106,7 +116,14 @@ for table_name, table in dependency_tables():
         resolved.append((name, package, optional))
 
 light = {package for _, package, optional in resolved if not optional}
-expected_light = {"rustfs-gateway-codegen", "rustfs-gateway-model"}
+expected_light = {
+    "command-group",
+    "rustfs-gateway-codegen",
+    "rustfs-gateway-model",
+    "serde",
+    "serde_json",
+    "signal-hook",
+}
 if light != expected_light:
     fail(f"the light xtask surface selected unexpected direct packages: {sorted(light)}")
 
@@ -128,9 +145,11 @@ def feature_closure(name, seen):
         fail(f"feature {name} has an unsupported shape")
     enabled = set()
     for entry in entries:
+        if "/" in entry or "?" in entry:
+            fail(f"feature {name} may not forward dependency features: {entry}")
         if entry.startswith("dep:"):
             enabled.add(entry.removeprefix("dep:"))
-        elif "/" not in entry:
+        else:
             enabled.update(feature_closure(entry, seen))
     return enabled
 
@@ -395,11 +414,12 @@ expected_light_dispatch = compact('''
 match first.as_deref() {
     Some("codegen") => codegen::codegen(&rest),
     Some("spec") if rest.first().map(String::as_str) == Some("verify") => codegen::verify(&rest[1..]),
+    Some("verify") if verify::is_crate_request(&rest) => verify::verify(&rest),
     _ => run_full(first, &rest),
 }
 ''')
 if compact(light_dispatches[0]) != expected_light_dispatch:
-    fail("the light dispatcher must directly handle only codegen and spec verify")
+    fail("the light dispatcher must directly handle codegen, spec verify and exact crate verification")
 
 run_full_functions = functions_named("run_full", syntax, comments_removed)
 if len(run_full_functions) != 1 or [compact(attr) for attr in run_full_functions[0][0]] != [expected_light_attribute]:
@@ -420,10 +440,10 @@ command.args(rest);
 }
 #[cfg(not(unix))]
 match command.status() {
-    Ok(status) => ExitCode::from(u8::try_from(status.code().unwrap_or(1)).unwrap_or(1)),
+    Ok(status) => std::process::exit(status.code().unwrap_or(1)),
     Err(error) => {
         eprintln!("failed to run full xtask: {error}");
-        ExitCode::FAILURE
+        std::process::exit(1)
     }
 }
 ''')
@@ -450,9 +470,12 @@ def top_level_items(pattern):
 
 
 catalog_items = top_level_items(r"\bmod\s+catalog\s*;")
+verify_items = top_level_items(r"\bmod\s+verify\s*;")
 usage_items = top_level_items(r"\bconst\s+USAGE\s*:")
 if len(catalog_items) != 1 or catalog_items[0][1]:
     fail("the catalog module must remain available to the light codegen runner")
+if len(verify_items) != 1 or verify_items[0][1]:
+    fail("the verify module must remain available to the light crate-verification runner")
 if len(usage_items) != 1 or [compact(attr) for attr in usage_items[0][1]] != [expected_full_attribute]:
     fail("the USAGE constant must remain full-only so light commands emit no dead-code warnings")
 
@@ -476,5 +499,145 @@ for name in ("VerifyEntry", "ScaffoldEntry"):
         fail(f"catalog item {name} must remain full-only")
 comments_removed, syntax = main_comments, main_syntax
 
-print("OK: cargo xtask codegen selects only the light model/codegen dependency surface")
+verify_source = (root / "xtask/src/verify.rs").read_text()
+verify_comments, verify_syntax = rust_views(verify_source)
+comments_removed, syntax = verify_comments, verify_syntax
+for name in ("verify", "verify_crate"):
+    items = functions_named(name, syntax, comments_removed)
+    if len(items) != 1 or items[0][0]:
+        fail(f"verify item {name} must remain on the light crate-verification surface")
+request_items = functions_named("is_crate_request", syntax, comments_removed)
+request_declarations = top_level_items(r"\bpub\s*\(\s*crate\s*\)\s+fn\s+is_crate_request\s*\(")
+if len(request_items) != 1 or len(request_declarations) != 1 or [compact(attr) for attr in request_declarations[0][1]] != [expected_light_attribute]:
+    fail("crate-request classification must remain light-only")
+expected_request_body = compact('''
+let (args, _) = take_json(args);
+matches!(args.as_slice(), [flag, _] if flag == "--crate")
+''')
+if compact(request_items[0][1]) != expected_request_body:
+    fail("light crate verification must recognize only one crate pair with optional JSON output")
+verify_items = functions_named("verify", syntax, comments_removed)
+expected_verify_body = compact('''
+let (args, json) = take_json(args);
+match args.as_slice() {
+    [flag, name] if flag == "--crate" => return verify_crate(name, json),
+    _ => {}
+}
+#[cfg(feature = "full")]
+{
+    verify_full(&args, json)
+}
+#[cfg(not(feature = "full"))]
+{
+    usage()
+}
+''')
+if compact(verify_items[0][1]) != expected_verify_body:
+    fail("verify must execute exact crate requests before delegating full-only forms")
+verify_crate_items = functions_named("verify_crate", syntax, comments_removed)
+expected_verify_crate_body = compact('''
+let package = match resolve_workspace_package(name) {
+    Ok(package) => package,
+    Err(error) => {
+        if json {
+            println!("{}", package_resolution_failure_json(name, &error));
+            return ExitCode::FAILURE;
+        }
+        return diagnostic("workspace package could not be resolved", &format!("crate {name}"), &error.to_string());
+    }
+};
+let mut test_step = vec!["test".to_owned(), "-p".to_owned(), package.clone()];
+if package == "rustfs-gateway-core" {
+    test_step.extend([
+        "--".to_owned(),
+        "--skip".to_owned(),
+        "compile_fail::compile_time_contracts_are_not_openable".to_owned(),
+    ]);
+}
+let mut steps = vec![
+    test_step,
+    vec![
+        "clippy".to_owned(),
+        "-p".to_owned(),
+        package.clone(),
+        "--all-targets".to_owned(),
+        "--".to_owned(),
+        "-D".to_owned(),
+        "warnings".to_owned(),
+    ],
+];
+if let Some(case) = crate_case(&package) {
+    steps.push(conformance_step("validate", case));
+}
+let subject = if package == "rustfs-gateway-core" {
+    format!("crate {package} runtime scope; compile-time contracts remain in cargo test --workspace")
+} else {
+    format!("crate {package}")
+};
+run_steps(
+    &steps,
+    Duration::from_secs(30),
+    &subject,
+    "a crate verification loop must finish within 30 seconds",
+    json,
+    None,
+    None,
+)
+''')
+if compact(verify_crate_items[0][1]) != expected_verify_crate_body:
+    fail("crate verification must skip only the core compile-fail harness and disclose the full-gate scope")
+for name in (
+    "verify_full",
+    "verify_operation",
+    "run_representative_case",
+    "run_operation_contract",
+    "verify_scaffold",
+    "snake_case",
+    "run_all",
+    "run_setup_then_concurrently",
+    "run_commands_concurrently",
+    "run",
+):
+    items = functions_named(name, syntax, comments_removed)
+    if len(items) != 1 or [compact(attr) for attr in items[0][0]] != [expected_full_attribute]:
+        fail(f"verify item {name} must remain full-only")
+verify_full_items = functions_named("verify_full", syntax, comments_removed)
+expected_verify_full_body = compact('''
+match args {
+    [] => run(
+        &["test", "--workspace"],
+        Duration::from_secs(600),
+        "workspace",
+        "the full gate must finish within 10 minutes",
+        json,
+    ),
+    [flag] if flag == "--all" => run_all(json),
+    [flag, name] if flag == "--op" => verify_operation(name, json),
+    _ => usage(),
+}
+''')
+if compact(verify_full_items[0][1]) != expected_verify_full_body:
+    fail("full verification must match its borrowed argument slice without unstable conversion")
+for name in ("GateCommand", "GateResult"):
+    items = top_level_items(rf"\btype\s+{name}\s*=")
+    if len(items) != 1 or items[0][1]:
+        fail(f"verify item {name} must remain on the light crate-verification surface")
+process_items = top_level_items(r"\bmod\s+process\s*;")
+if len(process_items) != 1 or process_items[0][1]:
+    fail("the process supervisor must remain on the light crate-verification surface")
+for pattern, description in (
+    (r"\buse\s+crate\s*::\s*\{\s*catalog\s*,\s*codegen\s*\}\s*;", "the operation catalog imports"),
+):
+    items = top_level_items(pattern)
+    if len(items) != 1 or [compact(attr) for attr in items[0][1]] != [expected_full_attribute]:
+        fail(f"{description} must remain full-only")
+output_imports = top_level_items(r"\buse\s+std\s*::\s*process\s*::\s*\{[^}]*\bOutput\b[^}]*\}\s*;")
+if len(output_imports) != 1 or output_imports[0][1]:
+    fail("the process output import must remain on the light crate-verification surface")
+tests_items = top_level_items(r"\bmod\s+tests\s*\{")
+expected_tests_attribute = compact('#[cfg(all(test, feature = "full"))]')
+if len(tests_items) != 1 or [compact(attr) for attr in tests_items[0][1]] != [expected_tests_attribute]:
+    fail("verify module tests must require the full feature")
+
+print("OK: cargo xtask keeps codegen and exact crate verification on the bounded light surface")
 PYEOF

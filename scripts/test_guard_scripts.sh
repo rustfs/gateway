@@ -41,6 +41,76 @@ fail_msg() {
 # the whole tree for every case made the reset cost grow with the repository rather than
 # with the mutation and pushed the suite past the ten-minute CI budget.
 SANDBOX=""
+SANDBOX_RESET_TRACKED=""
+SANDBOX_RESET_UNTRACKED=""
+SANDBOX_RESET_READY=0
+
+literalize_nul_paths() {
+    local input="$1" output="$2" path
+    : >"$output"
+    while IFS= read -r -d '' path; do
+        printf ':(literal)%s\0' "$path" >>"$output"
+    done <"$input"
+}
+
+reset_sandbox_changes() {
+    local sandbox="$1" changed changed_literal untracked path
+    if [[ "$sandbox" == "$SANDBOX" && "$SANDBOX_RESET_READY" -eq 1 ]]; then
+        # Consume before touching Git so an interrupted or failed reset can never leak paths into
+        # the next case. The cache contains only literal NUL entries published after staging.
+        SANDBOX_RESET_READY=0
+        local rc=0
+        (
+            cd "$sandbox"
+            if [[ -s "$SANDBOX_RESET_TRACKED" ]]; then
+                git reset -q HEAD --pathspec-from-file="$SANDBOX_RESET_TRACKED" \
+                    --pathspec-file-nul >/dev/null 2>&1 || exit $?
+            fi
+            if [[ -s "$SANDBOX_RESET_UNTRACKED" ]]; then
+                git reset -q HEAD --pathspec-from-file="$SANDBOX_RESET_UNTRACKED" \
+                    --pathspec-file-nul >/dev/null 2>&1 || exit $?
+                while IFS= read -r -d '' path; do
+                    git clean -fdq -- "$path" >/dev/null 2>&1 || exit $?
+                done <"$SANDBOX_RESET_UNTRACKED"
+            fi
+            if [[ -s "$SANDBOX_RESET_TRACKED" ]]; then
+                git checkout -f HEAD --pathspec-from-file="$SANDBOX_RESET_TRACKED" \
+                    --pathspec-file-nul >/dev/null 2>&1 || exit $?
+            fi
+        ) || rc=$?
+        : >"$SANDBOX_RESET_TRACKED"
+        : >"$SANDBOX_RESET_UNTRACKED"
+        return "$rc"
+    fi
+
+    # Special probes that deliberately bypass staging have no cache. Scan once for those callers;
+    # ordinary negative cases always arrive through stage_sandbox_changes and avoid this path.
+    changed="$(mktemp "${TMPDIR:-/tmp}/gateway-guard-changed.XXXXXX")"
+    changed_literal="$(mktemp "${TMPDIR:-/tmp}/gateway-guard-changed-literal.XXXXXX")"
+    untracked="$(mktemp "${TMPDIR:-/tmp}/gateway-guard-untracked.XXXXXX")"
+    local rc=0
+    (
+        cd "$sandbox"
+        git diff --name-only -z HEAD -- >"$changed" || exit $?
+        if [[ -s "$changed" ]]; then
+            literalize_nul_paths "$changed" "$changed_literal"
+            git reset -q HEAD --pathspec-from-file="$changed_literal" \
+                --pathspec-file-nul >/dev/null 2>&1 || exit $?
+        fi
+        git ls-files --others --exclude-standard -z >"$untracked" || exit $?
+        while IFS= read -r -d '' path; do
+            git clean -fdq -- ":(literal)${path}" >/dev/null 2>&1 || exit $?
+        done <"$untracked"
+        git diff --name-only -z HEAD -- >"$changed" || exit $?
+        if [[ -s "$changed" ]]; then
+            literalize_nul_paths "$changed" "$changed_literal"
+            git checkout -f HEAD --pathspec-from-file="$changed_literal" \
+                --pathspec-file-nul >/dev/null 2>&1 || exit $?
+        fi
+    ) || rc=$?
+    rm -f "$changed" "$changed_literal" "$untracked"
+    return "$rc"
+}
 
 # Reuse the caller's build directory. A guard that declares REQUIRES-BUILD compiles
 # the workspace, and a separate target/ recompiles it after `cargo test --workspace`.
@@ -57,25 +127,7 @@ export CARGO_TARGET_DIR="$GUARD_TARGET_DIR"
 
 make_sandbox() {
     if [[ -n "$SANDBOX" ]]; then
-        local changed untracked
-        changed="$(mktemp "${TMPDIR:-/tmp}/gateway-guard-changed.XXXXXX")"
-        untracked="$(mktemp "${TMPDIR:-/tmp}/gateway-guard-untracked.XXXXXX")"
-        (
-            cd "$SANDBOX"
-            git diff --name-only -z HEAD -- >"$changed"
-            if [[ -s "$changed" ]]; then
-                xargs -0 git reset -q HEAD -- <"$changed" >/dev/null 2>&1
-            fi
-            git ls-files --others --exclude-standard -z >"$untracked"
-            if [[ -s "$untracked" ]]; then
-                xargs -0 git clean -fdq -- <"$untracked" >/dev/null 2>&1
-            fi
-            git diff --name-only -z HEAD -- >"$changed"
-            if [[ -s "$changed" ]]; then
-                xargs -0 git checkout -f HEAD -- <"$changed" >/dev/null 2>&1
-            fi
-        )
-        rm -f "$changed" "$untracked"
+        reset_sandbox_changes "$SANDBOX"
         return
     fi
 
@@ -135,6 +187,50 @@ make_sandbox() {
         return 1
     fi
     SANDBOX="$dir"
+    SANDBOX_RESET_TRACKED="${dir}.reset-tracked"
+    SANDBOX_RESET_UNTRACKED="${dir}.reset-untracked"
+    : >"$SANDBOX_RESET_TRACKED"
+    : >"$SANDBOX_RESET_UNTRACKED"
+    SANDBOX_RESET_READY=0
+}
+
+# Stage only paths changed by the current mutation. A repository-wide `git add -A` rescans every
+# workspace file for every negative case; the guard reads the same index when the exact tracked and
+# untracked paths are staged explicitly.
+stage_sandbox_changes() {
+    local sandbox="$1" tracked untracked paths
+    tracked="$(mktemp "${TMPDIR:-/tmp}/gateway-guard-stage-tracked.XXXXXX")"
+    untracked="$(mktemp "${TMPDIR:-/tmp}/gateway-guard-stage-untracked.XXXXXX")"
+    paths="$(mktemp "${TMPDIR:-/tmp}/gateway-guard-stage-paths.XXXXXX")"
+    if [[ "$sandbox" == "$SANDBOX" ]]; then
+        SANDBOX_RESET_READY=0
+        : >"$SANDBOX_RESET_TRACKED"
+        : >"$SANDBOX_RESET_UNTRACKED"
+    fi
+    if ! (
+        cd "$sandbox"
+        git diff --name-only -z HEAD -- >"$tracked" &&
+            git ls-files --others --exclude-standard -z >"$untracked"
+    ); then
+        rm -f "$tracked" "$untracked" "$paths" "$paths.tracked" "$paths.untracked"
+        return 1
+    fi
+    literalize_nul_paths "$tracked" "$paths.tracked"
+    literalize_nul_paths "$untracked" "$paths.untracked"
+    cat "$paths.tracked" "$paths.untracked" >"$paths"
+    if [[ -s "$paths" ]] && ! (
+        cd "$sandbox"
+        git add -A --pathspec-from-file="$paths" --pathspec-file-nul
+    ); then
+        rm -f "$tracked" "$untracked" "$paths" "$paths.tracked" "$paths.untracked"
+        return 1
+    fi
+    if [[ "$sandbox" == "$SANDBOX" ]]; then
+        cp "$paths.tracked" "$SANDBOX_RESET_TRACKED"
+        cp "$paths.untracked" "$SANDBOX_RESET_UNTRACKED"
+        SANDBOX_RESET_READY=1
+    fi
+    rm -f "$tracked" "$untracked" "$paths" "$paths.tracked" "$paths.untracked"
 }
 
 cleanup_sandbox() {
@@ -144,6 +240,7 @@ cleanup_sandbox() {
     if [[ -n "$SANDBOX" ]]; then
         rm -rf "$SANDBOX"
     fi
+    rm -f "$SANDBOX_RESET_TRACKED" "$SANDBOX_RESET_UNTRACKED"
     return 0
 }
 trap cleanup_sandbox EXIT
@@ -228,7 +325,7 @@ expect_fail() {
     make_sandbox
     sandbox="$SANDBOX"
     (cd "$sandbox" && "$mutate" >/dev/null)
-    (cd "$sandbox" && git add -A >/dev/null 2>&1)
+    stage_sandbox_changes "$sandbox" >/dev/null 2>&1
     GATEWAY_CHECK_ROOT="$sandbox" "${SCRIPT_DIR}/${guard}" >/dev/null 2>&1 || rc=$?
     if [[ "$rc" -ne 0 ]]; then
         pass_msg "${guard} catches: ${desc}"
@@ -248,7 +345,7 @@ expect_fail_self_mutation() {
     make_sandbox
     sandbox="$SANDBOX"
     (cd "$sandbox" && "$mutate" >/dev/null)
-    (cd "$sandbox" && git add -A >/dev/null 2>&1)
+    stage_sandbox_changes "$sandbox" >/dev/null 2>&1
     GATEWAY_CHECK_ROOT="$sandbox" "$sandbox/scripts/$guard" >/dev/null 2>&1 || rc=$?
     if [[ "$rc" -ne 0 ]]; then
         pass_msg "${guard} catches its own mutation: ${desc}"
@@ -270,7 +367,7 @@ expect_fail_and_missing_grep() {
     make_sandbox
     sandbox="$SANDBOX"
     (cd "$sandbox" && "$mutate" >/dev/null)
-    (cd "$sandbox" && git add -A >/dev/null 2>&1)
+    stage_sandbox_changes "$sandbox" >/dev/null 2>&1
     GATEWAY_CHECK_ROOT="$sandbox" "${SCRIPT_DIR}/${guard}" >/dev/null 2>&1 || mutation_rc=$?
 
     make_sandbox
@@ -423,10 +520,10 @@ from pathlib import Path
 
 path = Path("xtask/src/main.rs")
 text = path.read_text()
-old = "        Ok(status) => ExitCode::from(u8::try_from(status.code().unwrap_or(1)).unwrap_or(1)),"
-new = "        Ok(_) => ExitCode::SUCCESS, // " + old.strip()
+old = "        Ok(status) => std::process::exit(status.code().unwrap_or(1)),"
+new = "        Ok(_) => std::process::exit(0),"
 if text.count(old) != 1:
-    raise SystemExit("non-Unix status propagation is missing")
+    raise SystemExit("non-Unix i32 status propagation is missing")
 path.write_text(text.replace(old, new, 1))
 PYEOF
 }
@@ -501,6 +598,318 @@ PYEOF
 expect_fail check_xtask_codegen_surface.sh \
     'the light runner compiling the full-only usage text' \
     mut_xtask_light_builds_full_usage
+
+mut_xtask_crate_verify_reexecutes_full_runner() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("xtask/src/main.rs")
+text = path.read_text()
+old = 'Some("verify") if verify::is_crate_request(&rest) => verify::verify(&rest),'
+new = 'Some("verify") if verify::is_crate_request(&rest) => run_full(first, &rest),'
+if text.count(old) != 1:
+    raise SystemExit("expected exactly one light crate-verification dispatch arm")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_xtask_codegen_surface.sh \
+    'exact crate verification re-entering the full runner' \
+    mut_xtask_crate_verify_reexecutes_full_runner
+
+mut_xtask_crate_verify_drops_arguments() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("xtask/src/main.rs")
+text = path.read_text()
+old = 'Some("verify") if verify::is_crate_request(&rest) => verify::verify(&rest),'
+new = 'Some("verify") if verify::is_crate_request(&rest) => verify::verify(&[]),'
+if text.count(old) != 1:
+    raise SystemExit("expected exactly one light crate-verification dispatch arm")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_xtask_codegen_surface.sh \
+    'the light crate-verification runner dropping its arguments' \
+    mut_xtask_crate_verify_drops_arguments
+
+mut_xtask_process_supervisor_becomes_full_only() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("xtask/Cargo.toml")
+text = path.read_text()
+old = "command-group.workspace = true"
+new = "command-group = { workspace = true, optional = true }"
+if text.count(old) != 1:
+    raise SystemExit("light process-supervisor dependency is missing")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_xtask_codegen_surface.sh \
+    'the crate-verification process supervisor becoming full-only' \
+    mut_xtask_process_supervisor_becomes_full_only
+
+mut_xtask_verify_operation_loses_full_gate() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("xtask/src/verify.rs")
+text = path.read_text()
+old = '#[cfg(feature = "full")]\nfn verify_operation'
+new = 'fn verify_operation'
+if text.count(old) != 1:
+    raise SystemExit("full-only operation verifier is missing")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_xtask_codegen_surface.sh \
+    'an operation-only verifier leaking into the light crate surface' \
+    mut_xtask_verify_operation_loses_full_gate
+
+mut_xtask_full_verify_uses_unstable_slice_conversion() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("xtask/src/verify.rs")
+text = path.read_text()
+old = "fn verify_full(args: &[String], json: bool) -> ExitCode {\n    match args {"
+new = "fn verify_full(args: &[String], json: bool) -> ExitCode {\n    match args.as_slice() {"
+if text.count(old) != 1:
+    raise SystemExit("borrowed full-verification slice match is missing")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_xtask_codegen_surface.sh \
+    'full verification calling unstable as_slice on an existing slice' \
+    mut_xtask_full_verify_uses_unstable_slice_conversion
+
+mut_xtask_core_fast_scope_loses_compile_fail_skip() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("xtask/src/verify.rs")
+text = path.read_text()
+old = '''    if package == "rustfs-gateway-core" {
+        test_step.extend([
+            "--".to_owned(),
+            "--skip".to_owned(),
+            "compile_fail::compile_time_contracts_are_not_openable".to_owned(),
+        ]);
+    }
+'''
+if text.count(old) != 1:
+    raise SystemExit("core compile-fail fast-scope skip is missing")
+path.write_text(text.replace(old, "", 1))
+PYEOF
+}
+expect_fail check_xtask_codegen_surface.sh \
+    'the core fast scope losing its compile-fail skip' \
+    mut_xtask_core_fast_scope_loses_compile_fail_skip
+
+mut_xtask_core_fast_scope_renames_compile_fail_skip() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("xtask/src/verify.rs")
+text = path.read_text()
+old = '"compile_fail::compile_time_contracts_are_not_openable".to_owned(),'
+new = '"compile_fail::renamed_contract".to_owned(),'
+if text.count(old) != 1:
+    raise SystemExit("core compile-fail skip name is missing")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_xtask_codegen_surface.sh \
+    'the core fast scope naming a nonexistent skipped test' \
+    mut_xtask_core_fast_scope_renames_compile_fail_skip
+
+mut_xtask_compile_fail_skip_applies_to_every_crate() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("xtask/src/verify.rs")
+text = path.read_text()
+old = 'if package == "rustfs-gateway-core" {'
+new = 'if !package.is_empty() {'
+if text.count(old) != 2:
+    raise SystemExit("core-only skip and diagnostic conditions are not both present")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_xtask_codegen_surface.sh \
+    'the core compile-fail skip leaking into another crate scope' \
+    mut_xtask_compile_fail_skip_applies_to_every_crate
+
+mut_xtask_crate_classifier_leaks_into_full_build() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("xtask/src/verify.rs")
+text = path.read_text()
+old = '#[cfg(not(feature = "full"))]\npub(crate) fn is_crate_request'
+new = 'pub(crate) fn is_crate_request'
+if text.count(old) != 1:
+    raise SystemExit("light-only crate classifier is missing")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_xtask_codegen_surface.sh \
+    'the light crate classifier leaking as dead code into full builds' \
+    mut_xtask_crate_classifier_leaks_into_full_build
+
+mut_xtask_light_gate_result_becomes_full_only() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("xtask/src/verify.rs")
+text = path.read_text()
+old = "type GateResult = (String, std::io::Result<Output>);"
+new = '#[cfg(feature = "full")]\n' + old
+if text.count(old) != 1:
+    raise SystemExit("light gate-result carrier is missing")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_xtask_codegen_surface.sh \
+    'the gate-result carrier becoming unavailable to light crate verification' \
+    mut_xtask_light_gate_result_becomes_full_only
+
+mut_xtask_light_gate_command_becomes_full_only() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("xtask/src/verify.rs")
+text = path.read_text()
+old = "type GateCommand = (String, Vec<String>, String);"
+new = '#[cfg(feature = "full")]\n' + old
+if text.count(old) != 1:
+    raise SystemExit("light gate-command carrier is missing")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_xtask_codegen_surface.sh \
+    'the gate-command carrier becoming unavailable to light crate verification' \
+    mut_xtask_light_gate_command_becomes_full_only
+
+mut_xtask_light_output_import_becomes_full_only() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("xtask/src/verify.rs")
+text = path.read_text()
+old = "use std::process::{Command, ExitCode, Output};"
+new = '#[cfg(feature = "full")]\n' + old
+if text.count(old) != 1:
+    raise SystemExit("light process-output import is missing")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_xtask_codegen_surface.sh \
+    'the process-output import becoming unavailable to light crate verification' \
+    mut_xtask_light_output_import_becomes_full_only
+
+mut_xtask_full_forwards_dangerous_dependency_feature() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("xtask/Cargo.toml")
+text = path.read_text()
+old = '    "dep:rustfs-gateway",'
+new = old + '\n    "rustfs-gateway/dangerous-allow-all-authorizer",'
+if text.count(old) != 1:
+    raise SystemExit("full facade dependency feature is missing")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_xtask_codegen_surface.sh \
+    'the full feature forwarding a dangerous facade feature' \
+    mut_xtask_full_forwards_dangerous_dependency_feature
+
+mut_xtask_facade_dependency_enables_dangerous_feature() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("xtask/Cargo.toml")
+text = path.read_text()
+old = "rustfs-gateway = { workspace = true, optional = true }"
+new = 'rustfs-gateway = { workspace = true, optional = true, features = ["dangerous-allow-all-authorizer"] }'
+if text.count(old) != 1:
+    raise SystemExit("optional facade dependency is missing")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_xtask_codegen_surface.sh \
+    'the local facade dependency enabling its dangerous authorizer feature' \
+    mut_xtask_facade_dependency_enables_dangerous_feature
+
+mut_xtask_local_dependency_changes_default_features() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("xtask/Cargo.toml")
+text = path.read_text()
+old = "signal-hook.workspace = true"
+new = "signal-hook = { workspace = true, default-features = false }"
+if text.count(old) != 1:
+    raise SystemExit("light signal-hook dependency is missing")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_xtask_codegen_surface.sh \
+    'a local dependency overriding inherited default features' \
+    mut_xtask_local_dependency_changes_default_features
+
+mut_xtask_inherits_dangerous_facade_feature() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("Cargo.toml")
+text = path.read_text()
+old = 'rustfs-gateway = { path = "crates/gateway", version = "0.5.0" }'
+new = 'rustfs-gateway = { path = "crates/gateway", version = "0.5.0", features = ["dangerous-allow-all-authorizer"] }'
+if text.count(old) != 1:
+    raise SystemExit("workspace facade dependency is missing")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_xtask_codegen_surface.sh \
+    'the workspace facade dependency injecting its dangerous authorizer feature' \
+    mut_xtask_inherits_dangerous_facade_feature
+
+mut_xtask_inherits_jsonschema_default_features() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("Cargo.toml")
+text = path.read_text()
+old = 'jsonschema = { version = "0.48.2", default-features = false }'
+new = 'jsonschema = { version = "0.48.2", default-features = true }'
+if text.count(old) != 1:
+    raise SystemExit("workspace jsonschema dependency policy is missing")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_xtask_codegen_surface.sh \
+    'the workspace jsonschema dependency restoring default features' \
+    mut_xtask_inherits_jsonschema_default_features
+
+mut_xtask_nonunix_runner_truncates_large_status() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("xtask/src/main.rs")
+text = path.read_text()
+old = "        Ok(status) => std::process::exit(status.code().unwrap_or(1)),"
+new = "        Ok(status) => return ExitCode::from(status.code().unwrap_or(1) as u8),"
+if text.count(old) != 1:
+    raise SystemExit("non-Unix i32 status propagation is missing")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_xtask_codegen_surface.sh \
+    'the non-Unix bridge truncating a child status above 255' \
+    mut_xtask_nonunix_runner_truncates_large_status
 
 mut_scalar_duplicate_acceptance_id() {
     python3 - <<'PYEOF'
@@ -1426,6 +1835,504 @@ PY
 expect_fail check_minimal_assembly_lines.sh \
     'the assembly measurement loses its opening marker' mut_minimal_assembly_marker_removed
 
+# Exercise selective staging in a tiny repository so the control measures only index semantics.
+# The Git shim records every invocation and rejects a regression to repository-wide `git add -A`.
+stage_helper_contract() {
+    local helper="$1" repo shim log expected real_git output rc=0
+    repo="$(mktemp -d "${TMPDIR:-/tmp}/gateway-stage-helper.XXXXXX")"
+    shim="$(mktemp -d "${TMPDIR:-/tmp}/gateway-stage-git.XXXXXX")"
+    log="$(mktemp "${TMPDIR:-/tmp}/gateway-stage-log.XXXXXX")"
+    expected="$(mktemp "${TMPDIR:-/tmp}/gateway-stage-expected.XXXXXX")"
+    real_git="$(command -v git)"
+    write_stage_contract_pathspec "$expected"
+    (
+        cd "$repo"
+        "$real_git" init -q .
+        printf 'keep\n' >modified.txt
+        printf 'delete\n' >deleted.txt
+        printf 'magic\n' >':(glob)decoy'
+        printf 'bracket\n' >'tracked[one].txt'
+        printf 'unchanged\n' >unchanged.txt
+        "$real_git" add modified.txt deleted.txt unchanged.txt -- \
+            ':(literal):(glob)decoy' ':(literal)tracked[one].txt'
+        "$real_git" -c user.name=t -c user.email=t@t commit -qm base
+        printf 'changed\n' >>modified.txt
+        rm deleted.txt
+        printf 'changed\n' >>':(glob)decoy'
+        rm 'tracked[one].txt'
+        printf 'new\n' >untracked.txt
+        printf 'new magic\n' >':(glob)untracked'
+        printf 'new bracket\n' >'untracked[two].txt'
+    )
+    printf '%s\n' \
+        '#!/bin/sh' \
+        'printf "CALL\0" >>"$GATEWAY_STAGE_GIT_LOG"' \
+        'printf "%s\0" "$@" >>"$GATEWAY_STAGE_GIT_LOG"' \
+        'printf "END\0" >>"$GATEWAY_STAGE_GIT_LOG"' \
+        'case "${1-}" in' \
+        '    add)' \
+        '        [ "$#" -eq 4 ] && [ "${2-}" = -A ] && [ "${4-}" = --pathspec-file-nul ] || exit 97' \
+        '        case "${3-}" in --pathspec-from-file=*) pathspec=${3#*=} ;; *) exit 97 ;; esac' \
+        '        [ -n "$pathspec" ] && [ "$pathspec" != - ] || exit 97' \
+        '        "$GATEWAY_STAGE_VALIDATE" "$GATEWAY_STAGE_EXPECTED" "$pathspec" || exit 97' \
+        '        ;;' \
+        '    diff)' \
+        '        [ "$#" -eq 5 ] && [ "${2-}" = --name-only ] && [ "${3-}" = -z ] &&' \
+        '            [ "${4-}" = HEAD ] && [ "${5-}" = -- ] || exit 97' \
+        '        ;;' \
+        '    ls-files)' \
+        '        [ "$#" -eq 4 ] && [ "${2-}" = --others ] &&' \
+        '            [ "${3-}" = --exclude-standard ] && [ "${4-}" = -z ] || exit 97' \
+        '        ;;' \
+        '    *) exit 97 ;;' \
+        'esac' \
+        'exec "$GATEWAY_STAGE_REAL_GIT" "$@"' >"$shim/git"
+    printf '%s\n' \
+        '#!/usr/bin/env python3' \
+        'import pathlib' \
+        'import sys' \
+        '' \
+        'def entries(path):' \
+        '    data = pathlib.Path(path).read_bytes()' \
+        '    if not data or not data.endswith(b"\0"):' \
+        '        raise SystemExit(1)' \
+        '    values = data[:-1].split(b"\0")' \
+        '    if any(not value for value in values):' \
+        '        raise SystemExit(1)' \
+        '    return values' \
+        '' \
+        'expected = entries(sys.argv[1])' \
+        'actual = entries(sys.argv[2])' \
+        'if len(actual) != len(set(actual)):' \
+        '    raise SystemExit(1)' \
+        'if any(not value.startswith(b":(literal)") for value in actual):' \
+        '    raise SystemExit(1)' \
+        'if set(actual) != set(expected):' \
+        '    raise SystemExit(1)' >"$shim/validate"
+    chmod +x "$shim/git"
+    chmod +x "$shim/validate"
+    PATH="$shim:$PATH" GATEWAY_STAGE_GIT_LOG="$log" GATEWAY_STAGE_EXPECTED="$expected" \
+        GATEWAY_STAGE_VALIDATE="$shim/validate" GATEWAY_STAGE_REAL_GIT="$real_git" \
+        "$helper" "$repo" || rc=$?
+    if [[ "$rc" -eq 0 ]]; then
+        output="$(cd "$repo" && "$real_git" diff --cached --name-only -z | python3 -c 'import sys; print("\n".join(sorted(part.decode() for part in sys.stdin.buffer.read().split(b"\0") if part)))')"
+        if [[ "$output" != $':(glob)decoy\n:(glob)untracked\ndeleted.txt\nmodified.txt\ntracked[one].txt\nuntracked.txt\nuntracked[two].txt' ]] ||
+            ! (cd "$repo" && "$real_git" diff --quiet) ||
+            [[ -n "$(cd "$repo" && "$real_git" ls-files --others --exclude-standard)" ]]; then
+            rc=1
+        fi
+    fi
+    if [[ "$rc" -eq 0 ]] && python3 - "$log" <<'PYEOF'
+import pathlib
+import sys
+
+records = pathlib.Path(sys.argv[1]).read_bytes().split(b"\0")
+calls = []
+current = None
+for record in records:
+    if record == b"CALL":
+        if current is not None:
+            raise SystemExit(1)
+        current = []
+    elif record == b"END":
+        if current is None:
+            raise SystemExit(1)
+        calls.append(current)
+        current = None
+    elif record and current is not None:
+        current.append(record)
+if current is not None or not calls:
+    raise SystemExit(1)
+for call in calls:
+    allowed_query = call in (
+        [b"diff", b"--name-only", b"-z", b"HEAD", b"--"],
+        [b"ls-files", b"--others", b"--exclude-standard", b"-z"],
+    )
+    allowed_add = (
+        len(call) == 4
+        and call[0] == b"add"
+        and call[1] == b"-A"
+        and call[2].startswith(b"--pathspec-from-file=")
+        and call[3] == b"--pathspec-file-nul"
+    )
+    if not (allowed_query or allowed_add):
+        raise SystemExit(1)
+PYEOF
+    then
+        (cd "$repo" && "$real_git" reset -q --hard HEAD && "$real_git" clean -fdq)
+        PATH="$shim:$PATH" GATEWAY_STAGE_GIT_LOG="$log" GATEWAY_STAGE_EXPECTED="$expected" \
+            GATEWAY_STAGE_VALIDATE="$shim/validate" GATEWAY_STAGE_REAL_GIT="$real_git" \
+            "$helper" "$repo" || rc=$?
+        if [[ "$rc" -eq 0 ]] && ! (cd "$repo" && "$real_git" status --porcelain | grep -q .); then
+            rc=0
+        else
+            rc=1
+        fi
+    else
+        rc=1
+    fi
+    rm -rf "$repo" "$shim"
+    rm -f "$log" "$expected"
+    return "$rc"
+}
+
+write_stage_contract_pathspec() {
+    printf '%s\0' \
+        ':(literal):(glob)decoy' \
+        ':(literal):(glob)untracked' \
+        ':(literal)deleted.txt' \
+        ':(literal)modified.txt' \
+        ':(literal)tracked[one].txt' \
+        ':(literal)untracked.txt' \
+        ':(literal)untracked[two].txt' >"$1"
+}
+
+stage_mutant_adds_whole_tree() {
+    (cd "$1" && git add -A)
+}
+
+stage_mutant_adds_dot() {
+    (cd "$1" && git add .)
+}
+
+stage_mutant_adds_dot_with_global_directory() {
+    git -C "$1" add .
+}
+
+stage_mutant_adds_whole_tree_then_targeted() {
+    (cd "$1" && git add -A) || return
+    stage_sandbox_changes "$1"
+}
+
+stage_mutant_adds_whole_tree_via_file() {
+    local pathspec rc=0
+    pathspec="$(mktemp "${TMPDIR:-/tmp}/gateway-stage-mutant.XXXXXX")"
+    printf '.\0' >"$pathspec"
+    (cd "$1" && git add -A --pathspec-from-file="$pathspec" --pathspec-file-nul) || rc=$?
+    rm -f "$pathspec"
+    return "$rc"
+}
+
+stage_mutant_uses_glob_via_file() {
+    local pathspec rc=0
+    pathspec="$(mktemp "${TMPDIR:-/tmp}/gateway-stage-mutant.XXXXXX")"
+    printf ':(glob)*\0' >"$pathspec"
+    (cd "$1" && git add -A --pathspec-from-file="$pathspec" --pathspec-file-nul) || rc=$?
+    rm -f "$pathspec"
+    return "$rc"
+}
+
+stage_mutant_duplicates_pathspec() {
+    local pathspec rc=0
+    pathspec="$(mktemp "${TMPDIR:-/tmp}/gateway-stage-mutant.XXXXXX")"
+    write_stage_contract_pathspec "$pathspec"
+    printf ':(literal)modified.txt\0' >>"$pathspec"
+    (cd "$1" && git add -A --pathspec-from-file="$pathspec" --pathspec-file-nul) || rc=$?
+    rm -f "$pathspec"
+    return "$rc"
+}
+
+stage_mutant_adds_extra_pathspec() {
+    local pathspec rc=0
+    pathspec="$(mktemp "${TMPDIR:-/tmp}/gateway-stage-mutant.XXXXXX")"
+    write_stage_contract_pathspec "$pathspec"
+    printf ':(literal)unchanged.txt\0' >>"$pathspec"
+    (cd "$1" && git add -A --pathspec-from-file="$pathspec" --pathspec-file-nul) || rc=$?
+    rm -f "$pathspec"
+    return "$rc"
+}
+
+stage_mutant_misses_tracked() {
+    local list paths
+    list="$(mktemp "${TMPDIR:-/tmp}/gateway-stage-mutant.XXXXXX")"
+    paths="${list}.paths"
+    (cd "$1" && git ls-files --others --exclude-standard -z >"$list")
+    literalize_nul_paths "$list" "$paths"
+    [[ ! -s "$paths" ]] ||
+        (cd "$1" && git add -A --pathspec-from-file="$paths" --pathspec-file-nul)
+    rm -f "$list" "$paths"
+}
+
+stage_mutant_misses_untracked() {
+    local list paths
+    list="$(mktemp "${TMPDIR:-/tmp}/gateway-stage-mutant.XXXXXX")"
+    paths="${list}.paths"
+    (cd "$1" && git diff --name-only -z HEAD -- >"$list")
+    literalize_nul_paths "$list" "$paths"
+    [[ ! -s "$paths" ]] ||
+        (cd "$1" && git add -A --pathspec-from-file="$paths" --pathspec-file-nul)
+    rm -f "$list" "$paths"
+}
+
+stage_mutant_rejects_empty() {
+    stage_sandbox_changes "$1"
+    [[ -n "$(cd "$1" && git status --porcelain)" ]]
+}
+
+probe_selective_staging() {
+    local mutant desc
+    cases=$((cases + 1))
+    if stage_helper_contract stage_sandbox_changes; then
+        pass_msg 'selective staging covers modified, deleted, untracked and empty mutations'
+    else
+        fail_msg 'selective staging lost a changed path or scanned the whole repository'
+    fi
+    while IFS='|' read -r mutant desc; do
+        cases=$((cases + 1))
+        if stage_helper_contract "$mutant"; then
+            fail_msg "selective staging accepted its mutation: ${desc}"
+        else
+            pass_msg "selective staging catches its own mutation: ${desc}"
+        fi
+    done <<'EOF'
+stage_mutant_adds_whole_tree|repository-wide git add restored
+stage_mutant_adds_dot|repository-wide git add dot restored
+stage_mutant_adds_dot_with_global_directory|repository-wide git add dot hidden after a global directory argument
+stage_mutant_adds_whole_tree_then_targeted|repository-wide git add hidden before targeted staging
+stage_mutant_adds_whole_tree_via_file|repository-wide dot path hidden in a pathspec file
+stage_mutant_uses_glob_via_file|repository-wide glob hidden in a pathspec file
+stage_mutant_duplicates_pathspec|a duplicate literal path hidden in a pathspec file
+stage_mutant_adds_extra_pathspec|an unchanged extra path hidden in a pathspec file
+stage_mutant_misses_tracked|tracked modifications and deletions omitted
+stage_mutant_misses_untracked|untracked additions omitted
+stage_mutant_rejects_empty|an empty mutation reported as failure
+EOF
+}
+probe_selective_staging
+
+reset_helper_contract() {
+    local helper="$1" repo real_git rc=0
+    repo="$(mktemp -d "${TMPDIR:-/tmp}/gateway-reset-helper.XXXXXX")"
+    real_git="$(command -v git)"
+    (
+        cd "$repo"
+        "$real_git" init -q .
+        printf 'magic baseline\n' >':(glob)decoy'
+        printf 'bracket baseline\n' >'tracked[one].txt'
+        "$real_git" add -- ':(literal):(glob)decoy' ':(literal)tracked[one].txt'
+        "$real_git" -c user.name=t -c user.email=t@t commit -qm base
+        printf 'changed\n' >>':(glob)decoy'
+        rm 'tracked[one].txt'
+        printf 'untracked magic\n' >':(glob)untracked'
+        printf 'untracked bracket\n' >'untracked[two].txt'
+        "$real_git" add -- ':(literal):(glob)decoy' ':(literal)untracked[two].txt'
+    )
+    "$helper" "$repo" >/dev/null 2>&1 || rc=$?
+    if [[ "$rc" -eq 0 ]] &&
+        [[ "$(cd "$repo" && "$real_git" status --porcelain)" == "" ]] &&
+        [[ "$(<"$repo/:(glob)decoy")" == 'magic baseline' ]] &&
+        [[ "$(<"$repo/tracked[one].txt")" == 'bracket baseline' ]] &&
+        [[ ! -e "$repo/:(glob)untracked" ]] &&
+        [[ ! -e "$repo/untracked[two].txt" ]]; then
+        rc=0
+    else
+        rc=1
+    fi
+    rm -rf "$repo"
+    return "$rc"
+}
+
+reset_mutant_uses_raw_pathspecs() {
+    local repo="$1" changed untracked
+    changed="$(mktemp "${TMPDIR:-/tmp}/gateway-reset-mutant.XXXXXX")"
+    untracked="${changed}.untracked"
+    (
+        cd "$repo"
+        git diff --name-only -z HEAD -- >"$changed"
+        [[ ! -s "$changed" ]] || xargs -0 git reset -q HEAD -- <"$changed"
+        git ls-files --others --exclude-standard -z >"$untracked"
+        [[ ! -s "$untracked" ]] || xargs -0 git clean -fdq -- <"$untracked"
+        git diff --name-only -z HEAD -- >"$changed"
+        [[ ! -s "$changed" ]] || xargs -0 git checkout -f HEAD -- <"$changed"
+    )
+    local rc=$?
+    rm -f "$changed" "$untracked"
+    return "$rc"
+}
+
+probe_literal_reset_paths() {
+    cases=$((cases + 1))
+    if reset_helper_contract reset_sandbox_changes; then
+        pass_msg 'selective reset treats glob-like and bracket paths literally'
+    else
+        fail_msg 'selective reset lost a literal tracked or untracked path'
+    fi
+    cases=$((cases + 1))
+    if reset_helper_contract reset_mutant_uses_raw_pathspecs; then
+        fail_msg 'selective reset accepted raw Git pathspec magic'
+    else
+        pass_msg 'selective reset catches its own mutation: raw Git pathspec magic restored'
+    fi
+}
+probe_literal_reset_paths
+
+# Prove that a successful stage publishes the exact literal path sets for one reset, that the
+# reset consumes them without rescanning the repository, and that failure/empty/fallback paths do
+# not leak state into the next case.
+probe_cached_sandbox_reset() {
+    local repo shim log real_git rc=0
+    cases=$((cases + 1))
+    repo="$(mktemp -d "${TMPDIR:-/tmp}/gateway-reset-cache.XXXXXX")"
+    shim="$(mktemp -d "${TMPDIR:-/tmp}/gateway-reset-cache-git.XXXXXX")"
+    log="$(mktemp "${TMPDIR:-/tmp}/gateway-reset-cache-log.XXXXXX")"
+    real_git="$(command -v git)"
+    SANDBOX="$repo"
+    SANDBOX_RESET_TRACKED="${repo}.tracked"
+    SANDBOX_RESET_UNTRACKED="${repo}.untracked"
+    SANDBOX_RESET_READY=0
+    (
+        cd "$repo"
+        "$real_git" init -q .
+        printf 'modified baseline\n' >modified.txt
+        printf 'deleted baseline\n' >deleted.txt
+        printf 'magic baseline\n' >':(glob)tracked'
+        printf 'fallback baseline\n' >fallback.txt
+        "$real_git" add -- modified.txt deleted.txt fallback.txt ':(literal):(glob)tracked'
+        "$real_git" -c user.name=t -c user.email=t@t commit -qm base
+    )
+    printf '%s\n' \
+        '#!/bin/sh' \
+        'printf "%s\n" "${1-}" >>"$GATEWAY_RESET_CACHE_LOG"' \
+        'if [ "${GATEWAY_RESET_FAIL_ADD-0}" -eq 1 ] && [ "${1-}" = add ]; then exit 71; fi' \
+        'exec "$GATEWAY_RESET_REAL_GIT" "$@"' >"$shim/git"
+    chmod +x "$shim/git"
+
+    (
+        cd "$repo"
+        printf 'changed\n' >>modified.txt
+        rm deleted.txt
+        printf 'changed\n' >>':(glob)tracked'
+        printf 'untracked magic\n' >':(glob)untracked'
+        printf 'untracked bracket\n' >'untracked[one].txt'
+    )
+    PATH="$shim:$PATH" GATEWAY_RESET_CACHE_LOG="$log" GATEWAY_RESET_REAL_GIT="$real_git" \
+        stage_sandbox_changes "$repo" || rc=$?
+    : >"$log"
+    if [[ "$rc" -eq 0 ]]; then
+        PATH="$shim:$PATH" GATEWAY_RESET_CACHE_LOG="$log" GATEWAY_RESET_REAL_GIT="$real_git" \
+            reset_sandbox_changes "$repo" || rc=$?
+    fi
+    if [[ "$rc" -eq 0 ]] &&
+        grep -Eq '^(diff|ls-files)$' "$log"; then
+        rc=1
+    fi
+    if [[ "$rc" -eq 0 ]] && ! (
+        cd "$repo"
+        [[ -z "$("$real_git" status --porcelain)" ]] &&
+            [[ "$(<modified.txt)" == 'modified baseline' ]] &&
+            [[ "$(<deleted.txt)" == 'deleted baseline' ]] &&
+            [[ "$(<':(glob)tracked')" == 'magic baseline' ]] &&
+            [[ ! -e ':(glob)untracked' ]] &&
+            [[ ! -e 'untracked[one].txt' ]]
+    ); then
+        rc=1
+    fi
+    if [[ "$rc" -eq 0 && "$SANDBOX_RESET_READY" -ne 0 ]]; then
+        rc=1
+    fi
+
+    # An unstaged special probe has no cache and must take the explicit scan fallback once.
+    if [[ "$rc" -eq 0 ]]; then
+        printf 'fallback change\n' >>"$repo/fallback.txt"
+        printf 'fallback untracked\n' >"$repo/fallback-new.txt"
+        : >"$log"
+        PATH="$shim:$PATH" GATEWAY_RESET_CACHE_LOG="$log" GATEWAY_RESET_REAL_GIT="$real_git" \
+            reset_sandbox_changes "$repo" || rc=$?
+        if ! grep -qx diff "$log" || ! grep -qx ls-files "$log" ||
+            [[ -n "$(cd "$repo" && "$real_git" status --porcelain)" ]]; then
+            rc=1
+        fi
+    fi
+
+    # Empty staging still publishes a consumable empty set, avoiding a scan on the next reset.
+    if [[ "$rc" -eq 0 ]]; then
+        : >"$log"
+        PATH="$shim:$PATH" GATEWAY_RESET_CACHE_LOG="$log" GATEWAY_RESET_REAL_GIT="$real_git" \
+            stage_sandbox_changes "$repo" || rc=$?
+        : >"$log"
+        PATH="$shim:$PATH" GATEWAY_RESET_CACHE_LOG="$log" GATEWAY_RESET_REAL_GIT="$real_git" \
+            reset_sandbox_changes "$repo" || rc=$?
+        if grep -Eq '^(diff|ls-files)$' "$log"; then
+            rc=1
+        fi
+    fi
+
+    # A failed stage must not publish a cache for a later case.
+    if [[ "$rc" -eq 0 ]]; then
+        printf 'failed stage\n' >>"$repo/modified.txt"
+        GATEWAY_RESET_FAIL_ADD=1 PATH="$shim:$PATH" GATEWAY_RESET_CACHE_LOG="$log" \
+            GATEWAY_RESET_REAL_GIT="$real_git" stage_sandbox_changes "$repo" >/dev/null 2>&1 && rc=1
+        if [[ "$SANDBOX_RESET_READY" -ne 0 ]]; then
+            rc=1
+        fi
+        (cd "$repo" && "$real_git" reset -q --hard HEAD && "$real_git" clean -fdq)
+    fi
+
+    rm -rf "$repo" "$shim"
+    rm -f "$log" "$SANDBOX_RESET_TRACKED" "$SANDBOX_RESET_UNTRACKED"
+    SANDBOX=""
+    SANDBOX_RESET_TRACKED=""
+    SANDBOX_RESET_UNTRACKED=""
+    SANDBOX_RESET_READY=0
+    if [[ "$rc" -eq 0 ]]; then
+        pass_msg 'cached sandbox reset consumes exact literal paths once and keeps fallback isolated'
+    else
+        fail_msg 'cached sandbox reset rescanned, leaked, or lost a modified/deleted/untracked path'
+    fi
+}
+probe_cached_sandbox_reset
+
+probe_cached_reset_failures() {
+    local command repo shim marker real_git helper_rc
+    for command in reset clean checkout; do
+        cases=$((cases + 1))
+        repo="$(mktemp -d "${TMPDIR:-/tmp}/gateway-reset-failure.XXXXXX")"
+        shim="$(mktemp -d "${TMPDIR:-/tmp}/gateway-reset-failure-git.XXXXXX")"
+        marker="${repo}.failed"
+        real_git="$(command -v git)"
+        SANDBOX="$repo"
+        SANDBOX_RESET_TRACKED="${repo}.tracked"
+        SANDBOX_RESET_UNTRACKED="${repo}.untracked"
+        SANDBOX_RESET_READY=0
+        (
+            cd "$repo"
+            "$real_git" init -q .
+            printf 'baseline\n' >tracked.txt
+            "$real_git" add tracked.txt
+            "$real_git" -c user.name=t -c user.email=t@t commit -qm base
+            printf 'changed\n' >>tracked.txt
+            printf 'untracked\n' >untracked.txt
+        )
+        printf '%s\n' \
+            '#!/bin/sh' \
+            'if [ "${1-}" = "$GATEWAY_RESET_FAIL_COMMAND" ] && [ ! -e "$GATEWAY_RESET_FAIL_MARKER" ]; then' \
+            '    : >"$GATEWAY_RESET_FAIL_MARKER"' \
+            '    exit 72' \
+            'fi' \
+            'exec "$GATEWAY_RESET_REAL_GIT" "$@"' >"$shim/git"
+        chmod +x "$shim/git"
+        stage_sandbox_changes "$repo"
+        helper_rc=0
+        GATEWAY_RESET_FAIL_COMMAND="$command" GATEWAY_RESET_FAIL_MARKER="$marker" \
+            GATEWAY_RESET_REAL_GIT="$real_git" PATH="$shim:$PATH" \
+            reset_sandbox_changes "$repo" >/dev/null 2>&1 || helper_rc=$?
+        if [[ "$helper_rc" -ne 0 && "$SANDBOX_RESET_READY" -eq 0 &&
+            ! -s "$SANDBOX_RESET_TRACKED" && ! -s "$SANDBOX_RESET_UNTRACKED" ]]; then
+            pass_msg "cached sandbox reset fails closed when git ${command} fails"
+        else
+            fail_msg "cached sandbox reset swallowed a git ${command} failure or leaked its cache"
+        fi
+        (cd "$repo" && "$real_git" reset -q --hard HEAD && "$real_git" clean -fdq)
+        rm -rf "$repo" "$shim"
+        rm -f "$marker" "$SANDBOX_RESET_TRACKED" "$SANDBOX_RESET_UNTRACKED"
+    done
+    SANDBOX=""
+    SANDBOX_RESET_TRACKED=""
+    SANDBOX_RESET_UNTRACKED=""
+    SANDBOX_RESET_READY=0
+}
+probe_cached_reset_failures
+
 # Prove the selective reset itself before relying on it for the remaining cases. The probe dirties
 # the index, a tracked file and an untracked file, then asks the next sandbox acquisition for the
 # same clean baseline every guard case expects.
@@ -1438,8 +2345,8 @@ probe_selective_reset() {
         cd "$sandbox"
         printf '\n# reset probe\n' >>Cargo.toml
         printf 'probe\n' >reset-probe.txt
-        git add -A >/dev/null 2>&1
     )
+    stage_sandbox_changes "$sandbox" >/dev/null 2>&1
     make_sandbox
     if (
         cd "$sandbox"
@@ -4514,6 +5421,98 @@ expect_fail check_secret_hygiene.sh \
 
 # ── check_authz_fail_closed.sh (P6-02) ─────────────────────────────────────────
 
+expect_authz_fail_minimal() {
+    local desc="$1" mutate="$2" expected="$3"
+    local sandbox file output tool rc=0
+    local -a sources=(
+        crates/core/src/authz/mod.rs
+        crates/core/tests/registration.rs
+        crates/gateway/src/ext/authorizer.rs
+        crates/gateway/src/ext/authz_audit.rs
+        crates/gateway/src/ext/mod.rs
+        crates/gateway/src/service.rs
+        crates/gateway/examples/custom_authorizer.rs
+        crates/gateway/examples/minimal.rs
+        crates/gateway/tests/assembly.rs
+        crates/gateway/tests/authz_consumption.rs
+        crates/gateway/tests/authz_contract.rs
+        crates/gateway/tests/authz_contract/oracle.rs
+        crates/gateway/tests/authz_implementations.rs
+        crates/gateway/tests/compile_fail/azc_0014_missing_input.rs
+        crates/gateway/tests/compile_fail/azc_0015_forge_authorized.rs
+        crates/gateway/tests/compile_fail/azc_0016_denial_code.rs
+        crates/gateway/tests/compile_fail/azc_0020_service_config_default.rs
+        crates/gateway/tests/compile_fail/azc_0021_allow_all.rs
+        crates/gateway/tests/compile_fail/azc_0025_request_extensions.rs
+    )
+
+    cases=$((cases + 1))
+    for tool in awk bash cat cp dirname git grep mkdir mktemp python3 rm sort tr; do
+        if ! command -v "$tool" >/dev/null 2>&1; then
+            fail_msg "check_authz_fail_closed.sh cannot test ${desc}; required command is missing: ${tool}"
+            return
+        fi
+    done
+    if [[ ! -f "${SCRIPT_DIR}/check_authz_fail_closed.sh" ]]; then
+        fail_msg "check_authz_fail_closed.sh cannot test ${desc}; the real guard source is missing"
+        return
+    fi
+    for file in "${sources[@]}"; do
+        if [[ ! -f "${REPO_ROOT}/${file}" ]]; then
+            fail_msg "check_authz_fail_closed.sh cannot test ${desc}; required source is missing: ${file}"
+            return
+        fi
+    done
+
+    sandbox="$(mktemp -d "${TMPDIR:-/tmp}/gateway-authz-guard.XXXXXX")" || {
+        fail_msg "check_authz_fail_closed.sh cannot create its fixture: ${desc}"
+        return
+    }
+    if ! mkdir -p "$sandbox/scripts" ||
+        ! cp "${SCRIPT_DIR}/check_authz_fail_closed.sh" "$sandbox/scripts/"; then
+        rm -rf "$sandbox"
+        fail_msg "check_authz_fail_closed.sh fixture initialization failed: ${desc}"
+        return
+    fi
+    for file in "${sources[@]}"; do
+        if ! mkdir -p "$(dirname "$sandbox/$file")" ||
+            ! cp "${REPO_ROOT}/${file}" "$sandbox/$file"; then
+            rm -rf "$sandbox"
+            fail_msg "check_authz_fail_closed.sh fixture initialization failed while copying ${file}: ${desc}"
+            return
+        fi
+    done
+    if ! git -C "$sandbox" init -q ||
+        ! git -C "$sandbox" add -A; then
+        rm -rf "$sandbox"
+        fail_msg "check_authz_fail_closed.sh fixture Git initialization failed: ${desc}"
+        return
+    fi
+
+    output="$(GATEWAY_CHECK_ROOT="$sandbox" bash "$sandbox/scripts/check_authz_fail_closed.sh" 2>&1)" || rc=$?
+    if [[ "$rc" -ne 0 ]]; then
+        rm -rf "$sandbox"
+        fail_msg "check_authz_fail_closed.sh rejects its unmutated source closure: ${desc}"
+        printf '%s\n' "$output" >&2
+        return
+    fi
+    if ! (cd "$sandbox" && "$mutate" >/dev/null); then
+        rm -rf "$sandbox"
+        fail_msg "check_authz_fail_closed.sh mutation setup failed: ${desc}"
+        return
+    fi
+
+    rc=0
+    output="$(GATEWAY_CHECK_ROOT="$sandbox" bash "$sandbox/scripts/check_authz_fail_closed.sh" 2>&1)" || rc=$?
+    rm -rf "$sandbox"
+    if [[ "$rc" -ne 0 && "$output" == *"$expected"* ]]; then
+        pass_msg "check_authz_fail_closed.sh catches: ${desc}"
+    else
+        fail_msg "check_authz_fail_closed.sh did not report its expected violation: ${desc}"
+        printf '%s\n' "$output" >&2
+    fi
+}
+
 mut_a_fourth_verdict_state() {
     python3 - <<'AZPY'
 import pathlib
@@ -4523,8 +5522,9 @@ s = s.replace("    Indeterminate,\n}", "    Indeterminate,\n    Unknown,\n}", 1)
 p.write_text(s)
 AZPY
 }
-expect_fail check_authz_fail_closed.sh \
-    'a fourth Decision state, which no interpretation site was written for' mut_a_fourth_verdict_state
+expect_authz_fail_minimal \
+    'a fourth Decision state, which no interpretation site was written for' \
+    mut_a_fourth_verdict_state 'Decision declares [Allow Deny Indeterminate Unknown]'
 
 mut_decision_from_a_bool() {
     cat >>crates/gateway/src/ext/mod.rs <<'AZEOF'
@@ -4536,8 +5536,9 @@ impl Default for Decision {
 }
 AZEOF
 }
-expect_fail check_authz_fail_closed.sh \
-    'a Default impl for Decision, so a verdict nobody reached becomes Allow' mut_decision_from_a_bool
+expect_authz_fail_minimal \
+    'a Default impl for Decision, so a verdict nobody reached becomes Allow' \
+    mut_decision_from_a_bool 'an impl of Default or From for Decision'
 
 mut_a_second_interpretation_site() {
     cat >>crates/gateway/src/service.rs <<'AZEOF'
@@ -4551,8 +5552,9 @@ fn interpret(verdict: crate::ext::Decision) -> bool {
 }
 AZEOF
 }
-expect_fail check_authz_fail_closed.sh \
-    'a second place deciding what a verdict means, reading Indeterminate as allow' mut_a_second_interpretation_site
+expect_authz_fail_minimal \
+    'a second place deciding what a verdict means, reading Indeterminate as allow' \
+    mut_a_second_interpretation_site 'matches on a Decision variant'
 
 mut_a_wildcard_in_settle() {
     python3 - <<'AZPY'
@@ -4564,8 +5566,9 @@ s = s.replace("            Self::Deny | Self::Indeterminate => Err(Denied { deci
 p.write_text(s)
 AZPY
 }
-expect_fail check_authz_fail_closed.sh \
-    'a wildcard arm in settle, so a later state inherits a branch nobody chose for it' mut_a_wildcard_in_settle
+expect_authz_fail_minimal \
+    'a wildcard arm in settle, so a later state inherits a branch nobody chose for it' \
+    mut_a_wildcard_in_settle 'settle has a wildcard arm'
 
 mut_a_denial_that_picks_its_code() {
     python3 - <<'AZPY'
@@ -4576,8 +5579,9 @@ s = s.replace("impl Denied {\n", "impl Denied {\n    pub fn with_code(code: Erro
 p.write_text(s)
 AZPY
 }
-expect_fail check_authz_fail_closed.sh \
-    'a Denial constructor taking an ErrorCode, which is a private-bucket enumeration oracle' mut_a_denial_that_picks_its_code
+expect_authz_fail_minimal \
+    'a Denial constructor taking an ErrorCode, which is a private-bucket enumeration oracle' \
+    mut_a_denial_that_picks_its_code 'a Denial constructor takes an ErrorCode'
 
 mut_an_audit_sink_that_answers() {
     python3 - <<'AZPY'
@@ -4589,8 +5593,9 @@ s = s.replace("    fn on_decision(&self, event: &AuthzAuditEvent<'_>);",
 p.write_text(s)
 AZPY
 }
-expect_fail check_authz_fail_closed.sh \
-    'an audit sink whose method returns a verdict, so the hook could overturn the decision' mut_an_audit_sink_that_answers
+expect_authz_fail_minimal \
+    'an audit sink whose method returns a verdict, so the hook could overturn the decision' \
+    mut_an_audit_sink_that_answers 'an AuthzAuditSink method returns a value or takes a mutable reference'
 
 mut_an_allow_all_example() {
     cat >>crates/gateway/examples/minimal.rs <<'AZEOF'
@@ -4600,16 +5605,18 @@ fn convenient() -> impl rustfs_gateway::Authorizer {
 }
 AZEOF
 }
-expect_fail check_authz_fail_closed.sh \
-    'a copy-pasteable allow-all in an example, which is API' mut_an_allow_all_example
+expect_authz_fail_minimal \
+    'a copy-pasteable allow-all in an example, which is API' \
+    mut_an_allow_all_example 'an example ships an unconditional allow'
 expect_fail check_no_allow_all_in_examples.sh \
     'a copy-pasteable allow-all in an example' mut_an_allow_all_example
 
 mut_authorizer_module_deleted() {
     rm -f crates/gateway/src/ext/authorizer.rs
 }
-expect_fail check_authz_fail_closed.sh \
-    "the guard's own subject deleted, which must fail rather than skip" mut_authorizer_module_deleted
+expect_authz_fail_minimal \
+    "the guard's own subject deleted, which must fail rather than skip" \
+    mut_authorizer_module_deleted 'authorizer.rs does not exist; the guard cannot find the surface it is written about'
 
 mut_an_authz_case_removed() {
     python3 - <<'AZPY'
@@ -4618,8 +5625,9 @@ p = pathlib.Path("crates/gateway/tests/authz_contract.rs")
 p.write_text(p.read_text().replace("c-azc-0030", "removed-case", 1))
 AZPY
 }
-expect_fail check_authz_fail_closed.sh \
-    'one of the thirty executable authorization cases removed' mut_an_authz_case_removed
+expect_authz_fail_minimal \
+    'one of the thirty executable authorization cases removed' \
+    mut_an_authz_case_removed 'the executable authorization matrix is not exactly c-azc-0001 through c-azc-0030'
 
 # ── check_policy_snapshot_once.sh (P6-02) ──────────────────────────────────────
 
