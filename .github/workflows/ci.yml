@@ -212,11 +212,24 @@ jobs:
           elapsed="$(( $(date +%s) - started ))"
           echo "guard mutations completed in ${elapsed}s"
 
-  # Branch protection requires this exact check name. It aggregates all three parallel jobs and must
+  target-consolidation-self-test:
+    name: Target consolidation self-test
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - name: Target consolidation mutations (maximum 2 minutes after setup)
+        run: |
+          started="$(date +%s)"
+          timeout 120s bash scripts/test_test_target_consolidation.sh
+          elapsed="$(( $(date +%s) - started ))"
+          echo "target consolidation self-test completed in ${elapsed}s"
+
+  # Branch protection requires this exact check name. It aggregates all four parallel jobs and must
   # run even after a dependency fails, otherwise a skipped required check could hide the failure.
   test:
     name: Test
-    needs: [workspace-tests, guard-self-test, gateway-tsan]
+    needs: [workspace-tests, guard-self-test, target-consolidation-self-test, gateway-tsan]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 1
@@ -225,8 +238,10 @@ jobs:
         env:
           WORKSPACE_RESULT: ${{ needs.workspace-tests.result }}
           GUARD_RESULT: ${{ needs.guard-self-test.result }}
+          TARGET_CONSOLIDATION_RESULT: ${{ needs.target-consolidation-self-test.result }}
           TSAN_RESULT: ${{ needs.gateway-tsan.result }}
         run: |
           test "$WORKSPACE_RESULT" = success
           test "$GUARD_RESULT" = success
+          test "$TARGET_CONSOLIDATION_RESULT" = success
           test "$TSAN_RESULT" = success
