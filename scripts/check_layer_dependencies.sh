@@ -80,6 +80,7 @@ cd "$ROOT_DIR"
 LAYERS=(
     "rustfs-gateway-macros|"
     "rustfs-gateway-model|"
+    "rustfs-gateway-xtask-dispatch|"
     "rustfs-gateway-stream|"
     "rustfs-gateway-server|"
     "rustfs-gateway-xml|"
@@ -105,6 +106,11 @@ fail() {
     status=1
 }
 
+command -v python3 >/dev/null 2>&1 || {
+    printf 'check_layer_dependencies: required command is missing: python3\n' >&2
+    exit 1
+}
+
 rank_of() {
     local want="$1" idx=0 entry
     for entry in "${LAYERS[@]}"; do
@@ -127,6 +133,16 @@ allowed_of() {
     done
     return 1
 }
+
+if ! dispatcher_dependencies="$(allowed_of "rustfs-gateway-xtask-dispatch")"; then
+    fail "allow matrix: the std-only rustfs-gateway-xtask-dispatch build tool is not registered"
+elif [[ -n "$dispatcher_dependencies" ]]; then
+    fail "allow matrix: rustfs-gateway-xtask-dispatch must remain std-only"
+fi
+dispatcher_graph_line="        rustfs-gateway-xtask-dispatch (crates/xtask-dispatch)   std-only cargo xtask process selection"
+if [[ ! -f AGENTS.md ]] || [[ "$(grep -Fxc "$dispatcher_graph_line" AGENTS.md || true)" -ne 1 ]]; then
+    fail "AGENTS.md: the std-only rustfs-gateway-xtask-dispatch build tool must appear exactly once in the dependency graph"
+fi
 
 is_internal() {
     [[ "$1" == "rustfs-gateway" || "$1" == rustfs-gateway-* ]]
@@ -188,6 +204,79 @@ fi
 # -----------------------------------------------------------------------------
 # Rules 1 and 3: scan the manifests
 # -----------------------------------------------------------------------------
+dispatcher_audit=""
+dispatcher_audit_rc=0
+dispatcher_audit="$(python3 - "$ROOT_DIR" <<'PYEOF'
+import pathlib
+import sys
+import tomllib
+
+root = pathlib.Path(sys.argv[1])
+canonical = pathlib.Path("crates/xtask-dispatch/Cargo.toml")
+ignored = {".git", ".claude", "target"}
+errors = []
+
+
+def dependency_error(path: pathlib.Path, label: str, value: object) -> None:
+    if not isinstance(value, dict) or value:
+        errors.append(f"{path}: the std-only dispatcher may not declare {label}")
+
+
+for path in sorted(root.rglob("Cargo.toml")):
+    relative = path.relative_to(root)
+    if any(part in ignored for part in relative.parts):
+        continue
+    try:
+        if path.is_symlink():
+            raise ValueError("manifest must not be a symlink")
+        with path.open("rb") as source:
+            manifest = tomllib.load(source)
+    except (OSError, tomllib.TOMLDecodeError, ValueError) as error:
+        errors.append(f"{relative}: unable to parse manifest census input: {error}")
+        continue
+    package = manifest.get("package")
+    if not isinstance(package, dict) or package.get("name") != "rustfs-gateway-xtask-dispatch":
+        continue
+    if relative != canonical:
+        errors.append(
+            f"{relative}: rustfs-gateway-xtask-dispatch must live only at {canonical}"
+        )
+        continue
+    for kind in ("dependencies", "dev-dependencies", "build-dependencies"):
+        if kind in manifest:
+            dependency_error(relative, kind, manifest[kind])
+
+    def inspect_target(node: object, prefix: str) -> None:
+        if not isinstance(node, dict):
+            errors.append(f"{relative}: target dependency inventory '{prefix}' must be a table")
+            return
+        for key, value in node.items():
+            label = f"{prefix}.{key}"
+            if key in {"dependencies", "dev-dependencies", "build-dependencies"}:
+                dependency_error(relative, label, value)
+            elif isinstance(value, dict):
+                inspect_target(value, label)
+
+    if "target" in manifest:
+        inspect_target(manifest["target"], "target")
+
+print("\n".join(errors))
+raise SystemExit(bool(errors))
+PYEOF
+)" || dispatcher_audit_rc=$?
+if [[ "$dispatcher_audit_rc" -ne 0 ]]; then
+    reported_error=0
+    while IFS= read -r error; do
+        if [[ -n "$error" ]]; then
+            fail "$error"
+            reported_error=1
+        fi
+    done <<<"$dispatcher_audit"
+    if [[ "$reported_error" -eq 0 ]]; then
+        fail "manifest census: structured dispatcher audit failed without a diagnostic"
+    fi
+fi
+
 manifests=()
 while IFS= read -r manifest; do
     [[ -n "$manifest" ]] && manifests+=("$manifest")
