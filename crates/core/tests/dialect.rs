@@ -57,13 +57,10 @@ use support::{Req as RouteReq, block_on};
 /// The vendor operation the example registers.
 struct HeadObjectReport;
 
-static REPORT_SPEC: OperationSpec = OperationSpec {
-    name: "acme:HeadObjectReport",
-    success_status: 200,
-    required_params: &[],
-    not_configured_error: None,
-    auth: Some(AuthRequirement::new("acme:HeadObjectReport", ResourceShape::Object)),
-};
+static REPORT_SPEC: OperationSpec = OperationSpec::builder("acme:HeadObjectReport", 200, None)
+    .required_params(&[])
+    .auth(AuthRequirement::new("acme:HeadObjectReport", ResourceShape::Object))
+    .build();
 
 static REPORT_FLOOR: OperationFloor = OperationFloor::custom("acme:HeadObjectReport", SigService::S3);
 
@@ -256,12 +253,9 @@ macro_rules! vendor_operation {
         struct $ident;
 
         const _: () = {
-            static SPEC: OperationSpec = OperationSpec {
-                name: $spec_name,
-                success_status: $status,
-                required_params: &[],
-                not_configured_error: None,
-                auth: $action,
+            static SPEC: OperationSpec = match $action {
+                Some(auth) => OperationSpec::builder($spec_name, $status, None).auth(auth).build(),
+                None => OperationSpec::builder($spec_name, $status, None).build(),
             };
             static FLOOR: OperationFloor = if $anonymous {
                 OperationFloor::custom($name, SigService::S3).allow_anonymous_after_listing_in_the_posture_report()

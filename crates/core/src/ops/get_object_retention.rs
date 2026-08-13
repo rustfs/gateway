@@ -50,13 +50,11 @@ use crate::registry::OperationSpec;
 /// `retention` is a routing discriminator, not a required parameter: a `GET` on an object key
 /// without it is `GetObject`. Nothing else is required — `versionId` selects a version and its
 /// absence selects the current one.
-static SPEC: OperationSpec = OperationSpec {
-    name: "GetObjectRetention",
-    success_status: 200,
-    required_params: &[],
-    not_configured_error: Some(ErrorCode::NO_SUCH_OBJECT_LOCK_CONFIGURATION),
-    auth: Some(AuthRequirement::new("s3:GetObjectRetention", ResourceShape::Object)),
-};
+static SPEC: OperationSpec =
+    OperationSpec::builder("GetObjectRetention", 200, Some(ErrorCode::NO_SUCH_OBJECT_LOCK_CONFIGURATION))
+        .required_params(&[])
+        .auth(AuthRequirement::new("s3:GetObjectRetention", ResourceShape::Object))
+        .build();
 
 /// Header signatures only, and not privileged.
 static FLOOR: OperationFloor = OperationFloor::builtin("GetObjectRetention", SigService::S3);

@@ -271,13 +271,10 @@ mod tests {
     /// table, not of the check.
     struct NotInTheTable;
 
-    static SPEC: OperationSpec = OperationSpec {
-        name: "GetObjectTorrent",
-        success_status: 200,
-        required_params: &[],
-        not_configured_error: None,
-        auth: Some(AuthRequirement::new("s3:GetObjectTorrent", ResourceShape::Object)),
-    };
+    static SPEC: OperationSpec = OperationSpec::builder("GetObjectTorrent", 200, None)
+        .required_params(&[])
+        .auth(AuthRequirement::new("s3:GetObjectTorrent", ResourceShape::Object))
+        .build();
 
     static FLOOR: OperationFloor = OperationFloor::builtin("GetObjectTorrent", SigService::S3);
 

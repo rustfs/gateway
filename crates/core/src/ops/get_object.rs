@@ -67,13 +67,10 @@ pub static CONDITION_KIND: RequestKind = RequestKind::Read;
 pub static CONDITIONS: [ConditionalHeader; 2] = [ConditionalHeader::IfMatch, ConditionalHeader::IfNoneMatch];
 
 /// What this operation requires of a request once routing has chosen it.
-static SPEC: OperationSpec = OperationSpec {
-    name: "GetObject",
-    success_status: 200,
-    required_params: &[],
-    not_configured_error: None,
-    auth: Some(AuthRequirement::new("s3:GetObject", ResourceShape::Object)),
-};
+static SPEC: OperationSpec = OperationSpec::builder("GetObject", 200, None)
+    .required_params(&[])
+    .auth(AuthRequirement::new("s3:GetObject", ResourceShape::Object))
+    .build();
 
 /// Header and presigned signatures, matching `spec/operations/GetObject.toml`.
 static FLOOR: OperationFloor = OperationFloor::builtin_presigned("GetObject", SigService::S3);

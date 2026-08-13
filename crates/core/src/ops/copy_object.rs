@@ -56,13 +56,10 @@ use crate::registry::OperationSpec;
 /// expressible here: [`AuthRequirement`] carries one action and one resource shape, which is P4-05's
 /// open item. Until it carries two, the stage that cannot be skipped is the type state in
 /// [`shared::copy_source`](super::shared::copy_source), not this field.
-static SPEC: OperationSpec = OperationSpec {
-    name: "CopyObject",
-    success_status: 200,
-    required_params: &[],
-    not_configured_error: None,
-    auth: Some(AuthRequirement::new("s3:PutObject", ResourceShape::Object)),
-};
+static SPEC: OperationSpec = OperationSpec::builder("CopyObject", 200, None)
+    .required_params(&[])
+    .auth(AuthRequirement::new("s3:PutObject", ResourceShape::Object))
+    .build();
 
 /// Header signatures only, and not privileged. The request carries no body, so no payload mode
 /// beyond the empty one is reachable.

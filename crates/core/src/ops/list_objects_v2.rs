@@ -46,13 +46,10 @@ use crate::registry::OperationSpec;
 ///
 /// `list-type=2` is a routing discriminator, not a required parameter: without it the request is
 /// `ListObjects`, a different operation, rather than a malformed one.
-static SPEC: OperationSpec = OperationSpec {
-    name: "ListObjectsV2",
-    success_status: 200,
-    required_params: &[],
-    not_configured_error: None,
-    auth: Some(AuthRequirement::new("s3:ListBucket", ResourceShape::Bucket)),
-};
+static SPEC: OperationSpec = OperationSpec::builder("ListObjectsV2", 200, None)
+    .required_params(&[])
+    .auth(AuthRequirement::new("s3:ListBucket", ResourceShape::Bucket))
+    .build();
 
 /// Header signatures only, and not privileged.
 static FLOOR: OperationFloor = OperationFloor::builtin("ListObjectsV2", SigService::S3);

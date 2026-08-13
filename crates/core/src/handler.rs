@@ -99,8 +99,14 @@ pub type HandlerResult<O> = Result<Resp<O>, HandlerError>;
 /// (P4-04) adds what a handler is allowed to know about the caller — identity, region, request id.
 /// Adding those to a struct is a minor change; adding them to a bare `O::Input` parameter is a
 /// signature change in every handler that exists.
+///
+/// The input is boxed once when authorization becomes a handler request. Generated DTOs keep
+/// their public fields, `Default`, and functional-update construction, while `Req<O>` stays one
+/// pointer plus its authorization proofs even for large operations such as `PutObject`. Keeping
+/// the DTO inline here made every async handler future carry the whole request layout across each
+/// suspension point.
 pub struct Req<O: Operation> {
-    input: O::Input,
+    input: Box<O::Input>,
     resources: O::DerivedResources,
     read: crate::AuthorizedRead,
 }
@@ -109,7 +115,11 @@ impl<O: Operation> Req<O> {
     /// Converts the framework's authorization proof into a handler request.
     pub(crate) fn from_authorized(authorized: crate::Authorized<O>) -> Self {
         let (input, resources, read) = authorized.into_parts();
-        Self { input, resources, read }
+        Self {
+            input: Box::new(input),
+            resources,
+            read,
+        }
     }
 
     /// The decoded input.
@@ -134,7 +144,7 @@ impl<O: Operation> Req<O> {
 
     /// Takes the input out.
     pub fn into_input(self) -> O::Input {
-        self.input
+        *self.input
     }
 
     /// The operation this request names.
@@ -154,9 +164,9 @@ where
     /// Registry and wire dispatch still require [`crate::Authorized<O>`]; this constructor cannot
     /// be used for copy, batch-delete, or any future operation with derived resources.
     #[must_use]
-    pub const fn new(input: O::Input) -> Self {
+    pub fn new(input: O::Input) -> Self {
         Self {
-            input,
+            input: Box::new(input),
             resources: crate::NoDerived,
             read: crate::AuthorizedRead::empty(),
         }

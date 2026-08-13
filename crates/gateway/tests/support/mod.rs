@@ -62,13 +62,10 @@ pub struct PingOutput {
     pub message: String,
 }
 
-pub static PING_SPEC: OperationSpec = OperationSpec {
-    name: "example:Ping",
-    success_status: 200,
-    required_params: &[],
-    not_configured_error: None,
-    auth: Some(AuthRequirement::new("example:Ping", ResourceShape::Service)),
-};
+pub static PING_SPEC: OperationSpec = OperationSpec::builder("example:Ping", 200, None)
+    .required_params(&[])
+    .auth(AuthRequirement::new("example:Ping", ResourceShape::Service))
+    .build();
 
 pub static PING_FLOOR: OperationFloor =
     OperationFloor::custom("example:Ping", SigService::S3).allow_anonymous_after_listing_in_the_posture_report();
@@ -153,13 +150,10 @@ pub enum HeadPingInput {
     CommitThenFail,
 }
 
-pub static HEAD_PING_SPEC: OperationSpec = OperationSpec {
-    name: "example:HeadPing",
-    success_status: 200,
-    required_params: &[],
-    not_configured_error: None,
-    auth: Some(AuthRequirement::new("example:HeadPing", ResourceShape::Service)),
-};
+pub static HEAD_PING_SPEC: OperationSpec = OperationSpec::builder("example:HeadPing", 200, None)
+    .required_params(&[])
+    .auth(AuthRequirement::new("example:HeadPing", ResourceShape::Service))
+    .build();
 
 pub static HEAD_PING_FLOOR: OperationFloor =
     OperationFloor::custom("example:HeadPing", SigService::S3).allow_anonymous_after_listing_in_the_posture_report();
@@ -248,13 +242,10 @@ pub fn head_ping_route() -> RouteEntry {
 /// is a difference the method made and nothing else.
 pub struct ContentPing;
 
-pub static CONTENT_PING_SPEC: OperationSpec = OperationSpec {
-    name: "example:ContentPing",
-    success_status: 200,
-    required_params: &[],
-    not_configured_error: None,
-    auth: Some(AuthRequirement::new("example:ContentPing", ResourceShape::Service)),
-};
+pub static CONTENT_PING_SPEC: OperationSpec = OperationSpec::builder("example:ContentPing", 200, None)
+    .required_params(&[])
+    .auth(AuthRequirement::new("example:ContentPing", ResourceShape::Service))
+    .build();
 
 pub static CONTENT_PING_FLOOR: OperationFloor =
     OperationFloor::custom("example:ContentPing", SigService::S3).allow_anonymous_after_listing_in_the_posture_report();
@@ -366,13 +357,10 @@ impl Handler<HeadPing> for Backend {
 /// A vendor operation that forgot its namespace. Registration must refuse it.
 pub struct Unnamespaced;
 
-pub static UNNAMESPACED_SPEC: OperationSpec = OperationSpec {
-    name: "Ping",
-    success_status: 200,
-    required_params: &[],
-    not_configured_error: None,
-    auth: Some(AuthRequirement::new("example:Ping", ResourceShape::Service)),
-};
+pub static UNNAMESPACED_SPEC: OperationSpec = OperationSpec::builder("Ping", 200, None)
+    .required_params(&[])
+    .auth(AuthRequirement::new("example:Ping", ResourceShape::Service))
+    .build();
 
 pub static UNNAMESPACED_FLOOR: OperationFloor = OperationFloor::custom("Ping", SigService::S3);
 
@@ -411,13 +399,10 @@ impl OperationCodec for Unnamespaced {
 /// A vendor operation wearing an AWS name. Registration must refuse it.
 pub struct Impostor;
 
-pub static IMPOSTOR_SPEC: OperationSpec = OperationSpec {
-    name: "GetObject",
-    success_status: 200,
-    required_params: &[],
-    not_configured_error: None,
-    auth: Some(AuthRequirement::new("s3:GetObject", ResourceShape::Object)),
-};
+pub static IMPOSTOR_SPEC: OperationSpec = OperationSpec::builder("GetObject", 200, None)
+    .required_params(&[])
+    .auth(AuthRequirement::new("s3:GetObject", ResourceShape::Object))
+    .build();
 
 pub static IMPOSTOR_FLOOR: OperationFloor = OperationFloor::custom("GetObject", SigService::S3);
 

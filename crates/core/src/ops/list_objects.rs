@@ -50,13 +50,10 @@ use crate::registry::OperationSpec;
 /// No required parameter, and that is the point: this operation is what a `GET` on a bucket means
 /// when no other bucket route claimed it, so it sits last in the bucket band rather than asserting
 /// anything about the query string.
-static SPEC: OperationSpec = OperationSpec {
-    name: "ListObjects",
-    success_status: 200,
-    required_params: &[],
-    not_configured_error: None,
-    auth: Some(AuthRequirement::new("s3:ListBucket", ResourceShape::Bucket)),
-};
+static SPEC: OperationSpec = OperationSpec::builder("ListObjects", 200, None)
+    .required_params(&[])
+    .auth(AuthRequirement::new("s3:ListBucket", ResourceShape::Bucket))
+    .build();
 
 /// Header signatures only, and not privileged.
 static FLOOR: OperationFloor = OperationFloor::builtin("ListObjects", SigService::S3);

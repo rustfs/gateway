@@ -54,13 +54,10 @@ use crate::ops::shared::pagination::CursorSpec;
 use crate::registry::OperationSpec;
 
 /// What this operation requires of a request once routing has chosen it.
-static SPEC: OperationSpec = OperationSpec {
-    name: "ListBuckets",
-    success_status: 200,
-    required_params: &[],
-    not_configured_error: None,
-    auth: Some(AuthRequirement::new("s3:ListAllMyBuckets", ResourceShape::Service)),
-};
+static SPEC: OperationSpec = OperationSpec::builder("ListBuckets", 200, None)
+    .required_params(&[])
+    .auth(AuthRequirement::new("s3:ListAllMyBuckets", ResourceShape::Service))
+    .build();
 
 /// Header signatures only, and not privileged.
 static FLOOR: OperationFloor = OperationFloor::builtin("ListBuckets", SigService::S3);

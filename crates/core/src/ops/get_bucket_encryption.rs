@@ -54,13 +54,14 @@ use crate::registry::OperationSpec;
 ///
 /// `encryption` is a routing discriminator, not a required parameter: a `GET` on a bucket
 /// without it is the key listing. Nothing else is required.
-static SPEC: OperationSpec = OperationSpec {
-    name: "GetBucketEncryption",
-    success_status: 200,
-    required_params: &[],
-    not_configured_error: Some(ErrorCode::SERVER_SIDE_ENCRYPTION_CONFIGURATION_NOT_FOUND),
-    auth: Some(AuthRequirement::new("s3:GetEncryptionConfiguration", ResourceShape::Bucket)),
-};
+static SPEC: OperationSpec = OperationSpec::builder(
+    "GetBucketEncryption",
+    200,
+    Some(ErrorCode::SERVER_SIDE_ENCRYPTION_CONFIGURATION_NOT_FOUND),
+)
+.required_params(&[])
+.auth(AuthRequirement::new("s3:GetEncryptionConfiguration", ResourceShape::Bucket))
+.build();
 
 /// Header signatures only, and not privileged.
 static FLOOR: OperationFloor = OperationFloor::builtin("GetBucketEncryption", SigService::S3);

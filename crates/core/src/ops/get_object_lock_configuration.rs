@@ -55,13 +55,11 @@ use crate::registry::OperationSpec;
 ///
 /// `object-lock` is a routing discriminator, not a required parameter: a `GET` on a bucket
 /// without it is the key listing. Nothing else is required.
-static SPEC: OperationSpec = OperationSpec {
-    name: "GetObjectLockConfiguration",
-    success_status: 200,
-    required_params: &[],
-    not_configured_error: Some(ErrorCode::OBJECT_LOCK_CONFIGURATION_NOT_FOUND),
-    auth: Some(AuthRequirement::new("s3:GetBucketObjectLockConfiguration", ResourceShape::Bucket)),
-};
+static SPEC: OperationSpec =
+    OperationSpec::builder("GetObjectLockConfiguration", 200, Some(ErrorCode::OBJECT_LOCK_CONFIGURATION_NOT_FOUND))
+        .required_params(&[])
+        .auth(AuthRequirement::new("s3:GetBucketObjectLockConfiguration", ResourceShape::Bucket))
+        .build();
 
 /// Header signatures only, and not privileged.
 static FLOOR: OperationFloor = OperationFloor::builtin("GetObjectLockConfiguration", SigService::S3);

@@ -146,6 +146,7 @@ match word for word.
 | `spec/ir.schema.json` | The frozen codegen IR. Every generated artifact is shaped by it; a change invalidates the samples and re-opens decisions P2–P10 already built on |
 | `conformance/case.schema.json` | The frozen case format. Widening it late silently weakens every case already written against the narrower form |
 | `model/s3.json`, `model/sts.json`, their `.sha256` sidecars, `model/PROVENANCE.md` | The pinned AWS service models. Re-pinning changes every generated artifact, so it is a reviewed protocol event, never a dependency bump |
+| `generated/dto/field_counts.txt` | Public DTO field-count ratchet; a removed type or field is a breaking downstream API change |
 | `crates/core/tests/golden/route-table.txt` | The resolved route table, in order. A diff here means some request now reaches a different operation than it did before — the one change that cannot be reviewed by reading the code that caused it |
 
 | `model/overlays/**` | The only sanctioned hand-written protocol exception source. Quirks are hand-written, so they live here and **never** under the generated `spec/` tree |

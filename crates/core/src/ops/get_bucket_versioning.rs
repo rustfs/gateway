@@ -58,13 +58,10 @@ use crate::registry::OperationSpec;
 ///
 /// `versioning` is a routing discriminator, not a required parameter: nothing on the request head is
 /// required beyond it.
-static SPEC: OperationSpec = OperationSpec {
-    name: "GetBucketVersioning",
-    success_status: 200,
-    required_params: &[],
-    not_configured_error: None,
-    auth: Some(AuthRequirement::new("s3:GetBucketVersioning", ResourceShape::Bucket)),
-};
+static SPEC: OperationSpec = OperationSpec::builder("GetBucketVersioning", 200, None)
+    .required_params(&[])
+    .auth(AuthRequirement::new("s3:GetBucketVersioning", ResourceShape::Bucket))
+    .build();
 
 /// Header signatures only, and not privileged.
 static FLOOR: OperationFloor = OperationFloor::builtin("GetBucketVersioning", SigService::S3);

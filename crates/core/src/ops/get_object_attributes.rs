@@ -49,18 +49,15 @@ use crate::registry::{OperationSpec, ParamKind, RequiredParam};
 /// required, it selects which of the five attribute groups the response carries, and a request
 /// that omits it names no attributes at all. It is checked here rather than in the decoder so the
 /// refusal happens on the request head, before a body is read.
-static SPEC: OperationSpec = OperationSpec {
-    name: "GetObjectAttributes",
-    success_status: 200,
-    required_params: &[RequiredParam {
+static SPEC: OperationSpec = OperationSpec::builder("GetObjectAttributes", 200, None)
+    .required_params(&[RequiredParam {
         kind: ParamKind::Header,
         name: "x-amz-object-attributes",
         missing_error: ErrorCode::INVALID_REQUEST,
         message: "The x-amz-object-attributes header is required and names which attribute groups the response carries.",
-    }],
-    not_configured_error: None,
-    auth: Some(AuthRequirement::new("s3:GetObject", ResourceShape::Object)),
-};
+    }])
+    .auth(AuthRequirement::new("s3:GetObject", ResourceShape::Object))
+    .build();
 
 /// Header signatures only, and not privileged.
 static FLOOR: OperationFloor = OperationFloor::builtin("GetObjectAttributes", SigService::S3);

@@ -20,8 +20,8 @@ use ext_field_spike::{
 use rustfs_gateway_core::Req as FrameworkReq;
 use rustfs_gateway_types::dto::PutBucketLifecycleConfiguration;
 
-// Measured from origin/main@f4d90745b0ebe20349338638442d230426c7ca2c.
-const MAIN_REQ_SIZE_64: usize = 136;
+// Measured after ADR-0010 boxes the public DTO inside the real framework request.
+const MAIN_REQ_SIZE_64: usize = 32;
 
 const STANDARD_XML: &str = "<Rule><Expiration><Days>30</Days></Expiration><ID>rule-1</ID><Status>Enabled</Status></Rule>";
 const DIALECT_XML: &str = "<Rule><Expiration><Days>30</Days></Expiration><DelMarkerExpiration><Days>7</Days></DelMarkerExpiration><ID>rule-1</ID><Status>Enabled</Status></Rule>";

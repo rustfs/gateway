@@ -73,7 +73,11 @@ def dependency(alias_name, local):
             inherited = {}
         if not isinstance(inherited, dict):
             fail(f"workspace dependency {alias_name} has an unsupported shape")
-        expected_features = ["derive"] if alias_name == "serde" else None
+        expected_features = {
+            "proc-macro2": ["span-locations"],
+            "serde": ["derive"],
+            "syn": ["full", "extra-traits", "visit"],
+        }.get(alias_name)
         expected_default_features = False if alias_name == "jsonschema" else None
         actual_features = inherited.get("features")
         actual_default_features = inherited.get("default-features")

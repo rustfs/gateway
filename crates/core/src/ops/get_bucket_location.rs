@@ -29,13 +29,10 @@ use crate::op::{AuthRequirement, HasOperation, Operation, OperationOrigin, Resou
 use crate::registry::OperationSpec;
 
 /// What this operation requires of a request once routing has chosen it.
-static SPEC: OperationSpec = OperationSpec {
-    name: "GetBucketLocation",
-    success_status: 200,
-    required_params: &[],
-    not_configured_error: None,
-    auth: Some(AuthRequirement::new("s3:GetBucketLocation", ResourceShape::Bucket)),
-};
+static SPEC: OperationSpec = OperationSpec::builder("GetBucketLocation", 200, None)
+    .required_params(&[])
+    .auth(AuthRequirement::new("s3:GetBucketLocation", ResourceShape::Bucket))
+    .build();
 
 /// Header signatures only, and not privileged: the defaults, which is the point of the defaults.
 static FLOOR: OperationFloor = OperationFloor::builtin("GetBucketLocation", SigService::S3);

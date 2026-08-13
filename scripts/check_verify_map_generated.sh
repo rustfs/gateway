@@ -39,6 +39,12 @@ if [[ "$first_line" != "$EXPECTED" ]]; then
     exit 1
 fi
 
+SOURCE_MAP="$(cd "${SCRIPT_DIR}/.." && pwd)/xtask/verify-map.toml"
+if [[ "$MAP" != "$SOURCE_MAP" ]] && ! cmp -s "$SOURCE_MAP" "$MAP"; then
+    printf 'check_verify_map_generated.sh: verify-map drifted from the tested baseline\n' >&2
+    exit 1
+fi
+
 # IR validation deliberately carries a full draft 2020-12 implementation. This guard exercises
 # only codegen, so keep that unrelated dependency out of its cold CI build.
 if ! (cd "$ROOT_DIR" && "${CARGO:-cargo}" run --quiet --package xtask --no-default-features -- codegen --check); then

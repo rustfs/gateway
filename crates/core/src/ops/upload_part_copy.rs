@@ -56,13 +56,10 @@ use crate::registry::OperationSpec;
 /// The source's `s3:GetObject` is the second stage and is carried by the type state in
 /// [`shared::copy_source`](super::shared::copy_source), not by this field — see the note on
 /// `CopyObject`'s spec for why.
-static SPEC: OperationSpec = OperationSpec {
-    name: "UploadPartCopy",
-    success_status: 200,
-    required_params: &[],
-    not_configured_error: None,
-    auth: Some(AuthRequirement::new("s3:PutObject", ResourceShape::Object)),
-};
+static SPEC: OperationSpec = OperationSpec::builder("UploadPartCopy", 200, None)
+    .required_params(&[])
+    .auth(AuthRequirement::new("s3:PutObject", ResourceShape::Object))
+    .build();
 
 /// Header signatures only, and not privileged. The request carries no body: the bytes come from the
 /// source object, so there is no payload mode to freeze beyond the empty one.

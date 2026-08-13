@@ -78,13 +78,10 @@ pub const ALT_SUCCESS_STATUSES: &[u16] = &[200];
 /// AWS documents a bodyless restore, and the missing-`RestoreRequest` refusal is the operation's
 /// (`InvalidRequest`), not the parser's `MalformedXML` — see the module note in
 /// [`shared::restore`](super::shared::restore).
-static SPEC: OperationSpec = OperationSpec {
-    name: "RestoreObject",
-    success_status: 202,
-    required_params: &[],
-    not_configured_error: None,
-    auth: Some(AuthRequirement::new("s3:RestoreObject", ResourceShape::Object)),
-};
+static SPEC: OperationSpec = OperationSpec::builder("RestoreObject", 202, None)
+    .required_params(&[])
+    .auth(AuthRequirement::new("s3:RestoreObject", ResourceShape::Object))
+    .build();
 
 /// Header signatures only, and not privileged.
 static FLOOR: OperationFloor = OperationFloor::builtin("RestoreObject", SigService::S3);

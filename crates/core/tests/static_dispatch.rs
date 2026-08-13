@@ -30,13 +30,10 @@ use rustfs_gateway_core::{
 use rustfs_gateway_http::{Limits, WireRequest};
 use rustfs_gateway_sig::{OperationFloor, SigService};
 
-static SPEC: OperationSpec = OperationSpec {
-    name: "example:StaticProbe",
-    success_status: 200,
-    required_params: &[],
-    not_configured_error: None,
-    auth: Some(AuthRequirement::new("example:Probe", ResourceShape::Service)),
-};
+static SPEC: OperationSpec = OperationSpec::builder("example:StaticProbe", 200, None)
+    .required_params(&[])
+    .auth(AuthRequirement::new("example:Probe", ResourceShape::Service))
+    .build();
 static FLOOR: OperationFloor = OperationFloor::builtin("example:StaticProbe", SigService::S3);
 
 struct StaticProbe;

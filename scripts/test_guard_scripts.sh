@@ -34,6 +34,20 @@ if [[ "$QUIRK_LEDGER_ONLY" != 0 && "$QUIRK_LEDGER_ONLY" != 1 ]]; then
     printf 'test_guard_scripts: GATEWAY_GUARD_QUIRK_LEDGER_ONLY must be 0 or 1\n' >&2
     exit 1
 fi
+DTO_COMPILER_ONLY="${GATEWAY_GUARD_DTO_COMPILER_ONLY:-0}"
+if [[ "$DTO_COMPILER_ONLY" != 0 && "$DTO_COMPILER_ONLY" != 1 ]]; then
+    printf 'test_guard_scripts: GATEWAY_GUARD_DTO_COMPILER_ONLY must be 0 or 1\n' >&2
+    exit 1
+fi
+BUILD_GUARDS_ONLY="${GATEWAY_GUARD_BUILD_GUARDS_ONLY:-0}"
+if [[ "$BUILD_GUARDS_ONLY" != 0 && "$BUILD_GUARDS_ONLY" != 1 ]]; then
+    printf 'test_guard_scripts: GATEWAY_GUARD_BUILD_GUARDS_ONLY must be 0 or 1\n' >&2
+    exit 1
+fi
+if [[ $((QUIRK_LEDGER_ONLY + DTO_COMPILER_ONLY + BUILD_GUARDS_ONLY)) -gt 1 ]]; then
+    printf 'test_guard_scripts: mutation-only modes are mutually exclusive\n' >&2
+    exit 1
+fi
 
 pass_msg() { printf '  ok   %s\n' "$*"; }
 fail_msg() {
@@ -52,6 +66,7 @@ SANDBOX_RESET_READY=0
 QUIRK_LEDGER_PARSE_CACHE=""
 CT_EQ_SANDBOX=""
 SEMVER_SANDBOX=""
+SANDBOX_BASE=""
 
 literalize_nul_paths() {
     local input="$1" output="$2" path
@@ -119,7 +134,6 @@ reset_sandbox_changes() {
     rm -f "$changed" "$changed_literal" "$untracked"
     return "$rc"
 }
-
 # Reuse the caller's build directory. A guard that declares REQUIRES-BUILD compiles
 # the workspace, and a separate target/ recompiles it after `cargo test --workspace`.
 # CI measured that duplication past the ten-minute hard limit. Sandbox mutations still
@@ -135,7 +149,18 @@ export CARGO_TARGET_DIR="$GUARD_TARGET_DIR"
 
 make_sandbox() {
     if [[ -n "$SANDBOX" ]]; then
-        reset_sandbox_changes "$SANDBOX"
+        # History-sensitive mutations may add commits. Restore the disposable branch before the
+        # literal-path reset consumes the current mutation journal.
+        if [[ "$(git -C "$SANDBOX" rev-parse HEAD)" != "$SANDBOX_BASE" ]]; then
+            git -C "$SANDBOX" reset -q --hard "$SANDBOX_BASE"
+            git -C "$SANDBOX" clean -fdq
+            SANDBOX_RESET_READY=0
+            : >"$SANDBOX_RESET_TRACKED"
+            : >"$SANDBOX_RESET_UNTRACKED"
+        else
+            reset_sandbox_changes "$SANDBOX"
+        fi
+        git -C "$SANDBOX" update-ref refs/remotes/origin/main "$SANDBOX_BASE"
         return
     fi
 
@@ -200,6 +225,8 @@ make_sandbox() {
     : >"$SANDBOX_RESET_TRACKED"
     : >"$SANDBOX_RESET_UNTRACKED"
     SANDBOX_RESET_READY=0
+    SANDBOX_BASE="$(git -C "$dir" rev-parse HEAD)"
+    git -C "$dir" update-ref refs/remotes/origin/main "$SANDBOX_BASE"
 }
 
 # Stage only paths changed by the current mutation. A repository-wide `git add -A` rescans every
@@ -532,6 +559,49 @@ expect_fail_self_mutation() {
     fi
 }
 
+# expect_fail_with_diagnostic <guard> <description> <diagnostic> <mutation-fn>
+# Runs the mutation and also proves the guard failed for the policy reason under test.
+expect_fail_with_diagnostic() {
+    local guard="$1" desc="$2" diagnostic="$3" mutate="$4"
+    local sandbox output rc=0
+    cases=$((cases + 1))
+    if [[ ! -x "${SCRIPT_DIR}/${guard}" ]]; then
+        fail_msg "${guard} is missing or not executable; cannot test: ${desc}"
+        return
+    fi
+    make_sandbox
+    sandbox="$SANDBOX"
+    (cd "$sandbox" && "$mutate" >/dev/null)
+    stage_sandbox_changes "$sandbox" >/dev/null 2>&1
+    output="$(GATEWAY_CHECK_ROOT="$sandbox" "${SCRIPT_DIR}/${guard}" 2>&1)" || rc=$?
+    if [[ "$rc" -ne 0 && "$output" == *"$diagnostic"* ]]; then
+        pass_msg "${guard} catches: ${desc}"
+    else
+        fail_msg "${guard} did not catch with its expected diagnostic: ${desc}"
+    fi
+}
+
+# expect_cargo_test_fail_with_diagnostic <package> <target> <test> <diagnostic> <mutation-fn>
+# Proves a compiler-backed policy test rejects the mutation for the intended reason.
+expect_cargo_test_fail_with_diagnostic() {
+    local package="$1" target="$2" test_name="$3" diagnostic="$4" mutate="$5"
+    local sandbox output rc=0
+    cases=$((cases + 1))
+    make_sandbox
+    sandbox="$SANDBOX"
+    (cd "$sandbox" && "$mutate" >/dev/null)
+    stage_sandbox_changes "$sandbox" >/dev/null 2>&1
+    output="$(
+        cd "$sandbox" &&
+            cargo test -p "$package" --test "$target" "$test_name" -- --exact 2>&1
+    )" || rc=$?
+    if [[ "$rc" -ne 0 && "$output" == *"$diagnostic"* ]]; then
+        pass_msg "${package}/${target} catches: ${test_name}"
+    else
+        fail_msg "${package}/${target} did not catch ${test_name} with its expected diagnostic"
+    fi
+}
+
 # expect_fail_and_missing_grep <guard> <description> <mutation-fn>
 # Proves both the policy mutation and the dependency-missing path while keeping them one guard case.
 expect_fail_and_missing_grep() {
@@ -590,13 +660,119 @@ expect_monomorphic_ir_fail() {
     fi
 }
 
+# expect_fail_and_missing_cargo <guard> <description> <mutation-fn>
+# Proves the Rust-aware guard catches its policy mutation and fails closed without its parser.
+expect_fail_and_missing_cargo() {
+    local guard="$1" desc="$2" mutate="$3"
+    local sandbox mutation_rc=0 missing_rc=0 missing_output tool_path clean=1
+    cases=$((cases + 1))
+    if [[ ! -x "${SCRIPT_DIR}/${guard}" ]]; then
+        fail_msg "${guard} is missing or not executable; cannot test: ${desc}"
+        return
+    fi
+    make_sandbox
+    sandbox="$SANDBOX"
+    (cd "$sandbox" && "$mutate" >/dev/null)
+    stage_sandbox_changes "$sandbox" >/dev/null 2>&1
+    GATEWAY_CHECK_ROOT="$sandbox" "${SCRIPT_DIR}/${guard}" >/dev/null 2>&1 || mutation_rc=$?
+
+    make_sandbox
+    sandbox="$SANDBOX"
+    if ! (
+        cd "$sandbox"
+        git diff --quiet HEAD -- &&
+            git diff --cached --quiet HEAD -- &&
+            [[ -z "$(git ls-files --others --exclude-standard)" ]]
+    ); then
+        clean=0
+    fi
+    tool_path="$(mktemp -d "${TMPDIR:-/tmp}/gateway-guard-path.XXXXXX")"
+    ln -s "$(command -v dirname)" "${tool_path}/dirname"
+    missing_output="$(GATEWAY_CHECK_ROOT="$sandbox" PATH="$tool_path" /bin/bash "${SCRIPT_DIR}/${guard}" 2>&1)" || missing_rc=$?
+    rm -rf "$tool_path"
+
+    if [[ "$mutation_rc" -ne 0 && "$clean" -eq 1 && "$missing_rc" -ne 0 && "$missing_output" == *'required command is missing: cargo'* ]]; then
+        pass_msg "${guard} catches: ${desc}; missing cargo also fails closed"
+    else
+        fail_msg "${guard} did not catch its mutation or reported green without cargo: ${desc}"
+    fi
+}
+
 # -----------------------------------------------------------------------------
 # Positive control: the repository as it stands must be clean.
 # -----------------------------------------------------------------------------
-if [[ "$QUIRK_LEDGER_ONLY" == 0 ]]; then
+if [[ "$BUILD_GUARDS_ONLY" == 1 ]]; then
+printf 'Build-backed controls\n'
+for guard in check_case_keys_honoured.sh check_monomorphic_dispatch.sh check_verify_map_generated.sh; do
+    cases=$((cases + 1))
+    if "${SCRIPT_DIR}/${guard}" >/dev/null 2>&1; then
+        pass_msg "$guard"
+    else
+        fail_msg "$guard fails on the current tree"
+    fi
+done
+mut_build_monomorphic_handler_is_indirect() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+Path("scripts/monomorphic-indirect.ll").write_text("""\
+define internal void @_Rdispatch() {
+; <integration::support::Backend as rustfs_gateway_core::handler::Handler<integration::support::Ping>>::call
+  %result = call ptr %handler()
+}
+define internal void @_Rdecode() {
+; <integration::support::Ping as rustfs_gateway_core::codec::OperationCodec>::decode
+  call void @_Rcodec()
+}
+""")
+PYEOF
+}
+expect_monomorphic_ir_fail \
+    'the concrete Handler<Ping> call becoming indirect' mut_build_monomorphic_handler_is_indirect
+mut_build_unread_schema_key() {
+    python3 - <<'PYEOF'
+import json, pathlib
+path = pathlib.Path("conformance/case.schema.json")
+schema = json.loads(path.read_text())
+schema["$defs"]["expect"]["properties"]["nothing_reads_this"] = {"type": "boolean"}
+path.write_text(json.dumps(schema, indent=2))
+PYEOF
+}
+expect_fail check_case_keys_honoured.sh \
+    'a schema key the harness never reads' mut_build_unread_schema_key
+mut_build_dropped_schema_field() {
+    python3 - <<'PYEOF'
+import json, pathlib
+path = pathlib.Path("conformance/case.schema.json")
+schema = json.loads(path.read_text())
+del schema["$defs"]["evidence"]["properties"]["kind"]
+path.write_text(json.dumps(schema, indent=2))
+PYEOF
+}
+expect_fail check_case_keys_honoured.sh \
+    'a DECLARED entry naming a field the schema dropped' mut_build_dropped_schema_field
+mut_build_verify_map_edited() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("xtask/verify-map.toml")
+text = path.read_text()
+old = 'name = "AbortMultipartUpload"'
+if text.count(old) != 1:
+    raise SystemExit("verify-map mutation anchor is not unique")
+path.write_text(text.replace(old, 'name = "AbortMultipartUploadEdited"'))
+PYEOF
+}
+expect_fail check_verify_map_generated.sh \
+    'a manual edit to the generated operation verification map' mut_build_verify_map_edited
+mut_build_verify_map_deleted() { rm -f xtask/verify-map.toml; }
+expect_fail check_verify_map_generated.sh \
+    'the generated operation verification map being absent' mut_build_verify_map_deleted
+fi
+
+if [[ "$QUIRK_LEDGER_ONLY" == 0 && "$DTO_COMPILER_ONLY" == 0 && "$BUILD_GUARDS_ONLY" == 0 ]]; then
 printf 'Positive control (repository must be clean)\n'
 for guard in "${SCRIPT_DIR}"/check_*.sh; do
     grep -q '^# REQUIRES-PR$' "$guard" && continue
+    grep -q '^# REQUIRES-BUILD$' "$guard" && continue
     cases=$((cases + 1))
     if grep -q '^# REQUIRES-PR$' "$guard"; then
         pass_msg "$(basename "$guard") deferred to its PR-context probes"
@@ -608,11 +784,14 @@ for guard in "${SCRIPT_DIR}"/check_*.sh; do
         fail_msg "$(basename "$guard") fails on the current tree"
     fi
 done
+fi
 
 # -----------------------------------------------------------------------------
 # Negative cases
 # -----------------------------------------------------------------------------
 printf '\nNegative cases (guards must fail)\n'
+
+if [[ "$QUIRK_LEDGER_ONLY" == 0 && "$DTO_COMPILER_ONLY" == 0 && "$BUILD_GUARDS_ONLY" == 0 ]]; then
 
 replace_template_text() {
     python3 - "$1" "$2" "$3" <<'PYEOF'
@@ -1323,8 +1502,8 @@ from pathlib import Path
 
 path = Path("Cargo.toml")
 text = path.read_text()
-old = 'rustfs-gateway = { path = "crates/gateway", version = "0.5.0" }'
-new = 'rustfs-gateway = { path = "crates/gateway", version = "0.5.0", features = ["dangerous-allow-all-authorizer"] }'
+old = 'rustfs-gateway = { path = "crates/gateway", version = "0.6.0" }'
+new = 'rustfs-gateway = { path = "crates/gateway", version = "0.6.0", features = ["dangerous-allow-all-authorizer"] }'
 if text.count(old) != 1:
     raise SystemExit("workspace facade dependency is missing")
 path.write_text(text.replace(old, new, 1))
@@ -2511,12 +2690,12 @@ probe_adr_paired_supersession_allowed() {
     (
         cd "$sandbox"
         replace_adr_text docs/adr/0008-closed-error-resolution.md \
-            '- Status: Accepted' '- Status: Superseded by ADR-0010'
+            '- Status: Accepted' '- Status: Superseded by ADR-0011'
         replace_adr_text docs/adr/0008-closed-error-resolution.md \
             '- Supersedes / Superseded by: none' \
-            '- Supersedes / Superseded by: ADR-0010'
-        cat >docs/adr/0010-supersede-closed-error-resolution.md <<'EOF'
-# ADR-0010: Supersede closed error resolution
+            '- Supersedes / Superseded by: ADR-0011'
+        cat >docs/adr/0011-supersede-closed-error-resolution.md <<'EOF'
+# ADR-0011: Supersede closed error resolution
 
 - Status: Accepted
 - Date: 2026-08-12
@@ -2549,15 +2728,16 @@ from pathlib import Path
 path = Path("docs/adr/README.md")
 text = path.read_text()
 old_row = "| 0008 | Closed error resolution across the types, signature, core and facade boundary | Accepted |"
-new_row = "| 0008 | Closed error resolution across the types, signature, core and facade boundary | Superseded by ADR-0010 |"
-anchor = "| 0009 | Typed scope-region rejection across sig and gateway | Accepted |"
+new_row = "| 0008 | Closed error resolution across the types, signature, core and facade boundary | Superseded by ADR-0011 |"
+anchor = "| 0010 | Box the public DTO inside handler requests | Accepted |"
 if text.count(old_row) != 1 or text.count(anchor) != 1:
     raise SystemExit("ADR index supersession fixture is not unique")
 text = text.replace(old_row, new_row, 1)
-text = text.replace(anchor, anchor + "\n| 0010 | Supersede closed error resolution | Accepted |", 1)
+text = text.replace(anchor, anchor + "\n| 0011 | Supersede closed error resolution | Accepted |", 1)
 path.write_text(text)
 PYEOF
     )
+    git -C "$sandbox" update-ref -d refs/remotes/origin/main
     GATEWAY_CHECK_ROOT="$sandbox" "${SCRIPT_DIR}/check_adr_contract.sh" >/dev/null 2>&1 || rc=$?
     if [[ "$rc" -eq 0 ]]; then
         pass_msg 'check_adr_contract.sh allows paired supersession through a new ADR'
@@ -2756,8 +2936,9 @@ define internal void @_Rdecode() {
 """)
 PYEOF
 }
-expect_monomorphic_ir_fail \
-    'the concrete Handler<Ping> call becoming indirect' mut_monomorphic_handler_is_indirect
+# Executed by the build-guard worker above.
+
+
 
 # ── check_minimal_assembly_lines.sh (P7-01) ───────────────────────────────────
 
@@ -3310,6 +3491,31 @@ probe_selective_reset() {
     fi
 }
 probe_selective_reset
+
+# History-sensitive mutations may commit more than one revision. The next case must restore the
+# original sandbox commit, including tracked paths introduced only by that temporary history.
+probe_history_sensitive_reset() {
+    local sandbox
+    cases=$((cases + 1))
+    make_sandbox
+    sandbox="$SANDBOX"
+    (
+        cd "$sandbox"
+        printf 'history-only\n' >history-reset-probe.txt
+        git add history-reset-probe.txt
+        git -c user.name=t -c user.email=t@t commit -qm 'history reset probe'
+        git -c user.name=t -c user.email=t@t commit --allow-empty -qm 'history reset follow-up'
+    )
+    make_sandbox
+    if [[ "$(git -C "$sandbox" rev-parse HEAD)" == "$SANDBOX_BASE" &&
+        ! -e "$sandbox/history-reset-probe.txt" &&
+        -z "$(git -C "$sandbox" status --porcelain)" ]]; then
+        pass_msg 'history-sensitive sandbox reset restores its original commit and paths'
+    else
+        fail_msg 'history-sensitive sandbox reset leaked a temporary commit or tracked path'
+    fi
+}
+probe_history_sensitive_reset
 
 mut_reverse_edge() {
     printf 'rustfs-gateway-types = { workspace = true }\n' >>crates/xml/Cargo.toml
@@ -6903,8 +7109,7 @@ schema["$defs"]["expect"]["properties"]["nothing_reads_this"] = {
 path.write_text(json.dumps(schema, indent=2))
 PYEOF
 }
-expect_fail check_case_keys_honoured.sh \
-    'a schema key the harness never reads' mut_unread_schema_key
+# Executed by the build-guard worker above.
 
 mut_declaration_for_a_dropped_field() {
     python3 - <<'PYEOF'
@@ -6917,8 +7122,9 @@ del schema["$defs"]["evidence"]["properties"]["kind"]
 path.write_text(json.dumps(schema, indent=2))
 PYEOF
 }
-expect_fail check_case_keys_honoured.sh \
-    'a DECLARED entry naming a field the schema dropped' mut_declaration_for_a_dropped_field
+# Executed by the build-guard worker above.
+
+
 
 # -----------------------------------------------------------------------------
 # P8-01 freezes the case language and the baseline contract. These controls
@@ -7490,6 +7696,8 @@ expect_fail check_cors_credentials_exclusive.sh \
 # `o`, so the strings reach the sandbox intact and are absent from this source.
 # -----------------------------------------------------------------------------
 
+fi
+if [[ "$BUILD_GUARDS_ONLY" == 1 ]]; then
 mut_agpl_licence_text() {
     printf '\n// Licensed under the GNU \x41FFERO GENERAL PUBLIC LICENSE Version 3\n' \
         >>crates/core/src/dialect/overlay.rs
@@ -7756,6 +7964,8 @@ else
     fail_msg 'scanner process harness reported green or did not count a missing scanner tool'
 fi
 rm -rf "$missing_tool_dir" "$missing_tool_count_dir"
+fi
+if [[ "$QUIRK_LEDGER_ONLY" == 0 && "$DTO_COMPILER_ONLY" == 0 && "$BUILD_GUARDS_ONLY" == 0 ]]; then
 # check_stage_filter_sync.sh has four rules and each one gets its own negative
 # control, for the reason check_resolver_pure.sh's do: two of the three seams
 # run before the request has been authenticated, so "it cannot await", "it holds
@@ -8394,14 +8604,14 @@ expect_fail_unstaged check_no_scaffold_on_main.sh \
 mut_verify_map_edited() {
     printf '\n# hand-edited mapping\n' >>xtask/verify-map.toml
 }
-expect_fail check_verify_map_generated.sh \
-    'a manual edit to the generated operation verification map' mut_verify_map_edited
+# Executed by the build-guard worker above.
 
 mut_verify_map_deleted() {
     rm -f xtask/verify-map.toml
 }
-expect_fail check_verify_map_generated.sh \
-    'the generated operation verification map being absent' mut_verify_map_deleted
+# Executed by the build-guard worker above.
+
+
 
 # Tool pins are one reviewable block. Test a moving version, a missing pin and the
 # explicitly rejected installer independently so each assertion has gone red.
@@ -8627,6 +8837,10 @@ PYEOF
 expect_fail check_no_signing_key_cache.sh \
     'a cache retaining derived signing keys' mut_signing_key_cache
 
+fi
+
+if [[ "$BUILD_GUARDS_ONLY" == 1 ]]; then
+
 replace_ci_text() {
     python3 - "$1" "$2" <<'PYEOF'
 import pathlib
@@ -8814,12 +9028,12 @@ import pathlib
 path = pathlib.Path(".github/workflows/ci.yml")
 text = path.read_text()
 start = text.index("  static:")
-position = text.index("          fetch-depth: 2", start)
-path.write_text(text[:position] + text[position:].replace("          fetch-depth: 2", "          fetch-depth: 1", 1))
+position = text.index("          fetch-depth: 0", start)
+path.write_text(text[:position] + text[position:].replace("          fetch-depth: 0", "          fetch-depth: 2", 1))
 PYEOF
 }
 expect_fail check_ci_time_gate.sh \
-    'the Static checks job losing access to the baseline parent commit' mut_ci_time_static_parent_fetch_dropped
+    'the Static checks job losing the branch graph required by merge-base guards' mut_ci_time_static_parent_fetch_dropped
 
 mut_ci_time_clippy_setup_action_replaced() {
     python3 - <<'PYEOF'
@@ -8983,13 +9197,13 @@ import pathlib
 path = pathlib.Path(".github/workflows/ci.yml")
 text = path.read_text()
 start = text.index("  guard-self-test:")
-old = "          fetch-depth: 2"
+old = "          fetch-depth: 0"
 position = text.index(old, start)
 path.write_text(text[:position] + text[position:].replace(old, "          fetch-depth: 1", 1))
 PYEOF
 }
 expect_fail check_ci_test_split.sh \
-    'the guard mutation job losing access to the baseline parent commit' mut_ci_guard_parent_fetch_dropped
+    'the guard mutation job losing access to the branch merge base' mut_ci_guard_parent_fetch_dropped
 
 mut_ci_guard_command_dropped() {
     replace_ci_text 'timeout 480s bash scripts/test_guard_scripts.sh' 'timeout 480s true'
@@ -9141,6 +9355,34 @@ mut_ci_quirk_ledger_serialized() {
 expect_fail check_ci_test_split.sh \
     'the quirk-ledger job waiting for guard mutations' mut_ci_quirk_ledger_serialized
 
+mut_ci_dto_compiler_command_dropped() {
+    replace_ci_text 'timeout 90s env GATEWAY_GUARD_DTO_COMPILER_ONLY=1 bash scripts/test_guard_scripts.sh' \
+        'timeout 90s true'
+}
+expect_fail check_ci_test_split.sh \
+    'the DTO compiler mutation suite being replaced with a no-op' mut_ci_dto_compiler_command_dropped
+
+mut_ci_dto_compiler_failure_swallowed() {
+    replace_ci_text '          timeout 90s env GATEWAY_GUARD_DTO_COMPILER_ONLY=1 bash scripts/test_guard_scripts.sh' \
+        '          timeout 90s env GATEWAY_GUARD_DTO_COMPILER_ONLY=1 bash scripts/test_guard_scripts.sh || true'
+}
+expect_fail check_ci_test_split.sh \
+    'the DTO compiler job swallowing a failure or timeout' mut_ci_dto_compiler_failure_swallowed
+
+mut_ci_build_guard_command_dropped() {
+    replace_ci_text 'timeout 270s env GATEWAY_GUARD_BUILD_GUARDS_ONLY=1 bash scripts/test_guard_scripts.sh' \
+        'timeout 270s true'
+}
+expect_fail check_ci_test_split.sh \
+    'the build-backed mutation suite being replaced with a no-op' mut_ci_build_guard_command_dropped
+
+mut_ci_build_guard_failure_swallowed() {
+    replace_ci_text '          timeout 270s env GATEWAY_GUARD_BUILD_GUARDS_ONLY=1 bash scripts/test_guard_scripts.sh' \
+        '          timeout 270s env GATEWAY_GUARD_BUILD_GUARDS_ONLY=1 bash scripts/test_guard_scripts.sh || true'
+}
+expect_fail check_ci_test_split.sh \
+    'the build-backed guard job swallowing a failure or timeout' mut_ci_build_guard_failure_swallowed
+
 mut_ci_target_serialized_in_guard() {
     printf '%s\n' 'if "${SCRIPT_DIR}/test_test_target_consolidation.sh"; then' \
         >>scripts/test_guard_scripts.sh
@@ -9155,27 +9397,43 @@ expect_fail check_ci_test_split.sh \
     'the branch-protected Test check being renamed' mut_ci_required_name_changed
 
 mut_ci_aggregate_drops_guard() {
-    replace_ci_text 'needs: [workspace-tests, guard-self-test, target-consolidation-self-test, quirk-ledger-self-test, gateway-tsan]' \
-        'needs: [workspace-tests, target-consolidation-self-test, quirk-ledger-self-test, gateway-tsan]'
+    replace_ci_text 'needs: [workspace-tests, guard-self-test, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, gateway-tsan]' \
+        'needs: [workspace-tests, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, gateway-tsan]'
 }
 expect_fail check_ci_test_split.sh \
     'the required Test check no longer waiting for guard mutations' mut_ci_aggregate_drops_guard
 
 mut_ci_aggregate_drops_target() {
-    replace_ci_text 'needs: [workspace-tests, guard-self-test, target-consolidation-self-test, quirk-ledger-self-test, gateway-tsan]' \
-        'needs: [workspace-tests, guard-self-test, quirk-ledger-self-test, gateway-tsan]'
+    replace_ci_text 'needs: [workspace-tests, guard-self-test, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, gateway-tsan]' \
+        'needs: [workspace-tests, guard-self-test, quirk-ledger-self-test, dto-compiler-self-test, gateway-tsan]'
 }
 expect_fail check_ci_test_split.sh \
     'the required Test check no longer waiting for target-consolidation mutations' \
     mut_ci_aggregate_drops_target
 
 mut_ci_aggregate_drops_quirk_ledger() {
-    replace_ci_text 'needs: [workspace-tests, guard-self-test, target-consolidation-self-test, quirk-ledger-self-test, gateway-tsan]' \
-        'needs: [workspace-tests, guard-self-test, target-consolidation-self-test, gateway-tsan]'
+    replace_ci_text 'needs: [workspace-tests, guard-self-test, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, gateway-tsan]' \
+        'needs: [workspace-tests, guard-self-test, target-consolidation-self-test, dto-compiler-self-test, gateway-tsan]'
 }
 expect_fail check_ci_test_split.sh \
     'the required Test check no longer waiting for quirk-ledger mutations' \
     mut_ci_aggregate_drops_quirk_ledger
+
+mut_ci_aggregate_drops_dto_compiler() {
+    replace_ci_text 'needs: [workspace-tests, guard-self-test, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, gateway-tsan]' \
+        'needs: [workspace-tests, guard-self-test, target-consolidation-self-test, quirk-ledger-self-test, gateway-tsan]'
+}
+expect_fail check_ci_test_split.sh \
+    'the required Test check no longer waiting for DTO compiler mutations' \
+    mut_ci_aggregate_drops_dto_compiler
+
+mut_ci_aggregate_drops_build_guard() {
+    replace_ci_text 'needs: [workspace-tests, guard-self-test, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, gateway-tsan]' \
+        'needs: [workspace-tests, guard-self-test, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, gateway-tsan]'
+}
+expect_fail check_ci_test_split.sh \
+    'the required Test check no longer waiting for build-backed mutations' \
+    mut_ci_aggregate_drops_build_guard
 
 mut_ci_aggregate_skips_on_failure() {
     replace_ci_text 'if: always()' 'if: success()'
@@ -9200,12 +9458,12 @@ expect_fail check_ci_test_split.sh \
 mut_ci_aggregate_budget_widened() {
     replace_ci_text '  test:
     name: Test
-    needs: [workspace-tests, guard-self-test, target-consolidation-self-test, quirk-ledger-self-test, gateway-tsan]
+    needs: [workspace-tests, guard-self-test, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, gateway-tsan]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 1' '  test:
     name: Test
-    needs: [workspace-tests, guard-self-test, target-consolidation-self-test, quirk-ledger-self-test, gateway-tsan]
+    needs: [workspace-tests, guard-self-test, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, gateway-tsan]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 2'
@@ -9239,6 +9497,20 @@ mut_ci_quirk_ledger_result_ignored() {
 expect_fail check_ci_test_split.sh \
     'the aggregate check ignoring the quirk-ledger result' mut_ci_quirk_ledger_result_ignored
 
+mut_ci_dto_compiler_result_ignored() {
+    replace_ci_text 'DTO_COMPILER_RESULT: ${{ needs.dto-compiler-self-test.result }}' \
+        'DTO_COMPILER_RESULT: success'
+}
+expect_fail check_ci_test_split.sh \
+    'the aggregate check ignoring the DTO compiler result' mut_ci_dto_compiler_result_ignored
+
+mut_ci_build_guard_result_ignored() {
+    replace_ci_text 'BUILD_GUARD_RESULT: ${{ needs.build-guard-self-test.result }}' \
+        'BUILD_GUARD_RESULT: success'
+}
+expect_fail check_ci_test_split.sh \
+    'the aggregate check ignoring the build-backed guard result' mut_ci_build_guard_result_ignored
+
 mut_ci_workspace_comparison_dropped() {
     replace_ci_text '          test "$WORKSPACE_RESULT" = success' '          true'
 }
@@ -9264,6 +9536,20 @@ mut_ci_quirk_ledger_comparison_dropped() {
 expect_fail check_ci_test_split.sh \
     'the aggregate check not executing the quirk-ledger result comparison' \
     mut_ci_quirk_ledger_comparison_dropped
+
+mut_ci_dto_compiler_comparison_dropped() {
+    replace_ci_text '          test "$DTO_COMPILER_RESULT" = success' '          true'
+}
+expect_fail check_ci_test_split.sh \
+    'the aggregate check not executing the DTO compiler result comparison' \
+    mut_ci_dto_compiler_comparison_dropped
+
+mut_ci_build_guard_comparison_dropped() {
+    replace_ci_text '          test "$BUILD_GUARD_RESULT" = success' '          true'
+}
+expect_fail check_ci_test_split.sh \
+    'the aggregate check not executing the build-backed guard result comparison' \
+    mut_ci_build_guard_comparison_dropped
 
 mut_ci_workers_share_concurrency_lane() {
     replace_ci_text '  workspace-tests:
@@ -9364,6 +9650,10 @@ mut_ci_workflow_deleted() {
 }
 expect_fail check_ci_test_split.sh \
     "the guard's own workflow input deleted, which must fail rather than skip" mut_ci_workflow_deleted
+
+fi
+
+if [[ "$QUIRK_LEDGER_ONLY" == 0 && "$DTO_COMPILER_ONLY" == 0 && "$BUILD_GUARDS_ONLY" == 0 ]]; then
 mut_second_config_load() {
     python3 - <<'PYEOF'
 import pathlib
@@ -10017,6 +10307,7 @@ PYEOF
 then
     fail_msg 'check_quirk_ledger.sh mutation manifest is missing or duplicated'
 fi
+
 QUIRK_LEDGER_PARSE_CACHE="$(mktemp "${TMPDIR:-/tmp}/gateway-quirk-ledger-cache.XXXXXX")"
 rm -f "$QUIRK_LEDGER_PARSE_CACHE"
 export GATEWAY_QUIRK_LEDGER_PARSE_CACHE="$QUIRK_LEDGER_PARSE_CACHE"
@@ -10523,6 +10814,259 @@ fi
 unset GATEWAY_QUIRK_LEDGER_PARSE_CACHE
 rm -f "$QUIRK_LEDGER_PARSE_CACHE"
 QUIRK_LEDGER_PARSE_CACHE=""
+
+fi
+
+if [[ "$QUIRK_LEDGER_ONLY" == 0 && "$DTO_COMPILER_ONLY" == 0 && "$BUILD_GUARDS_ONLY" == 0 ]]; then
+
+mut_dto_field_count_decreased() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("generated/dto/field_counts.txt")
+lines = path.read_text().splitlines()
+name, count = lines[0].split()
+lines[0] = f"{name} {int(count) - 1}"
+path.write_text("\n".join(lines) + "\n")
+PYEOF
+}
+expect_fail check_dto_fields.sh \
+    'a generated dto losing one public field' mut_dto_field_count_decreased
+
+mut_dto_field_count_input_missing() {
+    rm -f generated/dto/field_counts.txt
+}
+expect_fail check_dto_fields.sh \
+    'the required dto field-count input being absent' mut_dto_field_count_input_missing
+
+mut_dto_field_count_decreased_before_an_unrelated_commit() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("generated/dto/field_counts.txt")
+lines = path.read_text().splitlines()
+name, count = lines[0].split()
+lines[0] = f"{name} {int(count) - 1}"
+path.write_text("\n".join(lines) + "\n")
+PYEOF
+    git add generated/dto/field_counts.txt
+    git -c user.name=t -c user.email=t@t commit -qm 'decrease dto field count'
+    git -c user.name=t -c user.email=t@t commit --allow-empty -qm 'unrelated follow-up'
+}
+expect_fail_with_diagnostic check_dto_fields.sh \
+    'a dto field removed in the penultimate branch commit' \
+    'lost public fields' mut_dto_field_count_decreased_before_an_unrelated_commit
+
+mut_dto_field_base_ref_missing() {
+    git update-ref -d refs/remotes/origin/main
+}
+expect_fail_with_diagnostic check_dto_fields.sh \
+    'the branch merge-base reference being unavailable' \
+    'required base is unavailable: origin/main' mut_dto_field_base_ref_missing
+
+fi
+
+if [[ "$DTO_COMPILER_ONLY" == 1 ]]; then
+
+mut_e0639_non_exhaustive_removed() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("crates/types/tests/semver_policy.rs")
+text = path.read_text()
+needle = "#[non_exhaustive]\n#[derive(Default)]"
+if text.count(needle) != 1:
+    raise SystemExit("expected exactly one non-exhaustive compiler probe")
+path.write_text(text.replace(needle, "#[derive(Default)]", 1))
+PYEOF
+}
+expect_cargo_test_fail_with_diagnostic rustfs-gateway-types semver_policy \
+    c_dto_n002_non_exhaustive_blocks_fru_across_a_crate_boundary \
+    'non-exhaustive FRU unexpectedly compiled' mut_e0639_non_exhaustive_removed
+
+mut_req_input_box_removed() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("crates/core/src/handler.rs")
+text = path.read_text()
+replacements = (
+    ("    input: Box<O::Input>,", "    input: O::Input,"),
+    ("            input: Box::new(input),", "            input,"),
+    ("        *self.input", "        self.input"),
+)
+for old, new in replacements:
+    if old not in text:
+        raise SystemExit(f"boxed request mutation subject is missing: {old}")
+    text = text.replace(old, new)
+path.write_text(text)
+PYEOF
+}
+expect_cargo_test_fail_with_diagnostic rustfs-gateway-core integration \
+    dto_cold_split::c_dto_n011_req_put_object_has_the_boxed_snapshot_and_stays_within_the_ceiling \
+    'evaluation panicked: assertion failed: size_of::<Req<PutObject>>() == 32' mut_req_input_box_removed
+
+mut_operation_spec_builder_bypassed_by_return_literal() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("crates/core/src/registry/reject.rs")
+path.write_text(path.read_text() + '''
+
+fn review_mutation_returns_literal() -> OperationSpec {
+    OperationSpec
+    {
+        name: "review:Mutation",
+        success_status: 200,
+        required_params: &[],
+        not_configured_error: None,
+        auth: None,
+    }
+}
+''')
+PYEOF
+}
+expect_fail_and_missing_cargo check_operation_spec_builder.sh \
+    'a function returning a multiline OperationSpec literal' mut_operation_spec_builder_bypassed_by_return_literal
+
+mut_operation_spec_builder_bypassed_by_grouped_use_rename() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("crates/core/src/registry/reject.rs")
+path.write_text(path.read_text() + '''
+
+use crate::registry::{OperationSpec as ReviewRenamedSpec};
+
+fn review_mutation_returns_renamed_literal() -> ReviewRenamedSpec {
+    ReviewRenamedSpec {
+        name: "review:RenamedMutation",
+        success_status: 200,
+        required_params: &[],
+        not_configured_error: None,
+        auth: None,
+    }
+}
+''')
+PYEOF
+}
+expect_fail check_operation_spec_builder.sh \
+    'a grouped use rename hiding an OperationSpec literal' mut_operation_spec_builder_bypassed_by_grouped_use_rename
+
+mut_operation_spec_builder_bypassed_by_chained_type_alias() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("crates/core/src/registry/reject.rs")
+path.write_text(path.read_text() + '''
+
+type ReviewSpecAlias = OperationSpec;
+type ReviewChainedSpecAlias = ReviewSpecAlias;
+
+fn review_mutation_returns_chained_alias_literal() -> ReviewChainedSpecAlias {
+    ReviewChainedSpecAlias {
+        name: "review:AliasMutation",
+        success_status: 200,
+        required_params: &[],
+        not_configured_error: None,
+        auth: None,
+    }
+}
+''')
+PYEOF
+}
+expect_fail check_operation_spec_builder.sh \
+    'a chained type alias hiding an OperationSpec literal' mut_operation_spec_builder_bypassed_by_chained_type_alias
+
+mut_operation_spec_builder_bypassed_by_namespace_alias() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("crates/core/src/registry/reject.rs")
+path.write_text(path.read_text() + '''
+
+use crate::registry as ReviewRegistry;
+
+fn review_mutation_returns_namespace_alias_literal() -> ReviewRegistry::OperationSpec {
+    ReviewRegistry::OperationSpec {
+        name: "review:NamespaceMutation",
+        success_status: 200,
+        required_params: &[],
+        not_configured_error: None,
+        auth: None,
+    }
+}
+''')
+PYEOF
+}
+expect_fail check_operation_spec_builder.sh \
+    'a namespace alias hiding an OperationSpec literal' mut_operation_spec_builder_bypassed_by_namespace_alias
+
+mut_operation_spec_builder_bypassed_by_chained_grouped_namespace_alias() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("crates/core/src/registry/reject.rs")
+path.write_text(path.read_text() + '''
+
+use crate::{registry as ReviewGroupedRegistry};
+use ReviewGroupedRegistry as ReviewChainedRegistry;
+
+fn review_mutation_returns_chained_namespace_literal() -> ReviewChainedRegistry::OperationSpec {
+    ReviewChainedRegistry::OperationSpec {
+        name: "review:ChainedNamespaceMutation",
+        success_status: 200,
+        required_params: &[],
+        not_configured_error: None,
+        auth: None,
+    }
+}
+''')
+PYEOF
+}
+expect_fail check_operation_spec_builder.sh \
+    'a grouped and chained namespace alias hiding an OperationSpec literal' \
+    mut_operation_spec_builder_bypassed_by_chained_grouped_namespace_alias
+
+fi
+
+if [[ "$QUIRK_LEDGER_ONLY" == 0 && "$DTO_COMPILER_ONLY" == 0 && "$BUILD_GUARDS_ONLY" == 0 ]]; then
+
+mut_types_version_loses_model_date() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("crates/types/Cargo.toml")
+text = path.read_text().replace('version = "0.2.1+aws.2026-08-04"', 'version = "0.2.1"', 1)
+path.write_text(text)
+PYEOF
+}
+expect_fail check_version_metadata.sh \
+    'the types crate version losing its AWS model date' mut_types_version_loses_model_date
+
+mut_types_version_has_invalid_model_date() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("crates/types/Cargo.toml")
+text = path.read_text().replace('aws.2026-08-04', 'aws.2026-02-30', 1)
+path.write_text(text)
+PYEOF
+}
+expect_fail check_version_metadata.sh \
+    'the types crate version carrying an invalid calendar date' mut_types_version_has_invalid_model_date
+
+mut_types_version_numeric_part_diverges() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("crates/types/Cargo.toml")
+text = path.read_text().replace('version = "0.2.1+aws.', 'version = "0.3.0+aws.', 1)
+path.write_text(text)
+PYEOF
+}
+expect_fail check_version_metadata.sh \
+    'the types crate numeric version diverging from the root dependency' mut_types_version_numeric_part_diverges
 
 fi
 

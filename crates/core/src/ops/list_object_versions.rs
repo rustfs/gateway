@@ -51,13 +51,10 @@ use crate::registry::OperationSpec;
 ///
 /// `versions` is a routing discriminator rather than a required parameter: without it the request
 /// is a key listing, a different operation, not a malformed one.
-static SPEC: OperationSpec = OperationSpec {
-    name: "ListObjectVersions",
-    success_status: 200,
-    required_params: &[],
-    not_configured_error: None,
-    auth: Some(AuthRequirement::new("s3:ListBucket", ResourceShape::Bucket)),
-};
+static SPEC: OperationSpec = OperationSpec::builder("ListObjectVersions", 200, None)
+    .required_params(&[])
+    .auth(AuthRequirement::new("s3:ListBucket", ResourceShape::Bucket))
+    .build();
 
 /// Header signatures only, and not privileged.
 static FLOOR: OperationFloor = OperationFloor::builtin("ListObjectVersions", SigService::S3);

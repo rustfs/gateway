@@ -1,0 +1,12 @@
+error[E0639]: cannot create non-exhaustive struct using struct expression
+  --> tests/compile_fail/operation_spec_literal.rs:23:13
+   |
+23 |       let _ = OperationSpec {
+   |  _____________^
+24 | |         name: "extension:Ping",
+25 | |         success_status: 200,
+26 | |         required_params: &[],
+27 | |         not_configured_error: None,
+28 | |         auth: None,
+29 | |     };
+   | |_____^

@@ -46,13 +46,10 @@ use crate::registry::OperationSpec;
 /// The `LegalHold` document is a required *member*, refused by the decoder with `MalformedXML`
 /// when the body is absent or wrongly rooted — not a required *parameter*, which is a check on
 /// the request head. Nothing on the head is required beyond the routing discriminator.
-static SPEC: OperationSpec = OperationSpec {
-    name: "PutObjectLegalHold",
-    success_status: 200,
-    required_params: &[],
-    not_configured_error: None,
-    auth: Some(AuthRequirement::new("s3:PutObjectLegalHold", ResourceShape::Object)),
-};
+static SPEC: OperationSpec = OperationSpec::builder("PutObjectLegalHold", 200, None)
+    .required_params(&[])
+    .auth(AuthRequirement::new("s3:PutObjectLegalHold", ResourceShape::Object))
+    .build();
 
 /// Header signatures only, and not privileged.
 static FLOOR: OperationFloor = OperationFloor::builtin("PutObjectLegalHold", SigService::S3);

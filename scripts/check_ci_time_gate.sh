@@ -98,8 +98,8 @@ require_equal(static_steps.first(2).map { |step| step.fetch("uses") }, [
                 "actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10",
                 "dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30"
               ], "static setup action or pin changed")
-require_equal(static_steps.first.fetch("with"), {"fetch-depth" => 2},
-              "static must retain the baseline parent fetch")
+require_equal(static_steps.first.fetch("with"), {"fetch-depth" => 0},
+              "static must retain the branch graph for merge-base guards")
 
 clippy_steps = jobs.fetch("clippy").fetch("steps")
 require_equal(clippy_steps.map(&:keys), [["uses"], ["uses"], ["uses"], ["run"]],

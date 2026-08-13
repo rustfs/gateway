@@ -30,6 +30,8 @@ mod model;
 #[cfg(feature = "full")]
 mod new_op;
 #[cfg(feature = "full")]
+mod operation_spec_guard;
+#[cfg(feature = "full")]
 mod route;
 mod verify;
 #[cfg(feature = "full")]
@@ -62,6 +64,7 @@ fn dispatch(first: Option<String>, rest: Vec<String>) -> ExitCode {
         Some("conformance") => conformance(rest),
         Some("route") => route::route(&rest),
         Some("new-op") => new_op::new_op(&rest),
+        Some("check-operation-spec-builder") => operation_spec_guard::check(&rest),
         Some("bootstrap") => bootstrap::bootstrap(&rest),
         Some("-h" | "--help") => {
             print!("{USAGE}");

@@ -52,13 +52,10 @@ use crate::registry::OperationSpec;
 ///
 /// `logging` is a routing discriminator, not a required parameter: nothing on the request head is
 /// required beyond it.
-static SPEC: OperationSpec = OperationSpec {
-    name: "GetBucketLogging",
-    success_status: 200,
-    required_params: &[],
-    not_configured_error: None,
-    auth: Some(AuthRequirement::new("s3:GetBucketLogging", ResourceShape::Bucket)),
-};
+static SPEC: OperationSpec = OperationSpec::builder("GetBucketLogging", 200, None)
+    .required_params(&[])
+    .auth(AuthRequirement::new("s3:GetBucketLogging", ResourceShape::Bucket))
+    .build();
 
 /// Header signatures only, and not privileged.
 static FLOOR: OperationFloor = OperationFloor::builtin("GetBucketLogging", SigService::S3);

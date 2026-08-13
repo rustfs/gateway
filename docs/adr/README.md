@@ -62,9 +62,10 @@ second copy is a second thing to keep in sync.
 | 0004 | SemVer policy for the public API and generated dto | Accepted |
 | 0005 | The generated dto crosses the package boundary by symlink | Accepted |
 | 0006 | Static operation dispatch across the core-facade boundary | Accepted |
-| 0007 | Runtime vtables for dialect XML fields | Accepted |
+| 0007 | Runtime vtables for dialect XML fields | Superseded by ADR-0010 |
 | 0008 | Closed error resolution across the types, signature, core and facade boundary | Accepted |
 | 0009 | Typed scope-region rejection across sig and gateway | Accepted |
+| 0010 | Box the public DTO inside handler requests | Accepted |
 
 The index is hand-maintained. Generating it would cost more than it saves until
 there are at least fifteen records.

@@ -498,13 +498,10 @@ mod tests {
     use super::*;
     use crate::{AuthRequirement, OperationOrigin, OperationSpec, ResourceShape};
 
-    static SPEC: OperationSpec = OperationSpec {
-        name: "example:DeleteMany",
-        success_status: 200,
-        required_params: &[],
-        not_configured_error: None,
-        auth: Some(AuthRequirement::new("example:Delete", ResourceShape::Object)),
-    };
+    static SPEC: OperationSpec = OperationSpec::builder("example:DeleteMany", 200, None)
+        .required_params(&[])
+        .auth(AuthRequirement::new("example:Delete", ResourceShape::Object))
+        .build();
     static FLOOR: OperationFloor = OperationFloor::builtin("example:DeleteMany", SigService::S3);
 
     struct DeleteMany;

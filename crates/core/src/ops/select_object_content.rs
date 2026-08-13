@@ -70,16 +70,17 @@ use crate::registry::OperationSpec;
 /// every other member of the request is in the body, where the decoder refuses a missing
 /// required element with `MalformedXML`. The success status is the `200` the head carries before
 /// the first frame exists — see the module note on why no frame follows it yet.
-static SPEC: OperationSpec = OperationSpec {
-    name: "SelectObjectContent",
-    success_status: match SELECT_EVENT_STATUS {
+static SPEC: OperationSpec = OperationSpec::builder(
+    "SelectObjectContent",
+    match SELECT_EVENT_STATUS {
         SelectEventStatusPolicy::Success200 => 200,
         SelectEventStatusPolicy::Success202 => 202,
     },
-    required_params: &[],
-    not_configured_error: None,
-    auth: Some(AuthRequirement::new("s3:GetObject", ResourceShape::Object)),
-};
+    None,
+)
+.required_params(&[])
+.auth(AuthRequirement::new("s3:GetObject", ResourceShape::Object))
+.build();
 
 /// Header signatures only, and not privileged.
 static FLOOR: OperationFloor = OperationFloor::builtin("SelectObjectContent", SigService::S3);

@@ -111,6 +111,7 @@ pub struct RequiredParam {
 ///
 /// A subset of the IR: the fields that matter between "we know which operation this is" and "the
 /// decoder takes over".
+#[non_exhaustive]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OperationSpec {
     /// The operation name, matching the route entry.
@@ -132,6 +133,49 @@ pub struct OperationSpec {
     /// rustfs/rustfs#4845. Every registration path goes through
     /// [`RegistryError::MissingAuthRequirement`], so there is no way to install a handler for one.
     pub auth: Option<AuthRequirement>,
+}
+
+impl OperationSpec {
+    /// Starts an operation specification with no parameters or authorization requirement.
+    ///
+    /// `not_configured_error` carries the operation-specific error for an absent bucket
+    /// subresource; most operations pass `None`.
+    ///
+    /// The registry rejects a built specification until [`Self::auth`] supplies the authorization
+    /// requirement. Keeping that validation at registration lets tests exercise the fail-closed
+    /// path without a second, invalid constructor.
+    #[must_use]
+    pub const fn builder(name: &'static str, success_status: u16, not_configured_error: Option<ErrorCode>) -> Self {
+        Self {
+            name,
+            success_status,
+            required_params: &[],
+            not_configured_error,
+            auth: None,
+        }
+    }
+
+    /// Sets parameters that must be present after routing and before decoding.
+    #[must_use]
+    pub const fn required_params(mut self, required_params: &'static [RequiredParam]) -> Self {
+        self.required_params = required_params;
+        self
+    }
+
+    /// Sets the action and resource shape required to authorize the operation.
+    #[must_use]
+    pub const fn auth(mut self, auth: AuthRequirement) -> Self {
+        self.auth = Some(auth);
+        self
+    }
+
+    /// Finishes the specification.
+    ///
+    /// Registration remains the validation boundary and may reject the result.
+    #[must_use]
+    pub const fn build(self) -> Self {
+        self
+    }
 }
 
 /// The operations this backend handles, and the erased handler for each one that has one.

@@ -38,6 +38,9 @@ mod configuration_error_declarations;
 #[path = "dialect.rs"]
 mod dialect;
 
+#[path = "dto_cold_split.rs"]
+mod dto_cold_split;
+
 #[path = "error_resolution.rs"]
 mod error_resolution;
 
@@ -49,6 +52,9 @@ mod hot_path;
 
 #[path = "limit_layering.rs"]
 mod limit_layering;
+
+#[path = "operation_spec_semver.rs"]
+mod operation_spec_semver;
 
 #[path = "params_and_dispatch.rs"]
 mod params_and_dispatch;

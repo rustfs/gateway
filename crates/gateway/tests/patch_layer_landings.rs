@@ -277,13 +277,10 @@ struct QueryShapedInput;
 /// What it answers with.
 struct QueryShapedOutput;
 
-static QUERY_SHAPED_SPEC: OperationSpec = OperationSpec {
-    name: "example:QueryShaped",
-    success_status: 200,
-    required_params: &[],
-    not_configured_error: None,
-    auth: Some(AuthRequirement::new("example:QueryShaped", ResourceShape::Service)),
-};
+static QUERY_SHAPED_SPEC: OperationSpec = OperationSpec::builder("example:QueryShaped", 200, None)
+    .required_params(&[])
+    .auth(AuthRequirement::new("example:QueryShaped", ResourceShape::Service))
+    .build();
 
 static QUERY_SHAPED_FLOOR: OperationFloor =
     OperationFloor::custom("example:QueryShaped", SigService::Sts).allow_anonymous_after_listing_in_the_posture_report();

@@ -88,13 +88,10 @@ struct CredProbe;
 struct Nothing;
 struct Answered;
 
-static SPEC: OperationSpec = OperationSpec {
-    name: "example:CredProbe",
-    success_status: 200,
-    required_params: &[],
-    not_configured_error: None,
-    auth: Some(AuthRequirement::new("example:CredProbe", ResourceShape::Object)),
-};
+static SPEC: OperationSpec = OperationSpec::builder("example:CredProbe", 200, None)
+    .required_params(&[])
+    .auth(AuthRequirement::new("example:CredProbe", ResourceShape::Object))
+    .build();
 
 /// No `allow_anonymous_after_listing_in_the_posture_report`: this operation demands a signature,
 /// which is what makes the provider reachable at all.

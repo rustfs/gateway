@@ -44,13 +44,10 @@ use crate::registry::OperationSpec;
 pub static REGION_HEADER_DUTY: RegionHeaderDuty = RegionHeaderDuty::RedirectOnly;
 
 /// What this operation requires of a request once routing has chosen it.
-static SPEC: OperationSpec = OperationSpec {
-    name: "DeleteBucket",
-    success_status: 204,
-    required_params: &[],
-    not_configured_error: None,
-    auth: Some(AuthRequirement::new("s3:DeleteBucket", ResourceShape::Bucket)),
-};
+static SPEC: OperationSpec = OperationSpec::builder("DeleteBucket", 204, None)
+    .required_params(&[])
+    .auth(AuthRequirement::new("s3:DeleteBucket", ResourceShape::Bucket))
+    .build();
 
 /// Header signatures only, and not privileged.
 static FLOOR: OperationFloor = OperationFloor::builtin("DeleteBucket", SigService::S3);

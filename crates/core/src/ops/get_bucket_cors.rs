@@ -51,13 +51,10 @@ use crate::registry::OperationSpec;
 ///
 /// `cors` is a routing discriminator, not a required parameter: a `GET` on a bucket without it is
 /// the key listing. Nothing else is required.
-static SPEC: OperationSpec = OperationSpec {
-    name: "GetBucketCors",
-    success_status: 200,
-    required_params: &[],
-    not_configured_error: Some(ErrorCode::NO_SUCH_CORS_CONFIGURATION),
-    auth: Some(AuthRequirement::new("s3:GetBucketCORS", ResourceShape::Bucket)),
-};
+static SPEC: OperationSpec = OperationSpec::builder("GetBucketCors", 200, Some(ErrorCode::NO_SUCH_CORS_CONFIGURATION))
+    .required_params(&[])
+    .auth(AuthRequirement::new("s3:GetBucketCORS", ResourceShape::Bucket))
+    .build();
 
 /// Header signatures only, and not privileged.
 static FLOOR: OperationFloor = OperationFloor::builtin("GetBucketCors", SigService::S3);

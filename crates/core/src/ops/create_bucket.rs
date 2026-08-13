@@ -66,13 +66,10 @@ pub static REGION_HEADER_DUTY: RegionHeaderDuty = RegionHeaderDuty::RedirectOnly
 /// Nothing beyond the bucket in the path: the configuration body is optional (its absence *is*
 /// the us-east-1 spelling), and every header is optional. Content problems in the body are
 /// parameter validation — a 400, never a routing miss.
-static SPEC: OperationSpec = OperationSpec {
-    name: "CreateBucket",
-    success_status: 200,
-    required_params: &[],
-    not_configured_error: None,
-    auth: Some(AuthRequirement::new("s3:CreateBucket", ResourceShape::Bucket)),
-};
+static SPEC: OperationSpec = OperationSpec::builder("CreateBucket", 200, None)
+    .required_params(&[])
+    .auth(AuthRequirement::new("s3:CreateBucket", ResourceShape::Bucket))
+    .build();
 
 /// Header signatures only, and not privileged.
 static FLOOR: OperationFloor = OperationFloor::builtin("CreateBucket", SigService::S3);

@@ -59,13 +59,10 @@ use crate::registry::OperationSpec;
 ///
 /// `accelerate` is a routing discriminator, not a required parameter: nothing on the request head is
 /// required beyond it.
-static SPEC: OperationSpec = OperationSpec {
-    name: "GetBucketAccelerateConfiguration",
-    success_status: 200,
-    required_params: &[],
-    not_configured_error: None,
-    auth: Some(AuthRequirement::new("s3:GetAccelerateConfiguration", ResourceShape::Bucket)),
-};
+static SPEC: OperationSpec = OperationSpec::builder("GetBucketAccelerateConfiguration", 200, None)
+    .required_params(&[])
+    .auth(AuthRequirement::new("s3:GetAccelerateConfiguration", ResourceShape::Bucket))
+    .build();
 
 /// Header signatures only, and not privileged.
 static FLOOR: OperationFloor = OperationFloor::builtin("GetBucketAccelerateConfiguration", SigService::S3);
