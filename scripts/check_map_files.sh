@@ -46,12 +46,21 @@ while IFS= read -r manifest; do
     if ! grep -Eq '^\|[[:space:]]*File[[:space:]]*\|[[:space:]]*Responsibility[[:space:]]*\|[[:space:]]*Read it when[[:space:]]*\|' "$map"; then
         fail "${map#"$ROOT"/} is missing the File / Responsibility / Read it when table"
     fi
+    rows=0
     while IFS='|' read -r _ file _ when _; do
+        file="${file#"${file%%[![:space:]]*}"}"
+        file="${file%"${file##*[![:space:]]}"}"
+        if [[ "$file" == \`*\` ]]; then
+            rows=$((rows + 1))
+        fi
         if [[ "$file" =~ generated/|model/s3\.json|Cargo\.lock ]] &&
             [[ ! "$when" =~ [Nn]ever|[Dd]o[[:space:]]not|[Ff]orbidden ]]; then
             fail "${map#"$ROOT"/} recommends forbidden path:${file}"
         fi
     done <"$map"
+    if (( rows == 0 )); then
+        fail "${map#"$ROOT"/} has no file entries"
+    fi
 done < <(find "$ROOT/crates" "$ROOT/xtask" -mindepth 1 -maxdepth 2 -type f -name Cargo.toml | sort)
 
 format="$ROOT/docs/MAP-format.md"

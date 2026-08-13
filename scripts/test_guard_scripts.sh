@@ -7286,6 +7286,12 @@ mut_map_too_long() {
 expect_fail check_map_files.sh \
     'a MAP.md growing beyond the 100-line entry-point budget' mut_map_too_long
 
+mut_map_has_no_file_entries() {
+    printf '| File | Responsibility | Read it when |\n| --- | --- | --- |\n' >crates/xml/MAP.md
+}
+expect_fail check_map_files.sh \
+    'a MAP.md retaining only an empty table header' mut_map_has_no_file_entries
+
 mut_map_recommends_generated() {
     printf '| `generated/**` | generated details | Read it when debugging |\n' >>crates/xml/MAP.md
 }
@@ -7299,6 +7305,30 @@ mut_module_doc_loses_boundary() {
 expect_fail check_module_doc.sh \
     'a Rust file documenting responsibility but not its boundary' mut_module_doc_loses_boundary
 
+mut_module_doc_nested_cfg_decoy() {
+    python3 - <<'PY'
+from pathlib import Path
+
+path = Path("xtask/src/main.rs")
+lines = [
+    line
+    for line in path.read_text().splitlines()
+    if not any(marker in line for marker in ("Responsible for:", "NOT responsible for:", "Upstream:", "Downstream:"))
+]
+decoy = """#[cfg(any())]
+mod disabled_doc_decoy {
+//! Responsible for: nothing active.
+//! NOT responsible for: the actual file.
+//! Upstream: disabled input.
+//! Downstream: disabled output.
+}
+"""
+path.write_text(decoy + "\n".join(lines) + "\n")
+PY
+}
+expect_fail check_module_doc.sh \
+    'a cfg-disabled nested module impersonating the root module docs' mut_module_doc_nested_cfg_decoy
+
 mut_unallowed_large_file() {
     for _ in $(seq 1 801); do printf '// padding\n' >>xtask/src/main.rs; done
 }
@@ -7311,12 +7341,30 @@ mut_invalid_file_size_allowance() {
 expect_fail check_file_size.sh \
     'a file-size allowance without an issue URL and reason' mut_invalid_file_size_allowance
 
+mut_stale_file_size_allowance() {
+    printf 'crates/xml/src/lib.rs 900 https://github.com/rustfs/backlog/issues/1714 stale allowance decoy\n' \
+        >>allowances/file_size.txt
+}
+expect_fail check_file_size.sh \
+    'an allowance remaining on a file below the ordinary 800-line ceiling' mut_stale_file_size_allowance
+
 mut_forbidden_list_loses_alternative() {
     sed 's|`cargo tree -p <crate> -e normal`|none|' AGENTS.md >AGENTS.md.mut
     mv AGENTS.md.mut AGENTS.md
 }
 expect_fail check_agents_forbidden_list.sh \
     'a forbidden-list entry losing its safe alternative' mut_forbidden_list_loses_alternative
+
+mut_agents_context_budget_removed() {
+    python3 - <<'PY'
+from pathlib import Path
+
+path = Path("AGENTS.md")
+path.write_text(path.read_text().replace("**≤8 files / ≤40k tokens**", "an unbounded input set", 1))
+PY
+}
+expect_fail check_agents_context_contract.sh \
+    'the task-start file and token budget becoming unbounded' mut_agents_context_budget_removed
 
 mut_scoped_agents_file() {
     printf '# local rules\n' >crates/xml/AGENTS.md

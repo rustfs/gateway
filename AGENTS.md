@@ -22,7 +22,7 @@ Highest wins on conflict:
 **Layering trigger — do not create a scoped AGENTS.md before it fires.** A crate may get its own
 scoped AGENTS.md only when it has **5 or more rules that apply to that crate alone**. The known failure
 mode of layered rule files is that an agent reads the nearest scoped file and never reads the root
-one; with total rules under 400 lines, layering only dilutes and duplicates. The PR that introduces
+one; at this repository's current scale, layering only dilutes and duplicates. The PR that introduces
 the first scoped file must land `scripts/check_agents_no_dup.sh` (sentence-level duplicate
 detection between root and scoped files) in the same PR.
 
@@ -348,7 +348,7 @@ agent reads it.
   / what it is explicitly not responsible for / who is upstream and downstream**. A file whose `//!`
   answers only the first question is incomplete.
 - **Hard limit: 800 lines per file.** Over the limit, split it, or register an exemption in
-  `docs/file-size-allowances.txt` with a reason. Large files are the number one context killer.
+  `allowances/file_size.txt` with a limit, backlog issue and reason. Large files are the number one context killer.
 
 ## One Operation Per File
 

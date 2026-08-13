@@ -61,7 +61,10 @@ while read -r lines file; do
             break
         fi
     done
-    if (( lines > limit )); then
+    if [[ -n "$allowance" ]] && (( lines <= 800 )); then
+        printf 'check_file_size: stale allowance for %s; file has only %s lines\n' "$relative" "$lines" >&2
+        failures=$((failures + 1))
+    elif (( lines > limit )); then
         printf 'check_file_size: %s has %s lines; limit is %s\n' "$relative" "$lines" "$limit" >&2
         failures=$((failures + 1))
     elif [[ -n "$allowance" ]]; then

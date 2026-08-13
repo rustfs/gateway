@@ -36,6 +36,7 @@ awk -v root="$ROOT" '
         finish_file()
         started = 1
         responsible = not_responsible = upstream = downstream = generated = 0
+        root_docs_open = 1
         relative = FILENAME
         if (index(relative, root "/") == 1) relative = substr(relative, length(root) + 2)
         generated_candidate = relative ~ /^crates\/macros\/tests\/expand\/.*\.expanded\.rs$/
@@ -43,7 +44,7 @@ awk -v root="$ROOT" '
     FNR <= 45 {
         line = tolower($0)
         if (generated_candidate && line ~ /@generated/) generated = 1
-        if (line ~ /^\/\/!/) {
+        if (root_docs_open && line ~ /^\/\/!/) {
             line = tolower($0)
             responsibility_line = line
             gsub(/not responsible for:/, "", responsibility_line)
@@ -51,6 +52,8 @@ awk -v root="$ROOT" '
             if (line ~ /not responsible for:/) not_responsible = 1
             if (line ~ /upstream:/) upstream = 1
             if (line ~ /downstream:/) downstream = 1
+        } else if (root_docs_open && line !~ /^[[:space:]]*$/ && line !~ /^\/\//) {
+            root_docs_open = 0
         }
     }
     END {
