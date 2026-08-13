@@ -30,13 +30,8 @@ set -euo pipefail
 #   outside any panic or tracing context.
 #
 # HOW TO EXEMPT
-#   Add a line to `scripts/allowances/global-registry-allowances.txt`
-#   (create the file if it does not exist yet):
-#
-#       <crate> -> <dependency>    # <reason and the ADR amendment that allows it>
-#
-#   ADR-0003 is a merged ADR. An allowance here means the ADR is being
-#   contradicted, so it needs an ADR amendment, not just a comment.
+#   There is no allowance. Supersede ADR-0003 and change this guard in the same
+#   reviewed change; a text file must not silently weaken an absolute ban.
 #
 # USAGE
 #   scripts/check_no_global_registry_deps.sh
@@ -45,75 +40,152 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="${GATEWAY_CHECK_ROOT:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
-DEPS_AWK="${SCRIPT_DIR}/lib/cargo_deps.awk"
-ALLOWANCE_FILE="${ROOT_DIR}/scripts/allowances/global-registry-allowances.txt"
 
-cd "$ROOT_DIR"
-
-BANNED_CRATES="inventory linkme ctor"
-
-status=0
-
-ALLOWANCES=""
-if [[ -f "$ALLOWANCE_FILE" ]]; then
-    while IFS= read -r line; do
-        line="${line%%#*}"
-        line="$(printf '%s' "$line" | tr -s ' \t' ' ')"
-        line="${line# }"
-        line="${line% }"
-        [[ -z "$line" ]] && continue
-        ALLOWANCES="${ALLOWANCES}${line}
-"
-    done <"$ALLOWANCE_FILE"
-fi
-
-is_allowed() {
-    [[ -z "$ALLOWANCES" ]] && return 1
-    printf '%s' "$ALLOWANCES" | grep -qxF "$1 -> $2"
+fail() {
+    printf 'check_no_global_registry_deps: %s\n' "$*" >&2
+    exit 1
 }
 
-manifests=()
-while IFS= read -r manifest; do
-    [[ -n "$manifest" ]] && manifests+=("$manifest")
-# `--cached --others --exclude-standard` rather than a bare `git ls-files`: the bare form lists
-# only *tracked* files, so a brand-new file stays invisible to this guard right up until the
-# moment `git add -A` commits it. That is how CJK text reached commit 343f044 past a guard run
-# that had just reported success. `--exclude-standard` keeps ignored files out.
-done < <(git ls-files --cached --others --exclude-standard -- 'Cargo.toml' '*/Cargo.toml' 2>/dev/null || true)
+command -v python3 >/dev/null 2>&1 || fail 'required command is missing: python3'
+python3 -c 'import tomllib' >/dev/null 2>&1 || fail 'required Python module is missing: tomllib'
+[[ -f "${ROOT_DIR}/docs/adr/0003-no-global-registry-crates.md" ]] || \
+    fail 'rule input is missing: docs/adr/0003-no-global-registry-crates.md'
 
-if [[ "${#manifests[@]}" -eq 0 ]]; then
-    printf 'check_no_global_registry_deps: no tracked Cargo.toml found under %s\n' "$ROOT_DIR" >&2
-    exit 1
-fi
+python3 - "$ROOT_DIR" <<'PY'
+from __future__ import annotations
 
-for manifest in "${manifests[@]}"; do
-    if [[ "$manifest" == "Cargo.toml" ]]; then
-        crate="<workspace>"
-    else
-        crate="$(basename "$(dirname "$manifest")")"
-    fi
+import os
+import re
+import subprocess
+import sys
+import tomllib
+from pathlib import Path
+from typing import Any, Iterator
 
-    while IFS=$'\t' read -r kind dep; do
-        [[ -z "${dep:-}" ]] && continue
-        for banned in $BANNED_CRATES; do
-            [[ "$dep" == "$banned" ]] || continue
-            if is_allowed "$crate" "$dep"; then
-                continue
-            fi
-            printf "%s: '%s' declares the global-registry crate '%s' (%s); ADR-0003 requires explicit compile-time registration\n" \
-                "$manifest" "$crate" "$dep" "$kind" >&2
-            status=1
-        done
-    done < <(awk -f "$DEPS_AWK" "$manifest")
-done
+ROOT = Path(sys.argv[1])
+BANNED = {"inventory", "linkme", "ctor"}
 
-if [[ "$status" -ne 0 ]]; then
-    cat >&2 <<'EOF'
 
-Global registry crates are banned by ADR-0003. Register the operation
-explicitly instead — a plain `const` table or a generated `match` keeps the
-routing table deterministic, greppable, and dead-code-eliminable.
-EOF
-fi
+def fail(message: str) -> None:
+    print(f"check_no_global_registry_deps: {message}", file=sys.stderr)
+    raise SystemExit(1)
 
-exit "$status"
+
+def dependency_tables(document: dict[str, Any]) -> Iterator[tuple[str, Any]]:
+    for kind in ("dependencies", "dev-dependencies", "build-dependencies"):
+        if kind in document:
+            yield kind, document[kind]
+
+    workspace = document.get("workspace", {})
+    if not isinstance(workspace, dict):
+        fail("[workspace] must be a TOML table")
+    for kind in ("dependencies", "dev-dependencies", "build-dependencies"):
+        if kind in workspace:
+            yield f"workspace.{kind}", workspace[kind]
+
+    targets = document.get("target", {})
+    if not isinstance(targets, dict):
+        fail("[target] must be a TOML table")
+    for selector, target in targets.items():
+        if not isinstance(target, dict):
+            fail(f"[target.{selector}] must be a TOML table")
+        for kind in ("dependencies", "dev-dependencies", "build-dependencies"):
+            if kind in target:
+                yield f"target.{selector}.{kind}", target[kind]
+
+
+def is_banned(package: str) -> bool:
+    return package.lower() in BANNED
+
+
+def declaration_line(source: str, alias: str, package: str) -> int:
+    lines = source.splitlines()
+    quoted_alias = re.escape(alias)
+    alias_key = rf"(?:{quoted_alias}|'(?:{quoted_alias})'|\"(?:{quoted_alias})\")"
+    alias_patterns = (
+        re.compile(rf"^\s*{alias_key}\s*="),
+        re.compile(rf"^\s*.*\.{alias_key}\s*="),
+        re.compile(rf"^\s*\[.*\.{alias_key}\]\s*$"),
+    )
+    for number, line in enumerate(lines, 1):
+        if any(pattern.search(line) for pattern in alias_patterns):
+            return number
+
+    if package.lower() != alias.lower():
+        quoted_package = re.escape(package)
+        package_pattern = re.compile(rf"\bpackage\s*=\s*['\"]{quoted_package}['\"]")
+        for number, line in enumerate(lines, 1):
+            if package_pattern.search(line):
+                return number
+    fail(
+        f"cannot locate declaration line for [{alias}] resolving to {package} "
+        "(rule: docs/adr/0003-no-global-registry-crates.md)"
+    )
+
+
+try:
+    listed = subprocess.run(
+        [
+            "git",
+            "ls-files",
+            "--cached",
+            "--others",
+            "--exclude-standard",
+            "-z",
+            "--",
+            "Cargo.toml",
+            "*/Cargo.toml",
+        ],
+        cwd=ROOT,
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    ).stdout
+except (OSError, subprocess.CalledProcessError) as error:
+    fail(f"cannot enumerate Cargo.toml inputs: {error}")
+
+manifests = sorted(os.fsdecode(item) for item in listed.split(b"\0") if item)
+if not manifests:
+    fail(f"no Cargo.toml found under {ROOT}")
+
+violations: list[tuple[str, int, str, str, str]] = []
+for manifest in manifests:
+    path = ROOT / manifest
+    try:
+        source = path.read_text(encoding="utf-8")
+        document = tomllib.loads(source)
+    except (OSError, UnicodeError, tomllib.TOMLDecodeError) as error:
+        fail(f"cannot parse {manifest}: {error}")
+
+    for scope, dependencies in dependency_tables(document):
+        if not isinstance(dependencies, dict):
+            fail(f"{manifest}: [{scope}] must be a TOML table")
+        for alias, declaration in dependencies.items():
+            if isinstance(declaration, str):
+                package = alias
+            elif isinstance(declaration, dict):
+                package = declaration.get("package", alias)
+                if not isinstance(package, str):
+                    fail(f"{manifest}: [{scope}].{alias} has a non-string package")
+            else:
+                fail(f"{manifest}: [{scope}].{alias} has an invalid dependency declaration")
+            if is_banned(package):
+                violations.append(
+                    (manifest, declaration_line(source, alias, package), scope, alias, package)
+                )
+
+for manifest, line, scope, alias, package in violations:
+    print(
+        f"{manifest}:{line}: [{scope}].{alias} resolves to banned package "
+        f"'{package}' (rule: docs/adr/0003-no-global-registry-crates.md)",
+        file=sys.stderr,
+    )
+
+if violations:
+    print(
+        "\nGlobal registry crates are banned by ADR-0003. Register operations "
+        "explicitly with a const table or generated match.",
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+PY

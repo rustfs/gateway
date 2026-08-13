@@ -4658,6 +4658,17 @@ PYEOF
 expect_fail check_no_global_registry_deps.sh \
     'an `inventory` dependency' mut_inventory
 
+mut_linkme() {
+    python3 - <<'PY'
+from pathlib import Path
+path = Path("crates/core/Cargo.toml")
+text = path.read_text()
+path.write_text(text.replace("[dependencies]\n", "[dependencies]\nlinkme = \"0.3\"\n", 1))
+PY
+}
+expect_fail check_no_global_registry_deps.sh \
+    'a `linkme` dependency' mut_linkme
+
 # NOTE: appended to a manifest whose last table is `[dependencies]`. Appending
 # to rustfs-gateway-types would land the line in its `[features]` table, where it is
 # correctly NOT a dependency.
@@ -4666,6 +4677,164 @@ mut_ctor() {
 }
 expect_fail check_no_global_registry_deps.sh \
     'a `ctor` dependency' mut_ctor
+
+mut_renamed_inventory_package() {
+    python3 - <<'PY'
+from pathlib import Path
+path = Path("crates/core/Cargo.toml")
+text = path.read_text()
+path.write_text(text.replace(
+    "[dependencies]\n",
+    '[dependencies]\nregistry_alias = { package = "inventory", version = "0.3" }\n',
+    1,
+))
+PY
+}
+expect_fail check_no_global_registry_deps.sh \
+    'an `inventory` package hidden behind a dependency alias' mut_renamed_inventory_package
+
+mut_workspace_renamed_inventory_package() {
+    cat >>Cargo.toml <<'TOML'
+
+[workspace.dependencies.registry_alias]
+package = "inventory"
+version = "0.3"
+TOML
+}
+expect_fail check_no_global_registry_deps.sh \
+    'a renamed inventory package in workspace dependencies' mut_workspace_renamed_inventory_package
+
+mut_target_renamed_linkme_package() {
+    cat >>crates/core/Cargo.toml <<'TOML'
+
+[target.'cfg(unix)'.dev-dependencies.registry_alias]
+package = "linkme"
+version = "0.3"
+TOML
+}
+expect_fail check_no_global_registry_deps.sh \
+    'a renamed linkme package in target-specific dev-dependencies' mut_target_renamed_linkme_package
+
+mut_quoted_ctor_dependency() {
+    python3 - <<'PY'
+from pathlib import Path
+path = Path("crates/core/Cargo.toml")
+text = path.read_text()
+path.write_text(text.replace("[dependencies]\n", '[dependencies]\n"ctor" = "0.2"\n', 1))
+PY
+}
+expect_fail check_no_global_registry_deps.sh \
+    'a quoted ctor dependency key' mut_quoted_ctor_dependency
+
+mut_untracked_renamed_inventory_package() {
+    mkdir -p examples/untracked-registry
+    cat >examples/untracked-registry/Cargo.toml <<'TOML'
+[package]
+name = "untracked-registry"
+version = "0.0.0"
+
+[dependencies]
+registry_alias = { package = "inventory", version = "0.3" }
+TOML
+}
+expect_fail_unstaged check_no_global_registry_deps.sh \
+    'a renamed inventory package in an untracked manifest' mut_untracked_renamed_inventory_package
+
+mut_global_registry_allowance_attempt() {
+    python3 - <<'PY'
+from pathlib import Path
+path = Path("crates/core/Cargo.toml")
+text = path.read_text()
+path.write_text(text.replace("[dependencies]\n", '[dependencies]\ninventory = "0.3"\n', 1))
+PY
+    printf 'core -> inventory\n' >scripts/allowances/global-registry-allowances.txt
+}
+expect_fail check_no_global_registry_deps.sh \
+    'an allowance file attempting to bypass the absolute ban' mut_global_registry_allowance_attempt
+
+mut_malformed_manifest_for_registry_guard() {
+    printf '\nregistry_alias = { package = "inventory"\n' >>crates/core/Cargo.toml
+}
+expect_fail check_no_global_registry_deps.sh \
+    'a malformed manifest that must fail closed rather than under-report' \
+    mut_malformed_manifest_for_registry_guard
+
+mut_missing_global_registry_adr() {
+    rm -f docs/adr/0003-no-global-registry-crates.md
+}
+expect_fail check_no_global_registry_deps.sh \
+    'the ADR rule input being missing' mut_missing_global_registry_adr
+
+probe_global_registry_diagnostic() {
+    local diagnostic_pattern output rc=0 sandbox
+    cases=$((cases + 1))
+    make_sandbox
+    sandbox="$SANDBOX"
+    cat >>"$sandbox/crates/core/Cargo.toml" <<'TOML'
+
+[dependencies.registry_alias]
+package = "inventory"
+version = "0.3"
+TOML
+    (cd "$sandbox" && git add -A >/dev/null 2>&1)
+    output="$(GATEWAY_CHECK_ROOT="$sandbox" \
+        "${SCRIPT_DIR}/check_no_global_registry_deps.sh" 2>&1)" || rc=$?
+    diagnostic_pattern='crates/core/Cargo.toml:[0-9]+:.*\[dependencies\]\.registry_alias.*inventory'
+    if [[ "$rc" -ne 0 &&
+        "$output" =~ $diagnostic_pattern &&
+        "$output" == *'rule: docs/adr/0003-no-global-registry-crates.md'* ]]; then
+        pass_msg 'check_no_global_registry_deps.sh reports path, line, alias, package and ADR rule'
+    else
+        fail_msg 'check_no_global_registry_deps.sh emitted an incomplete diagnostic'
+    fi
+}
+probe_global_registry_diagnostic
+
+probe_global_registry_text_decoys() {
+    local sandbox rc=0
+    cases=$((cases + 1))
+    make_sandbox
+    sandbox="$SANDBOX"
+    mkdir -p "$sandbox/examples/registry-decoy"
+    cat >"$sandbox/examples/registry-decoy/Cargo.toml" <<'TOML'
+[package]
+name = "registry-decoy"
+version = "0.0.0"
+description = "an inventory of linkme and ctor alternatives"
+
+# inventory = "0.3"
+
+[dependencies]
+ordinary_helper = { package = "inventory-helper", version = "0.1" }
+TOML
+    (cd "$sandbox" && git add -A >/dev/null 2>&1)
+    GATEWAY_CHECK_ROOT="$sandbox" "${SCRIPT_DIR}/check_no_global_registry_deps.sh" \
+        >/dev/null 2>&1 || rc=$?
+    if [[ "$rc" -eq 0 ]]; then
+        pass_msg 'check_no_global_registry_deps.sh ignores text decoys and allows non-banned inventory-helper'
+    else
+        fail_msg 'check_no_global_registry_deps.sh reported a text decoy or non-banned package'
+    fi
+}
+probe_global_registry_text_decoys
+
+probe_global_registry_guard_missing_python() {
+    local output rc=0 sandbox tool_path
+    cases=$((cases + 1))
+    make_sandbox
+    sandbox="$SANDBOX"
+    tool_path="$(mktemp -d "${TMPDIR:-/tmp}/gateway-registry-path.XXXXXX")"
+    ln -s "$(command -v dirname)" "${tool_path}/dirname"
+    output="$(GATEWAY_CHECK_ROOT="$sandbox" PATH="$tool_path" /bin/bash \
+        "${SCRIPT_DIR}/check_no_global_registry_deps.sh" 2>&1)" || rc=$?
+    rm -rf "$tool_path"
+    if [[ "$rc" -ne 0 && "$output" == *'required command is missing: python3'* ]]; then
+        pass_msg 'check_no_global_registry_deps.sh fails closed without python3'
+    else
+        fail_msg 'check_no_global_registry_deps.sh reported green without python3'
+    fi
+}
+probe_global_registry_guard_missing_python
 
 mut_derived_signature() {
     cat >crates/sig/src/proof.rs <<'RS'
