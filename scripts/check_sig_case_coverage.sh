@@ -67,6 +67,20 @@ verification_cases=(
     'c-sig-0128|negative|crates/gateway/tests/credential_runtime.rs|fn c_sig_0128_request_logs_exclude_credential_material'
 )
 
+p2_03_cases=()
+p2_03_manifest="${ROOT}/scripts/sig-case-coverage-p2-03.txt"
+[[ -f "$p2_03_manifest" ]] || {
+    printf 'check_sig_case_coverage: P2-03 case manifest is missing\n' >&2
+    exit 1
+}
+while IFS= read -r mapping; do
+    [[ -n "$mapping" ]] || {
+        printf 'check_sig_case_coverage: P2-03 case manifest contains a blank row\n' >&2
+        exit 1
+    }
+    p2_03_cases+=("$mapping")
+done <"$p2_03_manifest"
+
 [[ "${#cases[@]}" -eq 25 ]] || {
     printf 'check_sig_case_coverage: expected 25 mappings, got %s\n' "${#cases[@]}" >&2
     exit 1
@@ -546,6 +560,85 @@ done
         "${#verification_compile_fail_paths[@]}" >&2
     exit 1
 }
+
+[[ "${#p2_03_cases[@]}" -eq 43 ]] || {
+    printf 'check_sig_case_coverage: expected 43 P2-03 mappings, got %s\n' "${#p2_03_cases[@]}" >&2
+    exit 1
+}
+positive=0
+negative=0
+p2_03_compile_fail_paths=()
+for index in "${!p2_03_cases[@]}"; do
+    IFS='|' read -r id polarity relative evidence <<<"${p2_03_cases[$index]}"
+    if [[ "$index" -lt 14 ]]; then
+        printf -v wanted 'c-sig-%04d' "$((201 + index))"
+    else
+        printf -v wanted 'c-sig-%04d' "$((230 + index - 14))"
+    fi
+    [[ "$id" == "$wanted" ]] || {
+        printf 'check_sig_case_coverage: expected %s, found %s\n' "$wanted" "$id" >&2
+        exit 1
+    }
+    case "$polarity" in
+        positive) positive=$((positive + 1)) ;;
+        negative) negative=$((negative + 1)) ;;
+        *) printf 'check_sig_case_coverage: %s has unknown polarity %s\n' "$id" "$polarity" >&2; exit 1 ;;
+    esac
+    file="${ROOT}/${relative}"
+    [[ -f "$file" ]] || {
+        printf 'check_sig_case_coverage: mapped file is missing: %s\n' "$relative" >&2
+        exit 1
+    }
+    grep -Fq "$id" "$file" || {
+        printf 'check_sig_case_coverage: %s is not named by %s\n' "$id" "$relative" >&2
+        exit 1
+    }
+    if [[ "$relative" == crates/sig/tests/compile_fail/c_sig_025[34]_*.rs ]]; then
+        p2_03_compile_fail_paths+=("$relative")
+        validate_rust_evidence "$file" compile "$evidence" '' \
+            "check_sig_case_coverage: ${relative} is not an executable compile-fail fixture"
+        stderr="${file%.rs}.stderr"
+        [[ -f "$stderr" ]] || { printf 'check_sig_case_coverage: compile-fail golden is missing: %s\n' "$stderr" >&2; exit 1; }
+        grep -Fq 'error[E' "$stderr" || { printf 'check_sig_case_coverage: compile-fail golden has no rustc diagnostic: %s\n' "$stderr" >&2; exit 1; }
+        case "$id" in
+            c-sig-0253) diagnostic='expected reference `&RawHost`' ;;
+            c-sig-0254) diagnostic='no associated function or constant named `from_presented` found for struct `VerifiedScope`' ;;
+        esac
+        grep -Fq "$diagnostic" "$stderr" || {
+            printf 'check_sig_case_coverage: %s golden lost its case-specific diagnostic\n' "$id" >&2
+            exit 1
+        }
+    else
+        function="${evidence#fn }"
+        token="${id//-/_}"
+        case "$id" in
+            c-sig-0212|c-sig-0213|c-sig-0214) wanted_function='c_sig_official_suite' ;;
+            c-sig-0244|c-sig-0245) wanted_function='c_sig_0244_and_0245_every_unsigned_amz_header_is_refused_individually' ;;
+            *) wanted_function="${token}_" ;;
+        esac
+        if [[ "$wanted_function" == *_ ]]; then
+            [[ "$function" == "$wanted_function"* ]] || {
+                printf 'check_sig_case_coverage: %s is bound to the wrong executable test %s\n' "$id" "$function" >&2
+                exit 1
+            }
+        else
+            [[ "$function" == "$wanted_function" ]] || {
+                printf 'check_sig_case_coverage: %s is bound to the wrong executable test %s\n' "$id" "$function" >&2
+                exit 1
+            }
+        fi
+        validate_rust_evidence "$file" runtime "$evidence" '' \
+            "check_sig_case_coverage: ${id} is not a named #[test] item in ${relative}"
+    fi
+done
+[[ "$positive" -eq 14 && "$negative" -eq 29 ]] || {
+    printf 'check_sig_case_coverage: expected 14 positive and 29 negative P2-03 cases, got %s/%s\n' "$positive" "$negative" >&2
+    exit 1
+}
+[[ "${#p2_03_compile_fail_paths[@]}" -eq 2 && "${p2_03_compile_fail_paths[0]}" != "${p2_03_compile_fail_paths[1]}" ]] || {
+    printf 'check_sig_case_coverage: P2-03 compile-fail cases must use two distinct fixtures\n' >&2
+    exit 1
+}
 [[ "$(printf '%s\n' "${verification_compile_fail_paths[@]}" | sort -u | wc -l | tr -d ' ')" -eq 9 ]] || {
     printf 'check_sig_case_coverage: P2-02 compile-fail cases must use distinct fixtures\n' >&2
     exit 1
@@ -575,6 +668,10 @@ validate_rust_evidence "$harness" harness \
     p2_02_compile_time_boundaries_are_not_openable \
     'cases.compile_fail("tests/compile_fail/p2_02_*_cannot_*.rs")' \
     'check_sig_case_coverage: compile-fail harness does not execute the proof-token copy controls'
+validate_rust_evidence "$harness" harness \
+    p2_03_compile_time_boundaries_are_not_openable \
+    'cases.compile_fail("tests/compile_fail/c_sig_025[34]_*.rs")' \
+    'check_sig_case_coverage: compile-fail harness does not execute c-sig-0253 and c-sig-0254'
 [[ -f "$core_harness" ]] || {
     printf 'check_sig_case_coverage: core signature compile-fail harness is missing\n' >&2
     exit 1
@@ -690,5 +787,5 @@ done
 
 run_evidence_validations
 
-printf 'OK: all 53 P2 signature cases map to executable evidence '
-printf '(P2-01: 8/17; P2-02: 6/22)\n'
+printf 'OK: all 96 P2 signature cases map to executable evidence '
+printf '(P2-01: 8/17; P2-02: 6/22; P2-03: 14/29)\n'

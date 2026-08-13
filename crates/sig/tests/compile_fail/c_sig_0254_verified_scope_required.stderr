@@ -1,0 +1,5 @@
+error[E0599]: no associated function or constant named `from_presented` found for struct `VerifiedScope` in the current scope
+  --> tests/compile_fail/c_sig_0254_verified_scope_required.rs:26:50
+   |
+26 |     let _ = signing_key(&secret, &VerifiedScope::from_presented(&presented));
+   |                                                  ^^^^^^^^^^^^^^ associated function or constant not found in `VerifiedScope`
