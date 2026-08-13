@@ -14,4 +14,5 @@ Agent entry point for SigV2/SigV4 parsing, canonicalization and verification.
 | `src/signer.rs` | Test/client request signing. | Conformance requests are signed wrongly. |
 | `src/time.rs` | Signing-time parsing and skew. | Expiry or skew decisions are wrong. |
 | `src/v2.rs` | SigV2 compatibility path. | A SigV2 request fails. |
-| `tests/` | Public verification and negative matrices. | Change any signature contract. |
+| `tests/integration.rs` | Single Cargo target registering all integration-test modules. | Integration tests duplicate compile or disappear. |
+| `tests/*.rs` | Public verification and negative matrices. | Change any signature contract. |

@@ -12,20 +12,23 @@ command -v python3 >/dev/null 2>&1 || {
     exit 1
 }
 
-python3 - "$REPO_ROOT" <<'PYEOF'
+python3 - "$REPO_ROOT" "${GATEWAY_TEST_TARGET_CRATE:-xtask}" \
+    "${GATEWAY_TEST_TARGET_MODULES:-cli_contract,scaffold_must_be_red,toolchain_contract,why_contract}" <<'PYEOF'
 from pathlib import Path
 import re
 import sys
 import tomllib
 
 root = Path(sys.argv[1]).resolve()
-crate = root / "xtask"
+crate_relative = Path(sys.argv[2])
+crate = root / crate_relative
 tests = crate / "tests"
-modules = ("cli_contract", "scaffold_must_be_red", "toolchain_contract", "why_contract")
+modules = tuple(sys.argv[3].split(","))
+crate_name = crate.name
 
 
 def fail(message: str) -> None:
-    raise SystemExit(f"xtask test-target consolidation violation: {message}")
+    raise SystemExit(f"{crate_name} test-target consolidation violation: {message}")
 
 
 def rust_views(source: str, path: Path) -> tuple[str, str]:
@@ -140,26 +143,26 @@ def balanced_end(code: str, opening: int, path: Path) -> int:
 try:
     manifest = tomllib.loads((crate / "Cargo.toml").read_text())
 except (OSError, tomllib.TOMLDecodeError) as error:
-    fail(f"cannot parse xtask/Cargo.toml: {error}")
+    fail(f"cannot parse {crate_relative}/Cargo.toml: {error}")
 package = manifest.get("package")
 if not isinstance(package, dict) or package.get("autotests") is not False:
-    fail("xtask must set package.autotests = false")
+    fail(f"{crate_name} must set package.autotests = false")
 build = package.get("build")
 if build not in (None, False):
     if not isinstance(build, str) or not build or "\\" in build:
-        fail("xtask package build target must be false, absent, or a resolvable path")
+        fail(f"{crate_name} package build target must be false, absent, or a resolvable path")
     try:
         build_path = (crate / build).resolve(strict=True)
     except OSError as error:
-        fail(f"cannot resolve xtask package build target: {error}")
+        fail(f"cannot resolve {crate_name} package build target: {error}")
 else:
     build_path = None
 targets = manifest.get("test")
 if not isinstance(targets, list) or len(targets) != 1 or not isinstance(targets[0], dict):
-    fail("xtask must declare exactly one explicit [[test]] target")
+    fail(f"{crate_name} must declare exactly one explicit [[test]] target")
 target = targets[0]
 if target != {"name": "integration", "path": "tests/integration.rs"}:
-    fail("xtask test target must be exactly integration at tests/integration.rs")
+    fail(f"{crate_name} test target must be exactly integration at tests/integration.rs")
 
 try:
     test_entries = tuple(tests.rglob("*"))
@@ -170,15 +173,16 @@ for entry in test_entries:
         fail(f"{entry.relative_to(root)} may not be a symlink")
 actual = tuple(
     sorted(
-        path.relative_to(tests).with_suffix("").as_posix()
-        for path in test_entries
+        path.stem
+        for path in tests.iterdir()
         if path.is_file() and path.suffix == ".rs" and path.name != "integration.rs"
     )
 )
 if actual != modules:
-    fail("xtask integration source inventory does not match the frozen module suite")
+    fail(f"{crate_name} integration source inventory does not match the frozen module suite")
 
 protected: set[Path] = set()
+module_code: dict[str, str] = {}
 for module in modules:
     path = tests / f"{module}.rs"
     if path.is_symlink():
@@ -189,11 +193,19 @@ for module in modules:
     except OSError as error:
         fail(f"cannot read {path.relative_to(root)}: {error}")
     if resolved in protected:
-        fail("xtask integration sources must resolve to unique files")
+        fail(f"{crate_name} integration sources must resolve to unique files")
     protected.add(resolved)
     _, code = rust_views(source, path)
+    module_code[module] = code
     if re.search(r"#!\s*\[\s*(?:cfg|cfg_attr)\b", code):
         fail(f"{path.relative_to(root)} may not disable its module with a file-level cfg")
+
+if crate_name == "sig":
+    shared_fixture_use = "use crate::security_floor_fixtures::*;"
+    for module in ("security_floor", "security_floor_schemes"):
+        code = module_code[module]
+        if code.count(shared_fixture_use) != 1 or re.search(r"\bmod\s+security_floor_fixtures\s*;", code):
+            fail(f"{module}.rs must consume the harness-owned security-floor fixtures exactly once")
 
 license_header = """// Copyright 2026 RustFS Team
 //
@@ -210,37 +222,46 @@ license_header = """// Copyright 2026 RustFS Team
 // limitations under the License.
 """
 harness_path = tests / "integration.rs"
+prose_name = crate_name if crate_name == "xtask" else f"`{crate_name}`"
 harness = license_header + """
-//! Consolidated integration-test entry point for `xtask`.
+//! Consolidated integration-test entry point for `""" + crate_name + """`.
 //!
-//! Responsible for: registering every xtask integration-test source in one Cargo target.
+//! Responsible for: registering every """ + prose_name + """ integration-test source in one Cargo target.
 //! NOT responsible for: test behavior or repository automation implementation.
-//! Upstream: the xtask integration-test modules. Downstream: Cargo's test harness.
+//! Upstream: the """ + prose_name + """ integration-test modules. Downstream: Cargo's test harness.
 
-""" + "\n".join(f'#[path = "{module}.rs"]\nmod {module};' for module in modules) + "\n"
+""" + "\n".join(f'#[path = "{module}.rs"]\nmod {module};' for module in modules)
+if crate_name == "sig":
+    anchor = '#[path = "security_floor.rs"]\nmod security_floor;'
+    harness = harness.replace(
+        anchor,
+        anchor + '\n#[path = "security_floor_fixtures/mod.rs"]\nmod security_floor_fixtures;',
+        1,
+    )
+harness += "\n"
 try:
     if harness_path.read_text() != harness:
-        fail("xtask integration harness must register each frozen source exactly once")
+        fail(f"{crate_name} integration harness must register each frozen source exactly once")
 except OSError as error:
-    fail(f"cannot read xtask/tests/integration.rs: {error}")
+    fail(f"cannot read {crate_relative}/tests/integration.rs: {error}")
 protected.add(harness_path.resolve())
 if build_path in protected:
-    fail("xtask package build target reuses a registered integration entry")
+    fail(f"{crate_name} package build target reuses a registered integration entry")
 
 # Explicit non-test targets may not create another entry for a registered source or the harness.
 for kind in ("lib", "bin", "example", "bench"):
     raw = manifest.get(kind, [] if kind != "lib" else None)
     entries = [] if raw is None else [raw] if kind == "lib" else raw
     if not isinstance(entries, list) or any(not isinstance(entry, dict) for entry in entries):
-        fail(f"xtask has an invalid {kind} target inventory")
+        fail(f"{crate_name} has an invalid {kind} target inventory")
     for entry in entries:
         raw_path = entry.get("path")
         if raw_path is None:
             continue
         if not isinstance(raw_path, str) or not raw_path or "\\" in raw_path:
-            fail(f"xtask has an unresolvable {kind} target path")
+            fail(f"{crate_name} has an unresolvable {kind} target path")
         if (crate / raw_path).resolve() in protected:
-            fail(f"xtask {kind} target reuses a registered integration entry")
+            fail(f"{crate_name} {kind} target reuses a registered integration entry")
 
 registered = {tests / f"{module}.rs" for module in modules} | {harness_path}
 for path in crate.rglob("*.rs"):
@@ -278,5 +299,5 @@ for path in crate.rglob("*.rs"):
         if (path.parent / literal.group(1)).resolve() in protected:
             fail(f"{path.relative_to(root)} includes a registered integration entry")
 
-print("xtask test-target consolidation guard passed")
+print(f"{crate_name} test-target consolidation guard passed")
 PYEOF

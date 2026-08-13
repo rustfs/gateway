@@ -22,8 +22,6 @@
 //! NOT responsible for: the clock, expiry and scope cases, which are `tests/security_floor.rs`.
 //! Upstream: the `rustfs-gateway-sig` public API. Downstream: none (test target).
 
-mod security_floor_fixtures;
-
 use core::time::Duration;
 
 use http::header::{HeaderMap, HeaderName, HeaderValue};
@@ -33,7 +31,7 @@ use rustfs_gateway_sig::{
     detect_aws_credential_marker, detect_credentials, enforce_no_duplicate_sig_params,
 };
 
-use security_floor_fixtures::*;
+use crate::security_floor_fixtures::*;
 
 /// Positive — c-sig-0308: a request with no AWS credential marker reaches the registered custom
 /// scheme, and the floor has already run by the time it does.

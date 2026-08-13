@@ -10414,6 +10414,124 @@ RUSTEOF
 expect_fail check_xtask_test_target_consolidation.sh \
     'the default build target including an xtask test source' mut_xtask_default_build_includes_source
 
+mut_sig_autotests_restored() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/sig/Cargo.toml")
+text = path.read_text()
+path.write_text(text.replace("autotests = false\n", "autotests = true\n", 1))
+PYEOF
+}
+expect_fail check_sig_test_target_consolidation.sh \
+    'restoring sig implicit test discovery' mut_sig_autotests_restored
+
+mut_sig_registration_omitted() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/sig/tests/integration.rs")
+text = path.read_text()
+path.write_text(text.replace('#[path = "canonical_request.rs"]\nmod canonical_request;\n', '', 1))
+PYEOF
+}
+expect_fail check_sig_test_target_consolidation.sh \
+    'an omitted sig integration registration' mut_sig_registration_omitted
+
+mut_sig_registration_duplicated() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/sig/tests/integration.rs")
+text = path.read_text()
+entry = '#[path = "canonical_request.rs"]\nmod canonical_request;\n'
+path.write_text(text.replace(entry, entry + entry, 1))
+PYEOF
+}
+expect_fail check_sig_test_target_consolidation.sh \
+    'a duplicated sig integration registration' mut_sig_registration_duplicated
+
+mut_sig_source_unregistered() {
+    cp crates/sig/tests/canonical_request.rs crates/sig/tests/unregistered_contract.rs
+}
+expect_fail check_sig_test_target_consolidation.sh \
+    'a new unregistered sig integration source' mut_sig_source_unregistered
+
+mut_sig_source_disabled() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/sig/tests/canonical_request.rs")
+path.write_text("#![cfg(any())]\n" + path.read_text())
+PYEOF
+}
+expect_fail check_sig_test_target_consolidation.sh \
+    'a registered sig source disabled by file cfg' mut_sig_source_disabled
+
+mut_sig_source_symlinked() {
+    rm crates/sig/tests/canonical_request.rs
+    ln -s timing.rs crates/sig/tests/canonical_request.rs
+}
+expect_fail check_sig_test_target_consolidation.sh \
+    'a registered sig source replaced by a symlink' mut_sig_source_symlinked
+
+mut_sig_extra_test_target() {
+    cat >>crates/sig/Cargo.toml <<'TOMLEOF'
+
+[[test]]
+name = "duplicate"
+path = "tests/integration.rs"
+TOMLEOF
+}
+expect_fail check_sig_test_target_consolidation.sh \
+    'a second explicit sig test target' mut_sig_extra_test_target
+
+mut_sig_example_reuses_source() {
+    cat >>crates/sig/Cargo.toml <<'TOMLEOF'
+
+[[example]]
+name = "duplicate-contract"
+path = "tests/canonical_request.rs"
+test = true
+TOMLEOF
+}
+expect_fail check_sig_test_target_consolidation.sh \
+    'an example target reusing a sig test source' mut_sig_example_reuses_source
+
+mut_sig_path_reuses_source() {
+    cat >>crates/sig/src/lib.rs <<'RUSTEOF'
+
+#[cfg(test)]
+#[path = "../tests/canonical_request.rs"]
+mod duplicate_contract;
+RUSTEOF
+}
+expect_fail check_sig_test_target_consolidation.sh \
+    'a path attribute reusing a sig test source' mut_sig_path_reuses_source
+
+mut_sig_include_reuses_source() {
+    cat >>crates/sig/src/lib.rs <<'RUSTEOF'
+
+#[cfg(test)]
+mod duplicate_contract {
+    include!("../tests/canonical_request.rs");
+}
+RUSTEOF
+}
+expect_fail check_sig_test_target_consolidation.sh \
+    'an include reusing a sig test source' mut_sig_include_reuses_source
+
+mut_sig_shared_fixture_loaded_twice() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/sig/tests/security_floor.rs")
+text = path.read_text()
+old = "use crate::security_floor_fixtures::*;"
+new = "mod security_floor_fixtures;\nuse security_floor_fixtures::*;"
+if text.count(old) != 1:
+    raise SystemExit("the shared fixture import anchor is not unique")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_sig_test_target_consolidation.sh \
+    'a sig integration source loading the shared fixture as a second module' mut_sig_shared_fixture_loaded_twice
+
 fi
 
 if [[ "$QUIRK_LEDGER_ONLY" == 1 ]]; then
