@@ -2,8 +2,9 @@
 set -euo pipefail
 
 # WHAT THIS CHECKS
-#   Workspace tests, guard mutations, target-consolidation mutations, quirk-ledger mutations and
-#   TSAN run on separate CI runners, while the branch-protected Test check waits for all five. This
+#   Workspace tests, the official signing suite, guard mutations, target-consolidation mutations,
+#   quirk-ledger mutations and TSAN run on separate CI runners, while the branch-protected Test
+#   check waits for every worker. This
 #   keeps the gate wall time below ten
 #   minutes as coverage grows.
 
@@ -41,6 +42,7 @@ require_equal(workflow.fetch("env", {}).keys, workflow_env_keys,
               "workflow environment may not override split-job commands")
 
 workspace = jobs.fetch("workspace-tests")
+signing_suite = jobs.fetch("signing-suite")
 guard = jobs.fetch("guard-self-test")
 target = jobs.fetch("target-consolidation-self-test")
 quirk_ledger = jobs.fetch("quirk-ledger-self-test")
@@ -53,6 +55,9 @@ require_equal(workspace.keys, worker_keys, "workspace-tests changed its parallel
 require_equal(guard.keys, worker_keys, "guard-self-test changed its parallel nine-minute contract")
 require_equal(workspace.values_at("name", "runs-on", "timeout-minutes"),
               ["Workspace tests", "ubuntu-latest", 9], "workspace-tests identity or budget changed")
+require_equal(signing_suite.keys, worker_keys, "signing-suite changed its parallel four-minute contract")
+require_equal(signing_suite.values_at("name", "runs-on", "timeout-minutes"),
+              ["Official signing suite", "ubuntu-latest", 4], "signing-suite identity or budget changed")
 require_equal(guard.values_at("name", "runs-on", "timeout-minutes"),
               ["Guard self-test", "ubuntu-latest", 9], "guard-self-test identity or budget changed")
 require_equal(target.keys, worker_keys,
@@ -91,6 +96,17 @@ end
 
 require_equal(workspace.fetch("steps").first(3).map(&:keys), [["uses"], ["uses"], ["uses"]],
               "workspace-tests setup gained executable control")
+signing_suite_steps = signing_suite.fetch("steps")
+require_equal(signing_suite_steps.length, 4, "signing-suite changed its setup or command step count")
+require_equal(signing_suite_steps.first(3).map { |step| step.fetch("uses") }, [
+  "actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10",
+  "dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30",
+  "Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32"
+], "signing-suite setup action or pin changed")
+require_equal(signing_suite_steps.first(3).map(&:keys), [["uses"], ["uses"], ["uses"]],
+              "signing-suite setup gained executable control")
+require_equal(signing_suite_steps.last.keys, ["name", "run"],
+              "signing-suite command can skip or hide failure")
 guard_steps = guard.fetch("steps")
 require_equal(guard_steps.first(3).map(&:keys), [["uses", "with"], ["uses"], ["uses"]],
               "guard-self-test setup changed its parent-fetch contract")
@@ -143,6 +159,11 @@ workspace_run = <<~'RUN'
   elapsed="$(( $(date +%s) - started ))"
   echo "workspace tests completed in ${elapsed}s"
 RUN
+signing_suite_run = <<~'RUN'
+  timeout 90s cargo build --package xtask --bin xtask
+  timeout 60s target/debug/xtask sigsuite fetch
+  timeout 60s target/debug/xtask sigsuite run
+RUN
 guard_run = <<~'RUN'
   started="$(date +%s)"
   timeout 480s bash scripts/test_guard_scripts.sh
@@ -175,6 +196,8 @@ build_guard_run = <<~'RUN'
 RUN
 require_equal(workspace.fetch("steps").last.fetch("run"), workspace_run,
               "workspace-tests command changed or can hide a failure")
+require_equal(signing_suite_steps.last.fetch("run"), signing_suite_run,
+              "signing-suite command changed or can hide a failure")
 require_equal(guard.fetch("steps").last.fetch("run"), guard_run,
               "guard-self-test command changed or can hide a failure")
 require_equal(target.fetch("steps").last.fetch("run"), target_run,
@@ -189,13 +212,14 @@ require_equal(build_guard.fetch("steps").last.fetch("run"), build_guard_run,
 aggregate_keys = ["name", "needs", "if", "runs-on", "timeout-minutes", "steps"]
 require_equal(aggregate.keys, aggregate_keys, "the Test job changed its dependency, failure, or budget contract")
 require_equal(aggregate.values_at("name", "needs", "if", "runs-on", "timeout-minutes"),
-              ["Test", ["workspace-tests", "guard-self-test", "target-consolidation-self-test", "quirk-ledger-self-test", "dto-compiler-self-test", "build-guard-self-test", "gateway-tsan"], "always()", "ubuntu-latest", 1],
-              "the Test job no longer aggregates all seven workers within the budget")
+              ["Test", ["workspace-tests", "signing-suite", "guard-self-test", "target-consolidation-self-test", "quirk-ledger-self-test", "dto-compiler-self-test", "build-guard-self-test", "gateway-tsan"], "always()", "ubuntu-latest", 1],
+              "the Test job no longer aggregates all eight workers within the budget")
 steps = aggregate.fetch("steps")
 require_equal(steps.length, 1, "the Test job must have exactly one result-checking step")
 require_equal(steps.first.keys, ["name", "env", "run"], "the Test comparison step can be skipped or hidden")
 expected_env = {
   "WORKSPACE_RESULT" => "${{ needs.workspace-tests.result }}",
+  "SIGNING_SUITE_RESULT" => "${{ needs.signing-suite.result }}",
   "GUARD_RESULT" => "${{ needs.guard-self-test.result }}",
   "TARGET_CONSOLIDATION_RESULT" => "${{ needs.target-consolidation-self-test.result }}",
   "QUIRK_LEDGER_RESULT" => "${{ needs.quirk-ledger-self-test.result }}",
@@ -206,6 +230,7 @@ expected_env = {
 require_equal(steps.first.fetch("env"), expected_env, "the Test step does not bind all worker results")
 expected_run = <<~'RUN'
   test "$WORKSPACE_RESULT" = success
+  test "$SIGNING_SUITE_RESULT" = success
   test "$GUARD_RESULT" = success
   test "$TARGET_CONSOLIDATION_RESULT" = success
   test "$QUIRK_LEDGER_RESULT" = success
@@ -248,4 +273,4 @@ if ! grep -F 'if [[ "$BUILD_GUARDS_ONLY" == 1 ]]; then' "$GUARD_SELF_TEST" >/dev
     fail 'build-guard-self-test omits a build-backed control or mutation'
 fi
 
-printf 'OK: workspace, guard, target-consolidation, quirk-ledger, DTO compiler, build guard and TSAN workers are parallel behind Test\n'
+printf 'OK: workspace, signing suite, guard, target-consolidation, quirk-ledger, DTO compiler, build guard and TSAN workers are parallel behind Test\n'

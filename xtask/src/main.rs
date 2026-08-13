@@ -33,6 +33,8 @@ mod new_op;
 mod operation_spec_guard;
 #[cfg(feature = "full")]
 mod route;
+#[cfg(feature = "full")]
+mod sigsuite;
 mod verify;
 #[cfg(feature = "full")]
 mod why;
@@ -63,6 +65,7 @@ fn dispatch(first: Option<String>, rest: Vec<String>) -> ExitCode {
         Some("why") => why::run(&rest),
         Some("conformance") => conformance(rest),
         Some("route") => route::route(&rest),
+        Some("sigsuite") => sigsuite::command(&rest),
         Some("new-op") => new_op::new_op(&rest),
         Some("check-operation-spec-builder") => operation_spec_guard::check(&rest),
         Some("bootstrap") => bootstrap::bootstrap(&rest),
@@ -140,6 +143,7 @@ commands:
   why <target> [--json]     trace a quirk, operation, error code, header, ADR or assembly rule
   route explain [--json] 'METHOD /path?query'
                             explain route selection and every predicate
+  sigsuite <fetch|run>      fetch and run the pinned official signing suite
   new-op <Operation>        create an intentionally-red operation scaffold
   bootstrap                 prepare a fresh checkout for work (<=5 minutes)
   conformance <run|validate|baseline> [--filter <glob>] [--transport hyper|conn]
