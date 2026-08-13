@@ -284,12 +284,12 @@ jobs:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-      - name: DTO and OperationSpec compiler mutations (maximum 1 minute after setup)
+      - name: DTO compiler mutations (maximum 1 minute after setup)
         run: |
           started="$(date +%s)"
           timeout 90s env GATEWAY_GUARD_DTO_COMPILER_ONLY=1 bash scripts/test_guard_scripts.sh
           elapsed="$(( $(date +%s) - started ))"
-          echo "DTO and OperationSpec compiler self-test completed in ${elapsed}s"
+          echo "DTO compiler self-test completed in ${elapsed}s"
 
   build-guard-self-test:
     name: Build guard self-test

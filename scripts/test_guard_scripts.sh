@@ -602,6 +602,35 @@ expect_cargo_test_fail_with_diagnostic() {
     fi
 }
 
+# expect_rustc_test_fail_with_diagnostic <source> <test> <diagnostic> <mutation-fn>
+# Runs a std-only compiler probe without starting an unrelated crate dependency graph.
+expect_rustc_test_fail_with_diagnostic() {
+    local source="$1" test_name="$2" diagnostic="$3" mutate="$4"
+    local sandbox output binary rc=0
+    cases=$((cases + 1))
+    make_sandbox
+    sandbox="$SANDBOX"
+    binary="$(mktemp "${TMPDIR:-/tmp}/gateway-rustc-test.XXXXXX")"
+    if ! rustc --edition=2024 --test "$sandbox/$source" -o "$binary" >/dev/null 2>&1 ||
+        ! "$binary" "$test_name" --exact >/dev/null 2>&1; then
+        rm -f "$binary"
+        fail_msg "${source} rejects its unmodified compiler control: ${test_name}"
+        return
+    fi
+    (cd "$sandbox" && "$mutate" >/dev/null)
+    stage_sandbox_changes "$sandbox" >/dev/null 2>&1
+    output="$({
+        rustc --edition=2024 --test "$sandbox/$source" -o "$binary" &&
+            "$binary" "$test_name" --exact --nocapture
+    } 2>&1)" || rc=$?
+    rm -f "$binary"
+    if [[ "$rc" -ne 0 && "$output" == *"$diagnostic"* && "$output" == *"test result: FAILED"* ]]; then
+        pass_msg "${source} catches: ${test_name}"
+    else
+        fail_msg "${source} did not catch ${test_name} with its expected diagnostic"
+    fi
+}
+
 # expect_fail_and_missing_grep <guard> <description> <mutation-fn>
 # Proves both the policy mutation and the dependency-missing path while keeping them one guard case.
 expect_fail_and_missing_grep() {
@@ -10880,7 +10909,7 @@ if text.count(needle) != 1:
 path.write_text(text.replace(needle, "#[derive(Default)]", 1))
 PYEOF
 }
-expect_cargo_test_fail_with_diagnostic rustfs-gateway-types semver_policy \
+expect_rustc_test_fail_with_diagnostic crates/types/tests/semver_policy.rs \
     c_dto_n002_non_exhaustive_blocks_fru_across_a_crate_boundary \
     'non-exhaustive FRU unexpectedly compiled' mut_e0639_non_exhaustive_removed
 
@@ -10905,6 +10934,10 @@ PYEOF
 expect_cargo_test_fail_with_diagnostic rustfs-gateway-core integration \
     dto_cold_split::c_dto_n011_req_put_object_has_the_boxed_snapshot_and_stays_within_the_ceiling \
     'evaluation panicked: assertion failed: size_of::<Req<PutObject>>() == 32' mut_req_input_box_removed
+
+fi
+
+if [[ "$BUILD_GUARDS_ONLY" == 1 ]]; then
 
 mut_operation_spec_builder_bypassed_by_return_literal() {
     python3 - <<'PYEOF'

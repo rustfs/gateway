@@ -49,7 +49,7 @@ if implemented.count(row) != 1 or row in registered:
 
 required_mutation_fragments = (
     "\nmut_e0639_non_exhaustive_removed() {\n",
-    "\nexpect_cargo_test_fail_with_diagnostic rustfs-gateway-types semver_policy \\\n",
+    "\nexpect_rustc_test_fail_with_diagnostic crates/types/tests/semver_policy.rs \\\n",
     "'non-exhaustive FRU unexpectedly compiled' mut_e0639_non_exhaustive_removed\n",
 )
 if any(harness.count(fragment) != 1 for fragment in required_mutation_fragments):

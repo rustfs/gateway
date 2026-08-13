@@ -165,7 +165,7 @@ dto_compiler_run = <<~'RUN'
   started="$(date +%s)"
   timeout 90s env GATEWAY_GUARD_DTO_COMPILER_ONLY=1 bash scripts/test_guard_scripts.sh
   elapsed="$(( $(date +%s) - started ))"
-  echo "DTO and OperationSpec compiler self-test completed in ${elapsed}s"
+  echo "DTO compiler self-test completed in ${elapsed}s"
 RUN
 build_guard_run = <<~'RUN'
   started="$(date +%s)"
@@ -234,16 +234,16 @@ if start < 0 or first_case < start or end < first_case:
     raise SystemExit("ERROR: guard-self-test still serializes or omits quirk-ledger mutations")
 PY
 if ! grep -F 'if [[ "$DTO_COMPILER_ONLY" == 1 ]]; then' "$GUARD_SELF_TEST" >/dev/null ||
-    ! grep -F 'expect_cargo_test_fail_with_diagnostic rustfs-gateway-types semver_policy' "$GUARD_SELF_TEST" >/dev/null ||
-    ! grep -F 'expect_cargo_test_fail_with_diagnostic rustfs-gateway-core integration' "$GUARD_SELF_TEST" >/dev/null ||
-    ! grep -F 'expect_fail_and_missing_cargo check_operation_spec_builder.sh' "$GUARD_SELF_TEST" >/dev/null; then
-    fail 'dto-compiler-self-test omits a DTO or OperationSpec compiler mutation'
+    ! grep -F 'expect_rustc_test_fail_with_diagnostic crates/types/tests/semver_policy.rs' "$GUARD_SELF_TEST" >/dev/null ||
+    ! grep -F 'expect_cargo_test_fail_with_diagnostic rustfs-gateway-core integration' "$GUARD_SELF_TEST" >/dev/null; then
+    fail 'dto-compiler-self-test omits a DTO compiler mutation'
 fi
 if ! grep -F 'if [[ "$BUILD_GUARDS_ONLY" == 1 ]]; then' "$GUARD_SELF_TEST" >/dev/null ||
     ! grep -F 'check_case_keys_honoured.sh check_monomorphic_dispatch.sh check_verify_map_generated.sh' "$GUARD_SELF_TEST" >/dev/null ||
     ! grep -F 'mut_build_monomorphic_handler_is_indirect' "$GUARD_SELF_TEST" >/dev/null ||
     ! grep -F 'mut_build_unread_schema_key' "$GUARD_SELF_TEST" >/dev/null ||
     ! grep -F 'mut_build_verify_map_edited' "$GUARD_SELF_TEST" >/dev/null ||
+    ! grep -F 'expect_fail_and_missing_cargo check_operation_spec_builder.sh' "$GUARD_SELF_TEST" >/dev/null ||
     ! grep -F 'scanner_budget_case check_single_normalization.sh 21 within' "$GUARD_SELF_TEST" >/dev/null; then
     fail 'build-guard-self-test omits a build-backed control or mutation'
 fi
