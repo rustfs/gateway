@@ -50,13 +50,10 @@ use crate::registry::OperationSpec;
 pub static ACL_TARGET: AclTarget = AclTarget::Object;
 
 /// What this operation requires of a request once routing has chosen it.
-static SPEC: OperationSpec = OperationSpec {
-    name: "GetObjectAcl",
-    success_status: 200,
-    required_params: &[],
-    not_configured_error: None,
-    auth: Some(AuthRequirement::new("s3:GetObjectAcl", ResourceShape::Object)),
-};
+static SPEC: OperationSpec = OperationSpec::builder("GetObjectAcl", 200, None)
+    .required_params(&[])
+    .auth(AuthRequirement::new("s3:GetObjectAcl", ResourceShape::Object))
+    .build();
 
 /// Header signatures only, and not privileged.
 static FLOOR: OperationFloor = OperationFloor::builtin("GetObjectAcl", SigService::S3);

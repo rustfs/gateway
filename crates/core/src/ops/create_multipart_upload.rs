@@ -42,13 +42,10 @@ use crate::registry::OperationSpec;
 ///
 /// `uploads` is a routing discriminator, not a required parameter: without it a `POST` to an
 /// object key is a different operation rather than a malformed one.
-static SPEC: OperationSpec = OperationSpec {
-    name: "CreateMultipartUpload",
-    success_status: 200,
-    required_params: &[],
-    not_configured_error: None,
-    auth: Some(AuthRequirement::new("s3:PutObject", ResourceShape::Object)),
-};
+static SPEC: OperationSpec = OperationSpec::builder("CreateMultipartUpload", 200, None)
+    .required_params(&[])
+    .auth(AuthRequirement::new("s3:PutObject", ResourceShape::Object))
+    .build();
 
 /// Header signatures only, and not privileged.
 static FLOOR: OperationFloor = OperationFloor::builtin("CreateMultipartUpload", SigService::S3);

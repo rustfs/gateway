@@ -53,13 +53,10 @@ pub static TAG_SCOPE: TagScope = TagScope::Object;
 /// The `Tagging` document is a required *member*, refused by the decoder with `MalformedXML` when
 /// the body is absent or wrongly rooted — not a required *parameter*, which is a check on the
 /// request head. Nothing on the head is required beyond the routing discriminator.
-static SPEC: OperationSpec = OperationSpec {
-    name: "PutObjectTagging",
-    success_status: 200,
-    required_params: &[],
-    not_configured_error: None,
-    auth: Some(AuthRequirement::new("s3:PutObjectTagging", ResourceShape::Object)),
-};
+static SPEC: OperationSpec = OperationSpec::builder("PutObjectTagging", 200, None)
+    .required_params(&[])
+    .auth(AuthRequirement::new("s3:PutObjectTagging", ResourceShape::Object))
+    .build();
 
 /// Header signatures only, and not privileged.
 static FLOOR: OperationFloor = OperationFloor::builtin("PutObjectTagging", SigService::S3);

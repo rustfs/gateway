@@ -57,13 +57,10 @@ pub struct PingOutput {
     pub message: String,
 }
 
-static PING_SPEC: OperationSpec = OperationSpec {
-    name: "example:Ping",
-    success_status: 200,
-    required_params: &[],
-    not_configured_error: None,
-    auth: Some(AuthRequirement::new("example:Ping", ResourceShape::Service)),
-};
+static PING_SPEC: OperationSpec = OperationSpec::builder("example:Ping", 200, None)
+    .required_params(&[])
+    .auth(AuthRequirement::new("example:Ping", ResourceShape::Service))
+    .build();
 
 /// Anonymously reachable, which is a deliberate widening and is spelled as one.
 static PING_FLOOR: OperationFloor =

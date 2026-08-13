@@ -78,11 +78,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 9
     steps:
-      # The baseline ratchet compares the pull-request merge commit with its
-      # first parent, so the static job needs that parent object locally.
+      # Baseline ratchets resolve origin/main and the pull-request merge base,
+      # so the static job needs the full branch graph locally.
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
-          fetch-depth: 2
+          fetch-depth: 0
       - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
       - run: cargo fmt --all --check
       # Pinned models must match their recorded checksums before anything is generated from them.
@@ -240,7 +240,7 @@ jobs:
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
-          fetch-depth: 2
+          fetch-depth: 0
       - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - name: Guard mutations (maximum 8 minutes after setup)
@@ -276,11 +276,41 @@ jobs:
           elapsed="$(( $(date +%s) - started ))"
           echo "quirk ledger self-test completed in ${elapsed}s"
 
-  # Branch protection requires this exact check name. It aggregates all five parallel jobs and must
+  dto-compiler-self-test:
+    name: DTO compiler self-test
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: DTO and OperationSpec compiler mutations (maximum 1 minute after setup)
+        run: |
+          started="$(date +%s)"
+          timeout 90s env GATEWAY_GUARD_DTO_COMPILER_ONLY=1 bash scripts/test_guard_scripts.sh
+          elapsed="$(( $(date +%s) - started ))"
+          echo "DTO and OperationSpec compiler self-test completed in ${elapsed}s"
+
+  build-guard-self-test:
+    name: Build guard self-test
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Build-backed guards (maximum 2 minutes after setup)
+        run: |
+          started="$(date +%s)"
+          timeout 150s env GATEWAY_GUARD_BUILD_GUARDS_ONLY=1 bash scripts/test_guard_scripts.sh
+          elapsed="$(( $(date +%s) - started ))"
+          echo "build-backed guards completed in ${elapsed}s"
+
+  # Branch protection requires this exact check name. It aggregates all seven parallel jobs and must
   # run even after a dependency fails, otherwise a skipped required check could hide the failure.
   test:
     name: Test
-    needs: [workspace-tests, guard-self-test, target-consolidation-self-test, quirk-ledger-self-test, gateway-tsan]
+    needs: [workspace-tests, guard-self-test, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, gateway-tsan]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 1
@@ -291,10 +321,14 @@ jobs:
           GUARD_RESULT: ${{ needs.guard-self-test.result }}
           TARGET_CONSOLIDATION_RESULT: ${{ needs.target-consolidation-self-test.result }}
           QUIRK_LEDGER_RESULT: ${{ needs.quirk-ledger-self-test.result }}
+          DTO_COMPILER_RESULT: ${{ needs.dto-compiler-self-test.result }}
+          BUILD_GUARD_RESULT: ${{ needs.build-guard-self-test.result }}
           TSAN_RESULT: ${{ needs.gateway-tsan.result }}
         run: |
           test "$WORKSPACE_RESULT" = success
           test "$GUARD_RESULT" = success
           test "$TARGET_CONSOLIDATION_RESULT" = success
           test "$QUIRK_LEDGER_RESULT" = success
+          test "$DTO_COMPILER_RESULT" = success
+          test "$BUILD_GUARD_RESULT" = success
           test "$TSAN_RESULT" = success

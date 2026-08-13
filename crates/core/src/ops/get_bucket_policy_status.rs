@@ -58,13 +58,10 @@ use crate::registry::OperationSpec;
 ///
 /// `policyStatus` is a routing discriminator, not a required parameter: nothing on the request head is
 /// required beyond it.
-static SPEC: OperationSpec = OperationSpec {
-    name: "GetBucketPolicyStatus",
-    success_status: 200,
-    required_params: &[],
-    not_configured_error: Some(ErrorCode::NO_SUCH_BUCKET_POLICY),
-    auth: Some(AuthRequirement::new("s3:GetBucketPolicyStatus", ResourceShape::Bucket)),
-};
+static SPEC: OperationSpec = OperationSpec::builder("GetBucketPolicyStatus", 200, Some(ErrorCode::NO_SUCH_BUCKET_POLICY))
+    .required_params(&[])
+    .auth(AuthRequirement::new("s3:GetBucketPolicyStatus", ResourceShape::Bucket))
+    .build();
 
 /// Header signatures only, and not privileged.
 static FLOOR: OperationFloor = OperationFloor::builtin("GetBucketPolicyStatus", SigService::S3);

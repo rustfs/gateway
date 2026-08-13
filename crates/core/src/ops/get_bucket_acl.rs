@@ -63,13 +63,10 @@ pub static ACL_TARGET: AclTarget = AclTarget::Bucket;
 /// `acl` is a routing discriminator, not a required parameter: a `GET` on a bucket without it is
 /// the key listing. Nothing else is required, and `not_configured_error` is deliberately `None` —
 /// see the module docs.
-static SPEC: OperationSpec = OperationSpec {
-    name: "GetBucketAcl",
-    success_status: 200,
-    required_params: &[],
-    not_configured_error: None,
-    auth: Some(AuthRequirement::new("s3:GetBucketAcl", ResourceShape::Bucket)),
-};
+static SPEC: OperationSpec = OperationSpec::builder("GetBucketAcl", 200, None)
+    .required_params(&[])
+    .auth(AuthRequirement::new("s3:GetBucketAcl", ResourceShape::Bucket))
+    .build();
 
 /// Header signatures only, and not privileged.
 static FLOOR: OperationFloor = OperationFloor::builtin("GetBucketAcl", SigService::S3);

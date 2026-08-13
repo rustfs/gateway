@@ -56,13 +56,11 @@ use crate::registry::OperationSpec;
 ///
 /// `publicAccessBlock` is a routing discriminator, not a required parameter: nothing on the request head is
 /// required beyond it.
-static SPEC: OperationSpec = OperationSpec {
-    name: "GetPublicAccessBlock",
-    success_status: 200,
-    required_params: &[],
-    not_configured_error: Some(ErrorCode::NO_SUCH_PUBLIC_ACCESS_BLOCK_CONFIGURATION),
-    auth: Some(AuthRequirement::new("s3:GetBucketPublicAccessBlock", ResourceShape::Bucket)),
-};
+static SPEC: OperationSpec =
+    OperationSpec::builder("GetPublicAccessBlock", 200, Some(ErrorCode::NO_SUCH_PUBLIC_ACCESS_BLOCK_CONFIGURATION))
+        .required_params(&[])
+        .auth(AuthRequirement::new("s3:GetBucketPublicAccessBlock", ResourceShape::Bucket))
+        .build();
 
 /// Header signatures only, and not privileged.
 static FLOOR: OperationFloor = OperationFloor::builtin("GetPublicAccessBlock", SigService::S3);

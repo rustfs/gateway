@@ -64,13 +64,10 @@ struct PingInput;
 /// What `example:Ping` answers with.
 struct PingOutput;
 
-static PING_SPEC: OperationSpec = OperationSpec {
-    name: "example:Ping",
-    success_status: 200,
-    required_params: &[],
-    not_configured_error: None,
-    auth: Some(AuthRequirement::new("example:Ping", ResourceShape::Service)),
-};
+static PING_SPEC: OperationSpec = OperationSpec::builder("example:Ping", 200, None)
+    .required_params(&[])
+    .auth(AuthRequirement::new("example:Ping", ResourceShape::Service))
+    .build();
 
 static PING_FLOOR: OperationFloor =
     OperationFloor::custom("example:Ping", SigService::S3).allow_anonymous_after_listing_in_the_posture_report();

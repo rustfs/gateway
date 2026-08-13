@@ -43,13 +43,10 @@ use crate::registry::OperationSpec;
 pub static TAG_SCOPE: TagScope = TagScope::Bucket;
 
 /// What this operation requires of a request once routing has chosen it.
-static SPEC: OperationSpec = OperationSpec {
-    name: "DeleteBucketTagging",
-    success_status: 204,
-    required_params: &[],
-    not_configured_error: None,
-    auth: Some(AuthRequirement::new("s3:DeleteBucketTagging", ResourceShape::Bucket)),
-};
+static SPEC: OperationSpec = OperationSpec::builder("DeleteBucketTagging", 204, None)
+    .required_params(&[])
+    .auth(AuthRequirement::new("s3:DeleteBucketTagging", ResourceShape::Bucket))
+    .build();
 
 /// Header signatures only, and not privileged.
 static FLOOR: OperationFloor = OperationFloor::builtin("DeleteBucketTagging", SigService::S3);

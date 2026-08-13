@@ -47,13 +47,10 @@ use crate::registry::OperationSpec;
 ///
 /// `uploads` is a routing discriminator, not a required parameter: without it a `GET` on a bucket
 /// is a listing of objects rather than a malformed listing of uploads.
-static SPEC: OperationSpec = OperationSpec {
-    name: "ListMultipartUploads",
-    success_status: 200,
-    required_params: &[],
-    not_configured_error: None,
-    auth: Some(AuthRequirement::new("s3:ListBucketMultipartUploads", ResourceShape::Bucket)),
-};
+static SPEC: OperationSpec = OperationSpec::builder("ListMultipartUploads", 200, None)
+    .required_params(&[])
+    .auth(AuthRequirement::new("s3:ListBucketMultipartUploads", ResourceShape::Bucket))
+    .build();
 
 /// Header signatures only, and not privileged.
 static FLOOR: OperationFloor = OperationFloor::builtin("ListMultipartUploads", SigService::S3);

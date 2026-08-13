@@ -55,13 +55,11 @@ use crate::registry::OperationSpec;
 ///
 /// `replication` is a routing discriminator, not a required parameter: a `GET` on a bucket
 /// without it is the key listing. Nothing else is required.
-static SPEC: OperationSpec = OperationSpec {
-    name: "GetBucketReplication",
-    success_status: 200,
-    required_params: &[],
-    not_configured_error: Some(ErrorCode::REPLICATION_CONFIGURATION_NOT_FOUND),
-    auth: Some(AuthRequirement::new("s3:GetReplicationConfiguration", ResourceShape::Bucket)),
-};
+static SPEC: OperationSpec =
+    OperationSpec::builder("GetBucketReplication", 200, Some(ErrorCode::REPLICATION_CONFIGURATION_NOT_FOUND))
+        .required_params(&[])
+        .auth(AuthRequirement::new("s3:GetReplicationConfiguration", ResourceShape::Bucket))
+        .build();
 
 /// Header signatures only, and not privileged.
 static FLOOR: OperationFloor = OperationFloor::builtin("GetBucketReplication", SigService::S3);

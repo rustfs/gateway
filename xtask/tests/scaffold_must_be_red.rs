@@ -34,6 +34,12 @@ fn the_checked_in_handler_template_is_intentionally_red() {
 }
 
 #[test]
+fn the_operation_template_uses_the_additive_spec_builder() {
+    assert!(OPERATION.contains("OperationSpec::builder("));
+    assert!(!OPERATION.contains("= OperationSpec {"));
+}
+
+#[test]
 fn a_default_return_mutation_is_detected() {
     let fake_green = OPERATION.replace(
         "todo!(\"SCAFFOLD handler is not implemented\")",

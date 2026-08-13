@@ -39,73 +39,53 @@ use rustfs_gateway_core::route::{Predicate, RouteTable, ShadowingDecls, Shadowin
 use rustfs_gateway_types::ErrorCode;
 use support::{Req, entry};
 
-static PUT_ANALYTICS: OperationSpec = OperationSpec {
-    name: "PutBucketAnalyticsConfiguration",
-    success_status: 200,
-    required_params: &[RequiredParam {
+static PUT_ANALYTICS: OperationSpec = OperationSpec::builder("PutBucketAnalyticsConfiguration", 200, None)
+    .required_params(&[RequiredParam {
         kind: ParamKind::Query,
         name: "id",
         missing_error: ErrorCode::INVALID_ARGUMENT,
         message: "The required parameter 'id' is missing",
-    }],
-    not_configured_error: None,
-    auth: Some(AuthRequirement::new("s3:PutAnalyticsConfiguration", ResourceShape::Bucket)),
-};
+    }])
+    .auth(AuthRequirement::new("s3:PutAnalyticsConfiguration", ResourceShape::Bucket))
+    .build();
 
-static GET_OBJECT: OperationSpec = OperationSpec {
-    name: "GetObject",
-    success_status: 200,
-    required_params: &[],
-    not_configured_error: None,
-    auth: Some(AuthRequirement::new("s3:GetObject", ResourceShape::Object)),
-};
+static GET_OBJECT: OperationSpec = OperationSpec::builder("GetObject", 200, None)
+    .required_params(&[])
+    .auth(AuthRequirement::new("s3:GetObject", ResourceShape::Object))
+    .build();
 
-static DELETE_OBJECT: OperationSpec = OperationSpec {
-    name: "DeleteObject",
-    success_status: 204,
-    required_params: &[],
-    not_configured_error: None,
-    auth: Some(AuthRequirement::new("s3:DeleteObject", ResourceShape::Object)),
-};
+static DELETE_OBJECT: OperationSpec = OperationSpec::builder("DeleteObject", 204, None)
+    .required_params(&[])
+    .auth(AuthRequirement::new("s3:DeleteObject", ResourceShape::Object))
+    .build();
 
-static LIST_OBJECTS: OperationSpec = OperationSpec {
-    name: "ListObjects",
-    success_status: 200,
-    required_params: &[],
-    not_configured_error: None,
-    auth: Some(AuthRequirement::new("s3:ListBucket", ResourceShape::Bucket)),
-};
+static LIST_OBJECTS: OperationSpec = OperationSpec::builder("ListObjects", 200, None)
+    .required_params(&[])
+    .auth(AuthRequirement::new("s3:ListBucket", ResourceShape::Bucket))
+    .build();
 
-static GET_LIFECYCLE: OperationSpec = OperationSpec {
-    name: "GetBucketLifecycleConfiguration",
-    success_status: 200,
-    required_params: &[],
-    not_configured_error: Some(ErrorCode::NO_SUCH_LIFECYCLE_CONFIGURATION),
-    auth: Some(AuthRequirement::new("s3:GetLifecycleConfiguration", ResourceShape::Bucket)),
-};
+static GET_LIFECYCLE: OperationSpec =
+    OperationSpec::builder("GetBucketLifecycleConfiguration", 200, Some(ErrorCode::NO_SUCH_LIFECYCLE_CONFIGURATION))
+        .required_params(&[])
+        .auth(AuthRequirement::new("s3:GetLifecycleConfiguration", ResourceShape::Bucket))
+        .build();
 
-static COPY_OBJECT: OperationSpec = OperationSpec {
-    name: "CopyObject",
-    success_status: 200,
-    required_params: &[RequiredParam {
+static COPY_OBJECT: OperationSpec = OperationSpec::builder("CopyObject", 200, None)
+    .required_params(&[RequiredParam {
         kind: ParamKind::Header,
         name: "x-amz-copy-source",
         missing_error: ErrorCode::INVALID_ARGUMENT,
         message: "The required header 'x-amz-copy-source' is missing",
-    }],
-    not_configured_error: None,
-    auth: Some(AuthRequirement::new("s3:PutObject", ResourceShape::Object)),
-};
+    }])
+    .auth(AuthRequirement::new("s3:PutObject", ResourceShape::Object))
+    .build();
 
 /// The plain object write, registered by the ACL block below so that a request reaching it
 /// instead of its subresource row is a wrong answer rather than a second `501`.
-static PUT_OBJECT: OperationSpec = OperationSpec {
-    name: "PutObject",
-    success_status: 200,
-    required_params: &[],
-    not_configured_error: None,
-    auth: Some(AuthRequirement::new("s3:PutObject", ResourceShape::Object)),
-};
+static PUT_OBJECT: OperationSpec = OperationSpec::builder("PutObject", 200, None)
+    .required_params(&[])
+    .auth(AuthRequirement::new("s3:PutObject", ResourceShape::Object))
+    .build();
 
 /// Deliberately unregistrable, and kept for the test that says so.
 ///
@@ -113,18 +93,15 @@ static PUT_OBJECT: OperationSpec = OperationSpec {
 /// which is outside the closed set. That is not a gap in the set — a missing `Content-Length` is a
 /// framing fact the acceptance layer already refuses, long before an operation is known — but the
 /// only way to be sure the closed set is enforced rather than described is to try to break it.
-static UPLOAD_PART: OperationSpec = OperationSpec {
-    name: "UploadPart",
-    success_status: 200,
-    required_params: &[RequiredParam {
+static UPLOAD_PART: OperationSpec = OperationSpec::builder("UploadPart", 200, None)
+    .required_params(&[RequiredParam {
         kind: ParamKind::Header,
         name: "content-length",
         missing_error: ErrorCode::MISSING_CONTENT_LENGTH,
         message: "The request is missing a Content-Length header",
-    }],
-    not_configured_error: None,
-    auth: Some(AuthRequirement::new("s3:PutObject", ResourceShape::Object)),
-};
+    }])
+    .auth(AuthRequirement::new("s3:PutObject", ResourceShape::Object))
+    .build();
 
 /// A table with the four operations these cases route to.
 fn table() -> RouteTable {

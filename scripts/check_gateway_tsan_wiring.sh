@@ -33,7 +33,7 @@ grep -Fq 'assert_eq!(completed.load(Ordering::SeqCst), 100' "$CASE" \
     || fail 'the case no longer asserts that all 100 threads completed'
 
 grep -Fq 'scripts/run_gateway_tsan.sh' "$CI" || fail 'CI no longer calls the TSAN runner'
-grep -Fq 'needs: [workspace-tests, guard-self-test, target-consolidation-self-test, quirk-ledger-self-test, gateway-tsan]' "$CI" \
+grep -Fq 'needs: [workspace-tests, guard-self-test, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, gateway-tsan]' "$CI" \
     || fail 'the required Test check no longer depends on the TSAN job'
 grep -Fq 'test "$TSAN_RESULT" = success' "$CI" || fail 'the required Test check ignores the TSAN result'
 

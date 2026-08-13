@@ -68,6 +68,7 @@ expected_rows = [
     "`spec/ir.schema.json`",
     "`conformance/case.schema.json`",
     "`model/s3.json`, `model/sts.json`, their `.sha256` sidecars, `model/PROVENANCE.md`",
+    "`generated/dto/field_counts.txt`",
     "`crates/core/tests/golden/route-table.txt`",
     "`model/overlays/**`",
     "`spec/quirks/**`",
@@ -105,6 +106,7 @@ exact = {
     "model/s3.json.sha256",
     "model/sts.json.sha256",
     "model/PROVENANCE.md",
+    "generated/dto/field_counts.txt",
     "crates/core/tests/golden/route-table.txt",
 }
 violations: set[tuple[str, str]] = set()

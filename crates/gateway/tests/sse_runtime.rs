@@ -97,21 +97,15 @@ struct PresentedKey(Option<KeyFingerprint>);
 
 struct Answered;
 
-static PUT_SPEC: OperationSpec = OperationSpec {
-    name: "example:SsePut",
-    success_status: 200,
-    required_params: &[],
-    not_configured_error: None,
-    auth: Some(AuthRequirement::new("example:SsePut", ResourceShape::Object)),
-};
+static PUT_SPEC: OperationSpec = OperationSpec::builder("example:SsePut", 200, None)
+    .required_params(&[])
+    .auth(AuthRequirement::new("example:SsePut", ResourceShape::Object))
+    .build();
 
-static PART_SPEC: OperationSpec = OperationSpec {
-    name: "example:SsePart",
-    success_status: 200,
-    required_params: &[],
-    not_configured_error: None,
-    auth: Some(AuthRequirement::new("example:SsePart", ResourceShape::Object)),
-};
+static PART_SPEC: OperationSpec = OperationSpec::builder("example:SsePart", 200, None)
+    .required_params(&[])
+    .auth(AuthRequirement::new("example:SsePart", ResourceShape::Object))
+    .build();
 
 static PUT_FLOOR: OperationFloor =
     OperationFloor::custom("example:SsePut", SigService::S3).allow_anonymous_after_listing_in_the_posture_report();

@@ -21,12 +21,9 @@
 use rustfs_gateway_core::{AuthRequirement, OperationSpec, ResourceShape};
 use rustfs_gateway_sig::{OperationFloor, SigService};
 
-pub static SPEC: OperationSpec = OperationSpec {
-    name: "example:Probe",
-    success_status: 200,
-    required_params: &[],
-    not_configured_error: None,
-    auth: Some(AuthRequirement::new("example:Probe", ResourceShape::Service)),
-};
+pub static SPEC: OperationSpec = OperationSpec::builder("example:Probe", 200, None)
+    .required_params(&[])
+    .auth(AuthRequirement::new("example:Probe", ResourceShape::Service))
+    .build();
 
 pub static FLOOR: OperationFloor = OperationFloor::builtin("example:Probe", SigService::S3);

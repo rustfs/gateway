@@ -44,13 +44,10 @@ use crate::registry::OperationSpec;
 ///
 /// `uploadId` is a routing discriminator, not a required parameter: a `DELETE` on an object key
 /// without it is `DeleteObject`, a different operation.
-static SPEC: OperationSpec = OperationSpec {
-    name: "AbortMultipartUpload",
-    success_status: 204,
-    required_params: &[],
-    not_configured_error: None,
-    auth: Some(AuthRequirement::new("s3:AbortMultipartUpload", ResourceShape::Object)),
-};
+static SPEC: OperationSpec = OperationSpec::builder("AbortMultipartUpload", 204, None)
+    .required_params(&[])
+    .auth(AuthRequirement::new("s3:AbortMultipartUpload", ResourceShape::Object))
+    .build();
 
 /// Header signatures only, and not privileged.
 static FLOOR: OperationFloor = OperationFloor::builtin("AbortMultipartUpload", SigService::S3);

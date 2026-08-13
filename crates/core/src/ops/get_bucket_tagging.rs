@@ -51,13 +51,10 @@ pub static TAG_SCOPE: TagScope = TagScope::Bucket;
 ///
 /// `tagging` is a routing discriminator, not a required parameter: a `GET` on a bucket without it
 /// is a listing. What this spec does declare is the unconfigured answer — see the module docs.
-static SPEC: OperationSpec = OperationSpec {
-    name: "GetBucketTagging",
-    success_status: 200,
-    required_params: &[],
-    not_configured_error: Some(ErrorCode::NO_SUCH_TAG_SET),
-    auth: Some(AuthRequirement::new("s3:GetBucketTagging", ResourceShape::Bucket)),
-};
+static SPEC: OperationSpec = OperationSpec::builder("GetBucketTagging", 200, Some(ErrorCode::NO_SUCH_TAG_SET))
+    .required_params(&[])
+    .auth(AuthRequirement::new("s3:GetBucketTagging", ResourceShape::Bucket))
+    .build();
 
 /// Header signatures only, and not privileged.
 static FLOOR: OperationFloor = OperationFloor::builtin("GetBucketTagging", SigService::S3);

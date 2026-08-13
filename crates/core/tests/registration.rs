@@ -117,13 +117,10 @@ impl Handler<PutObject> for Fs {
 /// A well-formed third-party operation.
 struct AdminSetConfig;
 
-static ADMIN_SPEC: OperationSpec = OperationSpec {
-    name: "rustfs:AdminSetConfig",
-    success_status: 200,
-    required_params: &[],
-    not_configured_error: None,
-    auth: Some(AuthRequirement::new("admin:SetConfig", ResourceShape::Service)),
-};
+static ADMIN_SPEC: OperationSpec = OperationSpec::builder("rustfs:AdminSetConfig", 200, None)
+    .required_params(&[])
+    .auth(AuthRequirement::new("admin:SetConfig", ResourceShape::Service))
+    .build();
 
 static ADMIN_FLOOR: OperationFloor = OperationFloor::custom("rustfs:AdminSetConfig", SigService::S3);
 
@@ -166,12 +163,9 @@ macro_rules! bad_operation {
         struct $ident;
 
         const _: () = {
-            static SPEC: OperationSpec = OperationSpec {
-                name: $spec,
-                success_status: 200,
-                required_params: &[],
-                not_configured_error: None,
-                auth: $auth,
+            static SPEC: OperationSpec = match $auth {
+                Some(auth) => OperationSpec::builder($spec, 200, None).auth(auth).build(),
+                None => OperationSpec::builder($spec, 200, None).build(),
             };
             static FLOOR: OperationFloor = OperationFloor::custom($floor, SigService::S3);
 

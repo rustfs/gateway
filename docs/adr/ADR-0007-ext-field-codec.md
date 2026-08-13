@@ -1,9 +1,9 @@
 # ADR-0007: Runtime vtables for dialect XML fields
 
-- Status: Accepted
+- Status: Superseded by ADR-0010
 - Date: 2026-08-10
 - Trigger: dialect codec strategy
-- Supersedes / Superseded by: none
+- Supersedes / Superseded by: ADR-0010
 
 ## Context
 

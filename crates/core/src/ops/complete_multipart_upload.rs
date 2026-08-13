@@ -66,13 +66,10 @@ use crate::registry::OperationSpec;
 ///
 /// `uploadId` is a routing discriminator, not a required parameter: a `POST` to an object key
 /// without it is `CreateMultipartUpload` or `PostObject`, not a malformed completion.
-static SPEC: OperationSpec = OperationSpec {
-    name: "CompleteMultipartUpload",
-    success_status: 200,
-    required_params: &[],
-    not_configured_error: None,
-    auth: Some(AuthRequirement::new("s3:PutObject", ResourceShape::Object)),
-};
+static SPEC: OperationSpec = OperationSpec::builder("CompleteMultipartUpload", 200, None)
+    .required_params(&[])
+    .auth(AuthRequirement::new("s3:PutObject", ResourceShape::Object))
+    .build();
 
 /// Header signatures only, and not privileged.
 static FLOOR: OperationFloor = OperationFloor::builtin("CompleteMultipartUpload", SigService::S3);

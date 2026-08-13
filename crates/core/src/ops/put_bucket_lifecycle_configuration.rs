@@ -58,13 +58,10 @@ use crate::registry::OperationSpec;
 /// The integrity header is a required *claim*, refused by the generated decoder before the body
 /// is read — not a required *parameter*, which is a check on the request head alone. Nothing on
 /// the head is required beyond the routing discriminator.
-static SPEC: OperationSpec = OperationSpec {
-    name: "PutBucketLifecycleConfiguration",
-    success_status: 200,
-    required_params: &[],
-    not_configured_error: None,
-    auth: Some(AuthRequirement::new("s3:PutLifecycleConfiguration", ResourceShape::Bucket)),
-};
+static SPEC: OperationSpec = OperationSpec::builder("PutBucketLifecycleConfiguration", 200, None)
+    .required_params(&[])
+    .auth(AuthRequirement::new("s3:PutLifecycleConfiguration", ResourceShape::Bucket))
+    .build();
 
 /// Header signatures only, and not privileged.
 static FLOOR: OperationFloor = OperationFloor::builtin("PutBucketLifecycleConfiguration", SigService::S3);

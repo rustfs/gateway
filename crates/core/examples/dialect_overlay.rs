@@ -62,13 +62,10 @@ struct HeadObjectReport;
 ///
 /// `auth` is `Some` because it has to be: an operation with `None` is refused at registration, so
 /// there is no path on which the authorisation question can be skipped.
-static SPEC: OperationSpec = OperationSpec {
-    name: "acme:HeadObjectReport",
-    success_status: 200,
-    required_params: &[],
-    not_configured_error: None,
-    auth: Some(AuthRequirement::new("acme:HeadObjectReport", ResourceShape::Object)),
-};
+static SPEC: OperationSpec = OperationSpec::builder("acme:HeadObjectReport", 200, None)
+    .required_params(&[])
+    .auth(AuthRequirement::new("acme:HeadObjectReport", ResourceShape::Object))
+    .build();
 
 /// What it tells the security floor about itself.
 ///

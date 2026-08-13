@@ -30,13 +30,9 @@ use crate::registry::OperationSpec;
 /// The temporary operation marker type.
 pub struct {{NAME}};
 
-static SPEC: OperationSpec = OperationSpec {
-    name: "scaffold:{{NAME}}",
-    success_status: 200,
-    required_params: &[],
-    not_configured_error: None,
-    auth: Some(AuthRequirement::new("scaffold:{{NAME}}", ResourceShape::Object)),
-};
+static SPEC: OperationSpec = OperationSpec::builder("scaffold:{{NAME}}", 200, None)
+    .auth(AuthRequirement::new("scaffold:{{NAME}}", ResourceShape::Object))
+    .build();
 
 static FLOOR: OperationFloor = OperationFloor::custom("scaffold:{{NAME}}", SigService::S3);
 
