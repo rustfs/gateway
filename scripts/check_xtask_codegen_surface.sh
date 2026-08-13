@@ -502,7 +502,7 @@ comments_removed, syntax = main_comments, main_syntax
 verify_source = (root / "xtask/src/verify.rs").read_text()
 verify_comments, verify_syntax = rust_views(verify_source)
 comments_removed, syntax = verify_comments, verify_syntax
-for name in ("verify", "verify_crate"):
+for name in ("verify", "verify_crate", "crate_steps"):
     items = functions_named(name, syntax, comments_removed)
     if len(items) != 1 or items[0][0]:
         fail(f"verify item {name} must remain on the light crate-verification surface")
@@ -546,31 +546,11 @@ let package = match resolve_workspace_package(name) {
         return diagnostic("workspace package could not be resolved", &format!("crate {name}"), &error.to_string());
     }
 };
-let mut test_step = vec!["test".to_owned(), "-p".to_owned(), package.clone()];
-if package == "rustfs-gateway-core" {
-    test_step.extend([
-        "--".to_owned(),
-        "--skip".to_owned(),
-        "compile_fail::compile_time_contracts_are_not_openable".to_owned(),
-    ]);
-}
-let mut steps = vec![
-    test_step,
-    vec![
-        "clippy".to_owned(),
-        "-p".to_owned(),
-        package.clone(),
-        "--all-targets".to_owned(),
-        "--".to_owned(),
-        "-D".to_owned(),
-        "warnings".to_owned(),
-    ],
-];
-if let Some(case) = crate_case(&package) {
-    steps.push(conformance_step("validate", case));
-}
+let steps = crate_steps(&package);
 let subject = if package == "rustfs-gateway-core" {
     format!("crate {package} runtime scope; compile-time contracts remain in cargo test --workspace")
+} else if package == "rustfs-gateway-conformance" {
+    format!("crate {package} library scope; integration contracts remain in cargo test --workspace")
 } else {
     format!("crate {package}")
 };
@@ -585,7 +565,38 @@ run_steps(
 )
 ''')
 if compact(verify_crate_items[0][1]) != expected_verify_crate_body:
-    fail("crate verification must skip only the core compile-fail harness and disclose the full-gate scope")
+    fail("crate verification must disclose each fast-scope boundary and keep the 30-second deadline")
+crate_steps_items = functions_named("crate_steps", syntax, comments_removed)
+expected_crate_steps_body = compact('''
+let mut test_step = vec!["test".to_owned(), "-p".to_owned(), package.to_owned()];
+if package == "rustfs-gateway-core" {
+    test_step.extend([
+        "--".to_owned(),
+        "--skip".to_owned(),
+        "compile_fail::compile_time_contracts_are_not_openable".to_owned(),
+    ]);
+} else if package == "rustfs-gateway-conformance" {
+    test_step.push("--lib".to_owned());
+}
+let mut steps = vec![
+    test_step,
+    vec![
+        "clippy".to_owned(),
+        "-p".to_owned(),
+        package.to_owned(),
+        "--all-targets".to_owned(),
+        "--".to_owned(),
+        "-D".to_owned(),
+        "warnings".to_owned(),
+    ],
+];
+if let Some(case) = crate_case(package) {
+    steps.push(conformance_step("validate", case));
+}
+steps
+''')
+if compact(crate_steps_items[0][1]) != expected_crate_steps_body:
+    fail("crate verification steps must preserve the core skip, conformance library scope and all-target clippy")
 for name in (
     "verify_full",
     "verify_operation",

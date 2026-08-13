@@ -1110,11 +1110,14 @@ old = '''    if package == "rustfs-gateway-core" {
             "--skip".to_owned(),
             "compile_fail::compile_time_contracts_are_not_openable".to_owned(),
         ]);
-    }
+    } else if package == "rustfs-gateway-conformance" {
+'''
+new = '''    if package == "rustfs-gateway-core" {
+    } else if package == "rustfs-gateway-conformance" {
 '''
 if text.count(old) != 1:
     raise SystemExit("core compile-fail fast-scope skip is missing")
-path.write_text(text.replace(old, "", 1))
+path.write_text(text.replace(old, new, 1))
 PYEOF
 }
 expect_fail check_xtask_codegen_surface.sh \
@@ -1144,16 +1147,56 @@ from pathlib import Path
 
 path = Path("xtask/src/verify.rs")
 text = path.read_text()
-old = 'if package == "rustfs-gateway-core" {'
-new = 'if !package.is_empty() {'
-if text.count(old) != 2:
-    raise SystemExit("core-only skip and diagnostic conditions are not both present")
+old = '''fn crate_steps(package: &str) -> Vec<Vec<String>> {
+    let mut test_step = vec!["test".to_owned(), "-p".to_owned(), package.to_owned()];
+    if package == "rustfs-gateway-core" {'''
+new = '''fn crate_steps(package: &str) -> Vec<Vec<String>> {
+    let mut test_step = vec!["test".to_owned(), "-p".to_owned(), package.to_owned()];
+    if !package.is_empty() {'''
+if text.count(old) != 1:
+    raise SystemExit("core-only skip condition is missing")
 path.write_text(text.replace(old, new, 1))
 PYEOF
 }
 expect_fail check_xtask_codegen_surface.sh \
     'the core compile-fail skip leaking into another crate scope' \
     mut_xtask_compile_fail_skip_applies_to_every_crate
+
+mut_xtask_conformance_fast_scope_loses_library_limit() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("xtask/src/verify.rs")
+text = path.read_text()
+old = '''    } else if package == "rustfs-gateway-conformance" {
+        test_step.push("--lib".to_owned());
+'''
+new = '''    } else if package == "rustfs-gateway-conformance" {
+'''
+if text.count(old) != 1:
+    raise SystemExit("conformance library fast-scope limit is missing")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_xtask_codegen_surface.sh \
+    'the conformance fast scope losing its library-only test limit' \
+    mut_xtask_conformance_fast_scope_loses_library_limit
+
+mut_xtask_conformance_scope_weakens_all_target_clippy() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("xtask/src/verify.rs")
+text = path.read_text()
+old = '            "--all-targets".to_owned(),'
+if text.count(old) != 1:
+    raise SystemExit("all-target clippy scope is missing")
+path.write_text(text.replace(old, "", 1))
+PYEOF
+}
+expect_fail check_xtask_codegen_surface.sh \
+    'crate verification weakening all-target clippy' \
+    mut_xtask_conformance_scope_weakens_all_target_clippy
 
 mut_xtask_crate_classifier_leaks_into_full_build() {
     python3 - <<'PYEOF'
