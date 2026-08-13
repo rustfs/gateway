@@ -4020,6 +4020,73 @@ probe_smithy_timestamp_guard_missing_python() {
 }
 probe_smithy_timestamp_guard_missing_python
 
+mut_has_operation_mapping_removed() {
+    python3 - <<'PY'
+from pathlib import Path
+
+path = Path("crates/core/src/ops/get_object.rs")
+text = path.read_text()
+old = """impl HasOperation for GetObjectInput {
+    type Op = GetObject;
+}
+"""
+if old not in text:
+    raise SystemExit("expected GetObject reverse mapping is missing")
+path.write_text(text.replace(old, "", 1))
+PY
+}
+expect_fail check_has_operation_coverage.sh \
+    'a standard operation losing its reverse mapping' mut_has_operation_mapping_removed
+
+mut_has_operation_target_changed() {
+    python3 - <<'PY'
+from pathlib import Path
+
+path = Path("crates/core/src/ops/get_object.rs")
+text = path.read_text()
+old = "type Op = GetObject;"
+if old not in text:
+    raise SystemExit("expected GetObject reverse target is missing")
+path.write_text(text.replace(old, "type Op = HeadObject;", 1))
+PY
+}
+expect_fail check_has_operation_coverage.sh \
+    'a reverse mapping naming another operation' mut_has_operation_target_changed
+
+mut_has_operation_input_codrift() {
+    python3 - <<'PY'
+from pathlib import Path
+
+path = Path("crates/core/src/ops/get_object.rs")
+text = path.read_text()
+old_input = "type Input = GetObjectInput;"
+old_reverse = "impl HasOperation for GetObjectInput"
+if old_input not in text or old_reverse not in text:
+    raise SystemExit("expected GetObject input mapping is missing")
+text = text.replace(old_input, "type Input = HeadObjectInput;", 1)
+path.write_text(text.replace(old_reverse, "impl HasOperation for HeadObjectInput", 1))
+PY
+}
+expect_fail check_has_operation_coverage.sh \
+    'an Operation and reverse mapping drifting together from the codegen name' \
+    mut_has_operation_input_codrift
+
+probe_has_operation_guard_missing_python() {
+    local output rc=0 tool_path
+    cases=$((cases + 1))
+    tool_path="$(mktemp -d "${TMPDIR:-/tmp}/gateway-has-operation-path.XXXXXX")"
+    ln -s "$(command -v dirname)" "${tool_path}/dirname"
+    output="$(GATEWAY_CHECK_ROOT="$REPO_ROOT" PATH="$tool_path" /bin/bash \
+        "${SCRIPT_DIR}/check_has_operation_coverage.sh" 2>&1)" || rc=$?
+    rm -rf "$tool_path"
+    if [[ "$rc" -ne 0 && "$output" == *'required command is missing: python3'* ]]; then
+        pass_msg 'check_has_operation_coverage.sh fails closed without python3'
+    else
+        fail_msg 'check_has_operation_coverage.sh reported green without python3'
+    fi
+}
+probe_has_operation_guard_missing_python
+
 mut_rust_toolchain_moving_channel() {
     python3 - <<'PY'
 from pathlib import Path

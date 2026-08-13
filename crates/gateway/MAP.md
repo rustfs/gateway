@@ -73,6 +73,7 @@ the consumer surface. Ring 1: no rustfs crate dependency. Start at `src/lib.rs`;
 | `tests/sse_runtime.rs` | TLS gate, key hygiene, multipart consistency |
 | `tests/vhost_resolution.rs` | Host boundary and fallback behavior |
 | `tests/connection_teardown.rs` | Connection intent propagation |
+| `tests/compat_aliases.rs` | Input-parameterized compatibility aliases remain identical to operation requests |
 | `tests/refusal_order_guards.rs` | Body-proof source guards |
 | `tests/precondition_contract.rs` | Real adapter controls for conditional-race and completed-part contract inputs |
 | `tests/support/mod.rs` | Shared operations, backends, signing, probes |

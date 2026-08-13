@@ -74,6 +74,7 @@ fixed now so that the same check does not get written twice under two names.
 | `check_license_headers.sh` | Every tracked `.rs` file opens with the Apache-2.0 licence header (ADR-0001 provenance boundary) | P0 |
 | `check_governance_attribution.sh` | The s3s relationship statement and adapted aws-sigv4 helpers retain their reviewed source, revision, licence, and copied-code registry entry | P0-01 |
 | `check_smithy_timestamp_corpus.sh` | The vendored Smithy timestamp corpus matches its pinned bytes, case counts, license attribution, and format mapping | P1-04 |
+| `check_has_operation_coverage.sh` | Every code-generated standard operation name has exactly one matching per-operation `HasOperation` reverse mapping | P1-07 |
 | `check_guard_grep_pipelines.sh` | The license and secret-hygiene guards contain no quiet grep option token, including in comments or strings; their grep checks must read input fully under `pipefail` | P0 |
 | `check_english_only.sh` | No tracked file contains CJK text. `rustfs/backlog` is the one repository in the organisation where Chinese is allowed; this is not it. Matches by codepoint in Python — a grep bracket range is read by locale collation and flags an em dash | P0 |
 | `check_ci_time_gate.sh` | Every PR job has a timeout, every dependency path stays within ten minutes, and Static checks / Clippy / Test retain their exact branch-protected contract | P0-04 |
