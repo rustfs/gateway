@@ -151,8 +151,8 @@ use crate::monomorphic::sealed::Set as StaticSet;
 use crate::operation_mode::{DynamicMode, MonomorphicMode, OperationMode};
 use crate::payload_header::payload_mode;
 use crate::render::{
-    S3Error, from_auth, from_auth_context, from_codec, from_denial, from_handler, from_pre_auth, from_sse, from_wire_reject,
-    render,
+    S3Error, from_auth, from_auth_context, from_auth_with_detail, from_codec, from_denial, from_handler, from_pre_auth, from_sse,
+    from_wire_reject, render,
 };
 use crate::request_config::{BodyRead, Entered, RequestConfig, RouteAuthorized};
 use crate::request_deadline::{elapsed_since, hold_failure_floor, policy_snapshot_with_timeout};
@@ -630,8 +630,8 @@ impl S3Service {
         // Kept out of the `match` so the read at the bottom can consult it: for an anonymous or
         // custom admission there is no payload mode and therefore no framed body to decode.
         let mut framing_mode: Option<PayloadMode> = None;
-        let authentication = match self.inner.floor.admit(view, M::floor(&op), now) {
-            Ok(Admission::Anonymous(evidence)) => AuthenticationOutcome::ordinary(Verdict::anonymous(evidence)),
+        let (authentication, signature_mismatch) = match self.inner.floor.admit(view, M::floor(&op), now) {
+            Ok(Admission::Anonymous(evidence)) => (AuthenticationOutcome::ordinary(Verdict::anonymous(evidence)), None),
             Ok(Admission::Sealed(sealed)) => {
                 let payload = match payload_mode(&headers, sealed.marker().location()) {
                     Ok(payload) => payload,
@@ -650,8 +650,10 @@ impl S3Service {
                 // chain is verified with the same key and seed the request signature was, and
                 // neither survives `Verdict` — see `crate::ext::ChunkVerification`.
                 .with_chunk_sink(&chunk_sink);
-                match self.inner.authenticator.authenticate(&question).await {
-                    Ok(authentication) => authentication,
+                let result = self.inner.authenticator.authenticate(&question).await;
+                let signature_mismatch = question.into_signature_mismatch();
+                match result {
+                    Ok(authentication) => (authentication, signature_mismatch),
                     Err(_) => {
                         return outcome.refuse_handler(HandlerError::internal_error("the request could not be authenticated"));
                     }
@@ -699,7 +701,12 @@ impl S3Service {
                 };
                 return outcome.refuse(from_auth_context(error, context, response_kind));
             }
-            return outcome.refuse(from_auth(error, response_kind));
+            return outcome.refuse(from_auth_with_detail(
+                error,
+                signature_mismatch.as_ref(),
+                config.config().verbose_signature_errors(),
+                response_kind,
+            ));
         }
         // The proof, minted from the verdict that has just been checked. The `else` arm is
         // unreachable — `rejection()` was `None` one line ago — and is refused rather than

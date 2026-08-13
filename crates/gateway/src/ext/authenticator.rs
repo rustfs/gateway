@@ -263,7 +263,6 @@ impl core::fmt::Debug for ChunkSink {
 /// The path and the host are the *raw* spellings. Handing over a normalised value would be the
 /// defect the one-host invariant exists to prevent: normalisation is many-to-one, so several
 /// distinct spellings would share one valid signature.
-#[derive(Debug)]
 pub struct Authentication<'a> {
     sealed: &'a SealedAws<'a>,
     method: &'a Method,
@@ -272,6 +271,22 @@ pub struct Authentication<'a> {
     payload: &'a PayloadMode,
     declared_content_length: Option<u64>,
     chunks: Option<&'a ChunkSink>,
+    signature_mismatch: std::sync::OnceLock<rustfs_gateway_sig::SignatureMismatchDetail>,
+}
+
+impl core::fmt::Debug for Authentication<'_> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("Authentication")
+            .field("sealed", &self.sealed)
+            .field("method", &self.method)
+            .field("raw_path", &self.raw_path)
+            .field("host", &self.host)
+            .field("payload", &self.payload)
+            .field("declared_content_length", &self.declared_content_length)
+            .field("chunks", &self.chunks)
+            .field("signature_mismatch_published", &self.signature_mismatch.get().is_some())
+            .finish()
+    }
 }
 
 impl<'a> Authentication<'a> {
@@ -293,6 +308,7 @@ impl<'a> Authentication<'a> {
             payload,
             declared_content_length,
             chunks: None,
+            signature_mismatch: std::sync::OnceLock::new(),
         }
     }
 
@@ -314,6 +330,10 @@ impl<'a> Authentication<'a> {
     #[must_use]
     pub const fn chunk_sink(&self) -> Option<&'a ChunkSink> {
         self.chunks
+    }
+
+    pub(crate) fn into_signature_mismatch(self) -> Option<rustfs_gateway_sig::SignatureMismatchDetail> {
+        self.signature_mismatch.into_inner()
     }
 
     /// The admitted request. Holding one is proof the floor has run.
@@ -509,8 +529,11 @@ impl SigV4Authenticator {
         let key = signing_key(&secret, &verified);
         let date = presented.signed_at(sealed);
         let mut proof: Option<SignatureMatch> = None;
+        let mut mismatch_detail = None;
         for candidate in spec.candidates()? {
-            let derived = calculate_signature(&key, &candidate.string_to_sign(&date, presented.scope()));
+            let string_to_sign = candidate.string_to_sign(&date, presented.scope());
+            let derived = calculate_signature(&key, &string_to_sign);
+            mismatch_detail = Some(rustfs_gateway_sig::SignatureMismatchDetail::new(&candidate, &string_to_sign));
             // Every candidate is derived and compared even after one has matched: returning early
             // would make the number of HMAC rounds a function of which spelling the client sent.
             if let Ok(matched) = presented.signature().ct_verify(&derived) {
@@ -524,7 +547,14 @@ impl SigV4Authenticator {
             return Err(AuthError::InvalidAccessKeyId.into());
         };
         let Some(proof) = proof else {
-            return Err(AuthError::InvalidAccessKeyId.into());
+            if refusal.is_some() {
+                return Err(AuthError::InvalidAccessKeyId.into());
+            }
+            let Some(detail) = mismatch_detail else {
+                return Err(AuthError::SignatureDoesNotMatch.into());
+            };
+            let _ = request.signature_mismatch.set(detail);
+            return Err(AuthError::SignatureDoesNotMatch.into());
         };
         // A credential that exists, is correctly signed for, and is still not usable: switched
         // off, expired, or presented without the token it is bound to. Answered as

@@ -14,48 +14,11 @@
 
 //! The one place a refusal becomes an HTTP response.
 //!
-//! Responsible for: [`S3Error`] — a code, a status, a message and whatever headers and extra
-//! document elements the refusing stage attached — [`document`], which builds the `<Error>` XML,
-//! and [`render`], which wraps it in a response head.
-//! NOT responsible for: deciding any code. Every code here arrives from the stage that refused:
-//! `WireReject`, `PreAuthError`, `AuthError`, `Denial`, `CodecError` or `HandlerError`. Nor for
-//! deciding *which* headers a backend may attach: that closed set is
-//! `rustfs_gateway_core::ErrorHeader`, and the complement is `crate::stamp::is_reserved`.
+//! Responsible for: [`S3Error`], `<Error>` XML in [`document`], and response heads in [`render`].
+//! NOT responsible for: choosing an error code or backend header; refusing stages and
+//! `rustfs_gateway_core::ErrorHeader` own those decisions.
 //! Upstream: `rustfs-gateway-types`, `rustfs-gateway-xml`. Downstream: `crate::service`.
-//!
-//! # Why every stage funnels through one renderer
-//!
-//! Six stages can refuse a request and each of them has its own error type. Rendering per stage
-//! means six places that decide whether the body is XML, whether `Content-Type` is set, and
-//! whether the response echoes anything the caller sent. The last of those is the one that
-//! matters: a rejection body is the only thing an unauthenticated caller can make this service
-//! produce, so "does this contain request bytes" must be answerable by reading one function.
-//!
-//! # What may appear in the body
-//!
-//! The code, a message, — for a decode failure — the *model member* name, which is a compile-time
-//! constant from the IR, and the two server-minted identifiers. Nothing derived from the request
-//! reaches [`S3Error::message`], because the types that carry a message before authentication
-//! (`PreAuthError`, `CodecError`) hold `&'static str` and `format!` does not typecheck into them.
-//! A [`rustfs_gateway_core::HandlerError`] may carry a dynamic message, and it may because by then
-//! the caller has been authenticated and authorised.
-//!
-//! # Why the identifiers arrive as a parameter rather than being minted here
-//!
-//! [`render`] takes the [`RequestTrace`] the service already minted. Minting one here would be the
-//! second minting site in a request, and the header the service writes and the `<RequestId>` this
-//! function writes would then name two different requests — a discrepancy no test that reads only
-//! one of them would ever see. So this function cannot mint: it holds no [`crate::TraceSource`],
-//! and the value it renders is the value the caller receives in the header, because it writes that
-//! header too.
-//!
-//! # Where the 200-then-fail case will attach
-//!
-//! `CompleteMultipartUpload` commits `200` before it knows whether it succeeded, so it has to emit
-//! an `<Error>` document into a body whose head has already gone out. That path needs the document
-//! without the head, which is why [`document`] is a function of its own rather than the first half
-//! of [`render`]. What it will additionally need — a `HandlerResult` that can say "committed, then
-//! failed" — is not here; it is a change to the handler contract, not to this file.
+//! It keeps framing, identifiers, reserved headers, and redaction reviewable in one place.
 
 use http::header::{CONTENT_LENGTH, CONTENT_TYPE, ETAG};
 use http::{Response, StatusCode};
@@ -64,7 +27,7 @@ use rustfs_gateway_core::{
     resolve,
 };
 use rustfs_gateway_http::WireReject;
-use rustfs_gateway_sig::AuthError;
+use rustfs_gateway_sig::{AuthError, SignatureMismatchDetail};
 use rustfs_gateway_stream::Body;
 use rustfs_gateway_types::{ETag, ErrorCode, EtagRender};
 use rustfs_gateway_xml::{DECLARATION, XmlWriter};
@@ -73,20 +36,22 @@ use crate::close::ConnectionIntent;
 use crate::ext::Denial;
 use crate::trace::RequestTrace;
 
-/// What a refusal adds to itself beyond a code, a status and a message.
-///
-/// Behind one pointer, and absent unless something filled it in. Almost no refusal carries either
-/// list — five stages out of six have no way to produce one — and an `S3Error` travels in the `Err`
-/// arm of the pipeline's own `Result`s, where two inline `Vec`s are 48 bytes every refusal and every
-/// success pays for. `clippy::result_large_err` is what noticed.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+/// Optional refusal headers, details, and redacted signature diagnostics behind one pointer.
+#[derive(Clone, Default)]
 struct Extras {
     headers: Vec<ErrorHeader>,
     details: Vec<ErrorDetail>,
+    signature: Option<SignatureDetails>,
+}
+
+#[derive(Clone)]
+struct SignatureDetails {
+    canonical_request: String,
+    string_to_sign: String,
 }
 
 /// A refusal, in the shape the renderer needs.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone)]
 pub struct S3Error {
     code: Option<ErrorCode>,
     status: StatusCode,
@@ -98,22 +63,56 @@ pub struct S3Error {
     extras: Option<Box<Extras>>,
 }
 
-/// What [`S3Error::headers`] and [`S3Error::details`] answer when there are no extras.
+impl core::fmt::Debug for S3Error {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("S3Error")
+            .field("code", &self.code)
+            .field("status", &self.status)
+            .field("message", &self.message)
+            .field("body_policy", &self.body_policy)
+            .field("connection", &self.connection)
+            .finish_non_exhaustive()
+    }
+}
+
+impl PartialEq for S3Error {
+    fn eq(&self, other: &Self) -> bool {
+        self.code == other.code
+            && self.status == other.status
+            && self.message == other.message
+            && self.resource == other.resource
+            && self.etag == other.etag
+            && self.body_policy == other.body_policy
+            && self.connection == other.connection
+            && self.headers() == other.headers()
+            && self.details() == other.details()
+            && signature_details_eq(self.extras.as_deref(), other.extras.as_deref())
+    }
+}
+
+impl Eq for S3Error {}
+
+fn signature_details_eq(left: Option<&Extras>, right: Option<&Extras>) -> bool {
+    match (
+        left.and_then(|extras| extras.signature.as_ref()),
+        right.and_then(|extras| extras.signature.as_ref()),
+    ) {
+        (Some(left), Some(right)) => {
+            left.canonical_request == right.canonical_request && left.string_to_sign == right.string_to_sign
+        }
+        (None, None) => true,
+        _ => false,
+    }
+}
+
 const NO_HEADERS: &[ErrorHeader] = &[];
-/// The [`NO_HEADERS`] twin.
 const NO_DETAILS: &[ErrorDetail] = &[];
 
 impl S3Error {
     /// What this refusal does to the connection.
     ///
-    /// A transport that keeps a connection this returns [`ConnectionIntent::Close`] for has left
-    /// undrained request octets in the stream, and the next bytes it parses as a request line are
-    /// the tail of a body it decided not to read — RFC 9112 §9.3's request-smuggling shape.
-    ///
-    /// [`render`] carries the same value into the response's extensions, where
-    /// [`connection_intent_of`] reads it; `crate::adapt` turns it into `Connection: close` for the
-    /// hyper and tower paths. The header is an *announcement* — a peer learns from it, a transport
-    /// must not, and a harness must never report it as an observation of the socket.
+    /// Closing protects the next request from unread request-body bytes. [`render`] carries the
+    /// intent in an extension; a transport acts on it and a harness must observe the socket.
     #[must_use]
     pub const fn connection_intent(&self) -> ConnectionIntent {
         self.connection
@@ -145,8 +144,7 @@ impl S3Error {
 
     /// The headers the refusing stage attached, before the reserved ones are filtered out.
     ///
-    /// Only a `HandlerError` populates these today: every stage that refuses before a handler runs
-    /// does so from a type that has no way to carry one.
+    /// Only a `HandlerError` populates these today.
     #[must_use]
     pub fn headers(&self) -> &[ErrorHeader] {
         self.extras.as_ref().map_or(NO_HEADERS, |extras| &extras.headers)
@@ -167,6 +165,7 @@ impl From<ErrorResolution> for S3Error {
             Some(Box::new(Extras {
                 headers: resolution.headers().to_vec(),
                 details: resolution.details().to_vec(),
+                signature: None,
             }))
         };
         Self {
@@ -185,14 +184,7 @@ impl From<ErrorResolution> for S3Error {
 }
 
 pub(crate) fn from_wire_reject(reject: WireReject) -> S3Error {
-    // The status comes from the reject, not from the code table: `LimitExceeded` maps to
-    // several statuses depending on which ceiling was hit, and only the reject knows which.
-    // `message()`, never `label()`. This is the one place a refusal becomes bytes a client
-    // reads, and the two strings exist precisely because they have different audiences: the
-    // label is an operator's identifier and belongs in a log. There used to be a third name,
-    // `as_str()`, which delegated here — it was removed because a habit-reached name that
-    // happens to be right is not a guarantee, and a reviewer who sees `label()` on this line
-    // can tell it is wrong, which is the property worth having.
+    // The reject owns the status because one code can represent several wire failures.
     typed_refusal(
         reject.error_code(),
         reject.message(),
@@ -233,9 +225,7 @@ pub(crate) fn from_auth(error: AuthError, response: ResponseKind) -> S3Error {
     // the internal variants distinct lets the verifier test its state machine without making
     // the access-key store observable on the wire.
     //
-    // The third leg issue #20 asks for: an authentication failure is neither a `WireReject` nor
-    // a `ChunkReject`, so neither flag could ever have reached `c-sig-0001`. The reasoning for
-    // the verdict is `crate::close::after_auth_failure`, and it is a policy row, not an RFC one.
+    // Authentication has its own connection policy; it is neither wire nor chunk rejection.
     let (code, message) = if error == AuthError::SignatureDoesNotMatch {
         (ErrorCode::INVALID_ACCESS_KEY_ID, AuthError::InvalidAccessKeyId.message())
     } else if error == AuthError::AuthorizationHeaderMalformed {
@@ -244,6 +234,73 @@ pub(crate) fn from_auth(error: AuthError, response: ResponseKind) -> S3Error {
         (ErrorCode::custom(error.code()), error.message())
     };
     from_handler(HandlerError::new(code, message), response, crate::close::after_auth_failure(&error))
+}
+
+pub(crate) fn from_auth_with_detail(
+    error: AuthError,
+    detail: Option<&SignatureMismatchDetail>,
+    verbose: bool,
+    response: ResponseKind,
+) -> S3Error {
+    let Some((canonical_request, string_to_sign)) = detail.as_ref().and_then(|detail| detail.for_response(verbose)) else {
+        return from_auth(error, response);
+    };
+    if error != AuthError::SignatureDoesNotMatch {
+        return from_auth(error, response);
+    }
+    let mut rendered = from_handler(
+        HandlerError::new(ErrorCode::SIGNATURE_DOES_NOT_MATCH, error.message()),
+        response,
+        crate::close::after_auth_failure(&error),
+    );
+    rendered.extras = Some(Box::new(Extras {
+        headers: Vec::new(),
+        details: Vec::new(),
+        signature: Some(SignatureDetails {
+            canonical_request: redact_sensitive_canonical_values(canonical_request),
+            string_to_sign: string_to_sign.to_owned(),
+        }),
+    }));
+    rendered
+}
+
+fn redact_sensitive_canonical_values(canonical_request: &str) -> String {
+    canonical_request
+        .lines()
+        .enumerate()
+        .map(|(line_number, line)| {
+            if line_number == 2 {
+                return line
+                    .split('&')
+                    .map(|parameter| match parameter.split_once('=') {
+                        Some((name, _))
+                            if matches!(
+                                name.to_ascii_lowercase().as_str(),
+                                "x-amz-credential" | "x-amz-security-token" | "x-amz-signature"
+                            ) =>
+                        {
+                            format!("{name}=__REDACTED__")
+                        }
+                        _ => parameter.to_owned(),
+                    })
+                    .collect::<Vec<_>>()
+                    .join("&");
+            }
+            let Some((name, _)) = line.split_once(':') else {
+                return line.to_owned();
+            };
+            let sensitive = name == "x-amz-security-token"
+                || (name.starts_with("x-amz-server-side-encryption-")
+                    && (name.contains("customer-key") || name.ends_with("aws-kms-key-id")))
+                || (name.starts_with("x-amz-copy-source-server-side-encryption-") && name.contains("customer-key"));
+            if sensitive {
+                format!("{name}:__REDACTED__")
+            } else {
+                line.to_owned()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 pub(crate) fn from_auth_context(error: AuthError, context: ErrorContext, response: ResponseKind) -> S3Error {
@@ -350,11 +407,7 @@ fn unreachable_internal_resolution() -> S3Error {
 
 /// The `<Error>` document on its own, with no response head around it.
 ///
-/// Separate from [`render`] because the 200-then-fail path has no head to write — see the module
-/// documentation. `RequestId` and `HostId` come last in the element order, after `Resource` and
-/// after every extra element, which is where S3 puts them and where a positional reader expects
-/// them; the extras themselves are already in `rustfs_gateway_core::ELEMENT_ORDER`, because the
-/// type that carries them keeps them there.
+/// Used by the committed path, which already sent its response head.
 #[must_use]
 pub fn document(error: &S3Error, trace: &RequestTrace) -> String {
     let mut out = String::from(DECLARATION);
@@ -364,9 +417,7 @@ pub fn document(error: &S3Error, trace: &RequestTrace) -> String {
 
 /// The `<Error>` document with neither a response head **nor an XML declaration** around it.
 ///
-/// For the committed path, whose declaration went out with the head: see `crate::commit`. Element
-/// for element it is [`document`]'s output, and it is the same function producing both — a second
-/// renderer for the committed path is a second place `<Code>` could be spelled differently.
+/// The committed path already sent the XML declaration; see `crate::commit`.
 #[must_use]
 pub fn document_body(error: &S3Error, trace: &RequestTrace) -> String {
     let mut xml = XmlWriter::fragment();
@@ -383,6 +434,10 @@ pub fn document_body(error: &S3Error, trace: &RequestTrace) -> String {
     for detail in error.details() {
         xml.element(detail.element(), detail.text().as_ref());
     }
+    if let Some(signature) = error.extras.as_ref().and_then(|extras| extras.signature.as_ref()) {
+        xml.element("CanonicalRequest", &signature.canonical_request);
+        xml.element("StringToSign", &signature.string_to_sign);
+    }
     xml.element("RequestId", trace.request_id().as_str());
     xml.element("HostId", trace.host_id().as_str());
     xml.close();
@@ -391,17 +446,7 @@ pub fn document_body(error: &S3Error, trace: &RequestTrace) -> String {
 
 /// Renders a refusal as the `<Error>` document S3 clients parse, with its response head.
 ///
-/// The body is omitted for the statuses RFC 9110 says carry none, and for `HEAD`, which the
-/// service applies afterwards through `EncodedResponse::enforce_http_invariants`. Everything else
-/// gets a document, because a client that receives a bare status has nothing to branch on.
-///
-/// `trace` is written twice — into the response head and into the document — from one value, which
-/// is the whole of the request-identifier invariant.
-///
-/// The refusing stage's own headers are written **first**, before the document's framing headers
-/// and before the identifiers. That order is the point: a name reserved by the stamp module is
-/// skipped outright, and even if that predicate were wrong, the framework's own writes come
-/// afterwards and win. Two locks, because the first one is a list somebody has to keep correct.
+/// Bodyless statuses omit XML; framework-owned framing and identifiers overwrite refusal headers.
 #[must_use]
 pub fn render(error: &S3Error, trace: &RequestTrace) -> Response<Body> {
     let body = match error.body_policy {
@@ -437,29 +482,16 @@ pub fn render(error: &S3Error, trace: &RequestTrace) -> Response<Body> {
     trace.apply(headers);
     // The connection verdict travels in the response's extensions, not in its headers.
     //
-    // `Connection` is hop-by-hop: it describes the connection, and this crate does not have one —
-    // its own documentation says so, and `crate::adapt` is where a hop actually exists. Writing the
-    // header here made this function a *second* writer of it, behind whatever transport was already
-    // writing its own, and a response reached the wire carrying `Connection: close` **and**
-    // `Connection: keep-alive`. Two contradictory hop-by-hop headers is the shape
-    // `WireReject::DuplicateContentLength` refuses on the way in; emitting one on the way out is
-    // not a fix for a missing header.
+    // The transport owns the hop-by-hop `Connection` header.
     //
-    // Extensions never reach the wire, so this cannot become an announcement by accident. A
-    // transport reads it — `crate::adapt` does, and `Response::extensions` is how anything else
-    // can — and only a transport turns it into a header and a closed socket.
+    // Only a transport turns this extension into a header and socket action.
     response.extensions_mut().insert(error.connection);
     response
 }
 
 /// The connection verdict a rendered refusal is carrying, if it is carrying one.
 ///
-/// The read half of what [`render`] writes into the response's extensions. A transport calls this
-/// and acts on it; nothing else should, and in particular a harness that reported a connection as
-/// closed because this said `Close` would be reporting an intention as an observation — the defect
-/// <https://github.com/rustfs/gateway/issues/20> was opened about.
-///
-/// `None` for a response no refusal produced, which is every successful answer.
+/// A transport consumes this intent; it is not proof that a socket closed.
 #[must_use]
 pub fn connection_intent_of<B>(response: &Response<B>) -> Option<ConnectionIntent> {
     response.extensions().get::<ConnectionIntent>().copied()
@@ -481,6 +513,17 @@ mod compatibility_tests;
 mod tests {
     use super::*;
 
+    #[test]
+    fn verbose_details_redact_presigned_credentials() {
+        let canonical = "GET\n/key\nX-Amz-Credential=AKID%2Fscope&X-Amz-Security-Token=session-secret&prefix=visible\nhost:example.com\n\nhost\nUNSIGNED-PAYLOAD";
+        let redacted = redact_sensitive_canonical_values(canonical);
+        assert!(redacted.contains("X-Amz-Credential=__REDACTED__"), "{redacted}");
+        assert!(redacted.contains("X-Amz-Security-Token=__REDACTED__"), "{redacted}");
+        assert!(redacted.contains("prefix=visible"), "{redacted}");
+        assert!(!redacted.contains("AKID"), "{redacted}");
+        assert!(!redacted.contains("session-secret"), "{redacted}");
+    }
+
     /// The trace the tests below render with; pinned so a body can be read literally.
     fn trace() -> RequestTrace {
         RequestTrace::from_bits(0x0123_4567_89AB_CDEF, 0)
@@ -494,9 +537,7 @@ mod tests {
         handler(HandlerError::new(code, message))
     }
 
-    /// Negative — a comparison rejection carries the uniform credential code and message and
-    /// nothing else. This is the
-    /// assertion that stops a future edit from adding the request path "for debuggability".
+    /// Negative — a comparison rejection carries the uniform credential code and no request data.
     #[tokio::test]
     async fn a_rendered_refusal_echoes_nothing_from_the_request() {
         let error = from_auth(AuthError::SignatureDoesNotMatch, ResponseKind::Other);
@@ -519,8 +560,7 @@ mod tests {
         assert_eq!(unknown.status(), mismatch.status());
     }
 
-    /// Negative — malformed authentication without a validated expected region cannot enter the
-    /// contextual region-mismatch response.
+    /// Negative — malformed authentication cannot enter the contextual region response.
     #[test]
     fn a_malformed_scope_is_a_bad_request() {
         assert_eq!(
@@ -538,8 +578,7 @@ mod tests {
         );
     }
 
-    /// Negative — a wire rejection keeps the status the wire layer chose, not the one the code
-    /// table would give, because several limits share one code and differ in status.
+    /// Negative — a wire rejection keeps the status the wire layer chose.
     #[test]
     fn a_wire_rejection_keeps_its_own_status() {
         let reject = WireReject::MalformedRequestTarget;
@@ -665,9 +704,7 @@ mod tests {
         }
     }
 
-    /// Negative — an element's text is escaped, so a key or a range echoed back cannot close the
-    /// element it sits in. This is the injection the extra elements would otherwise open: their
-    /// text is the one part of the document derived from what the caller sent.
+    /// Negative — escaped detail text cannot close its own element.
     #[tokio::test]
     async fn an_extra_element_cannot_break_out_of_its_own_element() {
         let error = handler(
@@ -679,8 +716,7 @@ mod tests {
         assert!(body.contains("&lt;/Key&gt;"), "{body}");
     }
 
-    /// Negative — a refusal that carries no extras renders exactly the document it rendered before
-    /// this capability existed. Adding an empty list must not add an empty element.
+    /// Negative — no extras preserves the original document exactly.
     #[tokio::test]
     async fn a_refusal_with_no_extras_renders_the_document_it_always_did() {
         let error = ordinary(ErrorCode::ACCESS_DENIED, "the request is not allowed");
@@ -695,10 +731,7 @@ mod tests {
         );
     }
 
-    /// Negative — a refusal that carries a header of its own does not disturb the document's own
-    /// framing, and does not disturb the identifiers. `Content-Length` still describes the bytes
-    /// this function built, and the identifier is still the one the service minted, because both
-    /// are written after the refusal's headers rather than before.
+    /// Negative — refusal headers cannot disturb framework framing or identifiers.
     #[tokio::test]
     async fn a_header_of_the_refusals_own_does_not_disturb_what_the_framework_writes() {
         let plain = render(&handler(HandlerError::new(ErrorCode::SERVICE_UNAVAILABLE, "unavailable")), &trace());
@@ -729,14 +762,11 @@ mod tests {
         );
     }
 
-    /// Negative — a header whose name the framework owns is dropped rather than written, whatever
-    /// it was attached to. The closed set has no such variant today, so the filter is exercised
-    /// through its predicate and through the write order: the framework writes last.
+    /// Negative — framework-owned header names never survive refusal rendering.
     #[tokio::test]
     async fn a_reserved_name_would_be_dropped_and_the_framework_writes_last() {
         let error = handler(HandlerError::unsatisfiable_range("bytes=20-30", 10));
         let response = render(&error, &trace());
-        // Every name that survived is one a backend is allowed to have written.
         for name in response.headers().keys() {
             let written_by_the_error = error.headers().iter().any(|header| header.name() == *name);
             assert!(
@@ -747,9 +777,6 @@ mod tests {
         assert_eq!(response.headers().get_all(CONTENT_TYPE).iter().count(), 1);
     }
 
-    /// Negative — every name the closed set can produce survives the filter, and every name the
-    /// framework owns would not. The second half is the one that matters: it is the assertion that
-    /// a widened `ErrorHeader` cannot quietly hand a backend the request identifier.
     #[test]
     fn the_filter_passes_the_closed_set_and_stops_the_framework_owned_names() {
         for header in [
