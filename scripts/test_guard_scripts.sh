@@ -50,6 +50,7 @@ SANDBOX_RESET_TRACKED=""
 SANDBOX_RESET_UNTRACKED=""
 SANDBOX_RESET_READY=0
 QUIRK_LEDGER_PARSE_CACHE=""
+CT_EQ_SANDBOX=""
 
 literalize_nul_paths() {
     local input="$1" output="$2" path
@@ -250,9 +251,57 @@ cleanup_sandbox() {
     if [[ -n "$QUIRK_LEDGER_PARSE_CACHE" ]]; then
         rm -f "$QUIRK_LEDGER_PARSE_CACHE"
     fi
+    if [[ -n "$CT_EQ_SANDBOX" ]]; then
+        rm -rf "$CT_EQ_SANDBOX"
+    fi
     return 0
 }
 trap cleanup_sandbox EXIT
+
+make_ct_eq_sandbox() {
+    if [[ -n "$CT_EQ_SANDBOX" ]]; then
+        (
+            cd "$CT_EQ_SANDBOX"
+            git reset --hard -q HEAD
+            git clean -fdq
+        )
+        return
+    fi
+
+    CT_EQ_SANDBOX="$(mktemp -d "${TMPDIR:-/tmp}/gateway-ct-eq-test.XXXXXX")"
+    mkdir -p "$CT_EQ_SANDBOX/crates" "$CT_EQ_SANDBOX/scripts/allowances"
+    cp -R "$REPO_ROOT/crates/sig" "$CT_EQ_SANDBOX/crates/sig"
+    if [[ -f "$REPO_ROOT/scripts/allowances/ct-eq-allowances.txt" ]]; then
+        cp "$REPO_ROOT/scripts/allowances/ct-eq-allowances.txt" \
+            "$CT_EQ_SANDBOX/scripts/allowances/ct-eq-allowances.txt"
+    fi
+    (
+        cd "$CT_EQ_SANDBOX"
+        git init -q .
+        git add -A
+        git -c user.name=t -c user.email=t@t commit -qm base
+    )
+    if ! GATEWAY_CHECK_ROOT="$CT_EQ_SANDBOX" "${SCRIPT_DIR}/check_ct_eq.sh" >/dev/null 2>&1; then
+        fail_msg 'check_ct_eq.sh rejects its minimal unmodified sig fixture'
+        return 1
+    fi
+}
+
+expect_ct_eq_fail() {
+    local desc="$1" mutate="$2" output rc=0
+    cases=$((cases + 1))
+    make_ct_eq_sandbox
+    (cd "$CT_EQ_SANDBOX" && "$mutate" >/dev/null)
+    (cd "$CT_EQ_SANDBOX" && git add -A >/dev/null 2>&1)
+    output="$(GATEWAY_CHECK_ROOT="$CT_EQ_SANDBOX" "${SCRIPT_DIR}/check_ct_eq.sh" 2>&1)" || rc=$?
+    if [[ "$rc" -ne 0 && "$output" == *'Constant-time rule violated.'* ]]; then
+        pass_msg "check_ct_eq.sh catches: ${desc}"
+    elif [[ "$rc" -ne 0 ]]; then
+        fail_msg "check_ct_eq.sh failed without its policy diagnostic: ${desc}"
+    else
+        fail_msg "check_ct_eq.sh did NOT catch: ${desc}"
+    fi
+}
 
 # expect_fail_unstaged <guard> <description> <mutation-fn>
 # Same as expect_fail, but deliberately does NOT `git add` the mutation. This is what
@@ -482,6 +531,10 @@ printf 'Positive control (repository must be clean)\n'
 for guard in "${SCRIPT_DIR}"/check_*.sh; do
     grep -q '^# REQUIRES-PR$' "$guard" && continue
     cases=$((cases + 1))
+    if grep -q '^# REQUIRES-PR$' "$guard"; then
+        pass_msg "$(basename "$guard") deferred to its PR-context probes"
+        continue
+    fi
     if "$guard" >/dev/null 2>&1; then
         pass_msg "$(basename "$guard")"
     else
@@ -4637,7 +4690,7 @@ mut_derived_signature() {
 pub struct Signature([u8; 32]);
 RS
 }
-expect_fail check_ct_eq.sh \
+expect_ct_eq_fail \
     'a Signature type deriving Debug/PartialEq/Eq' mut_derived_signature
 
 mut_strip_header() {
@@ -4854,7 +4907,7 @@ probe_guard_grep_policy_awk_error
 
 
 # -----------------------------------------------------------------------------
-# check_ct_eq.sh grew from one rule to seven when P2-02 landed. Each new rule
+# check_ct_eq.sh grew from one rule to eight when P2-02 and P0-10 landed. Each new rule
 # needs its own negative control here: a rule with no failing case is a rule
 # nobody has ever seen work.
 # -----------------------------------------------------------------------------
@@ -4863,35 +4916,35 @@ mut_secret_display() {
     printf '\nimpl core::fmt::Display for SecretBytes {\n    fn fmt(&self, _: &mut core::fmt::Formatter<\x27_>) -> core::fmt::Result { Ok(()) }\n}\n' \
         >>crates/sig/src/secret.rs
 }
-expect_fail check_ct_eq.sh \
+expect_ct_eq_fail \
     'a Display impl on a secret-bearing type' mut_secret_display
 
 mut_second_bool_from() {
     printf '\nfn leak(c: subtle::Choice) -> bool { bool::from(c) }\n' \
         >>crates/sig/src/verdict.rs
 }
-expect_fail check_ct_eq.sh \
+expect_ct_eq_fail \
     'a second bool::from(Choice), which turns constant time back into a branch' mut_second_bool_from
 
 mut_unwrap_u8() {
     printf '\nfn peek(c: subtle::Choice) -> u8 { c.unwrap_u8() }\n' \
         >>crates/sig/src/verdict.rs
 }
-expect_fail check_ct_eq.sh \
+expect_ct_eq_fail \
     'Choice::unwrap_u8, which discards the constant-time wrapper' mut_unwrap_u8
 
 mut_secret_in_log() {
     printf '\nfn oops(s: &SecretBytes) -> String { format!("secret={s:?}") }\n' \
         >>crates/sig/src/secret.rs
 }
-expect_fail check_ct_eq.sh \
+expect_ct_eq_fail \
     'a secret interpolated into a formatting macro' mut_secret_in_log
 
 mut_unboxed_key_material() {
     printf '\npub(crate) struct Leaky { signing_key: Vec<u8> }\n' \
         >>crates/sig/src/timing.rs
 }
-expect_fail check_ct_eq.sh \
+expect_ct_eq_fail \
     'key material held in Vec<u8> instead of a zeroizing box' mut_unboxed_key_material
 
 mut_strip_negative_floor() {
@@ -4901,8 +4954,505 @@ mut_strip_negative_floor() {
         grep -v '^/// Negative' "$f" >"${f}.nf" && mv "${f}.nf" "$f"
     done
 }
-expect_fail check_ct_eq.sh \
+expect_ct_eq_fail \
     'negative-case coverage dropping below its floor' mut_strip_negative_floor
+
+mut_secret_partial_eq_without_ct_eq() {
+    cat >>crates/sig/src/secret.rs <<'RS'
+
+impl PartialEq for SecretBytes {
+    fn eq(&self, other: &Self) -> bool {
+        self.expose() == other.expose()
+    }
+}
+RS
+}
+expect_ct_eq_fail \
+    'a hand-written PartialEq for secret material without ct_eq in the same impl' \
+    mut_secret_partial_eq_without_ct_eq
+
+mut_secret_partial_eq_with_decoys() {
+    cat >>crates/sig/src/secret.rs <<'RS'
+
+impl PartialEq for SecretBytes {
+    fn eq(&self, other: &Self) -> bool {
+        // self.expose().ct_eq(other.expose())
+        let decoy = "ct_eq(";
+        let _ = decoy;
+        self.expose() == other.expose()
+    }
+}
+RS
+}
+expect_ct_eq_fail \
+    'ct_eq appearing only in comments or literals beside ordinary equality' \
+    mut_secret_partial_eq_with_decoys
+
+mut_secret_partial_eq_with_bare_helper() {
+    cat >>crates/sig/src/secret.rs <<'RS'
+
+impl PartialEq for SecretBytes {
+    fn eq(&self, other: &Self) -> bool {
+        fn ct_eq(_: &[u8], _: &[u8]) -> bool { true }
+        let _ = ct_eq(self.expose(), other.expose());
+        self.expose() == other.expose()
+    }
+}
+RS
+}
+expect_ct_eq_fail \
+    'a bare local ct_eq helper authorizing ordinary equality' \
+    mut_secret_partial_eq_with_bare_helper
+
+mut_secret_partial_eq_with_type_alias() {
+    cat >>crates/sig/src/secret.rs <<'RS'
+
+type Material = SecretBytes;
+impl PartialEq for Material {
+    fn eq(&self, other: &Self) -> bool {
+        self.expose() == other.expose()
+    }
+}
+RS
+}
+expect_ct_eq_fail \
+    'a secret type alias hiding an ordinary PartialEq implementation' \
+    mut_secret_partial_eq_with_type_alias
+
+mut_secret_partial_eq_with_trait_alias() {
+    cat >>crates/sig/src/secret.rs <<'RS'
+
+use core::cmp::PartialEq as Same;
+impl Same for SecretBytes {
+    fn eq(&self, other: &Self) -> bool {
+        self.expose() == other.expose()
+    }
+}
+RS
+}
+expect_ct_eq_fail \
+    'a PartialEq import alias hiding ordinary comparison' \
+    mut_secret_partial_eq_with_trait_alias
+
+mut_secret_partial_eq_with_fake_authority() {
+    cat >>crates/sig/src/secret.rs <<'RS'
+
+mod fake {
+    pub fn ct_eq(a: &[u8], b: &[u8]) -> bool { a == b }
+}
+impl PartialEq for SecretBytes {
+    fn eq(&self, other: &Self) -> bool {
+        fake::ct_eq(self.expose(), other.expose())
+    }
+}
+RS
+}
+expect_ct_eq_fail \
+    'a look-alike ct_eq function that performs ordinary equality' \
+    mut_secret_partial_eq_with_fake_authority
+
+mut_secret_partial_eq_with_shadowed_subtle() {
+    cat >>crates/sig/src/secret.rs <<'RS'
+
+mod subtle {
+    pub trait ConstantTimeEq {
+        fn ct_eq(&self, other: &Self) -> bool;
+    }
+    impl ConstantTimeEq for [u8] {
+        fn ct_eq(&self, other: &Self) -> bool { self == other }
+    }
+}
+impl PartialEq for SecretBytes {
+    fn eq(&self, other: &Self) -> bool {
+        subtle::ConstantTimeEq::ct_eq(self.expose(), other.expose())
+    }
+}
+RS
+}
+expect_ct_eq_fail \
+    'a local subtle module shadowing the constant-time authority' \
+    mut_secret_partial_eq_with_shadowed_subtle
+
+mut_secret_partial_eq_with_constant_time_decoy() {
+    cat >>crates/sig/src/secret.rs <<'RS'
+
+impl PartialEq for SecretBytes {
+    fn eq(&self, other: &Self) -> bool {
+        let _ = ::subtle::ConstantTimeEq::ct_eq(self.expose(), other.expose());
+        self.expose() == other.expose()
+    }
+}
+RS
+}
+expect_ct_eq_fail \
+    'a real constant-time call used as a decoy before ordinary equality' \
+    mut_secret_partial_eq_with_constant_time_decoy
+
+mut_secret_partial_eq_with_ordinary_ne() {
+    cat >>crates/sig/src/secret.rs <<'RS'
+
+impl PartialEq for SecretBytes {
+    fn eq(&self, other: &Self) -> bool {
+        ::subtle::ConstantTimeEq::ct_eq(self.expose(), other.expose()).into()
+    }
+    fn ne(&self, other: &Self) -> bool {
+        self.expose() != other.expose()
+    }
+}
+RS
+}
+expect_ct_eq_fail \
+    'an ordinary comparison hidden in a PartialEq ne override' \
+    mut_secret_partial_eq_with_ordinary_ne
+
+mut_secret_partial_eq_from_macro() {
+    cat >>crates/sig/src/secret.rs <<'RS'
+
+macro_rules! unsafe_eq {
+    ($t:ty) => {
+        impl PartialEq for $t {
+            fn eq(&self, other: &Self) -> bool {
+                self.expose() == other.expose()
+            }
+        }
+    }
+}
+unsafe_eq!(SecretBytes);
+RS
+}
+expect_ct_eq_fail \
+    'a macro parameter generating PartialEq for secret material' \
+    mut_secret_partial_eq_from_macro
+
+mut_secret_partial_eq_from_nested_macro() {
+    cat >>crates/sig/src/secret.rs <<'RS'
+
+macro_rules! inner_eq {
+    ($t:ty) => {
+        impl PartialEq for $t {
+            fn eq(&self, other: &Self) -> bool {
+                self.expose() == other.expose()
+            }
+        }
+    }
+}
+macro_rules! outer_eq {
+    ($t:ty) => { inner_eq!($t); }
+}
+outer_eq!(SecretBytes);
+RS
+}
+expect_ct_eq_fail \
+    'a nested macro forwarding secret material into a PartialEq generator' \
+    mut_secret_partial_eq_from_nested_macro
+
+mut_secret_partial_eq_from_macro_metavariable() {
+    cat >>crates/sig/src/secret.rs <<'RS'
+
+macro_rules! inner_meta_eq {
+    ($t:ty) => {
+        impl PartialEq for $t {
+            fn eq(&self, other: &Self) -> bool {
+                self.expose() == other.expose()
+            }
+        }
+    }
+}
+macro_rules! outer_meta_eq {
+    ($m:ident, $t:ty) => { $m!($t); }
+}
+outer_meta_eq!(inner_meta_eq, SecretBytes);
+RS
+}
+expect_ct_eq_fail \
+    'a macro name passed through a metavariable before generating PartialEq' \
+    mut_secret_partial_eq_from_macro_metavariable
+
+probe_secret_partial_eq_with_constant_time_call() {
+    local sandbox rc=0
+    cases=$((cases + 1))
+    make_ct_eq_sandbox
+    sandbox="$CT_EQ_SANDBOX"
+    cat >"${sandbox}/ct_eq_positive.rs" <<'RS'
+struct FixtureSecret([u8; 4]);
+
+impl PartialEq for FixtureSecret {
+    fn eq(&self, other: &Self) -> bool {
+        ::subtle::ConstantTimeEq::ct_eq(&self.0, &other.0).into()
+    }
+}
+
+trait FixtureMarker {}
+impl<T: PartialEq> FixtureMarker for FixtureSecret {}
+RS
+    (cd "$sandbox" && git add ct_eq_positive.rs)
+    GATEWAY_CHECK_ROOT="$sandbox" "${SCRIPT_DIR}/check_ct_eq.sh" >/dev/null 2>&1 || rc=$?
+    if [[ "$rc" -eq 0 ]]; then
+        pass_msg 'check_ct_eq.sh accepts a hand-written PartialEq that calls ConstantTimeEq'
+    else
+        fail_msg 'check_ct_eq.sh rejected a hand-written PartialEq that calls ConstantTimeEq'
+    fi
+}
+probe_secret_partial_eq_with_constant_time_call
+
+probe_secret_partial_eq_allowance() {
+    local sandbox rc=0
+    cases=$((cases + 1))
+    make_ct_eq_sandbox
+    sandbox="$CT_EQ_SANDBOX"
+    cat >"${sandbox}/ct_eq_allowed.rs" <<'RS'
+struct FixtureSecretAlgorithm;
+
+impl PartialEq for FixtureSecretAlgorithm {
+    fn eq(&self, _: &Self) -> bool { true }
+}
+RS
+    printf 'ct_eq_allowed.rs:FixtureSecretAlgorithm # names an algorithm and carries no secret material\n' \
+        >>"${sandbox}/scripts/allowances/ct-eq-allowances.txt"
+    (cd "$sandbox" && git add ct_eq_allowed.rs scripts/allowances/ct-eq-allowances.txt)
+    GATEWAY_CHECK_ROOT="$sandbox" "${SCRIPT_DIR}/check_ct_eq.sh" >/dev/null 2>&1 || rc=$?
+    if [[ "$rc" -eq 0 ]]; then
+        pass_msg 'check_ct_eq.sh honours a reasoned false-positive allowance for PartialEq'
+    else
+        fail_msg 'check_ct_eq.sh ignored a reasoned false-positive allowance for PartialEq'
+    fi
+}
+probe_secret_partial_eq_allowance
+
+probe_ct_eq_missing_git_inputs() {
+    local empty output rc=0
+    cases=$((cases + 1))
+    empty="$(mktemp -d "${TMPDIR:-/tmp}/gateway-ct-eq-empty.XXXXXX")"
+    output="$(GATEWAY_CHECK_ROOT="$empty" "${SCRIPT_DIR}/check_ct_eq.sh" 2>&1)" || rc=$?
+    rmdir "$empty"
+    if [[ "$rc" -ne 0 && "$output" == *'cannot enumerate Rust source inputs'* ]]; then
+        pass_msg 'check_ct_eq.sh fails closed when git source inputs are unavailable'
+    else
+        fail_msg 'check_ct_eq.sh reported green without git source inputs'
+    fi
+}
+probe_ct_eq_missing_git_inputs
+
+probe_role_verdict_guard_exists() {
+    cases=$((cases + 1))
+    if [[ -x "${SCRIPT_DIR}/check_role_verdicts.sh" ]]; then
+        pass_msg 'check_role_verdicts.sh exists and is executable'
+    else
+        fail_msg 'check_role_verdicts.sh is missing or not executable'
+    fi
+}
+probe_role_verdict_guard_exists
+
+expect_role_result() {
+    local expected="$1" desc="$2" changed="$3" body="$4" changed_diff="${5:-}" rc=0
+    cases=$((cases + 1))
+    GATEWAY_CHECK_ROOT="$REPO_ROOT" \
+        GATEWAY_CHANGED_FILES="$changed" \
+        GATEWAY_CHANGED_DIFF="$changed_diff" \
+        GATEWAY_PR_BODY="$body" \
+        "${SCRIPT_DIR}/check_role_verdicts.sh" >/dev/null 2>&1 || rc=$?
+    if [[ "$expected" == pass && "$rc" -eq 0 ]]; then
+        pass_msg "check_role_verdicts.sh allows: ${desc}"
+    elif [[ "$expected" == fail && "$rc" -ne 0 ]]; then
+        pass_msg "check_role_verdicts.sh catches: ${desc}"
+    else
+        fail_msg "check_role_verdicts.sh unexpected result for: ${desc}"
+    fi
+}
+
+expect_role_result pass 'documentation-only changes without a role section' \
+    $'M\tdocs/guide.md' ''
+expect_role_result pass 'an ordinary script change with a substantive simplicity verdict' \
+    $'M\tscripts/check_example.sh' \
+    $'## Role Verdicts\n- simplicity-adversary: scripts/check_example.sh:12 accepts a missing input and can report false green.'
+expect_role_result pass 'a types change with both required roles' \
+    $'M\tcrates/types/src/lib.rs' \
+    $'## Role Verdicts\n- simplicity-adversary: attacked public surface and abstraction count — no break found.\n- protocol-auditor: attacked wire names and optional-field boundaries — no break found.'
+expect_role_result pass 'a signature change with its high-risk three-role exception' \
+    $'M\tcrates/sig/src/lib.rs' \
+    $'## Role Verdicts\n- simplicity-adversary: attacked API surface and abstraction count — no break found.\n- security-adversary: attacked timing and secret exposure paths — no break found.\n- test-adversary: attacked comparison reversion and negative cases — no break found.'
+expect_role_result pass 'an HTTP change with its high-risk four-role exception' \
+    $'M\tcrates/http/src/lib.rs' \
+    $'## Role Verdicts\n- simplicity-adversary: attacked API surface and abstraction count — no break found.\n- security-adversary: attacked parser limits and malformed input — no break found.\n- concurrency-durability: attacked cancellation and partial-read paths — no break found.\n- perf-engineer: attacked allocation and copy boundaries — no break found.'
+expect_role_result fail 'a missing required security verdict' \
+    $'M\tcrates/sig/src/lib.rs' \
+    $'## Role Verdicts\n- simplicity-adversary: attacked API surface and abstraction count — no break found.\n- test-adversary: attacked comparison reversion and negative cases — no break found.'
+expect_role_result fail 'a bare pass presented as a verdict' \
+    $'M\tscripts/check_example.sh' \
+    $'## Role Verdicts\n- simplicity-adversary: pass'
+expect_role_result fail 'a one-word pass synonym presented as a verdict' \
+    $'M\tscripts/check_example.sh' \
+    $'## Role Verdicts\n- simplicity-adversary: passed'
+expect_role_result fail 'two-word approval prose presented as a verdict' \
+    $'M\tscripts/check_example.sh' \
+    $'## Role Verdicts\n- simplicity-adversary: looks good'
+expect_role_result fail 'a role section hidden in an HTML comment' \
+    $'M\tscripts/check_example.sh' \
+    $'<!--\n## Role Verdicts\n- simplicity-adversary: attacked the input boundary.\n-->'
+expect_role_result fail 'a role section hidden in a fenced block' \
+    $'M\tscripts/check_example.sh' \
+    $'```markdown\n## Role Verdicts\n- simplicity-adversary: attacked the input boundary.\n```'
+expect_role_result fail 'a role section hidden by a backtick fence whose info starts with tilde' \
+    $'M\tscripts/check_example.sh' \
+    $'```~markdown\n## Role Verdicts\n- simplicity-adversary: attacked the input boundary.\n```'
+expect_role_result fail 'a role heading hidden in an indented code block' \
+    $'M\tscripts/check_example.sh' \
+    $'    ## Role Verdicts\n- simplicity-adversary: attacked the input boundary.'
+expect_role_result fail 'a role heading hidden in a raw HTML block' \
+    $'M\tscripts/check_example.sh' \
+    $'<pre>\n## Role Verdicts\n- simplicity-adversary: attacked the input boundary.\n</pre>'
+expect_role_result fail 'duplicate visible role sections' \
+    $'M\tscripts/check_example.sh' \
+    $'## Role Verdicts\n- simplicity-adversary: attacked the input boundary — no break found.\n## Role Verdicts\n- simplicity-adversary: attacked the error boundary — no break found.'
+expect_role_result fail 'duplicate verdict lines for one role' \
+    $'M\tscripts/check_example.sh' \
+    $'## Role Verdicts\n- simplicity-adversary: attacked the input boundary — no break found.\n- simplicity-adversary: attacked the error boundary — no break found.'
+expect_role_result fail 'a rename into signature code without its path roles' \
+    $'R100\tcrates/core/src/old.rs\tcrates/sig/src/new.rs' \
+    $'## Role Verdicts\n- simplicity-adversary: attacked rename path selection — no break found.'
+expect_role_result fail 'a hidden HIGH-RISK marker authorizing four roles' \
+    $'M\tcrates/types/src/lib.rs\nA\tconformance/cases/example.toml\nM\tcrates/core/src/lib.rs' \
+    $'<!-- HIGH-RISK -->\n## Role Verdicts\n- simplicity-adversary: attacked the surface — no break found.\n- protocol-auditor: attacked the protocol — no break found.\n- security-adversary: attacked the trust boundary — no break found.\n- test-adversary: attacked the case — no break found.'
+
+probe_role_verdict_missing_inputs() {
+    local rc=0
+    cases=$((cases + 1))
+    GATEWAY_CHECK_ROOT="$REPO_ROOT" GATEWAY_PR_BODY='' \
+        "${SCRIPT_DIR}/check_role_verdicts.sh" >/dev/null 2>&1 || rc=$?
+    if [[ "$rc" -ne 0 ]]; then
+        pass_msg 'check_role_verdicts.sh fails closed without changed-file inputs'
+    else
+        fail_msg 'check_role_verdicts.sh reported green without changed-file inputs'
+    fi
+}
+probe_role_verdict_missing_inputs
+
+probe_role_verdict_table_drift() {
+    local sandbox rc=0
+    cases=$((cases + 1))
+    make_sandbox
+    sandbox="$SANDBOX"
+    sed -i.bak 's/at most 60k tokens per PR/at most 61k tokens per PR/' "${sandbox}/AGENTS.md"
+    rm -f "${sandbox}/AGENTS.md.bak"
+    GATEWAY_CHECK_ROOT="$sandbox" \
+        GATEWAY_CHANGED_FILES=$'M\tscripts/check_example.sh' \
+        GATEWAY_PR_BODY=$'## Role Verdicts\n- simplicity-adversary: attacked the input boundary — no break found.' \
+        "${SCRIPT_DIR}/check_role_verdicts.sh" >/dev/null 2>&1 || rc=$?
+    if [[ "$rc" -ne 0 ]]; then
+        pass_msg 'check_role_verdicts.sh catches AGENTS.md trigger-table drift'
+    else
+        fail_msg 'check_role_verdicts.sh accepted AGENTS.md trigger-table drift'
+    fi
+}
+probe_role_verdict_table_drift
+
+probe_compat_role_required() {
+    local repo base head rc=0
+    cases=$((cases + 1))
+    repo="$(mktemp -d "${TMPDIR:-/tmp}/gateway-role-compat.XXXXXX")"
+    mkdir -p "${repo}/crates/types"
+    cp "${REPO_ROOT}/AGENTS.md" "${repo}/AGENTS.md"
+    printf '[features]\ndefault = []\n' >"${repo}/crates/types/Cargo.toml"
+    (
+        cd "$repo"
+        git init -q .
+        git add -A
+        git -c user.name=t -c user.email=t@t commit -qm base
+    )
+    base="$(git -C "$repo" rev-parse HEAD)"
+    printf 'compat-s3s = []\n' >>"${repo}/crates/types/Cargo.toml"
+    (
+        cd "$repo"
+        git add -A
+        git -c user.name=t -c user.email=t@t commit -qm compat
+    )
+    head="$(git -C "$repo" rev-parse HEAD)"
+    GATEWAY_CHECK_ROOT="$repo" \
+        GATEWAY_ROLE_BASE="$base" \
+        GATEWAY_ROLE_HEAD="$head" \
+        GATEWAY_PR_BODY=$'## Role Verdicts\n- simplicity-adversary: attacked the compatibility surface — no break found.' \
+        "${SCRIPT_DIR}/check_role_verdicts.sh" >/dev/null 2>&1 || rc=$?
+    rm -rf "$repo"
+    if [[ "$rc" -ne 0 ]]; then
+        pass_msg 'check_role_verdicts.sh requires migration safety when compat-s3s changes'
+    else
+        fail_msg 'check_role_verdicts.sh missed a compat-s3s change'
+    fi
+}
+probe_compat_role_required
+
+probe_compat_source_role_required() {
+    local repo base head rc=0
+    cases=$((cases + 1))
+    repo="$(mktemp -d "${TMPDIR:-/tmp}/gateway-role-compat-source.XXXXXX")"
+    mkdir -p "${repo}/crates/types/src"
+    cp "${REPO_ROOT}/AGENTS.md" "${repo}/AGENTS.md"
+    printf 'pub fn ordinary() {}\n' >"${repo}/crates/types/src/lib.rs"
+    (
+        cd "$repo"
+        git init -q .
+        git add -A
+        git -c user.name=t -c user.email=t@t commit -qm base
+    )
+    base="$(git -C "$repo" rev-parse HEAD)"
+    printf '#[cfg(feature = "compat-s3s")]\npub fn compatibility() {}\n' \
+        >>"${repo}/crates/types/src/lib.rs"
+    (
+        cd "$repo"
+        git add -A
+        git -c user.name=t -c user.email=t@t commit -qm compat-source
+    )
+    head="$(git -C "$repo" rev-parse HEAD)"
+    GATEWAY_CHECK_ROOT="$repo" \
+        GATEWAY_ROLE_BASE="$base" \
+        GATEWAY_ROLE_HEAD="$head" \
+        GATEWAY_PR_BODY=$'## Role Verdicts\n- simplicity-adversary: attacked the compatibility surface — no break found.\n- protocol-auditor: attacked the wire contract — no break found.' \
+        "${SCRIPT_DIR}/check_role_verdicts.sh" >/dev/null 2>&1 || rc=$?
+    rm -rf "$repo"
+    if [[ "$rc" -ne 0 ]]; then
+        pass_msg 'check_role_verdicts.sh requires migration safety for compat-s3s source cfg changes'
+    else
+        fail_msg 'check_role_verdicts.sh missed a compat-s3s source cfg change'
+    fi
+}
+probe_compat_source_role_required
+
+probe_existing_compat_body_role_required() {
+    local repo base head rc=0
+    cases=$((cases + 1))
+    repo="$(mktemp -d "${TMPDIR:-/tmp}/gateway-role-compat-body.XXXXXX")"
+    mkdir -p "${repo}/crates/types/src"
+    cp "${REPO_ROOT}/AGENTS.md" "${repo}/AGENTS.md"
+    printf '#[cfg(feature = "compat-s3s")]\npub fn adapter() { old(); }\n' \
+        >"${repo}/crates/types/src/lib.rs"
+    (
+        cd "$repo"
+        git init -q .
+        git add -A
+        git -c user.name=t -c user.email=t@t commit -qm base
+    )
+    base="$(git -C "$repo" rev-parse HEAD)"
+    sed -i.bak 's/old()/new()/' "${repo}/crates/types/src/lib.rs"
+    rm -f "${repo}/crates/types/src/lib.rs.bak"
+    (
+        cd "$repo"
+        git add -A
+        git -c user.name=t -c user.email=t@t commit -qm compat-body
+    )
+    head="$(git -C "$repo" rev-parse HEAD)"
+    GATEWAY_CHECK_ROOT="$repo" \
+        GATEWAY_ROLE_BASE="$base" \
+        GATEWAY_ROLE_HEAD="$head" \
+        GATEWAY_PR_BODY=$'## Role Verdicts\n- simplicity-adversary: attacked the compatibility surface — no break found.\n- protocol-auditor: attacked the wire contract — no break found.' \
+        "${SCRIPT_DIR}/check_role_verdicts.sh" >/dev/null 2>&1 || rc=$?
+    rm -rf "$repo"
+    if [[ "$rc" -ne 0 ]]; then
+        pass_msg 'check_role_verdicts.sh requires migration safety when an existing compat item body changes'
+    else
+        fail_msg 'check_role_verdicts.sh missed a body-only change inside an existing compat item'
+    fi
+}
+probe_existing_compat_body_role_required
 
 # P2-01 case coverage. Each failure mode has an independent mutation: a mapping can disappear,
 # lie about its polarity, point nowhere, name no case, point at no executable assertion, lose its

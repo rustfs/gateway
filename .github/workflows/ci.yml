@@ -124,6 +124,15 @@ jobs:
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
             bash scripts/check_protected_files.sh
           fi
+      - name: Role verdicts
+        env:
+          GATEWAY_ROLE_BASE: ${{ github.event.pull_request.base.sha }}
+          GATEWAY_ROLE_HEAD: ${{ github.event.pull_request.head.sha }}
+          GATEWAY_PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            bash scripts/check_role_verdicts.sh
+          fi
       # Generated artefacts are a pure function of (model, overlays). If regenerating moves a
       # byte, the checked-in output and the generator disagree, and every review that read the
       # output was reading something the generator no longer produces.
