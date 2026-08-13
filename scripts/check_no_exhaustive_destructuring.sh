@@ -21,10 +21,8 @@ set -euo pipefail
 #   See ADR-0004 rule P3.
 #
 # HOW TO EXEMPT
-#   Add a line to `scripts/allowances/exhaustive-destructuring-allowances.txt`
-#   in the form `<path>:<line>` with a comment giving the reason. Exhaustive
-#   destructuring is occasionally right — a test that asserts the full shape of
-#   a small struct, for instance — but it should be a decision, not an accident.
+#   There is no allowance. Supersede ADR-0004 and change this guard in the same
+#   reviewed change; a path-and-line text file must not silently weaken P3.
 #
 # USAGE
 #   scripts/check_no_exhaustive_destructuring.sh
@@ -33,99 +31,14 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="${GATEWAY_CHECK_ROOT:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
-ALLOWANCE_FILE="${ROOT_DIR}/scripts/allowances/exhaustive-destructuring-allowances.txt"
-cd "$ROOT_DIR"
+HELPER="${SCRIPT_DIR}/lib/rust_semver_surface.py"
 
-status=0
-
-ALLOWANCES=""
-if [[ -f "$ALLOWANCE_FILE" ]]; then
-    while IFS= read -r line; do
-        line="${line%%#*}"
-        line="$(printf '%s' "$line" | tr -d ' \t')"
-        [[ -z "$line" ]] && continue
-        ALLOWANCES="${ALLOWANCES}${line}
-"
-    done <"$ALLOWANCE_FILE"
-fi
-
-is_allowed() {
-    [[ -z "$ALLOWANCES" ]] && return 1
-    printf '%s' "$ALLOWANCES" | grep -qxF "$1"
+fail() {
+    printf 'check_no_exhaustive_destructuring: %s\n' "$*" >&2
+    exit 1
 }
 
-# The dto type names to look for, taken from what codegen actually emitted, so the
-# guard cannot drift from the model.
-#
-# The layout is module-per-operation, so the real type names ARE `Input` and
-# `Output`. Excluding them as "too common" — the first instinct — removes the only
-# names that matter and leaves a guard that cannot fail. They are therefore matched
-# only in qualified position (`...::Output {`), which is how a dto is actually named
-# at a destructuring site, while a local `struct Output` in some unrelated module
-# stays out of scope.
-# `--cached --others --exclude-standard` rather than a bare `git ls-files`: the bare form lists
-# only *tracked* files, so a brand-new file stays invisible to this guard right up until the
-# moment `git add -A` commits it. That is how CJK text reached commit 343f044 past a guard run
-# that had just reported success. `--exclude-standard` keeps ignored files out.
-dto_names="$(git ls-files --cached --others --exclude-standard -- 'generated/dto/*' 'generated/dto/**' 2>/dev/null |
-    xargs grep -ho '^pub struct [A-Za-z0-9_]*' 2>/dev/null |
-    sed 's/^pub struct //' |
-    grep -vxE 'Input|Output' |
-    sort -u || true)"
+command -v python3 >/dev/null 2>&1 || fail 'required command is missing: python3'
+[[ -f "$HELPER" ]] || fail 'required parser is missing: scripts/lib/rust_semver_surface.py'
 
-# Flat aliases (`GetBucketLocationOutput`) are ordinary names and match unqualified.
-flat_names="$(git ls-files --cached --others --exclude-standard -- 'generated/dto/flat.rs' 2>/dev/null |
-    xargs grep -hoE 'as [A-Za-z0-9_]+' 2>/dev/null |
-    sed 's/^as //' |
-    sort -u || true)"
-dto_names="$(printf '%s\n%s\n' "$dto_names" "$flat_names" | grep -v '^$' | sort -u || true)"
-
-if [[ -z "$dto_names" ]]; then
-    # Nothing generated yet: the guard has nothing to say, and saying it loudly
-    # would train people to ignore it.
-    exit 0
-fi
-
-names="$(printf '%s' "$dto_names" | paste -sd'|' -)"
-# A bare name counts only where an identifier starts. The model contains a shape
-# named `Name`, and unanchored it makes the guard read
-# `BuildError::RouteClaimsStandardName {` as that shape and report a dto where
-# there is none. A false report is not a harmless one: its remedy is an allowance
-# line, so an over-matching guard spends its own authority teaching people to
-# silence it.
-#
-# The boundary belongs to the bare names alone. `::Input` / `::Output` carry their
-# own in the `::`, and requiring another one in front would demand a non-identifier
-# character before the path separator — which `dto::Input` does not have, and which
-# would quietly stop the guard seeing the two names it most needs to.
-pattern="((^|[^A-Za-z0-9_])(${names})|::(Input|Output))"
-
-while IFS= read -r file; do
-    [[ -n "$file" ]] || continue
-    [[ -f "$file" ]] || continue
-    case "$file" in
-    generated/*) continue ;; # generated code is not hand-written
-    esac
-    while IFS=: read -r lineno text; do
-        [[ -n "${lineno:-}" ]] || continue
-        # A destructuring pattern with no `..` before the closing brace.
-        if printf '%s' "$text" | grep -qE "(${pattern})[[:space:]]*\{[^}]*\}" &&
-            ! printf '%s' "$text" | grep -qE "(${pattern})[[:space:]]*\{[^}]*\.\.[^}]*\}"; then
-            if is_allowed "${file}:${lineno}"; then continue; fi
-            printf '%s:%s: exhaustive destructuring of a dto; add `..` so a new field stays a minor change (ADR-0004 P3)\n' \
-                "$file" "$lineno" >&2
-            status=1
-        fi
-    done < <(grep -nE "(let|if let|while let|match)[^=]*(${pattern})[[:space:]]*\{" "$file" 2>/dev/null || true)
-done < <(git ls-files --cached --others --exclude-standard -- '*.rs' 2>/dev/null || true)
-
-if [[ "$status" -ne 0 ]]; then
-    cat >&2 <<'EOF'
-
-ADR-0004 P3: destructure dto types with a trailing `..`. AWS grows these structs
-on its own schedule, and an exhaustive pattern turns every addition into a
-compile error at a site that wanted two fields out of forty.
-EOF
-fi
-
-exit "$status"
+python3 "$HELPER" destructuring "$ROOT_DIR"

@@ -51,6 +51,7 @@ SANDBOX_RESET_UNTRACKED=""
 SANDBOX_RESET_READY=0
 QUIRK_LEDGER_PARSE_CACHE=""
 CT_EQ_SANDBOX=""
+SEMVER_SANDBOX=""
 
 literalize_nul_paths() {
     local input="$1" output="$2" path
@@ -254,7 +255,73 @@ cleanup_sandbox() {
     if [[ -n "$CT_EQ_SANDBOX" ]]; then
         rm -rf "$CT_EQ_SANDBOX"
     fi
+    if [[ -n "$SEMVER_SANDBOX" ]]; then
+        rm -rf "$SEMVER_SANDBOX"
+    fi
     return 0
+}
+
+make_semver_sandbox() {
+    if [[ -n "$SEMVER_SANDBOX" ]]; then
+        (
+            cd "$SEMVER_SANDBOX"
+            git reset --hard -q HEAD
+            git clean -fdq
+        )
+        return
+    fi
+
+    SEMVER_SANDBOX="$(mktemp -d "${TMPDIR:-/tmp}/gateway-semver-test.XXXXXX")"
+    mkdir -p \
+        "$SEMVER_SANDBOX/crates/types/src" \
+        "$SEMVER_SANDBOX/docs/adr" \
+        "$SEMVER_SANDBOX/generated/dto/ops" \
+        "$SEMVER_SANDBOX/scripts/allowances" \
+        "$SEMVER_SANDBOX/scripts/lib"
+    cp "$REPO_ROOT/crates/types/src/lib.rs" "$SEMVER_SANDBOX/crates/types/src/lib.rs"
+    cp "$REPO_ROOT/generated/dto/ops/get_bucket_location.rs" \
+        "$SEMVER_SANDBOX/generated/dto/ops/get_bucket_location.rs"
+    cp "$REPO_ROOT/docs/adr/0004-semver-policy.md" "$SEMVER_SANDBOX/docs/adr/"
+    cp "$REPO_ROOT/scripts/check_no_dto_non_exhaustive.sh" \
+        "$REPO_ROOT/scripts/check_no_exhaustive_destructuring.sh" \
+        "$SEMVER_SANDBOX/scripts/"
+    cp "$REPO_ROOT/scripts/lib/rust_semver_surface.py" "$SEMVER_SANDBOX/scripts/lib/"
+    cat >"$SEMVER_SANDBOX/generated/dto/semver_names.rs" <<'RS'
+pub struct Nested {}
+pub struct ObjectLockConfiguration {}
+RS
+    (
+        cd "$SEMVER_SANDBOX"
+        git init -q .
+        git add -A
+        git -c user.name=t -c user.email=t@t commit -qm base
+    )
+    if ! GATEWAY_CHECK_ROOT="$SEMVER_SANDBOX" \
+        "$SEMVER_SANDBOX/scripts/check_no_dto_non_exhaustive.sh" >/dev/null 2>&1 ||
+        ! GATEWAY_CHECK_ROOT="$SEMVER_SANDBOX" \
+            "$SEMVER_SANDBOX/scripts/check_no_exhaustive_destructuring.sh" >/dev/null 2>&1; then
+        fail_msg 'ADR-0004 guards reject their minimal unmodified fixture'
+        return 1
+    fi
+}
+
+expect_semver_fail() {
+    local guard="$1" desc="$2" mutate="$3" output rc=0
+    cases=$((cases + 1))
+    make_semver_sandbox
+    (cd "$SEMVER_SANDBOX" && "$mutate" >/dev/null)
+    output="$(GATEWAY_CHECK_ROOT="$SEMVER_SANDBOX" \
+        "$SEMVER_SANDBOX/scripts/$guard" 2>&1)" || rc=$?
+    if [[ "$rc" -ne 0 &&
+        ( "$output" == *'rule: docs/adr/0004-semver-policy.md'* ||
+            "$output" == *'ADR-0004 guard:'* ||
+            "$output" == *'required parser is missing:'* ) ]]; then
+        pass_msg "${guard} catches: ${desc}"
+    elif [[ "$rc" -ne 0 ]]; then
+        fail_msg "${guard} failed without its policy diagnostic: ${desc}"
+    else
+        fail_msg "${guard} did NOT catch: ${desc}"
+    fi
 }
 trap cleanup_sandbox EXIT
 
@@ -6280,19 +6347,61 @@ expect_fail check_generated_dto_packaged.sh \
 
 
 # -----------------------------------------------------------------------------
-# ADR-0004's SemVer policy was prose until now. These two guards are what make
+# ADR-0004's SemVer policy was prose until now. These guards are what make
 # "a new optional field is a minor change" enforceable rather than aspirational.
+# The mutations cover attributes independent of layout and every Rust pattern
+# position where exhaustive destructuring can hide.
 # -----------------------------------------------------------------------------
 
 mut_dto_non_exhaustive() {
     f=generated/dto/ops/get_bucket_location.rs
-    awk '/^#\[derive\(Debug, Clone, Default\)\]$/ && !done { print "#[non_exhaustive]"; done = 1 } { print }' \
+    awk '/^pub struct / && !done { print "#[non_exhaustive]"; done = 1 } { print }' \
         "$f" >"${f}.mut" && mv "${f}.mut" "$f"
 }
-expect_fail check_no_dto_non_exhaustive.sh \
+expect_semver_fail check_no_dto_non_exhaustive.sh \
     'a dto struct marked #[non_exhaustive], which forbids FRU' mut_dto_non_exhaustive
 
-mut_exhaustive_destructuring() {
+mut_dto_non_exhaustive_same_line() {
+    f=generated/dto/ops/get_bucket_location.rs
+    awk '/^pub struct / && !done { sub(/^pub struct /, "#[non_exhaustive] pub struct "); done = 1 } { print }' \
+        "$f" >"${f}.mut" && mv "${f}.mut" "$f"
+}
+expect_semver_fail check_no_dto_non_exhaustive.sh \
+    'a same-line #[non_exhaustive] dto struct attribute' mut_dto_non_exhaustive_same_line
+
+mut_dto_cfg_attr_non_exhaustive() {
+    f=generated/dto/ops/get_bucket_location.rs
+    awk '/^pub struct / && !done { print "#[cfg_attr(all(), non_exhaustive)]"; done = 1 } { print }' \
+        "$f" >"${f}.mut" && mv "${f}.mut" "$f"
+}
+expect_semver_fail check_no_dto_non_exhaustive.sh \
+    'a cfg_attr that applies non_exhaustive to a dto struct' mut_dto_cfg_attr_non_exhaustive
+
+mut_dto_non_exhaustive_missing_inputs() {
+    mv generated/dto generated/dto-hidden
+}
+expect_semver_fail check_no_dto_non_exhaustive.sh \
+    'the required generated dto inputs are missing' mut_dto_non_exhaustive_missing_inputs
+
+mut_dto_non_exhaustive_missing_rule() {
+    rm docs/adr/0004-semver-policy.md
+}
+expect_semver_fail check_no_dto_non_exhaustive.sh \
+    'the governing ADR input is missing' mut_dto_non_exhaustive_missing_rule
+
+mut_dto_non_exhaustive_malformed_source() {
+    printf '\npub struct Unclosed {\n' >>generated/dto/ops/get_bucket_location.rs
+}
+expect_semver_fail check_no_dto_non_exhaustive.sh \
+    'a generated Rust input cannot be parsed completely' mut_dto_non_exhaustive_malformed_source
+
+mut_dto_non_exhaustive_missing_parser() {
+    rm scripts/lib/rust_semver_surface.py
+}
+expect_semver_fail check_no_dto_non_exhaustive.sh \
+    'the required Rust source parser is missing' mut_dto_non_exhaustive_missing_parser
+
+mut_exhaustive_destructuring_multiline() {
     cat >>crates/types/src/lib.rs <<'RS'
 
 #[cfg(test)]
@@ -6300,14 +6409,244 @@ mod destructure_fixture {
     #[test]
     fn fixture() {
         let out = crate::ops::get_bucket_location::Output::default();
-        let crate::ops::get_bucket_location::Output { location_constraint } = out;
+        let crate::ops::get_bucket_location::Output {
+            location_constraint,
+        } = out;
         let _ = location_constraint;
     }
 }
 RS
 }
-expect_fail check_no_exhaustive_destructuring.sh \
-    'a dto destructured without a trailing ..' mut_exhaustive_destructuring
+expect_semver_fail check_no_exhaustive_destructuring.sh \
+    'a multiline dto pattern without a trailing ..' mut_exhaustive_destructuring_multiline
+
+mut_destructuring_nested_rest() {
+    cat >>crates/types/src/lib.rs <<'RS'
+
+fn semver_nested_rest(value: crate::ops::get_bucket_location::Output) {
+    let crate::ops::get_bucket_location::Output {
+        location_constraint: Some(crate::types::Nested { .. }),
+    } = value;
+}
+RS
+}
+expect_semver_fail check_no_exhaustive_destructuring.sh \
+    'a nested rest pattern that does not make the outer dto additive' mut_destructuring_nested_rest
+
+mut_destructuring_range_decoy() {
+    cat >>crates/types/src/lib.rs <<'RS'
+
+fn semver_range(value: crate::ops::get_bucket_location::Output) {
+    let crate::ops::get_bucket_location::Output { location_constraint: 0..=10 } = value;
+}
+RS
+}
+expect_semver_fail check_no_exhaustive_destructuring.sh \
+    'a range pattern that is not a top-level rest pattern' mut_destructuring_range_decoy
+
+mut_destructuring_pattern_positions() {
+    cat >>crates/types/src/lib.rs <<'RS'
+
+fn semver_pattern_positions<T>(
+    crate::ops::get_bucket_location::Output { location_constraint }: crate::ops::get_bucket_location::Output,
+    values: T,
+) {
+    for crate::ops::get_bucket_location::Output { location_constraint } in values {}
+    let closure = |crate::ops::get_bucket_location::Output { location_constraint }| location_constraint;
+    match crate::ops::get_bucket_location::Output::default() {
+        crate::ops::get_bucket_location::Output { location_constraint } => (),
+    }
+    let _ = matches!(
+        crate::ops::get_bucket_location::Output::default(),
+        crate::ops::get_bucket_location::Output { location_constraint }
+    );
+    (crate::ops::get_bucket_location::Output { location_constraint }) =
+        crate::ops::get_bucket_location::Output::default();
+}
+RS
+}
+expect_semver_fail check_no_exhaustive_destructuring.sh \
+    'for, parameter, closure, match, matches, and assignment dto patterns' \
+    mut_destructuring_pattern_positions
+
+mut_destructuring_match_block_without_comma() {
+    cat >>crates/types/src/lib.rs <<'RS'
+
+fn semver_match_blocks(value: crate::ops::get_bucket_location::Output) {
+    match value {
+        crate::ops::get_bucket_location::Output { location_constraint, .. } => {}
+        crate::ops::get_bucket_location::Output { location_constraint } => {}
+    }
+}
+RS
+}
+expect_semver_fail check_no_exhaustive_destructuring.sh \
+    'a later exhaustive match arm after a comma-less block arm' \
+    mut_destructuring_match_block_without_comma
+
+mut_destructuring_match_if_block_without_comma() {
+    cat >>crates/types/src/lib.rs <<'RS'
+
+fn semver_match_if_blocks(value: crate::ops::get_bucket_location::Output, flag: bool) {
+    match value {
+        crate::ops::get_bucket_location::Output { location_constraint: None, .. } => if flag {}
+        crate::ops::get_bucket_location::Output { location_constraint } => {}
+    }
+}
+RS
+}
+expect_semver_fail check_no_exhaustive_destructuring.sh \
+    'a later exhaustive arm after a comma-less if expression with block' \
+    mut_destructuring_match_if_block_without_comma
+
+mut_destructuring_import_alias() {
+    cat >>crates/types/src/lib.rs <<'RS'
+
+use crate::ops::get_bucket_location::Output as SemverReply;
+use crate::ops::get_bucket_location as semver_op;
+use rustfs_gateway_types::dto;
+type SemverLock = dto::ObjectLockConfiguration;
+
+fn semver_import_alias(
+    value: SemverReply,
+    operation_value: semver_op::Output,
+    lock: dto::ObjectLockConfiguration,
+    typed_lock: SemverLock,
+) {
+    let SemverReply { location_constraint } = value;
+    let semver_op::Output { location_constraint } = operation_value;
+    let dto::ObjectLockConfiguration { object_lock_enabled, rule } = lock;
+    let SemverLock { object_lock_enabled, rule } = typed_lock;
+}
+RS
+}
+expect_semver_fail check_no_exhaustive_destructuring.sh \
+    'a dto destructured through an alias or dto namespace' mut_destructuring_import_alias
+
+mut_destructuring_untracked_source() {
+    cat >crates/types/src/semver_untracked.rs <<'RS'
+fn semver_untracked(value: crate::ops::get_bucket_location::Output) {
+    let crate::ops::get_bucket_location::Output { location_constraint } = value;
+}
+RS
+}
+expect_semver_fail check_no_exhaustive_destructuring.sh \
+    'an exhaustive dto pattern in an untracked Rust source' mut_destructuring_untracked_source
+
+mut_destructuring_allowance_bypass() {
+    f=crates/types/src/lib.rs
+    line=$(($(wc -l <"$f") + 1))
+    mkdir -p scripts/allowances
+    printf '%s\n' \
+        'fn semver_allowed(value: crate::ops::get_bucket_location::Output) { let crate::ops::get_bucket_location::Output { location_constraint } = value; }' \
+        >>"$f"
+    printf '%s:%s # exhaustive patterns cannot be allowed\n' "$f" "$line" \
+        >scripts/allowances/exhaustive-destructuring-allowances.txt
+}
+expect_semver_fail check_no_exhaustive_destructuring.sh \
+    'a path-and-line allowance attempting to bypass ADR-0004 P3' mut_destructuring_allowance_bypass
+
+mut_destructuring_missing_inputs() {
+    mv generated/dto generated/dto-hidden
+}
+expect_semver_fail check_no_exhaustive_destructuring.sh \
+    'the dto name source is missing instead of silently skipping' mut_destructuring_missing_inputs
+
+mut_destructuring_malformed_source() {
+    printf '\nfn semver_unclosed( {\n' >>crates/types/src/lib.rs
+}
+expect_semver_fail check_no_exhaustive_destructuring.sh \
+    'a hand-written Rust input cannot be parsed completely' mut_destructuring_malformed_source
+
+mut_destructuring_missing_parser() {
+    rm scripts/lib/rust_semver_surface.py
+}
+expect_semver_fail check_no_exhaustive_destructuring.sh \
+    'the required Rust source parser is missing' mut_destructuring_missing_parser
+
+probe_semver_guards_missing_python() {
+    local guard output rc tool_path all_failed=1
+    cases=$((cases + 1))
+    make_semver_sandbox
+    tool_path="$(mktemp -d "${TMPDIR:-/tmp}/gateway-semver-path.XXXXXX")"
+    ln -s "$(command -v dirname)" "${tool_path}/dirname"
+    for guard in check_no_dto_non_exhaustive.sh check_no_exhaustive_destructuring.sh; do
+        rc=0
+        output="$(GATEWAY_CHECK_ROOT="$SEMVER_SANDBOX" PATH="$tool_path" /bin/bash \
+            "$SEMVER_SANDBOX/scripts/${guard}" 2>&1)" || rc=$?
+        if [[ "$rc" -eq 0 || "$output" != *'required command is missing: python3'* ]]; then
+            all_failed=0
+        fi
+    done
+    rm -rf "$tool_path"
+    if [[ "$all_failed" -eq 1 ]]; then
+        pass_msg 'ADR-0004 guards fail closed when python3 is unavailable'
+    else
+        fail_msg 'an ADR-0004 guard reported green without python3'
+    fi
+}
+probe_semver_guards_missing_python
+
+probe_semver_guard_decoys() {
+    local sandbox rc=0 non_exhaustive_output destructuring_output
+    cases=$((cases + 1))
+    make_semver_sandbox
+    sandbox="$SEMVER_SANDBOX"
+    cat >>"$sandbox/generated/dto/ops/get_bucket_location.rs" <<'RS'
+
+// #[non_exhaustive] pub struct CommentOnly {}
+const NON_EXHAUSTIVE_TEXT: &str = r#"#[non_exhaustive] pub struct StringOnly {}"#;
+#[non_exhaustive]
+pub enum FutureEnum { Value }
+#[cfg_attr(all(), allow(non_exhaustive))]
+pub struct AttributeArgumentOnly {}
+RS
+    cat >>"$sandbox/crates/types/src/lib.rs" <<'RS'
+
+struct Output { local: bool }
+struct Owner { local: bool }
+
+mod local {
+    pub struct Owner { pub local: bool }
+}
+mod dto {
+    pub struct Owner { pub local: bool }
+}
+mod ops {
+    pub struct Owner { pub local: bool }
+}
+
+fn semver_safe_patterns(
+    value: crate::ops::get_bucket_location::Output,
+    output: Output,
+    owner: Owner,
+    qualified_owner: local::Owner,
+    local_dto_owner: dto::Owner,
+    local_ops_owner: ops::Owner,
+) {
+    let crate::ops::get_bucket_location::Output { location_constraint, .. } = value;
+    let _constructed = crate::ops::get_bucket_location::Output { location_constraint, ..Default::default() };
+    let Output { local } = output;
+    let Owner { local } = owner;
+    let local::Owner { local } = qualified_owner;
+    let dto::Owner { local } = local_dto_owner;
+    let ops::Owner { local } = local_ops_owner;
+    // let crate::ops::get_bucket_location::Output { location_constraint } = value;
+    let _text = r#"let crate::ops::get_bucket_location::Output { location_constraint } = value;"#;
+}
+RS
+    non_exhaustive_output="$(GATEWAY_CHECK_ROOT="$sandbox" \
+        "$sandbox/scripts/check_no_dto_non_exhaustive.sh" 2>&1)" || rc=1
+    destructuring_output="$(GATEWAY_CHECK_ROOT="$sandbox" \
+        "$sandbox/scripts/check_no_exhaustive_destructuring.sh" 2>&1)" || rc=1
+    if [[ "$rc" -eq 0 ]]; then
+        pass_msg 'ADR-0004 guards ignore enum/comment/string/construction decoys and accept top-level rest'
+    else
+        fail_msg 'ADR-0004 guards reject a valid enum/comment/string/construction/rest control'
+        printf '%s\n%s\n' "$non_exhaustive_output" "$destructuring_output" >&2
+    fi
+}
+probe_semver_guard_decoys
 
 
 # -----------------------------------------------------------------------------
