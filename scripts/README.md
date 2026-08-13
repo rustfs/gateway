@@ -98,6 +98,7 @@ fixed now so that the same check does not get written twice under two names.
 | `check_module_doc.sh` | Every hand-written Rust file answers responsibility, non-responsibility and upstream/downstream in its opening docs | P7-05 |
 | `check_file_size.sh` | Hand-written Rust files stay within 800 lines or a reasoned, issue-linked allowance | P7-05 |
 | `check_agents_forbidden_list.sh` | The three context-budget prohibitions each retain a reason and safe alternative | P7-05 |
+| `check_agents_context_contract.sh` | The root task-start context budget remains bounded at 8 files and 40k tokens | P0-03 |
 | `check_agents_layering.sh` | Scoped AGENTS files wait for the five-rule trigger and duplicate checker | P7-05 |
 | `check_config_load_once.sh` | Every `.load()` / `.load_full()` call site is frozen so hot service configuration can be loaded only once at request entry | P7-01 |
 | `check_default_doc.sh` | Every public extension `Default` implementation states its security consequence; derived subjects are discovered rather than listed by hand | P7-01 |
