@@ -41,7 +41,7 @@ use sha2::{Digest, Sha256};
 use crate::canonical::{CanonicalRequestSpec, PathCandidate, StringToSign, UriPathCandidates};
 use crate::codec::{decode_hex_lower, encode_hex_lower};
 use crate::derive::{VerifiedScope, calculate_signature, signing_key};
-use crate::mode::{EMPTY_PAYLOAD_SHA256_HEX, PayloadMode, TrailerSet};
+use crate::mode::{EMPTY_PAYLOAD_SHA256_HEX, PayloadMode};
 use crate::parse::{AmzDate, CredentialScope, ScopeDate};
 use crate::query::RawQuery;
 use crate::secret::SecretBytes;
@@ -257,17 +257,17 @@ const SUITE_DIR_ENV: &str = "S3GATE_AWS_SIGV4_SUITE_DIR";
 ///     https://github.com/smithy-lang/smithy-rs.git /tmp/smithy-rs
 /// git -C /tmp/smithy-rs sparse-checkout set aws/rust-runtime/aws-sigv4/aws-signing-test-suite
 /// export S3GATE_AWS_SIGV4_SUITE_DIR=/tmp/smithy-rs/aws/rust-runtime/aws-sigv4/aws-signing-test-suite/v4
+/// export S3GATE_AWS_SIGV4A_SUITE_DIR=/tmp/smithy-rs/aws/rust-runtime/aws-sigv4/aws-signing-test-suite/v4a
 /// cargo test -p rustfs-gateway-sig
 /// ```
 ///
 /// Revision this was written against: `cb39d6e52459b47fa8881a241ac9f78849f1bc25`.
 ///
-/// TODO(P2-07): move the fetch into the conformance runner so that CI pins the revision itself.
-/// This task may not touch `scripts/**` or `conformance/**`, so the pin lives in this constant
-/// until the runner exists.
+/// The reviewed identity and complete case disposition live in the protected signing-suite lock.
+/// The follow-up runner supplies both directories from that exact checkout.
 const SUITE_HOWTO: &str = concat!(
-    "skipping the AWS signing test suite: set S3GATE_AWS_SIGV4_SUITE_DIR to a checkout of\n",
-    "smithy-rs' aws/rust-runtime/aws-sigv4/aws-signing-test-suite/v4 directory.\n",
+    "skipping the AWS signing test suite: set S3GATE_AWS_SIGV4_SUITE_DIR and\n",
+    "S3GATE_AWS_SIGV4A_SUITE_DIR to the smithy-rs suite's v4 and v4a directories.\n",
     "See the SUITE_HOWTO constant in crates/sig/src/full_chain_tests.rs for the commands.",
 );
 
@@ -282,38 +282,14 @@ const SUITE_HOWTO: &str = concat!(
 ///   `c_sig_0258_the_double_encoding_cases_are_negative_controls_for_s3`;
 /// * `post-sts-header-after` — its expectation is that the session token is attached *after*
 ///   signing, which is a property of a client-side signer rather than of a canonical request.
-const SUITE_CASES: [&str; 24] = [
-    "get-vanilla",
-    "get-header-value-trim",
-    "get-header-key-duplicate",
-    "get-header-value-order",
-    "get-header-value-multiline",
-    "get-unreserved",
-    "get-utf8",
-    "get-space-unnormalized",
-    "get-slash-dot-slash-unnormalized",
-    "get-relative-relative-unnormalized",
-    "get-vanilla-query-order-key-case",
-    "get-vanilla-query-order-encoded",
-    "get-vanilla-utf8-query",
-    "get-vanilla-query-unreserved",
-    "post-header-value-case",
-    "post-vanilla",
-    "post-vanilla-query",
-    "post-header-key-case",
-    "post-header-key-sort",
-    "get-vanilla-empty-query-key",
-    "get-vanilla-with-session-token",
-    "post-sts-header-before",
-    "post-vanilla-empty-query-value",
-    "get-vanilla-query",
-];
+const SUITE_LOCK: &str = include_str!("../../../spec/third-party/aws-signing-test-suite.lock");
 
 struct SuiteRequest {
     method: String,
     path: String,
     query: String,
     headers: Vec<(String, String)>,
+    body: String,
 }
 
 fn parse_suite_request(text: &str) -> SuiteRequest {
@@ -330,7 +306,7 @@ fn parse_suite_request(text: &str) -> SuiteRequest {
     };
 
     let mut headers: Vec<(String, String)> = Vec::new();
-    for line in lines {
+    for line in lines.by_ref() {
         if line.is_empty() {
             break;
         }
@@ -347,12 +323,32 @@ fn parse_suite_request(text: &str) -> SuiteRequest {
         let (name, value) = line.split_once(':').expect("a header line");
         headers.push((name.to_ascii_lowercase(), value.to_owned()));
     }
+    let body = lines.collect::<Vec<_>>().join("\n");
     SuiteRequest {
         method,
         path,
         query,
         headers,
+        body,
     }
+}
+
+fn lock_array(name: &str) -> Vec<&'static str> {
+    let opening = format!("{name} = [\n");
+    let (_, rest) = SUITE_LOCK
+        .split_once(&opening)
+        .unwrap_or_else(|| panic!("protected lock has no {name}"));
+    let (body, _) = rest
+        .split_once("\n]\n")
+        .unwrap_or_else(|| panic!("protected lock has no closing array for {name}"));
+    body.lines()
+        .map(|line| {
+            line.trim()
+                .strip_prefix('"')
+                .and_then(|value| value.strip_suffix("\","))
+                .unwrap_or_else(|| panic!("invalid protected-lock array entry for {name}: {line}"))
+        })
+        .collect()
 }
 
 /// A one-field reader for the suite's context files.
@@ -373,7 +369,7 @@ fn read(path: &Path) -> String {
     std::fs::read_to_string(path).unwrap_or_else(|error| panic!("cannot read {}: {error}", path.display()))
 }
 
-fn run_suite_case(dir: &Path, name: &str) {
+fn suite_canonical(dir: &Path, name: &str) -> (SuiteRequest, crate::CanonicalRequest, String, String) {
     let case = dir.join(name);
     let request = parse_suite_request(&read(&case.join("request.txt")));
     let context = read(&case.join("context.json"));
@@ -399,22 +395,40 @@ fn run_suite_case(dir: &Path, name: &str) {
         );
     }
 
-    // The suite's signer covers every header it was handed, plus `host`.
-    let mut names: BTreeSet<String> = headers.keys().map(|field| field.as_str().to_owned()).collect();
-    names.insert("host".to_owned());
-    let signed_list = names.into_iter().collect::<Vec<_>>().join(";");
-
-    let signed = SignedHeaderSet::parse_and_enforce(&signed_list, &headers, None)
-        .unwrap_or_else(|_| panic!("{name}: the suite's own header set must satisfy the completeness rules"));
     let paths = UriPathCandidates::new(&request.path).expect("a valid path");
     let query = RawQuery::new(&request.query);
     let host = RawHost::from_host_header(host_value.expect("a Host header").as_bytes()).expect("a valid host");
     let method = Method::from_bytes(request.method.as_bytes()).expect("a method");
-    let payload = PayloadMode::parse(EMPTY_PAYLOAD_SHA256_HEX, TrailerSet::None).expect("valid");
+    let wire_content_length = request
+        .headers
+        .iter()
+        .find(|(field, _)| field == "content-length")
+        .map(|(_, value)| value.parse::<u64>().expect("a content length"));
+    let payload = if request.body.is_empty() {
+        PayloadMode::Empty
+    } else {
+        let digest: [u8; 32] = Sha256::digest(request.body.as_bytes()).into();
+        headers.append(
+            HeaderName::from_static("x-amz-content-sha256"),
+            HeaderValue::from_str(&encode_hex_lower(&digest)).expect("a payload digest"),
+        );
+        PayloadMode::ExactSha256(digest)
+    };
+    let mut names: BTreeSet<String> = headers.keys().map(|field| field.as_str().to_owned()).collect();
+    names.insert("host".to_owned());
+    let signed_list = names.into_iter().collect::<Vec<_>>().join(";");
+    let signed = SignedHeaderSet::parse_and_enforce(&signed_list, &headers, wire_content_length)
+        .unwrap_or_else(|_| panic!("{name}: the suite's own header set must satisfy the completeness rules"));
     let spec = CanonicalRequestSpec::new(&method, &paths, &query, &headers, &signed, &host, payload.canonical_payload_token());
+    let canonical = spec.candidates().expect("canonicalisable").next().expect("one candidate");
+    (request, canonical, region, service)
+}
+
+fn run_suite_case(dir: &Path, name: &str) {
+    let case = dir.join(name);
+    let (_request, canonical, region, service) = suite_canonical(dir, name);
 
     // Layer one: the canonical request, byte for byte.
-    let canonical = spec.candidates().expect("canonicalisable").next().expect("one candidate");
     let expected_canonical = read(&case.join("header-canonical-request.txt"));
     assert_eq!(canonical.text(), expected_canonical, "{name}: canonical request");
 
@@ -438,17 +452,106 @@ fn run_suite_case(dir: &Path, name: &str) {
     assert!(computed.ct_verify(&expected).is_ok(), "{name}: signature");
 }
 
+fn run_s3_path_negative(dir: &Path, name: &str) {
+    let case = dir.join(name);
+    let (_request, canonical, _region, _service) = suite_canonical(dir, name);
+    assert_ne!(
+        canonical.text(),
+        read(&case.join("header-canonical-request.txt")),
+        "{name}: S3 must preserve path spelling"
+    );
+}
+
+fn run_unsigned_token_negative(dir: &Path) {
+    let name = "post-sts-header-after";
+    let case = dir.join(name);
+    let request = parse_suite_request(&read(&case.join("request.txt")));
+    let signed_request = read(&case.join("header-signed-request.txt"));
+    let authorization = signed_request
+        .lines()
+        .find_map(|line| line.strip_prefix("Authorization:"))
+        .expect("an authorization header");
+    let signed_headers = authorization
+        .split_once("SignedHeaders=")
+        .and_then(|(_, rest)| rest.split_once(", Signature="))
+        .map(|(value, _)| value)
+        .expect("a signed-header list");
+    let mut headers = HeaderMap::new();
+    for (field, value) in request.headers {
+        if field != "host" {
+            headers.append(
+                HeaderName::from_bytes(field.as_bytes()).expect("a header name"),
+                HeaderValue::from_str(&value).expect("a header value"),
+            );
+        }
+    }
+    let context = read(&case.join("context.json"));
+    headers.append(
+        HeaderName::from_static("x-amz-security-token"),
+        HeaderValue::from_str(&context_field(&context, "token").expect("a session token")).expect("a token value"),
+    );
+    headers.append(HeaderName::from_static("x-amz-date"), HeaderValue::from_static(EXAMPLE_TIMESTAMP));
+    assert_eq!(
+        SignedHeaderSet::parse_and_enforce(signed_headers, &headers, None).err(),
+        Some(AuthError::SignatureDoesNotMatch),
+        "{name}: an unsigned session token must be rejected"
+    );
+}
+
+fn run_v4a_refusal(dir: &Path, name: &str) {
+    let case = dir.join(name);
+    let header_request = read(&case.join("header-signed-request.txt"));
+    let authorization = header_request
+        .lines()
+        .find_map(|line| line.strip_prefix("Authorization:"))
+        .expect("a SigV4a authorization header");
+    assert_eq!(
+        crate::SigV4Authorization::parse(authorization).err(),
+        Some(AuthError::NotImplemented(crate::Unimplemented::SigV4a)),
+        "{name}: header SigV4a must be recognised and refused"
+    );
+    let query_request = read(&case.join("query-signed-request.txt"));
+    let request = parse_suite_request(&query_request);
+    assert_eq!(
+        crate::PresignedParams::parse(&RawQuery::new(&request.query)).err(),
+        Some(AuthError::NotImplemented(crate::Unimplemented::SigV4a)),
+        "{name}: query SigV4a must be recognised and refused"
+    );
+}
+
 /// Positive — c-sig-0212 / c-sig-0213 / c-sig-0214: the upstream suite matches at all three
 /// plaintext layers, so a mismatch says *which* layer diverged. Skipped, loudly, when the suite is
 /// not checked out.
 #[test]
-fn c_sig_0212_to_0214_the_aws_signing_suite_matches_at_all_three_layers() {
-    let Some(dir) = std::env::var_os(SUITE_DIR_ENV).map(PathBuf::from) else {
+fn c_sig_official_suite() {
+    let v4 = std::env::var_os(SUITE_DIR_ENV).map(PathBuf::from);
+    let v4a = std::env::var_os("S3GATE_AWS_SIGV4A_SUITE_DIR").map(PathBuf::from);
+    let (Some(dir), Some(v4a)) = (v4, v4a) else {
+        assert!(
+            std::env::var_os(SUITE_DIR_ENV).is_none() && std::env::var_os("S3GATE_AWS_SIGV4A_SUITE_DIR").is_none(),
+            "the official-suite runner must provide both v4 and v4a directories"
+        );
         println!("{SUITE_HOWTO}");
         return;
     };
-    for name in SUITE_CASES {
+    let runnable = lock_array("v4_run_three_layer");
+    let negatives = lock_array("v4_s3_negative");
+    let v4a_cases = lock_array("v4a_reject_not_implemented");
+    assert_eq!((runnable.len(), negatives.len(), v4a_cases.len()), (31, 9, 38));
+    for name in runnable {
         run_suite_case(&dir, name);
+    }
+    for name in negatives
+        .iter()
+        .copied()
+        .filter(|name| !matches!(*name, "double-encode-path" | "double-url-encode" | "post-sts-header-after"))
+    {
+        run_s3_path_negative(&dir, name);
+    }
+    run_double_encoding_negative(&dir);
+    run_unsigned_token_negative(&dir);
+    for name in v4a_cases {
+        run_v4a_refusal(&v4a, name);
     }
 }
 
@@ -456,15 +559,20 @@ fn c_sig_0212_to_0214_the_aws_signing_suite_matches_at_all_three_layers() {
 /// matching their expectation would be the bug. S3 encodes the path once (s3s#13).
 #[test]
 fn c_sig_0258_the_double_encoding_cases_are_negative_controls_for_s3() {
-    let lambda =
-        UriPathCandidates::new("/2015-03-31/functions/arn%3Aaws%3Alambda%3Aus-west-2%3Afunction/invocations").expect("valid");
-    assert_eq!(
-        lambda.decoded(),
-        "/2015-03-31/functions/arn%3Aaws%3Alambda%3Aus-west-2%3Afunction/invocations"
-    );
+    let Some(dir) = std::env::var_os(SUITE_DIR_ENV).map(PathBuf::from) else {
+        return;
+    };
+    run_double_encoding_negative(&dir);
+}
+
+fn run_double_encoding_negative(dir: &Path) {
+    let lambda_request = parse_suite_request(&read(&dir.join("double-url-encode/request.txt")));
+    let lambda = UriPathCandidates::new(&lambda_request.path).expect("valid");
+    assert_eq!(lambda.decoded(), lambda_request.path);
     assert!(!lambda.decoded().contains("%253A"), "S3 must not double-encode");
 
-    let api_gateway = UriPathCandidates::new("/test/@connections/JBDvjfGEIAMCERw%3D").expect("valid");
+    let api_request = parse_suite_request(&read(&dir.join("double-encode-path/request.txt")));
+    let api_gateway = UriPathCandidates::new(&api_request.path).expect("valid");
     assert_eq!(api_gateway.decoded(), "/test/%40connections/JBDvjfGEIAMCERw%3D");
     assert!(!api_gateway.decoded().contains("%253D"), "S3 must not double-encode");
 }
@@ -472,14 +580,12 @@ fn c_sig_0258_the_double_encoding_cases_are_negative_controls_for_s3() {
 /// Negative — the suite runner must not silently pass on an emptied case list, which is how a
 /// conformance suite quietly stops testing anything.
 #[test]
-fn the_suite_case_list_is_not_empty_and_names_no_normalising_case() {
-    assert!(SUITE_CASES.len() >= 8, "the acceptance criterion asks for at least eight");
-    for name in SUITE_CASES {
-        assert!(
-            !name.ends_with("-normalized") || name.ends_with("-unnormalized"),
-            "{name} depends on path normalisation, which S3 does not do"
-        );
-    }
+fn every_official_case_has_one_disposition() {
+    let mut v4 = lock_array("v4_run_three_layer");
+    v4.extend(lock_array("v4_s3_negative"));
+    v4.sort_unstable();
+    assert_eq!(v4, lock_array("v4_cases"));
+    assert_eq!(lock_array("v4a_reject_not_implemented"), lock_array("v4a_cases"));
 }
 
 /// Positive — the empty-payload digest constant this crate publishes is the real SHA-256.

@@ -11190,6 +11190,23 @@ PYEOF
 expect_fail check_signing_suite_lock.sh \
     'a duplicated v4 case replacing another case' mut_signing_suite_case_duplicated
 
+mut_signing_suite_disposition_removed() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("spec/third-party/aws-signing-test-suite.lock")
+text = path.read_text()
+prefix, marker, disposition = text.partition("v4_run_three_layer = [\n")
+body, suffix_marker, suffix = disposition.partition("\n]\n\nv4_s3_negative = [\n")
+if not marker or not suffix_marker or body.count('  "get-space-normalized",\n') != 1:
+    raise SystemExit("missing unique v4 disposition mutation subject")
+text = prefix + marker + body.replace('  "get-space-normalized",\n', '', 1) + suffix_marker + suffix
+path.write_text(text)
+PYEOF
+}
+expect_fail check_signing_suite_lock.sh \
+    'a reviewed v4 disposition being removed' mut_signing_suite_disposition_removed
+
 mut_signing_suite_provenance_removed() {
     python3 - <<'PYEOF'
 import pathlib
