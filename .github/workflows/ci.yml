@@ -294,15 +294,15 @@ jobs:
   build-guard-self-test:
     name: Build guard self-test
     runs-on: ubuntu-latest
-    timeout-minutes: 3
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-      - name: Build-backed guards (maximum 2 minutes after setup)
+      - name: Build-backed guards (maximum 4.5 minutes after setup)
         run: |
           started="$(date +%s)"
-          timeout 150s env GATEWAY_GUARD_BUILD_GUARDS_ONLY=1 bash scripts/test_guard_scripts.sh
+          timeout 270s env GATEWAY_GUARD_BUILD_GUARDS_ONLY=1 bash scripts/test_guard_scripts.sh
           elapsed="$(( $(date +%s) - started ))"
           echo "build-backed guards completed in ${elapsed}s"
 

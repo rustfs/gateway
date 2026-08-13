@@ -9370,15 +9370,15 @@ expect_fail check_ci_test_split.sh \
     'the DTO compiler job swallowing a failure or timeout' mut_ci_dto_compiler_failure_swallowed
 
 mut_ci_build_guard_command_dropped() {
-    replace_ci_text 'timeout 150s env GATEWAY_GUARD_BUILD_GUARDS_ONLY=1 bash scripts/test_guard_scripts.sh' \
-        'timeout 150s true'
+    replace_ci_text 'timeout 270s env GATEWAY_GUARD_BUILD_GUARDS_ONLY=1 bash scripts/test_guard_scripts.sh' \
+        'timeout 270s true'
 }
 expect_fail check_ci_test_split.sh \
     'the build-backed mutation suite being replaced with a no-op' mut_ci_build_guard_command_dropped
 
 mut_ci_build_guard_failure_swallowed() {
-    replace_ci_text '          timeout 150s env GATEWAY_GUARD_BUILD_GUARDS_ONLY=1 bash scripts/test_guard_scripts.sh' \
-        '          timeout 150s env GATEWAY_GUARD_BUILD_GUARDS_ONLY=1 bash scripts/test_guard_scripts.sh || true'
+    replace_ci_text '          timeout 270s env GATEWAY_GUARD_BUILD_GUARDS_ONLY=1 bash scripts/test_guard_scripts.sh' \
+        '          timeout 270s env GATEWAY_GUARD_BUILD_GUARDS_ONLY=1 bash scripts/test_guard_scripts.sh || true'
 }
 expect_fail check_ci_test_split.sh \
     'the build-backed guard job swallowing a failure or timeout' mut_ci_build_guard_failure_swallowed

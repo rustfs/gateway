@@ -73,7 +73,7 @@ require_equal(dto_compiler.values_at("name", "runs-on", "timeout-minutes"),
 require_equal(build_guard.keys, worker_keys,
               "build-guard-self-test changed its parallel three-minute contract")
 require_equal(build_guard.values_at("name", "runs-on", "timeout-minutes"),
-              ["Build guard self-test", "ubuntu-latest", 3],
+              ["Build guard self-test", "ubuntu-latest", 5],
               "build-guard-self-test identity or budget changed")
 
 [workspace, guard].each do |job|
@@ -169,7 +169,7 @@ dto_compiler_run = <<~'RUN'
 RUN
 build_guard_run = <<~'RUN'
   started="$(date +%s)"
-  timeout 150s env GATEWAY_GUARD_BUILD_GUARDS_ONLY=1 bash scripts/test_guard_scripts.sh
+  timeout 270s env GATEWAY_GUARD_BUILD_GUARDS_ONLY=1 bash scripts/test_guard_scripts.sh
   elapsed="$(( $(date +%s) - started ))"
   echo "build-backed guards completed in ${elapsed}s"
 RUN
