@@ -152,6 +152,7 @@ match word for word.
 | `model/overlays/**` | The only sanctioned hand-written protocol exception source. Quirks are hand-written, so they live here and **never** under the generated `spec/` tree |
 | `spec/quirks/**` | Generated mutable protocol-rule table. Every entry names a typed current value and mutation dimension consumed by the mutation gate |
 | `spec/contracts/**` | Generated non-codec contract table. Every entry must bind to an independently mutable runtime or emitter consumer; this is not a mutation exemption |
+| `spec/third-party/aws-signing-test-suite.lock` | Reviewed smithy-rs signing-suite commit, license, tree identities, and complete v4/v4a case census |
 
 Overlay records without a typed current value and mutation dimension are deferred facts. They remain
 in `model/overlays/**`, but are not generated into either protected rule table and do not count as
