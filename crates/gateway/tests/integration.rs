@@ -32,6 +32,8 @@ mod authz_contract;
 mod authz_implementations;
 #[path = "backend_reachability.rs"]
 mod backend_reachability;
+#[path = "compat_aliases.rs"]
+mod compat_aliases;
 #[path = "compile_fail.rs"]
 mod compile_fail;
 #[path = "connection_teardown.rs"]

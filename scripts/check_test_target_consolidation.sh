@@ -553,6 +553,7 @@ gateway_modules = (
     "authz_contract",
     "authz_implementations",
     "backend_reachability",
+    "compat_aliases",
     "compile_fail",
     "connection_teardown",
     "cors_runtime",

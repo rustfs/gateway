@@ -157,11 +157,19 @@ pub use rustfs_gateway_types::dto;
 pub use rustfs_gateway_core::{
     Answer, ArnForm, AuthRequirement, Authorized, BodyPolicy, BoxFuture, CodecError, CommitOutcome, CommitWork,
     DerivedResourceError, ELEMENT_ORDER, EncodedResponse, ErrorContext, ErrorDetail, ErrorHeader, ErrorResolution, Handler,
-    HandlerError, HandlerErrorContext, HandlerResult, HostClass, InvalidErrorContext, MetaView, MissingHandlers, MissingObject,
-    NoDerived, Operation, OperationCodec, OperationSet, OperationSpec, PRECONDITION_FAILED_MESSAGE, ParamKind, PreAuthError,
-    Predicate, RANGE_NOT_SATISFIABLE_MESSAGE, Req, RequestBody, RequiredParam, ResourceIdentity, ResourceShape,
+    HandlerError, HandlerErrorContext, HandlerResult, HasOperation, HostClass, InvalidErrorContext, MetaView, MissingHandlers,
+    MissingObject, NoDerived, Operation, OperationCodec, OperationSet, OperationSpec, PRECONDITION_FAILED_MESSAGE, ParamKind,
+    PreAuthError, Predicate, RANGE_NOT_SATISFIABLE_MESSAGE, Req, RequestBody, RequiredParam, ResourceIdentity, ResourceShape,
     ResourceVisibility, Resp, ResponseBody, ResponseKind, ResponseOverride, RouteEntry, RouteSelector, TargetKind, resolve,
 };
+
+/// Input-parameterized compatibility name for an operation request.
+///
+/// This is the same type as [`Req`] for the operation selected by [`HasOperation`].
+pub type S3Request<I> = Req<<I as HasOperation>::Op>;
+
+/// Compatibility result using the facade's protocol error type.
+pub type S3Result<T> = std::result::Result<T, S3Error>;
 // The pagination contract. Found unreachable by check_shared_reachable.sh the moment that
 // guard existed — the fourth contract in a row written for backends and left where no
 // backend could see it. key_count is the KeyCount = Contents + CommonPrefixes rule that
