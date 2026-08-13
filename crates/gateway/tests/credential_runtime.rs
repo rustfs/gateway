@@ -52,10 +52,10 @@ use rustfs_gateway::sig::{
 };
 use rustfs_gateway::{
     AuthRequirement, BoxFuture, ClockSkewAck, CodecError, CredentialGuardConfig, CredentialLookup, CredentialProvider,
-    Credentials, EncodedResponse, FixedClock, GovernorRates, Handler, HandlerResult, Limits, MetaView, Operation, OperationCodec,
-    OperationFloor, OperationSpec, Predicate, ProviderError, Rate, RegionSet, Req, RequestBody, ResourceShape, Resp,
-    ResponseBody, RouteEntry, RouteSelector, S3Service, ServiceBuilder, SessionBinding, SigV4Authenticator, StaticCredentials,
-    TargetKind, WireRequest, WireResponse, allow_when, collect,
+    Credentials, DEFAULT_MAX_BUFFERED_BODY_BYTES, EncodedResponse, FixedClock, GovernorRates, Handler, HandlerResult, Limits,
+    MetaView, Operation, OperationCodec, OperationFloor, OperationSpec, Predicate, ProviderError, Rate, RegionSet, Req,
+    RequestBody, ResourceShape, Resp, ResponseBody, RouteEntry, RouteSelector, S3Service, ServiceBuilder, ServiceConfig,
+    SessionBinding, SigV4Authenticator, StaticCredentials, TargetKind, WireRequest, WireResponse, allow_when, collect,
 };
 
 /// The instant every request in this file is signed at and judged against.
@@ -200,11 +200,24 @@ fn fixtures() -> Arc<Counting> {
 
 fn build<P: CredentialProvider>(provider: Arc<P>) -> S3Service {
     let authenticator = SigV4Authenticator::new(provider, RegionSet::new([REGION]).expect("non-empty"));
-    build_with_authenticator(authenticator)
+    build_with_authenticator(authenticator, None)
 }
 
-fn build_with_authenticator(authenticator: SigV4Authenticator) -> S3Service {
-    ServiceBuilder::new()
+fn build_verbose<P: CredentialProvider>(provider: Arc<P>) -> S3Service {
+    let authenticator = SigV4Authenticator::new(provider, RegionSet::new([REGION]).expect("non-empty"));
+    build_with_authenticator(authenticator, Some(true))
+}
+
+fn build_with_authenticator(authenticator: SigV4Authenticator, verbose_signature_errors: Option<bool>) -> S3Service {
+    let builder = match verbose_signature_errors {
+        Some(enabled) => {
+            ServiceBuilder::new()
+                .config(ServiceConfig::new(DEFAULT_MAX_BUFFERED_BODY_BYTES).with_verbose_signature_errors(enabled))
+                .0
+        }
+        None => ServiceBuilder::new(),
+    };
+    builder
         .register::<CredProbe, _>(Arc::new(Backend))
         .route(RouteEntry {
             precedence: 52,
@@ -510,6 +523,67 @@ async fn a_wrong_secret_is_indistinguishable_from_an_unknown_key() {
     assert_eq!(unknown, wrong, "a wrong signature disclosed that the access key exists");
 }
 
+/// Positive — c-sig-0257: an operator who explicitly enables verbose signature errors receives
+/// the two comparison intermediates for a known key whose signature did not match.
+#[tokio::test]
+async fn c_sig_0257_verbose_signature_errors_render_comparison_intermediates() {
+    let provider = fixtures();
+    let service = build_verbose(Arc::clone(&provider));
+    let body = without_request_id(&send(&service, LONG_TERM_KEY, WRONG_SECRET, None).await);
+    assert!(body.contains("<Code>SignatureDoesNotMatch</Code>"), "{body}");
+    assert!(body.contains("<CanonicalRequest>"), "{body}");
+    assert!(body.contains("<StringToSign>"), "{body}");
+    assert!(!body.contains("Signature="), "the presented signature reached the response: {body}");
+    assert!(!body.contains("wJalrXUtnFEMI"), "the secret reached the response: {body}");
+}
+
+/// Negative — c-sig-0257: the shipped default never reflects comparison intermediates.
+#[tokio::test]
+async fn c_sig_0257_default_signature_errors_are_not_verbose() {
+    let provider = fixtures();
+    let service = build(Arc::clone(&provider));
+    let body = without_request_id(&send(&service, LONG_TERM_KEY, WRONG_SECRET, None).await);
+    assert!(body.contains("<Code>InvalidAccessKeyId</Code>"), "{body}");
+    assert!(!body.contains("<CanonicalRequest>"), "{body}");
+    assert!(!body.contains("<StringToSign>"), "{body}");
+}
+
+/// Negative — verbose mode does not invent comparison detail for an unknown access key.
+#[tokio::test]
+async fn c_sig_0257_verbose_signature_errors_do_not_disclose_unknown_keys() {
+    let provider = fixtures();
+    let service = build_verbose(Arc::clone(&provider));
+    let body = without_request_id(&send(&service, UNKNOWN_KEY, SECRET, None).await);
+    assert!(body.contains("<Code>InvalidAccessKeyId</Code>"), "{body}");
+    assert!(!body.contains("<CanonicalRequest>"), "{body}");
+    assert!(!body.contains("<StringToSign>"), "{body}");
+}
+
+/// Negative — a known but unusable credential remains indistinguishable from an unknown key even
+/// when verbose diagnostics are enabled.
+#[tokio::test]
+async fn c_sig_0257_verbose_signature_errors_do_not_disclose_unusable_keys() {
+    let provider = fixtures();
+    let service = build_verbose(Arc::clone(&provider));
+    let body = without_request_id(&send(&service, EXPIRED_KEY, WRONG_SECRET, Some(TOKEN)).await);
+    assert!(body.contains("<Code>InvalidAccessKeyId</Code>"), "{body}");
+    assert!(!body.contains("<CanonicalRequest>"), "{body}");
+    assert!(!body.contains("<StringToSign>"), "{body}");
+}
+
+/// Negative — a valid session token can participate in comparison without ever being reflected
+/// into the verbose response.
+#[tokio::test]
+async fn c_sig_0257_verbose_signature_errors_redact_session_tokens() {
+    let provider = fixtures();
+    let service = build_verbose(Arc::clone(&provider));
+    let body = without_request_id(&send(&service, SESSION_KEY, WRONG_SECRET, Some(TOKEN)).await);
+    assert!(body.contains("<Code>SignatureDoesNotMatch</Code>"), "{body}");
+    assert!(body.contains("<CanonicalRequest>"), "{body}");
+    assert!(body.contains("x-amz-security-token:__REDACTED__"), "{body}");
+    assert!(!body.contains(TOKEN), "the session token reached the response: {body}");
+}
+
 // ── ordering: no session rule answers before the signature has been compared ────────────────────
 
 /// Negative — an expired session with a wrong signature remains on the uniform credential-failure
@@ -681,18 +755,21 @@ async fn provider_faults_are_isolated_and_indistinguishable() {
 
     let failed = build(Arc::new(Fails));
     let panicked = build(Arc::new(Panics));
-    let timed_out = build_with_authenticator(SigV4Authenticator::with_guard_config(
-        Arc::new(Never),
-        RegionSet::new([REGION]).expect("non-empty"),
-        CredentialGuardConfig {
-            budget: rustfs_gateway::sig::LookupBudget::new(
-                std::time::Duration::from_millis(5),
-                std::time::Duration::from_secs(30),
-                std::time::Duration::from_secs(30),
-            ),
-            ..CredentialGuardConfig::default()
-        },
-    ));
+    let timed_out = build_with_authenticator(
+        SigV4Authenticator::with_guard_config(
+            Arc::new(Never),
+            RegionSet::new([REGION]).expect("non-empty"),
+            CredentialGuardConfig {
+                budget: rustfs_gateway::sig::LookupBudget::new(
+                    std::time::Duration::from_millis(5),
+                    std::time::Duration::from_secs(30),
+                    std::time::Duration::from_secs(30),
+                ),
+                ..CredentialGuardConfig::default()
+            },
+        ),
+        None,
+    );
 
     for response in [
         send(&failed, LONG_TERM_KEY, SECRET, None).await,
