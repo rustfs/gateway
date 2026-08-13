@@ -6578,6 +6578,84 @@ mut_sig_core_harness_removed() {
 expect_fail check_sig_case_coverage.sh \
     'the c-sig-0018 real-serde harness being deleted' mut_sig_core_harness_removed
 
+mut_sig_p2_03_mapping_deleted() {
+    sed -i.bak '/^c-sig-0258|/d' scripts/sig-case-coverage-p2-03.txt
+}
+expect_fail check_sig_case_coverage.sh \
+    'a P2-03 acceptance mapping being deleted' mut_sig_p2_03_mapping_deleted
+
+mut_sig_p2_03_mapping_reordered() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("scripts/sig-case-coverage-p2-03.txt")
+rows = path.read_text().splitlines()
+rows[0], rows[1] = rows[1], rows[0]
+path.write_text("\n".join(rows) + "\n")
+PYEOF
+}
+expect_fail check_sig_case_coverage.sh \
+    'the P2-03 acceptance mappings being reordered' mut_sig_p2_03_mapping_reordered
+
+mut_sig_p2_03_case_wrongly_bound() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("scripts/sig-case-coverage-p2-03.txt")
+text = path.read_text()
+old = "c-sig-0201|positive|crates/sig/tests/canonical_request.rs|fn c_sig_0201_an_encoded_key_is_not_encoded_a_second_time"
+new = "c-sig-0201|positive|crates/sig/tests/canonical_request.rs|fn c_sig_0202_header_values_are_trimmed_and_collapsed"
+if text.count(old) != 1:
+    raise SystemExit("missing P2-03 wrong-binding mutation subject")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_sig_case_coverage.sh \
+    'one P2-03 id being bound to another active test in the same file' mut_sig_p2_03_case_wrongly_bound
+
+mut_sig_p2_03_compile_fixture_reused() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+manifest = Path("scripts/sig-case-coverage-p2-03.txt")
+text = manifest.read_text()
+old = "c-sig-0254|negative|crates/sig/tests/compile_fail/c_sig_0254_verified_scope_required.rs|signing_key"
+new = "c-sig-0254|negative|crates/sig/tests/compile_fail/c_sig_0253_raw_host_required.rs|CanonicalRequestSpec::new"
+if text.count(old) != 1:
+    raise SystemExit("missing P2-03 fixture-reuse mapping subject")
+manifest.write_text(text.replace(old, new, 1))
+fixture = Path("crates/sig/tests/compile_fail/c_sig_0253_raw_host_required.rs")
+fixture.write_text(fixture.read_text() + "\n// c-sig-0254\n")
+PYEOF
+}
+expect_fail check_sig_case_coverage.sh \
+    'the two P2-03 compile-time cases reusing one fixture' mut_sig_p2_03_compile_fixture_reused
+
+mut_sig_p2_03_harness_glob_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/sig/tests/compile_fail.rs")
+text = path.read_text()
+old = 'cases.compile_fail("tests/compile_fail/c_sig_025[34]_*.rs")'
+if text.count(old) != 1:
+    raise SystemExit("missing P2-03 harness mutation subject")
+path.write_text(text.replace(old, 'cases.compile_fail("tests/compile_fail/never_*.rs")', 1))
+PYEOF
+}
+expect_fail check_sig_case_coverage.sh \
+    'the harness no longer executing c-sig-0253 and c-sig-0254' mut_sig_p2_03_harness_glob_removed
+
+mut_sig_p2_03_diagnostic_hollow() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/sig/tests/compile_fail/c_sig_0253_raw_host_required.stderr")
+text = path.read_text()
+old = 'expected reference `&RawHost`'
+if text.count(old) != 1:
+    raise SystemExit("missing P2-03 diagnostic mutation subject")
+path.write_text(text.replace(old, 'expected another type', 1))
+PYEOF
+}
+expect_fail check_sig_case_coverage.sh \
+    'c-sig-0253 losing its RawHost-specific diagnostic' mut_sig_p2_03_diagnostic_hollow
+
 mut_sig_core_harness_comment_string_decoy() {
     python3 - <<'PYEOF'
 from pathlib import Path

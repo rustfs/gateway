@@ -30,3 +30,9 @@ fn p2_02_compile_time_boundaries_are_not_openable() {
     cases.compile_fail("tests/compile_fail/c_sig_01[12][0-9]_*.rs");
     cases.compile_fail("tests/compile_fail/p2_02_*_cannot_*.rs");
 }
+
+#[test]
+fn p2_03_compile_time_boundaries_are_not_openable() {
+    let cases = trybuild::TestCases::new();
+    cases.compile_fail("tests/compile_fail/c_sig_025[34]_*.rs");
+}
