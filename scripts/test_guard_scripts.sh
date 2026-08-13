@@ -11067,6 +11067,157 @@ fi
 
 if [[ "$QUIRK_LEDGER_ONLY" == 0 && "$DTO_COMPILER_ONLY" == 0 && "$BUILD_GUARDS_ONLY" == 0 ]]; then
 
+expect_signing_suite_dirty_checkout_fail() {
+    local checkout output rc=0
+    cases=$((cases + 1))
+    checkout="$(mktemp -d "${TMPDIR:-/tmp}/gateway-signing-suite-dirty.XXXXXX")"
+    if ! git -C "$checkout" init -q ||
+        ! git -C "$checkout" config user.name t ||
+        ! git -C "$checkout" config user.email t@t; then
+        rm -rf "$checkout"
+        fail_msg "check_signing_suite_lock.sh dirty-checkout fixture initialization failed"
+        return
+    fi
+    printf 'baseline\n' >"$checkout/tracked.txt"
+    if ! git -C "$checkout" add tracked.txt ||
+        ! git -C "$checkout" commit -qm base; then
+        rm -rf "$checkout"
+        fail_msg "check_signing_suite_lock.sh dirty-checkout fixture commit failed"
+        return
+    fi
+    printf 'dirty\n' >>"$checkout/tracked.txt"
+    output="$("${SCRIPT_DIR}/check_signing_suite_lock.sh" --checkout "$checkout" 2>&1)" || rc=$?
+    rm -rf "$checkout"
+    if [[ "$rc" -ne 0 && "$output" == *'checkout has tracked or untracked changes'* ]]; then
+        pass_msg "check_signing_suite_lock.sh catches: a dirty official-suite checkout"
+    else
+        fail_msg "check_signing_suite_lock.sh did not reject a dirty official-suite checkout"
+    fi
+}
+expect_signing_suite_dirty_checkout_fail
+
+mut_signing_suite_lock_deleted() {
+    rm spec/third-party/aws-signing-test-suite.lock
+}
+expect_fail check_signing_suite_lock.sh \
+    'the protected signing-suite lock being deleted' mut_signing_suite_lock_deleted
+
+mut_signing_suite_commit_drifted() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("spec/third-party/aws-signing-test-suite.lock")
+text = path.read_text().replace(
+    'commit = "cb39d6e52459b47fa8881a241ac9f78849f1bc25"',
+    'commit = "0000000000000000000000000000000000000000"',
+    1,
+)
+path.write_text(text)
+PYEOF
+}
+expect_fail check_signing_suite_lock.sh \
+    'the reviewed signing-suite commit drifting' mut_signing_suite_commit_drifted
+
+mut_signing_suite_tree_drifted() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("spec/third-party/aws-signing-test-suite.lock")
+text = path.read_text().replace(
+    'v4_tree = "a40b300e3d573b47b6fc959787d1773b571f532f"',
+    'v4_tree = "0000000000000000000000000000000000000000"',
+    1,
+)
+path.write_text(text)
+PYEOF
+}
+expect_fail check_signing_suite_lock.sh \
+    'the reviewed v4 tree identity drifting' mut_signing_suite_tree_drifted
+
+mut_signing_suite_license_drifted() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("spec/third-party/aws-signing-test-suite.lock")
+text = path.read_text().replace(
+    'license_blob = "67db8588217f266eb561f75fae738656325deac9"',
+    'license_blob = "0000000000000000000000000000000000000000"',
+    1,
+)
+path.write_text(text)
+PYEOF
+}
+expect_fail check_signing_suite_lock.sh \
+    'the reviewed upstream license blob drifting' mut_signing_suite_license_drifted
+
+mut_signing_suite_retrieval_date_drifted() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("spec/third-party/aws-signing-test-suite.lock")
+text = path.read_text().replace('retrieved = "2026-08-14"', 'retrieved = "unknown"', 1)
+path.write_text(text)
+PYEOF
+}
+expect_fail check_signing_suite_lock.sh \
+    'the reviewed retrieval date losing its exact value' mut_signing_suite_retrieval_date_drifted
+
+mut_signing_suite_case_removed() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("spec/third-party/aws-signing-test-suite.lock")
+text = path.read_text().replace('  "double-encode-path",\n', '', 1)
+path.write_text(text)
+PYEOF
+}
+expect_fail check_signing_suite_lock.sh \
+    'one of the forty v4 cases being removed' mut_signing_suite_case_removed
+
+mut_signing_suite_case_duplicated() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("spec/third-party/aws-signing-test-suite.lock")
+text = path.read_text().replace(
+    '  "double-url-encode",\n',
+    '  "double-encode-path",\n',
+    1,
+)
+path.write_text(text)
+PYEOF
+}
+expect_fail check_signing_suite_lock.sh \
+    'a duplicated v4 case replacing another case' mut_signing_suite_case_duplicated
+
+mut_signing_suite_provenance_removed() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("THIRD-PARTY-NOTICES.md")
+text = path.read_text().replace("## Smithy signing test suite", "## Removed signing provenance", 1)
+path.write_text(text)
+PYEOF
+}
+expect_fail check_signing_suite_lock.sh \
+    'the signing-suite provenance heading being removed' mut_signing_suite_provenance_removed
+
+mut_signing_suite_protected_row_removed() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("AGENTS.md")
+text = path.read_text()
+line = '| `spec/third-party/aws-signing-test-suite.lock` | Reviewed smithy-rs signing-suite commit, license, tree identities, and complete v4/v4a case census |\n'
+if text.count(line) != 1:
+    raise SystemExit("missing signing-suite protected row mutation subject")
+path.write_text(text.replace(line, "", 1))
+PYEOF
+}
+expect_fail check_signing_suite_lock.sh \
+    'the signing-suite lock disappearing from the protected table' \
+    mut_signing_suite_protected_row_removed
+
 mut_types_version_loses_model_date() {
     python3 - <<'PYEOF'
 import pathlib
