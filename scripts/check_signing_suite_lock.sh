@@ -62,6 +62,21 @@ for key, expected_count in (("v4_cases", 40), ("v4a_cases", 38)):
     if len(values) != expected_count or len(set(values)) != expected_count or values != sorted(values):
         fail(f"{key} must contain exactly {expected_count} unique sorted cases")
 
+v4_run = lock.get("v4_run_three_layer")
+v4_negative = lock.get("v4_s3_negative")
+v4a_refused = lock.get("v4a_reject_not_implemented")
+for key, values, expected_count in (
+    ("v4_run_three_layer", v4_run, 31),
+    ("v4_s3_negative", v4_negative, 9),
+    ("v4a_reject_not_implemented", v4a_refused, 38),
+):
+    if not isinstance(values, list) or len(values) != expected_count or len(set(values)) != expected_count:
+        fail(f"{key} must contain exactly {expected_count} unique cases")
+if sorted(v4_run + v4_negative) != lock["v4_cases"]:
+    fail("v4 dispositions must cover the protected census exactly once")
+if v4a_refused != lock["v4a_cases"]:
+    fail("v4a refusal disposition must equal the protected census")
+
 notice = (root / "THIRD-PARTY-NOTICES.md").read_text(encoding="utf-8")
 for phrase in (
     "## Smithy signing test suite",
@@ -88,7 +103,7 @@ if protected_guard.count('"spec/third-party/aws-signing-test-suite.lock"') != 1:
 if mode not in {"", "--checkout"}:
     fail("usage: check_signing_suite_lock.sh [--checkout PATH]")
 if not mode:
-    print("check_signing_suite_lock: lock records 40 v4 and 38 v4a cases")
+    print("check_signing_suite_lock: lock records 31 executed v4, 9 S3 negative, and 38 refused v4a cases")
     raise SystemExit(0)
 if not checkout_arg:
     fail("--checkout requires a path")
