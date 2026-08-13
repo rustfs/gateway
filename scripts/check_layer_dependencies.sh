@@ -1,360 +1,346 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# =============================================================================
-# check_layer_dependencies.sh
-#
-# WHAT THIS CHECKS
-#   Every internal (`rustfs-gateway` / `rustfs-gateway-*`) dependency edge declared in
-#   `crates/*/Cargo.toml` and `xtask/Cargo.toml`, against the allow matrix
-#   below. Four rules in one pass:
-#
-#     1. Direction  — a crate may only depend on the crates its own row lists.
-#                     A reverse edge (e.g. `rustfs-gateway-xml` depending on
-#                     `rustfs-gateway-types`) fails.
-#     2. Acyclicity — the matrix is declared in topological order and every
-#                     allowed edge must point strictly backwards in that order.
-#                     This is checked against the matrix itself before any
-#                     manifest is read, so a future edit cannot introduce a
-#                     cycle by adding a row in the wrong place.
-#     3. Facade-only — `rustfs-gateway-conformance` may depend on the `rustfs-gateway` facade
-#                     and nothing else internal. It is a product other S3
-#                     implementations run against themselves, so it must
-#                     exercise the public API, not internal crates.
-#     4. Stream leaf — `rustfs-gateway-stream` may use only its reviewed external
-#                     primitive dependencies. A new external edge must be an
-#                     explicit architecture decision rather than a silent leak.
-#
-#   Registration is mandatory: a crate directory that is not in the matrix
-#   fails the check. Adding a crate is a deliberate architectural act.
-#
-#   NOT checked here (by design, to keep one guard per question):
-#     - `rustfs-*` / ring-2 dependencies and the `s3s` compat exception
-#       -> `check_ring_boundaries.sh`
-#     - global-registry crates (`inventory`, `linkme`)
-#       -> `check_no_inventory.sh`
-#
-# WHY
-#   The layering is not an aesthetic preference; three concrete constraints
-#   ride on it (see rustfs/backlog#1723 and AGENTS.md "Dependency Boundaries"):
-#     - `rustfs-gateway-stream` must stay standalone, otherwise
-#       `GetObjectOutput.body: StreamingBlob` creates a `rustfs-gateway-types` <->
-#       `rustfs-gateway-http` dependency cycle;
-#     - `rustfs-gateway-types`' `compat-s3s` feature is the only place a core crate may
-#       ever reach for s3s, because the orphan rule (E0117) forbids writing
-#       `impl From<s3s::X> for rustfs-gateway::X` from a third crate;
-#     - `rustfs-gateway-sig` must freeze `PayloadMode` before `rustfs-gateway-http` decodes
-#       chunked framing, because the framing mode is derived from the signature.
-#   The first codegen PR touches these boundaries, so they must be hard before
-#   P1 starts.
-#
-# HOW TO EXEMPT
-#   Add a line to `scripts/allowances/layer-dependency-allowances.txt`
-#   (create the file if it does not exist yet):
-#
-#       <crate> -> <dependency>    # <reason, issue link, and removal trigger>
-#
-#   The file is intentionally reviewed by humans, not generated. An allowance
-#   without a stated removal trigger should not survive review.
-#
-# USAGE
-#   scripts/check_layer_dependencies.sh
-#   GATEWAY_CHECK_ROOT=/path/to/repo scripts/check_layer_dependencies.sh
-# =============================================================================
+# Checks the internal dependency DAG declared by AGENTS.md. With
+# GATEWAY_LAYER_MODE=ring it checks the ring-0/1 prohibition and the one dated
+# compat-s3s exception instead. Dependencies are parsed as TOML, including
+# renamed, workspace-inherited and target-specific declarations. Internal dev
+# edges are intentionally exempt from the layer DAG; ring boundaries are not.
+# There is no allowance: changing either boundary requires changing AGENTS.md.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="${GATEWAY_CHECK_ROOT:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
-DEPS_AWK="${SCRIPT_DIR}/lib/cargo_deps.awk"
-ALLOWANCE_FILE="${ROOT_DIR}/scripts/allowances/layer-dependency-allowances.txt"
-
-cd "$ROOT_DIR"
-
-# -----------------------------------------------------------------------------
-# The allow matrix. Format: "<crate>|<space separated allowed internal deps>".
-#
-# DECLARATION ORDER IS THE TOPOLOGICAL ORDER. Every allowed dependency must
-# appear ABOVE its dependent; rule 2 enforces this, which is what makes the
-# matrix provably acyclic. Keep it byte-for-byte in sync with the dependency
-# graph in AGENTS.md — AGENTS.md is the source of truth, this list follows it.
-# -----------------------------------------------------------------------------
-LAYERS=(
-    "rustfs-gateway-macros|"
-    "rustfs-gateway-model|"
-    "rustfs-gateway-xtask-dispatch|"
-    "rustfs-gateway-stream|"
-    "rustfs-gateway-server|"
-    "rustfs-gateway-xml|"
-    "rustfs-gateway-codegen|rustfs-gateway-model"
-    "rustfs-gateway-types|rustfs-gateway-xml rustfs-gateway-stream"
-    "rustfs-gateway-http|rustfs-gateway-types rustfs-gateway-stream"
-    "rustfs-gateway-sig|rustfs-gateway-http rustfs-gateway-types rustfs-gateway-stream"
-    "rustfs-gateway-core|rustfs-gateway-sig rustfs-gateway-http rustfs-gateway-types rustfs-gateway-xml rustfs-gateway-stream"
-    "rustfs-gateway|rustfs-gateway-core rustfs-gateway-sig rustfs-gateway-http rustfs-gateway-types rustfs-gateway-xml rustfs-gateway-stream"
-    "rustfs-gateway-conformance|rustfs-gateway"
-    "xtask|rustfs-gateway-codegen rustfs-gateway-model rustfs-gateway-core rustfs-gateway-conformance rustfs-gateway"
-)
-
-# rustfs/backlog#1707 freezes the stream kernel below every protocol crate. Dev dependencies are
-# excluded for the same reason they are excluded from the internal DAG below: they do not enter a
-# normal dependency tree. `bitflags` was added by the issue's recorded follow-up decision.
-STREAM_EXTERNAL_DEPS="bitflags bytes futures-core http http-body pin-project-lite tokio"
-
-status=0
+MODE="${GATEWAY_LAYER_MODE:-layer}"
 
 fail() {
-    printf '%s\n' "$*" >&2
-    status=1
-}
-
-command -v python3 >/dev/null 2>&1 || {
-    printf 'check_layer_dependencies: required command is missing: python3\n' >&2
+    printf 'check_%s_dependencies: %s\n' "$MODE" "$*" >&2
     exit 1
 }
 
-rank_of() {
-    local want="$1" idx=0 entry
-    for entry in "${LAYERS[@]}"; do
-        idx=$((idx + 1))
-        if [[ "${entry%%|*}" == "$want" ]]; then
-            printf '%s' "$idx"
-            return 0
-        fi
-    done
-    return 1
-}
+command -v python3 >/dev/null 2>&1 || fail 'required command is missing: python3'
+python3 -c 'import tomllib' >/dev/null 2>&1 || fail 'required Python module is missing: tomllib'
+[[ -f "${ROOT_DIR}/AGENTS.md" ]] || fail 'rule input is missing: AGENTS.md'
 
-allowed_of() {
-    local want="$1" entry
-    for entry in "${LAYERS[@]}"; do
-        if [[ "${entry%%|*}" == "$want" ]]; then
-            printf '%s' "${entry#*|}"
-            return 0
-        fi
-    done
-    return 1
-}
+python3 - "$ROOT_DIR" "$MODE" <<'PY'
+from __future__ import annotations
 
-if ! dispatcher_dependencies="$(allowed_of "rustfs-gateway-xtask-dispatch")"; then
-    fail "allow matrix: the std-only rustfs-gateway-xtask-dispatch build tool is not registered"
-elif [[ -n "$dispatcher_dependencies" ]]; then
-    fail "allow matrix: rustfs-gateway-xtask-dispatch must remain std-only"
-fi
-dispatcher_graph_line="        rustfs-gateway-xtask-dispatch (crates/xtask-dispatch)   std-only cargo xtask process selection"
-if [[ ! -f AGENTS.md ]] || [[ "$(grep -Fxc "$dispatcher_graph_line" AGENTS.md || true)" -ne 1 ]]; then
-    fail "AGENTS.md: the std-only rustfs-gateway-xtask-dispatch build tool must appear exactly once in the dependency graph"
-fi
-
-is_internal() {
-    [[ "$1" == "rustfs-gateway" || "$1" == rustfs-gateway-* ]]
-}
-
-is_stream_external() {
-    local want="$1" candidate
-    for candidate in $STREAM_EXTERNAL_DEPS; do
-        [[ "$candidate" == "$want" ]] && return 0
-    done
-    return 1
-}
-
-# -----------------------------------------------------------------------------
-# Allowances
-# -----------------------------------------------------------------------------
-ALLOWANCES=""
-if [[ -f "$ALLOWANCE_FILE" ]]; then
-    while IFS= read -r line; do
-        line="${line%%#*}"
-        line="$(printf '%s' "$line" | tr -s ' \t' ' ')"
-        line="${line# }"
-        line="${line% }"
-        [[ -z "$line" ]] && continue
-        ALLOWANCES="${ALLOWANCES}${line}
-"
-    done <"$ALLOWANCE_FILE"
-fi
-
-is_allowed_exception() {
-    local crate="$1" dep="$2"
-    [[ -z "$ALLOWANCES" ]] && return 1
-    printf '%s' "$ALLOWANCES" | grep -qxF "${crate} -> ${dep}"
-}
-
-# -----------------------------------------------------------------------------
-# Rule 2: the matrix itself must be a DAG (checked before any manifest is read)
-# -----------------------------------------------------------------------------
-for entry in "${LAYERS[@]}"; do
-    crate="${entry%%|*}"
-    crate_rank="$(rank_of "$crate")"
-    for dep in ${entry#*|}; do
-        if ! dep_rank="$(rank_of "$dep")"; then
-            fail "allow matrix: '${crate}' is allowed to depend on unknown crate '${dep}'"
-            continue
-        fi
-        if [[ "$dep_rank" -ge "$crate_rank" ]]; then
-            fail "allow matrix is not a DAG: '${crate}' (position ${crate_rank}) may not be allowed to depend on '${dep}' (position ${dep_rank}); a dependency must be declared above its dependent"
-        fi
-    done
-done
-
-if [[ "$status" -ne 0 ]]; then
-    printf '\nThe allow matrix in %s is internally inconsistent. Fix it before touching manifests.\n' \
-        "${BASH_SOURCE[0]}" >&2
-    exit "$status"
-fi
-
-# -----------------------------------------------------------------------------
-# Rules 1 and 3: scan the manifests
-# -----------------------------------------------------------------------------
-dispatcher_audit=""
-dispatcher_audit_rc=0
-dispatcher_audit="$(python3 - "$ROOT_DIR" <<'PYEOF'
-import pathlib
+import os
+import re
+import subprocess
 import sys
 import tomllib
+from pathlib import Path
+from typing import Any, Iterator
 
-root = pathlib.Path(sys.argv[1])
-canonical = pathlib.Path("crates/xtask-dispatch/Cargo.toml")
-ignored = {".git", ".claude", "target"}
-errors = []
+root = Path(sys.argv[1])
+mode = sys.argv[2]
+layers = [
+    ("rustfs-gateway-macros", set()),
+    ("rustfs-gateway-model", set()),
+    ("rustfs-gateway-stream", set()),
+    ("rustfs-gateway-xml", set()),
+    ("rustfs-gateway-codegen", {"rustfs-gateway-model"}),
+    ("rustfs-gateway-types", {"rustfs-gateway-xml", "rustfs-gateway-stream"}),
+    ("rustfs-gateway-http", {"rustfs-gateway-types", "rustfs-gateway-stream"}),
+    ("rustfs-gateway-sig", {"rustfs-gateway-http", "rustfs-gateway-types", "rustfs-gateway-stream"}),
+    (
+        "rustfs-gateway-core",
+        {
+            "rustfs-gateway-sig",
+            "rustfs-gateway-http",
+            "rustfs-gateway-types",
+            "rustfs-gateway-xml",
+            "rustfs-gateway-stream",
+        },
+    ),
+    (
+        "rustfs-gateway",
+        {
+            "rustfs-gateway-core",
+            "rustfs-gateway-sig",
+            "rustfs-gateway-http",
+            "rustfs-gateway-types",
+            "rustfs-gateway-xml",
+            "rustfs-gateway-stream",
+        },
+    ),
+    ("rustfs-gateway-conformance", {"rustfs-gateway"}),
+    ("rustfs-gateway-server", set()),
+    (
+        "xtask",
+        {
+            "rustfs-gateway",
+            "rustfs-gateway-conformance",
+            "rustfs-gateway-core",
+            "rustfs-gateway-codegen",
+            "rustfs-gateway-model",
+        },
+    ),
+]
+allowed = dict(layers)
+rank = {name: index for index, (name, _) in enumerate(layers)}
+stream_external = {"bitflags", "bytes", "http"}
+dispatcher_name = "rustfs-gateway-xtask-dispatch"
+dispatcher_manifest = "crates/xtask-dispatch/Cargo.toml"
+dispatcher_allowed_dependencies: set[str] = set()
+dispatcher_audit_sentinel = "complete"
+
+required_agents_fragments = [
+    "- **Ring 0/1 — protocol kernel and runtime**: every package under `crates/`. Zero rustfs dependencies.",
+    "  runtime host, with no internal crate dependency:\n        rustfs-gateway-server                    listener, TLS, hyper, admission, shutdown",
+    "        rustfs-gateway-types ──▶ rustfs-gateway-stream ──▶ bitflags / bytes / http",
+    "        rustfs-gateway-xtask-dispatch (crates/xtask-dispatch)   std-only cargo xtask process selection",
+    "        xtask ──▶ gateway + conformance + core + codegen + model   generation and diagnostics only",
+]
 
 
-def dependency_error(path: pathlib.Path, label: str, value: object) -> None:
-    if not isinstance(value, dict) or value:
-        errors.append(f"{path}: the std-only dispatcher may not declare {label}")
+def fail(message: str) -> None:
+    print(f"check_{mode}_dependencies: {message}", file=sys.stderr)
+    raise SystemExit(1)
 
 
-for path in sorted(root.rglob("Cargo.toml")):
-    relative = path.relative_to(root)
-    if any(part in ignored for part in relative.parts):
-        continue
+def git_files() -> list[str]:
     try:
+        output = subprocess.run(
+            [
+                "git",
+                "ls-files",
+                "--cached",
+                "--others",
+                "--exclude-standard",
+                "-z",
+                "--",
+                "Cargo.toml",
+                "crates/*/Cargo.toml",
+                "xtask/Cargo.toml",
+            ],
+            cwd=root,
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        ).stdout
+    except (OSError, subprocess.CalledProcessError) as error:
+        fail(f"cannot enumerate Cargo.toml inputs: {error}")
+    files = sorted(os.fsdecode(item) for item in output.split(b"\0") if item)
+    if "Cargo.toml" not in files or len(files) < 2:
+        fail("workspace Cargo.toml inputs are missing")
+    return files
+
+
+def all_manifests() -> list[str]:
+    try:
+        output = subprocess.run(
+            [
+                "git",
+                "ls-files",
+                "--cached",
+                "--others",
+                "--exclude-standard",
+                "-z",
+                "--",
+                "Cargo.toml",
+                "**/Cargo.toml",
+            ],
+            cwd=root,
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        ).stdout
+    except (OSError, subprocess.CalledProcessError) as error:
+        fail(f"cannot enumerate dispatcher census inputs: {error}")
+    return sorted(os.fsdecode(item) for item in output.split(b"\0") if item)
+
+
+def load(relative: str) -> tuple[str, dict[str, Any]]:
+    try:
+        source = (root / relative).read_text(encoding="utf-8")
+        return source, tomllib.loads(source)
+    except (OSError, UnicodeError, tomllib.TOMLDecodeError) as error:
+        fail(f"cannot parse {relative}: {error}")
+
+
+def audit_dispatcher() -> str:
+    found: list[str] = []
+    for relative in all_manifests():
+        path = root / relative
         if path.is_symlink():
-            raise ValueError("manifest must not be a symlink")
-        with path.open("rb") as source:
-            manifest = tomllib.load(source)
-    except (OSError, tomllib.TOMLDecodeError, ValueError) as error:
-        errors.append(f"{relative}: unable to parse manifest census input: {error}")
-        continue
-    package = manifest.get("package")
-    if not isinstance(package, dict) or package.get("name") != "rustfs-gateway-xtask-dispatch":
-        continue
-    if relative != canonical:
-        errors.append(
-            f"{relative}: rustfs-gateway-xtask-dispatch must live only at {canonical}"
-        )
-        continue
+            fail(f"{relative}: dispatcher census manifest must not be a symlink")
+        _, document = load(relative)
+        package = document.get("package", {})
+        if not isinstance(package, dict) or package.get("name") != dispatcher_name:
+            continue
+        found.append(relative)
+        if relative != dispatcher_manifest:
+            fail(f"{relative}: {dispatcher_name} must live only at {dispatcher_manifest}")
+        for kind, dependency_table in tables(document):
+            if dependency_table:
+                fail(f"{relative}: the std-only dispatcher may not declare {kind}")
+    if len(found) > 1:
+        fail(f"{dispatcher_name} must have at most one canonical manifest")
+    return dispatcher_audit_sentinel
+
+
+try:
+    agents = (root / "AGENTS.md").read_text(encoding="utf-8")
+except (OSError, UnicodeError) as error:
+    fail(f"cannot read AGENTS.md: {error}")
+for fragment in required_agents_fragments:
+    if agents.count(fragment) != 1:
+        fail(f"AGENTS.md dependency matrix drifted at {fragment!r}")
+
+
+def tables(document: dict[str, Any]) -> Iterator[tuple[str, dict[str, Any]]]:
     for kind in ("dependencies", "dev-dependencies", "build-dependencies"):
-        if kind in manifest:
-            dependency_error(relative, kind, manifest[kind])
+        value = document.get(kind, {})
+        if not isinstance(value, dict):
+            fail(f"[{kind}] must be a TOML table")
+        yield kind, value
+    targets = document.get("target", {})
+    if not isinstance(targets, dict):
+        fail("[target] must be a TOML table")
+    for selector, target in targets.items():
+        if not isinstance(target, dict):
+            fail(f"[target.{selector}] must be a TOML table")
+        for kind in ("dependencies", "dev-dependencies", "build-dependencies"):
+            value = target.get(kind, {})
+            if not isinstance(value, dict):
+                fail(f"[target.{selector}.{kind}] must be a TOML table")
+            yield kind, value
 
-    def inspect_target(node: object, prefix: str) -> None:
-        if not isinstance(node, dict):
-            errors.append(f"{relative}: target dependency inventory '{prefix}' must be a table")
-            return
-        for key, value in node.items():
-            label = f"{prefix}.{key}"
-            if key in {"dependencies", "dev-dependencies", "build-dependencies"}:
-                dependency_error(relative, label, value)
-            elif isinstance(value, dict):
-                inspect_target(value, label)
 
-    if "target" in manifest:
-        inspect_target(manifest["target"], "target")
+def resolve(alias: str, value: Any, workspace: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    if isinstance(value, str):
+        return alias, {}
+    if not isinstance(value, dict):
+        fail(f"dependency {alias!r} has an invalid declaration")
+    merged = dict(value)
+    if value.get("workspace") is True:
+        inherited = workspace.get(alias)
+        if inherited is None:
+            fail(f"dependency {alias!r} inherits a missing [workspace.dependencies] entry")
+        if isinstance(inherited, str):
+            inherited = {}
+        if not isinstance(inherited, dict):
+            fail(f"workspace dependency {alias!r} has an invalid declaration")
+        merged = {**inherited, **value}
+    package = merged.get("package", alias)
+    if not isinstance(package, str):
+        fail(f"dependency {alias!r} has a non-string package")
+    return package, merged
 
-print("\n".join(errors))
-raise SystemExit(bool(errors))
-PYEOF
-)" || dispatcher_audit_rc=$?
-if [[ "$dispatcher_audit_rc" -ne 0 ]]; then
-    reported_error=0
-    while IFS= read -r error; do
-        if [[ -n "$error" ]]; then
-            fail "$error"
-            reported_error=1
-        fi
-    done <<<"$dispatcher_audit"
-    if [[ "$reported_error" -eq 0 ]]; then
-        fail "manifest census: structured dispatcher audit failed without a diagnostic"
-    fi
-fi
 
-manifests=()
-while IFS= read -r manifest; do
-    [[ -n "$manifest" ]] && manifests+=("$manifest")
-done < <(ls -1 crates/*/Cargo.toml xtask/Cargo.toml 2>/dev/null || true)
+def line_for(source: str, alias: str, package: str) -> int:
+    key = re.escape(alias)
+    patterns = [
+        re.compile(rf"^\s*(?:{key}|'(?:{key})'|\"(?:{key})\")\s*=", re.MULTILINE),
+        re.compile(rf"^\s*\[.*\.(?:{key}|'(?:{key})'|\"(?:{key})\")\]\s*$", re.MULTILINE),
+    ]
+    for pattern in patterns:
+        match = pattern.search(source)
+        if match:
+            return source.count("\n", 0, match.start()) + 1
+    match = re.search(rf"\bpackage\s*=\s*['\"]{re.escape(package)}['\"]", source)
+    return source.count("\n", 0, match.start()) + 1 if match else 1
 
-if [[ "${#manifests[@]}" -eq 0 ]]; then
-    printf 'check_layer_dependencies: no crate manifests found under %s\n' "$ROOT_DIR" >&2
-    exit 1
-fi
 
-for manifest in "${manifests[@]}"; do
-    # The matrix is keyed by PACKAGE name, which no longer equals the directory name:
-    # directories dropped the prefix (crates/types) while packages kept it
-    # (rustfs-gateway-types), matching the convention in the rustfs main repository.
-    crate="$(awk -F'"' '/^name[[:space:]]*=/ {print $2; exit}' "$manifest")"
-    if [[ -z "$crate" ]]; then
-        fail "${manifest}: no package name found"
+if dispatcher_allowed_dependencies:
+    fail("the std-only dispatcher dependency allowance must remain empty")
+if audit_dispatcher() != dispatcher_audit_sentinel:
+    fail("structured dispatcher audit failed without a diagnostic")
+files = git_files()
+documents = {relative: load(relative) for relative in files}
+root_doc = documents["Cargo.toml"][1]
+workspace = root_doc.get("workspace", {})
+if not isinstance(workspace, dict) or not isinstance(workspace.get("dependencies", {}), dict):
+    fail("[workspace.dependencies] must be a TOML table")
+workspace_dependencies = workspace.get("dependencies", {})
+
+packages: dict[str, tuple[str, str, dict[str, Any]]] = {}
+for relative, (source, document) in documents.items():
+    if relative == "Cargo.toml":
         continue
-    fi
+    package = document.get("package", {})
+    if not isinstance(package, dict) or not isinstance(package.get("name"), str):
+        fail(f"{relative}: [package].name is missing")
+    name = package["name"]
+    if name in packages:
+        fail(f"duplicate package name {name!r}")
+    packages[name] = (relative, source, document)
 
-    if ! allowed="$(allowed_of "$crate")"; then
-        fail "${manifest}: crate '${crate}' is not registered in the layer allow matrix; add a row to LAYERS in $(basename "${BASH_SOURCE[0]}") and to the dependency graph in AGENTS.md"
-        continue
-    fi
+# The dispatcher is pre-governed for a later slice. It may be absent today, but
+# if present the structured census above has already proved its canonical path
+# and that every normal/dev/build/target dependency table is empty.
+packages.pop(dispatcher_name, None)
 
-    while IFS=$'\t' read -r kind dep; do
-        [[ -z "${dep:-}" ]] && continue
+if mode == "layer":
+    if set(packages) != set(allowed):
+        fail(f"layer matrix/package drift: missing={sorted(set(packages) - set(allowed))}, stale={sorted(set(allowed) - set(packages))}")
+    for crate, dependencies in layers:
+        for dependency in dependencies:
+            if dependency not in rank or rank[dependency] >= rank[crate]:
+                fail(f"allow matrix is not a DAG: {crate} -> {dependency}")
+    violations = []
+    for crate, (relative, source, document) in packages.items():
+        for kind, dependency_table in tables(document):
+            if kind == "dev-dependencies" and crate not in {"rustfs-gateway-server", "xtask"}:
+                continue
+            for alias, declaration in dependency_table.items():
+                package, _ = resolve(alias, declaration, workspace_dependencies)
+                if package in packages and package in allowed[crate]:
+                    continue
+                if package not in packages and (crate != "rustfs-gateway-stream" or package in stream_external):
+                    continue
+                violations.append((relative, line_for(source, alias, package), crate, kind, alias, package))
+    for relative, line, crate, kind, alias, package in violations:
+        print(
+            f"{relative}:{line}: {crate} [{kind}].{alias} resolves to forbidden internal package {package} "
+            "(rule: AGENTS.md Dependency Boundaries)",
+            file=sys.stderr,
+        )
+    raise SystemExit(1 if violations else 0)
 
-        if [[ "$crate" == "rustfs-gateway-stream" && "$kind" != "dev-dependencies" ]] && ! is_internal "$dep"; then
-            if ! is_stream_external "$dep"; then
-                fail "${manifest}: '${crate}' depends on unapproved external crate '${dep}' (${kind}); allowed: ${STREAM_EXTERNAL_DEPS}"
-            fi
-            continue
-        fi
+if mode != "ring":
+    fail(f"unknown mode {mode!r}")
 
-        is_internal "$dep" || continue
-
-        # A dev-dependency on a higher layer is not a cycle. Cargo builds dev-deps only for
-        # tests and explicitly permits them to point back at a dependent crate, which is how a
-        # proc-macro crate tests that its expansion produces the same registry as hand-written
-        # code: it needs the real types to compare against. Treating dev-deps like build deps
-        # would either forbid that test or push it into the crate it is meant to check.
-        # Every other kind is still held to the matrix.
-        if [[ "$kind" == "dev-dependencies" ]]; then
-            continue
-        fi
-
-        allowed_here=0
-        for candidate in $allowed; do
-            if [[ "$candidate" == "$dep" ]]; then
-                allowed_here=1
-                break
-            fi
-        done
-        [[ "$allowed_here" -eq 1 ]] && continue
-
-        if is_allowed_exception "$crate" "$dep"; then
-            continue
-        fi
-
-        if [[ "$crate" == "rustfs-gateway-conformance" ]]; then
-            fail "${manifest}: '${crate}' depends on internal crate '${dep}' (${kind}); the conformance suite is a product run against other S3 implementations and may only use the public API of the 'rustfs-gateway' facade"
-        elif rank_of "$dep" >/dev/null 2>&1 && [[ "$(rank_of "$dep")" -gt "$(rank_of "$crate")" ]]; then
-            fail "${manifest}: '${crate}' depends on '${dep}' (${kind}), which sits ABOVE it in the layering; this is a reverse dependency and would eventually close a cycle"
-        else
-            fail "${manifest}: '${crate}' depends on '${dep}' (${kind}), which its row in the allow matrix does not permit (allowed: ${allowed:-none})"
-        fi
-    done < <(awk -f "$DEPS_AWK" "$manifest")
-done
-
-if [[ "$status" -ne 0 ]]; then
-    cat >&2 <<'EOF'
-
-Layer violation. See AGENTS.md "Dependency Boundaries" and rustfs/backlog#1723.
-Either move the code to the correct crate, or — if the edge is genuinely
-required — record it in scripts/allowances/layer-dependency-allowances.txt with
-a reason and a removal trigger, and say so in the PR body.
-EOF
-fi
-
-exit "$status"
+local = set(packages)
+violations = []
+types_feature_checked = False
+for crate, (relative, source, document) in packages.items():
+    metadata = document.get("package", {}).get("metadata", {}).get("gateway", {})
+    if crate != "xtask" and (not isinstance(metadata, dict) or metadata.get("ring") not in {0, 1}):
+        violations.append((relative, 1, f"{crate} lacks a valid [package.metadata.gateway] ring = 0/1"))
+    for kind, dependency_table in tables(document):
+        for alias, declaration in dependency_table.items():
+            package, merged = resolve(alias, declaration, workspace_dependencies)
+            line = line_for(source, alias, package)
+            if package in local:
+                continue
+            if package == "rustfs" or package.startswith(("rustfs-", "rustfs_")):
+                violations.append((relative, line, f"{crate} [{kind}].{alias} resolves to forbidden RustFS/ring-2 package {package}"))
+            if package == "s3s" or package.startswith("s3s-"):
+                if crate != "rustfs-gateway-types":
+                    violations.append((relative, line, f"{crate} [{kind}].{alias} resolves to s3s package {package} outside compat-s3s"))
+                    continue
+                if merged.get("optional") is not True:
+                    violations.append((relative, line, f"{alias} must be optional behind compat-s3s"))
+                features = document.get("features", {})
+                feature = features.get("compat-s3s") if isinstance(features, dict) else None
+                if not isinstance(feature, list) or f"dep:{alias}" not in feature:
+                    violations.append((relative, line, f"compat-s3s must explicitly contain dep:{alias}"))
+    if crate == "rustfs-gateway-types":
+        features = document.get("features", {})
+        if not isinstance(features, dict) or "compat-s3s" not in features:
+            violations.append((relative, 1, "compat-s3s feature is missing"))
+        else:
+            lines = source.splitlines()
+            feature_line = next((index for index, line in enumerate(lines) if re.match(r"^\s*compat-s3s\s*=", line)), None)
+            nearby = lines[max(0, (feature_line or 0) - 4) : (feature_line or 0) + 1]
+            if feature_line is None or not any(re.search(r"# DELETE BY:\s*\S+", line) for line in nearby):
+                violations.append((relative, (feature_line or 0) + 1, "compat-s3s lacks a nearby # DELETE BY: <milestone> marker"))
+        types_feature_checked = True
+if not types_feature_checked:
+    violations.append(("crates/types/Cargo.toml", 1, "rustfs-gateway-types package is missing"))
+for relative, line, message in violations:
+    print(f"{relative}:{line}: {message} (rule: AGENTS.md Dependency Boundaries)", file=sys.stderr)
+raise SystemExit(1 if violations else 0)
+PY

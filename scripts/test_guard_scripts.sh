@@ -354,6 +354,30 @@ expect_fail() {
     fi
 }
 
+# Planning-directory fixtures must use `git add -f` because the repository deliberately ignores
+# those paths. Keep them in a disposable sandbox so a staged file absent from HEAD never enters the
+# shared selective-reset cache.
+expect_fail_forced_staged() {
+    local guard="$1" desc="$2" mutate="$3"
+    local sandbox output rc=0
+    cases=$((cases + 1))
+    make_sandbox
+    sandbox="$SANDBOX"
+    (cd "$sandbox" && "$mutate" >/dev/null)
+    output="$(GATEWAY_CHECK_ROOT="$sandbox" "${SCRIPT_DIR}/${guard}" 2>&1)" || rc=$?
+    rm -rf "$sandbox"
+    rm -f "$SANDBOX_RESET_TRACKED" "$SANDBOX_RESET_UNTRACKED"
+    SANDBOX=""
+    SANDBOX_RESET_TRACKED=""
+    SANDBOX_RESET_UNTRACKED=""
+    SANDBOX_RESET_READY=0
+    if [[ "$rc" -ne 0 ]]; then
+        pass_msg "${guard} catches: ${desc}"
+    else
+        fail_msg "${guard} did NOT catch: ${desc}"
+    fi
+}
+
 # expect_guard_pass <guard> <description> <mutation-fn>
 # Proves token decoys stay ignored while the same syntax in active Rust is rejected separately.
 expect_guard_pass() {
@@ -456,6 +480,7 @@ expect_monomorphic_ir_fail() {
 if [[ "$QUIRK_LEDGER_ONLY" == 0 ]]; then
 printf 'Positive control (repository must be clean)\n'
 for guard in "${SCRIPT_DIR}"/check_*.sh; do
+    grep -q '^# REQUIRES-PR$' "$guard" && continue
     cases=$((cases + 1))
     if "$guard" >/dev/null 2>&1; then
         pass_msg "$(basename "$guard")"
@@ -2232,8 +2257,10 @@ probe_adr_origin_main_self_base_rejected() {
 probe_adr_origin_main_self_base_rejected
 
 probe_adr_pull_request_merge_uses_first_parent() {
+    local sandbox
     cases=$((cases + 1))
     make_sandbox
+    sandbox="$SANDBOX"
     local rc=0
     (
         cd "$sandbox"
@@ -3127,6 +3154,36 @@ mut_reverse_edge() {
 expect_fail check_layer_dependencies.sh \
     'reverse edge rustfs-gateway-xml -> rustfs-gateway-types' mut_reverse_edge
 
+mut_reverse_edge_renamed() {
+    printf 'types-bridge = { package = "rustfs-gateway-types", path = "../types" }\n' >>crates/xml/Cargo.toml
+}
+expect_fail check_layer_dependencies.sh \
+    'a renamed reverse internal dependency' mut_reverse_edge_renamed
+
+mut_reverse_edge_target_specific() {
+    printf '\n[target.'"'"'cfg(any())'"'"'.dependencies]\ntypes-target = { package = "rustfs-gateway-types", path = "../types" }\n' \
+        >>crates/xml/Cargo.toml
+}
+expect_fail check_layer_dependencies.sh \
+    'a target-specific reverse internal dependency' mut_reverse_edge_target_specific
+
+mut_reverse_edge_workspace_inherited() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+root = Path("Cargo.toml")
+text = root.read_text()
+marker = "[workspace.dependencies]\n"
+if text.count(marker) != 1:
+    raise SystemExit("workspace dependency table is not unique")
+root.write_text(text.replace(marker, marker + 'types-workspace-alias = { package = "rustfs-gateway-types", path = "crates/types" }\n', 1))
+with Path("crates/xml/Cargo.toml").open("a") as output:
+    output.write('types-workspace-alias = { workspace = true }\n')
+PYEOF
+}
+expect_fail check_layer_dependencies.sh \
+    'a workspace-inherited renamed reverse internal dependency' \
+    mut_reverse_edge_workspace_inherited
+
 mut_conformance_internal() {
     printf 'rustfs-gateway-core = { workspace = true }\n' >>crates/conformance/Cargo.toml
 }
@@ -3141,7 +3198,7 @@ expect_fail check_layer_dependencies.sh \
     'a new crate that is not registered in the allow matrix' mut_unregistered_crate
 
 mut_xtask_dispatch_layer_registration_deleted() {
-    sed '/    "rustfs-gateway-xtask-dispatch|"/d' scripts/check_layer_dependencies.sh \
+    sed '/^dispatcher_name = "rustfs-gateway-xtask-dispatch"$/d' scripts/check_layer_dependencies.sh \
         >scripts/check_layer_dependencies.sh.mut
     mv scripts/check_layer_dependencies.sh.mut scripts/check_layer_dependencies.sh
 }
@@ -3150,7 +3207,7 @@ expect_fail_self_mutation check_layer_dependencies.sh \
     mut_xtask_dispatch_layer_registration_deleted
 
 mut_xtask_dispatch_layer_allows_dependency() {
-    perl -0pi -e 's/rustfs-gateway-xtask-dispatch\|"/rustfs-gateway-xtask-dispatch|rustfs-gateway-model"/' \
+    perl -0pi -e 's/dispatcher_allowed_dependencies: set\[str\] = set\(\)/dispatcher_allowed_dependencies: set[str] = {"rustfs-gateway-model"}/' \
         scripts/check_layer_dependencies.sh
 }
 expect_fail_self_mutation check_layer_dependencies.sh \
@@ -3163,10 +3220,10 @@ from pathlib import Path
 
 path = Path("scripts/check_layer_dependencies.sh")
 text = path.read_text()
-old = "raise SystemExit(bool(errors))"
+old = "    return dispatcher_audit_sentinel\n"
 if text.count(old) != 1:
     raise SystemExit("dispatcher audit exit mutation subject is not exact")
-path.write_text(text.replace(old, "raise SystemExit(1)", 1))
+path.write_text(text.replace(old, "    return \"\"\n", 1))
 PYEOF
 }
 expect_fail_self_mutation check_layer_dependencies.sh \
@@ -3299,6 +3356,59 @@ mut_stream_unapproved_external_dependency() {
 expect_fail check_layer_dependencies.sh \
     'the stream kernel adding an external dependency outside its whitelist' \
     mut_stream_unapproved_external_dependency
+
+mut_xtask_extra_internal_dependency() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("xtask/Cargo.toml")
+text = path.read_text()
+marker = "[dependencies]\n"
+if text.count(marker) != 1:
+    raise SystemExit("xtask dependency table is not unique")
+path.write_text(text.replace(marker, marker + "rustfs-gateway-http = { workspace = true }\n", 1))
+PYEOF
+}
+expect_fail check_layer_dependencies.sh \
+    'xtask gaining an internal dependency outside its five-package tooling row' \
+    mut_xtask_extra_internal_dependency
+
+mut_xtask_extra_internal_dev_dependency() {
+    printf '\n[dev-dependencies]\nrustfs-gateway-http = { workspace = true }\n' >>xtask/Cargo.toml
+}
+expect_fail check_layer_dependencies.sh \
+    'xtask gaining a dev-only internal dependency outside its five-package tooling row' \
+    mut_xtask_extra_internal_dev_dependency
+
+mut_agents_dependency_matrix_drift() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("AGENTS.md")
+text = path.read_text()
+old = "xtask ──▶ gateway + conformance + core + codegen + model"
+if text.count(old) != 1:
+    raise SystemExit("xtask matrix row is not unique")
+path.write_text(text.replace(old, "xtask ──▶ gateway + core + codegen + model", 1))
+PYEOF
+}
+expect_fail check_layer_dependencies.sh \
+    'the AGENTS dependency matrix drifting from the executable xtask row' \
+    mut_agents_dependency_matrix_drift
+
+probe_layer_dev_dependency_is_allowed() {
+    local sandbox rc=0
+    cases=$((cases + 1))
+    make_sandbox
+    sandbox="$SANDBOX"
+    printf '\n[dev-dependencies]\nrustfs-gateway-types = { workspace = true }\n' \
+        >>"$sandbox/crates/xml/Cargo.toml"
+    GATEWAY_CHECK_ROOT="$sandbox" "${SCRIPT_DIR}/check_layer_dependencies.sh" >/dev/null 2>&1 || rc=$?
+    if [[ "$rc" -eq 0 ]]; then
+        pass_msg 'check_layer_dependencies.sh allows internal dev-only edges'
+    else
+        fail_msg 'check_layer_dependencies.sh rejected an internal dev-only edge'
+    fi
+}
+probe_layer_dev_dependency_is_allowed
 
 mut_stream_shared_trailer_slot() {
     printf '\nstruct SharedTrailers(std::sync::Mutex<Option<crate::TrailingHeaders>>);\n' \
@@ -4277,11 +4387,28 @@ PYEOF
 expect_fail check_ring_boundaries.sh \
     'ring-0 crate depending on a rustfs crate' mut_rustfs_dep
 
+mut_renamed_rustfs_dep() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/core/Cargo.toml")
+text = path.read_text()
+marker = "[dependencies]\n"
+if text.count(marker) != 1:
+    raise SystemExit("core dependency table is not unique")
+path.write_text(text.replace(marker, marker + 'storage = { package = "rustfs-ecstore", version = "0.1" }\n', 1))
+PYEOF
+}
+expect_fail check_ring_boundaries.sh 'a renamed RustFS business dependency' mut_renamed_rustfs_dep
+
 mut_ring2_dep() {
     printf 'rustfs-gateway-admin = "0.1"\n' >>crates/http/Cargo.toml
 }
 expect_fail check_ring_boundaries.sh \
     'ring-0 crate depending on a ring-2 crate not declared in this workspace' mut_ring2_dep
+
+mut_renamed_ring2_dep() { printf 'admin-adapter = { package = "rustfs-gateway-admin", version = "0.1" }\n' >>crates/http/Cargo.toml; }
+expect_fail check_ring_boundaries.sh 'a renamed ring-2 dependency not declared in this workspace' mut_renamed_ring2_dep
 
 # After the rename the crate name carries no ring information, so the declaration is
 # the only thing the guard can read. A crate without one must fail rather than be
@@ -4304,6 +4431,30 @@ mut_stray_s3s() {
 expect_fail check_ring_boundaries.sh \
     's3s dependency outside rustfs-gateway-types' mut_stray_s3s
 
+mut_renamed_target_s3s() {
+    printf '\n[target.'"'"'cfg(any())'"'"'.dev-dependencies]\nlegacy-s3 = { package = "s3s", version = "0.11" }\n' >>crates/http/Cargo.toml
+}
+expect_fail check_ring_boundaries.sh 'a renamed target-specific dev s3s dependency' mut_renamed_target_s3s
+
+mut_workspace_inherited_rustfs_dep() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+root = Path("Cargo.toml")
+text = root.read_text()
+marker = "[workspace.dependencies]\n"
+if text.count(marker) != 1:
+    raise SystemExit("workspace dependency table is not unique")
+root.write_text(text.replace(marker, marker + 'storage-workspace = { package = "rustfs-ecstore", version = "0.1" }\n', 1))
+path = Path("crates/core/Cargo.toml")
+text = path.read_text()
+marker = "[dependencies]\n"
+if text.count(marker) != 1:
+    raise SystemExit("core dependency table is not unique")
+path.write_text(text.replace(marker, marker + 'storage-workspace = { workspace = true }\n', 1))
+PYEOF
+}
+expect_fail check_ring_boundaries.sh 'a workspace-inherited renamed RustFS dependency' mut_workspace_inherited_rustfs_dep
+
 mut_drop_delete_by() {
     grep -v '# DELETE BY' crates/types/Cargo.toml >/tmp/.ct.$$ && mv /tmp/.ct.$$ crates/types/Cargo.toml
 }
@@ -4311,10 +4462,22 @@ expect_fail check_ring_boundaries.sh \
     'compat-s3s losing its "# DELETE BY" expiry marker' mut_drop_delete_by
 
 mut_server_unreviewed_dep() {
-    printf 'reqwest = "0.12"\n' >>crates/server/Cargo.toml
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/server/Cargo.toml")
+text = path.read_text()
+marker = "[dependencies]\n"
+if text.count(marker) != 1:
+    raise SystemExit("server dependency table is not unique")
+path.write_text(text.replace(marker, marker + "rustfs-gateway-stream = { workspace = true }\n", 1))
+PYEOF
 }
-expect_fail check_ring_boundaries.sh \
-    'ring-1 server gaining a dependency outside its allowlist' mut_server_unreviewed_dep
+expect_fail check_layer_dependencies.sh \
+    'the dependency-free server gaining an internal runtime edge' mut_server_unreviewed_dep
+
+mut_server_internal_dev_dependency() { printf 'rustfs-gateway-stream = { workspace = true }\n' >>crates/server/Cargo.toml; }
+expect_fail check_layer_dependencies.sh 'the dependency-free server gaining an internal dev edge' mut_server_internal_dev_dependency
 
 mut_server_host_write() {
     printf '\nfn normalize_host(request: &mut http::Request<()>) { request.headers_mut().insert(http::header::HOST, http::HeaderValue::from_static("x")); }\n' >>crates/server/src/conn.rs
@@ -4346,8 +4509,9 @@ expect_fail check_tuning_doc.sh \
 mut_planning_dir() {
     mkdir -p docs/plans
     printf '# scratch\n' >docs/plans/codegen-rollout.md
+    git add -f docs/plans/codegen-rollout.md
 }
-expect_fail check_no_planning_docs.sh \
+expect_fail_forced_staged check_no_planning_docs.sh \
     'a document committed under docs/plans/' mut_planning_dir
 
 mut_planning_name() {
@@ -4355,6 +4519,76 @@ mut_planning_name() {
 }
 expect_fail check_no_planning_docs.sh \
     'a root-level MIGRATION_PLAN.md' mut_planning_name
+
+mut_planning_allowance_bypass() {
+    mkdir -p docs/plans scripts/allowances
+    printf '# scratch\n' >docs/plans/allowed-rollout.md
+    printf 'docs/plans/allowed-rollout.md # stale policy must not exempt a plan\n' >scripts/allowances/planning-doc-allowances.txt
+    git add -f docs/plans/allowed-rollout.md scripts/allowances/planning-doc-allowances.txt
+}
+expect_fail_forced_staged check_no_planning_docs.sh \
+    'a stale allowance attempting to exempt a tracked planning document' mut_planning_allowance_bypass
+
+probe_planning_guard_missing_git_input() {
+    local empty output rc=0
+    cases=$((cases + 1))
+    empty="$(mktemp -d "${TMPDIR:-/tmp}/gateway-planning-empty.XXXXXX")"
+    output="$(GATEWAY_CHECK_ROOT="$empty" "${SCRIPT_DIR}/check_no_planning_docs.sh" 2>&1)" || rc=$?
+    rmdir "$empty"
+    if [[ "$rc" -ne 0 && "$output" == *'cannot enumerate planning-directory inputs'* ]]; then
+        pass_msg 'check_no_planning_docs.sh fails closed when git inputs are unavailable'
+    else
+        fail_msg 'check_no_planning_docs.sh reported green without git inputs'
+    fi
+}
+probe_planning_guard_missing_git_input
+
+expect_protected_fail() {
+    local desc="$1" mutate="$2" sandbox rc=0
+    cases=$((cases + 1))
+    [[ -x "${SCRIPT_DIR}/check_protected_files.sh" ]] || { fail_msg "check_protected_files.sh is missing or not executable; cannot test: ${desc}"; return; }
+    make_sandbox; sandbox="$SANDBOX"
+    (cd "$sandbox" && "$mutate" >/dev/null && git add -A && git -c user.name=t -c user.email=t@t commit -qm mutation)
+    GATEWAY_CHECK_ROOT="$sandbox" GATEWAY_PROTECTED_BASE=HEAD^ GATEWAY_PROTECTED_HEAD=HEAD GATEWAY_PR_BODY='' \
+        "${SCRIPT_DIR}/check_protected_files.sh" >/dev/null 2>&1 || rc=$?
+    [[ "$rc" -ne 0 ]] && pass_msg "check_protected_files.sh catches: ${desc}" || fail_msg "check_protected_files.sh did NOT catch: ${desc}"
+}
+
+expect_protected_pass() {
+    local desc="$1" mutate="$2" body="${3:-}" sandbox rc=0
+    cases=$((cases + 1)); make_sandbox; sandbox="$SANDBOX"
+    (cd "$sandbox" && "$mutate" >/dev/null && git add -A && git -c user.name=t -c user.email=t@t commit -qm mutation)
+    GATEWAY_CHECK_ROOT="$sandbox" GATEWAY_PROTECTED_BASE=HEAD^ GATEWAY_PROTECTED_HEAD=HEAD GATEWAY_PR_BODY="$body" \
+        "${SCRIPT_DIR}/check_protected_files.sh" >/dev/null 2>&1 || rc=$?
+    [[ "$rc" -eq 0 ]] && pass_msg "check_protected_files.sh allows: ${desc}" || fail_msg "check_protected_files.sh rejected: ${desc}"
+}
+
+mut_protected_existing_adr() { printf '\nA changed accepted decision.\n' >>docs/adr/0003-no-global-registry-crates.md; }
+expect_protected_fail 'an existing ADR modified without a BREAKING declaration' mut_protected_existing_adr
+mut_protected_with_breaking() { printf '\nContract note.\n' >>NOTICE; }
+expect_protected_pass 'a protected change carrying the literal BREAKING declaration' mut_protected_with_breaking 'BREAKING: downstream users must adopt the new contract.'
+mut_new_adr() { printf '# New decision\n' >docs/adr/9999-new-decision.md; }
+expect_protected_pass 'a newly added ADR' mut_new_adr
+mut_ordinary_manifest_and_new_case() { printf '\n# ordinary manifest comment\n' >>crates/core/Cargo.toml; printf '[case]\nid = "c-new-9999"\n' >conformance/cases/c-new-9999.toml; }
+expect_protected_pass 'an ordinary Cargo.toml edit and a newly added conformance case' mut_ordinary_manifest_and_new_case
+mut_protected_rust_version() { sed 's/^rust-version = .*/rust-version = "999.0"/' Cargo.toml >Cargo.toml.mut; mv Cargo.toml.mut Cargo.toml; }
+expect_protected_fail 'a rust-version change without BREAKING' mut_protected_rust_version
+mut_deleted_conformance_case() { rm conformance/cases/acl/c-acl-0005.toml; }
+expect_protected_fail 'a deleted conformance case without BREAKING' mut_deleted_conformance_case
+mut_new_protocol_overlay() { printf '[[quirk]]\nid = "q-new-9999"\n' >model/overlays/quirks/new-guard-fixture.toml; }
+expect_protected_fail 'a newly added protocol overlay without BREAKING' mut_new_protocol_overlay
+mut_protected_table_drift() { sed 's/`rustfmt.toml`/`rustfmt-contract.toml`/' AGENTS.md >AGENTS.md.mut; mv AGENTS.md.mut AGENTS.md; }
+expect_protected_fail 'the AGENTS protected path table drifting from the executable policy' mut_protected_table_drift
+
+probe_protected_missing_inputs() {
+    local output rc=0
+    cases=$((cases + 1))
+    output="$(GATEWAY_CHECK_ROOT="$REPO_ROOT" "${SCRIPT_DIR}/check_protected_files.sh" 2>&1)" || rc=$?
+    [[ "$rc" -ne 0 && "$output" == *'required input is missing: GATEWAY_PROTECTED_BASE'* ]] && \
+        pass_msg 'check_protected_files.sh fails closed without PR comparison inputs' || \
+        fail_msg 'check_protected_files.sh reported green without PR comparison inputs'
+}
+probe_protected_missing_inputs
 
 mut_inventory() {
     python3 - <<'PYEOF'
