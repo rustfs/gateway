@@ -551,7 +551,7 @@ let package = match resolve_workspace_package(name) {
     }
 };
 let steps = crate_steps(&package);
-let subject = if package == "rustfs-gateway-core" {
+let subject = if matches!(package.as_str(), "rustfs-gateway-core" | "rustfs-gateway") {
     format!("crate {package} runtime scope; compile-time contracts remain in cargo test --workspace")
 } else if package == "rustfs-gateway-conformance" {
     format!("crate {package} library scope; integration contracts remain in cargo test --workspace")
@@ -579,6 +579,12 @@ if package == "rustfs-gateway-core" {
         "--skip".to_owned(),
         "compile_fail::compile_time_contracts_are_not_openable".to_owned(),
     ]);
+} else if package == "rustfs-gateway" {
+    test_step.extend([
+        "--".to_owned(),
+        "--skip".to_owned(),
+        "compile_fail::gateway_compile_fail_contracts_are_enforced".to_owned(),
+    ]);
 } else if package == "rustfs-gateway-conformance" {
     test_step.push("--lib".to_owned());
 }
@@ -600,7 +606,7 @@ if let Some(case) = crate_case(package) {
 steps
 ''')
 if compact(crate_steps_items[0][1]) != expected_crate_steps_body:
-    fail("crate verification steps must preserve the core skip, conformance library scope and all-target clippy")
+    fail("crate verification steps must preserve compile-fail skips, conformance library scope and all-target clippy")
 for name in (
     "verify_full",
     "verify_operation",
