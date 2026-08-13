@@ -219,6 +219,20 @@ jobs:
           elapsed="$(( $(date +%s) - started ))"
           echo "workspace tests completed in ${elapsed}s"
 
+  signing-suite:
+    name: Official signing suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Pinned smithy-rs signing suite
+        run: |
+          timeout 90s cargo build --package xtask --bin xtask
+          timeout 60s target/debug/xtask sigsuite fetch
+          timeout 60s target/debug/xtask sigsuite run
+
   gateway-tsan:
     name: Gateway ThreadSanitizer
     runs-on: ubuntu-latest
@@ -306,11 +320,11 @@ jobs:
           elapsed="$(( $(date +%s) - started ))"
           echo "build-backed guards completed in ${elapsed}s"
 
-  # Branch protection requires this exact check name. It aggregates all seven parallel jobs and must
+  # Branch protection requires this exact check name. It aggregates all eight parallel jobs and must
   # run even after a dependency fails, otherwise a skipped required check could hide the failure.
   test:
     name: Test
-    needs: [workspace-tests, guard-self-test, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, gateway-tsan]
+    needs: [workspace-tests, signing-suite, guard-self-test, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, gateway-tsan]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 1
@@ -318,6 +332,7 @@ jobs:
       - name: Require test jobs
         env:
           WORKSPACE_RESULT: ${{ needs.workspace-tests.result }}
+          SIGNING_SUITE_RESULT: ${{ needs.signing-suite.result }}
           GUARD_RESULT: ${{ needs.guard-self-test.result }}
           TARGET_CONSOLIDATION_RESULT: ${{ needs.target-consolidation-self-test.result }}
           QUIRK_LEDGER_RESULT: ${{ needs.quirk-ledger-self-test.result }}
@@ -326,6 +341,7 @@ jobs:
           TSAN_RESULT: ${{ needs.gateway-tsan.result }}
         run: |
           test "$WORKSPACE_RESULT" = success
+          test "$SIGNING_SUITE_RESULT" = success
           test "$GUARD_RESULT" = success
           test "$TARGET_CONSOLIDATION_RESULT" = success
           test "$QUIRK_LEDGER_RESULT" = success
