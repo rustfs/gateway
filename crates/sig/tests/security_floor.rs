@@ -22,8 +22,6 @@
 //! and `verifier` and run as doctests.
 //! Upstream: the `rustfs-gateway-sig` public API. Downstream: none (test target).
 
-mod security_floor_fixtures;
-
 use core::time::Duration;
 
 use http::header::HeaderMap;
@@ -33,7 +31,7 @@ use rustfs_gateway_sig::{
     enforce_scope,
 };
 
-use security_floor_fixtures::*;
+use crate::security_floor_fixtures::*;
 
 // ---------------------------------------------------------------------------
 // Positive cases

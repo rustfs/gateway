@@ -2,6 +2,7 @@
 name = "rustfs-gateway-sig"
 description = "SigV2/SigV4 verification state machine"
 version = "0.5.0"
+autotests = false
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -11,6 +12,10 @@ authors.workspace = true
 # consumed s3s. Publishing would buy nothing and cost a cross-repository version
 # lockstep on every change to a ring-0 type.
 publish = false
+
+[[test]]
+name = "integration"
+path = "tests/integration.rs"
 
 [package.metadata.gateway]
 ring = 0

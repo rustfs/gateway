@@ -118,6 +118,7 @@ fixed now so that the same check does not get written twice under two names.
 | `check_sig_case_coverage.sh` | All 53 P2-01/P2-02 signature cases map to named executable evidence | P2-01, P2-02 |
 | `check_test_target_consolidation.sh` | Core, gateway and conformance integration sources each remain one explicit Cargo target, with gateway compile-fail fixtures sharing one trybuild batch | P0-04 |
 | `check_xtask_test_target_consolidation.sh` | All four xtask integration sources remain active and unique in one explicit Cargo target | P0 |
+| `check_sig_test_target_consolidation.sh` | All nine sig integration sources remain active and unique in one explicit Cargo target | P0 |
 | `check_no_host_normalize.sh` | Ring-1 server source never mutates Host or URI authority | P7-02 |
 | `check_timeout_layer_ownership.sh` | Server owns four connection timeouts and never the body/handler layers | P7-02 |
 | `check_tuning_doc.sh` | Every server tuning field documents both directions of its tradeoff | P7-02 |
