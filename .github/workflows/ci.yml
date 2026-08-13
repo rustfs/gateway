@@ -97,6 +97,8 @@ jobs:
       # guard that starts needing a build cannot silently make this job slow, and
       # the two loops cannot drift apart.
       - name: Repository guards
+        env:
+          GATEWAY_ADR_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: |
           ran=0
           for guard in scripts/check_*.sh; do

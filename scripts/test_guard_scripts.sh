@@ -2067,6 +2067,478 @@ probe_error_scope_guards_missing_python() {
 }
 probe_error_scope_guards_missing_python
 
+replace_adr_text() {
+    python3 - "$1" "$2" "$3" <<'PYEOF'
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+old, new = sys.argv[2:]
+text = path.read_text()
+if old not in text:
+    raise SystemExit(f"missing ADR mutation subject in {path}: {old}")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+
+mut_adr_second_legacy_filename() {
+    cp docs/adr/0008-closed-error-resolution.md docs/adr/ADR-0010-second-legacy.md
+}
+expect_fail check_adr_contract.sh \
+    'a second uppercase ADR filename expanding the one historical exception' mut_adr_second_legacy_filename
+
+mut_adr_number_gap() {
+    mv docs/adr/0008-closed-error-resolution.md docs/adr/0010-closed-error-resolution.md
+}
+expect_fail check_adr_contract.sh \
+    'the numbered ADR record gaining a gap' mut_adr_number_gap
+
+mut_adr_duplicate_number() {
+    cp docs/adr/0008-closed-error-resolution.md docs/adr/0008-duplicate-number.md
+}
+expect_fail check_adr_contract.sh \
+    'two ADR files claiming the same number' mut_adr_duplicate_number
+
+mut_adr_h1_number_mismatch() {
+    replace_adr_text docs/adr/0008-closed-error-resolution.md \
+        '# ADR-0008:' '# ADR-0010:'
+}
+expect_fail check_adr_contract.sh \
+    'an ADR H1 disagreeing with its file number' mut_adr_h1_number_mismatch
+
+mut_adr_placeholder_title() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("docs/adr/0008-closed-error-resolution.md")
+lines = path.read_text().splitlines()
+lines[0] = "# ADR-0008: <Title>"
+path.write_text("\n".join(lines) + "\n")
+PYEOF
+}
+expect_fail check_adr_contract.sh \
+    'an accepted ADR retaining the template title' mut_adr_placeholder_title
+
+mut_adr_duplicate_status_metadata() {
+    replace_adr_text docs/adr/0008-closed-error-resolution.md \
+        '- Status: Accepted' '- Status: Accepted
+- Status: Accepted'
+}
+expect_fail check_adr_contract.sh \
+    'an ADR carrying two active status rows' mut_adr_duplicate_status_metadata
+
+mut_adr_invalid_status() {
+    replace_adr_text docs/adr/0008-closed-error-resolution.md \
+        '- Status: Accepted' '- Status: Proposed'
+}
+expect_fail check_adr_contract.sh \
+    'an ADR restoring the forbidden Proposed state' mut_adr_invalid_status
+
+mut_adr_invalid_date() {
+    replace_adr_text docs/adr/0008-closed-error-resolution.md \
+        '- Date: 2026-08-11' '- Date: someday'
+}
+expect_fail check_adr_contract.sh \
+    'an ADR losing its exact decision date' mut_adr_invalid_date
+
+mut_adr_impossible_calendar_date() {
+    replace_adr_text docs/adr/0008-closed-error-resolution.md \
+        '- Date: 2026-08-11' '- Date: 2026-02-31'
+}
+expect_fail check_adr_contract.sh \
+    'an ADR using a shaped but impossible calendar date' mut_adr_impossible_calendar_date
+
+mut_adr_metadata_fence_decoy() {
+    replace_adr_text docs/adr/0008-closed-error-resolution.md \
+        '- Status: Accepted' '```markdown
+- Status: Accepted
+```'
+}
+expect_fail check_adr_contract.sh \
+    'an ADR status surviving only inside a fenced block' mut_adr_metadata_fence_decoy
+
+mut_adr_merged_body_drift() {
+    replace_adr_text docs/adr/0008-closed-error-resolution.md \
+        'The `204` case is the proof that this cannot remain only an error-code mapping' \
+        'The `204` case merely suggests that this should not remain only an error-code mapping'
+}
+expect_fail check_adr_contract.sh \
+    'an already merged ADR body changing outside lifecycle metadata' mut_adr_merged_body_drift
+
+mut_adr_body_status_prefix_drift() {
+    cat >>docs/adr/0008-closed-error-resolution.md <<'EOF'
+
+- Status: this is Decision prose, not lifecycle metadata
+EOF
+}
+expect_fail check_adr_contract.sh \
+    'ADR body prose sharing the Status prefix, which remains immutable' \
+    mut_adr_body_status_prefix_drift
+
+probe_adr_committed_self_base_rejected() {
+    local holder sandbox implicit_output explicit_output implicit_rc=0 explicit_rc=0
+    cases=$((cases + 1))
+    make_sandbox
+    holder="$(mktemp -d "${TMPDIR:-/tmp}/gateway-adr-self-base.XXXXXX")"
+    git clone -q "$SANDBOX" "$holder/repository"
+    sandbox="$holder/repository"
+    git -C "$sandbox" remote remove origin
+    (
+        cd "$sandbox"
+        replace_adr_text docs/adr/0008-closed-error-resolution.md \
+            'The `204` case is the proof that this cannot remain only an error-code mapping' \
+            'The committed drift tries to become its own baseline'
+        git add docs/adr/0008-closed-error-resolution.md
+        git -c user.name=t -c user.email=t@t commit -qm 'mutate ADR body'
+    )
+    implicit_output="$(GATEWAY_CHECK_ROOT="$sandbox" "${SCRIPT_DIR}/check_adr_contract.sh" 2>&1)" || implicit_rc=$?
+    explicit_output="$(GATEWAY_CHECK_ROOT="$sandbox" GATEWAY_ADR_BASE=HEAD \
+        "${SCRIPT_DIR}/check_adr_contract.sh" 2>&1)" || explicit_rc=$?
+    rm -rf "$holder"
+    if [[ "$implicit_rc" -ne 0 && "$implicit_output" == *'cannot resolve a trusted ADR base'* &&
+        "$explicit_rc" -ne 0 && "$explicit_output" == *'must not resolve to HEAD'* ]]; then
+        pass_msg 'check_adr_contract.sh rejects committed drift with an implicit or explicit self-base'
+    else
+        fail_msg 'check_adr_contract.sh accepted a committed ADR as its own baseline'
+    fi
+}
+probe_adr_committed_self_base_rejected
+
+probe_adr_origin_main_self_base_rejected() {
+    local holder sandbox output rc=0
+    cases=$((cases + 1))
+    make_sandbox
+    holder="$(mktemp -d "${TMPDIR:-/tmp}/gateway-adr-origin-self.XXXXXX")"
+    git clone -q "$SANDBOX" "$holder/repository"
+    sandbox="$holder/repository"
+    git -C "$sandbox" remote remove origin
+    (
+        cd "$sandbox"
+        replace_adr_text docs/adr/0008-closed-error-resolution.md \
+            'The `204` case is the proof that this cannot remain only an error-code mapping' \
+            'The committed drift advances the local origin/main ref too'
+        git add docs/adr/0008-closed-error-resolution.md
+        git -c user.name=t -c user.email=t@t commit -qm 'mutate ADR body and main'
+        git update-ref refs/remotes/origin/main HEAD
+    )
+    output="$(GATEWAY_CHECK_ROOT="$sandbox" "${SCRIPT_DIR}/check_adr_contract.sh" 2>&1)" || rc=$?
+    rm -rf "$holder"
+    if [[ "$rc" -ne 0 && "$output" == *'merged body changed outside lifecycle metadata'* ]]; then
+        pass_msg 'check_adr_contract.sh compares origin/main HEAD with its prior independent state'
+    else
+        fail_msg 'check_adr_contract.sh accepted origin/main HEAD as its own ADR baseline'
+    fi
+}
+probe_adr_origin_main_self_base_rejected
+
+probe_adr_pull_request_merge_uses_first_parent() {
+    cases=$((cases + 1))
+    make_sandbox
+    local rc=0
+    (
+        cd "$sandbox"
+        base="$(git rev-parse HEAD)"
+        replace_adr_text docs/adr/0008-closed-error-resolution.md \
+            'The `204` case is the proof that this cannot remain only an error-code mapping' \
+            'The `204` case merely suggests that this should not remain only an error-code mapping'
+        git add docs/adr/0008-closed-error-resolution.md
+        tree="$(git write-tree)"
+        mutation="$(printf 'mutate ADR body\n' | git commit-tree "$tree" -p "$base")"
+        merge="$(printf 'merge mutation\n' | git commit-tree "$tree" -p "$base" -p "$mutation")"
+        git reset -q --hard "$merge"
+    ) || rc=$?
+    if [[ "$rc" -eq 0 ]]; then
+        GATEWAY_CHECK_ROOT="$sandbox" GITHUB_ACTIONS=true GITHUB_EVENT_NAME=pull_request \
+            "${SCRIPT_DIR}/check_adr_contract.sh" >/dev/null 2>&1 || rc=$?
+    fi
+    if [[ "$rc" -ne 0 ]]; then
+        pass_msg 'check_adr_contract.sh compares a pull-request merge checkout with its first parent'
+    else
+        fail_msg 'check_adr_contract.sh accepted pull-request ADR drift from a merge result'
+    fi
+}
+probe_adr_pull_request_merge_uses_first_parent
+
+mut_adr_mixed_fence_marker() {
+    cat >>docs/adr/0008-closed-error-resolution.md <<'EOF'
+
+```~
+## Mixed fence decoy
+```~
+EOF
+}
+expect_fail check_adr_contract.sh \
+    'a mixed backtick/tilde run hiding an extra ADR section' mut_adr_mixed_fence_marker
+
+mut_adr_invalid_fence_close() {
+    replace_adr_text docs/adr/0008-closed-error-resolution.md \
+        '## Evidence' '```markdown
+``` trailing text
+## Evidence
+```
+```'
+}
+expect_fail check_adr_contract.sh \
+    'a fenced block closing with non-whitespace trailing text' mut_adr_invalid_fence_close
+
+mut_adr_placeholder_trigger() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("docs/adr/0008-closed-error-resolution.md")
+text = path.read_text()
+start = text.index("- Trigger: ")
+end = text.index("\n", start)
+path.write_text(text[:start] + "- Trigger: <axiom>" + text[end:])
+PYEOF
+}
+expect_fail check_adr_contract.sh \
+    'an accepted ADR retaining a placeholder trigger' mut_adr_placeholder_trigger
+
+mut_adr_missing_relation_target() {
+    replace_adr_text docs/adr/0008-closed-error-resolution.md \
+        '- Supersedes / Superseded by: none' \
+        '- Supersedes / Superseded by: ADR-9999'
+}
+expect_fail check_adr_contract.sh \
+    'supersession metadata naming a missing ADR' mut_adr_missing_relation_target
+
+mut_adr_one_way_supersession() {
+    replace_adr_text docs/adr/0008-closed-error-resolution.md \
+        '- Status: Accepted' '- Status: Superseded by ADR-0009'
+    replace_adr_text docs/adr/0008-closed-error-resolution.md \
+        '- Supersedes / Superseded by: none' \
+        '- Supersedes / Superseded by: ADR-0009'
+}
+expect_fail check_adr_contract.sh \
+    'a supersession recorded on only one side' mut_adr_one_way_supersession
+
+probe_adr_paired_supersession_allowed() {
+    local sandbox rc=0
+    cases=$((cases + 1))
+    make_sandbox
+    sandbox="$SANDBOX"
+    (
+        cd "$sandbox"
+        replace_adr_text docs/adr/0008-closed-error-resolution.md \
+            '- Status: Accepted' '- Status: Superseded by ADR-0010'
+        replace_adr_text docs/adr/0008-closed-error-resolution.md \
+            '- Supersedes / Superseded by: none' \
+            '- Supersedes / Superseded by: ADR-0010'
+        cat >docs/adr/0010-supersede-closed-error-resolution.md <<'EOF'
+# ADR-0010: Supersede closed error resolution
+
+- Status: Accepted
+- Date: 2026-08-12
+- Trigger: axiom A2 changed through a new reviewed decision
+- Supersedes / Superseded by: ADR-0008
+
+## Context
+
+The previous decision needs a replacement.
+
+## Decision
+
+The replacement is recorded in a new ADR.
+
+## Evidence
+
+The reciprocal metadata names the prior record.
+
+## Rejected alternatives
+
+Editing the merged body would erase history.
+
+## Consequences
+
+Readers can follow both directions.
+EOF
+        python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("docs/adr/README.md")
+text = path.read_text()
+old_row = "| 0008 | Closed error resolution across the types, signature, core and facade boundary | Accepted |"
+new_row = "| 0008 | Closed error resolution across the types, signature, core and facade boundary | Superseded by ADR-0010 |"
+anchor = "| 0009 | Typed scope-region rejection across sig and gateway | Accepted |"
+if text.count(old_row) != 1 or text.count(anchor) != 1:
+    raise SystemExit("ADR index supersession fixture is not unique")
+text = text.replace(old_row, new_row, 1)
+text = text.replace(anchor, anchor + "\n| 0010 | Supersede closed error resolution | Accepted |", 1)
+path.write_text(text)
+PYEOF
+    )
+    GATEWAY_CHECK_ROOT="$sandbox" "${SCRIPT_DIR}/check_adr_contract.sh" >/dev/null 2>&1 || rc=$?
+    if [[ "$rc" -eq 0 ]]; then
+        pass_msg 'check_adr_contract.sh allows paired supersession through a new ADR'
+    else
+        fail_msg 'check_adr_contract.sh rejected a paired new superseding ADR'
+    fi
+}
+probe_adr_paired_supersession_allowed
+
+mut_adr_relation_without_superseded_side() {
+    replace_adr_text docs/adr/0008-closed-error-resolution.md \
+        '- Supersedes / Superseded by: none' \
+        '- Supersedes / Superseded by: ADR-0009'
+    replace_adr_text docs/adr/0009-typed-scope-region-rejection.md \
+        '- Supersedes / Superseded by: none' \
+        '- Supersedes / Superseded by: ADR-0008'
+}
+expect_fail check_adr_contract.sh \
+    'two accepted ADRs claiming a relation with no superseded side' mut_adr_relation_without_superseded_side
+
+mut_adr_section_heading_comment_decoy() {
+    replace_adr_text docs/adr/0008-closed-error-resolution.md \
+        '## Evidence' '<!-- ## Evidence -->'
+}
+expect_fail check_adr_contract.sh \
+    'an ADR section heading surviving only inside a comment' mut_adr_section_heading_comment_decoy
+
+mut_adr_empty_evidence_comment_decoy() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("docs/adr/0008-closed-error-resolution.md")
+text = path.read_text()
+start = text.index("## Evidence\n")
+end = text.index("## Rejected alternatives\n", start)
+path.write_text(text[:start] + "## Evidence\n\n<!-- measured facts removed -->\n\n" + text[end:])
+PYEOF
+}
+expect_fail check_adr_contract.sh \
+    'an Evidence section containing only a comment' mut_adr_empty_evidence_comment_decoy
+
+mut_adr_empty_rejected_alternatives() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("docs/adr/0008-closed-error-resolution.md")
+text = path.read_text()
+start = text.index("## Rejected alternatives\n")
+end = text.index("## Consequences\n", start)
+path.write_text(text[:start] + "## Rejected alternatives\n\n" + text[end:])
+PYEOF
+}
+expect_fail check_adr_contract.sh \
+    'an ADR losing every rejected alternative' mut_adr_empty_rejected_alternatives
+
+mut_adr_template_heading_fence_decoy() {
+    replace_adr_text docs/adr/0000-template.md \
+        '## Evidence' '```markdown
+## Evidence
+```'
+}
+expect_fail check_adr_contract.sh \
+    'the template Evidence heading surviving only inside a fence' mut_adr_template_heading_fence_decoy
+
+mut_adr_template_metadata_changed() {
+    replace_adr_text docs/adr/0000-template.md \
+        '- Status: Accepted' '- Status: Proposed'
+}
+expect_fail check_adr_contract.sh \
+    'the ADR template restoring a Proposed lifecycle' mut_adr_template_metadata_changed
+
+mut_adr_readme_trigger_removed() {
+    replace_adr_text docs/adr/README.md \
+        '3. Changing the licensing or dependency policy.' \
+        '<!-- 3. Changing the licensing or dependency policy. -->'
+}
+expect_fail check_adr_contract.sh \
+    'one ADR trigger surviving only inside a comment' mut_adr_readme_trigger_removed
+
+mut_adr_readme_fourth_trigger() {
+    replace_adr_text docs/adr/README.md \
+        'If your change is not one of these three, do NOT write an ADR.' \
+        '4. Changing a local implementation detail.
+
+If your change is not one of these three, do NOT write an ADR.'
+}
+expect_fail check_adr_contract.sh \
+    'a fourth ADR trigger widening the mechanism' mut_adr_readme_fourth_trigger
+
+mut_adr_readme_exclusion_removed() {
+    replace_adr_text docs/adr/README.md \
+        'do NOT write an ADR' 'consider an ADR'
+}
+expect_fail check_adr_contract.sh \
+    'the ADR README losing its non-trigger exclusion' mut_adr_readme_exclusion_removed
+
+mut_adr_readme_exclusion_comment_decoy() {
+    replace_adr_text docs/adr/README.md \
+        'do NOT write an ADR' 'consider an ADR<!-- do NOT write an ADR -->'
+}
+expect_fail check_adr_contract.sh \
+    'the non-trigger exclusion surviving only inside a comment' mut_adr_readme_exclusion_comment_decoy
+
+mut_adr_readme_filename_rule_changed() {
+    replace_adr_text docs/adr/README.md \
+        'NNNN-kebab-case-title.md' 'ADR-NNNN-any-title.md'
+}
+expect_fail check_adr_contract.sh \
+    'the documented ADR filename rule drifting' mut_adr_readme_filename_rule_changed
+
+mut_adr_readme_rule_comment_decoy() {
+    replace_adr_text docs/adr/README.md \
+        'There is no `Proposed` state' \
+        'The lifecycle is flexible<!-- There is no `Proposed` state -->'
+}
+expect_fail check_adr_contract.sh \
+    'a required ADR rule surviving only inside a comment' mut_adr_readme_rule_comment_decoy
+
+mut_adr_index_title_changed() {
+    replace_adr_text docs/adr/README.md \
+        '| 0008 | Closed error resolution across the types, signature, core and facade boundary | Accepted |' \
+        '| 0008 | Error handling notes | Accepted |'
+}
+expect_fail check_adr_contract.sh \
+    'the ADR index title disagreeing with the record H1' mut_adr_index_title_changed
+
+mut_adr_index_row_comment_decoy() {
+    replace_adr_text docs/adr/README.md \
+        '| 0008 | Closed error resolution across the types, signature, core and facade boundary | Accepted |' \
+        '<!-- | 0008 | Closed error resolution across the types, signature, core and facade boundary | Accepted | -->'
+}
+expect_fail check_adr_contract.sh \
+    'an ADR index row surviving only inside a comment' mut_adr_index_row_comment_decoy
+
+mut_adr_duplicate_index_row() {
+    replace_adr_text docs/adr/README.md \
+        '| 0008 | Closed error resolution across the types, signature, core and facade boundary | Accepted |' \
+        '| 0008 | Closed error resolution across the types, signature, core and facade boundary | Accepted |
+| 0008 | Closed error resolution across the types, signature, core and facade boundary | Accepted |'
+}
+expect_fail check_adr_contract.sh \
+    'the hand-maintained index duplicating one ADR number' mut_adr_duplicate_index_row
+
+mut_adr_record_symlink() {
+    rm -f docs/adr/0009-typed-scope-region-rejection.md
+    ln -s 0008-closed-error-resolution.md docs/adr/0009-typed-scope-region-rejection.md
+}
+expect_fail check_adr_contract.sh \
+    'an ADR record replaced by a symlink' mut_adr_record_symlink
+
+mut_adr_readme_deleted() {
+    rm -f docs/adr/README.md
+}
+expect_fail check_adr_contract.sh \
+    "the guard's README input deleted, which must fail rather than skip" mut_adr_readme_deleted
+
+probe_adr_guard_missing_ruby() {
+    local output rc=0 sandbox
+    cases=$((cases + 1))
+    make_sandbox
+    sandbox="$SANDBOX"
+    output="$(GATEWAY_CHECK_ROOT="$sandbox" PATH=/nonexistent /bin/bash \
+        "${SCRIPT_DIR}/check_adr_contract.sh" 2>&1)" || rc=$?
+    if [[ "$rc" -ne 0 && "$output" == *'required command is missing: ruby'* ]]; then
+        pass_msg 'check_adr_contract.sh fails closed without ruby'
+    else
+        fail_msg 'check_adr_contract.sh reported green without ruby'
+    fi
+}
+probe_adr_guard_missing_ruby
+
 mut_assembly_case_id_deleted() {
     python3 - <<'PYEOF'
 import pathlib
