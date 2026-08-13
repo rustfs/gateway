@@ -283,6 +283,14 @@ the suite?*
 
 ---
 
+## Temporary `migration-safety-reviewer` (P9 only)
+
+Use this role for `compat-s3s`, dual-stack switches and metadata compatibility. Attack rollback in
+four directions: the new version reads old bytes, new writes remain byte-compatible where promised,
+the old version can read data written during rollout, and persisted-data parsing never becomes
+stricter. Require a dated shim-removal trigger and a tested rollback path; do not turn this outline
+into a permanent seventh role after P9.
+
 ## Deferred deterministic gates
 
 These probes are meant to become scripts or CI jobs; until they do, the role

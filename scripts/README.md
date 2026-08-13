@@ -69,7 +69,8 @@ fixed now so that the same check does not get written twice under two names.
 | `check_no_planning_docs.sh` | Agent notes and planning documents are not tracked by git (closes the `git add -f` hole that `.gitignore` leaves open) | P0 |
 | `check_protected_files.sh` | Existing contract paths, `rust-version`, and deleted conformance cases require a literal `BREAKING` declaration in the PR body; new ADRs and cases remain unrestricted | P0-09 |
 | `check_no_global_registry_deps.sh` | No `inventory` / `linkme` / `ctor` dependency in any `Cargo.toml` (ADR-0003) | P0-07 |
-| `check_ct_eq.sh` | Secret-bearing types (`Signature`, `Secret`, `SigningKey`, …) derive no `PartialEq` / `Eq` / `Debug`; comparison must go through `ct_eq`. No-ops with an explanation until `crates/sig` lands | P0 (before P2) |
+| `check_ct_eq.sh` | Secret-bearing types (`Signature`, `Secret`, `SigningKey`, …) derive no `PartialEq` / `Eq` / `Debug`; every hand-written `PartialEq` calls `::subtle::ConstantTimeEq::ct_eq`; aliases and look-alike helpers cannot restore ordinary equality | P0 (before P2) |
+| `check_role_verdicts.sh` | PR bodies record each path-triggered advisory role with substantive evidence; deterministic presence is enforced but verdict judgement never blocks CI | P0-10 |
 | `check_license_headers.sh` | Every tracked `.rs` file opens with the Apache-2.0 licence header (ADR-0001 provenance boundary) | P0 |
 | `check_governance_attribution.sh` | The s3s relationship statement and adapted aws-sigv4 helpers retain their reviewed source, revision, licence, and copied-code registry entry | P0-01 |
 | `check_smithy_timestamp_corpus.sh` | The vendored Smithy timestamp corpus matches its pinned bytes, case counts, license attribution, and format mapping | P1-04 |
@@ -123,7 +124,6 @@ fixed now so that the same check does not get written twice under two names.
 | Script | Checks | Phase |
 |---|---|---|
 | `check_dto_fields.sh` | DTO public field count only grows (the `non_exhaustive` and destructuring halves are now implemented separately, see above) | P0-08 |
-| `check_role_verdicts.sh` | High-risk PR descriptions carry the required expert-role verdicts (PR-only job; needs the `## Role Verdicts` anchor from the PR template) | P0-10 |
 | `check_op_file_shape.sh` | One operation per file; `//! Shares:` declaration agrees with the actual `use` graph; 800-line ceiling | P1 |
 | `check_quirks_evidence.sh` | Every quirk has ≥1 evidence and ≥1 case referencing it, consistent in both directions | P1 |
 | `check_error_has_rule_ref.sh` | Diagnostic errors carry a rule reference (quirk id / RFC section / spec field path) | P2 |

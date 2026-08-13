@@ -435,3 +435,35 @@ the answer only exists after expansion. Four rules:
 | `cargo xtask verify --crate X` takes minutes → wait it out | Open an issue; the ≤30s loop is a contract, not a hope |
 
 <!-- P0-10 appends: Expert Roles & Trigger Table -->
+
+## Expert Roles & Trigger Table
+
+Role verdicts are advisory review evidence. CI may deterministically check that the required review
+was recorded, but it must never judge whether an LLM verdict is favourable. Documentation and CI
+configuration changes require no role; every other ordinary PR defaults to
+`simplicity-adversary` plus at most one path-specific role.
+
+| Changed path | Required roles | Execution |
+| --- | --- | --- |
+| `docs/**`, `.github/**`, Markdown-only changes | none | no role |
+| added `conformance/cases/**` | `simplicity-adversary`, `test-adversary` | single-session skill |
+| `model/**`, `spec/**`, `generated/**` | `simplicity-adversary`, `protocol-auditor` | skill plus deterministic spec verification |
+| `crates/types/**`, `crates/xml/**` | `simplicity-adversary`, `protocol-auditor` | single-session skill |
+| `crates/http/**` | `simplicity-adversary`, `security-adversary`, `concurrency-durability`, `perf-engineer` | parallel review allowed; high risk |
+| `crates/sig/**` | `simplicity-adversary`, `security-adversary`, `test-adversary` | parallel review allowed; high risk |
+| `crates/core/**` routing or pipeline | `simplicity-adversary`, `security-adversary` | single-session skill |
+| `ops/**` or `crates/core/src/ops/**` | `simplicity-adversary`, `protocol-auditor` | single-session skill |
+| a `compat-s3s` change | `simplicity-adversary`, `migration-safety-reviewer` | single-session skill |
+| every other behaviour-affecting path | `simplicity-adversary` | single-session skill |
+
+Cost and blocking rules:
+
+1. The default is at most 2 roles per PR: `simplicity-adversary` and one path-specific role.
+2. More than 2 roles are allowed only for the `crates/http/**` and `crates/sig/**` high-risk rows,
+   or when the PR description contains `HIGH-RISK`.
+3. The total role budget is at most 60k tokens per PR. Above that, use one skill pass rather than
+   adding agents.
+4. Only deterministic scripts block CI. Role judgement is advisory and never a merge verdict.
+5. Record all role findings or null reports in one PR comment and one line per required role under
+   `## Role Verdicts`: either a repository-relative `file:line` finding or an
+   `attacked X, Y, Z — no break found` null report. Bare approval prose is not a result.
