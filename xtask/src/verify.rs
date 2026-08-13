@@ -65,7 +65,7 @@ fn verify_crate(name: &str, json: bool) -> ExitCode {
         }
     };
     let steps = crate_steps(&package);
-    let subject = if package == "rustfs-gateway-core" {
+    let subject = if matches!(package.as_str(), "rustfs-gateway-core" | "rustfs-gateway") {
         format!("crate {package} runtime scope; compile-time contracts remain in cargo test --workspace")
     } else if package == "rustfs-gateway-conformance" {
         format!("crate {package} library scope; integration contracts remain in cargo test --workspace")
@@ -90,6 +90,12 @@ fn crate_steps(package: &str) -> Vec<Vec<String>> {
             "--".to_owned(),
             "--skip".to_owned(),
             "compile_fail::compile_time_contracts_are_not_openable".to_owned(),
+        ]);
+    } else if package == "rustfs-gateway" {
+        test_step.extend([
+            "--".to_owned(),
+            "--skip".to_owned(),
+            "compile_fail::gateway_compile_fail_contracts_are_enforced".to_owned(),
         ]);
     } else if package == "rustfs-gateway-conformance" {
         test_step.push("--lib".to_owned());
