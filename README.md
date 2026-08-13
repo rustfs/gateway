@@ -66,6 +66,11 @@ the same bytes whether or not the bucket exists, and a reflected `Origin` cannot
 Details, including the ten-entry timing side-channel register, are in
 [docs/security-model.md](docs/security-model.md); the preflight design is in [docs/cors.md](docs/cors.md).
 
+Never run a debug build of `rustfs-gateway-sig` in production: `subtle` uses secret-dependent
+`debug_assert!` checks. AWS compatibility also requires `InvalidAccessKeyId` and
+`SignatureDoesNotMatch` to remain distinct; timing parity and rate limiting mitigate that
+enumeration surface instead of changing the wire error code.
+
 ## Building
 
 - **MSRV: 1.97.1.** Every crate declares `rust-version = "1.97.1"`; CI verifies it in a dedicated job. The policy —

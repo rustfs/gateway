@@ -1,0 +1,5 @@
+error[E0599]: no method named `clone` found for struct `AnonymousAck` in the current scope
+  --> tests/compile_fail/p2_02_anonymous_ack_cannot_clone.rs:25:22
+   |
+25 |     let _ = evidence.clone();
+   |                      ^^^^^ method not found in `AnonymousAck`

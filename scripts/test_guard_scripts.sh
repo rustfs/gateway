@@ -5248,7 +5248,7 @@ probe_global_registry_guard_missing_python() {
 }
 probe_global_registry_guard_missing_python
 
-mut_derived_signature() {
+mut_c_sig_0126_derived_signature() {
     cat >crates/sig/src/proof.rs <<'RS'
 // Copyright 2026 RustFS Team
 //
@@ -5272,7 +5272,7 @@ pub struct Signature([u8; 32]);
 RS
 }
 expect_ct_eq_fail \
-    'a Signature type deriving Debug/PartialEq/Eq' mut_derived_signature
+    '[c-sig-0126] a Signature type deriving Debug/PartialEq/Eq' mut_c_sig_0126_derived_signature
 
 mut_strip_header() {
     grep -v 'Licensed under the Apache License' crates/core/src/lib.rs >/tmp/.lh.$$ &&
@@ -5500,12 +5500,12 @@ mut_secret_display() {
 expect_ct_eq_fail \
     'a Display impl on a secret-bearing type' mut_secret_display
 
-mut_second_bool_from() {
+mut_c_sig_0127_second_bool_from() {
     printf '\nfn leak(c: subtle::Choice) -> bool { bool::from(c) }\n' \
         >>crates/sig/src/verdict.rs
 }
 expect_ct_eq_fail \
-    'a second bool::from(Choice), which turns constant time back into a branch' mut_second_bool_from
+    '[c-sig-0127] a second bool::from(Choice), which turns constant time back into a branch' mut_c_sig_0127_second_bool_from
 
 mut_unwrap_u8() {
     printf '\nfn peek(c: subtle::Choice) -> u8 { c.unwrap_u8() }\n' \
@@ -6655,6 +6655,8 @@ PYEOF
 }
 expect_fail check_sig_case_coverage.sh \
     'c-sig-0018 no longer diagnosing its serialization bound' mut_sig_serialize_call_diagnostic_changed
+
+"${SCRIPT_DIR}/test_sig_case_coverage.sh"
 
 # -----------------------------------------------------------------------------
 # ADR-0005. Each of the three mutations below is a way the generated dto silently

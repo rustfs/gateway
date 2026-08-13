@@ -1,0 +1,9 @@
+error[E0382]: use of moved value: `proof`
+  --> tests/compile_fail/p2_02_signature_match_cannot_copy.rs:28:21
+   |
+26 |     let proof = left.ct_verify(&right).unwrap();
+   |         ----- move occurs because `proof` has type `SignatureMatch`, which does not implement the `Copy` trait
+27 |     let moved = proof;
+   |                 ----- value moved here
+28 |     let _ = (moved, proof);
+   |                     ^^^^^ value used here after move

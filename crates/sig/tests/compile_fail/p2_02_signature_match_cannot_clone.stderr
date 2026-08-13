@@ -1,0 +1,5 @@
+error[E0599]: no method named `clone` found for struct `SignatureMatch` in the current scope
+  --> tests/compile_fail/p2_02_signature_match_cannot_clone.rs:27:19
+   |
+27 |     let _ = proof.clone();
+   |                   ^^^^^ method not found in `SignatureMatch`

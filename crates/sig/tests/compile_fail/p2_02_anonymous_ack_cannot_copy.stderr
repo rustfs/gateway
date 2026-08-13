@@ -1,0 +1,9 @@
+error[E0382]: use of moved value: `evidence`
+  --> tests/compile_fail/p2_02_anonymous_ack_cannot_copy.rs:26:21
+   |
+24 |     let evidence = CredentialPresence::NONE.into_evidence().unwrap();
+   |         -------- move occurs because `evidence` has type `AnonymousAck`, which does not implement the `Copy` trait
+25 |     let moved = evidence;
+   |                 -------- value moved here
+26 |     let _ = (moved, evidence);
+   |                     ^^^^^^^^ value used here after move

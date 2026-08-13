@@ -113,7 +113,6 @@ pub enum Signature {
 /// compile error rather than a CVE (the shape of MinIO CVE-2025-31489).
 ///
 /// It has no `Debug` and no `PartialEq`: it carries nothing to print and nothing to compare.
-#[derive(Clone, Copy)]
 pub struct SignatureMatch(());
 
 /// Why a signature comparison did not produce a [`SignatureMatch`].

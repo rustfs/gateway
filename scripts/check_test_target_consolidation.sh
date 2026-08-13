@@ -445,6 +445,8 @@ core_calls = [
     'cases.pass("tests/compile_pass/authz_authorized.rs");',
     'cases.compile_fail("tests/compile_fail/c_sig_0018_*.rs");',
 ]
+if any(core_compile_dir.glob("c_sig_0123_*.rs")):
+    core_calls.append('cases.compile_fail("tests/compile_fail/c_sig_0123_*.rs");')
 if core_error_sources:
     core_calls.append('cases.compile_fail("tests/compile_fail/error_resolution_*.rs");')
 expected_core_compile_code = "".join(

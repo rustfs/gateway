@@ -43,8 +43,8 @@
 //! let _ = Verdict::Authenticated { identity, scheme };
 //! ```
 //!
-//! [`SignatureMatch`] has a private field and no `Default`, `Clone` is `Copy`-derived from a value
-//! that only [`crate::Signature::ct_verify`] hands out, so the token cannot be conjured either:
+//! [`SignatureMatch`] has a private field and no `Default`, `Clone` or `Copy`; only
+//! [`crate::Signature::ct_verify`] hands it out, so the token cannot be conjured or reused:
 //!
 //! ```compile_fail,E0423
 //! use rustfs_gateway_sig::SignatureMatch;
@@ -357,7 +357,6 @@ impl core::error::Error for AuthError {}
 /// Zero-sized, with a private field and no `Default`: the only producer is
 /// [`CredentialPresence::into_evidence`], and it refuses whenever any authentication surface was
 /// touched. It exists so that [`Verdict::Anonymous`] cannot be reached from a failed verification.
-#[derive(Clone, Copy)]
 pub struct AnonymousAck(());
 
 /// The refusal returned when anonymous access is claimed for a request that presented credentials.
