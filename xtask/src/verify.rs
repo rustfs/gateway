@@ -64,31 +64,11 @@ fn verify_crate(name: &str, json: bool) -> ExitCode {
             return diagnostic("workspace package could not be resolved", &format!("crate {name}"), &error.to_string());
         }
     };
-    let mut test_step = vec!["test".to_owned(), "-p".to_owned(), package.clone()];
-    if package == "rustfs-gateway-core" {
-        test_step.extend([
-            "--".to_owned(),
-            "--skip".to_owned(),
-            "compile_fail::compile_time_contracts_are_not_openable".to_owned(),
-        ]);
-    }
-    let mut steps = vec![
-        test_step,
-        vec![
-            "clippy".to_owned(),
-            "-p".to_owned(),
-            package.clone(),
-            "--all-targets".to_owned(),
-            "--".to_owned(),
-            "-D".to_owned(),
-            "warnings".to_owned(),
-        ],
-    ];
-    if let Some(case) = crate_case(&package) {
-        steps.push(conformance_step("validate", case));
-    }
+    let steps = crate_steps(&package);
     let subject = if package == "rustfs-gateway-core" {
         format!("crate {package} runtime scope; compile-time contracts remain in cargo test --workspace")
+    } else if package == "rustfs-gateway-conformance" {
+        format!("crate {package} library scope; integration contracts remain in cargo test --workspace")
     } else {
         format!("crate {package}")
     };
@@ -101,6 +81,35 @@ fn verify_crate(name: &str, json: bool) -> ExitCode {
         None,
         None,
     )
+}
+
+fn crate_steps(package: &str) -> Vec<Vec<String>> {
+    let mut test_step = vec!["test".to_owned(), "-p".to_owned(), package.to_owned()];
+    if package == "rustfs-gateway-core" {
+        test_step.extend([
+            "--".to_owned(),
+            "--skip".to_owned(),
+            "compile_fail::compile_time_contracts_are_not_openable".to_owned(),
+        ]);
+    } else if package == "rustfs-gateway-conformance" {
+        test_step.push("--lib".to_owned());
+    }
+    let mut steps = vec![
+        test_step,
+        vec![
+            "clippy".to_owned(),
+            "-p".to_owned(),
+            package.to_owned(),
+            "--all-targets".to_owned(),
+            "--".to_owned(),
+            "-D".to_owned(),
+            "warnings".to_owned(),
+        ],
+    ];
+    if let Some(case) = crate_case(package) {
+        steps.push(conformance_step("validate", case));
+    }
+    steps
 }
 
 #[cfg(feature = "full")]
@@ -766,5 +775,13 @@ mod tests {
             resolve_package_name("core", &["rustfs-gateway-core".to_owned()]),
             Ok("rustfs-gateway-core".to_owned())
         );
+    }
+
+    #[test]
+    fn conformance_fast_scope_keeps_integration_contracts_in_the_workspace_gate() {
+        let steps = crate_steps("rustfs-gateway-conformance");
+
+        assert!(steps[0].iter().any(|arg| arg == "--lib"));
+        assert!(steps[1].iter().any(|arg| arg == "--all-targets"));
     }
 }
