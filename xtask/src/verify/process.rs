@@ -25,7 +25,7 @@ use std::process::{Command, ExitStatus, Output, Stdio};
 #[cfg(unix)]
 use std::sync::atomic::{AtomicI32, Ordering};
 #[cfg(unix)]
-use std::sync::{Mutex, MutexGuard, OnceLock};
+use std::sync::{Mutex, MutexGuard, OnceLock, TryLockError};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -105,8 +105,16 @@ fn run_supervised(commands: &[GateCommand], current_dir: &Path, deadline: Option
         Ok(path) => path,
         Err(error) => return failed_to_start(&commands[0].2, error),
     };
-    let signals = match SignalControl::new() {
-        Ok(signals) => signals,
+    let signals = match SignalControl::new(deadline) {
+        Ok(Some(signals)) => signals,
+        Ok(None) => {
+            let _ = fs::remove_dir_all(capture_root);
+            return Batch {
+                results: Vec::new(),
+                timed_out: true,
+                interrupted: false,
+            };
+        }
         Err(error) => {
             let _ = fs::remove_dir_all(capture_root);
             return failed_to_start(&commands[0].2, error);
@@ -119,8 +127,16 @@ fn run_supervised(commands: &[GateCommand], current_dir: &Path, deadline: Option
         cleaned: false,
     };
     for (index, (program, args, step)) in commands.iter().enumerate() {
-        if let Err(error) = supervisor.spawn(index, program, args, step, current_dir) {
-            return failed_to_start(step, error);
+        match supervisor.spawn_before_deadline(index, program, args, step, current_dir, deadline) {
+            Ok(true) => {}
+            Ok(false) => {
+                return supervisor.finish(Batch {
+                    results: Vec::new(),
+                    timed_out: true,
+                    interrupted: false,
+                });
+            }
+            Err(error) => return failed_to_start(step, error),
         }
     }
     let batch = supervisor.wait(deadline);
@@ -143,6 +159,22 @@ fn capture_root() -> io::Result<PathBuf> {
 }
 
 impl Supervisor {
+    fn spawn_before_deadline(
+        &mut self,
+        index: usize,
+        program: &str,
+        args: &[String],
+        step: &str,
+        current_dir: &Path,
+        deadline: Option<Instant>,
+    ) -> io::Result<bool> {
+        if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+            return Ok(false);
+        }
+        self.spawn(index, program, args, step, current_dir)?;
+        Ok(true)
+    }
+
     fn spawn(&mut self, index: usize, program: &str, args: &[String], step: &str, current_dir: &Path) -> io::Result<()> {
         let stdout = self.capture_root.join(format!("{index}.stdout"));
         let stderr = self.capture_root.join(format!("{index}.stderr"));
@@ -294,16 +326,33 @@ impl Supervisor {
 
 #[cfg(unix)]
 impl SignalControl {
-    fn new() -> io::Result<Self> {
+    fn new(deadline: Option<Instant>) -> io::Result<Option<Self>> {
         ensure_signal_listener()?;
-        let guard = SUPERVISOR_LOCK
-            .lock()
-            .map_err(|_| io::Error::other("signal supervisor lock is poisoned"))?;
+        let guard = match deadline {
+            None => SUPERVISOR_LOCK
+                .lock()
+                .map_err(|_| io::Error::other("signal supervisor lock is poisoned"))?,
+            Some(deadline) => loop {
+                match SUPERVISOR_LOCK.try_lock() {
+                    Ok(guard) => break guard,
+                    Err(TryLockError::Poisoned(_)) => {
+                        return Err(io::Error::other("signal supervisor lock is poisoned"));
+                    }
+                    Err(TryLockError::WouldBlock) => {
+                        let remaining = deadline.saturating_duration_since(Instant::now());
+                        if remaining.is_zero() {
+                            return Ok(None);
+                        }
+                        thread::sleep(remaining.min(Duration::from_millis(10)));
+                    }
+                }
+            },
+        };
         SIGNAL_STATE.store(SIGNAL_ACTIVE, Ordering::SeqCst);
-        Ok(Self {
+        Ok(Some(Self {
             _guard: guard,
             finished: false,
-        })
+        }))
     }
 
     fn interrupted(&self) -> bool {
@@ -322,8 +371,11 @@ impl SignalControl {
 
 #[cfg(not(unix))]
 impl SignalControl {
-    fn new() -> io::Result<Self> {
-        Ok(Self)
+    fn new(deadline: Option<Instant>) -> io::Result<Option<Self>> {
+        if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+            return Ok(None);
+        }
+        Ok(Some(Self))
     }
 
     fn interrupted(&self) -> bool {

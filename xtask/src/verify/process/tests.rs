@@ -18,6 +18,7 @@
 
 use std::os::unix::process::ExitStatusExt;
 use std::process::Child;
+use std::sync::mpsc;
 
 use super::*;
 
@@ -36,7 +37,9 @@ fn shell(args: Vec<String>, step: &str) -> GateCommand {
 }
 
 fn test_supervisor(capture_root: PathBuf) -> Supervisor {
-    let signals = SignalControl::new().expect("signal listener must start");
+    let signals = SignalControl::new(None)
+        .expect("signal listener must start")
+        .expect("a supervisor without a deadline must acquire the lock");
     Supervisor {
         children: Vec::new(),
         capture_root,
@@ -254,6 +257,106 @@ fn deadline_is_enforced_while_children_are_running() {
 
     assert!(batch.timed_out, "an over-budget crate step passed");
     assert!(started.elapsed() < Duration::from_secs(1), "the deadline was checked after completion");
+}
+
+#[test]
+fn deadline_expires_while_waiting_for_supervisor_lock_without_starting_command() {
+    let root = test_root("lock-deadline");
+    let marker = root.join("started");
+    let lock = SUPERVISOR_LOCK.lock().expect("test must hold the supervisor lock");
+    let (sender, receiver) = mpsc::channel();
+    let (ready_sender, ready_receiver) = mpsc::channel();
+    let worker_root = root.clone();
+    let worker_marker = marker.clone();
+    let worker = thread::spawn(move || {
+        let commands = vec![shell(
+            vec!["-c".to_owned(), format!("touch '{}'", worker_marker.display())],
+            "must not start",
+        )];
+        ready_sender.send(()).expect("test readiness receiver must remain available");
+        let batch = run(&commands, &worker_root, Some(Instant::now() + Duration::from_millis(50)));
+        sender.send(batch).expect("test result receiver must remain available");
+    });
+
+    ready_receiver.recv().expect("deadline worker must become ready");
+    let result = receiver.recv_timeout(Duration::from_millis(250));
+    drop(lock);
+    let batch = result.expect("the expired deadline waited for the supervisor lock");
+    worker.join().expect("deadline worker must finish");
+
+    assert!(batch.timed_out, "lock contention was not reported as a timeout");
+    assert!(batch.results.is_empty(), "a command was reported before the supervisor lock was acquired");
+    assert!(!marker.exists(), "an expired command started after waiting for the supervisor lock");
+    fs::remove_dir_all(root).expect("test directory must be removable");
+}
+
+#[test]
+fn supervisor_lock_released_before_deadline_allows_command_to_start() {
+    let root = test_root("lock-release");
+    let marker = root.join("started");
+    let lock = SUPERVISOR_LOCK.lock().expect("test must hold the supervisor lock");
+    let (ready_sender, ready_receiver) = mpsc::channel();
+    let worker_root = root.clone();
+    let worker_marker = marker.clone();
+    let worker = thread::spawn(move || {
+        let commands = vec![shell(
+            vec!["-c".to_owned(), format!("touch '{}'", worker_marker.display())],
+            "must start",
+        )];
+        ready_sender.send(()).expect("test readiness receiver must remain available");
+        run(&commands, &worker_root, Some(Instant::now() + Duration::from_secs(1)))
+    });
+    ready_receiver.recv().expect("deadline worker must become ready");
+    thread::sleep(Duration::from_millis(50));
+    drop(lock);
+
+    let batch = worker.join().expect("deadline worker must finish");
+
+    assert!(all_succeeded(&batch, 1), "lock contention caused an early timeout");
+    assert!(marker.exists(), "a command released before its deadline did not start");
+    fs::remove_dir_all(root).expect("test directory must be removable");
+}
+
+#[test]
+fn already_expired_deadline_never_starts_command() {
+    let root = test_root("expired-before-spawn");
+    let marker = root.join("started");
+    let commands = vec![shell(
+        vec!["-c".to_owned(), format!("touch '{}'", marker.display())],
+        "must not start",
+    )];
+
+    let batch = run(&commands, &root, Some(Instant::now()));
+
+    assert!(batch.timed_out, "an expired deadline was not reported");
+    assert!(batch.results.is_empty(), "an expired command produced a result");
+    assert!(!marker.exists(), "an already expired command started");
+    fs::remove_dir_all(root).expect("test directory must be removable");
+}
+
+#[test]
+fn deadline_expiring_after_lock_acquisition_stops_command_startup() {
+    let root = test_root("expired-before-spawn");
+    let marker = root.join("started");
+    let capture = capture_root().expect("capture directory must be creatable");
+    let mut supervisor = test_supervisor(capture);
+    let deadline = Instant::now() + Duration::from_millis(25);
+    thread::sleep(Duration::from_millis(50));
+    let started = supervisor
+        .spawn_before_deadline(
+            0,
+            "sh",
+            &["-c".to_owned(), format!("touch '{}'", marker.display())],
+            "must not start",
+            &root,
+            Some(deadline),
+        )
+        .expect("deadline check must not fail");
+
+    assert!(!started, "startup did not recheck the deadline after acquiring the lock");
+    assert!(!marker.exists(), "a command started after its deadline expired");
+    drop(supervisor);
+    fs::remove_dir_all(root).expect("test directory must be removable");
 }
 
 #[test]
