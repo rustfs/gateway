@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# WHAT: Maps every P2-01 acceptance id to named executable evidence.
-# WHY: rustfs/backlog#1678 requires 25 explicit cases; nearby doctests or a green crate suite do
-# not prove that every listed contract still has a test.
+# WHAT: Maps every P2-01 and P2-02 acceptance id to named executable evidence.
+# WHY: rustfs/backlog#1678 and rustfs/backlog#1679 require explicit cases; nearby doctests or a
+# green crate suite do not prove that every listed contract still has a test.
 # HOW TO EXEMPT: There is no exemption; replace a mapping only with equivalent executable evidence.
 
 ROOT="${GATEWAY_CHECK_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
@@ -36,8 +36,45 @@ cases=(
     'c-sig-0025|negative|crates/sig/tests/frozen_dimensions.rs|fn c_sig_0025_non_canonical_base64_is_rejected'
 )
 
+verification_cases=(
+    'c-sig-0101|positive|crates/sig/tests/verification_proof.rs|fn c_sig_0101_equal_sigv4_signatures_produce_a_proof'
+    'c-sig-0102|positive|crates/sig/tests/verification_proof.rs|fn c_sig_0102_equal_sigv2_signatures_produce_a_proof'
+    'c-sig-0103|positive|crates/sig/tests/verification_proof.rs|fn c_sig_0103_exact_lowercase_hex_decodes'
+    'c-sig-0104|positive|crates/sig/tests/verification_proof.rs|fn c_sig_0104_canonical_base64_decodes'
+    'c-sig-0105|positive|crates/sig/tests/verification_proof.rs|fn c_sig_0105_no_credentials_is_an_anonymous_verdict'
+    'c-sig-0106|positive|crates/sig/tests/verification_proof.rs|fn c_sig_0106_key_material_is_zeroized_and_never_grows'
+    'c-sig-0107|negative|crates/sig/tests/verification_proof.rs|fn c_sig_0107_a_first_byte_difference_is_a_mismatch'
+    'c-sig-0108|negative|crates/sig/tests/verification_proof.rs|fn c_sig_0108_a_last_byte_difference_is_the_same_mismatch'
+    'c-sig-0109|negative|crates/sig/tests/verification_proof.rs|fn c_sig_0109_algorithm_families_are_never_coerced'
+    'c-sig-0110|negative|crates/sig/tests/verification_proof.rs|fn c_sig_0110_a_known_key_with_a_wrong_signature_is_rejected'
+    'c-sig-0111|negative|crates/sig/tests/verification_proof.rs|fn c_sig_0111_the_two_credential_rejections_differ_only_in_their_code'
+    'c-sig-0112|negative|crates/sig/tests/verification_proof.rs|fn c_sig_0112_wrong_length_hex_is_rejected'
+    'c-sig-0113|negative|crates/sig/tests/verification_proof.rs|fn c_sig_0113_url_safe_base64_is_rejected'
+    'c-sig-0114|negative|crates/sig/tests/verification_proof.rs|fn c_sig_0114_base64_padding_must_be_exact'
+    'c-sig-0115|negative|crates/sig/tests/verification_proof.rs|fn c_sig_0115_base64_whitespace_is_rejected'
+    'c-sig-0116|negative|crates/sig/tests/verification_proof.rs|fn c_sig_0116_non_hex_characters_are_rejected'
+    'c-sig-0117|negative|crates/sig/tests/compile_fail/c_sig_0117_authenticated_requires_proof.rs|let _ = Verdict::Authenticated { identity, scheme };'
+    'c-sig-0118|negative|crates/sig/tests/compile_fail/c_sig_0118_signature_match_private.rs|let _ = SignatureMatch(());'
+    'c-sig-0119|negative|crates/sig/tests/compile_fail/c_sig_0119_signature_match_no_default.rs|let _ = SignatureMatch::default();'
+    'c-sig-0120|negative|crates/sig/tests/compile_fail/c_sig_0120_anonymous_ack_private.rs|let _ = AnonymousAck(());'
+    'c-sig-0121|negative|crates/sig/tests/compile_fail/c_sig_0121_secret_bytes_eq.rs|let _ = left == right;'
+    'c-sig-0122|negative|crates/sig/tests/compile_fail/c_sig_0122_secret_bytes_display.rs|let _ = format!'
+    'c-sig-0123|negative|crates/core/tests/compile_fail/c_sig_0123_secret_bytes_serialize.rs|let _ = serde_json::to_string(&secret);'
+    'c-sig-0124|negative|crates/sig/tests/compile_fail/c_sig_0124_secret_bytes_clone.rs|let _ = secret.clone();'
+    'c-sig-0125|negative|crates/sig/tests/compile_fail/c_sig_0125_verification_result_must_be_used.rs|left.ct_verify(&right);'
+    'c-sig-0126|negative|scripts/test_guard_scripts.sh|mut_c_sig_0126_derived_signature'
+    'c-sig-0127|negative|scripts/test_guard_scripts.sh|mut_c_sig_0127_second_bool_from'
+    'c-sig-0128|negative|crates/gateway/tests/credential_runtime.rs|fn c_sig_0128_request_logs_exclude_credential_material'
+)
+
 [[ "${#cases[@]}" -eq 25 ]] || {
     printf 'check_sig_case_coverage: expected 25 mappings, got %s\n' "${#cases[@]}" >&2
+    exit 1
+}
+
+[[ "${#verification_cases[@]}" -eq 28 ]] || {
+    printf 'check_sig_case_coverage: expected 28 P2-02 mappings, got %s\n' \
+        "${#verification_cases[@]}" >&2
     exit 1
 }
 
@@ -345,6 +382,13 @@ if not isinstance(serde_json, dict) or serde_json.get("workspace") is not True:
 PYEOF
 }
 
+validate_shell_mutation() {
+    local file="$1" function="$2"
+    bash -n "$file" || return 1
+    grep -Eq "^${function}\\(\\)[[:space:]]*\\{" "$file" || return 1
+    grep -Eq "^[[:space:]]*'[^']*'[[:space:]]+${function}$" "$file" || return 1
+}
+
 for mapping in "${cases[@]}"; do
     IFS='|' read -r id polarity relative evidence <<<"$mapping"
     printf -v wanted 'c-sig-%04d' "$expected"
@@ -415,6 +459,98 @@ done
     exit 1
 }
 
+positive=0
+negative=0
+expected=101
+verification_compile_fail_paths=()
+
+for mapping in "${verification_cases[@]}"; do
+    IFS='|' read -r id polarity relative evidence <<<"$mapping"
+    printf -v wanted 'c-sig-%04d' "$expected"
+    [[ "$id" == "$wanted" ]] || {
+        printf 'check_sig_case_coverage: expected %s, found %s\n' "$wanted" "$id" >&2
+        exit 1
+    }
+    case "$polarity" in
+        positive) positive=$((positive + 1)) ;;
+        negative) negative=$((negative + 1)) ;;
+        *)
+            printf 'check_sig_case_coverage: %s has unknown polarity %s\n' "$id" "$polarity" >&2
+            exit 1
+            ;;
+    esac
+    file="${ROOT}/${relative}"
+    [[ -f "$file" ]] || {
+        printf 'check_sig_case_coverage: mapped file is missing: %s\n' "$relative" >&2
+        exit 1
+    }
+    if [[ "$relative" == scripts/*.sh ]]; then
+        validate_shell_mutation "$file" "$evidence" || {
+            printf 'check_sig_case_coverage: %s is not an executable guard mutation in %s\n' \
+                "$id" "$relative" >&2
+            exit 1
+        }
+    else
+        grep -Fq "$id" "$file" || {
+            printf 'check_sig_case_coverage: %s is not named by %s\n' "$id" "$relative" >&2
+            exit 1
+        }
+        if [[ "$relative" == crates/*/tests/compile_fail/c_sig_*.rs ]]; then
+            verification_compile_fail_paths+=("$relative")
+            validate_rust_evidence "$file" compile "$evidence" '' \
+                "check_sig_case_coverage: ${relative} is not an executable compile-fail fixture"
+            stderr="${file%.rs}.stderr"
+            [[ -f "$stderr" ]] || {
+                printf 'check_sig_case_coverage: compile-fail golden is missing: %s.stderr\n' \
+                    "${relative%.rs}" >&2
+                exit 1
+            }
+            grep -Eq '^error(\[E[0-9]+\])?:' "$stderr" || {
+                printf 'check_sig_case_coverage: compile-fail golden has no rustc error: %s.stderr\n' \
+                    "${relative%.rs}" >&2
+                exit 1
+            }
+            diagnostic=''
+            case "$id" in
+                c-sig-0117) diagnostic='missing field `proof`' ;;
+                c-sig-0118) diagnostic='cannot initialize a tuple struct which contains private fields' ;;
+                c-sig-0119) diagnostic='no associated function or constant named `default` found for struct `SignatureMatch`' ;;
+                c-sig-0120) diagnostic='cannot initialize a tuple struct which contains private fields' ;;
+                c-sig-0121) diagnostic='binary operation `==` cannot be applied to type `SecretBytes`' ;;
+                c-sig-0122) diagnostic='`SecretBytes` doesn'"'"'t implement `std::fmt::Display`' ;;
+                c-sig-0123) diagnostic='the trait bound `SecretBytes: serde::Serialize` is not satisfied' ;;
+                c-sig-0124) diagnostic='no method named `clone` found for struct `SecretBytes`' ;;
+                c-sig-0125) diagnostic='unused `Result` that must be used' ;;
+            esac
+            if [[ -n "$diagnostic" ]] && ! grep -Fq "$diagnostic" "$stderr"; then
+                printf 'check_sig_case_coverage: %s golden lost its case-specific diagnostic\n' \
+                    "$id" >&2
+                exit 1
+            fi
+        else
+            validate_rust_evidence "$file" runtime "$evidence" '' \
+                "check_sig_case_coverage: ${id} is not a named #[test] item in ${relative}"
+        fi
+    fi
+    expected=$((expected + 1))
+done
+
+[[ "$positive" -eq 6 && "$negative" -eq 22 && "$negative" -ge "$positive" ]] || {
+    printf 'check_sig_case_coverage: expected 6 positive and 22 negative P2-02 cases, got %s/%s\n' \
+        "$positive" "$negative" >&2
+    exit 1
+}
+
+[[ "${#verification_compile_fail_paths[@]}" -eq 9 ]] || {
+    printf 'check_sig_case_coverage: expected nine P2-02 compile-fail fixtures, got %s\n' \
+        "${#verification_compile_fail_paths[@]}" >&2
+    exit 1
+}
+[[ "$(printf '%s\n' "${verification_compile_fail_paths[@]}" | sort -u | wc -l | tr -d ' ')" -eq 9 ]] || {
+    printf 'check_sig_case_coverage: P2-02 compile-fail cases must use distinct fixtures\n' >&2
+    exit 1
+}
+
 manifest="${ROOT}/crates/sig/Cargo.toml"
 harness="${ROOT}/crates/sig/tests/compile_fail.rs"
 core_manifest="${ROOT}/crates/core/Cargo.toml"
@@ -431,6 +567,14 @@ validate_rust_evidence "$harness" harness \
     p2_01_compile_time_boundaries_are_not_openable \
     'cases.compile_fail("tests/compile_fail/c_sig_001[4-79]_*.rs")' \
     'check_sig_case_coverage: compile-fail harness does not execute the P2-01 fixtures'
+validate_rust_evidence "$harness" harness \
+    p2_02_compile_time_boundaries_are_not_openable \
+    'cases.compile_fail("tests/compile_fail/c_sig_01[12][0-9]_*.rs")' \
+    'check_sig_case_coverage: compile-fail harness does not execute c-sig-0117 through c-sig-0125'
+validate_rust_evidence "$harness" harness \
+    p2_02_compile_time_boundaries_are_not_openable \
+    'cases.compile_fail("tests/compile_fail/p2_02_*_cannot_*.rs")' \
+    'check_sig_case_coverage: compile-fail harness does not execute the proof-token copy controls'
 [[ -f "$core_harness" ]] || {
     printf 'check_sig_case_coverage: core signature compile-fail harness is missing\n' >&2
     exit 1
@@ -439,8 +583,13 @@ validate_rust_evidence "$core_harness" harness \
     compile_time_contracts_are_not_openable \
     'cases.compile_fail("tests/compile_fail/c_sig_0018_*.rs")' \
     'check_sig_case_coverage: core harness does not execute c-sig-0018'
+validate_rust_evidence "$core_harness" harness \
+    compile_time_contracts_are_not_openable \
+    'cases.compile_fail("tests/compile_fail/c_sig_0123_*.rs")' \
+    'check_sig_case_coverage: core harness does not execute c-sig-0123'
 
 run_evidence_validations
+evidence_requests=()
 
 serialize_golden="${ROOT}/crates/core/tests/compile_fail/c_sig_0018_session_token_serialize.stderr"
 grep -Fq 'error[E0277]: the trait bound `SessionToken: serde::Serialize` is not satisfied' "$serialize_golden" || {
@@ -456,4 +605,90 @@ grep -Fq 'required by a bound in `serde_json::to_string`' "$serialize_golden" ||
     exit 1
 }
 
-printf 'OK: all 25 P2-01 cases map to executable evidence (8 positive, 17 negative)\n'
+secret_serialize_golden="${ROOT}/crates/core/tests/compile_fail/c_sig_0123_secret_bytes_serialize.stderr"
+grep -Fq 'error[E0277]: the trait bound `SecretBytes: serde::Serialize` is not satisfied' \
+    "$secret_serialize_golden" || {
+    printf 'check_sig_case_coverage: c-sig-0123 no longer proves SecretBytes lacks Serialize\n' >&2
+    exit 1
+}
+grep -Fq 'the trait `serde_core::ser::Serialize` is not implemented for `SecretBytes`' \
+    "$secret_serialize_golden" || {
+    printf 'check_sig_case_coverage: c-sig-0123 no longer identifies the missing implementation\n' >&2
+    exit 1
+}
+grep -Fq 'required by a bound in `serde_json::to_string`' "$secret_serialize_golden" || {
+    printf 'check_sig_case_coverage: c-sig-0123 no longer diagnoses the real serde_json call\n' >&2
+    exit 1
+}
+
+proof_controls=(
+    'crates/sig/tests/compile_fail/p2_02_signature_match_cannot_clone.rs|no method named `clone` found for struct `SignatureMatch`'
+    'crates/sig/tests/compile_fail/p2_02_signature_match_cannot_copy.rs|use of moved value: `proof`'
+    'crates/sig/tests/compile_fail/p2_02_anonymous_ack_cannot_clone.rs|no method named `clone` found for struct `AnonymousAck`'
+    'crates/sig/tests/compile_fail/p2_02_anonymous_ack_cannot_copy.rs|use of moved value: `evidence`'
+)
+for control in "${proof_controls[@]}"; do
+    IFS='|' read -r relative diagnostic <<<"$control"
+    file="${ROOT}/${relative}"
+    [[ -f "$file" ]] || {
+        printf 'check_sig_case_coverage: proof-token control is missing: %s\n' "$relative" >&2
+        exit 1
+    }
+    validate_rust_evidence "$file" compile 'let _ =' '' \
+        "check_sig_case_coverage: proof-token control is not executable: ${relative}"
+    stderr="${file%.rs}.stderr"
+    [[ -f "$stderr" ]] || {
+        printf 'check_sig_case_coverage: proof-token golden is missing: %s.stderr\n' \
+            "${relative%.rs}" >&2
+        exit 1
+    }
+    grep -Fq "$diagnostic" "$stderr" || {
+        printf 'check_sig_case_coverage: proof-token golden lost its case-specific diagnostic: %s\n' \
+            "${relative%.rs}" >&2
+        exit 1
+    }
+done
+
+grep -Fq 'Never run a debug build of `rustfs-gateway-sig` in production' "${ROOT}/README.md" || {
+    printf 'check_sig_case_coverage: README lost the debug-build production warning\n' >&2
+    exit 1
+}
+grep -Fq '`InvalidAccessKeyId` and' "${ROOT}/README.md" || {
+    printf 'check_sig_case_coverage: README lost the T1 error-code compatibility statement\n' >&2
+    exit 1
+}
+grep -Fq 'timing parity and rate limiting mitigate' "${ROOT}/README.md" || {
+    printf 'check_sig_case_coverage: README lost the T1 mitigation statement\n' >&2
+    exit 1
+}
+grep -Fq 'Never run a debug build of `rustfs-gateway-sig` in production' \
+    "${ROOT}/docs/security-model.md" || {
+    printf 'check_sig_case_coverage: security model lost the debug-build production warning\n' >&2
+    exit 1
+}
+grep -Fq 'known key with a wrong signature answers `SignatureDoesNotMatch`' \
+    "${ROOT}/docs/security-model.md" || {
+    printf 'check_sig_case_coverage: security model lost the T1 error-code distinction\n' >&2
+    exit 1
+}
+grep -Fq 'Timing parity and the mandatory' "${ROOT}/docs/security-model.md" || {
+    printf 'check_sig_case_coverage: security model lost the T1 mitigation statement\n' >&2
+    exit 1
+}
+
+log_capture="${ROOT}/crates/gateway/tests/credential_runtime.rs"
+for evidence in \
+    'let clean = run_log_capture_child(false);' \
+    'let poison = run_log_capture_child(true);' \
+    'credential_material_marker(&poison_log).is_some()' \
+    'eprintln!("Authorization: capture-control-without-credential-material");'; do
+    grep -Fq "$evidence" "$log_capture" || {
+        printf 'check_sig_case_coverage: c-sig-0128 lost request-path log-capture evidence\n' >&2
+        exit 1
+    }
+done
+
+run_evidence_validations
+
+printf 'OK: all 53 P2 signature cases map to executable evidence '
+printf '(P2-01: 8/17; P2-02: 6/22)\n'

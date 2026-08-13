@@ -43,8 +43,12 @@ Two properties of the design are worth stating outside the code:
 
 - **The unknown-access-key path does the same work as the known one.** It signs with a placeholder
   secret and runs the full four-step derivation and comparison before answering
-  `InvalidAccessKeyId`. A wrong signature and every other unusable credential receive the same
-  response, so neither response bytes nor the derivation path confirms that an access key exists.
+  `InvalidAccessKeyId`. A wrong signature follows the same derivation path and uses the same
+  generic message, so neither the work performed nor the prose confirms that an access key exists.
+- **AWS error codes remain distinct.** An unknown access key answers `InvalidAccessKeyId`, while a
+  known key with a wrong signature answers `SignatureDoesNotMatch`. Timing parity and the mandatory
+  credential rate limit mitigate that compatibility-required enumeration surface; changing the
+  wire code would not be AWS-compatible.
 - **The failure floor never sleeps.** `FailureFloor` returns the delay to wait for. A blocking
   sleep inside an async server turns a timing defence into a denial-of-service lever.
 

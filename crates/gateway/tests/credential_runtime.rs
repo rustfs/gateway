@@ -81,6 +81,9 @@ const SECRET: &[u8] = b"wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
 const WRONG_SECRET: &[u8] = b"this-is-not-the-secret-the-target-knows-";
 const TOKEN: &str = "FQoGZXIvYXdzEExampleSessionTokenValue";
 const OTHER_TOKEN: &str = "FQoGZXIvYXdzEAnotherSessionTokenValue";
+const LOG_CAPTURE_CHILD: &str = "GATEWAY_C_SIG_0128_LOG_CAPTURE_CHILD";
+const LOG_CAPTURE_POISON: &str = "GATEWAY_C_SIG_0128_LOG_CAPTURE_POISON";
+const LOG_CAPTURE_MARKER: &str = "c-sig-0128 request path completed";
 
 // ── one vendor operation on an object path, reachable only with a signature ─────────────────────
 
@@ -562,6 +565,87 @@ async fn no_response_carries_key_material() {
         assert!(!seen.contains(TOKEN), "the session token reached the caller: {seen}");
         assert!(!seen.contains("StringToSign"), "the string to sign reached the caller: {seen}");
     }
+}
+
+/// Negative — c-sig-0128: the real request path writes no credential material to captured process
+/// output. A second child emits a safe `Authorization`-shaped poison line so the parent also proves
+/// the capture and detector can observe the forbidden direction.
+#[test]
+fn c_sig_0128_request_logs_exclude_credential_material() {
+    if std::env::var_os(LOG_CAPTURE_CHILD).is_some() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("the test runtime is constructible");
+        runtime.block_on(async {
+            let provider = fixtures();
+            let service = build(Arc::clone(&provider));
+            let accepted = send(&service, LONG_TERM_KEY, SECRET, None).await;
+            let rejected = send(&service, LONG_TERM_KEY, WRONG_SECRET, None).await;
+            assert_eq!(accepted.status().as_u16(), 200);
+            assert_eq!(rejected.status().as_u16(), 403);
+            assert_eq!(provider.calls(), 2);
+        });
+        eprintln!("{LOG_CAPTURE_MARKER}");
+        if std::env::var_os(LOG_CAPTURE_POISON).is_some() {
+            eprintln!("Authorization: capture-control-without-credential-material");
+        }
+        return;
+    }
+
+    let clean = run_log_capture_child(false);
+    assert!(clean.status.success(), "{}", String::from_utf8_lossy(&clean.stderr));
+    let clean_log = captured_output(&clean);
+    assert!(clean_log.contains(LOG_CAPTURE_MARKER), "the child output was not captured: {clean_log}");
+    assert_no_credential_material(&clean_log);
+
+    let poison = run_log_capture_child(true);
+    assert!(poison.status.success(), "{}", String::from_utf8_lossy(&poison.stderr));
+    let poison_log = captured_output(&poison);
+    assert!(
+        credential_material_marker(&poison_log).is_some(),
+        "the poison control did not reach the detector: {poison_log}"
+    );
+}
+
+fn run_log_capture_child(poison: bool) -> std::process::Output {
+    let mut command = std::process::Command::new(std::env::current_exe().expect("the test executable has a path"));
+    command
+        .env(LOG_CAPTURE_CHILD, "1")
+        .arg("--exact")
+        .arg("credential_runtime::c_sig_0128_request_logs_exclude_credential_material")
+        .arg("--nocapture");
+    if poison {
+        command.env(LOG_CAPTURE_POISON, "1");
+    }
+    command.output().expect("the log-capture child starts")
+}
+
+fn captured_output(output: &std::process::Output) -> String {
+    let mut captured = String::from_utf8_lossy(&output.stdout).into_owned();
+    captured.push_str(&String::from_utf8_lossy(&output.stderr));
+    captured
+}
+
+fn assert_no_credential_material(captured: &str) {
+    assert!(
+        credential_material_marker(captured).is_none(),
+        "credential material reached captured output: {captured}"
+    );
+}
+
+fn credential_material_marker(captured: &str) -> Option<&'static str> {
+    [
+        ("wJalrXUtnFEMI", "secret access key"),
+        (TOKEN, "session token"),
+        (OTHER_TOKEN, "alternate session token"),
+        ("Authorization:", "Authorization header"),
+        ("X-Amz-Signature", "query signature"),
+        ("Signature=", "expected signature"),
+        ("StringToSign", "string to sign"),
+    ]
+    .into_iter()
+    .find_map(|(needle, label)| captured.contains(needle).then_some(label))
 }
 
 struct Fails;

@@ -517,6 +517,7 @@ validate_harness(
     [
         'cases.compile_fail("tests/compile_fail/authz_*.rs");',
         'cases.compile_fail("tests/compile_fail/c_sig_0018_*.rs");',
+        'cases.compile_fail("tests/compile_fail/c_sig_0123_*.rs");',
         'cases.compile_fail("tests/compile_fail/error_resolution_*.rs");',
     ],
 )

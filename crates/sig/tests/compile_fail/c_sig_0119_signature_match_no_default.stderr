@@ -1,0 +1,5 @@
+error[E0599]: no associated function or constant named `default` found for struct `SignatureMatch` in the current scope
+  --> tests/compile_fail/c_sig_0119_signature_match_no_default.rs:24:29
+   |
+24 |     let _ = SignatureMatch::default();
+   |                             ^^^^^^^ associated function or constant not found in `SignatureMatch`

@@ -1,0 +1,11 @@
+error[E0423]: cannot initialize a tuple struct which contains private fields
+  --> tests/compile_fail/c_sig_0118_signature_match_private.rs:24:13
+   |
+24 |     let _ = SignatureMatch(());
+   |             ^^^^^^^^^^^^^^
+   |
+note: constructor is not visible here due to private fields
+  --> src/signature.rs
+   |
+   | pub struct SignatureMatch(());
+   |                           ^^ private field

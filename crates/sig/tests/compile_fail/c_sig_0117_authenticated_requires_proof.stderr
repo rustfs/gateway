@@ -1,0 +1,5 @@
+error[E0063]: missing field `proof` in initializer of `Verdict`
+  --> tests/compile_fail/c_sig_0117_authenticated_requires_proof.rs:26:13
+   |
+26 |     let _ = Verdict::Authenticated { identity, scheme };
+   |             ^^^^^^^^^^^^^^^^^^^^^^ missing `proof`
