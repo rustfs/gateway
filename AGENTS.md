@@ -262,9 +262,13 @@ scope untouched: `rustfs-gateway-types` is consumed by `rustfs/ecstore`, `lifecy
 and the scanner, while ring 2 depends on `ecstore`/`iam`/`policy`. One ring-0 edge back into rustfs
 closes the cycle.
 
-- **Ring 0/1 — protocol kernel**: every crate in this workspace. Zero rustfs dependencies.
+- **Ring 0/1 — protocol kernel and runtime**: every package under `crates/`. Zero rustfs dependencies.
   Membership is **declared** in `[package.metadata.gateway]`, not inferred from the crate name:
   after the rename every crate is `rustfs-gateway-*`, so the name carries no information.
+- **Repository tooling**: `xtask` is not a runtime crate and carries no ring number. Its internal
+  dependencies are limited to `rustfs-gateway`, `rustfs-gateway-conformance`,
+  `rustfs-gateway-core`, `rustfs-gateway-codegen`, and `rustfs-gateway-model`; this tooling-only
+  row is not an exemption any runtime crate may reuse.
 - **Ring 2 — rustfs adapters**: `rustfs-gateway-*`. Not present in this workspace yet. Ring 2 may
   depend on ring 0/1 and on rustfs crates; the reverse is permanently forbidden.
 
@@ -286,7 +290,7 @@ closes the cycle.
               rustfs-gateway-http                wire layer: header/query views, limits, aws-chunked
                  │       │
                  ▼       ▼
-        rustfs-gateway-types ──▶ rustfs-gateway-stream ──▶ http / bytes
+        rustfs-gateway-types ──▶ rustfs-gateway-stream ──▶ bitflags / bytes / http
                  │
                  ▼
            rustfs-gateway-xml ──▶ quick-xml
@@ -297,7 +301,7 @@ closes the cycle.
 
   runtime host, with no internal crate dependency:
         rustfs-gateway-server                    listener, TLS, hyper, admission, shutdown
-        xtask ──▶ codegen + gateway/core + conformance   generation plus runtime diagnostics; build-time only
+        xtask ──▶ gateway + conformance + core + codegen + model   generation and diagnostics only
 ```
 
 Three annotations you must not lose:

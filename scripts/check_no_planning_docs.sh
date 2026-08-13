@@ -35,13 +35,8 @@ set -euo pipefail
 #   they were current. That is a correctness hazard, not just clutter.
 #
 # HOW TO EXEMPT
-#   Add the exact repository-relative path to
-#   `scripts/allowances/planning-doc-allowances.txt` (create it if absent):
-#
-#       docs/plans/example.md    # <why this one is durable, and who owns it>
-#
-#   Prefer renaming the document into a durable form (an ADR, a section of an
-#   existing doc) over adding an allowance.
+#   There is no allowance. Durable material belongs in an existing document or
+#   an ADR; working state belongs in the issue tracker.
 #
 # USAGE
 #   scripts/check_no_planning_docs.sh
@@ -50,9 +45,15 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="${GATEWAY_CHECK_ROOT:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
-ALLOWANCE_FILE="${ROOT_DIR}/scripts/allowances/planning-doc-allowances.txt"
 
 cd "$ROOT_DIR"
+
+fail() {
+    printf 'check_no_planning_docs: %s\n' "$*" >&2
+    exit 1
+}
+
+command -v git >/dev/null 2>&1 || fail 'required command is missing: git'
 
 PLANNING_DIRS=(
     'docs/notes/*'
@@ -71,41 +72,31 @@ PLANNING_NAME_RE='^(plan|plans|notes|todo|analysis|report|summary|progress|statu
 
 status=0
 
-ALLOWANCES=""
-if [[ -f "$ALLOWANCE_FILE" ]]; then
-    while IFS= read -r line; do
-        line="${line%%#*}"
-        line="$(printf '%s' "$line" | tr -d ' \t')"
-        [[ -z "$line" ]] && continue
-        ALLOWANCES="${ALLOWANCES}${line}
-"
-    done <"$ALLOWANCE_FILE"
-fi
-
-is_allowed() {
-    [[ -z "$ALLOWANCES" ]] && return 1
-    printf '%s' "$ALLOWANCES" | grep -qxF "$1"
-}
-
 report() {
     local file="$1" reason="$2"
-    if is_allowed "$file"; then
-        return 0
-    fi
     printf '%s: %s — planning-type documents must not be committed; keep it in the GitHub issue or a local worktree\n' \
         "$file" "$reason" >&2
     status=1
 }
 
+directory_inputs="$(mktemp "${TMPDIR:-/tmp}/gateway-planning-dirs.XXXXXX")" || fail 'cannot create input buffer'
+markdown_inputs="$(mktemp "${TMPDIR:-/tmp}/gateway-planning-markdown.XXXXXX")" || {
+    rm -f "$directory_inputs"
+    fail 'cannot create input buffer'
+}
+cleanup() {
+    rm -f "$directory_inputs" "$markdown_inputs"
+}
+trap cleanup EXIT
+
+git ls-files --cached -- "${PLANNING_DIRS[@]}" >"$directory_inputs" || fail 'cannot enumerate planning-directory inputs'
+git ls-files --cached -- ':(icase)*.md' >"$markdown_inputs" || fail 'cannot enumerate Markdown inputs'
+
 # Detector 1: whole directories reserved for throwaway material.
 while IFS= read -r file; do
     [[ -z "$file" ]] && continue
     report "$file" "lives in a planning/notes directory"
-# `--cached --others --exclude-standard` rather than a bare `git ls-files`: the bare form lists
-# only *tracked* files, so a brand-new file stays invisible to this guard right up until the
-# moment `git add -A` commits it. That is how CJK text reached commit 343f044 past a guard run
-# that had just reported success. `--exclude-standard` keeps ignored files out.
-done < <(git ls-files --cached --others --exclude-standard -- "${PLANNING_DIRS[@]}" 2>/dev/null || true)
+done <"$directory_inputs"
 
 # Detector 2: filenames that read like an agent working note.
 while IFS= read -r file; do
@@ -114,7 +105,7 @@ while IFS= read -r file; do
     if printf '%s' "$base" | grep -Eq "$PLANNING_NAME_RE"; then
         report "$file" "filename reads like a working note"
     fi
-done < <(git ls-files --cached --others --exclude-standard -- ':(icase)*.md' 2>/dev/null || true)
+done <"$markdown_inputs"
 
 if [[ "$status" -ne 0 ]]; then
     cat >&2 <<'EOF'

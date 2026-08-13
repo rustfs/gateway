@@ -26,7 +26,6 @@ name: CI
 # Each line records where the job belongs and why it is not here yet.
 #
 #   advisories (cargo-deny)         -> Week-1, together with deny.toml
-#   protected-files                 -> task P0-09 (appends a job to THIS file)
 #   arch checks                     -> task P0-07
 #   SemVer / cargo public-api       -> before the first release; no baseline yet
 #   role-verdict / ct-eq checks     -> task P0-10
@@ -102,6 +101,10 @@ jobs:
         run: |
           ran=0
           for guard in scripts/check_*.sh; do
+            if grep -q '^# REQUIRES-PR$' "$guard"; then
+              echo "deferred to the pull-request step: $guard"
+              continue
+            fi
             if grep -q '^# REQUIRES-BUILD$' "$guard"; then
               echo "deferred to the guard-self-test job: $guard"
               continue
@@ -112,6 +115,15 @@ jobs:
             ran=$((ran + 1))
           done
           echo "ran $ran guard(s)"
+      - name: Protected files
+        env:
+          GATEWAY_PROTECTED_BASE: ${{ github.event.pull_request.base.sha }}
+          GATEWAY_PROTECTED_HEAD: ${{ github.event.pull_request.head.sha }}
+          GATEWAY_PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            bash scripts/check_protected_files.sh
+          fi
       # Generated artefacts are a pure function of (model, overlays). If regenerating moves a
       # byte, the checked-in output and the generator disagree, and every review that read the
       # output was reading something the generator no longer produces.

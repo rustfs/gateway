@@ -67,6 +67,7 @@ fixed now so that the same check does not get written twice under two names.
 | `check_assembly_case_coverage.sh` | All 24 P7-01 acceptance ids map in order to a named executable test or deterministic guard | P7-01 |
 | `check_ring_boundaries.sh` | Ring 0/1 (`rustfs-gateway*`) depends on no `rustfs-*` crate and no ring-2 `rustfs-gateway-*` crate; `s3s` only via `rustfs-gateway-types`' `compat-s3s` feature, which must keep its `# DELETE BY` marker | P0 (Week-1) |
 | `check_no_planning_docs.sh` | Agent notes and planning documents are not tracked by git (closes the `git add -f` hole that `.gitignore` leaves open) | P0 |
+| `check_protected_files.sh` | Existing contract paths, `rust-version`, and deleted conformance cases require a literal `BREAKING` declaration in the PR body; new ADRs and cases remain unrestricted | P0-09 |
 | `check_no_global_registry_deps.sh` | No `inventory` / `linkme` / `ctor` dependency in any `Cargo.toml` (ADR-0003) | P0-07 |
 | `check_ct_eq.sh` | Secret-bearing types (`Signature`, `Secret`, `SigningKey`, …) derive no `PartialEq` / `Eq` / `Debug`; comparison must go through `ct_eq`. No-ops with an explanation until `crates/sig` lands | P0 (before P2) |
 | `check_license_headers.sh` | Every tracked `.rs` file opens with the Apache-2.0 licence header (ADR-0001 provenance boundary) | P0 |
