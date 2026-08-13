@@ -36,46 +36,14 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="${GATEWAY_CHECK_ROOT:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
-cd "$ROOT_DIR"
+HELPER="${SCRIPT_DIR}/lib/rust_semver_surface.py"
 
-status=0
+fail() {
+    printf 'check_no_dto_non_exhaustive: %s\n' "$*" >&2
+    exit 1
+}
 
-# Walk every generated dto file and report a `#[non_exhaustive]` that is followed
-# by a `struct` before the next `enum`. Attribute and item sit on separate lines,
-# so this needs a tiny state machine rather than a grep.
-while IFS= read -r file; do
-    [[ -n "$file" ]] || continue
-    [[ -f "$file" ]] || continue
-    awk -v f="$file" '
-        # Skip comments first. The generated dto documents this very rule, so the
-        # literal `#[non_exhaustive]` appears in prose; matching it there would make
-        # the guard fire on the text that explains why it exists.
-        /^[[:space:]]*(\/\/|\*)/ { next }
-        /#\[non_exhaustive\]/ { pending = NR; next }
-        pending && /^[[:space:]]*(pub )?struct / {
-            printf "%s:%d: dto struct carries #[non_exhaustive], which forbids ..Default::default() (E0639); see ADR-0004 P1\n", f, pending > "/dev/stderr"
-            bad = 1
-            pending = 0
-            next
-        }
-        pending && /^[[:space:]]*(pub )?enum / { pending = 0; next }
-        { if (pending && $0 !~ /^[[:space:]]*(#|\/\/|$)/) pending = 0 }
-        END { exit bad ? 1 : 0 }
-    ' "$file" || status=1
-# `--cached --others --exclude-standard` rather than a bare `git ls-files`: the bare form lists
-# only *tracked* files, so a brand-new file stays invisible to this guard right up until the
-# moment `git add -A` commits it. That is how CJK text reached commit 343f044 past a guard run
-# that had just reported success. `--exclude-standard` keeps ignored files out.
-done < <(git ls-files --cached --others --exclude-standard -- 'generated/dto/*' 'generated/dto/**' 2>/dev/null || true)
+command -v python3 >/dev/null 2>&1 || fail 'required command is missing: python3'
+[[ -f "$HELPER" ]] || fail 'required parser is missing: scripts/lib/rust_semver_surface.py'
 
-if [[ "$status" -ne 0 ]]; then
-    cat >&2 <<'EOF'
-
-ADR-0004 P1: dto structs are plain, public-field, `#[derive(Default)]` structs.
-Adding an `Option` field to one of those is already a minor change, because
-downstream writes `..Default::default()`. Marking it `#[non_exhaustive]` breaks
-exactly that syntax and buys nothing in return.
-EOF
-fi
-
-exit "$status"
+python3 "$HELPER" non-exhaustive "$ROOT_DIR"
