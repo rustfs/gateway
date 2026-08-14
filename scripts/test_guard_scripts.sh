@@ -4691,6 +4691,22 @@ PY
 expect_fail check_governance_attribution.sh \
     'the NOTICE commit surviving only inside Notes' mut_governance_notice_commit_survives_only_in_notes
 
+mut_governance_notice_permalink_changed() {
+    python3 - <<'PY'
+from pathlib import Path
+
+path = Path("NOTICE")
+text = path.read_text()
+old = "   Permalink: https://github.com/smithy-lang/smithy-rs/blob/2880e0785db4cf2ceb086cfeba86a4cbdeb14176/aws/rust-runtime/aws-sigv4/src/sign/v4.rs"
+new = "   Permalink: https://github.com/smithy-lang/smithy-rs/blob/" + "0" * 40 + "/aws/rust-runtime/aws-sigv4/src/sign/v4.rs"
+if text.count(old) != 1:
+    raise SystemExit("the NOTICE permalink anchor is not unique")
+path.write_text(text.replace(old, new, 1))
+PY
+}
+expect_fail check_governance_attribution.sh \
+    'the NOTICE aws-sigv4 entry losing its revision-pinned permalink' mut_governance_notice_permalink_changed
+
 mut_governance_notice_source_field_duplicated() {
     python3 - <<'PY'
 from pathlib import Path
@@ -4770,6 +4786,22 @@ PY
 expect_fail check_governance_attribution.sh \
     'the copied-code registry losing the exact upstream path' mut_governance_registry_path_changed
 
+mut_governance_registry_permalink_changed() {
+    python3 - <<'PY'
+from pathlib import Path
+
+path = Path("NOTICE")
+text = path.read_text()
+old = "  Upstream permalink: https://github.com/smithy-lang/smithy-rs/blob/2880e0785db4cf2ceb086cfeba86a4cbdeb14176/aws/rust-runtime/aws-sigv4/src/sign/v4.rs"
+new = "  Upstream permalink: https://github.com/smithy-lang/smithy-rs/blob/" + "0" * 40 + "/aws/rust-runtime/aws-sigv4/src/sign/v4.rs"
+if text.count(old) != 1:
+    raise SystemExit("the registry permalink anchor is not unique")
+path.write_text(text.replace(old, new, 1))
+PY
+}
+expect_fail check_governance_attribution.sh \
+    'the copied-code registry losing its revision-pinned permalink' mut_governance_registry_permalink_changed
+
 mut_governance_registry_license_in_notes() {
     python3 - <<'PY'
 from pathlib import Path
@@ -4809,6 +4841,22 @@ PY
 }
 expect_fail check_governance_attribution.sh \
     'the in-file attribution losing the reviewed upstream revision' mut_governance_source_revision_removed
+
+mut_governance_source_permalink_changed() {
+    python3 - <<'PY'
+from pathlib import Path
+
+path = Path("crates/sig/src/derive.rs")
+text = path.read_text()
+old = "//     Upstream permalink: https://github.com/smithy-lang/smithy-rs/blob/2880e0785db4cf2ceb086cfeba86a4cbdeb14176/aws/rust-runtime/aws-sigv4/src/sign/v4.rs"
+new = "//     Upstream permalink: https://github.com/smithy-lang/smithy-rs/blob/" + "0" * 40 + "/aws/rust-runtime/aws-sigv4/src/sign/v4.rs"
+if text.count(old) != 1:
+    raise SystemExit("the source permalink anchor is not unique")
+path.write_text(text.replace(old, new, 1))
+PY
+}
+expect_fail check_governance_attribution.sh \
+    'derive.rs losing its revision-pinned upstream permalink' mut_governance_source_permalink_changed
 
 mut_governance_source_revision_survives_only_outside_attribution() {
     python3 - <<'PY'

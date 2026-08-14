@@ -104,13 +104,16 @@ for fact in (
 revision = "2880e0785db4cf2ceb086cfeba86a4cbdeb14176"
 upstream_url = "https://github.com/smithy-lang/smithy-rs"
 upstream_path = "aws/rust-runtime/aws-sigv4/src/sign/v4.rs"
+upstream_permalink = f"{upstream_url}/blob/{revision}/{upstream_path}"
 local_path = "crates/sig/src/derive.rs"
 
 notice = notice_path.read_text()
 sigv4_notice = section(notice, "2. aws-sigv4 (AWS SDK for Rust)\n", "\n3. ")
 notice_fields = {}
 for line in sigv4_notice.splitlines():
-    matched = re.fullmatch(r"   (Source|Crate|License|Commit|Path):[ \t]+(.*?)\s*", line)
+    matched = re.fullmatch(
+        r"   (Source|Crate|License|Commit|Path|Permalink):[ \t]+(.*?)\s*", line
+    )
     if matched is None:
         continue
     name, value = matched.groups()
@@ -123,6 +126,7 @@ expected_notice_fields = {
     "License": "Apache License 2.0",
     "Commit": revision,
     "Path": upstream_path,
+    "Permalink": upstream_permalink,
 }
 if notice_fields != expected_notice_fields:
     raise SystemExit("check_governance_attribution: NOTICE aws-sigv4 fields do not match reviewed facts")
@@ -142,6 +146,7 @@ field_names = {
     "Upstream project",
     "Upstream revision",
     "Upstream path",
+    "Upstream permalink",
     "License",
 }
 entries = []
@@ -173,6 +178,7 @@ expected_entry = {
     "Upstream project": upstream_url,
     "Upstream revision": revision,
     "Upstream path": upstream_path,
+    "Upstream permalink": upstream_permalink,
     "License": "Apache-2.0",
 }
 if matching_entries[0] != expected_entry:
@@ -205,6 +211,7 @@ for line in attribution.splitlines():
 expected_attribution_fields = {
     "Upstream URL": upstream_url,
     "Upstream path": upstream_path,
+    "Upstream permalink": upstream_permalink,
     "Revision": f"{revision} (aws-sigv4 1.5.1)",
     "License": "Apache-2.0",
     "Copyright": "Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.",
