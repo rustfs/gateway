@@ -506,7 +506,7 @@ comments_removed, syntax = main_comments, main_syntax
 verify_source = (root / "xtask/src/verify.rs").read_text()
 verify_comments, verify_syntax = rust_views(verify_source)
 comments_removed, syntax = verify_comments, verify_syntax
-for name in ("verify", "verify_crate", "crate_steps"):
+for name in ("verify", "verify_crate", "crate_steps", "conformance_test_step"):
     items = functions_named(name, syntax, comments_removed)
     if len(items) != 1 or items[0][0]:
         fail(f"verify item {name} must remain on the light crate-verification surface")
@@ -563,9 +563,12 @@ run_steps(
     Duration::from_secs(30),
     &subject,
     "a crate verification loop must finish within 30 seconds",
-    json,
-    None,
-    None,
+    RunOptions {
+        json,
+        operation_cases: None,
+        started: None,
+        conformance_case: crate_case(&package),
+    },
 )
 ''')
 if compact(verify_crate_items[0][1]) != expected_verify_crate_body:
@@ -588,7 +591,7 @@ if package == "rustfs-gateway-core" {
 } else if package == "rustfs-gateway-conformance" {
     test_step.push("--lib".to_owned());
 }
-let mut steps = vec![
+vec![
     test_step,
     vec![
         "clippy".to_owned(),
@@ -599,19 +602,34 @@ let mut steps = vec![
         "-D".to_owned(),
         "warnings".to_owned(),
     ],
-];
-if let Some(case) = crate_case(package) {
-    steps.push(conformance_step("validate", case));
-}
-steps
+]
 ''')
 if compact(crate_steps_items[0][1]) != expected_crate_steps_body:
     fail("crate verification steps must preserve compile-fail skips, conformance library scope and all-target clippy")
+conformance_test_items = functions_named("conformance_test_step", syntax, comments_removed)
+expected_conformance_test_body = compact('''
+vec![
+    "test".to_owned(),
+    "-p".to_owned(),
+    "rustfs-gateway-conformance".to_owned(),
+    "--lib".to_owned(),
+    format!("cli::tests::feedback_case_{}", case.replace('-', "_")),
+    "--".to_owned(),
+    "--exact".to_owned(),
+]
+''')
+if compact(conformance_test_items[0][1]) != expected_conformance_test_body:
+    fail("crate verification must reuse the workspace-built conformance library target")
+run_steps_items = functions_named("run_steps", syntax, comments_removed)
+run_steps_body = compact(run_steps_items[0][1])
+if run_steps_body.count(compact("conformance_test_step(case)")) != 1:
+    fail("crate conformance verification must run after the concurrent Cargo batch without rebuilding the binary")
 for name in (
     "verify_full",
     "verify_operation",
     "run_representative_case",
     "run_operation_contract",
+    "conformance_step",
     "verify_scaffold",
     "snake_case",
     "run_all",
@@ -655,7 +673,7 @@ for pattern, description in (
 output_imports = top_level_items(r"\buse\s+std\s*::\s*process\s*::\s*\{[^}]*\bOutput\b[^}]*\}\s*;")
 if len(output_imports) != 1 or output_imports[0][1]:
     fail("the process output import must remain on the light crate-verification surface")
-tests_items = top_level_items(r"\bmod\s+tests\s*\{")
+tests_items = top_level_items(r"\bmod\s+tests\s*;")
 expected_tests_attribute = compact('#[cfg(all(test, feature = "full"))]')
 if len(tests_items) != 1 or [compact(attr) for attr in tests_items[0][1]] != [expected_tests_attribute]:
     fail("verify module tests must require the full feature")

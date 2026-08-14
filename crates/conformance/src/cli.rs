@@ -330,6 +330,25 @@ mod tests {
         list.iter().map(|item| (*item).to_owned()).collect()
     }
 
+    fn assert_feedback_case(case: &str) {
+        assert_eq!(main(&args(&["validate", "--filter", case])), ExitCode::SUCCESS);
+    }
+
+    #[test]
+    fn feedback_case_c_sig_0001() {
+        assert_feedback_case("c-sig-0001");
+    }
+
+    #[test]
+    fn feedback_case_c_chunked_0001() {
+        assert_feedback_case("c-chunked-0001");
+    }
+
+    #[test]
+    fn feedback_case_c_object_0001() {
+        assert_feedback_case("c-object-0001");
+    }
+
     #[test]
     fn a_run_command_with_a_filter_parses() {
         let options = Options::parse(&args(&["run", "--filter", "etag/"]))

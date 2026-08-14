@@ -1289,6 +1289,23 @@ expect_fail check_xtask_codegen_surface.sh \
     'an operation-only verifier leaking into the light crate surface' \
     mut_xtask_verify_operation_loses_full_gate
 
+mut_xtask_conformance_runner_leaks_into_light_surface() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("xtask/src/verify.rs")
+text = path.read_text()
+old = '#[cfg(feature = "full")]\nfn conformance_step'
+new = 'fn conformance_step'
+if text.count(old) != 1:
+    raise SystemExit("full-only conformance runner is missing")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_xtask_codegen_surface.sh \
+    'the standalone conformance runner leaking into the light crate surface' \
+    mut_xtask_conformance_runner_leaks_into_light_surface
+
 mut_xtask_full_verify_uses_unstable_slice_conversion() {
     python3 - <<'PYEOF'
 from pathlib import Path
@@ -1355,6 +1372,60 @@ PYEOF
 expect_fail check_xtask_codegen_surface.sh \
     'the gateway fast scope losing its compile-fail skip' \
     mut_xtask_gateway_fast_scope_loses_compile_fail_skip
+
+mut_xtask_gateway_fast_scope_drops_its_conformance_case() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("xtask/src/verify.rs")
+text = path.read_text()
+old = "            conformance_case: crate_case(&package),"
+new = "            conformance_case: None,"
+if text.count(old) != 1:
+    raise SystemExit("sequential crate conformance case is missing")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_xtask_codegen_surface.sh \
+    'the gateway fast scope dropping its conformance case' \
+    mut_xtask_gateway_fast_scope_drops_its_conformance_case
+
+mut_xtask_gateway_conformance_rejoins_concurrent_cargo() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("xtask/src/verify.rs")
+text = path.read_text()
+old = "    let steps = crate_steps(&package);"
+new = '''    let mut steps = crate_steps(&package);
+    if let Some(case) = crate_case(&package) {
+        steps.push(conformance_step("validate", case));
+    }'''
+if text.count(old) != 1:
+    raise SystemExit("bounded crate step construction is missing")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_xtask_codegen_surface.sh \
+    'the gateway conformance case rejoining concurrent Cargo processes' \
+    mut_xtask_gateway_conformance_rejoins_concurrent_cargo
+
+mut_xtask_gateway_conformance_rebuilds_its_binary() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("xtask/src/verify.rs")
+text = path.read_text()
+old = "            conformance_test_step(case),"
+new = '            conformance_step("validate", case),'
+if text.count(old) != 1:
+    raise SystemExit("workspace-built conformance test step is missing")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_xtask_codegen_surface.sh \
+    'the gateway conformance case rebuilding its standalone binary' \
+    mut_xtask_gateway_conformance_rebuilds_its_binary
 
 mut_xtask_core_fast_scope_renames_compile_fail_skip() {
     python3 - <<'PYEOF'
