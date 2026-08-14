@@ -77,9 +77,12 @@ fn verify_crate(name: &str, json: bool) -> ExitCode {
         Duration::from_secs(30),
         &subject,
         "a crate verification loop must finish within 30 seconds",
-        json,
-        None,
-        None,
+        RunOptions {
+            json,
+            operation_cases: None,
+            started: None,
+            conformance_case: crate_case(&package),
+        },
     )
 }
 
@@ -100,7 +103,7 @@ fn crate_steps(package: &str) -> Vec<Vec<String>> {
     } else if package == "rustfs-gateway-conformance" {
         test_step.push("--lib".to_owned());
     }
-    let mut steps = vec![
+    vec![
         test_step,
         vec![
             "clippy".to_owned(),
@@ -111,11 +114,7 @@ fn crate_steps(package: &str) -> Vec<Vec<String>> {
             "-D".to_owned(),
             "warnings".to_owned(),
         ],
-    ];
-    if let Some(case) = crate_case(package) {
-        steps.push(conformance_step("validate", case));
-    }
-    steps
+    ]
 }
 
 #[cfg(feature = "full")]
@@ -178,9 +177,12 @@ fn verify_operation(name: &str, json: bool) -> ExitCode {
         Duration::from_secs(30),
         &format!("operation {name}"),
         "a-xt-0002 operation unit and conformance checks must finish within 30 seconds",
-        json,
-        Some((representative.as_deref(), entry.cases.len())),
-        Some(started),
+        RunOptions {
+            json,
+            operation_cases: Some((representative.as_deref(), entry.cases.len())),
+            started: Some(started),
+            conformance_case: None,
+        },
     )
 }
 
@@ -427,6 +429,7 @@ fn crate_case(package: &str) -> Option<&'static str> {
     }
 }
 
+#[cfg(feature = "full")]
 fn conformance_step(command: &str, case: &str) -> Vec<String> {
     vec![
         "run".to_owned(),
@@ -442,46 +445,65 @@ fn conformance_step(command: &str, case: &str) -> Vec<String> {
     ]
 }
 
-fn run_steps(
-    steps: &[Vec<String>],
-    budget: Duration,
-    subject: &str,
-    rule: &str,
-    json: bool,
-    operation_cases: Option<(Option<&str>, usize)>,
-    started: Option<Instant>,
-) -> ExitCode {
+fn conformance_test_step(case: &str) -> Vec<String> {
+    vec![
+        "test".to_owned(),
+        "-p".to_owned(),
+        "rustfs-gateway-conformance".to_owned(),
+        "--lib".to_owned(),
+        format!("cli::tests::feedback_case_{}", case.replace('-', "_")),
+        "--".to_owned(),
+        "--exact".to_owned(),
+    ]
+}
+
+fn run_steps(steps: &[Vec<String>], budget: Duration, subject: &str, rule: &str, options: RunOptions<'_>) -> ExitCode {
+    let RunOptions {
+        json,
+        operation_cases,
+        started,
+        conformance_case,
+    } = options;
     let started = started.unwrap_or_else(Instant::now);
     let commands: Vec<GateCommand> = steps
         .iter()
         .enumerate()
         .map(|(index, step)| (env!("CARGO").to_owned(), step.clone(), format!("{subject} step {}", index + 1)))
         .collect::<Vec<_>>();
-    let batch = process::run(&commands, Path::new("."), Some(started + budget));
-    if batch.interrupted {
-        return diagnostic("verification interrupted", subject, rule);
+    let mut command_batches = vec![commands];
+    if let Some(case) = conformance_case {
+        command_batches.push(vec![(
+            env!("CARGO").to_owned(),
+            conformance_test_step(case),
+            format!("{subject} conformance case {case}"),
+        )]);
     }
-    if batch.timed_out {
-        return diagnostic(
-            "verification exceeded its feedback budget",
-            subject,
-            &format!("{rule}; observed {:.2}s", started.elapsed().as_secs_f64()),
-        );
-    }
-    let results: Vec<GateResult> = batch.results;
-    for (_, output) in results {
-        match output {
-            Ok(output) if output.status.success() => {}
-            Ok(output) => {
-                print_cargo_failure(&output);
-                print_json_failure(json, "verification command failed", subject);
-                return diagnostic(
-                    "verification command failed",
-                    subject,
-                    &format!("{rule}; cargo exited with {}", output.status),
-                );
+    for commands in command_batches {
+        let batch = process::run(&commands, Path::new("."), Some(started + budget));
+        if batch.interrupted {
+            return diagnostic("verification interrupted", subject, rule);
+        }
+        if batch.timed_out {
+            return diagnostic(
+                "verification exceeded its feedback budget",
+                subject,
+                &format!("{rule}; observed {:.2}s", started.elapsed().as_secs_f64()),
+            );
+        }
+        for (_, output) in batch.results {
+            match output {
+                Ok(output) if output.status.success() => {}
+                Ok(output) => {
+                    print_cargo_failure(&output);
+                    print_json_failure(json, "verification command failed", subject);
+                    return diagnostic(
+                        "verification command failed",
+                        subject,
+                        &format!("{rule}; cargo exited with {}", output.status),
+                    );
+                }
+                Err(error) => return diagnostic("cargo could not be started", subject, &format!("{rule}; {error}")),
             }
-            Err(error) => return diagnostic("cargo could not be started", subject, &format!("{rule}; {error}")),
         }
     }
     let elapsed = started.elapsed();
@@ -494,6 +516,13 @@ fn run_steps(
     }
     print_success(subject, elapsed, json, operation_cases);
     ExitCode::SUCCESS
+}
+
+struct RunOptions<'a> {
+    json: bool,
+    operation_cases: Option<(Option<&'a str>, usize)>,
+    started: Option<Instant>,
+    conformance_case: Option<&'a str>,
 }
 
 #[cfg(feature = "full")]
@@ -683,111 +712,4 @@ fn diagnostic(what: &str, where_: &str, rule: &str) -> ExitCode {
 }
 
 #[cfg(all(test, feature = "full"))]
-mod tests {
-    use std::fs;
-
-    use super::*;
-
-    #[test]
-    fn full_gate_steps_start_before_either_is_awaited() {
-        let nonce = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .expect("test clock must be after the Unix epoch")
-            .as_nanos();
-        let root = std::env::temp_dir().join(format!("gateway-parallel-{}-{nonce}", std::process::id()));
-        fs::create_dir_all(&root).expect("test directory must be creatable");
-        let ready = root.join("ready");
-        let first = root.join("first");
-        let second = root.join("second");
-        let wait_for = |own: &std::path::Path, peer: &std::path::Path| {
-            vec![
-                "-c".to_owned(),
-                format!(
-                    "test -f '{}' || exit 1; touch '{}'; for _ in $(seq 1 200); do test -f '{}' && exit 0; sleep 0.01; done; exit 1",
-                    ready.display(),
-                    own.display(),
-                    peer.display()
-                ),
-            ]
-        };
-        let setup = (
-            "sh".to_owned(),
-            vec!["-c".to_owned(), format!("touch '{}'", ready.display())],
-            "setup".to_owned(),
-        );
-        let commands = vec![
-            ("sh".to_owned(), wait_for(&first, &second), "first".to_owned()),
-            ("sh".to_owned(), wait_for(&second, &first), "second".to_owned()),
-        ];
-
-        let outputs = run_setup_then_concurrently(&setup, &commands, &root);
-
-        assert!(
-            outputs
-                .iter()
-                .all(|(_, output)| output.as_ref().is_ok_and(|output| output.status.success()))
-        );
-        fs::remove_dir_all(root).expect("test directory must be removable");
-    }
-
-    #[test]
-    fn the_facade_accepts_its_current_and_legacy_crate_names() {
-        assert_eq!(package_name("rustfs-gateway"), "rustfs-gateway");
-        assert_eq!(package_name("s3gate"), "rustfs-gateway");
-    }
-
-    #[test]
-    fn an_exact_workspace_package_wins_before_prefix_compatibility() {
-        let packages = vec!["ext-field-spike".to_owned(), "rustfs-gateway-ext-field-spike".to_owned()];
-
-        assert_eq!(resolve_package_name("ext-field-spike", &packages), Ok("ext-field-spike".to_owned()));
-    }
-
-    #[test]
-    fn a_missing_workspace_package_is_not_passed_to_cargo() {
-        assert_eq!(
-            resolve_package_name("absent", &["rustfs-gateway-core".to_owned()]),
-            Err(PackageResolutionError::Missing {
-                requested: "absent".to_owned(),
-                compatible: "rustfs-gateway-absent".to_owned(),
-            })
-        );
-    }
-
-    #[test]
-    fn an_ambiguous_workspace_package_is_rejected() {
-        let packages = vec!["duplicate".to_owned(), "duplicate".to_owned()];
-
-        let error = PackageResolutionError::Ambiguous {
-            requested: "duplicate".to_owned(),
-            matches: vec!["duplicate".to_owned(), "duplicate".to_owned()],
-        };
-        assert_eq!(resolve_package_name("duplicate", &packages), Err(error));
-        assert_eq!(
-            package_resolution_failure_json(
-                "duplicate",
-                &PackageResolutionError::Ambiguous {
-                    requested: "duplicate".to_owned(),
-                    matches: vec!["duplicate".to_owned(), "duplicate".to_owned()],
-                }
-            ),
-            "{\"command\":\"verify\",\"ok\":false,\"what\":\"workspace package could not be resolved\",\"where\":\"crate duplicate\"}"
-        );
-    }
-
-    #[test]
-    fn a_legacy_short_name_still_resolves_to_the_prefixed_package() {
-        assert_eq!(
-            resolve_package_name("core", &["rustfs-gateway-core".to_owned()]),
-            Ok("rustfs-gateway-core".to_owned())
-        );
-    }
-
-    #[test]
-    fn conformance_fast_scope_keeps_integration_contracts_in_the_workspace_gate() {
-        let steps = crate_steps("rustfs-gateway-conformance");
-
-        assert!(steps[0].iter().any(|arg| arg == "--lib"));
-        assert!(steps[1].iter().any(|arg| arg == "--all-targets"));
-    }
-}
+mod tests;
