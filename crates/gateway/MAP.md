@@ -76,6 +76,7 @@ the consumer surface. Ring 1: no rustfs crate dependency. Start at `src/lib.rs`;
 | `tests/compat_aliases.rs` | Input-parameterized compatibility aliases remain identical to operation requests |
 | `tests/refusal_order_guards.rs` | Body-proof source guards |
 | `tests/precondition_contract.rs` | Real adapter controls for conditional-race and completed-part contract inputs |
+| `tests/custom_signature_verifier.rs` | Custom verifier wiring and AWS sealed-path isolation |
 | `tests/support/mod.rs` | Shared operations, backends, signing, probes |
 | `examples/minimal.rs` | Minimal complete assembly and two requests |
 

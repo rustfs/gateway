@@ -47,7 +47,7 @@ use std::sync::Arc;
 
 use rustfs_gateway_core::{Handler, MissingHandlers, Operation, OperationCodec, OperationSet, RouterBuilder, SseConfig};
 use rustfs_gateway_http::Limits;
-use rustfs_gateway_sig::SecurityFloor;
+use rustfs_gateway_sig::{SecurityFloor, SignatureVerifier};
 use rustfs_gateway_types::{NamePolicy, NameValidator, SlashPolicy};
 
 use crate::assembly::{AssemblyError, RuleRef};
@@ -106,6 +106,7 @@ pub struct ServiceBuilder {
     authorizer: Option<Arc<dyn Authorizer>>,
     dangerous_allow_all_authorizer: bool,
     authenticator: Option<Arc<dyn Authenticator>>,
+    custom_signature_verifier: Option<Arc<dyn SignatureVerifier>>,
     policy_source: Arc<dyn PolicySource>,
     policy_timeout: PolicyTimeout,
     authz_audit: Arc<dyn AuthzAuditSink>,
@@ -128,6 +129,7 @@ impl core::fmt::Debug for ServiceBuilder {
             .field("operations", &self.registered().collect::<Vec<_>>())
             .field("has_authorizer", &self.authorizer.is_some())
             .field("has_authenticator", &self.authenticator.is_some())
+            .field("has_custom_signature_verifier", &self.custom_signature_verifier.is_some())
             .field("stage_filters", &self.filters.len())
             .field("op_layers", &self.op_layers.values().map(Vec::len).sum::<usize>())
             .finish_non_exhaustive()
@@ -160,6 +162,7 @@ impl ServiceBuilder {
             authorizer: None,
             dangerous_allow_all_authorizer: false,
             authenticator: None,
+            custom_signature_verifier: None,
             policy_source: Arc::new(NoPolicy),
             policy_timeout: PolicyTimeout::default(),
             authz_audit: Arc::new(NoAuthzAudit),
@@ -286,6 +289,16 @@ impl ServiceBuilder {
     #[must_use]
     pub fn authenticator(mut self, authenticator: impl Authenticator) -> Self {
         self.authenticator = Some(Arc::new(authenticator));
+        self
+    }
+
+    /// Installs the verifier for registered non-AWS authentication schemes.
+    ///
+    /// The security floor decides whether a request is custom before this verifier runs. Requests
+    /// carrying any AWS credential marker remain sealed to the built-in [`Authenticator`] path.
+    #[must_use]
+    pub fn custom_signature_verifier(mut self, verifier: impl SignatureVerifier) -> Self {
+        self.custom_signature_verifier = Some(Arc::new(verifier));
         self
     }
 
@@ -606,6 +619,7 @@ impl ServiceBuilder {
             config: self.config,
             authorizer,
             authenticator,
+            custom_signature_verifier: self.custom_signature_verifier,
             policy_source: self.policy_source,
             policy_timeout: self.policy_timeout,
             authz_audit: self.authz_audit,
