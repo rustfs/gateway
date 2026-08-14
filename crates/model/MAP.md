@@ -24,7 +24,7 @@ overlays/quirks/*.toml  ──┘
 | `src/overlay.rs` | The hand-written source, **merged from one file per operation family**: whitelist, deferred groups, scalar map, per-operation and per-shape overrides, quirk records, and typed codec rules paired with mutation dimensions. Self-consistency checks and every cross-file collision refusal live here. | Adding an overlay key, a quirk is rejected, or a load failed naming two family files. |
 | `src/overlay/codec.rs` | Typed codec/runtime values, lowered-IR mutation sources, and the strict runtime-contract parser. | Adding a codec value or diagnosing a mismatched runtime value and dimension. |
 | `src/overlay/codec_inputs.rs` | Strict parsers for mutable codec inputs and lowered-IR source paths. | A mutable record's codec value or source path is rejected. |
-| `src/overlay/contract_values.rs` | Closed runtime values selected by response, copy-adapter, and naming contract rules. | Adding a typed runtime-contract alternative. |
+| `src/overlay/contract_values.rs` | Closed runtime values selected by response, copy-adapter, naming and signature contract rules. | Adding a typed runtime-contract alternative. |
 | `src/overlay/cors_contract_values.rs` | Closed current/mutation values for bucket-CORS contracts. | Adding a CORS runtime policy. |
 | `src/overlay/cors_contract_inputs.rs` | Strict parser for typed bucket-CORS contract values. | A CORS contract value is rejected. |
 | `src/overlay/select_restore_contract_values.rs` | Closed current/mutation values for select and restore contracts. | Adding a SelectObjectContent or RestoreObject runtime policy. |

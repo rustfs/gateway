@@ -271,6 +271,30 @@ pub fn render(
         None => {}
     }
     match contract_rule.map(|rule| &rule.current) {
+        Some(ContractValue::SignaturePolicy(true)) => match contract_rule.map(|rule| rule.mutation_dimension) {
+            Some(rustfs_gateway_model::MutationDimension::SignatureCanonicalHostPolicy) => {
+                out.push_str("contract_value = \"raw_host_bytes\"\n")
+            }
+            Some(rustfs_gateway_model::MutationDimension::SignaturePathFallbackPolicy) => {
+                out.push_str("contract_value = \"decoded_then_raw\"\n")
+            }
+            Some(rustfs_gateway_model::MutationDimension::SignaturePayloadTokenPolicy) => {
+                out.push_str("contract_value = \"verbatim_payload_token\"\n")
+            }
+            _ => {}
+        },
+        Some(ContractValue::SignaturePolicy(false)) => match contract_rule.map(|rule| rule.mutation_dimension) {
+            Some(rustfs_gateway_model::MutationDimension::SignatureCanonicalHostPolicy) => {
+                out.push_str("contract_value = \"normalized_host\"\n")
+            }
+            Some(rustfs_gateway_model::MutationDimension::SignaturePathFallbackPolicy) => {
+                out.push_str("contract_value = \"decoded_only\"\n")
+            }
+            Some(rustfs_gateway_model::MutationDimension::SignaturePayloadTokenPolicy) => {
+                out.push_str("contract_value = \"digest_hex\"\n")
+            }
+            _ => {}
+        },
         Some(ContractValue::GranteeTypeFromIdentifyingMember) => {
             out.push_str("contract_value = \"derive_from_identifying_member\"\n");
         }

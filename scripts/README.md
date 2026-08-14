@@ -133,6 +133,7 @@ fixed now so that the same check does not get written twice under two names.
 | `check_role_verdicts.sh` | High-risk PR descriptions carry the required expert-role verdicts (PR-only job; needs the `## Role Verdicts` anchor from the PR template) | P0-10 |
 | `check_op_file_shape.sh` | One operation per file; `//! Shares:` declaration agrees with the actual `use` graph; 800-line ceiling | P1 |
 | `check_quirks_evidence.sh` | Every quirk has ≥1 evidence and ≥1 case referencing it, consistent in both directions | P1 |
+| `check_quirk_ledger.sh` | Every typed quirk joins its generated constant to one production consumer and bilateral executable case evidence | P1, P2 |
 | `check_error_has_rule_ref.sh` | Diagnostic errors carry a rule reference (quirk id / RFC section / spec field path) | P2 |
 | `check_wire_boundary.sh` | Wire-layer boundary constraints | P3 |
 | `check_multer_constraints.sh` | multipart parsing sets explicit limits (multer defaults to `u64::MAX`) | P3 |

@@ -272,6 +272,24 @@ pub(super) fn contract_rule(table: &Toml, id: &str) -> Result<Option<ContractRul
         return Ok(Some(rule));
     }
     let (current, mutation_dimension) = match (dimension.as_str(), value.as_str()) {
+        ("signature_canonical_host_policy", "raw_host_bytes") => {
+            (ContractValue::SignaturePolicy(true), MutationDimension::SignatureCanonicalHostPolicy)
+        }
+        ("signature_canonical_host_policy", "normalized_host") => {
+            (ContractValue::SignaturePolicy(false), MutationDimension::SignatureCanonicalHostPolicy)
+        }
+        ("signature_path_fallback_policy", "decoded_then_raw") => {
+            (ContractValue::SignaturePolicy(true), MutationDimension::SignaturePathFallbackPolicy)
+        }
+        ("signature_path_fallback_policy", "decoded_only") => {
+            (ContractValue::SignaturePolicy(false), MutationDimension::SignaturePathFallbackPolicy)
+        }
+        ("signature_payload_token_policy", "verbatim_payload_token") => {
+            (ContractValue::SignaturePolicy(true), MutationDimension::SignaturePayloadTokenPolicy)
+        }
+        ("signature_payload_token_policy", "digest_hex") => {
+            (ContractValue::SignaturePolicy(false), MutationDimension::SignaturePayloadTokenPolicy)
+        }
         ("grantee_discriminator_policy", "derive_from_identifying_member") => (
             ContractValue::GranteeTypeFromIdentifyingMember,
             MutationDimension::GranteeDiscriminatorPolicy,

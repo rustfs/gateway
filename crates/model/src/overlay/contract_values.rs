@@ -194,6 +194,8 @@ pub enum CaseFoldingValue {
 /// A typed runtime contract value emitted into generated consumer inputs.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ContractValue {
+    /// Whether a signature canonicalization policy keeps its source spelling.
+    SignaturePolicy(bool),
     /// A bucket-CORS runtime policy.
     Cors(CorsContractValue),
     /// A RestoreObject or SelectObjectContent runtime policy.

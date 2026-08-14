@@ -4,7 +4,7 @@ Agent entry point for SigV2/SigV4 parsing, canonicalization and verification.
 
 | File | Responsibility | Read it when |
 |---|---|---|
-| `src/lib.rs` | Public signature state machine. | Start here for an authentication task. |
+| `src/lib.rs` | Public signature state machine and generated policy wiring. | Start here for an authentication task or a missing signature-policy consumer. |
 | `src/auth.rs` | Authorization header/query parsing. | Credentials or signed fields parse wrongly. |
 | `src/canonical.rs` | Canonical request construction. | A signature differs despite the same request. |
 | `src/credential.rs` | Credential scope parsing. | Date/region/service scope is wrong. |

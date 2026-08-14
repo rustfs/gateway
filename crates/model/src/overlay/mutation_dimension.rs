@@ -21,6 +21,12 @@
 /// The mechanically mutable dimension carried by one typed protocol rule.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MutationDimension {
+    /// Change whether the canonical host keeps its original wire spelling.
+    SignatureCanonicalHostPolicy,
+    /// Change whether verification retains the raw-path fallback candidate.
+    SignaturePathFallbackPolicy,
+    /// Change whether the canonical payload line keeps the client's accepted token spelling.
+    SignaturePayloadTokenPolicy,
     /// Replace the grammar used to validate a wire string.
     WireForm,
     /// Move one or both inclusive integer bounds.
@@ -369,6 +375,9 @@ impl MutationDimension {
     /// Stable spelling written to generated mutation tables.
     pub fn as_str(self) -> &'static str {
         match self {
+            Self::SignatureCanonicalHostPolicy => "signature_canonical_host_policy",
+            Self::SignaturePathFallbackPolicy => "signature_path_fallback_policy",
+            Self::SignaturePayloadTokenPolicy => "signature_payload_token_policy",
             Self::WireForm => "wire_form",
             Self::IntegerRange => "integer_range",
             Self::MediaType => "media_type",

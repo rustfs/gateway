@@ -41,11 +41,11 @@ fn only_proven_mutable_quirks_and_typed_contracts_have_generated_tables() {
     assert_eq!(mutable, 96, "the mutable side of the protected ledger drifted");
     assert_eq!(
         artifacts.contract_rules.len(),
-        157,
+        160,
         "the typed-contract side of the protected ledger drifted"
     );
-    assert_eq!(contracts, 157, "only typed contracts belong in the protected contract table");
-    assert_eq!(mutable + contracts, 253, "only proven typed sources belong in generated rule tables");
+    assert_eq!(contracts, 160, "only typed contracts belong in the protected contract table");
+    assert_eq!(mutable + contracts, 256, "only proven typed sources belong in generated rule tables");
 
     let mut typed_sources = BTreeSet::new();
     let mut dimensions = BTreeSet::new();
@@ -61,13 +61,13 @@ fn only_proven_mutable_quirks_and_typed_contracts_have_generated_tables() {
         assert!(typed_sources.insert(id.as_str()), "{id} has more than one typed source");
         dimensions.insert(rule.mutation_dimension.as_str());
     }
-    assert_eq!(typed_sources.len(), 253, "the typed source union drifted");
-    assert_eq!(dimensions.len(), 171, "the protected mutation-dimension ledger drifted");
+    assert_eq!(typed_sources.len(), 256, "the typed source union drifted");
+    assert_eq!(dimensions.len(), 174, "the protected mutation-dimension ledger drifted");
 
     let capability_blocks = BTreeSet::from(["q-cors-0006", "q-cors-0047"]);
     assert!(capability_blocks.is_subset(&typed_sources), "capability blocks must remain typed sources");
     let wired = typed_sources.difference(&capability_blocks).copied().collect::<BTreeSet<_>>();
-    assert_eq!(wired.len(), 251, "the production-wired ledger drifted");
+    assert_eq!(wired.len(), 254, "the production-wired ledger drifted");
     assert_eq!(typed_sources.difference(&wired).copied().collect::<BTreeSet<_>>(), capability_blocks);
     assert!(
         artifacts

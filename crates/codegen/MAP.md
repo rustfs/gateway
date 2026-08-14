@@ -35,7 +35,7 @@ and the zero-diff gate needs no temporary directory.
 | `src/emit/codec/forms.rs` | Resolves string wire grammars from typed codec rules; free-text quirk kinds are not codec inputs. | A member's wire spelling is wrong. |
 | `src/emit/codec/tolerance.rs` | Resolves tolerant header readings from typed codec rules; free-text quirk kinds are not codec inputs. | A header must be ignored rather than refused. |
 | `src/emit/quirk_toml.rs` | Disjoint `spec/quirks/<id>.toml` mutable rules and `spec/contracts/<id>.toml` typed runtime contracts; deferred overlay facts are not emitted. | A mutation input is missing or a deferred fact leaked into a protected table. |
-| `src/emit/runtime_contracts.rs` | `generated/contracts.rs` — typed data constants selected by runtime contract rules. | A non-codec protocol rule must become the unique input to a core runtime consumer. |
+| `src/emit/runtime_contracts.rs` | `generated/contracts.rs` and `generated/signature_contracts.rs` — typed data constants selected by runtime contract rules. | A non-codec protocol rule must become the unique input to a core or signature runtime consumer. |
 | `src/emit/naming_contracts.rs` | `generated/naming_contracts.rs` — typed data constants consumed by the ring-0 naming pipeline. | A naming contract must become the unique input to key or bucket materialisation. |
 | `src/emit/range_contracts.rs` | `generated/range_contracts.rs` — typed data constants consumed by ring-0 byte-range parsing and resolution. | A range grammar or boundary contract must become a types-crate input. |
 | `src/emit/runtime_contracts/precondition.rs` | Conditional/range half of `generated/contracts.rs`. | A precondition policy needs a new core runtime constant. |

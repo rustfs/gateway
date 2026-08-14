@@ -28,14 +28,14 @@ ops_dir = root / "model/overlays/ops"
 case_dir = root / "conformance/cases"
 
 EXPECTED = {
-    "records": 341,
+    "records": 344,
     "mutable": 96,
-    "typed_contracts": 157,
+    "typed_contracts": 160,
     "untyped_contracts": 88,
-    "typed_sources": 253,
-    "dimensions": 171,
-    "wired": 251,
-    "emitted_constants": 163,
+    "typed_sources": 256,
+    "dimensions": 174,
+    "wired": 254,
+    "emitted_constants": 166,
 }
 CAPABILITY_BLOCKS = {"q-cors-0006", "q-cors-0047"}
 
@@ -605,7 +605,11 @@ for path in sorted((root / "crates/model/src/overlay").glob("*.rs")):
 # Real Rust identifier uses are collected after lexing, with use/re-export statements removed.
 # Comments, normal strings and character literals therefore cannot manufacture a consumer.
 production_identifiers: dict[pathlib.Path, set[str]] = {}
-production_paths = sorted((root / "crates/types/src/scalar").rglob("*.rs")) + sorted((root / "crates/core/src").rglob("*.rs"))
+production_paths = (
+    sorted((root / "crates/types/src/scalar").rglob("*.rs"))
+    + sorted((root / "crates/core/src").rglob("*.rs"))
+    + sorted((root / "crates/sig/src").rglob("*.rs"))
+)
 for path in production_paths:
     relative = path.relative_to(root)
     if "generated" in relative.parts:
@@ -698,6 +702,8 @@ def consumer_identity(path: pathlib.Path) -> str:
         return "rustfs-gateway-types::scalar"
     if relative.startswith("crates/core/src/"):
         return "rustfs-gateway-core"
+    if relative.startswith("crates/sig/src/"):
+        return "rustfs-gateway-sig"
     return relative
 
 
@@ -725,7 +731,13 @@ for quirk_id in sorted(typed_contracts):
                 or (emitter.name == "range_contracts.rs" and path.relative_to(root).as_posix() == "crates/types/src/scalar/range.rs")
                 or (
                     emitter.name not in {"naming_contracts.rs", "range_contracts.rs"}
-                    and path.relative_to(root).as_posix().startswith("crates/core/src/")
+                    and (
+                        path.relative_to(root).as_posix().startswith("crates/core/src/")
+                        or (
+                            constant.startswith("SIGNATURE_")
+                            and path.relative_to(root).as_posix().startswith("crates/sig/src/")
+                        )
+                    )
                 )
             )
         }
@@ -913,5 +925,5 @@ if errors:
         print(f"check_quirk_ledger: {error}", file=sys.stderr)
     raise SystemExit(1)
 
-print("OK: quirk ledger 341 overlay facts = 253 proven sources (96 mutable + 157 typed contracts) + 88 deferred; 171 dimensions; 251 wired; 2 capability blocks")
+print("OK: quirk ledger 344 overlay facts = 256 proven sources (96 mutable + 160 typed contracts) + 88 deferred; 174 dimensions; 254 wired; 2 capability blocks")
 PYEOF

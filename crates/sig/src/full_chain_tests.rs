@@ -156,7 +156,11 @@ fn c_sig_0209_the_raw_path_fallback_verifies_a_proxy_rewritten_request() {
     let rewritten = Fixture::get("/bucket/my key", "");
     // The client signed the spelling that arrived, which canonicalises to candidate two.
     let signature = sign_candidate(&rewritten, 1);
-    assert_eq!(verify(&rewritten, &signature).expect("the fallback must verify it"), PathCandidate::Raw);
+    ::core::assert_eq!(
+        verify(&rewritten, &signature).expect("the fallback must verify it"),
+        PathCandidate::Raw,
+        "q-sig-raw-path-fallback-0157"
+    );
 
     // The ordinary case still resolves on the first candidate, and the first candidate alone.
     let untouched = Fixture::get("/bucket/mykey", "");
@@ -220,10 +224,10 @@ fn c_sig_0252_one_signature_is_never_valid_for_two_host_spellings() {
     for spelling in ["EXAMPLE.AMAZONAWS.COM", "example.amazonaws.com.", "example.amazonaws.com:443"] {
         let mut other = Fixture::get("/", "");
         other.host = RawHost::from_host_header(spelling.as_bytes()).expect("valid");
-        assert_eq!(
+        ::core::assert_eq!(
             verify(&other, &signature),
             Err(AuthError::SignatureDoesNotMatch),
-            "a signature for example.amazonaws.com must not verify {spelling}"
+            "q-sig-canonical-host-raw-0156: a signature for example.amazonaws.com must not verify {spelling}"
         );
     }
 }

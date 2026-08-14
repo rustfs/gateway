@@ -86,6 +86,9 @@
 #![forbid(unsafe_code)]
 
 mod canonical;
+mod contracts {
+    include!("../../../generated/signature_contracts.rs");
+}
 mod clock;
 pub mod codec;
 mod derive;

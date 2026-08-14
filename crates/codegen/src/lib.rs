@@ -268,6 +268,10 @@ pub fn generate(input: &CodegenInput, out: &CodegenOutput) -> Result<Artifacts> 
         emit::runtime_contracts::render(&overlay.contract_rules).map_err(Error::Policy)?,
     ));
     files.push((
+        out.generated_dir.join("signature_contracts.rs"),
+        emit::runtime_contracts::render_signature(&overlay.contract_rules).map_err(Error::Policy)?,
+    ));
+    files.push((
         out.generated_dir.join("error_codes.rs"),
         emit::rust_files::error_codes(&lowered.operations),
     ));
