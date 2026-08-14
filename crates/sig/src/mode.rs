@@ -26,6 +26,8 @@
 use core::fmt;
 use std::borrow::Cow;
 
+use crate::contracts::SIGNATURE_PAYLOAD_TOKEN_VERBATIM;
+
 use smallvec::SmallVec;
 
 use crate::codec::{decode_base64_sha256, decode_hex_lower, encode_base64_sha256, encode_hex_lower};
@@ -378,7 +380,8 @@ impl PayloadMode {
         let token = match self {
             Self::Empty => Cow::Borrowed(EMPTY_PAYLOAD_SHA256_HEX),
             Self::ExactSha256(digest) => Cow::Owned(encode_hex_lower(digest)),
-            Self::Base64Sha256(digest) => Cow::Owned(encode_base64_sha256(digest)),
+            Self::Base64Sha256(digest) if SIGNATURE_PAYLOAD_TOKEN_VERBATIM => Cow::Owned(encode_base64_sha256(digest)),
+            Self::Base64Sha256(digest) => Cow::Owned(encode_hex_lower(digest)),
             Self::Unsigned => Cow::Borrowed(UNSIGNED_PAYLOAD),
             Self::StreamingSigned { trailer } => Cow::Borrowed(if trailer.is_declared() {
                 STREAMING_SIGNED_TRAILER

@@ -487,6 +487,42 @@ pub fn render(rules: &BTreeMap<String, ContractRule>) -> Result<String, String> 
     Ok(out)
 }
 
+/// Renders the signature crate's generated canonicalization inputs.
+pub fn render_signature(rules: &BTreeMap<String, ContractRule>) -> Result<String, String> {
+    let mut out = String::from(LICENSE);
+    out.push_str("\n// Generated signature protocol-contract inputs.\n\n");
+    let host = unique(rules, MutationDimension::SignatureCanonicalHostPolicy)?;
+    let ContractValue::SignaturePolicy(host) = host else {
+        return Err(wrong_type(MutationDimension::SignatureCanonicalHostPolicy));
+    };
+    writeln!(
+        out,
+        "/// Whether canonical signing keeps the effective host's wire spelling.\npub(crate) const SIGNATURE_CANONICAL_HOST_RAW: bool = {host};"
+    )
+    .expect("writing to String cannot fail");
+
+    let path = unique(rules, MutationDimension::SignaturePathFallbackPolicy)?;
+    let ContractValue::SignaturePolicy(path) = path else {
+        return Err(wrong_type(MutationDimension::SignaturePathFallbackPolicy));
+    };
+    writeln!(
+        out,
+        "/// Whether verification retains the original wire path as its second candidate.\npub(crate) const SIGNATURE_RAW_PATH_FALLBACK: bool = {path};"
+    )
+    .expect("writing to String cannot fail");
+
+    let payload = unique(rules, MutationDimension::SignaturePayloadTokenPolicy)?;
+    let ContractValue::SignaturePolicy(payload) = payload else {
+        return Err(wrong_type(MutationDimension::SignaturePayloadTokenPolicy));
+    };
+    writeln!(
+        out,
+        "/// Whether canonical signing keeps the client's accepted payload token spelling.\npub(crate) const SIGNATURE_PAYLOAD_TOKEN_VERBATIM: bool = {payload};"
+    )
+    .expect("writing to String cannot fail");
+    Ok(out)
+}
+
 pub(super) fn unique(rules: &BTreeMap<String, ContractRule>, dimension: MutationDimension) -> Result<&ContractValue, String> {
     let mut matching = rules.values().filter(|rule| rule.mutation_dimension == dimension);
     let current = matching

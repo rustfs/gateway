@@ -51,6 +51,8 @@ use core::fmt;
 use http::Method;
 use http::header::{HOST, HeaderMap, HeaderName};
 use rustfs_gateway_http::RawHost;
+
+use crate::contracts::{SIGNATURE_CANONICAL_HOST_RAW, SIGNATURE_RAW_PATH_FALLBACK};
 use sha2::{Digest, Sha256};
 use smallvec::SmallVec;
 
@@ -161,7 +163,7 @@ impl UriPathCandidates {
     }
 
     fn order(&self) -> SmallVec<[PathCandidate; 2]> {
-        if self.is_single() {
+        if self.is_single() || !SIGNATURE_RAW_PATH_FALLBACK {
             SmallVec::from_slice(&[PathCandidate::Decoded])
         } else {
             SmallVec::from_slice(&[PathCandidate::Decoded, PathCandidate::Raw])
@@ -294,7 +296,11 @@ impl<'r> CanonicalRequestSpec<'r> {
     /// be a second derivation of the one value that must have exactly one.
     fn canonical_value(&self, name: &HeaderName) -> Result<String, AuthError> {
         if name == HOST {
-            return Ok(self.host.as_str().to_owned());
+            return Ok(if SIGNATURE_CANONICAL_HOST_RAW {
+                self.host.as_str().to_owned()
+            } else {
+                self.host.as_str().trim_end_matches('.').to_ascii_lowercase()
+            });
         }
         let mut out = String::new();
         let mut seen = false;

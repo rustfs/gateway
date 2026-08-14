@@ -1,0 +1,60 @@
+# Copyright 2026 RustFS Team
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Signature canonicalization contracts that are not represented by the pinned Smithy model.
+
+[[quirk]]
+id      = "q-sig-canonical-host-raw-0156"
+kind    = "canonical_host_policy"
+classification = "contract"
+mutation_dimension = "signature_canonical_host_policy"
+contract_value = "raw_host_bytes"
+target  = "Signature.CanonicalHost"
+summary = "Canonical signing uses the effective host's original wire spelling."
+cases   = ["c-sig-0252"]
+
+  [[quirk.evidence]]
+  kind    = "decision"
+  ref     = "https://github.com/rustfs/backlog/issues/1683"
+  summary = "The accepted signature contract keeps host spelling byte-exact so routing normalization cannot change what was signed."
+
+[[quirk]]
+id      = "q-sig-raw-path-fallback-0157"
+kind    = "canonical_path_policy"
+classification = "contract"
+mutation_dimension = "signature_path_fallback_policy"
+contract_value = "decoded_then_raw"
+target  = "Signature.CanonicalPath"
+summary = "Verification tries the decoded canonical path before the original wire path."
+cases   = ["c-sig-0209"]
+
+  [[quirk.evidence]]
+  kind    = "s3s-pr"
+  ref     = "https://github.com/s3s-project/s3s/pull/589"
+  summary = "Upstream added a raw-path retry after real clients signed a different path spelling than its first canonicalization."
+
+[[quirk]]
+id      = "q-sig-payload-token-verbatim-0158"
+kind    = "canonical_payload_policy"
+classification = "contract"
+mutation_dimension = "signature_payload_token_policy"
+contract_value = "verbatim_payload_token"
+target  = "Signature.CanonicalPayload"
+summary = "The payload line preserves the client's accepted digest spelling."
+cases   = ["c-sig-0210"]
+
+  [[quirk.evidence]]
+  kind    = "s3s-pr"
+  ref     = "https://github.com/s3s-project/s3s/pull/631"
+  summary = "Upstream fixed verification after a valid base64 payload digest was re-encoded as hexadecimal before signing."

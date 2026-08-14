@@ -33,9 +33,12 @@
 //! HTTP/2 is modelled the way hyper presents it: `:authority` becomes the URI authority, and a
 //! bare-frame request that carried only `host` arrives with no authority at all.
 
-use http::header::HOST;
+use http::Method;
+use http::header::{HOST, HeaderMap};
 use http::{Request, Uri};
-use rustfs_gateway_sig::{HostError, HostSource, MAX_HOST_BYTES, RawHost, effective_host};
+use rustfs_gateway_sig::{
+    HostError, HostSource, MAX_HOST_BYTES, PayloadMode, RawHost, RawQuery, SignedHeaderSet, UriPathCandidates, effective_host,
+};
 
 fn request(uri: &str, hosts: &[&str]) -> Request<()> {
     let mut builder = Request::builder().method("GET").uri(uri.parse::<Uri>().expect("test uri"));
@@ -199,7 +202,30 @@ fn c_sig_0252_host_spellings_are_never_folded_together() {
         .map(|spelling| resolve("/foo", &[spelling]).expect("resolved"))
         .collect();
     for (index, host) in resolved.iter().enumerate() {
-        assert_eq!(host.as_str(), spellings[index], "nothing may be normalised");
+        assert_eq!(host.as_str(), spellings[index], "q-sig-canonical-host-raw-0156");
+        let headers = HeaderMap::new();
+        let signed = SignedHeaderSet::parse_and_enforce("host", &headers, None).expect("valid signed headers");
+        let path = UriPathCandidates::new("/").expect("valid path");
+        let query = RawQuery::new("");
+        let canonical = rustfs_gateway_sig::CanonicalRequestSpec::new(
+            &Method::GET,
+            &path,
+            &query,
+            &headers,
+            &signed,
+            host,
+            PayloadMode::Empty.canonical_payload_token(),
+        )
+        .candidates()
+        .expect("canonical request")
+        .next()
+        .expect("one candidate")
+        .text()
+        .to_owned();
+        assert!(
+            canonical.contains(&format!("\nhost:{}\n", spellings[index])),
+            "q-sig-canonical-host-raw-0156"
+        );
         for (other_index, other) in resolved.iter().enumerate() {
             if index != other_index {
                 assert_ne!(

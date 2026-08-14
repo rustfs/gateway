@@ -185,7 +185,7 @@ fn c_sig_0210_the_payload_token_is_the_client_s_own_spelling() {
     let hex_text = canonical("GET", "/", "", &[("x-amz-date", DATE)], "host;x-amz-date", hex_mode);
     let b64_text = canonical("GET", "/", "", &[("x-amz-date", DATE)], "host;x-amz-date", b64_mode);
     assert!(hex_text.ends_with(digest_hex));
-    assert!(b64_text.ends_with(digest_b64));
+    ::core::assert!(b64_text.ends_with(digest_b64), "q-sig-payload-token-verbatim-0158");
     assert_ne!(hex_text, b64_text);
 }
 
@@ -500,7 +500,7 @@ fn c_sig_0209a_the_fallback_candidate_is_second_and_never_duplicated() {
     let first = candidates.next().expect("decoded candidate");
     let second = candidates.next().expect("raw candidate");
     assert_eq!(first.path_candidate(), PathCandidate::Decoded);
-    assert_eq!(second.path_candidate(), PathCandidate::Raw);
+    ::core::assert_eq!(second.path_candidate(), PathCandidate::Raw, "q-sig-raw-path-fallback-0157");
     assert!(first.text().contains("\n/my%20key\n"));
     assert!(second.text().contains("\n/my key\n"));
     assert!(candidates.next().is_none(), "there is no third spelling");
