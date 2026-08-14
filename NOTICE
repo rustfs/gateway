@@ -31,6 +31,7 @@ Third-party material
    License: Apache License 2.0
    Commit:  2880e0785db4cf2ceb086cfeba86a4cbdeb14176
    Path:    aws/rust-runtime/aws-sigv4/src/sign/v4.rs
+   Permalink: https://github.com/smithy-lang/smithy-rs/blob/2880e0785db4cf2ceb086cfeba86a4cbdeb14176/aws/rust-runtime/aws-sigv4/src/sign/v4.rs
    Notes:   rustfs-gateway does not depend on this crate. `signing_key` adapted from `generate_signing_key`;
             `calculate_signature` adapted from the upstream function of the same name. The local
             versions move key material through this crate's zeroizing containers and accept only a
@@ -73,4 +74,5 @@ license, and the paths of the affected files in this repository.
   Upstream project:  https://github.com/smithy-lang/smithy-rs
   Upstream revision: 2880e0785db4cf2ceb086cfeba86a4cbdeb14176
   Upstream path:     aws/rust-runtime/aws-sigv4/src/sign/v4.rs
+  Upstream permalink: https://github.com/smithy-lang/smithy-rs/blob/2880e0785db4cf2ceb086cfeba86a4cbdeb14176/aws/rust-runtime/aws-sigv4/src/sign/v4.rs
   License:           Apache-2.0

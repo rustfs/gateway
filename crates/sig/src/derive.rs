@@ -15,12 +15,11 @@
 // ---------------------------------------------------------------------------
 // ATTRIBUTION
 //
-// These fields bind each local function to the exact reviewed upstream source:
-//
 //     Function mapping: signing_key <- generate_signing_key
 //     Function mapping: calculate_signature <- calculate_signature
 //     Upstream URL: https://github.com/smithy-lang/smithy-rs
 //     Upstream path: aws/rust-runtime/aws-sigv4/src/sign/v4.rs
+//     Upstream permalink: https://github.com/smithy-lang/smithy-rs/blob/2880e0785db4cf2ceb086cfeba86a4cbdeb14176/aws/rust-runtime/aws-sigv4/src/sign/v4.rs
 //     Revision: 2880e0785db4cf2ceb086cfeba86a4cbdeb14176 (aws-sigv4 1.5.1)
 //     License: Apache-2.0
 //     Copyright: Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
@@ -41,8 +40,8 @@
 //! NOT responsible for: deciding whether a scope is acceptable. That decision is P2-04's and it is
 //! deliberately not expressible here, because the type this module accepts has no constructor in
 //! this crate.
-//! Upstream: [`crate::SecretBytes`], [`crate::SigningKey`], [`crate::canonical`]'s
-//! [`StringToSign`]. Downstream: P2-04's authentication stage.
+//! Upstream: [`crate::SecretBytes`], [`crate::SigningKey`], and [`crate::canonical::StringToSign`].
+//! Downstream: P2-04's authentication stage.
 //!
 //! # Why the parameter type is the whole design
 //!
