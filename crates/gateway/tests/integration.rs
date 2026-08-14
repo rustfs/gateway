@@ -42,6 +42,8 @@ mod connection_teardown;
 mod cors_runtime;
 #[path = "credential_runtime.rs"]
 mod credential_runtime;
+#[path = "custom_signature_verifier.rs"]
+mod custom_signature_verifier;
 #[path = "error_context_filters.rs"]
 mod error_context_filters;
 #[path = "facade_probe.rs"]

@@ -163,8 +163,7 @@ use crate::trace::{RequestTrace, TraceSource};
 pub(crate) struct Inner {
     pub(crate) router: Router,
     pub(crate) dispatch: DispatchTable,
-    /// The deployment's stage filters, in registration order. Empty for almost every deployment,
-    /// and the emptiness is checked before any of the three seams does any work.
+    /// The deployment's stage filters, in order; emptiness is checked before any seam does work.
     pub(crate) filters: Arc<[Arc<dyn StageFilter>]>,
     pub(crate) floor: SecurityFloor,
     pub(crate) limits: Limits,
@@ -172,6 +171,7 @@ pub(crate) struct Inner {
     pub(crate) config: ConfigStore,
     pub(crate) authorizer: Arc<dyn Authorizer>,
     pub(crate) authenticator: Arc<dyn Authenticator>,
+    pub(crate) custom_signature_verifier: Option<Arc<dyn rustfs_gateway_sig::SignatureVerifier>>,
     pub(crate) policy_source: Arc<dyn PolicySource>,
     pub(crate) policy_timeout: PolicyTimeout,
     pub(crate) authz_audit: Arc<dyn AuthzAuditSink>,
@@ -659,15 +659,23 @@ impl S3Service {
                     }
                 }
             }
-            // A registered custom scheme reaches here. This assembly wires no verifier for one, and
-            // answering it with the AWS path would be a downgrade rather than a compatibility
-            // measure, so it is refused in the open.
-            Ok(Admission::Custom(_)) => {
-                return outcome.refuse_handler(HandlerError::new(
-                    ErrorCode::NOT_IMPLEMENTED,
-                    "this deployment registered a custom authentication scheme and installed no verifier for it",
-                ));
-            }
+            Ok(Admission::Custom(request)) => match &self.inner.custom_signature_verifier {
+                Some(verifier) => {
+                    let verdict = verifier.verify(&request);
+                    let verdict = if verdict.is_anonymous() {
+                        Verdict::reject(AuthError::AuthorizationHeaderMalformed)
+                    } else {
+                        verdict
+                    };
+                    (AuthenticationOutcome::ordinary(verdict), None)
+                }
+                None => {
+                    return outcome.refuse_handler(HandlerError::new(
+                        ErrorCode::NOT_IMPLEMENTED,
+                        "this deployment registered a custom authentication scheme and installed no verifier for it",
+                    ));
+                }
+            },
             // `Admission` is `#[non_exhaustive]`: a variant added later must not be answered by a
             // wildcard that falls through to "authenticated". Refused, loudly.
             Ok(_) => {

@@ -37,11 +37,12 @@
 
 pub use rustfs_gateway_sig::timing::LookupBudget;
 pub use rustfs_gateway_sig::{
-    AmzDate, AnonymousAck, AuthError, AuthScheme, CHUNK_ALGORITHM, CHUNK_SIGNATURE_EXTENSION, ChunkSigner, CredentialScope,
-    Identity, MAX_PRESIGNED_EXPIRY_SECONDS, PayloadMode, PresignedParams, RegionSet, RequestClock, RequestNow, SecretBytes,
-    SecurityFloor, SessionBinding, SessionBindingError, SessionToken, SigFamily, SigIdentity, SigLocation, SigService,
-    SigV4Authorization, SigV4Signer, SignatureMatch, SignedRequest, SignerError, SigningCredentials, SigningRequest,
-    SigningScope, SkewWindow, SystemClock, TRAILER_ALGORITHM, Tamper, TamperComponent, TrailerSet, Verdict,
+    AmzDate, AnonymousAck, AuthError, AuthScheme, CHUNK_ALGORITHM, CHUNK_SIGNATURE_EXTENSION, ChunkSigner, CredentialPresence,
+    CredentialScope, CtBytes, CustomAuthRequest, CustomAuthScheme, CustomSchemeRegistry, Identity, MAX_PRESIGNED_EXPIRY_SECONDS,
+    PayloadMode, PresignedParams, RegionSet, RequestClock, RequestNow, SecretBytes, SecurityFloor, SessionBinding,
+    SessionBindingError, SessionToken, SigFamily, SigIdentity, SigLocation, SigService, SigV4Authorization, SigV4Signer,
+    Signature, SignatureMatch, SignatureVerifier, SignedRequest, SignerError, SigningCredentials, SigningRequest, SigningScope,
+    SkewWindow, SystemClock, TRAILER_ALGORITHM, Tamper, TamperComponent, TrailerSet, Verdict,
 };
 
 /// The client-side signer, under the name the conformance runner names it by.

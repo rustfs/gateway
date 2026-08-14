@@ -562,6 +562,7 @@ gateway_modules = (
     "connection_teardown",
     "cors_runtime",
     "credential_runtime",
+    "custom_signature_verifier",
     "error_context_filters",
     "facade_probe",
     "governor_runtime",
