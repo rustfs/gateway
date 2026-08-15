@@ -33,7 +33,7 @@
 //! that hands the inner source back, so no call path reaches the deployment's read without going
 //! through here.
 //!
-//! Four properties make the cache a bound rather than a speed-up:
+//! Five properties make the cache a bound rather than a speed-up:
 //!
 //! - **Negative entries have the same shape as positive ones.** "This bucket has no document",
 //!   "this bucket does not exist" and "the source failed" are all stored as the same `None`, so
@@ -45,15 +45,9 @@
 //!   from the key itself, so a burst of misses admitted together does not expire together.
 //! - **Source reads have a hard deadline.** A backend future that never resolves is collapsed and
 //!   cached as the same negative entry as every other source failure.
-//!
-//! # What is deliberately not here
-//!
-//! **Single-flight.** A thousand concurrent misses for one uncached bucket are a thousand reads,
-//! not one. Collapsing them needs an async notification primitive this crate does not depend on
-//! (`tokio` is a dev-dependency only), and a hand-rolled one on the pre-authentication path is
-//! where the next defect would live. The concurrency bound in the meantime is
-//! [`crate::Governor`], which runs before this and is the mechanism the design leans on for the
-//! rate bound anyway. This is a gap, and it is written down rather than papered over.
+//! - **Concurrent misses for one key share one read.** The in-flight future is shared through the
+//!   runtime-independent `futures-util` primitive; this module does not hand-roll wakeups or make
+//!   Tokio a production dependency. Cancelling every waiter removes the abandoned flight.
 
 use std::collections::HashMap;
 use std::future::{Future, poll_fn};
@@ -62,6 +56,8 @@ use std::task::Poll;
 use std::time::Duration;
 
 use futures_timer::Delay;
+use futures_util::FutureExt;
+use futures_util::future::Shared;
 use rustfs_gateway_core::BoxFuture;
 use rustfs_gateway_sig::RequestNow;
 use rustfs_gateway_types::BucketName;
@@ -173,6 +169,7 @@ struct State {
     entries: HashMap<String, Entry>,
     /// Keys in the order they were last stored, so the cap evicts the oldest write.
     order: Vec<String>,
+    in_flight: HashMap<String, InFlight>,
 }
 
 struct Entry {
@@ -180,6 +177,62 @@ struct Entry {
     document: Option<Arc<CorsConfiguration>>,
     /// Unix seconds after which this entry is stale.
     expires_at: i64,
+}
+
+#[derive(Clone)]
+enum LoadOutcome {
+    Store(Option<Arc<CorsConfiguration>>),
+    DoNotStore,
+}
+
+impl LoadOutcome {
+    fn document(&self) -> Option<Arc<CorsConfiguration>> {
+        match self {
+            Self::Store(document) => document.clone(),
+            Self::DoNotStore => None,
+        }
+    }
+}
+
+type SharedLoad = Shared<BoxFuture<'static, LoadOutcome>>;
+
+struct InFlight {
+    token: Arc<()>,
+    load: SharedLoad,
+    waiters: usize,
+}
+
+struct FlightHandle {
+    key: String,
+    token: Arc<()>,
+    load: SharedLoad,
+}
+
+enum Lookup {
+    Cached(Option<Arc<CorsConfiguration>>),
+    Flight(FlightHandle),
+}
+
+struct FlightWaiter<'a> {
+    cache: &'a CachedCorsSource,
+    key: String,
+    token: Arc<()>,
+    active: bool,
+}
+
+impl FlightWaiter<'_> {
+    fn complete(mut self, outcome: LoadOutcome, now: RequestNow) {
+        self.cache.complete_flight(&self.key, &self.token, outcome, now);
+        self.active = false;
+    }
+}
+
+impl Drop for FlightWaiter<'_> {
+    fn drop(&mut self) {
+        if self.active {
+            self.cache.release_waiter(&self.key, &self.token);
+        }
+    }
 }
 
 impl core::fmt::Debug for CachedCorsSource {
@@ -212,49 +265,109 @@ impl CachedCorsSource {
     /// failed. The three are stored identically, so a second probe cannot tell them apart by
     /// timing either.
     pub async fn get(&self, bucket: &BucketName, now: RequestNow) -> Option<Arc<CorsConfiguration>> {
-        if let Some(cached) = self.fresh(bucket.as_str(), now) {
-            return cached;
-        }
-        // The guard is dropped before this await, and taken again after it. A read that failed is
-        // cached as a negative entry on purpose: a backend that is down must not become a way to
-        // reach it once per request.
-        let loaded = match load_before_deadline(self.inner.load(bucket), self.source_timeout).await {
-            Ok(document) => document.map(Arc::new),
-            Err(_) if rustfs_gateway_core::cors::source_absence_is_collapsed() => None,
-            // The mutation keeps a failed read distinguishable from an ordinary negative entry
-            // by refusing to cache it. The next request therefore reaches the source again, which
-            // the gateway-level counter observes without exposing the distinction on the wire.
-            Err(_) => return None,
+        let Some(lookup) = self.lookup(bucket, now) else {
+            return load_collapsed(Arc::clone(&self.inner), bucket.clone(), self.source_timeout)
+                .await
+                .document();
         };
-        self.store(bucket.as_str(), loaded.clone(), now);
+        let flight = match lookup {
+            Lookup::Cached(document) => return document,
+            Lookup::Flight(flight) => flight,
+        };
+        let waiter = FlightWaiter {
+            cache: self,
+            key: flight.key,
+            token: flight.token,
+            active: true,
+        };
+        let outcome = flight.load.await;
+        let loaded = outcome.document();
+        waiter.complete(outcome, now);
         loaded
     }
 
-    /// The cached answer, when there is a fresh one. The outer `Option` is "was there an entry",
-    /// the inner one is the answer itself.
-    fn fresh(&self, bucket: &str, now: RequestNow) -> Option<Option<Arc<CorsConfiguration>>> {
-        let state = self.state.lock().ok()?;
-        let entry = state.entries.get(bucket)?;
-        (entry.expires_at > now.unix_seconds()).then(|| entry.document.clone())
+    fn lookup(&self, bucket: &BucketName, now: RequestNow) -> Option<Lookup> {
+        let key = bucket.as_str();
+        let mut state = self.state.lock().ok()?;
+        if let Some(entry) = state.entries.get(key)
+            && entry.expires_at > now.unix_seconds()
+        {
+            return Some(Lookup::Cached(entry.document.clone()));
+        }
+        if let Some(flight) = state.in_flight.get_mut(key) {
+            flight.waiters = flight.waiters.saturating_add(1);
+            return Some(Lookup::Flight(FlightHandle {
+                key: key.to_owned(),
+                token: Arc::clone(&flight.token),
+                load: flight.load.clone(),
+            }));
+        }
+
+        let token = Arc::new(());
+        let future: BoxFuture<'static, LoadOutcome> =
+            Box::pin(load_collapsed(Arc::clone(&self.inner), bucket.clone(), self.source_timeout));
+        let load = future.shared();
+        state.in_flight.insert(
+            key.to_owned(),
+            InFlight {
+                token: Arc::clone(&token),
+                load: load.clone(),
+                waiters: 1,
+            },
+        );
+        Some(Lookup::Flight(FlightHandle {
+            key: key.to_owned(),
+            token,
+            load,
+        }))
     }
 
-    fn store(&self, bucket: &str, document: Option<Arc<CorsConfiguration>>, now: RequestNow) {
+    fn complete_flight(&self, bucket: &str, token: &Arc<()>, outcome: LoadOutcome, now: RequestNow) {
         let Ok(mut state) = self.state.lock() else {
             // A poisoned mutex means another thread panicked while holding it. Not caching is
             // correct and safe here; refusing the request would turn one panic into an outage.
             return;
         };
-        let expires_at = now.unix_seconds().saturating_add(i64::from(self.lifetime_of(bucket)));
-        if state
-            .entries
-            .insert(bucket.to_owned(), Entry { document, expires_at })
-            .is_none()
-        {
-            state.order.push(bucket.to_owned());
+        let is_current = state
+            .in_flight
+            .get(bucket)
+            .is_some_and(|flight| Arc::ptr_eq(&flight.token, token));
+        if !is_current {
+            return;
         }
-        while state.order.len() > self.config.entries.max(1) {
-            let evicted = state.order.remove(0);
-            state.entries.remove(&evicted);
+        if let LoadOutcome::Store(document) = outcome {
+            let expires_at = now.unix_seconds().saturating_add(i64::from(self.lifetime_of(bucket)));
+            if state
+                .entries
+                .insert(bucket.to_owned(), Entry { document, expires_at })
+                .is_none()
+            {
+                state.order.push(bucket.to_owned());
+            }
+            while state.order.len() > self.config.entries.max(1) {
+                let evicted = state.order.remove(0);
+                state.entries.remove(&evicted);
+            }
+        }
+        state.in_flight.remove(bucket);
+    }
+
+    fn release_waiter(&self, bucket: &str, token: &Arc<()>) {
+        let Ok(mut state) = self.state.lock() else {
+            return;
+        };
+        let remove = if let Some(flight) = state.in_flight.get_mut(bucket) {
+            if Arc::ptr_eq(&flight.token, token) {
+                flight.waiters = flight.waiters.saturating_sub(1);
+                flight.waiters == 0
+            } else {
+                false
+            }
+        } else {
+            false
+        };
+        if remove {
+            state.in_flight.remove(bucket);
         }
     }
 
@@ -290,6 +403,17 @@ impl CachedCorsSource {
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.len() == 0
+    }
+}
+
+async fn load_collapsed(inner: Arc<dyn CorsSource>, bucket: BucketName, timeout: Duration) -> LoadOutcome {
+    match load_before_deadline(inner.load(&bucket), timeout).await {
+        Ok(document) => LoadOutcome::Store(document.map(Arc::new)),
+        Err(_) if rustfs_gateway_core::cors::source_absence_is_collapsed() => LoadOutcome::Store(None),
+        // The mutation keeps a failed read distinguishable from an ordinary negative entry by
+        // refusing to cache it. The next request therefore reaches the source again, which the
+        // gateway-level counter observes without exposing the distinction on the wire.
+        Err(_) => LoadOutcome::DoNotStore,
     }
 }
 
@@ -372,6 +496,19 @@ mod tests {
         fn load<'a>(&'a self, _bucket: &'a BucketName) -> BoxFuture<'a, Result<Option<CorsConfiguration>, CorsSourceError>> {
             self.0.fetch_add(1, Ordering::SeqCst);
             Box::pin(std::future::pending())
+        }
+    }
+
+    struct CancelThenReady(AtomicUsize);
+
+    impl CorsSource for CancelThenReady {
+        fn load<'a>(&'a self, _bucket: &'a BucketName) -> BoxFuture<'a, Result<Option<CorsConfiguration>, CorsSourceError>> {
+            let attempt = self.0.fetch_add(1, Ordering::SeqCst);
+            if attempt == 0 {
+                Box::pin(std::future::pending())
+            } else {
+                Box::pin(async { Ok(None) })
+            }
         }
     }
 
@@ -472,6 +609,81 @@ mod tests {
         assert!(first.is_none());
         assert!(cache.get(&bucket("configured"), at(1000)).await.is_none());
         assert_eq!(source.0.load(Ordering::SeqCst), 1, "a timed-out source was retried");
+    }
+
+    /// Negative — concurrent cold misses for one bucket share one source read. Without
+    /// single-flight an unauthenticated burst reaches the deployment store once per request even
+    /// though every request asks for the same cache key.
+    #[tokio::test]
+    async fn n_concurrent_cold_misses_share_one_source_read() {
+        let source = Arc::new(Never(AtomicUsize::new(0)));
+        let cache = Arc::new(cache(Arc::clone(&source) as Arc<dyn CorsSource>, CorsCacheConfig::default()));
+        let name = bucket("same-bucket");
+        let mut requests = Vec::new();
+        for _ in 0..32 {
+            let mut request = Box::pin(cache.get(&name, at(1000)));
+            poll_fn(|context| match request.as_mut().poll(context) {
+                Poll::Pending => Poll::Ready(()),
+                Poll::Ready(_) => panic!("a never-ready source completed"),
+            })
+            .await;
+            requests.push(request);
+        }
+        assert_eq!(source.0.load(Ordering::SeqCst), 1, "concurrent misses were not coalesced");
+    }
+
+    /// Negative — cancelling the last waiter removes its abandoned flight. Otherwise every later
+    /// request for that bucket would attach to a future nobody can complete.
+    #[tokio::test]
+    async fn n_cancelling_the_last_waiter_allows_a_retry() {
+        let source = Arc::new(CancelThenReady(AtomicUsize::new(0)));
+        let cache = Arc::new(cache(Arc::clone(&source) as Arc<dyn CorsSource>, CorsCacheConfig::default()));
+        let first_cache = Arc::clone(&cache);
+        let first = tokio::spawn(async move { first_cache.get(&bucket("same-bucket"), at(1000)).await });
+        while source.0.load(Ordering::SeqCst) == 0 {
+            tokio::task::yield_now().await;
+        }
+        first.abort();
+        assert!(first.await.is_err(), "the first waiter was not cancelled");
+
+        let name = bucket("same-bucket");
+        let retry = tokio::select! {
+            result = cache.get(&name, at(1000)) => Some(result),
+            () = Delay::new(Duration::from_millis(100)) => None,
+        }
+        .expect("an abandoned flight blocked the retry");
+        assert!(retry.is_none());
+        assert_eq!(source.0.load(Ordering::SeqCst), 2, "the cancelled flight was reused");
+    }
+
+    /// Negative — cancelling one waiter must not discard a flight that another waiter still
+    /// needs. A third waiter must join that same flight rather than start another source read.
+    #[tokio::test]
+    async fn n_cancelling_one_waiter_keeps_the_shared_flight() {
+        let source = Arc::new(Never(AtomicUsize::new(0)));
+        let cache = Arc::new(cache(Arc::clone(&source) as Arc<dyn CorsSource>, CorsCacheConfig::default()));
+        let name = bucket("same-bucket");
+        let mut first = Box::pin(cache.get(&name, at(1000)));
+        poll_fn(|context| match first.as_mut().poll(context) {
+            Poll::Pending => Poll::Ready(()),
+            Poll::Ready(_) => panic!("a never-ready source completed"),
+        })
+        .await;
+        let mut second = Box::pin(cache.get(&name, at(1000)));
+        poll_fn(|context| match second.as_mut().poll(context) {
+            Poll::Pending => Poll::Ready(()),
+            Poll::Ready(_) => panic!("a never-ready source completed"),
+        })
+        .await;
+        drop(first);
+
+        let mut third = Box::pin(cache.get(&name, at(1000)));
+        poll_fn(|context| match third.as_mut().poll(context) {
+            Poll::Pending => Poll::Ready(()),
+            Poll::Ready(_) => panic!("a never-ready source completed"),
+        })
+        .await;
+        assert_eq!(source.0.load(Ordering::SeqCst), 1, "one cancellation discarded a live flight");
     }
 
     /// Negative — the entry count is capped, so a caller inventing names cannot grow the process.

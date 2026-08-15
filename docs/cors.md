@@ -70,7 +70,7 @@ Inside the branch the order is fixed and may not be rearranged:
 | 2. `CachedCorsSource::get` | The only path to the deployment's `CorsSource`. `ServiceBuilder::cors_source` takes a bare source and stores a wrapped one; there is no setter that accepts an unwrapped source and no accessor that hands the inner one back |
 | 3. `answer_preflight` | One allowance or one refusal |
 
-The cache is a bound rather than a speed-up, and three properties are what make it one:
+The cache is a bound rather than a speed-up, and four properties are what make it one:
 
 - **A negative entry has the same shape as a positive one.** "No document", "no bucket" and "the
   source failed" are all stored as the same `None`, so the second probe for a name that does not
@@ -80,12 +80,9 @@ The cache is a bound rather than a speed-up, and three properties are what make 
   evicts their own earlier entries instead of growing the process.
 - **Expiry is spread.** Each key's lifetime is the TTL plus an offset derived from the key, so a
   burst of misses admitted in one second does not expire in one second.
-
-**What is not there: single-flight.** A thousand concurrent misses for one uncached bucket are a
-thousand reads. Collapsing them needs an async notification primitive `rustfs-gateway` does not
-depend on, and a hand-rolled one on the pre-authentication path is where the next defect would
-live. The concurrency bound in the meantime is the `Governor`, which runs first. This is a gap,
-and it is written here rather than papered over.
+- **Concurrent misses for one key share one source read.** The shared-future primitive is
+  runtime-independent, so this does not add Tokio to production or hand-roll wakeup logic. If all
+  waiters are cancelled, the abandoned flight is removed and the next request may retry.
 
 **What the defaults cost.** `NoCors` is the default source, so no preflight is ever allowed and
 there is nothing to amplify. The governor default is no longer `Unlimited`: `DefaultGovernor`
