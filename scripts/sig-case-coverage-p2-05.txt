@@ -10,3 +10,7 @@ c-sig-0425|negative|crates/sig/src/post_policy.rs|fn c_sig_0425_expired_policy_i
 c-sig-0426|negative|crates/sig/src/post_policy.rs|fn c_sig_0426_wrong_signature_is_rejected|policy.verify(&SigningKey::from_array([7u8; 32]))|Some(PostPolicyError::SignatureMismatch)
 c-sig-0427|negative|crates/sig/src/post_policy.rs|fn c_sig_0427_final_size_bounds_are_enforced_both_ways|Some(PostPolicyError::EntityTooSmall)|Some(PostPolicyError::EntityTooLarge)
 c-sig-0428|positive|crates/gateway/src/ext/authenticator.rs|fn c_sig_0428_form_field_material_uses_the_post_policy_authority|authenticator().try_verify(&request).await|assert!(verdict.is_authenticated())
+c-sig-0429|positive|crates/gateway/tests/pipeline.rs|fn c_sig_0429_presigned_body_matching_its_signed_digest_is_accepted|assert_eq!(status, http::StatusCode::OK|assert_eq!(reached.load(Ordering::SeqCst), 1
+c-sig-0430|negative|crates/gateway/tests/pipeline.rs|fn c_sig_0430_tampered_presigned_body_is_refused_before_the_handler|assert_eq!(status, http::StatusCode::BAD_REQUEST|assert_eq!(reached.load(Ordering::SeqCst), 0
+c-sig-0431|negative|crates/gateway/tests/pipeline.rs|fn c_sig_0431_missing_presigned_body_is_refused_before_the_handler|assert_eq!(status, http::StatusCode::BAD_REQUEST|assert_eq!(reached.load(Ordering::SeqCst), 0
+c-sig-0432|negative|crates/gateway/tests/pipeline.rs|fn c_sig_0432_streaming_presigned_body_is_not_implemented|assert_eq!(status, http::StatusCode::NOT_IMPLEMENTED|assert_eq!(reached.load(Ordering::SeqCst), 0

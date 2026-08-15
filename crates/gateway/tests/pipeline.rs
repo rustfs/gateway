@@ -53,7 +53,7 @@ fn presigned_service(reached: &Arc<std::sync::atomic::AtomicUsize>) -> S3Service
 
 /// Positive — a presigned body that matches its signed digest reaches the handler once.
 #[tokio::test]
-async fn a_presigned_body_matching_its_signed_digest_is_accepted() {
+async fn c_sig_0429_presigned_body_matching_its_signed_digest_is_accepted() {
     let reached = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let request = support::presigned_with_body(Bytes::from_static(b"expected-payload"), exact_presigned_payload());
     let (status, body) = exchange(&presigned_service(&reached), request).await;
@@ -63,7 +63,7 @@ async fn a_presigned_body_matching_its_signed_digest_is_accepted() {
 
 /// Negative — changing the body after presigning is refused before the handler can commit it.
 #[tokio::test]
-async fn a_tampered_presigned_body_is_refused_before_the_handler() {
+async fn c_sig_0430_tampered_presigned_body_is_refused_before_the_handler() {
     let reached = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let request = support::presigned_with_body(Bytes::from_static(b"tampered-payload"), exact_presigned_payload());
     let (status, body) = exchange(&presigned_service(&reached), request).await;
@@ -74,7 +74,7 @@ async fn a_tampered_presigned_body_is_refused_before_the_handler() {
 
 /// Negative — omitting a body cannot satisfy a signed non-empty digest.
 #[tokio::test]
-async fn a_missing_presigned_body_is_refused_before_the_handler() {
+async fn c_sig_0431_missing_presigned_body_is_refused_before_the_handler() {
     let reached = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let request = support::presigned_with_body(Bytes::new(), exact_presigned_payload());
     let (status, body) = exchange(&presigned_service(&reached), request).await;
@@ -85,7 +85,7 @@ async fn a_missing_presigned_body_is_refused_before_the_handler() {
 
 /// Negative — streaming payload modes are recognised but unsupported for presigned requests.
 #[tokio::test]
-async fn a_streaming_presigned_body_is_not_implemented() {
+async fn c_sig_0432_streaming_presigned_body_is_not_implemented() {
     let reached = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let payload =
         rustfs_gateway::sig::PayloadMode::parse("STREAMING-AWS4-HMAC-SHA256-PAYLOAD", rustfs_gateway::sig::TrailerSet::None)

@@ -974,13 +974,14 @@ done
     exit 1
 }
 
-[[ "${#p2_05_cases[@]}" -eq 12 ]] || {
-    printf 'check_sig_case_coverage: expected 12 P2-05 mappings, got %s\n' "${#p2_05_cases[@]}" >&2
+[[ "${#p2_05_cases[@]}" -eq 16 ]] || {
+    printf 'check_sig_case_coverage: expected 16 P2-05 mappings, got %s\n' "${#p2_05_cases[@]}" >&2
     exit 1
 }
 p2_05_expected_ids=(
     c-sig-0417 c-sig-0418 c-sig-0419 c-sig-0420 c-sig-0421 c-sig-0422
     c-sig-0423 c-sig-0424 c-sig-0425 c-sig-0426 c-sig-0427 c-sig-0428
+    c-sig-0429 c-sig-0430 c-sig-0431 c-sig-0432
 )
 positive=0
 negative=0
@@ -1010,19 +1011,21 @@ for index in "${!p2_05_cases[@]}"; do
         exit 1
     }
     p2_05_evidence+=("${relative}|${evidence}")
-    validate_rust_evidence "$file" nested_runtime "$evidence" "$required_call" \
-        "check_sig_case_coverage: ${id} is not a named active POST-policy test in ${relative}"
+    evidence_kind=nested_runtime
+    [[ "$relative" == crates/gateway/tests/pipeline.rs ]] && evidence_kind=runtime
+    validate_rust_evidence "$file" "$evidence_kind" "$evidence" "$required_call" \
+        "check_sig_case_coverage: ${id} is not a named active P2-05 test in ${relative}"
     if [[ -n "${secondary_call:-}" ]]; then
-        validate_rust_evidence "$file" nested_runtime "$evidence" "$secondary_call" \
-            "check_sig_case_coverage: ${id} lost its second active POST-policy assertion in ${relative}"
+        validate_rust_evidence "$file" "$evidence_kind" "$evidence" "$secondary_call" \
+            "check_sig_case_coverage: ${id} lost its second active P2-05 assertion in ${relative}"
     fi
 done
-[[ "$positive" -eq 2 && "$negative" -eq 10 && "$negative" -gt "$positive" ]] || {
-    printf 'check_sig_case_coverage: expected 2 positive and 10 negative P2-05 cases, got %s/%s\n' \
+[[ "$positive" -eq 3 && "$negative" -eq 13 && "$negative" -gt "$positive" ]] || {
+    printf 'check_sig_case_coverage: expected 3 positive and 13 negative P2-05 cases, got %s/%s\n' \
         "$positive" "$negative" >&2
     exit 1
 }
-[[ "$(printf '%s\n' "${p2_05_evidence[@]}" | sort -u | wc -l | tr -d ' ')" -eq 12 ]] || {
+[[ "$(printf '%s\n' "${p2_05_evidence[@]}" | sort -u | wc -l | tr -d ' ')" -eq 16 ]] || {
     printf 'check_sig_case_coverage: P2-05 cases must use distinct named tests\n' >&2
     exit 1
 }
@@ -1336,5 +1339,5 @@ done
 
 run_evidence_validations
 
-printf 'OK: all 159 P2 signature cases map to executable evidence '
-printf '(P2-01: 8/17; P2-02: 6/22; P2-03: 14/29; P2-04: 9/42; P2-05: 2/10)\n'
+printf 'OK: all 163 P2 signature cases map to executable evidence '
+printf '(P2-01: 8/17; P2-02: 6/22; P2-03: 14/29; P2-04: 9/42; P2-05: 3/13)\n'

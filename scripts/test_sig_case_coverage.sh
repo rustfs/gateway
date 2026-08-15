@@ -315,10 +315,10 @@ expect_fail check_sig_case_coverage.sh \
     'the P2-05 acceptance manifest being removed' mut_sig_p2_05_manifest_removed
 
 mut_sig_p2_05_mapping_deleted() {
-    sed -i.bak '/^c-sig-0428|/d' scripts/sig-case-coverage-p2-05.txt
+    sed -i.bak '/^c-sig-0432|/d' scripts/sig-case-coverage-p2-05.txt
 }
 expect_fail check_sig_case_coverage.sh \
-    'one of the twelve P2-05 mappings being deleted' mut_sig_p2_05_mapping_deleted
+    'one of the sixteen P2-05 mappings being deleted' mut_sig_p2_05_mapping_deleted
 
 mut_sig_p2_05_polarity_changed() {
     python3 - <<'PYEOF'
@@ -407,6 +407,98 @@ PYEOF
 }
 expect_fail check_sig_case_coverage.sh \
     'c-sig-0427 losing the upper size-bound direction' mut_sig_p2_05_second_size_direction_removed
+
+mut_sig_0429_test_disabled() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/gateway/tests/pipeline.rs")
+text = path.read_text()
+old = "#[tokio::test]\nasync fn c_sig_0429_presigned_body_matching_its_signed_digest_is_accepted()"
+new = "#[cfg(any())]\n#[tokio::test]\nasync fn c_sig_0429_presigned_body_matching_its_signed_digest_is_accepted()"
+if text.count(old) != 1:
+    raise SystemExit("missing c-sig-0429 active-test mutation subject")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_sig_case_coverage.sh \
+    'c-sig-0429 being disabled by cfg' mut_sig_0429_test_disabled
+
+mutate_p2_05_pipeline_test() {
+    python3 - "$1" "$2" "$3" <<'PYEOF'
+from pathlib import Path
+import sys
+
+name, old, new = sys.argv[1:]
+path = Path("crates/gateway/tests/pipeline.rs")
+text = path.read_text()
+start = text.find(f"async fn {name}()")
+if start == -1:
+    raise SystemExit(f"missing P2-05 pipeline test {name}")
+end = text.find("\n///", start)
+if end == -1:
+    end = len(text)
+body = text[start:end]
+if body.count(old) != 1:
+    raise SystemExit(f"missing unique P2-05 mutation subject in {name}: {old}")
+path.write_text(text[:start] + body.replace(old, new, 1) + text[end:])
+PYEOF
+}
+
+mut_sig_0429_status_removed() {
+    mutate_p2_05_pipeline_test c_sig_0429_presigned_body_matching_its_signed_digest_is_accepted \
+        'http::StatusCode::OK' 'http::StatusCode::CREATED'
+}
+expect_fail check_sig_case_coverage.sh \
+    'c-sig-0429 losing its accepted-status assertion' mut_sig_0429_status_removed
+
+mut_sig_0429_handler_count_removed() {
+    mutate_p2_05_pipeline_test c_sig_0429_presigned_body_matching_its_signed_digest_is_accepted \
+        'reached.load(Ordering::SeqCst), 1' 'reached.load(Ordering::SeqCst), 0'
+}
+expect_fail check_sig_case_coverage.sh \
+    'c-sig-0429 losing its one-handler assertion' mut_sig_0429_handler_count_removed
+
+mut_sig_0430_status_removed() {
+    mutate_p2_05_pipeline_test c_sig_0430_tampered_presigned_body_is_refused_before_the_handler \
+        'http::StatusCode::BAD_REQUEST' 'http::StatusCode::FORBIDDEN'
+}
+expect_fail check_sig_case_coverage.sh \
+    'c-sig-0430 losing its mismatch-status assertion' mut_sig_0430_status_removed
+
+mut_sig_0430_zero_commit_removed() {
+    mutate_p2_05_pipeline_test c_sig_0430_tampered_presigned_body_is_refused_before_the_handler \
+        'reached.load(Ordering::SeqCst), 0' 'reached.load(Ordering::SeqCst), 1'
+}
+expect_fail check_sig_case_coverage.sh \
+    'c-sig-0430 losing its zero-handler assertion' mut_sig_0430_zero_commit_removed
+
+mut_sig_0431_status_removed() {
+    mutate_p2_05_pipeline_test c_sig_0431_missing_presigned_body_is_refused_before_the_handler \
+        'http::StatusCode::BAD_REQUEST' 'http::StatusCode::FORBIDDEN'
+}
+expect_fail check_sig_case_coverage.sh \
+    'c-sig-0431 losing its missing-body status assertion' mut_sig_0431_status_removed
+
+mut_sig_0431_zero_commit_removed() {
+    mutate_p2_05_pipeline_test c_sig_0431_missing_presigned_body_is_refused_before_the_handler \
+        'reached.load(Ordering::SeqCst), 0' 'reached.load(Ordering::SeqCst), 1'
+}
+expect_fail check_sig_case_coverage.sh \
+    'c-sig-0431 losing its zero-handler assertion' mut_sig_0431_zero_commit_removed
+
+mut_sig_0432_status_removed() {
+    mutate_p2_05_pipeline_test c_sig_0432_streaming_presigned_body_is_not_implemented \
+        'http::StatusCode::NOT_IMPLEMENTED' 'http::StatusCode::BAD_REQUEST'
+}
+expect_fail check_sig_case_coverage.sh \
+    'c-sig-0432 losing its unsupported-status assertion' mut_sig_0432_status_removed
+
+mut_sig_0432_zero_commit_removed() {
+    mutate_p2_05_pipeline_test c_sig_0432_streaming_presigned_body_is_not_implemented \
+        'reached.load(Ordering::SeqCst), 0' 'reached.load(Ordering::SeqCst), 1'
+}
+expect_fail check_sig_case_coverage.sh \
+    'c-sig-0432 losing its zero-handler assertion' mut_sig_0432_zero_commit_removed
 
 printf '\n%s case(s), %s failure(s)\n' "$cases" "$failures"
 [[ "$failures" -eq 0 ]]
