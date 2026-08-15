@@ -27,6 +27,7 @@ use rustfs_gateway::sig::{
     AuthError, AuthScheme, CredentialPresence, CtBytes, CustomAuthRequest, CustomAuthScheme, CustomSchemeRegistry, Identity,
     SigFamily, SigIdentity, SigLocation, SigService, Signature, SignatureVerifier, Verdict,
 };
+use rustfs_gateway_core::route::{generated_entries, render_selector};
 
 use crate::support::{self, Backend, CountingBackend, Ping, exchange, ping_route};
 
@@ -80,7 +81,7 @@ fn custom_floor() -> rustfs_gateway::SecurityFloor {
 }
 
 #[tokio::test]
-async fn a_custom_verifier_authenticates_before_authorization_and_handler_dispatch() {
+async fn c_sig_0308_a_non_aws_request_reaches_the_installed_custom_verifier() {
     let calls = Arc::new(AtomicUsize::new(0));
     let reached = Arc::new(AtomicUsize::new(0));
     let service = support::wired()
@@ -174,4 +175,27 @@ async fn an_aws_marked_request_never_reaches_the_custom_verifier() {
 
     assert_eq!(status, http::StatusCode::OK);
     assert_eq!(calls.load(Ordering::SeqCst), 0);
+}
+
+/// Negative — c-sig-0378: security posture is startup-only and has no unauthenticated HTTP route.
+#[tokio::test]
+async fn c_sig_0378_no_unauthenticated_security_posture_endpoint_exists() {
+    for entry in generated_entries().expect("the generated route table is valid") {
+        let selector = render_selector(&entry.selector);
+        for forbidden in ["/debug", "/status", "/security-posture"] {
+            assert!(!selector.contains(forbidden), "{} exposes {forbidden}: {selector}", entry.op_name);
+        }
+    }
+
+    let service = support::wired()
+        .register::<Ping, _>(Arc::new(Backend))
+        .route(ping_route())
+        .build()
+        .expect("a complete assembly");
+
+    for path in ["/debug", "/status", "/security-posture"] {
+        let (status, body) = exchange(&service, support::plain(http::Method::GET, path)).await;
+        assert_ne!(status, http::StatusCode::OK, "{path} exposed an unauthenticated endpoint");
+        assert!(!body.contains("custom_verifier"));
+    }
 }

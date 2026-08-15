@@ -244,18 +244,55 @@ fn presigned_expiry_error(expires: &str) -> Option<AuthError> {
     SecurityFloor::default().admit(view, &s3_object_op(), now()).err()
 }
 
-/// Negative — c-sig-0323 .. c-sig-0329: every malformed or out-of-range `X-Amz-Expires` spelling
-/// is refused with the query-parameter error (rustfs#5368), and none of them is treated as absent.
+fn assert_expiry_is_refused(expires: &str) {
+    assert_eq!(
+        presigned_expiry_error(expires),
+        Some(AuthError::AuthorizationQueryParametersError),
+        "must refuse X-Amz-Expires={expires:?}"
+    );
+}
+
+/// Negative — c-sig-0323: a value far above the seven-day ceiling is refused.
 #[test]
-fn c_sig_0323_to_0329_malformed_and_out_of_range_expiries_are_refused() {
+fn c_sig_0323_expiry_over_the_ceiling_is_refused() {
+    assert_expiry_is_refused("999999");
+}
+
+/// Negative — c-sig-0324: the ceiling plus one is refused.
+#[test]
+fn c_sig_0324_expiry_one_second_over_the_ceiling_is_refused() {
+    assert_expiry_is_refused("604801");
+}
+
+/// Negative — c-sig-0325: zero is outside the accepted range.
+#[test]
+fn c_sig_0325_zero_expiry_is_refused() {
+    assert_expiry_is_refused("0");
+}
+
+/// Negative — c-sig-0326: a negative value is not unsigned decimal.
+#[test]
+fn c_sig_0326_negative_expiry_is_refused() {
+    assert_expiry_is_refused("-1");
+}
+
+/// Negative — c-sig-0327: an explicit positive sign is not unsigned decimal.
+#[test]
+fn c_sig_0327_signed_positive_expiry_is_refused() {
+    assert_expiry_is_refused("+100");
+}
+
+/// Negative — c-sig-0328: fractional seconds are not accepted.
+#[test]
+fn c_sig_0328_fractional_expiry_is_refused() {
+    assert_expiry_is_refused("1.5");
+}
+
+/// Negative — c-sig-0329: all other non-decimal spellings are refused.
+#[test]
+fn c_sig_0329_other_non_decimal_expiry_spellings_are_refused() {
     for expires in [
-        "999999",                  // c-sig-0323
-        "604801",                  // c-sig-0324, the ceiling plus one
-        "0",                       // c-sig-0325
-        "-1",                      // c-sig-0326
-        "+100",                    // c-sig-0327
-        "1.5",                     // c-sig-0328
-        "%2B7d",                   // c-sig-0329
+        "%2B7d",
         "1e3",                     // c-sig-0329
         "%20100",                  // c-sig-0329, a leading space
         "100%20",                  // c-sig-0329, a trailing space
@@ -264,11 +301,7 @@ fn c_sig_0323_to_0329_malformed_and_out_of_range_expiries_are_refused() {
         "١٠٠",                     // c-sig-0329, non-ASCII digits
         "99999999999999999999999", // c-sig-0329, wider than u64
     ] {
-        assert_eq!(
-            presigned_expiry_error(expires),
-            Some(AuthError::AuthorizationQueryParametersError),
-            "must refuse X-Amz-Expires={expires:?}"
-        );
+        assert_expiry_is_refused(expires);
     }
 }
 
@@ -344,17 +377,20 @@ fn scope_rejection(credential: &str, expected_service: SigService) -> Option<Sco
     enforce_scope(&presented, sealed.clock(), &expected).err()
 }
 
-/// Negative — c-sig-0340 / c-sig-0341: a scope naming another service is refused in both
-/// directions. This is the cross-service replay: a signature a legitimate SDK produced for STS
-/// must not verify against an S3 operation.
+/// Negative — c-sig-0340: a signature minted for STS cannot replay against S3.
 #[test]
-fn c_sig_0340_and_0341_a_scope_for_another_service_is_refused() {
-    let s3_rejection =
+fn c_sig_0340_an_sts_scope_is_refused_for_an_s3_operation() {
+    let rejection =
         scope_rejection("AKIDEXAMPLE/20150830/us-east-1/sts/aws4_request", SigService::S3).expect("the service disagrees");
-    assert_eq!(s3_rejection.expected_region(), None);
-    let sts_rejection =
+    assert_eq!(rejection.expected_region(), None);
+}
+
+/// Negative — c-sig-0341: a signature minted for S3 cannot replay against STS.
+#[test]
+fn c_sig_0341_an_s3_scope_is_refused_for_an_sts_operation() {
+    let rejection =
         scope_rejection("AKIDEXAMPLE/20150830/us-east-1/s3/aws4_request", SigService::Sts).expect("the service disagrees");
-    assert_eq!(sts_rejection.expected_region(), None);
+    assert_eq!(rejection.expected_region(), None);
 }
 
 /// Negative — c-sig-0342: a region outside the configured set is refused.

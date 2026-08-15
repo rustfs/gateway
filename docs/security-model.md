@@ -221,6 +221,14 @@ Four things are **yours**:
 
 ## Credentials: your responsibilities
 
+### Presigned replay semantics
+
+Presigned URLs are replayable within their validity window. That is an intentional property of
+the AWS-compatible scheme, not evidence that the gateway failed to authenticate a request.
+`ReplayNonceStore` is an opt-in single-use hook for deployments that accept the availability and
+coordination cost of a strongly consistent write on the authentication path. The framework does
+not install a replay store by default, and never exposes replay state through an HTTP endpoint.
+
 `CredentialProvider` is the only extension point on the **unauthenticated** path: anybody who can
 reach the port can make the gateway call it, and what it returns is a long-term secret. The
 framework's half:
