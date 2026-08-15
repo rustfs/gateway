@@ -13,11 +13,11 @@ documented beside every example and proved equivalent by a test.
 | `src/expand.rs` | Parsing the block, validating each method, emitting the three pieces | You are changing what the macro produces |
 | `src/mapping.rs` | snake ↔ Pascal, the unknown-operation error, the signature cross-check | You are changing an error message or the mapping |
 | `src/levenshtein.rs` | Edit distance and the two nearest suggestions | Rarely |
-| `src/op_names.rs` | The operation-name mirror, and why it is a mirror | You added an operation and the macro does not know it |
+| `src/op_names.rs` | The code-generated operation-name table consumed by the macro | You added an operation and the macro does not know it |
 | `src/tests/mod.rs` | 7 positive / 15 negative: goldens, error spans, both governance guards | You changed anything above |
 | `tests/expand/*.rs` + `*.expanded.rs` | The expansion, checked in | You want to know what the macro does, without reading it |
 | `tests/equivalence.rs` | 3 positive / 3 negative: macro form ≡ hand-written form | You changed `expand.rs` |
-| `tests/op_names.rs` | 1 positive / 2 negative: the mirror against the route table | The operation whitelist grew |
+| `tests/op_names.rs` | Codegen ownership plus 1 positive / 2 negative checks against the route table | The operation whitelist grew |
 
 ## The five governance rules, and where each one is enforced
 
@@ -57,15 +57,9 @@ documented beside every example and proved equivalent by a test.
 
 ## Open for maintainer review
 
-- **`crates/macros` is not in the layer allow matrix.** `scripts/check_layer_dependencies.sh`
-  refuses a crate it has no row for, and both that script and `AGENTS.md`'s dependency graph are
-  outside this task's file scope. The row to add, below the `rustfs-gateway-core` one, is
-  `"rustfs-gateway-macros|rustfs-gateway-core rustfs-gateway-types"` — the two edges are
-  dev-dependencies of the equivalence and mirror tests. Until it lands, that one guard is red and
-  `scripts/test_guard_scripts.sh` reports one failure in its positive control.
-- **`src/op_names.rs` should become a codegen artefact.** It is a mirror guarded by a test today
-  because `xtask` is outside this task's scope. When codegen owns it, keep `tests/op_names.rs`:
-  it is what proves the generator ran.
+- **`src/op_names.rs` is a codegen artefact.** The proc-macro consumes the generated strings without
+  depending on the runtime route-table crate; `tests/op_names.rs` proves both outputs still name the
+  same operations.
 - **`syn` 3.0 is used, and `ReceiverKind` is 3.0-only.** If the workspace ever pins `syn` 2, the
   receiver check in `mapping.rs` is the one place that has to change.
 - **The macro has no opinion about `OperationSpec`, floors or `derive_resources`.** Those stay
