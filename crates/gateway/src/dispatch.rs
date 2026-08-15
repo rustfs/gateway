@@ -376,6 +376,11 @@ impl DispatchTable {
     pub(crate) fn names(&self) -> impl Iterator<Item = &'static str> {
         self.entries.keys().copied().collect::<Vec<_>>().into_iter()
     }
+
+    /// Every registered operation floor, for the one startup posture report.
+    pub(crate) fn floors(&self) -> impl Iterator<Item = &'static OperationFloor> + '_ {
+        self.entries.values().map(OperationDispatch::floor)
+    }
 }
 
 /// What the path of a routed request addresses.

@@ -57,10 +57,11 @@ use crate::clock::{Clock, ClockPosture, ClockSkewAck, MAX_CLOCK_SKEW_SECONDS, Sy
 use crate::config::{ConfigHandle, ConfigStore, ServiceConfig};
 use crate::dispatch::{DispatchTable, OperationDispatch};
 use crate::ext::{
-    Authenticator, Authorizer, AuthzAuditSink, CachedCorsSource, CorsCacheConfig, CorsSource, CredentialGuardConfig,
-    DefaultGovernor, Governor, GovernorRates, HostResolver, LayeredGovernor, NoAuthzAudit, NoCors, NoObserver, NoPolicy,
-    Observer, OpLayer, OpLayerSlot, PathStyleOnly, PolicySource, PolicyTimeout, Rate, StageFilter,
+    Authenticator, Authorizer, AuthzAuditSink, CachedCorsSource, CorsCacheConfig, CorsSource, DefaultGovernor, Governor,
+    GovernorRates, HostResolver, LayeredGovernor, NoAuthzAudit, NoCors, NoObserver, NoPolicy, Observer, OpLayer, OpLayerSlot,
+    PathStyleOnly, PolicySource, PolicyTimeout, StageFilter,
 };
+use crate::posture::{SecurityPosture, log_startup_posture};
 use crate::service::{Inner, S3Service};
 use crate::trace::{MintedTraces, TraceSource};
 use crate::{MonomorphicOperationSet, MonomorphicService};
@@ -84,84 +85,6 @@ type PendingRegistration = Box<dyn FnOnce(Vec<ErasedOpLayer>) -> Result<Operatio
 /// through it. Until it is, the honest ceiling is the one this service can actually survive, and a
 /// larger body is refused with `413` rather than accepted and buffered.
 pub const DEFAULT_MAX_BUFFERED_BODY_BYTES: u64 = 64 * 1024 * 1024;
-
-/// Security-sensitive assembly configuration for a start-up report, not runtime observations.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct SecurityPosture {
-    credential_guard: Option<CredentialGuardConfig>,
-    per_ip: Rate,
-    custom_signature_verifier: bool,
-    dangerously_replaced_signature_verifier: bool,
-}
-
-impl SecurityPosture {
-    const fn new(
-        credential_guard: Option<CredentialGuardConfig>,
-        per_ip: Rate,
-        custom_signature_verifier: bool,
-        dangerously_replaced_signature_verifier: bool,
-    ) -> Self {
-        Self {
-            credential_guard,
-            per_ip,
-            custom_signature_verifier,
-            dangerously_replaced_signature_verifier,
-        }
-    }
-
-    /// The built-in credential guard settings, or `None` for an authenticator with no lookup.
-    #[must_use]
-    pub const fn credential_guard(self) -> Option<CredentialGuardConfig> {
-        self.credential_guard
-    }
-    /// The mandatory framework's per-client pre-authentication rate.
-    #[must_use]
-    pub const fn per_ip_rate(self) -> Rate {
-        self.per_ip
-    }
-    /// Whether the deployment installed a verifier for a registered non-AWS scheme.
-    #[must_use]
-    pub const fn custom_signature_verifier(self) -> bool {
-        self.custom_signature_verifier
-    }
-    /// Whether the deployment replaced AWS signature computation after the H1..H7 floor.
-    #[must_use]
-    pub const fn dangerously_replaced_aws_signature_verifier(self) -> bool {
-        self.dangerously_replaced_signature_verifier
-    }
-}
-
-impl core::fmt::Display for SecurityPosture {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        match self.credential_guard {
-            Some(config) if config.negative_entries == 0 || config.budget.negative_ttl().is_zero() => {
-                f.write_str("credential negative cache: disabled")?;
-            }
-            Some(_) => f.write_str("credential negative cache: enabled")?,
-            None => f.write_str("credential negative cache: not applicable")?,
-        }
-        if self.per_ip.admits_nothing() {
-            f.write_str("; per-IP bucket: closed")?;
-        } else {
-            write!(
-                f,
-                "; per-IP bucket: bounded ({}/s, burst {})",
-                self.per_ip.per_second(),
-                self.per_ip.burst()
-            )?;
-        }
-        if self.dangerously_replaced_signature_verifier {
-            f.write_str("; AWS signature verifier: dangerously replaced")?;
-        } else {
-            f.write_str("; AWS signature verifier: built in")?;
-        }
-        if self.custom_signature_verifier {
-            f.write_str("; custom signature verifier: installed")
-        } else {
-            f.write_str("; custom signature verifier: none")
-        }
-    }
-}
 
 /// Collects operations and extension points, and turns them into an [`S3Service`].
 ///
@@ -717,6 +640,12 @@ impl ServiceBuilder {
         let security_posture = SecurityPosture::new(
             authenticator.credential_guard_config(),
             self.governor_rates.per_ip,
+            custom_signature_verifier,
+            dangerously_replaced_signature_verifier,
+        );
+        log_startup_posture(
+            dispatch.floors(),
+            &self.floor,
             custom_signature_verifier,
             dangerously_replaced_signature_verifier,
         );

@@ -136,7 +136,6 @@ use rustfs_gateway_sig::{
 use rustfs_gateway_stream::Body;
 use rustfs_gateway_types::{ErrorCode, NamePolicy};
 
-pub use crate::builder::SecurityPosture;
 use crate::clock::{Clock, ClockPosture, MonotonicClock};
 use crate::close::ConnectionIntent;
 use crate::config::ConfigStore;
@@ -151,6 +150,7 @@ use crate::gate::{Authenticated, BodyCeilings, SealedBody};
 use crate::monomorphic::sealed::Set as StaticSet;
 use crate::operation_mode::{DynamicMode, MonomorphicMode, OperationMode};
 use crate::payload_header::payload_mode;
+pub use crate::posture::SecurityPosture;
 use crate::render::{
     S3Error, from_auth, from_auth_context, from_auth_with_detail, from_codec, from_denial, from_handler, from_pre_auth, from_sse,
     from_wire_reject, render,
