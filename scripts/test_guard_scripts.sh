@@ -464,11 +464,12 @@ expect_english_fail_minimal() {
     fi
 }
 
-# expect_fail <guard> <description> <mutation-fn>
+# expect_fail <guard> <description> <mutation-fn> [expected-diagnostic]
 # Runs the mutation inside a sandbox, then asserts the guard exits non-zero.
 expect_fail() {
     local guard="$1" desc="$2" mutate="$3"
-    local sandbox output rc=0
+    local expected_diagnostic="${4:-}" require_diagnostic=0 sandbox output rc=0
+    [[ "$#" -ge 4 ]] && require_diagnostic=1
     cases=$((cases + 1))
     if [[ ! -x "${SCRIPT_DIR}/${guard}" ]]; then
         fail_msg "${guard} is missing or not executable; cannot test: ${desc}"
@@ -479,8 +480,10 @@ expect_fail() {
     (cd "$sandbox" && "$mutate" >/dev/null)
     stage_sandbox_changes "$sandbox" >/dev/null 2>&1
     output="$(GATEWAY_CHECK_ROOT="$sandbox" "${SCRIPT_DIR}/${guard}" 2>&1)" || rc=$?
-    local expected_diagnostic="" diagnostic_helper diagnostic_fragment
+    local diagnostic_helper diagnostic_fragment
     if [[ "$guard" == check_quirk_ledger.sh ]]; then
+        require_diagnostic=1
+        expected_diagnostic=""
         while IFS=$'\t' read -r diagnostic_helper diagnostic_fragment; do
             if [[ "$diagnostic_helper" == "$mutate" ]]; then
                 expected_diagnostic="$diagnostic_fragment"
@@ -488,7 +491,7 @@ expect_fail() {
             fi
         done <<<"$QUIRK_LEDGER_DIAGNOSTICS"
     fi
-    if [[ "$rc" -ne 0 && ( "$guard" != check_quirk_ledger.sh || ( -n "$expected_diagnostic" && "$output" == *"$expected_diagnostic"* ) ) ]]; then
+    if [[ "$rc" -ne 0 && ( "$require_diagnostic" -eq 0 || ( -n "$expected_diagnostic" && "$output" == *"$expected_diagnostic"* ) ) ]]; then
         pass_msg "${guard} catches: ${desc}"
     elif [[ "$rc" -ne 0 ]]; then
         fail_msg "${guard} failed without its policy diagnostic: ${desc}"
@@ -7320,6 +7323,188 @@ PYEOF
 }
 expect_fail check_sig_case_coverage.sh \
     'the startup posture report being rendered but never written' mut_sig_p2_04_startup_posture_log_render_removed
+
+mut_sig_p2_04_dry_run_arguments_unchecked() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("xtask/src/security_posture.rs")
+text = path.read_text()
+old = '    if args != ["--dry-run"] {'
+if text.count(old) != 1:
+    raise SystemExit("missing dry-run argument mutation subject")
+path.write_text(text.replace(old, '    // if args != ["--dry-run"] {\n    if false {', 1))
+PYEOF
+}
+expect_fail check_sig_case_coverage.sh \
+    'security-posture accepting arguments other than --dry-run' \
+    mut_sig_p2_04_dry_run_arguments_unchecked \
+    'check_sig_case_coverage: security-posture accepts arguments other than --dry-run'
+
+mut_sig_p2_04_dry_run_dispatch_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("xtask/src/main.rs")
+text = path.read_text()
+old = '        Some("security-posture") => security_posture::command(&rest),'
+if text.count(old) != 1:
+    raise SystemExit("missing dry-run dispatch mutation subject")
+new = '        // Some("security-posture") => security_posture::command(&rest),\n        Some("security-posture") => ExitCode::SUCCESS,'
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_sig_case_coverage.sh \
+    'security-posture dispatch bypassing the dry-run command' \
+    mut_sig_p2_04_dry_run_dispatch_removed \
+    'check_sig_case_coverage: security-posture dry-run is not dispatched'
+
+mut_sig_p2_04_dry_run_floor_parser_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("xtask/src/security_posture.rs")
+text = path.read_text()
+old = '    let floors = parse_standard_floors(&root.join("crates/core/src/ops"))?;'
+if text.count(old) != 1:
+    raise SystemExit("missing dry-run floor-parser mutation subject")
+new = '    // let floors = parse_standard_floors(&root.join("crates/core/src/ops"))?;\n    let floors = BTreeMap::new();'
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_sig_case_coverage.sh \
+    'dry-run replacing real operation floors with an empty proxy' \
+    mut_sig_p2_04_dry_run_floor_parser_removed \
+    'check_sig_case_coverage: dry-run does not join real floors to the route-table inventory'
+
+mut_sig_p2_04_dry_run_route_inventory_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("xtask/src/security_posture.rs")
+text = path.read_text()
+old = '    let routed: BTreeSet<_> = rustfs_gateway_core::standard_operation_names()'
+if text.count(old) != 1:
+    raise SystemExit("missing dry-run route-inventory mutation subject")
+new = '    // let routed: BTreeSet<_> = rustfs_gateway_core::standard_operation_names()\n    let routed: BTreeSet<_> = Vec::<&str>::new()'
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_sig_case_coverage.sh \
+    'dry-run replacing the route-table inventory with an empty proxy' \
+    mut_sig_p2_04_dry_run_route_inventory_removed \
+    'check_sig_case_coverage: dry-run does not join real floors to the route-table inventory'
+
+mut_sig_p2_04_dry_run_inventory_check_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("xtask/src/security_posture.rs")
+text = path.read_text()
+old = '    if parsed != routed {'
+if text.count(old) != 1:
+    raise SystemExit("missing dry-run inventory-check mutation subject")
+path.write_text(text.replace(old, '    // if parsed != routed {\n    if false {', 1))
+PYEOF
+}
+expect_fail check_sig_case_coverage.sh \
+    'dry-run ignoring route-table and floor inventory drift' \
+    mut_sig_p2_04_dry_run_inventory_check_removed \
+    'check_sig_case_coverage: dry-run no longer rejects operation inventory drift'
+
+mut_sig_p2_04_dry_run_real_source_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("xtask/src/security_posture.rs")
+text = path.read_text()
+old = '    let entries = std::fs::read_dir(directory)'
+if text.count(old) != 1:
+    raise SystemExit("missing dry-run source-directory mutation subject")
+new = '    let entries = std::fs::read_dir(directory.join("../../../spec/operations"))'
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_sig_case_coverage.sh \
+    'dry-run reading spec instead of real operation-floor sources' \
+    mut_sig_p2_04_dry_run_real_source_removed \
+    'check_sig_case_coverage: dry-run no longer parses the real operation sources'
+
+mut_sig_p2_04_dry_run_floor_binding_check_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("xtask/src/security_posture.rs")
+text = path.read_text()
+old = '        validate_operation_impl_uses_floor(&file, &path)?;'
+if text.count(old) != 1:
+    raise SystemExit("missing dry-run floor-binding mutation subject")
+path.write_text(text.replace(old, '        // validate_operation_impl_uses_floor(&file, &path)?;', 1))
+PYEOF
+}
+expect_fail check_sig_case_coverage.sh \
+    'dry-run trusting a FLOOR static that Operation::floor does not return' \
+    mut_sig_p2_04_dry_run_floor_binding_check_removed \
+    'check_sig_case_coverage: dry-run no longer proves Operation::floor returns the parsed floor'
+
+mut_sig_p2_04_dry_run_floor_shape_check_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("xtask/src/security_posture.rs")
+text = path.read_text()
+old = '    if segments.len() != 2 || segments[0] != "OperationFloor" || call.args.len() != 2 {'
+if text.count(old) != 1:
+    raise SystemExit("missing dry-run floor-shape mutation subject")
+path.write_text(text.replace(old, '    // ' + old.strip() + '\n    if false {', 1))
+PYEOF
+}
+expect_fail check_sig_case_coverage.sh \
+    'dry-run accepting a non-canonical operation-floor expression' \
+    mut_sig_p2_04_dry_run_floor_shape_check_removed \
+    'check_sig_case_coverage: dry-run accepts a non-canonical operation floor expression'
+
+mut_sig_p2_04_dry_run_presigned_constructor_disabled() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("xtask/src/security_posture.rs")
+text = path.read_text()
+old = '        "builtin_presigned" => true,'
+if text.count(old) != 1:
+    raise SystemExit("missing presigned-constructor mutation subject")
+new = '        // "builtin_presigned" => true,\n        "builtin_presigned" => false,'
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_sig_case_coverage.sh \
+    'dry-run treating presigned operation floors as ordinary floors' \
+    mut_sig_p2_04_dry_run_presigned_constructor_disabled \
+    'check_sig_case_coverage: dry-run no longer recognizes the presigned floor constructor'
+
+mut_sig_p2_04_dry_run_presigned_filter_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("xtask/src/security_posture.rs")
+text = path.read_text()
+old = '        .filter_map(|(name, floor)| floor.presigned.then_some(name.as_str()))'
+if text.count(old) != 1:
+    raise SystemExit("missing dry-run presigned-filter mutation subject")
+path.write_text(text.replace(old, '        .filter_map(|_| None)', 1))
+PYEOF
+}
+expect_fail check_sig_case_coverage.sh \
+    'dry-run forcing the presigned operation list empty' \
+    mut_sig_p2_04_dry_run_presigned_filter_removed \
+    'check_sig_case_coverage: dry-run no longer derives the presigned operation list'
+
+mut_sig_p2_04_dry_run_output_dropped_field() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("xtask/src/security_posture.rs")
+text = path.read_text()
+old = '        "SECURITY_POSTURE anonymous_reachable_ops=[] custom_verifier=none sigv2=disabled presigned_allowed_ops=[{presigned}] aws_signature_verifier=built-in"'
+if text.count(old) != 1:
+    raise SystemExit("missing dry-run output mutation subject")
+new = '        // "SECURITY_POSTURE anonymous_reachable_ops=[] custom_verifier=none sigv2=disabled presigned_allowed_ops=[{presigned}] aws_signature_verifier=built-in"\n        "SECURITY_POSTURE anonymous_reachable_ops=[] custom_verifier=none sigv2=disabled presigned_allowed_ops=[{presigned}]"'
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_sig_case_coverage.sh \
+    'dry-run output dropping a required field beside a comment decoy' \
+    mut_sig_p2_04_dry_run_output_dropped_field \
+    'check_sig_case_coverage: dry-run output lost a required startup-posture field'
 
 mut_sig_p2_04_replay_store_call_removed() {
     python3 - <<'PYEOF'

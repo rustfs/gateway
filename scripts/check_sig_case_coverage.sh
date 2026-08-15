@@ -387,6 +387,26 @@ elif kind == "format_literal":
     )
     if exact_format is None:
         raise SystemExit(f"{path}: startup posture format literal drifted")
+elif kind == "format_literal_exact":
+    matches = []
+    position = code.find("format!(")
+    while position != -1:
+        if re.match(rf"format!\(\s*{re.escape(required_call)}\s*\)", source[position:], re.DOTALL):
+            matches.append(position)
+        position = code.find("format!(", position + 1)
+    if len(matches) != 1:
+        raise SystemExit(f"{path}: dry-run posture format literal is missing or ambiguous")
+elif kind == "string_match_arm":
+    pattern = re.compile(
+        rf"(?m)^[ \t]*{re.escape(evidence)}[ \t]*=>[ \t]*{re.escape(required_call)},[ \t]*$"
+    )
+    matches = []
+    for match in pattern.finditer(source):
+        line = code[match.start() : match.end()]
+        if re.search(rf"=>[ \t]*{re.escape(required_call)},", line):
+            matches.append(match.start())
+    if len(matches) != 1:
+        raise SystemExit(f"{path}: active floor-constructor mapping is missing or ambiguous")
 elif kind == "log_render":
     if code.count("eprintln!(") != 1:
         raise SystemExit(f"{path}: startup posture log call is missing or ambiguous")
@@ -963,6 +983,8 @@ gateway_builder="${ROOT}/crates/gateway/src/builder.rs"
 gateway_service="${ROOT}/crates/gateway/src/service.rs"
 gateway_dispatch="${ROOT}/crates/gateway/src/dispatch.rs"
 gateway_posture="${ROOT}/crates/gateway/src/posture.rs"
+xtask_main="${ROOT}/xtask/src/main.rs"
+xtask_security_posture="${ROOT}/xtask/src/security_posture.rs"
 validate_rust_evidence "$gateway_builder" source_order \
     'pub fn with_dangerously_replaced_signature_verifier(' \
     '_acknowledgement: DangerAck,' \
@@ -1035,6 +1057,54 @@ validate_rust_evidence "$gateway_posture" log_render \
     'log_startup_posture' \
     'render_startup_posture' \
     'check_sig_case_coverage: startup posture is not written to the startup log'
+validate_rust_evidence "$xtask_main" source_order \
+    'mod security_posture;' \
+    'security_posture::command(&rest),' \
+    'check_sig_case_coverage: security-posture dry-run is not dispatched'
+validate_rust_evidence "$xtask_security_posture" source_order \
+    'if args !=' \
+    'return ExitCode::from(2);' \
+    'check_sig_case_coverage: security-posture accepts arguments other than --dry-run'
+validate_rust_evidence "$xtask_security_posture" source_order \
+    'let floors = parse_standard_floors' \
+    'rustfs_gateway_core::standard_operation_names()' \
+    'check_sig_case_coverage: dry-run does not join real floors to the route-table inventory'
+validate_rust_evidence "$xtask_security_posture" source_order \
+    'let parsed: BTreeSet<_> = floors.keys().cloned().collect();' \
+    'if parsed != routed {' \
+    'check_sig_case_coverage: dry-run no longer rejects operation inventory drift'
+validate_rust_evidence "$xtask_security_posture" source_order \
+    'std::fs::read_dir(directory)' \
+    'syn::parse_file(&source)' \
+    'check_sig_case_coverage: dry-run no longer parses the real operation sources'
+validate_rust_evidence "$xtask_security_posture" source_order \
+    'validate_operation_impl_uses_floor(&file, &path)?;' \
+    'let floor_items: Vec<_>' \
+    'check_sig_case_coverage: dry-run no longer proves Operation::floor returns the parsed floor'
+validate_rust_evidence "$xtask_security_posture" source_order \
+    'let operation_impls: Vec<_>' \
+    'let floor_methods: Vec<_>' \
+    'check_sig_case_coverage: dry-run no longer requires one real Operation floor method'
+validate_rust_evidence "$xtask_security_posture" source_order \
+    'let [syn::Stmt::Expr(syn::Expr::Reference(reference), None)]' \
+    'returned.path.segments.len() != 1' \
+    'check_sig_case_coverage: dry-run accepts an Operation::floor decoy binding'
+validate_rust_evidence "$xtask_security_posture" source_order \
+    'let syn::Expr::Call(call) = expression else {' \
+    'if segments.len() != 2 || segments[0] !=' \
+    'check_sig_case_coverage: dry-run accepts a non-canonical operation floor expression'
+validate_rust_evidence "$xtask_security_posture" source_order \
+    'let presigned = floors' \
+    'floor.presigned.then_some(name.as_str())' \
+    'check_sig_case_coverage: dry-run no longer derives the presigned operation list'
+validate_rust_evidence "$xtask_security_posture" string_match_arm \
+    '"builtin_presigned"' \
+    'true' \
+    'check_sig_case_coverage: dry-run no longer recognizes the presigned floor constructor'
+validate_rust_evidence "$xtask_security_posture" format_literal_exact \
+    'SECURITY_POSTURE' \
+    '"SECURITY_POSTURE anonymous_reachable_ops=[] custom_verifier=none sigv2=disabled presigned_allowed_ops=[{presigned}] aws_signature_verifier=built-in"' \
+    'check_sig_case_coverage: dry-run output lost a required startup-posture field'
 
 python3 - "$ROOT/crates/gateway/Cargo.toml" <<'PYEOF'
 import sys

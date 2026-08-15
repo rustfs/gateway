@@ -13,6 +13,7 @@ Agent entry point for repository automation commands.
 | `src/ir/semantic.rs` | Cross-field, shape, unwrapped-output, and quirk invariants. | A semantic IR rule changes. |
 | `src/new_op.rs` | Intentionally-red operation scaffold. | Scaffold contents or collision checks change. |
 | `src/route.rs` | Route explanation CLI rendering. | `route explain` output changes. |
+| `src/security_posture.rs` | Fail-closed dry-run preview derived from standard operation-floor sources. | The security-posture command or standard floor inventory changes. |
 | `src/sigsuite.rs` | Pinned external signing-suite fetch and run process boundary. | Official signing-suite checkout or invocation changes. |
 | `src/verify.rs` | Light crate verification and full operation/workspace verification selection; core compile-fail contracts stay in the full workspace gate. | A crate/op/all verification command is wrong. |
 | `src/verify/process.rs` | Deadline-aware child supervision and output capture. | Verification children block, leak, or report out of order. |

@@ -18,6 +18,8 @@ commands:
   why <target> [--json]     trace a quirk, operation, error code, header, ADR or assembly rule
   route explain [--json] 'METHOD /path?query'
                             explain route selection and every predicate
+  security-posture --dry-run
+                            report the standard operation floors without starting a service
   sigsuite <fetch|run>      fetch and run the pinned official signing suite
   new-op <Operation>        create an intentionally-red operation scaffold
   bootstrap                 prepare a fresh checkout for work (<=5 minutes)
