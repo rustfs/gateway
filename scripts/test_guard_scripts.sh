@@ -6970,6 +6970,208 @@ PYEOF
 expect_fail check_sig_case_coverage.sh \
     'c-sig-0378 replacing the real route inventory with an empty proxy' mut_sig_p2_04_route_inventory_removed
 
+mut_sig_p2_04_dangerous_floor_mapping_deleted() {
+    sed -i.bak '/^c-sig-0375|/d' scripts/sig-case-coverage-p2-04-runtime.txt
+}
+expect_fail check_sig_case_coverage.sh \
+    'c-sig-0375 losing its runtime mapping' mut_sig_p2_04_dangerous_floor_mapping_deleted
+
+mut_sig_p2_04_gateway_feature_forwarding_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/gateway/Cargo.toml")
+text = path.read_text()
+old = 'dangerous-replace-signature-verifier = ["rustfs-gateway-sig/dangerous-replace-signature-verifier"]'
+if text.count(old) != 1:
+    raise SystemExit("missing gateway feature-forwarding mutation subject")
+path.write_text(text.replace(old, 'dangerous-replace-signature-verifier = []', 1))
+PYEOF
+}
+expect_fail check_sig_case_coverage.sh \
+    'the gateway dangerous replacement feature losing sig forwarding' \
+    mut_sig_p2_04_gateway_feature_forwarding_removed
+
+mut_sig_p2_04_danger_ack_removed_from_builder() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/gateway/src/builder.rs")
+text = path.read_text()
+old = "        _acknowledgement: DangerAck,"
+if text.count(old) != 1:
+    raise SystemExit("missing DangerAck builder mutation subject")
+path.write_text(text.replace(old, "        _acknowledgement: (),", 1))
+PYEOF
+}
+expect_fail check_sig_case_coverage.sh \
+    'the replacement builder losing its explicit DangerAck' mut_sig_p2_04_danger_ack_removed_from_builder
+
+mut_sig_p2_04_replacement_assignment_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/gateway/src/builder.rs")
+text = path.read_text()
+old = "        self.dangerously_replaced_signature_verifier = Some(Arc::new(verifier));"
+if text.count(old) != 1:
+    raise SystemExit("missing replacement assignment mutation subject")
+path.write_text(text.replace(old, "        let _ = verifier;", 1))
+PYEOF
+}
+expect_fail check_sig_case_coverage.sh \
+    'the replacement builder dropping the supplied verifier' mut_sig_p2_04_replacement_assignment_removed
+
+mut_sig_p2_04_replacement_dispatch_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/gateway/src/service.rs")
+text = path.read_text()
+old = "                    .map(|verifier| verifier.verify_sealed(&sealed));"
+if text.count(old) != 1:
+    raise SystemExit("missing replacement dispatch mutation subject")
+path.write_text(text.replace(old, "                    .and_then(|_| None);", 1))
+PYEOF
+}
+expect_fail check_sig_case_coverage.sh \
+    'the replacement verifier no longer receiving the sealed request' mut_sig_p2_04_replacement_dispatch_removed
+
+mut_sig_p2_04_floor_uses_stale_clock() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/gateway/src/service.rs")
+text = path.read_text()
+old = "self.inner.floor.admit(view, M::floor(&op), now)"
+if text.count(old) != 1:
+    raise SystemExit("missing live floor clock mutation subject")
+path.write_text(text.replace(old, "self.inner.floor.admit(view, M::floor(&op), RequestNow::from_unix_seconds(1_577_836_800))", 1))
+PYEOF
+}
+expect_fail check_sig_case_coverage.sh \
+    'the security floor no longer using the request clock snapshot' mut_sig_p2_04_floor_uses_stale_clock
+
+mut_sig_p2_04_dangerous_posture_forced_false() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/gateway/src/builder.rs")
+text = path.read_text()
+old = "let dangerously_replaced_signature_verifier = self.dangerously_replaced_signature_verifier.is_some();"
+if text.count(old) != 1:
+    raise SystemExit("missing dangerous posture mutation subject")
+path.write_text(text.replace(old, "let dangerously_replaced_signature_verifier = false;", 1))
+PYEOF
+}
+expect_fail check_sig_case_coverage.sh \
+    'dangerous replacement posture being forced off' mut_sig_p2_04_dangerous_posture_forced_false
+
+mut_sig_p2_04_custom_posture_forced_false() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/gateway/src/builder.rs")
+text = path.read_text()
+old = "let custom_signature_verifier = self.custom_signature_verifier.is_some();"
+if text.count(old) != 1:
+    raise SystemExit("missing custom posture mutation subject")
+path.write_text(text.replace(old, "let custom_signature_verifier = false;", 1))
+PYEOF
+}
+expect_fail check_sig_case_coverage.sh \
+    'custom verifier posture being forced off' mut_sig_p2_04_custom_posture_forced_false
+
+mut_sig_p2_04_warning_literal_changed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/gateway/src/builder.rs")
+text = path.read_text()
+old = '        "WARN: the built-in AWS signature verifier is dangerously replaced; the H1..H7 security floor remains enforced"'
+if text.count(old) != 1:
+    raise SystemExit("missing replacement warning mutation subject")
+new = '        // "WARN: the built-in AWS signature verifier is dangerously replaced; the H1..H7 security floor remains enforced"\n        "WARN: signature replacement enabled"'
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_sig_case_coverage.sh \
+    'the replacement warning drifting beside a comment decoy' mut_sig_p2_04_warning_literal_changed
+
+mut_sig_p2_04_warning_call_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/gateway/src/builder.rs")
+text = path.read_text()
+old = '''            eprintln!(
+                "WARN: the built-in AWS signature verifier is dangerously replaced; the H1..H7 security floor remains enforced"
+            );'''
+if text.count(old) != 1:
+    raise SystemExit("missing replacement warning call mutation subject")
+path.write_text(text.replace(old, "            let _ = dangerously_replaced_signature_verifier;", 1))
+PYEOF
+}
+expect_fail check_sig_case_coverage.sh \
+    'assembly no longer emitting the replacement warning' mut_sig_p2_04_warning_call_removed
+
+mut_sig_p2_04_floor_test_feature_changed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/gateway/tests/custom_signature_verifier.rs")
+text = path.read_text()
+old = '#[cfg(feature = "dangerous-replace-signature-verifier")]\n#[tokio::test]\nasync fn c_sig_0375_the_floor_rejects_before_the_replacement_runs()'
+if text.count(old) != 1:
+    raise SystemExit("missing c-sig-0375 feature mutation subject")
+new = '// #[cfg(feature = "dangerous-replace-signature-verifier")]\n#[cfg(feature = "another-feature")]\n#[tokio::test]\nasync fn c_sig_0375_the_floor_rejects_before_the_replacement_runs()'
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_sig_case_coverage.sh \
+    'c-sig-0375 moving behind another feature beside a comment decoy' mut_sig_p2_04_floor_test_feature_changed
+
+mut_sig_p2_04_floor_test_replacement_call_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/gateway/tests/custom_signature_verifier.rs")
+text = path.read_text()
+anchor = "async fn c_sig_0375_the_floor_rejects_before_the_replacement_runs()"
+start = text.find(anchor)
+if start == -1:
+    raise SystemExit("missing c-sig-0375 mutation anchor")
+old = ".with_dangerously_replaced_signature_verifier("
+position = text.find(old, start)
+if position == -1:
+    raise SystemExit("missing c-sig-0375 replacement-call mutation subject")
+text = text[:position] + ".without_dangerously_replaced_signature_verifier(" + text[position + len(old):]
+path.write_text(text)
+PYEOF
+}
+expect_fail check_sig_case_coverage.sh \
+    'c-sig-0375 no longer assembling the dangerous replacement' \
+    mut_sig_p2_04_floor_test_replacement_call_removed
+
+mut_sig_p2_04_dangerous_posture_display_changed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/gateway/src/builder.rs")
+text = path.read_text()
+old = '            f.write_str("; AWS signature verifier: dangerously replaced")?;'
+if text.count(old) != 1:
+    raise SystemExit("missing dangerous posture display mutation subject")
+new = '            // f.write_str("; AWS signature verifier: dangerously replaced")?;\n            f.write_str("; AWS signature verifier: custom")?;'
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_sig_case_coverage.sh \
+    'dangerous posture display drifting beside a comment decoy' mut_sig_p2_04_dangerous_posture_display_changed
+
+mut_sig_p2_04_custom_posture_display_changed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/gateway/src/builder.rs")
+text = path.read_text()
+old = '            f.write_str("; custom signature verifier: installed")'
+if text.count(old) != 1:
+    raise SystemExit("missing custom posture display mutation subject")
+new = '            // f.write_str("; custom signature verifier: installed")\n            f.write_str("; custom signature verifier: present")'
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_sig_case_coverage.sh \
+    'custom posture display drifting beside a comment decoy' mut_sig_p2_04_custom_posture_display_changed
+
 mut_sig_p2_04_replay_store_call_removed() {
     python3 - <<'PYEOF'
 from pathlib import Path
