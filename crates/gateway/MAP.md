@@ -52,6 +52,7 @@ the consumer surface. Ring 1: no rustfs crate dependency. Start at `src/lib.rs`;
 | `src/ext/governor/meter.rs` | Atomic token-bucket meter | Changing quota accounting |
 | `src/ext/governor/rates.rs` | Validated default rates | Changing capacity defaults |
 | `src/ext/cors.rs` | Cached bucket CORS source | Serving browser requests |
+| `src/ext/cors/cache.rs` | Bounded LRU entries and recency metadata | Changing CORS cache eviction |
 | `src/ext/observer.rs` | Final response observer | Wiring logs or metrics |
 | `src/ext/filter.rs` | Wire, routed, and response seams | Rewriting untyped HTTP shape |
 | `src/ext/oplayer.rs` | Typed per-operation middleware | Rewriting one DTO |
