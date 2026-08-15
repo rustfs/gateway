@@ -264,8 +264,26 @@ if ! grep -F 'if [[ "$DTO_COMPILER_ONLY" == 1 ]]; then' "$GUARD_SELF_TEST" >/dev
     ! grep -F 'expect_cargo_test_fail_with_diagnostic rustfs-gateway-core integration' "$GUARD_SELF_TEST" >/dev/null; then
     fail 'dto-compiler-self-test omits a DTO compiler mutation'
 fi
+python3 - "$GUARD_SELF_TEST" <<'PY' || fail 'build-guard-self-test omits a build-backed control or mutation'
+from pathlib import Path
+import re
+import sys
+
+text = Path(sys.argv[1]).read_text()
+marker = 'if [[ "$BUILD_GUARDS_ONLY" == 1 ]]; then'
+start = text.index("for guard in \\\n", text.index(marker))
+end = text.index("; do", start)
+actual = re.findall(r"check_[a-z0-9_]+\.sh", text[start:end])
+expected = [
+    "check_case_keys_honoured.sh",
+    "check_macro_governance.sh",
+    "check_monomorphic_dispatch.sh",
+    "check_verify_map_generated.sh",
+]
+if actual != expected:
+    raise SystemExit(1)
+PY
 if ! grep -F 'if [[ "$BUILD_GUARDS_ONLY" == 1 ]]; then' "$GUARD_SELF_TEST" >/dev/null ||
-    ! grep -F 'check_case_keys_honoured.sh check_monomorphic_dispatch.sh check_verify_map_generated.sh' "$GUARD_SELF_TEST" >/dev/null ||
     ! grep -F 'mut_build_monomorphic_handler_is_indirect' "$GUARD_SELF_TEST" >/dev/null ||
     ! grep -F 'mut_build_unread_schema_key' "$GUARD_SELF_TEST" >/dev/null ||
     ! grep -F 'mut_build_verify_map_edited' "$GUARD_SELF_TEST" >/dev/null ||
