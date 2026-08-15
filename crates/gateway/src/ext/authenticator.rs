@@ -65,9 +65,9 @@ use http::Method;
 use rustfs_gateway_core::BoxFuture;
 use rustfs_gateway_sig::{
     AUTHORIZATION_HEADER, AmzDate, AuthError, AuthScheme, CanonicalRequestSpec, CredentialScope, ExpectedScope, PayloadMode,
-    PresignedParams, RawHost, RegionSet, ScopeRejection, SealedAws, SigIdentity, SigLocation, SigV4Authorization, Signature,
-    SignatureMatch, SignedHeaderSet, UriPathCandidates, Verdict, X_AMZ_SECURITY_TOKEN, X_AMZ_SECURITY_TOKEN_HEADER,
-    calculate_signature, enforce_scope, signing_key, timing,
+    PostPolicy, PostPolicyError, PostPolicyLimits, PresignedParams, RawHost, RegionSet, ScopeRejection, SealedAws, SessionToken,
+    SigFamily, SigIdentity, SigLocation, SigV4Authorization, Signature, SignatureMatch, SignedHeaderSet, UriPathCandidates,
+    Verdict, X_AMZ_SECURITY_TOKEN, X_AMZ_SECURITY_TOKEN_HEADER, calculate_signature, enforce_scope, signing_key, timing,
 };
 
 use super::credential_guard::{CredentialGuardConfig, GuardedCredentialProvider};
@@ -499,54 +499,71 @@ impl SigV4Authenticator {
         // a wrong secret by the clock. Holding the verdict until after the derivation is also what
         // keeps cheap session checks from introducing a shorter rejection path.
         let refusal = match &resolved {
-            Ok(CredentialLookup::Found(credentials)) => match view.headers().get(X_AMZ_SECURITY_TOKEN_HEADER) {
-                Some(value) => credentials.admit(Some(value.as_bytes()), sealed.clock().now()).err(),
-                None if view.query_contains(X_AMZ_SECURITY_TOKEN) => {
+            Ok(CredentialLookup::Found(credentials)) => match location {
+                SigLocation::FormField => credentials
+                    .admit(presented.session_token().map(SessionToken::expose), sealed.clock().now())
+                    .err(),
+                SigLocation::Query if view.query_contains(X_AMZ_SECURITY_TOKEN) => {
                     credentials.admit_query(view.query(), sealed.clock().now()).err()
                 }
-                None => credentials.admit(None, sealed.clock().now()).err(),
+                _ => credentials
+                    .admit(
+                        view.headers()
+                            .get(X_AMZ_SECURITY_TOKEN_HEADER)
+                            .map(http::HeaderValue::as_bytes),
+                        sealed.clock().now(),
+                    )
+                    .err(),
             },
             Ok(CredentialLookup::NotFound) | Err(_) => None,
         };
 
-        let signed =
-            SignedHeaderSet::parse_and_enforce(presented.signed_headers(), view.headers(), request.declared_content_length())?;
-        let paths = UriPathCandidates::new(request.raw_path())?;
-        let query = view.query();
-        let mut spec = CanonicalRequestSpec::new(
-            request.method(),
-            &paths,
-            &query,
-            view.headers(),
-            &signed,
-            request.host(),
-            request.payload().canonical_payload_token(),
-        );
-        if location.is_presigned() {
-            spec = spec.presigned();
-        }
-
         let key = signing_key(&secret, &verified);
         let date = presented.signed_at(sealed);
-        let mut proof: Option<SignatureMatch> = None;
-        let mut mismatch_detail = None;
-        for candidate in spec.candidates()? {
-            let string_to_sign = candidate.string_to_sign(&date, presented.scope());
-            let derived = calculate_signature(&key, &string_to_sign);
-            mismatch_detail = Some(rustfs_gateway_sig::SignatureMismatchDetail::new(&candidate, &string_to_sign));
-            // Every candidate is derived and compared even after one has matched: returning early
-            // would make the number of HMAC rounds a function of which spelling the client sent.
-            if let Ok(matched) = presented.signature().ct_verify(&derived) {
-                proof = proof.or(Some(matched));
-            }
-        }
+        let (mut proof, mismatch_detail): (Option<SignatureMatch>, Option<rustfs_gateway_sig::SignatureMismatchDetail>) =
+            match &presented {
+                Presented::Form(policy) => (policy.verify(&key).ok(), None),
+                Presented::Header(_) | Presented::Query(_) => {
+                    let (signed_headers, signature) =
+                        presented.canonical_parts().ok_or(AuthError::AuthorizationHeaderMalformed)?;
+                    let signed =
+                        SignedHeaderSet::parse_and_enforce(signed_headers, view.headers(), request.declared_content_length())?;
+                    let paths = UriPathCandidates::new(request.raw_path())?;
+                    let query = view.query();
+                    let mut spec = CanonicalRequestSpec::new(
+                        request.method(),
+                        &paths,
+                        &query,
+                        view.headers(),
+                        &signed,
+                        request.host(),
+                        request.payload().canonical_payload_token(),
+                    );
+                    if location.is_presigned() {
+                        spec = spec.presigned();
+                    }
+                    let mut matched = None;
+                    let mut detail = None;
+                    for candidate in spec.candidates()? {
+                        let string_to_sign = candidate.string_to_sign(&date, presented.scope());
+                        let derived = calculate_signature(&key, &string_to_sign);
+                        detail = Some(rustfs_gateway_sig::SignatureMismatchDetail::new(&candidate, &string_to_sign));
+                        // Every candidate is derived and compared even after one has matched:
+                        // returning early would make the number of HMAC rounds observable.
+                        if let Ok(equal) = signature.ct_verify(&derived) {
+                            matched = matched.or(Some(equal));
+                        }
+                    }
+                    (matched, detail)
+                }
+            };
 
         // The unknown-key branch has now paid for the same derivation a known key does. Only after
         // that is the uniform credential rejection answered.
         let Ok(CredentialLookup::Found(credentials)) = resolved else {
             return Err(AuthError::InvalidAccessKeyId.into());
         };
-        let Some(proof) = proof else {
+        let Some(proof) = proof.take() else {
             if refusal.is_some() {
                 return Err(AuthError::InvalidAccessKeyId.into());
             }
@@ -571,10 +588,11 @@ impl SigV4Authenticator {
             },
             None => SigIdentity::LongTerm,
         };
-        let scheme = if location.is_presigned() {
-            AuthScheme::sigv4_presigned(identity_axis, sealed.expected_service())
-        } else {
-            AuthScheme::sigv4_header(identity_axis, sealed.expected_service())
+        let scheme = match location {
+            SigLocation::Query => AuthScheme::sigv4_presigned(identity_axis, sealed.expected_service()),
+            SigLocation::FormField => AuthScheme::post_policy(SigFamily::V4, identity_axis, sealed.expected_service()),
+            SigLocation::Header => AuthScheme::sigv4_header(identity_axis, sealed.expected_service()),
+            _ => return Err(AuthError::AuthorizationHeaderMalformed.into()),
         };
 
         // Published only here: after the comparison produced a `SignatureMatch` and after the
@@ -622,13 +640,20 @@ impl From<AuthError> for VerificationFailure {
 enum Presented {
     Header(Box<SigV4Authorization>),
     Query(Box<PresignedParams>),
+    Form(Box<PostPolicy>),
 }
 
 impl Presented {
     fn read(sealed: &SealedAws<'_>, location: SigLocation) -> Result<Self, AuthError> {
         match location {
             SigLocation::Query => Ok(Self::Query(Box::new(PresignedParams::parse(&sealed.view().query())?))),
-            _ => {
+            SigLocation::FormField => {
+                let fields = sealed.view().form_fields().ok_or(AuthError::AuthorizationHeaderMalformed)?;
+                let policy = PostPolicy::parse(fields, "", PostPolicyLimits::default(), sealed.clock().now())
+                    .map_err(PostPolicyError::auth_error)?;
+                Ok(Self::Form(Box::new(policy)))
+            }
+            SigLocation::Header => {
                 let raw = sealed
                     .view()
                     .headers()
@@ -638,6 +663,7 @@ impl Presented {
                     .map_err(|_| AuthError::AuthorizationHeaderMalformed)?;
                 Ok(Self::Header(Box::new(SigV4Authorization::parse(raw)?)))
             }
+            _ => Err(AuthError::AuthorizationHeaderMalformed),
         }
     }
 
@@ -645,21 +671,21 @@ impl Presented {
         match self {
             Self::Header(parsed) => parsed.scope(),
             Self::Query(parsed) => parsed.scope(),
+            Self::Form(policy) => policy.scope(),
         }
     }
 
-    fn signed_headers(&self) -> &str {
+    fn canonical_parts(&self) -> Option<(&str, &Signature)> {
         match self {
-            Self::Header(parsed) => parsed.signed_headers(),
-            Self::Query(parsed) => parsed.signed_headers(),
+            Self::Header(parsed) => Some((parsed.signed_headers(), parsed.signature())),
+            Self::Query(parsed) => Some((parsed.signed_headers(), parsed.signature())),
+            Self::Form(_) => None,
         }
     }
 
-    fn signature(&self) -> &Signature {
-        match self {
-            Self::Header(parsed) => parsed.signature(),
-            Self::Query(parsed) => parsed.signature(),
-        }
+    fn session_token(&self) -> Option<&SessionToken> {
+        let Self::Form(policy) = self else { return None };
+        policy.session_token()
     }
 
     /// The timestamp the string-to-sign is dated with.
@@ -670,6 +696,7 @@ impl Presented {
         match self {
             Self::Header(_) => sealed.clock().signed_at(),
             Self::Query(parsed) => parsed.date(),
+            Self::Form(policy) => policy.signed_at(),
         }
     }
 }
@@ -679,7 +706,9 @@ impl Presented {
 mod tests {
     use super::*;
     use crate::ext::credentials::{Credentials, StaticCredentials};
-    use rustfs_gateway_sig::{RequestNow, SigService, SkewWindow, enforce_clock_skew};
+    use rustfs_gateway_sig::{
+        Admission, OperationFloor, RawQuery, RequestNow, SecurityFloor, SigService, SkewWindow, WireView, enforce_clock_skew,
+    };
 
     fn authenticator() -> SigV4Authenticator {
         SigV4Authenticator::new(
@@ -737,5 +766,34 @@ mod tests {
                 .map(rustfs_gateway_sig::ScopeRegion::as_str),
             Some("us-east-1")
         );
+    }
+
+    #[tokio::test]
+    async fn form_field_material_uses_the_post_policy_authority() {
+        const POLICY: &str = "eyJleHBpcmF0aW9uIjoiMjAxNS0wOC0zMFQxMzozNjowMFoiLCJjb25kaXRpb25zIjpbeyJidWNrZXQiOiJleGFtcGxlLWJ1Y2tldCJ9LHsia2V5IjoidXBsb2Fkcy9yZXBvcnQudHh0In0seyJ4LWFtei1hbGdvcml0aG0iOiJBV1M0LUhNQUMtU0hBMjU2In0seyJ4LWFtei1jcmVkZW50aWFsIjoiQUtJREVYQU1QTEUvMjAxNTA4MzAvdXMtZWFzdC0xL3MzL2F3czRfcmVxdWVzdCJ9LHsieC1hbXotZGF0ZSI6IjIwMTUwODMwVDEyMzYwMFoifV19";
+        let headers = http::HeaderMap::new();
+        let fields = [
+            ("key", "uploads/report.txt"),
+            ("bucket", "example-bucket"),
+            ("x-amz-algorithm", "AWS4-HMAC-SHA256"),
+            ("x-amz-credential", "AKIDEXAMPLE/20150830/us-east-1/s3/aws4_request"),
+            ("x-amz-date", "20150830T123600Z"),
+            ("x-amz-signature", "77e76bae68e9999f40becaeae16e5e41ae02b70e6e816c41d7fcf1a3a7e0b5f9"),
+            ("policy", POLICY),
+        ];
+        let view = WireView::new(&headers, RawQuery::new("")).with_form_fields(&fields);
+        let operation = OperationFloor::builtin("PutObject", SigService::S3).allow_post_policy();
+        let admitted = SecurityFloor::new()
+            .admit(view, &operation, RequestNow::from_unix_seconds(1_440_938_160))
+            .expect("valid form reaches the sealed path");
+        let Admission::Sealed(sealed) = admitted else { panic!("AWS form must be sealed") };
+        let method = Method::POST;
+        let host = RawHost::from_host_header(b"example-bucket.s3.example.test").expect("valid host");
+        let payload = PayloadMode::Empty;
+        let request = Authentication::new(&sealed, &method, "/", &host, &payload, Some(0));
+        let Ok(Some(verdict)) = authenticator().try_verify(&request).await else {
+            panic!("authenticated verdict required")
+        };
+        assert!(verdict.is_authenticated());
     }
 }

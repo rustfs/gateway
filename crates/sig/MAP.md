@@ -13,6 +13,8 @@ Agent entry point for SigV2/SigV4 parsing, canonicalization and verification.
 | `src/mode.rs` | Authenticated payload-mode selection. | HTTP framing receives the wrong mode. |
 | `src/operation.rs` | Per-operation authentication-scheme policy. | Presigned or anonymous access reaches the wrong operation. |
 | `src/parse.rs` | Credential and authorization parsing. | Date, region, service, or credential fields parse incorrectly. |
+| `src/post_policy.rs` | Strict browser POST-policy parsing, field enforcement, and signature proof. | A POST form condition, filename, size range, or proof changes. |
+| `src/post_policy_json.rs` | Bounded duplicate-free JSON parsing for POST policies. | JSON shape, string escaping, nesting, or element limits change. |
 | `src/query.rs` | Presigned-query constraints and duplicate detection. | Query authentication, expiry, or duplicate handling fails. |
 | `src/scheme.rs` | Closed authentication-scheme dimensions. | Header, query, POST, or SigV2 dispatch changes. |
 | `src/scope.rs` | H5 scope cross-checks. | Credential date, region, service, or terminator validation changes. |

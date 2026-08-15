@@ -318,7 +318,7 @@ pub fn enforce_expiry(clock: ClockChecked, expires_in_seconds: u64) -> Result<Pr
 /// against one other instant. The civil-to-days step is the standard proleptic Gregorian
 /// algorithm; `chrono`'s and `time`'s agree with it to the second for every value `AmzDate` can
 /// spell.
-fn unix_seconds(date: &AmzDate) -> Option<i64> {
+pub(crate) fn unix_seconds(date: &AmzDate) -> Option<i64> {
     let text = date.as_str().as_bytes();
     let digits = |range: core::ops::Range<usize>| -> Option<i64> {
         let mut value: i64 = 0;
