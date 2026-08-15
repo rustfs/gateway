@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Compile-time boundaries for the P2-01 signature dimensions.
+//! Compile-time boundaries for the P2 signature contracts.
 //!
-//! Responsible for: executing the six independently named compile-fail cases from #1678.
+//! Responsible for: executing independently named compile-fail cases from P2-01 through P2-04.
 //! NOT responsible for: runtime parsing, verification, or the colocated rustdoc examples.
 //! Upstream: `rustfs_gateway_sig` public types. Downstream: downstream implementors.
 
@@ -35,4 +35,19 @@ fn p2_02_compile_time_boundaries_are_not_openable() {
 fn p2_03_compile_time_boundaries_are_not_openable() {
     let cases = trybuild::TestCases::new();
     cases.compile_fail("tests/compile_fail/c_sig_025[34]_*.rs");
+}
+
+#[test]
+fn p2_04_compile_time_boundaries_are_not_openable() {
+    let cases = trybuild::TestCases::new();
+    cases.compile_fail("tests/compile_fail/c_sig_034[56]_*.rs");
+    cases.compile_fail("tests/compile_fail/c_sig_0354_*.rs");
+    cases.compile_fail("tests/compile_fail/c_sig_0377_*.rs");
+}
+
+#[cfg(feature = "dangerous-replace-signature-verifier")]
+#[test]
+fn p2_04_danger_ack_compile_time_boundary_is_not_openable() {
+    let cases = trybuild::TestCases::new();
+    cases.compile_fail("tests/compile_fail/c_sig_0376_*.rs");
 }

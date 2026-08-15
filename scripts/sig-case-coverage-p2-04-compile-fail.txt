@@ -1,0 +1,5 @@
+c-sig-0345|negative|H5|crates/sig/tests/compile_fail/c_sig_0345_verified_scope_private.rs|let _ = VerifiedScope {|fields `date`, `region` and `service` of struct `VerifiedScope` are private|default
+c-sig-0346|negative|H5|crates/sig/tests/compile_fail/c_sig_0346_verified_scope_required.rs|signing_key(&secret, &presented)|expected `&VerifiedScope`, found `&CredentialScope`|default
+c-sig-0354|negative|H4|crates/sig/tests/compile_fail/c_sig_0354_anonymous_ack_private.rs|let _ = AnonymousAck(())|cannot initialize a tuple struct which contains private fields|default
+c-sig-0376|negative|BOUNDARY|crates/sig/tests/compile_fail/c_sig_0376_danger_ack_explicit.rs|DangerAck::default()|no associated function or constant named `default` found for struct `DangerAck`|dangerous-replace-signature-verifier
+c-sig-0377|negative|BOUNDARY|crates/sig/tests/compile_fail/c_sig_0377_verifier_returns_verdict.rs|let _ = WrongVerifier;|method `verify` has an incompatible type for trait|default

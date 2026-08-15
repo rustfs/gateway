@@ -95,6 +95,20 @@ while IFS= read -r mapping; do
     p2_04_runtime_cases+=("$mapping")
 done <"$p2_04_runtime_manifest"
 
+p2_04_compile_fail_cases=()
+p2_04_compile_fail_manifest="${ROOT}/scripts/sig-case-coverage-p2-04-compile-fail.txt"
+[[ -f "$p2_04_compile_fail_manifest" ]] || {
+    printf 'check_sig_case_coverage: P2-04 compile-fail case manifest is missing\n' >&2
+    exit 1
+}
+while IFS= read -r mapping; do
+    [[ -n "$mapping" ]] || {
+        printf 'check_sig_case_coverage: P2-04 compile-fail manifest contains a blank row\n' >&2
+        exit 1
+    }
+    p2_04_compile_fail_cases+=("$mapping")
+done <"$p2_04_compile_fail_manifest"
+
 [[ "${#cases[@]}" -eq 25 ]] || {
     printf 'check_sig_case_coverage: expected 25 mappings, got %s\n' "${#cases[@]}" >&2
     exit 1
@@ -321,11 +335,28 @@ elif kind == "runtime":
         body_start, body_end = function_body(item)
         if not direct_occurrence(body_start, body_end, required_call):
             raise SystemExit(f"{path}: mapped runtime evidence is not active in the test body")
-elif kind == "harness":
+elif kind in ("harness", "feature_harness"):
     item = top_level_function(evidence)
     attributes = outer_attributes(item.start()) if item is not None else []
-    if len(attributes) != 1 or not re.fullmatch(r"#\s*\[\s*test\s*\]", attributes[0]):
-        raise SystemExit(f"{path}: compile-fail harness is not an active top-level #[test]")
+    test_attribute = r"#\s*\[\s*test\s*\]"
+    feature_attribute = r"#\s*\[\s*cfg\s*\(\s*feature\s*=\s*[^)]*\)\s*\]"
+    if kind == "harness":
+        valid_attributes = len(attributes) == 1 and re.fullmatch(test_attribute, attributes[0])
+    else:
+        raw_prefix = source[max(0, item.start() - 200) : item.start()]
+        exact_feature_attributes = re.search(
+            r'#\[cfg\(feature = "dangerous-replace-signature-verifier"\)\]\s*'
+            r'#\[test\]\s*$',
+            raw_prefix,
+        )
+        valid_attributes = (
+            len(attributes) == 2
+            and any(re.fullmatch(test_attribute, attribute) for attribute in attributes)
+            and any(re.fullmatch(feature_attribute, attribute) for attribute in attributes)
+            and exact_feature_attributes is not None
+        )
+    if not valid_attributes:
+        raise SystemExit(f"{path}: compile-fail harness has the wrong test/feature attributes")
     body_start, body_end = function_body(item)
     if not direct_invocation(body_start, body_end, "cases.compile_fail", required_call):
         raise SystemExit(f"{path}: compile-fail call is not active in the harness test body")
@@ -589,6 +620,11 @@ done
         "${#p2_04_runtime_cases[@]}" >&2
     exit 1
 }
+[[ "${#p2_04_compile_fail_cases[@]}" -eq 5 ]] || {
+    printf 'check_sig_case_coverage: expected five P2-04 compile-fail mappings, got %s\n' \
+        "${#p2_04_compile_fail_cases[@]}" >&2
+    exit 1
+}
 positive=0
 negative=0
 p2_03_compile_fail_paths=()
@@ -736,6 +772,72 @@ for hard_constraint in H1 H2 H3 H4 H5 H6 H7; do
     }
 done
 
+p2_04_compile_fail_expected_ids=(
+    c-sig-0345 c-sig-0346 c-sig-0354 c-sig-0376 c-sig-0377
+)
+p2_04_compile_fail_paths=()
+for index in "${!p2_04_compile_fail_cases[@]}"; do
+    IFS='|' read -r id polarity hard_constraint relative evidence diagnostic feature \
+        <<<"${p2_04_compile_fail_cases[$index]}"
+    [[ "$id" == "${p2_04_compile_fail_expected_ids[$index]}" ]] || {
+        printf 'check_sig_case_coverage: expected P2-04 compile-fail %s, found %s\n' \
+            "${p2_04_compile_fail_expected_ids[$index]}" "$id" >&2
+        exit 1
+    }
+    [[ "$polarity" == negative ]] || {
+        printf 'check_sig_case_coverage: %s must remain a negative compile-fail case\n' "$id" >&2
+        exit 1
+    }
+    [[ "$hard_constraint" =~ ^H[1-7]$|^BOUNDARY$ ]] || {
+        printf 'check_sig_case_coverage: %s has unknown compile-fail constraint %s\n' \
+            "$id" "$hard_constraint" >&2
+        exit 1
+    }
+    case "$id" in
+        c-sig-0376) expected_feature='dangerous-replace-signature-verifier' ;;
+        *) expected_feature='default' ;;
+    esac
+    [[ "$feature" == "$expected_feature" ]] || {
+        printf 'check_sig_case_coverage: %s has the wrong feature boundary %s\n' "$id" "$feature" >&2
+        exit 1
+    }
+    [[ "$relative" == crates/sig/tests/compile_fail/c_sig_${id#c-sig-}_*.rs ]] || {
+        printf 'check_sig_case_coverage: %s is mapped to the wrong fixture %s\n' "$id" "$relative" >&2
+        exit 1
+    }
+    file="${ROOT}/${relative}"
+    [[ -f "$file" ]] || {
+        printf 'check_sig_case_coverage: P2-04 compile-fail fixture is missing: %s\n' "$relative" >&2
+        exit 1
+    }
+    grep -Fq "$id" "$file" || {
+        printf 'check_sig_case_coverage: %s is not named by %s\n' "$id" "$relative" >&2
+        exit 1
+    }
+    validate_rust_evidence "$file" compile "$evidence" '' \
+        "check_sig_case_coverage: ${relative} is not an executable compile-fail fixture"
+    stderr="${file%.rs}.stderr"
+    [[ -f "$stderr" ]] || {
+        printf 'check_sig_case_coverage: P2-04 compile-fail golden is missing: %s\n' \
+            "${relative%.rs}.stderr" >&2
+        exit 1
+    }
+    grep -Fq 'error[E' "$stderr" || {
+        printf 'check_sig_case_coverage: P2-04 compile-fail golden has no rustc diagnostic: %s\n' \
+            "${relative%.rs}.stderr" >&2
+        exit 1
+    }
+    grep -Fq "$diagnostic" "$stderr" || {
+        printf 'check_sig_case_coverage: %s golden lost its case-specific diagnostic\n' "$id" >&2
+        exit 1
+    }
+    p2_04_compile_fail_paths+=("$relative")
+done
+[[ "$(printf '%s\n' "${p2_04_compile_fail_paths[@]}" | sort -u | wc -l | tr -d ' ')" -eq 5 ]] || {
+    printf 'check_sig_case_coverage: P2-04 compile-fail cases must use five distinct fixtures\n' >&2
+    exit 1
+}
+
 grep -Fq 'Presigned URLs are replayable within their validity window.' \
     "${ROOT}/docs/security-model.md" || {
     printf 'check_sig_case_coverage: security model lost the H7 replay statement\n' >&2
@@ -775,6 +877,22 @@ validate_rust_evidence "$harness" harness \
     p2_03_compile_time_boundaries_are_not_openable \
     'cases.compile_fail("tests/compile_fail/c_sig_025[34]_*.rs")' \
     'check_sig_case_coverage: compile-fail harness does not execute c-sig-0253 and c-sig-0254'
+validate_rust_evidence "$harness" harness \
+    p2_04_compile_time_boundaries_are_not_openable \
+    'cases.compile_fail("tests/compile_fail/c_sig_034[56]_*.rs")' \
+    'check_sig_case_coverage: compile-fail harness does not execute c-sig-0345 and c-sig-0346'
+validate_rust_evidence "$harness" harness \
+    p2_04_compile_time_boundaries_are_not_openable \
+    'cases.compile_fail("tests/compile_fail/c_sig_0354_*.rs")' \
+    'check_sig_case_coverage: compile-fail harness does not execute c-sig-0354'
+validate_rust_evidence "$harness" harness \
+    p2_04_compile_time_boundaries_are_not_openable \
+    'cases.compile_fail("tests/compile_fail/c_sig_0377_*.rs")' \
+    'check_sig_case_coverage: compile-fail harness does not execute c-sig-0377'
+validate_rust_evidence "$harness" feature_harness \
+    p2_04_danger_ack_compile_time_boundary_is_not_openable \
+    'cases.compile_fail("tests/compile_fail/c_sig_0376_*.rs")' \
+    'check_sig_case_coverage: dangerous feature harness does not execute c-sig-0376'
 [[ -f "$core_harness" ]] || {
     printf 'check_sig_case_coverage: core signature compile-fail harness is missing\n' >&2
     exit 1
@@ -890,5 +1008,5 @@ done
 
 run_evidence_validations
 
-printf 'OK: all 141 P2 signature cases map to executable evidence '
-printf '(P2-01: 8/17; P2-02: 6/22; P2-03: 14/29; P2-04: 9/36)\n'
+printf 'OK: all 146 P2 signature cases map to executable evidence '
+printf '(P2-01: 8/17; P2-02: 6/22; P2-03: 14/29; P2-04: 9/41)\n'
