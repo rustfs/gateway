@@ -107,6 +107,30 @@ fn model_drift_propagates_tool_failures() {
 }
 
 #[test]
+fn security_posture_dry_run_reports_standard_operation_floors() {
+    let output = xtask(&["security-posture", "--dry-run"]);
+
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout),
+        "SECURITY_POSTURE anonymous_reachable_ops=[] custom_verifier=none sigv2=disabled presigned_allowed_ops=[GetObject] aws_signature_verifier=built-in\n"
+    );
+}
+
+#[test]
+fn security_posture_requires_dry_run_without_extra_arguments() {
+    for args in [&["security-posture"][..], &["security-posture", "--dry-run", "extra"]] {
+        let output = xtask(args);
+        assert_eq!(output.status.code(), Some(2), "args={args:?}");
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains("security-posture accepts exactly --dry-run"),
+            "args={args:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+}
+
+#[test]
 fn usage_names_every_p7_command() {
     let output = xtask(&[]);
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -116,6 +140,7 @@ fn usage_names_every_p7_command() {
         "  model verify ",
         "  model drift --against",
         "route explain",
+        "security-posture --dry-run",
         "new-op",
         "bootstrap",
     ] {
