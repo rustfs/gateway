@@ -146,10 +146,10 @@ use crate::ext::{
     HostResolver, InputAuthzRequest, Observer, PolicySnapshot, PolicySource, PolicyTimeout, RequestContext, RequestEvent,
     ResolvedHost, ResponseView, RoutedView, ServerExtensions, StageFilter, WireHead, emit_safely,
 };
-use crate::gate::{Authenticated, BodyCeilings, SealedBody};
+use crate::gate::{Authenticated, BodyCeilings, BodyDigestObligation, SealedBody};
 use crate::monomorphic::sealed::Set as StaticSet;
 use crate::operation_mode::{DynamicMode, MonomorphicMode, OperationMode};
-use crate::payload_header::payload_mode;
+use crate::payload_header::{payload_mode, presigned_body_obligation};
 pub use crate::posture::SecurityPosture;
 use crate::render::{
     S3Error, from_auth, from_auth_context, from_auth_with_detail, from_codec, from_denial, from_handler, from_pre_auth, from_sse,
@@ -580,12 +580,22 @@ impl S3Service {
         // Kept out of the `match` so the read at the bottom can consult it: for an anonymous or
         // custom admission there is no payload mode and therefore no framed body to decode.
         let mut framing_mode: Option<PayloadMode> = None;
+        let mut body_digest = BodyDigestObligation::None;
         let (authentication, signature_mismatch) = match self.inner.floor.admit(view, M::floor(&op), now) {
             Ok(Admission::Anonymous(evidence)) => (AuthenticationOutcome::ordinary(Verdict::anonymous(evidence)), None),
             Ok(Admission::Sealed(sealed)) => {
                 let payload = match payload_mode(&headers, sealed.marker().location()) {
                     Ok(payload) => payload,
                     Err(error) => return outcome.refuse(error),
+                };
+                body_digest = match presigned_body_obligation(&payload, sealed.marker().location()) {
+                    Ok(obligation) => obligation,
+                    Err(_) => {
+                        return outcome.refuse_handler(HandlerError::new(
+                            ErrorCode::NOT_IMPLEMENTED,
+                            "streaming payloads are not implemented for presigned requests",
+                        ));
+                    }
                 };
                 framing_mode = Some(payload.clone());
                 #[cfg(feature = "dangerous-replace-signature-verifier")]
@@ -859,7 +869,7 @@ impl S3Service {
             };
 
             let ceilings = BodyCeilings::of(operation, state.config.config().max_buffered_body_bytes());
-            let body = sealed.read(&authenticated, ceilings, ingest).await?;
+            let body = sealed.read(&authenticated, ceilings, ingest, body_digest).await?;
             Ok((
                 ReadForDecode {
                     policy: state.policy,

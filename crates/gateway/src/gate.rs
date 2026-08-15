@@ -60,6 +60,7 @@ use http_body_util::BodyExt;
 use rustfs_gateway_core::{HandlerError, ResponseKind};
 use rustfs_gateway_sig::Verdict;
 use rustfs_gateway_types::ErrorCode;
+use sha2::{Digest, Sha256};
 
 use crate::render::{S3Error, from_handler, from_transport_limit};
 
@@ -111,6 +112,15 @@ pub(crate) struct BodyCeilings {
     pub(crate) declared: Option<u64>,
 }
 
+/// The integrity work that remains after authentication and before decoding.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum BodyDigestObligation {
+    /// No digest was promised for this body.
+    None,
+    /// The body must match this signed SHA-256 value before it may reach a handler.
+    Sha256([u8; 32]),
+}
+
 impl BodyCeilings {
     /// The ceilings in force for one operation of this assembly.
     pub(crate) const fn of(operation: &str, buffered: u64) -> Self {
@@ -157,8 +167,16 @@ where
         _proof: &Authenticated<'_>,
         ceilings: BodyCeilings,
         ingest: Option<crate::chunked::ChunkIngest>,
+        digest: BodyDigestObligation,
     ) -> Result<Bytes, S3Error> {
+        let mut sha256 = match digest {
+            BodyDigestObligation::None => None,
+            BodyDigestObligation::Sha256(_) => Some(Sha256::new()),
+        };
         let Some(body) = self.body else {
+            if !body_digest_matches(digest, sha256) {
+                return Err(content_sha256_mismatch());
+            }
             return Ok(Bytes::new());
         };
         if let Some(cap) = ceilings.declared
@@ -175,7 +193,7 @@ where
         let mut seen: u64 = 0;
         while let Some(frame) = body.frame().await {
             let frame = frame.map_err(|_| incomplete())?;
-            let Ok(data) = frame.into_data() else {
+            let Ok(mut data) = frame.into_data() else {
                 // A trailer frame carries no payload. This assembly does not verify trailers, so
                 // it neither counts nor keeps one; the framing layer is where a trailer is judged.
                 continue;
@@ -192,7 +210,21 @@ where
             if seen > ceilings.buffered {
                 return Err(past_buffered_ceiling());
             }
-            collected.put(data);
+            match sha256.as_mut() {
+                Some(hasher) => {
+                    while data.has_remaining() {
+                        let chunk = data.chunk();
+                        let length = chunk.len();
+                        hasher.update(chunk);
+                        collected.put_slice(chunk);
+                        data.advance(length);
+                    }
+                }
+                None => collected.put(data),
+            }
+        }
+        if !body_digest_matches(digest, sha256) {
+            return Err(content_sha256_mismatch());
         }
         let wire_bytes = collected.freeze();
         // The decode runs here and nowhere earlier. Both ceilings above have already been applied
@@ -204,6 +236,25 @@ where
             None => Ok(wire_bytes),
         }
     }
+}
+
+fn body_digest_matches(digest: BodyDigestObligation, sha256: Option<Sha256>) -> bool {
+    if let (BodyDigestObligation::Sha256(expected), Some(hasher)) = (digest, sha256) {
+        let actual: [u8; 32] = hasher.finalize().into();
+        return actual == expected;
+    }
+    true
+}
+
+fn content_sha256_mismatch() -> S3Error {
+    from_handler(
+        HandlerError::new(
+            ErrorCode::X_AMZ_CONTENT_SHA256_MISMATCH,
+            "the request body does not match x-amz-content-sha256",
+        ),
+        ResponseKind::Other,
+        crate::close::ConnectionIntent::MayKeepAlive,
+    )
 }
 
 /// How large a well-formed body for this operation can be, when the operation bounds one.
@@ -323,7 +374,7 @@ mod tests {
             declared: None,
         };
         let error = SealedBody::seal(Some(body), Some(1 << 30))
-            .read(&proof, ceilings, None)
+            .read(&proof, ceilings, None, BodyDigestObligation::None)
             .await
             .expect_err("over the ceiling");
         assert_eq!(error.status(), StatusCode::PAYLOAD_TOO_LARGE);
@@ -342,7 +393,7 @@ mod tests {
             declared: None,
         };
         let error = SealedBody::seal(Some(body), None)
-            .read(&proof, ceilings, None)
+            .read(&proof, ceilings, None, BodyDigestObligation::None)
             .await
             .expect_err("over the ceiling");
         assert_eq!(error.code(), Some(&ErrorCode::ENTITY_TOO_LARGE));
@@ -362,7 +413,7 @@ mod tests {
             declared: Some(128),
         };
         let error = SealedBody::seal(Some(body), None)
-            .read(&proof, ceilings, None)
+            .read(&proof, ceilings, None, BodyDigestObligation::None)
             .await
             .expect_err("past the operation's cap");
         assert_eq!(error.code(), Some(&ErrorCode::INVALID_REQUEST));
@@ -383,7 +434,7 @@ mod tests {
             declared: Some(128),
         };
         let error = SealedBody::seal(Some(body), Some(4096))
-            .read(&proof, ceilings, None)
+            .read(&proof, ceilings, None, BodyDigestObligation::None)
             .await
             .expect_err("past the operation's cap");
         assert_eq!(error.code(), Some(&ErrorCode::INVALID_REQUEST));
@@ -395,7 +446,13 @@ mod tests {
     async fn an_absent_body_reads_as_empty() {
         let proof = Authenticated::granted_for_test();
         let sealed: SealedBody<crate::probe::ObservedBody> = SealedBody::seal(None, None);
-        assert!(sealed.read(&proof, roomy(), None).await.expect("no body").is_empty());
+        assert!(
+            sealed
+                .read(&proof, roomy(), None, BodyDigestObligation::None)
+                .await
+                .expect("no body")
+                .is_empty()
+        );
     }
 
     /// Positive — a body inside both ceilings arrives whole, in frame order.
@@ -404,7 +461,7 @@ mod tests {
         let proof = Authenticated::granted_for_test();
         let (body, read) = crate::probe::ObservedBody::new([Bytes::from_static(b"first-"), Bytes::from_static(b"second")]);
         let bytes = SealedBody::seal(Some(body), Some(12))
-            .read(&proof, roomy(), None)
+            .read(&proof, roomy(), None, BodyDigestObligation::None)
             .await
             .expect("inside every ceiling");
         assert_eq!(bytes, Bytes::from_static(b"first-second"));

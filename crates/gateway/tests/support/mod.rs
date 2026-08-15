@@ -38,6 +38,7 @@ use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
 use bytes::Bytes;
 use rustfs_gateway::dto::{Bucket, ListBuckets, ListBucketsOutput};
+use rustfs_gateway::sig::PayloadMode;
 use rustfs_gateway::{
     AuthRequirement, BoxFuture, BucketName, CodecError, Credentials, ETag, EncodedResponse, Governor, GovernorRequest, Handler,
     HandlerError, HandlerErrorContext, HandlerResult, Lease, MetaView, MissingObject, Observer, Operation, OperationCodec,
@@ -68,7 +69,7 @@ pub static PING_SPEC: OperationSpec = OperationSpec::builder("example:Ping", 200
     .build();
 
 pub static PING_FLOOR: OperationFloor =
-    OperationFloor::custom("example:Ping", SigService::S3).allow_anonymous_after_listing_in_the_posture_report();
+    OperationFloor::builtin_presigned("example:Ping", SigService::S3).allow_anonymous_after_listing_in_the_posture_report();
 
 /// `POST /`, which no AWS operation claims.
 pub static PING_PREDICATES: &[Predicate] = &[Predicate::Method(http::Method::POST), Predicate::Target(TargetKind::Service)];
@@ -738,6 +739,43 @@ pub fn signed_with(method: http::Method, target: &str, extra: &[(&str, &str)]) -
 #[must_use]
 pub fn signed(method: http::Method, target: &str) -> http::Request<Bytes> {
     signed_with(method, target, &[])
+}
+
+/// One correctly presigned request whose payload declaration is chosen by the caller.
+#[must_use]
+pub fn presigned_with_body(body: Bytes, payload: PayloadMode) -> http::Request<Bytes> {
+    use rustfs_gateway::sig::{AmzDate, SigService, SigV4Signer, SigningCredentials, SigningRequest, SigningScope};
+
+    let mut map = http::HeaderMap::new();
+    map.insert(http::header::HOST, http::HeaderValue::from_static("s3.example.com"));
+    if !matches!(payload, PayloadMode::Empty | PayloadMode::Unsigned) {
+        map.insert(
+            http::HeaderName::from_static("x-amz-content-sha256"),
+            http::HeaderValue::from_str(payload.canonical_payload_token().as_str()).expect("a payload declaration"),
+        );
+    }
+
+    let host = rustfs_gateway_http::RawHost::from_host_header(b"s3.example.com").expect("an acceptable host");
+    let credentials = SigningCredentials::new("AKIDEXAMPLE", b"secret").expect("valid credentials");
+    let stamp = AmzDate::parse(SIGNED_AT_STAMP).expect("a SigV4 stamp");
+    let scope = SigningScope::new(stamp.day(), "us-east-1", SigService::S3).expect("a well-formed scope");
+    let mut signer = SigV4Signer::new(credentials, scope);
+    let framed = payload.is_framed();
+    let signing = SigningRequest::new(&http::Method::POST, "/", "", &map, &host, payload, stamp);
+    let signing = if framed {
+        signing.with_decoded_content_length(body.len() as u64)
+    } else {
+        signing
+    };
+    let signed = signer.presign(&signing, 900).expect("a signable request");
+
+    let mut builder = http::Request::builder()
+        .method(http::Method::POST)
+        .uri(format!("/?{}", signed.query()));
+    for (name, value) in signed.headers() {
+        builder = builder.header(name, value);
+    }
+    builder.body(body).expect("a valid request")
 }
 
 /// A builder whose authorizer denies everything, for the assertions about what runs after it.
