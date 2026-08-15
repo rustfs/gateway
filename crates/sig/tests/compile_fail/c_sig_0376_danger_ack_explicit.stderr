@@ -1,0 +1,28 @@
+error[E0599]: no associated function or constant named `default` found for struct `DangerAck` in the current scope
+  --> tests/compile_fail/c_sig_0376_danger_ack_explicit.rs:24:24
+   |
+24 |     let _ = DangerAck::default();
+   |                        ^^^^^^^ associated function or constant not found in `DangerAck`
+   |
+note: if you're trying to build a new `DangerAck`, consider using `DangerAck::i_understand_this_disables_aws_sigv4` which returns `DangerAck`
+  --> src/verifier.rs
+   |
+   |     pub const fn i_understand_this_disables_aws_sigv4() -> Self {
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[E0423]: cannot initialize a tuple struct which contains private fields
+  --> tests/compile_fail/c_sig_0376_danger_ack_explicit.rs:25:13
+   |
+25 |     let _ = DangerAck(());
+   |             ^^^^^^^^^
+   |
+note: constructor is not visible here due to private fields
+  --> src/verifier.rs
+   |
+   | pub struct DangerAck(());
+   |                      ^^ private field
+help: you might have meant to use the `i_understand_this_disables_aws_sigv4` associated function
+   |
+25 -     let _ = DangerAck(());
+25 +     let _ = DangerAck::i_understand_this_disables_aws_sigv4();
+   |

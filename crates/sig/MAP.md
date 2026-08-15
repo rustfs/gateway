@@ -5,14 +5,25 @@ Agent entry point for SigV2/SigV4 parsing, canonicalization and verification.
 | File | Responsibility | Read it when |
 |---|---|---|
 | `src/lib.rs` | Public signature state machine and generated policy wiring. | Start here for an authentication task or a missing signature-policy consumer. |
-| `src/auth.rs` | Authorization header/query parsing. | Credentials or signed fields parse wrongly. |
 | `src/canonical.rs` | Canonical request construction. | A signature differs despite the same request. |
-| `src/credential.rs` | Credential scope parsing. | Date/region/service scope is wrong. |
-| `src/payload.rs` | Authenticated payload-mode selection. | HTTP framing receives the wrong mode. |
-| `src/presign.rs` | Presigned request constraints. | Query authentication or expiry fails. |
+| `src/clock.rs` | Single request-time snapshot and skew policy. | Header, query, and POST-policy paths disagree about time. |
+| `src/codec.rs` | Authorization wire parsing and rendering helpers. | Header authentication syntax is decoded incorrectly. |
+| `src/derive.rs` | Verified scope and signing-key derivation. | An unchecked credential scope reaches HMAC derivation. |
+| `src/floor.rs` | H1-H6 unconditional admission checks. | A verifier or authentication scheme appears able to bypass the security floor. |
+| `src/mode.rs` | Authenticated payload-mode selection. | HTTP framing receives the wrong mode. |
+| `src/operation.rs` | Per-operation authentication-scheme policy. | Presigned or anonymous access reaches the wrong operation. |
+| `src/parse.rs` | Credential and authorization parsing. | Date, region, service, or credential fields parse incorrectly. |
+| `src/query.rs` | Presigned-query constraints and duplicate detection. | Query authentication, expiry, or duplicate handling fails. |
+| `src/scheme.rs` | Closed authentication-scheme dimensions. | Header, query, POST, or SigV2 dispatch changes. |
+| `src/scope.rs` | H5 scope cross-checks. | Credential date, region, service, or terminator validation changes. |
+| `src/secret.rs` | Secret byte ownership, redaction, and constant-time boundaries. | Credential material leaks or becomes comparable. |
 | `src/signature.rs` | Secret-bearing signature types and constant-time comparison. | Verification or redaction changes. |
 | `src/signer.rs` | Test/client request signing. | Conformance requests are signed wrongly. |
-| `src/time.rs` | Signing-time parsing and skew. | Expiry or skew decisions are wrong. |
-| `src/v2.rs` | SigV2 compatibility path. | A SigV2 request fails. |
+| `src/signed_headers.rs` | Signed-header parsing and canonical selection. | Header coverage differs between signer and verifier. |
+| `src/timing.rs` | Constant-time comparison helpers. | Signature comparison timing changes. |
+| `src/verdict.rs` | Proof-carrying authentication outcomes and errors. | Authenticated or anonymous outcomes become forgeable. |
+| `src/verifier.rs` | Sealed AWS markers, custom verifier boundary, replay hook, and danger acknowledgement. | A custom or replacement verifier crosses its permitted boundary. |
 | `tests/integration.rs` | Single Cargo target registering all integration-test modules. | Integration tests duplicate compile or disappear. |
-| `tests/*.rs` | Public verification and negative matrices. | Change any signature contract. |
+| `tests/compile_fail.rs` | Trybuild harness for compile-time proof boundaries. | A private witness or verified type becomes constructible. |
+| `tests/security_floor*.rs` | P2-04 H1-H7 runtime evidence. | Security-floor admission or scheme policy changes. |
+| `tests/*.rs` | Remaining public verification and negative matrices. | Change any signature contract. |

@@ -6985,6 +6985,125 @@ PYEOF
 expect_fail check_sig_case_coverage.sh \
     'the H7 evidence no longer invoking the replay hook' mut_sig_p2_04_replay_store_call_removed
 
+mut_sig_p2_04_compile_fail_mapping_deleted() {
+    sed -i.bak '/^c-sig-0377|/d' scripts/sig-case-coverage-p2-04-compile-fail.txt
+}
+expect_fail check_sig_case_coverage.sh \
+    'a P2-04 compile-fail mapping being deleted' mut_sig_p2_04_compile_fail_mapping_deleted
+
+mut_sig_p2_04_compile_fail_polarity_changed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("scripts/sig-case-coverage-p2-04-compile-fail.txt")
+text = path.read_text()
+old = "c-sig-0345|negative|H5|"
+if text.count(old) != 1:
+    raise SystemExit("missing P2-04 compile-fail polarity mutation subject")
+path.write_text(text.replace(old, "c-sig-0345|positive|H5|", 1))
+PYEOF
+}
+expect_fail check_sig_case_coverage.sh \
+    'a P2-04 compile-fail case becoming positive' mut_sig_p2_04_compile_fail_polarity_changed
+
+mut_sig_p2_04_compile_fail_feature_changed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("scripts/sig-case-coverage-p2-04-compile-fail.txt")
+text = path.read_text()
+old = "|dangerous-replace-signature-verifier\n"
+if text.count(old) != 1:
+    raise SystemExit("missing P2-04 compile-fail feature mutation subject")
+path.write_text(text.replace(old, "|default\n", 1))
+PYEOF
+}
+expect_fail check_sig_case_coverage.sh \
+    'c-sig-0376 losing its dangerous feature boundary' mut_sig_p2_04_compile_fail_feature_changed
+
+mut_sig_p2_04_compile_fail_fixture_removed() {
+    rm crates/sig/tests/compile_fail/c_sig_0354_anonymous_ack_private.rs
+}
+expect_fail check_sig_case_coverage.sh \
+    'a P2-04 compile-fail fixture being removed' mut_sig_p2_04_compile_fail_fixture_removed
+
+mut_sig_p2_04_compile_fail_evidence_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/sig/tests/compile_fail/c_sig_0354_anonymous_ack_private.rs")
+text = path.read_text()
+old = "    let _ = AnonymousAck(());"
+if text.count(old) != 1:
+    raise SystemExit("missing anonymous-ack compile-fail mutation subject")
+path.write_text(text.replace(old, "    let _ = ();", 1))
+PYEOF
+}
+expect_fail check_sig_case_coverage.sh \
+    'c-sig-0354 losing its active private-constructor evidence' mut_sig_p2_04_compile_fail_evidence_removed
+
+mut_sig_p2_04_compile_fail_golden_removed() {
+    rm crates/sig/tests/compile_fail/c_sig_0345_verified_scope_private.stderr
+}
+expect_fail check_sig_case_coverage.sh \
+    'a P2-04 compile-fail golden being removed' mut_sig_p2_04_compile_fail_golden_removed
+
+mut_sig_p2_04_compile_fail_diagnostic_changed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/sig/tests/compile_fail/c_sig_0377_verifier_returns_verdict.stderr")
+text = path.read_text()
+old = "method `verify` has an incompatible type for trait"
+if text.count(old) != 1:
+    raise SystemExit("missing verifier diagnostic mutation subject")
+path.write_text(text.replace(old, "method `verify` was accepted", 1))
+PYEOF
+}
+expect_fail check_sig_case_coverage.sh \
+    'c-sig-0377 losing its case-specific rustc diagnostic' mut_sig_p2_04_compile_fail_diagnostic_changed
+
+mut_sig_p2_04_compile_fail_harness_call_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/sig/tests/compile_fail.rs")
+text = path.read_text()
+old = 'cases.compile_fail("tests/compile_fail/c_sig_034[56]_*.rs")'
+if text.count(old) != 1:
+    raise SystemExit("missing P2-04 compile-fail harness mutation subject")
+path.write_text(text.replace(old, 'cases.compile_fail("tests/compile_fail/never_*.rs")', 1))
+PYEOF
+}
+expect_fail check_sig_case_coverage.sh \
+    'the P2-04 default compile-fail harness losing c-sig-0345 and c-sig-0346' \
+    mut_sig_p2_04_compile_fail_harness_call_removed
+
+mut_sig_p2_04_danger_ack_feature_gate_changed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/sig/tests/compile_fail.rs")
+text = path.read_text()
+old = '#[cfg(feature = "dangerous-replace-signature-verifier")]'
+if text.count(old) != 1:
+    raise SystemExit("missing danger-ack feature-gate mutation subject")
+new = '// #[cfg(feature = "dangerous-replace-signature-verifier")]\n#[cfg(feature = "another-feature")]'
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_sig_case_coverage.sh \
+    'the DangerAck compile-fail harness moving behind another feature beside a comment decoy' \
+    mut_sig_p2_04_danger_ack_feature_gate_changed
+
+mut_sig_p2_04_danger_ack_harness_call_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/sig/tests/compile_fail.rs")
+text = path.read_text()
+old = 'cases.compile_fail("tests/compile_fail/c_sig_0376_*.rs")'
+if text.count(old) != 1:
+    raise SystemExit("missing danger-ack harness mutation subject")
+path.write_text(text.replace(old, 'cases.compile_fail("tests/compile_fail/never_*.rs")', 1))
+PYEOF
+}
+expect_fail check_sig_case_coverage.sh \
+    'the dangerous feature harness losing c-sig-0376' mut_sig_p2_04_danger_ack_harness_call_removed
+
 "${SCRIPT_DIR}/test_sig_case_coverage.sh"
 
 # -----------------------------------------------------------------------------

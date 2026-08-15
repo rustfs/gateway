@@ -1,0 +1,11 @@
+error[E0451]: fields `date`, `region` and `service` of struct `VerifiedScope` are private
+  --> tests/compile_fail/c_sig_0345_verified_scope_private.rs:29:9
+   |
+28 |     let _ = VerifiedScope {
+   |             ------------- in this type
+29 |         date: private_field_value(),
+   |         ^^^^ private field
+30 |         region: private_field_value(),
+   |         ^^^^^^ private field
+31 |         service: private_field_value(),
+   |         ^^^^^^^ private field

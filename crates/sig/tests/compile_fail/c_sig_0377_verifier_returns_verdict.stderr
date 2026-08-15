@@ -1,0 +1,13 @@
+error[E0053]: method `verify` has an incompatible type for trait
+  --> tests/compile_fail/c_sig_0377_verifier_returns_verdict.rs:26:59
+   |
+26 |     fn verify(&self, _request: &CustomAuthRequest<'_>) -> Identity {
+   |                                                           ^^^^^^^^ expected `Verdict`, found `Identity`
+   |
+   = note: expected signature `fn(&WrongVerifier, &CustomAuthRequest<'_>) -> Verdict`
+              found signature `fn(&WrongVerifier, &CustomAuthRequest<'_>) -> Identity`
+help: change the output type to match the trait
+   |
+26 -     fn verify(&self, _request: &CustomAuthRequest<'_>) -> Identity {
+26 +     fn verify(&self, _request: &CustomAuthRequest<'_>) -> Verdict {
+   |
