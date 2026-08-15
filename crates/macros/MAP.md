@@ -23,10 +23,10 @@ documented beside every example and proved equivalent by a test.
 
 | # | Rule | Enforced by |
 |---|---|---|
-| 1 | Declarative registration only: no minted type names | `tests::the_expansion_mints_no_public_type_name` — parses the expansion and counts `struct`/`enum`/`type`/`union`/`trait`/`mod` items; the count must be zero |
-| 2 | No rewritten function bodies | `tests::the_expansion_rewrites_no_function_body` — compares every method body token for token before and after, plus `the_generated_handler_only_delegates`, which asserts the body appears exactly once |
+| 1 | Declarative registration only: no minted type names | `scripts/check_macro_governance.sh` runs `tests::the_expansion_mints_no_public_type_name`; the central guard suite mutates the real expansion to prove this test fails |
+| 2 | No rewritten function bodies | `scripts/check_macro_governance.sh` runs the token-for-token body and delegation tests; the central guard suite removes the source impl from the real expansion and proves they fail |
 | 3 | Expansion goldens checked in | `tests/expand/*.expanded.rs`, asserted by `assert_golden`; refresh with `UPDATE_GOLDEN=1 cargo test -p rustfs-gateway-macros` |
-| 4 | A macro-free equivalent exists and is documented | `tests/equivalence.rs::macro_and_manual_registration_are_equivalent` and `the_two_forms_answer_identically`; the hand-written spelling is in `src/lib.rs`'s module docs and in `rustfs-gateway-core`'s |
+| 4 | A macro-free equivalent exists and is documented | `scripts/check_macro_governance.sh` locks the adjacent public docs and runs `tests/equivalence.rs`; both have direct mutations in the central guard suite |
 | 5 | Errors point at the method name, with suggestions | `tests::an_unknown_operation_is_reported_on_the_method_name` (line and column of the identifier), `the_error_is_not_reported_on_the_impl_block`, `a_signature_for_another_operation_is_reported_on_the_request_type` |
 
 ## Shape decisions worth not re-litigating

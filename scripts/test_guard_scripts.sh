@@ -735,7 +735,11 @@ expect_fail_and_missing_cargo() {
 # -----------------------------------------------------------------------------
 if [[ "$BUILD_GUARDS_ONLY" == 1 ]]; then
 printf 'Build-backed controls\n'
-for guard in check_case_keys_honoured.sh check_monomorphic_dispatch.sh check_verify_map_generated.sh; do
+for guard in \
+    check_case_keys_honoured.sh \
+    check_macro_governance.sh \
+    check_monomorphic_dispatch.sh \
+    check_verify_map_generated.sh; do
     cases=$((cases + 1))
     if "${SCRIPT_DIR}/${guard}" >/dev/null 2>&1; then
         pass_msg "$guard"
@@ -838,6 +842,90 @@ expect_fail check_verify_map_generated.sh \
     'the code generator no longer emitting the macro operation-name table' \
     mut_build_macro_operation_names_emission_removed \
     'required codegen artefact was not emitted'
+mut_build_macro_mints_public_type() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/macros/src/expand.rs")
+text = path.read_text()
+old = "    quote! {\n        #block\n"
+if text.count(old) != 1:
+    raise SystemExit("macro public-type mutation anchor is not unique")
+path.write_text(text.replace(old, old + "        pub struct GeneratedRegistry;\n", 1))
+PYEOF
+}
+expect_fail check_macro_governance.sh \
+    'the handler macro minting a public type name' \
+    mut_build_macro_mints_public_type \
+    'tests::the_expansion_mints_no_public_type_name'
+mut_build_macro_rewrites_body() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/macros/src/expand.rs")
+text = path.read_text()
+old = "    quote! {\n        #block\n"
+if text.count(old) != 1:
+    raise SystemExit("macro body-rewrite mutation anchor is not unique")
+path.write_text(text.replace(old, "    quote! {\n", 1))
+PYEOF
+}
+expect_fail check_macro_governance.sh \
+    'the handler macro dropping the source impl and its bodies' \
+    mut_build_macro_rewrites_body \
+    'tests::the_expansion_rewrites_no_function_body'
+mut_build_macro_docs_pair_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/macros/src/lib.rs")
+text = path.read_text()
+old = "//! # The hand-written equivalent, which always works"
+if text.count(old) != 1:
+    raise SystemExit("macro documentation-pair mutation anchor is not unique")
+path.write_text(text.replace(old, "//! # Registration example", 1))
+PYEOF
+}
+expect_fail check_macro_governance.sh \
+    'the public macro docs losing the adjacent macro-free form' \
+    mut_build_macro_docs_pair_removed \
+    'macro-free documentation pair is missing'
+mut_build_macro_manual_equivalence_broken() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/macros/tests/equivalence.rs")
+text = path.read_text()
+old = '''\
+    async fn list_objects_v2(&self, request: Req<ListObjectsV2>) -> HandlerResult<ListObjectsV2> {
+        let _ = request.input();
+        Ok(Resp::new(ListObjectsV2Output {
+            key_count: 0,
+            ..ListObjectsV2Output::default()
+        }))
+    }
+
+'''
+if text.count(old) != 2:
+    raise SystemExit("macro/manual equivalence mutation anchors are not exact")
+path.write_text(text.replace(old, "", 1))
+PYEOF
+}
+expect_fail check_macro_governance.sh \
+    'the macro fixture dropping a registration kept by the hand-written form' \
+    mut_build_macro_manual_equivalence_broken \
+    'macro_and_manual_registration_are_equivalent'
+mut_build_macro_link_magic_added() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/macros/Cargo.toml")
+text = path.read_text()
+old = "[dependencies]\n"
+if text.count(old) != 1:
+    raise SystemExit("macro dependency mutation anchor is not unique")
+path.write_text(text.replace(old, old + 'inventory = "0.3"\n', 1))
+PYEOF
+}
+expect_fail check_macro_governance.sh \
+    'the macro crate adding link-time registration magic' \
+    mut_build_macro_link_magic_added \
+    'crates/macros/Cargo.toml'
 fi
 
 if [[ "$QUIRK_LEDGER_ONLY" == 0 && "$DTO_COMPILER_ONLY" == 0 && "$BUILD_GUARDS_ONLY" == 0 ]]; then
@@ -10516,6 +10604,23 @@ mut_ci_build_guard_failure_swallowed() {
 }
 expect_fail check_ci_test_split.sh \
     'the build-backed guard job swallowing a failure or timeout' mut_ci_build_guard_failure_swallowed
+
+mut_ci_build_guard_macro_control_dropped() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("scripts/test_guard_scripts.sh")
+text = path.read_text()
+old = "    check_macro_governance.sh \\\n"
+if text.count(old) != 1:
+    raise SystemExit("macro governance build-control mutation anchor is not unique")
+path.write_text(text.replace(old, "", 1))
+PYEOF
+}
+expect_fail check_ci_test_split.sh \
+    'the build-backed job omitting the macro governance control' \
+    mut_ci_build_guard_macro_control_dropped \
+    'build-guard-self-test omits a build-backed control or mutation'
 
 mut_ci_target_serialized_in_guard() {
     printf '%s\n' 'if "${SCRIPT_DIR}/test_test_target_consolidation.sh"; then' \
