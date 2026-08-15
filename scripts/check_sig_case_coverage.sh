@@ -323,18 +323,59 @@ if kind == "compile":
     body_start, body_end = function_body(main)
     if not direct_occurrence(body_start, body_end, evidence):
         raise SystemExit(f"{path}: mapped compile-fail evidence is not active in fn main()")
-elif kind == "runtime":
+elif kind in ("runtime", "feature_runtime"):
     if not evidence.startswith("fn "):
         raise SystemExit(f"{path}: runtime evidence must name a function")
     function = evidence.removeprefix("fn ")
     item = top_level_function(function)
     attributes = outer_attributes(item.start()) if item is not None else []
-    if len(attributes) != 1 or not re.fullmatch(r"#\s*\[\s*(?:tokio::)?test\s*\]", attributes[0]):
+    ordinary = len(attributes) == 1 and re.fullmatch(r"#\s*\[\s*(?:tokio::)?test\s*\]", attributes[0])
+    feature_gated = False
+    if kind == "feature_runtime" and item is not None:
+        raw_prefix = source[max(0, item.start() - 200) : item.start()]
+        feature_gated = (
+            len(attributes) == 2
+            and re.search(
+                r'#\[cfg\(feature = "dangerous-replace-signature-verifier"\)\]\s*'
+                r'#\[tokio::test\]\s*$',
+                raw_prefix,
+            )
+            is not None
+        )
+    if not (ordinary if kind == "runtime" else feature_gated):
         raise SystemExit(f"{path}: mapped function is not a real #[test] item")
     if required_call:
         body_start, body_end = function_body(item)
         if not direct_occurrence(body_start, body_end, required_call):
             raise SystemExit(f"{path}: mapped runtime evidence is not active in the test body")
+elif kind == "source_order":
+    if code.count(evidence) != 1 or code.count(required_call) != 1:
+        raise SystemExit(f"{path}: ordered production evidence is missing or ambiguous")
+    if code.index(evidence) >= code.index(required_call):
+        raise SystemExit(f"{path}: ordered production evidence is reversed")
+elif kind == "source_literal_after":
+    if code.count(evidence) != 1:
+        raise SystemExit(f"{path}: production branch evidence is missing or ambiguous")
+    position = code.index(evidence)
+    branch_end = code.find("}", position)
+    call_position = code.find("f.write_str", position, branch_end)
+    if call_position == -1 or not source.startswith(required_call, call_position):
+        raise SystemExit(f"{path}: production branch lost its exact literal")
+elif kind == "warning_branch":
+    if code.count(evidence) != 1:
+        raise SystemExit(f"{path}: warning branch evidence is missing or ambiguous")
+    branch_start = code.index(evidence)
+    branch_end = code.find("}", branch_start)
+    position = code.find("eprintln!", branch_start, branch_end)
+    statement_end = code.find(";", position, branch_end) if position != -1 else -1
+    statement = source[position : statement_end + 1] if statement_end != -1 else ""
+    exact_warning = re.fullmatch(
+        rf"eprintln!\(\s*{re.escape(required_call)}\s*\);",
+        statement,
+        re.DOTALL,
+    )
+    if position == -1 or exact_warning is None:
+        raise SystemExit(f"{path}: warning branch lost its exact active diagnostic")
 elif kind in ("harness", "feature_harness"):
     item = top_level_function(evidence)
     attributes = outer_attributes(item.start()) if item is not None else []
@@ -615,8 +656,8 @@ done
     exit 1
 }
 
-[[ "${#p2_04_runtime_cases[@]}" -eq 45 ]] || {
-    printf 'check_sig_case_coverage: expected 45 P2-04 runtime mappings, got %s\n' \
+[[ "${#p2_04_runtime_cases[@]}" -eq 46 ]] || {
+    printf 'check_sig_case_coverage: expected 46 P2-04 runtime mappings, got %s\n' \
         "${#p2_04_runtime_cases[@]}" >&2
     exit 1
 }
@@ -711,7 +752,7 @@ p2_04_expected_ids=(
     c-sig-0340 c-sig-0341 c-sig-0342 c-sig-0343 c-sig-0344
     c-sig-0350 c-sig-0351 c-sig-0352 c-sig-0353
     c-sig-0360 c-sig-0361 c-sig-0362 c-sig-0363 c-sig-0364 c-sig-0365 c-sig-0366
-    c-sig-0370 c-sig-0371 c-sig-0372 c-sig-0373 c-sig-0374 c-sig-0378 h7-replay-hook
+    c-sig-0370 c-sig-0371 c-sig-0372 c-sig-0373 c-sig-0374 c-sig-0375 c-sig-0378 h7-replay-hook
 )
 positive=0
 negative=0
@@ -752,15 +793,17 @@ for index in "${!p2_04_runtime_cases[@]}"; do
         exit 1
     }
     p2_04_evidence+=("${relative}|${evidence}")
-    validate_rust_evidence "$file" runtime "$evidence" "${required_call:-}" \
+    evidence_kind=runtime
+    [[ "$id" == c-sig-0375 ]] && evidence_kind=feature_runtime
+    validate_rust_evidence "$file" "$evidence_kind" "$evidence" "${required_call:-}" \
         "check_sig_case_coverage: ${id} is not a named #[test] item in ${relative}"
 done
-[[ "$positive" -eq 9 && "$negative" -eq 36 && "$negative" -ge "$positive" ]] || {
-    printf 'check_sig_case_coverage: expected 9 positive and 36 negative P2-04 runtime cases, got %s/%s\n' \
+[[ "$positive" -eq 9 && "$negative" -eq 37 && "$negative" -ge "$positive" ]] || {
+    printf 'check_sig_case_coverage: expected 9 positive and 37 negative P2-04 runtime cases, got %s/%s\n' \
         "$positive" "$negative" >&2
     exit 1
 }
-[[ "$(printf '%s\n' "${p2_04_evidence[@]}" | sort -u | wc -l | tr -d ' ')" -eq 45 ]] || {
+[[ "$(printf '%s\n' "${p2_04_evidence[@]}" | sort -u | wc -l | tr -d ' ')" -eq 46 ]] || {
     printf 'check_sig_case_coverage: P2-04 runtime cases must use distinct named tests\n' >&2
     exit 1
 }
@@ -893,6 +936,57 @@ validate_rust_evidence "$harness" feature_harness \
     p2_04_danger_ack_compile_time_boundary_is_not_openable \
     'cases.compile_fail("tests/compile_fail/c_sig_0376_*.rs")' \
     'check_sig_case_coverage: dangerous feature harness does not execute c-sig-0376'
+
+gateway_builder="${ROOT}/crates/gateway/src/builder.rs"
+gateway_service="${ROOT}/crates/gateway/src/service.rs"
+validate_rust_evidence "$gateway_builder" source_order \
+    'pub fn with_dangerously_replaced_signature_verifier(' \
+    '_acknowledgement: DangerAck,' \
+    'check_sig_case_coverage: dangerous replacement builder lost its explicit acknowledgement'
+validate_rust_evidence "$gateway_builder" source_order \
+    '_acknowledgement: DangerAck,' \
+    'self.dangerously_replaced_signature_verifier = Some(Arc::new(verifier));' \
+    'check_sig_case_coverage: dangerous replacement builder wiring is incomplete'
+validate_rust_evidence "$gateway_service" source_order \
+    'self.inner.floor.admit(view, M::floor(&op), now)' \
+    'verifier.verify_sealed(&sealed)' \
+    'check_sig_case_coverage: the replacement is not ordered after the security floor'
+validate_rust_evidence "$gateway_builder" source_order \
+    'let dangerously_replaced_signature_verifier = self.dangerously_replaced_signature_verifier.is_some();' \
+    'SecurityPosture::new(' \
+    'check_sig_case_coverage: dangerous replacement posture is not derived at assembly'
+validate_rust_evidence "$gateway_builder" source_order \
+    'let custom_signature_verifier = self.custom_signature_verifier.is_some();' \
+    'SecurityPosture::new(' \
+    'check_sig_case_coverage: custom verifier posture is not derived at assembly'
+validate_rust_evidence "$gateway_builder" source_order \
+    'let dangerously_replaced_signature_verifier = self.dangerously_replaced_signature_verifier.is_some();' \
+    'if dangerously_replaced_signature_verifier {' \
+    'check_sig_case_coverage: dangerous replacement warning is not reached at assembly'
+validate_rust_evidence "$gateway_builder" warning_branch \
+    'if dangerously_replaced_signature_verifier {' \
+    '"WARN: the built-in AWS signature verifier is dangerously replaced; the H1..H7 security floor remains enforced"' \
+    'check_sig_case_coverage: dangerous replacement lost its exact start-up warning'
+validate_rust_evidence "$gateway_builder" source_literal_after \
+    'if self.dangerously_replaced_signature_verifier {' \
+    'f.write_str("; AWS signature verifier: dangerously replaced")?;' \
+    'check_sig_case_coverage: dangerous replacement posture display drifted'
+validate_rust_evidence "$gateway_builder" source_literal_after \
+    'if self.custom_signature_verifier {' \
+    'f.write_str("; custom signature verifier: installed")' \
+    'check_sig_case_coverage: custom verifier posture display drifted'
+
+python3 - "$ROOT/crates/gateway/Cargo.toml" <<'PYEOF'
+import sys
+import tomllib
+from pathlib import Path
+
+manifest = tomllib.loads(Path(sys.argv[1]).read_text())
+expected = ["rustfs-gateway-sig/dangerous-replace-signature-verifier"]
+actual = manifest.get("features", {}).get("dangerous-replace-signature-verifier")
+if actual != expected:
+    raise SystemExit("check_sig_case_coverage: gateway dangerous replacement feature forwarding drifted")
+PYEOF
 [[ -f "$core_harness" ]] || {
     printf 'check_sig_case_coverage: core signature compile-fail harness is missing\n' >&2
     exit 1
@@ -1008,5 +1102,5 @@ done
 
 run_evidence_validations
 
-printf 'OK: all 146 P2 signature cases map to executable evidence '
-printf '(P2-01: 8/17; P2-02: 6/22; P2-03: 14/29; P2-04: 9/41)\n'
+printf 'OK: all 147 P2 signature cases map to executable evidence '
+printf '(P2-01: 8/17; P2-02: 6/22; P2-03: 14/29; P2-04: 9/42)\n'

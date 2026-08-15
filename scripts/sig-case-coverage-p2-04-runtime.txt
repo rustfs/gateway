@@ -41,5 +41,6 @@ c-sig-0371|negative|H4|crates/sig/tests/security_floor_schemes.rs|fn c_sig_0371_
 c-sig-0372|negative|H4|crates/sig/tests/security_floor_schemes.rs|fn c_sig_0372_a_sigv2_header_never_reaches_a_custom_verifier
 c-sig-0373|negative|H4|crates/sig/tests/security_floor_schemes.rs|fn c_sig_0373_a_custom_scheme_cannot_claim_a_reserved_or_taken_prefix
 c-sig-0374|negative|H3|crates/sig/tests/security_floor_schemes.rs|fn c_sig_0374_an_anonymous_operation_still_runs_the_floor
+c-sig-0375|negative|BOUNDARY|crates/gateway/tests/custom_signature_verifier.rs|fn c_sig_0375_the_floor_rejects_before_the_replacement_runs|with_dangerously_replaced_signature_verifier
 c-sig-0378|negative|BOUNDARY|crates/gateway/tests/custom_signature_verifier.rs|fn c_sig_0378_no_unauthenticated_security_posture_endpoint_exists|generated_entries()
 h7-replay-hook|positive|H7|crates/sig/tests/security_floor_schemes.rs|fn h7_replay_nonce_hook_is_explicit_and_opaque|store.record_first_use
