@@ -115,7 +115,7 @@ fixed now so that the same check does not get written twice under two names.
 | `check_baseline_ratchet.sh` | The conformance baseline failure set only shrinks | P8-01 |
 | `check_runner_raw_bytes.sh` | Case requests retain a raw TCP byte path and acquire no normalizing client dependency | P8-01 |
 | `check_guard_sandbox_archive.sh` | Guard sandboxes use a temporary archive file; archive creation and extraction fail closed and clean partial state | P0 |
-| `check_sig_case_coverage.sh` | All 53 P2-01/P2-02 signature cases map to named executable evidence | P2-01, P2-02 |
+| `check_sig_case_coverage.sh` | All 141 P2-01 through P2-04 signature cases map to named executable evidence | P2-01 through P2-04 |
 | `check_test_target_consolidation.sh` | Core, gateway and conformance integration sources each remain one explicit Cargo target, with gateway compile-fail fixtures sharing one trybuild batch | P0-04 |
 | `check_xtask_test_target_consolidation.sh` | All four xtask integration sources remain active and unique in one explicit Cargo target | P0 |
 | `check_sig_test_target_consolidation.sh` | All nine sig integration sources remain active and unique in one explicit Cargo target | P0 |

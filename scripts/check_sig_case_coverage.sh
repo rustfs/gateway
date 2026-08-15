@@ -81,6 +81,20 @@ while IFS= read -r mapping; do
     p2_03_cases+=("$mapping")
 done <"$p2_03_manifest"
 
+p2_04_runtime_cases=()
+p2_04_runtime_manifest="${ROOT}/scripts/sig-case-coverage-p2-04-runtime.txt"
+[[ -f "$p2_04_runtime_manifest" ]] || {
+    printf 'check_sig_case_coverage: P2-04 runtime case manifest is missing\n' >&2
+    exit 1
+}
+while IFS= read -r mapping; do
+    [[ -n "$mapping" ]] || {
+        printf 'check_sig_case_coverage: P2-04 runtime manifest contains a blank row\n' >&2
+        exit 1
+    }
+    p2_04_runtime_cases+=("$mapping")
+done <"$p2_04_runtime_manifest"
+
 [[ "${#cases[@]}" -eq 25 ]] || {
     printf 'check_sig_case_coverage: expected 25 mappings, got %s\n' "${#cases[@]}" >&2
     exit 1
@@ -240,7 +254,7 @@ def outer_attributes(start):
     return attributes
 
 def top_level_function(name):
-    pattern = re.compile(rf"(?m)^[ \t]*fn\s+{re.escape(name)}\s*\(\s*\)[^;{{]*\{{")
+    pattern = re.compile(rf"(?m)^[ \t]*(?:async\s+)?fn\s+{re.escape(name)}\s*\(\s*\)[^;{{]*\{{")
     return next(
         (
             match
@@ -301,8 +315,12 @@ elif kind == "runtime":
     function = evidence.removeprefix("fn ")
     item = top_level_function(function)
     attributes = outer_attributes(item.start()) if item is not None else []
-    if len(attributes) != 1 or not re.fullmatch(r"#\s*\[\s*test\s*\]", attributes[0]):
+    if len(attributes) != 1 or not re.fullmatch(r"#\s*\[\s*(?:tokio::)?test\s*\]", attributes[0]):
         raise SystemExit(f"{path}: mapped function is not a real #[test] item")
+    if required_call:
+        body_start, body_end = function_body(item)
+        if not direct_occurrence(body_start, body_end, required_call):
+            raise SystemExit(f"{path}: mapped runtime evidence is not active in the test body")
 elif kind == "harness":
     item = top_level_function(evidence)
     attributes = outer_attributes(item.start()) if item is not None else []
@@ -565,6 +583,12 @@ done
     printf 'check_sig_case_coverage: expected 43 P2-03 mappings, got %s\n' "${#p2_03_cases[@]}" >&2
     exit 1
 }
+
+[[ "${#p2_04_runtime_cases[@]}" -eq 45 ]] || {
+    printf 'check_sig_case_coverage: expected 45 P2-04 runtime mappings, got %s\n' \
+        "${#p2_04_runtime_cases[@]}" >&2
+    exit 1
+}
 positive=0
 negative=0
 p2_03_compile_fail_paths=()
@@ -641,6 +665,85 @@ done
 }
 [[ "$(printf '%s\n' "${verification_compile_fail_paths[@]}" | sort -u | wc -l | tr -d ' ')" -eq 9 ]] || {
     printf 'check_sig_case_coverage: P2-02 compile-fail cases must use distinct fixtures\n' >&2
+    exit 1
+}
+
+p2_04_expected_ids=(
+    c-sig-0301 c-sig-0302 c-sig-0303 c-sig-0304 c-sig-0305 c-sig-0306 c-sig-0307 c-sig-0308
+    c-sig-0320 c-sig-0321 c-sig-0322 c-sig-0323 c-sig-0324 c-sig-0325 c-sig-0326 c-sig-0327
+    c-sig-0328 c-sig-0329 c-sig-0330 c-sig-0331 c-sig-0332 c-sig-0333
+    c-sig-0340 c-sig-0341 c-sig-0342 c-sig-0343 c-sig-0344
+    c-sig-0350 c-sig-0351 c-sig-0352 c-sig-0353
+    c-sig-0360 c-sig-0361 c-sig-0362 c-sig-0363 c-sig-0364 c-sig-0365 c-sig-0366
+    c-sig-0370 c-sig-0371 c-sig-0372 c-sig-0373 c-sig-0374 c-sig-0378 h7-replay-hook
+)
+positive=0
+negative=0
+p2_04_evidence=()
+p2_04_hard_constraints=()
+for index in "${!p2_04_runtime_cases[@]}"; do
+    IFS='|' read -r id polarity hard_constraint relative evidence required_call <<<"${p2_04_runtime_cases[$index]}"
+    [[ "$id" == "${p2_04_expected_ids[$index]}" ]] || {
+        printf 'check_sig_case_coverage: expected P2-04 %s, found %s\n' \
+            "${p2_04_expected_ids[$index]}" "$id" >&2
+        exit 1
+    }
+    case "$polarity" in
+        positive) positive=$((positive + 1)) ;;
+        negative) negative=$((negative + 1)) ;;
+        *) printf 'check_sig_case_coverage: %s has unknown polarity %s\n' "$id" "$polarity" >&2; exit 1 ;;
+    esac
+    [[ "$hard_constraint" =~ ^H[1-7]$|^BOUNDARY$ ]] || {
+        printf 'check_sig_case_coverage: %s has unknown security-floor constraint %s\n' \
+            "$id" "$hard_constraint" >&2
+        exit 1
+    }
+    p2_04_hard_constraints+=("$hard_constraint")
+    file="${ROOT}/${relative}"
+    [[ -f "$file" ]] || {
+        printf 'check_sig_case_coverage: mapped file is missing: %s\n' "$relative" >&2
+        exit 1
+    }
+    function="${evidence#fn }"
+    if [[ "$id" == h7-replay-hook ]]; then
+        token='h7_replay_'
+    else
+        token="${id//-/_}_"
+    fi
+    [[ "$function" == "$token"* ]] || {
+        printf 'check_sig_case_coverage: %s is bound to the wrong executable test %s\n' \
+            "$id" "$function" >&2
+        exit 1
+    }
+    p2_04_evidence+=("${relative}|${evidence}")
+    validate_rust_evidence "$file" runtime "$evidence" "${required_call:-}" \
+        "check_sig_case_coverage: ${id} is not a named #[test] item in ${relative}"
+done
+[[ "$positive" -eq 9 && "$negative" -eq 36 && "$negative" -ge "$positive" ]] || {
+    printf 'check_sig_case_coverage: expected 9 positive and 36 negative P2-04 runtime cases, got %s/%s\n' \
+        "$positive" "$negative" >&2
+    exit 1
+}
+[[ "$(printf '%s\n' "${p2_04_evidence[@]}" | sort -u | wc -l | tr -d ' ')" -eq 45 ]] || {
+    printf 'check_sig_case_coverage: P2-04 runtime cases must use distinct named tests\n' >&2
+    exit 1
+}
+for hard_constraint in H1 H2 H3 H4 H5 H6 H7; do
+    printf '%s\n' "${p2_04_hard_constraints[@]}" | grep -Fxq "$hard_constraint" || {
+        printf 'check_sig_case_coverage: P2-04 runtime ledger has no %s evidence\n' \
+            "$hard_constraint" >&2
+        exit 1
+    }
+done
+
+grep -Fq 'Presigned URLs are replayable within their validity window.' \
+    "${ROOT}/docs/security-model.md" || {
+    printf 'check_sig_case_coverage: security model lost the H7 replay statement\n' >&2
+    exit 1
+}
+grep -Fq '`ReplayNonceStore` is an opt-in single-use hook' \
+    "${ROOT}/docs/security-model.md" || {
+    printf 'check_sig_case_coverage: security model lost the H7 replay-hook guidance\n' >&2
     exit 1
 }
 
@@ -787,5 +890,5 @@ done
 
 run_evidence_validations
 
-printf 'OK: all 96 P2 signature cases map to executable evidence '
-printf '(P2-01: 8/17; P2-02: 6/22; P2-03: 14/29)\n'
+printf 'OK: all 141 P2 signature cases map to executable evidence '
+printf '(P2-01: 8/17; P2-02: 6/22; P2-03: 14/29; P2-04: 9/36)\n'

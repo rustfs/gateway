@@ -26,17 +26,16 @@ use core::time::Duration;
 
 use http::header::{HeaderMap, HeaderName, HeaderValue};
 use rustfs_gateway_sig::{
-    Admission, AuthError, CredentialPresence, CustomAuthRequest, CustomAuthScheme, CustomSchemeRegistry, OperationFloor,
-    RawQuery, SchemeRegistrationError, SecurityFloor, SigService, SignatureVerifier, Verdict, WireView,
-    detect_aws_credential_marker, detect_credentials, enforce_no_duplicate_sig_params,
+    Admission, AuthError, CredentialPresence, CtBytes, CustomAuthRequest, CustomAuthScheme, CustomSchemeRegistry, OperationFloor,
+    RawQuery, ReplayDecision, ReplayNonceStore, SchemeRegistrationError, SecurityFloor, SigService, Signature, SignatureVerifier,
+    Verdict, WireView, detect_aws_credential_marker, detect_credentials, enforce_no_duplicate_sig_params,
 };
 
 use crate::security_floor_fixtures::*;
 
-/// Positive — c-sig-0308: a request with no AWS credential marker reaches the registered custom
-/// scheme, and the floor has already run by the time it does.
+/// A request with no AWS credential marker reaches the registered custom scheme after the floor.
 #[test]
-fn c_sig_0308_a_non_aws_request_reaches_the_custom_scheme() {
+fn a_non_aws_request_reaches_the_custom_scheme() {
     let mut registry = CustomSchemeRegistry::new();
     registry
         .register(CustomAuthScheme::new("x-vendor-auth-").expect("a legal prefix"))
@@ -72,6 +71,20 @@ fn c_sig_0350_a_malformed_authorization_header_is_never_anonymous() {
         SecurityFloor::default().admit(view, &operation, now()),
         Ok(Admission::Sealed(_))
     ));
+}
+
+/// Negative — c-sig-0351: a well-formed credential with a wrong signature is a rejection verdict,
+/// never an anonymous principal.
+#[test]
+fn c_sig_0351_a_wrong_signature_is_rejected_not_anonymous() {
+    let presented = Signature::HmacSha256(CtBytes::from_array([1; 32]));
+    let expected = Signature::HmacSha256(CtBytes::from_array([2; 32]));
+    let verdict = match presented.ct_verify(&expected) {
+        Ok(_) => panic!("different signatures produced a proof"),
+        Err(rejection) => Verdict::reject(rejection.into()),
+    };
+    assert_eq!(verdict.rejection(), Some(AuthError::SignatureDoesNotMatch));
+    assert!(!verdict.is_anonymous());
 }
 
 /// Negative — c-sig-0352: `X-Amz-Signature` without the rest of the presigned parameters is a
@@ -144,33 +157,45 @@ fn c_sig_0357_a_custom_anonymous_verdict_for_a_presented_request_is_refused() {
 // Negative — H6 duplicate signature parameters
 // ---------------------------------------------------------------------------
 
-/// Negative — c-sig-0360 .. c-sig-0362: every signature-bearing query parameter is refused when it
-/// appears twice. A server that takes the first and a proxy that takes the last disagree about
-/// what was signed (s3s#176).
+fn assert_repeated_query_parameter_is_refused(name: &str, value: &str) {
+    let query = format!("{}&{name}={value}&{name}={value}", presigned_query(SIGNED_AT, "3600"));
+    let headers = HeaderMap::new();
+    let view = WireView::new(&headers, RawQuery::new(&query));
+    assert_eq!(
+        enforce_no_duplicate_sig_params(&view).err(),
+        Some(AuthError::AuthorizationQueryParametersError),
+        "must refuse a repeated {name}"
+    );
+    assert_eq!(
+        SecurityFloor::default().admit(view, &s3_object_op(), now()).err(),
+        Some(AuthError::AuthorizationQueryParametersError),
+        "the floor must refuse a repeated {name} before anything else runs"
+    );
+}
+
+/// Negative — c-sig-0360: a repeated signature is refused.
 #[test]
-fn c_sig_0360_to_0362_repeated_signature_query_parameters_are_refused() {
+fn c_sig_0360_a_repeated_signature_parameter_is_refused() {
+    assert_repeated_query_parameter_is_refused("X-Amz-Signature", SIG_HEX);
+}
+
+/// Negative — c-sig-0361: a repeated credential is refused.
+#[test]
+fn c_sig_0361_a_repeated_credential_parameter_is_refused() {
+    assert_repeated_query_parameter_is_refused("X-Amz-Credential", CRED);
+}
+
+/// Negative — c-sig-0362: every other signature-bearing query parameter is refused when repeated.
+#[test]
+fn c_sig_0362_every_other_signature_query_parameter_rejects_duplicates() {
     for (name, value) in [
-        ("X-Amz-Signature", SIG_HEX),
-        ("X-Amz-Credential", CRED),
         ("X-Amz-Algorithm", "AWS4-HMAC-SHA256"),
         ("X-Amz-Date", SIGNED_AT),
         ("X-Amz-Expires", "3600"),
         ("X-Amz-SignedHeaders", "host"),
         ("X-Amz-Security-Token", "FQoDYXdzE"),
     ] {
-        let query = format!("{}&{name}={value}&{name}={value}", presigned_query(SIGNED_AT, "3600"));
-        let headers = HeaderMap::new();
-        let view = WireView::new(&headers, RawQuery::new(&query));
-        assert_eq!(
-            enforce_no_duplicate_sig_params(&view).err(),
-            Some(AuthError::AuthorizationQueryParametersError),
-            "must refuse a repeated {name}"
-        );
-        assert_eq!(
-            SecurityFloor::default().admit(view, &s3_object_op(), now()).err(),
-            Some(AuthError::AuthorizationQueryParametersError),
-            "the floor must refuse a repeated {name} before anything else runs"
-        );
+        assert_repeated_query_parameter_is_refused(name, value);
     }
 }
 
@@ -302,53 +327,75 @@ fn sealed_floor() -> SecurityFloor {
     SecurityFloor::default().with_custom_schemes(registry)
 }
 
-/// Negative — c-sig-0370 .. c-sig-0372: a request carrying any AWS credential marker never reaches
-/// a third-party verifier, however the marker is spelled. This is attack scenario C: swapping the
-/// verifier must not be a way to swap out SigV4.
-#[test]
-fn c_sig_0370_to_0372_an_aws_marked_request_never_reaches_a_custom_verifier() {
+fn assert_aws_marker_never_reaches_custom_verifier(case: &str, view: WireView<'_>) {
     let verifier = AlwaysYes {
         calls: std::sync::atomic::AtomicUsize::new(0),
     };
     let floor = sealed_floor();
     let operation = s3_object_op().allow_anonymous_after_listing_in_the_posture_report();
+    assert!(detect_aws_credential_marker(&view).is_some(), "{case}: the marker must be detected");
+    match floor.admit(view, &operation, now()) {
+        Ok(Admission::Custom(request)) => {
+            let _ = verifier.verify(&request);
+            panic!("{case}: an AWS-marked request reached the custom verifier");
+        }
+        Ok(Admission::Anonymous(_)) => panic!("{case}: an AWS-marked request was treated as anonymous"),
+        Ok(Admission::Sealed(_)) | Err(_) => {}
+        Ok(_) => panic!("{case}: an AWS-marked request took an unexpected admission"),
+    }
+    assert_eq!(verifier.calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+}
 
-    // c-sig-0370: the SigV4 header form, plus a vendor header that would otherwise match.
-    let mut v4_headers = signed_headers(SIGNED_AT);
-    v4_headers.append(HeaderName::from_static("x-vendor-auth-token"), HeaderValue::from_static("opaque"));
-    // c-sig-0371: the presigned form.
-    let v4_query = presigned_query(SIGNED_AT, "3600");
-    // c-sig-0372: SigV2 in the `Authorization` header.
-    let v2_headers = header_map(&[
+/// Negative — c-sig-0370: a SigV4 header never reaches a custom verifier.
+#[test]
+fn c_sig_0370_a_sigv4_header_never_reaches_a_custom_verifier() {
+    let mut headers = signed_headers(SIGNED_AT);
+    headers.append(HeaderName::from_static("x-vendor-auth-token"), HeaderValue::from_static("opaque"));
+    assert_aws_marker_never_reaches_custom_verifier("c-sig-0370", WireView::new(&headers, RawQuery::new("")));
+}
+
+/// Negative — c-sig-0371: a presigned request never reaches a custom verifier.
+#[test]
+fn c_sig_0371_a_presigned_request_never_reaches_a_custom_verifier() {
+    let headers = HeaderMap::new();
+    let query = presigned_query(SIGNED_AT, "3600");
+    assert_aws_marker_never_reaches_custom_verifier("c-sig-0371", WireView::new(&headers, RawQuery::new(&query)));
+}
+
+/// Negative — c-sig-0372: a SigV2 header never reaches a custom verifier.
+#[test]
+fn c_sig_0372_a_sigv2_header_never_reaches_a_custom_verifier() {
+    let headers = header_map(&[
         ("authorization", &format!("AWS AKIDEXAMPLE:{SIG_HEX}")),
         ("x-vendor-auth-token", "opaque"),
     ]);
-    let empty = HeaderMap::new();
+    assert_aws_marker_never_reaches_custom_verifier("c-sig-0372", WireView::new(&headers, RawQuery::new("")));
+}
 
-    let cases: [(&str, WireView<'_>); 3] = [
-        ("c-sig-0370", WireView::new(&v4_headers, RawQuery::new(""))),
-        ("c-sig-0371", WireView::new(&empty, RawQuery::new(&v4_query))),
-        ("c-sig-0372", WireView::new(&v2_headers, RawQuery::new(""))),
-    ];
-    for (case, view) in cases {
-        assert!(detect_aws_credential_marker(&view).is_some(), "{case}: the marker must be detected");
-        match floor.admit(view, &operation, now()) {
-            Ok(Admission::Custom(request)) => {
-                let _ = verifier.verify(&request);
-                panic!("{case}: an AWS-marked request reached the custom verifier");
-            }
-            Ok(Admission::Anonymous(_)) => panic!("{case}: an AWS-marked request was treated as anonymous"),
-            // `Admission` is `#[non_exhaustive]`; a future variant must be spelled out here
-            // rather than swept into the AWS path by a wildcard.
-            Ok(Admission::Sealed(_)) | Err(_) => {}
-            Ok(_) => panic!("{case}: an AWS-marked request took an unexpected admission"),
-        }
+struct RememberReplay;
+
+impl ReplayNonceStore for RememberReplay {
+    fn record_first_use(&self, _fingerprint: rustfs_gateway_sig::ReplayFingerprint) -> ReplayDecision {
+        ReplayDecision::FirstUse
     }
-    assert_eq!(
-        verifier.calls.load(std::sync::atomic::Ordering::SeqCst),
-        0,
-        "the custom verifier must not have been called at all"
-    );
+}
+
+/// H7: replay prevention is an explicit deployment hook and its key never reveals a signature.
+#[test]
+fn h7_replay_nonce_hook_is_explicit_and_opaque() {
+    let store = RememberReplay;
+    let query = presigned_query(SIGNED_AT, "3600");
+    let headers = HeaderMap::new();
+    let sealed = match SecurityFloor::default().admit(WireView::new(&headers, RawQuery::new(&query)), &s3_object_op(), now()) {
+        Ok(Admission::Sealed(sealed)) => sealed,
+        other => panic!("expected a sealed presigned request, got {other:?}"),
+    };
+    let fingerprint = sealed
+        .replay_fingerprint()
+        .expect("presigned requests have a replay fingerprint");
+    assert_eq!(format!("{fingerprint:?}"), "ReplayFingerprint(<opaque>)");
+    let decision = store.record_first_use(fingerprint);
+    assert_eq!(decision, ReplayDecision::FirstUse);
 }
 
 /// Negative — c-sig-0373: a custom scheme may not claim an AWS prefix, and two schemes may not

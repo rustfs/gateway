@@ -6877,6 +6877,114 @@ PYEOF
 expect_fail check_sig_case_coverage.sh \
     'c-sig-0018 no longer diagnosing its serialization bound' mut_sig_serialize_call_diagnostic_changed
 
+mut_sig_p2_04_runtime_mapping_deleted() {
+    sed -i.bak '/^c-sig-0378|/d' scripts/sig-case-coverage-p2-04-runtime.txt
+}
+expect_fail check_sig_case_coverage.sh \
+    'a P2-04 runtime case mapping being deleted' mut_sig_p2_04_runtime_mapping_deleted
+
+mut_sig_p2_04_runtime_polarity_changed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("scripts/sig-case-coverage-p2-04-runtime.txt")
+text = path.read_text()
+old = "c-sig-0308|positive|H4|"
+if text.count(old) != 1:
+    raise SystemExit("missing P2-04 polarity mutation subject")
+path.write_text(text.replace(old, "c-sig-0308|negative|H4|", 1))
+PYEOF
+}
+expect_fail check_sig_case_coverage.sh \
+    'the P2-04 runtime polarity split changing' mut_sig_p2_04_runtime_polarity_changed
+
+mut_sig_p2_04_runtime_evidence_reused() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("scripts/sig-case-coverage-p2-04-runtime.txt")
+text = path.read_text()
+old = "fn c_sig_0324_expiry_one_second_over_the_ceiling_is_refused"
+new = "fn c_sig_0323_expiry_over_the_ceiling_is_refused"
+if text.count(old) != 1:
+    raise SystemExit("missing P2-04 evidence-reuse mutation subject")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_sig_case_coverage.sh \
+    'two P2-04 cases reusing one named runtime test' mut_sig_p2_04_runtime_evidence_reused
+
+mut_sig_p2_04_async_test_disabled() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/gateway/tests/custom_signature_verifier.rs")
+text = path.read_text()
+old = "#[tokio::test]\nasync fn c_sig_0308_a_non_aws_request_reaches_the_installed_custom_verifier()"
+new = "#[cfg(any())]\n#[tokio::test]\nasync fn c_sig_0308_a_non_aws_request_reaches_the_installed_custom_verifier()"
+if text.count(old) != 1:
+    raise SystemExit("missing P2-04 async-test mutation subject")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_sig_case_coverage.sh \
+    'a P2-04 tokio test being disabled by cfg' mut_sig_p2_04_async_test_disabled
+
+mut_sig_p2_04_h7_constraint_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("scripts/sig-case-coverage-p2-04-runtime.txt")
+text = path.read_text()
+old = "h7-replay-hook|positive|H7|"
+if text.count(old) != 1:
+    raise SystemExit("missing H7 ledger mutation subject")
+path.write_text(text.replace(old, "h7-replay-hook|positive|BOUNDARY|", 1))
+PYEOF
+}
+expect_fail check_sig_case_coverage.sh \
+    'the P2-04 ledger losing H7 executable evidence' mut_sig_p2_04_h7_constraint_removed
+
+mut_sig_p2_04_h7_documentation_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("docs/security-model.md")
+text = path.read_text()
+old = "Presigned URLs are replayable within their validity window."
+if text.count(old) != 1:
+    raise SystemExit("missing H7 documentation mutation subject")
+path.write_text(text.replace(old, "Presigned URLs are single-use by default.", 1))
+PYEOF
+}
+expect_fail check_sig_case_coverage.sh \
+    'the security model losing the H7 replay semantics' mut_sig_p2_04_h7_documentation_removed
+
+mut_sig_p2_04_route_inventory_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/gateway/tests/custom_signature_verifier.rs")
+text = path.read_text()
+old = 'for entry in generated_entries().expect("the generated route table is valid") {'
+new = 'for entry in Vec::<rustfs_gateway_core::RouteEntry>::new() {'
+if text.count(old) != 1:
+    raise SystemExit("missing posture route-inventory mutation subject")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_sig_case_coverage.sh \
+    'c-sig-0378 replacing the real route inventory with an empty proxy' mut_sig_p2_04_route_inventory_removed
+
+mut_sig_p2_04_replay_store_call_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/sig/tests/security_floor_schemes.rs")
+text = path.read_text()
+old = "let decision = store.record_first_use(fingerprint);"
+new = "let decision = ReplayDecision::FirstUse;\n    let _ = (store, fingerprint);"
+if text.count(old) != 1:
+    raise SystemExit("missing replay-store mutation subject")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_sig_case_coverage.sh \
+    'the H7 evidence no longer invoking the replay hook' mut_sig_p2_04_replay_store_call_removed
+
 "${SCRIPT_DIR}/test_sig_case_coverage.sh"
 
 # -----------------------------------------------------------------------------
