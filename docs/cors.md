@@ -76,8 +76,8 @@ The cache is a bound rather than a speed-up, and four properties are what make i
   source failed" are all stored as the same `None`, so the second probe for a name that does not
   exist costs what the second probe for a configured bucket costs. Without negative caching the
   enumeration probe is also the amplifier.
-- **The entry count is capped** (4096 by default). A caller inventing a million bucket names
-  evicts their own earlier entries instead of growing the process.
+- **The entry count is capped** (4096 by default). A bounded recency index retains hot entries and
+  evicts the least recently used key in logarithmic time; invented names cannot grow the process.
 - **Expiry is spread.** Each key's lifetime is the TTL plus an offset derived from the key, so a
   burst of misses admitted in one second does not expire in one second.
 - **Concurrent misses for one key share one source read.** The shared-future primitive is

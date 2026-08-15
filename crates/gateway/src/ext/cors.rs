@@ -39,8 +39,8 @@
 //!   "this bucket does not exist" and "the source failed" are all stored as the same `None`, so
 //!   the second probe for a non-existent bucket costs exactly what the second probe for a
 //!   configured one costs.
-//! - **The entry count is capped.** A caller who invents a million bucket names evicts their own
-//!   earlier entries rather than growing the process.
+//! - **The entry count is capped.** A caller who invents names evicts the least recently used
+//!   entries through a bounded logarithmic index rather than growing the process.
 //! - **Expiry is spread.** Each key's lifetime is the configured TTL plus a fixed offset derived
 //!   from the key itself, so a burst of misses admitted together does not expire together.
 //! - **Source reads have a hard deadline.** A backend future that never resolves is collapsed and
@@ -62,6 +62,10 @@ use rustfs_gateway_core::BoxFuture;
 use rustfs_gateway_sig::RequestNow;
 use rustfs_gateway_types::BucketName;
 use rustfs_gateway_types::dto::CorsConfiguration;
+
+mod cache;
+
+use self::cache::Cache;
 
 /// The name a CORS preflight is limited under.
 ///
@@ -166,17 +170,8 @@ pub struct CachedCorsSource {
 
 #[derive(Default)]
 struct State {
-    entries: HashMap<String, Entry>,
-    /// Keys in the order they were last stored, so the cap evicts the oldest write.
-    order: Vec<String>,
+    cache: Cache,
     in_flight: HashMap<String, InFlight>,
-}
-
-struct Entry {
-    /// `None` for every negative answer, whatever produced it.
-    document: Option<Arc<CorsConfiguration>>,
-    /// Unix seconds after which this entry is stale.
-    expires_at: i64,
 }
 
 #[derive(Clone)]
@@ -289,10 +284,8 @@ impl CachedCorsSource {
     fn lookup(&self, bucket: &BucketName, now: RequestNow) -> Option<Lookup> {
         let key = bucket.as_str();
         let mut state = self.state.lock().ok()?;
-        if let Some(entry) = state.entries.get(key)
-            && entry.expires_at > now.unix_seconds()
-        {
-            return Some(Lookup::Cached(entry.document.clone()));
+        if let Some(document) = state.cache.fresh(key, now) {
+            return Some(Lookup::Cached(document));
         }
         if let Some(flight) = state.in_flight.get_mut(key) {
             flight.waiters = flight.waiters.saturating_add(1);
@@ -337,17 +330,8 @@ impl CachedCorsSource {
         }
         if let LoadOutcome::Store(document) = outcome {
             let expires_at = now.unix_seconds().saturating_add(i64::from(self.lifetime_of(bucket)));
-            if state
-                .entries
-                .insert(bucket.to_owned(), Entry { document, expires_at })
-                .is_none()
-            {
-                state.order.push(bucket.to_owned());
-            }
-            while state.order.len() > self.config.entries.max(1) {
-                let evicted = state.order.remove(0);
-                state.entries.remove(&evicted);
-            }
+            state.cache.store(bucket, document, expires_at);
+            state.cache.evict_to(self.config.entries.max(1));
         }
         state.in_flight.remove(bucket);
     }
@@ -396,7 +380,7 @@ impl CachedCorsSource {
     /// How many buckets are currently held. For tests and for a deployment's own metrics.
     #[must_use]
     pub fn len(&self) -> usize {
-        self.state.lock().map_or(0, |state| state.entries.len())
+        self.state.lock().map_or(0, |state| state.cache.len())
     }
 
     /// Whether nothing is held.
@@ -702,6 +686,22 @@ mod tests {
             let _ = cache.get(&bucket(&name), at(1000)).await;
         }
         assert_eq!(cache.len(), 8);
+    }
+
+    #[tokio::test]
+    async fn n_the_least_recently_used_entry_is_evicted() {
+        let source = Counting::new(&[]);
+        let config = CorsCacheConfig {
+            entries: 2,
+            ..CorsCacheConfig::default()
+        };
+        let cache = cache(Arc::clone(&source) as Arc<dyn CorsSource>, config);
+        for name in ["alpha", "bravo", "alpha", "charlie", "alpha"] {
+            let _ = cache.get(&bucket(name), at(1000)).await;
+        }
+        assert_eq!(source.reads(), 3, "a recently used entry was evicted");
+        let _ = cache.get(&bucket("bravo"), at(1000)).await;
+        assert_eq!(source.reads(), 4, "the least recently used entry survived");
     }
 
     /// Negative — an entry goes stale. A cache that never expired would serve a deleted CORS
