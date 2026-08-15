@@ -1626,8 +1626,8 @@ from pathlib import Path
 
 path = Path("Cargo.toml")
 text = path.read_text()
-old = 'rustfs-gateway = { path = "crates/gateway", version = "0.7.1" }'
-new = 'rustfs-gateway = { path = "crates/gateway", version = "0.7.1", features = ["dangerous-allow-all-authorizer"] }'
+old = 'rustfs-gateway = { path = "crates/gateway", version = "0.7.2" }'
+new = 'rustfs-gateway = { path = "crates/gateway", version = "0.7.2", features = ["dangerous-allow-all-authorizer"] }'
 if text.count(old) != 1:
     raise SystemExit("workspace facade dependency is missing")
 path.write_text(text.replace(old, new, 1))

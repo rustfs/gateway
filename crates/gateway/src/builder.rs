@@ -47,6 +47,8 @@ use std::sync::Arc;
 
 use rustfs_gateway_core::{Handler, MissingHandlers, Operation, OperationCodec, OperationSet, RouterBuilder, SseConfig};
 use rustfs_gateway_http::Limits;
+#[cfg(feature = "dangerous-replace-signature-verifier")]
+use rustfs_gateway_sig::{AwsSignatureVerifier, DangerAck};
 use rustfs_gateway_sig::{SecurityFloor, SignatureVerifier};
 use rustfs_gateway_types::{NamePolicy, NameValidator, SlashPolicy};
 
@@ -55,11 +57,11 @@ use crate::clock::{Clock, ClockPosture, ClockSkewAck, MAX_CLOCK_SKEW_SECONDS, Sy
 use crate::config::{ConfigHandle, ConfigStore, ServiceConfig};
 use crate::dispatch::{DispatchTable, OperationDispatch};
 use crate::ext::{
-    Authenticator, Authorizer, AuthzAuditSink, CachedCorsSource, CorsCacheConfig, CorsSource, DefaultGovernor, Governor,
-    GovernorRates, HostResolver, LayeredGovernor, NoAuthzAudit, NoCors, NoObserver, NoPolicy, Observer, OpLayer, OpLayerSlot,
-    PathStyleOnly, PolicySource, PolicyTimeout, StageFilter,
+    Authenticator, Authorizer, AuthzAuditSink, CachedCorsSource, CorsCacheConfig, CorsSource, CredentialGuardConfig,
+    DefaultGovernor, Governor, GovernorRates, HostResolver, LayeredGovernor, NoAuthzAudit, NoCors, NoObserver, NoPolicy,
+    Observer, OpLayer, OpLayerSlot, PathStyleOnly, PolicySource, PolicyTimeout, Rate, StageFilter,
 };
-use crate::service::{Inner, S3Service, SecurityPosture};
+use crate::service::{Inner, S3Service};
 use crate::trace::{MintedTraces, TraceSource};
 use crate::{MonomorphicOperationSet, MonomorphicService};
 use rustfs_gateway_core::cors::CorsPolicy;
@@ -82,6 +84,84 @@ type PendingRegistration = Box<dyn FnOnce(Vec<ErasedOpLayer>) -> Result<Operatio
 /// through it. Until it is, the honest ceiling is the one this service can actually survive, and a
 /// larger body is refused with `413` rather than accepted and buffered.
 pub const DEFAULT_MAX_BUFFERED_BODY_BYTES: u64 = 64 * 1024 * 1024;
+
+/// Security-sensitive assembly configuration for a start-up report, not runtime observations.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SecurityPosture {
+    credential_guard: Option<CredentialGuardConfig>,
+    per_ip: Rate,
+    custom_signature_verifier: bool,
+    dangerously_replaced_signature_verifier: bool,
+}
+
+impl SecurityPosture {
+    const fn new(
+        credential_guard: Option<CredentialGuardConfig>,
+        per_ip: Rate,
+        custom_signature_verifier: bool,
+        dangerously_replaced_signature_verifier: bool,
+    ) -> Self {
+        Self {
+            credential_guard,
+            per_ip,
+            custom_signature_verifier,
+            dangerously_replaced_signature_verifier,
+        }
+    }
+
+    /// The built-in credential guard settings, or `None` for an authenticator with no lookup.
+    #[must_use]
+    pub const fn credential_guard(self) -> Option<CredentialGuardConfig> {
+        self.credential_guard
+    }
+    /// The mandatory framework's per-client pre-authentication rate.
+    #[must_use]
+    pub const fn per_ip_rate(self) -> Rate {
+        self.per_ip
+    }
+    /// Whether the deployment installed a verifier for a registered non-AWS scheme.
+    #[must_use]
+    pub const fn custom_signature_verifier(self) -> bool {
+        self.custom_signature_verifier
+    }
+    /// Whether the deployment replaced AWS signature computation after the H1..H7 floor.
+    #[must_use]
+    pub const fn dangerously_replaced_aws_signature_verifier(self) -> bool {
+        self.dangerously_replaced_signature_verifier
+    }
+}
+
+impl core::fmt::Display for SecurityPosture {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self.credential_guard {
+            Some(config) if config.negative_entries == 0 || config.budget.negative_ttl().is_zero() => {
+                f.write_str("credential negative cache: disabled")?;
+            }
+            Some(_) => f.write_str("credential negative cache: enabled")?,
+            None => f.write_str("credential negative cache: not applicable")?,
+        }
+        if self.per_ip.admits_nothing() {
+            f.write_str("; per-IP bucket: closed")?;
+        } else {
+            write!(
+                f,
+                "; per-IP bucket: bounded ({}/s, burst {})",
+                self.per_ip.per_second(),
+                self.per_ip.burst()
+            )?;
+        }
+        if self.dangerously_replaced_signature_verifier {
+            f.write_str("; AWS signature verifier: dangerously replaced")?;
+        } else {
+            f.write_str("; AWS signature verifier: built in")?;
+        }
+        if self.custom_signature_verifier {
+            f.write_str("; custom signature verifier: installed")
+        } else {
+            f.write_str("; custom signature verifier: none")
+        }
+    }
+}
 
 /// Collects operations and extension points, and turns them into an [`S3Service`].
 ///
@@ -107,6 +187,8 @@ pub struct ServiceBuilder {
     dangerous_allow_all_authorizer: bool,
     authenticator: Option<Arc<dyn Authenticator>>,
     custom_signature_verifier: Option<Arc<dyn SignatureVerifier>>,
+    #[cfg(feature = "dangerous-replace-signature-verifier")]
+    dangerously_replaced_signature_verifier: Option<Arc<dyn AwsSignatureVerifier>>,
     policy_source: Arc<dyn PolicySource>,
     policy_timeout: PolicyTimeout,
     authz_audit: Arc<dyn AuthzAuditSink>,
@@ -163,6 +245,8 @@ impl ServiceBuilder {
             dangerous_allow_all_authorizer: false,
             authenticator: None,
             custom_signature_verifier: None,
+            #[cfg(feature = "dangerous-replace-signature-verifier")]
+            dangerously_replaced_signature_verifier: None,
             policy_source: Arc::new(NoPolicy),
             policy_timeout: PolicyTimeout::default(),
             authz_audit: Arc::new(NoAuthzAudit),
@@ -299,6 +383,22 @@ impl ServiceBuilder {
     #[must_use]
     pub fn custom_signature_verifier(mut self, verifier: impl SignatureVerifier) -> Self {
         self.custom_signature_verifier = Some(Arc::new(verifier));
+        self
+    }
+
+    /// Replaces the built-in AWS signature computation after the unconditional security floor.
+    ///
+    /// This feature-gated escape hatch emits a start-up warning and is recorded in
+    /// [`SecurityPosture`]. It does not bypass H1..H7: malformed, expired, duplicated, skewed, or
+    /// privileged presigned requests are refused before `verifier` receives a sealed request.
+    #[cfg(feature = "dangerous-replace-signature-verifier")]
+    #[must_use]
+    pub fn with_dangerously_replaced_signature_verifier(
+        mut self,
+        verifier: impl AwsSignatureVerifier,
+        _acknowledgement: DangerAck,
+    ) -> Self {
+        self.dangerously_replaced_signature_verifier = Some(Arc::new(verifier));
         self
     }
 
@@ -602,8 +702,24 @@ impl ServiceBuilder {
             eprintln!("WARN: dangerous allow-all authorizer disables authorization for every request");
         }
 
+        #[cfg(feature = "dangerous-replace-signature-verifier")]
+        let dangerously_replaced_signature_verifier = self.dangerously_replaced_signature_verifier.is_some();
+        #[cfg(not(feature = "dangerous-replace-signature-verifier"))]
+        let dangerously_replaced_signature_verifier = false;
+        if dangerously_replaced_signature_verifier {
+            eprintln!(
+                "WARN: the built-in AWS signature verifier is dangerously replaced; the H1..H7 security floor remains enforced"
+            );
+        }
+
         let framework_governor = DefaultGovernor::with_rates(self.governor_rates);
-        let security_posture = SecurityPosture::new(authenticator.credential_guard_config(), self.governor_rates.per_ip);
+        let custom_signature_verifier = self.custom_signature_verifier.is_some();
+        let security_posture = SecurityPosture::new(
+            authenticator.credential_guard_config(),
+            self.governor_rates.per_ip,
+            custom_signature_verifier,
+            dangerously_replaced_signature_verifier,
+        );
         let governor: Arc<dyn Governor> = match self.governor {
             Some(user) => Arc::new(LayeredGovernor::new(framework_governor, user)),
             None => Arc::new(framework_governor),
@@ -620,6 +736,8 @@ impl ServiceBuilder {
             authorizer,
             authenticator,
             custom_signature_verifier: self.custom_signature_verifier,
+            #[cfg(feature = "dangerous-replace-signature-verifier")]
+            dangerously_replaced_signature_verifier: self.dangerously_replaced_signature_verifier,
             policy_source: self.policy_source,
             policy_timeout: self.policy_timeout,
             authz_audit: self.authz_audit,
