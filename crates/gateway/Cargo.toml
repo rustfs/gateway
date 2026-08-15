@@ -42,6 +42,7 @@ rustfs-gateway-xml = { workspace = true }
 arc-swap = { workspace = true }
 bytes = { workspace = true }
 futures-timer = { workspace = true }
+futures-util = { workspace = true }
 http = { workspace = true }
 http-body = { workspace = true }
 http-body-util = { workspace = true }
