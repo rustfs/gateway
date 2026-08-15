@@ -44,6 +44,8 @@ pub use rustfs_gateway_sig::{
     Signature, SignatureMatch, SignatureVerifier, SignedRequest, SignerError, SigningCredentials, SigningRequest, SigningScope,
     SkewWindow, SystemClock, TRAILER_ALGORITHM, Tamper, TamperComponent, TrailerSet, Verdict,
 };
+#[cfg(feature = "dangerous-replace-signature-verifier")]
+pub use rustfs_gateway_sig::{AwsSignatureVerifier, DangerAck, SealedAws};
 
 /// The client-side signer, under the name the conformance runner names it by.
 pub use rustfs_gateway_sig::SigV4Signer as Signer;

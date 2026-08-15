@@ -136,15 +136,16 @@ use rustfs_gateway_sig::{
 use rustfs_gateway_stream::Body;
 use rustfs_gateway_types::{ErrorCode, NamePolicy};
 
+pub use crate::builder::SecurityPosture;
 use crate::clock::{Clock, ClockPosture, MonotonicClock};
 use crate::close::ConnectionIntent;
 use crate::config::ConfigStore;
 use crate::dispatch::{DispatchTable, target_of};
 use crate::ext::{
     AuthSchemeRef, Authentication, AuthenticationOutcome, Authenticator, Authorizer, AuthzAuditEvent, AuthzAuditSink,
-    AuthzRequest, AuthzStage, CORS_PREFLIGHT, CachedCorsSource, ClassKind, ClientAddr, CredentialGuardConfig, Governor,
-    GovernorRequest, HostQuery, HostResolver, InputAuthzRequest, Observer, PolicySnapshot, PolicySource, PolicyTimeout, Rate,
-    RequestContext, RequestEvent, ResolvedHost, ResponseView, RoutedView, ServerExtensions, StageFilter, WireHead, emit_safely,
+    AuthzRequest, AuthzStage, CORS_PREFLIGHT, CachedCorsSource, ClassKind, ClientAddr, Governor, GovernorRequest, HostQuery,
+    HostResolver, InputAuthzRequest, Observer, PolicySnapshot, PolicySource, PolicyTimeout, RequestContext, RequestEvent,
+    ResolvedHost, ResponseView, RoutedView, ServerExtensions, StageFilter, WireHead, emit_safely,
 };
 use crate::gate::{Authenticated, BodyCeilings, SealedBody};
 use crate::monomorphic::sealed::Set as StaticSet;
@@ -172,6 +173,8 @@ pub(crate) struct Inner {
     pub(crate) authorizer: Arc<dyn Authorizer>,
     pub(crate) authenticator: Arc<dyn Authenticator>,
     pub(crate) custom_signature_verifier: Option<Arc<dyn rustfs_gateway_sig::SignatureVerifier>>,
+    #[cfg(feature = "dangerous-replace-signature-verifier")]
+    pub(crate) dangerously_replaced_signature_verifier: Option<Arc<dyn rustfs_gateway_sig::AwsSignatureVerifier>>,
     pub(crate) policy_source: Arc<dyn PolicySource>,
     pub(crate) policy_timeout: PolicyTimeout,
     pub(crate) authz_audit: Arc<dyn AuthzAuditSink>,
@@ -213,59 +216,6 @@ struct RequestEntryContext {
 #[derive(Clone)]
 pub struct S3Service {
     inner: Arc<Inner>,
-}
-
-/// Security-sensitive assembly choices that a start-up report should expose.
-///
-/// This value reports configuration, not observed enforcement. Runtime counters belong to the
-/// credential provider and governor themselves.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct SecurityPosture {
-    credential_guard: Option<CredentialGuardConfig>,
-    per_ip: Rate,
-}
-
-impl SecurityPosture {
-    pub(crate) const fn new(credential_guard: Option<CredentialGuardConfig>, per_ip: Rate) -> Self {
-        Self {
-            credential_guard,
-            per_ip,
-        }
-    }
-
-    /// The built-in credential guard settings, or `None` for an authenticator with no lookup.
-    #[must_use]
-    pub const fn credential_guard(self) -> Option<CredentialGuardConfig> {
-        self.credential_guard
-    }
-
-    /// The mandatory framework's per-client pre-authentication rate.
-    #[must_use]
-    pub const fn per_ip_rate(self) -> Rate {
-        self.per_ip
-    }
-}
-
-impl core::fmt::Display for SecurityPosture {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        match self.credential_guard {
-            Some(config) if config.negative_entries == 0 || config.budget.negative_ttl().is_zero() => {
-                f.write_str("credential negative cache: disabled")?;
-            }
-            Some(_) => f.write_str("credential negative cache: enabled")?,
-            None => f.write_str("credential negative cache: not applicable")?,
-        }
-        if self.per_ip.admits_nothing() {
-            f.write_str("; per-IP bucket: closed")
-        } else {
-            write!(
-                f,
-                "; per-IP bucket: bounded ({}/s, burst {})",
-                self.per_ip.per_second(),
-                self.per_ip.burst()
-            )
-        }
-    }
 }
 
 impl core::fmt::Debug for S3Service {
@@ -638,24 +588,37 @@ impl S3Service {
                     Err(error) => return outcome.refuse(error),
                 };
                 framing_mode = Some(payload.clone());
-                let question = Authentication::new(
-                    &sealed,
-                    wire.method(),
-                    wire.raw_path().as_str(),
-                    wire.host().raw_for_signing(),
-                    &payload,
-                    declared_length,
-                )
-                // Offered before the verdict and read long after it. An `aws-chunked` body's chunk
-                // chain is verified with the same key and seed the request signature was, and
-                // neither survives `Verdict` — see `crate::ext::ChunkVerification`.
-                .with_chunk_sink(&chunk_sink);
-                let result = self.inner.authenticator.authenticate(&question).await;
-                let signature_mismatch = question.into_signature_mismatch();
-                match result {
-                    Ok(authentication) => (authentication, signature_mismatch),
-                    Err(_) => {
-                        return outcome.refuse_handler(HandlerError::internal_error("the request could not be authenticated"));
+                #[cfg(feature = "dangerous-replace-signature-verifier")]
+                let replacement_verdict = self
+                    .inner
+                    .dangerously_replaced_signature_verifier
+                    .as_ref()
+                    .map(|verifier| verifier.verify_sealed(&sealed));
+                #[cfg(not(feature = "dangerous-replace-signature-verifier"))]
+                let replacement_verdict: Option<Verdict> = None;
+                if let Some(verdict) = replacement_verdict {
+                    (AuthenticationOutcome::ordinary(verdict), None)
+                } else {
+                    let question = Authentication::new(
+                        &sealed,
+                        wire.method(),
+                        wire.raw_path().as_str(),
+                        wire.host().raw_for_signing(),
+                        &payload,
+                        declared_length,
+                    )
+                    // Offered before the verdict and read long after it. An `aws-chunked` body's chunk
+                    // chain is verified with the same key and seed the request signature was, and
+                    // neither survives `Verdict` — see `crate::ext::ChunkVerification`.
+                    .with_chunk_sink(&chunk_sink);
+                    let result = self.inner.authenticator.authenticate(&question).await;
+                    let signature_mismatch = question.into_signature_mismatch();
+                    match result {
+                        Ok(authentication) => (authentication, signature_mismatch),
+                        Err(_) => {
+                            return outcome
+                                .refuse_handler(HandlerError::internal_error("the request could not be authenticated"));
+                        }
                     }
                 }
             }

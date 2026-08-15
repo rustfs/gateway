@@ -29,6 +29,9 @@ use rustfs_gateway::sig::{
 };
 use rustfs_gateway_core::route::{generated_entries, render_selector};
 
+#[cfg(feature = "dangerous-replace-signature-verifier")]
+use rustfs_gateway::sig::{AwsSignatureVerifier, DangerAck, SealedAws};
+
 use crate::support::{self, Backend, CountingBackend, Ping, exchange, ping_route};
 
 struct AcceptingVerifier {
@@ -104,6 +107,13 @@ async fn c_sig_0308_a_non_aws_request_reaches_the_installed_custom_verifier() {
     assert_eq!(status, http::StatusCode::OK);
     assert_eq!(calls.load(Ordering::SeqCst), 1);
     assert_eq!(reached.load(Ordering::SeqCst), 1);
+    assert!(service.security_posture().custom_signature_verifier());
+    assert!(
+        service
+            .security_posture()
+            .to_string()
+            .contains("custom signature verifier: installed")
+    );
 }
 
 #[tokio::test]
@@ -192,10 +202,138 @@ async fn c_sig_0378_no_unauthenticated_security_posture_endpoint_exists() {
         .route(ping_route())
         .build()
         .expect("a complete assembly");
+    assert!(!service.security_posture().custom_signature_verifier());
+    assert!(
+        service
+            .security_posture()
+            .to_string()
+            .contains("custom signature verifier: none")
+    );
 
     for path in ["/debug", "/status", "/security-posture"] {
         let (status, body) = exchange(&service, support::plain(http::Method::GET, path)).await;
         assert_ne!(status, http::StatusCode::OK, "{path} exposed an unauthenticated endpoint");
         assert!(!body.contains("custom_verifier"));
     }
+}
+
+#[cfg(feature = "dangerous-replace-signature-verifier")]
+struct AuthenticateEverything {
+    calls: Arc<AtomicUsize>,
+}
+
+#[cfg(feature = "dangerous-replace-signature-verifier")]
+impl AwsSignatureVerifier for AuthenticateEverything {
+    fn verify_sealed(&self, request: &SealedAws<'_>) -> Verdict {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        let actual = Signature::HmacSha256(CtBytes::from_array([9; 32]));
+        let expected = Signature::HmacSha256(CtBytes::from_array([9; 32]));
+        let proof = actual.ct_verify(&expected).expect("equal signatures produce a proof");
+        Verdict::authenticated(
+            Identity::new("DANGEROUSACCESSKEY").expect("a valid identity"),
+            AuthScheme::new(SigFamily::V4, SigLocation::Header, SigIdentity::LongTerm, request.expected_service()),
+            proof,
+        )
+    }
+}
+
+#[cfg(feature = "dangerous-replace-signature-verifier")]
+#[tokio::test]
+async fn a_valid_aws_request_reaches_the_explicit_replacement() {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let service = support::wired()
+        .clock_with_skew_ack(
+            support::fixed_clock(),
+            rustfs_gateway::ClockSkewAck::i_understand_a_skewed_clock_can_disable_signature_expiry(),
+        )
+        .with_dangerously_replaced_signature_verifier(
+            AuthenticateEverything {
+                calls: Arc::clone(&calls),
+            },
+            DangerAck::i_understand_this_disables_aws_sigv4(),
+        )
+        .register::<ListBuckets, _>(Arc::new(Backend))
+        .build()
+        .expect("a complete assembly");
+
+    let (status, _) = exchange(&service, support::signed(http::Method::GET, "/")).await;
+
+    assert_eq!(status, http::StatusCode::OK);
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+}
+
+#[cfg(feature = "dangerous-replace-signature-verifier")]
+#[tokio::test]
+async fn c_sig_0375_the_floor_rejects_before_the_replacement_runs() {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let service = support::wired()
+        .clock_with_skew_ack(
+            support::fixed_clock(),
+            rustfs_gateway::ClockSkewAck::i_understand_a_skewed_clock_can_disable_signature_expiry(),
+        )
+        .with_dangerously_replaced_signature_verifier(
+            AuthenticateEverything {
+                calls: Arc::clone(&calls),
+            },
+            DangerAck::i_understand_this_disables_aws_sigv4(),
+        )
+        .register::<ListBuckets, _>(Arc::new(Backend))
+        .build()
+        .expect("a complete assembly");
+    let request = support::signed(http::Method::GET, "/");
+    let (mut parts, body) = request.into_parts();
+    let authorization = parts
+        .headers
+        .get(http::header::AUTHORIZATION)
+        .expect("the signed fixture has an authorization header")
+        .to_str()
+        .expect("the fixture authorization is ASCII")
+        .replace("20260102", "20200101");
+    parts.headers.insert(
+        http::header::AUTHORIZATION,
+        http::HeaderValue::from_str(&authorization).expect("the adjusted authorization remains a header value"),
+    );
+    parts
+        .headers
+        .insert("x-amz-date", http::HeaderValue::from_static("20200101T000000Z"));
+
+    let (status, response) = exchange(&service, http::Request::from_parts(parts, body)).await;
+
+    assert_eq!(status, http::StatusCode::FORBIDDEN);
+    assert!(response.contains("RequestTimeTooSkewed"), "{response}");
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+}
+
+#[cfg(feature = "dangerous-replace-signature-verifier")]
+#[test]
+fn the_security_posture_names_both_verifier_states() {
+    let built_in = support::wired()
+        .register::<ListBuckets, _>(Arc::new(Backend))
+        .build()
+        .expect("a complete assembly");
+    assert!(!built_in.security_posture().dangerously_replaced_aws_signature_verifier());
+    assert!(
+        built_in
+            .security_posture()
+            .to_string()
+            .contains("AWS signature verifier: built in")
+    );
+
+    let replaced = support::wired()
+        .with_dangerously_replaced_signature_verifier(
+            AuthenticateEverything {
+                calls: Arc::new(AtomicUsize::new(0)),
+            },
+            DangerAck::i_understand_this_disables_aws_sigv4(),
+        )
+        .register::<ListBuckets, _>(Arc::new(Backend))
+        .build()
+        .expect("a complete assembly");
+    assert!(replaced.security_posture().dangerously_replaced_aws_signature_verifier());
+    assert!(
+        replaced
+            .security_posture()
+            .to_string()
+            .contains("AWS signature verifier: dangerously replaced")
+    );
 }
