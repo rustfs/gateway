@@ -197,7 +197,11 @@ jobs:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-      - run: cargo build -p xtask
+      - name: Prebuild operation verification targets
+        run: |
+          cargo build -p xtask
+          cargo test -p xtask --bin xtask --no-run
+          cargo build -p rustfs-gateway-conformance --bin rustfs-gateway-conformance
       - name: Three operation samples (maximum 30 seconds each)
         run: |
           timeout 30s cargo xtask verify --op GetObject
@@ -216,6 +220,7 @@ jobs:
         run: |
           started="$(date +%s)"
           timeout 480s cargo test --workspace
+          timeout 30s scripts/test_handlers_facade_fixture.sh
           elapsed="$(( $(date +%s) - started ))"
           echo "workspace tests completed in ${elapsed}s"
 

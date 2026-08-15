@@ -156,6 +156,7 @@ require_equal(build_guard_steps.last.keys, ["name", "run"],
 workspace_run = <<~'RUN'
   started="$(date +%s)"
   timeout 480s cargo test --workspace
+  timeout 30s scripts/test_handlers_facade_fixture.sh
   elapsed="$(( $(date +%s) - started ))"
   echo "workspace tests completed in ${elapsed}s"
 RUN

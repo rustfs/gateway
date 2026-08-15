@@ -59,6 +59,7 @@ layers = [
             "rustfs-gateway-core",
             "rustfs-gateway-sig",
             "rustfs-gateway-http",
+            "rustfs-gateway-macros",
             "rustfs-gateway-types",
             "rustfs-gateway-xml",
             "rustfs-gateway-stream",
@@ -89,6 +90,7 @@ required_agents_fragments = [
     "- **Ring 0/1 — protocol kernel and runtime**: every package under `crates/`. Zero rustfs dependencies.",
     "  runtime host, with no internal crate dependency:\n        rustfs-gateway-server                    listener, TLS, hyper, admission, shutdown",
     "        rustfs-gateway-types ──▶ rustfs-gateway-stream ──▶ bitflags / bytes / http",
+    "        rustfs-gateway ──▶ rustfs-gateway-macros          public facade re-export of optional registration sugar",
     "        rustfs-gateway-xtask-dispatch (crates/xtask-dispatch)   std-only cargo xtask process selection",
     "        xtask ──▶ gateway + conformance + core + codegen + model   generation and diagnostics only",
 ]
@@ -187,6 +189,15 @@ except (OSError, UnicodeError) as error:
 for fragment in required_agents_fragments:
     if agents.count(fragment) != 1:
         fail(f"AGENTS.md dependency matrix drifted at {fragment!r}")
+
+try:
+    macro_expansion = (root / "crates/macros/src/expand.rs").read_text(encoding="utf-8")
+except (OSError, UnicodeError) as error:
+    fail(f"cannot read facade macro expansion: {error}")
+if "::rustfs_gateway_core" in macro_expansion:
+    fail("macro expansion reaches past the public facade into rustfs_gateway_core")
+if macro_expansion.count("::rustfs_gateway::Handler<#operations>") != 1:
+    fail("macro expansion does not use the unique public facade Handler path")
 
 
 def tables(document: dict[str, Any]) -> Iterator[tuple[str, dict[str, Any]]]:

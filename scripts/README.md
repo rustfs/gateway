@@ -8,6 +8,7 @@ exit code is the verdict**. Each one can be run on its own:
 scripts/check_layer_dependencies.sh
 scripts/test_guard_scripts.sh          # runs the main guard suite and its negative cases
 scripts/test_test_target_consolidation.sh # runs target-consolidation mutations in a parallel CI job
+scripts/test_handlers_facade_fixture.sh # compiles the facade-only downstream macro fixture
 GATEWAY_GUARD_QUIRK_LEDGER_ONLY=1 scripts/test_guard_scripts.sh # runs quirk-ledger mutations in a parallel CI job
 ```
 
@@ -123,6 +124,7 @@ fixed now so that the same check does not get written twice under two names.
 | `check_timeout_layer_ownership.sh` | Server owns four connection timeouts and never the body/handler layers | P7-02 |
 | `check_tuning_doc.sh` | Every server tuning field documents both directions of its tradeoff | P7-02 |
 | `test_guard_scripts.sh` | Not a guard: runs every guard on the tree and asserts each one fails on an injected violation | P0 |
+| `test_handlers_facade_fixture.sh` | Not a guard: compiles a downstream Cargo fixture whose only dependency is `rustfs-gateway` | P4-01 |
 | `test_sig_case_coverage.sh` | Not a guard: isolates the P2-02 and P2-05 signature coverage mutations from the central guard self-test | P2-02, P2-05 |
 
 ### Registered, not yet implemented (TODO)

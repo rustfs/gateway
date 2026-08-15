@@ -39,6 +39,10 @@ use rustfs_gateway_core::handler::{Handler, HandlerResult, Req, Resp};
 use rustfs_gateway_core::registry::RouterBuilder;
 use rustfs_gateway_core::{Router, dispatch};
 use rustfs_gateway_macros::handlers;
+
+// The proc-macro crate's own equivalence test stands in for the public facade without creating a
+// dev-dependency cycle. Downstream users reach the same surface as `rustfs_gateway`.
+extern crate rustfs_gateway_core as rustfs_gateway;
 use rustfs_gateway_types::dto::{
     GetBucketLocation, GetBucketLocationInput, GetBucketLocationOutput, ListObjectsV2, ListObjectsV2Input, ListObjectsV2Output,
     LocationConstraint, PutObject, PutObjectInput, PutObjectOutput,

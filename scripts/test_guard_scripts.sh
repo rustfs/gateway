@@ -3693,6 +3693,52 @@ mut_unregistered_crate() {
 expect_fail check_layer_dependencies.sh \
     'a new crate that is not registered in the allow matrix' mut_unregistered_crate
 
+mut_gateway_macro_layer_edge_deleted() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("scripts/check_layer_dependencies.sh")
+text = path.read_text()
+old = '''            "rustfs-gateway-http",
+            "rustfs-gateway-macros",
+            "rustfs-gateway-types",'''
+new = '''            "rustfs-gateway-http",
+            "rustfs-gateway-types",'''
+if text.count(old) != 1:
+    raise SystemExit("the gateway macro edge is not unique")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail_self_mutation check_layer_dependencies.sh \
+    'the public facade macro edge disappearing from the executable layer matrix' \
+    mut_gateway_macro_layer_edge_deleted
+
+mut_gateway_macro_agents_edge_deleted() {
+    sed '/rustfs-gateway.*rustfs-gateway-macros.*public facade re-export/d' AGENTS.md >AGENTS.md.mut
+    mv AGENTS.md.mut AGENTS.md
+}
+expect_fail check_layer_dependencies.sh \
+    'the public facade macro edge disappearing from the AGENTS dependency graph' \
+    mut_gateway_macro_agents_edge_deleted
+
+mut_handlers_facade_expansion_reaches_core() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/macros/src/expand.rs")
+text = path.read_text()
+old = "impl #impl_generics ::rustfs_gateway::Handler<#operations> for #self_ty #where_clause {"
+new = "impl #impl_generics ::rustfs_gateway_core::handler::Handler<#operations> for #self_ty #where_clause {"
+if text.count(old) != 1:
+    raise SystemExit("the facade Handler expansion path is not unique")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_layer_dependencies.sh \
+    'generated handler impls reaching through the facade into rustfs-gateway-core' \
+    mut_handlers_facade_expansion_reaches_core \
+    'macro expansion reaches past the public facade into rustfs_gateway_core'
+
 mut_xtask_dispatch_layer_registration_deleted() {
     sed '/^dispatcher_name = "rustfs-gateway-xtask-dispatch"$/d' scripts/check_layer_dependencies.sh \
         >scripts/check_layer_dependencies.sh.mut
@@ -10154,6 +10200,14 @@ mut_ci_workspace_command_weakened() {
 }
 expect_fail check_ci_test_split.sh \
     'the workspace test job running only one package' mut_ci_workspace_command_weakened
+
+mut_ci_handlers_facade_fixture_removed() {
+    replace_ci_text '          timeout 30s scripts/test_handlers_facade_fixture.sh
+' ''
+}
+expect_fail check_ci_test_split.sh \
+    'the workspace test job dropping the facade-only downstream fixture' \
+    mut_ci_handlers_facade_fixture_removed
 
 mut_ci_workspace_failure_swallowed() {
     replace_ci_text '          timeout 480s cargo test --workspace' \
