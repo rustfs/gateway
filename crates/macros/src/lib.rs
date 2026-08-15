@@ -20,7 +20,7 @@
 //! NOT responsible for: registration semantics (that is `rustfs-gateway-core`), specs, floors,
 //! or authorisation. The macro never decides anything a reader could not decide by looking at the
 //! method name.
-//! Upstream: `syn`, `quote`. Downstream: any backend crate that would rather not write 73
+//! Upstream: `syn`, `quote`. Downstream: any backend crate that would rather not write 72
 //! delegating `impl` blocks by hand.
 //!
 //! # What it does, in one sentence
@@ -33,7 +33,7 @@
 //!
 //! ```ignore
 //! // With the macro:
-//! #[rustfs_gateway_macros::handlers(group = objects)]
+//! #[rustfs_gateway::handlers(group = objects)]
 //! impl Fs {
 //!     async fn put_object(&self, req: Req<PutObject>) -> HandlerResult<PutObject> { /* ... */ }
 //! }

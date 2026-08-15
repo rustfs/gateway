@@ -23,7 +23,19 @@
 //! name the runner asks for resolves whatever the signature crate calls its own type.
 
 #[allow(unused_imports)]
-use rustfs_gateway::{Body, ByteStream, Clock, Credentials, S3Service, ServiceBuilder, Transport, WireRequest, WireResponse};
+use rustfs_gateway::{
+    Body, ByteStream, Clock, Credentials, HandlerResult, Req, Resp, RouterBuilder, S3Service, ServiceBuilder, Transport,
+    WireRequest, WireResponse, dto::GetObject, handlers,
+};
+
+struct FacadeMacroBackend;
+
+#[handlers]
+impl FacadeMacroBackend {
+    async fn get_object(&self, _request: Req<GetObject>) -> HandlerResult<GetObject> {
+        Ok(Resp::new(rustfs_gateway::dto::GetObjectOutput::default()))
+    }
+}
 
 /// Positive — every required export resolves, and the two that carry values round-trip.
 #[test]
@@ -56,4 +68,10 @@ fn every_required_facade_export_resolves() {
     let _: Option<rustfs_gateway::sig::Signer> = None;
     // S3Service — the thing all of the above exist to drive.
     let _: fn(&S3Service) -> &rustfs_gateway::Limits = S3Service::limits;
+}
+
+/// The optional registration macro is re-exported beside its handler types.
+#[test]
+fn handlers_macro_is_reexported_by_the_facade() {
+    let _: fn(&std::sync::Arc<FacadeMacroBackend>, RouterBuilder) -> RouterBuilder = FacadeMacroBackend::register;
 }

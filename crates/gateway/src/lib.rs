@@ -140,6 +140,7 @@ pub use crate::trace::{
 };
 pub use crate::transport::Transport;
 pub use crate::wire::{OrderedHeaders, WireResponse, collect};
+pub use rustfs_gateway_macros::handlers;
 
 /// The generated request and response types, and the operation markers they belong to.
 ///
@@ -161,7 +162,8 @@ pub use rustfs_gateway_core::{
     HandlerError, HandlerErrorContext, HandlerResult, HasOperation, HostClass, InvalidErrorContext, MetaView, MissingHandlers,
     MissingObject, NoDerived, Operation, OperationCodec, OperationSet, OperationSpec, PRECONDITION_FAILED_MESSAGE, ParamKind,
     PreAuthError, Predicate, RANGE_NOT_SATISFIABLE_MESSAGE, Req, RequestBody, RequiredParam, ResourceIdentity, ResourceShape,
-    ResourceVisibility, Resp, ResponseBody, ResponseKind, ResponseOverride, RouteEntry, RouteSelector, TargetKind, resolve,
+    ResourceVisibility, Resp, ResponseBody, ResponseKind, ResponseOverride, RouteEntry, RouteSelector, RouterBuilder, TargetKind,
+    resolve,
 };
 
 /// Input-parameterized compatibility name for an operation request.

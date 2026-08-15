@@ -33,6 +33,7 @@ workspace = true
 [dependencies]
 rustfs-gateway-core = { workspace = true }
 rustfs-gateway-http = { workspace = true }
+rustfs-gateway-macros = { workspace = true }
 rustfs-gateway-sig = { workspace = true }
 rustfs-gateway-stream = { workspace = true }
 rustfs-gateway-types = { workspace = true }

@@ -298,6 +298,7 @@ closes the cycle.
            rustfs-gateway-xml ──▶ quick-xml
 
   build-time only, never present in a runtime dependency tree:
+        rustfs-gateway ──▶ rustfs-gateway-macros          public facade re-export of optional registration sugar
         rustfs-gateway-codegen ──▶ rustfs-gateway-model   codegen emits generated/**, spec/, OPERATIONS.md
         rustfs-gateway-xtask-dispatch (crates/xtask-dispatch)   std-only cargo xtask process selection
 
