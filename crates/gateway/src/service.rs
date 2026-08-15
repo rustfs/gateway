@@ -338,8 +338,13 @@ impl S3Service {
             .filter(|_| headers_apply_to_post_auth_errors() || response.status().is_success())
         {
             let headers = response.headers_mut();
-            for (name, value) in cors.iter() {
-                headers.insert(name, value.clone());
+            if let Some(cors_headers) = cors.headers {
+                for (name, value) in cors_headers.iter() {
+                    headers.insert(name, value.clone());
+                }
+            }
+            if cors.vary_origin {
+                headers.insert(VARY, VARY_ORIGIN);
             }
         }
         // The response seam. After the CORS decoration, so a filter sees the response a browser
@@ -1105,15 +1110,16 @@ impl S3Service {
     /// The CORS decoration an ordinary response should carry, if any.
     ///
     /// Called once, after authorisation. `None` for a request with no usable `Origin`, for a path
-    /// that names no bucket, and for an origin no rule admits — the last of which is not an error:
-    /// the request is served and the browser is the one that withholds the answer from the page.
+    /// that names no bucket, and for a bucket with no CORS document. An origin no rule admits gets
+    /// only `Vary: Origin`: the request is served and the browser withholds the answer from the
+    /// page, while shared caches still keep origin-dependent answers separate.
     async fn actual_cors(
         &self,
         headers: &http::HeaderMap,
         bucket: Option<&rustfs_gateway_types::BucketName>,
         method: &http::Method,
         now: RequestNow,
-    ) -> Option<CorsHeaders> {
+    ) -> Option<CorsDecoration> {
         let view = rustfs_gateway_http::HeaderView::new(headers);
         // Exactly one line, and one this runtime would be willing to echo. Two `Origin` lines are
         // refused here as they are on a preflight, and for the same cache-poisoning reason.
@@ -1122,7 +1128,10 @@ impl S3Service {
             .flatten()
             .filter(|origin| rustfs_gateway_core::cors::is_plausible_origin(origin))?;
         let document = self.inner.cors.get(bucket?, now).await?;
-        answer_actual(&self.inner.cors_policy, Some(&document), origin, method.as_str())
+        Some(CorsDecoration {
+            headers: answer_actual(&self.inner.cors_policy, Some(&document), origin, method.as_str()),
+            vary_origin: true,
+        })
     }
 }
 
@@ -1194,6 +1203,11 @@ fn preflight_response(headers: &CorsHeaders) -> Response<Body> {
 /// Borrows the request's [`RequestTrace`] rather than owning a source, which is what makes the one
 /// identifier per request a property of the type: every refusal below renders through
 /// [`Outcome::refuse`], and `refuse` has exactly one trace it can render with.
+struct CorsDecoration {
+    headers: Option<CorsHeaders>,
+    vary_origin: bool,
+}
+
 struct Outcome<'a> {
     trace: &'a RequestTrace,
     operation: Option<&'static str>,
@@ -1203,7 +1217,7 @@ struct Outcome<'a> {
     /// applied by [`S3Service::call`] to whatever the pipeline produced afterwards. `None` for
     /// every request that never got that far, which is what keeps a pre-authentication refusal
     /// from costing a configuration read.
-    cors: Option<CorsHeaders>,
+    cors: Option<CorsDecoration>,
     response_kind: ResponseKind,
 }
 

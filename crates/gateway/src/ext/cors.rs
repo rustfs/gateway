@@ -33,7 +33,7 @@
 //! that hands the inner source back, so no call path reaches the deployment's read without going
 //! through here.
 //!
-//! Three properties make the cache a bound rather than a speed-up:
+//! Four properties make the cache a bound rather than a speed-up:
 //!
 //! - **Negative entries have the same shape as positive ones.** "This bucket has no document",
 //!   "this bucket does not exist" and "the source failed" are all stored as the same `None`, so
@@ -43,6 +43,8 @@
 //!   earlier entries rather than growing the process.
 //! - **Expiry is spread.** Each key's lifetime is the configured TTL plus a fixed offset derived
 //!   from the key itself, so a burst of misses admitted together does not expire together.
+//! - **Source reads have a hard deadline.** A backend future that never resolves is collapsed and
+//!   cached as the same negative entry as every other source failure.
 //!
 //! # What is deliberately not here
 //!
@@ -54,8 +56,12 @@
 //! rate bound anyway. This is a gap, and it is written down rather than papered over.
 
 use std::collections::HashMap;
+use std::future::{Future, poll_fn};
 use std::sync::{Arc, Mutex};
+use std::task::Poll;
+use std::time::Duration;
 
+use futures_timer::Delay;
 use rustfs_gateway_core::BoxFuture;
 use rustfs_gateway_sig::RequestNow;
 use rustfs_gateway_types::BucketName;
@@ -67,6 +73,8 @@ use rustfs_gateway_types::dto::CorsConfiguration;
 /// is a distinct string so that a deployment can give unauthenticated preflight traffic its own
 /// budget without that budget being shared with any request an authenticated caller makes.
 pub const CORS_PREFLIGHT: &str = "CorsPreflight";
+
+const DEFAULT_SOURCE_TIMEOUT: Duration = Duration::from_secs(1);
 
 /// A read of a bucket's CORS document failed.
 ///
@@ -153,6 +161,7 @@ impl Default for CorsCacheConfig {
 pub struct CachedCorsSource {
     inner: Arc<dyn CorsSource>,
     config: CorsCacheConfig,
+    source_timeout: Duration,
     // A plain mutex, never held across an await: the read below drops the guard, awaits, and
     // takes it again. A caller that held it across the source read would serialise every
     // unauthenticated preflight in the process behind the slowest backend.
@@ -183,10 +192,16 @@ impl core::fmt::Debug for CachedCorsSource {
 
 impl CachedCorsSource {
     /// Wraps a source. Called by the builder and nowhere else in a deployment's own code.
+    /// Source reads are cut off after one second.
     pub fn new(inner: Arc<dyn CorsSource>, config: CorsCacheConfig) -> Self {
+        Self::with_source_timeout(inner, config, DEFAULT_SOURCE_TIMEOUT)
+    }
+
+    fn with_source_timeout(inner: Arc<dyn CorsSource>, config: CorsCacheConfig, source_timeout: Duration) -> Self {
         Self {
             inner,
             config,
+            source_timeout,
             state: Mutex::new(State::default()),
         }
     }
@@ -203,7 +218,7 @@ impl CachedCorsSource {
         // The guard is dropped before this await, and taken again after it. A read that failed is
         // cached as a negative entry on purpose: a backend that is down must not become a way to
         // reach it once per request.
-        let loaded = match self.inner.load(bucket).await {
+        let loaded = match load_before_deadline(self.inner.load(bucket), self.source_timeout).await {
             Ok(document) => document.map(Arc::new),
             Err(_) if rustfs_gateway_core::cors::source_absence_is_collapsed() => None,
             // The mutation keeps a failed read distinguishable from an ordinary negative entry
@@ -278,6 +293,26 @@ impl CachedCorsSource {
     }
 }
 
+async fn load_before_deadline(
+    mut future: BoxFuture<'_, Result<Option<CorsConfiguration>, CorsSourceError>>,
+    timeout: Duration,
+) -> Result<Option<CorsConfiguration>, CorsSourceError> {
+    if timeout.is_zero() {
+        return Err(CorsSourceError);
+    }
+    let mut deadline = Box::pin(Delay::new(timeout));
+    poll_fn(move |cx| {
+        if let Poll::Ready(result) = future.as_mut().poll(cx) {
+            return Poll::Ready(result);
+        }
+        if deadline.as_mut().poll(cx).is_ready() {
+            return Poll::Ready(Err(CorsSourceError));
+        }
+        Poll::Pending
+    })
+    .await
+}
+
 /// FNV-1a, 64 bit. Chosen over `DefaultHasher` because the offset it produces is asserted in a
 /// test, and `DefaultHasher`'s output is explicitly not stable across releases.
 fn fnv1a(bytes: &[u8]) -> u64 {
@@ -328,6 +363,15 @@ mod tests {
     impl CorsSource for Broken {
         fn load<'a>(&'a self, _bucket: &'a BucketName) -> BoxFuture<'a, Result<Option<CorsConfiguration>, CorsSourceError>> {
             Box::pin(async { Err(CorsSourceError) })
+        }
+    }
+
+    struct Never(AtomicUsize);
+
+    impl CorsSource for Never {
+        fn load<'a>(&'a self, _bucket: &'a BucketName) -> BoxFuture<'a, Result<Option<CorsConfiguration>, CorsSourceError>> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            Box::pin(std::future::pending())
         }
     }
 
@@ -407,6 +451,27 @@ mod tests {
         assert!(cache.get(&bucket("configured"), at(1000)).await.is_none());
         let broken = CachedCorsSource::new(Arc::new(Broken), CorsCacheConfig::default());
         assert!(broken.get(&bucket("any"), at(1)).await.is_none());
+    }
+
+    /// Negative — a source that never resolves is cut off and cached as the same absence as every
+    /// other source failure. The outer timeout is only a test watchdog: production must win first.
+    #[tokio::test]
+    async fn n_a_never_resolving_source_is_cut_off_and_negative_cached() {
+        let source = Arc::new(Never(AtomicUsize::new(0)));
+        let cache = CachedCorsSource::with_source_timeout(
+            Arc::clone(&source) as Arc<dyn CorsSource>,
+            CorsCacheConfig::default(),
+            Duration::from_millis(5),
+        );
+        let name = bucket("configured");
+        let first = tokio::select! {
+            result = cache.get(&name, at(1000)) => Some(result),
+            () = futures_timer::Delay::new(Duration::from_millis(100)) => None,
+        }
+        .expect("the mandatory source timeout must beat the test watchdog");
+        assert!(first.is_none());
+        assert!(cache.get(&bucket("configured"), at(1000)).await.is_none());
+        assert_eq!(source.0.load(Ordering::SeqCst), 1, "a timed-out source was retried");
     }
 
     /// Negative — the entry count is capped, so a caller inventing names cannot grow the process.

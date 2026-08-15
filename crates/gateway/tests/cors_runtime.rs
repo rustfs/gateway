@@ -413,6 +413,18 @@ async fn an_enumerated_origin_receives_the_credentials_allowance() {
     assert_eq!(header(&response, "vary").as_deref(), Some("origin"));
 }
 
+/// Negative — an authorised response still varies by `Origin` when the bucket has a CORS
+/// document but no rule admits this origin. Otherwise a shared cache can reuse this denied view
+/// for an origin that the same document would admit.
+#[tokio::test]
+async fn an_unmatched_authorised_origin_still_varies_by_origin() {
+    let built = build(&[NAMED], &["POST"], CorsPolicy::default(), None);
+    let response = send(&built.service, "POST", PING, &[("origin", STRANGER)]).await;
+    assert_eq!(response.status().as_u16(), 200);
+    assert_eq!(header(&response, "access-control-allow-origin"), None);
+    assert_eq!(header(&response, "vary").as_deref(), Some("origin"));
+}
+
 /// Negative — the same policy, and a rule that matches through a wildcard rather than by name:
 /// the origin is reflected and the credentials allowance is gone. This is
 /// `GHSA-x5xv-223c-8vm7` measured through the assembly a deployment actually builds, rather than
