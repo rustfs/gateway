@@ -32,6 +32,71 @@ use bytes::Bytes;
 use rustfs_gateway::{BodyProgress, ClockSkewAck, EVENT_STREAM_CONTENT_TYPE, ObservedBody, S3Service, ServiceBuilder, dto};
 use support::{Backend, CountingBody, Failing, Ping, Recorder, RefuseEverything, exchange, ping_route, plain, wired};
 
+const EXPECTED_PAYLOAD_SHA256: &str = "c32cace75647e3e184b9dce888af087f63740976550541874c37a1037b196b56";
+
+fn exact_presigned_payload() -> rustfs_gateway::sig::PayloadMode {
+    rustfs_gateway::sig::PayloadMode::parse(EXPECTED_PAYLOAD_SHA256, rustfs_gateway::sig::TrailerSet::None)
+        .expect("a lowercase SHA-256")
+}
+
+fn presigned_service(reached: &Arc<std::sync::atomic::AtomicUsize>) -> S3Service {
+    wired()
+        .clock_with_skew_ack(
+            support::fixed_clock(),
+            ClockSkewAck::i_understand_a_skewed_clock_can_disable_signature_expiry(),
+        )
+        .register::<Ping, _>(Arc::new(support::CountingBackend::new(reached)))
+        .route(ping_route())
+        .build()
+        .expect("a complete assembly")
+}
+
+/// Positive — a presigned body that matches its signed digest reaches the handler once.
+#[tokio::test]
+async fn a_presigned_body_matching_its_signed_digest_is_accepted() {
+    let reached = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let request = support::presigned_with_body(Bytes::from_static(b"expected-payload"), exact_presigned_payload());
+    let (status, body) = exchange(&presigned_service(&reached), request).await;
+    assert_eq!(status, http::StatusCode::OK, "{body}");
+    assert_eq!(reached.load(Ordering::SeqCst), 1);
+}
+
+/// Negative — changing the body after presigning is refused before the handler can commit it.
+#[tokio::test]
+async fn a_tampered_presigned_body_is_refused_before_the_handler() {
+    let reached = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let request = support::presigned_with_body(Bytes::from_static(b"tampered-payload"), exact_presigned_payload());
+    let (status, body) = exchange(&presigned_service(&reached), request).await;
+    assert_eq!(status, http::StatusCode::BAD_REQUEST);
+    assert!(body.contains("<Code>XAmzContentSHA256Mismatch</Code>"), "{body}");
+    assert_eq!(reached.load(Ordering::SeqCst), 0, "a mismatched body reached the handler");
+}
+
+/// Negative — omitting a body cannot satisfy a signed non-empty digest.
+#[tokio::test]
+async fn a_missing_presigned_body_is_refused_before_the_handler() {
+    let reached = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let request = support::presigned_with_body(Bytes::new(), exact_presigned_payload());
+    let (status, body) = exchange(&presigned_service(&reached), request).await;
+    assert_eq!(status, http::StatusCode::BAD_REQUEST);
+    assert!(body.contains("<Code>XAmzContentSHA256Mismatch</Code>"), "{body}");
+    assert_eq!(reached.load(Ordering::SeqCst), 0, "a missing body reached the handler");
+}
+
+/// Negative — streaming payload modes are recognised but unsupported for presigned requests.
+#[tokio::test]
+async fn a_streaming_presigned_body_is_not_implemented() {
+    let reached = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let payload =
+        rustfs_gateway::sig::PayloadMode::parse("STREAMING-AWS4-HMAC-SHA256-PAYLOAD", rustfs_gateway::sig::TrailerSet::None)
+            .expect("a recognised streaming mode");
+    let request = support::presigned_with_body(Bytes::new(), payload);
+    let (status, body) = exchange(&presigned_service(&reached), request).await;
+    assert_eq!(status, http::StatusCode::NOT_IMPLEMENTED);
+    assert!(body.contains("<Code>NotImplemented</Code>"), "{body}");
+    assert_eq!(reached.load(Ordering::SeqCst), 0, "an unsupported body reached the handler");
+}
+
 /// Negative — a request that names no operation is answered with the `501` that tells an operator
 /// to check the configured domain, not with a bare "not implemented".
 #[tokio::test]

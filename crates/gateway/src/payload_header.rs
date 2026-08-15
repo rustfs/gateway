@@ -15,8 +15,9 @@
 //! Signature-owned payload declarations read from the request head.
 //!
 //! Responsible for: deriving one complete [`PayloadMode`] from the signed payload and trailer
-//! headers. NOT responsible for: authenticating the declaration or decoding `aws-chunked` framing.
-//! Upstream: `crate::service`. Downstream: `rustfs-gateway-sig` payload parsing.
+//! headers, and turning a presigned exact digest into body-reader work. NOT responsible for:
+//! authenticating the declaration or decoding `aws-chunked` framing. Upstream: `crate::service`.
+//! Downstream: `rustfs-gateway-sig` payload parsing and `crate::gate` body validation.
 
 use http::HeaderMap;
 use rustfs_gateway_core::{HandlerError, ResponseKind};
@@ -24,7 +25,11 @@ use rustfs_gateway_sig::{PayloadMode, SigLocation, TrailerSet};
 use rustfs_gateway_types::ErrorCode;
 
 use crate::close::ConnectionIntent;
+use crate::gate::BodyDigestObligation;
 use crate::render::{S3Error, from_handler};
+
+/// A recognised presigned payload shape this assembly deliberately does not implement.
+pub(crate) struct StreamingPresignedUnsupported;
 
 /// What `x-amz-content-sha256` said about the body.
 ///
@@ -51,6 +56,23 @@ pub(crate) fn payload_mode(headers: &HeaderMap, location: SigLocation) -> Result
             "the x-amz-content-sha256 header is not a value this service accepts",
         )
     })
+}
+
+/// The body-integrity work a presigned request leaves for the bounded body reader.
+pub(crate) fn presigned_body_obligation(
+    payload: &PayloadMode,
+    location: SigLocation,
+) -> Result<BodyDigestObligation, StreamingPresignedUnsupported> {
+    if !location.is_presigned() {
+        return Ok(BodyDigestObligation::None);
+    }
+    if let Some(digest) = payload.digest() {
+        return Ok(BodyDigestObligation::Sha256(*digest));
+    }
+    if payload.is_framed() {
+        return Err(StreamingPresignedUnsupported);
+    }
+    Ok(BodyDigestObligation::None)
 }
 
 fn declared_trailers(headers: &HeaderMap) -> Result<TrailerSet, S3Error> {
