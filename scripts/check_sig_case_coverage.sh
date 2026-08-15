@@ -376,6 +376,28 @@ elif kind == "warning_branch":
     )
     if position == -1 or exact_warning is None:
         raise SystemExit(f"{path}: warning branch lost its exact active diagnostic")
+elif kind == "format_literal":
+    if code.count("format!(") != 1:
+        raise SystemExit(f"{path}: startup posture format call is missing or ambiguous")
+    position = code.index("format!(")
+    exact_format = re.match(
+        rf"format!\(\s*{re.escape(required_call)}\s*,",
+        source[position:],
+        re.DOTALL,
+    )
+    if exact_format is None:
+        raise SystemExit(f"{path}: startup posture format literal drifted")
+elif kind == "log_render":
+    if code.count("eprintln!(") != 1:
+        raise SystemExit(f"{path}: startup posture log call is missing or ambiguous")
+    position = code.index("eprintln!(")
+    exact_log = re.match(
+        r'eprintln!\(\s*"\{\}"\s*,\s*render_startup_posture\(',
+        source[position:],
+        re.DOTALL,
+    )
+    if exact_log is None:
+        raise SystemExit(f"{path}: startup posture log no longer renders the live report")
 elif kind in ("harness", "feature_harness"):
     item = top_level_function(evidence)
     attributes = outer_attributes(item.start()) if item is not None else []
@@ -939,6 +961,8 @@ validate_rust_evidence "$harness" feature_harness \
 
 gateway_builder="${ROOT}/crates/gateway/src/builder.rs"
 gateway_service="${ROOT}/crates/gateway/src/service.rs"
+gateway_dispatch="${ROOT}/crates/gateway/src/dispatch.rs"
+gateway_posture="${ROOT}/crates/gateway/src/posture.rs"
 validate_rust_evidence "$gateway_builder" source_order \
     'pub fn with_dangerously_replaced_signature_verifier(' \
     '_acknowledgement: DangerAck,' \
@@ -960,6 +984,10 @@ validate_rust_evidence "$gateway_builder" source_order \
     'SecurityPosture::new(' \
     'check_sig_case_coverage: custom verifier posture is not derived at assembly'
 validate_rust_evidence "$gateway_builder" source_order \
+    'let security_posture = SecurityPosture::new(' \
+    'log_startup_posture(' \
+    'check_sig_case_coverage: assembly does not emit the startup security posture'
+validate_rust_evidence "$gateway_builder" source_order \
     'let dangerously_replaced_signature_verifier = self.dangerously_replaced_signature_verifier.is_some();' \
     'if dangerously_replaced_signature_verifier {' \
     'check_sig_case_coverage: dangerous replacement warning is not reached at assembly'
@@ -967,14 +995,46 @@ validate_rust_evidence "$gateway_builder" warning_branch \
     'if dangerously_replaced_signature_verifier {' \
     '"WARN: the built-in AWS signature verifier is dangerously replaced; the H1..H7 security floor remains enforced"' \
     'check_sig_case_coverage: dangerous replacement lost its exact start-up warning'
-validate_rust_evidence "$gateway_builder" source_literal_after \
+validate_rust_evidence "$gateway_posture" source_literal_after \
     'if self.dangerously_replaced_signature_verifier {' \
     'f.write_str("; AWS signature verifier: dangerously replaced")?;' \
     'check_sig_case_coverage: dangerous replacement posture display drifted'
-validate_rust_evidence "$gateway_builder" source_literal_after \
+validate_rust_evidence "$gateway_posture" source_literal_after \
     'if self.custom_signature_verifier {' \
     'f.write_str("; custom signature verifier: installed")' \
     'check_sig_case_coverage: custom verifier posture display drifted'
+validate_rust_evidence "$gateway_dispatch" source_order \
+    'pub(crate) fn floors(&self)' \
+    'self.entries.values().map(OperationDispatch::floor)' \
+    'check_sig_case_coverage: startup posture cannot enumerate registered operation floors'
+validate_rust_evidence "$gateway_posture" source_order \
+    '.filter(|operation| operation.allows_anonymous())' \
+    'format_names(&anonymous_reachable_ops)' \
+    'check_sig_case_coverage: startup posture lost anonymous operation enumeration'
+validate_rust_evidence "$gateway_posture" source_order \
+    '.filter(|operation| !operation.privileged() && operation.allowed_schemes().allows_presigned())' \
+    'format_names(&presigned_allowed_ops)' \
+    'check_sig_case_coverage: startup posture lost presigned operation enumeration'
+validate_rust_evidence "$gateway_posture" source_order \
+    'match floor.sigv2_presigned() {' \
+    'SigV2Presigned::Enabled =>' \
+    'check_sig_case_coverage: startup posture lost the live SigV2 switch'
+validate_rust_evidence "$gateway_posture" source_order \
+    'let custom_verifier = if custom_signature_verifier {' \
+    'let sigv2 = match floor.sigv2_presigned() {' \
+    'check_sig_case_coverage: startup posture lost the live custom verifier switch'
+validate_rust_evidence "$gateway_posture" source_order \
+    'let aws_signature_verifier = if dangerously_replaced_signature_verifier {' \
+    'format!(' \
+    'check_sig_case_coverage: startup posture lost the live AWS verifier switch'
+validate_rust_evidence "$gateway_posture" format_literal \
+    'SECURITY_POSTURE' \
+    '"SECURITY_POSTURE anonymous_reachable_ops=[{}] custom_verifier={custom_verifier} sigv2={sigv2} presigned_allowed_ops=[{}] aws_signature_verifier={aws_signature_verifier}"' \
+    'check_sig_case_coverage: startup posture output lost a required field'
+validate_rust_evidence "$gateway_posture" log_render \
+    'log_startup_posture' \
+    'render_startup_posture' \
+    'check_sig_case_coverage: startup posture is not written to the startup log'
 
 python3 - "$ROOT/crates/gateway/Cargo.toml" <<'PYEOF'
 import sys

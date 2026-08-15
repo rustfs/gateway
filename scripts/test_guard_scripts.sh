@@ -7145,7 +7145,7 @@ expect_fail check_sig_case_coverage.sh \
 mut_sig_p2_04_dangerous_posture_display_changed() {
     python3 - <<'PYEOF'
 from pathlib import Path
-path = Path("crates/gateway/src/builder.rs")
+path = Path("crates/gateway/src/posture.rs")
 text = path.read_text()
 old = '            f.write_str("; AWS signature verifier: dangerously replaced")?;'
 if text.count(old) != 1:
@@ -7160,7 +7160,7 @@ expect_fail check_sig_case_coverage.sh \
 mut_sig_p2_04_custom_posture_display_changed() {
     python3 - <<'PYEOF'
 from pathlib import Path
-path = Path("crates/gateway/src/builder.rs")
+path = Path("crates/gateway/src/posture.rs")
 text = path.read_text()
 old = '            f.write_str("; custom signature verifier: installed")'
 if text.count(old) != 1:
@@ -7171,6 +7171,155 @@ PYEOF
 }
 expect_fail check_sig_case_coverage.sh \
     'custom posture display drifting beside a comment decoy' mut_sig_p2_04_custom_posture_display_changed
+
+mut_sig_p2_04_startup_posture_log_call_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/gateway/src/builder.rs")
+text = path.read_text()
+old = """        log_startup_posture(
+            dispatch.floors(),
+            &self.floor,
+            custom_signature_verifier,
+            dangerously_replaced_signature_verifier,
+        );
+"""
+if text.count(old) != 1:
+    raise SystemExit("missing startup posture log mutation subject")
+path.write_text(text.replace(old, "        let _ = (&dispatch, &self.floor);\n", 1))
+PYEOF
+}
+expect_fail check_sig_case_coverage.sh \
+    'assembly no longer writing the startup posture report' mut_sig_p2_04_startup_posture_log_call_removed
+
+mut_sig_p2_04_startup_posture_floor_inventory_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/gateway/src/dispatch.rs")
+text = path.read_text()
+old = "        self.entries.values().map(OperationDispatch::floor)"
+if text.count(old) != 1:
+    raise SystemExit("missing startup posture floor inventory mutation subject")
+path.write_text(text.replace(old, "        core::iter::empty()", 1))
+PYEOF
+}
+expect_fail check_sig_case_coverage.sh \
+    'the startup posture no longer enumerating registered operation floors' \
+    mut_sig_p2_04_startup_posture_floor_inventory_removed
+
+mut_sig_p2_04_startup_posture_anonymous_filter_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/gateway/src/posture.rs")
+text = path.read_text()
+old = "        .filter(|operation| operation.allows_anonymous())"
+if text.count(old) != 1:
+    raise SystemExit("missing anonymous startup posture mutation subject")
+path.write_text(text.replace(old, "        .filter(|_| false)", 1))
+PYEOF
+}
+expect_fail check_sig_case_coverage.sh \
+    'the startup posture forcing the anonymous operation list empty' \
+    mut_sig_p2_04_startup_posture_anonymous_filter_removed
+
+mut_sig_p2_04_startup_posture_presigned_filter_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/gateway/src/posture.rs")
+text = path.read_text()
+old = "        .filter(|operation| !operation.privileged() && operation.allowed_schemes().allows_presigned())"
+if text.count(old) != 1:
+    raise SystemExit("missing presigned startup posture mutation subject")
+path.write_text(text.replace(old, "        .filter(|_| false)", 1))
+PYEOF
+}
+expect_fail check_sig_case_coverage.sh \
+    'the startup posture forcing the presigned operation list empty' \
+    mut_sig_p2_04_startup_posture_presigned_filter_removed
+
+mut_sig_p2_04_startup_posture_sigv2_switch_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/gateway/src/posture.rs")
+text = path.read_text()
+old = "    let sigv2 = match floor.sigv2_presigned() {"
+if text.count(old) != 1:
+    raise SystemExit("missing startup posture SigV2 mutation subject")
+path.write_text(text.replace(old, "    let sigv2 = match SigV2Presigned::Disabled {", 1))
+PYEOF
+}
+expect_fail check_sig_case_coverage.sh \
+    'the startup posture no longer reading the live SigV2 switch' mut_sig_p2_04_startup_posture_sigv2_switch_removed
+
+mut_sig_p2_04_startup_posture_custom_switch_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/gateway/src/posture.rs")
+text = path.read_text()
+old = '    let custom_verifier = if custom_signature_verifier { "installed" } else { "none" };'
+if text.count(old) != 1:
+    raise SystemExit("missing startup posture custom-verifier mutation subject")
+path.write_text(text.replace(old, '    let custom_verifier = "none";', 1))
+PYEOF
+}
+expect_fail check_sig_case_coverage.sh \
+    'the startup posture no longer reading the live custom verifier switch' \
+    mut_sig_p2_04_startup_posture_custom_switch_removed
+
+mut_sig_p2_04_startup_posture_aws_switch_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/gateway/src/posture.rs")
+text = path.read_text()
+old = "    let aws_signature_verifier = if dangerously_replaced_signature_verifier {"
+if text.count(old) != 1:
+    raise SystemExit("missing startup posture AWS-verifier mutation subject")
+path.write_text(text.replace(old, "    let aws_signature_verifier = if false {", 1))
+PYEOF
+}
+expect_fail check_sig_case_coverage.sh \
+    'the startup posture no longer reading the live AWS verifier switch' mut_sig_p2_04_startup_posture_aws_switch_removed
+
+mut_sig_p2_04_startup_posture_format_dropped_field() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/gateway/src/posture.rs")
+text = path.read_text()
+old = '        "SECURITY_POSTURE anonymous_reachable_ops=[{}] custom_verifier={custom_verifier} sigv2={sigv2} presigned_allowed_ops=[{}] aws_signature_verifier={aws_signature_verifier}",'
+if text.count(old) != 1:
+    raise SystemExit("missing startup posture format mutation subject")
+new = '        // "SECURITY_POSTURE anonymous_reachable_ops=[{}] custom_verifier={custom_verifier} sigv2={sigv2} presigned_allowed_ops=[{}] aws_signature_verifier={aws_signature_verifier}",\n        "SECURITY_POSTURE anonymous_reachable_ops=[{}] custom_verifier={custom_verifier} sigv2={sigv2} presigned_allowed_ops=[{}]",'
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_sig_case_coverage.sh \
+    'the startup posture output dropping a required field beside a comment decoy' \
+    mut_sig_p2_04_startup_posture_format_dropped_field
+
+mut_sig_p2_04_startup_posture_log_render_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/gateway/src/posture.rs")
+text = path.read_text()
+old = """    eprintln!(
+        "{}",
+        render_startup_posture(operations, floor, custom_signature_verifier, dangerously_replaced_signature_verifier,)
+    );
+"""
+if text.count(old) != 1:
+    raise SystemExit("missing startup posture renderer mutation subject")
+new = """    let _ = render_startup_posture(
+        operations,
+        floor,
+        custom_signature_verifier,
+        dangerously_replaced_signature_verifier,
+    );
+"""
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_sig_case_coverage.sh \
+    'the startup posture report being rendered but never written' mut_sig_p2_04_startup_posture_log_render_removed
 
 mut_sig_p2_04_replay_store_call_removed() {
     python3 - <<'PYEOF'
