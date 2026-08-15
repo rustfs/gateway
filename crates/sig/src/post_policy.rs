@@ -547,7 +547,7 @@ mod tests {
     const POLICY: &str = "eyJleHBpcmF0aW9uIjoiMjAxNS0wOC0zMFQxMzozNjowMFoiLCJjb25kaXRpb25zIjpbeyJidWNrZXQiOiJleGFtcGxlLWJ1Y2tldCJ9LFsic3RhcnRzLXdpdGgiLCIka2V5IiwidXBsb2Fkcy8iXSx7IngtYW16LWFsZ29yaXRobSI6IkFXUzQtSE1BQy1TSEEyNTYifSx7IngtYW16LWNyZWRlbnRpYWwiOiJBS0lERVhBTVBMRS8yMDE1MDgzMC91cy1lYXN0LTEvczMvYXdzNF9yZXF1ZXN0In0seyJ4LWFtei1kYXRlIjoiMjAxNTA4MzBUMTIzNjAwWiJ9XX0=";
 
     #[test]
-    fn valid_policy_produces_a_proof_and_final_receipt() {
+    fn c_sig_0417_valid_policy_produces_a_proof_and_final_receipt() {
         let key = SigningKey::from_array([7u8; 32]);
         let signature = hex_encode(&hmac_sha256(key.expose(), POLICY.as_bytes()));
         let fields = valid_fields(&signature);
@@ -558,7 +558,7 @@ mod tests {
     }
 
     #[test]
-    fn case_only_duplicate_fields_are_rejected() {
+    fn c_sig_0418_case_only_duplicate_fields_are_rejected() {
         let signature = "0".repeat(64);
         let mut fields = valid_fields(&signature);
         fields.push(("X-Amz-Date", "20150830T123600Z"));
@@ -566,19 +566,19 @@ mod tests {
     }
 
     #[test]
-    fn missing_filename_for_a_template_is_rejected() {
+    fn c_sig_0419_missing_filename_for_a_template_is_rejected() {
         let signature = "0".repeat(64);
         assert_eq!(parse(&valid_fields(&signature), "").err(), Some(PostPolicyError::ConditionFailed));
     }
 
     #[test]
-    fn control_character_in_filename_is_rejected() {
+    fn c_sig_0420_control_character_in_filename_is_rejected() {
         let signature = "0".repeat(64);
         assert_eq!(parse(&valid_fields(&signature), "bad\0name").err(), Some(PostPolicyError::Malformed));
     }
 
     #[test]
-    fn wrong_field_value_is_rejected() {
+    fn c_sig_0421_wrong_field_value_is_rejected() {
         let signature = "0".repeat(64);
         let mut fields = valid_fields(&signature);
         fields[1].1 = "other-bucket";
@@ -586,7 +586,7 @@ mod tests {
     }
 
     #[test]
-    fn bad_base64_padding_is_rejected() {
+    fn c_sig_0422_bad_base64_padding_is_rejected() {
         let signature = "0".repeat(64);
         let mut fields = valid_fields(&signature);
         fields[6].1 = "eyJleHBpcmF0aW9uIjoiMjAxNS0wOC0zMFQxMzozNjowMFoiLCJjb25kaXRpb25zIjpbeyJidWNrZXQiOiJleGFtcGxlLWJ1Y2tldCJ9LFsic3RhcnRzLXdpdGgiLCIka2V5IiwidXBsb2Fkcy8iXSx7IngtYW16LWFsZ29yaXRobSI6IkFXUzQtSE1BQy1TSEEyNTYifSx7IngtYW16LWNyZWRlbnRpYWwiOiJBS0lERVhBTVBMRS8yMDE1MDgzMC91cy1lYXN0LTEvczMvYXdzNF9yZXF1ZXN0In0seyJ4LWFtei1kYXRlIjoiMjAxNTA4MzBUMTIzNjAwWiJ9XX0gIB==";
@@ -594,7 +594,7 @@ mod tests {
     }
 
     #[test]
-    fn duplicate_json_keys_are_rejected() {
+    fn c_sig_0423_duplicate_json_keys_are_rejected() {
         let signature = "0".repeat(64);
         let mut fields = valid_fields(&signature);
         fields[6].1 = "eyJleHBpcmF0aW9uIjoiMjAxNS0wOC0zMFQxMzozNjowMFoiLCJleHBpcmF0aW9uIjoiMjAxNS0wOC0zMFQxMzozNjowMFoiLCJjb25kaXRpb25zIjpbeyJidWNrZXQiOiJleGFtcGxlLWJ1Y2tldCJ9LFsic3RhcnRzLXdpdGgiLCIka2V5IiwidXBsb2Fkcy8iXSx7IngtYW16LWFsZ29yaXRobSI6IkFXUzQtSE1BQy1TSEEyNTYifSx7IngtYW16LWNyZWRlbnRpYWwiOiJBS0lERVhBTVBMRS8yMDE1MDgzMC91cy1lYXN0LTEvczMvYXdzNF9yZXF1ZXN0In0seyJ4LWFtei1kYXRlIjoiMjAxNTA4MzBUMTIzNjAwWiJ9XX0=";
@@ -602,7 +602,7 @@ mod tests {
     }
 
     #[test]
-    fn unknown_condition_operators_are_rejected() {
+    fn c_sig_0424_unknown_condition_operators_are_rejected() {
         let signature = "0".repeat(64);
         let mut fields = valid_fields(&signature);
         fields[6].1 = "eyJleHBpcmF0aW9uIjoiMjAxNS0wOC0zMFQxMzozNjowMFoiLCJjb25kaXRpb25zIjpbeyJidWNrZXQiOiJleGFtcGxlLWJ1Y2tldCJ9LFsiY29udGFpbnMiLCIka2V5IiwidXBsb2Fkcy8iXSx7IngtYW16LWFsZ29yaXRobSI6IkFXUzQtSE1BQy1TSEEyNTYifSx7IngtYW16LWNyZWRlbnRpYWwiOiJBS0lERVhBTVBMRS8yMDE1MDgzMC91cy1lYXN0LTEvczMvYXdzNF9yZXF1ZXN0In0seyJ4LWFtei1kYXRlIjoiMjAxNTA4MzBUMTIzNjAwWiJ9XX0=";
@@ -610,7 +610,7 @@ mod tests {
     }
 
     #[test]
-    fn expired_policy_is_rejected() {
+    fn c_sig_0425_expired_policy_is_rejected() {
         let signature = "0".repeat(64);
         let fields = valid_fields(&signature);
         let result = PostPolicy::parse(
@@ -623,7 +623,7 @@ mod tests {
     }
 
     #[test]
-    fn wrong_signature_is_rejected() {
+    fn c_sig_0426_wrong_signature_is_rejected() {
         let signature = "0".repeat(64);
         let policy = parse(&valid_fields(&signature), "report.txt").expect("policy shape is valid");
         assert_eq!(
@@ -633,7 +633,7 @@ mod tests {
     }
 
     #[test]
-    fn final_size_bounds_are_enforced_both_ways() {
+    fn c_sig_0427_final_size_bounds_are_enforced_both_ways() {
         let signature = "0".repeat(64);
         let mut policy = parse(&valid_fields(&signature), "report.txt").expect("policy shape is valid");
         policy.minimum_file_bytes = 2;

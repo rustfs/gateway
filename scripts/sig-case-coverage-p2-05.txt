@@ -1,0 +1,12 @@
+c-sig-0417|positive|crates/sig/src/post_policy.rs|fn c_sig_0417_valid_policy_produces_a_proof_and_final_receipt|policy.verify(&key)|policy.enforce_final(
+c-sig-0418|negative|crates/sig/src/post_policy.rs|fn c_sig_0418_case_only_duplicate_fields_are_rejected|fields.push((|Some(PostPolicyError::Malformed)
+c-sig-0419|negative|crates/sig/src/post_policy.rs|fn c_sig_0419_missing_filename_for_a_template_is_rejected|parse(&valid_fields(&signature),|Some(PostPolicyError::ConditionFailed)
+c-sig-0420|negative|crates/sig/src/post_policy.rs|fn c_sig_0420_control_character_in_filename_is_rejected|Some(PostPolicyError::Malformed)
+c-sig-0421|negative|crates/sig/src/post_policy.rs|fn c_sig_0421_wrong_field_value_is_rejected|fields[1].1 =|Some(PostPolicyError::ConditionFailed)
+c-sig-0422|negative|crates/sig/src/post_policy.rs|fn c_sig_0422_bad_base64_padding_is_rejected|fields[6].1 =|Some(PostPolicyError::Malformed)
+c-sig-0423|negative|crates/sig/src/post_policy.rs|fn c_sig_0423_duplicate_json_keys_are_rejected|Some(PostPolicyError::Malformed)
+c-sig-0424|negative|crates/sig/src/post_policy.rs|fn c_sig_0424_unknown_condition_operators_are_rejected|Some(PostPolicyError::Malformed)
+c-sig-0425|negative|crates/sig/src/post_policy.rs|fn c_sig_0425_expired_policy_is_rejected|RequestNow::from_unix_seconds(1_440_941_761)|Some(PostPolicyError::Expired)
+c-sig-0426|negative|crates/sig/src/post_policy.rs|fn c_sig_0426_wrong_signature_is_rejected|policy.verify(&SigningKey::from_array([7u8; 32]))|Some(PostPolicyError::SignatureMismatch)
+c-sig-0427|negative|crates/sig/src/post_policy.rs|fn c_sig_0427_final_size_bounds_are_enforced_both_ways|Some(PostPolicyError::EntityTooSmall)|Some(PostPolicyError::EntityTooLarge)
+c-sig-0428|positive|crates/gateway/src/ext/authenticator.rs|fn c_sig_0428_form_field_material_uses_the_post_policy_authority|authenticator().try_verify(&request).await|assert!(verdict.is_authenticated())

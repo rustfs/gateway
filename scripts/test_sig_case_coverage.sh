@@ -5,12 +5,12 @@ set -euo pipefail
 # test_sig_case_coverage.sh
 #
 # WHAT THIS CHECKS
-#   That the P2-02 additions to check_sig_case_coverage.sh fail for missing or
+#   That the P2-02 and P2-05 additions to check_sig_case_coverage.sh fail for missing or
 #   weakened acceptance evidence. Each mutation runs in a throwaway repository
 #   copy; the working tree is never modified.
 #
 # WHY
-#   rustfs/backlog#1679 adds a second signature-proof case set. Its guard must
+#   rustfs/backlog#1679 and rustfs/backlog#1685 add signature-proof case sets. Their guard must
 #   fail when the case count, polarity, harness, serde evidence, proof controls,
 #   executable guard mappings, or deployment guidance changes.
 #
@@ -307,6 +307,106 @@ PYEOF
 }
 expect_fail check_sig_case_coverage.sh \
     'c-sig-0128 losing the observable poison direction' mut_sig_log_capture_poison_removed
+
+mut_sig_p2_05_manifest_removed() {
+    rm scripts/sig-case-coverage-p2-05.txt
+}
+expect_fail check_sig_case_coverage.sh \
+    'the P2-05 acceptance manifest being removed' mut_sig_p2_05_manifest_removed
+
+mut_sig_p2_05_mapping_deleted() {
+    sed -i.bak '/^c-sig-0428|/d' scripts/sig-case-coverage-p2-05.txt
+}
+expect_fail check_sig_case_coverage.sh \
+    'one of the twelve P2-05 mappings being deleted' mut_sig_p2_05_mapping_deleted
+
+mut_sig_p2_05_polarity_changed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("scripts/sig-case-coverage-p2-05.txt")
+text = path.read_text()
+old = "c-sig-0417|positive|"
+if text.count(old) != 1:
+    raise SystemExit("missing P2-05 polarity mutation subject")
+path.write_text(text.replace(old, "c-sig-0417|negative|", 1))
+PYEOF
+}
+expect_fail check_sig_case_coverage.sh \
+    'the P2-05 positive and negative split changing' mut_sig_p2_05_polarity_changed
+
+mut_sig_p2_05_evidence_reused() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("scripts/sig-case-coverage-p2-05.txt")
+text = path.read_text()
+old = "fn c_sig_0418_case_only_duplicate_fields_are_rejected"
+new = "fn c_sig_0417_valid_policy_produces_a_proof_and_final_receipt"
+if text.count(old) != 1:
+    raise SystemExit("missing P2-05 evidence-reuse mutation subject")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_sig_case_coverage.sh \
+    'two P2-05 cases reusing one named test' mut_sig_p2_05_evidence_reused
+
+mut_sig_p2_05_nested_test_disabled() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/sig/src/post_policy.rs")
+text = path.read_text()
+old = "#[test]\n    fn c_sig_0418_case_only_duplicate_fields_are_rejected()"
+new = "#[cfg(any())]\n    #[test]\n    fn c_sig_0418_case_only_duplicate_fields_are_rejected()"
+if text.count(old) != 1:
+    raise SystemExit("missing P2-05 nested-test mutation subject")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_sig_case_coverage.sh \
+    'a P2-05 nested test being disabled by cfg' mut_sig_p2_05_nested_test_disabled
+
+mut_sig_p2_05_test_module_disabled() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/sig/src/post_policy.rs")
+text = path.read_text()
+old = "#[cfg(test)]\nmod tests {"
+new = "#[cfg(any())]\nmod tests {"
+if text.count(old) != 1:
+    raise SystemExit("missing P2-05 test-module mutation subject")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_sig_case_coverage.sh \
+    'the P2-05 test module being disabled by cfg' mut_sig_p2_05_test_module_disabled
+
+mut_sig_p2_05_primary_assertion_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/sig/src/post_policy.rs")
+text = path.read_text()
+old = "assert!(policy.verify(&key).is_ok());"
+new = "assert!(policy.final_key().starts_with(\"uploads/\"));"
+if text.count(old) != 1:
+    raise SystemExit("missing P2-05 primary-assertion mutation subject")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_sig_case_coverage.sh \
+    'c-sig-0417 losing its signature-proof assertion' mut_sig_p2_05_primary_assertion_removed
+
+mut_sig_p2_05_second_size_direction_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/sig/src/post_policy.rs")
+text = path.read_text()
+old = "Some(PostPolicyError::EntityTooLarge)"
+if text.count(old) != 1:
+    raise SystemExit("missing P2-05 upper-size mutation subject")
+path.write_text(text.replace(old, "Some(PostPolicyError::EntityTooSmall)", 1))
+PYEOF
+}
+expect_fail check_sig_case_coverage.sh \
+    'c-sig-0427 losing the upper size-bound direction' mut_sig_p2_05_second_size_direction_removed
 
 printf '\n%s case(s), %s failure(s)\n' "$cases" "$failures"
 [[ "$failures" -eq 0 ]]

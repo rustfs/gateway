@@ -109,6 +109,20 @@ while IFS= read -r mapping; do
     p2_04_compile_fail_cases+=("$mapping")
 done <"$p2_04_compile_fail_manifest"
 
+p2_05_cases=()
+p2_05_manifest="${ROOT}/scripts/sig-case-coverage-p2-05.txt"
+[[ -f "$p2_05_manifest" ]] || {
+    printf 'check_sig_case_coverage: P2-05 case manifest is missing\n' >&2
+    exit 1
+}
+while IFS= read -r mapping; do
+    [[ -n "$mapping" ]] || {
+        printf 'check_sig_case_coverage: P2-05 case manifest contains a blank row\n' >&2
+        exit 1
+    }
+    p2_05_cases+=("$mapping")
+done <"$p2_05_manifest"
+
 [[ "${#cases[@]}" -eq 25 ]] || {
     printf 'check_sig_case_coverage: expected 25 mappings, got %s\n' "${#cases[@]}" >&2
     exit 1
@@ -348,6 +362,43 @@ elif kind in ("runtime", "feature_runtime"):
         body_start, body_end = function_body(item)
         if not direct_occurrence(body_start, body_end, required_call):
             raise SystemExit(f"{path}: mapped runtime evidence is not active in the test body")
+elif kind == "nested_runtime":
+    if not evidence.startswith("fn "):
+        raise SystemExit(f"{path}: nested runtime evidence must name a function")
+    function = evidence.removeprefix("fn ")
+    pattern = re.compile(rf"(?m)^[ \t]*(?:async\s+)?fn\s+{re.escape(function)}\s*\(\s*\)[^;{{]*\{{")
+    items = list(pattern.finditer(code))
+    if len(items) != 1:
+        raise SystemExit(f"{path}: mapped nested test is missing or ambiguous")
+    item = items[0]
+    attributes = outer_attributes(item.start())
+    ordinary = len(attributes) == 1 and re.fullmatch(r"#\s*\[\s*(?:tokio::)?test\s*\]", attributes[0])
+    if not ordinary:
+        raise SystemExit(f"{path}: mapped nested function is not a real #[test] item")
+    module_pattern = re.compile(r"(?m)^[ \t]*mod\s+tests\s*\{\s*$")
+    containers = []
+    for module in module_pattern.finditer(code):
+        module_start, module_end = function_body(module)
+        if module_start < item.start() < module_end:
+            containers.append(module)
+    if len(containers) != 1:
+        raise SystemExit(f"{path}: mapped nested test is not in one direct tests module")
+    module_attributes = outer_attributes(containers[0].start())
+    cfg_attributes = [attribute for attribute in module_attributes if re.match(r"#\s*\[\s*cfg", attribute)]
+    active_module = (
+        len(cfg_attributes) == 1
+        and re.fullmatch(r"#\s*\[\s*cfg\s*\(\s*test\s*\)\s*\]", cfg_attributes[0])
+        and all(
+            attribute == cfg_attributes[0] or re.match(r"#\s*\[\s*allow\s*\(", attribute)
+            for attribute in module_attributes
+        )
+    )
+    direct_depth = delimiter_depth(item.start()) == {"{": 1, "(": 0, "[": 0}
+    if not active_module or not direct_depth:
+        raise SystemExit(f"{path}: mapped nested test is disabled or not a direct module item")
+    body_start, body_end = function_body(item)
+    if required_call and required_call not in code[body_start:body_end]:
+        raise SystemExit(f"{path}: mapped nested test lost its required active evidence")
 elif kind == "source_order":
     if code.count(evidence) != 1 or code.count(required_call) != 1:
         raise SystemExit(f"{path}: ordered production evidence is missing or ambiguous")
@@ -923,6 +974,59 @@ done
     exit 1
 }
 
+[[ "${#p2_05_cases[@]}" -eq 12 ]] || {
+    printf 'check_sig_case_coverage: expected 12 P2-05 mappings, got %s\n' "${#p2_05_cases[@]}" >&2
+    exit 1
+}
+p2_05_expected_ids=(
+    c-sig-0417 c-sig-0418 c-sig-0419 c-sig-0420 c-sig-0421 c-sig-0422
+    c-sig-0423 c-sig-0424 c-sig-0425 c-sig-0426 c-sig-0427 c-sig-0428
+)
+positive=0
+negative=0
+p2_05_evidence=()
+for index in "${!p2_05_cases[@]}"; do
+    IFS='|' read -r id polarity relative evidence required_call secondary_call <<<"${p2_05_cases[$index]}"
+    [[ "$id" == "${p2_05_expected_ids[$index]}" ]] || {
+        printf 'check_sig_case_coverage: expected P2-05 %s, found %s\n' \
+            "${p2_05_expected_ids[$index]}" "$id" >&2
+        exit 1
+    }
+    case "$polarity" in
+        positive) positive=$((positive + 1)) ;;
+        negative) negative=$((negative + 1)) ;;
+        *) printf 'check_sig_case_coverage: %s has unknown polarity %s\n' "$id" "$polarity" >&2; exit 1 ;;
+    esac
+    file="${ROOT}/${relative}"
+    [[ -f "$file" ]] || {
+        printf 'check_sig_case_coverage: mapped file is missing: %s\n' "$relative" >&2
+        exit 1
+    }
+    function="${evidence#fn }"
+    token="${id//-/_}_"
+    [[ "$function" == "$token"* ]] || {
+        printf 'check_sig_case_coverage: %s is bound to the wrong executable test %s\n' \
+            "$id" "$function" >&2
+        exit 1
+    }
+    p2_05_evidence+=("${relative}|${evidence}")
+    validate_rust_evidence "$file" nested_runtime "$evidence" "$required_call" \
+        "check_sig_case_coverage: ${id} is not a named active POST-policy test in ${relative}"
+    if [[ -n "${secondary_call:-}" ]]; then
+        validate_rust_evidence "$file" nested_runtime "$evidence" "$secondary_call" \
+            "check_sig_case_coverage: ${id} lost its second active POST-policy assertion in ${relative}"
+    fi
+done
+[[ "$positive" -eq 2 && "$negative" -eq 10 && "$negative" -gt "$positive" ]] || {
+    printf 'check_sig_case_coverage: expected 2 positive and 10 negative P2-05 cases, got %s/%s\n' \
+        "$positive" "$negative" >&2
+    exit 1
+}
+[[ "$(printf '%s\n' "${p2_05_evidence[@]}" | sort -u | wc -l | tr -d ' ')" -eq 12 ]] || {
+    printf 'check_sig_case_coverage: P2-05 cases must use distinct named tests\n' >&2
+    exit 1
+}
+
 grep -Fq 'Presigned URLs are replayable within their validity window.' \
     "${ROOT}/docs/security-model.md" || {
     printf 'check_sig_case_coverage: security model lost the H7 replay statement\n' >&2
@@ -1232,5 +1336,5 @@ done
 
 run_evidence_validations
 
-printf 'OK: all 147 P2 signature cases map to executable evidence '
-printf '(P2-01: 8/17; P2-02: 6/22; P2-03: 14/29; P2-04: 9/42)\n'
+printf 'OK: all 159 P2 signature cases map to executable evidence '
+printf '(P2-01: 8/17; P2-02: 6/22; P2-03: 14/29; P2-04: 9/42; P2-05: 2/10)\n'
