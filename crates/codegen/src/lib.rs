@@ -158,6 +158,17 @@ impl CodegenOutput {
             .parent()
             .map_or_else(|| PathBuf::from("spec/contracts"), |spec| spec.join("contracts"))
     }
+
+    fn macro_operation_names(&self) -> PathBuf {
+        self.generated_dir.parent().map_or_else(
+            || PathBuf::from("crates/macros/src/op_names.rs"),
+            |root| root.join("crates/macros/src/op_names.rs"),
+        )
+    }
+
+    fn required_external_files(&self) -> [PathBuf; 2] {
+        [self.operations_md.clone(), self.macro_operation_names()]
+    }
 }
 
 /// What one run produced.
@@ -255,6 +266,7 @@ pub fn generate(input: &CodegenInput, out: &CodegenOutput) -> Result<Artifacts> 
         emit::operations_md::render(&lowered.operations, &lowered.deferred),
     ));
     files.push((out.generated_dir.join("routes.rs"), emit::rust_files::routes(&lowered.operations)));
+    files.push((out.macro_operation_names(), emit::rust_files::macro_operation_names(&lowered.operations)));
     files.push((
         out.generated_dir.join("naming_contracts.rs"),
         emit::naming_contracts::render(&overlay.contract_rules).map_err(Error::Policy)?,
@@ -278,6 +290,14 @@ pub fn generate(input: &CodegenInput, out: &CodegenOutput) -> Result<Artifacts> 
     let (dto_files, dto) = emit::dto::emit(&lowered.operations, &out.generated_dir).map_err(Error::Policy)?;
     files.extend(dto_files);
     files.extend(emit::codec::emit(&lowered.operations, &overlay.codec_rules, &out.generated_dir).map_err(Error::Policy)?);
+    for required in out.required_external_files() {
+        if !files.iter().any(|(path, _)| *path == required) {
+            return Err(Error::Policy(format!(
+                "required codegen artefact was not emitted: {}",
+                required.display()
+            )));
+        }
+    }
     files.sort_by(|a, b| a.0.cmp(&b.0));
 
     Ok(Artifacts {

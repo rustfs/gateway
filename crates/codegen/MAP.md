@@ -21,7 +21,7 @@ and the zero-diff gate needs no temporary directory.
 | `src/emit/mod.rs` | Shared TOML value formatting. | Adding a value kind to a spec file. |
 | `src/emit/spec_toml.rs` | `spec/operations/<Op>.toml` — the field-binding view, plus the one-line spellings of a type and a predicate that the other emitters reuse. | A field's rendering in a spec file is wrong. |
 | `src/emit/operations_md.rs` | `OPERATIONS.md` — three reverse indexes (query key, header, error code), the forward table, the route order, and one section per operation. | You are changing what an agent can look up without reading the model. |
-| `src/emit/rust_files.rs` | `generated/routes.rs` and `generated/error_codes.rs`, data only. | P4 wires the route table up, or a row shape changes. |
+| `src/emit/rust_files.rs` | `generated/routes.rs`, `generated/error_codes.rs`, and the macros crate's operation-name table; data only. | P4 wires the route table up, a row shape changes, or the handler macro rejects a standard operation. |
 | `src/emit/dto/mod.rs` | `generated/dto/**` — one module per operation, plus flat aliases and the `field_counts.txt` ratchet. Owns the **ADR-0004 P2 gate**: a required member whose type has no `Default` fails the build rather than being quietly wrapped in an `Option`. | A dto's shape is wrong, or the P2 gate fires. |
 | `src/emit/dto/naming.rs` | Operation and member names to Rust identifiers, keyword escaping included. | A generated name collides or reads badly. |
 | `src/emit/dto/registry.rs` | Which shapes and enums each operation drags in, so a shape emitted once is shared rather than duplicated. | A type is emitted twice, or is missing. |
