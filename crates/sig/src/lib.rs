@@ -97,6 +97,8 @@ mod floor;
 mod mode;
 mod operation;
 mod parse;
+pub mod post_policy;
+mod post_policy_json;
 mod query;
 mod scheme;
 mod scope;
@@ -135,6 +137,7 @@ pub use parse::{
     AmzDate, CredentialScope, PresignedParams, SCOPE_TERMINATOR, ScopeDate, SigV4Authorization, X_AMZ_ALGORITHM,
     X_AMZ_CREDENTIAL, X_AMZ_DATE, X_AMZ_SIGNED_HEADERS,
 };
+pub use post_policy::{PostPolicy, PostPolicyEnforcement, PostPolicyError, PostPolicyLimits};
 pub use query::{QueryExclusion, RawQuery, X_AMZ_SIGNATURE, percent_decode, percent_encode};
 pub use secret::{SessionTokenMatch, TokenMismatch};
 // The effective host is determined in `rustfs-gateway-http` and nowhere else. These are
