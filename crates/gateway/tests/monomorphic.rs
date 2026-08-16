@@ -183,6 +183,10 @@ impl Handler<Ping> for Panics {
     async fn call(&self, _request: Req<Ping>) -> HandlerResult<Ping> {
         panic!("handler panic fixture");
     }
+
+    async fn call_with_context(&self, _request: Req<Ping>, _context: rustfs_gateway::HandlerContext) -> HandlerResult<Ping> {
+        panic!("handler panic fixture");
+    }
 }
 
 /// a-asm-0007. A panic in the concrete handler is still contained by the common service boundary.
@@ -211,6 +215,13 @@ struct CommitPanics;
 
 impl Handler<Ping> for CommitPanics {
     async fn call(&self, _request: Req<Ping>) -> HandlerResult<Ping> {
+        Ok(rustfs_gateway::Resp::commit_with_status(
+            Box::pin(async { panic!("committed continuation panic fixture") }),
+            http::StatusCode::ACCEPTED.as_u16(),
+        ))
+    }
+
+    async fn call_with_context(&self, _request: Req<Ping>, _context: rustfs_gateway::HandlerContext) -> HandlerResult<Ping> {
         Ok(rustfs_gateway::Resp::commit_with_status(
             Box::pin(async { panic!("committed continuation panic fixture") }),
             http::StatusCode::ACCEPTED.as_u16(),
@@ -266,6 +277,13 @@ struct CommitDropPanics;
 
 impl Handler<Ping> for CommitDropPanics {
     async fn call(&self, _request: Req<Ping>) -> HandlerResult<Ping> {
+        Ok(rustfs_gateway::Resp::commit_with_status(
+            Box::pin(ReadyThenDropPanics),
+            http::StatusCode::ACCEPTED.as_u16(),
+        ))
+    }
+
+    async fn call_with_context(&self, _request: Req<Ping>, _context: rustfs_gateway::HandlerContext) -> HandlerResult<Ping> {
         Ok(rustfs_gateway::Resp::commit_with_status(
             Box::pin(ReadyThenDropPanics),
             http::StatusCode::ACCEPTED.as_u16(),
