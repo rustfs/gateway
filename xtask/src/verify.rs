@@ -87,14 +87,33 @@ fn verify_crate(name: &str, json: bool) -> ExitCode {
 }
 
 fn crate_steps(package: &str) -> Vec<Vec<String>> {
-    let mut test_step = vec!["test".to_owned(), "-p".to_owned(), package.to_owned()];
+    let clippy_step = vec![
+        "clippy".to_owned(),
+        "-p".to_owned(),
+        package.to_owned(),
+        "--all-targets".to_owned(),
+        "--".to_owned(),
+        "-D".to_owned(),
+        "warnings".to_owned(),
+    ];
     if package == "rustfs-gateway-core" {
-        test_step.extend([
-            "--".to_owned(),
-            "--skip".to_owned(),
-            "compile_fail::compile_time_contracts_are_not_openable".to_owned(),
-        ]);
-    } else if package == "rustfs-gateway" {
+        return vec![
+            vec![
+                "test".to_owned(),
+                "-p".to_owned(),
+                package.to_owned(),
+                "--lib".to_owned(),
+                "--test".to_owned(),
+                "integration".to_owned(),
+                "--".to_owned(),
+                "--skip".to_owned(),
+                "compile_fail::compile_time_contracts_are_not_openable".to_owned(),
+            ],
+            clippy_step,
+        ];
+    }
+    let mut test_step = vec!["test".to_owned(), "-p".to_owned(), package.to_owned()];
+    if package == "rustfs-gateway" {
         test_step.extend([
             "--".to_owned(),
             "--skip".to_owned(),
@@ -103,18 +122,7 @@ fn crate_steps(package: &str) -> Vec<Vec<String>> {
     } else if package == "rustfs-gateway-conformance" {
         test_step.push("--lib".to_owned());
     }
-    vec![
-        test_step,
-        vec![
-            "clippy".to_owned(),
-            "-p".to_owned(),
-            package.to_owned(),
-            "--all-targets".to_owned(),
-            "--".to_owned(),
-            "-D".to_owned(),
-            "warnings".to_owned(),
-        ],
-    ]
+    vec![test_step, clippy_step]
 }
 
 #[cfg(feature = "full")]
@@ -470,7 +478,7 @@ fn run_steps(steps: &[Vec<String>], budget: Duration, subject: &str, rule: &str,
         .enumerate()
         .map(|(index, step)| (env!("CARGO").to_owned(), step.clone(), format!("{subject} step {}", index + 1)))
         .collect::<Vec<_>>();
-    let mut command_batches = vec![commands];
+    let mut command_batches = Vec::new();
     if let Some(case) = conformance_case {
         command_batches.push(vec![(
             env!("CARGO").to_owned(),
@@ -478,6 +486,7 @@ fn run_steps(steps: &[Vec<String>], budget: Duration, subject: &str, rule: &str,
             format!("{subject} conformance case {case}"),
         )]);
     }
+    command_batches.push(commands);
     for commands in command_batches {
         let batch = process::run(&commands, Path::new("."), Some(started + budget));
         if batch.interrupted {
