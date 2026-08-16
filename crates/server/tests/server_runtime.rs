@@ -271,7 +271,7 @@ async fn a_srv_0008_one_thousand_connections_stay_inside_the_rss_budget() {
 }
 
 #[tokio::test]
-async fn a_srv_0011_a_one_byte_slow_reader_triggers_the_write_progress_timeout() {
+async fn c_lim_0035_a_srv_0011_a_one_byte_slow_reader_triggers_the_write_progress_timeout() {
     const BODY_LEN: usize = 100 * 1024 * 1024;
     let mut config = plaintext_config();
     config.so_sndbuf = Some(4 * 1024);
@@ -324,6 +324,56 @@ async fn a_srv_0011_a_one_byte_slow_reader_triggers_the_write_progress_timeout()
     assert!(bytes_read.load(std::sync::atomic::Ordering::Relaxed) <= 2);
     slow_reader.abort();
     let _ = slow_reader.await;
+    let _ = shutdown.trigger(Duration::from_secs(1)).await;
+    assert!(task.await.expect("server task joins").is_ok());
+}
+
+#[tokio::test]
+async fn c_lim_0036_an_idle_keep_alive_connection_closes_after_one_gap() {
+    let mut config = plaintext_config();
+    config.header_read_timeout = Duration::from_secs(1);
+    config.keep_alive_idle = Duration::from_millis(40);
+    let RunningServer {
+        local_addr,
+        metrics,
+        task,
+        shutdown,
+    } = echo_server(config);
+    let mut stream = TcpStream::connect(local_addr).await.expect("connect succeeds");
+    stream
+        .write_all(b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n")
+        .await
+        .expect("keep-alive request writes");
+    let mut response = Vec::new();
+    tokio::time::timeout(Duration::from_secs(1), async {
+        let mut buffer = [0_u8; 1024];
+        while !response.windows(b"\r\n\r\nok".len()).any(|window| window == b"\r\n\r\nok") {
+            let read = stream.read(&mut buffer).await.expect("response reads");
+            assert_ne!(read, 0, "the connection closed before the response completed");
+            response.extend_from_slice(&buffer[..read]);
+        }
+    })
+    .await
+    .expect("the response arrives before the idle interval");
+    assert!(response.starts_with(b"HTTP/1.1 200"));
+    assert!(
+        !String::from_utf8_lossy(&response)
+            .to_ascii_lowercase()
+            .contains("connection: close")
+    );
+    let mut tail = Vec::new();
+    tokio::time::timeout(Duration::from_millis(250), stream.read_to_end(&mut tail))
+        .await
+        .expect("the idle deadline closes the socket")
+        .expect("idle close reaches EOF");
+    assert!(tail.is_empty(), "no second response was written");
+    tokio::time::timeout(Duration::from_millis(250), async {
+        while metrics.active_connections() != 0 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("the idle connection releases its admission permit");
     let _ = shutdown.trigger(Duration::from_secs(1)).await;
     assert!(task.await.expect("server task joins").is_ok());
 }
