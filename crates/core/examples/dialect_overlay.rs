@@ -45,7 +45,7 @@ use http::Method;
 use rustfs_gateway_core::dialect::{Dialect, DialectOverlay, DialectRoute, OverlayRow};
 use rustfs_gateway_core::handler::{Handler, HandlerResult, Req, Resp};
 use rustfs_gateway_core::op::{AuthRequirement, Operation, ResourceShape};
-use rustfs_gateway_core::registry::{OperationSpec, RouterBuilder};
+use rustfs_gateway_core::registry::{HandlerDeadlineClass, OperationSpec, RouterBuilder};
 use rustfs_gateway_core::route::{Predicate, ShadowingDecl, TargetKind};
 use rustfs_gateway_sig::{OperationFloor, SigService};
 
@@ -63,6 +63,7 @@ struct HeadObjectReport;
 /// `auth` is `Some` because it has to be: an operation with `None` is refused at registration, so
 /// there is no path on which the authorisation question can be skipped.
 static SPEC: OperationSpec = OperationSpec::builder("acme:HeadObjectReport", 200, None)
+    .handler_deadline_class(HandlerDeadlineClass::Standard)
     .required_params(&[])
     .auth(AuthRequirement::new("acme:HeadObjectReport", ResourceShape::Object))
     .build();
