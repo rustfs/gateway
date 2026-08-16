@@ -46,4 +46,13 @@ impl ::rustfs_gateway::Handler<PutObject> for Fs {
     > + ::core::marker::Send {
         self.put_object(request)
     }
+    fn call_with_context(
+        &self,
+        request: ::rustfs_gateway::Req<PutObject>,
+        _context: ::rustfs_gateway::HandlerContext,
+    ) -> impl ::core::future::Future<
+        Output = ::rustfs_gateway::HandlerResult<PutObject>,
+    > + ::core::marker::Send {
+        self.put_object(request)
+    }
 }

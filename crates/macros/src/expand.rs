@@ -206,6 +206,16 @@ fn emit(block: &ItemImpl, args: &Args, registrations: &[Registration]) -> TokenS
                 > + ::core::marker::Send {
                     self.#methods(request)
                 }
+
+                fn call_with_context(
+                    &self,
+                    request: ::rustfs_gateway::Req<#operations>,
+                    _context: ::rustfs_gateway::HandlerContext,
+                ) -> impl ::core::future::Future<
+                    Output = ::rustfs_gateway::HandlerResult<#operations>,
+                > + ::core::marker::Send {
+                    self.#methods(request)
+                }
             }
         )*
     }
