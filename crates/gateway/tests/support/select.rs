@@ -38,6 +38,19 @@ impl Handler<rustfs_gateway::dto::SelectObjectContent> for SelectBackend {
         sequence.end(&mut frames).expect("terminator");
         Ok(Resp::event_stream(ByteStream::from_bytes(Bytes::from(frames))))
     }
+
+    async fn call_with_context(
+        &self,
+        _request: Req<rustfs_gateway::dto::SelectObjectContent>,
+        _context: rustfs_gateway::HandlerContext,
+    ) -> HandlerResult<rustfs_gateway::dto::SelectObjectContent> {
+        let mut frames = Vec::new();
+        let mut sequence = EventSequence::new();
+        sequence.records(b"a,b\n1,2\n", &mut frames).expect("records first");
+        sequence.stats(&stats_document(8, 8, 8), &mut frames).expect("accounting");
+        sequence.end(&mut frames).expect("terminator");
+        Ok(Resp::event_stream(ByteStream::from_bytes(Bytes::from(frames))))
+    }
 }
 
 #[must_use]

@@ -427,6 +427,14 @@ pub(crate) mod tests {
         async fn call(&self, _request: Req<dto::ListBuckets>) -> HandlerResult<dto::ListBuckets> {
             Err(HandlerError::not_implemented("this backend stores nothing"))
         }
+
+        async fn call_with_context(
+            &self,
+            _request: Req<dto::ListBuckets>,
+            _context: HandlerContext,
+        ) -> HandlerResult<dto::ListBuckets> {
+            Err(HandlerError::not_implemented("this backend stores nothing"))
+        }
     }
 
     /// The smallest service this crate can build.

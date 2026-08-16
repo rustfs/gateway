@@ -30,6 +30,7 @@
 // re-exports it. Both are properties of a shared test fixture rather than of the code under test.
 #![allow(dead_code, unreachable_pub, clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 
+mod handlers;
 pub mod select;
 pub mod vhost_stub;
 
@@ -294,12 +295,6 @@ impl OperationCodec for ContentPing {
     }
 }
 
-impl Handler<ContentPing> for Backend {
-    async fn call(&self, request: Req<ContentPing>) -> HandlerResult<ContentPing> {
-        answer_ping(request.input())
-    }
-}
-
 /// The route entry that reaches [`ContentPing`].
 #[must_use]
 pub fn content_ping_route() -> RouteEntry {
@@ -344,12 +339,6 @@ where
         HeadPingInput::CommitThenFail => Ok(Resp::commit(Box::pin(async {
             Err(HandlerErrorContext::missing_object(MissingObject::Key, ResourceVisibility::Visible).into())
         }))),
-    }
-}
-
-impl Handler<HeadPing> for Backend {
-    async fn call(&self, request: Req<HeadPing>) -> HandlerResult<HeadPing> {
-        answer_ping(request.input())
     }
 }
 
@@ -444,47 +433,6 @@ impl OperationCodec for Impostor {
 /// Answers `example:Ping` and lists two buckets.
 pub struct Backend;
 
-impl Handler<Ping> for Backend {
-    async fn call(&self, _request: Req<Ping>) -> HandlerResult<Ping> {
-        Ok(Resp::new(PingOutput {
-            message: "pong".to_owned(),
-        }))
-    }
-}
-
-impl Handler<ListBuckets> for Backend {
-    async fn call(&self, _request: Req<ListBuckets>) -> HandlerResult<ListBuckets> {
-        Ok(Resp::new(ListBucketsOutput {
-            buckets: vec![Bucket {
-                name: BucketName::new("alpha").expect("a valid bucket name"),
-                // A real instant, not the default: `CreationDate` is bound to an ISO-8601
-                // rendering, and the zero value has none — so a fixture that left it default
-                // answered `500 InternalError` the first time anything managed to sign a request
-                // and reach the encoder.
-                creation_date: rustfs_gateway::Timestamp::from_secs(SIGNED_AT_UNIX_SECONDS),
-                ..Bucket::default()
-            }],
-            ..ListBucketsOutput::default()
-        }))
-    }
-}
-
-impl Handler<Unnamespaced> for Backend {
-    async fn call(&self, _request: Req<Unnamespaced>) -> HandlerResult<Unnamespaced> {
-        Ok(Resp::new(PingOutput {
-            message: "pong".to_owned(),
-        }))
-    }
-}
-
-impl Handler<Impostor> for Backend {
-    async fn call(&self, _request: Req<Impostor>) -> HandlerResult<Impostor> {
-        Ok(Resp::new(PingOutput {
-            message: "pong".to_owned(),
-        }))
-    }
-}
-
 /// A backend that counts the requests that reached it, so "the handler never ran" is a
 /// measurement.
 pub struct CountingBackend {
@@ -500,23 +448,8 @@ impl CountingBackend {
     }
 }
 
-impl Handler<Ping> for CountingBackend {
-    async fn call(&self, _request: Req<Ping>) -> HandlerResult<Ping> {
-        self.reached.fetch_add(1, Ordering::SeqCst);
-        Ok(Resp::new(PingOutput {
-            message: "pong".to_owned(),
-        }))
-    }
-}
-
 /// A backend whose handler always fails, so the failure path can be observed.
 pub struct Failing;
-
-impl Handler<Ping> for Failing {
-    async fn call(&self, _request: Req<Ping>) -> HandlerResult<Ping> {
-        Err(HandlerError::internal_error("the backend is not available"))
-    }
-}
 
 // ── extension-point fixtures ───────────────────────────────────────────────────────────────────
 
@@ -797,18 +730,6 @@ pub const LAYER_ETAG: &str = "rewritten-by-a-layer";
 
 /// A backend that answers `GetObjectAttributes` with one entity tag and nothing else.
 pub struct Attributes;
-
-impl Handler<rustfs_gateway::dto::GetObjectAttributes> for Attributes {
-    async fn call(
-        &self,
-        _request: Req<rustfs_gateway::dto::GetObjectAttributes>,
-    ) -> HandlerResult<rustfs_gateway::dto::GetObjectAttributes> {
-        Ok(Resp::new(rustfs_gateway::dto::GetObjectAttributesOutput {
-            e_tag: Some(rustfs_gateway::ETag::new(BACKEND_ETAG).expect("a valid entity tag")),
-            ..rustfs_gateway::dto::GetObjectAttributesOutput::default()
-        }))
-    }
-}
 
 /// A service over `GetObjectAttributes`, optionally with the demonstration layer installed.
 ///
