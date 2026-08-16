@@ -32,8 +32,8 @@ use rustfs_gateway_types::ErrorCode;
 
 use crate::authz::{Decoded, authorize_input, prepare_input};
 use crate::{
-    Answer, CodecError, Decision, Denied, DerivedResourceSet, EncodedResponse, Handler, HandlerError, MetaView, OperationCodec,
-    OwnedResource, RequestBody,
+    Answer, CodecError, Decision, Denied, DerivedResourceSet, EncodedResponse, Handler, HandlerCancellationSource, HandlerError,
+    MetaView, OperationCodec, OwnedResource, RequestBody,
 };
 
 /// The result of a static operation whose response head was not committed early.
@@ -141,8 +141,9 @@ where
             .map_err(StaticDispatchError::Input)?;
         let _request_guard = request_guard;
         let authorized = authorize::<O>(decoded, &decisions).map_err(StaticDispatchError::Denied)?;
+        let (_cancellation, context) = HandlerCancellationSource::pair();
         let response = backend
-            .call(authorized.into_request())
+            .call_with_context(authorized.into_request(), context)
             .await
             .map_err(StaticDispatchError::Handler)?;
         let (answer, status) = response.into_parts();

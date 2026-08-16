@@ -88,6 +88,37 @@ fn assert_wire_parity(dynamic: &WireResponse, monomorphic: &WireResponse) {
     }
 }
 
+struct ContextOnly;
+
+impl Handler<Ping> for ContextOnly {
+    async fn call(&self, _request: Req<Ping>) -> HandlerResult<Ping> {
+        Err(rustfs_gateway::HandlerError::internal_error("the legacy handler entry was used"))
+    }
+
+    async fn call_with_context(&self, _request: Req<Ping>, context: rustfs_gateway::HandlerContext) -> HandlerResult<Ping> {
+        assert!(context.cancellation_reason().is_none());
+        Ok(rustfs_gateway::Resp::new(PingOutput {
+            message: "the monomorphic path preserved its handler context".to_owned(),
+        }))
+    }
+}
+
+/// Positive — the public monomorphic facade must call the context-aware handler entry rather than
+/// silently falling back to the temporary one-argument migration bridge.
+#[tokio::test]
+async fn monomorphic_dispatch_reaches_the_context_aware_handler_entry() {
+    type Operations = OperationSetNode<Ping, OperationSetEnd>;
+    let backend = Arc::new(ContextOnly);
+    let monomorphic = wired()
+        .register::<Ping, _>(Arc::clone(&backend))
+        .route(ping_route())
+        .build_monomorphic::<_, Operations>(backend)
+        .expect("a complete static assembly");
+
+    let response = collect(monomorphic.call_bytes(plain(http::Method::POST, "/")).await).await;
+    assert_eq!(response.status(), http::StatusCode::OK);
+}
+
 /// a-asm-0007. The public static builder preserves ordinary, refusal and committed response
 /// semantics while selecting the operation codec and handler through the type-level set.
 #[tokio::test]
