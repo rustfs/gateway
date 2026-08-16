@@ -2994,13 +2994,31 @@ probe_adr_paired_supersession_allowed() {
     sandbox="$SANDBOX"
     (
         cd "$sandbox"
-        replace_adr_text docs/adr/0008-closed-error-resolution.md \
-            '- Status: Accepted' '- Status: Superseded by ADR-0011'
-        replace_adr_text docs/adr/0008-closed-error-resolution.md \
-            '- Supersedes / Superseded by: none' \
-            '- Supersedes / Superseded by: ADR-0011'
-        cat >docs/adr/0011-supersede-closed-error-resolution.md <<'EOF'
-# ADR-0011: Supersede closed error resolution
+        python3 - <<'PYEOF'
+import re
+from pathlib import Path
+
+adr_dir = Path("docs/adr")
+numbers = [
+    int(match.group(1))
+    for path in adr_dir.iterdir()
+    if (match := re.match(r"^(\d{4})-", path.name)) is not None
+]
+next_number = max(numbers) + 1
+next_digits = f"{next_number:04d}"
+next_adr = f"ADR-{next_digits}"
+
+prior = adr_dir / "0008-closed-error-resolution.md"
+prior_text = prior.read_text()
+status = "- Status: Accepted"
+relation = "- Supersedes / Superseded by: none"
+if prior_text.count(status) != 1 or prior_text.count(relation) != 1:
+    raise SystemExit("ADR supersession fixture is not unique")
+prior_text = prior_text.replace(status, f"- Status: Superseded by {next_adr}", 1)
+prior_text = prior_text.replace(relation, f"- Supersedes / Superseded by: {next_adr}", 1)
+prior.write_text(prior_text)
+
+(adr_dir / f"{next_digits}-supersede-closed-error-resolution.md").write_text(f"""# {next_adr}: Supersede closed error resolution
 
 - Status: Accepted
 - Date: 2026-08-12
@@ -3026,19 +3044,18 @@ Editing the merged body would erase history.
 ## Consequences
 
 Readers can follow both directions.
-EOF
-        python3 - <<'PYEOF'
-from pathlib import Path
+""")
 
 path = Path("docs/adr/README.md")
 text = path.read_text()
 old_row = "| 0008 | Closed error resolution across the types, signature, core and facade boundary | Accepted |"
-new_row = "| 0008 | Closed error resolution across the types, signature, core and facade boundary | Superseded by ADR-0011 |"
-anchor = "| 0010 | Box the public DTO inside handler requests | Accepted |"
-if text.count(old_row) != 1 or text.count(anchor) != 1:
+new_row = f"| 0008 | Closed error resolution across the types, signature, core and facade boundary | Superseded by {next_adr} |"
+rows = list(re.finditer(r"^\| (\d{4}) \|.*\|$", text, flags=re.MULTILINE))
+if text.count(old_row) != 1 or not rows:
     raise SystemExit("ADR index supersession fixture is not unique")
 text = text.replace(old_row, new_row, 1)
-text = text.replace(anchor, anchor + "\n| 0011 | Supersede closed error resolution | Accepted |", 1)
+last_row = rows[-1].group(0)
+text = text.replace(last_row, last_row + f"\n| {next_digits} | Supersede closed error resolution | Accepted |", 1)
 path.write_text(text)
 PYEOF
     )

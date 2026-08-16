@@ -408,7 +408,7 @@ dependencies = [
 
 [[package]]
 name = "ext-field-spike"
-version = "0.1.1"
+version = "0.1.3"
 dependencies = [
  "quick-xml",
  "rustfs-gateway-core",
@@ -1419,22 +1419,26 @@ checksum = "08d43f7aa6b08d49f382cde6a7982047c3426db949b1424bc4b7ec9ae12c6ce2"
 
 [[package]]
 name = "rustfs-gateway"
-version = "0.5.0"
+version = "0.7.3"
 dependencies = [
  "arc-swap",
  "bytes",
  "dhat",
  "futures-timer",
+ "futures-util",
  "http",
  "http-body",
  "http-body-util",
  "hyper",
  "rustfs-gateway-core",
  "rustfs-gateway-http",
+ "rustfs-gateway-macros",
+ "rustfs-gateway-server",
  "rustfs-gateway-sig",
  "rustfs-gateway-stream",
  "rustfs-gateway-types",
  "rustfs-gateway-xml",
+ "sha2",
  "tokio",
  "tower",
  "trybuild",
@@ -1442,7 +1446,7 @@ dependencies = [
 
 [[package]]
 name = "rustfs-gateway-codegen"
-version = "0.1.1"
+version = "0.2.1"
 dependencies = [
  "rustfs-gateway-model",
  "thiserror",
@@ -1460,7 +1464,7 @@ dependencies = [
 
 [[package]]
 name = "rustfs-gateway-core"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "bytes",
  "http",
@@ -1481,7 +1485,7 @@ dependencies = [
 
 [[package]]
 name = "rustfs-gateway-http"
-version = "0.1.1"
+version = "0.1.3"
 dependencies = [
  "hmac",
  "http",
@@ -1495,7 +1499,7 @@ dependencies = [
 
 [[package]]
 name = "rustfs-gateway-macros"
-version = "0.1.1"
+version = "0.1.3"
 dependencies = [
  "prettyplease",
  "proc-macro2",
@@ -1507,14 +1511,14 @@ dependencies = [
 
 [[package]]
 name = "rustfs-gateway-model"
-version = "0.1.1"
+version = "0.2.1"
 dependencies = [
  "thiserror",
 ]
 
 [[package]]
 name = "rustfs-gateway-server"
-version = "0.1.1"
+version = "0.1.3"
 dependencies = [
  "arc-swap",
  "bytes",
@@ -1538,7 +1542,7 @@ dependencies = [
 
 [[package]]
 name = "rustfs-gateway-sig"
-version = "0.2.0"
+version = "0.5.3"
 dependencies = [
  "hmac",
  "http",
@@ -1552,7 +1556,7 @@ dependencies = [
 
 [[package]]
 name = "rustfs-gateway-stream"
-version = "0.1.1"
+version = "0.1.3"
 dependencies = [
  "bitflags",
  "bytes",
@@ -1561,7 +1565,7 @@ dependencies = [
 
 [[package]]
 name = "rustfs-gateway-types"
-version = "0.2.0+aws.2026-08-04"
+version = "0.2.1+aws.2026-08-04"
 dependencies = [
  "bytes",
  "crc-fast",
@@ -1575,11 +1579,12 @@ dependencies = [
  "serde_json",
  "sha1",
  "sha2",
+ "unicode-normalization",
 ]
 
 [[package]]
 name = "rustfs-gateway-xml"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "quick-xml",
 ]
@@ -1965,6 +1970,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "tinyvec"
+version = "1.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bb4ebadaa0af04fab11ae01eb5f9fdb5f9c5b875506e210e71c07873528baa7f"
+dependencies = [
+ "tinyvec_macros",
+]
+
+[[package]]
+name = "tinyvec_macros"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
+
+[[package]]
 name = "tokio"
 version = "1.53.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2201,6 +2221,15 @@ name = "unicode-ident"
 version = "1.0.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e6e4313cd5fcd3dad5cafa179702e2b244f760991f45397d14d4ebf38247da75"
+
+[[package]]
+name = "unicode-normalization"
+version = "0.1.25"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5fd4f6878c9cb28d874b009da9e8d183b5abc80117c40bbd187a1fde336be6e8"
+dependencies = [
+ "tinyvec",
+]
 
 [[package]]
 name = "untrusted"
@@ -2488,11 +2517,12 @@ dependencies = [
 
 [[package]]
 name = "xtask"
-version = "0.1.1"
+version = "0.1.3"
 dependencies = [
  "command-group",
  "http",
  "jsonschema",
+ "proc-macro2",
  "rustfs-gateway",
  "rustfs-gateway-codegen",
  "rustfs-gateway-conformance",
@@ -2501,6 +2531,7 @@ dependencies = [
  "serde",
  "serde_json",
  "signal-hook",
+ "syn 3.0.3",
 ]
 
 [[package]]
