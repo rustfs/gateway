@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# WHAT: Pins the four connection-level timeout fields and rejects body/handler timeout ownership.
-# WHY: rustfs/backlog#1739 assigns four of six progress layers to transport and two to the core.
+# WHAT: Pins the three transport-owned idle timeout layers and rejects body/handler ownership.
+# WHY: rustfs/backlog#1699 assigns three of six progress layers to transport; connection lifetime is an extra safety valve.
 # EXEMPTIONS: None. Moving ownership requires changing the task contract first.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -20,7 +20,7 @@ if ! command -v grep >/dev/null 2>&1; then
     exit 1
 fi
 
-required=(header_read_timeout write_progress_timeout keep_alive_idle connection_lifetime)
+required=(header_read_timeout write_progress_timeout keep_alive_idle)
 for field in "${required[@]}"; do
     if ! grep -q -E "pub ${field}:" "$CONFIG"; then
         printf 'check_timeout_layer_ownership: missing transport timeout field %s\n' "$field" >&2
@@ -28,9 +28,16 @@ for field in "${required[@]}"; do
     fi
 done
 
-if grep -R -n -i -E --include='*.rs' '(body_read_(timeout|interval)|handler(_progress)?_timeout)' "$SOURCE_DIR"; then
-    printf 'check_timeout_layer_ownership: body-read and handler-progress timeouts belong to the core\n' >&2
+if ! grep -q -E 'pub connection_lifetime:' "$CONFIG"; then
+    printf 'check_timeout_layer_ownership: missing extra connection-lifetime safety valve\n' >&2
     exit 1
 fi
 
-printf 'OK: 4/6 timeout layers owned by rustfs-gateway-server\n'
+if grep -R -n -i -E --include='*.rs' \
+    '(first_body_byte_(timeout|idle|interval)|body_read_(timeout|idle|interval)|handler(_progress)?_(timeout|deadline)|handler_deadline)' \
+    "$SOURCE_DIR"; then
+    printf 'check_timeout_layer_ownership: first-body, body-read, and handler timeouts belong outside the server runtime\n' >&2
+    exit 1
+fi
+
+printf 'OK: 3/6 timeout layers owned by rustfs-gateway-server; connection lifetime is an extra safety valve\n'

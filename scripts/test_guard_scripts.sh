@@ -5346,6 +5346,33 @@ mut_server_handler_timeout() {
 expect_fail_and_missing_grep check_timeout_layer_ownership.sh \
     'ring-1 server claiming the handler timeout layer' mut_server_handler_timeout
 
+mut_server_first_body_byte_timeout() {
+    printf '\nconst FIRST_BODY_BYTE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);\n' >>crates/server/src/config.rs
+}
+expect_fail check_timeout_layer_ownership.sh \
+    'ring-1 server claiming the first-body-byte timeout layer' mut_server_first_body_byte_timeout
+
+mut_server_body_read_idle_timeout() {
+    printf '\nconst BODY_READ_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);\n' >>crates/server/src/config.rs
+}
+expect_fail check_timeout_layer_ownership.sh \
+    'ring-1 server claiming the body-read idle timeout layer' mut_server_body_read_idle_timeout
+
+mut_server_connection_lifetime_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/server/src/config.rs")
+text = path.read_text()
+needle = "    pub connection_lifetime: Option<Duration>,\n"
+if text.count(needle) != 1:
+    raise SystemExit("connection-lifetime field is not unique")
+path.write_text(text.replace(needle, "", 1))
+PYEOF
+}
+expect_fail check_timeout_layer_ownership.sh \
+    'the extra connection-lifetime safety valve being removed' mut_server_connection_lifetime_removed
+
 mut_server_tuning_doc() {
     python3 - <<'PYEOF'
 import pathlib
