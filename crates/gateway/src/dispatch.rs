@@ -60,13 +60,16 @@
 //! not taken.
 
 use std::collections::BTreeMap;
+use std::pin::Pin;
 use std::sync::Arc;
+use std::task::{Context, Poll};
 
 use bytes::Bytes;
+use rustfs_gateway_core::registry::erase_authorized_handler_with_context;
 use rustfs_gateway_core::{
     Answer as CoreAnswer, AuthRequirement, BoxFuture, CodecError, Decision, Denied, EncodedResponse, ErasedCodec, ErasedDecoded,
-    ErasedRequest, Handler, HandlerError, MetaView, OperationCodec, OwnedResource, Req, RequestBody, Resp, RouteEntry,
-    TargetKind, erase_authorized_handler,
+    ErasedRequest, Handler, HandlerCancellationSource, HandlerContext, HandlerError, MetaView, OperationCodec, OwnedResource,
+    Req, RequestBody, Resp, RouteEntry, TargetKind,
 };
 use rustfs_gateway_sig::OperationFloor;
 use rustfs_gateway_stream::ByteStream;
@@ -98,8 +101,27 @@ pub(crate) enum ErasedAnswer {
 /// The answer a backend produced, and the status it goes out with.
 type Answer = Result<(ErasedAnswer, u16), HandlerError>;
 
-/// A backend call in flight.
-pub(crate) type Invocation = BoxFuture<'static, Answer>;
+/// A backend call in flight and the framework-owned half of its cancellation signal.
+pub(crate) struct Invocation {
+    inner: BoxFuture<'static, Answer>,
+    _cancellation: HandlerCancellationSource,
+}
+
+impl Invocation {
+    /// Signals this handler invocation once.
+    #[cfg(test)]
+    pub(crate) fn cancel(&self, reason: rustfs_gateway_core::HandlerCancellation) -> bool {
+        self._cancellation.cancel(reason)
+    }
+}
+
+impl Future for Invocation {
+    type Output = Answer;
+
+    fn poll(self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Self::Output> {
+        self.get_mut().inner.as_mut().poll(context)
+    }
+}
 
 /// Call the backend with input that carries the authorization proof.
 type Invoke = Arc<dyn Fn(ErasedRequest, RequestConfig<InputAuthorized>) -> Result<Invocation, HandlerError> + Send + Sync>;
@@ -144,33 +166,36 @@ impl OperationDispatch {
 
         let codec = ErasedCodec::for_operation::<O>();
 
-        let handler = erase_authorized_handler::<O, _>(Arc::new(LayeredBackend {
+        let handler = erase_authorized_handler_with_context::<O, _>(Arc::new(LayeredBackend {
             backend,
             layers,
             operation: core::marker::PhantomData,
         }));
         let invoke: Invoke = Arc::new(move |request: ErasedRequest, request_config: RequestConfig<InputAuthorized>| {
-            let call = handler(request);
-            Ok(Box::pin(async move {
-                // Keep the request's one configuration snapshot alive through the backend call.
-                // No dispatch implementation can load or substitute another snapshot.
-                let _request_config = request_config;
-                let response = call.await?;
-                let response = response
-                    .downcast::<Resp<O>>()
-                    .map_err(|_| HandlerError::internal_error("the registered dispatch received another operation's response"))?;
-                let (answer, status) = response.into_parts();
-                let answer = match answer {
-                    CoreAnswer::Settled(output) => ErasedAnswer::Settled(Box::new(output) as ErasedOutput),
-                    CoreAnswer::Committed(work) => {
-                        ErasedAnswer::Committed(Box::pin(
-                            async move { work.await.map(|output| Box::new(output) as ErasedOutput) },
-                        ))
-                    }
-                    CoreAnswer::EventStream(stream) => ErasedAnswer::EventStream(stream),
-                };
-                Ok((answer, status))
-            }))
+            let (cancellation, context) = HandlerCancellationSource::pair();
+            let call = handler(request, context);
+            Ok(Invocation {
+                _cancellation: cancellation,
+                inner: Box::pin(async move {
+                    // Keep the request's one configuration snapshot alive through the backend call.
+                    // No dispatch implementation can load or substitute another snapshot.
+                    let _request_config = request_config;
+                    let response = call.await?;
+                    let response = response.downcast::<Resp<O>>().map_err(|_| {
+                        HandlerError::internal_error("the registered dispatch received another operation's response")
+                    })?;
+                    let (answer, status) = response.into_parts();
+                    let answer =
+                        match answer {
+                            CoreAnswer::Settled(output) => ErasedAnswer::Settled(Box::new(output) as ErasedOutput),
+                            CoreAnswer::Committed(work) => ErasedAnswer::Committed(Box::pin(async move {
+                                work.await.map(|output| Box::new(output) as ErasedOutput)
+                            })),
+                            CoreAnswer::EventStream(stream) => ErasedAnswer::EventStream(stream),
+                        };
+                    Ok((answer, status))
+                }),
+            })
         });
 
         let encode: Encode = Arc::new(|output: ErasedOutput, meta: &MetaView<'_>, status: u16| {
@@ -298,7 +323,17 @@ where
     async fn call(&self, request: Req<O>) -> rustfs_gateway_core::HandlerResult<O> {
         match &self.layers {
             None => self.backend.call(request).await,
-            Some(layers) => run_layered::<O, B>(&self.backend, layers, request).await,
+            Some(layers) => {
+                let (_source, context) = HandlerCancellationSource::pair();
+                run_layered::<O, B>(&self.backend, layers, request, context).await
+            }
+        }
+    }
+
+    async fn call_with_context(&self, request: Req<O>, context: HandlerContext) -> rustfs_gateway_core::HandlerResult<O> {
+        match &self.layers {
+            None => self.backend.call_with_context(request, context).await,
+            Some(layers) => run_layered::<O, B>(&self.backend, layers, request, context).await,
         }
     }
 }
@@ -306,7 +341,12 @@ where
 /// Runs one operation's layer chain, outermost first, with the backend as the terminal.
 ///
 /// Reached only when at least one layer is registered; see [`OperationDispatch::layered`].
-async fn run_layered<O, B>(backend: &B, layers: &[Arc<dyn OpLayer<O>>], request: Req<O>) -> Result<Resp<O>, HandlerError>
+async fn run_layered<O, B>(
+    backend: &B,
+    layers: &[Arc<dyn OpLayer<O>>],
+    request: Req<O>,
+    context: HandlerContext,
+) -> Result<Resp<O>, HandlerError>
 where
     O: OperationCodec,
     B: Handler<O>,
@@ -315,6 +355,7 @@ where
     LAYERED_INVOCATIONS.with(|entries| entries.set(entries.get().saturating_add(1)));
     let terminal = BackendTerminal::<O, B> {
         backend,
+        context,
         operation: core::marker::PhantomData,
     };
     Next::new(layers, &terminal).run(request).await
@@ -323,6 +364,7 @@ where
 /// The innermost link of a chain: the registered backend, in the shape `Next` calls.
 struct BackendTerminal<'a, O, B> {
     backend: &'a B,
+    context: HandlerContext,
     operation: core::marker::PhantomData<fn() -> O>,
 }
 
@@ -332,7 +374,7 @@ where
     B: Handler<O>,
 {
     fn call(&self, request: Req<O>) -> BoxFuture<'_, rustfs_gateway_core::HandlerResult<O>> {
-        Box::pin(self.backend.call(request))
+        Box::pin(self.backend.call_with_context(request, self.context.clone()))
     }
 }
 
@@ -408,6 +450,7 @@ pub(crate) fn target_of(entry: &RouteEntry) -> TargetKind {
 mod tests {
     use super::*;
     use rustfs_gateway_core::{Predicate, RouteSelector};
+    use std::sync::atomic::{AtomicBool, Ordering};
 
     fn entry(predicates: &'static [Predicate], path_shape: &'static str) -> RouteEntry {
         RouteEntry {
@@ -472,6 +515,33 @@ mod tests {
         assert_eq!(layered_invocations(), before, "an unlayered operation entered the layer chain");
     }
 
+    /// Positive — the erased dynamic path must preserve the handler context rather than silently
+    /// falling back to the legacy one-argument call. The deadline owner cannot signal a context
+    /// that disappears at registration-time erasure.
+    #[tokio::test]
+    async fn dynamic_dispatch_reaches_the_context_aware_handler_entry() {
+        let observed = Arc::new(AtomicBool::new(false));
+        let backend = Arc::new(ContextAwareBackend {
+            observed: Arc::clone(&observed),
+        });
+
+        let dispatch = OperationDispatch::of::<rustfs_gateway_types::dto::ListBuckets, _>(Arc::clone(&backend));
+        let invocation = invocation_once(&dispatch).expect("dispatchable");
+        assert!(invocation.cancel(rustfs_gateway_core::HandlerCancellation::Deadline));
+        let _ = invocation.await;
+        assert!(observed.swap(false, Ordering::AcqRel), "the erased path discarded HandlerContext");
+
+        let layer: Arc<dyn OpLayer<rustfs_gateway_types::dto::ListBuckets>> =
+            Arc::new(crate::ext::op_layer(|request, next: Next<'_, rustfs_gateway_types::dto::ListBuckets>| {
+                next.run(request)
+            }));
+        let dispatch = OperationDispatch::layered::<rustfs_gateway_types::dto::ListBuckets, _>(backend, vec![layer]);
+        let invocation = invocation_once(&dispatch).expect("dispatchable");
+        assert!(invocation.cancel(rustfs_gateway_core::HandlerCancellation::Deadline));
+        let _ = invocation.await;
+        assert!(observed.swap(false, Ordering::AcqRel), "the operation layer discarded HandlerContext");
+    }
+
     /// Positive — the other direction. One registered layer does enter the chain, so the counter
     /// above is a measurement of the branch rather than of a code path nothing ever reaches.
     #[tokio::test]
@@ -488,6 +558,10 @@ mod tests {
 
     /// Drives one invocation of an already-erased operation, with an empty body.
     async fn invoke_once(dispatch: &OperationDispatch) -> Result<(ErasedAnswer, u16), HandlerError> {
+        invocation_once(dispatch)?.await
+    }
+
+    fn invocation_once(dispatch: &OperationDispatch) -> Result<Invocation, HandlerError> {
         let request = http::Request::builder()
             .method(http::Method::GET)
             .uri("/")
@@ -510,10 +584,33 @@ mod tests {
             .body_read()
             .decoded()
             .input_authorized();
-        dispatch.invoke(authorized, config).expect("dispatchable").await
+        dispatch.invoke(authorized, config)
     }
 
     struct NoBackend;
+
+    struct ContextAwareBackend {
+        observed: Arc<AtomicBool>,
+    }
+
+    impl Handler<rustfs_gateway_types::dto::ListBuckets> for ContextAwareBackend {
+        async fn call(
+            &self,
+            _request: Req<rustfs_gateway_types::dto::ListBuckets>,
+        ) -> rustfs_gateway_core::HandlerResult<rustfs_gateway_types::dto::ListBuckets> {
+            Err(HandlerError::internal_error("the legacy handler entry was used"))
+        }
+
+        async fn call_with_context(
+            &self,
+            _request: Req<rustfs_gateway_types::dto::ListBuckets>,
+            context: rustfs_gateway_core::HandlerContext,
+        ) -> rustfs_gateway_core::HandlerResult<rustfs_gateway_types::dto::ListBuckets> {
+            assert_eq!(context.cancelled().await, rustfs_gateway_core::HandlerCancellation::Deadline);
+            self.observed.store(true, Ordering::Release);
+            Err(HandlerError::not_implemented("the context-aware handler entry was used"))
+        }
+    }
 
     impl Handler<rustfs_gateway_types::dto::ListBuckets> for NoBackend {
         async fn call(

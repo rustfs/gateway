@@ -159,11 +159,11 @@ pub use rustfs_gateway_types::dto;
 pub use rustfs_gateway_core::{
     Answer, ArnForm, AuthRequirement, Authorized, BodyPolicy, BoxFuture, CodecError, CommitOutcome, CommitWork,
     DerivedResourceError, ELEMENT_ORDER, EncodedResponse, ErrorContext, ErrorDetail, ErrorHeader, ErrorResolution, Handler,
-    HandlerError, HandlerErrorContext, HandlerResult, HasOperation, HostClass, InvalidErrorContext, MetaView, MissingHandlers,
-    MissingObject, NoDerived, Operation, OperationCodec, OperationSet, OperationSpec, PRECONDITION_FAILED_MESSAGE, ParamKind,
-    PreAuthError, Predicate, RANGE_NOT_SATISFIABLE_MESSAGE, Req, RequestBody, RequiredParam, ResourceIdentity, ResourceShape,
-    ResourceVisibility, Resp, ResponseBody, ResponseKind, ResponseOverride, RouteEntry, RouteSelector, RouterBuilder, TargetKind,
-    resolve,
+    HandlerCancellation, HandlerContext, HandlerError, HandlerErrorContext, HandlerResult, HasOperation, HostClass,
+    InvalidErrorContext, MetaView, MissingHandlers, MissingObject, NoDerived, Operation, OperationCodec, OperationSet,
+    OperationSpec, PRECONDITION_FAILED_MESSAGE, ParamKind, PreAuthError, Predicate, RANGE_NOT_SATISFIABLE_MESSAGE, Req,
+    RequestBody, RequiredParam, ResourceIdentity, ResourceShape, ResourceVisibility, Resp, ResponseBody, ResponseKind,
+    ResponseOverride, RouteEntry, RouteSelector, RouterBuilder, TargetKind, resolve,
 };
 
 /// Input-parameterized compatibility name for an operation request.
