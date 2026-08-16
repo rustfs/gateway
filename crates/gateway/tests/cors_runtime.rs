@@ -17,7 +17,8 @@
 //! Responsible for: the four properties `conformance/cases/cors/` cannot express, because a case
 //! reads a response and these are about what happened *behind* one — how many times the
 //! deployment's `CorsSource` was called, whether the governor was consulted before it, and
-//! whether a credentials allowance can be reached from a wildcard match through a real assembly.
+//! whether a credentials allowance can be reached from a wildcard match through a real assembly,
+//! and whether attacker-chosen cache keys can grow resident memory past the configured bound.
 //! NOT responsible for: matching (`rustfs-gateway-core`'s `cors` inline tests), the wire shape of
 //! any answer (`conformance/cases/cors/c-cors-0027` onwards), or the cache's own mechanics
 //! (`crate::ext::cors` inline tests).
@@ -38,17 +39,27 @@
 
 #![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 
+use std::process::Command;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use rustfs_gateway::dto::{CorsConfiguration, CorsRule};
 use rustfs_gateway::{
-    AuthRequirement, BoxFuture, BucketName, CodecError, CorsOrigins, CorsPolicy, CorsSource, CorsSourceError, Credentials,
-    EncodedResponse, FixedClock, Governor, GovernorRequest, Handler, HandlerResult, Lease, MetaView, Operation, OperationCodec,
-    OperationFloor, OperationSpec, Predicate, RegionSet, Req, RequestBody, ResourceShape, Resp, ResponseBody, RouteEntry,
-    RouteSelector, S3Service, ServiceBuilder, SigService, SigV4Authenticator, StaticCredentials, TargetKind, WireResponse,
-    allow_when, collect,
+    AuthRequirement, BoxFuture, BucketName, CachedCorsSource, CodecError, CorsCacheConfig, CorsOrigins, CorsPolicy, CorsSource,
+    CorsSourceError, Credentials, EncodedResponse, FixedClock, Governor, GovernorRequest, Handler, HandlerResult, Lease,
+    MetaView, NoCors, Operation, OperationCodec, OperationFloor, OperationSpec, Predicate, RegionSet, Req, RequestBody,
+    RequestNow, ResourceShape, Resp, ResponseBody, RouteEntry, RouteSelector, S3Service, ServiceBuilder, SigService,
+    SigV4Authenticator, StaticCredentials, TargetKind, WireResponse, allow_when, collect,
 };
+
+const RSS_CHILD_MARKER: &str = "RUSTFS_GATEWAY_CORS_RSS_CHILD";
+const RSS_TEST_NAME: &str = "cors_runtime::a_million_unique_keys_keep_rss_within_the_entry_budget";
+const RSS_ENTRY_LIMIT: usize = 4096;
+const RSS_REQUESTS: usize = 1_000_000;
+// Four KiB per live entry is deliberately conservative for two bounded bucket-name strings, the
+// map nodes and allocator slack, while keeping the budget proportional to configured capacity.
+// An unbounded million-key cache exceeds it by hundreds of megabytes.
+const MAX_RSS_BYTES_PER_ENTRY: usize = 4096;
 
 /// The origin every rule below names literally.
 const NAMED: &str = "https://app.example.com";
@@ -272,6 +283,15 @@ fn header(response: &WireResponse, name: &str) -> Option<String> {
     response.header(name).map(str::to_owned)
 }
 
+fn rss_bytes() -> Option<usize> {
+    let output = Command::new("ps")
+        .args(["-o", "rss=", "-p", &std::process::id().to_string()])
+        .output()
+        .ok()?;
+    let kibibytes = String::from_utf8(output.stdout).ok()?.trim().parse::<usize>().ok()?;
+    kibibytes.checked_mul(1024)
+}
+
 const PREFLIGHT: &str = "/cors-runtime/key.txt";
 const PING: &str = "/cors-runtime?corsping";
 
@@ -341,6 +361,51 @@ async fn a_repeated_preflight_for_an_unknown_bucket_reads_the_configuration_once
         assert_eq!(response.status().as_u16(), 403);
     }
     assert_eq!(built.reads.load(Ordering::SeqCst), 1);
+}
+
+/// Negative — one million attacker-chosen names cannot make resident memory grow with request
+/// cardinality. The child process keeps unrelated integration-test allocations out of the delta.
+#[test]
+fn a_million_unique_keys_keep_rss_within_the_entry_budget() {
+    if std::env::var_os(RSS_CHILD_MARKER).is_none() {
+        let status = Command::new(std::env::current_exe().expect("test executable path is available"))
+            .args(["--exact", RSS_TEST_NAME, "--nocapture"])
+            .env(RSS_CHILD_MARKER, "1")
+            .status()
+            .expect("isolated CORS RSS test starts");
+        assert!(status.success(), "isolated CORS RSS test failed");
+        return;
+    }
+
+    let before = rss_bytes().expect("RSS is readable through ps");
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .build()
+        .expect("the isolated runtime starts");
+    let cache = CachedCorsSource::new(
+        Arc::new(NoCors),
+        CorsCacheConfig {
+            entries: RSS_ENTRY_LIMIT,
+            ..CorsCacheConfig::default()
+        },
+    );
+    runtime.block_on(async {
+        for index in 0..RSS_REQUESTS {
+            let name = BucketName::new(format!("random-bucket-{index:07}")).expect("the generated bucket name is valid");
+            let _ = cache.get(&name, RequestNow::from_unix_seconds(1000)).await;
+        }
+    });
+    let after = rss_bytes().expect("RSS remains readable through ps");
+    let growth = after.saturating_sub(before);
+    let budget = RSS_ENTRY_LIMIT * MAX_RSS_BYTES_PER_ENTRY;
+    eprintln!(
+        "CORS RSS: requests={RSS_REQUESTS} entries={} growth_bytes={growth} budget_bytes={budget}",
+        cache.len()
+    );
+    assert!(
+        growth <= budget,
+        "CORS cache RSS grew by {growth} bytes, above the {budget}-byte entry budget"
+    );
+    assert_eq!(cache.len(), RSS_ENTRY_LIMIT, "the entry census escaped its configured cap");
 }
 
 /// Negative — a source failure is collapsed into the same cached absence as a missing document.
