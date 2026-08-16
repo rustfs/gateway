@@ -18,10 +18,11 @@
 //! NOT responsible for: implementing the production behavior under test.
 //! Upstream: the test harness and subject module. Downstream: the repository verification gate.
 
-use rustfs_gateway_core::{AuthRequirement, OperationSpec, ResourceShape};
+use rustfs_gateway_core::{AuthRequirement, HandlerDeadlineClass, OperationSpec, ResourceShape};
 use rustfs_gateway_sig::{OperationFloor, SigService};
 
 pub static SPEC: OperationSpec = OperationSpec::builder("example:Probe", 200, None)
+    .handler_deadline_class(HandlerDeadlineClass::Standard)
     .required_params(&[])
     .auth(AuthRequirement::new("example:Probe", ResourceShape::Service))
     .build();

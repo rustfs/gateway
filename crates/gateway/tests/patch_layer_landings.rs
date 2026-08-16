@@ -45,6 +45,7 @@ use rustfs_gateway::{
     ResponseBody, ResponseView, RouteEntry, RouteSelector, SigService, TargetKind, VirtualHostStyle, response_filter,
     wire_filter,
 };
+use rustfs_gateway_core::HandlerDeadlineClass;
 use support::{
     Backend, ContentPing, HeadPing, LENGTH_ECHO, Ping, attributes_request, attributes_service, content_ping_route, exchange,
     exchange_wire, fixed_clock, head_ping_route, ping_route, plain, signed, wired,
@@ -278,6 +279,7 @@ struct QueryShapedInput;
 struct QueryShapedOutput;
 
 static QUERY_SHAPED_SPEC: OperationSpec = OperationSpec::builder("example:QueryShaped", 200, None)
+    .handler_deadline_class(HandlerDeadlineClass::Standard)
     .required_params(&[])
     .auth(AuthRequirement::new("example:QueryShaped", ResourceShape::Service))
     .build();

@@ -17,9 +17,10 @@
 //! Responsible for: compiling the supported additive construction path. NOT responsible for:
 //! registry validation. Upstream: the public builder. Downstream: the trybuild SemVer test.
 
-use rustfs_gateway_core::{AuthRequirement, OperationSpec, ResourceShape};
+use rustfs_gateway_core::{AuthRequirement, HandlerDeadlineClass, OperationSpec, ResourceShape};
 
 static SPEC: OperationSpec = OperationSpec::builder("extension:Ping", 200, None)
+    .handler_deadline_class(HandlerDeadlineClass::Standard)
     .auth(AuthRequirement::new("extension:Ping", ResourceShape::Object))
     .build();
 
