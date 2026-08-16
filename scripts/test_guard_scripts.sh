@@ -1807,8 +1807,8 @@ from pathlib import Path
 
 path = Path("Cargo.toml")
 text = path.read_text()
-old = 'rustfs-gateway = { path = "crates/gateway", version = "0.7.4" }'
-new = 'rustfs-gateway = { path = "crates/gateway", version = "0.7.4", features = ["dangerous-allow-all-authorizer"] }'
+old = 'rustfs-gateway = { path = "crates/gateway", version = "0.7.5" }'
+new = 'rustfs-gateway = { path = "crates/gateway", version = "0.7.5", features = ["dangerous-allow-all-authorizer"] }'
 if text.count(old) != 1:
     raise SystemExit("workspace facade dependency is missing")
 path.write_text(text.replace(old, new, 1))
@@ -13094,6 +13094,145 @@ expect_fail_with_diagnostic check_handler_deadline_class.sh \
     'the facade losing validated handler deadline configuration' \
     'facade does not export HandlerDeadlineConfig' \
     mut_handler_deadline_config_facade_export_removed
+
+mut_handler_cleanup_grace_default_drifted() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/gateway/src/config.rs")
+text = path.read_text()
+subject = "const DEFAULT_HANDLER_CLEANUP_GRACE: Duration = Duration::from_secs(1);\n"
+replacement = "const DEFAULT_HANDLER_CLEANUP_GRACE: Duration = Duration::from_secs(2);\n"
+if text.count(subject) != 1:
+    raise SystemExit("missing unique handler cleanup grace default mutation subject")
+path.write_text(text.replace(subject, replacement, 1))
+PYEOF
+}
+expect_fail_with_diagnostic check_handler_deadline_class.sh \
+    'the handler cleanup grace default drifting from one second' \
+    'handler cleanup grace default is not one second' \
+    mut_handler_cleanup_grace_default_drifted
+
+mut_handler_cleanup_grace_zero_validation_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/gateway/src/config.rs")
+text = path.read_text()
+subject = '''        if cleanup_grace.is_zero() {
+            return None;
+        }
+'''
+if text.count(subject) != 1:
+    raise SystemExit("missing unique handler cleanup grace validation mutation subject")
+path.write_text(text.replace(subject, "", 1))
+PYEOF
+}
+expect_fail_with_diagnostic check_handler_deadline_class.sh \
+    'the handler cleanup grace accepting zero as an immediate drop' \
+    'handler cleanup grace is not validated and stored' \
+    mut_handler_cleanup_grace_zero_validation_removed
+
+mut_handler_deadline_snapshot_duration_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/gateway/src/dispatch.rs")
+text = path.read_text()
+subject = "            let deadline = request_config.config().handler_deadline(deadline_class);\n"
+replacement = "            let deadline = std::time::Duration::from_secs(30);\n"
+if text.count(subject) != 1:
+    raise SystemExit("missing unique handler deadline snapshot mutation subject")
+path.write_text(text.replace(subject, replacement, 1))
+PYEOF
+}
+expect_fail_with_diagnostic check_handler_deadline_class.sh \
+    'dynamic dispatch hard-coding a deadline instead of consuming the request snapshot' \
+    "dynamic dispatch does not consume one request snapshot's handler deadline configuration" \
+    mut_handler_deadline_snapshot_duration_removed
+
+mut_handler_deadline_signal_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/gateway/src/request_deadline.rs")
+text = path.read_text()
+subject = "    cancellation.cancel(HandlerCancellation::Deadline);\n"
+if text.count(subject) != 1:
+    raise SystemExit("missing unique handler deadline signal mutation subject")
+path.write_text(text.replace(subject, "", 1))
+PYEOF
+}
+expect_fail_with_diagnostic check_handler_deadline_class.sh \
+    'an expired handler deadline no longer signalling its cancellation token' \
+    'handler deadline race is missing a required poll or cancellation signal' \
+    mut_handler_deadline_signal_removed
+
+mut_handler_late_deadline_result_accepted() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/gateway/src/request_deadline.rs")
+text = path.read_text()
+subject = "    cancellation.cancel(HandlerCancellation::Deadline);\n"
+replacement = subject + "    return HandlerDeadlineOutcome::Completed(handler.await);\n"
+if text.count(subject) != 1:
+    raise SystemExit("missing unique late handler result mutation subject")
+path.write_text(text.replace(subject, replacement, 1))
+PYEOF
+}
+expect_fail_with_diagnostic check_handler_deadline_class.sh \
+    'a handler result completed after its deadline becoming the response' \
+    'a handler result completed after its deadline can be committed' \
+    mut_handler_late_deadline_result_accepted
+
+mut_handler_cleanup_grace_race_reversed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/gateway/src/request_deadline.rs")
+text = path.read_text()
+subject = '''        if grace.as_mut().poll(context).is_ready() {
+            return Poll::Ready(false);
+        }
+        if handler.as_mut().poll(context).is_ready() {
+            return Poll::Ready(true);
+        }
+'''
+replacement = '''        if handler.as_mut().poll(context).is_ready() {
+            return Poll::Ready(true);
+        }
+        if grace.as_mut().poll(context).is_ready() {
+            return Poll::Ready(false);
+        }
+'''
+if text.count(subject) != 1:
+    raise SystemExit("missing unique handler cleanup race mutation subject")
+path.write_text(text.replace(subject, replacement, 1))
+PYEOF
+}
+expect_fail_with_diagnostic check_handler_deadline_class.sh \
+    'handler cleanup completion winning after its grace is already exhausted' \
+    'handler cleanup completion wins an exhausted grace race' \
+    mut_handler_cleanup_grace_race_reversed
+
+mut_handler_cleanup_completion_mapping_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/gateway/src/dispatch.rs")
+text = path.read_text()
+subject = "handler deadline exceeded after cleanup completed"
+replacement = "handler deadline exceeded before cleanup completed"
+if text.count(subject) != 2:
+    raise SystemExit("missing handler cleanup completion mapping and its test oracle")
+path.write_text(text.replace(subject, replacement, 1))
+PYEOF
+}
+expect_fail_with_diagnostic check_handler_deadline_class.sh \
+    'dynamic dispatch losing the observed cleanup-completed outcome' \
+    'dynamic dispatch can commit a handler result completed after its deadline' \
+    mut_handler_cleanup_completion_mapping_removed
 
 expect_signing_suite_dirty_checkout_fail() {
     local checkout output rc=0

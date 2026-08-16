@@ -77,6 +77,7 @@ use rustfs_gateway_types::ErrorCode;
 
 use crate::ext::{Next, OpLayer, Terminal};
 use crate::request_config::{InputAuthorized, RequestConfig};
+use crate::request_deadline::{HandlerDeadlineOutcome, handler_with_deadline};
 
 /// A `Resp<O>`'s output whose `O` this table has forgotten.
 type ErasedOutput = Box<dyn std::any::Any + Send>;
@@ -174,13 +175,27 @@ impl OperationDispatch {
         let invoke: Invoke = Arc::new(move |request: ErasedRequest, request_config: RequestConfig<InputAuthorized>| {
             let (cancellation, context) = HandlerCancellationSource::pair();
             let call = handler(request, context);
+            let deadline_class = O::spec()
+                .deadline_class()
+                .ok_or_else(|| HandlerError::internal_error("registered operation is missing its handler deadline class"))?;
+            let deadline = request_config.config().handler_deadline(deadline_class);
+            let cleanup_grace = request_config.config().handler_cleanup_grace();
+            let deadline_cancellation = cancellation.clone();
             Ok(Invocation {
                 _cancellation: cancellation,
                 inner: Box::pin(async move {
                     // Keep the request's one configuration snapshot alive through the backend call.
                     // No dispatch implementation can load or substitute another snapshot.
                     let _request_config = request_config;
-                    let response = call.await?;
+                    let response = match handler_with_deadline(call, deadline_cancellation, deadline, cleanup_grace).await {
+                        HandlerDeadlineOutcome::Completed(response) => response?,
+                        HandlerDeadlineOutcome::Expired { cleanup_completed: true } => {
+                            return Err(HandlerError::internal_error("handler deadline exceeded after cleanup completed"));
+                        }
+                        HandlerDeadlineOutcome::Expired {
+                            cleanup_completed: false,
+                        } => return Err(HandlerError::internal_error("handler deadline exceeded before cleanup completed")),
+                    };
                     let response = response.downcast::<Resp<O>>().map_err(|_| {
                         HandlerError::internal_error("the registered dispatch received another operation's response")
                     })?;
@@ -451,6 +466,7 @@ mod tests {
     use super::*;
     use rustfs_gateway_core::{Predicate, RouteSelector};
     use std::sync::atomic::{AtomicBool, Ordering};
+    use std::time::Duration;
 
     fn entry(predicates: &'static [Predicate], path_shape: &'static str) -> RouteEntry {
         RouteEntry {
@@ -523,6 +539,7 @@ mod tests {
         let observed = Arc::new(AtomicBool::new(false));
         let backend = Arc::new(ContextAwareBackend {
             observed: Arc::clone(&observed),
+            behavior: ContextBehavior::ObserveCancellation,
         });
 
         let dispatch = OperationDispatch::of::<rustfs_gateway_types::dto::ListBuckets, _>(Arc::clone(&backend));
@@ -540,6 +557,62 @@ mod tests {
         assert!(invocation.cancel(rustfs_gateway_core::HandlerCancellation::Deadline));
         let _ = invocation.await;
         assert!(observed.swap(false, Ordering::AcqRel), "the operation layer discarded HandlerContext");
+    }
+
+    /// Negative — a handler that cooperates with the deadline may finish cleanup, but its late
+    /// success must never become the response.
+    #[tokio::test]
+    async fn handler_deadline_signals_cleanup_and_discards_the_late_result() {
+        let cleaned = Arc::new(AtomicBool::new(false));
+        let dispatch = OperationDispatch::of::<rustfs_gateway_types::dto::ListBuckets, _>(Arc::new(ContextAwareBackend {
+            observed: Arc::clone(&cleaned),
+            behavior: ContextBehavior::Cleanup,
+        }));
+        let invocation =
+            invocation_with_deadline(&dispatch, Duration::from_millis(20), Duration::from_millis(100)).expect("dispatchable");
+
+        let result = tokio::time::timeout(Duration::from_secs(1), invocation)
+            .await
+            .expect("the handler deadline is bounded");
+        let Err(error) = result else {
+            panic!("a success completed after the deadline");
+        };
+        assert_eq!(error.message(), "handler deadline exceeded after cleanup completed");
+        assert!(cleaned.load(Ordering::Acquire), "the handler did not observe the deadline signal");
+    }
+
+    /// Negative — an uncooperative handler remains pending through the cleanup grace, then the
+    /// invocation returns without waiting for the backend forever.
+    #[tokio::test]
+    async fn handler_deadline_bounds_an_uncooperative_handler() {
+        let dispatch = OperationDispatch::of::<rustfs_gateway_types::dto::ListBuckets, _>(Arc::new(ContextAwareBackend {
+            observed: Arc::new(AtomicBool::new(false)),
+            behavior: ContextBehavior::NeverCompletes,
+        }));
+        let invocation =
+            invocation_with_deadline(&dispatch, Duration::from_millis(20), Duration::from_millis(40)).expect("dispatchable");
+
+        let result = tokio::time::timeout(Duration::from_secs(1), invocation)
+            .await
+            .expect("deadline plus cleanup grace is bounded");
+        let Err(error) = result else {
+            panic!("an uncooperative handler produced a response");
+        };
+        assert_eq!(error.message(), "handler deadline exceeded before cleanup completed");
+    }
+
+    /// Positive — a handler that completes before its class deadline keeps its ordinary response.
+    #[tokio::test]
+    async fn handler_result_before_deadline_is_preserved() {
+        let dispatch = OperationDispatch::of::<rustfs_gateway_types::dto::ListBuckets, _>(Arc::new(ContextAwareBackend {
+            observed: Arc::new(AtomicBool::new(false)),
+            behavior: ContextBehavior::Immediate,
+        }));
+        let invocation =
+            invocation_with_deadline(&dispatch, Duration::from_millis(100), Duration::from_millis(20)).expect("dispatchable");
+
+        let result = invocation.await;
+        assert!(matches!(result, Ok((ErasedAnswer::Settled(_), 200))));
     }
 
     /// Positive — the other direction. One registered layer does enter the chain, so the counter
@@ -562,6 +635,22 @@ mod tests {
     }
 
     fn invocation_once(dispatch: &OperationDispatch) -> Result<Invocation, HandlerError> {
+        invocation_with_config(dispatch, crate::ServiceConfig::new(1))
+    }
+
+    fn invocation_with_deadline(
+        dispatch: &OperationDispatch,
+        deadline: Duration,
+        cleanup_grace: Duration,
+    ) -> Result<Invocation, HandlerError> {
+        let deadlines = crate::HandlerDeadlineConfig::new(deadline, deadline)
+            .expect("non-zero deadlines")
+            .try_with_cleanup_grace(cleanup_grace)
+            .expect("a non-zero cleanup grace");
+        invocation_with_config(dispatch, crate::ServiceConfig::new(1).with_handler_deadlines(deadlines))
+    }
+
+    fn invocation_with_config(dispatch: &OperationDispatch, config: crate::ServiceConfig) -> Result<Invocation, HandlerError> {
         let request = http::Request::builder()
             .method(http::Method::GET)
             .uri("/")
@@ -575,7 +664,7 @@ mod tests {
         let resources = dispatch.resources(&decoded).expect("derived resources");
         let decisions = vec![Decision::Allow; resources.len()];
         let authorized = dispatch.authorize(decoded, &decisions).expect("authorized");
-        let config = RequestConfig::enter(Arc::new(crate::ServiceConfig::new(1)))
+        let config = RequestConfig::enter(Arc::new(config))
             .accepted()
             .routed()
             .governed()
@@ -591,6 +680,14 @@ mod tests {
 
     struct ContextAwareBackend {
         observed: Arc<AtomicBool>,
+        behavior: ContextBehavior,
+    }
+
+    enum ContextBehavior {
+        ObserveCancellation,
+        Cleanup,
+        NeverCompletes,
+        Immediate,
     }
 
     impl Handler<rustfs_gateway_types::dto::ListBuckets> for ContextAwareBackend {
@@ -606,9 +703,23 @@ mod tests {
             _request: Req<rustfs_gateway_types::dto::ListBuckets>,
             context: rustfs_gateway_core::HandlerContext,
         ) -> rustfs_gateway_core::HandlerResult<rustfs_gateway_types::dto::ListBuckets> {
-            assert_eq!(context.cancelled().await, rustfs_gateway_core::HandlerCancellation::Deadline);
+            match &self.behavior {
+                ContextBehavior::NeverCompletes => return std::future::pending().await,
+                ContextBehavior::Immediate => return Ok(Resp::new(Default::default())),
+                ContextBehavior::ObserveCancellation | ContextBehavior::Cleanup => {
+                    assert_eq!(context.cancelled().await, rustfs_gateway_core::HandlerCancellation::Deadline);
+                }
+            }
             self.observed.store(true, Ordering::Release);
-            Err(HandlerError::not_implemented("the context-aware handler entry was used"))
+            match self.behavior {
+                ContextBehavior::ObserveCancellation => {
+                    Err(HandlerError::not_implemented("the context-aware handler entry was used"))
+                }
+                ContextBehavior::Cleanup => Ok(Resp::new(Default::default())),
+                ContextBehavior::NeverCompletes | ContextBehavior::Immediate => {
+                    Err(HandlerError::internal_error("the context-aware test backend used the wrong behavior"))
+                }
+            }
         }
     }
 

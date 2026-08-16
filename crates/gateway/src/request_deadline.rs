@@ -14,11 +14,12 @@
 
 //! Runtime-independent request deadlines.
 //!
-//! Responsible for: policy snapshot timeouts and security failure-floor delays without assuming
-//! a Tokio runtime.
+//! Responsible for: handler, policy snapshot and security failure-floor deadlines without
+//! assuming a Tokio runtime.
 //! NOT responsible for: choosing either duration or rendering a timeout response.
 //! Upstream: clocks and policy sources. Downstream: `service`.
 
+use std::future::Future;
 use std::future::poll_fn;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -26,10 +27,52 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::task::Poll;
 use std::time::Duration;
 
+use rustfs_gateway_core::{BoxFuture, HandlerCancellation, HandlerCancellationSource};
 use rustfs_gateway_sig::timing::FailureFloor;
 
 use crate::clock::{MonotonicClock, MonotonicNow};
 use crate::ext::{PolicyError, PolicySnapshot, PolicySource};
+
+pub(crate) enum HandlerDeadlineOutcome<T> {
+    Completed(T),
+    Expired { cleanup_completed: bool },
+}
+
+pub(crate) async fn handler_with_deadline<T>(
+    mut handler: BoxFuture<'static, T>,
+    cancellation: HandlerCancellationSource,
+    deadline: Duration,
+    cleanup_grace: Duration,
+) -> HandlerDeadlineOutcome<T> {
+    let mut deadline = Box::pin(futures_timer::Delay::new(deadline));
+    let completed = poll_fn(|context| {
+        if deadline.as_mut().poll(context).is_ready() {
+            return Poll::Ready(None);
+        }
+        if let Poll::Ready(output) = handler.as_mut().poll(context) {
+            return Poll::Ready(Some(output));
+        }
+        Poll::Pending
+    })
+    .await;
+    if let Some(output) = completed {
+        return HandlerDeadlineOutcome::Completed(output);
+    }
+
+    cancellation.cancel(HandlerCancellation::Deadline);
+    let mut grace = Box::pin(futures_timer::Delay::new(cleanup_grace));
+    let cleanup_completed = poll_fn(|context| {
+        if grace.as_mut().poll(context).is_ready() {
+            return Poll::Ready(false);
+        }
+        if handler.as_mut().poll(context).is_ready() {
+            return Poll::Ready(true);
+        }
+        Poll::Pending
+    })
+    .await;
+    HandlerDeadlineOutcome::Expired { cleanup_completed }
+}
 
 pub(crate) async fn policy_snapshot_with_timeout<'a>(
     source: &'a dyn PolicySource,
