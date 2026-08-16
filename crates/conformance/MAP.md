@@ -19,6 +19,8 @@ ADRs; this map only selects files.
 | `src/conn/` | Connection state and reusable transport helpers. | A multi-exchange case loses connection state. |
 | `src/sign.rs` | Request signing for corpus inputs. | A signed case sends the wrong request. |
 | `src/fixture.rs` | Deterministic fixture backend used by local runs. | Setup state or a fixture operation behaves wrongly. |
+| `src/fixture/handlers_bucket.rs` | Bucket Handler entries for the deterministic fixture. | A bucket operation stops reaching existing fixture behavior. |
+| `src/fixture/handlers_object.rs` | Object, multipart, listing, and event Handler entries for the deterministic fixture. | An object-family operation stops reaching existing fixture behavior. |
 | `src/keys/` | Schema-key consumption audit. | A declared case key is parsed but ignored. |
 | `src/report.rs` | Human, JSON and JUnit reports. | A verdict is rendered or grouped wrongly. |
 | `src/baseline.rs` | Baseline comparison. | Known failures or regressions are classified wrongly. |

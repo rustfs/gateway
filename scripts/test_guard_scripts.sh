@@ -12689,6 +12689,30 @@ expect_fail_with_diagnostic check_handler_context_migration.sh \
     'crates/gateway/tests/monomorphic.rs Handler impl 1 does not inspect its context cancellation state' \
     mut_monomorphic_context_cancellation_observation_bypassed
 
+mut_conformance_handler_context_entry_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/conformance/src/fixture/handlers_object.rs")
+text = path.read_text()
+subject = '''    fn call_with_context(
+        &self,
+        request: Req<dto::GetObject>,
+'''
+replacement = '''    fn call_without_context(
+        &self,
+        request: Req<dto::GetObject>,
+'''
+if text.count(subject) != 1:
+    raise SystemExit("missing unique conformance Handler context-entry mutation subject")
+path.write_text(text.replace(subject, replacement, 1))
+PYEOF
+}
+expect_fail_with_diagnostic check_handler_context_migration.sh \
+    'a conformance fixture Handler losing its explicit context-aware entry' \
+    'crates/conformance/src/fixture/handlers_object.rs Handler impl 1 is not on the reviewed facade migration bridge' \
+    mut_conformance_handler_context_entry_removed
+
 expect_signing_suite_dirty_checkout_fail() {
     local checkout output rc=0
     cases=$((cases + 1))
