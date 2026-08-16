@@ -47,6 +47,7 @@ use rustfs_gateway::{
     RegionSet, Req, RequestBody, RequestContext, ResourceShape, Resp, ResponseBody, RouteEntry, RouteSelector, ServiceBuilder,
     SigService, SigV4Authenticator, StaticCredentials, TargetKind,
 };
+use rustfs_gateway_core::HandlerDeadlineClass;
 
 // ── a vendor operation, so the example reaches authorisation without signing anything ──────────
 //
@@ -65,6 +66,7 @@ struct PingInput;
 struct PingOutput;
 
 static PING_SPEC: OperationSpec = OperationSpec::builder("example:Ping", 200, None)
+    .handler_deadline_class(HandlerDeadlineClass::Standard)
     .required_params(&[])
     .auth(AuthRequirement::new("example:Ping", ResourceShape::Service))
     .build();

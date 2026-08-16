@@ -54,6 +54,7 @@ use rustfs_gateway::{
     RequestNow, ResourceShape, Resp, ResponseBody, RouteEntry, RouteSelector, S3Service, ServiceBuilder, SigService,
     SigV4Authenticator, StaticCredentials, TargetKind, WireResponse, allow_when, collect,
 };
+use rustfs_gateway_core::HandlerDeadlineClass;
 
 const RSS_CHILD_MARKER: &str = "RUSTFS_GATEWAY_CORS_RSS_CHILD";
 const RSS_TEST_NAME: &str = "cors_runtime::a_million_unique_keys_keep_rss_within_the_entry_budget";
@@ -86,6 +87,7 @@ struct BucketPingInput;
 struct BucketPingOutput;
 
 static BUCKET_PING_SPEC: OperationSpec = OperationSpec::builder("example:BucketPing", 200, None)
+    .handler_deadline_class(HandlerDeadlineClass::Standard)
     .required_params(&[])
     .auth(AuthRequirement::new("example:BucketPing", ResourceShape::Bucket))
     .build();

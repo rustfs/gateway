@@ -116,9 +116,15 @@ if wrong_standard:
 reviewed_third_party_sources = {
     "crates/core/examples/dialect_overlay.rs": 1,
     "crates/core/src/authz/mod.rs": 1,
+    "crates/core/tests/compile_fail/support.rs": 1,
+    "crates/core/tests/compile_pass/operation_spec_builder.rs": 1,
     "crates/core/tests/dialect.rs": 3,
     "crates/core/tests/static_dispatch.rs": 1,
+    "crates/gateway/examples/custom_authorizer.rs": 1,
     "crates/gateway/examples/minimal.rs": 1,
+    "crates/gateway/tests/cors_runtime.rs": 1,
+    "crates/gateway/tests/credential_runtime.rs": 1,
+    "crates/gateway/tests/patch_layer_landings.rs": 1,
     "crates/gateway/tests/support/mod.rs": 5,
 }
 reviewed_builders = 0
@@ -140,11 +146,11 @@ for relative, expected_builders in reviewed_third_party_sources.items():
         if standard != 1 or extended:
             fail(f"reviewed third-party builder lacks one explicit Standard deadline class: {relative}")
     reviewed_builders += len(builders)
-if reviewed_builders != 12:
-    fail(f"reviewed third-party builder census is {reviewed_builders}, expected 12")
+if reviewed_builders != 18:
+    fail(f"reviewed third-party builder census is {reviewed_builders}, expected 18")
 
 print(
-    "check_handler_deadline_class: 72 standard operations and 12 reviewed third-party builders "
-    "have explicit deadline classes (83 Standard, 1 Extended)"
+    "check_handler_deadline_class: 72 standard operations and 18 reviewed third-party builders "
+    "have explicit deadline classes (89 Standard, 1 Extended)"
 )
 PY

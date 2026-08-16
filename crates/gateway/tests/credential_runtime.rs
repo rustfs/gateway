@@ -57,6 +57,7 @@ use rustfs_gateway::{
     RequestBody, ResourceShape, Resp, ResponseBody, RouteEntry, RouteSelector, S3Service, ServiceBuilder, ServiceConfig,
     SessionBinding, SigV4Authenticator, StaticCredentials, TargetKind, WireRequest, WireResponse, allow_when, collect,
 };
+use rustfs_gateway_core::HandlerDeadlineClass;
 
 /// The instant every request in this file is signed at and judged against.
 const NOW: i64 = 1_767_225_600;
@@ -92,6 +93,7 @@ struct Nothing;
 struct Answered;
 
 static SPEC: OperationSpec = OperationSpec::builder("example:CredProbe", 200, None)
+    .handler_deadline_class(HandlerDeadlineClass::Standard)
     .required_params(&[])
     .auth(AuthRequirement::new("example:CredProbe", ResourceShape::Object))
     .build();

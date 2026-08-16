@@ -12862,6 +12862,41 @@ expect_fail_with_diagnostic check_handler_deadline_class.sh \
     'reviewed third-party builder lacks one explicit Standard deadline class' \
     mut_handler_deadline_reviewed_third_party_class_extended
 
+mut_handler_deadline_second_batch_class_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/gateway/examples/custom_authorizer.rs")
+text = path.read_text()
+subject = "    .handler_deadline_class(HandlerDeadlineClass::Standard)\n"
+if text.count(subject) != 1:
+    raise SystemExit("missing unique second-batch deadline removal subject")
+path.write_text(text.replace(subject, "", 1))
+PYEOF
+}
+expect_fail_with_diagnostic check_handler_deadline_class.sh \
+    'a second-batch third-party operation losing its explicit handler deadline class' \
+    'reviewed third-party builder lacks one explicit Standard deadline class' \
+    mut_handler_deadline_second_batch_class_removed
+
+mut_handler_deadline_second_batch_class_extended() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/gateway/tests/cors_runtime.rs")
+text = path.read_text()
+subject = "    .handler_deadline_class(HandlerDeadlineClass::Standard)\n"
+replacement = "    .handler_deadline_class(HandlerDeadlineClass::Extended)\n"
+if text.count(subject) != 1:
+    raise SystemExit("missing unique second-batch deadline class subject")
+path.write_text(text.replace(subject, replacement, 1))
+PYEOF
+}
+expect_fail_with_diagnostic check_handler_deadline_class.sh \
+    'a second-batch third-party operation gaining the extended handler deadline class' \
+    'reviewed third-party builder lacks one explicit Standard deadline class' \
+    mut_handler_deadline_second_batch_class_extended
+
 expect_signing_suite_dirty_checkout_fail() {
     local checkout output rc=0
     cases=$((cases + 1))
