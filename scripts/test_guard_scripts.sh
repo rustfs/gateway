@@ -1807,8 +1807,8 @@ from pathlib import Path
 
 path = Path("Cargo.toml")
 text = path.read_text()
-old = 'rustfs-gateway = { path = "crates/gateway", version = "0.7.3" }'
-new = 'rustfs-gateway = { path = "crates/gateway", version = "0.7.3", features = ["dangerous-allow-all-authorizer"] }'
+old = 'rustfs-gateway = { path = "crates/gateway", version = "0.7.4" }'
+new = 'rustfs-gateway = { path = "crates/gateway", version = "0.7.4", features = ["dangerous-allow-all-authorizer"] }'
 if text.count(old) != 1:
     raise SystemExit("workspace facade dependency is missing")
 path.write_text(text.replace(old, new, 1))
@@ -13002,6 +13002,98 @@ expect_fail_with_diagnostic check_handler_deadline_class.sh \
     'an OperationSpec alias hiding a builder from the repository census' \
     'OperationSpec aliases are forbidden from the deadline-class census' \
     mut_handler_deadline_builder_alias_added
+
+mut_handler_deadline_standard_default_drifted() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/gateway/src/config.rs")
+text = path.read_text()
+subject = "pub const DEFAULT_STANDARD_HANDLER_DEADLINE: Duration = Duration::from_secs(30);\n"
+replacement = "pub const DEFAULT_STANDARD_HANDLER_DEADLINE: Duration = Duration::from_secs(31);\n"
+if text.count(subject) != 1:
+    raise SystemExit("missing unique standard handler deadline default mutation subject")
+path.write_text(text.replace(subject, replacement, 1))
+PYEOF
+}
+expect_fail_with_diagnostic check_handler_deadline_class.sh \
+    'the Standard handler deadline default drifting from thirty seconds' \
+    'handler deadline defaults are not Standard=30s and Extended=15m' \
+    mut_handler_deadline_standard_default_drifted
+
+mut_handler_deadline_zero_validation_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/gateway/src/config.rs")
+text = path.read_text()
+subject = '''        if extended.is_zero() {
+            return Err(HandlerDeadlineConfigError::ZeroExtended);
+        }
+'''
+if text.count(subject) != 1:
+    raise SystemExit("missing unique handler deadline zero-validation mutation subject")
+path.write_text(text.replace(subject, "", 1))
+PYEOF
+}
+expect_fail_with_diagnostic check_handler_deadline_class.sh \
+    'the Extended handler deadline accepting zero as unlimited' \
+    'handler deadline configuration does not reject both zero durations' \
+    mut_handler_deadline_zero_validation_removed
+
+mut_handler_deadline_duration_mapping_crossed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/gateway/src/config.rs")
+text = path.read_text()
+subject = "            HandlerDeadlineClass::Extended => self.extended,\n"
+replacement = "            HandlerDeadlineClass::Extended => self.standard,\n"
+if text.count(subject) != 1:
+    raise SystemExit("missing unique handler deadline duration-mapping mutation subject")
+path.write_text(text.replace(subject, replacement, 1))
+PYEOF
+}
+expect_fail_with_diagnostic check_handler_deadline_class.sh \
+    'the Extended handler class using the ordinary configured duration' \
+    'Extended handler deadline is not mapped to its configured duration' \
+    mut_handler_deadline_duration_mapping_crossed
+
+mut_handler_deadline_class_facade_export_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/gateway/src/lib.rs")
+text = path.read_text()
+subject = "    HandlerCancellation, HandlerContext, HandlerDeadlineClass, HandlerError,"
+replacement = "    HandlerCancellation, HandlerContext, HandlerError,"
+if text.count(subject) != 1:
+    raise SystemExit("missing unique handler deadline class facade-export mutation subject")
+path.write_text(text.replace(subject, replacement, 1))
+PYEOF
+}
+expect_fail_with_diagnostic check_handler_deadline_class.sh \
+    'the facade losing the closed handler deadline vocabulary' \
+    'facade does not export HandlerDeadlineClass' \
+    mut_handler_deadline_class_facade_export_removed
+
+mut_handler_deadline_config_facade_export_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/gateway/src/lib.rs")
+text = path.read_text()
+subject = " DEFAULT_STANDARD_HANDLER_DEADLINE, HandlerDeadlineConfig,\n"
+replacement = " DEFAULT_STANDARD_HANDLER_DEADLINE,\n"
+if text.count(subject) != 1:
+    raise SystemExit("missing unique handler deadline config facade-export mutation subject")
+path.write_text(text.replace(subject, replacement, 1))
+PYEOF
+}
+expect_fail_with_diagnostic check_handler_deadline_class.sh \
+    'the facade losing validated handler deadline configuration' \
+    'facade does not export HandlerDeadlineConfig' \
+    mut_handler_deadline_config_facade_export_removed
 
 expect_signing_suite_dirty_checkout_fail() {
     local checkout output rc=0

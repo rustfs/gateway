@@ -17,14 +17,85 @@
 //! Upstream: [`crate::ServiceBuilder`]. Downstream: [`crate::S3Service`].
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use arc_swap::ArcSwap;
+use rustfs_gateway_core::HandlerDeadlineClass;
+
+/// Default deadline for ordinary handler execution.
+pub const DEFAULT_STANDARD_HANDLER_DEADLINE: Duration = Duration::from_secs(30);
+/// Default deadline for operations whose declared work is legitimately longer.
+pub const DEFAULT_EXTENDED_HANDLER_DEADLINE: Duration = Duration::from_secs(15 * 60);
+
+/// Validated durations for the closed handler deadline classes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct HandlerDeadlineConfig {
+    standard: Duration,
+    extended: Duration,
+}
+
+impl HandlerDeadlineConfig {
+    /// Validates explicit non-zero durations for both handler deadline classes.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`HandlerDeadlineConfigError`] when either duration is zero. Zero is never an
+    /// alias for an unlimited handler execution.
+    pub const fn new(standard: Duration, extended: Duration) -> Result<Self, HandlerDeadlineConfigError> {
+        if standard.is_zero() {
+            return Err(HandlerDeadlineConfigError::ZeroStandard);
+        }
+        if extended.is_zero() {
+            return Err(HandlerDeadlineConfigError::ZeroExtended);
+        }
+        Ok(Self { standard, extended })
+    }
+
+    /// Returns the configured duration for one closed operation class.
+    #[must_use]
+    pub const fn duration_for(self, class: HandlerDeadlineClass) -> Duration {
+        match class {
+            HandlerDeadlineClass::Standard => self.standard,
+            HandlerDeadlineClass::Extended => self.extended,
+        }
+    }
+}
+
+impl Default for HandlerDeadlineConfig {
+    fn default() -> Self {
+        Self {
+            standard: DEFAULT_STANDARD_HANDLER_DEADLINE,
+            extended: DEFAULT_EXTENDED_HANDLER_DEADLINE,
+        }
+    }
+}
+
+/// Why handler deadline configuration was rejected.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HandlerDeadlineConfigError {
+    /// The ordinary-operation deadline was zero.
+    ZeroStandard,
+    /// The extended-operation deadline was zero.
+    ZeroExtended,
+}
+
+impl core::fmt::Display for HandlerDeadlineConfigError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::ZeroStandard => f.write_str("standard handler deadline must be non-zero"),
+            Self::ZeroExtended => f.write_str("extended handler deadline must be non-zero"),
+        }
+    }
+}
+
+impl std::error::Error for HandlerDeadlineConfigError {}
 
 /// Replaceable request settings; no `Default` leaves the memory ceiling explicit.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ServiceConfig {
     max_buffered_body_bytes: u64,
     verbose_signature_errors: bool,
+    handler_deadlines: HandlerDeadlineConfig,
 }
 
 impl ServiceConfig {
@@ -34,6 +105,10 @@ impl ServiceConfig {
         Self {
             max_buffered_body_bytes,
             verbose_signature_errors: false,
+            handler_deadlines: HandlerDeadlineConfig {
+                standard: DEFAULT_STANDARD_HANDLER_DEADLINE,
+                extended: DEFAULT_EXTENDED_HANDLER_DEADLINE,
+            },
         }
     }
 
@@ -87,6 +162,19 @@ impl ServiceConfig {
     pub const fn verbose_signature_errors(&self) -> bool {
         self.verbose_signature_errors
     }
+
+    /// Replaces both validated handler deadline durations.
+    #[must_use]
+    pub const fn with_handler_deadlines(mut self, handler_deadlines: HandlerDeadlineConfig) -> Self {
+        self.handler_deadlines = handler_deadlines;
+        self
+    }
+
+    /// Returns the duration mapped to an operation's closed handler deadline class.
+    #[must_use]
+    pub const fn handler_deadline(&self, class: HandlerDeadlineClass) -> Duration {
+        self.handler_deadlines.duration_for(class)
+    }
 }
 
 #[cfg(test)]
@@ -109,6 +197,51 @@ fn load_replacement(store: &ConfigStore) -> ConfigSnapshot {
 mod tests {
     use super::*;
     use crate::request_config::RequestConfig;
+    use rustfs_gateway_core::HandlerDeadlineClass;
+
+    #[test]
+    fn handler_deadline_configuration_maps_each_closed_class() {
+        let defaults = HandlerDeadlineConfig::default();
+        assert_eq!(defaults.duration_for(HandlerDeadlineClass::Standard), std::time::Duration::from_secs(30));
+        assert_eq!(
+            defaults.duration_for(HandlerDeadlineClass::Extended),
+            std::time::Duration::from_secs(15 * 60)
+        );
+
+        let configured = HandlerDeadlineConfig {
+            standard: std::time::Duration::from_secs(3),
+            extended: std::time::Duration::from_secs(90),
+        };
+        assert_eq!(
+            HandlerDeadlineConfig::new(std::time::Duration::from_secs(3), std::time::Duration::from_secs(90)),
+            Ok(configured)
+        );
+        let service = ServiceConfig::new(8).with_handler_deadlines(configured);
+        assert_eq!(
+            service.handler_deadline(HandlerDeadlineClass::Standard),
+            std::time::Duration::from_secs(3)
+        );
+        assert_eq!(
+            service.handler_deadline(HandlerDeadlineClass::Extended),
+            std::time::Duration::from_secs(90)
+        );
+    }
+
+    #[test]
+    fn zero_standard_handler_deadline_is_refused() {
+        assert_eq!(
+            HandlerDeadlineConfig::new(std::time::Duration::ZERO, std::time::Duration::from_secs(1)),
+            Err(HandlerDeadlineConfigError::ZeroStandard),
+        );
+    }
+
+    #[test]
+    fn zero_extended_handler_deadline_is_refused() {
+        assert_eq!(
+            HandlerDeadlineConfig::new(std::time::Duration::from_secs(1), std::time::Duration::ZERO),
+            Err(HandlerDeadlineConfigError::ZeroExtended),
+        );
+    }
 
     // a-asm-0006: stable load anchors prove replacement cannot split the entry snapshot.
     #[test]
