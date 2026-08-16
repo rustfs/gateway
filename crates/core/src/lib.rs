@@ -96,6 +96,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing, clippy::panic)]
 
 pub mod authz;
+pub mod cancellation;
 pub mod codec;
 mod contracts;
 pub mod cors;
@@ -116,6 +117,7 @@ pub use crate::authz::{
     Authorized, AuthorizedRead, Decision, Denied, DerivedResourceError, DerivedResourceSet, NoDerived, OwnedResource,
     ResourceIdentity, ResourceRef,
 };
+pub use crate::cancellation::{HandlerCancellation, HandlerCancellationSource, HandlerContext};
 pub use crate::codec::{
     BodyAllowance, CodecError, EncodedResponse, MetaView, OperationCodec, RequestBody, ResponseBody, ResponseOverride,
     body_allowance, response_body_allowed, response_framing_allowed,
