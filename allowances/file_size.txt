@@ -6,7 +6,6 @@ crates/conformance/src/inprocess.rs 1700 https://github.com/rustfs/backlog/issue
 crates/core/tests/params_and_dispatch.rs 1350 https://github.com/rustfs/backlog/issues/1742 One response suite sharing the same operation specs and full_router; split when a second subject appears.
 crates/gateway/src/service.rs 1400 https://github.com/rustfs/backlog/issues/1742 Existing pipeline assembly; split in a dedicated behavior-reviewed task.
 crates/core/tests/dialect.rs 900 https://github.com/rustfs/backlog/issues/1742 Existing dialect matrix; split in a dedicated behavior-reviewed task.
-crates/gateway/tests/support/mod.rs 850 https://github.com/rustfs/backlog/issues/1742 Existing shared test support; split in a dedicated behavior-reviewed task.
 crates/core/tests/registration.rs 850 https://github.com/rustfs/backlog/issues/1742 Existing registration matrix; split in a dedicated behavior-reviewed task.
 crates/model/src/lower/mod.rs 850 https://github.com/rustfs/backlog/issues/1742 Existing lowering module; split in a dedicated behavior-reviewed task.
 crates/gateway/tests/authz_contract.rs 850 https://github.com/rustfs/backlog/issues/1742 Existing authorization matrix; split in a dedicated behavior-reviewed task.
