@@ -146,14 +146,32 @@ impl Fs {
 }
 
 impl Handler<HeadObjectReport> for Fs {
-    async fn call(&self, _request: Req<HeadObjectReport>) -> HandlerResult<HeadObjectReport> {
+    async fn call(&self, request: Req<HeadObjectReport>) -> HandlerResult<HeadObjectReport> {
+        let (_source, context) = rustfs_gateway_core::HandlerCancellationSource::pair();
+        self.call_with_context(request, context).await
+    }
+
+    async fn call_with_context(
+        &self,
+        _request: Req<HeadObjectReport>,
+        _context: rustfs_gateway_core::HandlerContext,
+    ) -> HandlerResult<HeadObjectReport> {
         self.reports.fetch_add(1, Ordering::Relaxed);
         Ok(Resp::new(()))
     }
 }
 
 impl Handler<HeadObject> for Fs {
-    async fn call(&self, _request: Req<HeadObject>) -> HandlerResult<HeadObject> {
+    async fn call(&self, request: Req<HeadObject>) -> HandlerResult<HeadObject> {
+        let (_source, context) = rustfs_gateway_core::HandlerCancellationSource::pair();
+        self.call_with_context(request, context).await
+    }
+
+    async fn call_with_context(
+        &self,
+        _request: Req<HeadObject>,
+        _context: rustfs_gateway_core::HandlerContext,
+    ) -> HandlerResult<HeadObject> {
         self.heads.fetch_add(1, Ordering::Relaxed);
         Ok(Resp::new(rustfs_gateway_types::dto::HeadObjectOutput::default()))
     }

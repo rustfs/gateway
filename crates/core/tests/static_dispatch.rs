@@ -73,7 +73,16 @@ impl OperationCodec for StaticProbe {
 struct Backend(Arc<Mutex<Vec<&'static str>>>);
 
 impl Handler<StaticProbe> for Backend {
-    async fn call(&self, _request: Req<StaticProbe>) -> HandlerResult<StaticProbe> {
+    async fn call(&self, request: Req<StaticProbe>) -> HandlerResult<StaticProbe> {
+        let (_source, context) = rustfs_gateway_core::HandlerCancellationSource::pair();
+        self.call_with_context(request, context).await
+    }
+
+    async fn call_with_context(
+        &self,
+        _request: Req<StaticProbe>,
+        _context: rustfs_gateway_core::HandlerContext,
+    ) -> HandlerResult<StaticProbe> {
         self.0.lock().expect("trail lock").push("handler");
         Ok(Resp::new(()))
     }

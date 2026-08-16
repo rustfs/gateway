@@ -12535,6 +12535,69 @@ fi
 
 if [[ "$QUIRK_LEDGER_ONLY" == 0 && "$DTO_COMPILER_ONLY" == 0 && "$BUILD_GUARDS_ONLY" == 0 ]]; then
 
+mut_handler_context_entry_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/core/tests/static_dispatch.rs")
+text = path.read_text()
+subject = "    async fn call_with_context(\n"
+if text.count(subject) != 1:
+    raise SystemExit("missing unique Handler context-entry mutation subject")
+path.write_text(text.replace(subject, "    async fn call_without_context(\n", 1))
+PYEOF
+}
+expect_fail_with_diagnostic check_handler_context_migration.sh \
+    'a reviewed Handler implementation losing its context-aware entry' \
+    'crates/core/tests/static_dispatch.rs Handler impl 1 is not on the reviewed two-entry migration bridge' \
+    mut_handler_context_entry_removed
+
+mut_handler_context_entry_replaced_by_decoys() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/core/tests/static_dispatch.rs")
+text = path.read_text()
+subject = "    async fn call_with_context(\n"
+replacement = '''    const CONTEXT_ENTRY_DECOY: &'static str = "fn call_with_context(request)";
+    // fn call_with_context(request) is not an active method.
+    async fn call_without_context(
+'''
+if text.count(subject) != 1:
+    raise SystemExit("missing unique Handler context-decoy mutation subject")
+path.write_text(text.replace(subject, replacement, 1))
+PYEOF
+}
+expect_fail_with_diagnostic check_handler_context_migration.sh \
+    'comments and strings replacing a reviewed Handler context-aware entry' \
+    'crates/core/tests/static_dispatch.rs Handler impl 1 is not on the reviewed two-entry migration bridge' \
+    mut_handler_context_entry_replaced_by_decoys
+
+mut_handler_context_source_dropped_before_call() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/core/tests/static_dispatch.rs")
+text = path.read_text()
+subject = '''        let (_source, context) = rustfs_gateway_core::HandlerCancellationSource::pair();
+        self.call_with_context(request, context).await
+'''
+replacement = '''        self.call_with_context(
+            request,
+            rustfs_gateway_core::HandlerCancellationSource::pair().1,
+        )
+        .await
+'''
+if text.count(subject) != 1:
+    raise SystemExit("missing unique Handler context-source mutation subject")
+path.write_text(text.replace(subject, replacement, 1))
+PYEOF
+}
+expect_fail_with_diagnostic check_handler_context_migration.sh \
+    'the compatibility Handler entry dropping its context source before delegation' \
+    'crates/core/tests/static_dispatch.rs Handler impl 1 drops or bypasses the migration context source' \
+    mut_handler_context_source_dropped_before_call
+
 expect_signing_suite_dirty_checkout_fail() {
     local checkout output rc=0
     cases=$((cases + 1))
