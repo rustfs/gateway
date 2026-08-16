@@ -34,12 +34,13 @@ use http::{Method, StatusCode};
 use rustfs_gateway_core::dispatch::{NO_ROUTE_MESSAGE, NOT_REGISTERED_MESSAGE, Router};
 use rustfs_gateway_core::error::{PRE_AUTH_STATUSES, PreAuthError};
 use rustfs_gateway_core::op::{AuthRequirement, ResourceShape};
-use rustfs_gateway_core::registry::{OperationSpec, ParamKind, Registry, RegistryError, RequiredParam};
+use rustfs_gateway_core::registry::{HandlerDeadlineClass, OperationSpec, ParamKind, Registry, RegistryError, RequiredParam};
 use rustfs_gateway_core::route::{Predicate, RouteTable, ShadowingDecls, ShadowingPolicy, TargetKind};
 use rustfs_gateway_types::ErrorCode;
 use support::{Req, entry};
 
 static PUT_ANALYTICS: OperationSpec = OperationSpec::builder("PutBucketAnalyticsConfiguration", 200, None)
+    .handler_deadline_class(HandlerDeadlineClass::Standard)
     .required_params(&[RequiredParam {
         kind: ParamKind::Query,
         name: "id",

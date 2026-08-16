@@ -269,7 +269,7 @@ mod tests {
 
     use super::{RegistryError, check_operation, is_namespaced};
     use crate::op::{AuthRequirement, Operation, OperationOrigin, ResourceShape, StandardOperation};
-    use crate::registry::OperationSpec;
+    use crate::registry::{HandlerDeadlineClass, OperationSpec};
 
     /// An operation claiming AWS origin under a name the route table does not have.
     ///
@@ -284,6 +284,7 @@ mod tests {
     struct NotInTheTable;
 
     static SPEC: OperationSpec = OperationSpec::builder("GetObjectTorrent", 200, None)
+        .handler_deadline_class(HandlerDeadlineClass::Standard)
         .required_params(&[])
         .auth(AuthRequirement::new("s3:GetObjectTorrent", ResourceShape::Object))
         .build();

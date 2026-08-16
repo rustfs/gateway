@@ -12897,6 +12897,63 @@ expect_fail_with_diagnostic check_handler_deadline_class.sh \
     'reviewed third-party builder lacks one explicit Standard deadline class' \
     mut_handler_deadline_second_batch_class_extended
 
+mut_handler_deadline_final_batch_class_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/core/src/registry/reject.rs")
+text = path.read_text()
+subject = "        .handler_deadline_class(HandlerDeadlineClass::Standard)\n"
+if text.count(subject) != 1:
+    raise SystemExit("missing unique final-batch deadline removal subject")
+path.write_text(text.replace(subject, "", 1))
+PYEOF
+}
+expect_fail_with_diagnostic check_handler_deadline_class.sh \
+    'a final-batch operation losing its explicit handler deadline class' \
+    'reviewed third-party builder lacks one explicit Standard deadline class' \
+    mut_handler_deadline_final_batch_class_removed
+
+mut_handler_deadline_mixed_custom_class_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/core/tests/params_and_dispatch.rs")
+text = path.read_text()
+subject = "    .handler_deadline_class(HandlerDeadlineClass::Standard)\n"
+if text.count(subject) != 1:
+    raise SystemExit("missing unique mixed custom deadline removal subject")
+path.write_text(text.replace(subject, "", 1))
+PYEOF
+}
+expect_fail_with_diagnostic check_handler_deadline_class.sh \
+    'the mixed source losing its one explicit third-party handler deadline class' \
+    'mixed-source third-party builder lacks one explicit Standard deadline class' \
+    mut_handler_deadline_mixed_custom_class_removed
+
+mut_handler_deadline_mixed_standard_override_added() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/core/tests/params_and_dispatch.rs")
+text = path.read_text()
+subject = '''static GET_OBJECT: OperationSpec = OperationSpec::builder("GetObject", 200, None)
+    .required_params(&[])
+'''
+replacement = '''static GET_OBJECT: OperationSpec = OperationSpec::builder("GetObject", 200, None)
+    .handler_deadline_class(HandlerDeadlineClass::Standard)
+    .required_params(&[])
+'''
+if text.count(subject) != 1:
+    raise SystemExit("missing unique mixed standard deadline override subject")
+path.write_text(text.replace(subject, replacement, 1))
+PYEOF
+}
+expect_fail_with_diagnostic check_handler_deadline_class.sh \
+    'a standard builder in the mixed source bypassing the central handler deadline authority' \
+    'standard builder bypasses the central deadline authority' \
+    mut_handler_deadline_mixed_standard_override_added
+
 expect_signing_suite_dirty_checkout_fail() {
     local checkout output rc=0
     cases=$((cases + 1))

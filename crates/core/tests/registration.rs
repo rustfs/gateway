@@ -42,7 +42,7 @@ use rustfs_gateway_core::dispatch::NOT_REGISTERED_MESSAGE;
 use rustfs_gateway_core::handler::{Handler, HandlerError, HandlerResult, Req, Resp};
 use rustfs_gateway_core::op::{AuthRequirement, HasOperation, Operation, ResourceShape};
 use rustfs_gateway_core::registry::{
-    BuildError, MissingHandlers, OperationSet, OperationSpec, Registry, RegistryError, RouterBuilder,
+    BuildError, HandlerDeadlineClass, MissingHandlers, OperationSet, OperationSpec, Registry, RegistryError, RouterBuilder,
 };
 use rustfs_gateway_core::route::{Predicate, TargetKind};
 use rustfs_gateway_http::{Limits, WireRequest};
@@ -132,14 +132,12 @@ impl Handler<PutObject> for Fs {
 
 /// A well-formed third-party operation.
 struct AdminSetConfig;
-
 static ADMIN_SPEC: OperationSpec = OperationSpec::builder("rustfs:AdminSetConfig", 200, None)
+    .handler_deadline_class(HandlerDeadlineClass::Standard)
     .required_params(&[])
     .auth(AuthRequirement::new("admin:SetConfig", ResourceShape::Service))
     .build();
-
 static ADMIN_FLOOR: OperationFloor = OperationFloor::custom("rustfs:AdminSetConfig", SigService::S3);
-
 impl Operation for AdminSetConfig {
     const NAME: &'static str = "rustfs:AdminSetConfig";
     type Input = ();
@@ -185,11 +183,15 @@ impl Handler<AdminSetConfig> for Fs {
 macro_rules! bad_operation {
     ($ident:ident, name = $name:expr, spec_name = $spec:expr, floor_name = $floor:expr, auth = $auth:expr) => {
         struct $ident;
-
         const _: () = {
             static SPEC: OperationSpec = match $auth {
-                Some(auth) => OperationSpec::builder($spec, 200, None).auth(auth).build(),
-                None => OperationSpec::builder($spec, 200, None).build(),
+                Some(auth) => OperationSpec::builder($spec, 200, None)
+                    .handler_deadline_class(HandlerDeadlineClass::Standard)
+                    .auth(auth)
+                    .build(),
+                None => OperationSpec::builder($spec, 200, None)
+                    .handler_deadline_class(HandlerDeadlineClass::Standard)
+                    .build(),
             };
             static FLOOR: OperationFloor = OperationFloor::custom($floor, SigService::S3);
 
