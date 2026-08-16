@@ -235,10 +235,32 @@ impl Handler<SsePut> for Backend {
         }
         Ok(Resp::new(Answered))
     }
+
+    async fn call_with_context(&self, request: Req<SsePut>, _context: rustfs_gateway::HandlerContext) -> HandlerResult<SsePut> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        if let Ok(mut bound) = self.bound.lock() {
+            *bound = request.input().0;
+        }
+        Ok(Resp::new(Answered))
+    }
 }
 
 impl Handler<SsePart> for Backend {
     async fn call(&self, request: Req<SsePart>) -> HandlerResult<SsePart> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        let bound = match self.bound.lock() {
+            Ok(bound) => *bound,
+            Err(_) => return Err(HandlerError::internal_error("the fixture's upload state is poisoned")),
+        };
+        // The cross-request rule the framework cannot apply for a backend, applied by the backend
+        // through the framework's one function.
+        check_part(bound.as_ref(), request.input().0.as_ref()).map_err(|_| {
+            HandlerError::new(ErrorCode::INVALID_ARGUMENT, "the part's encryption headers do not match the upload's")
+        })?;
+        Ok(Resp::new(Answered))
+    }
+
+    async fn call_with_context(&self, request: Req<SsePart>, _context: rustfs_gateway::HandlerContext) -> HandlerResult<SsePart> {
         self.calls.fetch_add(1, Ordering::SeqCst);
         let bound = match self.bound.lock() {
             Ok(bound) => *bound,

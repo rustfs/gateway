@@ -143,6 +143,14 @@ impl Handler<BucketPing> for PingBackend {
     async fn call(&self, _request: Req<BucketPing>) -> HandlerResult<BucketPing> {
         Ok(Resp::new(BucketPingOutput))
     }
+
+    async fn call_with_context(
+        &self,
+        _request: Req<BucketPing>,
+        _context: rustfs_gateway::HandlerContext,
+    ) -> HandlerResult<BucketPing> {
+        Ok(Resp::new(BucketPingOutput))
+    }
 }
 
 /// A registered AWS read, so that an unsigned request to it is refused by the **security floor**
@@ -151,6 +159,14 @@ impl Handler<BucketPing> for PingBackend {
 /// prove much less than asserting it about a request that got as far as the floor.
 impl Handler<rustfs_gateway::dto::GetObject> for PingBackend {
     async fn call(&self, _request: Req<rustfs_gateway::dto::GetObject>) -> HandlerResult<rustfs_gateway::dto::GetObject> {
+        Ok(Resp::new(rustfs_gateway::dto::GetObjectOutput::default()))
+    }
+
+    async fn call_with_context(
+        &self,
+        _request: Req<rustfs_gateway::dto::GetObject>,
+        _context: rustfs_gateway::HandlerContext,
+    ) -> HandlerResult<rustfs_gateway::dto::GetObject> {
         Ok(Resp::new(rustfs_gateway::dto::GetObjectOutput::default()))
     }
 }
