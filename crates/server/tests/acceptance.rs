@@ -61,6 +61,7 @@ fn a_srv_0024_tuning_defaults_are_bounded() {
     assert_eq!(config.connection_lifetime, None);
     assert_eq!(config.write_strategy, WriteStrategy::Auto);
     assert!(config.max_connections > 0);
+    assert_eq!(config.max_connections_per_ip, Some(256));
 }
 
 #[test]

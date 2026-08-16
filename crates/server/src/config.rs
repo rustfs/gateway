@@ -77,6 +77,7 @@ pub struct ServerConfig {
     /// Values above the runtime semaphore maximum are invalid.
     pub max_connections: usize,
     /// Optional per-IP open-connection ceiling. Increasing permits more NAT fan-in; decreasing limits single-source load.
+    /// The bounded default is 256; setting `None` explicitly disables this protection.
     pub max_connections_per_ip: Option<usize>,
     /// Time from accept to complete headers. Increasing admits slower headers; decreasing rejects slowloris peers sooner.
     pub header_read_timeout: Duration,
@@ -129,7 +130,7 @@ impl Default for ServerConfig {
             backlog: 1024,
             reuse_address: true,
             max_connections: 10_000,
-            max_connections_per_ip: None,
+            max_connections_per_ip: Some(256),
             header_read_timeout: Duration::from_secs(10),
             write_progress_timeout: Duration::from_secs(30),
             keep_alive_idle: Duration::from_secs(65),
