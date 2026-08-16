@@ -619,5 +619,13 @@ mod tests {
         ) -> rustfs_gateway_core::HandlerResult<rustfs_gateway_types::dto::ListBuckets> {
             Err(HandlerError::not_implemented("this backend answers nothing"))
         }
+
+        async fn call_with_context(
+            &self,
+            _request: Req<rustfs_gateway_types::dto::ListBuckets>,
+            _context: rustfs_gateway_core::HandlerContext,
+        ) -> rustfs_gateway_core::HandlerResult<rustfs_gateway_types::dto::ListBuckets> {
+            Err(HandlerError::not_implemented("this backend answers nothing"))
+        }
     }
 }

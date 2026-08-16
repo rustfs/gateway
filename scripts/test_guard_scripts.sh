@@ -12635,6 +12635,60 @@ expect_fail_with_diagnostic check_handler_context_migration.sh \
     'crates/gateway/examples/custom_authorizer.rs Handler impl 1 has diverged legacy and context bodies' \
     mut_facade_handler_context_body_drifted
 
+mut_layered_backend_context_forwarding_bypassed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/gateway/src/dispatch.rs")
+text = path.read_text()
+subject = "            None => self.backend.call_with_context(request, context).await,\n"
+replacement = "            None => self.backend.call(request).await,\n"
+if text.count(subject) != 1:
+    raise SystemExit("missing unique layered backend context-forwarding mutation subject")
+path.write_text(text.replace(subject, replacement, 1))
+PYEOF
+}
+expect_fail_with_diagnostic check_handler_context_migration.sh \
+    'the layered backend bypassing context forwarding on its direct path' \
+    'crates/gateway/src/dispatch.rs Handler impl 1 does not preserve layered context forwarding' \
+    mut_layered_backend_context_forwarding_bypassed
+
+mut_context_aware_backend_deadline_observation_bypassed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/gateway/src/dispatch.rs")
+text = path.read_text()
+subject = "            assert_eq!(context.cancelled().await, rustfs_gateway_core::HandlerCancellation::Deadline);\n"
+replacement = "            assert_eq!(context.cancelled().await, rustfs_gateway_core::HandlerCancellation::Signal);\n"
+if text.count(subject) != 1:
+    raise SystemExit("missing unique deadline-observation mutation subject")
+path.write_text(text.replace(subject, replacement, 1))
+PYEOF
+}
+expect_fail_with_diagnostic check_handler_context_migration.sh \
+    'the context-aware backend no longer observing deadline cancellation' \
+    'crates/gateway/src/dispatch.rs Handler impl 2 does not observe deadline cancellation' \
+    mut_context_aware_backend_deadline_observation_bypassed
+
+mut_monomorphic_context_cancellation_observation_bypassed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/gateway/tests/monomorphic.rs")
+text = path.read_text()
+subject = "        assert!(context.cancellation_reason().is_none());\n"
+replacement = "        assert!(context.cancellation_reason().is_some());\n"
+if text.count(subject) != 1:
+    raise SystemExit("missing unique monomorphic context-observation mutation subject")
+path.write_text(text.replace(subject, replacement, 1))
+PYEOF
+}
+expect_fail_with_diagnostic check_handler_context_migration.sh \
+    'the monomorphic handler no longer inspecting its context cancellation state' \
+    'crates/gateway/tests/monomorphic.rs Handler impl 1 does not inspect its context cancellation state' \
+    mut_monomorphic_context_cancellation_observation_bypassed
+
 expect_signing_suite_dirty_checkout_fail() {
     local checkout output rc=0
     cases=$((cases + 1))

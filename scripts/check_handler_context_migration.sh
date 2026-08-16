@@ -31,6 +31,7 @@ expected = {
     "crates/core/tests/static_dispatch.rs": 1,
     "crates/gateway/examples/custom_authorizer.rs": 1,
     "crates/gateway/examples/minimal.rs": 2,
+    "crates/gateway/src/dispatch.rs": 3,
     "crates/gateway/src/lib.rs": 1,
     "crates/gateway/tests/assembly_order.rs": 1,
     "crates/gateway/tests/authz_contract.rs": 2,
@@ -38,6 +39,7 @@ expected = {
     "crates/gateway/tests/cors_runtime.rs": 2,
     "crates/gateway/tests/credential_runtime.rs": 1,
     "crates/gateway/tests/handler_panic.rs": 1,
+    "crates/gateway/tests/monomorphic.rs": 4,
     "crates/gateway/tests/naming_policy.rs": 1,
     "crates/gateway/tests/patch_layer_landings.rs": 1,
     "crates/gateway/tests/precondition_contract.rs": 2,
@@ -48,6 +50,7 @@ expected = {
 facade_dual = {
     "crates/gateway/examples/custom_authorizer.rs",
     "crates/gateway/examples/minimal.rs",
+    "crates/gateway/src/dispatch.rs",
     "crates/gateway/src/lib.rs",
     "crates/gateway/tests/assembly_order.rs",
     "crates/gateway/tests/authz_contract.rs",
@@ -55,6 +58,7 @@ facade_dual = {
     "crates/gateway/tests/cors_runtime.rs",
     "crates/gateway/tests/credential_runtime.rs",
     "crates/gateway/tests/handler_panic.rs",
+    "crates/gateway/tests/monomorphic.rs",
     "crates/gateway/tests/naming_policy.rs",
     "crates/gateway/tests/patch_layer_landings.rs",
     "crates/gateway/tests/precondition_contract.rs",
@@ -159,14 +163,20 @@ def handler_methods(source: str) -> list[dict[str, list[str]]]:
             index += 1
             continue
         cursor = index + 1
-        handler = False
         while cursor < len(stream) and stream[cursor] not in ("{", ";"):
-            if stream[cursor] == "Handler" and cursor + 1 < len(stream) and stream[cursor + 1] == "<":
-                handler = True
             cursor += 1
         if cursor >= len(stream) or stream[cursor] != "{":
             index += 1
             continue
+        header = stream[index + 1 : cursor]
+        try:
+            trait_end = header.index("for")
+        except ValueError:
+            trait_end = 0
+        handler = any(
+            header[position] == "Handler" and header[position + 1] == "<"
+            for position in range(max(0, trait_end - 1))
+        )
         depth = 1
         methods: dict[str, list[str]] = {}
         cursor += 1
@@ -230,7 +240,36 @@ for relative, wanted in expected.items():
         if relative in facade_dual:
             if "call_with_context" not in methods or "call" not in methods:
                 fail(f"{relative} Handler impl {ordinal} is not on the reviewed facade migration bridge")
-            if relative == "crates/gateway/tests/assembly_order.rs":
+            if relative == "crates/gateway/src/dispatch.rs" and ordinal == 1:
+                legacy_source = [
+                    "let", "(", "_source", ",", "context", ")", "=",
+                    "HandlerCancellationSource", ":", ":", "pair", "(", ")", ";",
+                ]
+                legacy_layered = ["run_layered", ":", ":", "<", "O", ",", "B", ">", "(", "&", "self", ".", "backend", ",", "layers", ",", "request", ",", "context", ")", ".", "await"]
+                contextual_backend = ["self", ".", "backend", ".", "call_with_context", "(", "request", ",", "context", ")", ".", "await"]
+                contextual_layered = ["run_layered", ":", ":", "<", "O", ",", "B", ">", "(", "&", "self", ".", "backend", ",", "layers", ",", "request", ",", "context", ")", ".", "await"]
+                if (
+                    not contains_sequence(methods["call"], legacy_source)
+                    or not contains_sequence(methods["call"], legacy_layered)
+                    or not contains_sequence(methods["call_with_context"], contextual_backend)
+                    or not contains_sequence(methods["call_with_context"], contextual_layered)
+                ):
+                    fail(f"{relative} Handler impl {ordinal} does not preserve layered context forwarding")
+            elif relative == "crates/gateway/src/dispatch.rs" and ordinal == 2:
+                cancellation = ["context", ".", "cancelled", "(", ")", ".", "await"]
+                deadline = ["HandlerCancellation", ":", ":", "Deadline"]
+                observed = ["self", ".", "observed", ".", "store", "(", "true", ",", "Ordering", ":", ":", "Release", ")"]
+                if (
+                    not contains_sequence(methods["call_with_context"], cancellation)
+                    or not contains_sequence(methods["call_with_context"], deadline)
+                    or not contains_sequence(methods["call_with_context"], observed)
+                ):
+                    fail(f"{relative} Handler impl {ordinal} does not observe deadline cancellation")
+            elif relative == "crates/gateway/tests/monomorphic.rs" and ordinal == 1:
+                cancellation = ["context", ".", "cancellation_reason", "(", ")", ".", "is_none", "(", ")"]
+                if not contains_sequence(methods["call_with_context"], cancellation):
+                    fail(f"{relative} Handler impl {ordinal} does not inspect its context cancellation state")
+            elif relative == "crates/gateway/tests/assembly_order.rs":
                 legacy = ["self", ".", "note", "(", ")", ";", "self", ".", "inner", ".", "call", "(", "request", ")"]
                 contextual = [
                     "self", ".", "note", "(", ")", ";",
@@ -253,7 +292,7 @@ for relative, wanted in expected.items():
             fail(f"{relative} Handler impl {ordinal} drops or bypasses the migration context source")
     total += len(implementations)
 
-if total != 39:
-    fail(f"reviewed migration census is {total}, expected 39")
-print("check_handler_context_migration: 39 reviewed Handler impls preserve their context migration mode")
+if total != 46:
+    fail(f"reviewed migration census is {total}, expected 46")
+print("check_handler_context_migration: 46 reviewed Handler impls preserve their context migration mode")
 PY
