@@ -50,6 +50,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use bytes::Bytes;
+use futures_util::future::join_all;
 use rustfs_gateway::dto::CorsConfiguration;
 use rustfs_gateway::{
     BoxFuture, BucketName, ClientAddr, Clock, ClockSkewAck, CorsSource, CorsSourceError, CredentialLookup, CredentialProvider,
@@ -96,10 +97,10 @@ async fn an_assembly_that_configures_nothing_still_has_a_limit() {
     let attempts = 8_192_u32;
     let clock = SystemMonotonic::new();
     let started = clock.monotonic();
+    let responses = join_all((0..attempts).map(|_| send(&service, preflight(BUCKET)))).await;
     let mut admitted = 0_u32;
     let mut refused = 0_u32;
-    for _ in 0..attempts {
-        let response = send(&service, preflight(BUCKET)).await;
+    for response in responses {
         if response.status().as_u16() == 503 {
             refused += 1;
         } else {

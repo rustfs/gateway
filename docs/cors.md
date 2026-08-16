@@ -13,8 +13,9 @@ CORS has two halves and they landed separately. The **configuration codec** —
 
 A CORS preflight carries no credentials. The Fetch Standard forbids a browser from sending any,
 so requiring a signature here does not harden the endpoint — it switches CORS off. Every other
-request this gateway answers has passed the security floor before anything expensive happens;
-this one has passed nothing.
+request this gateway answers has passed the signature-admission floor before anything expensive
+happens; this one deliberately bypasses admission. Its refusals still pay the shared non-zero
+failure-latency floor, so bypassing signatures does not create a bucket-enumeration timing shortcut.
 
 Two consequences follow, and the whole design is those two consequences:
 
@@ -55,10 +56,11 @@ a CORS question with a `501`, which is what happens today if the branch is remov
 `conformance/cases/cors/c-cors-0043` pins that `501` for the `OPTIONS` that is *not* a preflight,
 so the two behaviours are held apart by cases rather than by intent.
 
-Nothing below the branch runs for a preflight: no security floor, no authenticator, no
-authorizer, no handler. `crates/gateway/tests/cors_runtime.rs` asserts the last of those by
-counting, and `conformance/cases/cors/c-cors-0045` asserts that an allowed preflight grants the
-request it described exactly nothing.
+Nothing below the branch runs for a preflight: no signature admission, authenticator, authorizer,
+or handler. A refused preflight does reuse the security floor's runtime-independent latency hold.
+`crates/gateway/tests/cors_runtime.rs` asserts both properties, and
+`conformance/cases/cors/c-cors-0045` asserts that an allowed preflight grants the request it
+described exactly nothing.
 
 ## The unauthenticated read, bounded
 
@@ -69,6 +71,7 @@ Inside the branch the order is fixed and may not be rearranged:
 | 1. `Governor::try_acquire`, under the name `CorsPreflight` | The rate bound. First, and unconditional — including for a bucket name that is not a legal one, because skipping it there would make that case measurably cheaper than the others |
 | 2. `CachedCorsSource::get` | The only path to the deployment's `CorsSource`. `ServiceBuilder::cors_source` takes a bare source and stores a wrapped one; there is no setter that accepts an unwrapped source and no accessor that hands the inner one back |
 | 3. `answer_preflight` | One allowance or one refusal |
+| 4. shared failure-latency floor, on refusal only | Every malformed target, absent document, source failure or timeout, and rule mismatch waits on the same floor before the uniform `403` is rendered |
 
 The cache is a bound rather than a speed-up, and four properties are what make it one:
 
