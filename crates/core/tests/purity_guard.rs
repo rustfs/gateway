@@ -92,6 +92,11 @@ const OFF_THE_ROUTING_PATH: &[(&str, &str)] = &[
         "the sealed generic decode, authorization, handler and encode entry runs only after the \
          facade security floor has admitted the request",
     ),
+    (
+        "cancellation.rs",
+        "handler cancellation is execution state observed only after the security floor has \
+         admitted the request",
+    ),
 ];
 
 /// Whether a file is one of the few allowed to await.
@@ -345,6 +350,7 @@ fn the_segmenter_splits_the_way_the_detector_needs() {
 fn the_off_path_check_matches_only_the_listed_files() {
     assert!(is_off_the_routing_path(&source_root().join("registry/handlers.rs")));
     assert!(is_off_the_routing_path(&source_root().join("static_dispatch.rs")));
+    assert!(is_off_the_routing_path(&source_root().join("cancellation.rs")));
     assert!(!is_off_the_routing_path(&source_root().join("registry/mod.rs")));
     assert!(!is_off_the_routing_path(&source_root().join("route/table.rs")));
 }
