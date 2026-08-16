@@ -71,7 +71,7 @@ pub enum RegistryError {
         /// The operation.
         name: &'static str,
     },
-    /// A standard operation has no handler-execution deadline class.
+    /// An operation has no handler-execution deadline class.
     MissingHandlerDeadlineClass {
         /// The operation.
         name: &'static str,
@@ -203,9 +203,6 @@ pub(crate) fn check_operation<O: Operation>() -> Result<(), RegistryError> {
         if !is_standard_operation_name(name) {
             return Err(RegistryError::UnknownStandardOperation { name });
         }
-        if spec.deadline_class().is_none() {
-            return Err(RegistryError::MissingHandlerDeadlineClass { name });
-        }
     } else {
         if let Some(standard) = standard_operation_name_ignoring_case(name) {
             return Err(RegistryError::NameCollidesWithStandard { name, standard });
@@ -222,11 +219,15 @@ pub(crate) fn check_operation<O: Operation>() -> Result<(), RegistryError> {
 ///
 /// # Errors
 ///
-/// [`RegistryError::MissingAuthRequirement`] or [`RegistryError::MalformedAuthAction`] when the
-/// operation cannot be authorised, and [`RegistryError::UnusableMissingError`] for a required
-/// parameter whose code could not be raised before authentication.
+/// [`RegistryError::MissingHandlerDeadlineClass`] when the operation cannot be bounded,
+/// [`RegistryError::MissingAuthRequirement`] or [`RegistryError::MalformedAuthAction`] when it
+/// cannot be authorised, and [`RegistryError::UnusableMissingError`] for a required parameter
+/// whose code could not be raised before authentication.
 pub(crate) fn check_spec(spec: &'static OperationSpec) -> Result<(), RegistryError> {
     let name = spec.name;
+    if spec.deadline_class().is_none() {
+        return Err(RegistryError::MissingHandlerDeadlineClass { name });
+    }
     let Some(auth) = spec.auth else {
         return Err(RegistryError::MissingAuthRequirement { name });
     };
