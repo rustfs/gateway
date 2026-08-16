@@ -15,7 +15,7 @@ the consumer surface. Ring 1: no rustfs crate dependency. Start at `src/lib.rs`;
 | `src/adapt.rs` | tower and hyper adapters | Wiring a server or checking `Infallible` |
 | `src/assembly.rs` | `AssemblyError` and `asm-*` rule refs | Adding an assembly refusal |
 | `src/dispatch.rs` | Codec-aware operation erasure and dispatch table | A route cannot decode or invoke |
-| `src/gate.rs` | Authentication proof, sealed body, body ceilings | Moving work around the body read |
+| `src/gate.rs` | Authentication proof, sealed body, body ceilings and body idle deadlines | Moving work around the body read |
 | `src/probe.rs` | Observable request-body progress | Testing whether a refusal read bytes |
 | `src/chunked.rs` | `aws-chunked` ingest selection and execution | A framed upload stores wrong bytes |
 | `src/payload_header.rs` | Signed payload and trailer declaration parsing | A request head selects the wrong payload mode |

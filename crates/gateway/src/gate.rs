@@ -16,7 +16,8 @@
 //!
 //! Responsible for: [`Authenticated`] — evidence that this request's signature was judged and not
 //! rejected — [`SealedBody`], which owns the body and publishes exactly one way to turn it into
-//! bytes, and [`BodyCeilings`], the two independent bounds that read is subject to.
+//! bytes, [`BodyCeilings`], the two independent bounds that read is subject to, and
+//! [`BodyTimeouts`], the first-byte and between-frame idle deadlines.
 //! NOT responsible for: deciding who the caller is (`crate::ext::Authenticator` and
 //! `rustfs_gateway_sig::SecurityFloor`), or what the body means once it is bytes
 //! (`rustfs_gateway_core`'s codecs).
@@ -54,7 +55,12 @@
 //! the frames behind it are never buffered. A ceiling that is only consulted once the body is in
 //! hand is not a ceiling; it is a report.
 
+use core::task::Poll;
+use std::pin::Pin;
+use std::time::Duration;
+
 use bytes::{Buf, BufMut, Bytes, BytesMut};
+use futures_timer::Delay;
 use http::StatusCode;
 use http_body_util::BodyExt;
 use rustfs_gateway_core::{HandlerError, ResponseKind};
@@ -112,6 +118,48 @@ pub(crate) struct BodyCeilings {
     pub(crate) declared: Option<u64>,
 }
 
+/// Idle deadlines for one request body.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct BodyTimeouts {
+    first_byte: Duration,
+    read_idle: Duration,
+}
+
+impl BodyTimeouts {
+    /// The framework defaults required by the limits contract.
+    pub(crate) const S3: Self = Self {
+        first_byte: Duration::from_secs(20),
+        read_idle: Duration::from_secs(30),
+    };
+
+    /// Builds non-zero deadlines. Zero is not an alias for unlimited.
+    #[cfg(test)]
+    pub(crate) const fn new(first_byte: Duration, read_idle: Duration) -> Option<Self> {
+        if first_byte.is_zero() || read_idle.is_zero() {
+            return None;
+        }
+        Some(Self { first_byte, read_idle })
+    }
+
+    /// Maximum silence between the request head and the first body byte.
+    #[must_use]
+    #[cfg(test)]
+    pub(crate) const fn first_byte(self) -> Duration {
+        self.first_byte
+    }
+
+    /// Maximum silence between adjacent body reads.
+    #[must_use]
+    #[cfg(test)]
+    pub(crate) const fn read_idle(self) -> Duration {
+        self.read_idle
+    }
+
+    const fn waiting_for(self, body_byte_seen: bool) -> Duration {
+        if body_byte_seen { self.read_idle } else { self.first_byte }
+    }
+}
+
 /// The integrity work that remains after authentication and before decoding.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum BodyDigestObligation {
@@ -166,6 +214,7 @@ where
         self,
         _proof: &Authenticated<'_>,
         ceilings: BodyCeilings,
+        timeouts: BodyTimeouts,
         ingest: Option<crate::chunked::ChunkIngest>,
         digest: BodyDigestObligation,
     ) -> Result<Bytes, S3Error> {
@@ -191,7 +240,7 @@ where
         let mut body = core::pin::pin!(body);
         let mut collected = BytesMut::new();
         let mut seen: u64 = 0;
-        while let Some(frame) = body.frame().await {
+        while let Some(frame) = next_frame(&mut body, timeouts.waiting_for(seen != 0)).await? {
             let frame = frame.map_err(|_| incomplete())?;
             let Ok(mut data) = frame.into_data() else {
                 // A trailer frame carries no payload. This assembly does not verify trailers, so
@@ -236,6 +285,38 @@ where
             None => Ok(wire_bytes),
         }
     }
+}
+
+async fn next_frame<B>(
+    body: &mut Pin<&mut B>,
+    timeout: Duration,
+) -> Result<Option<Result<http_body::Frame<B::Data>, B::Error>>, S3Error>
+where
+    B: http_body::Body,
+{
+    let mut frame = core::pin::pin!(body.frame());
+    let mut deadline = core::pin::pin!(Delay::new(timeout));
+    let mut first_poll = true;
+    core::future::poll_fn(move |context| {
+        if first_poll {
+            first_poll = false;
+            if let Poll::Ready(frame) = frame.as_mut().poll(context) {
+                return Poll::Ready(Ok(frame));
+            }
+            if deadline.as_mut().poll(context).is_ready() {
+                return Poll::Ready(Err(body_idle_timeout()));
+            }
+            return Poll::Pending;
+        }
+        if deadline.as_mut().poll(context).is_ready() {
+            return Poll::Ready(Err(body_idle_timeout()));
+        }
+        if let Poll::Ready(frame) = frame.as_mut().poll(context) {
+            return Poll::Ready(Ok(frame));
+        }
+        Poll::Pending
+    })
+    .await
 }
 
 fn body_digest_matches(digest: BodyDigestObligation, sha256: Option<Sha256>) -> bool {
@@ -320,10 +401,100 @@ fn incomplete() -> S3Error {
     )
 }
 
+/// The indistinguishable refusal for first-byte and between-frame idle expiry.
+fn body_idle_timeout() -> S3Error {
+    from_transport_limit(
+        HandlerError::new(ErrorCode::REQUEST_TIMEOUT, "the request body stopped making progress"),
+        StatusCode::REQUEST_TIMEOUT,
+        crate::close::ConnectionIntent::Close,
+    )
+}
+
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::unwrap_used)]
 mod tests {
+    use core::convert::Infallible;
+    use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::Duration;
+
+    use rustfs_gateway_server::{RunningServer, Server, ServerConfig, ShutdownReport};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpStream;
+
     use super::*;
+
+    fn body_timeout_server(timeouts: BodyTimeouts) -> (RunningServer, Arc<AtomicUsize>) {
+        let reached = Arc::new(AtomicUsize::new(0));
+        let service_reached = Arc::clone(&reached);
+        let service = tower::service_fn(move |request: http::Request<hyper::body::Incoming>| {
+            let service_reached = Arc::clone(&service_reached);
+            async move {
+                let declared_length = request
+                    .headers()
+                    .get(http::header::CONTENT_LENGTH)
+                    .and_then(|value| value.to_str().ok())
+                    .and_then(|value| value.parse().ok());
+                let body = SealedBody::seal(Some(request.into_body()), declared_length);
+                let proof = Authenticated::granted_for_test();
+                let mut response = match body.read(&proof, roomy(), timeouts, None, BodyDigestObligation::None).await {
+                    Ok(_) => {
+                        service_reached.fetch_add(1, Ordering::SeqCst);
+                        http::Response::new(rustfs_gateway_stream::Body::from_bytes(Bytes::from_static(b"ok")))
+                    }
+                    Err(error) => crate::render::render(&error, &crate::trace::RequestTrace::from_bits(1, 2)),
+                };
+                crate::adapt::announce_connection_verdict(&mut response);
+                let wire = crate::wire::collect(response).await.expect("the fixture response is finite");
+                let (status, headers, body, trailers) = wire.into_parts();
+                assert!(trailers.is_empty(), "the fixture response has no trailers");
+                let mut response = http::Response::builder().status(status);
+                for (name, value) in headers {
+                    response = response.header(name, value);
+                }
+                Ok::<_, Infallible>(response.body(http_body_util::Full::new(body)).expect("a valid response"))
+            }
+        });
+        let config = ServerConfig {
+            bind_addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),
+            plaintext: true,
+            header_read_timeout: Duration::from_secs(1),
+            ..ServerConfig::default()
+        };
+        (Server::new(config, service).serve().expect("server starts"), reached)
+    }
+
+    fn raw_head(close: bool) -> Vec<u8> {
+        let mut head = b"POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length: 4\r\n".to_vec();
+        if close {
+            head.extend_from_slice(b"Connection: close\r\n");
+        }
+        head.extend_from_slice(b"\r\n");
+        head
+    }
+
+    async fn stop_server(running: RunningServer) {
+        assert_eq!(
+            running.shutdown.trigger(Duration::from_secs(1)).await,
+            ShutdownReport { drained: 0, aborted: 0 }
+        );
+        assert!(running.task.await.expect("server task joins").is_ok());
+    }
+
+    async fn timeout_response(prefix: &[u8], timeouts: BodyTimeouts) -> (Vec<u8>, Arc<AtomicUsize>) {
+        let (running, reached) = body_timeout_server(timeouts);
+        let mut stream = TcpStream::connect(running.local_addr).await.expect("connection succeeds");
+        stream.write_all(&raw_head(false)).await.expect("head writes");
+        stream.write_all(prefix).await.expect("body prefix writes");
+        let mut response = Vec::new();
+        tokio::time::timeout(Duration::from_millis(250), stream.read_to_end(&mut response))
+            .await
+            .expect("the idle deadline closes the socket")
+            .expect("response reads to EOF");
+        stop_server(running).await;
+        (response, reached)
+    }
 
     /// Positive — the only operation with a declared cap has one, and it is the documented number.
     #[test]
@@ -374,7 +545,7 @@ mod tests {
             declared: None,
         };
         let error = SealedBody::seal(Some(body), Some(1 << 30))
-            .read(&proof, ceilings, None, BodyDigestObligation::None)
+            .read(&proof, ceilings, BodyTimeouts::S3, None, BodyDigestObligation::None)
             .await
             .expect_err("over the ceiling");
         assert_eq!(error.status(), StatusCode::PAYLOAD_TOO_LARGE);
@@ -393,7 +564,7 @@ mod tests {
             declared: None,
         };
         let error = SealedBody::seal(Some(body), None)
-            .read(&proof, ceilings, None, BodyDigestObligation::None)
+            .read(&proof, ceilings, BodyTimeouts::S3, None, BodyDigestObligation::None)
             .await
             .expect_err("over the ceiling");
         assert_eq!(error.code(), Some(&ErrorCode::ENTITY_TOO_LARGE));
@@ -413,7 +584,7 @@ mod tests {
             declared: Some(128),
         };
         let error = SealedBody::seal(Some(body), None)
-            .read(&proof, ceilings, None, BodyDigestObligation::None)
+            .read(&proof, ceilings, BodyTimeouts::S3, None, BodyDigestObligation::None)
             .await
             .expect_err("past the operation's cap");
         assert_eq!(error.code(), Some(&ErrorCode::INVALID_REQUEST));
@@ -434,7 +605,7 @@ mod tests {
             declared: Some(128),
         };
         let error = SealedBody::seal(Some(body), Some(4096))
-            .read(&proof, ceilings, None, BodyDigestObligation::None)
+            .read(&proof, ceilings, BodyTimeouts::S3, None, BodyDigestObligation::None)
             .await
             .expect_err("past the operation's cap");
         assert_eq!(error.code(), Some(&ErrorCode::INVALID_REQUEST));
@@ -448,7 +619,7 @@ mod tests {
         let sealed: SealedBody<crate::probe::ObservedBody> = SealedBody::seal(None, None);
         assert!(
             sealed
-                .read(&proof, roomy(), None, BodyDigestObligation::None)
+                .read(&proof, roomy(), BodyTimeouts::S3, None, BodyDigestObligation::None)
                 .await
                 .expect("no body")
                 .is_empty()
@@ -461,11 +632,70 @@ mod tests {
         let proof = Authenticated::granted_for_test();
         let (body, read) = crate::probe::ObservedBody::new([Bytes::from_static(b"first-"), Bytes::from_static(b"second")]);
         let bytes = SealedBody::seal(Some(body), Some(12))
-            .read(&proof, roomy(), None, BodyDigestObligation::None)
+            .read(&proof, roomy(), BodyTimeouts::S3, None, BodyDigestObligation::None)
             .await
             .expect("inside every ceiling");
         assert_eq!(bytes, Bytes::from_static(b"first-second"));
         assert_eq!(read.bytes_read(), 12);
         assert!(read.is_exhausted());
+    }
+
+    /// c-lim-0033. Negative — a real h1 connection closes after the first-body-byte deadline.
+    #[tokio::test]
+    async fn c_lim_0033_closes_a_socket_when_the_first_body_byte_never_arrives() {
+        let timeouts = BodyTimeouts::new(Duration::from_millis(20), Duration::from_millis(500)).expect("non-zero timeouts");
+        let (response, reached) = timeout_response(b"", timeouts).await;
+        let text = String::from_utf8(response).expect("HTTP response is text");
+        assert!(text.starts_with("HTTP/1.1 408"), "{text}");
+        assert!(text.contains("<Code>RequestTimeout</Code>"), "{text}");
+        assert!(text.to_ascii_lowercase().contains("connection: close"), "{text}");
+        assert_eq!(reached.fetch_add(0, Ordering::SeqCst), 0, "the timed-out request reached the handler");
+    }
+
+    /// c-lim-0034. Negative — progress once does not exempt the next body gap from its deadline.
+    #[tokio::test]
+    async fn c_lim_0034_closes_a_socket_when_the_body_stalls_between_bytes() {
+        let timeouts = BodyTimeouts::new(Duration::from_millis(500), Duration::from_millis(20)).expect("non-zero timeouts");
+        let (response, reached) = timeout_response(b"x", timeouts).await;
+        let text = String::from_utf8(response).expect("HTTP response is text");
+        assert!(text.starts_with("HTTP/1.1 408"), "{text}");
+        assert!(text.to_ascii_lowercase().contains("connection: close"), "{text}");
+        assert_eq!(reached.fetch_add(0, Ordering::SeqCst), 0, "the stalled request reached the handler");
+    }
+
+    /// c-lim-0001. Positive — total transfer time may exceed one idle interval while progress continues.
+    #[tokio::test]
+    async fn c_lim_0001_allows_a_long_socket_body_that_keeps_making_progress() {
+        let timeouts = BodyTimeouts::new(Duration::from_millis(100), Duration::from_millis(100)).expect("non-zero timeouts");
+        let (running, reached) = body_timeout_server(timeouts);
+        let mut stream = TcpStream::connect(running.local_addr).await.expect("connection succeeds");
+        stream.write_all(&raw_head(true)).await.expect("head writes");
+        for byte in b"body" {
+            tokio::time::sleep(Duration::from_millis(30)).await;
+            stream.write_all(&[*byte]).await.expect("one progress byte writes");
+        }
+        let mut response = Vec::new();
+        tokio::time::timeout(Duration::from_secs(1), stream.read_to_end(&mut response))
+            .await
+            .expect("the response completes")
+            .expect("response reads to EOF");
+        let text = String::from_utf8(response).expect("HTTP response is text");
+        assert!(text.starts_with("HTTP/1.1 200"), "{text}");
+        assert_eq!(reached.fetch_add(0, Ordering::SeqCst), 1, "the progressing request missed the handler");
+        stop_server(running).await;
+    }
+
+    /// Negative — zero is never an implicit unlimited body deadline.
+    #[test]
+    fn zero_body_deadlines_are_refused() {
+        assert!(BodyTimeouts::new(Duration::ZERO, Duration::from_secs(1)).is_none());
+        assert!(BodyTimeouts::new(Duration::from_secs(1), Duration::ZERO).is_none());
+    }
+
+    /// Positive — the assembly defaults are the two independent limits contract values.
+    #[test]
+    fn body_deadline_defaults_match_the_limits_contract() {
+        assert_eq!(BodyTimeouts::S3.first_byte(), Duration::from_secs(20));
+        assert_eq!(BodyTimeouts::S3.read_idle(), Duration::from_secs(30));
     }
 }
