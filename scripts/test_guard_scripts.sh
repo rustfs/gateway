@@ -12713,6 +12713,47 @@ expect_fail_with_diagnostic check_handler_context_migration.sh \
     'crates/conformance/src/fixture/handlers_object.rs Handler impl 1 is not on the reviewed facade migration bridge' \
     mut_conformance_handler_context_entry_removed
 
+mut_macro_handler_context_entry_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/macros/src/expand.rs")
+text = path.read_text()
+subject = "                fn call_with_context(\n"
+if text.count(subject) != 1:
+    raise SystemExit("missing unique macro Handler context-entry mutation subject")
+path.write_text(text.replace(subject, "                fn call_without_context(\n", 1))
+PYEOF
+}
+expect_fail_with_diagnostic check_handler_context_migration.sh \
+    'the Handler macro template losing its explicit context-aware entry' \
+    'crates/macros/src/expand.rs Handler impl 1 is not on the reviewed facade migration bridge' \
+    mut_macro_handler_context_entry_removed
+
+mut_manual_equivalence_handler_context_entry_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/macros/tests/equivalence.rs")
+text = path.read_text()
+subject = '''    fn call_with_context(
+        &self,
+        request: Req<PutObject>,
+'''
+replacement = '''    fn call_without_context(
+        &self,
+        request: Req<PutObject>,
+'''
+if text.count(subject) != 1:
+    raise SystemExit("missing unique manual equivalence context-entry mutation subject")
+path.write_text(text.replace(subject, replacement, 1))
+PYEOF
+}
+expect_fail_with_diagnostic check_handler_context_migration.sh \
+    'a hand-written macro-equivalence Handler losing its context-aware entry' \
+    'crates/macros/tests/equivalence.rs Handler impl 1 is not on the reviewed facade migration bridge' \
+    mut_manual_equivalence_handler_context_entry_removed
+
 expect_signing_suite_dirty_checkout_fail() {
     local checkout output rc=0
     cases=$((cases + 1))

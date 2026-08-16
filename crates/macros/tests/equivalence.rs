@@ -37,7 +37,7 @@ use std::thread::{self, Thread};
 
 use rustfs_gateway_core::handler::{Handler, HandlerResult, Req, Resp};
 use rustfs_gateway_core::registry::RouterBuilder;
-use rustfs_gateway_core::{Router, dispatch};
+use rustfs_gateway_core::{HandlerContext, Router, dispatch};
 use rustfs_gateway_macros::handlers;
 
 // The proc-macro crate's own equivalence test stands in for the public facade without creating a
@@ -142,16 +142,40 @@ impl Handler<PutObject> for ManualFs {
     fn call(&self, request: Req<PutObject>) -> impl Future<Output = HandlerResult<PutObject>> + Send {
         self.put_object(request)
     }
+
+    fn call_with_context(
+        &self,
+        request: Req<PutObject>,
+        _context: HandlerContext,
+    ) -> impl Future<Output = HandlerResult<PutObject>> + Send {
+        self.put_object(request)
+    }
 }
 
 impl Handler<ListObjectsV2> for ManualFs {
     fn call(&self, request: Req<ListObjectsV2>) -> impl Future<Output = HandlerResult<ListObjectsV2>> + Send {
         self.list_objects_v2(request)
     }
+
+    fn call_with_context(
+        &self,
+        request: Req<ListObjectsV2>,
+        _context: HandlerContext,
+    ) -> impl Future<Output = HandlerResult<ListObjectsV2>> + Send {
+        self.list_objects_v2(request)
+    }
 }
 
 impl Handler<GetBucketLocation> for ManualFs {
     fn call(&self, request: Req<GetBucketLocation>) -> impl Future<Output = HandlerResult<GetBucketLocation>> + Send {
+        self.get_bucket_location(request)
+    }
+
+    fn call_with_context(
+        &self,
+        request: Req<GetBucketLocation>,
+        _context: HandlerContext,
+    ) -> impl Future<Output = HandlerResult<GetBucketLocation>> + Send {
         self.get_bucket_location(request)
     }
 }

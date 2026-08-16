@@ -46,4 +46,13 @@ impl ::rustfs_gateway::Handler<GetBucketLocation> for Fs {
     > + ::core::marker::Send {
         self.get_bucket_location(request)
     }
+    fn call_with_context(
+        &self,
+        request: ::rustfs_gateway::Req<GetBucketLocation>,
+        _context: ::rustfs_gateway::HandlerContext,
+    ) -> impl ::core::future::Future<
+        Output = ::rustfs_gateway::HandlerResult<GetBucketLocation>,
+    > + ::core::marker::Send {
+        self.get_bucket_location(request)
+    }
 }
