@@ -62,7 +62,7 @@ pub type ServiceFuture = Pin<Box<dyn Future<Output = Result<Response<Body>, Infa
 /// only an announcement — hyper closes the connection because it reads this header, and a
 /// transport that wrote the header without closing would be lying to its peer in exactly the way
 /// the socket observation in `crates/conformance` exists to catch.
-fn announce_connection_verdict(response: &mut Response<Body>) {
+pub(crate) fn announce_connection_verdict(response: &mut Response<Body>) {
     if crate::render::connection_intent_of(response).is_some_and(crate::close::ConnectionIntent::must_close) {
         response
             .headers_mut()

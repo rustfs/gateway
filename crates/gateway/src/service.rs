@@ -146,7 +146,7 @@ use crate::ext::{
     HostResolver, InputAuthzRequest, Observer, PolicySnapshot, PolicySource, PolicyTimeout, RequestContext, RequestEvent,
     ResolvedHost, ResponseView, RoutedView, ServerExtensions, StageFilter, WireHead, emit_safely,
 };
-use crate::gate::{Authenticated, BodyCeilings, BodyDigestObligation, SealedBody};
+use crate::gate::{Authenticated, BodyCeilings, BodyDigestObligation, BodyTimeouts, SealedBody};
 use crate::monomorphic::sealed::Set as StaticSet;
 use crate::operation_mode::{DynamicMode, MonomorphicMode, OperationMode};
 use crate::payload_header::{payload_mode, presigned_body_obligation};
@@ -879,7 +879,9 @@ impl S3Service {
             };
 
             let ceilings = BodyCeilings::of(operation, state.config.config().max_buffered_body_bytes());
-            let body = sealed.read(&authenticated, ceilings, ingest, body_digest).await?;
+            let body = sealed
+                .read(&authenticated, ceilings, BodyTimeouts::S3, ingest, body_digest)
+                .await?;
             Ok((
                 ReadForDecode {
                     policy: state.policy,

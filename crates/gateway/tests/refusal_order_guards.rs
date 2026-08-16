@@ -122,7 +122,7 @@ fn the_pipeline_seals_before_it_authenticates_and_reads_after() {
     let sealed = source.find("SealedBody::seal(").expect("the body is sealed");
     let admitted = source.find(".floor.admit(").expect("the floor admits");
     let proof = source.find("Authenticated::of(&verdict)").expect("the proof is minted");
-    let read = source.find("sealed.read(&authenticated").expect("the body is read");
+    let read = source.find(".read(&authenticated").expect("the body is read");
     assert!(sealed < admitted, "the body must be sealed before the floor sees the request");
     assert!(admitted < proof, "the proof must be minted from a verdict the floor produced");
     assert!(proof < read, "the body must be read after the proof exists, never before");
