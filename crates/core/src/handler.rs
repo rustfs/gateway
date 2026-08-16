@@ -577,6 +577,20 @@ pub trait Handler<O: Operation>: Send + Sync + 'static {
     /// RPITIT is permitted here and in [`Operation`] alone (ADR-0002): registration erases the
     /// implementation behind a closure, so this trait is never used as a trait object.
     fn call(&self, request: Req<O>) -> impl Future<Output = HandlerResult<O>> + Send;
+
+    /// Answers one request with request-scoped execution signals.
+    ///
+    /// This temporary migration entry keeps existing backends source-compatible while handler
+    /// implementations move to the ADR-0011 signature in bounded batches. The default deliberately
+    /// ignores the context and must be removed when backlog#1861 completes. Dynamic framework
+    /// dispatch already calls this entry; the monomorphic path is the next bounded migration slice.
+    fn call_with_context(
+        &self,
+        request: Req<O>,
+        _context: crate::HandlerContext,
+    ) -> impl Future<Output = HandlerResult<O>> + Send {
+        self.call(request)
+    }
 }
 
 #[cfg(test)]

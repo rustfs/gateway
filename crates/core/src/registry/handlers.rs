@@ -60,6 +60,7 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 
 use crate::Authorized;
+use crate::HandlerContext;
 use crate::handler::{BoxFuture, Handler, HandlerError, Resp};
 use crate::op::Operation;
 use crate::registry::codecs::{ErasedCodec, ErasedDecode, ErasedEncode};
@@ -101,13 +102,48 @@ where
 {
     Arc::new(move |request: ErasedRequest| {
         let implementation = Arc::clone(&implementation);
-        Box::pin(async move {
-            let authorized = request
-                .into_inner()
-                .downcast::<Authorized<O>>()
-                .map_err(|_| mismatch::<O>())?;
-            dispatch::<O, B>(implementation, *authorized).await
-        })
+        erase_request::<O, B>(implementation, request, None)
+    })
+}
+
+/// Erases an operation and backend while preserving one caller-created handler context.
+///
+/// This is the bounded ADR-0011 migration entry used by the facade. The original
+/// [`erase_authorized_handler`] remains source-compatible until every handler implementation and
+/// the monomorphic path have migrated.
+pub fn erase_authorized_handler_with_context<O, B>(
+    implementation: Arc<B>,
+) -> Arc<impl Fn(ErasedRequest, HandlerContext) -> BoxFuture<'static, Result<ErasedResponse, HandlerError>> + Send + Sync>
+where
+    O: Operation,
+    B: Handler<O>,
+{
+    Arc::new(
+        move |request: ErasedRequest, context: HandlerContext| -> BoxFuture<'static, Result<ErasedResponse, HandlerError>> {
+            let implementation = Arc::clone(&implementation);
+            erase_request::<O, B>(implementation, request, Some(context))
+        },
+    )
+}
+
+fn erase_request<O, B>(
+    implementation: Arc<B>,
+    request: ErasedRequest,
+    context: Option<HandlerContext>,
+) -> BoxFuture<'static, Result<ErasedResponse, HandlerError>>
+where
+    O: Operation,
+    B: Handler<O>,
+{
+    Box::pin(async move {
+        let authorized = request
+            .into_inner()
+            .downcast::<Authorized<O>>()
+            .map_err(|_| mismatch::<O>())?;
+        match context {
+            Some(context) => dispatch_with_context::<O, B>(implementation, *authorized, context).await,
+            None => dispatch::<O, B>(implementation, *authorized).await,
+        }
     })
 }
 
@@ -118,6 +154,19 @@ where
     B: Handler<O>,
 {
     let response = implementation.call(authorized.into_request()).await?;
+    Ok(Box::new(response) as ErasedResponse)
+}
+
+async fn dispatch_with_context<O, B>(
+    implementation: Arc<B>,
+    authorized: Authorized<O>,
+    context: HandlerContext,
+) -> Result<ErasedResponse, HandlerError>
+where
+    O: Operation,
+    B: Handler<O>,
+{
+    let response = implementation.call_with_context(authorized.into_request(), context).await?;
     Ok(Box::new(response) as ErasedResponse)
 }
 

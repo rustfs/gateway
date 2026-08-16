@@ -81,7 +81,10 @@ use crate::route::RouteRequestParts;
 
 pub use self::builder::{BuildError, RouterBuilder};
 pub use self::codecs::{ErasedAuthorize, ErasedCodec, ErasedDecode, ErasedDecoded, ErasedEncode, ErasedResources};
-pub use self::handlers::{ErasedHandler, ErasedRequest, ErasedResponse, HandlerTable, Invocation, erase_authorized_handler};
+pub use self::handlers::{
+    ErasedHandler, ErasedRequest, ErasedResponse, HandlerTable, Invocation, erase_authorized_handler,
+    erase_authorized_handler_with_context,
+};
 pub use self::opset::{MissingHandlers, OperationSet};
 pub use self::reject::RegistryError;
 
