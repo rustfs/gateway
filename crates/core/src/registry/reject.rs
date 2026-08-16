@@ -71,6 +71,11 @@ pub enum RegistryError {
         /// The operation.
         name: &'static str,
     },
+    /// A standard operation has no handler-execution deadline class.
+    MissingHandlerDeadlineClass {
+        /// The operation.
+        name: &'static str,
+    },
     /// The operation declares an action that is not spelled `service:Action`.
     MalformedAuthAction {
         /// The operation.
@@ -126,6 +131,7 @@ impl RegistryError {
             Self::Duplicate { name }
             | Self::UnusableMissingError { name, .. }
             | Self::MissingAuthRequirement { name }
+            | Self::MissingHandlerDeadlineClass { name }
             | Self::MalformedAuthAction { name, .. }
             | Self::NameNotNamespaced { name }
             | Self::NameCollidesWithStandard { name, .. }
@@ -148,6 +154,9 @@ impl fmt::Display for RegistryError {
                 "{name} declares no authorisation action; an operation nobody can authorise is an \
                  operation whose authorisation check can be forgotten"
             ),
+            Self::MissingHandlerDeadlineClass { name } => {
+                write!(f, "{name} declares no handler deadline class")
+            }
             Self::MalformedAuthAction { name, action } => {
                 write!(f, "{name} declares the action {action:?}, which is not spelled `service:Action`")
             }
@@ -193,6 +202,9 @@ pub(crate) fn check_operation<O: Operation>() -> Result<(), RegistryError> {
     if O::ORIGIN.is_standard() {
         if !is_standard_operation_name(name) {
             return Err(RegistryError::UnknownStandardOperation { name });
+        }
+        if spec.deadline_class().is_none() {
+            return Err(RegistryError::MissingHandlerDeadlineClass { name });
         }
     } else {
         if let Some(standard) = standard_operation_name_ignoring_case(name) {
