@@ -116,15 +116,18 @@ if wrong_standard:
 reviewed_third_party_sources = {
     "crates/core/examples/dialect_overlay.rs": 1,
     "crates/core/src/authz/mod.rs": 1,
+    "crates/core/src/registry/reject.rs": 1,
     "crates/core/tests/compile_fail/support.rs": 1,
     "crates/core/tests/compile_pass/operation_spec_builder.rs": 1,
     "crates/core/tests/dialect.rs": 3,
+    "crates/core/tests/registration.rs": 3,
     "crates/core/tests/static_dispatch.rs": 1,
     "crates/gateway/examples/custom_authorizer.rs": 1,
     "crates/gateway/examples/minimal.rs": 1,
     "crates/gateway/tests/cors_runtime.rs": 1,
     "crates/gateway/tests/credential_runtime.rs": 1,
     "crates/gateway/tests/patch_layer_landings.rs": 1,
+    "crates/gateway/tests/sse_runtime.rs": 2,
     "crates/gateway/tests/support/mod.rs": 5,
 }
 reviewed_builders = 0
@@ -146,11 +149,41 @@ for relative, expected_builders in reviewed_third_party_sources.items():
         if standard != 1 or extended:
             fail(f"reviewed third-party builder lacks one explicit Standard deadline class: {relative}")
     reviewed_builders += len(builders)
-if reviewed_builders != 18:
-    fail(f"reviewed third-party builder census is {reviewed_builders}, expected 18")
+if reviewed_builders != 24:
+    fail(f"reviewed third-party builder census is {reviewed_builders}, expected 24")
+
+mixed_relative = "crates/core/tests/params_and_dispatch.rs"
+mixed_path = root / mixed_relative
+if not mixed_path.is_file() or mixed_path.is_symlink():
+    fail(f"mixed deadline source is missing or not a regular file: {mixed_relative}")
+try:
+    mixed_text = mixed_path.read_text(encoding="utf-8")
+except (OSError, UnicodeError) as error:
+    fail(f"cannot read mixed deadline source {mixed_relative}: {error}")
+mixed_builders = list(re.finditer(r"OperationSpec::builder\(.*?\.build\(\)", mixed_text, re.DOTALL))
+if len(mixed_builders) != 8:
+    fail(f"mixed builder census drifted for {mixed_relative}: {len(mixed_builders)} != 8")
+mixed_nonstandard: set[str] = set()
+for builder in mixed_builders:
+    chain = builder.group(0)
+    names = re.findall(r'OperationSpec::builder\("([A-Za-z0-9]+)"', chain)
+    if len(names) != 1:
+        fail(f"mixed builder does not have one literal name: {mixed_relative}")
+    name = names[0]
+    standard = chain.count(".handler_deadline_class(HandlerDeadlineClass::Standard)")
+    extended = chain.count(".handler_deadline_class(HandlerDeadlineClass::Extended)")
+    if name in operations:
+        if standard or extended:
+            fail(f"standard builder bypasses the central deadline authority: {name}")
+        continue
+    mixed_nonstandard.add(name)
+    if standard != 1 or extended:
+        fail(f"mixed-source third-party builder lacks one explicit Standard deadline class: {name}")
+if mixed_nonstandard != {"PutBucketAnalyticsConfiguration"}:
+    fail(f"mixed-source third-party builder set drifted: {sorted(mixed_nonstandard)}")
 
 print(
-    "check_handler_deadline_class: 72 standard operations and 18 reviewed third-party builders "
-    "have explicit deadline classes (89 Standard, 1 Extended)"
+    "check_handler_deadline_class: 72 standard operations and 25 reviewed third-party builders "
+    "have explicit deadline classes (96 Standard, 1 Extended)"
 )
 PY

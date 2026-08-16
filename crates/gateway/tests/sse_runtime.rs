@@ -57,6 +57,7 @@ use rustfs_gateway::{
     ResponseBody, RouteEntry, RouteSelector, S3Service, ServiceBuilder, SigService, SseConfig, StageFilter, TargetKind,
     TransportSecurity, WireHead, WireResponse, allow_when, check_part, collect, presented_customer_key, wire_filter,
 };
+use rustfs_gateway_core::HandlerDeadlineClass;
 use rustfs_gateway_types::ErrorCode;
 
 /// A 32-byte key and its true MD5.
@@ -98,11 +99,13 @@ struct PresentedKey(Option<KeyFingerprint>);
 struct Answered;
 
 static PUT_SPEC: OperationSpec = OperationSpec::builder("example:SsePut", 200, None)
+    .handler_deadline_class(HandlerDeadlineClass::Standard)
     .required_params(&[])
     .auth(AuthRequirement::new("example:SsePut", ResourceShape::Object))
     .build();
 
 static PART_SPEC: OperationSpec = OperationSpec::builder("example:SsePart", 200, None)
+    .handler_deadline_class(HandlerDeadlineClass::Standard)
     .required_params(&[])
     .auth(AuthRequirement::new("example:SsePart", ResourceShape::Object))
     .build();
