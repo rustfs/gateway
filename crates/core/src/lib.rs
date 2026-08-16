@@ -141,8 +141,9 @@ pub use crate::op::{
 };
 pub use crate::registry::{
     BuildError, ErasedAuthorize, ErasedCodec, ErasedDecode, ErasedDecoded, ErasedEncode, ErasedHandler, ErasedRequest,
-    ErasedResources, ErasedResponse, HandlerTable, Invocation, MissingHandlers, OperationSet, OperationSpec, ParamKind, Registry,
-    RegistryError, RequiredParam, RouterBuilder, WireEntry, check_required, erase_authorized_handler,
+    ErasedResources, ErasedResponse, HandlerDeadlineClass, HandlerTable, Invocation, MissingHandlers, OperationSet,
+    OperationSpec, ParamKind, Registry, RegistryError, RequiredParam, RouterBuilder, WireEntry, check_required,
+    erase_authorized_handler,
 };
 pub use crate::route::{
     ArnForm, CompileError, CompiledRouter, Explanation, HostClass, OpId, Predicate, RequestShape, RouteBuildError, RouteEntry,

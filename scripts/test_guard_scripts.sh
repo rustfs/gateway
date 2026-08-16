@@ -12754,6 +12754,79 @@ expect_fail_with_diagnostic check_handler_context_migration.sh \
     'crates/macros/tests/equivalence.rs Handler impl 1 is not on the reviewed facade migration bridge' \
     mut_manual_equivalence_handler_context_entry_removed
 
+mut_handler_deadline_class_mapping_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/core/src/registry/mod.rs")
+text = path.read_text()
+subject = '        "CompleteMultipartUpload" => Some(HandlerDeadlineClass::Extended),\n'
+if text.count(subject) != 1:
+    raise SystemExit("missing unique handler deadline mapping-removal subject")
+path.write_text(text.replace(subject, "", 1))
+PYEOF
+}
+expect_fail_with_diagnostic check_handler_deadline_class.sh \
+    'a standard operation losing its explicit handler deadline class' \
+    'deadline-class authority differs from standard operations' \
+    mut_handler_deadline_class_mapping_removed
+
+mut_handler_deadline_extended_class_weakened() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/core/src/registry/mod.rs")
+text = path.read_text()
+subject = '        "CompleteMultipartUpload" => Some(HandlerDeadlineClass::Extended),\n'
+replacement = '        "CompleteMultipartUpload" => Some(HandlerDeadlineClass::Standard),\n'
+if text.count(subject) != 1:
+    raise SystemExit("missing unique extended handler deadline mutation subject")
+path.write_text(text.replace(subject, replacement, 1))
+PYEOF
+}
+expect_fail_with_diagnostic check_handler_deadline_class.sh \
+    'CompleteMultipartUpload being reduced to the ordinary handler deadline' \
+    'CompleteMultipartUpload must use the Extended handler deadline' \
+    mut_handler_deadline_extended_class_weakened
+
+mut_handler_deadline_unknown_class_defaulted() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/core/src/registry/mod.rs")
+text = path.read_text()
+subject = "        _ => None,\n"
+replacement = "        _ => Some(HandlerDeadlineClass::Standard),\n"
+if text.count(subject) != 1:
+    raise SystemExit("missing unique unknown handler deadline mutation subject")
+path.write_text(text.replace(subject, replacement, 1))
+PYEOF
+}
+expect_fail_with_diagnostic check_handler_deadline_class.sh \
+    'unknown operations gaining an implicit handler deadline class' \
+    'deadline-class authority has an implicit wildcard class' \
+    mut_handler_deadline_unknown_class_defaulted
+
+mut_handler_deadline_registration_check_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/core/src/registry/reject.rs")
+text = path.read_text()
+subject = '''        if spec.deadline_class().is_none() {
+            return Err(RegistryError::MissingHandlerDeadlineClass { name });
+        }
+'''
+if text.count(subject) != 1:
+    raise SystemExit("missing unique handler deadline registration mutation subject")
+path.write_text(text.replace(subject, "", 1))
+PYEOF
+}
+expect_fail_with_diagnostic check_handler_deadline_class.sh \
+    'standard registration no longer failing closed without a handler deadline class' \
+    'standard registration does not fail closed without a handler deadline class' \
+    mut_handler_deadline_registration_check_removed
+
 expect_signing_suite_dirty_checkout_fail() {
     local checkout output rc=0
     cases=$((cases + 1))

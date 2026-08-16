@@ -110,6 +110,18 @@ pub struct RequiredParam {
     pub message: &'static str,
 }
 
+/// The operation contract's handler-execution deadline class.
+///
+/// Durations belong to the runtime configuration. Keeping this vocabulary closed prevents a
+/// custom operation from smuggling an unbounded duration into the request path.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum HandlerDeadlineClass {
+    /// Ordinary operations, including reads and bounded metadata writes.
+    Standard,
+    /// Operations whose bounded work legitimately exceeds the ordinary deadline.
+    Extended,
+}
+
 /// The per-operation metadata this crate needs after routing.
 ///
 /// A subset of the IR: the fields that matter between "we know which operation this is" and "the
@@ -136,6 +148,7 @@ pub struct OperationSpec {
     /// rustfs/rustfs#4845. Every registration path goes through
     /// [`RegistryError::MissingAuthRequirement`], so there is no way to install a handler for one.
     pub auth: Option<AuthRequirement>,
+    handler_deadline_class: Option<HandlerDeadlineClass>,
 }
 
 impl OperationSpec {
@@ -155,6 +168,7 @@ impl OperationSpec {
             required_params: &[],
             not_configured_error,
             auth: None,
+            handler_deadline_class: None,
         }
     }
 
@@ -172,12 +186,107 @@ impl OperationSpec {
         self
     }
 
+    /// Sets the explicit handler-execution deadline class for a third-party operation.
+    #[must_use]
+    pub const fn handler_deadline_class(mut self, deadline_class: HandlerDeadlineClass) -> Self {
+        self.handler_deadline_class = Some(deadline_class);
+        self
+    }
+
+    /// The explicit handler-execution deadline class.
+    ///
+    /// Standard operations use the closed table below; third-party operations must set the class
+    /// through [`Self::handler_deadline_class`] before the migration becomes mandatory.
+    #[must_use]
+    pub fn deadline_class(&self) -> Option<HandlerDeadlineClass> {
+        self.handler_deadline_class
+            .or_else(|| standard_handler_deadline_class(self.name))
+    }
+
     /// Finishes the specification.
     ///
     /// Registration remains the validation boundary and may reject the result.
     #[must_use]
     pub const fn build(self) -> Self {
         self
+    }
+}
+
+fn standard_handler_deadline_class(name: &str) -> Option<HandlerDeadlineClass> {
+    match name {
+        "CompleteMultipartUpload" => Some(HandlerDeadlineClass::Extended),
+        "AbortMultipartUpload"
+        | "CopyObject"
+        | "CreateBucket"
+        | "CreateMultipartUpload"
+        | "DeleteBucket"
+        | "DeleteBucketCors"
+        | "DeleteBucketEncryption"
+        | "DeleteBucketLifecycle"
+        | "DeleteBucketPolicy"
+        | "DeleteBucketReplication"
+        | "DeleteBucketTagging"
+        | "DeleteBucketWebsite"
+        | "DeleteObject"
+        | "DeleteObjectTagging"
+        | "DeleteObjects"
+        | "DeletePublicAccessBlock"
+        | "GetBucketAccelerateConfiguration"
+        | "GetBucketAcl"
+        | "GetBucketCors"
+        | "GetBucketEncryption"
+        | "GetBucketLifecycleConfiguration"
+        | "GetBucketLocation"
+        | "GetBucketLogging"
+        | "GetBucketNotificationConfiguration"
+        | "GetBucketPolicy"
+        | "GetBucketPolicyStatus"
+        | "GetBucketReplication"
+        | "GetBucketRequestPayment"
+        | "GetBucketTagging"
+        | "GetBucketVersioning"
+        | "GetBucketWebsite"
+        | "GetObject"
+        | "GetObjectAcl"
+        | "GetObjectAttributes"
+        | "GetObjectLegalHold"
+        | "GetObjectLockConfiguration"
+        | "GetObjectRetention"
+        | "GetObjectTagging"
+        | "GetPublicAccessBlock"
+        | "HeadBucket"
+        | "HeadObject"
+        | "ListBuckets"
+        | "ListMultipartUploads"
+        | "ListObjectVersions"
+        | "ListObjects"
+        | "ListObjectsV2"
+        | "ListParts"
+        | "PutBucketAccelerateConfiguration"
+        | "PutBucketAcl"
+        | "PutBucketCors"
+        | "PutBucketEncryption"
+        | "PutBucketLifecycleConfiguration"
+        | "PutBucketLogging"
+        | "PutBucketNotificationConfiguration"
+        | "PutBucketPolicy"
+        | "PutBucketReplication"
+        | "PutBucketRequestPayment"
+        | "PutBucketTagging"
+        | "PutBucketVersioning"
+        | "PutBucketWebsite"
+        | "PutObject"
+        | "PutObjectAcl"
+        | "PutObjectLegalHold"
+        | "PutObjectLockConfiguration"
+        | "PutObjectRetention"
+        | "PutObjectTagging"
+        | "PutPublicAccessBlock"
+        | "RestoreObject"
+        | "SelectObjectContent"
+        | "UploadPart"
+        | "UploadPartCopy" => Some(HandlerDeadlineClass::Standard),
+        _ => None,
     }
 }
 
@@ -435,4 +544,35 @@ pub fn check_required(spec: &OperationSpec, request: &RouteRequestParts<'_>) -> 
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod deadline_class_tests {
+    use super::{HandlerDeadlineClass, OperationSpec};
+
+    /// Positive — an ordinary standard operation resolves through the explicit standard table.
+    #[test]
+    fn a_standard_read_has_the_standard_handler_deadline() {
+        let spec = OperationSpec::builder("GetObject", 200, None).build();
+        assert_eq!(spec.deadline_class(), Some(HandlerDeadlineClass::Standard));
+    }
+
+    /// Negative — multipart completion must not inherit the ordinary 30-second policy class.
+    #[test]
+    fn multipart_completion_has_the_extended_handler_deadline() {
+        let spec = OperationSpec::builder("CompleteMultipartUpload", 200, None).build();
+        assert_eq!(spec.deadline_class(), Some(HandlerDeadlineClass::Extended));
+    }
+
+    /// Negative — an unknown operation receives no implicit deadline class.
+    #[test]
+    fn an_unknown_operation_must_declare_its_handler_deadline() {
+        let missing = OperationSpec::builder("vendor:Probe", 200, None).build();
+        assert_eq!(missing.deadline_class(), None);
+
+        let declared = OperationSpec::builder("vendor:Probe", 200, None)
+            .handler_deadline_class(HandlerDeadlineClass::Standard)
+            .build();
+        assert_eq!(declared.deadline_class(), Some(HandlerDeadlineClass::Standard));
+    }
 }
