@@ -279,6 +279,14 @@ impl rustfs_gateway::Handler<rustfs_gateway::dto::ListObjectsV2> for Listing {
     ) -> rustfs_gateway::HandlerResult<rustfs_gateway::dto::ListObjectsV2> {
         Ok(rustfs_gateway::Resp::new(rustfs_gateway::dto::ListObjectsV2Output::default()))
     }
+
+    async fn call_with_context(
+        &self,
+        _request: rustfs_gateway::Req<rustfs_gateway::dto::ListObjectsV2>,
+        _context: rustfs_gateway::HandlerContext,
+    ) -> rustfs_gateway::HandlerResult<rustfs_gateway::dto::ListObjectsV2> {
+        Ok(rustfs_gateway::Resp::new(rustfs_gateway::dto::ListObjectsV2Output::default()))
+    }
 }
 
 struct Copying;
@@ -287,6 +295,14 @@ impl rustfs_gateway::Handler<rustfs_gateway::dto::CopyObject> for Copying {
     async fn call(
         &self,
         _request: rustfs_gateway::Req<rustfs_gateway::dto::CopyObject>,
+    ) -> rustfs_gateway::HandlerResult<rustfs_gateway::dto::CopyObject> {
+        Ok(rustfs_gateway::Resp::new(rustfs_gateway::dto::CopyObjectOutput::default()))
+    }
+
+    async fn call_with_context(
+        &self,
+        _request: rustfs_gateway::Req<rustfs_gateway::dto::CopyObject>,
+        _context: rustfs_gateway::HandlerContext,
     ) -> rustfs_gateway::HandlerResult<rustfs_gateway::dto::CopyObject> {
         Ok(rustfs_gateway::Resp::new(rustfs_gateway::dto::CopyObjectOutput::default()))
     }

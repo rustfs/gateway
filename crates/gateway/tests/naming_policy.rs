@@ -336,6 +336,15 @@ impl Handler<dto::GetObject> for CountingBackend {
         self.0.hit();
         async { Ok(Resp::new(dto::GetObjectOutput::default())) }
     }
+
+    fn call_with_context(
+        &self,
+        _request: Req<dto::GetObject>,
+        _context: rustfs_gateway::HandlerContext,
+    ) -> impl core::future::Future<Output = HandlerResult<dto::GetObject>> + Send {
+        self.0.hit();
+        async { Ok(Resp::new(dto::GetObjectOutput::default())) }
+    }
 }
 
 fn assembled() -> (S3Service, Arc<Counter>, Arc<Counter>) {

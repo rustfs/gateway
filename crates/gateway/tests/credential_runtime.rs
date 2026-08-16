@@ -147,6 +147,14 @@ impl Handler<CredProbe> for Backend {
     async fn call(&self, _request: Req<CredProbe>) -> HandlerResult<CredProbe> {
         Ok(Resp::new(Answered))
     }
+
+    async fn call_with_context(
+        &self,
+        _request: Req<CredProbe>,
+        _context: rustfs_gateway::HandlerContext,
+    ) -> HandlerResult<CredProbe> {
+        Ok(Resp::new(Answered))
+    }
 }
 
 // ── a provider that counts, wrapping the fixture set ────────────────────────────────────────────

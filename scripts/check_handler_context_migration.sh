@@ -32,15 +32,29 @@ expected = {
     "crates/gateway/examples/custom_authorizer.rs": 1,
     "crates/gateway/examples/minimal.rs": 2,
     "crates/gateway/tests/assembly_order.rs": 1,
+    "crates/gateway/tests/authz_contract.rs": 2,
     "crates/gateway/tests/authz_consumption.rs": 1,
+    "crates/gateway/tests/cors_runtime.rs": 2,
+    "crates/gateway/tests/credential_runtime.rs": 1,
     "crates/gateway/tests/handler_panic.rs": 1,
+    "crates/gateway/tests/naming_policy.rs": 1,
+    "crates/gateway/tests/patch_layer_landings.rs": 1,
+    "crates/gateway/tests/precondition_contract.rs": 2,
+    "crates/gateway/tests/sse_runtime.rs": 2,
 }
 facade_dual = {
     "crates/gateway/examples/custom_authorizer.rs",
     "crates/gateway/examples/minimal.rs",
     "crates/gateway/tests/assembly_order.rs",
+    "crates/gateway/tests/authz_contract.rs",
     "crates/gateway/tests/authz_consumption.rs",
+    "crates/gateway/tests/cors_runtime.rs",
+    "crates/gateway/tests/credential_runtime.rs",
     "crates/gateway/tests/handler_panic.rs",
+    "crates/gateway/tests/naming_policy.rs",
+    "crates/gateway/tests/patch_layer_landings.rs",
+    "crates/gateway/tests/precondition_contract.rs",
+    "crates/gateway/tests/sse_runtime.rs",
 }
 
 
@@ -233,7 +247,7 @@ for relative, wanted in expected.items():
             fail(f"{relative} Handler impl {ordinal} drops or bypasses the migration context source")
     total += len(implementations)
 
-if total != 17:
-    fail(f"reviewed migration census is {total}, expected 17")
-print("check_handler_context_migration: 17 reviewed Handler impls preserve their context migration mode")
+if total != 28:
+    fail(f"reviewed migration census is {total}, expected 28")
+print("check_handler_context_migration: 28 reviewed Handler impls preserve their context migration mode")
 PY

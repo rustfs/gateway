@@ -45,10 +45,56 @@ impl Handler<dto::PutObject> for Backend {
             Err(HandlerError::new(code, "A conflicting conditional operation is currently in progress."))
         }
     }
+
+    fn call_with_context(
+        &self,
+        _request: Req<dto::PutObject>,
+        _context: rustfs_gateway::HandlerContext,
+    ) -> impl core::future::Future<Output = HandlerResult<dto::PutObject>> + Send {
+        self.put_called.store(true, Ordering::SeqCst);
+        let outcome = ConditionalOutcome::lost_race();
+        async move {
+            let code = outcome
+                .error_code()
+                .ok_or_else(|| HandlerError::internal_error("a lost race must be a refusal"))?;
+            Err(HandlerError::new(code, "A conflicting conditional operation is currently in progress."))
+        }
+    }
 }
 
 impl Handler<dto::GetObject> for Backend {
     fn call(&self, request: Req<dto::GetObject>) -> impl core::future::Future<Output = HandlerResult<dto::GetObject>> + Send {
+        let part_number = request.input().part_number;
+        async move {
+            let selectors = RangeSelectors {
+                range: None,
+                part_number: part_number.and_then(|value| u32::try_from(value).ok()),
+                if_range: None,
+            };
+            let decision = evaluate_range(&selectors, &ObjectValidators::default(), 12)
+                .map_err(|rejection| HandlerError::new(rejection.code().clone(), rejection.reason()))?;
+            if !matches!(&decision, RangeDecision::Part { part_number: 2, .. }) {
+                return Err(HandlerError::internal_error("the completed-part adapter received the wrong selector"));
+            }
+            let status = decision.status().as_u16();
+            let parts_count = decision.part_count_header(3).map(|value| value as i32);
+            Ok(Resp::with_status(
+                dto::GetObjectOutput {
+                    body: Some(ByteStream::from_bytes(Bytes::from_static(b"part"))),
+                    content_length: Some(4),
+                    parts_count,
+                    ..dto::GetObjectOutput::default()
+                },
+                status,
+            ))
+        }
+    }
+
+    fn call_with_context(
+        &self,
+        request: Req<dto::GetObject>,
+        _context: rustfs_gateway::HandlerContext,
+    ) -> impl core::future::Future<Output = HandlerResult<dto::GetObject>> + Send {
         let part_number = request.input().part_number;
         async move {
             let selectors = RangeSelectors {

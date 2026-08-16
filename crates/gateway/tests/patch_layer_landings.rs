@@ -333,6 +333,14 @@ impl Handler<QueryShaped> for QueryBackend {
     async fn call(&self, _request: Req<QueryShaped>) -> HandlerResult<QueryShaped> {
         Ok(Resp::new(QueryShapedOutput))
     }
+
+    async fn call_with_context(
+        &self,
+        _request: Req<QueryShaped>,
+        _context: rustfs_gateway::HandlerContext,
+    ) -> HandlerResult<QueryShaped> {
+        Ok(Resp::new(QueryShapedOutput))
+    }
 }
 
 /// Positive — an operation this workspace does not define is registered, given a route selected by
