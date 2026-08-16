@@ -131,6 +131,26 @@ impl Handler<dto::CopyObject> for CopyBackend {
         assert_eq!(source.key().as_str(), "secret");
         Ok(Resp::new(dto::CopyObjectOutput::default()))
     }
+
+    async fn call_with_context(
+        &self,
+        request: Req<dto::CopyObject>,
+        _context: rustfs_gateway::HandlerContext,
+    ) -> HandlerResult<dto::CopyObject> {
+        self.0.fetch_add(1, Ordering::SeqCst);
+        assert!(
+            request.input().copy_source.is_empty(),
+            "the raw source remained visible after authorization"
+        );
+        let source = request
+            .resources()
+            .source()
+            .resolve(request.read_proof())
+            .expect("the proof belongs to this source");
+        assert_eq!(source.bucket().as_str(), "source");
+        assert_eq!(source.key().as_str(), "secret");
+        Ok(Resp::new(dto::CopyObjectOutput::default()))
+    }
 }
 
 /// c-azc-0026: every normalized copy source is decided before the backend can run.
