@@ -124,6 +124,37 @@ fn conformance_fast_scope_keeps_integration_contracts_in_the_workspace_gate() {
 }
 
 #[test]
+fn core_fast_scope_runs_both_runtime_targets_concurrently() {
+    let steps = crate_steps("rustfs-gateway-core");
+
+    assert_eq!(steps.len(), 2);
+    assert_eq!(
+        steps[0],
+        [
+            "test",
+            "-p",
+            "rustfs-gateway-core",
+            "--lib",
+            "--test",
+            "integration",
+            "--",
+            "--skip",
+            "compile_fail::compile_time_contracts_are_not_openable",
+        ]
+        .into_iter()
+        .map(str::to_owned)
+        .collect::<Vec<_>>()
+    );
+    assert_eq!(
+        steps[1],
+        ["clippy", "-p", "rustfs-gateway-core", "--all-targets", "--", "-D", "warnings",]
+            .into_iter()
+            .map(str::to_owned)
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
 fn facade_case_does_not_start_a_nested_cargo_process() {
     let steps = crate_steps("rustfs-gateway");
 

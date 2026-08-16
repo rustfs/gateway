@@ -1460,14 +1460,11 @@ from pathlib import Path
 
 path = Path("xtask/src/verify.rs")
 text = path.read_text()
-old = '''    if package == "rustfs-gateway-core" {
-        test_step.extend([
-            "--".to_owned(),
-            "--skip".to_owned(),
-            "compile_fail::compile_time_contracts_are_not_openable".to_owned(),
-        ]);
+old = '''                "--".to_owned(),
+                "--skip".to_owned(),
+                "compile_fail::compile_time_contracts_are_not_openable".to_owned(),
 '''
-new = '''    if package == "rustfs-gateway-core" {
+new = '''
 '''
 if text.count(old) != 1:
     raise SystemExit("core compile-fail fast-scope skip is missing")
@@ -1478,13 +1475,56 @@ expect_fail check_xtask_codegen_surface.sh \
     'the core fast scope losing its compile-fail skip' \
     mut_xtask_core_fast_scope_loses_compile_fail_skip
 
+mut_xtask_core_fast_scope_drops_library_tests() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("xtask/src/verify.rs")
+text = path.read_text()
+old = '''                package.to_owned(),
+                "--lib".to_owned(),
+                "--test".to_owned(),
+'''
+new = '''                package.to_owned(),
+                "--test".to_owned(),
+'''
+if text.count(old) != 1:
+    raise SystemExit("core library runtime step is missing")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_xtask_codegen_surface.sh \
+    'the core fast scope dropping its library tests' \
+    mut_xtask_core_fast_scope_drops_library_tests
+
+mut_xtask_core_fast_scope_drops_integration_tests() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("xtask/src/verify.rs")
+text = path.read_text()
+old = '''                "--lib".to_owned(),
+                "--test".to_owned(),
+                "integration".to_owned(),
+'''
+new = '''                "--lib".to_owned(),
+'''
+if text.count(old) != 1:
+    raise SystemExit("core integration runtime step is missing")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_xtask_codegen_surface.sh \
+    'the core fast scope dropping its integration tests' \
+    mut_xtask_core_fast_scope_drops_integration_tests
+
 mut_xtask_gateway_fast_scope_loses_compile_fail_skip() {
     python3 - <<'PYEOF'
 from pathlib import Path
 
 path = Path("xtask/src/verify.rs")
 text = path.read_text()
-old = '''    } else if package == "rustfs-gateway" {
+old = '''    if package == "rustfs-gateway" {
         test_step.extend([
             "--".to_owned(),
             "--skip".to_owned(),
@@ -1492,7 +1532,7 @@ old = '''    } else if package == "rustfs-gateway" {
         ]);
     } else if package == "rustfs-gateway-conformance" {
 '''
-new = '''    } else if package == "rustfs-gateway" {
+new = '''    if package == "rustfs-gateway" {
     } else if package == "rustfs-gateway-conformance" {
 '''
 if text.count(old) != 1:
@@ -1541,6 +1581,40 @@ expect_fail check_xtask_codegen_surface.sh \
     'the gateway conformance case rejoining concurrent Cargo processes' \
     mut_xtask_gateway_conformance_rejoins_concurrent_cargo
 
+mut_xtask_conformance_runs_after_clippy() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("xtask/src/verify.rs")
+text = path.read_text()
+old = '''    let mut command_batches = Vec::new();
+    if let Some(case) = conformance_case {
+        command_batches.push(vec![(
+            env!("CARGO").to_owned(),
+            conformance_test_step(case),
+            format!("{subject} conformance case {case}"),
+        )]);
+    }
+    command_batches.push(commands);
+'''
+new = '''    let mut command_batches = vec![commands];
+    if let Some(case) = conformance_case {
+        command_batches.push(vec![(
+            env!("CARGO").to_owned(),
+            conformance_test_step(case),
+            format!("{subject} conformance case {case}"),
+        )]);
+    }
+'''
+if text.count(old) != 1:
+    raise SystemExit("pre-clippy conformance batch is missing")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_xtask_codegen_surface.sh \
+    'the crate conformance case moving after clippy invalidates its target' \
+    mut_xtask_conformance_runs_after_clippy
+
 mut_xtask_gateway_conformance_rebuilds_its_binary() {
     python3 - <<'PYEOF'
 from pathlib import Path
@@ -1581,12 +1655,8 @@ from pathlib import Path
 
 path = Path("xtask/src/verify.rs")
 text = path.read_text()
-old = '''fn crate_steps(package: &str) -> Vec<Vec<String>> {
-    let mut test_step = vec!["test".to_owned(), "-p".to_owned(), package.to_owned()];
-    if package == "rustfs-gateway-core" {'''
-new = '''fn crate_steps(package: &str) -> Vec<Vec<String>> {
-    let mut test_step = vec!["test".to_owned(), "-p".to_owned(), package.to_owned()];
-    if !package.is_empty() {'''
+old = '    if package == "rustfs-gateway-core" {'
+new = '    if !package.is_empty() {'
 if text.count(old) != 1:
     raise SystemExit("core-only skip condition is missing")
 path.write_text(text.replace(old, new, 1))
@@ -1622,7 +1692,7 @@ from pathlib import Path
 
 path = Path("xtask/src/verify.rs")
 text = path.read_text()
-old = '            "--all-targets".to_owned(),'
+old = '        "--all-targets".to_owned(),'
 if text.count(old) != 1:
     raise SystemExit("all-target clippy scope is missing")
 path.write_text(text.replace(old, "", 1))

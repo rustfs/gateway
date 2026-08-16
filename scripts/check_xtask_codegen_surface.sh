@@ -575,14 +575,33 @@ if compact(verify_crate_items[0][1]) != expected_verify_crate_body:
     fail("crate verification must disclose each fast-scope boundary and keep the 30-second deadline")
 crate_steps_items = functions_named("crate_steps", syntax, comments_removed)
 expected_crate_steps_body = compact('''
-let mut test_step = vec!["test".to_owned(), "-p".to_owned(), package.to_owned()];
+let clippy_step = vec![
+    "clippy".to_owned(),
+    "-p".to_owned(),
+    package.to_owned(),
+    "--all-targets".to_owned(),
+    "--".to_owned(),
+    "-D".to_owned(),
+    "warnings".to_owned(),
+];
 if package == "rustfs-gateway-core" {
-    test_step.extend([
-        "--".to_owned(),
-        "--skip".to_owned(),
-        "compile_fail::compile_time_contracts_are_not_openable".to_owned(),
-    ]);
-} else if package == "rustfs-gateway" {
+    return vec![
+        vec![
+            "test".to_owned(),
+            "-p".to_owned(),
+            package.to_owned(),
+            "--lib".to_owned(),
+            "--test".to_owned(),
+            "integration".to_owned(),
+            "--".to_owned(),
+            "--skip".to_owned(),
+            "compile_fail::compile_time_contracts_are_not_openable".to_owned(),
+        ],
+        clippy_step,
+    ];
+}
+let mut test_step = vec!["test".to_owned(), "-p".to_owned(), package.to_owned()];
+if package == "rustfs-gateway" {
     test_step.extend([
         "--".to_owned(),
         "--skip".to_owned(),
@@ -591,21 +610,10 @@ if package == "rustfs-gateway-core" {
 } else if package == "rustfs-gateway-conformance" {
     test_step.push("--lib".to_owned());
 }
-vec![
-    test_step,
-    vec![
-        "clippy".to_owned(),
-        "-p".to_owned(),
-        package.to_owned(),
-        "--all-targets".to_owned(),
-        "--".to_owned(),
-        "-D".to_owned(),
-        "warnings".to_owned(),
-    ],
-]
+vec![test_step, clippy_step]
 ''')
 if compact(crate_steps_items[0][1]) != expected_crate_steps_body:
-    fail("crate verification steps must preserve compile-fail skips, conformance library scope and all-target clippy")
+    fail("crate verification steps must preserve both core runtime targets, compile-fail skips, conformance library scope and all-target clippy")
 conformance_test_items = functions_named("conformance_test_step", syntax, comments_removed)
 expected_conformance_test_body = compact('''
 vec![
@@ -622,8 +630,19 @@ if compact(conformance_test_items[0][1]) != expected_conformance_test_body:
     fail("crate verification must reuse the workspace-built conformance library target")
 run_steps_items = functions_named("run_steps", syntax, comments_removed)
 run_steps_body = compact(run_steps_items[0][1])
-if run_steps_body.count(compact("conformance_test_step(case)")) != 1:
-    fail("crate conformance verification must run after the concurrent Cargo batch without rebuilding the binary")
+expected_crate_batch_order = compact('''
+let mut command_batches = Vec::new();
+if let Some(case) = conformance_case {
+    command_batches.push(vec![(
+        env!("CARGO").to_owned(),
+        conformance_test_step(case),
+        format!("{subject} conformance case {case}"),
+    )]);
+}
+command_batches.push(commands);
+''')
+if run_steps_body.count(expected_crate_batch_order) != 1:
+    fail("crate conformance verification must run before clippy can invalidate its workspace-built target")
 for name in (
     "verify_full",
     "verify_operation",
