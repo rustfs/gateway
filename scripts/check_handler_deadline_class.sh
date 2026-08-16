@@ -26,6 +26,8 @@ authority = root / "crates/core/src/registry/mod.rs"
 registration = root / "crates/core/src/registry/reject.rs"
 config = root / "crates/gateway/src/config.rs"
 facade = root / "crates/gateway/src/lib.rs"
+dispatch = root / "crates/gateway/src/dispatch.rs"
+runtime = root / "crates/gateway/src/request_deadline.rs"
 ops_dir = root / "crates/core/src/ops"
 
 
@@ -42,6 +44,10 @@ if not config.is_file() or config.is_symlink():
     fail("handler deadline configuration is missing or not a regular file")
 if not facade.is_file() or facade.is_symlink():
     fail("handler deadline facade is missing or not a regular file")
+if not dispatch.is_file() or dispatch.is_symlink():
+    fail("handler deadline dispatch is missing or not a regular file")
+if not runtime.is_file() or runtime.is_symlink():
+    fail("handler deadline runtime is missing or not a regular file")
 if not ops_dir.is_dir() or ops_dir.is_symlink():
     fail("standard operation directory is missing or not a directory")
 
@@ -50,6 +56,8 @@ try:
     registration_source = registration.read_text(encoding="utf-8")
     config_source = config.read_text(encoding="utf-8")
     facade_source = facade.read_text(encoding="utf-8")
+    dispatch_source = dispatch.read_text(encoding="utf-8")
+    runtime_source = runtime.read_text(encoding="utf-8")
 except (OSError, UnicodeError) as error:
     fail(f"cannot read deadline-class source: {error}")
 
@@ -75,8 +83,11 @@ def function_body(text: str, function_signature: str, label: str) -> str:
 
 standard_default = "pub const DEFAULT_STANDARD_HANDLER_DEADLINE: Duration = Duration::from_secs(30);"
 extended_default = "pub const DEFAULT_EXTENDED_HANDLER_DEADLINE: Duration = Duration::from_secs(15 * 60);"
+cleanup_default = "const DEFAULT_HANDLER_CLEANUP_GRACE: Duration = Duration::from_secs(1);"
 if config_source.count(standard_default) != 1 or config_source.count(extended_default) != 1:
     fail("handler deadline defaults are not Standard=30s and Extended=15m")
+if config_source.count(cleanup_default) != 1:
+    fail("handler cleanup grace default is not one second")
 
 constructor_body = function_body(
     config_source,
@@ -94,6 +105,22 @@ zero_extended = """        if extended.is_zero() {
 if constructor_body.count(zero_standard) != 1 or constructor_body.count(zero_extended) != 1:
     fail("handler deadline configuration does not reject both zero durations")
 
+cleanup_body = function_body(
+    config_source,
+    "pub const fn try_with_cleanup_grace(mut self, cleanup_grace: Duration) -> Option<Self>",
+    "handler cleanup grace configuration",
+)
+zero_cleanup = """        if cleanup_grace.is_zero() {
+            return None;
+        }
+"""
+if (
+    cleanup_body.count(zero_cleanup) != 1
+    or cleanup_body.count("self.cleanup_grace = cleanup_grace;") != 1
+    or cleanup_body.count("Some(self)") != 1
+):
+    fail("handler cleanup grace is not validated and stored")
+
 duration_body = function_body(
     config_source,
     "pub const fn duration_for(self, class: HandlerDeadlineClass) -> Duration",
@@ -103,6 +130,45 @@ if duration_body.count("HandlerDeadlineClass::Standard => self.standard") != 1:
     fail("Standard handler deadline is not mapped to its configured duration")
 if duration_body.count("HandlerDeadlineClass::Extended => self.extended") != 1:
     fail("Extended handler deadline is not mapped to its configured duration")
+
+invoke_body = function_body(
+    dispatch_source,
+    "pub(crate) fn layered<O, B>(backend: Arc<B>, layers: Vec<Arc<dyn OpLayer<O>>>) -> Self",
+    "dynamic handler dispatch",
+)
+for required in (
+    "O::spec()\n                .deadline_class()",
+    "request_config.config().handler_deadline(deadline_class)",
+    "request_config.config().handler_cleanup_grace()",
+    "handler_with_deadline(call, deadline_cancellation, deadline, cleanup_grace)",
+):
+    if invoke_body.count(required) != 1:
+        fail("dynamic dispatch does not consume one request snapshot's handler deadline configuration")
+if invoke_body.count("handler deadline exceeded after cleanup completed") != 1:
+    fail("dynamic dispatch can commit a handler result completed after its deadline")
+if invoke_body.count("handler deadline exceeded before cleanup completed") != 1:
+    fail("dynamic dispatch does not distinguish an exhausted cleanup grace")
+
+runtime_body = function_body(runtime_source, "pub(crate) async fn handler_with_deadline<T>", "handler deadline race")
+deadline_poll = "if deadline.as_mut().poll(context).is_ready()"
+handler_output_poll = "if let Poll::Ready(output) = handler.as_mut().poll(context)"
+cancel = "cancellation.cancel(HandlerCancellation::Deadline);"
+grace_poll = "if grace.as_mut().poll(context).is_ready()"
+cleanup_poll = "if handler.as_mut().poll(context).is_ready()"
+for required in (deadline_poll, handler_output_poll, cancel, grace_poll, cleanup_poll):
+    if runtime_body.count(required) != 1:
+        fail("handler deadline race is missing a required poll or cancellation signal")
+if runtime_body.find(deadline_poll) > runtime_body.find(handler_output_poll):
+    fail("handler completion wins a simultaneous deadline race")
+if runtime_body.find(cancel) > runtime_body.find(grace_poll):
+    fail("handler cleanup grace starts before the deadline cancellation signal")
+if runtime_body.find(grace_poll) > runtime_body.find(cleanup_poll):
+    fail("handler cleanup completion wins an exhausted grace race")
+after_cancel = runtime_body.partition(cancel)[2]
+if handler_output_poll in after_cancel or "HandlerDeadlineOutcome::Completed(handler.await)" in after_cancel:
+    fail("a handler result completed after its deadline can be committed")
+if runtime_body.count("HandlerDeadlineOutcome::Expired { cleanup_completed }") != 1:
+    fail("handler deadline race does not report bounded cleanup completion")
 
 core_exports = facade_source.partition("pub use rustfs_gateway_core::{")[2].partition("};")[0]
 config_exports = facade_source.partition("pub use crate::config::{")[2].partition("};")[0]

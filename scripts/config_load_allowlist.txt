@@ -1,6 +1,7 @@
 crates/gateway/src/clock.rs:338
-crates/gateway/src/config.rs:182
-crates/gateway/src/config.rs:192
+crates/gateway/src/config.rs:214
+crates/gateway/src/config.rs:224
+crates/gateway/src/dispatch.rs:581
 crates/gateway/src/ext/authz_audit.rs:230
 crates/gateway/src/ext/cors.rs:108
 crates/gateway/src/ext/cors.rs:278
@@ -26,6 +27,6 @@ crates/gateway/src/ext/oplayer.rs:286
 crates/gateway/src/operation_mode.rs:314
 crates/gateway/src/probe.rs:60
 crates/gateway/src/probe.rs:69
-crates/gateway/src/request_deadline.rs:92
-crates/gateway/src/request_deadline.rs:99
+crates/gateway/src/request_deadline.rs:135
+crates/gateway/src/request_deadline.rs:142
 crates/gateway/src/service.rs:301

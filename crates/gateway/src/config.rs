@@ -26,12 +26,14 @@ use rustfs_gateway_core::HandlerDeadlineClass;
 pub const DEFAULT_STANDARD_HANDLER_DEADLINE: Duration = Duration::from_secs(30);
 /// Default deadline for operations whose declared work is legitimately longer.
 pub const DEFAULT_EXTENDED_HANDLER_DEADLINE: Duration = Duration::from_secs(15 * 60);
+const DEFAULT_HANDLER_CLEANUP_GRACE: Duration = Duration::from_secs(1);
 
 /// Validated durations for the closed handler deadline classes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct HandlerDeadlineConfig {
     standard: Duration,
     extended: Duration,
+    cleanup_grace: Duration,
 }
 
 impl HandlerDeadlineConfig {
@@ -48,7 +50,29 @@ impl HandlerDeadlineConfig {
         if extended.is_zero() {
             return Err(HandlerDeadlineConfigError::ZeroExtended);
         }
-        Ok(Self { standard, extended })
+        Ok(Self {
+            standard,
+            extended,
+            cleanup_grace: DEFAULT_HANDLER_CLEANUP_GRACE,
+        })
+    }
+
+    /// Replaces the bounded cleanup grace after the framework signals a handler deadline.
+    ///
+    /// Returns `None` when `cleanup_grace` is zero.
+    #[must_use]
+    pub const fn try_with_cleanup_grace(mut self, cleanup_grace: Duration) -> Option<Self> {
+        if cleanup_grace.is_zero() {
+            return None;
+        }
+        self.cleanup_grace = cleanup_grace;
+        Some(self)
+    }
+
+    /// Returns the bounded cleanup grace after a handler deadline is signalled.
+    #[must_use]
+    pub const fn cleanup_grace(self) -> Duration {
+        self.cleanup_grace
     }
 
     /// Returns the configured duration for one closed operation class.
@@ -66,6 +90,7 @@ impl Default for HandlerDeadlineConfig {
         Self {
             standard: DEFAULT_STANDARD_HANDLER_DEADLINE,
             extended: DEFAULT_EXTENDED_HANDLER_DEADLINE,
+            cleanup_grace: DEFAULT_HANDLER_CLEANUP_GRACE,
         }
     }
 }
@@ -108,6 +133,7 @@ impl ServiceConfig {
             handler_deadlines: HandlerDeadlineConfig {
                 standard: DEFAULT_STANDARD_HANDLER_DEADLINE,
                 extended: DEFAULT_EXTENDED_HANDLER_DEADLINE,
+                cleanup_grace: DEFAULT_HANDLER_CLEANUP_GRACE,
             },
         }
     }
@@ -175,6 +201,12 @@ impl ServiceConfig {
     pub const fn handler_deadline(&self, class: HandlerDeadlineClass) -> Duration {
         self.handler_deadlines.duration_for(class)
     }
+
+    /// Returns the bounded cleanup grace after a handler deadline is signalled.
+    #[must_use]
+    pub const fn handler_cleanup_grace(&self) -> Duration {
+        self.handler_deadlines.cleanup_grace()
+    }
 }
 
 #[cfg(test)]
@@ -211,10 +243,11 @@ mod tests {
         let configured = HandlerDeadlineConfig {
             standard: std::time::Duration::from_secs(3),
             extended: std::time::Duration::from_secs(90),
+            cleanup_grace: DEFAULT_HANDLER_CLEANUP_GRACE,
         };
         assert_eq!(
             HandlerDeadlineConfig::new(std::time::Duration::from_secs(3), std::time::Duration::from_secs(90)),
-            Ok(configured)
+            Ok(configured),
         );
         let service = ServiceConfig::new(8).with_handler_deadlines(configured);
         assert_eq!(
@@ -241,6 +274,21 @@ mod tests {
             HandlerDeadlineConfig::new(std::time::Duration::from_secs(1), std::time::Duration::ZERO),
             Err(HandlerDeadlineConfigError::ZeroExtended),
         );
+    }
+
+    #[test]
+    fn handler_cleanup_grace_is_non_zero_and_configurable() {
+        let defaults = HandlerDeadlineConfig::default();
+        assert_eq!(defaults.cleanup_grace(), std::time::Duration::from_secs(1));
+
+        let configured = defaults.try_with_cleanup_grace(std::time::Duration::from_millis(75));
+        assert!(configured.is_some());
+        let configured = configured.unwrap_or(defaults);
+        assert_eq!(configured.cleanup_grace(), std::time::Duration::from_millis(75));
+        assert_eq!(configured.try_with_cleanup_grace(std::time::Duration::ZERO), None,);
+
+        let service = ServiceConfig::new(8).with_handler_deadlines(configured);
+        assert_eq!(service.handler_cleanup_grace(), std::time::Duration::from_millis(75));
     }
 
     // a-asm-0006: stable load anchors prove replacement cannot split the entry snapshot.
