@@ -147,7 +147,16 @@ static ACME: DialectOverlay = DialectOverlay {
 struct Acme;
 
 impl Handler<HeadObjectReport> for Acme {
-    async fn call(&self, _request: Req<HeadObjectReport>) -> HandlerResult<HeadObjectReport> {
+    async fn call(&self, request: Req<HeadObjectReport>) -> HandlerResult<HeadObjectReport> {
+        let (_source, context) = rustfs_gateway_core::HandlerCancellationSource::pair();
+        self.call_with_context(request, context).await
+    }
+
+    async fn call_with_context(
+        &self,
+        _request: Req<HeadObjectReport>,
+        _context: rustfs_gateway_core::HandlerContext,
+    ) -> HandlerResult<HeadObjectReport> {
         Ok(Resp::new(()))
     }
 }

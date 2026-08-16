@@ -69,7 +69,16 @@ impl Fs {
 }
 
 impl Handler<GetBucketLocation> for Fs {
-    fn call(&self, _request: Req<GetBucketLocation>) -> impl Future<Output = HandlerResult<GetBucketLocation>> + Send {
+    async fn call(&self, request: Req<GetBucketLocation>) -> HandlerResult<GetBucketLocation> {
+        let (_source, context) = rustfs_gateway_core::HandlerCancellationSource::pair();
+        self.call_with_context(request, context).await
+    }
+
+    fn call_with_context(
+        &self,
+        _request: Req<GetBucketLocation>,
+        _context: rustfs_gateway_core::HandlerContext,
+    ) -> impl Future<Output = HandlerResult<GetBucketLocation>> + Send {
         let region = self.region;
         async move {
             Ok(Resp::new(GetBucketLocationOutput {
@@ -80,14 +89,32 @@ impl Handler<GetBucketLocation> for Fs {
 }
 
 impl Handler<PutObject> for Fs {
-    async fn call(&self, _request: Req<PutObject>) -> HandlerResult<PutObject> {
+    async fn call(&self, request: Req<PutObject>) -> HandlerResult<PutObject> {
+        let (_source, context) = rustfs_gateway_core::HandlerCancellationSource::pair();
+        self.call_with_context(request, context).await
+    }
+
+    async fn call_with_context(
+        &self,
+        _request: Req<PutObject>,
+        _context: rustfs_gateway_core::HandlerContext,
+    ) -> HandlerResult<PutObject> {
         Ok(Resp::new(PutObjectOutput::default()))
     }
 }
 
 /// Answers with a status the spec does not declare, which is what `Resp::with_status` is for.
 impl Handler<UploadPart> for Fs {
-    async fn call(&self, _request: Req<UploadPart>) -> HandlerResult<UploadPart> {
+    async fn call(&self, request: Req<UploadPart>) -> HandlerResult<UploadPart> {
+        let (_source, context) = rustfs_gateway_core::HandlerCancellationSource::pair();
+        self.call_with_context(request, context).await
+    }
+
+    async fn call_with_context(
+        &self,
+        _request: Req<UploadPart>,
+        _context: rustfs_gateway_core::HandlerContext,
+    ) -> HandlerResult<UploadPart> {
         Ok(Resp::with_status(UploadPartOutput::default(), 206))
     }
 }

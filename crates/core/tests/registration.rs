@@ -88,7 +88,15 @@ impl Fs {
 }
 
 impl Handler<GetBucketLocation> for Fs {
-    fn call(&self, request: Req<GetBucketLocation>) -> impl Future<Output = HandlerResult<GetBucketLocation>> + Send {
+    async fn call(&self, request: Req<GetBucketLocation>) -> HandlerResult<GetBucketLocation> {
+        let (_source, context) = rustfs_gateway_core::HandlerCancellationSource::pair();
+        self.call_with_context(request, context).await
+    }
+    fn call_with_context(
+        &self,
+        request: Req<GetBucketLocation>,
+        _context: rustfs_gateway_core::HandlerContext,
+    ) -> impl Future<Output = HandlerResult<GetBucketLocation>> + Send {
         self.calls.fetch_add(1, Ordering::Relaxed);
         let region = self.region;
         let _ = request.input();
@@ -101,7 +109,15 @@ impl Handler<GetBucketLocation> for Fs {
 }
 
 impl Handler<PutObject> for Fs {
-    fn call(&self, _request: Req<PutObject>) -> impl Future<Output = HandlerResult<PutObject>> + Send {
+    async fn call(&self, request: Req<PutObject>) -> HandlerResult<PutObject> {
+        let (_source, context) = rustfs_gateway_core::HandlerCancellationSource::pair();
+        self.call_with_context(request, context).await
+    }
+    fn call_with_context(
+        &self,
+        _request: Req<PutObject>,
+        _context: rustfs_gateway_core::HandlerContext,
+    ) -> impl Future<Output = HandlerResult<PutObject>> + Send {
         self.calls.fetch_add(1, Ordering::Relaxed);
         async move { Err(HandlerError::internal_error("this backend is read only")) }
     }
@@ -149,7 +165,15 @@ impl Operation for AdminSetConfig {
 /// one. The macro generates the second form, since its body is a delegation rather than an `async`
 /// block; a hand-written handler is free to take the shorter one.
 impl Handler<AdminSetConfig> for Fs {
-    async fn call(&self, _request: Req<AdminSetConfig>) -> HandlerResult<AdminSetConfig> {
+    async fn call(&self, request: Req<AdminSetConfig>) -> HandlerResult<AdminSetConfig> {
+        let (_source, context) = rustfs_gateway_core::HandlerCancellationSource::pair();
+        self.call_with_context(request, context).await
+    }
+    async fn call_with_context(
+        &self,
+        _request: Req<AdminSetConfig>,
+        _context: rustfs_gateway_core::HandlerContext,
+    ) -> HandlerResult<AdminSetConfig> {
         Ok(Resp::new(()))
     }
 }
@@ -194,7 +218,15 @@ macro_rules! bad_operation {
         };
 
         impl Handler<$ident> for Fs {
-            fn call(&self, _request: Req<$ident>) -> impl Future<Output = HandlerResult<$ident>> + Send {
+            async fn call(&self, request: Req<$ident>) -> HandlerResult<$ident> {
+                let (_source, context) = rustfs_gateway_core::HandlerCancellationSource::pair();
+                self.call_with_context(request, context).await
+            }
+            fn call_with_context(
+                &self,
+                _request: Req<$ident>,
+                _context: rustfs_gateway_core::HandlerContext,
+            ) -> impl Future<Output = HandlerResult<$ident>> + Send {
                 async move { Ok(Resp::new(())) }
             }
         }
