@@ -24,7 +24,9 @@
 //! whitespace, paired empty elements, escaping — are only observable that way.
 
 use crate::error::XmlError;
-use crate::read::parse;
+use crate::read::{
+    MAX_ATTRIBUTE_BYTES, MAX_ATTRIBUTES_PER_ELEMENT, MAX_DEPTH, MAX_ELEMENTS, XmlLimits, parse, parse_with_limits,
+};
 use crate::write::{DECLARATION, S3_XMLNS, XmlWriter, strip_declaration};
 
 // ---------------------------------------------------------------------------------------------
@@ -188,6 +190,19 @@ fn reads_a_nested_body_into_a_tree() {
 }
 
 #[test]
+fn c_lim_0003_reads_a_body_at_depth_thirty() {
+    let mut body = String::new();
+    for _ in 0..30 {
+        body.push_str("<A>");
+    }
+    for _ in 0..30 {
+        body.push_str("</A>");
+    }
+
+    assert!(parse(body.as_bytes()).is_ok());
+}
+
+#[test]
 fn reads_a_prefixed_element_under_its_local_name() {
     let root = parse(b"<s3:Delete xmlns:s3=\"urn:x\"><s3:Quiet>true</s3:Quiet></s3:Delete>").expect("parses");
     assert_eq!(root.name, "Delete");
@@ -201,7 +216,7 @@ fn n_refuses_a_doctype_declaration() {
 }
 
 #[test]
-fn n_refuses_an_external_entity_reference() {
+fn c_lim_0025_refuses_an_external_entity_reference() {
     let body = b"<Delete><Quiet>&xxe;</Quiet></Delete>";
     assert!(matches!(parse(body), Err(XmlError::UnsupportedEntity) | Err(XmlError::Malformed)));
 }
@@ -222,25 +237,59 @@ fn n_refuses_an_empty_body() {
 }
 
 #[test]
-fn n_refuses_a_body_that_nests_past_the_depth_ceiling() {
+fn c_lim_0023_refuses_a_body_that_nests_past_the_depth_ceiling() {
     let mut body = String::new();
-    for _ in 0..64 {
+    for _ in 0..=MAX_DEPTH {
         body.push_str("<A>");
     }
-    for _ in 0..64 {
+    for _ in 0..=MAX_DEPTH {
         body.push_str("</A>");
     }
     assert_eq!(parse(body.as_bytes()), Err(XmlError::TooDeep));
 }
 
 #[test]
-fn n_refuses_a_body_with_more_elements_than_the_ceiling() {
+fn c_lim_0024_refuses_a_body_with_more_elements_than_the_ceiling() {
     let mut body = String::from("<Delete>");
-    for _ in 0..40_000 {
-        body.push_str("<Object></Object>");
+    for _ in 0..MAX_ELEMENTS {
+        body.push_str("<Object/>");
     }
     body.push_str("</Delete>");
     assert_eq!(parse(body.as_bytes()), Err(XmlError::TooManyElements));
+}
+
+#[test]
+fn n_refuses_a_body_larger_than_the_configured_ceiling() {
+    let limits = XmlLimits::new(8, MAX_DEPTH, MAX_ELEMENTS, MAX_ATTRIBUTES_PER_ELEMENT, MAX_ATTRIBUTE_BYTES)
+        .expect("all limits are non-zero");
+    assert_eq!(parse_with_limits(b"<Root></Root>", limits), Err(XmlError::BodyTooLarge));
+}
+
+#[test]
+fn n_refuses_more_attributes_than_one_element_may_hold() {
+    let mut body = String::from("<Root");
+    for index in 0..=MAX_ATTRIBUTES_PER_ELEMENT {
+        body.push_str(&format!(" a{index}=\"x\""));
+    }
+    body.push_str("></Root>");
+
+    assert_eq!(parse(body.as_bytes()), Err(XmlError::TooManyAttributes));
+}
+
+#[test]
+fn c_lim_0026_refuses_an_attribute_value_larger_than_the_ceiling() {
+    let value = "x".repeat(MAX_ATTRIBUTE_BYTES + 1);
+    let body = format!("<Root value=\"{value}\"></Root>");
+    assert_eq!(parse(body.as_bytes()), Err(XmlError::AttributeTooLong));
+}
+
+#[test]
+fn n_zero_xml_limits_are_not_constructible() {
+    assert!(XmlLimits::new(0, MAX_DEPTH, MAX_ELEMENTS, MAX_ATTRIBUTES_PER_ELEMENT, MAX_ATTRIBUTE_BYTES).is_none());
+    assert!(XmlLimits::new(1, 0, MAX_ELEMENTS, MAX_ATTRIBUTES_PER_ELEMENT, MAX_ATTRIBUTE_BYTES).is_none());
+    assert!(XmlLimits::new(1, MAX_DEPTH, 0, MAX_ATTRIBUTES_PER_ELEMENT, MAX_ATTRIBUTE_BYTES).is_none());
+    assert!(XmlLimits::new(1, MAX_DEPTH, MAX_ELEMENTS, 0, MAX_ATTRIBUTE_BYTES).is_none());
+    assert!(XmlLimits::new(1, MAX_DEPTH, MAX_ELEMENTS, MAX_ATTRIBUTES_PER_ELEMENT, 0).is_none());
 }
 
 #[test]

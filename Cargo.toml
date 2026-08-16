@@ -25,7 +25,7 @@ rustfs-gateway-sig = { path = "crates/sig", version = "0.5.3" }
 rustfs-gateway-server = { path = "crates/server", version = "0.1.0" }
 rustfs-gateway-stream = { path = "crates/stream", version = "0.1.0" }
 rustfs-gateway-types = { path = "crates/types", version = "0.2.1" }
-rustfs-gateway-xml = { path = "crates/xml", version = "0.1.0" }
+rustfs-gateway-xml = { path = "crates/xml", version = "0.2.0" }
 
 # Third-party. Versions verified against crates.io on 2026-08-05; MSRV 1.97.1 constrains this set.
 # `aws-sigv4` is deliberately absent: its server-side verification has measured defects; see

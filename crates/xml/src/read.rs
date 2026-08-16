@@ -33,23 +33,109 @@
 //! reason: the cap on body bytes does not bound the tree a body can describe.
 
 use quick_xml::Reader;
-use quick_xml::events::Event;
+use quick_xml::events::{BytesStart, Event};
 
 use crate::error::XmlError;
 
+/// How many buffered bytes one XML request body may hold.
+pub const MAX_BODY_BYTES: usize = 1024 * 1024;
+
 /// How deep a request body may nest.
 ///
-/// The deepest shape in the supported surface is a list of structures inside the root, which is
-/// three. Sixteen leaves room for a family that has not landed yet without leaving room for a
-/// body whose only purpose is its depth.
-pub const MAX_DEPTH: usize = 16;
+/// The deepest supported shapes use only a small fraction of this budget; the separate ceiling
+/// prevents a compact body from manufacturing an arbitrarily deep tree.
+pub const MAX_DEPTH: usize = 32;
 
 /// How many elements a request body may hold.
 ///
 /// A `DeleteObjects` request is the largest legitimate one, and AWS caps it at a thousand keys of
 /// up to five members each. The ceiling is that, with room to answer over it with a protocol error
 /// rather than a parse error.
-pub const MAX_ELEMENTS: usize = 32_768;
+pub const MAX_ELEMENTS: usize = 100_000;
+
+/// How many attributes one element may carry.
+pub const MAX_ATTRIBUTES_PER_ELEMENT: usize = 32;
+
+/// How many bytes one attribute value may carry.
+pub const MAX_ATTRIBUTE_BYTES: usize = 4 * 1024;
+
+/// Independent allocation ceilings applied while an XML request body is parsed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct XmlLimits {
+    max_body_bytes: usize,
+    max_depth: usize,
+    max_elements: usize,
+    max_attributes_per_element: usize,
+    max_attribute_bytes: usize,
+}
+
+impl XmlLimits {
+    /// The bounded S3 request-body posture.
+    pub const S3: Self = Self {
+        max_body_bytes: MAX_BODY_BYTES,
+        max_depth: MAX_DEPTH,
+        max_elements: MAX_ELEMENTS,
+        max_attributes_per_element: MAX_ATTRIBUTES_PER_ELEMENT,
+        max_attribute_bytes: MAX_ATTRIBUTE_BYTES,
+    };
+
+    /// Builds a limit set, rejecting zero rather than treating it as unlimited.
+    #[must_use]
+    pub const fn new(
+        max_body_bytes: usize,
+        max_depth: usize,
+        max_elements: usize,
+        max_attributes_per_element: usize,
+        max_attribute_bytes: usize,
+    ) -> Option<Self> {
+        if max_body_bytes == 0
+            || max_depth == 0
+            || max_elements == 0
+            || max_attributes_per_element == 0
+            || max_attribute_bytes == 0
+        {
+            None
+        } else {
+            Some(Self {
+                max_body_bytes,
+                max_depth,
+                max_elements,
+                max_attributes_per_element,
+                max_attribute_bytes,
+            })
+        }
+    }
+
+    /// Maximum buffered document size in bytes.
+    #[must_use]
+    pub const fn max_body_bytes(self) -> usize {
+        self.max_body_bytes
+    }
+
+    /// Maximum nesting depth.
+    #[must_use]
+    pub const fn max_depth(self) -> usize {
+        self.max_depth
+    }
+
+    /// Maximum element count.
+    #[must_use]
+    pub const fn max_elements(self) -> usize {
+        self.max_elements
+    }
+
+    /// Maximum attributes on one element.
+    #[must_use]
+    pub const fn max_attributes_per_element(self) -> usize {
+        self.max_attributes_per_element
+    }
+
+    /// Maximum bytes in one attribute value.
+    #[must_use]
+    pub const fn max_attribute_bytes(self) -> usize {
+        self.max_attribute_bytes
+    }
+}
 
 /// One element of a parsed body.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -87,6 +173,18 @@ impl XmlNode {
 ///
 /// [`XmlError`], one variant per refusal. No variant carries a fragment of the input.
 pub fn parse(body: &[u8]) -> Result<XmlNode, XmlError> {
+    parse_with_limits(body, XmlLimits::S3)
+}
+
+/// Parses a buffered body under an explicit, non-zero limit set.
+///
+/// # Errors
+///
+/// [`XmlError`], one variant per refusal. No variant carries a fragment of the input.
+pub fn parse_with_limits(body: &[u8], limits: XmlLimits) -> Result<XmlNode, XmlError> {
+    if body.len() > limits.max_body_bytes {
+        return Err(XmlError::BodyTooLarge);
+    }
     let text = core::str::from_utf8(body).map_err(|_| XmlError::NotUtf8)?;
     let mut reader = Reader::from_str(text);
     let config = reader.config_mut();
@@ -104,12 +202,13 @@ pub fn parse(body: &[u8]) -> Result<XmlNode, XmlError> {
             Ok(Event::DocType(_)) => return Err(XmlError::DocTypeDeclaration),
             Ok(Event::Start(start)) => {
                 elements = elements.saturating_add(1);
-                if elements > MAX_ELEMENTS {
+                if elements > limits.max_elements {
                     return Err(XmlError::TooManyElements);
                 }
-                if stack.len() >= MAX_DEPTH {
+                if stack.len() >= limits.max_depth {
                     return Err(XmlError::TooDeep);
                 }
+                check_attributes(&start, limits)?;
                 stack.push(XmlNode {
                     name: local_name(start.name().as_ref())?,
                     ..XmlNode::default()
@@ -117,9 +216,10 @@ pub fn parse(body: &[u8]) -> Result<XmlNode, XmlError> {
             }
             Ok(Event::Empty(empty)) => {
                 elements = elements.saturating_add(1);
-                if elements > MAX_ELEMENTS {
+                if elements > limits.max_elements {
                     return Err(XmlError::TooManyElements);
                 }
+                check_attributes(&empty, limits)?;
                 let node = XmlNode {
                     name: local_name(empty.name().as_ref())?,
                     ..XmlNode::default()
@@ -188,6 +288,21 @@ pub fn parse(body: &[u8]) -> Result<XmlNode, XmlError> {
         return Err(XmlError::Malformed);
     }
     root.ok_or(XmlError::Empty)
+}
+
+fn check_attributes(start: &BytesStart<'_>, limits: XmlLimits) -> Result<(), XmlError> {
+    let mut count = 0usize;
+    for attribute in start.attributes() {
+        let attribute = attribute.map_err(|_| XmlError::Malformed)?;
+        count = count.saturating_add(1);
+        if count > limits.max_attributes_per_element {
+            return Err(XmlError::TooManyAttributes);
+        }
+        if attribute.value.as_ref().len() > limits.max_attribute_bytes {
+            return Err(XmlError::AttributeTooLong);
+        }
+    }
+    Ok(())
 }
 
 /// The five entities XML defines without a DTD. There is no sixth, by design.
