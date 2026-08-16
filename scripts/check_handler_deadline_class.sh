@@ -24,6 +24,8 @@ from pathlib import Path
 root = Path(sys.argv[1])
 authority = root / "crates/core/src/registry/mod.rs"
 registration = root / "crates/core/src/registry/reject.rs"
+config = root / "crates/gateway/src/config.rs"
+facade = root / "crates/gateway/src/lib.rs"
 ops_dir = root / "crates/core/src/ops"
 
 
@@ -36,12 +38,18 @@ if not authority.is_file() or authority.is_symlink():
     fail("deadline-class authority is missing or not a regular file")
 if not registration.is_file() or registration.is_symlink():
     fail("registration deadline check is missing or not a regular file")
+if not config.is_file() or config.is_symlink():
+    fail("handler deadline configuration is missing or not a regular file")
+if not facade.is_file() or facade.is_symlink():
+    fail("handler deadline facade is missing or not a regular file")
 if not ops_dir.is_dir() or ops_dir.is_symlink():
     fail("standard operation directory is missing or not a directory")
 
 try:
     source = authority.read_text(encoding="utf-8")
     registration_source = registration.read_text(encoding="utf-8")
+    config_source = config.read_text(encoding="utf-8")
+    facade_source = facade.read_text(encoding="utf-8")
 except (OSError, UnicodeError) as error:
     fail(f"cannot read deadline-class source: {error}")
 
@@ -63,6 +71,51 @@ def function_body(text: str, function_signature: str, label: str) -> str:
     if depth:
         fail(f"{label} function has unbalanced braces")
     return text[start + 1 : index - 1]
+
+
+standard_default = "pub const DEFAULT_STANDARD_HANDLER_DEADLINE: Duration = Duration::from_secs(30);"
+extended_default = "pub const DEFAULT_EXTENDED_HANDLER_DEADLINE: Duration = Duration::from_secs(15 * 60);"
+if config_source.count(standard_default) != 1 or config_source.count(extended_default) != 1:
+    fail("handler deadline defaults are not Standard=30s and Extended=15m")
+
+constructor_body = function_body(
+    config_source,
+    "pub const fn new(standard: Duration, extended: Duration) -> Result<Self, HandlerDeadlineConfigError>",
+    "handler deadline configuration constructor",
+)
+zero_standard = """        if standard.is_zero() {
+            return Err(HandlerDeadlineConfigError::ZeroStandard);
+        }
+"""
+zero_extended = """        if extended.is_zero() {
+            return Err(HandlerDeadlineConfigError::ZeroExtended);
+        }
+"""
+if constructor_body.count(zero_standard) != 1 or constructor_body.count(zero_extended) != 1:
+    fail("handler deadline configuration does not reject both zero durations")
+
+duration_body = function_body(
+    config_source,
+    "pub const fn duration_for(self, class: HandlerDeadlineClass) -> Duration",
+    "handler deadline class mapping",
+)
+if duration_body.count("HandlerDeadlineClass::Standard => self.standard") != 1:
+    fail("Standard handler deadline is not mapped to its configured duration")
+if duration_body.count("HandlerDeadlineClass::Extended => self.extended") != 1:
+    fail("Extended handler deadline is not mapped to its configured duration")
+
+core_exports = facade_source.partition("pub use rustfs_gateway_core::{")[2].partition("};")[0]
+config_exports = facade_source.partition("pub use crate::config::{")[2].partition("};")[0]
+if not core_exports or "HandlerDeadlineClass" not in core_exports.replace("\n", " ").replace(",", " ").split():
+    fail("facade does not export HandlerDeadlineClass")
+for exported in (
+    "HandlerDeadlineConfig",
+    "HandlerDeadlineConfigError",
+    "DEFAULT_STANDARD_HANDLER_DEADLINE",
+    "DEFAULT_EXTENDED_HANDLER_DEADLINE",
+):
+    if exported not in config_exports.replace("\n", " ").replace(",", " ").split():
+        fail(f"facade does not export {exported}")
 
 
 check_spec_body = function_body(

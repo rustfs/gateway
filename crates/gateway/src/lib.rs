@@ -114,7 +114,10 @@ pub use crate::clock::{
     SystemMonotonic, system_clock,
 };
 pub use crate::close::ConnectionIntent;
-pub use crate::config::{ConfigHandle, ConfigSnapshot, ServiceConfig};
+pub use crate::config::{
+    ConfigHandle, ConfigSnapshot, DEFAULT_EXTENDED_HANDLER_DEADLINE, DEFAULT_STANDARD_HANDLER_DEADLINE, HandlerDeadlineConfig,
+    HandlerDeadlineConfigError, ServiceConfig,
+};
 pub use crate::ext::{
     Addressing, AuthSchemeRef, Authentication, AuthenticationOutcome, Authenticator, Authorizer, AuthzAuditEvent, AuthzAuditSink,
     AuthzRequest, AuthzStage, BaseDomain, CORS_PREFLIGHT, CachedCorsSource, ChunkSink, ChunkVerification, ClassKind, ClientAddr,
@@ -159,7 +162,7 @@ pub use rustfs_gateway_types::dto;
 pub use rustfs_gateway_core::{
     Answer, ArnForm, AuthRequirement, Authorized, BodyPolicy, BoxFuture, CodecError, CommitOutcome, CommitWork,
     DerivedResourceError, ELEMENT_ORDER, EncodedResponse, ErrorContext, ErrorDetail, ErrorHeader, ErrorResolution, Handler,
-    HandlerCancellation, HandlerContext, HandlerError, HandlerErrorContext, HandlerResult, HasOperation, HostClass,
+    HandlerCancellation, HandlerContext, HandlerDeadlineClass, HandlerError, HandlerErrorContext, HandlerResult, HasOperation,
     InvalidErrorContext, MetaView, MissingHandlers, MissingObject, NoDerived, Operation, OperationCodec, OperationSet,
     OperationSpec, PRECONDITION_FAILED_MESSAGE, ParamKind, PreAuthError, Predicate, RANGE_NOT_SATISFIABLE_MESSAGE, Req,
     RequestBody, RequiredParam, ResourceIdentity, ResourceShape, ResourceVisibility, Resp, ResponseBody, ResponseKind,
