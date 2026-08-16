@@ -125,8 +125,10 @@ fn conformance_fast_scope_keeps_integration_contracts_in_the_workspace_gate() {
 
 #[test]
 fn core_fast_scope_runs_both_runtime_targets_concurrently() {
-    let steps = crate_steps("rustfs-gateway-core");
+    let batches = crate_step_batches("rustfs-gateway-core");
+    let steps = &batches[0];
 
+    assert_eq!(batches.len(), 1);
     assert_eq!(steps.len(), 2);
     assert_eq!(
         steps[0],
@@ -151,6 +153,41 @@ fn core_fast_scope_runs_both_runtime_targets_concurrently() {
             .into_iter()
             .map(str::to_owned)
             .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn facade_fast_scope_keeps_heavy_contracts_in_the_workspace_gate() {
+    let batches = crate_step_batches("rustfs-gateway");
+
+    assert_eq!(batches.len(), 1);
+    assert_eq!(batches[0].len(), 2);
+    assert_eq!(batches[0][1][0], "clippy");
+    assert_eq!(standalone_crate_case("rustfs-gateway"), None);
+    assert_eq!(
+        batches[0][0],
+        [
+            "test",
+            "-p",
+            "rustfs-gateway",
+            "--",
+            "--skip",
+            "compile_fail::gateway_compile_fail_contracts_are_enforced",
+            "--skip",
+            GATEWAY_RSS_TEST,
+        ]
+        .into_iter()
+        .map(str::to_owned)
+        .collect::<Vec<_>>()
+    );
+    assert!(
+        include_str!("../../../crates/conformance/src/cli.rs").contains("fn feedback_case_c_object_0001()"),
+        "the workspace-only representative conformance case must remain active"
+    );
+    assert!(
+        include_str!("../../../crates/gateway/tests/cors_runtime.rs")
+            .contains("fn a_million_unique_keys_keep_rss_within_the_entry_budget()"),
+        "the workspace-only RSS contract must remain an active test"
     );
 }
 

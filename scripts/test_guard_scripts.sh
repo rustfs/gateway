@@ -1548,89 +1548,69 @@ mut_xtask_gateway_fast_scope_drops_its_conformance_case() {
     python3 - <<'PYEOF'
 from pathlib import Path
 
-path = Path("xtask/src/verify.rs")
+path = Path("crates/conformance/src/cli.rs")
 text = path.read_text()
-old = "            conformance_case: crate_case(&package),"
-new = "            conformance_case: None,"
+old = "    fn feedback_case_c_object_0001() {"
+new = "    fn feedback_case_c_object_0001_removed() {"
 if text.count(old) != 1:
-    raise SystemExit("sequential crate conformance case is missing")
+    raise SystemExit("workspace-only gateway conformance case is missing")
 path.write_text(text.replace(old, new, 1))
 PYEOF
 }
 expect_fail check_xtask_codegen_surface.sh \
-    'the gateway fast scope dropping its conformance case' \
+    'the workspace gate dropping the gateway representative conformance case' \
     mut_xtask_gateway_fast_scope_drops_its_conformance_case
 
-mut_xtask_gateway_conformance_rejoins_concurrent_cargo() {
+mut_xtask_gateway_fast_scope_runs_rss_stress() {
     python3 - <<'PYEOF'
 from pathlib import Path
 
 path = Path("xtask/src/verify.rs")
 text = path.read_text()
-old = "    let steps = crate_steps(&package);"
-new = '''    let mut steps = crate_steps(&package);
-    if let Some(case) = crate_case(&package) {
-        steps.push(conformance_step("validate", case));
-    }'''
+old = '    test.extend(["--skip".to_owned(), GATEWAY_RSS_TEST.to_owned()]);'
+new = ""
 if text.count(old) != 1:
-    raise SystemExit("bounded crate step construction is missing")
+    raise SystemExit("gateway RSS fast-scope exclusion is missing")
 path.write_text(text.replace(old, new, 1))
 PYEOF
 }
 expect_fail check_xtask_codegen_surface.sh \
-    'the gateway conformance case rejoining concurrent Cargo processes' \
-    mut_xtask_gateway_conformance_rejoins_concurrent_cargo
+    'the gateway fast scope rerunning its million-key workspace stress contract' \
+    mut_xtask_gateway_fast_scope_runs_rss_stress
 
-mut_xtask_conformance_runs_after_clippy() {
+mut_xtask_gateway_conformance_runs_twice() {
     python3 - <<'PYEOF'
 from pathlib import Path
 
 path = Path("xtask/src/verify.rs")
 text = path.read_text()
-old = '''    let mut command_batches = Vec::new();
-    if let Some(case) = conformance_case {
-        command_batches.push(vec![(
-            env!("CARGO").to_owned(),
-            conformance_test_step(case),
-            format!("{subject} conformance case {case}"),
-        )]);
-    }
-    command_batches.push(commands);
-'''
-new = '''    let mut command_batches = vec![commands];
-    if let Some(case) = conformance_case {
-        command_batches.push(vec![(
-            env!("CARGO").to_owned(),
-            conformance_test_step(case),
-            format!("{subject} conformance case {case}"),
-        )]);
-    }
-'''
+old = '(package != "rustfs-gateway").then(|| crate_case(package)).flatten()'
+new = 'crate_case(package)'
 if text.count(old) != 1:
-    raise SystemExit("pre-clippy conformance batch is missing")
+    raise SystemExit("gateway standalone conformance suppression is missing")
 path.write_text(text.replace(old, new, 1))
 PYEOF
 }
 expect_fail check_xtask_codegen_surface.sh \
-    'the crate conformance case moving after clippy invalidates its target' \
-    mut_xtask_conformance_runs_after_clippy
+    'the representative conformance case rejoining the gateway fast scope' \
+    mut_xtask_gateway_conformance_runs_twice
 
-mut_xtask_gateway_conformance_rebuilds_its_binary() {
+mut_xtask_gateway_rss_contract_disappears() {
     python3 - <<'PYEOF'
 from pathlib import Path
 
-path = Path("xtask/src/verify.rs")
+path = Path("crates/gateway/tests/cors_runtime.rs")
 text = path.read_text()
-old = "            conformance_test_step(case),"
-new = '            conformance_step("validate", case),'
+old = "fn a_million_unique_keys_keep_rss_within_the_entry_budget() {"
+new = "fn a_million_unique_keys_keep_rss_within_the_entry_budget_removed() {"
 if text.count(old) != 1:
-    raise SystemExit("workspace-built conformance test step is missing")
+    raise SystemExit("workspace-only gateway RSS contract is missing")
 path.write_text(text.replace(old, new, 1))
 PYEOF
 }
 expect_fail check_xtask_codegen_surface.sh \
-    'the gateway conformance case rebuilding its standalone binary' \
-    mut_xtask_gateway_conformance_rebuilds_its_binary
+    'the workspace gate dropping the gateway million-key RSS contract' \
+    mut_xtask_gateway_rss_contract_disappears
 
 mut_xtask_core_fast_scope_renames_compile_fail_skip() {
     python3 - <<'PYEOF'

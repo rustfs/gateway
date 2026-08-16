@@ -31,6 +31,8 @@ use serde::Deserialize;
 #[cfg(feature = "full")]
 use crate::{catalog, codegen};
 
+const GATEWAY_RSS_TEST: &str = "cors_runtime::a_million_unique_keys_keep_rss_within_the_entry_budget";
+
 #[cfg(not(feature = "full"))]
 pub(crate) fn is_crate_request(args: &[String]) -> bool {
     let (args, _) = take_json(args);
@@ -64,16 +66,20 @@ fn verify_crate(name: &str, json: bool) -> ExitCode {
             return diagnostic("workspace package could not be resolved", &format!("crate {name}"), &error.to_string());
         }
     };
-    let steps = crate_steps(&package);
-    let subject = if matches!(package.as_str(), "rustfs-gateway-core" | "rustfs-gateway") {
+    let step_batches = crate_step_batches(&package);
+    let subject = if package == "rustfs-gateway" {
+        format!(
+            "crate {package} fast runtime scope; compile-time, representative conformance, and million-key RSS contracts remain in cargo test --workspace"
+        )
+    } else if package == "rustfs-gateway-core" {
         format!("crate {package} runtime scope; compile-time contracts remain in cargo test --workspace")
     } else if package == "rustfs-gateway-conformance" {
         format!("crate {package} library scope; integration contracts remain in cargo test --workspace")
     } else {
         format!("crate {package}")
     };
-    run_steps(
-        &steps,
+    run_step_batches(
+        &step_batches,
         Duration::from_secs(30),
         &subject,
         "a crate verification loop must finish within 30 seconds",
@@ -81,9 +87,24 @@ fn verify_crate(name: &str, json: bool) -> ExitCode {
             json,
             operation_cases: None,
             started: None,
-            conformance_case: crate_case(&package),
+            conformance_case: standalone_crate_case(&package),
         },
     )
+}
+
+fn crate_step_batches(package: &str) -> Vec<Vec<Vec<String>>> {
+    let mut steps = crate_steps(package);
+    if package != "rustfs-gateway" {
+        return vec![steps];
+    }
+    let mut test = steps.remove(0);
+    test.extend(["--skip".to_owned(), GATEWAY_RSS_TEST.to_owned()]);
+    let clippy = steps.remove(0);
+    vec![vec![test, clippy]]
+}
+
+fn standalone_crate_case(package: &str) -> Option<&'static str> {
+    (package != "rustfs-gateway").then(|| crate_case(package)).flatten()
 }
 
 fn crate_steps(package: &str) -> Vec<Vec<String>> {
@@ -465,7 +486,18 @@ fn conformance_test_step(case: &str) -> Vec<String> {
     ]
 }
 
+#[cfg(feature = "full")]
 fn run_steps(steps: &[Vec<String>], budget: Duration, subject: &str, rule: &str, options: RunOptions<'_>) -> ExitCode {
+    run_step_batches(&[steps.to_vec()], budget, subject, rule, options)
+}
+
+fn run_step_batches(
+    step_batches: &[Vec<Vec<String>>],
+    budget: Duration,
+    subject: &str,
+    rule: &str,
+    options: RunOptions<'_>,
+) -> ExitCode {
     let RunOptions {
         json,
         operation_cases,
@@ -473,11 +505,6 @@ fn run_steps(steps: &[Vec<String>], budget: Duration, subject: &str, rule: &str,
         conformance_case,
     } = options;
     let started = started.unwrap_or_else(Instant::now);
-    let commands: Vec<GateCommand> = steps
-        .iter()
-        .enumerate()
-        .map(|(index, step)| (env!("CARGO").to_owned(), step.clone(), format!("{subject} step {}", index + 1)))
-        .collect::<Vec<_>>();
     let mut command_batches = Vec::new();
     if let Some(case) = conformance_case {
         command_batches.push(vec![(
@@ -486,7 +513,17 @@ fn run_steps(steps: &[Vec<String>], budget: Duration, subject: &str, rule: &str,
             format!("{subject} conformance case {case}"),
         )]);
     }
-    command_batches.push(commands);
+    let mut step_number = 0;
+    for steps in step_batches {
+        let commands = steps
+            .iter()
+            .map(|step| {
+                step_number += 1;
+                (env!("CARGO").to_owned(), step.clone(), format!("{subject} step {step_number}"))
+            })
+            .collect();
+        command_batches.push(commands);
+    }
     for commands in command_batches {
         let batch = process::run(&commands, Path::new("."), Some(started + budget));
         if batch.interrupted {
