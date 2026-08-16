@@ -136,7 +136,7 @@ use rustfs_gateway_sig::{
 use rustfs_gateway_stream::Body;
 use rustfs_gateway_types::{ErrorCode, NamePolicy};
 
-use crate::clock::{Clock, ClockPosture, MonotonicClock};
+use crate::clock::{Clock, ClockPosture, MonotonicClock, MonotonicNow};
 use crate::close::ConnectionIntent;
 use crate::config::ConfigStore;
 use crate::dispatch::{DispatchTable, target_of};
@@ -461,12 +461,17 @@ impl S3Service {
         // bucket's stored document, and routing it would answer a CORS question with a `501`.
         // Removing this branch is therefore visible as an `OPTIONS` reaching the route table.
         //
-        // Nothing below this point runs for a preflight: no security floor, no authenticator, no
-        // authorizer, no handler. That is not a shortcut, it is the protocol — a browser sends no
-        // credentials on a preflight, so requiring a signature here would switch CORS off.
+        // Nothing below this point runs for a preflight: no signature admission, authenticator,
+        // authorizer or handler. Refusal latency is held inside this branch; requiring a signature
+        // here would switch CORS off because a browser sends no credentials on a preflight.
         match classify(wire.method(), &wire.headers()) {
             PreflightClass::NotPreflight => {}
-            PreflightClass::Malformed => return outcome.refuse_preflight(PreflightRefusalCause::Malformed),
+            PreflightClass::Malformed => {
+                let started = self.inner.authz_clock.monotonic();
+                return self
+                    .refuse_preflight(outcome, PreflightRefusalCause::Malformed, started)
+                    .await;
+            }
             PreflightClass::Preflight(preflight) => {
                 let valid_target = preflight_bucket(wire.raw_path().as_str(), &resolved).is_some();
                 if preflight_bypasses_pipeline() && (invalid_target_is_uniform_refusal() || valid_target) {
@@ -1075,6 +1080,7 @@ impl S3Service {
         now: RequestNow,
         client_addr: Option<ClientAddr>,
     ) -> Response<Body> {
+        let started = self.inner.authz_clock.monotonic();
         let bucket = preflight_bucket(path, &resolved);
         if self
             .inner
@@ -1096,15 +1102,34 @@ impl S3Service {
             Some(name) => self.inner.cors.get(name, now).await,
             // An illegal bucket name, or a path that names no bucket at all. Answered exactly as
             // a bucket that does not exist is, and without a read.
-            None => return outcome.refuse_preflight(PreflightRefusalCause::InvalidTarget),
+            None => {
+                return self
+                    .refuse_preflight(outcome, PreflightRefusalCause::InvalidTarget, started)
+                    .await;
+            }
         };
         let Some(document) = document else {
-            return outcome.refuse_preflight(PreflightRefusalCause::MissingDocument);
+            return self
+                .refuse_preflight(outcome, PreflightRefusalCause::MissingDocument, started)
+                .await;
         };
         match answer_preflight(&self.inner.cors_policy, Some(document.as_ref()), preflight) {
             PreflightOutcome::Allowed(headers) => preflight_response(&headers),
-            PreflightOutcome::Refused => outcome.refuse_preflight(PreflightRefusalCause::RuleMismatch),
+            PreflightOutcome::Refused => {
+                self.refuse_preflight(outcome, PreflightRefusalCause::RuleMismatch, started)
+                    .await
+            }
         }
+    }
+
+    async fn refuse_preflight(
+        &self,
+        outcome: &mut Outcome<'_>,
+        cause: PreflightRefusalCause,
+        started: MonotonicNow,
+    ) -> Response<Body> {
+        hold_failure_floor(self.inner.floor.failure_floor(), self.inner.authz_clock.as_ref(), started).await;
+        outcome.refuse_preflight(cause)
     }
 
     /// The CORS decoration an ordinary response should carry, if any.

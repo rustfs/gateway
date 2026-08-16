@@ -14,11 +14,12 @@
 
 //! What the CORS runtime costs, and what it never writes — counted, not inferred.
 //!
-//! Responsible for: the four properties `conformance/cases/cors/` cannot express, because a case
+//! Responsible for: the properties `conformance/cases/cors/` cannot express, because a case
 //! reads a response and these are about what happened *behind* one — how many times the
 //! deployment's `CorsSource` was called, whether the governor was consulted before it, and
 //! whether a credentials allowance can be reached from a wildcard match through a real assembly,
-//! and whether attacker-chosen cache keys can grow resident memory past the configured bound.
+//! whether attacker-chosen cache keys can grow resident memory past the configured bound, and
+//! whether every preflight refusal enters the shared security failure floor.
 //! NOT responsible for: matching (`rustfs-gateway-core`'s `cors` inline tests), the wire shape of
 //! any answer (`conformance/cases/cors/c-cors-0027` onwards), or the cache's own mechanics
 //! (`crate::ext::cors` inline tests).
@@ -39,9 +40,11 @@
 
 #![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 
+use std::future::Future;
 use std::process::Command;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::task::{Context, Poll, Waker};
 
 use rustfs_gateway::dto::{CorsConfiguration, CorsRule};
 use rustfs_gateway::{
@@ -174,10 +177,19 @@ struct FailingSource {
     reads: Arc<AtomicUsize>,
 }
 
+/// A source that never answers, so the mandatory source timeout reaches the same refusal path.
+struct NeverSource;
+
 impl CorsSource for FailingSource {
     fn load<'a>(&'a self, _bucket: &'a BucketName) -> BoxFuture<'a, Result<Option<CorsConfiguration>, CorsSourceError>> {
         self.reads.fetch_add(1, Ordering::SeqCst);
         Box::pin(async { Err(CorsSourceError) })
+    }
+}
+
+impl CorsSource for NeverSource {
+    fn load<'a>(&'a self, _bucket: &'a BucketName) -> BoxFuture<'a, Result<Option<CorsConfiguration>, CorsSourceError>> {
+        Box::pin(std::future::pending())
     }
 }
 
@@ -281,6 +293,18 @@ async fn send(service: &S3Service, method: &str, uri: &str, headers: &[(&str, &s
 
 fn header(response: &WireResponse, name: &str) -> Option<String> {
     response.header(name).map(str::to_owned)
+}
+
+async fn assert_refusal_enters_failure_floor(future: impl Future<Output = WireResponse>) {
+    let mut future = Box::pin(future);
+    let mut context = Context::from_waker(Waker::noop());
+    assert!(
+        matches!(future.as_mut().poll(&mut context), Poll::Pending),
+        "a preflight refusal completed before entering the shared failure floor"
+    );
+    let response = future.await;
+    assert_eq!(response.status().as_u16(), 403);
+    assert_eq!(header(&response, "vary").as_deref(), Some("origin"));
 }
 
 fn rss_bytes() -> Option<usize> {
@@ -433,6 +457,63 @@ async fn a_repeated_preflight_for_a_failing_source_reads_once() {
         assert_eq!(response.status().as_u16(), 403);
     }
     assert_eq!(built.reads.load(Ordering::SeqCst), 1, "a failed source read was not collapsed");
+}
+
+/// Negative — every cheap and expensive CORS refusal enters the same failure-floor helper. The
+/// first poll is the deterministic assertion: an immediate refusal cannot complete until the
+/// floor's runtime-independent delay has been armed. Source timeout is included even though its
+/// own one-second deadline already exceeds the default floor.
+#[tokio::test]
+async fn every_preflight_refusal_enters_the_shared_failure_floor() {
+    let ordinary = build(&[NAMED], &["PUT"], CorsPolicy::default(), None);
+    assert_refusal_enters_failure_floor(send(&ordinary.service, "OPTIONS", PREFLIGHT, &[("origin", NAMED)])).await;
+    assert_refusal_enters_failure_floor(send(
+        &ordinary.service,
+        "OPTIONS",
+        "/",
+        &[("origin", NAMED), ("access-control-request-method", "PUT")],
+    ))
+    .await;
+    assert_refusal_enters_failure_floor(send(
+        &ordinary.service,
+        "OPTIONS",
+        "/never-existed/key.txt",
+        &[("origin", NAMED), ("access-control-request-method", "PUT")],
+    ))
+    .await;
+    assert_refusal_enters_failure_floor(send(
+        &ordinary.service,
+        "OPTIONS",
+        PREFLIGHT,
+        &[("origin", NAMED), ("access-control-request-method", "DELETE")],
+    ))
+    .await;
+
+    let failed_reads = Arc::new(AtomicUsize::new(0));
+    let failed = build_with_source(
+        FailingSource {
+            reads: Arc::clone(&failed_reads),
+        },
+        failed_reads,
+        CorsPolicy::default(),
+        None,
+    );
+    assert_refusal_enters_failure_floor(send(
+        &failed.service,
+        "OPTIONS",
+        PREFLIGHT,
+        &[("origin", NAMED), ("access-control-request-method", "PUT")],
+    ))
+    .await;
+
+    let never = build_with_source(NeverSource, Arc::new(AtomicUsize::new(0)), CorsPolicy::default(), None);
+    assert_refusal_enters_failure_floor(send(
+        &never.service,
+        "OPTIONS",
+        PREFLIGHT,
+        &[("origin", NAMED), ("access-control-request-method", "PUT")],
+    ))
+    .await;
 }
 
 /// Negative — the governor is consulted for a preflight, under its own name, and a refusal stops
