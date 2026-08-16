@@ -14,11 +14,13 @@ fail() {
 }
 
 command -v python3 >/dev/null 2>&1 || fail 'python3 is required'
-for required in .cargo/config.toml Cargo.toml xtask/Cargo.toml xtask/src/main.rs xtask/src/catalog.rs xtask/src/verify.rs; do
+for required in .cargo/config.toml Cargo.toml xtask/Cargo.toml xtask/src/main.rs xtask/src/catalog.rs xtask/src/verify.rs \
+    crates/conformance/src/cli.rs crates/gateway/tests/cors_runtime.rs; do
     [[ -f "${ROOT}/${required}" ]] || fail "required input is missing: ${required}"
 done
 
 python3 - "$ROOT" <<'PYEOF'
+import re
 import sys
 import tomllib
 from pathlib import Path
@@ -505,6 +507,14 @@ comments_removed, syntax = main_comments, main_syntax
 
 verify_source = (root / "xtask/src/verify.rs").read_text()
 verify_comments, verify_syntax = rust_views(verify_source)
+for relative, test_name in (
+    ("crates/conformance/src/cli.rs", "feedback_case_c_object_0001"),
+    ("crates/gateway/tests/cors_runtime.rs", "a_million_unique_keys_keep_rss_within_the_entry_budget"),
+):
+    _, test_syntax = rust_views((root / relative).read_text())
+    pattern = re.compile(rf"#\s*\[\s*test\s*\]\s*fn\s+{re.escape(test_name)}\s*\(")
+    if len(pattern.findall(test_syntax)) != 1:
+        fail(f"workspace-only fast-scope contract is missing or inactive: {test_name}")
 comments_removed, syntax = verify_comments, verify_syntax
 for name in ("verify", "verify_crate", "crate_steps", "conformance_test_step"):
     items = functions_named(name, syntax, comments_removed)
@@ -550,16 +560,20 @@ let package = match resolve_workspace_package(name) {
         return diagnostic("workspace package could not be resolved", &format!("crate {name}"), &error.to_string());
     }
 };
-let steps = crate_steps(&package);
-let subject = if matches!(package.as_str(), "rustfs-gateway-core" | "rustfs-gateway") {
+let step_batches = crate_step_batches(&package);
+let subject = if package == "rustfs-gateway" {
+    format!(
+        "crate {package} fast runtime scope; compile-time, representative conformance, and million-key RSS contracts remain in cargo test --workspace"
+    )
+} else if package == "rustfs-gateway-core" {
     format!("crate {package} runtime scope; compile-time contracts remain in cargo test --workspace")
 } else if package == "rustfs-gateway-conformance" {
     format!("crate {package} library scope; integration contracts remain in cargo test --workspace")
 } else {
     format!("crate {package}")
 };
-run_steps(
-    &steps,
+run_step_batches(
+    &step_batches,
     Duration::from_secs(30),
     &subject,
     "a crate verification loop must finish within 30 seconds",
@@ -567,7 +581,7 @@ run_steps(
         json,
         operation_cases: None,
         started: None,
-        conformance_case: crate_case(&package),
+        conformance_case: standalone_crate_case(&package),
     },
 )
 ''')
@@ -628,8 +642,8 @@ vec![
 ''')
 if compact(conformance_test_items[0][1]) != expected_conformance_test_body:
     fail("crate verification must reuse the workspace-built conformance library target")
-run_steps_items = functions_named("run_steps", syntax, comments_removed)
-run_steps_body = compact(run_steps_items[0][1])
+run_step_batches_items = functions_named("run_step_batches", syntax, comments_removed)
+run_step_batches_body = compact(run_step_batches_items[0][1])
 expected_crate_batch_order = compact('''
 let mut command_batches = Vec::new();
 if let Some(case) = conformance_case {
@@ -639,10 +653,25 @@ if let Some(case) = conformance_case {
         format!("{subject} conformance case {case}"),
     )]);
 }
-command_batches.push(commands);
+let mut step_number = 0;
 ''')
-if run_steps_body.count(expected_crate_batch_order) != 1:
-    fail("crate conformance verification must run before clippy can invalidate its workspace-built target")
+if run_step_batches_body.count(expected_crate_batch_order) != 1:
+    fail("standalone crate conformance verification must precede the scheduled command batches")
+crate_step_batches_items = functions_named("crate_step_batches", syntax, comments_removed)
+expected_gateway_batch = compact('''
+let mut test = steps.remove(0);
+test.extend(["--skip".to_owned(), GATEWAY_RSS_TEST.to_owned()]);
+let clippy = steps.remove(0);
+vec![vec![test, clippy]]
+''')
+if compact(crate_step_batches_items[0][1]).count(expected_gateway_batch) != 1:
+    fail("gateway fast verification must retain ordinary runtime tests and all-target Clippy")
+standalone_case_items = functions_named("standalone_crate_case", syntax, comments_removed)
+expected_standalone_case = compact('''
+(package != "rustfs-gateway").then(|| crate_case(package)).flatten()
+''')
+if compact(standalone_case_items[0][1]) != expected_standalone_case:
+    fail("gateway representative evidence must run exactly once inside its bounded batch")
 for name in (
     "verify_full",
     "verify_operation",
