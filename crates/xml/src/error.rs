@@ -28,6 +28,8 @@ use core::fmt;
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum XmlError {
+    /// The buffered document is larger than the configured byte ceiling.
+    BodyTooLarge,
     /// The bytes are not well-formed XML.
     Malformed,
     /// The document is not UTF-8.
@@ -44,6 +46,10 @@ pub enum XmlError {
     TooDeep,
     /// The document holds more elements than [`crate::MAX_ELEMENTS`].
     TooManyElements,
+    /// One element holds more attributes than [`crate::MAX_ATTRIBUTES_PER_ELEMENT`].
+    TooManyAttributes,
+    /// One attribute value is larger than [`crate::MAX_ATTRIBUTE_BYTES`].
+    AttributeTooLong,
     /// The document has no root element.
     Empty,
 }
@@ -51,12 +57,15 @@ pub enum XmlError {
 impl fmt::Display for XmlError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let text = match self {
+            Self::BodyTooLarge => "the XML body is larger than the parser accepts",
             Self::Malformed => "the body is not well-formed XML",
             Self::NotUtf8 => "the body is not UTF-8",
             Self::DocTypeDeclaration => "the body carries a DOCTYPE declaration",
             Self::UnsupportedEntity => "the body carries an entity reference that is not one of the five XML predefines",
             Self::TooDeep => "the body nests deeper than the parser accepts",
             Self::TooManyElements => "the body holds more elements than the parser accepts",
+            Self::TooManyAttributes => "an element holds more attributes than the parser accepts",
+            Self::AttributeTooLong => "an attribute value is larger than the parser accepts",
             Self::Empty => "the body has no root element",
         };
         f.write_str(text)
