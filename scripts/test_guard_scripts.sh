@@ -12598,6 +12598,43 @@ expect_fail_with_diagnostic check_handler_context_migration.sh \
     'crates/core/tests/static_dispatch.rs Handler impl 1 drops or bypasses the migration context source' \
     mut_handler_context_source_dropped_before_call
 
+mut_facade_handler_context_entry_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/gateway/tests/handler_panic.rs")
+text = path.read_text()
+subject = "    async fn call_with_context("
+if text.count(subject) != 1:
+    raise SystemExit("missing unique facade Handler context-entry mutation subject")
+path.write_text(text.replace(subject, "    async fn call_without_context(", 1))
+PYEOF
+}
+expect_fail_with_diagnostic check_handler_context_migration.sh \
+    'a facade Handler losing its explicit context-aware entry' \
+    'crates/gateway/tests/handler_panic.rs Handler impl 1 is not on the reviewed facade migration bridge' \
+    mut_facade_handler_context_entry_removed
+
+mut_facade_handler_context_body_drifted() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/gateway/examples/custom_authorizer.rs")
+text = path.read_text()
+marker = "    async fn call_with_context("
+prefix, found, suffix = text.partition(marker)
+subject = "        Ok(Resp::new(PingOutput))\n"
+if not found or suffix.count(subject) != 1:
+    raise SystemExit("missing unique facade Handler body-drift mutation subject")
+suffix = suffix.replace(subject, '        let _drift = "context only";\n' + subject, 1)
+path.write_text(prefix + found + suffix)
+PYEOF
+}
+expect_fail_with_diagnostic check_handler_context_migration.sh \
+    'a facade Handler context body drifting from its legacy body' \
+    'crates/gateway/examples/custom_authorizer.rs Handler impl 1 has diverged legacy and context bodies' \
+    mut_facade_handler_context_body_drifted
+
 expect_signing_suite_dirty_checkout_fail() {
     local checkout output rc=0
     cases=$((cases + 1))

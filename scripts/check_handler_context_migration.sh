@@ -29,6 +29,18 @@ expected = {
     "crates/core/tests/dialect.rs": 2,
     "crates/core/tests/registration.rs": 4,
     "crates/core/tests/static_dispatch.rs": 1,
+    "crates/gateway/examples/custom_authorizer.rs": 1,
+    "crates/gateway/examples/minimal.rs": 2,
+    "crates/gateway/tests/assembly_order.rs": 1,
+    "crates/gateway/tests/authz_consumption.rs": 1,
+    "crates/gateway/tests/handler_panic.rs": 1,
+}
+facade_dual = {
+    "crates/gateway/examples/custom_authorizer.rs",
+    "crates/gateway/examples/minimal.rs",
+    "crates/gateway/tests/assembly_order.rs",
+    "crates/gateway/tests/authz_consumption.rs",
+    "crates/gateway/tests/handler_panic.rs",
 }
 
 
@@ -195,18 +207,33 @@ for relative, wanted in expected.items():
     if len(implementations) != wanted:
         fail(f"{relative} has {len(implementations)} Handler impls, expected {wanted}")
     for ordinal, methods in enumerate(implementations, start=1):
+        if relative in facade_dual:
+            if "call_with_context" not in methods or "call" not in methods:
+                fail(f"{relative} Handler impl {ordinal} is not on the reviewed facade migration bridge")
+            if relative == "crates/gateway/tests/assembly_order.rs":
+                legacy = ["self", ".", "note", "(", ")", ";", "self", ".", "inner", ".", "call", "(", "request", ")"]
+                contextual = [
+                    "self", ".", "note", "(", ")", ";",
+                    "self", ".", "inner", ".", "call_with_context", "(", "request", ",", "context", ")",
+                ]
+                if methods["call"] != legacy or methods["call_with_context"] != contextual:
+                    fail(f"{relative} Handler impl {ordinal} does not forward the same request context")
+            elif methods["call"] != methods["call_with_context"]:
+                fail(f"{relative} Handler impl {ordinal} has diverged legacy and context bodies")
+            continue
         if "call" not in methods or "call_with_context" not in methods:
             fail(f"{relative} Handler impl {ordinal} is not on the reviewed two-entry migration bridge")
+        source_authority = "rustfs_gateway_core" if relative.startswith("crates/core/") else "rustfs_gateway"
         bridge = [
             "let", "(", "_source", ",", "context", ")", "=",
-            "rustfs_gateway_core", ":", ":", "HandlerCancellationSource", ":", ":", "pair", "(", ")", ";",
+            source_authority, ":", ":", "HandlerCancellationSource", ":", ":", "pair", "(", ")", ";",
             "self", ".", "call_with_context", "(", "request", ",", "context", ")", ".", "await",
         ]
         if not contains_sequence(methods["call"], bridge):
             fail(f"{relative} Handler impl {ordinal} drops or bypasses the migration context source")
     total += len(implementations)
 
-if total != 11:
-    fail(f"reviewed migration census is {total}, expected 11")
-print("check_handler_context_migration: 11 reviewed Handler impls preserve both migration entries")
+if total != 17:
+    fail(f"reviewed migration census is {total}, expected 17")
+print("check_handler_context_migration: 17 reviewed Handler impls preserve their context migration mode")
 PY

@@ -119,10 +119,40 @@ impl Handler<Ping> for InMemory {
         let message = format!("{} buckets", self.buckets.len());
         async move { Ok(Resp::new(PingOutput { message })) }
     }
+
+    fn call_with_context(
+        &self,
+        _request: Req<Ping>,
+        _context: rustfs_gateway::HandlerContext,
+    ) -> impl core::future::Future<Output = HandlerResult<Ping>> + Send {
+        let message = format!("{} buckets", self.buckets.len());
+        async move { Ok(Resp::new(PingOutput { message })) }
+    }
 }
 
 impl Handler<ListBuckets> for InMemory {
     fn call(&self, _request: Req<ListBuckets>) -> impl core::future::Future<Output = HandlerResult<ListBuckets>> + Send {
+        let buckets: Vec<Bucket> = self
+            .buckets
+            .iter()
+            .map(|name| Bucket {
+                name: name.clone(),
+                ..Bucket::default()
+            })
+            .collect();
+        async move {
+            Ok(Resp::new(ListBucketsOutput {
+                buckets,
+                ..ListBucketsOutput::default()
+            }))
+        }
+    }
+
+    fn call_with_context(
+        &self,
+        _request: Req<ListBuckets>,
+        _context: rustfs_gateway::HandlerContext,
+    ) -> impl core::future::Future<Output = HandlerResult<ListBuckets>> + Send {
         let buckets: Vec<Bucket> = self
             .buckets
             .iter()

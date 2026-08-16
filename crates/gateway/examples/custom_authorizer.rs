@@ -267,4 +267,8 @@ impl Handler<Ping> for Pong {
     async fn call(&self, _request: Req<Ping>) -> HandlerResult<Ping> {
         Ok(Resp::new(PingOutput))
     }
+
+    async fn call_with_context(&self, _request: Req<Ping>, _context: rustfs_gateway::HandlerContext) -> HandlerResult<Ping> {
+        Ok(Resp::new(PingOutput))
+    }
 }

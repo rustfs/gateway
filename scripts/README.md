@@ -112,7 +112,7 @@ fixed now so that the same check does not get written twice under two names.
 | `check_minimal_assembly_lines.sh` | The complete assembly in the minimal example stays within twenty effective Rust lines | P7-01 |
 | `check_gateway_tsan_wiring.sh` | The TSAN job keeps sanitizer/build-std flags, runs in required CI, and drives exactly 100 completed OS threads | P7-01 |
 | `check_monomorphic_dispatch.sh` | The public static assembly emits direct operation codec and concrete handler calls, with no erased dispatch callback in that call chain | P7-01 |
-| `check_handler_context_migration.sh` | The reviewed Handler implementations keep both the compatibility `call` entry and the context-aware `call_with_context` entry during migration | P3-03 |
+| `check_handler_context_migration.sh` | Reviewed handlers keep legacy `call` beside an explicit `call_with_context`; core wrappers also retain the framework cancellation source through delegation | P3-03 |
 | `check_schema_dimensions.sh` | The frozen conformance schema retains all nine P8-01 day-one expression dimensions | P8-01 |
 | `check_evidence_shape.sh` | Every case has compact HTTPS/URN-plus-summary evidence and cannot carry pasted upstream prose | P8-01 |
 | `check_baseline_ratchet.sh` | The conformance baseline failure set only shrinks | P8-01 |

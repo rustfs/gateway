@@ -42,6 +42,15 @@ impl Handler<Ping> for PanicsOnce {
             message: "recovered".to_owned(),
         }))
     }
+
+    async fn call_with_context(&self, _request: Req<Ping>, _context: rustfs_gateway::HandlerContext) -> HandlerResult<Ping> {
+        if self.calls.fetch_add(1, Ordering::SeqCst) == 0 {
+            panic!("handler panic fixture");
+        }
+        Ok(Resp::new(PingOutput {
+            message: "recovered".to_owned(),
+        }))
+    }
 }
 
 /// a-asm-0019. A handler panic is rendered as a protocol response and the same service remains

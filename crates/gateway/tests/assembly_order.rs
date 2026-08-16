@@ -140,6 +140,15 @@ where
         self.note();
         self.inner.call(request)
     }
+
+    fn call_with_context(
+        &self,
+        request: Req<O>,
+        context: rustfs_gateway::HandlerContext,
+    ) -> impl core::future::Future<Output = HandlerResult<O>> + Send {
+        self.note();
+        self.inner.call_with_context(request, context)
+    }
 }
 
 struct Filter(Trail);
