@@ -45,12 +45,37 @@ try:
 except (OSError, UnicodeError) as error:
     fail(f"cannot read deadline-class source: {error}")
 
-registration_check = """        if spec.deadline_class().is_none() {
-            return Err(RegistryError::MissingHandlerDeadlineClass { name });
-        }
+
+def function_body(text: str, function_signature: str, label: str) -> str:
+    if text.count(function_signature) != 1:
+        fail(f"{label} function is missing or duplicated")
+    start = text.find("{", text.find(function_signature) + len(function_signature))
+    if start < 0:
+        fail(f"{label} function has no body")
+    depth = 1
+    index = start + 1
+    while index < len(text) and depth:
+        if text[index] == "{":
+            depth += 1
+        elif text[index] == "}":
+            depth -= 1
+        index += 1
+    if depth:
+        fail(f"{label} function has unbalanced braces")
+    return text[start + 1 : index - 1]
+
+
+check_spec_body = function_body(
+    registration_source,
+    "pub(crate) fn check_spec(spec: &'static OperationSpec) -> Result<(), RegistryError>",
+    "shared registration check",
+)
+registration_check = """    if spec.deadline_class().is_none() {
+        return Err(RegistryError::MissingHandlerDeadlineClass { name });
+    }
 """
-if registration_source.count(registration_check) != 1:
-    fail("standard registration does not fail closed without a handler deadline class")
+if check_spec_body.count(registration_check) != 1 or registration_source.count(registration_check) != 1:
+    fail("shared registration does not fail closed without a handler deadline class")
 
 signature = "fn standard_handler_deadline_class(name: &str) -> Option<HandlerDeadlineClass>"
 if source.count(signature) != 1:
@@ -113,77 +138,78 @@ wrong_standard = sorted(name for name in operations - {"CompleteMultipartUpload"
 if wrong_standard:
     fail(f"standard handler deadline drifted for: {wrong_standard}")
 
-reviewed_third_party_sources = {
-    "crates/core/examples/dialect_overlay.rs": 1,
-    "crates/core/src/authz/mod.rs": 1,
-    "crates/core/src/registry/reject.rs": 1,
-    "crates/core/tests/compile_fail/support.rs": 1,
-    "crates/core/tests/compile_pass/operation_spec_builder.rs": 1,
-    "crates/core/tests/dialect.rs": 3,
-    "crates/core/tests/registration.rs": 3,
-    "crates/core/tests/static_dispatch.rs": 1,
-    "crates/gateway/examples/custom_authorizer.rs": 1,
-    "crates/gateway/examples/minimal.rs": 1,
-    "crates/gateway/tests/cors_runtime.rs": 1,
-    "crates/gateway/tests/credential_runtime.rs": 1,
-    "crates/gateway/tests/patch_layer_landings.rs": 1,
-    "crates/gateway/tests/sse_runtime.rs": 2,
-    "crates/gateway/tests/support/mod.rs": 5,
-}
-reviewed_builders = 0
-for relative, expected_builders in reviewed_third_party_sources.items():
-    path = root / relative
-    if not path.is_file() or path.is_symlink():
-        fail(f"reviewed third-party deadline source is missing or not a regular file: {relative}")
+builder_pattern = re.compile(r"OperationSpec::builder\(.*?\.build\(\)", re.DOTALL)
+authority_builders = [match.group(0) for match in builder_pattern.finditer(source)]
+authority_builder_names = [
+    re.findall(r'OperationSpec::builder\(\s*"([A-Za-z0-9:]+)"', chain) for chain in authority_builders
+]
+authority_explicit_classes = [
+    chain.count(".handler_deadline_class(HandlerDeadlineClass::Standard)") for chain in authority_builders
+]
+if authority_builder_names != [
+    ["vendor:Probe"],
+    ["GetObject"],
+    ["CompleteMultipartUpload"],
+    ["vendor:Probe"],
+    ["vendor:Probe"],
+] or authority_explicit_classes != [0, 0, 0, 0, 1]:
+    fail("deadline-class authority test-builder census drifted")
+
+central_builders = 0
+explicit_builders = 0
+for path in sorted((root / "crates").rglob("*.rs")):
+    relative = path.relative_to(root).as_posix()
+    if relative == "crates/core/src/registry/mod.rs" or relative.startswith("crates/types/generated/"):
+        continue
+    if path.is_symlink() or not path.is_file():
+        fail(f"deadline-class Rust source is not a regular file: {relative}")
     try:
         text = path.read_text(encoding="utf-8")
     except (OSError, UnicodeError) as error:
-        fail(f"cannot read reviewed third-party deadline source {relative}: {error}")
-    builders = list(re.finditer(r"OperationSpec::builder\(.*?\.build\(\)", text, re.DOTALL))
-    if len(builders) != expected_builders:
-        fail(f"reviewed third-party builder census drifted for {relative}: {len(builders)} != {expected_builders}")
+        fail(f"cannot read deadline-class Rust source {relative}: {error}")
+    if re.search(r"\bOperationSpec\s+as\s+\w+|\btype\s+\w+\s*=\s*[^;]*\bOperationSpec\b", text):
+        fail(f"OperationSpec aliases are forbidden from the deadline-class census: {relative}")
+    builders = list(builder_pattern.finditer(text))
+    if "OperationSpec::builder" in text and not builders:
+        fail(f"OperationSpec builder cannot be inventoried: {relative}")
+    in_standard_source = path.parent == ops_dir and path.name != "mod.rs"
+    if in_standard_source and len(builders) != 1:
+        fail(f"standard operation source has {len(builders)} builders instead of one: {relative}")
     for builder in builders:
         chain = builder.group(0)
+        names = re.findall(r'OperationSpec::builder\(\s*"([A-Za-z0-9:]+)"', chain)
         standard = chain.count(".handler_deadline_class(HandlerDeadlineClass::Standard)")
         extended = chain.count(".handler_deadline_class(HandlerDeadlineClass::Extended)")
-        if standard != 1 or extended:
-            fail(f"reviewed third-party builder lacks one explicit Standard deadline class: {relative}")
-    reviewed_builders += len(builders)
-if reviewed_builders != 24:
-    fail(f"reviewed third-party builder census is {reviewed_builders}, expected 24")
+        if standard + extended > 1:
+            fail(f"OperationSpec builder declares multiple deadline classes: {relative}")
+        if in_standard_source:
+            if len(names) != 1 or names[0] not in operations or standard or extended:
+                fail(f"standard operation builder bypasses the central deadline authority: {relative}")
+            central_builders += 1
+        elif len(names) == 1 and names[0] in operations:
+            if standard or extended:
+                if relative != "crates/gateway/tests/support/mod.rs":
+                    fail(f"standard builder bypasses the central deadline authority: {names[0]}")
+                if standard != 1 or extended:
+                    fail(f"explicit OperationSpec builder does not use Standard: {relative}")
+                explicit_builders += 1
+            else:
+                central_builders += 1
+        else:
+            if standard != 1 or extended:
+                if standard + extended == 0:
+                    fail(f"unclassified OperationSpec builder: {relative}")
+                fail(f"explicit OperationSpec builder does not use Standard: {relative}")
+            explicit_builders += 1
 
-mixed_relative = "crates/core/tests/params_and_dispatch.rs"
-mixed_path = root / mixed_relative
-if not mixed_path.is_file() or mixed_path.is_symlink():
-    fail(f"mixed deadline source is missing or not a regular file: {mixed_relative}")
-try:
-    mixed_text = mixed_path.read_text(encoding="utf-8")
-except (OSError, UnicodeError) as error:
-    fail(f"cannot read mixed deadline source {mixed_relative}: {error}")
-mixed_builders = list(re.finditer(r"OperationSpec::builder\(.*?\.build\(\)", mixed_text, re.DOTALL))
-if len(mixed_builders) != 8:
-    fail(f"mixed builder census drifted for {mixed_relative}: {len(mixed_builders)} != 8")
-mixed_nonstandard: set[str] = set()
-for builder in mixed_builders:
-    chain = builder.group(0)
-    names = re.findall(r'OperationSpec::builder\("([A-Za-z0-9]+)"', chain)
-    if len(names) != 1:
-        fail(f"mixed builder does not have one literal name: {mixed_relative}")
-    name = names[0]
-    standard = chain.count(".handler_deadline_class(HandlerDeadlineClass::Standard)")
-    extended = chain.count(".handler_deadline_class(HandlerDeadlineClass::Extended)")
-    if name in operations:
-        if standard or extended:
-            fail(f"standard builder bypasses the central deadline authority: {name}")
-        continue
-    mixed_nonstandard.add(name)
-    if standard != 1 or extended:
-        fail(f"mixed-source third-party builder lacks one explicit Standard deadline class: {name}")
-if mixed_nonstandard != {"PutBucketAnalyticsConfiguration"}:
-    fail(f"mixed-source third-party builder set drifted: {sorted(mixed_nonstandard)}")
+if central_builders != 79 or explicit_builders != 25:
+    fail(
+        "repository builder census drifted: "
+        f"central={central_builders} explicit={explicit_builders}, expected central=79 explicit=25"
+    )
 
 print(
-    "check_handler_deadline_class: 72 standard operations and 25 reviewed third-party builders "
-    "have explicit deadline classes (96 Standard, 1 Extended)"
+    "check_handler_deadline_class: 109 repository builder sites are inventoried "
+    "(104 classified: 79 central standard, 25 explicit; 5 authority tests)"
 )
 PY

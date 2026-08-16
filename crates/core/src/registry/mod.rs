@@ -196,7 +196,7 @@ impl OperationSpec {
     /// The explicit handler-execution deadline class.
     ///
     /// Standard operations use the closed table below; third-party operations must set the class
-    /// through [`Self::handler_deadline_class`] before the migration becomes mandatory.
+    /// through [`Self::handler_deadline_class`] before registration.
     #[must_use]
     pub fn deadline_class(&self) -> Option<HandlerDeadlineClass> {
         self.handler_deadline_class
@@ -548,7 +548,12 @@ pub fn check_required(spec: &OperationSpec, request: &RouteRequestParts<'_>) -> 
 
 #[cfg(test)]
 mod deadline_class_tests {
-    use super::{HandlerDeadlineClass, OperationSpec};
+    use super::{HandlerDeadlineClass, OperationSpec, Registry, RegistryError};
+    use crate::op::{AuthRequirement, ResourceShape};
+
+    static MISSING_DEADLINE_SPEC: OperationSpec = OperationSpec::builder("vendor:Probe", 200, None)
+        .auth(AuthRequirement::new("vendor:Probe", ResourceShape::Service))
+        .build();
 
     /// Positive — an ordinary standard operation resolves through the explicit standard table.
     #[test]
@@ -574,5 +579,15 @@ mod deadline_class_tests {
             .handler_deadline_class(HandlerDeadlineClass::Standard)
             .build();
         assert_eq!(declared.deadline_class(), Some(HandlerDeadlineClass::Standard));
+    }
+
+    /// Negative — every registration path rejects a third-party spec with no deadline class.
+    #[test]
+    fn registration_refuses_an_unclassified_third_party_spec() {
+        let mut registry = Registry::new();
+        assert_eq!(
+            registry.register(&MISSING_DEADLINE_SPEC),
+            Err(RegistryError::MissingHandlerDeadlineClass { name: "vendor:Probe" })
+        );
     }
 }

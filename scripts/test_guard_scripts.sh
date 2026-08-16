@@ -12813,9 +12813,9 @@ from pathlib import Path
 
 path = Path("crates/core/src/registry/reject.rs")
 text = path.read_text()
-subject = '''        if spec.deadline_class().is_none() {
-            return Err(RegistryError::MissingHandlerDeadlineClass { name });
-        }
+subject = '''    if spec.deadline_class().is_none() {
+        return Err(RegistryError::MissingHandlerDeadlineClass { name });
+    }
 '''
 if text.count(subject) != 1:
     raise SystemExit("missing unique handler deadline registration mutation subject")
@@ -12823,8 +12823,8 @@ path.write_text(text.replace(subject, "", 1))
 PYEOF
 }
 expect_fail_with_diagnostic check_handler_deadline_class.sh \
-    'standard registration no longer failing closed without a handler deadline class' \
-    'standard registration does not fail closed without a handler deadline class' \
+    'shared registration no longer failing closed without a handler deadline class' \
+    'shared registration does not fail closed without a handler deadline class' \
     mut_handler_deadline_registration_check_removed
 
 mut_handler_deadline_reviewed_third_party_class_removed() {
@@ -12841,7 +12841,7 @@ PYEOF
 }
 expect_fail_with_diagnostic check_handler_deadline_class.sh \
     'a reviewed third-party operation losing its explicit handler deadline class' \
-    'reviewed third-party builder lacks one explicit Standard deadline class' \
+    'unclassified OperationSpec builder' \
     mut_handler_deadline_reviewed_third_party_class_removed
 
 mut_handler_deadline_reviewed_third_party_class_extended() {
@@ -12859,7 +12859,7 @@ PYEOF
 }
 expect_fail_with_diagnostic check_handler_deadline_class.sh \
     'a reviewed third-party operation gaining the extended handler deadline class' \
-    'reviewed third-party builder lacks one explicit Standard deadline class' \
+    'explicit OperationSpec builder does not use Standard' \
     mut_handler_deadline_reviewed_third_party_class_extended
 
 mut_handler_deadline_second_batch_class_removed() {
@@ -12876,7 +12876,7 @@ PYEOF
 }
 expect_fail_with_diagnostic check_handler_deadline_class.sh \
     'a second-batch third-party operation losing its explicit handler deadline class' \
-    'reviewed third-party builder lacks one explicit Standard deadline class' \
+    'unclassified OperationSpec builder' \
     mut_handler_deadline_second_batch_class_removed
 
 mut_handler_deadline_second_batch_class_extended() {
@@ -12894,7 +12894,7 @@ PYEOF
 }
 expect_fail_with_diagnostic check_handler_deadline_class.sh \
     'a second-batch third-party operation gaining the extended handler deadline class' \
-    'reviewed third-party builder lacks one explicit Standard deadline class' \
+    'explicit OperationSpec builder does not use Standard' \
     mut_handler_deadline_second_batch_class_extended
 
 mut_handler_deadline_final_batch_class_removed() {
@@ -12911,7 +12911,7 @@ PYEOF
 }
 expect_fail_with_diagnostic check_handler_deadline_class.sh \
     'a final-batch operation losing its explicit handler deadline class' \
-    'reviewed third-party builder lacks one explicit Standard deadline class' \
+    'unclassified OperationSpec builder' \
     mut_handler_deadline_final_batch_class_removed
 
 mut_handler_deadline_mixed_custom_class_removed() {
@@ -12928,7 +12928,7 @@ PYEOF
 }
 expect_fail_with_diagnostic check_handler_deadline_class.sh \
     'the mixed source losing its one explicit third-party handler deadline class' \
-    'mixed-source third-party builder lacks one explicit Standard deadline class' \
+    'unclassified OperationSpec builder' \
     mut_handler_deadline_mixed_custom_class_removed
 
 mut_handler_deadline_mixed_standard_override_added() {
@@ -12953,6 +12953,55 @@ expect_fail_with_diagnostic check_handler_deadline_class.sh \
     'a standard builder in the mixed source bypassing the central handler deadline authority' \
     'standard builder bypasses the central deadline authority' \
     mut_handler_deadline_mixed_standard_override_added
+
+mut_handler_deadline_unclassified_source_added() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+Path("crates/core/tests/deadline_unclassified_probe.rs").write_text(
+    'use rustfs_gateway_core::OperationSpec;\n'
+    'static SPEC: OperationSpec = OperationSpec::builder("probe:Unclassified", 200, None).build();\n'
+)
+PYEOF
+}
+expect_fail_with_diagnostic check_handler_deadline_class.sh \
+    'an unclassified builder appearing outside the reviewed source list' \
+    'unclassified OperationSpec builder' \
+    mut_handler_deadline_unclassified_source_added
+
+mut_handler_deadline_classified_source_added() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+Path("crates/core/tests/deadline_classified_probe.rs").write_text(
+    'use rustfs_gateway_core::{HandlerDeadlineClass, OperationSpec};\n'
+    'static SPEC: OperationSpec = OperationSpec::builder("probe:Classified", 200, None)\n'
+    '    .handler_deadline_class(HandlerDeadlineClass::Standard)\n'
+    '    .build();\n'
+)
+PYEOF
+}
+expect_fail_with_diagnostic check_handler_deadline_class.sh \
+    'a classified builder appearing without updating the repository census' \
+    'repository builder census drifted' \
+    mut_handler_deadline_classified_source_added
+
+mut_handler_deadline_builder_alias_added() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+Path("crates/core/tests/deadline_alias_probe.rs").write_text(
+    'use rustfs_gateway_core::{HandlerDeadlineClass, OperationSpec as Spec};\n'
+    'static SPEC: Spec = Spec::builder("probe:Alias", 200, None)\n'
+    '    .handler_deadline_class(HandlerDeadlineClass::Standard)\n'
+    '    .build();\n'
+)
+PYEOF
+}
+expect_fail_with_diagnostic check_handler_deadline_class.sh \
+    'an OperationSpec alias hiding a builder from the repository census' \
+    'OperationSpec aliases are forbidden from the deadline-class census' \
+    mut_handler_deadline_builder_alias_added
 
 expect_signing_suite_dirty_checkout_fail() {
     local checkout output rc=0
