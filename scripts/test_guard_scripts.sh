@@ -12827,6 +12827,41 @@ expect_fail_with_diagnostic check_handler_deadline_class.sh \
     'standard registration does not fail closed without a handler deadline class' \
     mut_handler_deadline_registration_check_removed
 
+mut_handler_deadline_reviewed_third_party_class_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/core/examples/dialect_overlay.rs")
+text = path.read_text()
+subject = "    .handler_deadline_class(HandlerDeadlineClass::Standard)\n"
+if text.count(subject) != 1:
+    raise SystemExit("missing unique reviewed third-party deadline removal subject")
+path.write_text(text.replace(subject, "", 1))
+PYEOF
+}
+expect_fail_with_diagnostic check_handler_deadline_class.sh \
+    'a reviewed third-party operation losing its explicit handler deadline class' \
+    'reviewed third-party builder lacks one explicit Standard deadline class' \
+    mut_handler_deadline_reviewed_third_party_class_removed
+
+mut_handler_deadline_reviewed_third_party_class_extended() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/core/src/authz/mod.rs")
+text = path.read_text()
+subject = "        .handler_deadline_class(HandlerDeadlineClass::Standard)\n"
+replacement = "        .handler_deadline_class(HandlerDeadlineClass::Extended)\n"
+if text.count(subject) != 1:
+    raise SystemExit("missing unique reviewed third-party deadline class subject")
+path.write_text(text.replace(subject, replacement, 1))
+PYEOF
+}
+expect_fail_with_diagnostic check_handler_deadline_class.sh \
+    'a reviewed third-party operation gaining the extended handler deadline class' \
+    'reviewed third-party builder lacks one explicit Standard deadline class' \
+    mut_handler_deadline_reviewed_third_party_class_extended
+
 expect_signing_suite_dirty_checkout_fail() {
     local checkout output rc=0
     cases=$((cases + 1))

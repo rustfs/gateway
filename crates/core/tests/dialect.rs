@@ -40,7 +40,7 @@ use rustfs_gateway_core::dialect::{Dialect, DialectError, DialectOverlay, Dialec
 use rustfs_gateway_core::dispatch::RouterBuildError;
 use rustfs_gateway_core::handler::{Handler, HandlerResult, Req, Resp};
 use rustfs_gateway_core::op::{AuthRequirement, Operation, ResourceShape};
-use rustfs_gateway_core::registry::{BuildError, OperationSpec, RegistryError, RouterBuilder};
+use rustfs_gateway_core::registry::{BuildError, HandlerDeadlineClass, OperationSpec, RegistryError, RouterBuilder};
 use rustfs_gateway_core::route::{HostClass, Predicate, RouteBuildError, ShadowingDecl, TargetKind};
 use rustfs_gateway_sig::{OperationFloor, SigService};
 use rustfs_gateway_types::dto::HeadObject;
@@ -58,6 +58,7 @@ use support::{Req as RouteReq, block_on};
 struct HeadObjectReport;
 
 static REPORT_SPEC: OperationSpec = OperationSpec::builder("acme:HeadObjectReport", 200, None)
+    .handler_deadline_class(HandlerDeadlineClass::Standard)
     .required_params(&[])
     .auth(AuthRequirement::new("acme:HeadObjectReport", ResourceShape::Object))
     .build();
@@ -272,8 +273,13 @@ macro_rules! vendor_operation {
 
         const _: () = {
             static SPEC: OperationSpec = match $action {
-                Some(auth) => OperationSpec::builder($spec_name, $status, None).auth(auth).build(),
-                None => OperationSpec::builder($spec_name, $status, None).build(),
+                Some(auth) => OperationSpec::builder($spec_name, $status, None)
+                    .handler_deadline_class(HandlerDeadlineClass::Standard)
+                    .auth(auth)
+                    .build(),
+                None => OperationSpec::builder($spec_name, $status, None)
+                    .handler_deadline_class(HandlerDeadlineClass::Standard)
+                    .build(),
             };
             static FLOOR: OperationFloor = if $anonymous {
                 OperationFloor::custom($name, SigService::S3).allow_anonymous_after_listing_in_the_posture_report()

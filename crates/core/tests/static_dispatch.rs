@@ -23,14 +23,15 @@ use std::sync::{Arc, Mutex};
 
 use bytes::Bytes;
 use rustfs_gateway_core::{
-    AuthRequirement, CodecError, EncodedResponse, Handler, HandlerResult, MetaView, NoDerived, Operation, OperationCodec,
-    OperationOrigin, OperationSpec, Req, RequestBody, ResourceShape, Resp, StaticDispatchError, StaticDispatchOutcome,
-    StaticOperation, TargetKind,
+    AuthRequirement, CodecError, EncodedResponse, Handler, HandlerDeadlineClass, HandlerResult, MetaView, NoDerived, Operation,
+    OperationCodec, OperationOrigin, OperationSpec, Req, RequestBody, ResourceShape, Resp, StaticDispatchError,
+    StaticDispatchOutcome, StaticOperation, TargetKind,
 };
 use rustfs_gateway_http::{Limits, WireRequest};
 use rustfs_gateway_sig::{OperationFloor, SigService};
 
 static SPEC: OperationSpec = OperationSpec::builder("example:StaticProbe", 200, None)
+    .handler_deadline_class(HandlerDeadlineClass::Standard)
     .required_params(&[])
     .auth(AuthRequirement::new("example:Probe", ResourceShape::Service))
     .build();

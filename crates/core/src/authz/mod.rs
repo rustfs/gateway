@@ -496,9 +496,10 @@ mod tests {
     use rustfs_gateway_types::ObjectKey;
 
     use super::*;
-    use crate::{AuthRequirement, OperationOrigin, OperationSpec, ResourceShape};
+    use crate::{AuthRequirement, HandlerDeadlineClass, OperationOrigin, OperationSpec, ResourceShape};
 
     static SPEC: OperationSpec = OperationSpec::builder("example:DeleteMany", 200, None)
+        .handler_deadline_class(HandlerDeadlineClass::Standard)
         .required_params(&[])
         .auth(AuthRequirement::new("example:Delete", ResourceShape::Object))
         .build();

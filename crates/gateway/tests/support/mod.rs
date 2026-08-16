@@ -47,6 +47,7 @@ use rustfs_gateway::{
     ResponseBody, RouteEntry, RouteSelector, S3Service, ServiceBuilder, SigService, SigV4Authenticator, StaticCredentials,
     TargetKind, allow_when,
 };
+use rustfs_gateway_core::HandlerDeadlineClass;
 
 // ── a vendor operation, anonymously reachable ──────────────────────────────────────────────────
 
@@ -65,6 +66,7 @@ pub struct PingOutput {
 }
 
 pub static PING_SPEC: OperationSpec = OperationSpec::builder("example:Ping", 200, None)
+    .handler_deadline_class(HandlerDeadlineClass::Standard)
     .required_params(&[])
     .auth(AuthRequirement::new("example:Ping", ResourceShape::Service))
     .build();
@@ -153,6 +155,7 @@ pub enum HeadPingInput {
 }
 
 pub static HEAD_PING_SPEC: OperationSpec = OperationSpec::builder("example:HeadPing", 200, None)
+    .handler_deadline_class(HandlerDeadlineClass::Standard)
     .required_params(&[])
     .auth(AuthRequirement::new("example:HeadPing", ResourceShape::Service))
     .build();
@@ -245,6 +248,7 @@ pub fn head_ping_route() -> RouteEntry {
 pub struct ContentPing;
 
 pub static CONTENT_PING_SPEC: OperationSpec = OperationSpec::builder("example:ContentPing", 200, None)
+    .handler_deadline_class(HandlerDeadlineClass::Standard)
     .required_params(&[])
     .auth(AuthRequirement::new("example:ContentPing", ResourceShape::Service))
     .build();
@@ -348,6 +352,7 @@ where
 pub struct Unnamespaced;
 
 pub static UNNAMESPACED_SPEC: OperationSpec = OperationSpec::builder("Ping", 200, None)
+    .handler_deadline_class(HandlerDeadlineClass::Standard)
     .required_params(&[])
     .auth(AuthRequirement::new("example:Ping", ResourceShape::Service))
     .build();
@@ -390,6 +395,7 @@ impl OperationCodec for Unnamespaced {
 pub struct Impostor;
 
 pub static IMPOSTOR_SPEC: OperationSpec = OperationSpec::builder("GetObject", 200, None)
+    .handler_deadline_class(HandlerDeadlineClass::Standard)
     .required_params(&[])
     .auth(AuthRequirement::new("s3:GetObject", ResourceShape::Object))
     .build();

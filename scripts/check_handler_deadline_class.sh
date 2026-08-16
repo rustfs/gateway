@@ -113,5 +113,38 @@ wrong_standard = sorted(name for name in operations - {"CompleteMultipartUpload"
 if wrong_standard:
     fail(f"standard handler deadline drifted for: {wrong_standard}")
 
-print("check_handler_deadline_class: 72 standard operations have explicit deadline classes (71 Standard, 1 Extended)")
+reviewed_third_party_sources = {
+    "crates/core/examples/dialect_overlay.rs": 1,
+    "crates/core/src/authz/mod.rs": 1,
+    "crates/core/tests/dialect.rs": 3,
+    "crates/core/tests/static_dispatch.rs": 1,
+    "crates/gateway/examples/minimal.rs": 1,
+    "crates/gateway/tests/support/mod.rs": 5,
+}
+reviewed_builders = 0
+for relative, expected_builders in reviewed_third_party_sources.items():
+    path = root / relative
+    if not path.is_file() or path.is_symlink():
+        fail(f"reviewed third-party deadline source is missing or not a regular file: {relative}")
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as error:
+        fail(f"cannot read reviewed third-party deadline source {relative}: {error}")
+    builders = list(re.finditer(r"OperationSpec::builder\(.*?\.build\(\)", text, re.DOTALL))
+    if len(builders) != expected_builders:
+        fail(f"reviewed third-party builder census drifted for {relative}: {len(builders)} != {expected_builders}")
+    for builder in builders:
+        chain = builder.group(0)
+        standard = chain.count(".handler_deadline_class(HandlerDeadlineClass::Standard)")
+        extended = chain.count(".handler_deadline_class(HandlerDeadlineClass::Extended)")
+        if standard != 1 or extended:
+            fail(f"reviewed third-party builder lacks one explicit Standard deadline class: {relative}")
+    reviewed_builders += len(builders)
+if reviewed_builders != 12:
+    fail(f"reviewed third-party builder census is {reviewed_builders}, expected 12")
+
+print(
+    "check_handler_deadline_class: 72 standard operations and 12 reviewed third-party builders "
+    "have explicit deadline classes (83 Standard, 1 Extended)"
+)
 PY

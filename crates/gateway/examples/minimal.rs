@@ -42,6 +42,7 @@ use rustfs_gateway::{
     OperationCodec, OperationFloor, OperationSpec, Predicate, RegionSet, Req, RequestBody, ResourceShape, Resp, RouteEntry,
     RouteSelector, ServiceBuilder, SigService, SigV4Authenticator, StaticCredentials, TargetKind, allow_when,
 };
+use rustfs_gateway_core::HandlerDeadlineClass;
 
 // ── the vendor operation, which is what a dialect or an admin API looks like ────────────────────
 
@@ -58,6 +59,7 @@ pub struct PingOutput {
 }
 
 static PING_SPEC: OperationSpec = OperationSpec::builder("example:Ping", 200, None)
+    .handler_deadline_class(HandlerDeadlineClass::Standard)
     .required_params(&[])
     .auth(AuthRequirement::new("example:Ping", ResourceShape::Service))
     .build();
