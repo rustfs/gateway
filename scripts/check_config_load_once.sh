@@ -6,6 +6,7 @@ set -euo pipefail
 ROOT_DIR="${GATEWAY_CHECK_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 SOURCE_ROOT="${ROOT_DIR}/crates/gateway/src"
 ALLOWLIST="${ROOT_DIR}/scripts/config_load_allowlist.txt"
+RUNTIME_EVIDENCE="${ROOT_DIR}/crates/gateway/tests/service_config.rs"
 
 fail() {
     printf 'check_config_load_once: %s\n' "$1" >&2
@@ -15,6 +16,7 @@ fail() {
 [[ -d "$SOURCE_ROOT" ]] || fail 'gateway source tree is missing'
 [[ -f "${SOURCE_ROOT}/config.rs" ]] || fail 'the hot-configuration store is missing'
 [[ -f "$ALLOWLIST" ]] || fail 'scripts/config_load_allowlist.txt is missing'
+[[ -f "$RUNTIME_EVIDENCE" ]] || fail 'c-lim-0005 runtime evidence is missing'
 
 actual="$({
     cd "$ROOT_DIR"
@@ -38,4 +40,45 @@ expected_stages="$(printf '%s\n' accepted routed governed authenticated route_au
 [[ "$stages" == "$expected_stages" ]] \
     || fail 'the real S3Service path no longer consumes the snapshot through all eight stages in order'
 
-printf 'OK: one request-entry load feeds all eight ordered S3Service stages\n'
+python3 - "$RUNTIME_EVIDENCE" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+signature = "async fn c_lim_0005_hot_update_does_not_tear_an_inflight_request() {"
+if text.count(signature) != 1:
+    raise SystemExit("check_config_load_once: c-lim-0005 active runtime evidence is missing or duplicated")
+
+lines = text.splitlines()
+index = lines.index(signature)
+attributes = []
+cursor = index - 1
+while cursor >= 0 and lines[cursor].startswith("#["):
+    attributes.append(lines[cursor])
+    cursor -= 1
+if attributes != ["#[tokio::test]"]:
+    raise SystemExit("check_config_load_once: c-lim-0005 must be one unconditional tokio test")
+if cursor < 0 or "c-lim-0005" not in lines[cursor]:
+    raise SystemExit("check_config_load_once: c-lim-0005 runtime evidence lost its case identity")
+
+end_marker = "\n}\n\n/// Regression: reconfiguring a builder"
+start = text.index(signature)
+end = text.find(end_marker, start)
+if end < 0:
+    raise SystemExit("check_config_load_once: c-lim-0005 runtime evidence has no bounded function body")
+body = text[start:end]
+required = (
+    "wired().config(ServiceConfig::new(8))",
+    "UpdatingFilter::new(handle.clone(), ServiceConfig::new(32))",
+    "assert_eq!(first.status(), http::StatusCode::PAYLOAD_TOO_LARGE);",
+    "assert_eq!(second.status(), http::StatusCode::OK);",
+)
+for fragment in required:
+    if body.count(fragment) != 1:
+        raise SystemExit(f"check_config_load_once: c-lim-0005 runtime evidence drifted at {fragment!r}")
+if "#[cfg" in body:
+    raise SystemExit("check_config_load_once: c-lim-0005 runtime evidence is conditionally disabled")
+PY
+
+printf 'OK: c-lim-0005 observes one request snapshot; c-lim-0041 locks the sole request-entry load\n'

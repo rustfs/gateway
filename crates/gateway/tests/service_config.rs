@@ -53,10 +53,10 @@ impl StageFilter for UpdatingFilter {
     }
 }
 
-/// a-asm-0006. A request observes one configuration snapshot even when the handle is updated
-/// while its body is being polled; the following request observes the replacement.
+/// A request observes one configuration snapshot even when the handle is updated.
+/// c-lim-0005 / a-asm-0006: the following request observes the replacement.
 #[tokio::test]
-async fn a_hot_update_does_not_tear_an_inflight_request() {
+async fn c_lim_0005_hot_update_does_not_tear_an_inflight_request() {
     let (builder, handle) = wired().config(ServiceConfig::new(8));
     let service = builder
         .register::<ContentPing, _>(Arc::new(Backend))

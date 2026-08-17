@@ -11072,6 +11072,96 @@ expect_fail check_ci_test_split.sh \
 fi
 
 if [[ "$QUIRK_LEDGER_ONLY" == 0 && "$DTO_COMPILER_ONLY" == 0 && "$BUILD_GUARDS_ONLY" == 0 ]]; then
+mut_config_snapshot_case_identity_removed() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("crates/gateway/tests/service_config.rs")
+old = "async fn c_lim_0005_hot_update_does_not_tear_an_inflight_request() {"
+new = "async fn hot_update_does_not_tear_an_inflight_request() {"
+text = path.read_text()
+if text.count(old) != 1:
+    raise SystemExit("c-lim-0005 test identity anchor drifted")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_config_load_once.sh \
+    'c-lim-0005 losing its executable runtime identity' mut_config_snapshot_case_identity_removed \
+    'c-lim-0005 active runtime evidence is missing or duplicated'
+
+mut_config_snapshot_case_disabled() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("crates/gateway/tests/service_config.rs")
+old = "#[tokio::test]\nasync fn c_lim_0005_hot_update_does_not_tear_an_inflight_request() {"
+new = "#[cfg(any())]\n#[tokio::test]\nasync fn c_lim_0005_hot_update_does_not_tear_an_inflight_request() {"
+text = path.read_text()
+if text.count(old) != 1:
+    raise SystemExit("c-lim-0005 active-test anchor drifted")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_config_load_once.sh \
+    'c-lim-0005 being disabled by cfg' mut_config_snapshot_case_disabled \
+    'c-lim-0005 must be one unconditional tokio test'
+
+mut_config_snapshot_current_request_widened() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("crates/gateway/tests/service_config.rs")
+old = "assert_eq!(first.status(), http::StatusCode::PAYLOAD_TOO_LARGE);"
+new = "assert_eq!(first.status(), http::StatusCode::OK);"
+text = path.read_text()
+if text.count(old) != 1:
+    raise SystemExit("c-lim-0005 current-request assertion anchor drifted")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_config_load_once.sh \
+    'c-lim-0005 losing the current-request snapshot direction' mut_config_snapshot_current_request_widened \
+    "c-lim-0005 runtime evidence drifted at 'assert_eq!(first.status(), http::StatusCode::PAYLOAD_TOO_LARGE);'"
+
+mut_config_snapshot_next_request_stale() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("crates/gateway/tests/service_config.rs")
+old = "assert_eq!(second.status(), http::StatusCode::OK);"
+new = "assert_eq!(second.status(), http::StatusCode::PAYLOAD_TOO_LARGE);"
+text = path.read_text()
+if text.count(old) != 1:
+    raise SystemExit("c-lim-0005 next-request assertion anchor drifted")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_config_load_once.sh \
+    'c-lim-0005 losing the next-request replacement direction' mut_config_snapshot_next_request_stale \
+    "c-lim-0005 runtime evidence drifted at 'assert_eq!(second.status(), http::StatusCode::OK);'"
+
+mut_extension_config_load() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("crates/gateway/src/ext/mod.rs")
+text = path.read_text()
+addition = """
+
+#[allow(dead_code)]
+fn c_lim_0041_illicit_config_load(store: &crate::config::ConfigStore) {
+    let _snapshot = store.load_full();
+}
+"""
+if "c_lim_0041_illicit_config_load" in text:
+    raise SystemExit("c-lim-0041 mutation anchor is not unique")
+path.write_text(text + addition)
+PYEOF
+}
+expect_fail check_config_load_once.sh \
+    'c-lim-0041 adding a hot-configuration load inside the extension tree' mut_extension_config_load \
+    'crates/gateway/src/ext/mod.rs:'
+
 mut_second_config_load() {
     python3 - <<'PYEOF'
 import pathlib
@@ -11085,7 +11175,7 @@ path.write_text(text)
 PYEOF
 }
 expect_fail check_config_load_once.sh \
-    'a second hot-configuration read in the request pipeline' mut_second_config_load
+    'c-lim-0041 adding a second hot-configuration read in the request pipeline' mut_second_config_load
 
 mut_aliased_second_config_load() {
     python3 - <<'PYEOF'
