@@ -29,7 +29,7 @@ cases=(
     'a-asm-0018|scripts/check_config_load_once.sh|expected_stages='
     'a-asm-0019|crates/gateway/tests/handler_panic.rs|fn a_handler_panic_is_a_500_and_the_next_request_still_runs'
     'a-asm-0020|crates/gateway/src/adapt.rs|fn neither_adapter_can_return_an_error'
-    'a-asm-0021|crates/gateway/tests/pipeline.rs|fn a_refusing_governor_answers_before_the_body_is_read'
+    'a-asm-0021|crates/gateway/tests/pipeline.rs|fn c_lim_0040_refusing_governor_answers_before_the_body_is_read'
     'a-asm-0022|crates/gateway/tests/assembly_order.rs|"filter_routed",'
     'a-asm-0023|scripts/check_default_doc.sh|# Security'
     'a-asm-0024|crates/gateway/tests/service_concurrency.rs|fn one_hundred_clones_answer_concurrently'

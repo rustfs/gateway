@@ -169,11 +169,11 @@ async fn a_framing_ambiguity_is_refused_at_acceptance() {
     assert_eq!(status, http::StatusCode::BAD_REQUEST);
 }
 
-/// a-asm-0021. Negative — a refusing governor answers `503 SlowDown`, and the body is never read. The byte
+/// c-lim-0040 / a-asm-0021. A refusing governor answers `503 SlowDown`, and the body is never read. The byte
 /// counter is what makes "before the body" a measurement rather than a claim: a governor placed
 /// after the read would have paid for the upload it refused.
 #[tokio::test]
-async fn a_refusing_governor_answers_before_the_body_is_read() {
+async fn c_lim_0040_refusing_governor_answers_before_the_body_is_read() {
     let service = wired()
         .register::<Ping, _>(Arc::new(Backend))
         .route(ping_route())

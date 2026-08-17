@@ -9603,6 +9603,109 @@ mut_clock_monotonic_source_deleted() {
 expect_fail check_clock_single_source.sh \
     "the monotonic source deleted, which must fail rather than skip" mut_clock_monotonic_source_deleted
 
+mut_governor_moved_after_body_read() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("crates/gateway/src/service.rs")
+text = path.read_text()
+call_anchor = ".try_acquire(&GovernorRequest::new(operation, meta.bucket(), declared_length, None, client_addr, class))"
+call = text.find(call_anchor)
+if call < 0 or text.find(call_anchor, call + 1) >= 0:
+    raise SystemExit("c-lim-0039 main-pipeline governor call anchor drifted")
+start = text.rfind("        if self\n", 0, call)
+if start < 0:
+    raise SystemExit("c-lim-0039 governor block start drifted")
+end = text.find("        let config = config.governed();", call)
+if end < 0:
+    raise SystemExit("c-lim-0039 governed-stage anchor drifted")
+block = text[start:end]
+without = text[:start] + text[end:]
+read = without.find("            let body = sealed")
+if read < 0:
+    raise SystemExit("c-lim-0039 body-read anchor drifted")
+insert = without.find("                .await?;", read)
+if insert < 0:
+    raise SystemExit("c-lim-0039 body-read completion anchor drifted")
+insert += len("                .await?;")
+decoy = '        let _governor_position_decoy = r###"' + block + '"###;\n'
+without = without[:start] + decoy + without[start:]
+insert += len(decoy)
+path.write_text(without[:insert] + "\n" + block + without[insert:])
+PYEOF
+}
+expect_fail check_governor_position.sh \
+    'c-lim-0039 moving the real governor after body read beside a raw-string decoy' mut_governor_moved_after_body_read \
+    'c-lim-0039 governor must remain after routing and before every body-read boundary'
+
+mut_governor_runtime_identity_removed() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("crates/gateway/tests/pipeline.rs")
+old = "async fn c_lim_0040_refusing_governor_answers_before_the_body_is_read() {"
+new = "async fn refusing_governor_answers_before_the_body_is_read() {"
+text = path.read_text()
+if text.count(old) != 1:
+    raise SystemExit("c-lim-0040 identity anchor drifted")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_governor_position.sh \
+    'c-lim-0040 losing its executable runtime identity' mut_governor_runtime_identity_removed \
+    'c-lim-0040 runtime evidence is missing or duplicated'
+
+mut_governor_runtime_disabled() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("crates/gateway/tests/pipeline.rs")
+old = "#[tokio::test]\nasync fn c_lim_0040_refusing_governor_answers_before_the_body_is_read() {"
+new = "#[cfg(any())]\n#[tokio::test]\nasync fn c_lim_0040_refusing_governor_answers_before_the_body_is_read() {"
+text = path.read_text()
+if text.count(old) != 1:
+    raise SystemExit("c-lim-0040 active-test anchor drifted")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_governor_position.sh \
+    'c-lim-0040 being disabled by cfg' mut_governor_runtime_disabled \
+    'c-lim-0040 must be one unconditional tokio test'
+
+mut_governor_runtime_status_removed() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("crates/gateway/tests/pipeline.rs")
+old = "assert_eq!(response.status(), http::StatusCode::SERVICE_UNAVAILABLE);"
+new = "assert_eq!(response.status(), http::StatusCode::OK);"
+text = path.read_text()
+if text.count(old) != 1:
+    raise SystemExit("c-lim-0040 status anchor drifted")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_governor_position.sh \
+    'c-lim-0040 losing its 503 refusal direction' mut_governor_runtime_status_removed \
+    'c-lim-0040 runtime evidence lost its 503 refusal'
+
+mut_governor_runtime_body_read() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("crates/gateway/tests/pipeline.rs")
+old = 'assert_eq!(read.load(Ordering::SeqCst), 0, "the body must not have been read");'
+new = 'assert_eq!(read.load(Ordering::SeqCst), 1, "the body was read before refusal");'
+text = path.read_text()
+if text.count(old) != 1:
+    raise SystemExit("c-lim-0040 body-read anchor drifted")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_governor_position.sh \
+    'c-lim-0040 losing its zero-body-read observation' mut_governor_runtime_body_read \
+    'c-lim-0040 runtime evidence lost its zero body reads'
+
 mut_governor_sync_path_allocates() {
     python3 - <<'GOVPY'
 import pathlib
