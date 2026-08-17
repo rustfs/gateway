@@ -365,21 +365,21 @@ impl S3Service {
                 }
             }
         }
-        if handler_deadline_report.outcome() == Some(HandlerDeadlineReport::Unacknowledged) {
+        let handler_deadline = handler_deadline_report.outcome();
+        if handler_deadline == Some(HandlerDeadlineReport::Unacknowledged) {
             response.extensions_mut().insert(ConnectionIntent::Close);
         }
         // The body invariants run here on both paths; this is the only position from which
         // "a `HEAD` response has no content" covers refusals that never reached an encoder.
         crate::invariants::enforce(&mut response, &method);
-        // The one stamping site, on both paths, and the last writer on either. `render` has already
-        // written the identifiers on the refusal path and writes the identical bytes, so this is an
-        // overwrite with the same value there; on the success path it is the only writer, including
-        // over an encoder that wrote its own.
+        // Stamp last on both paths. A refusal already has the same identifiers; success encoders
+        // and filters cannot replace this final value.
         crate::stamp::stamp(response.headers_mut(), &trace, now);
         self.inner.observer.on_response(&RequestEvent {
             request_id: trace.request_id(),
             operation: outcome.operation,
             status: response.status().as_u16(),
+            handler_deadline,
             identity: outcome.identity.as_ref(),
             error: outcome.error.as_ref(),
         });

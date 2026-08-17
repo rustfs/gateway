@@ -1810,8 +1810,8 @@ from pathlib import Path
 
 path = Path("Cargo.toml")
 text = path.read_text()
-old = 'rustfs-gateway = { path = "crates/gateway", version = "0.7.6" }'
-new = 'rustfs-gateway = { path = "crates/gateway", version = "0.7.6", features = ["dangerous-allow-all-authorizer"] }'
+old = 'rustfs-gateway = { path = "crates/gateway", version = "0.8.0" }'
+new = 'rustfs-gateway = { path = "crates/gateway", version = "0.8.0", features = ["dangerous-allow-all-authorizer"] }'
 if text.count(old) != 1:
     raise SystemExit("workspace facade dependency is missing")
 path.write_text(text.replace(old, new, 1))
@@ -13403,8 +13403,8 @@ from pathlib import Path
 
 path = Path("crates/gateway/src/service.rs")
 text = path.read_text()
-subject = "handler_deadline_report.outcome() == Some(HandlerDeadlineReport::Unacknowledged)"
-replacement = "handler_deadline_report.outcome() == Some(HandlerDeadlineReport::Acknowledged)"
+subject = "handler_deadline == Some(HandlerDeadlineReport::Unacknowledged)"
+replacement = "handler_deadline == Some(HandlerDeadlineReport::Acknowledged)"
 if text.count(subject) != 1:
     raise SystemExit("missing unique unacknowledged deadline connection mutation subject")
 path.write_text(text.replace(subject, replacement, 1))
@@ -13432,6 +13432,78 @@ expect_fail_with_diagnostic check_handler_deadline_class.sh \
     'the real socket evidence for unacknowledged handler cancellation disappearing' \
     'handler deadline connection evidence is missing or duplicated' \
     mut_handler_deadline_socket_evidence_removed
+
+mut_handler_deadline_report_not_public() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/gateway/src/request_config.rs")
+text = path.read_text()
+subject = "pub enum HandlerDeadlineReport {"
+replacement = "pub(crate) enum HandlerDeadlineReport {"
+if text.count(subject) != 1:
+    raise SystemExit("missing unique public handler deadline report mutation subject")
+path.write_text(text.replace(subject, replacement, 1))
+PYEOF
+}
+expect_fail_with_diagnostic check_handler_deadline_class.sh \
+    'the typed handler deadline report becoming private' \
+    'handler deadline report is not a public typed contract' \
+    mut_handler_deadline_report_not_public
+
+mut_handler_deadline_report_not_exported() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/gateway/src/lib.rs")
+text = path.read_text()
+subject = "pub use crate::request_config::HandlerDeadlineReport;"
+replacement = "pub(crate) use crate::request_config::HandlerDeadlineReport;"
+if text.count(subject) != 1:
+    raise SystemExit("missing unique handler deadline report export mutation subject")
+path.write_text(text.replace(subject, replacement, 1))
+PYEOF
+}
+expect_fail_with_diagnostic check_handler_deadline_class.sh \
+    'the handler deadline report disappearing from the facade' \
+    'facade does not export the handler deadline report' \
+    mut_handler_deadline_report_not_exported
+
+mut_observer_handler_deadline_report_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/gateway/src/ext/observer.rs")
+text = path.read_text()
+subject = "pub handler_deadline: Option<HandlerDeadlineReport>,"
+replacement = "pub _handler_deadline: Option<HandlerDeadlineReport>,"
+if text.count(subject) != 1:
+    raise SystemExit("missing unique observer deadline report mutation subject")
+path.write_text(text.replace(subject, replacement, 1))
+PYEOF
+}
+expect_fail_with_diagnostic check_handler_deadline_class.sh \
+    'the request observer losing its typed handler deadline report' \
+    'request observer does not expose the typed handler deadline report' \
+    mut_observer_handler_deadline_report_removed
+
+mut_handler_deadline_report_dropped_from_event() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/gateway/src/service.rs")
+text = path.read_text()
+subject = "            handler_deadline,\n            identity: outcome.identity.as_ref(),"
+replacement = "            handler_deadline: None,\n            identity: outcome.identity.as_ref(),"
+if text.count(subject) != 1:
+    raise SystemExit("missing unique observed handler deadline mutation subject")
+path.write_text(text.replace(subject, replacement, 1))
+PYEOF
+}
+expect_fail_with_diagnostic check_handler_deadline_class.sh \
+    'the response observer dropping the recorded handler deadline report' \
+    'response observation does not carry the request handler deadline report' \
+    mut_handler_deadline_report_dropped_from_event
 
 expect_signing_suite_dirty_checkout_fail() {
     local checkout output rc=0
