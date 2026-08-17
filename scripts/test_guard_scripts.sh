@@ -751,8 +751,11 @@ mut_build_monomorphic_handler_is_indirect() {
     python3 - <<'PYEOF'
 from pathlib import Path
 Path("scripts/monomorphic-indirect.ll").write_text("""\
-define internal void @_Rdispatch() {
-; <integration::support::Backend as rustfs_gateway_core::handler::Handler<integration::support::Ping>>::call
+define internal void @_RNCINvMNtXstatic_dispatchXStaticOperationXintegration7support4PingE21dispatch_with_handlerX7Backend() {
+  call void @_Rstatic()
+}
+define internal void @_RNCINvNtNtXrustfs_gateway_core8registry8handlers21dispatch_with_contextXintegration7support4PingX7Backend() {
+; <integration::support::Backend as rustfs_gateway_core::handler::Handler<integration::support::Ping>>::call_with_context
   %result = call ptr %handler()
 }
 define internal void @_Rdecode() {
@@ -1807,8 +1810,8 @@ from pathlib import Path
 
 path = Path("Cargo.toml")
 text = path.read_text()
-old = 'rustfs-gateway = { path = "crates/gateway", version = "0.7.5" }'
-new = 'rustfs-gateway = { path = "crates/gateway", version = "0.7.5", features = ["dangerous-allow-all-authorizer"] }'
+old = 'rustfs-gateway = { path = "crates/gateway", version = "0.7.6" }'
+new = 'rustfs-gateway = { path = "crates/gateway", version = "0.7.6", features = ["dangerous-allow-all-authorizer"] }'
 if text.count(old) != 1:
     raise SystemExit("workspace facade dependency is missing")
 path.write_text(text.replace(old, new, 1))
@@ -13233,6 +13236,114 @@ expect_fail_with_diagnostic check_handler_deadline_class.sh \
     'dynamic dispatch losing the observed cleanup-completed outcome' \
     'dynamic dispatch can commit a handler result completed after its deadline' \
     mut_handler_cleanup_completion_mapping_removed
+
+mut_monomorphic_static_handler_injection_bypassed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/core/src/static_dispatch.rs")
+text = path.read_text()
+subject = "invoke_handler(backend, authorized.into_request(), request_guard)"
+replacement = "invoke_handler(backend, authorized.into_request(), ())"
+if text.count(subject) != 1:
+    raise SystemExit("missing unique static handler injection mutation subject")
+path.write_text(text.replace(subject, replacement, 1))
+PYEOF
+}
+expect_fail_with_diagnostic check_monomorphic_dispatch.sh \
+    'static dispatch dropping the request state before injected handler policy' \
+    'static dispatch bypasses the injected handler policy after authorization' \
+    mut_monomorphic_static_handler_injection_bypassed
+
+mut_monomorphic_handler_policy_injection_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/gateway/src/monomorphic.rs")
+text = path.read_text()
+subject = "StaticOperation::<O>::dispatch_with_handler("
+replacement = "StaticOperation::<O>::dispatch("
+if text.count(subject) != 1:
+    raise SystemExit("missing unique monomorphic handler injection mutation subject")
+path.write_text(text.replace(subject, replacement, 1))
+PYEOF
+}
+expect_fail_with_diagnostic check_monomorphic_dispatch.sh \
+    'monomorphic dispatch restoring the handler call without deadline policy' \
+    'monomorphic dispatch does not use the sealed handler-policy injection point' \
+    mut_monomorphic_handler_policy_injection_removed
+
+mut_monomorphic_handler_deadline_class_hardcoded() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/gateway/src/monomorphic.rs")
+text = path.read_text()
+subject = "let Some(deadline_class) = O::spec().deadline_class()"
+replacement = "let Some(deadline_class) = Some(rustfs_gateway_core::HandlerDeadlineClass::Standard)"
+if text.count(subject) != 1:
+    raise SystemExit("missing unique monomorphic deadline class mutation subject")
+path.write_text(text.replace(subject, replacement, 1))
+PYEOF
+}
+expect_fail_with_diagnostic check_monomorphic_dispatch.sh \
+    'monomorphic dispatch hard-coding the Standard deadline class' \
+    "monomorphic dispatch does not consume one request snapshot's handler deadline configuration" \
+    mut_monomorphic_handler_deadline_class_hardcoded
+
+mut_monomorphic_handler_deadline_snapshot_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/gateway/src/monomorphic.rs")
+text = path.read_text()
+subject = "let deadline = request_config.handler_deadline(deadline_class);"
+replacement = "let deadline = std::time::Duration::from_secs(30);"
+if text.count(subject) != 1:
+    raise SystemExit("missing unique monomorphic deadline snapshot mutation subject")
+path.write_text(text.replace(subject, replacement, 1))
+PYEOF
+}
+expect_fail_with_diagnostic check_monomorphic_dispatch.sh \
+    'monomorphic dispatch hard-coding a deadline instead of using the request snapshot' \
+    "monomorphic dispatch does not consume one request snapshot's handler deadline configuration" \
+    mut_monomorphic_handler_deadline_snapshot_removed
+
+mut_monomorphic_handler_deadline_signal_detached() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/gateway/src/monomorphic.rs")
+text = path.read_text()
+subject = "handler_with_deadline(call, deadline_cancellation, deadline, cleanup_grace)"
+replacement = "handler_with_deadline(call, HandlerCancellationSource::pair().0, deadline, cleanup_grace)"
+if text.count(subject) != 1:
+    raise SystemExit("missing unique monomorphic deadline signal mutation subject")
+path.write_text(text.replace(subject, replacement, 1))
+PYEOF
+}
+expect_fail_with_diagnostic check_monomorphic_dispatch.sh \
+    'monomorphic dispatch signalling a token the handler cannot observe' \
+    "monomorphic dispatch does not consume one request snapshot's handler deadline configuration" \
+    mut_monomorphic_handler_deadline_signal_detached
+
+mut_monomorphic_handler_cleanup_mapping_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/gateway/src/monomorphic.rs")
+text = path.read_text()
+subject = "handler deadline exceeded after cleanup completed"
+replacement = "handler deadline exceeded before cleanup completed"
+if text.count(subject) != 1:
+    raise SystemExit("missing unique monomorphic cleanup mapping mutation subject")
+path.write_text(text.replace(subject, replacement, 1))
+PYEOF
+}
+expect_fail_with_diagnostic check_monomorphic_dispatch.sh \
+    'monomorphic dispatch losing the observed cleanup-completed outcome' \
+    'monomorphic dispatch does not suppress and classify late handler completion' \
+    mut_monomorphic_handler_cleanup_mapping_removed
 
 expect_signing_suite_dirty_checkout_fail() {
     local checkout output rc=0
