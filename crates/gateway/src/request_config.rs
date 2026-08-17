@@ -19,6 +19,8 @@
 //! Upstream: [`crate::S3Service`]. Downstream: the ordered pipeline in `service.rs`.
 
 use core::marker::PhantomData;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU8, Ordering};
 
 use crate::ConfigSnapshot;
 
@@ -32,9 +34,37 @@ pub(crate) struct BodyRead;
 pub(crate) struct Decoded;
 pub(crate) struct InputAuthorized;
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum HandlerDeadlineReport {
+    Acknowledged,
+    Unacknowledged,
+}
+
+#[derive(Clone)]
+pub(crate) struct HandlerDeadlineReportSlot(Arc<AtomicU8>);
+
+impl HandlerDeadlineReportSlot {
+    fn new() -> Self {
+        Self(Arc::new(AtomicU8::new(0)))
+    }
+
+    pub(crate) fn record(&self, cleanup_completed: bool) {
+        self.0.store(if cleanup_completed { 1 } else { 2 }, Ordering::Release);
+    }
+
+    pub(crate) fn outcome(&self) -> Option<HandlerDeadlineReport> {
+        match self.0.load(Ordering::Acquire) {
+            0 => None,
+            1 => Some(HandlerDeadlineReport::Acknowledged),
+            _ => Some(HandlerDeadlineReport::Unacknowledged),
+        }
+    }
+}
+
 /// The one snapshot carried by a request, with its current real pipeline stage in the type.
 pub(crate) struct RequestConfig<S> {
     snapshot: ConfigSnapshot,
+    handler_deadline_report: HandlerDeadlineReportSlot,
     stage: PhantomData<fn() -> S>,
 }
 
@@ -42,6 +72,7 @@ impl RequestConfig<Entered> {
     pub(crate) fn enter(snapshot: ConfigSnapshot) -> Self {
         Self {
             snapshot,
+            handler_deadline_report: HandlerDeadlineReportSlot::new(),
             stage: PhantomData,
         }
     }
@@ -98,9 +129,18 @@ impl<S> RequestConfig<S> {
         &self.snapshot
     }
 
+    pub(crate) fn handler_deadline_report(&self) -> HandlerDeadlineReportSlot {
+        self.handler_deadline_report.clone()
+    }
+
+    pub(crate) fn record_handler_deadline(&self, cleanup_completed: bool) {
+        self.handler_deadline_report.record(cleanup_completed);
+    }
+
     fn advance<N>(self) -> RequestConfig<N> {
         RequestConfig {
             snapshot: self.snapshot,
+            handler_deadline_report: self.handler_deadline_report,
             stage: PhantomData,
         }
     }

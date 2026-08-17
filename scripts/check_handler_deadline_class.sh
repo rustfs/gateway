@@ -28,6 +28,10 @@ config = root / "crates/gateway/src/config.rs"
 facade = root / "crates/gateway/src/lib.rs"
 dispatch = root / "crates/gateway/src/dispatch.rs"
 runtime = root / "crates/gateway/src/request_deadline.rs"
+request_config = root / "crates/gateway/src/request_config.rs"
+monomorphic = root / "crates/gateway/src/monomorphic.rs"
+service = root / "crates/gateway/src/service.rs"
+connection_tests = root / "crates/gateway/tests/connection_teardown.rs"
 ops_dir = root / "crates/core/src/ops"
 
 
@@ -48,6 +52,14 @@ if not dispatch.is_file() or dispatch.is_symlink():
     fail("handler deadline dispatch is missing or not a regular file")
 if not runtime.is_file() or runtime.is_symlink():
     fail("handler deadline runtime is missing or not a regular file")
+for path, label in (
+    (request_config, "handler deadline report slot"),
+    (monomorphic, "monomorphic handler deadline dispatch"),
+    (service, "handler deadline response policy"),
+    (connection_tests, "handler deadline connection evidence"),
+):
+    if not path.is_file() or path.is_symlink():
+        fail(f"{label} is missing or not a regular file")
 if not ops_dir.is_dir() or ops_dir.is_symlink():
     fail("standard operation directory is missing or not a directory")
 
@@ -58,6 +70,10 @@ try:
     facade_source = facade.read_text(encoding="utf-8")
     dispatch_source = dispatch.read_text(encoding="utf-8")
     runtime_source = runtime.read_text(encoding="utf-8")
+    request_config_source = request_config.read_text(encoding="utf-8")
+    monomorphic_source = monomorphic.read_text(encoding="utf-8")
+    service_source = service.read_text(encoding="utf-8")
+    connection_test_source = connection_tests.read_text(encoding="utf-8")
 except (OSError, UnicodeError) as error:
     fail(f"cannot read deadline-class source: {error}")
 
@@ -169,6 +185,37 @@ if handler_output_poll in after_cancel or "HandlerDeadlineOutcome::Completed(han
     fail("a handler result completed after its deadline can be committed")
 if runtime_body.count("HandlerDeadlineOutcome::Expired { cleanup_completed }") != 1:
     fail("handler deadline race does not report bounded cleanup completion")
+
+if request_config_source.count("self.handler_deadline_report.record(cleanup_completed);") != 1:
+    fail("request config does not record the handler cleanup acknowledgement")
+for required in (
+    "0 => None,",
+    "1 => Some(HandlerDeadlineReport::Acknowledged),",
+    "_ => Some(HandlerDeadlineReport::Unacknowledged),",
+):
+    if request_config_source.count(required) != 1:
+        fail("handler deadline report slot does not fail closed on unacknowledged cleanup")
+for source_text, label in (
+    (dispatch_source, "dynamic dispatch"),
+    (monomorphic_source, "monomorphic dispatch"),
+):
+    if source_text.count("record_handler_deadline(true);") != 1:
+        fail(f"{label} does not record acknowledged handler cleanup")
+    if source_text.count("record_handler_deadline(false);") != 1:
+        fail(f"{label} does not record an exhausted cleanup grace")
+close_policy = """        if handler_deadline_report.outcome() == Some(HandlerDeadlineReport::Unacknowledged) {
+            response.extensions_mut().insert(ConnectionIntent::Close);
+        }
+"""
+if service_source.count(close_policy) != 1:
+    fail("an unacknowledged handler cancellation does not close the response path")
+for test_name in (
+    "an_unacknowledged_handler_deadline_closes_the_observed_socket",
+    "an_acknowledged_handler_deadline_keeps_the_observed_socket_reusable",
+    "a_monomorphic_unacknowledged_handler_deadline_carries_close_intent",
+):
+    if connection_test_source.count(f"async fn {test_name}()") != 1:
+        fail("handler deadline connection evidence is missing or duplicated")
 
 core_exports = facade_source.partition("pub use rustfs_gateway_core::{")[2].partition("};")[0]
 config_exports = facade_source.partition("pub use crate::config::{")[2].partition("};")[0]
