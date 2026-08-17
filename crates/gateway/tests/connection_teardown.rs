@@ -49,14 +49,14 @@
 use crate::support;
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use bytes::Bytes;
 use http_body_util::Full;
 use rustfs_gateway::{
-    ConnectionIntent, Handler, HandlerCancellation, HandlerDeadlineConfig, HandlerResult, Limits, OperationSetEnd,
-    OperationSetNode, Req, Resp, S3Service, ServiceConfig, connection_intent_of,
+    ConnectionIntent, Handler, HandlerCancellation, HandlerDeadlineConfig, HandlerDeadlineReport, HandlerResult, Limits,
+    Observer, OperationSetEnd, OperationSetNode, Req, RequestEvent, Resp, S3Service, ServiceConfig, connection_intent_of,
 };
 use rustfs_gateway_server::{RunningServer, Server, ServerConfig, ShutdownReport};
 use support::{Backend, Failing, Ping, PingOutput, ping_route, plain, service, wired, wired_denying};
@@ -69,6 +69,19 @@ async fn refusal(service: &S3Service, request: http::Request<Bytes>) -> http::Re
 
 struct DeadlineBackend {
     acknowledges_cleanup: bool,
+}
+
+#[derive(Default)]
+struct DeadlineReportRecorder {
+    seen: Mutex<Vec<Option<HandlerDeadlineReport>>>,
+}
+
+impl Observer for DeadlineReportRecorder {
+    fn on_response(&self, event: &RequestEvent<'_>) {
+        if let Ok(mut seen) = self.seen.lock() {
+            seen.push(event.handler_deadline);
+        }
+    }
 }
 
 impl Handler<Ping> for DeadlineBackend {
@@ -101,13 +114,15 @@ fn deadline_config() -> ServiceConfig {
     ServiceConfig::new(1024).with_handler_deadlines(deadlines)
 }
 
-fn deadline_service(acknowledges_cleanup: bool) -> (S3Service, Arc<DeadlineBackend>) {
+fn deadline_service(acknowledges_cleanup: bool) -> (S3Service, Arc<DeadlineBackend>, Arc<DeadlineReportRecorder>) {
     let backend = Arc::new(DeadlineBackend { acknowledges_cleanup });
+    let recorder = Arc::new(DeadlineReportRecorder::default());
     let (builder, _handle) = wired()
         .register::<Ping, _>(Arc::clone(&backend))
         .route(ping_route())
+        .observer(Arc::clone(&recorder))
         .config(deadline_config());
-    (builder.build().expect("a complete assembly"), backend)
+    (builder.build().expect("a complete assembly"), backend, recorder)
 }
 
 fn live_server(service: S3Service) -> RunningServer {
@@ -253,7 +268,7 @@ async fn a_response_no_refusal_produced_carries_no_verdict() {
 /// the deadline response, so a pipelined second request cannot be answered on contaminated state.
 #[tokio::test]
 async fn an_unacknowledged_handler_deadline_closes_the_observed_socket() {
-    let (service, _backend) = deadline_service(false);
+    let (service, _backend, recorder) = deadline_service(false);
     let (responses, wire) = pipelined_response_count(service).await;
     assert_eq!(
         responses, 1,
@@ -263,15 +278,26 @@ async fn an_unacknowledged_handler_deadline_closes_the_observed_socket() {
         wire.to_ascii_lowercase().contains("connection: close\r\n"),
         "the peer was not warned before close: {wire}"
     );
+    assert_eq!(
+        recorder.seen.lock().expect("not poisoned").as_slice(),
+        [Some(HandlerDeadlineReport::Unacknowledged)]
+    );
 }
 
 /// Positive — a handler that acknowledges cancellation finishes cleanup before the grace expires,
 /// so the same connection remains usable for the next request.
 #[tokio::test]
 async fn an_acknowledged_handler_deadline_keeps_the_observed_socket_reusable() {
-    let (service, _backend) = deadline_service(true);
+    let (service, _backend, recorder) = deadline_service(true);
     let (responses, wire) = pipelined_response_count(service).await;
     assert_eq!(responses, 2, "the server closed a connection whose handler acknowledged cleanup: {wire}");
+    assert_eq!(
+        recorder.seen.lock().expect("not poisoned").as_slice(),
+        [
+            Some(HandlerDeadlineReport::Acknowledged),
+            Some(HandlerDeadlineReport::Acknowledged),
+        ]
+    );
 }
 
 /// Negative — the monomorphic path records the same unacknowledged cancellation verdict before
@@ -282,9 +308,11 @@ async fn a_monomorphic_unacknowledged_handler_deadline_carries_close_intent() {
     let backend = Arc::new(DeadlineBackend {
         acknowledges_cleanup: false,
     });
+    let recorder = Arc::new(DeadlineReportRecorder::default());
     let (builder, _handle) = wired()
         .register::<Ping, _>(Arc::clone(&backend))
         .route(ping_route())
+        .observer(Arc::clone(&recorder))
         .config(deadline_config());
     let service = builder
         .build_monomorphic::<_, Operations>(backend)
@@ -293,4 +321,24 @@ async fn a_monomorphic_unacknowledged_handler_deadline_carries_close_intent() {
     let response = service.call_bytes(plain(http::Method::POST, "/")).await;
     assert_eq!(response.status(), http::StatusCode::INTERNAL_SERVER_ERROR);
     assert_eq!(connection_intent_of(&response), Some(ConnectionIntent::Close));
+    assert_eq!(
+        recorder.seen.lock().expect("not poisoned").as_slice(),
+        [Some(HandlerDeadlineReport::Unacknowledged)]
+    );
+}
+
+/// Positive — a handler that completes before its deadline records no deadline outcome.
+#[tokio::test]
+async fn a_completed_handler_reports_no_deadline() {
+    let recorder = Arc::new(DeadlineReportRecorder::default());
+    let service = wired()
+        .register::<Ping, _>(Arc::new(Backend))
+        .route(ping_route())
+        .observer(Arc::clone(&recorder))
+        .build()
+        .expect("a complete assembly");
+
+    let response = service.call_bytes(plain(http::Method::POST, "/")).await;
+    assert_eq!(response.status(), http::StatusCode::OK);
+    assert_eq!(recorder.seen.lock().expect("not poisoned").as_slice(), [None]);
 }
