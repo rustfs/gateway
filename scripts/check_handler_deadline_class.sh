@@ -226,9 +226,19 @@ for test_name in (
     "an_unacknowledged_handler_deadline_closes_the_observed_socket",
     "an_acknowledged_handler_deadline_keeps_the_observed_socket_reusable",
     "a_monomorphic_unacknowledged_handler_deadline_carries_close_intent",
+    "a_completed_handler_reports_no_deadline",
 ):
     if connection_test_source.count(f"async fn {test_name}()") != 1:
         fail("handler deadline connection evidence is missing or duplicated")
+if connection_test_source.count("seen.push(event.handler_deadline);") != 1:
+    fail("handler deadline observer evidence does not record the live event")
+for report, expected in (
+    ("Some(HandlerDeadlineReport::Acknowledged)", 2),
+    ("Some(HandlerDeadlineReport::Unacknowledged)", 2),
+    ("recorder.seen.lock().expect(\"not poisoned\").as_slice(), [None]", 1),
+):
+    if connection_test_source.count(report) != expected:
+        fail("handler deadline observer evidence does not distinguish all report outcomes")
 
 core_exports = facade_source.partition("pub use rustfs_gateway_core::{")[2].partition("};")[0]
 config_exports = facade_source.partition("pub use crate::config::{")[2].partition("};")[0]

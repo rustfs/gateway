@@ -13505,6 +13505,78 @@ expect_fail_with_diagnostic check_handler_deadline_class.sh \
     'response observation does not carry the request handler deadline report' \
     mut_handler_deadline_report_dropped_from_event
 
+mut_handler_deadline_evidence_records_none() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/gateway/tests/connection_teardown.rs")
+text = path.read_text()
+subject = "seen.push(event.handler_deadline);"
+replacement = "seen.push(None);"
+if text.count(subject) != 1:
+    raise SystemExit("missing unique live deadline report recorder mutation subject")
+path.write_text(text.replace(subject, replacement, 1))
+PYEOF
+}
+expect_fail_with_diagnostic check_handler_deadline_class.sh \
+    'the observer evidence replacing the live deadline report with none' \
+    'handler deadline observer evidence does not record the live event' \
+    mut_handler_deadline_evidence_records_none
+
+mut_unacknowledged_deadline_report_assertion_weakened() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/gateway/tests/connection_teardown.rs")
+text = path.read_text()
+subject = "Some(HandlerDeadlineReport::Unacknowledged)"
+replacement = "None"
+if text.count(subject) != 2:
+    raise SystemExit("missing exact unacknowledged deadline report assertion census")
+path.write_text(text.replace(subject, replacement, 1))
+PYEOF
+}
+expect_fail_with_diagnostic check_handler_deadline_class.sh \
+    'an unacknowledged handler deadline no longer requiring its report' \
+    'handler deadline observer evidence does not distinguish all report outcomes' \
+    mut_unacknowledged_deadline_report_assertion_weakened
+
+mut_acknowledged_deadline_report_assertion_weakened() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/gateway/tests/connection_teardown.rs")
+text = path.read_text()
+subject = "Some(HandlerDeadlineReport::Acknowledged)"
+replacement = "None"
+if text.count(subject) != 2:
+    raise SystemExit("missing exact acknowledged deadline report assertion census")
+path.write_text(text.replace(subject, replacement, 1))
+PYEOF
+}
+expect_fail_with_diagnostic check_handler_deadline_class.sh \
+    'an acknowledged handler deadline no longer requiring its report' \
+    'handler deadline observer evidence does not distinguish all report outcomes' \
+    mut_acknowledged_deadline_report_assertion_weakened
+
+mut_no_deadline_report_assertion_weakened() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/gateway/tests/connection_teardown.rs")
+text = path.read_text()
+subject = 'recorder.seen.lock().expect("not poisoned").as_slice(), [None]'
+replacement = 'recorder.seen.lock().expect("not poisoned").as_slice(), []'
+if text.count(subject) != 1:
+    raise SystemExit("missing unique no-deadline report assertion subject")
+path.write_text(text.replace(subject, replacement, 1))
+PYEOF
+}
+expect_fail_with_diagnostic check_handler_deadline_class.sh \
+    'a completed handler no longer requiring the absence of a deadline report' \
+    'handler deadline observer evidence does not distinguish all report outcomes' \
+    mut_no_deadline_report_assertion_weakened
+
 expect_signing_suite_dirty_checkout_fail() {
     local checkout output rc=0
     cases=$((cases + 1))
