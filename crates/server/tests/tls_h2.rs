@@ -269,10 +269,11 @@ async fn a_srv_0009_invalid_tls_reload_keeps_old_tls_and_never_opens_plaintext()
 }
 
 #[tokio::test]
-async fn a_srv_0015_per_ip_limit_rejects_before_starting_a_third_tls_handshake() {
+async fn c_lim_0062_a_srv_0015_per_ip_half_open_limit_and_header_deadline_recover() {
     let mut server_config = config();
     server_config.max_connections_per_ip = Some(2);
-    let (material, _) = generated_material();
+    server_config.header_read_timeout = Duration::from_millis(50);
+    let (material, certificate) = generated_material();
     let tls = TlsHandle::new(material).expect("material is valid");
     let RunningServer {
         local_addr,
@@ -283,8 +284,8 @@ async fn a_srv_0015_per_ip_limit_rejects_before_starting_a_third_tls_handshake()
         .with_tls(tls.clone())
         .serve()
         .expect("server starts");
-    let first = TcpStream::connect(local_addr).await.expect("first TCP connection succeeds");
-    let second = TcpStream::connect(local_addr).await.expect("second TCP connection succeeds");
+    let mut first = TcpStream::connect(local_addr).await.expect("first TCP connection succeeds");
+    let mut second = TcpStream::connect(local_addr).await.expect("second TCP connection succeeds");
     let third = TcpStream::connect(local_addr)
         .await
         .expect("third TCP handshake reaches the listener");
@@ -296,8 +297,21 @@ async fn a_srv_0015_per_ip_limit_rejects_before_starting_a_third_tls_handshake()
     .await
     .expect("third connection is rejected");
     assert_eq!(tls.handshake_count(), 2, "the rejected connection did not start TLS work");
-    drop(first);
-    drop(second);
+    tokio::time::timeout(Duration::from_millis(250), async {
+        while metrics.active_connections() != 0 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("the header deadline releases both half-open connection permits");
+    let mut byte = [0_u8; 1];
+    assert_eq!(first.read(&mut byte).await.expect("first close is observable"), 0);
+    assert_eq!(second.read(&mut byte).await.expect("second close is observable"), 0);
+
+    let mut recovered = tls_connect(local_addr, certificate).await;
+    assert!(request_keep_alive(&mut recovered).await.starts_with(b"HTTP/1.1 200"));
+    assert_eq!(tls.handshake_count(), 3, "a healthy handshake succeeds after deadline recovery");
+    drop(recovered);
     drop(third);
     let _ = shutdown.trigger(Duration::from_millis(20)).await;
     assert!(task.await.expect("server task joins").is_ok());
