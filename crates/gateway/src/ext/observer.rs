@@ -47,7 +47,7 @@
 use rustfs_gateway_sig::Identity;
 use rustfs_gateway_types::ErrorCode;
 
-use crate::trace::RequestId;
+use crate::{HandlerDeadlineReport, trace::RequestId};
 
 /// What happened to one request.
 #[derive(Debug)]
@@ -60,6 +60,9 @@ pub struct RequestEvent<'a> {
     pub operation: Option<&'a str>,
     /// The status the response went out with.
     pub status: u16,
+    /// How handler cleanup ended after a deadline. `None` when no handler deadline won, including
+    /// requests that never reached a handler.
+    pub handler_deadline: Option<HandlerDeadlineReport>,
     /// Who the request ran as. `None` for anonymous and for every rejected request: a rejected
     /// request must not be attributed to the access key it claimed.
     pub identity: Option<&'a Identity>,
@@ -135,6 +138,7 @@ mod tests {
             request_id: &RequestId::from_bits(1),
             operation: None,
             status: 501,
+            handler_deadline: None,
             identity: None,
             error: Some(&ErrorCode::NOT_IMPLEMENTED),
         });
@@ -152,6 +156,7 @@ mod tests {
                 request_id: &RequestId::from_bits(0xDEAD),
                 operation: Some("GetObject"),
                 status: 200,
+                handler_deadline: None,
                 identity: Some(&identity),
                 error: None,
             }
@@ -169,6 +174,7 @@ mod tests {
             request_id: &RequestId::from_bits(2),
             operation: Some("ListBuckets"),
             status: 200,
+            handler_deadline: None,
             identity: None,
             error: None,
         });

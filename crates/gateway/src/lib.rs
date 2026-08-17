@@ -137,6 +137,7 @@ pub use crate::ext::{AllowAllAuthorizer, DangerAck};
 pub use crate::monomorphic::{MonomorphicOperationSet, MonomorphicService, OperationSetEnd, OperationSetNode};
 pub use crate::probe::{BodyProgress, ObservedBody};
 pub use crate::render::{S3Error, connection_intent_of, declaration, document, document_body, render};
+pub use crate::request_config::HandlerDeadlineReport;
 pub use crate::service::{S3Service, SecurityPosture};
 pub use crate::trace::{
     FixedTrace, HOST_ID_HEADER, HostId, MintedTraces, REQUEST_ID_HEADER, RequestId, RequestTrace, TraceSource,

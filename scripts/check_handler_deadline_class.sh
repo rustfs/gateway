@@ -31,6 +31,7 @@ runtime = root / "crates/gateway/src/request_deadline.rs"
 request_config = root / "crates/gateway/src/request_config.rs"
 monomorphic = root / "crates/gateway/src/monomorphic.rs"
 service = root / "crates/gateway/src/service.rs"
+observer = root / "crates/gateway/src/ext/observer.rs"
 connection_tests = root / "crates/gateway/tests/connection_teardown.rs"
 ops_dir = root / "crates/core/src/ops"
 
@@ -56,6 +57,7 @@ for path, label in (
     (request_config, "handler deadline report slot"),
     (monomorphic, "monomorphic handler deadline dispatch"),
     (service, "handler deadline response policy"),
+    (observer, "handler deadline observer contract"),
     (connection_tests, "handler deadline connection evidence"),
 ):
     if not path.is_file() or path.is_symlink():
@@ -73,6 +75,7 @@ try:
     request_config_source = request_config.read_text(encoding="utf-8")
     monomorphic_source = monomorphic.read_text(encoding="utf-8")
     service_source = service.read_text(encoding="utf-8")
+    observer_source = observer.read_text(encoding="utf-8")
     connection_test_source = connection_tests.read_text(encoding="utf-8")
 except (OSError, UnicodeError) as error:
     fail(f"cannot read deadline-class source: {error}")
@@ -203,12 +206,22 @@ for source_text, label in (
         fail(f"{label} does not record acknowledged handler cleanup")
     if source_text.count("record_handler_deadline(false);") != 1:
         fail(f"{label} does not record an exhausted cleanup grace")
-close_policy = """        if handler_deadline_report.outcome() == Some(HandlerDeadlineReport::Unacknowledged) {
+close_policy = """        let handler_deadline = handler_deadline_report.outcome();
+        if handler_deadline == Some(HandlerDeadlineReport::Unacknowledged) {
             response.extensions_mut().insert(ConnectionIntent::Close);
         }
 """
 if service_source.count(close_policy) != 1:
     fail("an unacknowledged handler cancellation does not close the response path")
+if request_config_source.count("pub enum HandlerDeadlineReport {") != 1:
+    fail("handler deadline report is not a public typed contract")
+if facade_source.count("pub use crate::request_config::HandlerDeadlineReport;") != 1:
+    fail("facade does not export the handler deadline report")
+if observer_source.count("pub handler_deadline: Option<HandlerDeadlineReport>,") != 1:
+    fail("request observer does not expose the typed handler deadline report")
+event_body = service_source.partition("self.inner.observer.on_response(&RequestEvent {")[2].partition("});")[0]
+if not event_body or event_body.count("handler_deadline,") != 1:
+    fail("response observation does not carry the request handler deadline report")
 for test_name in (
     "an_unacknowledged_handler_deadline_closes_the_observed_socket",
     "an_acknowledged_handler_deadline_keeps_the_observed_socket_reusable",

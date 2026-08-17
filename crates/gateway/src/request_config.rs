@@ -14,15 +14,12 @@
 
 //! The request-local configuration carrier through the eight assembly stages.
 //!
-//! Responsible for: making every stage consume the one [`crate::ConfigSnapshot`] loaded at entry.
-//! NOT responsible for: loading or replacing configuration, or for implementing a pipeline stage.
+//! Responsible for: carrying the one configuration snapshot loaded at request entry.
+//! NOT responsible for: loading or replacing configuration, or implementing a pipeline stage.
 //! Upstream: [`crate::S3Service`]. Downstream: the ordered pipeline in `service.rs`.
 
-use core::marker::PhantomData;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicU8, Ordering};
-
 use crate::ConfigSnapshot;
+use std::sync::atomic::{AtomicU8, Ordering};
 
 pub(crate) struct Entered;
 pub(crate) struct Accepted;
@@ -34,18 +31,21 @@ pub(crate) struct BodyRead;
 pub(crate) struct Decoded;
 pub(crate) struct InputAuthorized;
 
+/// How a handler completed cleanup after its deadline won the response race.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum HandlerDeadlineReport {
+pub enum HandlerDeadlineReport {
+    /// The handler observed cancellation and returned before the cleanup grace expired.
     Acknowledged,
+    /// The cleanup grace expired before the handler returned.
     Unacknowledged,
 }
 
 #[derive(Clone)]
-pub(crate) struct HandlerDeadlineReportSlot(Arc<AtomicU8>);
+pub(crate) struct HandlerDeadlineReportSlot(std::sync::Arc<AtomicU8>);
 
 impl HandlerDeadlineReportSlot {
     fn new() -> Self {
-        Self(Arc::new(AtomicU8::new(0)))
+        Self(std::sync::Arc::new(AtomicU8::new(0)))
     }
 
     pub(crate) fn record(&self, cleanup_completed: bool) {
@@ -65,7 +65,7 @@ impl HandlerDeadlineReportSlot {
 pub(crate) struct RequestConfig<S> {
     snapshot: ConfigSnapshot,
     handler_deadline_report: HandlerDeadlineReportSlot,
-    stage: PhantomData<fn() -> S>,
+    stage: core::marker::PhantomData<fn() -> S>,
 }
 
 impl RequestConfig<Entered> {
@@ -73,7 +73,7 @@ impl RequestConfig<Entered> {
         Self {
             snapshot,
             handler_deadline_report: HandlerDeadlineReportSlot::new(),
-            stage: PhantomData,
+            stage: core::marker::PhantomData,
         }
     }
 
@@ -141,7 +141,7 @@ impl<S> RequestConfig<S> {
         RequestConfig {
             snapshot: self.snapshot,
             handler_deadline_report: self.handler_deadline_report,
-            stage: PhantomData,
+            stage: core::marker::PhantomData,
         }
     }
 }
