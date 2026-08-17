@@ -5358,6 +5358,88 @@ mut_server_body_read_idle_timeout() {
 expect_fail check_timeout_layer_ownership.sh \
     'ring-1 server claiming the body-read idle timeout layer' mut_server_body_read_idle_timeout
 
+mut_server_c_lim_0062_case_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/server/tests/tls_h2.rs")
+text = path.read_text()
+subject = "async fn c_lim_0062_a_srv_0015_per_ip_half_open_limit_and_header_deadline_recover() {"
+if text.count(subject) != 1:
+    raise SystemExit("c-lim-0062 test name is not unique")
+path.write_text(text.replace(subject, "async fn a_srv_0015_half_open_limit_and_header_deadline_recover() {", 1))
+PYEOF
+}
+expect_fail check_timeout_layer_ownership.sh \
+    'c-lim-0062 losing its executable TLS evidence' mut_server_c_lim_0062_case_removed
+
+mut_server_c_lim_0062_cfg_disabled() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/server/tests/tls_h2.rs")
+text = path.read_text()
+subject = "#[tokio::test]\nasync fn c_lim_0062_a_srv_0015_per_ip_half_open_limit_and_header_deadline_recover() {"
+if text.count(subject) != 1:
+    raise SystemExit("c-lim-0062 active test entry is not unique")
+path.write_text(text.replace(subject, "#[cfg(any())]\n" + subject, 1))
+PYEOF
+}
+expect_fail check_timeout_layer_ownership.sh \
+    'c-lim-0062 being disabled by cfg' mut_server_c_lim_0062_cfg_disabled
+
+mut_server_c_lim_0062_per_ip_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/server/tests/tls_h2.rs")
+text = path.read_text()
+subject = "    server_config.max_connections_per_ip = Some(2);\n"
+if text.count(subject) != 1:
+    raise SystemExit("c-lim-0062 per-IP setup is not unique")
+path.write_text(text.replace(subject, "", 1))
+PYEOF
+}
+expect_fail check_timeout_layer_ownership.sh \
+    'c-lim-0062 losing its per-IP rejection direction' mut_server_c_lim_0062_per_ip_removed
+
+mut_server_c_lim_0062_header_deadline_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/server/tests/tls_h2.rs")
+text = path.read_text()
+subject = (
+    "    server_config.max_connections_per_ip = Some(2);\n"
+    "    server_config.header_read_timeout = Duration::from_millis(50);\n"
+)
+if text.count(subject) != 1:
+    raise SystemExit("c-lim-0062 header deadline setup is not unique")
+replacement = (
+    "    server_config.max_connections_per_ip = Some(2);\n"
+    "    server_config.header_read_timeout = Duration::from_secs(5);\n"
+)
+path.write_text(text.replace(subject, replacement, 1))
+PYEOF
+}
+expect_fail check_timeout_layer_ownership.sh \
+    'c-lim-0062 losing its bounded header deadline' mut_server_c_lim_0062_header_deadline_removed
+
+mut_server_c_lim_0062_recovery_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/server/tests/tls_h2.rs")
+text = path.read_text()
+subject = '    assert!(request_keep_alive(&mut recovered).await.starts_with(b"HTTP/1.1 200"));\n'
+if text.count(subject) != 1:
+    raise SystemExit("c-lim-0062 healthy recovery assertion is not unique")
+path.write_text(text.replace(subject, "", 1))
+PYEOF
+}
+expect_fail check_timeout_layer_ownership.sh \
+    'c-lim-0062 losing its healthy recovery direction' mut_server_c_lim_0062_recovery_removed
+
 mut_server_connection_lifetime_removed() {
     python3 - <<'PYEOF'
 from pathlib import Path
