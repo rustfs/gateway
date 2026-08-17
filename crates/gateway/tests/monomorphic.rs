@@ -27,11 +27,13 @@ use core::future::Future;
 use core::pin::Pin;
 use core::task::{Context, Poll};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
 
 use bytes::Bytes;
 use rustfs_gateway::{
-    AssemblyError, ClockSkewAck, Handler, HandlerResult, Next, OperationSetEnd, OperationSetNode, Req, RuleRef, ServiceBuilder,
-    WireResponse, dto, op_layer,
+    AssemblyError, ClockSkewAck, Handler, HandlerCancellation, HandlerDeadlineConfig, HandlerResult, Next, OperationSetEnd,
+    OperationSetNode, Req, RuleRef, ServiceBuilder, ServiceConfig, WireResponse, dto, op_layer,
 };
 use support::{Backend, ContentPing, HeadPing, Ping, PingOutput, content_ping_route, head_ping_route, ping_route, plain, wired};
 
@@ -88,7 +90,35 @@ fn assert_wire_parity(dynamic: &WireResponse, monomorphic: &WireResponse) {
     }
 }
 
-struct ContextOnly;
+enum ContextBehavior {
+    Immediate,
+    Cooperative(Arc<AtomicBool>),
+    Uncooperative,
+}
+
+struct ContextOnly {
+    behavior: ContextBehavior,
+}
+
+impl ContextOnly {
+    fn immediate() -> Self {
+        Self {
+            behavior: ContextBehavior::Immediate,
+        }
+    }
+
+    fn cooperative(rollback_completed: Arc<AtomicBool>) -> Self {
+        Self {
+            behavior: ContextBehavior::Cooperative(rollback_completed),
+        }
+    }
+
+    fn uncooperative() -> Self {
+        Self {
+            behavior: ContextBehavior::Uncooperative,
+        }
+    }
+}
 
 impl Handler<Ping> for ContextOnly {
     async fn call(&self, _request: Req<Ping>) -> HandlerResult<Ping> {
@@ -96,10 +126,24 @@ impl Handler<Ping> for ContextOnly {
     }
 
     async fn call_with_context(&self, _request: Req<Ping>, context: rustfs_gateway::HandlerContext) -> HandlerResult<Ping> {
-        assert!(context.cancellation_reason().is_none());
-        Ok(rustfs_gateway::Resp::new(PingOutput {
-            message: "the monomorphic path preserved its handler context".to_owned(),
-        }))
+        match &self.behavior {
+            ContextBehavior::Immediate => {
+                assert!(context.cancellation_reason().is_none());
+                Ok(rustfs_gateway::Resp::new(PingOutput {
+                    message: "the monomorphic path preserved its handler context".to_owned(),
+                }))
+            }
+            ContextBehavior::Cooperative(rollback_completed) => loop {
+                if matches!(context.cancellation_reason(), Some(HandlerCancellation::Deadline)) {
+                    rollback_completed.store(true, Ordering::Release);
+                    return Ok(rustfs_gateway::Resp::new(PingOutput {
+                        message: "a late handler result must not become the response".to_owned(),
+                    }));
+                }
+                futures_timer::Delay::new(Duration::from_millis(1)).await;
+            },
+            ContextBehavior::Uncooperative => core::future::pending().await,
+        }
     }
 }
 
@@ -108,7 +152,7 @@ impl Handler<Ping> for ContextOnly {
 #[tokio::test]
 async fn monomorphic_dispatch_reaches_the_context_aware_handler_entry() {
     type Operations = OperationSetNode<Ping, OperationSetEnd>;
-    let backend = Arc::new(ContextOnly);
+    let backend = Arc::new(ContextOnly::immediate());
     let monomorphic = wired()
         .register::<Ping, _>(Arc::clone(&backend))
         .route(ping_route())
@@ -117,6 +161,54 @@ async fn monomorphic_dispatch_reaches_the_context_aware_handler_entry() {
 
     let response = collect(monomorphic.call_bytes(plain(http::Method::POST, "/")).await).await;
     assert_eq!(response.status(), http::StatusCode::OK);
+}
+
+fn short_handler_deadlines() -> ServiceConfig {
+    let deadlines = HandlerDeadlineConfig::new(Duration::from_millis(10), Duration::from_millis(10))
+        .expect("non-zero handler deadlines")
+        .try_with_cleanup_grace(Duration::from_millis(20))
+        .expect("a non-zero cleanup grace");
+    ServiceConfig::new(1024).with_handler_deadlines(deadlines)
+}
+
+/// Negative — the monomorphic path must signal deadline cancellation, observe cooperative cleanup,
+/// and discard the handler result completed after the response race was lost.
+#[tokio::test]
+async fn monomorphic_handler_deadline_signals_cleanup_and_discards_the_late_result() {
+    type Operations = OperationSetNode<Ping, OperationSetEnd>;
+    let rollback_completed = Arc::new(AtomicBool::new(false));
+    let backend = Arc::new(ContextOnly::cooperative(Arc::clone(&rollback_completed)));
+    let (builder, _config) = wired()
+        .register::<Ping, _>(Arc::clone(&backend))
+        .route(ping_route())
+        .config(short_handler_deadlines());
+    let monomorphic = builder
+        .build_monomorphic::<_, Operations>(backend)
+        .expect("a complete static assembly");
+
+    let response = collect(monomorphic.call_bytes(plain(http::Method::POST, "/")).await).await;
+    assert_eq!(response.status(), http::StatusCode::INTERNAL_SERVER_ERROR);
+    assert!(rollback_completed.load(Ordering::Acquire));
+}
+
+/// Negative — a handler that ignores cancellation must be abandoned after the bounded cleanup
+/// grace instead of keeping the request future alive indefinitely.
+#[tokio::test]
+async fn monomorphic_handler_deadline_bounds_an_uncooperative_handler() {
+    type Operations = OperationSetNode<Ping, OperationSetEnd>;
+    let backend = Arc::new(ContextOnly::uncooperative());
+    let (builder, _config) = wired()
+        .register::<Ping, _>(Arc::clone(&backend))
+        .route(ping_route())
+        .config(short_handler_deadlines());
+    let monomorphic = builder
+        .build_monomorphic::<_, Operations>(backend)
+        .expect("a complete static assembly");
+
+    let started = Instant::now();
+    let response = collect(monomorphic.call_bytes(plain(http::Method::POST, "/")).await).await;
+    assert_eq!(response.status(), http::StatusCode::INTERNAL_SERVER_ERROR);
+    assert!(started.elapsed() < Duration::from_secs(1));
 }
 
 /// a-asm-0007. The public static builder preserves ordinary, refusal and committed response

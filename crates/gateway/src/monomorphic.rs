@@ -97,14 +97,33 @@ where
 
 pub(crate) mod sealed {
     use core::future::Future;
+    use std::time::Duration;
 
     use rustfs_gateway_core::{
-        AuthRequirement, BoxFuture, Decision, Handler, MetaView, OperationCodec, OwnedResource, StaticDispatchError,
-        StaticDispatchOutcome, StaticOperation,
+        AuthRequirement, BoxFuture, Decision, Handler, HandlerCancellationSource, HandlerError, MetaView, OperationCodec,
+        OwnedResource, StaticDispatchError, StaticDispatchOutcome, StaticOperation,
     };
     use rustfs_gateway_sig::OperationFloor;
 
     use super::*;
+    use crate::request_config::{InputAuthorized, RequestConfig};
+    use crate::request_deadline::{HandlerDeadlineOutcome, handler_with_deadline};
+
+    pub trait HandlerDeadlinePolicy: Send {
+        fn handler_deadline(&self, class: rustfs_gateway_core::HandlerDeadlineClass) -> Duration;
+
+        fn handler_cleanup_grace(&self) -> Duration;
+    }
+
+    impl HandlerDeadlinePolicy for RequestConfig<InputAuthorized> {
+        fn handler_deadline(&self, class: rustfs_gateway_core::HandlerDeadlineClass) -> Duration {
+            self.config().handler_deadline(class)
+        }
+
+        fn handler_cleanup_grace(&self) -> Duration {
+            self.config().handler_cleanup_grace()
+        }
+    }
 
     pub trait Set<H>: Send + Sync + 'static {
         fn names(output: &mut Vec<&'static str>);
@@ -124,7 +143,7 @@ pub(crate) mod sealed {
         where
             S: Send + 'a,
             T: Send + 'a,
-            G: Send + 'a,
+            G: HandlerDeadlinePolicy + Send + 'a,
             E: Send + 'a,
             Route: FnOnce() -> RouteFuture + Send + 'a,
             RouteFuture: Future<Output = Result<S, E>> + Send + 'a,
@@ -159,7 +178,7 @@ pub(crate) mod sealed {
         where
             S: Send + 'a,
             T: Send + 'a,
-            G: Send + 'a,
+            G: HandlerDeadlinePolicy + Send + 'a,
             E: Send + 'a,
             Route: FnOnce() -> RouteFuture + Send + 'a,
             RouteFuture: Future<Output = Result<S, E>> + Send + 'a,
@@ -215,7 +234,7 @@ pub(crate) mod sealed {
         where
             S: Send + 'a,
             T: Send + 'a,
-            G: Send + 'a,
+            G: HandlerDeadlinePolicy + Send + 'a,
             E: Send + 'a,
             Route: FnOnce() -> RouteFuture + Send + 'a,
             RouteFuture: Future<Output = Result<S, E>> + Send + 'a,
@@ -225,13 +244,32 @@ pub(crate) mod sealed {
             InputFuture: Future<Output = Result<(Vec<Decision>, G), E>> + Send + 'a,
         {
             if operation == O::NAME {
-                Box::pin(StaticOperation::<O>::dispatch(
+                Box::pin(StaticOperation::<O>::dispatch_with_handler(
                     operation,
                     meta,
                     backend,
                     authorize_route,
                     read_body,
                     authorize_input,
+                    |backend, request, request_config| async move {
+                        let Some(deadline_class) = O::spec().deadline_class() else {
+                            return Err(HandlerError::internal_error("handler deadline class is missing"));
+                        };
+                        let deadline = request_config.handler_deadline(deadline_class);
+                        let cleanup_grace = request_config.handler_cleanup_grace();
+                        let (deadline_cancellation, context) = HandlerCancellationSource::pair();
+                        let call: BoxFuture<'static, _> =
+                            Box::pin(async move { backend.call_with_context(request, context).await });
+                        match handler_with_deadline(call, deadline_cancellation, deadline, cleanup_grace).await {
+                            HandlerDeadlineOutcome::Completed(response) => response,
+                            HandlerDeadlineOutcome::Expired { cleanup_completed: true } => {
+                                Err(HandlerError::internal_error("handler deadline exceeded after cleanup completed"))
+                            }
+                            HandlerDeadlineOutcome::Expired {
+                                cleanup_completed: false,
+                            } => Err(HandlerError::internal_error("handler deadline exceeded before cleanup completed")),
+                        }
+                    },
                 ))
             } else {
                 Tail::dispatch(operation, meta, backend, authorize_route, read_body, authorize_input)

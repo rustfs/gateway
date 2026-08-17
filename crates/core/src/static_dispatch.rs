@@ -14,7 +14,7 @@
 
 //! The sealed generic operation path shared with the facade.
 //!
-//! Responsible for: one public entry that preserves route authorization, body read, input
+//! Responsible for: public entries that preserve route authorization, body read, input
 //! authorization, concrete handler invocation and encoding order without stored callbacks.
 //! NOT responsible for: routing, assembly, extension implementations or rendering refusals.
 //! Upstream: the core codec, authorization and handler types. Downstream: the facade's
@@ -92,8 +92,9 @@ pub enum StaticDispatchError<E> {
 
 /// One operation's generic codec and concrete-handler path.
 ///
-/// This type has no public constructor and no public stage methods. [`Self::dispatch`] is the only
-/// public entry, so downstream code cannot reorder decode and the two authorization passes.
+/// This type has no public constructor and no public stage methods. Its two dispatch entries keep
+/// decode and both authorization passes sealed; the facade-only variant injects handler policy
+/// after authorization without exposing any earlier stage.
 pub struct StaticOperation<O>(PhantomData<fn() -> O>);
 
 impl<O> StaticOperation<O>
@@ -126,6 +127,67 @@ where
         Input: FnOnce(T, Vec<OwnedResource>) -> InputFuture,
         InputFuture: Future<Output = Result<(Vec<Decision>, G), E>>,
     {
+        Self::dispatch_with_handler(
+            routed_operation,
+            meta,
+            backend,
+            authorize_route,
+            read_body,
+            authorize_input_callback,
+            |backend, request, _request_guard| async move {
+                let (_cancellation, context) = HandlerCancellationSource::pair();
+                backend.call_with_context(request, context).await
+            },
+        )
+        .await
+    }
+
+    /// Runs one routed operation while allowing the facade to wrap only the concrete handler call.
+    ///
+    /// Route authorization, body read, decoding, input authorization, and encoding remain in this
+    /// sealed order. The callback receives the authorized request and the state returned by input
+    /// authorization, which lets the facade apply request-snapshot policy without erasing the
+    /// concrete handler type.
+    ///
+    /// # Errors
+    ///
+    /// [`StaticDispatchError`] identifies the stage that refused. A committed continuation uses
+    /// [`StaticDispatchOutcome::Committed`] because its status can no longer change.
+    #[doc(hidden)]
+    pub async fn dispatch_with_handler<
+        B,
+        S,
+        T,
+        G,
+        E,
+        Route,
+        RouteFuture,
+        Read,
+        ReadFuture,
+        Input,
+        InputFuture,
+        Invoke,
+        InvokeFuture,
+    >(
+        routed_operation: &str,
+        meta: &MetaView<'_>,
+        backend: Arc<B>,
+        authorize_route: Route,
+        read_body: Read,
+        authorize_input_callback: Input,
+        invoke_handler: Invoke,
+    ) -> Result<StaticDispatchOutcome, StaticDispatchError<E>>
+    where
+        B: Handler<O>,
+        Route: FnOnce() -> RouteFuture,
+        RouteFuture: Future<Output = Result<S, E>>,
+        Read: FnOnce(S) -> ReadFuture,
+        ReadFuture: Future<Output = Result<(T, Bytes), E>>,
+        Input: FnOnce(T, Vec<OwnedResource>) -> InputFuture,
+        InputFuture: Future<Output = Result<(Vec<Decision>, G), E>>,
+        Invoke: FnOnce(Arc<B>, crate::Req<O>, G) -> InvokeFuture,
+        InvokeFuture: Future<Output = crate::HandlerResult<O>>,
+    {
         if routed_operation != O::NAME {
             return Err(StaticDispatchError::OperationMismatch {
                 routed: routed_operation.to_owned(),
@@ -139,11 +201,8 @@ where
         let (decisions, request_guard) = authorize_input_callback(body_state, resources)
             .await
             .map_err(StaticDispatchError::Input)?;
-        let _request_guard = request_guard;
         let authorized = authorize::<O>(decoded, &decisions).map_err(StaticDispatchError::Denied)?;
-        let (_cancellation, context) = HandlerCancellationSource::pair();
-        let response = backend
-            .call_with_context(authorized.into_request(), context)
+        let response = invoke_handler(backend, authorized.into_request(), request_guard)
             .await
             .map_err(StaticDispatchError::Handler)?;
         let (answer, status) = response.into_parts();
