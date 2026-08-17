@@ -13345,6 +13345,94 @@ expect_fail_with_diagnostic check_monomorphic_dispatch.sh \
     'monomorphic dispatch does not suppress and classify late handler completion' \
     mut_monomorphic_handler_cleanup_mapping_removed
 
+mut_dynamic_handler_deadline_report_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/gateway/src/dispatch.rs")
+text = path.read_text()
+subject = "_request_config.record_handler_deadline(false);"
+if text.count(subject) != 1:
+    raise SystemExit("missing unique dynamic deadline report mutation subject")
+path.write_text(text.replace(subject, "_request_config.record_handler_deadline(true);", 1))
+PYEOF
+}
+expect_fail_with_diagnostic check_handler_deadline_class.sh \
+    'dynamic dispatch reporting an exhausted cleanup grace as acknowledged' \
+    'dynamic dispatch does not record acknowledged handler cleanup' \
+    mut_dynamic_handler_deadline_report_removed
+
+mut_monomorphic_handler_deadline_report_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/gateway/src/monomorphic.rs")
+text = path.read_text()
+subject = "request_config.record_handler_deadline(false);"
+if text.count(subject) != 1:
+    raise SystemExit("missing unique monomorphic deadline report mutation subject")
+path.write_text(text.replace(subject, "request_config.record_handler_deadline(true);", 1))
+PYEOF
+}
+expect_fail_with_diagnostic check_handler_deadline_class.sh \
+    'monomorphic dispatch reporting an exhausted cleanup grace as acknowledged' \
+    'monomorphic dispatch does not record acknowledged handler cleanup' \
+    mut_monomorphic_handler_deadline_report_removed
+
+mut_handler_deadline_report_slot_fails_open() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/gateway/src/request_config.rs")
+text = path.read_text()
+subject = "_ => Some(HandlerDeadlineReport::Unacknowledged),"
+replacement = "_ => None,"
+if text.count(subject) != 1:
+    raise SystemExit("missing unique deadline report fail-closed mutation subject")
+path.write_text(text.replace(subject, replacement, 1))
+PYEOF
+}
+expect_fail_with_diagnostic check_handler_deadline_class.sh \
+    'an unknown handler deadline report state failing open' \
+    'handler deadline report slot does not fail closed on unacknowledged cleanup' \
+    mut_handler_deadline_report_slot_fails_open
+
+mut_unacknowledged_handler_deadline_keeps_connection() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/gateway/src/service.rs")
+text = path.read_text()
+subject = "handler_deadline_report.outcome() == Some(HandlerDeadlineReport::Unacknowledged)"
+replacement = "handler_deadline_report.outcome() == Some(HandlerDeadlineReport::Acknowledged)"
+if text.count(subject) != 1:
+    raise SystemExit("missing unique unacknowledged deadline connection mutation subject")
+path.write_text(text.replace(subject, replacement, 1))
+PYEOF
+}
+expect_fail_with_diagnostic check_handler_deadline_class.sh \
+    'an unacknowledged handler cancellation leaving the connection reusable' \
+    'an unacknowledged handler cancellation does not close the response path' \
+    mut_unacknowledged_handler_deadline_keeps_connection
+
+mut_handler_deadline_socket_evidence_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/gateway/tests/connection_teardown.rs")
+text = path.read_text()
+subject = "async fn an_unacknowledged_handler_deadline_closes_the_observed_socket()"
+replacement = "async fn removed_handler_deadline_socket_evidence()"
+if text.count(subject) != 1:
+    raise SystemExit("missing unique handler deadline socket evidence mutation subject")
+path.write_text(text.replace(subject, replacement, 1))
+PYEOF
+}
+expect_fail_with_diagnostic check_handler_deadline_class.sh \
+    'the real socket evidence for unacknowledged handler cancellation disappearing' \
+    'handler deadline connection evidence is missing or duplicated' \
+    mut_handler_deadline_socket_evidence_removed
+
 expect_signing_suite_dirty_checkout_fail() {
     local checkout output rc=0
     cases=$((cases + 1))

@@ -190,11 +190,15 @@ impl OperationDispatch {
                     let response = match handler_with_deadline(call, deadline_cancellation, deadline, cleanup_grace).await {
                         HandlerDeadlineOutcome::Completed(response) => response?,
                         HandlerDeadlineOutcome::Expired { cleanup_completed: true } => {
+                            _request_config.record_handler_deadline(true);
                             return Err(HandlerError::internal_error("handler deadline exceeded after cleanup completed"));
                         }
                         HandlerDeadlineOutcome::Expired {
                             cleanup_completed: false,
-                        } => return Err(HandlerError::internal_error("handler deadline exceeded before cleanup completed")),
+                        } => {
+                            _request_config.record_handler_deadline(false);
+                            return Err(HandlerError::internal_error("handler deadline exceeded before cleanup completed"));
+                        }
                     };
                     let response = response.downcast::<Resp<O>>().map_err(|_| {
                         HandlerError::internal_error("the registered dispatch received another operation's response")

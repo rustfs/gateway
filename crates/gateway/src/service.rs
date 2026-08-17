@@ -155,7 +155,7 @@ use crate::render::{
     S3Error, from_auth, from_auth_context, from_auth_with_detail, from_codec, from_denial, from_handler, from_pre_auth, from_sse,
     from_wire_reject, render,
 };
-use crate::request_config::{BodyRead, Entered, RequestConfig, RouteAuthorized};
+use crate::request_config::{BodyRead, Entered, HandlerDeadlineReport, RequestConfig, RouteAuthorized};
 use crate::request_deadline::{elapsed_since, hold_failure_floor, policy_snapshot_with_timeout};
 use crate::trace::{RequestTrace, TraceSource};
 
@@ -300,6 +300,7 @@ impl S3Service {
         // later stage can observe a replacement made while this request is in flight.
         let config = self.inner.config.load_full();
         let config = RequestConfig::enter(config);
+        let handler_deadline_report = config.handler_deadline_report();
         let trace = self.inner.traces.mint();
         let now = self.inner.clock.now();
         // Read before the request is consumed, and the only thing kept out of it: the RFC 9110 body
@@ -364,9 +365,11 @@ impl S3Service {
                 }
             }
         }
-        // The one place the body invariants run, on both paths: the body is chosen and nothing has
-        // been written. A refusal never reaches an encoder, so this is the only position from which
-        // "a `HEAD` response has no content" can cover it.
+        if handler_deadline_report.outcome() == Some(HandlerDeadlineReport::Unacknowledged) {
+            response.extensions_mut().insert(ConnectionIntent::Close);
+        }
+        // The body invariants run here on both paths; this is the only position from which
+        // "a `HEAD` response has no content" covers refusals that never reached an encoder.
         crate::invariants::enforce(&mut response, &method);
         // The one stamping site, on both paths, and the last writer on either. `render` has already
         // written the identifiers on the refusal path and writes the identical bytes, so this is an

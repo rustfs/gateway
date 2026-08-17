@@ -113,6 +113,8 @@ pub(crate) mod sealed {
         fn handler_deadline(&self, class: rustfs_gateway_core::HandlerDeadlineClass) -> Duration;
 
         fn handler_cleanup_grace(&self) -> Duration;
+
+        fn record_handler_deadline(&self, cleanup_completed: bool);
     }
 
     impl HandlerDeadlinePolicy for RequestConfig<InputAuthorized> {
@@ -122,6 +124,10 @@ pub(crate) mod sealed {
 
         fn handler_cleanup_grace(&self) -> Duration {
             self.config().handler_cleanup_grace()
+        }
+
+        fn record_handler_deadline(&self, cleanup_completed: bool) {
+            RequestConfig::record_handler_deadline(self, cleanup_completed);
         }
     }
 
@@ -263,11 +269,15 @@ pub(crate) mod sealed {
                         match handler_with_deadline(call, deadline_cancellation, deadline, cleanup_grace).await {
                             HandlerDeadlineOutcome::Completed(response) => response,
                             HandlerDeadlineOutcome::Expired { cleanup_completed: true } => {
+                                request_config.record_handler_deadline(true);
                                 Err(HandlerError::internal_error("handler deadline exceeded after cleanup completed"))
                             }
                             HandlerDeadlineOutcome::Expired {
                                 cleanup_completed: false,
-                            } => Err(HandlerError::internal_error("handler deadline exceeded before cleanup completed")),
+                            } => {
+                                request_config.record_handler_deadline(false);
+                                Err(HandlerError::internal_error("handler deadline exceeded before cleanup completed"))
+                            }
                         }
                     },
                 ))
