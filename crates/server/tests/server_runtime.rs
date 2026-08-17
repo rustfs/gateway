@@ -436,6 +436,85 @@ async fn a_srv_0014_global_limit_pauses_accept_before_the_next_socket() {
 }
 
 #[tokio::test]
+async fn c_lim_0038_in_flight_request_limit_pauses_accept_before_the_next_socket() {
+    let mut config = plaintext_config();
+    config.max_global_inflight_requests = 1;
+    let entered = std::sync::Arc::new(tokio::sync::Barrier::new(2));
+    let release = std::sync::Arc::new(tokio::sync::Barrier::new(2));
+    let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let service = service_fn({
+        let entered = entered.clone();
+        let release = release.clone();
+        let calls = calls.clone();
+        move |_request: Request<hyper::body::Incoming>| {
+            let entered = entered.clone();
+            let release = release.clone();
+            let call = calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            async move {
+                if call == 0 {
+                    entered.wait().await;
+                    release.wait().await;
+                }
+                Ok::<_, Infallible>(Response::new(Full::new(Bytes::from_static(b"ok"))))
+            }
+        }
+    });
+    let RunningServer {
+        local_addr,
+        metrics,
+        task,
+        shutdown,
+    } = Server::new(config, service).serve().expect("server starts");
+
+    let mut first = TcpStream::connect(local_addr).await.expect("first connection succeeds");
+    first
+        .write_all(b"GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+        .await
+        .expect("first request writes");
+    entered.wait().await;
+
+    let mut second = TcpStream::connect(local_addr)
+        .await
+        .expect("the kernel completes the second TCP handshake");
+    second
+        .write_all(b"GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+        .await
+        .expect("the queued connection accepts request bytes");
+    let accepted_early = tokio::time::timeout(Duration::from_millis(50), async {
+        while metrics.accepted_connections() == 1 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await;
+    assert!(accepted_early.is_err(), "request exhaustion must pause the listener before accept");
+    assert_eq!(metrics.accepted_connections(), 1, "the second socket remains in the kernel backlog");
+    let mut probe = [0_u8; 1];
+    let error = second
+        .try_read(&mut probe)
+        .expect_err("the queued socket has neither a response nor EOF/RST");
+    assert_eq!(error.kind(), std::io::ErrorKind::WouldBlock);
+
+    release.wait().await;
+    let mut first_response = Vec::new();
+    first.read_to_end(&mut first_response).await.expect("first response reads");
+    assert!(first_response.starts_with(b"HTTP/1.1 200"));
+    tokio::time::timeout(Duration::from_secs(1), async {
+        while metrics.accepted_connections() != 2 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("releasing the request permit lets the accept loop take the queued socket");
+    let mut second_response = Vec::new();
+    second.read_to_end(&mut second_response).await.expect("second response reads");
+    assert!(second_response.starts_with(b"HTTP/1.1 200"));
+    assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 2);
+
+    let _ = shutdown.trigger(Duration::from_secs(1)).await;
+    assert!(task.await.expect("server task joins").is_ok());
+}
+
+#[tokio::test]
 async fn a_srv_0013_slow_headers_do_not_block_a_healthy_connection() {
     let RunningServer {
         local_addr,

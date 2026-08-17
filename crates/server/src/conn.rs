@@ -48,6 +48,10 @@ use crate::listener::Listener;
 use crate::shutdown::{MetricsInner, RunningServer, ServerMetrics, ShutdownCommand, ShutdownReport, ShutdownTrigger};
 use crate::tls::TlsHandle;
 
+#[path = "request_capacity.rs"]
+mod request_capacity;
+use request_capacity::{RequestCapacity, RequestPermitBody};
+
 #[cfg(test)]
 #[allow(clippy::expect_used)] // Test-only synchronization failures terminate the scenario; no value comes from external input.
 mod deadline_test;
@@ -196,13 +200,14 @@ where
     B::Error: Into<BoxError>,
 {
     let semaphore = Arc::new(Semaphore::new(config.max_connections));
+    let (request_capacity, mut request_capacity_receiver) = RequestCapacity::new(config.max_global_inflight_requests);
     let ip_counts = Arc::new(IpCounts::new(config.max_connections_per_ip));
     let request_stats = Arc::new(RequestStats::default());
     let (shutdown_sender, _) = watch::channel(false);
     let mut connections = JoinSet::new();
     let mut command_receiver = Some(command_receiver);
 
-    let command = loop {
+    let command = 'server: loop {
         let permit = if let Some(receiver) = &mut command_receiver {
             tokio::select! {
                 command = receiver => match command {
@@ -223,8 +228,34 @@ where
                 Err(_) => break None,
             }
         };
+        while *request_capacity_receiver.borrow_and_update() == 0 {
+            if let Some(receiver) = &mut command_receiver {
+                tokio::select! {
+                    command = receiver => match command {
+                        Ok(command) => {
+                            drop(permit);
+                            break 'server Some(command);
+                        }
+                        Err(_) => {
+                            command_receiver = None;
+                            continue;
+                        }
+                    },
+                    changed = request_capacity_receiver.changed() => {
+                        if changed.is_err() {
+                            drop(permit);
+                            break 'server None;
+                        }
+                    },
+                }
+            } else if request_capacity_receiver.changed().await.is_err() {
+                drop(permit);
+                break 'server None;
+            }
+        }
         let accepted = if let Some(receiver) = &mut command_receiver {
             tokio::select! {
+                biased;
                 command = receiver => match command {
                     Ok(command) => {
                         drop(permit);
@@ -236,10 +267,29 @@ where
                         continue;
                     }
                 },
+                changed = request_capacity_receiver.changed() => {
+                    if changed.is_err() {
+                        drop(permit);
+                        break None;
+                    }
+                    drop(permit);
+                    continue;
+                },
                 accepted = listener.accept() => accepted?,
             }
         } else {
-            listener.accept().await?
+            tokio::select! {
+                biased;
+                changed = request_capacity_receiver.changed() => {
+                    if changed.is_err() {
+                        drop(permit);
+                        break None;
+                    }
+                    drop(permit);
+                    continue;
+                },
+                accepted = listener.accept() => accepted?,
+            }
         };
         let (stream, peer) = accepted;
         let header_deadline = deadline_after(config.header_read_timeout);
@@ -268,6 +318,7 @@ where
                 tls: tls.clone(),
                 shutdown: shutdown_sender.subscribe(),
                 request_stats: Arc::clone(&request_stats),
+                request_capacity: Arc::clone(&request_capacity),
                 header_deadline,
                 #[cfg(test)]
                 deadline_observer: deadline_observer
@@ -317,6 +368,7 @@ struct ConnectionState {
     tls: Option<TlsHandle>,
     shutdown: watch::Receiver<bool>,
     request_stats: Arc<RequestStats>,
+    request_capacity: Arc<RequestCapacity>,
     header_deadline: tokio::time::Instant,
     #[cfg(test)]
     deadline_observer: Option<deadline_test::DeadlineArmObserver>,
@@ -338,6 +390,7 @@ where
         tls,
         mut shutdown,
         request_stats,
+        request_capacity,
         header_deadline,
         #[cfg(test)]
         deadline_observer,
@@ -401,6 +454,7 @@ where
             tcp_nodelay,
         },
         request_seen,
+        request_capacity,
     };
     let mut builder = auto::Builder::new(TokioExecutor::new());
     #[cfg(test)]
@@ -465,26 +519,34 @@ struct TowerToHyper<S> {
     inner: S,
     connection: ConnectionInfo,
     request_seen: Arc<AtomicBool>,
+    request_capacity: Arc<RequestCapacity>,
 }
 
-impl<S, B, R> hyper::service::Service<Request<B>> for TowerToHyper<S>
+impl<S, RequestBody, ResponseBody> hyper::service::Service<Request<RequestBody>> for TowerToHyper<S>
 where
-    S: TowerService<Request<B>, Response = R> + Clone + Send + 'static,
+    S: TowerService<Request<RequestBody>, Response = Response<ResponseBody>> + Clone + Send + 'static,
     S::Future: Send + 'static,
-    S::Error: Send + 'static,
-    B: Send + 'static,
+    S::Error: Into<BoxError> + Send + 'static,
+    RequestBody: Send + 'static,
+    ResponseBody: Body + Send + 'static,
 {
-    type Response = R;
-    type Error = S::Error;
-    type Future = Pin<Box<dyn Future<Output = Result<R, S::Error>> + Send>>;
+    type Response = Response<RequestPermitBody<ResponseBody>>;
+    type Error = BoxError;
+    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
 
-    fn call(&self, mut request: Request<B>) -> Self::Future {
+    fn call(&self, mut request: Request<RequestBody>) -> Self::Future {
         self.request_seen.store(true, Ordering::Release);
         request.extensions_mut().insert(self.connection);
         let mut service = self.inner.clone();
+        let request_capacity = Arc::clone(&self.request_capacity);
         Box::pin(async move {
-            poll_fn(|context| service.poll_ready(context)).await?;
-            service.call(request).await
+            let permit = request_capacity
+                .acquire()
+                .await
+                .map_err(|error| Box::new(error) as BoxError)?;
+            poll_fn(|context| service.poll_ready(context)).await.map_err(Into::into)?;
+            let response = service.call(request).await.map_err(Into::into)?;
+            Ok(response.map(|body| RequestPermitBody::new(body, permit)))
         })
     }
 }

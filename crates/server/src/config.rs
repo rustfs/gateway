@@ -76,6 +76,10 @@ pub struct ServerConfig {
     /// Global open-connection ceiling. Increasing raises capacity and memory; decreasing applies earlier backpressure.
     /// Values above the runtime semaphore maximum are invalid.
     pub max_connections: usize,
+    /// Global in-flight request ceiling across HTTP/1 and HTTP/2 connections.
+    /// Increasing raises concurrent handler and response memory; decreasing pauses listener acceptance sooner.
+    /// Values above the runtime semaphore maximum are invalid.
+    pub max_global_inflight_requests: usize,
     /// Optional per-IP open-connection ceiling. Increasing permits more NAT fan-in; decreasing limits single-source load.
     /// The bounded default is 256; setting `None` explicitly disables this protection.
     pub max_connections_per_ip: Option<usize>,
@@ -130,6 +134,7 @@ impl Default for ServerConfig {
             backlog: 1024,
             reuse_address: true,
             max_connections: 10_000,
+            max_global_inflight_requests: 10_000,
             max_connections_per_ip: Some(256),
             header_read_timeout: Duration::from_secs(10),
             write_progress_timeout: Duration::from_secs(30),
@@ -168,6 +173,15 @@ impl ServerConfig {
         if self.max_connections > Semaphore::MAX_PERMITS {
             return Err(ConfigError::MaxConnections {
                 configured: self.max_connections,
+                maximum: Semaphore::MAX_PERMITS,
+            });
+        }
+        if self.max_global_inflight_requests == 0 {
+            return Err(ConfigError::Zero("max_global_inflight_requests"));
+        }
+        if self.max_global_inflight_requests > Semaphore::MAX_PERMITS {
+            return Err(ConfigError::MaxGlobalInFlightRequests {
+                configured: self.max_global_inflight_requests,
                 maximum: Semaphore::MAX_PERMITS,
             });
         }
@@ -244,6 +258,14 @@ pub enum ConfigError {
         /// Largest ceiling Tokio's semaphore accepts.
         maximum: usize,
     },
+    /// The global in-flight request limit exceeds Tokio's semaphore representation.
+    #[error("max_global_inflight_requests {configured} exceeds the supported maximum {maximum}")]
+    MaxGlobalInFlightRequests {
+        /// Configured in-flight request ceiling.
+        configured: usize,
+        /// Largest ceiling Tokio's semaphore accepts.
+        maximum: usize,
+    },
     /// Hyper rejects HTTP/1 parser buffers below eight KiB.
     #[error("HTTP/1 max buffer size {0} is below 8192")]
     Http1BufferSize(usize),
@@ -258,4 +280,35 @@ pub enum ConfigError {
     /// HTTP/2 permits frame sizes only in its defined range.
     #[error("HTTP/2 max frame size {0} is outside 16384..=16777215")]
     Http2FrameSize(u32),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn global_request_limit_is_bounded_by_tokios_semaphore() {
+        assert!(ServerConfig::default().max_global_inflight_requests > 0);
+        let zero = ServerConfig {
+            max_global_inflight_requests: 0,
+            ..ServerConfig::default()
+        };
+        assert_eq!(zero.validate(true), Err(ConfigError::Zero("max_global_inflight_requests")));
+        let maximum = ServerConfig {
+            max_global_inflight_requests: Semaphore::MAX_PERMITS,
+            ..ServerConfig::default()
+        };
+        assert!(maximum.validate(true).is_ok());
+        let above_maximum = ServerConfig {
+            max_global_inflight_requests: Semaphore::MAX_PERMITS + 1,
+            ..ServerConfig::default()
+        };
+        assert_eq!(
+            above_maximum.validate(true),
+            Err(ConfigError::MaxGlobalInFlightRequests {
+                configured: Semaphore::MAX_PERMITS + 1,
+                maximum: Semaphore::MAX_PERMITS,
+            })
+        );
+    }
 }

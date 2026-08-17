@@ -22,20 +22,24 @@
 #![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 
 use std::convert::Infallible;
-use std::future::{Ready, ready};
+use std::future::{Future, Ready, ready};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::task::{Context, Poll};
 use std::time::Duration;
 
 use bytes::Bytes;
 use http::{Request, Response};
+use http_body::{Body, Frame};
 use http_body_util::{BodyExt, Empty, Full};
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use rustfs_gateway_server::{RunningServer, Server, ServerConfig, TlsHandle, TlsMaterial};
 use rustls::pki_types::{CertificateDer, ServerName};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
+use tokio::sync::{mpsc, oneshot};
 use tokio_rustls::{TlsConnector, client::TlsStream};
 use tower::service_fn;
 
@@ -65,6 +69,34 @@ fn echo(_request: Request<hyper::body::Incoming>) -> EchoFuture {
 
 fn service() -> EchoService {
     service_fn(echo as fn(Request<hyper::body::Incoming>) -> EchoFuture)
+}
+
+struct DelayedBody {
+    release: oneshot::Receiver<()>,
+    sent: bool,
+}
+
+impl Body for DelayedBody {
+    type Data = Bytes;
+    type Error = Infallible;
+
+    fn poll_frame(self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
+        let this = self.get_mut();
+        if this.sent {
+            return Poll::Ready(None);
+        }
+        match Pin::new(&mut this.release).poll(context) {
+            Poll::Ready(_) => {
+                this.sent = true;
+                Poll::Ready(Some(Ok(Frame::data(Bytes::from_static(b"ok")))))
+            }
+            Poll::Pending => Poll::Pending,
+        }
+    }
+
+    fn is_end_stream(&self) -> bool {
+        self.sent
+    }
 }
 
 async fn tls_connect(addr: SocketAddr, certificate: CertificateDer<'static>) -> TlsStream<TcpStream> {
@@ -229,6 +261,96 @@ async fn a_srv_0005_h2_excess_streams_queue_and_eventually_complete() {
         .body(Empty::<Bytes>::new())
         .expect("fixture request");
     assert!(sender.send_request(after_goaway).await.is_err(), "GOAWAY prevents a new h2 stream");
+    let _ = shutdown_task.await.expect("shutdown task joins");
+    assert!(task.await.expect("server task joins").is_ok());
+}
+
+#[tokio::test]
+async fn c_lim_0038_one_h2_connection_obeys_the_global_request_limit() {
+    let mut server_config = config();
+    server_config.plaintext = true;
+    server_config.h2_max_concurrent_streams = 4;
+    server_config.max_global_inflight_requests = 1;
+    let (entered_sender, mut entered_receiver) = mpsc::unbounded_channel();
+    let service = service_fn({
+        let entered_sender = entered_sender.clone();
+        move |_request: Request<hyper::body::Incoming>| {
+            let (release, released) = oneshot::channel();
+            entered_sender.send(release).expect("test receiver remains active");
+            async move {
+                Ok::<_, Infallible>(Response::new(DelayedBody {
+                    release: released,
+                    sent: false,
+                }))
+            }
+        }
+    });
+    let RunningServer {
+        local_addr,
+        task,
+        shutdown,
+        ..
+    } = Server::new(server_config, service).serve().expect("server starts");
+    let stream = TokioIo::new(TcpStream::connect(local_addr).await.expect("TCP connects"));
+    let (mut sender, connection) = hyper::client::conn::http2::Builder::new(TokioExecutor::new())
+        .handshake(stream)
+        .await
+        .expect("h2 handshake succeeds");
+    let connection_task = tokio::spawn(connection);
+    let first_request = Request::builder()
+        .uri("http://localhost/")
+        .body(Empty::<Bytes>::new())
+        .expect("fixture request");
+    let first_response = sender.send_request(first_request).await.expect("first response head arrives");
+    let first_release = entered_receiver.recv().await.expect("first handler enters");
+
+    let mut second_sender = sender.clone();
+    let second = tokio::spawn(async move {
+        second_sender.ready().await.expect("second stream capacity opens");
+        let request = Request::builder()
+            .uri("http://localhost/")
+            .body(Empty::<Bytes>::new())
+            .expect("fixture request");
+        second_sender
+            .send_request(request)
+            .await
+            .expect("second response head arrives")
+    });
+    assert!(
+        tokio::time::timeout(Duration::from_millis(50), entered_receiver.recv())
+            .await
+            .is_err(),
+        "the second h2 handler waits while the first response body owns the global permit"
+    );
+
+    first_release.send(()).expect("first response body releases");
+    assert_eq!(
+        first_response
+            .into_body()
+            .collect()
+            .await
+            .expect("first body reads")
+            .to_bytes(),
+        b"ok"[..]
+    );
+    let second_release = tokio::time::timeout(Duration::from_secs(1), entered_receiver.recv())
+        .await
+        .expect("second handler enters after the first body completes")
+        .expect("second release handle exists");
+    let second_response = second.await.expect("second request task joins");
+    second_release.send(()).expect("second response body releases");
+    assert_eq!(
+        second_response
+            .into_body()
+            .collect()
+            .await
+            .expect("second body reads")
+            .to_bytes(),
+        b"ok"[..]
+    );
+
+    let shutdown_task = tokio::spawn(shutdown.trigger(Duration::from_secs(1)));
+    assert!(connection_task.await.expect("connection task joins").is_ok());
     let _ = shutdown_task.await.expect("shutdown task joins");
     assert!(task.await.expect("server task joins").is_ok());
 }
