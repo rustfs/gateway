@@ -69,6 +69,34 @@ use atomic compare-and-swap; only one client shard is locked. The protected obje
 trait still returns `BoxFuture`, so dispatch through that existing extension boundary allocates the
 future box. Removing that boundary allocation would require a breaking trait change.
 
+## Connection memory
+
+`rustfs_gateway_server::conn_memory_budget(n)` is `n x 408 KiB`. The per-connection figure is
+Hyper's HTTP/1 read-buffer ceiling, `8 KiB + 4 KiB x 100`, which is what one connection can hold
+open at the parser alone; ten thousand connections is therefore a four-gibibyte planning number,
+not a four-gibibyte allocation.
+
+The budget is measured, not asserted. Two cases in `crates/server/tests/server_runtime.rs` read the
+process resident set through `ps` in an isolated child:
+
+| Case | Load | Observed growth | Budget |
+| --- | --- | ---: | ---: |
+| `c-lim-0006` / `a-srv-0008` | 1,000 open connections, one in ten mid-request | ~19 MiB | 408 MiB |
+| `c-lim-0061` / `a-srv-0026` | 1,000 readers parked on a stalled response | ~39 MiB | 408 MiB |
+
+Both cases then run a second identical wave and require it to cost a fraction of the first. That is
+deliberately a *reuse* measurement and not a return-to-baseline one: a freed allocation is not a
+shrinking resident set, since the allocator may keep the pages — and on macOS it does. "Resident
+memory came back down" is a claim that harness cannot make honestly, while "a second wave is nearly
+free" is one it can, and it is the claim an unbounded-growth defect actually fails.
+
+What the slow-reader case additionally observes is that the parked wave is not paid for by the
+traffic beside it: a healthy connection's p99 is sampled with the wave parked and without it, and
+the loaded reading must stay inside eight times the unloaded one. Measured on a four-worker
+runtime, that is single-digit milliseconds against a low-single-digit-millisecond baseline. On a
+single-worker runtime the same load pushes p99 past 200 ms, which is the reason the case pins its
+runtime flavour rather than inheriting the default.
+
 ## What this does not do
 
 - It does not share limits across processes. A fleet of `n` gateways has `n` independent budgets.
