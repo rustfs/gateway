@@ -91,6 +91,11 @@ fn overlay_from(text: &str) -> crate::Result<Overlay> {
     let dir = std::env::temp_dir().join(format!("s3gate-overlay-{}-{n}", std::process::id()));
     std::fs::create_dir_all(dir.join("ops")).expect("temp dir");
     std::fs::create_dir_all(dir.join("quirks")).expect("temp dir");
+    std::fs::write(
+        dir.join(crate::overlay::ROUTE_FILE),
+        "# no reviewed cross-precedence overlap in this fixture\n",
+    )
+    .expect("temp dir");
     // The overlay is a directory of family files: one cross-family scalar vocabulary, one
     // `ops/<family>.toml`, one `quirks/<family>.toml`. These tests are about lowering, so they
     // use one family and the smallest scalar map the miniature model needs.

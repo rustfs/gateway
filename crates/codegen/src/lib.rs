@@ -266,6 +266,10 @@ pub fn generate(input: &CodegenInput, out: &CodegenOutput) -> Result<Artifacts> 
         emit::operations_md::render(&lowered.operations, &lowered.deferred),
     ));
     files.push((out.generated_dir.join("routes.rs"), emit::rust_files::routes(&lowered.operations)));
+    files.push((
+        out.generated_dir.join("route_shadowing.rs"),
+        emit::rust_files::route_shadowing(&overlay.shadowing),
+    ));
     files.push((out.macro_operation_names(), emit::rust_files::macro_operation_names(&lowered.operations)));
     files.push((
         out.generated_dir.join("naming_contracts.rs"),

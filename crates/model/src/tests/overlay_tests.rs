@@ -26,7 +26,7 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::overlay::Overlay;
+use crate::overlay::{Overlay, ROUTE_FILE};
 
 /// A throwaway overlay directory. Removed on drop, so a failing assertion does not leak one.
 struct Sandbox {
@@ -42,6 +42,9 @@ impl Sandbox {
         }
         let sandbox = Self { root };
         sandbox.write("scalars.toml", "[scalar]\nETag = \"ETag\"\n");
+        // The route overlay is required to exist: a missing authority is a failure, never an
+        // empty declaration set. A fixture with no cross-precedence overlap declares none.
+        sandbox.write(ROUTE_FILE, "# no reviewed cross-precedence overlap in this fixture\n");
         // Both directories must hold at least one family file, so every sandbox starts with the
         // one that is not the subject of the test.
         sandbox.write("quirks/base.toml", &quirk("q-base-0001", "c-base-0001"));

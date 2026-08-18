@@ -16,7 +16,7 @@ Agent entry point for operations, routing, codecs, authorization state and handl
 | `src/route/selector.rs` | Route predicates and entries. | Add or interpret a predicate. |
 | `src/route/lattice.rs` | Selector overlap/refinement decision. | A conflict or shadowing decision is wrong. |
 | `src/route/table.rs` | Ordered table construction and resolution. | A request selects the wrong operation. |
-| `src/route/shadowing*.rs` | Reviewed overlap declarations. | A route intentionally stands before another. |
+| `src/route/shadowing.rs` | Declaration types; mounts the generated record from `model/overlays/route.toml`. | A route intentionally stands before another. |
 | `src/route/compiled.rs` | Fast lookup equivalent to the readable table. | Routing performance or equivalence fails. |
 | `src/route/explain.rs` | Route explanation data. | `cargo xtask route explain` omits a reason. |
 | `src/codec/mod.rs` | Per-operation wire codec contract. | Add a decode/encode binding. |

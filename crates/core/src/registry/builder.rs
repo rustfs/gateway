@@ -49,7 +49,7 @@ use crate::op::{Operation, is_standard_operation_name};
 use crate::registry::Registry;
 use crate::registry::opset::{MissingHandlers, OperationSet};
 use crate::registry::reject::RegistryError;
-use crate::route::{PROVISIONAL_SHADOWING, RouteEntry, RouteTable, ShadowingDecl, ShadowingDecls, generated_entries};
+use crate::route::{RouteEntry, RouteTable, SHADOWING, ShadowingDecl, ShadowingDecls, generated_entries};
 
 /// Why a router refused to be built.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -110,7 +110,7 @@ impl From<RouterBuildError> for BuildError {
 pub struct RouterBuilder {
     registry: Registry,
     entries: Vec<RouteEntry>,
-    /// One group per installed dialect, folded onto [`PROVISIONAL_SHADOWING`] at build time.
+    /// One group per installed dialect, folded onto [`SHADOWING`] at build time.
     shadowing: Vec<&'static [ShadowingDecl]>,
     errors: Vec<RegistryError>,
 }
@@ -234,7 +234,7 @@ impl RouterBuilder {
         }
         let mut entries = generated_entries().map_err(RouterBuildError::from)?;
         entries.extend(self.entries);
-        let mut shadowing: ShadowingDecls = PROVISIONAL_SHADOWING;
+        let mut shadowing: ShadowingDecls = SHADOWING;
         for group in self.shadowing {
             shadowing = shadowing.and(group);
         }

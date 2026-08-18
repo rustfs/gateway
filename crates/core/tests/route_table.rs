@@ -51,7 +51,7 @@ fn routed(table: &RouteTable, request: &Req) -> Option<&'static str> {
 /// The generated table, built under the strict shadowing policy the crate ships with.
 fn generated_table() -> RouteTable {
     let entries = generated_entries().expect("the generated rows parse");
-    RouteTable::build(entries, &rustfs_gateway_core::route::PROVISIONAL_SHADOWING)
+    RouteTable::build(entries, &rustfs_gateway_core::route::SHADOWING)
         .expect("the generated table is well formed under the strict shadowing policy")
 }
 
@@ -147,7 +147,7 @@ fn acl_and_tagging_together_pick_a_band_and_explain_the_other() {
 #[test]
 fn the_generated_table_builds_and_routes() {
     let entries = generated_entries().expect("the generated rows parse");
-    let table = RouteTable::build(entries, &rustfs_gateway_core::route::PROVISIONAL_SHADOWING)
+    let table = RouteTable::build(entries, &rustfs_gateway_core::route::SHADOWING)
         .expect("the generated table is well formed under the strict shadowing policy");
     assert_eq!(routed(&table, &Req::new("PUT /bucket/key")), Some("PutObject"));
     assert_eq!(routed(&table, &Req::new("GET /bucket?location")), Some("GetBucketLocation"));

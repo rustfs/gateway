@@ -22,4 +22,5 @@
 mod json_tests;
 mod lower_tests;
 mod overlay_tests;
+mod route_tests;
 mod toml_tests;

@@ -28,9 +28,7 @@ use std::process::ExitCode;
 use http::Request;
 use rustfs_gateway::{HostResolver, Limits, PathStyleOnly, VirtualHostStyle, WireRequest};
 use rustfs_gateway_conformance::toml;
-use rustfs_gateway_core::route::{
-    Explanation, PROVISIONAL_SHADOWING, Predicate, RouteRequestParts, RouteTable, generated_entries,
-};
+use rustfs_gateway_core::route::{Explanation, Predicate, RouteRequestParts, RouteTable, SHADOWING, generated_entries};
 #[cfg(test)]
 use rustfs_gateway_core::route::{HostClass, TargetKind};
 
@@ -86,7 +84,7 @@ pub(crate) fn route(args: &[String]) -> ExitCode {
     };
     let table = match generated_entries()
         .map_err(|error| error.to_string())
-        .and_then(|entries| RouteTable::build(entries, &PROVISIONAL_SHADOWING).map_err(|error| error.to_string()))
+        .and_then(|entries| RouteTable::build(entries, &SHADOWING).map_err(|error| error.to_string()))
     {
         Ok(table) => table,
         Err(error) => return failure("runtime route table did not build", "generated route table", &error),
@@ -272,7 +270,7 @@ pub(crate) fn verify_operation_route(name: &str) -> Result<(), String> {
     if !entry.selector.matches(&request) {
         return Err(format!("the generated witness does not satisfy {name}: {}", entry.selector));
     }
-    let table = RouteTable::build(entries, &PROVISIONAL_SHADOWING).map_err(|error| error.to_string())?;
+    let table = RouteTable::build(entries, &SHADOWING).map_err(|error| error.to_string())?;
     match table.resolve(&request) {
         Some(selected) if selected.op_name == name => Ok(()),
         Some(selected) => Err(format!("the {name} witness selected {} instead", selected.op_name)),

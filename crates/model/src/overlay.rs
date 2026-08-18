@@ -54,6 +54,7 @@ mod naming_contract_inputs;
 mod precondition_contract_inputs;
 mod precondition_contract_values;
 mod quirks;
+mod route;
 mod select_restore_contract_inputs;
 mod select_restore_contract_values;
 
@@ -74,6 +75,7 @@ pub use contract_values::{
 pub use cors_contract_values::*;
 pub use mutation_dimension::MutationDimension;
 pub use precondition_contract_values::*;
+pub use route::{ROUTE_FILE, ShadowingDecl};
 pub use select_restore_contract_values::*;
 
 /// Whether a protocol record is a mechanically mutable quirk or a non-mutable contract.
@@ -108,6 +110,8 @@ pub struct Overlay {
     pub contract_rules: BTreeMap<String, ContractRule>,
     /// Exhaustive classification for every protocol record, keyed by stable id.
     pub classifications: BTreeMap<String, RuleClassification>,
+    /// The reviewed cross-precedence shadowing record, in `route.toml` order.
+    pub shadowing: Vec<ShadowingDecl>,
 }
 
 /// Per-operation overrides. Every field is optional; absent means "take the model's answer".
@@ -337,6 +341,8 @@ impl Overlay {
             overlay.read_quirks(&path, &mut quirk_origin)?;
         }
 
+        overlay.shadowing = route::read(&dir.join(ROUTE_FILE))?;
+
         overlay.check(&include_origin, &deferred_origin)?;
         Ok(overlay)
     }
@@ -392,6 +398,12 @@ impl Overlay {
                  `{SCALARS_FILE}` alone"
             )));
         }
+        if doc.get("shadowing").is_some() {
+            return Err(Error::Overlay(format!(
+                "{file} carries `[[shadowing]]`; a shadowing pair spans two families by \
+                 construction and lives in `{ROUTE_FILE}` alone"
+            )));
+        }
         if let Some(include) = doc.get("include") {
             for op in include.string_array("include")? {
                 claim(include_origin, &op, &file, "included")?;
@@ -438,6 +450,19 @@ impl Overlay {
                     "`{op}` is included by `{included}` and deferred by `{deferred}`; one family owns \
                      an operation, and it decides which of the two it is"
                 )));
+            }
+        }
+        let included: std::collections::BTreeSet<&str> = self.include.iter().map(String::as_str).collect();
+        for decl in &self.shadowing {
+            for (role, op) in [("winner", &decl.winner), ("shadowed", &decl.shadowed)] {
+                if !included.contains(op.as_str()) {
+                    return Err(Error::Overlay(format!(
+                        "shadowing declaration `{} over {}` names `{op}` as its {role}, and no family \
+                         `include`s it; only an included operation emits a route row, so the pair \
+                         describes an overlap that cannot happen",
+                        decl.winner, decl.shadowed
+                    )));
+                }
             }
         }
         for (id, quirk) in &self.quirks {
