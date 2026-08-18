@@ -1,16 +1,23 @@
 # c-list-0021 — the listing keeps the quotes around an entity tag.
 #
-# Schema dimensions exercised: an entity tag rendered in the body rather than in a header.
+# Schema dimensions exercised: an entity tag rendered in the body rather than in a header,
+# multi-exchange form, a capture read back as a conditional header, a before/after control pair.
 
 [case]
 id = "c-list-0021"
 schema_version = 1
 title = "A multipart object's entity tag appears in the listing with its part suffix and its literal quotes"
 rationale = """
-The entity tag is quoted in the listing body and bare in the object-attributes body, and one rule applied to both gets one wrong. The multipart form is the harder half: the suffix after the dash is part of the value, so an implementation that parses the tag to re-render it drops the suffix and every client comparing tags across a copy decides the object changed."""
+The entity tag is quoted in the listing body and bare in the object-attributes body, and one rule \
+applied to both gets one wrong. The multipart form is the harder half: the suffix after the dash is \
+part of the value, so an implementation that parses the tag to re-render it drops the suffix and \
+every client comparing tags across a copy decides the object changed. An upload that was never \
+completed is the wrong witness for any of it — it contributes no entry at all — so the listing is \
+read once before the completion and once after, and the tag the object publishes is read back as an \
+If-Match so the value is pinned to the object rather than to a shape."""
 polarity = "positive"
 operation = "ListObjectsV2"
-tags = ["list", "etag", "xml"]
+tags = ["list", "etag", "xml", "multipart"]
 timeout_ms = 15000
 quirks = ["q-etag-0020"]
 
@@ -22,6 +29,11 @@ kind = "s3s-issue"
 [[case.evidence]]
 url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectsV2.html"
 summary = "The documented listing response carries the entity tag with its surrounding quotes."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CompleteMultipartUpload.html"
+summary = "A key becomes listable only once the upload is completed, and the completion result is where the tag is first published."
 kind = "aws-doc"
 
 [clock]
@@ -38,24 +50,150 @@ capture_upload_id_as = "upload_id"
 [[setup.multipart_uploads.parts]]
 part_number = 1
 body = { size = 5242880, fill = "00" }
+capture_etag_as = "part1_etag"
 
 [[setup.multipart_uploads.parts]]
 part_number = 2
 body = { size = 1024, fill = "ff" }
+capture_etag_as = "part2_etag"
 
-[request]
+# 1 — the control. While the upload is only created, the bucket lists nothing: an incomplete upload
+# is not an entry, so any tag found here would have come from somewhere other than the completion.
+[[exchanges]]
+name = "listing before the completion"
+
+[exchanges.request]
 method = "GET"
 target = "/conf-list-mpu?list-type=2"
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 
-[expect]
+[exchanges.expect]
 kind = "response"
 status = 200
 
-[expect.body]
-contains_utf8 = ["-2&quot;</ETag>"]
+[exchanges.expect.body]
+contains_utf8 = ["<KeyCount>0</KeyCount>"]
+not_contains_utf8 = ["<Contents>", "<ETag>", "big.bin", "<Error>"]
 
-[expect.body.xml]
+[exchanges.expect.body.xml]
+root = "ListBucketResult"
+xmlns = "http://s3.amazonaws.com/doc/2006-03-01/"
+empty_elements = "paired"
+
+# 2 — the completion. This is what turns the upload into an object at all, and it is where the
+# `-N` suffix is first published.
+[[exchanges]]
+name = "complete the upload"
+
+[exchanges.request]
+method = "POST"
+target = "/conf-list-mpu/big.bin?uploadId=${capture.upload_id}"
+headers = { "content-type" = "application/xml" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.request.body]
+utf8 = '''
+<CompleteMultipartUpload xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Part><PartNumber>1</PartNumber><ETag>${capture.part1_etag}</ETag></Part><Part><PartNumber>2</PartNumber><ETag>${capture.part2_etag}</ETag></Part></CompleteMultipartUpload>'''
+
+[exchanges.expect]
+kind = "response"
+status = 200
+
+[exchanges.expect.body]
+redact = ["Location", "UploadId"]
+contains_utf8 = ["<CompleteMultipartUploadResult", "-2&quot;</ETag>"]
+not_contains_utf8 = ["<Error>"]
+
+[exchanges.expect.body.xml]
+root = "CompleteMultipartUploadResult"
+element_order = ["Location", "Bucket", "Key", "ETag"]
+
+# 3 — the object exists, is the concatenation of both parts, and publishes the tag in its header
+# form: bare of any XML escaping, which is the form a precondition is written in.
+[[exchanges]]
+name = "the completed object carries the tag in a header"
+
+[exchanges.request]
+method = "HEAD"
+target = "/conf-list-mpu/big.bin"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+
+[exchanges.expect.capture]
+head_etag = { header = "etag" }
+
+[exchanges.expect.headers_present]
+etag = "*"
+content-length = "5243904"
+
+# 4 — the tag the header published is the object's own: read back as a precondition it matches.
+[[exchanges]]
+name = "the published tag matches as a precondition"
+
+[exchanges.request]
+method = "HEAD"
+target = "/conf-list-mpu/big.bin"
+headers = { "if-match" = "${capture.head_etag}" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+
+[exchanges.expect.headers_present]
+etag = "*"
+content-length = "5243904"
+
+# 5 — the control for exchange 4. A precondition that matched every tag of the same shape would
+# make exchange 4 green whatever the completion minted, so a different `-2` tag must be refused.
+#
+# A GET rather than a HEAD, because a HEAD is answered with no body whatever the server writes:
+# `body.size = 0` on one is true by construction and would be a green line nobody measured. The
+# refusal is asserted by its code instead, which is a value the implementation chooses.
+[[exchanges]]
+name = "a different multipart-shaped tag is refused"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-list-mpu/big.bin"
+headers = { "if-match" = "\"d41d8cd98f00b204e9800998ecf8427e-2\"" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 412
+
+[exchanges.expect.error]
+code = "PreconditionFailed"
+message_present = true
+
+# 6 — the assertion the case exists for.
+[[exchanges]]
+name = "listing after the completion"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-list-mpu?list-type=2"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+
+[exchanges.expect.body]
+contains_utf8 = [
+  "<KeyCount>1</KeyCount>",
+  "<Key>big.bin</Key>",
+  "<Size>5243904</Size>",
+  "-2&quot;</ETag>",
+  "<ETag>&quot;",
+]
+not_contains_utf8 = ["-2\"</ETag>", "<ETag>\"", "<Error>"]
+
+[exchanges.expect.body.xml]
 root = "ListBucketResult"
 xmlns = "http://s3.amazonaws.com/doc/2006-03-01/"
 empty_elements = "paired"
