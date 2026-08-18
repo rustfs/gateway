@@ -23,13 +23,14 @@ and the zero-diff gate needs no temporary directory.
 | `src/emit/operations_md.rs` | `OPERATIONS.md` — three reverse indexes (query key, header, error code), the forward table, the route order, and one section per operation. | You are changing what an agent can look up without reading the model. |
 | `src/emit/operations_json.rs` | `generated/OPERATIONS.json` — seven wire fields per operation and one reverse index per field, for a consumer that has wire evidence rather than an operation name. | A tool must reach an operation from a query key, a header, an error code or a precedence. |
 | `src/emit/rust_files.rs` | `generated/routes.rs`, `generated/error_codes.rs`, and the macros crate's operation-name table; data only. | P4 wires the route table up, a row shape changes, or the handler macro rejects a standard operation. |
+| `src/emit/error_status.rs` | `generated/error_status.rs` — every `ErrorCode` constant and the status lookup, rendered from `model/overlays/error-status.toml`, plus the wire-code to constant index generated call sites resolve through. | A code needs a status, or a call site must name a code. |
 | `src/emit/dto/mod.rs` | `generated/dto/**` — one module per operation, plus flat aliases and the `field_counts.txt` ratchet. Owns the **ADR-0004 P2 gate**: a required member whose type has no `Default` fails the build rather than being quietly wrapped in an `Option`. | A dto's shape is wrong, or the P2 gate fires. |
 | `src/emit/dto/naming.rs` | Operation and member names to Rust identifiers, keyword escaping included. | A generated name collides or reads badly. |
 | `src/emit/dto/registry.rs` | Which shapes and enums each operation drags in, so a shape emitted once is shared rather than duplicated. | A type is emitted twice, or is missing. |
 | `src/emit/dto/render.rs` | The struct, enum and builder text itself, formatted to rustfmt's normal form so `cargo fmt` is a no-op over generated code. | Output no longer survives `cargo fmt --check`. |
 | `src/emit/dto/shared.rs` | Helpers common to the dto emitters. | — |
 | `src/emit/codec/mod.rs` | `generated/codec/ops/**` — one `impl OperationCodec` per operation, the module facade, the `response-*` table, and which shapes need a reader or a writer. A binding the codec surface has no form for is a **hard failure**, never a skipped member. | You are adding an operation family, or codegen refuses a member. |
-| `src/emit/codec/decode.rs` | The request half: URI labels, headers, query, prefix headers, payloads and XML bodies, plus the per-shape readers. The error code for a missing member comes from `missing_error` in the overlay. | A request value is read wrongly, or a family needs a new missing-member code. |
+| `src/emit/codec/decode.rs` | The request half: URI labels, headers, query, prefix headers, payloads and XML bodies, plus the per-shape readers. The error code for a missing member comes from `missing_error` in the overlay and is emitted as the `ErrorCode` constant, so a code with no status row fails the build instead of the request. | A request value is read wrongly, or a family needs a new missing-member code. |
 | `src/emit/codec/encode.rs` | The response half: headers with their `omit_when` suppression, the XML body in `element_order` with its `empty_value_policy`, and the per-shape writers. | A response byte is wrong. |
 | `src/emit/codec/bounds.rs` | Resolves inclusive integer ranges from typed codec rules; free-text quirk kinds are not codec inputs. | A bounded member's typed current value is wrong. |
 | `src/emit/codec/boolean.rs` | Resolves field-level boolean spelling from typed codec rules, failing ambiguous operation-level attachments. | A boolean header's accepted spelling is wrong. |
@@ -62,10 +63,14 @@ cargo xtask why <target>   # quirk id, operation, error code, header or query ke
 - **A golden difference is not a build failure.** `spec/ir/samples/*.json` is hand-written and can
   be the stale side; the run reports differences and exits zero. The gate that must stay green is
   `spec verify`.
-- **The error-code → HTTP status table is deliberately not generated.** It is owned by
-  `rustfs-gateway-types::ErrorCode`. A generated second copy could disagree with it, which is the exact
-  failure the spec pipeline exists to prevent. `generated/error_codes.rs` carries only what the IR
-  knows and the status table cannot express: which operations produce a code.
+- **The error-code → HTTP status table is generated, and it is the only one.** Until
+  rustfs/backlog#1694 it was hand-written in `rustfs-gateway-types::ErrorCode` and this note said
+  the opposite — on the grounds that a generated second copy could disagree with it. That was the
+  right worry and the wrong conclusion: what a hand-written table could disagree with was the code
+  set the IR already knew, and it did, for six codes that took a silent 400. There is now one
+  input, `model/overlays/error-status.toml`, and `src/emit/error_status.rs` renders both the
+  constants and the lookup from it. `generated/error_codes.rs` still carries the separate fact the
+  status table cannot express: which operations produce a code.
 - **`generated/*.rs` define no types.** They are `include!` fodder. A generated file that minted a
   public type name would put a name into the tree that `grep` cannot trace to a declaration.
 - **Emitters must stay pure.** No clock, no host name, no `HashMap` iteration, no generator version

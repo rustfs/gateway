@@ -20,271 +20,126 @@
 //! NOT responsible for: choosing *which* code an operation returns (that is per-operation), the
 //! error body's XML shape (`rustfs-gateway-xml`), or contextual resolution, which belongs to
 //! `rustfs-gateway-core` because it needs operation and authorization facts.
-//! Upstream: `http`. Downstream: every operation, the error serialiser, and the conformance suite.
+//! Upstream: `http`, `generated/error_status.rs`. Downstream: every operation, the error
+//! serialiser, and the conformance suite.
 //!
 //! # A newtype, not an `enum`
 //!
 //! AWS adds error codes continuously, and downstream code stores codes it invented itself — one
 //! migration target uses a custom code in nearly thirty places. A real `enum` would force a `_ =>`
-//! arm into every consumer and would make every new AWS code a breaking change; a newtype over
-//! `Cow<'static, str>` with associated constants makes it a one-line addition. Known codes cost no
-//! allocation, and an unknown code is still a first-class value rather than a parse failure.
+//! arm into every consumer and would make every new AWS code a breaking change; a newtype with
+//! associated constants makes it a one-line addition. Known codes cost no allocation, and an
+//! unknown code is still a first-class value rather than a parse failure.
+//!
+//! # Where the table lives, and why there is no fallback
+//!
+//! The rows are not written here. `model/overlays/error-status.toml` is the single hand-written
+//! authority and `generated/error_status.rs`, included below, is rendered from it — so the
+//! constants and the statuses cannot drift apart, because they are one input.
+//!
+//! Until rustfs/backlog#1694 a code with no row silently took a 400, which reads exactly like a
+//! mapped code and hid six codes that operations declare they can produce. The fallback is gone
+//! rather than moved: a code has a status because a value carries one, [`ErrorCode::custom`] makes
+//! its caller name that status, and there is no constructor that invents one. `is_known` still
+//! reports whether the authority has a row, because a missing row usually means a missing
+//! constant — but nothing about the status depends on the answer.
 
 use std::borrow::Cow;
 use std::fmt;
 
 use http::StatusCode;
 
-/// An S3 error code, as it appears in the `<Code>` element of an error body.
+/// An S3 error code, as it appears in the `<Code>` element of an error body, with the status it
+/// renders as.
 ///
-/// Compare against the associated constants; construct unknown codes with [`ErrorCode::custom`].
+/// Compare against the associated constants; construct codes the authority does not declare with
+/// [`ErrorCode::custom`], and look one up by wire spelling with [`ErrorCode::known`].
+///
+/// Two values are equal when both the spelling and the status match. That is the wire identity: a
+/// value that renders `AccessDenied` with a 400 is not the `AccessDenied` any client has ever
+/// seen, and letting it compare equal to [`ErrorCode::ACCESS_DENIED`] would let it pass every
+/// assertion written about the real one.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct ErrorCode(Cow<'static, str>);
+pub struct ErrorCode {
+    name: Cow<'static, str>,
+    status: StatusCode,
+}
 
 impl ErrorCode {
-    /// Wraps a code this implementation does not have a constant for.
+    /// Wraps a code the authority does not declare, with the status it must render as.
     ///
     /// The escape hatch is deliberate. Implementations behind this framework emit codes of their
     /// own, and forcing them through a "closest match" would put a misleading code on the wire.
+    /// The status is a parameter and not a default because the default was the defect: a 5xx tells
+    /// a client to retry something that will fail again and trips its circuit breaker, and a 4xx
+    /// invented on the caller's behalf is a status nobody chose either.
+    ///
+    /// ```
+    /// use http::StatusCode;
+    /// use rustfs_gateway_types::ErrorCode;
+    ///
+    /// let code = ErrorCode::custom("RustFsTierBackendUnreachable", StatusCode::SERVICE_UNAVAILABLE);
+    /// assert_eq!(code.default_status(), StatusCode::SERVICE_UNAVAILABLE);
+    /// assert!(!code.is_known());
+    /// ```
     #[must_use]
-    pub fn custom(code: impl Into<Cow<'static, str>>) -> Self {
-        Self(code.into())
+    pub fn custom(code: impl Into<Cow<'static, str>>, status: StatusCode) -> Self {
+        Self {
+            name: code.into(),
+            status,
+        }
+    }
+
+    /// The declared code with this wire spelling, or `None`.
+    ///
+    /// The replacement for the old `From<&'static str>`: a spelling with no row has no status, so
+    /// it has no `ErrorCode` either. A caller that means to answer with an undeclared code says so
+    /// with [`ErrorCode::custom`] and names the status.
+    ///
+    /// ```
+    /// use rustfs_gateway_types::ErrorCode;
+    ///
+    /// assert_eq!(ErrorCode::known("NoSuchKey"), Some(ErrorCode::NO_SUCH_KEY));
+    /// assert_eq!(ErrorCode::known("NoSuchThing"), None);
+    /// ```
+    #[must_use]
+    pub fn known(code: &str) -> Option<Self> {
+        CODE_TABLE.iter().find(|(name, _)| *name == code).map(|(name, status)| Self {
+            name: Cow::Borrowed(name),
+            status: *status,
+        })
     }
 
     /// The wire spelling.
     #[must_use]
     pub fn as_str(&self) -> &str {
-        &self.0
+        &self.name
     }
 
-    /// Whether this code has an entry in the status table.
+    /// Whether this code has a row in the authority.
     ///
-    /// A code without one is not an error in itself — it maps to the fallback status — but it is
+    /// A code without one is not an error in itself — its status came from its author — but it is
     /// worth reporting, because it usually means a constant is missing.
     #[must_use]
     pub fn is_known(&self) -> bool {
-        CODE_TABLE.iter().any(|(name, _)| *name == self.0)
+        CODE_TABLE.iter().any(|(name, _)| *name == self.name)
     }
 
-    /// The status this code maps to, ignoring request context.
+    /// The status this code renders as, ignoring request context.
     ///
-    /// Unknown codes get `400 Bad Request`, never a 5xx: a server error tells the client to retry
-    /// something that will fail again, and some clients discard the body of a 5xx entirely, so the
-    /// code the operator carefully chose never reaches the user. Contextual outcomes are resolved
-    /// by `rustfs-gateway-core`.
+    /// Contextual outcomes — a 403 masking a 404, a redirect carrying `x-amz-bucket-region` — are
+    /// resolved by `rustfs-gateway-core`, which has the operation and authorization facts this
+    /// crate does not.
     #[must_use]
     pub fn default_status(&self) -> StatusCode {
-        CODE_TABLE
-            .iter()
-            .find(|(name, _)| *name == self.0)
-            .map_or(FALLBACK_STATUS, |(_, status)| *status)
+        self.status
     }
 }
 
 impl fmt::Display for ErrorCode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.0)
+        f.write_str(&self.name)
     }
 }
 
-impl From<&'static str> for ErrorCode {
-    fn from(value: &'static str) -> Self {
-        Self(Cow::Borrowed(value))
-    }
-}
-
-/// The status an unrecognised code receives. Never a 5xx — see [`ErrorCode::default_status`].
-pub(super) const FALLBACK_STATUS: StatusCode = StatusCode::BAD_REQUEST;
-
-/// Declares a code constant and its table row together, so the two cannot drift apart.
-macro_rules! error_codes {
-    ($( $(#[doc = $note:expr])* $name:ident = $wire:literal => $status:ident; )*) => {
-        impl ErrorCode {
-            $(
-                #[doc = concat!("`", $wire, "`, HTTP `", stringify!($status), "`.")]
-                $(
-                    #[doc = ""]
-                    #[doc = $note]
-                )*
-                pub const $name: Self = Self(Cow::Borrowed($wire));
-            )*
-        }
-
-        /// Every code this implementation knows, with its context-free status.
-        pub(super) const CODE_TABLE: &[(&str, StatusCode)] = &[
-            $( ($wire, StatusCode::$status), )*
-        ];
-    };
-}
-
-error_codes! {
-    // ── 3xx ───────────────────────────────────────────────────────────────────────────────────
-    /// Path-style request for a bucket in another region; the response also carries
-    /// `x-amz-bucket-region` so the client can retry without a second lookup.
-    PERMANENT_REDIRECT = "PermanentRedirect" => MOVED_PERMANENTLY;
-    /// A newly created bucket whose virtual-hosted DNS name has not propagated yet. Temporary by
-    /// definition, so the client must not cache it.
-    TEMPORARY_REDIRECT = "TemporaryRedirect" => TEMPORARY_REDIRECT;
-    /// A precondition matched on a read: the response carries an `ETag` and no body at all, not
-    /// even a `Content-Length`.
-    NOT_MODIFIED = "NotModified" => NOT_MODIFIED;
-
-    // ── 400 ───────────────────────────────────────────────────────────────────────────────────
-    AMBIGUOUS_GRANT_BY_EMAIL_ADDRESS = "AmbiguousGrantByEmailAddress" => BAD_REQUEST;
-    /// The signing region in the credential scope does not match the bucket's region. The error
-    /// body carries an extra `<Region>` element, which is why error bodies are not a fixed shape.
-    AUTHORIZATION_HEADER_MALFORMED = "AuthorizationHeaderMalformed" => BAD_REQUEST;
-    AUTHORIZATION_QUERY_PARAMETERS_ERROR = "AuthorizationQueryParametersError" => BAD_REQUEST;
-    /// `Content-MD5` was well formed but did not match the body.
-    BAD_DIGEST = "BadDigest" => BAD_REQUEST;
-    CREDENTIALS_NOT_SUPPORTED = "CredentialsNotSupported" => BAD_REQUEST;
-    /// An upload part below the 5 MiB minimum, in a position other than the last.
-    ENTITY_TOO_SMALL = "EntityTooSmall" => BAD_REQUEST;
-    /// An object beyond the size limit. Note this is a 400 and not the 413 the status name would
-    /// suggest.
-    ENTITY_TOO_LARGE = "EntityTooLarge" => BAD_REQUEST;
-    EXPIRED_TOKEN = "ExpiredToken" => BAD_REQUEST;
-    ILLEGAL_VERSIONING_CONFIGURATION = "IllegalVersioningConfigurationException" => BAD_REQUEST;
-    /// Fewer body bytes arrived than `Content-Length` promised.
-    INCOMPLETE_BODY = "IncompleteBody" => BAD_REQUEST;
-    INCORRECT_NUMBER_OF_FILES_IN_POST_REQUEST = "IncorrectNumberOfFilesInPostRequest" => BAD_REQUEST;
-    INLINE_DATA_TOO_LARGE = "InlineDataTooLarge" => BAD_REQUEST;
-    INVALID_ARGUMENT = "InvalidArgument" => BAD_REQUEST;
-    INVALID_BUCKET_NAME = "InvalidBucketName" => BAD_REQUEST;
-    INVALID_CHUNK_SIZE = "InvalidChunkSizeError" => BAD_REQUEST;
-    /// `Content-MD5` was not valid base64 of sixteen bytes.
-    INVALID_DIGEST = "InvalidDigest" => BAD_REQUEST;
-    INVALID_ENCRYPTION_ALGORITHM = "InvalidEncryptionAlgorithmError" => BAD_REQUEST;
-    INVALID_LOCATION_CONSTRAINT = "InvalidLocationConstraint" => BAD_REQUEST;
-    INVALID_PART = "InvalidPart" => BAD_REQUEST;
-    INVALID_PART_NUMBER = "InvalidPartNumber" => BAD_REQUEST;
-    INVALID_PART_ORDER = "InvalidPartOrder" => BAD_REQUEST;
-    INVALID_POLICY_DOCUMENT = "InvalidPolicyDocument" => BAD_REQUEST;
-    /// The general-purpose rejection, and the fallback for a code with no table row.
-    INVALID_REQUEST = "InvalidRequest" => BAD_REQUEST;
-    INVALID_RETENTION_PERIOD = "InvalidRetentionPeriod" => BAD_REQUEST;
-    INVALID_SOAP_REQUEST = "InvalidSOAPRequest" => BAD_REQUEST;
-    INVALID_STORAGE_CLASS = "InvalidStorageClass" => BAD_REQUEST;
-    INVALID_TAG = "InvalidTag" => BAD_REQUEST;
-    INVALID_TARGET_BUCKET_FOR_LOGGING = "InvalidTargetBucketForLogging" => BAD_REQUEST;
-    INVALID_TOKEN = "InvalidToken" => BAD_REQUEST;
-    INVALID_URI = "InvalidURI" => BAD_REQUEST;
-    KEY_TOO_LONG = "KeyTooLongError" => BAD_REQUEST;
-    MALFORMED_ACL = "MalformedACLError" => BAD_REQUEST;
-    MALFORMED_POLICY = "MalformedPolicy" => BAD_REQUEST;
-    MALFORMED_POST_REQUEST = "MalformedPOSTRequest" => BAD_REQUEST;
-    MALFORMED_XML = "MalformedXML" => BAD_REQUEST;
-    // ── SelectObjectContent's own codes ───────────────────────────────────────────────────────
-    //
-    // Twelve codes that belong to one operation, listed here rather than left to the fallback for
-    // a reason the fallback cannot serve: a code with no row is *rendered*, so an implementation
-    // that answered `CSVParsingError` without a row would answer the fallback status and read as
-    // correct. Every one is a 400 — the request described data the server could not read the way
-    // the request said it was written — and none is a 5xx: the object is fine, the description of
-    // it is not. When this crate raises them is a separate question and the answer is "never":
-    // parsing an expression and reading a record are the storage side's, and these rows exist so
-    // that side can express what it found.
-    CSV_PARSING_ERROR = "CSVParsingError" => BAD_REQUEST;
-    EXPRESSION_TOO_LONG = "ExpressionTooLong" => BAD_REQUEST;
-    INVALID_COLUMN_INDEX = "InvalidColumnIndex" => BAD_REQUEST;
-    INVALID_COMPRESSION_FORMAT = "InvalidCompressionFormat" => BAD_REQUEST;
-    INVALID_DATA_TYPE = "InvalidDataType" => BAD_REQUEST;
-    INVALID_EXPRESSION_TYPE = "InvalidExpressionType" => BAD_REQUEST;
-    INVALID_TEXT_ENCODING = "InvalidTextEncoding" => BAD_REQUEST;
-    JSON_PARSING_ERROR = "JSONParsingError" => BAD_REQUEST;
-    OBJECT_SERIALIZATION_CONFLICT = "ObjectSerializationConflict" => BAD_REQUEST;
-    OVER_MAX_RECORD_SIZE = "OverMaxRecordSize" => BAD_REQUEST;
-    PARSE_UNEXPECTED_TOKEN = "ParseUnexpectedToken" => BAD_REQUEST;
-    UNSUPPORTED_FUNCTION = "UnsupportedFunction" => BAD_REQUEST;
-    MAX_MESSAGE_LENGTH_EXCEEDED = "MaxMessageLengthExceeded" => BAD_REQUEST;
-    MAX_POST_PRE_DATA_LENGTH_EXCEEDED = "MaxPostPreDataLengthExceededError" => BAD_REQUEST;
-    METADATA_TOO_LARGE = "MetadataTooLarge" => BAD_REQUEST;
-    MISSING_REQUEST_BODY = "MissingRequestBodyError" => BAD_REQUEST;
-    MISSING_SECURITY_ELEMENT = "MissingSecurityElement" => BAD_REQUEST;
-    MISSING_SECURITY_HEADER = "MissingSecurityHeader" => BAD_REQUEST;
-    NO_LOGGING_STATUS_FOR_KEY = "NoLoggingStatusForKey" => BAD_REQUEST;
-    REQUEST_IS_NOT_MULTIPART_CONTENT = "RequestIsNotMultiPartContent" => BAD_REQUEST;
-    /// The client stopped sending. A 400 rather than the 408 the name suggests.
-    REQUEST_TIMEOUT = "RequestTimeout" => BAD_REQUEST;
-    TOKEN_REFRESH_REQUIRED = "TokenRefreshRequired" => BAD_REQUEST;
-    TOO_MANY_BUCKETS = "TooManyBuckets" => BAD_REQUEST;
-    UNEXPECTED_CONTENT = "UnexpectedContent" => BAD_REQUEST;
-    UNRESOLVABLE_GRANT_BY_EMAIL_ADDRESS = "UnresolvableGrantByEmailAddress" => BAD_REQUEST;
-    USER_KEY_MUST_BE_SPECIFIED = "UserKeyMustBeSpecified" => BAD_REQUEST;
-    /// An `x-amz-checksum-*` value did not match the body. Distinct from `BadDigest`, which is the
-    /// `Content-MD5` failure; SDKs branch on the difference.
-    X_AMZ_CONTENT_CHECKSUM_MISMATCH = "XAmzContentChecksumMismatch" => BAD_REQUEST;
-    X_AMZ_CONTENT_SHA256_MISMATCH = "XAmzContentSHA256Mismatch" => BAD_REQUEST;
-
-    // ── 403 ───────────────────────────────────────────────────────────────────────────────────
-    ACCESS_DENIED = "AccessDenied" => FORBIDDEN;
-    /// `OPTIONS` against a bucket with no CORS configuration. A 403 with its own code rather than
-    /// a 404, so a browser preflight fails in a way the developer can diagnose.
-    ACCESS_FORBIDDEN = "AccessForbidden" => FORBIDDEN;
-    ACCOUNT_PROBLEM = "AccountProblem" => FORBIDDEN;
-    ALL_ACCESS_DISABLED = "AllAccessDisabled" => FORBIDDEN;
-    CROSS_LOCATION_LOGGING_PROHIBITED = "CrossLocationLoggingProhibited" => FORBIDDEN;
-    INVALID_ACCESS_KEY_ID = "InvalidAccessKeyId" => FORBIDDEN;
-    /// The object's storage class requires a restore first. A 403, not a 409.
-    INVALID_OBJECT_STATE = "InvalidObjectState" => FORBIDDEN;
-    INVALID_PAYER = "InvalidPayer" => FORBIDDEN;
-    INVALID_SECURITY = "InvalidSecurity" => FORBIDDEN;
-    NOT_SIGNED_UP = "NotSignedUp" => FORBIDDEN;
-    REQUEST_TIME_TOO_SKEWED = "RequestTimeTooSkewed" => FORBIDDEN;
-    SIGNATURE_DOES_NOT_MATCH = "SignatureDoesNotMatch" => FORBIDDEN;
-
-    // ── 404 ───────────────────────────────────────────────────────────────────────────────────
-    NO_SUCH_BUCKET = "NoSuchBucket" => NOT_FOUND;
-    NO_SUCH_BUCKET_POLICY = "NoSuchBucketPolicy" => NOT_FOUND;
-    NO_SUCH_CORS_CONFIGURATION = "NoSuchCORSConfiguration" => NOT_FOUND;
-    /// Returned only when the caller may list the bucket; without that permission the existence of
-    /// the key is itself privileged and the answer is `AccessDenied`.
-    NO_SUCH_KEY = "NoSuchKey" => NOT_FOUND;
-    NO_SUCH_LIFECYCLE_CONFIGURATION = "NoSuchLifecycleConfiguration" => NOT_FOUND;
-    NO_SUCH_OBJECT_LOCK_CONFIGURATION = "NoSuchObjectLockConfiguration" => NOT_FOUND;
-    NO_SUCH_PUBLIC_ACCESS_BLOCK_CONFIGURATION = "NoSuchPublicAccessBlockConfiguration" => NOT_FOUND;
-    NO_SUCH_TAG_SET = "NoSuchTagSet" => NOT_FOUND;
-    NO_SUCH_UPLOAD = "NoSuchUpload" => NOT_FOUND;
-    NO_SUCH_VERSION = "NoSuchVersion" => NOT_FOUND;
-    NO_SUCH_WEBSITE_CONFIGURATION = "NoSuchWebsiteConfiguration" => NOT_FOUND;
-    OBJECT_LOCK_CONFIGURATION_NOT_FOUND = "ObjectLockConfigurationNotFoundError" => NOT_FOUND;
-    REPLICATION_CONFIGURATION_NOT_FOUND = "ReplicationConfigurationNotFoundError" => NOT_FOUND;
-    SERVER_SIDE_ENCRYPTION_CONFIGURATION_NOT_FOUND = "ServerSideEncryptionConfigurationNotFoundError" => NOT_FOUND;
-
-    // ── 405 / 409 / 411 / 412 / 416 ───────────────────────────────────────────────────────────
-    /// The verb is not allowed on this resource. Distinct from `NotImplemented`, which means the
-    /// operation itself is unknown; conflating them hides routing bugs. A `GET` of a delete marker
-    /// by version id also lands here.
-    METHOD_NOT_ALLOWED = "MethodNotAllowed" => METHOD_NOT_ALLOWED;
-    BUCKET_ALREADY_EXISTS = "BucketAlreadyExists" => CONFLICT;
-    /// Re-creating a bucket you already own. Historically a 200 in the original region, which is
-    /// why the status is context-sensitive rather than a plain table lookup.
-    BUCKET_ALREADY_OWNED_BY_YOU = "BucketAlreadyOwnedByYou" => CONFLICT;
-    BUCKET_NOT_EMPTY = "BucketNotEmpty" => CONFLICT;
-    /// Two conditional writes raced for the same key and this one lost. A 409 rather than a 412:
-    /// the precondition was true when it was evaluated, so the client is being told to retry, not
-    /// that its condition was false.
-    CONDITIONAL_REQUEST_CONFLICT = "ConditionalRequestConflict" => CONFLICT;
-    INVALID_BUCKET_STATE = "InvalidBucketState" => CONFLICT;
-    OPERATION_ABORTED = "OperationAborted" => CONFLICT;
-    /// A second restore for an object whose retrieval has not finished. A 409 and not a 202: the
-    /// request was not accepted, and a client that read one would stop polling.
-    RESTORE_ALREADY_IN_PROGRESS = "RestoreAlreadyInProgress" => CONFLICT;
-    /// A `PUT` with no `Content-Length`. A 411, not a 400: the client must add the header, not fix
-    /// its parameters.
-    MISSING_CONTENT_LENGTH = "MissingContentLength" => LENGTH_REQUIRED;
-    PRECONDITION_FAILED = "PreconditionFailed" => PRECONDITION_FAILED;
-    /// The requested range cannot be satisfied at all. A range that merely runs past the end is
-    /// clamped and answered with 206 instead.
-    INVALID_RANGE = "InvalidRange" => RANGE_NOT_SATISFIABLE;
-
-    // ── 5xx ───────────────────────────────────────────────────────────────────────────────────
-    /// Reserved for genuine server faults. It is never a fallback: see
-    /// [`ErrorCode::default_status`].
-    INTERNAL_ERROR = "InternalError" => INTERNAL_SERVER_ERROR;
-    /// The operation is not supported by this implementation at all.
-    NOT_IMPLEMENTED = "NotImplemented" => NOT_IMPLEMENTED;
-    SERVICE_UNAVAILABLE = "ServiceUnavailable" => SERVICE_UNAVAILABLE;
-    /// The throttling signal SDKs treat as retryable with backoff.
-    SLOW_DOWN = "SlowDown" => SERVICE_UNAVAILABLE;
-}
+include!("../../../../generated/error_status.rs");

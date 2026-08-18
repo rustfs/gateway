@@ -7,9 +7,10 @@ Build-time only. Nothing here ever appears in a runtime dependency tree.
 ```
 model/s3.json ──strip──▶ smithy::Model ──┐
                                          ├──▶ lower::lower ──▶ ir::OperationIr ──▶ rustfs-gateway-codegen
-overlays/scalars.toml   ──┐
-overlays/ops/*.toml     ──┼▶ overlay::Overlay ────┘
-overlays/quirks/*.toml  ──┘
+overlays/scalars.toml     ──┐
+overlays/error-status.toml ─┤
+overlays/ops/*.toml       ──┼▶ overlay::Overlay ────┘
+overlays/quirks/*.toml    ──┘
 ```
 
 ## Files
@@ -22,6 +23,7 @@ overlays/quirks/*.toml  ──┘
 | `src/toml_lite.rs` | The overlay TOML subset: tables, arrays of tables, strings, integers, booleans, arrays. Everything else is a parse error on purpose. | An overlay entry is rejected and you want to know whether the grammar or the entry is wrong. |
 | `src/smithy.rs` | Loads the pinned Smithy 2.0 AST and **deletes the documentation and client-endpoint traits before anything else sees a shape**. Shape, member, trait and enum lookups. | You need a model fact, or you are checking that a trait really cannot leak. |
 | `src/overlay.rs` | The hand-written source, **merged from one file per operation family**: whitelist, deferred groups, scalar map, per-operation and per-shape overrides, quirk records, and typed codec rules paired with mutation dimensions. Self-consistency checks and every cross-file collision refusal live here. | Adding an overlay key, a quirk is rejected, or a load failed naming two family files. |
+| `src/overlay/error_status.rs` | The error code to HTTP status authority: rows, and the refusals that keep two rows from disagreeing — a repeated code, a repeated constant, a status outside the HTTP range, a 5xx that did not declare itself a server fault. | Adding an error code, or a row was rejected. |
 | `src/overlay/codec.rs` | Typed codec/runtime values, lowered-IR mutation sources, and the strict runtime-contract parser. | Adding a codec value or diagnosing a mismatched runtime value and dimension. |
 | `src/overlay/codec_inputs.rs` | Strict parsers for mutable codec inputs and lowered-IR source paths. | A mutable record's codec value or source path is rejected. |
 | `src/overlay/contract_values.rs` | Closed runtime values selected by response, copy-adapter, naming and signature contract rules. | Adding a typed runtime-contract alternative. |
@@ -62,8 +64,10 @@ One file per operation family — `ops/<family>.toml` and `quirks/<family>.toml`
 file is the unit of parallel edit conflict. The cost is that two families can both claim one
 operation, so the loader refuses every cross-file collision and names **both** files: an operation
 included twice, deferred twice, included here and deferred there, an `[op.X]` or `[shape.X]`
-declared twice, or one quirk id declared twice. `scalars.toml` is the single cross-family file and
-may hold nothing but `[scalar]`.
+declared twice, or one quirk id declared twice. `scalars.toml` and `error-status.toml` are the two
+cross-family files: the first may hold nothing but `[scalar]`, the second nothing but `[[code]]`.
+Neither is sharded, because a shape name and an error code each mean one thing whichever family
+reads them, so two answers would be a contradiction rather than a merge.
 
 ## Things that will bite you
 

@@ -71,6 +71,7 @@ expected_rows = [
     "`generated/dto/field_counts.txt`",
     "`crates/core/tests/golden/route-table.txt`",
     "`model/overlays/**`",
+    "`model/overlays/error-status.toml`",
     "`spec/quirks/**`",
     "`spec/contracts/**`",
     "`spec/third-party/aws-signing-test-suite.lock`",

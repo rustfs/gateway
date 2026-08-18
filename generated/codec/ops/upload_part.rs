@@ -25,6 +25,7 @@
 //! Upstream: `generated/ir/UploadPart.json`, `spec/operations/UploadPart.toml`. Downstream:
 //! `crate::codec::ops`.
 
+use rustfs_gateway_types::ErrorCode;
 use rustfs_gateway_types::EtagRender;
 use rustfs_gateway_types::dto;
 use rustfs_gateway_types::ops::upload_part::Input;
@@ -44,7 +45,7 @@ impl OperationCodec for dto::UploadPart {
             let raw = raw.as_ref();
             input.content_length = value::long(raw, "ContentLength")?;
         } else {
-            return Err(value::missing("MissingContentLength", "ContentLength"));
+            return Err(value::missing(ErrorCode::MISSING_CONTENT_LENGTH, "ContentLength"));
         }
         // ContentMD5 — header `content-md5`, repeated field lines joined.
         if let Some(raw) = request.header("content-md5") {
@@ -65,14 +66,14 @@ impl OperationCodec for dto::UploadPart {
             let raw = raw.as_ref();
             input.part_number = value::integer_in_range(raw, "PartNumber", 1, 10000)?;
         } else {
-            return Err(value::missing("InvalidArgument", "PartNumber"));
+            return Err(value::missing(ErrorCode::INVALID_ARGUMENT, "PartNumber"));
         }
         // UploadId — query `uploadId`, percent-decoded once.
         if let Some(raw) = request.query("uploadId") {
             let raw = raw.as_ref();
             input.upload_id = raw.to_owned();
         } else {
-            return Err(value::missing("InvalidArgument", "UploadId"));
+            return Err(value::missing(ErrorCode::INVALID_ARGUMENT, "UploadId"));
         }
         // SSECustomerAlgorithm — header `x-amz-server-side-encryption-customer-algorithm`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-server-side-encryption-customer-algorithm") {

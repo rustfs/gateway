@@ -100,6 +100,11 @@ fn overlay_from(text: &str) -> crate::Result<Overlay> {
     // `ops/<family>.toml`, one `quirks/<family>.toml`. These tests are about lowering, so they
     // use one family and the smallest scalar map the miniature model needs.
     std::fs::write(dir.join("scalars.toml"), "[scalar]\nBucketName = \"BucketName\"\n").expect("write scalars");
+    std::fs::write(
+        dir.join("error-status.toml"),
+        "[[code]]\nname = \"NoSuchKey\"\nconstant = \"NO_SUCH_KEY\"\nstatus = 404\n",
+    )
+    .expect("write error status");
     std::fs::write(dir.join("ops").join("mini.toml"), text).expect("write overlay");
     std::fs::write(dir.join("quirks").join("mini.toml"), "").expect("write quirks");
     Overlay::load(&dir)

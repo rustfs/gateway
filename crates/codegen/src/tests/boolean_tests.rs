@@ -30,8 +30,8 @@ fn bypass_governance_boolean_spelling_comes_from_the_quirk_value() {
         .iter()
         .find(|operation| operation.operation == "PutObjectRetention")
         .expect("PutObjectRetention is lowered");
-    let current =
-        crate::emit::codec::operation_for_test(operation, &artifacts.codec_rules).expect("the current boolean policy renders");
+    let current = crate::emit::codec::operation_for_test(operation, &artifacts.codec_rules, &artifacts.error_codes)
+        .expect("the current boolean policy renders");
     assert!(current.contains("value::boolean(raw, \"BypassGovernanceRetention\")?"));
 
     let mut rules = artifacts.codec_rules;
@@ -39,6 +39,7 @@ fn bypass_governance_boolean_spelling_comes_from_the_quirk_value() {
         .get_mut("q-lock-0012")
         .expect("the boolean quirk has a typed codec rule")
         .current = CodecValue::BooleanSpelling(BooleanSpellingValue::LowercaseOnly);
-    let mutant = crate::emit::codec::operation_for_test(operation, &rules).expect("the boolean mutant renders");
+    let mutant =
+        crate::emit::codec::operation_for_test(operation, &rules, &artifacts.error_codes).expect("the boolean mutant renders");
     assert!(mutant.contains("value::boolean_lowercase(raw, \"BypassGovernanceRetention\")?"));
 }

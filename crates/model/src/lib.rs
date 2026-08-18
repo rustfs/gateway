@@ -55,9 +55,9 @@ pub use overlay::{
     ConditionFailureDetailValue, ConditionalWildcardParseValue, ConditionalWildcardWriteValue, ConditionalWriteOrderValue,
     ContractRule, ContractValue, CopySourceGuardOrderValue, CopySourceIfMatchMissValue, CopyValidatorScopeValue,
     DecodedUtf8Value, DefaultBucketValidatorValue, DefaultSlashPolicyValue, DeleteAbsentPolicyValue, ErrorRootNamespaceValue,
-    ErrorSecretFlowValue, EtagComparisonStrengthValue, HeadBodyPolicyValue, HeaderToleranceValue, IfMatchAbsentPolicyValue,
-    IfMatchDatePrecedenceValue, IfMatchMissOutcomeValue, IfNoneDatePrecedenceValue, MutationDimension, Overlay,
-    PercentDecodePassesValue, ResidualEncodedDangerousValue, RuleClassification, ShadowingDecl, SourceRule,
+    ErrorSecretFlowValue, ErrorStatus, EtagComparisonStrengthValue, HeadBodyPolicyValue, HeaderToleranceValue,
+    IfMatchAbsentPolicyValue, IfMatchDatePrecedenceValue, IfMatchMissOutcomeValue, IfNoneDatePrecedenceValue, MutationDimension,
+    Overlay, PercentDecodePassesValue, ResidualEncodedDangerousValue, RuleClassification, ShadowingDecl, SourceRule,
     StoredLegacyControlPolicyValue, TemporalRelationValue, TraversalSegmentDelimitersValue, UnicodeNormalizationValue,
     UnknownElementPolicyValue, ValidatorAuthorityValue, ValidatorReplaceabilityValue, WireFormValue,
 };

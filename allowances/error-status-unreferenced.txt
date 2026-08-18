@@ -1,0 +1,47 @@
+# Error codes with a row in `model/overlays/error-status.toml` that nothing in this tree reaches:
+# no `ErrorCode::` use site, no wire spelling in hand-written source, no operation that declares
+# them, no conformance case.
+#
+# They are kept rather than deleted because the row is what lets the storage side behind this
+# framework answer with the code at all, and because a row added later, under pressure, is a row
+# added without the status being reviewed. What the row must not do is accumulate silently: this is
+# a debt register, not an approval list. A line that disappears is progress; a line that appears is
+# a row somebody added without a caller.
+#
+# `check_error_status_total.sh` refuses a line whose code IS reachable, so the ledger cannot outlive
+# what it excuses, and it refuses a reachable-by-nothing row that is not listed here.
+#
+# Format: WireCode|reason
+AccountProblem|account-level condition; this gateway has no account model, the storage side answers it
+AllAccessDisabled|account-level condition; same owner as AccountProblem
+AmbiguousGrantByEmailAddress|grant-by-email ACL; the ACL family resolves no email grantees
+CredentialsNotSupported|session-credential path; P2 verifies signatures but raises no session-token codes
+CrossLocationLoggingProhibited|bucket-logging family; no logging operation is served yet
+IllegalVersioningConfigurationException|versioning family; PutBucketVersioning is not served yet
+IncorrectNumberOfFilesInPostRequest|browser POST upload; no POST object-upload family exists
+InlineDataTooLarge|browser POST upload; same owner as IncorrectNumberOfFilesInPostRequest
+InvalidBucketState|bucket-state conflict the storage side detects, not the protocol layer
+InvalidEncryptionAlgorithmError|SSE configuration family; no encryption-configuration operation is served yet
+InvalidPartNumber|multipart part addressing; the part-number refusal is not implemented yet
+InvalidPayer|requester-pays; no payer model exists in this gateway
+InvalidRetentionPeriod|object-lock family; retention validation is not implemented yet
+InvalidSOAPRequest|SOAP; deliberately never served, kept so the vocabulary is complete
+InvalidSecurity|session-credential path; same owner as CredentialsNotSupported
+InvalidTargetBucketForLogging|bucket-logging family; same owner as CrossLocationLoggingProhibited
+InvalidToken|session-credential path; same owner as CredentialsNotSupported
+MalformedACLError|ACL grant parsing; the ACL body validator does not raise it yet
+MalformedPOSTRequest|browser POST upload; same owner as IncorrectNumberOfFilesInPostRequest
+MaxPostPreDataLengthExceededError|browser POST upload; same owner as IncorrectNumberOfFilesInPostRequest
+MetadataTooLarge|user-metadata size cap; the cap is not enforced in this layer yet
+MissingRequestBodyError|empty-body refusal; the codec answers MalformedXML instead today
+MissingSecurityElement|browser POST policy document; same owner as MalformedPOSTRequest
+MissingSecurityHeader|browser POST policy document; same owner as MissingSecurityElement
+NoLoggingStatusForKey|bucket-logging family; same owner as CrossLocationLoggingProhibited
+NotSignedUp|account-level condition; same owner as AccountProblem
+OperationAborted|concurrent-modification conflict the storage side detects
+RequestIsNotMultiPartContent|browser POST upload; same owner as IncorrectNumberOfFilesInPostRequest
+TokenRefreshRequired|session-credential path; same owner as CredentialsNotSupported
+TooManyBuckets|account-level quota; same owner as AccountProblem
+UnexpectedContent|body-present-where-forbidden refusal; not raised in this layer yet
+UnresolvableGrantByEmailAddress|grant-by-email ACL; same owner as AmbiguousGrantByEmailAddress
+UserKeyMustBeSpecified|browser POST upload; same owner as IncorrectNumberOfFilesInPostRequest

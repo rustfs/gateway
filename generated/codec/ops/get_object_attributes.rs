@@ -25,6 +25,7 @@
 //! Upstream: `generated/ir/GetObjectAttributes.json`, `spec/operations/GetObjectAttributes.toml`. Downstream:
 //! `crate::codec::ops`.
 
+use rustfs_gateway_types::ErrorCode;
 use rustfs_gateway_types::EtagRender;
 use rustfs_gateway_types::TimestampFormat;
 use rustfs_gateway_types::dto;
@@ -85,7 +86,7 @@ impl OperationCodec for dto::GetObjectAttributes {
             let raw = raw.as_ref();
             input.object_attributes = raw.to_owned();
         } else {
-            return Err(value::missing("InvalidRequest", "ObjectAttributes"));
+            return Err(value::missing(ErrorCode::INVALID_REQUEST, "ObjectAttributes"));
         }
         let _ = body;
         value::exit(input.check_required())?;

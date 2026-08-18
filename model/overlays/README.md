@@ -13,7 +13,7 @@ spec/operations/*.toml field bindings
 spec/quirks/*.toml     typed mutable protocol rules
 spec/contracts/*.toml  typed non-codec rules with independent consumer mutation coverage
 OPERATIONS.md          wire reverse index
-generated/*.rs         route table, error-code index
+generated/*.rs         route table, error-code index, error-code status table
 ```
 
 Editing a generated file is a CI failure (`cargo xtask spec verify`), not a style question.
@@ -22,11 +22,15 @@ Editing a generated file is a CI failure (`cargo xtask spec verify`), not a styl
 
 ```
 overlays/
-  scalars.toml          the cross-family scalar vocabulary — the ONLY shared file
+  scalars.toml          the cross-family scalar vocabulary
   route.toml            [[shadowing]] — cross-precedence route order, also cross-family
+  error-status.toml     the cross-family error code -> HTTP status authority
   ops/<family>.toml     include, [[deferred]], [op.<Operation>], [shape.<Shape>]
   quirks/<family>.toml  [[quirk]]
 ```
+
+Those three are the only shared files, and all are deliberately unsharded for the same reason: a
+shape name, a route order and an error code each mean one thing whichever family reads them.
 
 **A family file is the unit of parallel edit conflict.** That is the whole reason for the layout,
 and it is the same reason `rustfs-gateway-core` puts one operation in one file: sixteen agents
@@ -74,6 +78,12 @@ as `[op.X]` twice, one `[shape.X]` twice, one quirk id twice. Also refused: a fa
 `scalars.toml` is deliberately *not* sharded. A shape name means the same thing whichever family
 reads it, so two families holding two answers for `ETag` is not a merge to resolve — it is a
 contradiction, and one file makes it impossible.
+
+`error-status.toml` is not sharded for the same reason, and carries one more constraint: it is the
+**only** place an error code's HTTP status is written. `generated/error_status.rs` is rendered from
+it and is the table `rustfs-gateway-types::ErrorCode` reads, so there is no second answer to drift
+from. Adding a code is a row; there is no fallback for a code without one, and
+`check_error_status_total.sh` refuses a code an operation can produce that has no row.
 
 ## ops/&lt;family&gt;.toml
 

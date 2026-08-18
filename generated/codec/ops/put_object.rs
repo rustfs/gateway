@@ -25,6 +25,7 @@
 //! Upstream: `generated/ir/PutObject.json`, `spec/operations/PutObject.toml`. Downstream:
 //! `crate::codec::ops`.
 
+use rustfs_gateway_types::ErrorCode;
 use rustfs_gateway_types::EtagRender;
 use rustfs_gateway_types::TimestampFormat;
 use rustfs_gateway_types::dto;
@@ -70,7 +71,7 @@ impl OperationCodec for dto::PutObject {
             let raw = raw.as_ref();
             input.content_length = value::long(raw, "ContentLength")?;
         } else {
-            return Err(value::missing("MissingContentLength", "ContentLength"));
+            return Err(value::missing(ErrorCode::MISSING_CONTENT_LENGTH, "ContentLength"));
         }
         // ContentMD5 — header `content-md5`, repeated field lines joined.
         if let Some(raw) = request.header("content-md5") {

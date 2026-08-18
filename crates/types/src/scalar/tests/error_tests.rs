@@ -14,8 +14,9 @@
 
 //! Error-code cases: the context-free table and the fallback that is not a 500.
 //!
-//! Responsible for: the surprising status mappings, the table's internal consistency, the
-//! counterintuitive rows and the property that no table miss produces a 500.
+//! Responsible for: the surprising status mappings, the generated table's internal consistency,
+//! the counterintuitive rows, and the property that a code the table does not hold keeps the
+//! status its author gave it rather than one this crate invented.
 //! NOT responsible for: contextual selection, which belongs to `rustfs-gateway-core`.
 //! Upstream: [`crate::scalar::error_code`]. Downstream: nothing.
 
@@ -56,14 +57,61 @@ fn the_counterintuitive_mappings_are_pinned() {
 }
 
 #[test]
-fn an_unknown_code_falls_back_to_400_and_never_to_500() {
-    // A 5xx tells the client to retry something that cannot succeed, and some clients discard the
-    // body of a 5xx entirely, so the operator's chosen code never reaches the user.
-    let custom = ErrorCode::custom("RustFsTierBackendUnreachable".to_owned());
+fn an_unknown_code_carries_the_status_its_author_chose() {
+    // There is no fallback left to fall back to: `custom` cannot be called without a status, so a
+    // code this implementation does not know is answered with the status its author picked and
+    // never with a status this crate invented on its behalf.
+    let custom = ErrorCode::custom("RustFsTierBackendUnreachable".to_owned(), StatusCode::SERVICE_UNAVAILABLE);
     assert!(!custom.is_known());
-    assert_eq!(custom.default_status(), StatusCode::BAD_REQUEST);
+    assert_eq!(custom.default_status(), StatusCode::SERVICE_UNAVAILABLE);
     assert_eq!(custom.as_str(), "RustFsTierBackendUnreachable");
     assert_eq!(custom.to_string(), "RustFsTierBackendUnreachable");
+}
+
+#[test]
+fn a_custom_code_is_never_silently_remapped_by_the_table() {
+    // The failure this pins: a `custom` that consulted the table would answer 403 here, quietly
+    // discarding the status the caller asked for and making the argument decorative.
+    let impersonator = ErrorCode::custom("AccessDenied", StatusCode::BAD_REQUEST);
+    assert_eq!(impersonator.default_status(), StatusCode::BAD_REQUEST);
+    assert_ne!(
+        impersonator,
+        ErrorCode::ACCESS_DENIED,
+        "a code that renders a different status is a different value, or it could impersonate one"
+    );
+    assert_eq!(ErrorCode::custom("AccessDenied", StatusCode::FORBIDDEN), ErrorCode::ACCESS_DENIED);
+}
+
+#[test]
+fn an_unknown_name_has_no_looked_up_form() {
+    // `known` is the whole replacement for `From<&'static str>`: a name with no row has no status,
+    // so it has no `ErrorCode` either, rather than one carrying a status nobody chose.
+    assert_eq!(ErrorCode::known("Nonsense"), None);
+    assert_eq!(ErrorCode::known(""), None);
+    assert_eq!(ErrorCode::known("nosuchkey"), None, "the wire spelling is case sensitive");
+    assert_eq!(ErrorCode::known("NoSuchKey"), Some(ErrorCode::NO_SUCH_KEY));
+    assert_eq!(
+        ErrorCode::known("NoSuchKey").map(|code| code.default_status()),
+        Some(StatusCode::NOT_FOUND)
+    );
+}
+
+#[test]
+fn the_codes_operations_declare_but_nobody_had_named_are_in_the_table() {
+    // Six codes that `generated/error_codes.rs` says an operation can produce had no row before
+    // rustfs/backlog#1694, so each one took the 400 fallback while reading like a mapped code.
+    let cases = [
+        (ErrorCode::NOT_FOUND, StatusCode::NOT_FOUND),
+        (ErrorCode::OBJECT_ALREADY_IN_ACTIVE_TIER, StatusCode::FORBIDDEN),
+        (ErrorCode::OBJECT_NOT_IN_ACTIVE_TIER, StatusCode::FORBIDDEN),
+        (ErrorCode::ENCRYPTION_TYPE_MISMATCH, StatusCode::BAD_REQUEST),
+        (ErrorCode::INVALID_WRITE_OFFSET, StatusCode::BAD_REQUEST),
+        (ErrorCode::TOO_MANY_PARTS, StatusCode::BAD_REQUEST),
+    ];
+    for (code, expected) in cases {
+        assert_eq!(code.default_status(), expected, "{code}");
+        assert!(code.is_known(), "{code}");
+    }
 }
 
 #[test]
@@ -98,16 +146,17 @@ fn the_table_has_no_duplicate_rows() {
 #[test]
 fn known_codes_are_recognised_as_known() {
     assert!(ErrorCode::NO_SUCH_BUCKET.is_known());
-    assert!(ErrorCode::from("NoSuchKey").is_known());
-    assert!(!ErrorCode::custom("Nonsense".to_owned()).is_known());
+    assert!(ErrorCode::known("NoSuchKey").is_some_and(|code| code.is_known()));
+    assert!(!ErrorCode::custom("Nonsense".to_owned(), StatusCode::BAD_REQUEST).is_known());
 }
 
 proptest! {
-    /// No string, however arbitrary, produces a server error from the mapping.
+    /// No name, however arbitrary, moves the status away from the one the caller chose. The old
+    /// property asserted the fallback was not a 500; there is no fallback now, so what has to hold
+    /// is that the table never reaches a code that is not in it.
     #[test]
-    fn no_arbitrary_code_maps_to_a_server_error(code in "[A-Za-z0-9]{0,40}") {
-        let error = ErrorCode::custom(code);
-        prop_assume!(!error.is_known());
-        prop_assert!(!error.default_status().is_server_error());
+    fn an_arbitrary_name_keeps_the_status_it_was_constructed_with(name in "[A-Za-z0-9]{0,40}") {
+        let error = ErrorCode::custom(name, StatusCode::IM_A_TEAPOT);
+        prop_assert_eq!(error.default_status(), StatusCode::IM_A_TEAPOT);
     }
 }

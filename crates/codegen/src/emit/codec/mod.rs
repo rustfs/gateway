@@ -55,6 +55,7 @@ use rustfs_gateway_model::ir::{AttributeSource, Binding, OperationIr, Shape, Typ
 use rustfs_gateway_model::{CodecRule, CodecValue, UnknownElementPolicyValue};
 
 use super::dto::{LICENSE, naming};
+use super::error_status::Constants;
 
 /// The query-parameter prefix that marks a response-header override.
 ///
@@ -73,21 +74,29 @@ pub type CodecRules = BTreeMap<String, CodecRule>;
 /// A string naming the operation and member whose binding the codec surface has no form for.
 /// Failing is the point: an emitter that skipped the member would produce a codec that compiles,
 /// runs, and silently drops a wire value.
-pub fn emit(operations: &[OperationIr], rules: &CodecRules, generated_dir: &Path) -> Result<Vec<(PathBuf, String)>, String> {
+pub fn emit(
+    operations: &[OperationIr],
+    rules: &CodecRules,
+    codes: &Constants,
+    generated_dir: &Path,
+) -> Result<Vec<(PathBuf, String)>, String> {
     let mut ordered: Vec<&OperationIr> = operations.iter().collect();
     ordered.sort_by(|a, b| a.operation.cmp(&b.operation));
 
     let ops_dir = generated_dir.join("codec").join("ops");
     let mut files: Vec<(PathBuf, String)> = Vec::new();
     for ir in &ordered {
-        files.push((ops_dir.join(format!("{}.rs", naming::module_name(&ir.operation))), operation(ir, rules)?));
+        files.push((
+            ops_dir.join(format!("{}.rs", naming::module_name(&ir.operation))),
+            operation(ir, rules, codes)?,
+        ));
     }
     files.push((ops_dir.join("mod.rs"), ops_mod(&ordered)));
     Ok(files)
 }
 
 /// Renders one operation's codec module.
-fn operation(ir: &OperationIr, rules: &CodecRules) -> Result<String, String> {
+fn operation(ir: &OperationIr, rules: &CodecRules, codes: &Constants) -> Result<String, String> {
     let op = &ir.operation;
     let marker = naming::type_name(op);
     let module = naming::module_name(op);
@@ -110,13 +119,16 @@ fn operation(ir: &OperationIr, rules: &CodecRules) -> Result<String, String> {
     // The bodies are rendered first: which imports a file needs is a fact about the code that was
     // generated, and `-D warnings` refuses an import the generated file does not use.
     let overrides = response_overrides(ir);
-    let decoded = decode::body(ir, rules)?;
+    let decoded = decode::body(ir, rules, codes)?;
     let encoded = encode::body(ir, rules)?;
     let uses = |needle: &str| decoded.contains(needle) || encoded.contains(needle);
 
     // rustfmt's order for one crate's imports, uppercase before lowercase. `cargo fmt` follows
     // `#[path]` into `generated/`, so an emitter that wrote them in any other order would make
     // `cargo xtask spec verify` fail the moment somebody formatted the tree.
+    if uses("ErrorCode::") {
+        out.push_str("use rustfs_gateway_types::ErrorCode;\n");
+    }
     if needs_etag(ir) {
         out.push_str("use rustfs_gateway_types::EtagRender;\n");
     }
@@ -162,8 +174,8 @@ fn operation(ir: &OperationIr, rules: &CodecRules) -> Result<String, String> {
 }
 
 #[cfg(test)]
-pub(crate) fn operation_for_test(ir: &OperationIr, rules: &CodecRules) -> Result<String, String> {
-    operation(ir, rules)
+pub(crate) fn operation_for_test(ir: &OperationIr, rules: &CodecRules, codes: &Constants) -> Result<String, String> {
+    operation(ir, rules, codes)
 }
 
 fn unknown_element_policy(ir: &OperationIr, rules: &CodecRules) -> Result<UnknownElementPolicyValue, String> {
