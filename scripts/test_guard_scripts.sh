@@ -4276,6 +4276,154 @@ mut_stream_generic_downcast_escape_hatch() {
 expect_fail check_no_as_any.sh \
     'stream payload using owned Any downcast for negotiation' mut_stream_generic_downcast_escape_hatch
 
+# The four cases above plant into `crates/stream/src`, which the guard already read
+# before P3-02. The eight below are the widening: an escape hatch in the wire layer or in
+# the facade, and an allowlist that could be used to switch the rule off from the outside.
+
+mut_wire_as_any_escape_hatch() {
+    printf '\ntrait EscapeHatch { fn as_any(&self) -> &dyn std::any::Any; }\n' \
+        >>crates/http/src/wire.rs
+}
+expect_fail check_no_as_any.sh \
+    'the wire layer exposing an as_any escape hatch' mut_wire_as_any_escape_hatch
+
+mut_facade_as_any_escape_hatch() {
+    printf '\ntrait EscapeHatch { fn as_any(&self) -> &dyn std::any::Any; }\n' \
+        >>crates/gateway/src/dispatch.rs
+}
+expect_fail check_no_as_any.sh \
+    'the facade exposing an as_any escape hatch' mut_facade_as_any_escape_hatch
+
+# A call site with no declaration anywhere: the transport half of the bypass, which is what
+# arrives first when the trait is defined in a downstream crate.
+mut_core_as_any_call_site() {
+    printf '\nfn escape(value: &u8) { let _ = value.as_any(); }\n' >>crates/core/src/lib.rs
+}
+expect_fail check_no_as_any.sh \
+    'an as_any call site with no declaration in the repository' mut_core_as_any_call_site
+
+mut_wire_downcast_ref_escape_hatch() {
+    printf '\nfn escape(value: &dyn std::any::Any) { let _ = value.downcast_ref::<u8>(); }\n' \
+        >>crates/http/src/wire.rs
+}
+expect_fail check_no_as_any.sh \
+    'the wire layer using downcast_ref, which the allowlist cannot reach' \
+    mut_wire_downcast_ref_escape_hatch
+
+mut_core_unregistered_downcast() {
+    printf '\nfn escape(value: &dyn std::any::Any) { let _ = value.downcast_ref::<u8>(); }\n' \
+        >>crates/core/src/lib.rs
+}
+expect_fail check_no_as_any.sh \
+    'a downcast outside the payload data plane that nobody registered' \
+    mut_core_unregistered_downcast
+
+mut_as_any_allowance_inside_data_plane() {
+    printf 'crates/stream/src/payload.rs:1    # convenient\n' \
+        >>scripts/allowances/as-any-allowances.txt
+}
+expect_fail check_no_as_any.sh \
+    'an allowlist entry reaching into the payload data plane' \
+    mut_as_any_allowance_inside_data_plane
+
+mut_as_any_allowance_without_reason() {
+    printf 'crates/core/src/lib.rs:1\n' >>scripts/allowances/as-any-allowances.txt
+}
+expect_fail check_no_as_any.sh \
+    'an allowlist entry with no reason written next to it' \
+    mut_as_any_allowance_without_reason
+
+# An exemption that outlives the code it was written for silently covers whatever moves
+# onto that line next, which is the shape every stale suppression takes.
+mut_as_any_allowance_stale() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("scripts/allowances/as-any-allowances.txt")
+text = path.read_text()
+if "codecs.rs:210" not in text:
+    raise SystemExit("expected allowlist entry is missing")
+path.write_text(text.replace("codecs.rs:210", "codecs.rs:211", 1))
+PYEOF
+}
+expect_fail check_no_as_any.sh \
+    'an allowlist entry whose line no longer holds a downcast' mut_as_any_allowance_stale
+
+# The positive half of the rule. "There is no as_any()" is only an argument while the named
+# accessors it points at still exist; without this case the guard would keep reporting green
+# over a Payload with no negotiation surface left.
+mut_payload_accessor_renamed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/stream/src/payload.rs")
+text = path.read_text()
+if "pub fn try_as_vectored" not in text:
+    raise SystemExit("expected payload accessor is missing")
+path.write_text(text.replace("pub fn try_as_vectored", "pub fn vectored_slice", 1))
+PYEOF
+}
+expect_fail check_no_as_any.sh \
+    'the named accessor as_any was banned in favour of, renamed away' \
+    mut_payload_accessor_renamed
+
+# --- check_no_spawn_in_stream.sh ------------------------------------------------------
+#
+# Back-pressure in the push model is the absence of a read-ahead task, so every one of
+# these plants a producer that would keep running after its consumer stopped.
+
+mut_stream_spawn_read_ahead() {
+    printf '\nfn prefetch() { let _ = tokio::spawn(async {}); }\n' >>crates/stream/src/adapt.rs
+}
+expect_fail check_no_spawn_in_stream.sh \
+    'a read-ahead task inside the payload crate' mut_stream_spawn_read_ahead
+
+# The case that scoping the rule to `crates/stream` alone would miss: the producer that
+# reads from a socket lives in the wire layer, not in the payload crate.
+mut_ingest_spawn_read_ahead() {
+    printf '\nfn prefetch() { let _ = tokio::spawn(async {}); }\n' \
+        >>crates/http/src/ingest/pipeline.rs
+}
+expect_fail check_no_spawn_in_stream.sh \
+    'a read-ahead task inside a wire-layer AsyncPayloadRead impl' mut_ingest_spawn_read_ahead
+
+mut_stream_join_set_read_ahead() {
+    printf '\nfn prefetch(set: &mut tokio::task::JoinSet<()>) { let _ = set; }\n' \
+        >>crates/stream/src/byte_stream.rs
+}
+expect_fail check_no_spawn_in_stream.sh \
+    'a JoinSet holding the handle a spawn returned' mut_stream_join_set_read_ahead
+
+mut_stream_thread_spawn_read_ahead() {
+    printf '\nfn prefetch() { let _ = std::thread::spawn(|| {}); }\n' >>crates/stream/src/stream.rs
+}
+expect_fail check_no_spawn_in_stream.sh \
+    'a read-ahead thread rather than a task' mut_stream_thread_spawn_read_ahead
+
+# The structural half: with no runtime in the dependency tree, a read-ahead task is not
+# merely forbidden in this crate, it is unwritable.
+mut_stream_declares_runtime() {
+    printf 'tokio = { workspace = true }\n' >>crates/stream/Cargo.toml
+}
+expect_fail check_no_spawn_in_stream.sh \
+    'the payload crate declaring an async runtime' mut_stream_declares_runtime
+
+mut_payload_traits_renamed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+for path in Path("crates").rglob("*.rs"):
+    text = path.read_text()
+    if "PayloadStream" in text or "AsyncPayloadRead" in text:
+        path.write_text(
+            text.replace("PayloadStream", "Renamed1").replace("AsyncPayloadRead", "Renamed2")
+        )
+PYEOF
+}
+expect_fail check_no_spawn_in_stream.sh \
+    'both data-plane traits renamed, leaving the guard with no subject' \
+    mut_payload_traits_renamed
+
 mut_stream_protocol_vocabulary() {
     printf '\n// Checksum belongs above the stream kernel.\n' >>crates/stream/src/stream.rs
 }
@@ -4504,6 +4652,7 @@ probe_stream_guards_fail_closed() {
     local guards=(
         check_no_shared_trailers.sh
         check_no_as_any.sh
+        check_no_spawn_in_stream.sh
         check_stream_vocabulary.sh
         check_pipeline_stage_shape.sh
     )
