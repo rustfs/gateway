@@ -1806,15 +1806,20 @@ expect_fail check_xtask_codegen_surface.sh \
 
 mut_xtask_inherits_dangerous_facade_feature() {
     python3 - <<'PYEOF'
+import re
 from pathlib import Path
 
+# The version is matched rather than spelled out. It used to be literal, and a facade version
+# bump then made this control fail as "anchor is missing" — a control that reports a defect it
+# was not testing for is one nobody trusts the next time.
 path = Path("Cargo.toml")
 text = path.read_text()
-old = 'rustfs-gateway = { path = "crates/gateway", version = "0.8.0" }'
-new = 'rustfs-gateway = { path = "crates/gateway", version = "0.8.0", features = ["dangerous-allow-all-authorizer"] }'
-if text.count(old) != 1:
+pattern = re.compile(r'^rustfs-gateway = \{ path = "crates/gateway", version = "[0-9]+\.[0-9]+\.[0-9]+" \}$', re.M)
+found = pattern.findall(text)
+if len(found) != 1:
     raise SystemExit("workspace facade dependency is missing")
-path.write_text(text.replace(old, new, 1))
+replacement = found[0][: -len(" }")] + ', features = ["dangerous-allow-all-authorizer"] }'
+path.write_text(pattern.sub(lambda _: replacement, text, count=1))
 PYEOF
 }
 expect_fail check_xtask_codegen_surface.sh \
