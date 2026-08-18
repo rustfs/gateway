@@ -63,6 +63,19 @@ pub enum Payload {
     Stream(BoxPayloadStream),
 }
 
+/// A `Payload` is moved through every stage of the data plane — wire, ingest, handler, response
+/// — and is stored inside request and response types that are themselves moved. Sixty-four bytes
+/// is one cache line: past it, each of those moves starts costing a second line's worth of
+/// traffic, on a type whose whole reason to exist is to stop copying.
+///
+/// The budget is a compile-time assertion rather than a comment because the way it gets blown is
+/// invisible in review. Replacing `Vectored(Vec<Bytes>)` with an inline `SmallVec<[Bytes; 4]>`
+/// reads as a pure win — it removes a heap allocation for the common case of at most four
+/// segments — and it takes the enum to 136 bytes, because the four `Bytes` are stored inline in
+/// every `Payload` ever constructed, including the `Empty` ones. The trade is real and may still
+/// be worth making, but it must be made deliberately, against a measurement, not arrived at.
+const _: () = assert!(size_of::<Payload>() <= 64);
+
 /// Why a payload could not be converted into the requested model.
 ///
 /// Named and exhaustible, so a caller can log or count the reason. This is the shape that
