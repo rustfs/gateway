@@ -39,6 +39,9 @@ crates = root / "crates"
 if not crates.is_dir():
     print("check_no_as_any: required input is missing: crates", file=sys.stderr)
     raise SystemExit(1)
+# Every workspace member, not `crates/` alone: `spikes/ext-field` is a member too, so an
+# escape hatch written there is code that compiles under `--workspace` like any other.
+roots = [crates] + [root / "spikes", root / "xtask"]
 
 # The payload data plane: the crate that owns `Payload`, and the wire layer that
 # produces and consumes one. Both are exemption-free.
@@ -159,7 +162,8 @@ for prefix in SEALED:
 CANDIDATE = re.compile(r"as_any|downcast|\bAny\b")
 
 registered = set()
-for path in sorted(crates.rglob("*.rs")):
+sources = sorted({path for directory in roots if directory.is_dir() for path in directory.rglob("*.rs")})
+for path in sources:
     relative = path.relative_to(root).as_posix()
     if "/generated/" in relative or "/target/" in relative:
         continue

@@ -28,10 +28,21 @@ if not crates.is_dir():
     print("check_no_spawn_in_stream: required input is missing: crates", file=sys.stderr)
     raise SystemExit(1)
 
-manifest = root / "crates/stream/Cargo.toml"
-if not manifest.is_file():
-    print("check_no_spawn_in_stream: required input is missing: crates/stream/Cargo.toml", file=sys.stderr)
-    raise SystemExit(1)
+# Both halves of the payload data plane: the crate that owns `Payload`, and the wire layer
+# that produces one from a socket. Scoping the rule to `crates/stream` alone would leave the
+# half where a producer actually reads bytes unguarded.
+PLANE = ("crates/stream", "crates/http")
+manifests = []
+for crate in PLANE:
+    manifest = root / crate / "Cargo.toml"
+    directory = root / crate / "src"
+    if not manifest.is_file():
+        print(f"check_no_spawn_in_stream: required input is missing: {crate}/Cargo.toml", file=sys.stderr)
+        raise SystemExit(1)
+    if not directory.is_dir() or not any(directory.rglob("*.rs")):
+        print(f"check_no_spawn_in_stream: required input is missing: {crate}/src", file=sys.stderr)
+        raise SystemExit(1)
+    manifests.append((crate, manifest))
 
 
 def strip(text: str) -> str:
@@ -120,21 +131,16 @@ violations = []
 # Rule 1 — the crate that owns the pull/push adapters has no runtime and must not grow
 # one. This is the structural half: with no async runtime in the dependency tree, a
 # read-ahead task is not merely forbidden here, it is unwritable.
-runtime_deps = re.findall(
-    r"^\s*(tokio|async-std|smol|futures-executor)\b",
-    manifest.read_text(),
-    re.M,
-)
-for dependency in sorted(set(runtime_deps)):
-    violations.append(
-        f"crates/stream/Cargo.toml: declares the async runtime '{dependency}'; "
-        "the payload crate must have no runtime, so a read-ahead task cannot be written in it"
-    )
+for crate, manifest in manifests:
+    for dependency in sorted(set(re.findall(r"^\s*(tokio|async-std|smol|futures-executor)\b", manifest.read_text(), re.M))):
+        violations.append(
+            f"{crate}/Cargo.toml: declares the async runtime '{dependency}'; "
+            "the payload data plane must have no runtime, so a read-ahead task cannot be written in it"
+        )
 
-stream_files = sorted(stream.rglob("*.rs"))
-if not stream_files:
-    print("check_no_spawn_in_stream: no Rust sources found under crates/stream/src", file=sys.stderr)
-    raise SystemExit(1)
+# Every file in both crates, not only the ones carrying an impl: a producer can call a spawning
+# helper that lives in a neighbouring module, and a file-scoped rule would read that as clean.
+plane_files = sorted({path for crate in PLANE for path in (root / crate / "src").rglob("*.rs")})
 
 # Rule 2 — every file anywhere in the workspace that implements either half of the data
 # plane. Scoping this to `crates/stream` alone would miss the wire layer, which is where
@@ -170,7 +176,7 @@ if not impl_files:
     raise SystemExit(1)
 
 scanned = {path: code for path, code in impl_files}
-for path in stream_files:
+for path in plane_files:
     if path not in scanned:
         scanned[path] = strip(path.read_text())
 

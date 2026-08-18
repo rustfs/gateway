@@ -4424,6 +4424,36 @@ expect_fail check_no_spawn_in_stream.sh \
     'both data-plane traits renamed, leaving the guard with no subject' \
     mut_payload_traits_renamed
 
+# A workspace member outside `crates/`. It compiles under `--workspace`, so an escape hatch
+# written there is shipped code, and scoping the scan to `crates/` alone would miss it.
+mut_spike_as_any_escape_hatch() {
+    printf '\ntrait EscapeHatch { fn as_any(&self) -> &dyn std::any::Any; }\n' \
+        >>spikes/ext-field/src/policy.rs
+}
+expect_fail check_no_as_any.sh \
+    'a workspace member outside crates/ exposing an as_any escape hatch' \
+    mut_spike_as_any_escape_hatch
+
+# A spawning helper one module away from the impl that calls it. A file-scoped rule reads the
+# impl as clean and the back-pressure is gone all the same.
+mut_wire_neighbour_spawn() {
+    printf '\nfn prefetch() { let _ = tokio::spawn(async {}); }\n' >>crates/http/src/limits.rs
+}
+expect_fail check_no_spawn_in_stream.sh \
+    'a spawning helper in a wire-layer module that carries no impl' mut_wire_neighbour_spawn
+
+mut_wire_declares_runtime() {
+    printf 'tokio = { workspace = true }\n' >>crates/http/Cargo.toml
+}
+expect_fail check_no_spawn_in_stream.sh \
+    'the wire layer declaring an async runtime' mut_wire_declares_runtime
+
+mut_wire_plane_removed() {
+    rm -rf crates/http/src
+}
+expect_fail check_no_spawn_in_stream.sh \
+    'the wire half of the data plane removed, leaving half a rule' mut_wire_plane_removed
+
 mut_stream_protocol_vocabulary() {
     printf '\n// Checksum belongs above the stream kernel.\n' >>crates/stream/src/stream.rs
 }
