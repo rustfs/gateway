@@ -254,10 +254,13 @@ jobs:
 
   # The guard self-test is split over four runners because it grows with every merge:
   # AGENTS.md requires a mutation per new assertion, so its case count only ever goes
-  # up. One runner ran it in 480s and started dying at exit 124 on innocent branches.
-  # Each runner takes one quarter of the case ordinals and splits that quarter again
-  # across worker processes, and each proves it executed exactly its own quarter, so
-  # the four green jobs together are a complete run. GATEWAY_GUARD_BUDGET_SECONDS
+  # up. On one runner it reached 479s of a 480s timeout and started dying at exit 124
+  # with every case still printing ok — on pull requests that had nothing to do with
+  # it, and on pristine main's own scheduled runs (32097529045, 32197900452).
+  # Each runner takes every fourth case ordinal and splits its share again across
+  # worker processes, and each proves it executed exactly its own share, so the four
+  # green jobs together are a complete run. Adding a fifth runner is this block plus
+  # the shard count in scripts/check_ci_test_split.sh. GATEWAY_GUARD_BUDGET_SECONDS
   # matches the timeout so the suite can stop and say "out of time" instead of being
   # killed with an unexplained 124.
 
