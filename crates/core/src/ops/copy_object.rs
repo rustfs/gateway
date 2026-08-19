@@ -14,7 +14,10 @@
 
 //! `CopyObject`: one server-side copy, and the two directives that decide what the copy carries.
 //!
-//! Shares: copy_source, precondition, etag
+//! Shares: copy_source, precondition. The conditional headers this operation carries are the
+//! precondition contract's to evaluate, and this file does not reach the entity-tag module
+//! directly — `shared/etag.rs`'s `Members:` line records that from the other end, and it states
+//! the use graph rather than what the use graph ought to be.
 //!
 //! Responsible for: the spec, the security floor and the [`Operation`] implementation for
 //! `CopyObject`, the [`HasOperation`] reverse mapping from its input type, and the one rule this

@@ -109,6 +109,9 @@ fixed now so that the same check does not get written twice under two names.
 | `check_governance_attribution.sh` | The s3s relationship statement and adapted aws-sigv4 helpers retain their reviewed source, revision, licence, and copied-code registry entry | P0-01 |
 | `check_smithy_timestamp_corpus.sh` | The vendored Smithy timestamp corpus matches its pinned bytes, case counts, license attribution, and format mapping | P1-04 |
 | `check_has_operation_coverage.sh` | Every code-generated standard operation name has exactly one matching per-operation `HasOperation` reverse mapping | P1-07 |
+| `check_op_file_shape.sh` | One `impl Operation` per `ops/<snake_name>.rs` and none outside it; the file name and the operation name agree; `ops/mod.rs` mounts every module; the `//! Shares:` declaration agrees with both the `shared::` use graph and the `//! Members:` list on the other end, in both directions for both; 800 lines over the ops tree with no allowance escape | P1 (rustfs/backlog#1895) |
+| `check_shared_members.sh` | Every `ops/shared/*.rs` module's `//! Members:` line agrees with the operations that actually reach it, in both directions | P1 |
+| `check_shared_reachable.sh` | Every `pub` item under `ops/shared/` is re-exported by the `rustfs-gateway` facade, so a backend cannot be forced to reimplement a shared contract | P1 |
 | `check_guard_grep_pipelines.sh` | The license and secret-hygiene guards contain no quiet grep option token, including in comments or strings; their grep checks must read input fully under `pipefail` | P0 |
 | `check_english_only.sh` | No tracked file contains CJK text. `rustfs/backlog` is the one repository in the organisation where Chinese is allowed; this is not it. Matches by codepoint in Python — a grep bracket range is read by locale collation and flags an em dash | P0 |
 | `check_ci_time_gate.sh` | Every PR job has a timeout, every dependency path stays within ten minutes, and Static checks / Clippy / Test retain their exact branch-protected contract | P0-04 |
@@ -171,7 +174,6 @@ fixed now so that the same check does not get written twice under two names.
 |---|---|---|
 | `check_ci_time_gate.sh` | Total PR gate wall time stays inside the 10-minute budget | P0-04 |
 | `check_role_verdicts.sh` | High-risk PR descriptions carry the required expert-role verdicts (PR-only job; needs the `## Role Verdicts` anchor from the PR template) | P0-10 |
-| `check_op_file_shape.sh` | One operation per file; `//! Shares:` declaration agrees with the actual `use` graph; 800-line ceiling | P1 |
 | `check_quirks_evidence.sh` | Every quirk has ≥1 evidence and ≥1 case referencing it, consistent in both directions | P1 |
 | `check_quirk_ledger.sh` | Every typed quirk joins its generated constant to one production consumer and bilateral executable case evidence | P1, P2 |
 | `check_error_status_total.sh` | The error code to HTTP status mapping has one hand-written authority, covers every code an operation can produce, keeps the 5xx band to an explicit allowlist in both directions, and carries no row nothing reaches | P4-02 |

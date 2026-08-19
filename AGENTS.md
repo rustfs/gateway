@@ -391,7 +391,12 @@ Known cross-operation clusters, for reference when you touch one of them:
 | ACL | Get/Put Bucket and Object ACL, canned ACL headers | grant parsing and canonicalization |
 | Checksum | every operation accepting `x-amz-checksum-*` | header/trailer cross-validation |
 
-`scripts/check_op_file_shape.sh` enforces this from P1; the rule binds now.
+Two guards enforce this, and neither is sufficient alone: `scripts/check_op_file_shape.sh` owns the
+file shape and the `//! Shares:` end of the declaration — against the `use` graph, and against the
+`//! Members:` list on the other end — while `scripts/check_shared_members.sh` owns the `//! Members:`
+end against the `use` graph. A one-ended declaration cannot be checked: `copy_object.rs` claimed
+`etag` while `shared/etag.rs` said in prose that `CopyObject` was deliberately not a member, and both
+files were green.
 
 ## Macro Governance
 
