@@ -177,6 +177,7 @@ fixed now so that the same check does not get written twice under two names.
 | `check_quirks_evidence.sh` | Every quirk has ≥1 evidence and ≥1 case referencing it, consistent in both directions | P1 |
 | `check_quirk_ledger.sh` | Every typed quirk joins its generated constant to one production consumer and bilateral executable case evidence | P1, P2 |
 | `check_error_status_total.sh` | The error code to HTTP status mapping has one hand-written authority, covers every code an operation can produce, keeps the 5xx band to an explicit allowlist in both directions, and carries no row nothing reaches | P4-02 |
+| `check_error_contract_ledger.sh` | Every one of the 24 acceptance ids in rustfs/backlog#1694 §7 maps to a resolved assertion in a case, a Rust test or a replayed guard mutation, or to a block with the issue that owns it; the 9/15 polarity split and each named case's declared polarity are pinned with it | P4-02 |
 | `check_error_has_rule_ref.sh` | Diagnostic errors carry a rule reference (quirk id / RFC section / spec field path) | P2 |
 | `check_wire_boundary.sh` | Wire-layer boundary constraints | P3 |
 | `check_form_limits.sh` | The six POST Object form cases each name one active test; `FileReader` has one door and it takes a byte ceiling, composed with the deployment maximum by `min`; `FormLimits` grows no unlimited constructor | P3-05 |

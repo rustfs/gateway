@@ -202,6 +202,7 @@ fn a_string_cannot_be_laundered_into_a_static_message() {
     }
 }
 
+/// c-err-1013 — the acceptance id rustfs/backlog#1694 §7 gives this rule.
 /// The pre-authentication error type must not build any of its text at runtime.
 #[test]
 fn the_pre_auth_error_never_formats_a_message() {

@@ -91,6 +91,7 @@ fn c_err_n006_entity_too_large_is_400() {
     assert_eq!(resolve(context, ResponseKind::Other).status(), StatusCode::BAD_REQUEST);
 }
 
+/// c-err-1007 — the acceptance id rustfs/backlog#1694 §7 gives this rule.
 #[test]
 fn c_err_n007_head_removes_body_and_framing_without_changing_status() {
     let context =
@@ -155,6 +156,7 @@ fn c_err_n011_resolution_answers_the_status_the_custom_code_carries() {
     }
 }
 
+/// c-err-1006 — the acceptance id rustfs/backlog#1694 §7 gives this rule.
 #[test]
 fn a_missing_key_is_hidden_from_a_caller_who_may_not_list() {
     let hidden = resolve(
@@ -308,6 +310,7 @@ fn the_contextual_not_found_messages_are_the_ones_the_corpus_pins() {
     assert_eq!(missing_key.message(), Some("The specified key does not exist."));
 }
 
+/// c-err-1006 — the acceptance id rustfs/backlog#1694 §7 gives this rule.
 /// Negative — masking replaces the message as well as the code, so a hidden key's refusal reads
 /// exactly like a refusal about a key that is there.
 ///

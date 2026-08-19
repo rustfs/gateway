@@ -1,0 +1,15 @@
+error[E0061]: this function takes 2 arguments but 1 argument was supplied
+  --> tests/compile_fail/c_err_1010_custom_code_without_a_status.rs:32:17
+   |
+32 |     let _code = ErrorCode::custom("Foo");
+   |                 ^^^^^^^^^^^^^^^^^------- argument #2 of type `http::status::StatusCode` is missing
+   |
+note: associated function defined here
+  --> $WORKSPACE/crates/types/src/scalar/error_code.rs
+   |
+   |     pub fn custom(code: impl Into<Cow<'static, str>>, status: StatusCode) -> Self {
+   |            ^^^^^^
+help: provide the argument
+   |
+32 |     let _code = ErrorCode::custom("Foo", /* http::status::StatusCode */);
+   |                                        ++++++++++++++++++++++++++++++++

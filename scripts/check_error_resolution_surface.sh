@@ -516,6 +516,7 @@ validate_harness(
     "compile_time_contracts_are_not_openable",
     [
         'cases.compile_fail("tests/compile_fail/authz_*.rs");',
+        'cases.compile_fail("tests/compile_fail/c_err_1010_*.rs");',
         'cases.compile_fail("tests/compile_fail/c_sig_0018_*.rs");',
         'cases.compile_fail("tests/compile_fail/c_sig_0123_*.rs");',
         'cases.compile_fail("tests/compile_fail/error_resolution_*.rs");',

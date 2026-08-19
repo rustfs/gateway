@@ -16905,6 +16905,110 @@ expect_fail check_error_status_total.sh \
     mut_error_status_authority_removed \
     'required input is missing'
 
+# -- check_error_contract_ledger.sh ---------------------------------------------------------------
+#
+# The ledger maps the 24 acceptance ids of rustfs/backlog#1694 §7 to real assertions. It owes one
+# death per mutation class its header names, plus one for each of the two evidence kinds it added
+# over the object ledger: a Rust literal and a guard mutation. Written out rather than looped
+# because each has to fail for its own diagnostic — a roll-call failure and an arithmetic failure
+# read identically in a green summary, and the point of the split is that they are different
+# mistakes.
+
+mut_error_ledger_row_id_duplicated() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("scripts/check_error_contract_ledger.sh")
+text = path.read_text()
+old = "    'c-err-1013|negative|bound|"
+new = "    'c-err-1011|negative|bound|"
+if text.count(old) != 1:
+    raise SystemExit("error ledger row mutation subject is not unique")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+# Mutation 1: one mapping stops existing. The polarity arithmetic is deliberately left intact by
+# renaming rather than deleting, so this can only be caught by the roll call.
+expect_fail_self_mutation check_error_contract_ledger.sh \
+    'a §7 acceptance id losing its mapping while the polarity totals still add up' \
+    mut_error_ledger_row_id_duplicated
+
+mut_error_ledger_row_polarity_flipped() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("scripts/check_error_contract_ledger.sh")
+text = path.read_text()
+old = "    'c-err-1013|negative|bound|"
+new = "    'c-err-1013|positive|bound|"
+if text.count(old) != 1:
+    raise SystemExit("error ledger polarity mutation subject is not unique")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+# Mutation 3: a refusal relabelled as a proof that something works.
+expect_fail_self_mutation check_error_contract_ledger.sh \
+    'a §7 refusal relabelled positive, moving the 9/15 split' \
+    mut_error_ledger_row_polarity_flipped
+
+mut_error_ledger_exact_message_weakened() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("conformance/cases/object/c-object-0007.toml")
+text = path.read_text()
+old = "<Message>The specified key does not exist.</Message>"
+new = "<Message>The key was not found.</Message>"
+if text.count(old) != 1:
+    raise SystemExit("NoSuchKey message mutation subject is not unique")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+# The rustfs/gateway#189 regression net itself: the exact AWS bytes are what caught the reworded
+# not-found message, and until this ledger nothing named them.
+expect_fail check_error_contract_ledger.sh \
+    'the exact NoSuchKey message bytes reworded out of the case that pins them' \
+    mut_error_ledger_exact_message_weakened \
+    'does not contain'
+
+mut_error_ledger_compile_fail_fixture_gutted() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/core/tests/compile_fail/c_err_1010_custom_code_without_a_status.rs")
+text = path.read_text()
+old = 'ErrorCode::custom("Foo")'
+if text.count(old) != 1:
+    raise SystemExit("custom-arity fixture mutation subject is not unique")
+path.write_text(text.replace(old, 'ErrorCode::custom("Foo", StatusCode::BAD_REQUEST)', 1))
+PYEOF
+}
+# A compile-fail fixture that compiles is a fixture that proves nothing, and trybuild would say so
+# only when the harness runs. The ledger says so from the evidence side.
+expect_fail check_error_contract_ledger.sh \
+    'the one-argument call disappearing from the fixture that must not compile' \
+    mut_error_ledger_compile_fail_fixture_gutted \
+    'no longer contains'
+
+mut_error_ledger_mutation_never_replayed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("scripts/test_guard_scripts.sh")
+text = path.read_text()
+old = "    mut_error_status_unflagged_5xx \\\n"
+if text.count(old) != 1:
+    raise SystemExit("5xx mutation replay subject is not unique")
+path.write_text(text.replace(old, "    mut_error_status_server_fault_on_a_client_error \\\n", 1))
+PYEOF
+}
+# The control on the control: a mutation function that no `expect_fail` line runs is a negative
+# case that never executes, which reads exactly like one that passed.
+expect_fail check_error_contract_ledger.sh \
+    'a 5xx-allowlist mutation left defined but no longer replayed by any expect_fail line' \
+    mut_error_ledger_mutation_never_replayed \
+    'no expect_fail line runs it'
+
 fi
 
 guard_finish
