@@ -33,6 +33,14 @@ def fail(message: str) -> None:
     raise SystemExit(f"test-target consolidation violation: {message}")
 
 
+# Matched at a position rather than against `source[index:]`. Slicing the remainder of the file
+# on every character makes the scan quadratic in file size, and this function runs once per source
+# file per guard invocation — sixty-one of them in the self-test alone. Neither pattern is anchored
+# or uses a lookbehind, so matching at an offset is the same match.
+RUST_RAW_STRING = re.compile(r'(?:b)?r(#{0,255})"')
+RUST_CHAR_LITERAL = re.compile(r"(?:b)?'(?:\\.|[^'\\\n])+'")
+
+
 def rust_views(source: str, path: Path) -> tuple[str, str]:
     """Return comment-free source and code with comments/literals masked."""
     comment_free = list(source)
@@ -72,10 +80,10 @@ def rust_views(source: str, path: Path) -> tuple[str, str]:
             index = end
             continue
 
-        raw = re.match(r'(?:b)?r(#{0,255})"', source[index:])
+        raw = RUST_RAW_STRING.match(source, index)
         if raw:
             delimiter = '"' + raw.group(1)
-            body_start = index + raw.end()
+            body_start = raw.end()
             close = source.find(delimiter, body_start)
             if close < 0:
                 fail(f"{path.relative_to(root)} has an unterminated raw string")
@@ -103,9 +111,9 @@ def rust_views(source: str, path: Path) -> tuple[str, str]:
             index = end
             continue
 
-        char_literal = re.match(r"(?:b)?'(?:\\.|[^'\\\n])+'", source[index:])
+        char_literal = RUST_CHAR_LITERAL.match(source, index)
         if char_literal:
-            end = index + char_literal.end()
+            end = char_literal.end()
             mask(index, end, comments=False)
             index = end
             continue
