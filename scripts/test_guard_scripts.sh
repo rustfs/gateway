@@ -5679,6 +5679,22 @@ PYEOF
 expect_fail check_timeout_layer_ownership.sh \
     'c-lim-0061 replacing its concurrently sampled control with a constant' mut_server_c_lim_0061_baseline_removed
 
+mut_server_c_lim_0061_stall_count_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/server/tests/server_load.rs")
+text = path.read_text()
+subject = "            loaded_probes.stalled <= control_probes.stalled,\n"
+if text.count(subject) != 1:
+    raise SystemExit("c-lim-0061 unanswered-probe direction is not unique")
+path.write_text(text.replace(subject, "            loaded_probes.stalled <= usize::MAX,\n", 1))
+PYEOF
+}
+expect_fail check_timeout_layer_ownership.sh \
+    'c-lim-0061 letting unanswered probes hide in the tail its percentile discards' \
+    mut_server_c_lim_0061_stall_count_removed
+
 mut_server_c_lim_0061_saturation_skip_removed() {
     python3 - <<'PYEOF'
 from pathlib import Path

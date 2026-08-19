@@ -504,6 +504,17 @@ async fn c_lim_0061_a_srv_0026_one_thousand_slow_readers_close_without_starving_
             control_probes.stalled
         );
     } else {
+        // A stalled probe is charged the ceiling, and the ceiling sits in the one percent of
+        // samples the rank discards, so up to four of them per listener are invisible to the
+        // percentile below. On a host quiet enough that the idle control answered all of its
+        // probes, a probe the loaded listener left unanswered for whole seconds is the starvation
+        // this case is named after, and it must not be able to hide in a discarded tail.
+        assert!(
+            loaded_probes.stalled <= control_probes.stalled,
+            "{} of {PROBES} probes against the listener holding {SLOW_READERS} parked slow readers went unanswered inside {PROBE_CEILING:?}, against {} on the idle control listener probed in lock-step with it",
+            loaded_probes.stalled,
+            control_probes.stalled
+        );
         let ceiling = control_probes.p99.saturating_mul(8) + Duration::from_millis(100);
         eprintln!("c-lim-0061 p99 ceiling: {ceiling:?}");
         assert!(
