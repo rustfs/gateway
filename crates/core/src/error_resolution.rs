@@ -423,9 +423,14 @@ pub fn resolve(context: ErrorContext, response: ResponseKind) -> ErrorResolution
                     MissingObject::Version => ErrorCode::NO_SUCH_VERSION,
                 },
             };
-            let message = match visibility {
-                ResourceVisibility::Hidden => "the request is not allowed",
-                ResourceVisibility::Visible => "the requested object does not exist",
+            // AWS's own sentence, because `conformance/cases/object/c-object-0007.toml` asserts the
+            // whole document byte for byte: this is observable API surface, not internal prose. The
+            // version arm keeps the neutral sentence — no case pins `NoSuchVersion`'s wording, and
+            // inventing one from memory is how the key arm came to be reworded in the first place.
+            let message = match (visibility, kind) {
+                (ResourceVisibility::Hidden, _) => "the request is not allowed",
+                (ResourceVisibility::Visible, MissingObject::Key) => "The specified key does not exist.",
+                (ResourceVisibility::Visible, MissingObject::Version) => "the requested object does not exist",
             };
             let details = match (visibility, key) {
                 (ResourceVisibility::Visible, Some(key)) if is_xml_representable(key.as_str()) => {
@@ -438,7 +443,8 @@ pub fn resolve(context: ErrorContext, response: ResponseKind) -> ErrorResolution
         ErrorCase::DeleteMissingKey => success(StatusCode::NO_CONTENT),
         ErrorCase::MissingBucket => ordinary_parts(
             ErrorCode::NO_SUCH_BUCKET,
-            Cow::Borrowed("the specified bucket does not exist"),
+            // Pinned byte-exactly by `c-cors-0025` and `c-lock-0029`; see the key arm above.
+            Cow::Borrowed("The specified bucket does not exist"),
             Vec::new(),
             Vec::new(),
             None,
