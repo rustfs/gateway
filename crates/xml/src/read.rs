@@ -43,6 +43,8 @@
 //! the namespace its prefix resolved to, and the declarations themselves are not attributes of
 //! the element they appear on.
 
+use std::sync::Arc;
+
 use quick_xml::events::{BytesStart, Event};
 use quick_xml::{Reader, XmlVersion};
 
@@ -163,7 +165,13 @@ pub struct XmlAttribute {
     /// in no namespace at all.
     ///
     /// An attribute whose prefix no enclosing element bound is not stored — see [`XmlNode`].
-    pub namespace: Option<String>,
+    ///
+    /// Shared rather than copied, and that is a bound and not a micro-optimisation: a declaration
+    /// is written once and may be referenced by every attribute under it, so a per-attribute
+    /// `String` would let a one-megabyte body naming a four-kilobyte namespace once and using it
+    /// a hundred thousand times allocate four hundred megabytes. The document bounds the bytes it
+    /// contains; it must not bound the bytes it can make this side hold.
+    pub namespace: Option<Arc<str>>,
     /// Attribute value, entity references already resolved.
     pub value: String,
 }
@@ -257,7 +265,7 @@ pub fn parse_with_limits(body: &[u8], limits: XmlLimits) -> Result<XmlNode, XmlE
     // element's own declarations are in scope for its own attributes — AWS declares `xmlns:xsi`
     // on the same `<Grantee>` that carries `xsi:type` — so a frame is pushed before that
     // element's attributes are resolved, and popped when the element closes.
-    let mut scopes: Vec<Vec<(String, String)>> = Vec::new();
+    let mut scopes: Vec<Vec<(String, Arc<str>)>> = Vec::new();
     let mut root: Option<XmlNode> = None;
     let mut elements = 0usize;
 
@@ -369,7 +377,7 @@ pub fn parse_with_limits(body: &[u8], limits: XmlLimits) -> Result<XmlNode, XmlE
 /// The limits are applied here rather than in [`read_attributes`] so that they are applied once
 /// per attribute and to *every* attribute — a declaration is an attribute on the wire, and a
 /// ceiling that skipped them would let a document carry an unbounded number of `xmlns:` pairs.
-fn declarations(start: &BytesStart<'_>, limits: XmlLimits) -> Result<Vec<(String, String)>, XmlError> {
+fn declarations(start: &BytesStart<'_>, limits: XmlLimits) -> Result<Vec<(String, Arc<str>)>, XmlError> {
     let mut declared = Vec::new();
     let mut count = 0usize;
     for attribute in start.attributes() {
@@ -389,7 +397,7 @@ fn declarations(start: &BytesStart<'_>, limits: XmlLimits) -> Result<Vec<(String
             let value = attribute
                 .normalized_value(XmlVersion::Implicit1_0)
                 .map_err(|_| XmlError::UnsupportedEntity)?;
-            declared.push((local, value.into_owned()));
+            declared.push((local, Arc::from(value.as_ref())));
         }
     }
     Ok(declared)
@@ -400,7 +408,7 @@ fn declarations(start: &BytesStart<'_>, limits: XmlLimits) -> Result<Vec<(String
 fn read_attributes(
     start: &BytesStart<'_>,
     limits: XmlLimits,
-    scopes: &[Vec<(String, String)>],
+    scopes: &[Vec<(String, Arc<str>)>],
 ) -> Result<Vec<XmlAttribute>, XmlError> {
     let mut out = Vec::new();
     for attribute in start.attributes() {
@@ -435,7 +443,7 @@ fn read_attributes(
 }
 
 /// The namespace a prefix is bound to by the innermost element that binds it.
-fn resolve(scopes: &[Vec<(String, String)>], prefix: &str) -> Option<String> {
+fn resolve(scopes: &[Vec<(String, Arc<str>)>], prefix: &str) -> Option<Arc<str>> {
     scopes.iter().rev().find_map(|frame| {
         frame
             .iter()

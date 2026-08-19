@@ -424,3 +424,35 @@ fn n_declarations_count_against_the_attribute_ceiling() {
     let long = format!("<Root xmlns:p=\"{value}\"></Root>");
     assert_eq!(parse(long.as_bytes()), Err(XmlError::AttributeTooLong));
 }
+
+/// Negative — the same attribute twice on one element is refused rather than resolved to whichever
+/// copy the parser happened to keep. Two spellings of one discriminator is a document whose meaning
+/// depends on the reader.
+#[test]
+fn n_refuses_an_element_carrying_the_same_attribute_twice() {
+    assert_eq!(parse(br#"<Grantee a="1" a="2"></Grantee>"#), Err(XmlError::Malformed));
+    let repeated =
+        br#"<Grantee xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:type="Group" xsi:type="CanonicalUser"/>"#;
+    assert_eq!(parse(repeated), Err(XmlError::Malformed));
+}
+
+/// Positive — a namespace is shared by every attribute that resolves through one declaration, so a
+/// document that declares once and refers many times does not make this side hold one copy per
+/// reference. The pointer equality is the assertion: a `String` per attribute would pass every
+/// other test in this file and allocate four hundred megabytes from a one-megabyte body.
+#[test]
+fn shares_one_namespace_across_every_attribute_that_resolves_through_it() {
+    let long = "urn:".to_owned() + &"n".repeat(2048);
+    let body = format!(r#"<A xmlns:p="{long}"><B p:k="1"/><B p:k="2"/></A>"#);
+    let root = parse(body.as_bytes()).expect("the document parses");
+    let mut children = root.children_named("B");
+    let first = children.next().expect("the first B");
+    let second = children.next().expect("the second B");
+    let one = first.attributes.first().expect("an attribute").namespace.clone();
+    let two = second.attributes.first().expect("an attribute").namespace.clone();
+    assert_eq!(one.as_deref(), Some(long.as_str()));
+    let (Some(one), Some(two)) = (one, two) else {
+        unreachable!("both attributes resolved");
+    };
+    assert!(std::sync::Arc::ptr_eq(&one, &two), "the namespace is shared, not copied per attribute");
+}
