@@ -7414,6 +7414,131 @@ probe_role_verdict_table_drift() {
 }
 probe_role_verdict_table_drift
 
+# -----------------------------------------------------------------------------
+# Role selection reads the merge base, not the base branch tip.
+#
+# GATEWAY_ROLE_BASE is `github.event.pull_request.base.sha`, which tracks `main` live and
+# therefore moves under an open pull request every time anything else merges. These three
+# cases share one repository shape: a common commit, a branch that touches `scripts/`
+# only, and a base branch that has since moved on with a commit under `crates/core/`.
+# A two-dot diff between the two tips reports that `crates/core/` file as changed and
+# demands `security-adversary` from an author who never touched it.
+# -----------------------------------------------------------------------------
+build_role_base_moved_repo() {
+    local repo="$1" branch_touches_core="$2"
+    mkdir -p "${repo}/scripts" "${repo}/crates/core/src"
+    cp "${REPO_ROOT}/AGENTS.md" "${repo}/AGENTS.md"
+    printf 'echo shared\n' >"${repo}/scripts/keep.sh"
+    printf 'pub fn resolution() {}\n' >"${repo}/crates/core/src/thing.rs"
+    (
+        cd "$repo"
+        git init -q .
+        git add -A
+        git -c user.name=t -c user.email=t@t commit -qm common
+    )
+    ROLE_MERGE_BASE="$(git -C "$repo" rev-parse HEAD)"
+    # The branch under review.
+    printf 'echo branch\n' >>"${repo}/scripts/keep.sh"
+    if [[ "$branch_touches_core" == core ]]; then
+        printf 'pub fn owned_by_the_branch() {}\n' >"${repo}/crates/core/src/branch_owned.rs"
+    fi
+    (
+        cd "$repo"
+        git add -A
+        git -c user.name=t -c user.email=t@t commit -qm branch
+    )
+    ROLE_HEAD_SHA="$(git -C "$repo" rev-parse HEAD)"
+    # The base branch, moving on without the branch under review.
+    (
+        cd "$repo"
+        git checkout -q "$ROLE_MERGE_BASE"
+        printf 'pub fn landed_after_the_branch_was_cut() {}\n' >>crates/core/src/thing.rs
+        git add -A
+        git -c user.name=t -c user.email=t@t commit -qm "base branch moved"
+    )
+    ROLE_BASE_SHA="$(git -C "$repo" rev-parse HEAD)"
+}
+
+ROLE_SIMPLICITY_ONLY_BODY=$'## Role Verdicts\n- simplicity-adversary: attacked the changed scripts — no break found.'
+
+probe_role_verdict_ignores_base_branch_commits() {
+    local repo rc=0
+    cases=$((cases + 1))
+    guard_case_owned "$cases" || return 0
+    repo="$(mktemp -d "${TMPDIR:-/tmp}/gateway-role-base-moved.XXXXXX")"
+    build_role_base_moved_repo "$repo" scripts
+    GATEWAY_CHECK_ROOT="$repo" \
+        GATEWAY_ROLE_BASE="$ROLE_BASE_SHA" \
+        GATEWAY_ROLE_HEAD="$ROLE_HEAD_SHA" \
+        GATEWAY_PR_BODY="$ROLE_SIMPLICITY_ONLY_BODY" \
+        "${SCRIPT_DIR}/check_role_verdicts.sh" >/dev/null 2>&1 || rc=$?
+    rm -rf "$repo"
+    if [[ "$rc" -eq 0 ]]; then
+        pass_msg 'check_role_verdicts.sh ignores a commit that landed on the base branch after the branch was cut'
+    else
+        fail_msg 'check_role_verdicts.sh demanded a role for a file only the base branch changed'
+    fi
+}
+probe_role_verdict_ignores_base_branch_commits
+
+probe_role_verdict_still_sees_branch_paths() {
+    local repo rc=0
+    cases=$((cases + 1))
+    guard_case_owned "$cases" || return 0
+    repo="$(mktemp -d "${TMPDIR:-/tmp}/gateway-role-branch-core.XXXXXX")"
+    build_role_base_moved_repo "$repo" core
+    GATEWAY_CHECK_ROOT="$repo" \
+        GATEWAY_ROLE_BASE="$ROLE_BASE_SHA" \
+        GATEWAY_ROLE_HEAD="$ROLE_HEAD_SHA" \
+        GATEWAY_PR_BODY="$ROLE_SIMPLICITY_ONLY_BODY" \
+        "${SCRIPT_DIR}/check_role_verdicts.sh" >/dev/null 2>&1 || rc=$?
+    rm -rf "$repo"
+    if [[ "$rc" -ne 0 ]]; then
+        pass_msg 'check_role_verdicts.sh still demands a role for a path the branch itself changed'
+    else
+        fail_msg 'check_role_verdicts.sh missed a crates/core path the branch itself changed'
+    fi
+}
+probe_role_verdict_still_sees_branch_paths
+
+mut_role_verdict_two_dot_diff() {
+    python3 - "$1" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text()
+old = '    role_base = os.fsdecode(git("merge-base", base, head)).strip()'
+if text.count(old) != 1:
+    raise SystemExit("missing the merge-base resolution")
+path.write_text(text.replace(old, "    role_base = base", 1))
+PY
+}
+
+probe_role_verdict_two_dot_diff_is_caught() {
+    local repo mutated rc=0
+    cases=$((cases + 1))
+    guard_case_owned "$cases" || return 0
+    repo="$(mktemp -d "${TMPDIR:-/tmp}/gateway-role-two-dot.XXXXXX")"
+    mutated="$(mktemp -d "${TMPDIR:-/tmp}/gateway-role-two-dot-guard.XXXXXX")"
+    build_role_base_moved_repo "$repo" scripts
+    cp "${SCRIPT_DIR}/check_role_verdicts.sh" "${mutated}/check_role_verdicts.sh"
+    mut_role_verdict_two_dot_diff "${mutated}/check_role_verdicts.sh"
+    GATEWAY_CHECK_ROOT="$repo" \
+        GATEWAY_ROLE_BASE="$ROLE_BASE_SHA" \
+        GATEWAY_ROLE_HEAD="$ROLE_HEAD_SHA" \
+        GATEWAY_PR_BODY="$ROLE_SIMPLICITY_ONLY_BODY" \
+        bash "${mutated}/check_role_verdicts.sh" >/dev/null 2>&1 || rc=$?
+    rm -rf "$repo" "$mutated"
+    if [[ "$rc" -ne 0 ]]; then
+        pass_msg 'the two-dot diff restored in check_role_verdicts.sh demands a role for somebody else'"'"'s commit'
+    else
+        fail_msg 'restoring the two-dot diff changed nothing, so the merge-base case cannot fail'
+    fi
+}
+probe_role_verdict_two_dot_diff_is_caught
+
+
 probe_compat_role_required() {
     local repo base head rc=0
     cases=$((cases + 1))
