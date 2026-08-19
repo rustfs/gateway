@@ -421,3 +421,37 @@ fn n_a_different_event_payload_is_reported() {
     let judgement = judge(&expect, &observed, "/expect", &no_goldens());
     assert_eq!(rules(&judgement), vec!["expect/body.exact_utf8"]);
 }
+
+// --- a capture is a value to spend, not a wire form to compare -----------------------------------
+
+#[test]
+fn a_captured_element_is_the_value_the_document_encoded_not_its_wire_spelling() {
+    let expect = expectation("kind = \"response\"\nstatus = 200\n[capture.object_etag]\nxml_text = \"ETag\"\n");
+    let observed = Observation::response(200, Vec::new(), b"<R><ETag>&quot;abc-1&quot;</ETag></R>".to_vec());
+    let judgement = judge(&expect, &observed, "/expect", &no_goldens());
+    assert_eq!(
+        judgement.captures.get("object_etag").map(String::as_str),
+        Some("\"abc-1\""),
+        "a captured entity tag has to be usable as an `If-Match` value"
+    );
+}
+
+/// The control: an element whose text needs no expansion is captured byte for byte, so the
+/// expansion above is not a transformation applied to everything.
+#[test]
+fn a_captured_element_with_no_entity_is_unchanged() {
+    let expect = expectation("kind = \"response\"\nstatus = 200\n[capture.upload_id]\nxml_text = \"UploadId\"\n");
+    let observed = Observation::response(200, Vec::new(), b"<R><UploadId>u-42</UploadId></R>".to_vec());
+    let judgement = judge(&expect, &observed, "/expect", &no_goldens());
+    assert_eq!(judgement.captures.get("upload_id").map(String::as_str), Some("u-42"));
+}
+
+/// A captured value is expanded; an *asserted* one is not. `expect.error.code` and
+/// `expect.body.contains_utf8` are assertions about the bytes on the wire, and expanding them
+/// would erase the difference between `&amp;` and `&` that the corpus exists to catch.
+#[test]
+fn an_asserted_element_is_still_judged_on_the_bytes_that_arrived() {
+    let expect = expectation("kind = \"response\"\nstatus = 200\n[body]\ncontains_utf8 = [\"<ETag>&quot;abc-1&quot;</ETag>\"]\n");
+    let observed = Observation::response(200, Vec::new(), b"<R><ETag>&quot;abc-1&quot;</ETag></R>".to_vec());
+    assert!(judge(&expect, &observed, "/expect", &no_goldens()).is_clean());
+}

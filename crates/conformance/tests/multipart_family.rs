@@ -17,7 +17,7 @@
 //! Responsible for: pinning the multipart family as a *closed* set — forty-eight identifiers with
 //! no gap and no duplicate, thirty-one negative against seventeen positive, every one of them
 //! carrying a verdict in the checked-in baseline — and for proving the family executes against the
-//! in-process target with no regression, with `c-mpu-0002`, `c-mpu-0003` and `c-mpu-0018` green,
+//! in-process target with no regression, with every id in `RECOVERED` green,
 //! and with no case skipping that was not already skipping. A family whose size, polarity and
 //! baseline membership are only ever counted by a human is a family that silently loses a case,
 //! and a case that quietly turns into a skip reads exactly like one that passed.
@@ -40,10 +40,12 @@ const FAMILY_SIZE: usize = 48;
 const NEGATIVE: usize = 31;
 const POSITIVE: usize = 17;
 
-/// The three cases this family was blocked on, all three of them about the entity tag a multipart
-/// upload publishes. The baseline still records them as failing, so their verdicts are checked
+/// The cases this family was blocked on. Three are about the entity tag a multipart upload
+/// publishes; `c-mpu-0038` is the one whose own expectation was the defect — it demanded that the
+/// completion body carry no XML declaration, which is neither what AWS emits nor what the rest of
+/// this corpus says. The baseline still records all four as failing, so their verdicts are checked
 /// directly rather than through the ratchet, which tolerates a recorded failure.
-const RECOVERED: [&str; 3] = ["c-mpu-0002", "c-mpu-0003", "c-mpu-0018"];
+const RECOVERED: [&str; 4] = ["c-mpu-0002", "c-mpu-0003", "c-mpu-0018", "c-mpu-0038"];
 
 /// The cases the in-process target cannot execute, each for a reason the runner prints with the
 /// skip. Two ask for a fresh connection per exchange, one for a malformed request head that only a
@@ -137,12 +139,12 @@ fn every_multipart_case_carries_a_verdict_in_the_baseline() {
     assert!(unrecorded.is_empty(), "multipart cases absent from the baseline: {unrecorded:?}");
 }
 
-/// The family executes, and the three entity-tag cases it was blocked on are green.
+/// The family executes, and the cases it was blocked on are green.
 ///
 /// Each half is asserted because none of them alone is worth anything: a run in which every
 /// multipart case was skipped has no regressions, a run with no regressions says nothing about a
 /// case the baseline records as failing, and a green verdict on a case that never ran is the shape
-/// this repository keeps regrowing. The baseline still records all three of `RECOVERED` as failed,
+/// this repository keeps regrowing. The baseline still records every id in `RECOVERED` as failed,
 /// so their verdicts are read directly.
 #[test]
 fn the_multipart_family_runs_green_with_the_entity_tag_cases_recovered() {

@@ -20,8 +20,16 @@
 //! of a named element. It is a scanner over the bytes as they arrived, deliberately not a
 //! document model: the assertions here are about the wire form, and a parse-then-compare would
 //! erase the very differences the corpus exists to catch.
-//! NOT responsible for: entity expansion, DTDs, namespaces beyond the literal `xmlns` attribute,
-//! or producing XML.
+//!
+//! Entity expansion is the one exception, and it is offered as a separate step ([`unescape`])
+//! rather than folded into the scanner. The distinction is between a value the case *asserts* and
+//! a value the case *spends*: an assertion is about the bytes that arrived, so `&quot;` must stay
+//! `&quot;` or the corpus stops being able to tell the two spellings apart; a captured value is
+//! about to be written back into a later request, where `&quot;` is six characters no server will
+//! match. Only [`crate::expect`]'s capture site expands.
+//!
+//! NOT responsible for: DTDs, entity *declarations* and the general entities they would define,
+//! namespaces beyond the literal `xmlns` attribute, or producing XML.
 //! Upstream: nothing. Downstream: `crate::expect`.
 
 /// The placeholder that replaces a redacted element's text on both sides of a comparison.
@@ -71,9 +79,20 @@ impl StartTag {
 }
 
 /// Whether the body opens with an XML declaration.
+///
+/// "Opens with" is meant literally: the declaration has to be the first byte of the body, because
+/// that is the only position XML gives it. `prolog ::= XMLDecl? Misc*` puts nothing before the
+/// declaration, so a `<?xml ...?>` that follows so much as a space is not a declaration at all —
+/// it is a processing instruction in a document that has none, and no parser accepts it.
+///
+/// The distinction is the whole subject of `c-mpu-0038`. A completion that has to flush its head
+/// before it knows the outcome writes the declaration first and its keep-alive whitespace *after*
+/// it, which is legal prolog whitespace; the same server writing the whitespace first produces
+/// bytes nothing can parse. Trimming here would report both as `true` and leave the case unable to
+/// tell them apart.
 #[must_use]
 pub fn has_declaration(body: &str) -> bool {
-    body.trim_start().starts_with("<?xml")
+    body.starts_with("<?xml")
 }
 
 /// The root element's start tag.
@@ -141,6 +160,77 @@ pub fn first_element_text(body: &str, name: &str) -> Option<String> {
     let start = body.find(&open)? + open.len();
     let end = body[start..].find(&close)? + start;
     Some(body[start..end].to_owned())
+}
+
+/// Expands the five predefined XML entities and numeric character references in `text`.
+///
+/// This is what turns an element's wire form into the value it encodes, so that a captured
+/// `<ETag>&quot;abc-1&quot;</ETag>` can be spent as an `If-Match` header rather than sent as six
+/// literal characters no server will match.
+///
+/// # What it deliberately does not do
+///
+/// A reference this function does not recognise is left exactly as it arrived. XML 1.0 defines
+/// only five predefined entities; anything else has to be *declared*, and a declaration is
+/// something [`crate::expect`] refuses to accept in a body rather than something it resolves.
+/// Rewriting an unknown reference into anything at all would be inventing a value the server never
+/// sent, which is the failure this module exists to avoid. The expansion is also a single
+/// left-to-right pass over the input, so `&amp;quot;` yields `&quot;` and never `"`: an expansion
+/// that ran twice would let a body that escaped its ampersand correctly masquerade as one that did
+/// not.
+///
+/// # Why not the production reader
+///
+/// `rustfs-gateway-xml` has a real parser that resolves entities. It is deliberately not used
+/// here, for the reason this whole module exists: it is the *implementation's* reader, and a
+/// harness that judged an implementation's output by running it back through that implementation's
+/// own parser would agree with it by construction. It also refuses an entity it does not know,
+/// which is right for a request the gateway must reject and wrong for a harness whose job is to
+/// record what a possibly-misbehaving target actually sent.
+#[must_use]
+pub fn unescape(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(position) = rest.find('&') {
+        out.push_str(&rest[..position]);
+        let after = &rest[position..];
+        // A reference is `&name;`. Without a terminating `;` — or with one so far away it cannot
+        // be a reference — the ampersand is just an ampersand.
+        let Some(end) = after.find(';').filter(|end| *end <= MAX_REFERENCE_LEN) else {
+            out.push('&');
+            rest = &after[1..];
+            continue;
+        };
+        match expand(&after[1..end]) {
+            Some(character) => out.push(character),
+            None => out.push_str(&after[..=end]),
+        }
+        rest = &after[end + 1..];
+    }
+    out.push_str(rest);
+    out
+}
+
+/// The longest reference worth considering, counted from the `&` to the `;`. `&#x10FFFF;` is nine
+/// characters; a `;` further away than this belongs to something else in the text.
+const MAX_REFERENCE_LEN: usize = 10;
+
+/// The character one reference names, or `None` when nothing in XML 1.0 defines it.
+fn expand(name: &str) -> Option<char> {
+    match name {
+        "amp" => return Some('&'),
+        "lt" => return Some('<'),
+        "gt" => return Some('>'),
+        "quot" => return Some('"'),
+        "apos" => return Some('\''),
+        _ => {}
+    }
+    let digits = name.strip_prefix('#')?;
+    let code = match digits.strip_prefix(['x', 'X']) {
+        Some(hex) => u32::from_str_radix(hex, 16).ok()?,
+        None => digits.parse::<u32>().ok()?,
+    };
+    char::from_u32(code)
 }
 
 /// Replaces the text of every named element with [`REDACTED`].
@@ -274,9 +364,56 @@ mod tests {
     }
 
     #[test]
+    fn the_five_predefined_entities_are_expanded() {
+        assert_eq!(unescape("&quot;abc-1&quot;"), "\"abc-1\"");
+        assert_eq!(unescape("a &amp; b"), "a & b");
+        assert_eq!(unescape("&lt;Key&gt;"), "<Key>");
+        assert_eq!(unescape("it&apos;s"), "it's");
+    }
+
+    #[test]
+    fn numeric_character_references_are_expanded_in_both_spellings() {
+        assert_eq!(unescape("&#34;x&#x22;"), "\"x\"");
+        assert_eq!(unescape("&#x1F600;"), "\u{1F600}");
+    }
+
+    #[test]
+    fn text_with_nothing_to_expand_is_returned_unchanged() {
+        assert_eq!(unescape("6304d8b66864869a34b0f9efd0631414-1"), "6304d8b66864869a34b0f9efd0631414-1");
+    }
+
+    /// The control on the whole function: an expansion that guessed would manufacture a value the
+    /// server never sent, which is worse than leaving the reference where it was.
+    #[test]
+    fn a_reference_xml_does_not_define_is_left_exactly_as_it_arrived() {
+        assert_eq!(unescape("&copy;"), "&copy;");
+        assert_eq!(unescape("&#xZZ;"), "&#xZZ;");
+        assert_eq!(unescape("&#x110000;"), "&#x110000;");
+        assert_eq!(unescape("a & b; c"), "a & b; c");
+        assert_eq!(unescape("&quot"), "&quot");
+    }
+
+    /// One pass, not a fixpoint. A body that escaped its ampersand correctly must not come out
+    /// looking like one that did not.
+    #[test]
+    fn expansion_does_not_run_twice_over_its_own_output() {
+        assert_eq!(unescape("&amp;quot;"), "&quot;");
+    }
+
+    #[test]
     fn a_declaration_is_detected() {
         assert!(has_declaration(LIST));
         assert!(!has_declaration("<Error><Code>x</Code></Error>"));
+    }
+
+    /// Whitespace *after* the declaration is legal prolog whitespace and the declaration is still
+    /// there; whitespace *before* it means there is no declaration, only a processing instruction
+    /// in a document that never had one.
+    #[test]
+    fn a_declaration_only_counts_where_xml_allows_one() {
+        assert!(has_declaration("<?xml version=\"1.0\"?>\n   \n<R/>"));
+        assert!(!has_declaration("   <?xml version=\"1.0\"?>\n<R/>"));
+        assert!(!has_declaration("\n<?xml version=\"1.0\"?><R/>"));
     }
 
     #[test]
