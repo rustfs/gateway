@@ -126,7 +126,10 @@ const GATES: &[(&str, Wiring)] = &[
     // one a stalled chunk, one a malformed request head. All four execute over a socket.
     ("mpu", Wiring::Runs(&["c-mpu-0027", "c-mpu-0039", "c-mpu-0043", "c-mpu-0045"])),
     ("naming", Wiring::Runs(&[])),
-    ("object", Wiring::Runs(&[])),
+    // `c-object-0030` writes a request head with neither a declared length nor chunked framing.
+    // Only a transport that puts bytes on a socket can express that; the in-process target is handed
+    // a parsed `http::Request`. `tests/object.rs` reads the same skip from the other side.
+    ("object", Wiring::Runs(&["c-object-0030"])),
     ("range", Wiring::Runs(&[])),
     ("replication", Wiring::Runs(&[])),
     ("select-restore", Wiring::Runs(&[])),
