@@ -856,9 +856,6 @@ impl S3Service {
         let body_headers = &headers;
         let body_wire = &wire;
         let read_body = move |state: AuthorizedRoute| async move {
-            if let Err(error) = rustfs_gateway_core::codec::value::refuse_contradictory_checksums(body_meta) {
-                return Err(from_codec(error, response_kind));
-            }
             if let Err(rejection) = rustfs_gateway_core::sse::enforce(body_meta, connection, &body_service.inner.sse) {
                 return Err(from_sse(rejection, response_kind));
             }
@@ -882,8 +879,10 @@ impl S3Service {
             };
 
             let ceilings = BodyCeilings::of(operation, state.config.config().max_buffered_body_bytes());
+            // The accepted head, not the pre-filter copy: it is the map the codec binds from.
+            let integrity = crate::integrity::resolve(&body_wire.headers(), body_wire.method(), operation)?;
             let body = sealed
-                .read(&authenticated, ceilings, BodyTimeouts::S3, ingest, body_digest)
+                .read(&authenticated, ceilings, BodyTimeouts::S3, ingest, body_digest, integrity)
                 .await?;
             Ok((
                 ReadForDecode {
