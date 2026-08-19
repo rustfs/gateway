@@ -1,0 +1,48 @@
+[case]
+id = "c-object-0020"
+schema_version = 1
+title = "A response override carrying a carriage return never reaches the response head"
+rationale = """
+The response overrides are the one place in this operation where a caller writes a response header value directly, and a presigned URL puts that power in the hands of whoever holds the link. A value carrying CR or LF that is copied into the head splits the response and lets the link's holder mint headers, a body, or a second response entirely. The assertion is that the request is refused and that no header carrying the injected name appears, because a server that strips the control bytes and answers 200 has still accepted an input it should have refused."""
+polarity = "negative"
+operation = "GetObject"
+tags = ["security", "presigned", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-response-0023"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObject.html"
+summary = "The documented read response is the authority for the headers a read returns and the query overrides it honours."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9110#section-5.5"
+summary = "A field value carries no bare CR or LF, so a value that does cannot be emitted as one."
+kind = "rfc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-object"
+
+[[setup.objects]]
+bucket = "conf-object"
+key = "overrides/inject.bin"
+content_type = "text/plain"
+body = { utf8 = "hello world" }
+
+[request]
+method = "GET"
+target = "/conf-object/overrides/inject.bin?response-content-disposition=inline%0d%0ax-injected%3A%20yes"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+connection_after = "open"
+headers_absent = ["x-injected", "content-disposition"]
+
+[expect.body]
+exact_utf8 = "hello world"
+not_contains_utf8 = ["x-injected"]

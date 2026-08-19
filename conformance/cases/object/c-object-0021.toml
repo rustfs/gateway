@@ -1,0 +1,43 @@
+[case]
+id = "c-object-0021"
+schema_version = 1
+title = "A multi-object delete with an empty body is a MalformedXML refusal, not an empty success"
+rationale = """
+An empty body parses to nothing, and nothing is indistinguishable from a well-formed request that deletes no keys unless the parser says so. An implementation that treats it as the latter answers 200 with an empty DeleteResult and tells the caller the request succeeded. The refusal is asserted by code rather than by status alone because a 400 carrying the wrong code sends a retrying client down the wrong branch."""
+polarity = "negative"
+operation = "DeleteObjects"
+tags = ["xml", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-deletes-0027"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteObjects.html"
+summary = "The documented multi-object delete is the authority for its request root, its result root and its integrity header."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-object"
+
+[request]
+method = "POST"
+target = "/conf-object?delete"
+headers = { "content-type" = "application/xml", "content-md5" = "1B2M2Y8AsgTpgAmY7PhCfg==" }
+body = { utf8 = "" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+code = "MalformedXML"
+request_id_present = true
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+contains_utf8 = ["<Code>MalformedXML</Code>"]
+not_contains_utf8 = ["<Deleted>", "<DeleteResult"]

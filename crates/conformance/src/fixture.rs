@@ -1188,14 +1188,21 @@ pub(crate) fn encode_base64(bytes: &[u8]) -> String {
 /// goes through the same function, because a fixture that checked the digest of a part and waved
 /// through the digest of a whole object would be asserting a distinction S3 does not make.
 ///
-/// What this does *not* do is separate a malformed header from a mismatched one. AWS answers
-/// `InvalidDigest` for a value that is not 16 base64-encoded bytes at all, and no case in the
-/// corpus draws that line — so rather than guess at a code nothing asserts, both arrive here as
-/// `BadDigest`. A case that wants the distinction will find this comment.
+/// The two failures are kept apart. AWS answers `InvalidDigest` for a value that is not sixteen
+/// base64-encoded bytes at all and `BadDigest` for one that is and disagrees with the body, and a
+/// client branches on the difference: the first is a request it must rebuild, the second is a
+/// transfer it may retry unchanged. `c-object-0026` is the case that draws the line; before it
+/// existed both arrived here as `BadDigest`.
 fn require_content_md5(claimed: Option<&str>, body: &[u8]) -> Result<(), HandlerError> {
     let Some(claimed) = claimed.map(str::trim).filter(|text| !text.is_empty()) else {
         return Ok(());
     };
+    if !is_base64_of_sixteen_bytes(claimed) {
+        return Err(HandlerError::new(
+            ErrorCode::INVALID_DIGEST,
+            "The Content-MD5 you specified is not valid.",
+        ));
+    }
     if claimed == encode_base64(&crate::md5::digest(body)) {
         return Ok(());
     }
@@ -1203,6 +1210,23 @@ fn require_content_md5(claimed: Option<&str>, body: &[u8]) -> Result<(), Handler
         ErrorCode::BAD_DIGEST,
         "The Content-MD5 you specified did not match what we received.",
     ))
+}
+
+/// Whether a header value has the shape of sixteen base64-encoded bytes.
+///
+/// A shape check rather than a decode: sixteen bytes are always twenty-two characters carrying the
+/// bits plus two of padding, so length, alphabet and padding decide it, and a decoder here would be
+/// a second implementation of the one the gateway ships — which is the one thing a conformance
+/// fixture must not borrow, because a suite that reuses the implementation's parser cannot catch
+/// that parser being wrong.
+fn is_base64_of_sixteen_bytes(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    if bytes.len() != 24 || !value.ends_with("==") {
+        return false;
+    }
+    bytes[..22]
+        .iter()
+        .all(|byte| byte.is_ascii_alphanumeric() || *byte == b'+' || *byte == b'/')
 }
 
 fn decode_hex(text: &str) -> Option<Vec<u8>> {

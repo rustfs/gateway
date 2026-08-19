@@ -2435,6 +2435,143 @@ PYEOF
 expect_fail check_scalar_case_coverage.sh \
     'a commented TOML id replacing the active conformance case id' mut_scalar_case_id_replaced_by_comment
 
+# -- check_object_semantics_ledger.sh -------------------------------------------------------------
+#
+# The ledger owes three separable deaths, one per mutation class its header names. They are written
+# out rather than looped because each one has to fail for its *own* diagnostic: a roll-call failure
+# and an arithmetic failure read identically in a green/red summary, and the whole point of the
+# split is that they are different mistakes.
+
+mut_object_ledger_row_id_duplicated() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("scripts/check_object_semantics_ledger.sh")
+text = path.read_text()
+old = "    'c-obj-0019|positive|bound|"
+new = "    'c-obj-0018|positive|bound|"
+if text.count(old) != 1:
+    raise SystemExit("object ledger row mutation subject is not unique")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+# Mutation 1: one mapping stops existing. The polarity arithmetic is deliberately left intact by
+# renaming rather than deleting, so this case can only be caught by the roll call.
+expect_fail_self_mutation check_object_semantics_ledger.sh \
+    'a §7 rule losing its mapping while the polarity totals still add up' \
+    mut_object_ledger_row_id_duplicated
+
+mut_object_ledger_row_polarity_flipped() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("scripts/check_object_semantics_ledger.sh")
+text = path.read_text()
+old = "    'c-obj-0019|positive|bound|"
+new = "    'c-obj-0019|negative|bound|"
+if text.count(old) != 1:
+    raise SystemExit("object ledger polarity mutation subject is not unique")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+# Mutation 3, first half: a rule relabelled to the other kind of evidence.
+expect_fail_self_mutation check_object_semantics_ledger.sh \
+    "a §7 rule's polarity flipped in the ledger" \
+    mut_object_ledger_row_polarity_flipped
+
+mut_object_ledger_assertion_deleted() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("conformance/cases/object/c-object-0006.toml")
+text = path.read_text()
+old = '"expires" = "not-a-date-at-all"\n'
+if text.count(old) != 1:
+    raise SystemExit("opaque-expires assertion mutation subject is not unique")
+path.write_text(text.replace(old, "", 1))
+PYEOF
+}
+# Mutation 2: the case keeps its id, its title and its rationale, and quietly stops asserting the
+# rule the ledger says it settles. This is the shape that made two audits disagree.
+expect_fail_with_diagnostic check_object_semantics_ledger.sh \
+    'a mapped case dropping the assertion the ledger names' \
+    'no longer carries an assertion at /exchanges/1/expect/headers_present/expires' \
+    mut_object_ledger_assertion_deleted
+
+mut_object_ledger_assertion_value_changed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("conformance/cases/object/c-object-0017.toml")
+text = path.read_text()
+old = '"content-type" = "binary/octet-stream"'
+new = '"content-type" = "application/octet-stream"'
+if text.count(old) != 1:
+    raise SystemExit("default media type mutation subject is not unique")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+# The assertion survives and answers a different rule. The IANA spelling is the exact substitution
+# q-content-0008 exists to refuse, so a ledger that only checked the pointer would stay green here.
+expect_fail_with_diagnostic check_object_semantics_ledger.sh \
+    'a mapped assertion keeping its shape and changing its value' \
+    "the ledger records 'binary/octet-stream'" \
+    mut_object_ledger_assertion_value_changed
+
+mut_object_ledger_case_polarity_flipped() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("conformance/cases/object/c-object-0024.toml")
+text = path.read_text()
+old = 'polarity = "positive"'
+if text.count(old) != 1:
+    raise SystemExit("case polarity mutation subject is not unique")
+path.write_text(text.replace(old, 'polarity = "negative"', 1))
+PYEOF
+}
+# Mutation 3, second half, and the independent one: the corpus's own label. `negative >= positive`
+# is counted from these, so relabelling a case is how a suite buys headroom without writing a case.
+expect_fail_with_diagnostic check_object_semantics_ledger.sh \
+    "a mapped case's own polarity relabelled" \
+    'the case declares' \
+    mut_object_ledger_case_polarity_flipped
+
+mut_object_ledger_blocked_row_without_owner() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("scripts/check_object_semantics_ledger.sh")
+text = path.read_text()
+old = "    'c-obj-0011|positive|blocked|rustfs/backlog#1680::"
+new = "    'c-obj-0011|positive|blocked|someone-will-do-it::"
+if text.count(old) != 1:
+    raise SystemExit("blocked-row owner mutation subject is not unique")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+# A block with no owner is a gap nobody is carrying, which is the state the ledger exists to end.
+expect_fail_self_mutation check_object_semantics_ledger.sh \
+    'a blocked rule with no owning issue' \
+    mut_object_ledger_blocked_row_without_owner
+
+probe_object_ledger_guard_missing_python() {
+    local output rc=0 tool_path
+    cases=$((cases + 1))
+    guard_case_owned "$cases" || return 0
+    tool_path="$(mktemp -d "${TMPDIR:-/tmp}/gateway-object-ledger-path.XXXXXX")"
+    ln -s "$(command -v dirname)" "${tool_path}/dirname"
+    output="$(GATEWAY_CHECK_ROOT="$REPO_ROOT" PATH="$tool_path" /bin/bash \
+        "${SCRIPT_DIR}/check_object_semantics_ledger.sh" 2>&1)" || rc=$?
+    rm -rf "$tool_path"
+    if [[ "$rc" -ne 0 && "$output" == *'required command is missing: python3'* ]]; then
+        pass_msg 'check_object_semantics_ledger.sh fails closed without python3'
+    else
+        fail_msg 'check_object_semantics_ledger.sh reported green without python3'
+    fi
+}
+probe_object_ledger_guard_missing_python
+
 probe_scalar_case_guard_missing_python() {
     local output rc=0 tool_path
     cases=$((cases + 1))

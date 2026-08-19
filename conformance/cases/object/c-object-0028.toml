@@ -1,0 +1,61 @@
+[case]
+id = "c-object-0028"
+schema_version = 1
+title = "User metadata comes back under a lowercase name, compared byte for byte"
+rationale = """
+HTTP/1.1 field names are case-insensitive and HTTP/2 forbids uppercase in them outright, so a name echoed back in the spelling it arrived in is a response that is legal on one version and illegal on the other. Every assertion elsewhere in this suite compares names case-insensitively, which is exactly why this one does not: without the byte-exact comparison a server that echoes the request spelling passes."""
+polarity = "positive"
+operation = "HeadObject"
+tags = ["encoding", "wire-bytes", "h2"]
+timeout_ms = 10000
+quirks = ["q-meta-0009"]
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9113#section-8.2.1"
+summary = "A field name carrying an uppercase letter makes an HTTP/2 message malformed."
+kind = "rfc"
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/issues/404"
+summary = "Upstream refused user metadata that clients routinely send."
+kind = "s3s-issue"
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = true
+
+[[setup.buckets]]
+name = "conf-object"
+
+[[exchanges]]
+name = "write-mixed-case"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-object/meta/case"
+headers = { "x-amz-meta-MixedCase" = "kept" }
+body = { utf8 = "hello world" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[[exchanges]]
+name = "head-back-lowercase"
+
+[exchanges.request]
+method = "HEAD"
+target = "/conf-object/meta/case"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+header_name_bytes_exact = true
+
+[exchanges.expect.headers_present]
+"x-amz-meta-mixedcase" = "kept"

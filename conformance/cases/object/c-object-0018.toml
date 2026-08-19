@@ -1,0 +1,70 @@
+[case]
+id = "c-object-0018"
+schema_version = 1
+title = "A write's content encoding and disposition come back on the head as they were sent"
+rationale = """
+Content-Encoding and Content-Disposition are the two standard attributes a read path most often drops, because neither one changes anything the server itself does with the bytes: the object is stored and served identically whether they survive or not, so nothing inside the implementation notices their loss. What notices is a browser that downloads a gzip stream it cannot inflate and a download link that opens in a tab instead of saving. The head is asserted rather than the read because the head is where the second copy of the bindings would be."""
+polarity = "positive"
+operation = "HeadObject"
+tags = ["object-attributes", "wire-bytes"]
+timeout_ms = 10000
+quirks = ["q-head-0025"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObject.html"
+summary = "The documented read response is the authority for which headers the stored object contributes."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/issues/419"
+summary = "Upstream stored the standard attributes on the write and did not return them on the read."
+kind = "s3s-issue"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = true
+
+[[setup.buckets]]
+name = "conf-object"
+
+[[exchanges]]
+name = "write"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-object/attrs/report.gz"
+headers = { "content-type" = "text/plain", "content-encoding" = "gzip", "content-disposition" = "attachment; filename=\"report.txt\"" }
+body = { utf8 = "hello world" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.headers_present]
+"etag" = "\"5eb63bbbe01eeed093cb22bb8f5acdc3\""
+
+[[exchanges]]
+name = "head-back"
+
+[exchanges.request]
+method = "HEAD"
+target = "/conf-object/attrs/report.gz"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.headers_present]
+"content-encoding" = "gzip"
+"content-disposition" = "attachment; filename=\"report.txt\""
+"content-type" = "text/plain"
+
+[exchanges.expect.body]
+size = 0
+exact_utf8 = ""

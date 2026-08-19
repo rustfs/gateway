@@ -24,6 +24,8 @@ mod bucket_lifecycle;
 mod corpus;
 #[path = "list_family.rs"]
 mod list_family;
+#[path = "object.rs"]
+mod object;
 #[path = "tagging.rs"]
 mod tagging;
 #[path = "wired.rs"]

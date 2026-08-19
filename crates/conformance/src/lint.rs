@@ -76,6 +76,9 @@ pub const TAG_VOCABULARY: &[&str] = &[
     "select",
     "acl",
     "naming",
+    // The standard object attributes a write sets and a read returns: content type,
+    // encoding, language, disposition, cache control and the opaque Expires string.
+    "object-attributes",
     "slow",
 ];
 

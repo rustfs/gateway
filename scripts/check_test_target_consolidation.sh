@@ -245,6 +245,7 @@ conformance_modules = (
     "bucket_lifecycle",
     "corpus",
     "list_family",
+    "object",
     "tagging",
     "wired",
 )

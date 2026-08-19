@@ -1,0 +1,69 @@
+[case]
+id = "c-object-0026"
+schema_version = 1
+title = "An unreadable content digest and a wrong one are different refusals"
+rationale = """
+InvalidDigest says the header could not be read and BadDigest says the header was read and the bytes disagreed with it; a client that retries on one and gives up on the other needs them kept apart. An implementation that decodes the base64 leniently, or that folds both into one code, turns a corrupt upload into a retry loop or a retryable transfer error into a permanent failure. Both are sent on one connection so that neither answer can be an artefact of connection state."""
+polarity = "negative"
+operation = "PutObject"
+tags = ["checksum", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-checksum-0006"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObject.html"
+summary = "The documented write is the authority for the headers a write accepts and the digests it verifies."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/pull/371"
+summary = "Upstream separated the unreadable digest from the mismatching one only after both had been reported as the same failure."
+kind = "s3s-issue"
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = true
+
+[[setup.buckets]]
+name = "conf-object"
+
+[[exchanges]]
+name = "unreadable-digest"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-object/digest/unreadable"
+headers = { "content-md5" = "not-base64!!" }
+body = { utf8 = "hello world" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 400
+connection_after = "open"
+headers_absent = ["etag"]
+
+[exchanges.expect.error]
+code = "InvalidDigest"
+request_id_present = true
+
+[[exchanges]]
+name = "wrong-digest"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-object/digest/wrong"
+headers = { "content-md5" = "NOP31GPJaSZodWxatv8tWg==" }
+body = { utf8 = "hello world" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 400
+connection_after = "open"
+headers_absent = ["etag"]
+
+[exchanges.expect.error]
+code = "BadDigest"
+request_id_present = true
