@@ -18,6 +18,8 @@
 //! NOT responsible for: test behavior or production implementation.
 //! Upstream: the conformance integration-test modules. Downstream: Cargo's test harness.
 
+#[path = "bucket_family.rs"]
+mod bucket_family;
 #[path = "bucket_lifecycle.rs"]
 mod bucket_lifecycle;
 #[path = "copy_family.rs"]
