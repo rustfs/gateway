@@ -14,8 +14,9 @@
 
 //! The crate's tests, grouped by the property each group defends.
 //!
-//! Responsible for: pointing at the four groups — trailer ordering, the capability matrix,
-//! adaptation cost, and file-region ranges — and at the scripted producers they share.
+//! Responsible for: pointing at the five groups — trailer ordering, the capability matrix,
+//! adaptation cost, file-region ranges, and the `c-pay-*` ledger — and at the scripted
+//! producers they share.
 //! NOT responsible for: any assertion of its own.
 //! Upstream: the crate's own modules. Downstream: nothing.
 //!
@@ -32,6 +33,12 @@ mod eof_trailers;
 #[cfg(unix)]
 mod file_region;
 mod observer;
+#[cfg(unix)]
+mod pay_cases;
+#[cfg(unix)]
+mod pay_ledger;
+#[cfg(unix)]
+mod pay_scale;
 mod support;
 mod trailers;
 mod zero_copy;

@@ -1,5 +1,13 @@
 # Registered downcasts outside the payload data plane.
 #
+# This file exists because rustfs/backlog#1690 says two things that cannot both hold: section
+# 4.3 grants a single-point allowlist for `Extensions` internals, and section 11.5 requires the
+# allowlist to be empty. Section 4.3 governs. Section 11.5 is read as the scope that makes it
+# true and checkable, and `check_no_as_any.sh` prints and enforces exactly that: the allowlist
+# is EMPTY INSIDE THE PAYLOAD DATA PLANE, and every entry outside it carries a written reason.
+# The data plane is not a directory list -- it is those two directories plus any file that
+# implements `PayloadStream` or `AsyncPayloadRead`, wherever it lives.
+#
 # Read `scripts/check_no_as_any.sh` first. The rule this file exempts from is rule 3,
 # which is deliberately the weakest of the three: rules 1 and 2 — no `as_any()` anywhere,
 # and no `Any` at all inside `crates/stream/src` or `crates/http/src` — take no exemptions
