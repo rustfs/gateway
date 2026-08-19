@@ -52,6 +52,8 @@ mod facade_probe;
 mod governor_runtime;
 #[path = "handler_panic.rs"]
 mod handler_panic;
+#[path = "ingest_assembly.rs"]
+mod ingest_assembly;
 #[path = "middleware.rs"]
 mod middleware;
 #[path = "monomorphic.rs"]
