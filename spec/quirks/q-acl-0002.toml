@@ -6,7 +6,7 @@ classification = "mutable"
 mutation_dimension = "attribute_rename"
 target = "Grantee"
 summary = "The XMLSchema-instance namespace is declared on the <Grantee> element itself rather than on the document root, so a client that resolves prefixes before reading xsi:type finds the declaration where AWS puts it."
-cases = ["c-acl-0001", "c-acl-0002", "c-acl-0003"]
+cases = ["c-acl-0001", "c-acl-0002", "c-acl-0003", "c-acl-0038"]
 
 [[source]]
 path = "GetBucketAcl.shapes.Grantee.xml.attributes.0.name"
