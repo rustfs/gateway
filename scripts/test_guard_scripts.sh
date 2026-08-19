@@ -1162,10 +1162,12 @@ for guard in \
     check_verify_map_generated.sh; do
     cases=$((cases + 1))
     guard_case_owned "$cases" || continue
-    if "${SCRIPT_DIR}/${guard}" >/dev/null 2>&1; then
+    positive_control_output=""
+    if positive_control_output="$("${SCRIPT_DIR}/${guard}" 2>&1)"; then
         pass_msg "$guard"
     else
         fail_msg "$guard fails on the current tree"
+        printf '%s\n' "$positive_control_output" | sed 's/^/       /' >&2
     fi
 done
 mut_build_monomorphic_handler_is_indirect() {
@@ -1363,10 +1365,15 @@ for guard in "${SCRIPT_DIR}"/check_*.sh; do
         pass_msg "$(basename "$guard") deferred to its PR-context probes"
         continue
     fi
-    if "$guard" >/dev/null 2>&1; then
+    positive_control_output=""
+    if positive_control_output="$("$guard" 2>&1)"; then
         pass_msg "$(basename "$guard")"
     else
+        # Print what the guard said. A positive control that swallows its own diagnosis
+        # reports "fails on the current tree" and nothing else, which is a whole CI cycle
+        # spent rediscovering a message the runner already had.
         fail_msg "$(basename "$guard") fails on the current tree"
+        printf '%s\n' "$positive_control_output" | sed 's/^/       /' >&2
     fi
 done
 fi
@@ -3858,7 +3865,7 @@ PYEOF
         PATH="$shim:$PATH" GATEWAY_STAGE_GIT_LOG="$log" GATEWAY_STAGE_EXPECTED="$expected" \
             GATEWAY_STAGE_VALIDATE="$shim/validate" GATEWAY_STAGE_REAL_GIT="$real_git" \
             "$helper" "$repo" || rc=$?
-        if [[ "$rc" -eq 0 ]] && ! (cd "$repo" && "$real_git" status --porcelain | grep -q .); then
+        if [[ "$rc" -eq 0 ]] && ! (cd "$repo" && "$real_git" status --porcelain | grep . >/dev/null); then
             rc=0
         else
             rc=1
@@ -6786,6 +6793,100 @@ probe_guard_grep_policy_allows_shell_eq() {
     fi
 }
 probe_guard_grep_policy_allows_shell_eq
+
+# -----------------------------------------------------------------------------
+# The pipe half of the policy, which is the half that has cost CI cycles. The two named
+# targets above are scanned for the option token anywhere; every other guard is scanned
+# for the option token on the receiving end of a pipe. The three mutations put the shape
+# back into three guards, none of which is a named target, and the two probes keep the
+# rule from degenerating into a blanket ban on quiet grep.
+# -----------------------------------------------------------------------------
+mut_restore_sig_coverage_grep_q_pipeline() {
+    python3 - <<'PY'
+from pathlib import Path
+
+path = Path("scripts/check_sig_case_coverage.sh")
+text = path.read_text()
+old = '''    printf '%s\\n' "${p2_04_hard_constraints[@]}" | grep -Fx "$hard_constraint" >/dev/null || {'''
+new = '''    printf '%s\\n' "${p2_04_hard_constraints[@]}" | grep -Fxq "$hard_constraint" || {'''
+if text.count(old) != 1:
+    raise SystemExit("missing the P2-04 hard-constraint membership pipeline")
+path.write_text(text.replace(old, new, 1))
+PY
+}
+expect_fail check_guard_grep_pipelines.sh \
+    'the signature coverage guard restoring the pipeline that failed on a clean tree' \
+    mut_restore_sig_coverage_grep_q_pipeline
+
+mut_restore_allowance_grep_q_pipeline() {
+    python3 - <<'PY'
+from pathlib import Path
+
+path = Path("scripts/check_ct_eq.sh")
+text = path.read_text()
+old = '''    printf '%s' "$ALLOWANCES" | grep -xF "$1" >/dev/null'''
+new = '''    printf '%s' "$ALLOWANCES" | grep -qxF "$1"'''
+if text.count(old) != 1:
+    raise SystemExit("missing the ct-eq allowance membership pipeline")
+path.write_text(text.replace(old, new, 1))
+PY
+}
+expect_fail check_guard_grep_pipelines.sh \
+    'a guard outside the two named targets restoring an early-exit grep pipeline' \
+    mut_restore_allowance_grep_q_pipeline
+
+mut_restore_grep_q_pipeline_over_a_line_break() {
+    python3 - <<'PY'
+from pathlib import Path
+
+path = Path("scripts/check_english_only.sh")
+text = path.read_text()
+old = '''    printf '%s' "$ALLOWANCES" | grep -xF "$1" >/dev/null'''
+new = '''    printf '%s' "$ALLOWANCES" |\n        grep --quiet -xF "$1"'''
+if text.count(old) != 1:
+    raise SystemExit("missing the english-only allowance membership pipeline")
+path.write_text(text.replace(old, new, 1))
+PY
+}
+expect_fail check_guard_grep_pipelines.sh \
+    'a pipeline continued over a bare trailing pipe with the quiet consumer on the next line' \
+    mut_restore_grep_q_pipeline_over_a_line_break
+
+probe_guard_grep_policy_allows_unpiped_quiet_grep() {
+    local sandbox rc=0
+    cases=$((cases + 1))
+    guard_case_owned "$cases" || return 0
+    make_sandbox
+    sandbox="$SANDBOX"
+    printf '\ngrep -qxF marker "$0"\n' >>"${sandbox}/scripts/check_ct_eq.sh"
+    GATEWAY_CHECK_ROOT="$sandbox" "${SCRIPT_DIR}/check_guard_grep_pipelines.sh" \
+        >/dev/null 2>&1 || rc=$?
+    if [[ "$rc" -eq 0 ]]; then
+        pass_msg 'check_guard_grep_pipelines.sh allows a quiet grep reading a named file'
+    else
+        fail_msg 'check_guard_grep_pipelines.sh rejected a quiet grep that consumes no pipe'
+    fi
+}
+probe_guard_grep_policy_allows_unpiped_quiet_grep
+
+probe_guard_grep_policy_allows_quiet_grep_after_or() {
+    local sandbox rc=0
+    cases=$((cases + 1))
+    guard_case_owned "$cases" || return 0
+    make_sandbox
+    sandbox="$SANDBOX"
+    printf '\n[[ -n "$ROOT_DIR" ]] ||\n    grep -qxF marker "$0"\n' \
+        >>"${sandbox}/scripts/check_ct_eq.sh"
+    GATEWAY_CHECK_ROOT="$sandbox" "${SCRIPT_DIR}/check_guard_grep_pipelines.sh" \
+        >/dev/null 2>&1 || rc=$?
+    if [[ "$rc" -eq 0 ]]; then
+        pass_msg 'check_guard_grep_pipelines.sh allows a quiet grep after a logical or'
+    else
+        fail_msg 'check_guard_grep_pipelines.sh mistook a logical or for a pipe'
+    fi
+}
+probe_guard_grep_policy_allows_quiet_grep_after_or
+
 
 probe_guard_grep_policy_missing_grep() {
     local sandbox tool_path output rc=0

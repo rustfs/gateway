@@ -53,7 +53,7 @@ fi
 
 is_allowed() {
     [[ -z "$ALLOWANCES" ]] && return 1
-    printf '%s' "$ALLOWANCES" | grep -qxF "$1"
+    printf '%s' "$ALLOWANCES" | grep -xF "$1" >/dev/null
 }
 
 # Codepoint ranges, checked in Python rather than with a grep bracket expression.

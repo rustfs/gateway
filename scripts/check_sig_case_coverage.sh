@@ -901,7 +901,7 @@ done
     exit 1
 }
 for hard_constraint in H1 H2 H3 H4 H5 H6 H7; do
-    printf '%s\n' "${p2_04_hard_constraints[@]}" | grep -Fxq "$hard_constraint" || {
+    printf '%s\n' "${p2_04_hard_constraints[@]}" | grep -Fx "$hard_constraint" >/dev/null || {
         printf 'check_sig_case_coverage: P2-04 runtime ledger has no %s evidence\n' \
             "$hard_constraint" >&2
         exit 1
