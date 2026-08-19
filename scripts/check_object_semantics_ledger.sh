@@ -89,7 +89,15 @@ requirements=(
     'c-obj-0055|negative|bound|conformance/cases/object/c-object-0022.toml::/request/body/utf8~<Delete xmlns="http://s3.amazonaws.com/doc/2006-03-01/">;conformance/cases/object/c-object-0022.toml::/expect/status=200'
     'c-obj-0056|negative|bound|conformance/cases/object/c-object-0023.toml::/expect/body/not_contains_utf8/0=<Deleted>'
     'c-obj-0057|negative|blocked|rustfs/backlog#1680::blocked behind c-obj-0043 — a mid-stream close on a write needs the socket transport and a PutObject staging the harness does not have'
-    'c-obj-0058|negative|bound|conformance/cases/object/c-object-0020.toml::/expect/headers_absent/0=x-injected'
+    # Repointed by the rustfs/backlog#1701 §4.4 slice. The rule is unchanged; the assertion it
+    # named was not one. `headers_absent/0=x-injected` could not fail for any reachable
+    # defect — a response header named by the caller is unconstructible under
+    # `#![forbid(unsafe_code)]` with every insertion going through `HeaderName::from_bytes`
+    # on a compile-time constant — so the ledger was holding this rule against a check that
+    # read green with the whole guard deleted. The body needle carries the same literal and
+    # does fail (it catches the value being echoed into the refusal), and the refusal's own
+    # code is now what the rule is really bound to.
+    'c-obj-0058|negative|bound|conformance/cases/object/c-object-0020.toml::/expect/body/not_contains_utf8/0=x-injected;conformance/cases/object/c-object-0020.toml::/expect/error/code=InvalidArgument'
     'c-obj-0059|negative|bound|conformance/cases/naming/c-naming-0017.toml::/expect/body/exact_utf8=decoded once;conformance/cases/naming/c-naming-0010.toml::/expect/error/code=InvalidArgument'
     'c-obj-0060|negative|bound|conformance/cases/object/c-object-0003.toml::/expect/headers_absent/0=content-length'
     'c-obj-0061|positive|bound|conformance/cases/object/c-object-0029.toml::/exchanges/2/expect/headers_present/x-amz-request-id=*;conformance/cases/object/c-object-0029.toml::/exchanges/0/expect/headers_present/accept-ranges=bytes'
