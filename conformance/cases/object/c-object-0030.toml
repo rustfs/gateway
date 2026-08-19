@@ -1,0 +1,55 @@
+# c-object-0030 — a plain object write with no declared length.
+#
+# Schema dimensions exercised: raw request head, dedicated status, connection verdict.
+
+[case]
+id = "c-object-0030"
+schema_version = 1
+title = "An object write with neither a declared length nor chunked framing is refused and the connection ends"
+rationale = """
+The part form of this rule is already in the corpus; this is the write form, and the two are worth \
+having separately because the operation is the thing that decides a length is required. Two \
+assertions, and the second is the one an implementation is likely to get wrong: the dedicated \
+status tells the client its framing was at fault rather than its payload, and the connection has to \
+end because the server and the peer have just been shown to disagree about where this message \
+stops. A server that answers the status and then keeps reading would take the octets the client \
+believed were its body and parse them as the next request line."""
+polarity = "negative"
+operation = "PutObject"
+tags = ["wire-bytes", "error-shape", "connection"]
+quirks = ["q-length-0007"]
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9110#section-15.5.12"
+summary = "The dedicated status exists for a request that must declare a length and does not."
+kind = "rfc"
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9112#section-11.2"
+summary = "Two ends of one connection that disagree about where a message stops are the condition smuggling exploits."
+kind = "rfc"
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/issues/526"
+summary = "Upstream returned a generic bad request where the reference implementation returns the dedicated length code."
+kind = "s3s-issue"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-object"
+
+[request]
+raw_head_utf8 = "PUT /conf-object/no-length-write HTTP/1.1\r\nhost: s3.localhost\r\nx-amz-content-sha256: UNSIGNED-PAYLOAD\r\n\r\n"
+sign = { mode = "sigv4_unsigned_payload", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 411
+connection_after = "closed"
+headers_absent = ["etag"]
+
+[expect.error]
+code = "MissingContentLength"
+request_id_present = true

@@ -73,7 +73,7 @@ requirements=(
     'c-obj-0039|negative|blocked|rustfs/backlog#1680::x-amz-sdk-checksum-algorithm with no value and no trailer is refused by nothing in this repository, and a case pinning the refusal would be pinning a rule that has no implementation to fail'
     'c-obj-0040|negative|blocked|rustfs/backlog#1680::blocked behind c-obj-0021 — nothing compares a request x-amz-checksum-* against the body, so a mismatch cannot be staged'
     'c-obj-0041|negative|blocked|rustfs/backlog#1680::blocked behind c-obj-0040 — the second of the three independent verifications does not run, so the pair cannot disagree'
-    'c-obj-0042|negative|blocked|rustfs/backlog#1680::c-mpu-0045 is the part form of this rule and it is skipped in process and red over a socket on connection_after, so this repository has no green evidence of the dedicated status for any operation'
+    'c-obj-0042|negative|bound|conformance/cases/object/c-object-0030.toml::/expect/status=411;conformance/cases/object/c-object-0030.toml::/expect/error/code=MissingContentLength;conformance/cases/object/c-object-0030.toml::/expect/connection_after=closed'
     'c-obj-0043|negative|blocked|rustfs/backlog#1680::c-mpu-0043 is the part form and needs the socket transport; the object form needs the same transport and a PutObject staging that does not exist yet'
     'c-obj-0044|negative|blocked|rustfs/backlog#1699::neither transport carries out dataChunk.delay_ms as wall-clock pacing, so a read-interval timeout cannot be provoked from a case'
     'c-obj-0045|negative|bound|crates/http/tests/framing_smuggling.rs::fn c_wire_0063_an_over_large_declared_body_is_400_entity_too_large_and_never_drained'
@@ -137,6 +137,7 @@ case_polarity=(
     'conformance/cases/object/c-object-0027.toml|negative'
     'conformance/cases/object/c-object-0028.toml|positive'
     'conformance/cases/object/c-object-0029.toml|positive'
+    'conformance/cases/object/c-object-0030.toml|negative'
     'conformance/cases/tagging/c-tagging-0019.toml|positive'
 )
 

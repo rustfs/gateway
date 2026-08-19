@@ -115,7 +115,7 @@ use std::io::{ErrorKind, Read, Write};
 use std::net::{Shutdown, SocketAddr, TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use rustfs_gateway::{ConnectionIntent, S3Service, collect, connection_intent_of};
 
@@ -402,6 +402,14 @@ pub const MAX_LINGER_DRAIN_BYTES: u64 = 64 * 1024;
 /// which writes its remainder as soon as it learns there is an answer. A drain that timed out is a
 /// peer that stopped sending, and RFC 9112 §9.3 then leaves no choice about the connection.
 const DRAIN_TIMEOUT: Duration = Duration::from_millis(200);
+
+/// The whole lingering close, end to end, however much the peer still has to say.
+///
+/// [`DRAIN_TIMEOUT`] bounds one read; a peer that keeps writing resets it on every block and would
+/// otherwise hold this thread for as long as it cared to. This is the outer bound, and it is a
+/// *time* rather than a byte count on purpose — see [`close_orderly`] for why the byte count that
+/// used to sit here made `connection_after = "closed"` unreachable for the cases that most need it.
+const LINGER_TIME: Duration = Duration::from_secs(2);
 
 /// Decides whether a connection survives one exchange.
 ///
@@ -697,15 +705,32 @@ fn serve(stream: TcpStream, service: &S3Service, policy: &ClosePolicy, announce:
 ///    server's demands and finishes writing what it owes as soon as it learns there is an answer, so
 ///    a refusal that never read the payload is followed by the payload arriving.
 ///
-/// Bounded in both bytes and time, because a peer that keeps writing must not hold a thread.
+/// # Why the bound is a clock and not a byte count
+///
+/// This used to stop after [`MAX_LINGER_DRAIN_BYTES`], and that made the second act useless in
+/// exactly the case it exists for. A refusal that fires *because* the body is too large leaves far
+/// more than 64 KiB in flight by construction, so the drain stopped early, `shutdown(Both)` ran
+/// over a socket still holding unread octets, and the peer got `RST` — erasing the refusal it had
+/// not finished reading. That is the failure RFC 9112 §9.6 describes in as many words, and
+/// `c-object-0015` observed it as `reset` against an assertion of `closed`.
+///
+/// The byte count is also the wrong quantity. What the ceilings above refuse to spend is *memory*:
+/// aggregating a body before deciding about it is the out-of-memory condition. Reading a block and
+/// dropping it costs no memory at all, so the resource a drain has to be bounded in is time — which
+/// is what `lingering_time` bounds in nginx and what Apache's lingering close bounds too. Both
+/// bounds are still here: [`DRAIN_TIMEOUT`] per read, so a peer that goes silent does not hold the
+/// thread, and [`LINGER_TIME`] overall, so a peer that keeps writing does not either.
+/// [`MAX_LINGER_DRAIN_BYTES`] keeps the job it was always right for — deciding in
+/// [`honour_the_services_intent`] whether a connection is worth keeping — and no longer decides how
+/// a connection that is already ending gets ended.
 fn close_orderly(reader: &Arc<Mutex<ConnReader>>) {
     let Ok(mut guard) = reader.lock() else { return };
     let _ = guard.stream.shutdown(Shutdown::Write);
     let _ = guard.stream.set_read_timeout(Some(DRAIN_TIMEOUT));
-    let mut discarded = 0_u64;
-    while discarded <= MAX_LINGER_DRAIN_BYTES {
+    let deadline = Instant::now() + LINGER_TIME;
+    while Instant::now() < deadline {
         match guard.take(8192) {
-            Ok(Some(block)) if !block.is_empty() => discarded = discarded.saturating_add(block.len() as u64),
+            Ok(Some(block)) if !block.is_empty() => {}
             _ => break,
         }
     }
@@ -1204,542 +1229,4 @@ fn parse_response_head(head: &str) -> Option<(u16, Vec<(String, String)>)> {
 }
 
 #[cfg(test)]
-#[allow(clippy::expect_used, clippy::panic, clippy::unwrap_used, clippy::indexing_slicing)]
-mod tests {
-    use super::*;
-
-    /// Negative — a head with no blank line is not a head, however much of it arrived.
-    #[test]
-    fn an_unterminated_head_has_no_end() {
-        assert_eq!(find_head_end(b"GET / HTTP/1.1\r\nhost: x\r\n"), None);
-        assert_eq!(find_head_end(b""), None);
-    }
-
-    /// Positive — the end is just past the blank line, so the next byte is the first body byte.
-    #[test]
-    fn the_head_ends_just_past_the_blank_line() {
-        let head = b"GET / HTTP/1.1\r\nhost: x\r\n\r\nBODY";
-        let end = find_head_end(head).expect("a terminated head");
-        assert_eq!(&head[end..], b"BODY");
-    }
-
-    /// Negative — a chunked request declares no length, so the framing must not fall back to a
-    /// `Content-Length` that a smuggling pair supplied alongside it.
-    #[test]
-    fn a_chunked_head_declares_no_length() {
-        let head = b"PUT /b/k HTTP/1.1\r\nhost: x\r\ntransfer-encoding: chunked\r\ncontent-length: 9\r\n\r\n";
-        assert_eq!(parse_head(head).expect("parsable").declared_length, None);
-    }
-
-    /// Negative — a request with no framing headers has a zero-length body, not an unbounded one.
-    ///
-    /// RFC 9112 §6.3. Reading such a request until the peer closed would hang every body-less `GET`
-    /// on a keep-alive connection, which is the defect this pins.
-    #[test]
-    fn a_head_with_no_framing_frames_an_empty_body() {
-        let parsed = parse_head(b"PUT /b/k HTTP/1.1\r\nhost: x\r\n\r\n").expect("parsable");
-        assert_eq!(parsed.declared_length, Some(0));
-        assert_eq!(parsed.method, "PUT");
-        assert_eq!(parsed.target, "/b/k");
-        // And the head still carries no `content-length`, so the service can still answer `411`.
-        assert!(
-            !parsed
-                .headers
-                .iter()
-                .any(|(name, _)| name.eq_ignore_ascii_case("content-length"))
-        );
-    }
-
-    /// Positive — a declared length survives parsing, because it is what frames the body.
-    #[test]
-    fn a_declared_length_is_read() {
-        let parsed = parse_head(b"PUT /b/k HTTP/1.1\r\nhost: x\r\ncontent-length: 11\r\n\r\n").expect("parsable");
-        assert_eq!(parsed.declared_length, Some(11));
-    }
-
-    /// Negative — a response head that is not a status line yields nothing rather than a zero.
-    #[test]
-    fn a_malformed_response_head_is_not_a_status() {
-        assert_eq!(parse_response_head("not a status line\r\n\r\n"), None);
-        assert_eq!(parse_response_head("HTTP/1.1 nope OK\r\n\r\n"), None);
-    }
-
-    /// Positive — wire casing and wire order survive, because `header_order` and
-    /// `header_name_bytes_exact` are assertions no normalised map could answer.
-    #[test]
-    fn a_response_head_keeps_wire_order_and_casing() {
-        let (status, headers) =
-            parse_response_head("HTTP/1.1 403 Forbidden\r\nContent-Type: application/xml\r\nX-Amz-Id-2: k\r\n\r\n")
-                .expect("parsable");
-        assert_eq!(status, 403);
-        assert_eq!(headers[0].0, "Content-Type");
-        assert_eq!(headers[1].0, "X-Amz-Id-2");
-    }
-
-    /// **Negative — the service's verdict is what closes the connection, and this is where a
-    /// harness-side rule would show up instead.**
-    ///
-    /// Both bodies below are abandoned. The one the service said `MayKeepAlive` about is small
-    /// enough to drain and the connection survives; the one it said `Close` about does not, and no
-    /// amount of drainability rescues it. A policy that ignored the intent would answer the same
-    /// for both — which is what "an undrained body closes" did, and the corpus refutes it:
-    /// `c-object-0013` leaves eleven bytes unread and asserts `open`, `c-sig-0001` leaves
-    /// twenty-four and asserts `closed`.
-    #[test]
-    fn the_intent_decides_and_the_remainder_only_narrows_it() {
-        let small = BodyDisposition {
-            declared: Some(11),
-            consumed: 0,
-            drained: false,
-        };
-        assert_eq!(
-            honour_the_services_intent()(&small, ConnectionIntent::MayKeepAlive),
-            ConnectionDisposition::Keep
-        );
-        assert_eq!(
-            honour_the_services_intent()(&small, ConnectionIntent::Close),
-            ConnectionDisposition::Close,
-            "the service's close is not overridden by a body that could have been drained"
-        );
-    }
-
-    /// Negative — `MayKeepAlive` over a remainder too large to read is still a close.
-    ///
-    /// Its own documentation says so: the variant promises the connection survives *if* the
-    /// remainder is drained, and four megabytes is the transfer a refusal exists to avoid. A
-    /// transport that read `MayKeepAlive` as "keep" would perform it.
-    #[test]
-    fn a_remainder_too_large_to_drain_closes_despite_a_permissive_intent() {
-        let abandoned = BodyDisposition {
-            declared: Some(4_000_000),
-            consumed: 8192,
-            drained: false,
-        };
-        assert!(abandoned.leaves_unread_bytes());
-        assert!(abandoned.undrained_bytes() > MAX_LINGER_DRAIN_BYTES);
-        assert_eq!(
-            honour_the_services_intent()(&abandoned, ConnectionIntent::MayKeepAlive),
-            ConnectionDisposition::Close
-        );
-        // A chunked body that never ended owes an unknowable amount, which is not a licence to
-        // guess a small one.
-        let unbounded = BodyDisposition {
-            declared: None,
-            consumed: 8192,
-            drained: false,
-        };
-        assert_eq!(unbounded.undrained_bytes(), u64::MAX);
-    }
-
-    /// Negative — a drained body is not a close, or every exchange would end the connection and
-    /// `connection_after = "open"` would be unobservable.
-    #[test]
-    fn a_drained_body_is_not_a_close() {
-        let drained = BodyDisposition {
-            declared: Some(11),
-            consumed: 11,
-            drained: true,
-        };
-        assert!(!drained.leaves_unread_bytes());
-        assert_eq!(drained.undrained_bytes(), 0);
-        assert_eq!(
-            honour_the_services_intent()(&drained, ConnectionIntent::MayKeepAlive),
-            ConnectionDisposition::Keep
-        );
-    }
-
-    /// Negative — the control policy never closes, whatever it is handed. The header-versus-socket
-    /// proof runs against this, and a version that closed under some condition would make the proof
-    /// vacuous.
-    #[test]
-    fn the_control_policy_never_closes() {
-        for drained in [true, false] {
-            for intent in [ConnectionIntent::MayKeepAlive, ConnectionIntent::Close] {
-                let disposition = BodyDisposition {
-                    declared: Some(9),
-                    consumed: 0,
-                    drained,
-                };
-                assert_eq!(never_close()(&disposition, intent), ConnectionDisposition::Keep);
-            }
-        }
-    }
-
-    // -- The socket-versus-header proof -------------------------------------------------------
-    //
-    // Everything below drives a real listener on a real port. The two that matter are the pair:
-    // one server announces `close` and does not close, the other announces `close` and does close,
-    // and the observer must tell them apart. A harness that read the header would report `closed`
-    // for both, and the corpus would then carry two assertions that cannot fail.
-
-    /// A listener over a service assembled from the facade, on a port the kernel chose.
-    fn listener(policy: ClosePolicy, announce: Announce) -> Listener {
-        let target = crate::inprocess::InProcess::new(std::path::PathBuf::from("."));
-        let service = target.assemble(0, 0).expect("the service assembles");
-        Listener::start(service, policy, announce).expect("a loopback listener binds")
-    }
-
-    /// Performs one exchange and reports what the socket was left in.
-    fn exchange_then_observe(listener: &Listener) -> (RawResponse, ConnectionState) {
-        let mut connection = Connection::open(listener.addr()).expect("the listener accepts");
-        connection
-            .write(b"GET /?x=1 HTTP/1.1\r\nhost: s3.example.com\r\n\r\n")
-            .expect("the request is written");
-        let response = connection.read_response(Duration::from_secs(10)).expect("a response arrives");
-        (response, connection.observe())
-    }
-
-    fn announced_close(response: &RawResponse) -> bool {
-        response
-            .headers
-            .iter()
-            .any(|(name, value)| name.eq_ignore_ascii_case("connection") && value.eq_ignore_ascii_case("close"))
-    }
-
-    /// **Negative — the assertion this whole module exists to make falsifiable.**
-    ///
-    /// The server announces `Connection: close` on every response and never closes anything. A
-    /// harness that inferred the connection state from the response header would report `closed`
-    /// here; one that asks the socket reports `open`. If this test ever goes red with `closed`,
-    /// `observe_connection` has started reading the header and every `connection_after` assertion
-    /// in the corpus has quietly stopped measuring anything.
-    #[test]
-    fn a_response_announcing_close_over_a_socket_that_stayed_up_is_observed_open() {
-        let listener = listener(never_close(), Announce::AlwaysClose);
-        let (response, state) = exchange_then_observe(&listener);
-        assert!(
-            announced_close(&response),
-            "the control server must announce close: {:?}",
-            response.headers
-        );
-        assert_eq!(
-            state,
-            ConnectionState::Open,
-            "the socket stayed up, so the observation must be `open` however the response was headed"
-        );
-    }
-
-    /// Positive — the other half of the pair. Same announcement, and this time the socket really
-    /// does close, so the observation moves. One test without the other proves nothing: a stuck
-    /// `open` would satisfy the negative above on its own.
-    #[test]
-    fn a_socket_the_server_actually_closed_is_observed_closed() {
-        let listener = listener(Arc::new(|_body, _intent| ConnectionDisposition::Close), Announce::AlwaysClose);
-        let (response, state) = exchange_then_observe(&listener);
-        assert!(announced_close(&response));
-        assert_eq!(state, ConnectionState::Closed);
-    }
-
-    /// **Negative — the same proof in the opposite direction.**
-    ///
-    /// The server closes the socket while announcing `keep-alive`. A harness reading the header
-    /// reports `open` and is wrong. Both lies are needed: an observer stuck at a single answer
-    /// satisfies whichever one control happens to agree with it, so one control alone proves
-    /// nothing about the other.
-    #[test]
-    fn a_socket_closed_while_announcing_keep_alive_is_still_observed_closed() {
-        let listener = listener(Arc::new(|_body, _intent| ConnectionDisposition::Close), Announce::AlwaysKeepAlive);
-        let (response, state) = exchange_then_observe(&listener);
-        assert!(!announced_close(&response), "{:?}", response.headers);
-        assert_eq!(
-            state,
-            ConnectionState::Closed,
-            "the socket was closed, so the observation must be `closed` however the response was headed"
-        );
-    }
-
-    /// Negative — the server never writes two `Content-Length` headers.
-    ///
-    /// A duplicate is the exact shape `WireReject::DuplicateContentLength` refuses, so a server
-    /// that emitted one would be generating the smuggling primitive this suite exists to detect —
-    /// and every response it framed would be one the corpus's own rules call malformed.
-    #[test]
-    fn a_response_carries_exactly_one_content_length() {
-        let listener = listener(never_close(), Announce::Matching);
-        let (response, _) = exchange_then_observe(&listener);
-        let lengths = response
-            .headers
-            .iter()
-            .filter(|(name, _)| name.eq_ignore_ascii_case("content-length"))
-            .count();
-        assert_eq!(lengths, 1, "{:?}", response.headers);
-    }
-
-    /// Positive — a kept connection really is reusable, which is what `open` claims. Asserted by
-    /// using it: a second request on the same socket is answered.
-    #[test]
-    fn a_connection_observed_open_carries_another_request() {
-        let listener = listener(never_close(), Announce::Matching);
-        let mut connection = Connection::open(listener.addr()).expect("the listener accepts");
-        for _ in 0..2 {
-            connection
-                .write(b"GET /?x=1 HTTP/1.1\r\nhost: s3.example.com\r\n\r\n")
-                .expect("written");
-            let response = connection.read_response(Duration::from_secs(10)).expect("answered");
-            assert!(response.status > 0);
-            assert_eq!(connection.observe(), ConnectionState::Open);
-        }
-    }
-
-    // -- The framing rules --------------------------------------------------------------------
-
-    /// Negative — a request that framed no body leaves nothing unread, however little was polled.
-    ///
-    /// The older `!drained` says the opposite, and this is the only place that says so: no case in
-    /// the corpus separates the two today, because the codec drains what it is given. So this test
-    /// is the whole of the guard, and it pins the shape that will separate them — a refusal that
-    /// answers a body-less request without touching its body, which under `!drained` is a
-    /// connection closed for carrying bytes nobody sent.
-    #[test]
-    fn a_body_that_framed_nothing_leaves_nothing_unread() {
-        let empty = BodyDisposition {
-            declared: Some(0),
-            consumed: 0,
-            drained: false,
-        };
-        assert!(!empty.leaves_unread_bytes());
-        assert_eq!(
-            honour_the_services_intent()(&empty, ConnectionIntent::MayKeepAlive),
-            ConnectionDisposition::Keep
-        );
-    }
-
-    /// Negative — a declared length that was only partly consumed leaves the rest, whatever the
-    /// drained flag says. Arithmetic, not a flag: the flag is set by the reader and the bytes are
-    /// owed by the peer.
-    #[test]
-    fn a_partly_consumed_declared_body_still_owes_bytes() {
-        let short = BodyDisposition {
-            declared: Some(24),
-            consumed: 12,
-            drained: false,
-        };
-        assert!(short.leaves_unread_bytes());
-        // And chunked framing, where there is no arithmetic to do it with, falls back to the flag.
-        let chunked = BodyDisposition {
-            declared: None,
-            consumed: 12,
-            drained: false,
-        };
-        assert!(chunked.leaves_unread_bytes());
-    }
-
-    /// Negative — three answers have no body whatever their headers claim, and one does.
-    ///
-    /// Both ends of this connection ask the same function. They used to disagree by construction:
-    /// the writer put `content-length` on a `304` that had none, and the reader then waited for a
-    /// body that was never coming — a hang that reads in a report as a server which never replied.
-    #[test]
-    fn a_head_a_204_and_a_304_carry_no_body() {
-        assert!(!carries_a_body("HEAD", 200));
-        assert!(!carries_a_body("head", 200));
-        assert!(!carries_a_body("GET", 204));
-        assert!(!carries_a_body("GET", 304));
-        assert!(!carries_a_body("GET", 100));
-        assert!(carries_a_body("GET", 200));
-        assert!(carries_a_body("PUT", 400));
-    }
-
-    // -- The rendezvous ------------------------------------------------------------------------
-
-    /// Negative — a service that answered without ever asking releases the client with `Answered`,
-    /// not with `More`.
-    ///
-    /// If this ever returns `More`, the client writes a frame the server never asked for and
-    /// `body_bytes_sent_at_response = 0` becomes unsatisfiable — which is the same defect as the
-    /// inversion, pointing the other way.
-    #[test]
-    fn an_answer_that_never_asked_for_the_body_stops_the_client() {
-        let pacer = Pacer::new();
-        pacer.server_answered();
-        let mut satisfied = 0;
-        assert_eq!(pacer.await_demand(&mut satisfied, Duration::from_millis(50)), Demand::Answered);
-        assert_eq!(satisfied, 0, "nothing was released");
-    }
-
-    /// Negative — one demand releases one frame, not every frame.
-    ///
-    /// The counter is why. A flag would be cleared by the first waiter and then set again by the
-    /// second poll, and a client that read it as "the server is hungry" would empty its whole chunk
-    /// list into the socket on a single demand — which is exactly the unpaced write this module
-    /// exists to avoid.
-    #[test]
-    fn one_demand_releases_one_frame() {
-        let pacer = Pacer::new();
-        let mut satisfied = 0;
-        pacer.server_wants_body();
-        assert_eq!(pacer.await_demand(&mut satisfied, Duration::from_millis(50)), Demand::More);
-        assert_eq!(pacer.await_demand(&mut satisfied, Duration::from_millis(50)), Demand::Wedged);
-        pacer.server_wants_body();
-        assert_eq!(pacer.await_demand(&mut satisfied, Duration::from_millis(50)), Demand::More);
-    }
-
-    /// Negative — a silent peer is `Wedged` and never `More`.
-    ///
-    /// The safety net has to be distinguishable from a demand, or a wedged exchange would be
-    /// reported as a byte count somebody measured.
-    #[test]
-    fn a_silent_peer_is_wedged_rather_than_hungry() {
-        let pacer = Pacer::new();
-        let mut satisfied = 0;
-        assert_eq!(pacer.await_demand(&mut satisfied, Duration::from_millis(20)), Demand::Wedged);
-        assert!(!pacer.answered());
-    }
-
-    /// Negative — a handover is complete when the server asks again, not only when the body ends.
-    ///
-    /// A truncating case never reaches the body's end: `c-mpu-0043` announces a megabyte, writes
-    /// twenty-nine bytes and half-closes. Waiting for `ended` alone held that case for its whole
-    /// twenty-second budget and failed it on the timing assertion — for the wrong reason, since
-    /// what it is about is what the server does with a short body.
-    #[test]
-    fn a_handover_completes_when_the_server_asks_again() {
-        let pacer = Pacer::new();
-        let mut satisfied = 0;
-        pacer.server_wants_body();
-        assert_eq!(pacer.await_demand(&mut satisfied, Duration::from_millis(50)), Demand::More);
-        pacer.server_wants_body();
-        assert_eq!(
-            pacer.await_handover(&mut satisfied, Duration::from_millis(50)),
-            Demand::More,
-            "a server asking for more has taken what it was given"
-        );
-    }
-
-    /// Negative — a reset forgets an answer, so the next exchange on a reused connection does not
-    /// start already released.
-    #[test]
-    fn a_reset_pacer_does_not_carry_the_previous_answer() {
-        let pacer = Pacer::new();
-        pacer.server_answered();
-        assert!(pacer.answered());
-        pacer.reset();
-        assert!(!pacer.answered());
-        let mut satisfied = 0;
-        assert_eq!(pacer.await_demand(&mut satisfied, Duration::from_millis(20)), Demand::Wedged);
-    }
-
-    // -- The pacing proof ----------------------------------------------------------------------
-    //
-    // The pair below is to pacing what the four-corner matrix above is to `connection_after`. One
-    // client waits for the server; one does not. They send the same bytes to the same server and
-    // get the same answer, and the number the corpus asserts on comes out differently. If the two
-    // ever agree, pacing has stopped happening and `body_bytes_sent_at_response` has gone back to
-    // measuring the kernel buffer.
-
-    /// Writes a `PUT` head, then its body only when the server asks for it.
-    fn paced_put(listener: &Listener, body: &[u8]) -> (u64, RawResponse) {
-        let pacer = Arc::new(Pacer::new());
-        listener.enqueue_pacer(&pacer);
-        let mut connection = Connection::open(listener.addr()).expect("the listener accepts");
-        connection.write(&put_head(body.len())).expect("the head is written");
-        let mut satisfied = 0;
-        if pacer.await_demand(&mut satisfied, Duration::from_secs(5)) == Demand::More {
-            connection.write_body(body).expect("the body is written");
-        }
-        let response = connection
-            .read_response_classified("PUT", Duration::from_secs(10))
-            .expect("a response arrives");
-        (connection.body_written(), response)
-    }
-
-    /// Writes the same request without waiting for anything — the control.
-    fn unpaced_put(listener: &Listener, body: &[u8]) -> (u64, RawResponse) {
-        let mut connection = Connection::open(listener.addr()).expect("the listener accepts");
-        connection.write(&put_head(body.len())).expect("the head is written");
-        connection.write_body(body).expect("the body is written");
-        let response = connection
-            .read_response_classified("PUT", Duration::from_secs(10))
-            .expect("a response arrives");
-        (connection.body_written(), response)
-    }
-
-    fn put_head(length: usize) -> Vec<u8> {
-        format!("PUT /conf/k HTTP/1.1\r\nhost: s3.example.com\r\ncontent-length: {length}\r\n\r\n").into_bytes()
-    }
-
-    /// **Negative — the assertion pacing exists to keep falsifiable.**
-    ///
-    /// The request is anonymous, so it is refused before the service asks for a byte of the body. A
-    /// paced client has therefore written *nothing* when the answer arrives, which is what
-    /// `c-sig-0001` asserts. If this ever reports the whole body, the client has stopped waiting on
-    /// the server and every early-refusal assertion in the corpus is being judged against the size
-    /// of a socket buffer.
-    #[test]
-    fn a_refusal_that_never_read_the_body_finds_a_paced_client_had_sent_none_of_it() {
-        let listener = listener(never_close(), Announce::Matching);
-        let body = b"twenty-four bytes payload";
-        let (written, response) = paced_put(&listener, body);
-        assert!(response.status >= 400, "the request must be refused: {}", response.status);
-        assert_eq!(written, 0, "the answer came before the body was asked for");
-    }
-
-    /// Positive — the other half of the pair, and the reason one test alone proves nothing.
-    ///
-    /// Same server, same bytes, same answer; the only difference is that this client did not wait.
-    /// It has written the whole body by the time the identical refusal arrives, because on a
-    /// loopback socket the payload is in the kernel before the server reads the head. A harness
-    /// built this way reports "the client had sent all of it" for `c-sig-0001` and the case inverts
-    /// while still reading as measured.
-    #[test]
-    fn an_unpaced_client_has_written_the_whole_body_before_the_same_refusal_arrives() {
-        let listener = listener(never_close(), Announce::Matching);
-        let body = b"twenty-four bytes payload";
-        let (paced, refusal) = paced_put(&listener, body);
-        let (unpaced, same_refusal) = unpaced_put(&listener, body);
-        assert_eq!(refusal.status, same_refusal.status, "the server answered both the same way");
-        assert_eq!(unpaced, body.len() as u64);
-        assert_ne!(paced, unpaced, "pacing is what makes the two numbers different");
-    }
-
-    /// Positive — pacing is not a way of always reporting zero.
-    ///
-    /// A service that does read the body releases every frame, so a client that paced its way
-    /// through the whole payload reports the whole payload. Without this, "wait for the server"
-    /// could be implemented as "never write anything" and the negative above would still be green.
-    #[test]
-    fn a_service_that_reads_the_body_gets_all_of_it_from_a_paced_client() {
-        let listener = listener(never_close(), Announce::Matching);
-        // Two pacers, and they must stay two. `serve` raises `server_answered` on whichever pacer
-        // it was handed, the moment the service returns — and this service does not read the body,
-        // so it returns at once. Sharing one pacer put that answer in a race with the demand raised
-        // below, and `await_demand` reports `Answered` ahead of `More` when both are set, so the
-        // assertion turned on which thread the runner scheduled first. It failed about one run in
-        // three on a loaded machine and never on an idle one. Nothing here needs the served pacer:
-        // `Connection` does not hold one, and `write_body` only writes and counts.
-        let serving = Arc::new(Pacer::new());
-        listener.enqueue_pacer(&serving);
-        let pacer = Arc::new(Pacer::new());
-        let mut connection = Connection::open(listener.addr()).expect("the listener accepts");
-        let body = b"hello world";
-        connection.write(&put_head(body.len())).expect("written");
-        // Stand in for a service that pulls the body: the rendezvous is between two threads and
-        // this is the other one. What is under test is that a demand really releases the frame.
-        let asking = Arc::clone(&pacer);
-        std::thread::spawn(move || asking.server_wants_body());
-        let mut satisfied = 0;
-        assert_eq!(pacer.await_demand(&mut satisfied, Duration::from_secs(5)), Demand::More);
-        connection.write_body(body).expect("written");
-        assert_eq!(connection.body_written(), body.len() as u64);
-        // The separation asserted rather than assumed, and in both directions: the served pacer is
-        // the one that carries the answer, and the rendezvous under test never does. Waiting for
-        // the answer first is what makes the pair deterministic — without the wait the second line
-        // would pass merely by being early. Sharing one pacer fails here on any machine, which is
-        // the point: the defect this replaced only failed on a loaded one.
-        let mut served = 0;
-        assert_eq!(serving.await_demand(&mut served, Duration::from_secs(5)), Demand::Answered);
-        assert!(!pacer.answered());
-    }
-
-    /// Negative — two listeners are on two different ports without either of them naming one.
-    ///
-    /// This is the whole of the port-collision argument: nothing here picks a port, so nothing can
-    /// pick the same one twice, however many run at once.
-    #[test]
-    fn two_listeners_never_share_a_port() {
-        let first = listener(never_close(), Announce::Matching);
-        let second = listener(never_close(), Announce::Matching);
-        assert_ne!(first.addr().port(), second.addr().port());
-        assert_ne!(first.addr().port(), 0, "the kernel assigned a real port");
-    }
-}
+mod tests;
