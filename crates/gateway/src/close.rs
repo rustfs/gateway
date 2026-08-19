@@ -223,6 +223,10 @@ pub const fn after_undeclared_length() -> ConnectionIntent {
 /// the body has been read to its end. Reading the code rather than the decode failure keeps the
 /// rule in one place: any stage that answers this code answers it the same way, and no call site
 /// gets to spell the row a second time.
+///
+/// Its one caller is `From<ErrorResolution> for S3Error` in [`crate::render`], which is the single
+/// seam every resolved refusal passes through. `with_connection` combines intents rather than
+/// replacing them, so a stage that has already decided to close is not talked out of it here.
 #[must_use]
 pub fn after_refusal_code(code: Option<&ErrorCode>) -> ConnectionIntent {
     if code.is_some_and(|code| *code == ErrorCode::MISSING_CONTENT_LENGTH) {
