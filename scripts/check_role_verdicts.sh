@@ -117,7 +117,20 @@ else:
     head = os.environ["GATEWAY_ROLE_HEAD"]
     git("rev-parse", "--verify", f"{base}^{{commit}}")
     git("rev-parse", "--verify", f"{head}^{{commit}}")
-    fields = git("diff", "--name-status", "-z", "--find-renames", base, head).split(b"\0")
+    # Select roles from what this branch changed, which is the diff from the merge base —
+    # not from the base branch tip. GATEWAY_ROLE_BASE is
+    # `github.event.pull_request.base.sha`, and that tracks `main` live: it moves under an
+    # open pull request every time anything else merges. A two-dot diff against it hands
+    # the trigger table every path in somebody else's commit, as a reverse change, and
+    # then asks this author for a verdict on work that is not in the branch at all.
+    # Measured: rustfs/gateway#199, whose entire diff is `scripts/**`, was asked for
+    # `security-adversary` because rustfs/gateway#189 touched
+    # `crates/core/src/error_resolution.rs` while it was in flight, and again for
+    # rustfs/gateway#198's `crates/sig/**` on the next attempt. Rebasing narrows that
+    # window; only the merge base closes it.
+    role_base = os.fsdecode(git("merge-base", base, head)).strip()
+    role_head = head
+    fields = git("diff", "--name-status", "-z", "--find-renames", role_base, role_head).split(b"\0")
     index = 0
     while index < len(fields) and fields[index]:
         status = os.fsdecode(fields[index])
@@ -139,16 +152,18 @@ if provided is not None:
         fail("required input is missing for a types change: GATEWAY_CHANGED_DIFF")
     diff_text = os.environ.get("GATEWAY_CHANGED_DIFF", "")
 else:
+    # Same reasoning as the changed-file diff above: the "before" this branch is judged
+    # against is the commit it was cut from, not whatever the base branch has since become.
     diff_text = git(
         "diff",
         "--unified=0",
-        os.environ["GATEWAY_ROLE_BASE"],
-        os.environ["GATEWAY_ROLE_HEAD"],
+        role_base,
+        role_head,
         "--",
         "crates/types",
     ).decode("utf-8", errors="replace")
-    base = os.environ["GATEWAY_ROLE_BASE"]
-    head = os.environ["GATEWAY_ROLE_HEAD"]
+    base = role_base
+    head = role_head
     for path in {path for path in paths if path.startswith("crates/types/") and path.endswith(".rs")}:
         before = git_blob(base, path)
         after = git_blob(head, path)
