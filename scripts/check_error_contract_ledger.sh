@@ -30,6 +30,19 @@ set -euo pipefail
 # and the sibling case that answers `NoSuchBucket` for the same request shape — so weakening either
 # is now a build failure and not a code review nobody scheduled.
 #
+# # What `c-err-1006` is bound to, and what it is not
+#
+# §4.4's hardest rule is that a caller without `s3:ListBucket` must be answered `AccessDenied` for
+# an object that is not there, because a `404` in that position is an existence oracle over every
+# key in the bucket. `ResourceVisibility::Hidden` is where the gateway decides that, and the two
+# tests this row names prove the decision and prove the masked message reveals nothing. What they
+# do not prove is that anything ever selects it: every production and fixture construction site
+# passes `Visible` — `crates/gateway/src/commit.rs:138`, `crates/conformance/src/fixture.rs:1849`
+# and `:1859` — so `Hidden` is reachable from tests alone. The row is `bound` because the rule has
+# a real assertion at the layer that owns it, and this paragraph is here so that nobody reads the
+# green line as "the oracle is closed end to end". rustfs/backlog#1680 tracks the case form as
+# `c-obj-0048`, blocked on a fixture that cannot deny a permission.
+#
 # # Why some rows point at a shell function
 #
 # Two of §7's rules are properties of the mapping table rather than of a request: no code outside
