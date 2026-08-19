@@ -93,6 +93,10 @@ strip_comments() {
 # `AllowOrigin::Reflected` in one function on purpose, because that is the assertion — and a guard
 # that read its own regression tests as violations would be deleted within a week.
 #
+# A `#[cfg(test)]` item with no body — the `#[cfg(test)] #[path = "x.rs"] mod tests;` split used
+# when a file crosses the 800-line limit — closes at its own semicolon instead, because it never
+# opens a brace for the balanced form to close.
+#
 # Balanced rather than "to the end of the file", which is the version this was first written as.
 # By convention the inline test module is the last item, so the two agree today; they stop
 # agreeing the moment somebody appends anything after it, and the version that stopped at EOF
@@ -124,6 +128,12 @@ strip_test_module() {
                 depth += d
                 print ""
                 if (opened == 1 && depth <= 0) { in_test = 0 }
+                # A `#[cfg(test)]` item with no body at all — `#[cfg(test)] #[path = "x.rs"] mod
+                # tests;`, the split this repository uses when a file crosses 800 lines — never
+                # opens a brace, so the balanced form above would never close it and everything
+                # after it in the file would be blanked. That is this guard switching itself off
+                # for the rest of the file. A bodyless item ends at its own semicolon.
+                else if (opened == 0 && s ~ /;[ \t]*$/) { in_test = 0 }
                 next
             }
             print line

@@ -9025,10 +9025,10 @@ mut_sig_p2_04_startup_posture_sigv2_switch_removed() {
 from pathlib import Path
 path = Path("crates/gateway/src/posture.rs")
 text = path.read_text()
-old = "    let sigv2 = match floor.sigv2_presigned() {"
+old = "    let sigv2_policy = floor.sigv2_policy().as_str();"
 if text.count(old) != 1:
     raise SystemExit("missing startup posture SigV2 mutation subject")
-path.write_text(text.replace(old, "    let sigv2 = match SigV2Presigned::Disabled {", 1))
+path.write_text(text.replace(old, '    let sigv2_policy = "HeaderOnly";', 1))
 PYEOF
 }
 expect_fail check_sig_case_coverage.sh \
