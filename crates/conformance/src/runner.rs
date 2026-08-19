@@ -21,7 +21,7 @@
 //! are different facts and a report that conflates them is worse than no report.
 //!
 //! Both sides are interpolated by the same total walk over the document
-//! ([`interpolate_value`]), which discriminates on the shape of a [`Value`] and never on a field
+//! (`interpolate_value`), which discriminates on the shape of a [`Value`] and never on a field
 //! name. That is deliberate: a substitution that had to be opted into field by field would
 //! eventually miss one, and an assertion that *looks* substituted and is not is worse than one
 //! that plainly is not — it reads as measured where nothing was measured.
