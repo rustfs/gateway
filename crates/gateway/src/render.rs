@@ -177,7 +177,12 @@ impl From<ErrorResolution> for S3Error {
                 .map(|message| std::borrow::Cow::Owned(message.to_owned())),
             resource: resolution.resource().map(Box::from),
             etag: resolution.etag().cloned(),
-            connection: ConnectionIntent::MayKeepAlive,
+            // Read off the code, once, for every stage that resolves one. The permissive answer is
+            // still the default — `after_refusal_code` returns `MayKeepAlive` for all but the one
+            // code whose meaning is a framing disagreement — and `with_connection` combines rather
+            // than overwrites, so a stage with a stricter verdict of its own cannot be weakened by
+            // arriving through here.
+            connection: crate::close::after_refusal_code(resolution.code()),
             extras,
         }
     }

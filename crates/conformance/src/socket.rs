@@ -115,7 +115,7 @@ use std::io::{ErrorKind, Read, Write};
 use std::net::{Shutdown, SocketAddr, TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use rustfs_gateway::{ConnectionIntent, S3Service, collect, connection_intent_of};
 
@@ -402,6 +402,14 @@ pub const MAX_LINGER_DRAIN_BYTES: u64 = 64 * 1024;
 /// which writes its remainder as soon as it learns there is an answer. A drain that timed out is a
 /// peer that stopped sending, and RFC 9112 §9.3 then leaves no choice about the connection.
 const DRAIN_TIMEOUT: Duration = Duration::from_millis(200);
+
+/// The whole lingering close, end to end, however much the peer still has to say.
+///
+/// [`DRAIN_TIMEOUT`] bounds one read; a peer that keeps writing resets it on every block and would
+/// otherwise hold this thread for as long as it cared to. This is the outer bound, and it is a
+/// *time* rather than a byte count on purpose — see [`close_orderly`] for why the byte count that
+/// used to sit here made `connection_after = "closed"` unreachable for the cases that most need it.
+const LINGER_TIME: Duration = Duration::from_secs(2);
 
 /// Decides whether a connection survives one exchange.
 ///
@@ -697,15 +705,32 @@ fn serve(stream: TcpStream, service: &S3Service, policy: &ClosePolicy, announce:
 ///    server's demands and finishes writing what it owes as soon as it learns there is an answer, so
 ///    a refusal that never read the payload is followed by the payload arriving.
 ///
-/// Bounded in both bytes and time, because a peer that keeps writing must not hold a thread.
+/// # Why the bound is a clock and not a byte count
+///
+/// This used to stop after [`MAX_LINGER_DRAIN_BYTES`], and that made the second act useless in
+/// exactly the case it exists for. A refusal that fires *because* the body is too large leaves far
+/// more than 64 KiB in flight by construction, so the drain stopped early, `shutdown(Both)` ran
+/// over a socket still holding unread octets, and the peer got `RST` — erasing the refusal it had
+/// not finished reading. That is the failure RFC 9112 §9.6 describes in as many words, and
+/// `c-object-0015` observed it as `reset` against an assertion of `closed`.
+///
+/// The byte count is also the wrong quantity. What the ceilings above refuse to spend is *memory*:
+/// aggregating a body before deciding about it is the out-of-memory condition. Reading a block and
+/// dropping it costs no memory at all, so the resource a drain has to be bounded in is time — which
+/// is what `lingering_time` bounds in nginx and what Apache's lingering close bounds too. Both
+/// bounds are still here: [`DRAIN_TIMEOUT`] per read, so a peer that goes silent does not hold the
+/// thread, and [`LINGER_TIME`] overall, so a peer that keeps writing does not either.
+/// [`MAX_LINGER_DRAIN_BYTES`] keeps the job it was always right for — deciding in
+/// [`honour_the_services_intent`] whether a connection is worth keeping — and no longer decides how
+/// a connection that is already ending gets ended.
 fn close_orderly(reader: &Arc<Mutex<ConnReader>>) {
     let Ok(mut guard) = reader.lock() else { return };
     let _ = guard.stream.shutdown(Shutdown::Write);
     let _ = guard.stream.set_read_timeout(Some(DRAIN_TIMEOUT));
-    let mut discarded = 0_u64;
-    while discarded <= MAX_LINGER_DRAIN_BYTES {
+    let deadline = Instant::now() + LINGER_TIME;
+    while Instant::now() < deadline {
         match guard.take(8192) {
-            Ok(Some(block)) if !block.is_empty() => discarded = discarded.saturating_add(block.len() as u64),
+            Ok(Some(block)) if !block.is_empty() => {}
             _ => break,
         }
     }
@@ -1445,6 +1470,88 @@ mod tests {
             state,
             ConnectionState::Closed,
             "the socket was closed, so the observation must be `closed` however the response was headed"
+        );
+    }
+
+    /// **Positive — the lingering close, on a real socket, with the peer still writing.**
+    ///
+    /// This is the arrangement every early refusal produces and the one the byte-budgeted drain
+    /// could not survive: the server has answered and decided to close, and a megabyte the service
+    /// never asked for is on its way. RFC 9112 §9.6 is about precisely this — a full close over
+    /// unread octets sends `RST`, and the reset can erase the response the peer has not finished
+    /// reading. So there are two claims here and they are one fact each: the answer arrives intact,
+    /// *and* the socket ends in a close rather than a reset.
+    ///
+    /// The megabyte is sixteen times the 64 KiB budget this drain used to stop at, which is what
+    /// makes it a measurement of the drain rather than of the kernel's buffers.
+    #[test]
+    fn a_megabyte_arriving_after_the_refusal_ends_in_a_close_and_not_a_reset() {
+        let listener = listener(Arc::new(|_body, _intent| ConnectionDisposition::Close), Announce::Matching);
+        let mut connection = Connection::open(listener.addr()).expect("the listener accepts");
+        connection
+            .write(b"GET /?x=1 HTTP/1.1\r\nhost: s3.example.com\r\ncontent-length: 1048576\r\n\r\n")
+            .expect("the head is written");
+        // Tolerated rather than expected: a server that abandoned the connection makes this write
+        // fail, and that is a finding for the assertions below to report rather than a panic here.
+        let written = connection.write_body(&vec![b'x'; 1024 * 1024]);
+        let response = connection.read_response(Duration::from_secs(10));
+        assert!(
+            response.is_ok(),
+            "the refusal must survive the close it announces: {:?} (body write: {written:?})",
+            response.err()
+        );
+        assert_eq!(
+            connection.observe(),
+            ConnectionState::Closed,
+            "a close over undrained octets is a reset, and the corpus spells the two differently"
+        );
+    }
+
+    /// **Negative — the control for the test above, and the shape it is a fix for.**
+    ///
+    /// A server that answers and closes without lingering, over the same megabyte, is observed
+    /// `reset`. Both halves of the pair are needed: an observer that had lost the ability to say
+    /// `reset` at all would satisfy the positive above no matter what the drain did, which is the
+    /// one-directional control this repository has been caught by before. It is also the exact
+    /// behaviour `close_orderly` had while it stopped at [`MAX_LINGER_DRAIN_BYTES`], so this is the
+    /// observation `c-object-0015` was making before the drain became time-bounded.
+    #[test]
+    fn a_server_that_closes_without_lingering_is_observed_reset() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("a loopback port");
+        let addr = listener.local_addr().expect("the kernel assigned one");
+        let served = std::thread::spawn(move || {
+            let Ok((mut stream, _)) = listener.accept() else { return };
+            // Read the head and stop there. Everything after it stays in the receive buffer, which
+            // is what turns the close below into a reset.
+            let mut seen = Vec::new();
+            let mut block = [0_u8; 4096];
+            while find_head_end(&seen).is_none() {
+                match stream.read(&mut block) {
+                    Ok(0) | Err(_) => return,
+                    Ok(read) => seen.extend_from_slice(block.get(..read).unwrap_or_default()),
+                }
+            }
+            let _ = stream.write_all(b"HTTP/1.1 400 Bad Request\r\ncontent-length: 0\r\nconnection: close\r\n\r\n");
+            let _ = stream.flush();
+            // No half-close and no drain: the socket goes away with octets nobody read.
+        });
+        let mut connection = Connection::open(addr).expect("the listener accepts");
+        connection
+            .write(b"GET /?x=1 HTTP/1.1\r\nhost: s3.example.com\r\ncontent-length: 1048576\r\n\r\n")
+            .expect("the head is written");
+        let response = connection
+            .read_response(Duration::from_secs(10))
+            .expect("the refusal arrives before the reset");
+        assert_eq!(response.status, 400);
+        // The join first, so the socket on the other end is gone before a byte of this is written:
+        // a megabyte sent to a fully closed peer is answered with `RST` by that peer's stack, and
+        // waiting removes the only ordering this test would otherwise be at the mercy of.
+        served.join().expect("the bare server thread joins");
+        let _ = connection.write_body(&vec![b'x'; 1024 * 1024]);
+        assert_eq!(
+            connection.observe(),
+            ConnectionState::Reset,
+            "an abortive close must still be reported as one, or `closed` stops being a claim"
         );
     }
 

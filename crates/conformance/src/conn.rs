@@ -43,15 +43,19 @@
 //!   *race*, and neither this framing layer nor the fixture has a window between evaluating a
 //!   condition and committing under it. Answering the case from a strictly ordered pair would make
 //!   it fail for a reason it is not about, which is what it already did before it was skipped.
-//! * **The close rule is the harness's, not the gateway's.** `WireReject::must_close_connection`
-//!   exists and `render.rs` drops it, so nothing the service returns carries a close decision out.
-//!   This target therefore runs [`crate::socket::honour_the_services_intent`]: a request body the
-//!   service did not read to its end ends the connection. That is a function of a *measured* fact
-//!   about the service — how much of the body it pulled — so `connection_after` is not vacuous
-//!   here. It is also not the gateway's own rule, and the corpus refutes it in one place:
-//!   `c-object-0013` leaves eleven bytes unread and asserts `open`. That case is red on this
-//!   transport for that stated reason, and tuning the policy until it passed would be deciding a
-//!   conformance verdict by assertion.
+//! # Where the close rule comes from, now that it has one
+//!
+//! It used to be this harness's own, because `render.rs` dropped the flag and nothing the service
+//! returned carried a close decision out. That is no longer true: `crates/gateway`'s `close.rs`
+//! states the rule as a table and the verdict travels on the response as an extension. This target
+//! runs [`crate::socket::honour_the_services_intent`], which reads that extension and adds one
+//! thing the service cannot know — whether the remainder of the body actually turned up — because
+//! `ConnectionIntent::MayKeepAlive` is a condition rather than a promise.
+//!
+//! Two facts about the *server*, then, and neither is a header: what it decided, and what it left
+//! unread. Which is why `c-object-0013` and `c-object-0015` can disagree here — eleven bytes
+//! refused on the head against megabytes refused for their size — and why moving either verdict
+//! means moving a row in `close.rs` rather than a line in the harness.
 //! * **Streaming signature modes** (`sigv4_streaming*`) still need aws-chunked framing on the wire,
 //!   which nothing here writes. `crate::inprocess::sign_request` refuses them by name.
 //! * **HTTP/2** framing does not exist on either transport.

@@ -206,6 +206,64 @@ fn an_outcome_true_by_construction_is_warned_about_on_the_case() {
     );
 }
 
+/// **Positive — a refusal that did not drain the request body ends the connection.**
+///
+/// The three cases that assert it, in the two shapes the rule has:
+///
+/// * `c-object-0015` refuses a body *because of its size* and leaves megabytes in flight. What was
+///   wrong here was never the verdict — the connection did end — it was the manner: a full close
+///   over undrained octets is an `RST`, which the corpus spells `reset`, and a reset can erase the
+///   refusal the peer has not finished reading.
+/// * `c-mpu-0045` and `c-object-0030` declare no length at all, and are answered `411`. Nothing is
+///   left undrained there; what is left is a disagreement about where the message stopped, which is
+///   the same hazard arriving from the other direction.
+///
+/// All three need this transport, and for the reason `crate::inprocess` states: a service that is a
+/// value has no socket to close, so `connection_after` is `open` there by construction. That is
+/// what the control below is.
+#[test]
+fn a_refusal_that_did_not_drain_the_body_ends_the_connection_over_a_socket() {
+    for id in ["c-object-0015", "c-mpu-0045", "c-object-0030"] {
+        let report = run_over_a_socket(id);
+        let outcome = only(&report);
+        assert_eq!(outcome.verdict, Verdict::Passed, "{id}: {:?}", failures(outcome));
+    }
+}
+
+/// **Negative — the other direction, on the same transport and in the same run.**
+///
+/// `c-object-0013` is refused without its body being read too, and asserts `connection_after =
+/// "open"`. It is the case that stops "every refusal closes" from being written into `close.rs`,
+/// and here it is the control that stops the test above from being satisfiable by a transport that
+/// reported `closed` for everything. One direction alone proves nothing: an observer stuck on a
+/// single answer satisfies whichever assertions happen to expect it.
+#[test]
+fn a_refusal_over_a_drainable_body_keeps_the_connection_over_a_socket() {
+    let report = run_over_a_socket("c-object-0013");
+    let outcome = only(&report);
+    assert_eq!(outcome.verdict, Verdict::Passed, "{:?}", failures(outcome));
+}
+
+/// **Negative — the in-process control for both of the above.**
+///
+/// Neither half is answerable without a socket, and this transport says so rather than approximating
+/// it: `c-object-0015` is red on `connection_after` and nothing else, and `c-object-0030` is skipped
+/// outright because a raw head cannot be put on the wire from here. If either of these ever turns
+/// green, `connection_after` has started being derived from the service's own verdict and every
+/// assertion in the corpus that reads it has stopped measuring anything.
+#[test]
+fn the_close_assertions_are_not_answered_by_a_transport_with_no_socket() {
+    let in_process = run("c-object-0015");
+    let outcome = only(&in_process);
+    assert_eq!(outcome.verdict, Verdict::Failed);
+    let reasons = failures(outcome);
+    assert_eq!(reasons.len(), 1, "{reasons:?}");
+    assert!(reasons[0].contains("connection_after"), "{reasons:?}");
+
+    let skipped = run("c-object-0030");
+    assert_eq!(only(&skipped).verdict, Verdict::Skipped, "{:?}", failures(only(&skipped)));
+}
+
 /// The property a socket run rests on, and the one a `--transport conn` that quietly ran in process
 /// would have hidden: cases are executed *over a connection*, and they conclude.
 #[test]

@@ -15,7 +15,7 @@
 //! The `object/` domain, executed rather than merely loaded.
 //!
 //! Responsible for: making the object data-plane corpus a verdict `cargo test` reaches, and naming
-//! the cases that are allowed to be red together with the issue that owns each one. Without this
+//! the cases that are allowed to be red together with the reason each one still is. Without this
 //! file the object cases are schema-checked by `corpus.rs` and run by nobody: `Unwired` gives every
 //! case a skip, and a skip and a pass are the same colour in a summary line.
 //! NOT responsible for: what any individual case asserts — that is the case file — or for the
@@ -37,17 +37,25 @@ use rustfs_gateway_conformance::inprocess::InProcess;
 use rustfs_gateway_conformance::report::{Report, Verdict};
 use rustfs_gateway_conformance::runner::{self, RunOptions};
 
-/// Cases in `object/` that may be red, each with the issue that owns the defect behind it.
+/// Cases in `object/` that may be red, each with the reason that keeps them so.
 ///
-/// A case earns a row here only with an owner. "Known failure" without one is how a corpus rots:
-/// the row outlives the reason, and nobody can tell a case waiting on a merge from a case nobody
-/// ever intends to fix.
+/// A case earns a row here only with a named reason. "Known failure" without one is how a corpus
+/// rots: the row outlives the reason, and nobody can tell a case waiting on a merge from a case
+/// nobody ever intends to fix.
+///
+/// Not every reason is a defect, and the difference matters when reading a red line. The row below
+/// used to be one — the refusal left the connection open — and is now the other: the case is
+/// answered, correctly, by a transport this file does not use.
 const OWNED_ELSEWHERE: &[(&str, &str)] = &[
-    // The size-cap refusal already arrives mid-body — `request_progress.body_fully_sent` is false —
-    // but the connection stays open afterwards, so the unread remainder of the request body is left
-    // on a socket the server intends to reuse. `c-mpu-0045` and the 411 arm fail the same way, so
-    // the defect is one shared rule about refusals that do not drain, not three cases.
-    ("c-object-0015", "rustfs/backlog#1680"),
+    // Not a defect any more, and not one this file can retire either. The size-cap refusal arrives
+    // mid-body and now ends the connection, and `c-object-0015` passes over `--transport conn` —
+    // `wired::a_refusal_that_did_not_drain_the_body_ends_the_connection_over_a_socket` is where that
+    // is asserted. What stays red here is the one assertion an in-process service cannot answer at
+    // all: it is a value rather than a peer, so `connection_after` is `open` by construction. The
+    // case is not skipped, because skipping it would also throw away the assertions this transport
+    // does measure — `request_progress.body_fully_sent` among them, which is the evidence
+    // rustfs/backlog#1680 §7 binds `c-obj-0052` to.
+    ("c-object-0015", "the in-process transport has no socket to observe"),
 ];
 
 /// The number of `object/` cases that must be green.
@@ -122,15 +130,20 @@ fn every_case_owned_elsewhere_still_exists_and_is_still_red() {
     }
 }
 
-/// Negative — the case this issue owns is red for the reason recorded against it, not for some
-/// other reason that happens to share a colour.
+/// Negative — the one red case is red for the reason recorded against it, not for some other
+/// reason that happens to share a colour.
 ///
-/// `c-object-0015` is the one entry above whose defect is not on another branch, so it is the one
-/// this file may pin to its cause. Failing for the wrong reason reads in a report exactly like
-/// failing for the right one, and an exemption that tolerates any failure would let the size cap
-/// itself break without anyone noticing.
+/// Failing for the wrong reason reads in a report exactly like failing for the right one, and an
+/// exemption that tolerated any failure would let the size cap itself break without anyone
+/// noticing. The pin is tighter than it was: the row above no longer records a defect, so the
+/// *only* thing this case may be red on is the assertion this transport cannot answer. A second
+/// failure appearing here is a regression in the size cap, in the refusal timing, or in the body
+/// the refusal returns — none of which the socket run would necessarily separate out.
+///
+/// The other half of the pin is in `wired.rs`, and the two are the two directions of one claim:
+/// green over a socket, red here, and red here on nothing but the socket.
 #[test]
-fn the_size_cap_case_is_red_only_on_the_connection_it_leaves_open() {
+fn the_size_cap_case_is_red_only_where_this_transport_cannot_look() {
     let report = run_object_domain();
     let outcome = report
         .outcomes
@@ -141,6 +154,25 @@ fn the_size_cap_case_is_red_only_on_the_connection_it_leaves_open() {
     assert_eq!(reasons.len(), 1, "c-object-0015 fails on more than the connection: {reasons:?}");
     assert!(
         reasons[0].contains("connection_after"),
-        "c-object-0015 is red for something other than the connection it leaves open: {reasons:?}"
+        "c-object-0015 is red for something other than the socket this transport has not got: {reasons:?}"
     );
+}
+
+/// Negative — the new write-framing case is in this domain and is not silently absent from it.
+///
+/// `c-object-0030` needs a raw request head, so it is skipped here rather than judged, and a skip
+/// and an id nobody loaded look identical in a summary line. This is the assertion that separates
+/// them: the case is selected by the domain filter, and the reason it is not judged is the one
+/// stated rather than any other.
+#[test]
+fn the_undeclared_length_case_is_selected_and_skipped_for_its_stated_reason() {
+    let report = run_object_domain();
+    let outcome = report
+        .outcomes
+        .iter()
+        .find(|outcome| outcome.id == "c-object-0030")
+        .expect("c-object-0030 is in the object domain");
+    assert_eq!(outcome.verdict, Verdict::Skipped);
+    let reason = outcome.skip_reason.as_deref().unwrap_or_default();
+    assert!(reason.contains("raw_head_utf8"), "{reason}");
 }

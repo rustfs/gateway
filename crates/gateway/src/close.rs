@@ -50,11 +50,12 @@
 //! | an authentication failure | close | **policy** — see [`after_auth_failure`] |
 //! | an authorisation denial | may keep | **the corpus** — `c-copy-0019`, `c-copy-0020`, `c-copy-0021` all assert `connection_after = "open"` for a `403 AccessDenied` |
 //! | a body past the operation's cap or the assembly's ceiling | close | **policy**, the same shape as `BodyBytes`; `c-object-0015` |
-//! | a decode, condition or handler refusal | may keep | **RFC 9112 §9.3** — the body was read to its end before the refusal could be reached |
+//! | `411 MissingContentLength` | close | **RFC 9112 §11.2** — see [`after_undeclared_length`] |
+//! | any other decode, condition or handler refusal | may keep | **RFC 9112 §9.3** — the body was read to its end before the refusal could be reached |
 //!
 //! # What is guessed, said plainly
 //!
-//! Three rows are not derivable from RFC 9112 and are marked as such wherever they are
+//! Four rows are not derivable from RFC 9112 §9.3 alone and are marked as such wherever they are
 //! implemented:
 //!
 //! 1. **"An unauthenticated peer's body is not drained."** [`after_auth_failure`]. The RFC has
@@ -64,21 +65,13 @@
 //!    `WireReject::LimitExceeded(BodyBytes)`.
 //! 3. **The drain budget itself.** [`rustfs_gateway_http::MAX_LINGER_DRAIN_BYTES`] — RFC 9112 §9.6
 //!    describes the lingering read and puts no number on it.
-//!
-//! # One row the corpus and this table disagree on
-//!
-//! `c-mpu-0045` sends a `PUT` with neither `Content-Length` nor `Transfer-Encoding`, expects
-//! `411 MissingContentLength`, and asserts `connection_after = "closed"`. RFC 9112 §6.3 item 7
-//! says a request with no framing headers *has* a zero-length body, so by §9.3 the entire body has
-//! been read and the connection is in sync — this table would say "may keep". The case is
-//! presumably reasoning about what the client evidently *intended* to send, whose octets would
-//! then be parsed as a request line. That is a real hazard and it is not a rule §9.3 states, so it
-//! is left as a disagreement rather than encoded: nothing here returns [`ConnectionIntent::Close`]
-//! for a missing length. `c-mpu-0045` is skipped by the in-process target for an unrelated reason
-//! (it needs a raw request head), so this disagreement is not currently visible as a verdict.
+//! 4. **"A request that declared no length has already disagreed with this server about where it
+//!    ends."** [`after_undeclared_length`]. This is the row `c-mpu-0045` rests on, and it used to
+//!    be recorded here as a disagreement with the corpus rather than as a rule.
 
 use rustfs_gateway_http::{ChunkReject, WireReject};
 use rustfs_gateway_sig::AuthError;
+use rustfs_gateway_types::ErrorCode;
 
 /// What a refusal says about the connection it was produced on.
 ///
@@ -198,6 +191,47 @@ pub const fn after_body_ceiling() -> ConnectionIntent {
     ConnectionIntent::Close
 }
 
+/// A refusal that the request never declared its body's length ends the connection.
+///
+/// **Judgement, in the same sense as [`after_auth_failure`], and the one row of this table the
+/// corpus argued for before the code did.** RFC 9112 §6.3 item 6 says a request carrying neither
+/// `Content-Length` nor `Transfer-Encoding` *has* a zero-length body, so by §9.3 this server has
+/// read the entire body and the connection is in sync. On that reading alone, a `411` would keep.
+///
+/// The reason it does not is §11.2. A `411 MissingContentLength` is this server saying "the
+/// operation you asked for is one whose body you must frame, and you did not" — which is only ever
+/// answered to a peer that meant to send a body. So the response is a written record that the two
+/// ends disagree about where this message stops: §6.3 puts its end at the blank line, the peer puts
+/// it some number of octets later. Keeping the connection means reading those octets as a request
+/// line, and a framing disagreement between two ends of one connection is the definition of the
+/// smuggling hazard §11.2 describes. Note which way the disagreement runs — this is not the server
+/// declining to drain a body it could have drained, it is the server having no body to drain and
+/// the peer believing otherwise, which is why it needs its own row instead of falling out of §9.3.
+///
+/// `c-mpu-0045` asserts it for `UploadPart`; `c-obj-0042` in rustfs/backlog#1680 §7 is the
+/// `PutObject` form of the same rule. Both are the reason this is a rule and not a comment.
+#[must_use]
+pub const fn after_undeclared_length() -> ConnectionIntent {
+    ConnectionIntent::Close
+}
+
+/// The verdict a refusal's own error code carries, for the stages that produce one without a
+/// [`WireReject`].
+///
+/// Decoding is where a `411` is minted — the operation declares `Content-Length` required and the
+/// codec reports it missing — and a decode refusal otherwise keeps the connection, because by then
+/// the body has been read to its end. Reading the code rather than the decode failure keeps the
+/// rule in one place: any stage that answers this code answers it the same way, and no call site
+/// gets to spell the row a second time.
+#[must_use]
+pub fn after_refusal_code(code: Option<&ErrorCode>) -> ConnectionIntent {
+    if code.is_some_and(|code| *code == ErrorCode::MISSING_CONTENT_LENGTH) {
+        after_undeclared_length()
+    } else {
+        ConnectionIntent::MayKeepAlive
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 mod tests {
@@ -285,5 +319,29 @@ mod tests {
     #[test]
     fn the_default_intent_keeps_the_connection() {
         assert_eq!(ConnectionIntent::default(), ConnectionIntent::MayKeepAlive);
+    }
+
+    /// Negative — the code-driven row is one code wide.
+    ///
+    /// Both directions, because the row is applied on the path *every* resolved refusal takes:
+    /// widening it by a single code would close the connection under a `NoSuchKey`, and the
+    /// assertion that would go red is the second half of this test rather than the first. The
+    /// codes below are the ordinary answers of the three stages that resolve — routing, decoding
+    /// and the handler — so a rule that stopped discriminating would be caught by one of them.
+    #[test]
+    fn only_the_undeclared_length_refusal_closes_on_its_code() {
+        assert_eq!(after_refusal_code(Some(&ErrorCode::MISSING_CONTENT_LENGTH)), ConnectionIntent::Close);
+        for code in [
+            ErrorCode::NO_SUCH_KEY,
+            ErrorCode::NO_SUCH_BUCKET,
+            ErrorCode::INVALID_REQUEST,
+            ErrorCode::INVALID_ARGUMENT,
+            ErrorCode::MALFORMED_XML,
+            ErrorCode::ACCESS_DENIED,
+            ErrorCode::INTERNAL_ERROR,
+        ] {
+            assert_eq!(after_refusal_code(Some(&code)), ConnectionIntent::MayKeepAlive, "{code:?}");
+        }
+        assert_eq!(after_refusal_code(None), ConnectionIntent::MayKeepAlive);
     }
 }
