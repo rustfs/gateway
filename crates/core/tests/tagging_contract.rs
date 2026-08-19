@@ -16,13 +16,13 @@
 //!
 //! Responsible for: every observable behaviour of `ops::shared::tagging` — the
 //! `x-amz-tagging` header grammar, the per-scope tag-set limits, the character set, and the
-//! rejection codes each violation carries. 8 positive / 17 negative, plus one property.
+//! rejection codes each violation carries. 9 positive / 19 negative, plus one property.
 //! NOT responsible for: the XML wire form (generated codecs) or what a backend stores.
 //! Upstream: `rustfs_gateway_core::ops::shared::tagging`. Downstream: nothing.
 
 use proptest::prelude::*;
 use rustfs_gateway_core::ops::shared::tagging::{
-    MAX_BUCKET_TAGS, MAX_OBJECT_TAGS, MAX_TAG_KEY_CHARS, MAX_TAG_VALUE_CHARS, TagScope, parse_tagging_header, validate_tag_set,
+    MAX_BUCKET_TAGS, MAX_OBJECT_TAGS, MAX_TAG_KEY_UNITS, MAX_TAG_VALUE_UNITS, TagScope, parse_tagging_header, validate_tag_set,
 };
 use rustfs_gateway_types::ErrorCode;
 
@@ -75,6 +75,19 @@ fn unicode_letters_validate_and_count_as_single_characters() {
     validate_tag_set(&pairs(&[(&key, &value)]), TagScope::Object).expect("128 and 256 characters exactly");
 }
 
+/// A supplementary-plane key at exactly the ceiling: 64 characters, 128 UTF-16 code units.
+///
+/// The positive half of the differential in [`n_a_supplementary_plane_key_is_measured_in_utf16`].
+/// A validator counting scalar values would also accept this one, which is why the pair has to be
+/// read together — this test alone cannot tell the two countings apart.
+#[test]
+fn a_supplementary_plane_key_at_the_ceiling_validates() {
+    let key = "\u{10400}".repeat(64); // 64 scalar values, 128 UTF-16 code units, 256 UTF-8 bytes.
+    assert_eq!(key.chars().count(), 64);
+    assert_eq!(key.encode_utf16().count(), MAX_TAG_KEY_UNITS);
+    validate_tag_set(&pairs(&[(&key, "v")]), TagScope::Object).expect("128 UTF-16 units is the ceiling");
+}
+
 /// The two scopes differ only in the count ceiling.
 #[test]
 fn the_scope_ceilings_are_the_documented_ten_and_fifty() {
@@ -82,8 +95,8 @@ fn the_scope_ceilings_are_the_documented_ten_and_fifty() {
     assert_eq!(TagScope::Bucket.max_tags(), MAX_BUCKET_TAGS);
     assert_eq!(MAX_OBJECT_TAGS, 10);
     assert_eq!(MAX_BUCKET_TAGS, 50);
-    assert_eq!(MAX_TAG_KEY_CHARS, 128);
-    assert_eq!(MAX_TAG_VALUE_CHARS, 256);
+    assert_eq!(MAX_TAG_KEY_UNITS, 128);
+    assert_eq!(MAX_TAG_VALUE_UNITS, 256);
 }
 
 /// Fifty tags on a bucket is the ceiling, not past it.
@@ -185,6 +198,35 @@ fn n_an_overlong_key_is_refused() {
 fn n_an_overlong_value_is_refused() {
     let value = "v".repeat(257);
     let rejection = validate_tag_set(&pairs(&[("k", &value)]), TagScope::Object).expect_err("257 characters");
+    assert_eq!(*rejection.code(), ErrorCode::INVALID_TAG);
+}
+
+/// The differential that names the unit: 65 supplementary-plane characters are 130 UTF-16 code
+/// units, and AWS measures the ceiling in those.
+///
+/// This key is 65 scalar values and 260 UTF-8 bytes, so a validator counting `char`s accepts it
+/// and one counting bytes refuses it for the wrong reason. Only the UTF-16 reading refuses it at
+/// 130 of an allowed 128, and AWS's user guide says object tags are held in UTF-16 and that a
+/// character occupies one or two positions there. Before rustfs/backlog#1717 this key was
+/// accepted here and refused by the real service, which is the divergence a caller only meets in
+/// production.
+#[test]
+fn n_a_supplementary_plane_key_is_measured_in_utf16() {
+    let key = "\u{10400}".repeat(65);
+    assert_eq!(key.chars().count(), 65, "a scalar-value count would be under the ceiling");
+    assert_eq!(key.encode_utf16().count(), 130, "the UTF-16 count is over it");
+    let rejection = validate_tag_set(&pairs(&[(&key, "v")]), TagScope::Object).expect_err("130 UTF-16 units");
+    assert_eq!(*rejection.code(), ErrorCode::INVALID_TAG);
+}
+
+/// The same differential on the value ceiling, which is a different constant read by a different
+/// branch — a fix applied to the key alone would leave this one green on the old counting.
+#[test]
+fn n_a_supplementary_plane_value_is_measured_in_utf16() {
+    let value = "\u{10400}".repeat(129);
+    assert_eq!(value.chars().count(), 129, "a scalar-value count would be under the ceiling");
+    assert_eq!(value.encode_utf16().count(), 258, "the UTF-16 count is over it");
+    let rejection = validate_tag_set(&pairs(&[("k", &value)]), TagScope::Object).expect_err("258 UTF-16 units");
     assert_eq!(*rejection.code(), ErrorCode::INVALID_TAG);
 }
 

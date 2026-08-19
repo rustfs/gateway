@@ -32,12 +32,11 @@
 //! From `required` in the **model**, and from nowhere else — never from an overlay that wants a
 //! refusal.
 //!
-//! Every list in the request surface is `xmlFlattened`, so its entries repeat directly under the
-//! parent with no enclosing element. For such a list "the member is absent" and "the list has no
-//! entries" are the same observation: there is nothing else on the wire to tell them apart. That
-//! is what makes refusing an empty flattened list a reading of `required` rather than an opinion
-//! about arity, and it is why `Delete.Objects` — `required` in the pinned model — is answered
-//! `MalformedXML` here.
+//! A *flattened* list repeats its entries directly under the parent with no enclosing element, so
+//! "the member is absent" and "the list has no entries" are the same observation: there is nothing
+//! else on the wire to tell them apart. That is what makes refusing an empty flattened list a
+//! reading of `required` rather than an opinion about arity, and it is why `Delete.Objects` —
+//! `required` in the pinned model — is answered `MalformedXML` here.
 //!
 //! The rule that had to be written down is the other half. `CompletedMultipartUpload.Parts` is
 //! **not** required in the model; `model/overlays/ops/multipart.toml` had made it so, and the only
@@ -52,9 +51,13 @@
 //! not be made `required` by an overlay to reach it. Requiredness is a fact about the wire that
 //! the model states; wanting a particular error code is not a reason to assert one.
 //!
-//! A *wrapped* list would break the equivalence above, because `<Parts></Parts>` is present and
-//! empty at the same time. None exists in the request surface today; the day one does, this
-//! paragraph is the reason the check has to be re-derived rather than inherited.
+//! A *wrapped* list breaks that equivalence: `<TagSet></TagSet>` is present and empty at once, so
+//! the refusal reads the **wrapper's absence** and never the entry count. The three wrapped request
+//! readers are all the `Tagging` document's `TagSet`, and until rustfs/backlog#1717 they inherited
+//! the flattened check rather than re-deriving it, so an empty `<TagSet/>` was `MalformedXML` — a
+//! claim about arity `required` does not make, `TagSet` carries no `smithy.api#length` to support,
+//! and AWS's user guide contradicts by documenting the empty tag set as *deleting* the existing
+//! one. This gateway wrote those bytes itself (`q-tag-object-unconfigured-0090`) and refused them.
 
 use std::fmt::Write as _;
 
@@ -67,6 +70,11 @@ use crate::emit::error_status::Constants;
 
 /// The default code for a required member the request did not carry.
 const DEFAULT_MISSING_CODE: &str = "InvalidArgument";
+
+/// A flattened required list with no entries; the only way such a list can be absent.
+const MISSING_LIST_ENTRIES: &str = "the body carries no entry for a member that requires one";
+/// A wrapped required list whose wrapper is not on the wire at all.
+const MISSING_MEMBER: &str = "the body omits a member the schema requires";
 
 /// The node iterator one list-typed member reads its entries from.
 ///
@@ -575,11 +583,22 @@ fn xml_member(
             // out of it. See the module documentation: an overlay that makes a list required in
             // order to reach an error code is taking the operation's answer, not stating a
             // wire fact.
+            //
+            // What "absent" means depends on whether the list has an element of its own: a
+            // flattened list *is* its entries, while a wrapped one has a wrapper whose absence
+            // and whose emptiness are two different documents. Only the first is a missing
+            // member; reading the entry count there refuses a document this shape's own encoder
+            // writes.
             if field.required {
-                let _ = writeln!(out, "{pad}if {target}.is_empty() {{");
+                let names = super::list_elements(*flattened, wrapper_name.as_deref(), &wire);
+                let (absent, reason) = match &names.wrapper {
+                    None => (format!("{target}.is_empty()"), MISSING_LIST_ENTRIES),
+                    Some(wrapper) => (format!("{node}.child(\"{wrapper}\").is_none()"), MISSING_MEMBER),
+                };
+                let _ = writeln!(out, "{pad}if {absent} {{");
                 let _ = writeln!(
                     out,
-                    "{}return Err(CodecError::malformed_xml(\"the body carries no entry for a member that requires one\").about(\"{member}\"));",
+                    "{}return Err(CodecError::malformed_xml(\"{reason}\").about(\"{member}\"));",
                     " ".repeat(inner)
                 );
                 let _ = writeln!(out, "{pad}}}");
