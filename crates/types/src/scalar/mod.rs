@@ -47,7 +47,8 @@ mod timestamp;
 mod tests;
 
 pub use self::checksum::{
-    ChecksumAlgorithm, ChecksumDigest, ChecksumError, ChecksumSpec, ChecksumType, Checksummer, ContentMd5, parse_request_checksum,
+    ChecksumAlgorithm, ChecksumDigest, ChecksumError, ChecksumSpec, ChecksumType, Checksummer, ContentMd5, Md5Digest,
+    parse_request_checksum,
 };
 pub use self::error_code::ErrorCode;
 pub use self::etag::{ETag, EtagRender};

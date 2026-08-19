@@ -89,6 +89,7 @@ mod config;
 mod dispatch;
 mod ext;
 mod gate;
+mod integrity;
 mod invariants;
 mod monomorphic;
 mod operation_mode;

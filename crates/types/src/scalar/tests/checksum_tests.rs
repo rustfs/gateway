@@ -112,7 +112,7 @@ fn c_cks_n001_two_different_checksum_headers_are_rejected() {
         ("x-amz-checksum-crc32", "mnG7TA=="),
         ("x-amz-checksum-sha256", "ungWv48Bz+pBQUDeXa4iI7ADYaOWF3qctBD/YfIAFa0="),
     ];
-    let error = parse_request_checksum(&headers).expect_err("only one checksum header is allowed");
+    let error = parse_request_checksum(headers.iter().copied()).expect_err("only one checksum header is allowed");
     assert_eq!(error, ChecksumError::MultipleChecksumHeaders);
     assert_eq!(error.error_code(), ErrorCode::INVALID_REQUEST);
     assert!(error.message().contains("single"));
@@ -121,25 +121,31 @@ fn c_cks_n001_two_different_checksum_headers_are_rejected() {
 #[test]
 fn a_repeated_identical_header_is_one_header() {
     let headers = [("x-amz-checksum-crc32", "mnG7TA=="), ("X-Amz-Checksum-CRC32", "mnG7TA==")];
-    let spec = parse_request_checksum(&headers).expect("the same value twice is not a conflict");
+    let spec = parse_request_checksum(headers.iter().copied()).expect("the same value twice is not a conflict");
     assert!(spec.is_some());
 }
 
 #[test]
 fn c_cks_n002_a_declared_algorithm_without_a_value_is_rejected() {
     let headers = [("x-amz-sdk-checksum-algorithm", "CRC32")];
-    assert_eq!(parse_request_checksum(&headers), Err(ChecksumError::AlgorithmDeclaredWithoutValue));
+    assert_eq!(
+        parse_request_checksum(headers.iter().copied()),
+        Err(ChecksumError::AlgorithmDeclaredWithoutValue)
+    );
 
     let mismatched = [
         ("x-amz-sdk-checksum-algorithm", "CRC32"),
         ("x-amz-checksum-sha256", "ungWv48Bz+pBQUDeXa4iI7ADYaOWF3qctBD/YfIAFa0="),
     ];
-    assert_eq!(parse_request_checksum(&mismatched), Err(ChecksumError::AlgorithmDeclaredWithoutValue));
+    assert_eq!(
+        parse_request_checksum(mismatched.iter().copied()),
+        Err(ChecksumError::AlgorithmDeclaredWithoutValue)
+    );
 }
 
 #[test]
 fn no_checksum_headers_at_all_is_not_an_error() {
-    assert_eq!(parse_request_checksum(&[("content-type", "text/plain")]), Ok(None));
+    assert_eq!(parse_request_checksum([("content-type", "text/plain")]), Ok(None));
 }
 
 #[test]
@@ -194,19 +200,22 @@ fn c_cks_n008_an_unknown_checksum_type_is_rejected() {
     assert!(ChecksumType::parse("BOGUS").is_err());
     assert!(ChecksumType::parse("composite").is_err(), "the wire spelling is uppercase");
     let headers = [("x-amz-checksum-crc32", "mnG7TA=="), ("x-amz-checksum-type", "BOGUS")];
-    assert_eq!(parse_request_checksum(&headers), Err(ChecksumError::InvalidChecksumValue));
+    assert_eq!(parse_request_checksum(headers.iter().copied()), Err(ChecksumError::InvalidChecksumValue));
 }
 
 #[test]
 fn a_checksum_type_that_contradicts_the_value_is_rejected() {
     let headers = [("x-amz-checksum-crc32", "mnG7TA=="), ("x-amz-checksum-type", "COMPOSITE")];
-    assert!(parse_request_checksum(&headers).is_err(), "a value without a -N suffix is not composite");
+    assert!(
+        parse_request_checksum(headers.iter().copied()).is_err(),
+        "a value without a -N suffix is not composite"
+    );
 }
 
 #[test]
 fn an_unknown_checksum_header_is_rejected_rather_than_ignored() {
     let headers = [("x-amz-checksum-blake3", "mnG7TA==")];
-    assert_eq!(parse_request_checksum(&headers), Err(ChecksumError::UnknownAlgorithm));
+    assert_eq!(parse_request_checksum(headers.iter().copied()), Err(ChecksumError::UnknownAlgorithm));
 }
 
 #[test]
@@ -243,4 +252,37 @@ proptest! {
             prop_assert_eq!(parsed.algorithm(), *algo);
         }
     }
+}
+
+#[test]
+fn c_cks_n011_the_read_side_checksum_mode_header_declares_no_digest() {
+    // `x-amz-checksum-mode: ENABLED` asks a read to return a checksum. It shares the prefix of the
+    // algorithm headers and carries no digest, so an arbitration that treats the prefix as a closed
+    // set of algorithms refuses every conditional read that asks for its object's checksum back.
+    let headers = [("x-amz-checksum-mode", "ENABLED"), ("range", "bytes=0-4")];
+    assert_eq!(parse_request_checksum(headers.iter().copied()), Ok(None));
+}
+
+#[test]
+fn c_cks_n012_a_malformed_checksum_value_is_refused_and_not_skipped() {
+    // The failure this pins is a `continue`: an arbitration that skips a header it cannot parse
+    // reports "no checksum was claimed" for a request that claimed one, and the body is then
+    // committed with no comparison at all.
+    for value in ["garbage", "mnG7T A==", "mnG7TA", "bW5HN1RBPT0=", ""] {
+        let headers = [("x-amz-checksum-crc32", value)];
+        assert_eq!(
+            parse_request_checksum(headers.iter().copied()),
+            Err(ChecksumError::InvalidChecksumValue),
+            "`{value}` is not a CRC32 digest and must be refused rather than dropped"
+        );
+    }
+}
+
+#[test]
+fn c_cks_0011_the_streaming_md5_reproduces_the_one_shot_digest() {
+    let mut running = ContentMd5::digester();
+    running.update(b"hello ");
+    running.update(b"world");
+    let expected: [u8; 16] = Md5::digest(b"hello world").into();
+    assert_eq!(running.finish(), expected, "a split feed must digest what one feed digests");
 }

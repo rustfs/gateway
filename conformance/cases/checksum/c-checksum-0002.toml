@@ -1,0 +1,58 @@
+# c-checksum-0002 — a bucket-subresource write whose Content-MD5 is not the digest of its document.
+
+[case]
+id = "c-checksum-0002"
+schema_version = 1
+title = "A bucket configuration write whose Content-MD5 disagrees with its document is refused"
+rationale = """
+Every bucket-configuration write in this band demands an integrity claim, and until now only the \
+presence of the header was required — c-cors-0014 refuses the empty side and nothing checked the \
+value. A requirement satisfied by any sixteen bytes is not an integrity requirement: a CORS \
+document corrupted in transit that still parses installs a policy nobody wrote, which is the exact \
+outcome the header exists to prevent, and the caller is told the round trip verified. This case is \
+the value half of that requirement, and it is stated on a bucket subresource rather than on \
+PutObject on purpose: the object path has a store-side digest check, the configuration path has \
+none, so a case written against PutObject would pass without the gateway comparing anything."""
+polarity = "negative"
+operation = "PutBucketCors"
+tags = ["checksum", "cors", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-checksum-0006"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketCors.html"
+summary = "The request syntax documents Content-MD5 as required for this operation, as the base64 digest of the message body."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/ErrorResponses.html"
+summary = "BadDigest is the documented code for a Content-MD5 that does not match what the service received."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "conf-checksum"
+
+[request]
+method = "PUT"
+target = "/conf-checksum?cors"
+# Valid base64 of exactly sixteen bytes, so this is a mismatch and not a malformed value: the
+# malformed spelling is InvalidDigest and is a different rule.
+headers = { "content-type" = "application/xml", "content-md5" = "AAAAAAAAAAAAAAAAAAAAAA==" }
+body = { utf8 = "<CORSConfiguration><CORSRule><AllowedMethod>GET</AllowedMethod><AllowedOrigin>https://example.com</AllowedOrigin></CORSRule></CORSConfiguration>" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+code = "BadDigest"
+request_id_present = true
+
+[expect.headers_present]
+"content-type" = "application/xml"
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+contains_utf8 = ["<Code>BadDigest</Code>"]

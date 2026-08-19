@@ -202,7 +202,7 @@ cases = "c-acl-0002,c-acl-0005,c-acl-0006,c-acl-0007,c-acl-0008,c-acl-0009,c-acl
 
 [[operation]]
 name = "PutBucketCors"
-cases = "c-cors-0001,c-cors-0003,c-cors-0004,c-cors-0005,c-cors-0006,c-cors-0007,c-cors-0008,c-cors-0009,c-cors-0010,c-cors-0014,c-cors-0015,c-cors-0016,c-cors-0017,c-cors-0018,c-cors-0019,c-cors-0020,c-cors-0021,c-cors-0022,c-cors-0023,c-cors-0024,c-cors-0026"
+cases = "c-checksum-0002,c-cors-0001,c-cors-0003,c-cors-0004,c-cors-0005,c-cors-0006,c-cors-0007,c-cors-0008,c-cors-0009,c-cors-0010,c-cors-0014,c-cors-0015,c-cors-0016,c-cors-0017,c-cors-0018,c-cors-0019,c-cors-0020,c-cors-0021,c-cors-0022,c-cors-0023,c-cors-0024,c-cors-0026"
 
 [[operation]]
 name = "PutBucketEncryption"
@@ -246,7 +246,7 @@ cases = "c-bucketconfig-0012,c-bucketconfig-0014,c-bucketconfig-0036,c-bucketcon
 
 [[operation]]
 name = "PutObject"
-cases = "c-chunked-0001,c-cond-0001,c-cond-0006,c-cond-0009,c-cond-0011,c-cond-0012,c-cond-0013,c-cond-0018,c-copy-0022,c-host-0008,c-object-0006,c-object-0013,c-sig-0001,c-ssec-0001,c-ssec-0003,c-ssec-0005,c-ssec-0006,c-ssec-0007,c-ssec-0008,c-ssec-0009,c-ssec-0010,c-tagging-0003,c-tagging-0016,c-tagging-0017"
+cases = "c-checksum-0001,c-chunked-0001,c-cond-0001,c-cond-0006,c-cond-0009,c-cond-0011,c-cond-0012,c-cond-0013,c-cond-0018,c-copy-0022,c-host-0008,c-object-0006,c-object-0013,c-sig-0001,c-ssec-0001,c-ssec-0003,c-ssec-0005,c-ssec-0006,c-ssec-0007,c-ssec-0008,c-ssec-0009,c-ssec-0010,c-tagging-0003,c-tagging-0016,c-tagging-0017"
 
 [[operation]]
 name = "PutObjectAcl"
