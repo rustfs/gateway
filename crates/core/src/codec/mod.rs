@@ -56,7 +56,7 @@ mod tests;
 
 pub use crate::codec::error::CodecError;
 pub use crate::codec::response::{
-    BodyAllowance, EncodedResponse, ResponseBody, ResponseOverride, body_allowance, response_body_allowed,
+    BodyAllowance, EncodedResponse, ResponseBody, ResponseOverride, body_allowance, override_header_value, response_body_allowed,
     response_framing_allowed, status_code,
 };
 pub use crate::codec::value::*;

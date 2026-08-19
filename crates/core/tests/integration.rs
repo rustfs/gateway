@@ -77,6 +77,9 @@ mod range_part_table;
 #[path = "registration.rs"]
 mod registration;
 
+#[path = "response_override_safety.rs"]
+mod response_override_safety;
+
 #[path = "route_table.rs"]
 mod route_table;
 

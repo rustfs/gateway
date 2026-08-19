@@ -1,9 +1,9 @@
 [case]
-id = "c-object-0020"
+id = "c-object-0034"
 schema_version = 1
-title = "response-content-disposition carrying a CRLF is refused, not quietly dropped"
+title = "response-content-type carrying a CRLF and a whole second header is refused"
 rationale = """
-The response overrides are the one place in this operation where a caller writes a response header value directly, and a presigned URL puts that power in the hands of whoever holds the link. A value carrying CR or LF that is copied into the head splits the response and lets the link's holder mint headers, a body, or a second response entirely. Dropping the header and answering 200 with the object is not the answer: the caller asked for a representation the service cannot describe, got a different one, and nothing on the wire records that the request was hostile. The case therefore asserts the refusal itself — 400 InvalidArgument naming this parameter's member — and that the object bytes never left, because a 400 that still shipped the body would have run the handler on a request that was never valid. One case per parameter: the six do not share a decoder line, and a case covering the group cannot say which one regressed."""
+This is the shape the attack is actually written in: a presigned read link whose content type is followed by the pair and a Set-Cookie of the attacker's choosing, delivered from the bucket's own origin so the browser accepts it. The parameter matters — Content-Type is the one override a caller reaches for legitimately, so it is the one most likely to be wired first and checked last — and the injected header is a cookie rather than a placeholder because the assertion has to be that no such header appears at all, under the name the attacker chose."""
 polarity = "negative"
 operation = "GetObject"
 tags = ["security", "presigned", "error-shape"]
@@ -34,7 +34,7 @@ body = { utf8 = "hello world" }
 
 [request]
 method = "GET"
-target = "/conf-object/overrides/inject.bin?response-content-disposition=inline%0d%0ax-injected%3A%20yes"
+target = "/conf-object/overrides/inject.bin?response-content-type=text%2Fplain%0d%0aset-cookie%3A%20session%3Dhijacked"
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 
 [expect]
@@ -48,7 +48,14 @@ connection_after = "open"
 # not fail for any reachable defect and would read exactly like a check that passed. The live
 # assertion against the same input is the `not_contains_utf8` twin below, which fires when the
 # value is echoed into the error document.
-headers_absent = ["content-disposition", "etag"]
+headers_absent = ["etag"]
+
+# `content-type` cannot be asserted absent here the way the sibling cases assert theirs: the
+# error document always sets one. The falsifiable statement is that it is still the error
+# document's own media type — an implementation that applied the override would relabel this
+# XML as `text/plain`, which is c-object-0016's rule reaching the refusal path as well.
+[expect.headers_present]
+"content-type" = "application/xml"
 
 [expect.error]
 code = "InvalidArgument"
@@ -59,6 +66,6 @@ redact = ["RequestId", "HostId"]
 contains_utf8 = [
   "<Code>InvalidArgument</Code>",
   "response-* override carries a value the response header cannot hold",
-  "<Resource>ResponseContentDisposition</Resource>",
+  "<Resource>ResponseContentType</Resource>",
 ]
-not_contains_utf8 = ["x-injected", "hello world"]
+not_contains_utf8 = ["set-cookie", "hijacked", "hello world"]

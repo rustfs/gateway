@@ -35,15 +35,18 @@ use crate::codec::{CodecError, MetaView, OperationCodec, RequestBody, value};
 
 impl OperationCodec for dto::GetObject {
     const RESPONSE_OVERRIDES: &'static [ResponseOverride] = &[
-        ResponseOverride::new("response-cache-control", "cache-control"),
-        ResponseOverride::new("response-content-disposition", "content-disposition"),
-        ResponseOverride::new("response-content-encoding", "content-encoding"),
-        ResponseOverride::new("response-content-language", "content-language"),
-        ResponseOverride::new("response-content-type", "content-type"),
-        ResponseOverride::new("response-expires", "expires"),
+        ResponseOverride::new("response-cache-control", "cache-control", "ResponseCacheControl"),
+        ResponseOverride::new("response-content-disposition", "content-disposition", "ResponseContentDisposition"),
+        ResponseOverride::new("response-content-encoding", "content-encoding", "ResponseContentEncoding"),
+        ResponseOverride::new("response-content-language", "content-language", "ResponseContentLanguage"),
+        ResponseOverride::new("response-content-type", "content-type", "ResponseContentType"),
+        ResponseOverride::new("response-expires", "expires", "ResponseExpires"),
     ];
 
     fn decode(request: &MetaView<'_>, body: RequestBody) -> Result<Self::Input, CodecError> {
+        // The `response-*` values reach the response head, so a value no header can hold is
+        // refused before any other binding is read and before a handler sees the request.
+        value::verify_response_overrides(request, Self::RESPONSE_OVERRIDES)?;
         let mut input = Input { ..Default::default() };
         // Bucket — URI label, decoded once by `MetaView::of`.
         input.bucket = request.require_bucket()?;

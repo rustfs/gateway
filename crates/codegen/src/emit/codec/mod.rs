@@ -119,7 +119,7 @@ fn operation(ir: &OperationIr, rules: &CodecRules, codes: &Constants) -> Result<
     // The bodies are rendered first: which imports a file needs is a fact about the code that was
     // generated, and `-D warnings` refuses an import the generated file does not use.
     let overrides = response_overrides(ir);
-    let decoded = decode::body(ir, rules, codes)?;
+    let decoded = format!("{}{}", override_guard(&overrides), decode::body(ir, rules, codes)?);
     let encoded = encode::body(ir, rules)?;
     let uses = |needle: &str| decoded.contains(needle) || encoded.contains(needle);
 
@@ -312,10 +312,10 @@ fn response_overrides(ir: &OperationIr) -> String {
         .input
         .iter()
         .filter(|field| field.binding == Binding::Query)
-        .filter_map(|field| field.wire_name.as_deref())
-        .filter_map(|wire| {
+        .filter_map(|field| field.wire_name.as_deref().map(|wire| (wire, field.name.as_str())))
+        .filter_map(|(wire, member)| {
             wire.strip_prefix(RESPONSE_OVERRIDE_PREFIX)
-                .map(|header| format!("        ResponseOverride::new(\"{wire}\", \"{header}\"),"))
+                .map(|header| format!("        ResponseOverride::new(\"{wire}\", \"{header}\", \"{member}\"),"))
         })
         .collect();
     if entries.is_empty() {
@@ -325,6 +325,23 @@ fn response_overrides(ir: &OperationIr) -> String {
         "    const RESPONSE_OVERRIDES: &'static [ResponseOverride] = &[\n{}\n    ];\n\n",
         entries.join("\n")
     )
+}
+
+/// The first statement of a decoder whose operation declares `response-*` parameters.
+///
+/// Emitted from the same table the encoder writes those headers from, and emitted *before* any
+/// binding is read, because the values are the caller's and they end up in the response head: a
+/// CR or an LF in one of them terminates the header block early. The refusal is generated rather
+/// than hand-written into the operations that have overrides for the same reason the table is —
+/// an operation that gains a `response-*` parameter gains the check with it, and no author has to
+/// remember that the two go together.
+fn override_guard(overrides: &str) -> &'static str {
+    if overrides.is_empty() {
+        return "";
+    }
+    "        // The `response-*` values reach the response head, so a value no header can hold is\n\
+     \x20       // refused before any other binding is read and before a handler sees the request.\n\
+     \x20       value::verify_response_overrides(request, Self::RESPONSE_OVERRIDES)?;\n"
 }
 
 fn needs_timestamp(ir: &OperationIr) -> bool {

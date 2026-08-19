@@ -36,6 +36,7 @@ use rustfs_gateway_types::{
 };
 
 use crate::codec::error::CodecError;
+use crate::codec::response::{ResponseOverride, override_header_value};
 use crate::codec::view::MetaView;
 
 /// The error a decoder raises for a required member the wire did not carry.
@@ -684,6 +685,42 @@ pub fn verify_body_digest(request: &MetaView<'_>, body: &[u8]) -> Result<(), Cod
     let mut digest = ContentMd5::digester();
     digest.update(body);
     expected.verify(&digest.finish()).map_err(refuse)
+}
+
+/// Refuses a request whose `response-*` override carries a value no response header can hold.
+///
+/// Generated as the first statement of every decoder whose operation declares such a parameter,
+/// and nowhere else. It is first on purpose: the value is head data, the refusal is about the
+/// response this request would produce rather than about anything a backend knows, and a request
+/// that would have to be answered by splitting its own response head must not reach a handler at
+/// all. Answering it later — or, as this gateway did until rustfs/backlog#1701, dropping the
+/// header and answering `200` with the object — hands the caller a success for a request the
+/// service could not carry out, and leaves the only evidence of the attempt in a header that is
+/// not there.
+///
+/// The reading is [`crate::codec::response::override_header_value`], the same function the encoder
+/// writes the value with. One predicate, two call sites: the set refused here and the set the
+/// encoder would have had to drop are the same set, so neither can silently widen.
+///
+/// # Errors
+///
+/// [`CodecError::invalid_argument`] naming the model member the parameter binds. `InvalidArgument`
+/// rather than a code of this rule's own: AWS answers a `response-*` value it cannot put in a
+/// header with `InvalidArgument`, and the status that code carries is
+/// `model/overlays/error-status.toml`'s to state, not this function's.
+pub fn verify_response_overrides(request: &MetaView<'_>, table: &[ResponseOverride]) -> Result<(), CodecError> {
+    for entry in table {
+        let Some(value) = request.query(entry.query) else {
+            continue;
+        };
+        if override_header_value(value.as_ref()).is_none() {
+            return Err(
+                CodecError::invalid_argument("a response-* override carries a value the response header cannot hold")
+                    .about(entry.member),
+            );
+        }
+    }
+    Ok(())
 }
 
 /// Renders a checksum back into its `x-amz-checksum-<algorithm>` header name and value.
