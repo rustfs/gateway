@@ -4946,6 +4946,65 @@ PYEOF
 expect_fail check_no_as_any.sh \
     'an allowlist entry whose line no longer holds a downcast' mut_as_any_allowance_stale
 
+# The data plane is what a file implements, not only where it sits. Without these three cases
+# the sealed set is two directory names, and a crate that grows a payload producer of its own
+# could take an allowlist entry for the downcast sitting beside it.
+
+mut_implementor_registers_a_downcast() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/core/src/lib.rs")
+text = path.read_text()
+planted = (
+    "\nstruct PlantedProducer;\n"
+    "impl crate::PayloadStream for PlantedProducer {}\n"
+    "fn planted(value: &dyn std::any::Any) { let _ = value.downcast_ref::<u8>(); }\n"
+)
+path.write_text(text + planted)
+line = len((text + planted).splitlines())
+Path("scripts/allowances/as-any-allowances.txt").open("a").write(
+    f"crates/core/src/lib.rs:{line}    # planted, and argued for exactly as a real entry would be\n"
+)
+PYEOF
+}
+expect_fail check_no_as_any.sh \
+    'an allowlist entry for a file that implements a payload producer' \
+    mut_implementor_registers_a_downcast
+
+mut_implementor_reaches_for_any() {
+    printf '\nstruct PlantedConsumer;\nimpl crate::AsyncPayloadRead for PlantedConsumer {}\nfn planted(value: &dyn std::any::Any) -> bool { value.is::<u8>() }\n' \
+        >>crates/core/src/lib.rs
+}
+expect_fail check_no_as_any.sh \
+    'a payload consumer outside the two directories reaching for Any' \
+    mut_implementor_reaches_for_any
+
+# Fail closed. If the traits that define the content half of the data plane are renamed away,
+# the rule silently narrows back to two directory names, which is the one failure a green line
+# would never show.
+mut_payload_contract_renamed_away() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+changed = 0
+for directory in (Path("crates"), Path("spikes"), Path("xtask")):
+    if not directory.is_dir():
+        continue
+    for path in directory.rglob("*.rs"):
+        text = path.read_text()
+        if "PayloadStream" not in text and "AsyncPayloadRead" not in text:
+            continue
+        path.write_text(text.replace("PayloadStream", "PushHalf").replace("AsyncPayloadRead", "PullHalf"))
+        changed += 1
+if changed == 0:
+    raise SystemExit("expected the payload contract to be implemented somewhere")
+PYEOF
+}
+expect_fail check_no_as_any.sh \
+    'the payload contract renamed away, leaving the content half of the data plane empty' \
+    mut_payload_contract_renamed_away
+
 # The positive half of the rule. "There is no as_any()" is only an argument while the named
 # accessors it points at still exist; without this case the guard would keep reporting green
 # over a Payload with no negotiation surface left.

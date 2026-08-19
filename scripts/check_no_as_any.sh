@@ -7,15 +7,33 @@ set -euo pipefail
 # Three rules, in widening scope:
 #   1. `fn as_any` / `.as_any()` anywhere in the repository. No exemption exists,
 #      because this identifier has exactly one purpose.
-#   2. Any `Any` or downcast, in any spelling, inside the payload data plane
-#      (`crates/stream/src` and `crates/http/src`). No exemption exists here
-#      either: this is the seam where a transport would reach past a validating
-#      wrapper to the payload inside it.
+#   2. Any `Any` or downcast, in any spelling, inside the payload data plane. No
+#      exemption exists here either: this is the seam where a transport would
+#      reach past a validating wrapper to the payload inside it.
 #   3. `downcast_ref` / `downcast_mut` / `downcast_mut_pin` elsewhere in the
 #      repository, with a single-point allowlist. Typed dispatch through a
 #      `TypeId`-keyed map is a different thing from payload negotiation, and the
 #      allowlist is what forces each such site to be named and argued for once,
 #      in the open, rather than spreading unremarked.
+#
+# WHAT COUNTS AS THE DATA PLANE
+#   Two directories -- `crates/stream/src` and `crates/http/src` -- plus any file
+#   anywhere in the workspace that implements `PayloadStream` or
+#   `AsyncPayloadRead`. A directory list alone is a rule about where code sits;
+#   a producer or consumer of a payload is payload negotiation wherever somebody
+#   puts it, and the directory form would have let a new crate implement the
+#   traits and then take an allowlist entry for the downcast beside them.
+#
+# THE ALLOWLIST, AND HOW EMPTY IT HAS TO BE
+#   rustfs/backlog#1690 says two things that cannot both hold: section 4.3 grants
+#   a single-point allowlist for `Extensions` internals, and section 11.5 requires
+#   the allowlist to be empty. Section 4.3 governs, and 11.5 is read as the scope
+#   that makes it true and checkable: the allowlist is EMPTY INSIDE THE DATA
+#   PLANE, and every entry outside it carries a written reason. The threat 11.5
+#   exists to close -- a transport reaching past a validating wrapper -- lives
+#   entirely in the data plane; outside it, a `TypeId`-keyed map reading back the
+#   value its own `insert` boxed is dispatch, and a mismatch fails loudly instead
+#   of degrading silently. The emptiness is asserted below, not asserted in prose.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="${GATEWAY_CHECK_ROOT:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
@@ -46,21 +64,22 @@ roots = [crates] + [root / "spikes", root / "xtask"]
 # The payload data plane: the crate that owns `Payload`, and the wire layer that
 # produces and consumes one. Both are exemption-free.
 SEALED = ("crates/stream/src", "crates/http/src")
+# The bucket a file lands in when it is data plane because of what it implements rather than
+# because of where it sits.
+IMPLEMENTOR = "a payload producer or consumer"
 
 allowance_file = root / "scripts/allowances/as-any-allowances.txt"
 allowances = {}
+# Where each entry was written, so the data-plane rejection below can still point at the line
+# that has to be deleted. The rejection cannot run here: whether a path is in the data plane
+# now depends on what that file implements, which is not known until the sources are read.
+allowance_lines = {}
 if allowance_file.is_file():
     for number, raw in enumerate(allowance_file.read_text().splitlines(), start=1):
         entry = raw.split("#", 1)[0].strip()
         if not entry:
             continue
-        if entry.startswith(tuple(f"{prefix}/" for prefix in SEALED)):
-            print(
-                f"scripts/allowances/as-any-allowances.txt:{number}: '{entry}' is inside the payload "
-                "data plane, which takes no exemptions; the negotiation seam is the whole point of the rule",
-                file=sys.stderr,
-            )
-            raise SystemExit(1)
+        allowance_lines[entry] = number
         allowances[entry] = raw.split("#", 1)[1].strip() if "#" in raw else ""
         if not allowances[entry]:
             print(
@@ -145,6 +164,7 @@ DOWNCAST = re.compile(r"\bdowncast_(?:ref|mut|mut_pin)\b")
 violations = []
 scanned = 0
 sealed_scanned = {prefix: 0 for prefix in SEALED}
+sealed_scanned[IMPLEMENTOR] = 0
 
 # Each half of the payload data plane is required to exist and to hold sources. Counting the
 # two together would let one of them be deleted or moved while the other kept the total above
@@ -161,21 +181,66 @@ for prefix in SEALED:
 # cost only, never in coverage.
 CANDIDATE = re.compile(r"as_any|downcast|\bAny\b")
 
+# The half of the data plane a directory list cannot see: a file that implements either half
+# of the payload contract is payload negotiation wherever it lives. Matching the raw text is
+# enough here because an occurrence inside a comment or a string only ever widens the sealed
+# set, and widening it is the safe direction.
+IMPLEMENTS = re.compile(r"\bimpl\b[^\n]*\b(?:PayloadStream|AsyncPayloadRead)\b[^\n]*\bfor\b")
+
 registered = set()
 sources = sorted({path for directory in roots if directory.is_dir() for path in directory.rglob("*.rs")})
+texts = {}
 for path in sources:
     relative = path.relative_to(root).as_posix()
     if "/generated/" in relative or "/target/" in relative:
         continue
-    scanned += 1
-    sealed = next((prefix for prefix in SEALED if relative.startswith(f"{prefix}/")), None)
-    if sealed:
-        sealed_scanned[sealed] += 1
     try:
-        text = path.read_text()
+        texts[relative] = path.read_text()
     except (OSError, UnicodeError) as error:
         print(f"check_no_as_any: cannot read {relative}: {error}", file=sys.stderr)
         raise SystemExit(1)
+
+implementors = {
+    relative
+    for relative, text in texts.items()
+    if ("PayloadStream" in text or "AsyncPayloadRead" in text) and IMPLEMENTS.search(text)
+}
+# Fail closed. If nothing in the workspace implements either half any more, the rule below has
+# quietly narrowed back to two directory names and nobody would see it in a green line.
+if not implementors:
+    print(
+        "check_no_as_any: required input is missing: no file implements PayloadStream or "
+        "AsyncPayloadRead, so the content-defined half of the data plane is empty",
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+
+
+def sealed_for(relative: str) -> str | None:
+    """The data plane a file belongs to: a directory of it, or the contract it implements."""
+    for prefix in SEALED:
+        if relative.startswith(f"{prefix}/"):
+            return prefix
+    return IMPLEMENTOR if relative in implementors else None
+
+
+# The allowlist rejection that had to wait for the data plane to be known.
+for entry, number in sorted(allowance_lines.items(), key=lambda pair: pair[1]):
+    where = sealed_for(entry.rsplit(":", 1)[0])
+    if where is not None:
+        print(
+            f"scripts/allowances/as-any-allowances.txt:{number}: '{entry}' is inside the payload "
+            f"data plane ({where}), which takes no exemptions; the negotiation seam is the whole "
+            "point of the rule",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+
+for relative, text in texts.items():
+    scanned += 1
+    sealed = sealed_for(relative)
+    if sealed:
+        sealed_scanned[sealed] = sealed_scanned.get(sealed, 0) + 1
     if not CANDIDATE.search(text):
         continue
     try:
@@ -224,8 +289,13 @@ if violations:
     print("\n".join(violations), file=sys.stderr)
     raise SystemExit(1)
 
+# Section 11.5 of rustfs/backlog#1690, as ruled at the top of this file: the number the issue
+# wanted at zero is the data-plane one, and it is printed rather than assumed so a reader can
+# see which of the two counts is the one being held at zero.
 print(
     f"OK: no as_any/downcast in the payload data plane "
-    f"({scanned} file(s) scanned, {sum(sealed_scanned.values())} sealed; allowlist: {len(allowances)} entries)"
+    f"({scanned} file(s) scanned, {sum(sealed_scanned.values())} in the data plane "
+    f"of which {sealed_scanned[IMPLEMENTOR]} by what they implement; "
+    f"allowlist: {len(allowances)} entries, 0 of them in the data plane)"
 )
 PY
