@@ -21,7 +21,7 @@
 //! new domain arrives without a gate exactly once.
 //! NOT responsible for: what any individual case asserts (that is the case file), the corpus-wide
 //! schema and convention invariants (`tests/corpus.rs`), or which cases are green — the
-//! `--baseline` ratchet owns that, and the six per-family ledgers own their own families' sizes,
+//! `--baseline` ratchet owns that, and the per-family ledgers own their own families' sizes,
 //! polarity and known-red sets. See `crates/conformance/MAP.md`.
 //! Upstream: the published API of `rustfs_gateway_conformance`. Downstream: nothing.
 //!
@@ -40,16 +40,17 @@
 //! going quiet, and a domain is the granularity at which operations are registered — so it is the
 //! granularity at which they get unregistered.
 //!
-//! # Why one table and not nineteen files
+//! # Why one table and not one file per family
 //!
-//! Six families already have hand-written ledgers, each hard-coding its own counts. Nineteen more
-//! of those would cost nineteen new Cargo test sources, each of which must be registered in
-//! `scripts/check_test_target_consolidation.sh` **and** `tests/integration.rs`; #207 and #208 both
-//! edited that frozen tuple within the same hour, so every additional file is another branch
-//! conflict at the same three lines. The per-domain fact this file needs is one short list, and one
-//! short list per domain belongs in a table. The existing six stay exactly as they are: they assert
-//! far more than wiring — family size, polarity, baseline membership, which case is red and for
-//! which reason — and this file deliberately asserts none of that.
+//! Seven hand-written ledgers already cover eight domains, each hard-coding its own counts.
+//! Seventeen more of those would cost seventeen new Cargo test sources, each of which must be
+//! registered in `scripts/check_test_target_consolidation.sh` **and** `tests/integration.rs`;
+//! #207 and #208 both edited that frozen tuple within the same hour, and #209 added
+//! `range_cond_family.rs` to it while this file was in flight. Every additional source is another
+//! branch conflict at the same three lines. The per-domain fact this file needs is one short list,
+//! and one short list per domain belongs in a table. The existing ledgers stay exactly as they are:
+//! they assert far more than wiring — family size, polarity, baseline membership, which case is red
+//! and for which reason — and this file deliberately asserts none of that.
 //!
 //! # Why the skip lists are subsets and not equalities
 //!
@@ -108,7 +109,9 @@ const GATES: &[(&str, Wiring)] = &[
     ),
     // `c-cond-0013` wants two requests in flight at once so one loses the race. Neither target can
     // stage it: the in-process facade performs one call at a time, and the socket transport can put
-    // both on the wire but cannot make them contend.
+    // both on the wire but cannot make them contend. `range_cond_family.rs` pins the same skip as an
+    // equality; this row is the subset form, so the two disagree only in the direction that lets a
+    // recovery land without touching this file.
     ("cond", Wiring::Runs(&["c-cond-0013"])),
     ("copy", Wiring::Runs(&[])),
     ("cors", Wiring::Runs(&[])),
@@ -173,6 +176,20 @@ fn corpus_domains() -> &'static BTreeMap<String, BTreeSet<String>> {
 
 fn outcomes_of(domain: &str) -> &'static [CaseOutcome] {
     measured().get(domain).map(Vec::as_slice).unwrap_or_default()
+}
+
+/// The first few of a list, with the total, for a failure message.
+///
+/// An unwiring turns whole domains into skips at once, so an assertion that prints every affected
+/// identifier prints hundreds of them. A failure nobody can read is a failure nobody acts on, and
+/// the identifiers after the first few add nothing the count does not already say.
+fn few(ids: &[&str]) -> String {
+    let head: Vec<&str> = ids.iter().copied().take(4).collect();
+    if ids.len() > head.len() {
+        format!("{head:?} and {} more", ids.len() - head.len())
+    } else {
+        format!("{head:?}")
+    }
 }
 
 /// Negative — the table and the corpus name the same domains, in both directions.
@@ -245,8 +262,12 @@ fn no_gate_allows_a_skip_it_cannot_bind_or_an_identifier_it_cannot_match() {
 fn every_gate_measures_every_case_the_domain_holds() {
     for (domain, held) in corpus_domains() {
         let observed: BTreeSet<&str> = outcomes_of(domain).iter().map(|outcome| outcome.id.as_str()).collect();
-        let missing: Vec<&String> = held.iter().filter(|id| !observed.contains(id.as_str())).collect();
-        assert!(missing.is_empty(), "the `{domain}` domain holds {missing:?}, which never reached the run");
+        let missing: Vec<&str> = held.iter().map(String::as_str).filter(|id| !observed.contains(id)).collect();
+        assert!(
+            missing.is_empty(),
+            "the `{domain}` domain holds {}, which never reached the run",
+            few(&missing)
+        );
         assert_eq!(
             observed.len(),
             held.len(),
@@ -277,12 +298,12 @@ fn no_domain_skips_a_case_its_gate_does_not_name() {
         let Some(first) = offenders.first() else { continue };
         // One line per domain rather than one per case: an unwiring turns hundreds of cases into
         // skips for a single reason, and a failure nobody can read is a failure nobody acts on.
-        let named: Vec<&str> = offenders.iter().take(4).map(|outcome| outcome.id.as_str()).collect();
+        let named: Vec<&str> = offenders.iter().map(|outcome| outcome.id.as_str()).collect();
         unexpected.push(format!(
-            "{domain}: {} of {} case(s) skipped, none of them allowed — {named:?}{}; first reason: {}",
+            "{domain}: {} of {} case(s) skipped, none of them allowed — {}; first reason: {}",
             offenders.len(),
             outcomes.len(),
-            if offenders.len() > named.len() { ", ..." } else { "" },
+            few(&named),
             first.skip_reason.as_deref().unwrap_or("no reason given")
         ));
     }
@@ -338,8 +359,10 @@ fn a_deferred_domain_is_still_skipped_everywhere_it_claims_to_be() {
             .collect();
         assert!(
             executed.is_empty(),
-            "the `{domain}` domain is recorded as deferred on `{reason}`, but {executed:?} \
-             produced a verdict — replace the deferral with a Runs row that names the rest"
+            "the `{domain}` domain is recorded as deferred on `{reason}`, but {} of its cases \
+             produced a verdict ({}) — replace the deferral with a Runs row that names the rest",
+            executed.len(),
+            few(&executed)
         );
     }
 }
