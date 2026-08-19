@@ -185,6 +185,15 @@ evidence = sys.argv[3]
 required_call = sys.argv[4]
 source = path.read_text()
 
+# Compiled once, then matched with an offset. Cutting a fresh `source[i:]` slice copies the
+# whole remainder of the file on every character, which makes an otherwise linear blanking
+# pass quadratic in file length; `pattern.match(source, i)` matches at the same place without
+# the copy. No pattern here carries `^`, `\A`, `\b` or a lookbehind, so anchoring at the
+# offset is exactly what slicing to it already meant. `.end()` is now an absolute offset into
+# `source`.
+RAW_STRING_RE = re.compile(r'(?:br|r)(#{0,255})"')
+CHAR_LITERAL_RE = re.compile(r"(?:b)?'(?:\\(?:x[0-9A-Fa-f]{2}|u\{[0-9A-Fa-f_]+\}|.)|[^\\'\n])'")
+
 # Blank line and nested block comments plus string/character literals while preserving newlines.
 # Evidence in any of those positions is data, not an executable assertion.
 out = []
@@ -211,10 +220,10 @@ while i < len(source):
         depth = 1
         out.extend("  ")
         i += 2
-    elif raw := re.match(r'(?:br|r)(#{0,255})"', source[i:]):
+    elif raw := RAW_STRING_RE.match(source, i):
         hashes = raw.group(1)
         closing = '"' + hashes
-        end = source.find(closing, i + raw.end())
+        end = source.find(closing, raw.end())
         if end == -1:
             raise SystemExit(f"{path}: unterminated raw string")
         end += len(closing)
@@ -235,8 +244,8 @@ while i < len(source):
             raise SystemExit(f"{path}: unterminated string")
         out.extend("\n" if char == "\n" else " " for char in source[i:end])
         i = end
-    elif character := re.match(r"(?:b)?'(?:\\(?:x[0-9A-Fa-f]{2}|u\{[0-9A-Fa-f_]+\}|.)|[^\\'\n])'", source[i:]):
-        end = i + character.end()
+    elif character := CHAR_LITERAL_RE.match(source, i):
+        end = character.end()
         out.extend(" " for _ in source[i:end])
         i = end
     else:
@@ -248,6 +257,7 @@ if depth:
 
 code = "".join(out)
 
+
 def delimiter_depth(end):
     depth = {"{": 0, "(": 0, "[": 0}
     closing = {"}": "{", ")": "(", "]": "["}
@@ -258,6 +268,7 @@ def delimiter_depth(end):
             opener = closing[char]
             depth[opener] -= 1
     return depth
+
 
 def outer_attributes(start):
     attributes = []
@@ -295,6 +306,7 @@ def outer_attributes(start):
     attributes.reverse()
     return attributes
 
+
 def top_level_function(name):
     pattern = re.compile(rf"(?m)^[ \t]*(?:async\s+)?fn\s+{re.escape(name)}\s*\(\s*\)[^;{{]*\{{")
     return next(
@@ -305,6 +317,7 @@ def top_level_function(name):
         ),
         None,
     )
+
 
 def function_body(item):
     opening = item.end() - 1
@@ -320,6 +333,7 @@ def function_body(item):
         raise SystemExit(f"{path}: function body is unterminated")
     return opening + 1, position - 1
 
+
 def direct_occurrence(start, end, needle):
     position = code.find(needle, start, end)
     while position != -1:
@@ -328,6 +342,7 @@ def direct_occurrence(start, end, needle):
             return True
         position = code.find(needle, position + 1, end)
     return False
+
 
 def direct_invocation(start, end, prefix, invocation):
     position = code.find(prefix, start, end)
@@ -454,9 +469,12 @@ elif kind == "format_literal":
         raise SystemExit(f"{path}: startup posture format literal drifted")
 elif kind == "format_literal_exact":
     matches = []
+    # Same shape, one level out: the file tail was re-copied at every `format!(`
+    # occurrence. Compiled once, matched at the occurrence offset instead.
+    exact_call = re.compile(rf"format!\(\s*{re.escape(required_call)}\s*\)", re.DOTALL)
     position = code.find("format!(")
     while position != -1:
-        if re.match(rf"format!\(\s*{re.escape(required_call)}\s*\)", source[position:], re.DOTALL):
+        if exact_call.match(source, position):
             matches.append(position)
         position = code.find("format!(", position + 1)
     if len(matches) != 1:

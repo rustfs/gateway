@@ -28,6 +28,16 @@ def fail(message: str) -> None:
     raise SystemExit(f"check_governor_position: {message}")
 
 
+# Compiled once, then matched with an offset. Cutting a fresh `source[index:]` slice copies
+# the whole remainder of the file on every character, which makes an otherwise linear masking
+# pass quadratic in file length; `pattern.match(source, index)` matches at the same place
+# without the copy. No pattern here carries `^`, `\A`, `\b` or a lookbehind, so anchoring at
+# the offset is exactly what slicing to it already meant. Each `.end()` is now an absolute
+# offset into `source`.
+RAW_STRING_RE = re.compile(r'(?:b)?r(#{0,255})"')
+IDENTIFIER_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
+
 def rust_code(source: str, path: Path) -> str:
     code = list(source)
     index = 0
@@ -60,10 +70,10 @@ def rust_code(source: str, path: Path) -> str:
             mask(index, end)
             index = end
             continue
-        raw = re.match(r'(?:b)?r(#{0,255})"', source[index:])
+        raw = RAW_STRING_RE.match(source, index)
         if raw:
             delimiter = '"' + raw.group(1)
-            close = source.find(delimiter, index + raw.end())
+            close = source.find(delimiter, raw.end())
             if close < 0:
                 fail(f"{path.relative_to(root)} has an unterminated raw string")
             end = close + len(delimiter)
@@ -91,9 +101,9 @@ def rust_code(source: str, path: Path) -> str:
         if byte_character or source[index:index + 1] == "'":
             quote = index + 1 if byte_character else index
             body = quote + 1
-            identifier = re.match(r"[A-Za-z_][A-Za-z0-9_]*", source[body:])
-            if not byte_character and identifier and source[body + identifier.end():body + identifier.end() + 1] != "'":
-                index = body + identifier.end()
+            identifier = IDENTIFIER_RE.match(source, body)
+            if not byte_character and identifier and source[identifier.end():identifier.end() + 1] != "'":
+                index = identifier.end()
                 continue
             end, escaped = body, False
             while end < len(source) and source[end] != "\n":

@@ -92,6 +92,15 @@ if not marker.startswith("fn "):
 prefix = marker.removeprefix("fn ")
 source = path.read_text()
 
+# Compiled once, then matched with an offset. Cutting a fresh `source[i:]` slice copies the
+# whole remainder of the file on every character, which makes an otherwise linear blanking
+# pass quadratic in file length; `pattern.match(source, i)` matches at the same place without
+# the copy. No pattern here carries `^`, `\A`, `\b` or a lookbehind, so anchoring at the
+# offset is exactly what slicing to it already meant. `.end()` is now an absolute offset into
+# `source`.
+RAW_STRING_RE = re.compile(r'(?:br|r)(#{0,255})"')
+CHAR_LITERAL_RE = re.compile(r"(?:b)?'(?:\\(?:x[0-9A-Fa-f]{2}|u\{[0-9A-Fa-f_]+\}|.)|[^\\'\n])'")
+
 # Blank comments and literals while preserving delimiters and byte positions. A test name in data
 # or inside a macro body is not executable evidence.
 out = []
@@ -118,9 +127,9 @@ while i < len(source):
         comment_depth = 1
         out.extend("  ")
         i += 2
-    elif raw := re.match(r'(?:br|r)(#{0,255})"', source[i:]):
+    elif raw := RAW_STRING_RE.match(source, i):
         closing = '"' + raw.group(1)
-        end = source.find(closing, i + raw.end())
+        end = source.find(closing, raw.end())
         if end == -1:
             raise SystemExit(f"{path}: unterminated raw string")
         end += len(closing)
@@ -141,8 +150,8 @@ while i < len(source):
             raise SystemExit(f"{path}: unterminated string")
         out.extend("\n" if char == "\n" else " " for char in source[i:end])
         i = end
-    elif character := re.match(r"(?:b)?'(?:\\(?:x[0-9A-Fa-f]{2}|u\{[0-9A-Fa-f_]+\}|.)|[^\\'\n])'", source[i:]):
-        end = i + character.end()
+    elif character := CHAR_LITERAL_RE.match(source, i):
+        end = character.end()
         out.extend(" " for _ in source[i:end])
         i = end
     else:
@@ -155,6 +164,7 @@ code = "".join(out)
 if re.search(r"(?m)^[ \t]*#!\s*\[\s*cfg(?:_attr)?\b", code):
     raise SystemExit(f"{path}: file-level cfg disables mapped scalar evidence")
 
+
 def delimiter_depth(end):
     depth = {"{": 0, "(": 0, "[": 0}
     closing = {"}": "{", ")": "(", "]": "["}
@@ -164,6 +174,7 @@ def delimiter_depth(end):
         elif char in closing:
             depth[closing[char]] -= 1
     return depth
+
 
 def outer_attributes(start):
     attributes = []

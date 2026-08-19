@@ -18,6 +18,15 @@ class Token:
     offset: int
 
 
+# Compiled once, then matched with an offset. Cutting a fresh `source[index:]` slice copies
+# the whole remainder of the file on every character, which makes an otherwise linear lexer
+# quadratic in file length; `pattern.match(source, index)` matches at the same place without
+# the copy. No pattern here carries `^`, `\A`, `\b` or a lookbehind, so anchoring at the
+# offset is exactly what slicing to it already meant.
+RAW_STRING_RE = re.compile(r'(?:b|c)?r(#+)?"')
+LIFETIME_RE = re.compile(r"'[A-Za-z_][A-Za-z0-9_]*")
+IDENTIFIER_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
 OPENING = {"(": ")", "[": "]", "{": "}"}
 CLOSING = {value: key for key, value in OPENING.items()}
 
@@ -77,10 +86,10 @@ def rust_tokens(source: str, label: str) -> list[Token]:
                 fail(f"{label}: unterminated block comment")
             continue
 
-        raw = re.match(r'(?:b|c)?r(#+)?"', source[index:])
+        raw = RAW_STRING_RE.match(source, index)
         if raw:
             hashes = raw.group(1) or ""
-            end = source.find('"' + hashes, index + raw.end())
+            end = source.find('"' + hashes, raw.end())
             if end < 0:
                 fail(f"{label}: unterminated raw string")
             index = end + 1 + len(hashes)
@@ -103,7 +112,7 @@ def rust_tokens(source: str, label: str) -> list[Token]:
             continue
 
         if source[index] == "'":
-            lifetime = re.match(r"'[A-Za-z_][A-Za-z0-9_]*", source[index:])
+            lifetime = LIFETIME_RE.match(source, index)
             if lifetime and (
                 index + len(lifetime.group(0)) >= len(source)
                 or source[index + len(lifetime.group(0))] != "'"
@@ -125,7 +134,7 @@ def rust_tokens(source: str, label: str) -> list[Token]:
             index = cursor
             continue
 
-        identifier = re.match(r"[A-Za-z_][A-Za-z0-9_]*", source[index:])
+        identifier = IDENTIFIER_RE.match(source, index)
         if identifier:
             value = identifier.group(0)
             tokens.append(Token("ident", value, index))

@@ -31,6 +31,18 @@ def fail(message: str) -> None:
     raise SystemExit(f"{crate_name} test-target consolidation violation: {message}")
 
 
+# Compiled once, then matched with an offset. Cutting a fresh `source[index:]` slice copies
+# the whole remainder of the file on every character, which makes an otherwise linear masking
+# pass quadratic in file length; `pattern.match(source, index)` matches at the same place
+# without the copy. No pattern here carries `^`, `\A`, `\b` or a lookbehind, so anchoring at
+# the offset is exactly what slicing to it already meant. Each `.end()` is now an absolute
+# offset into its subject.
+RAW_STRING_RE = re.compile(r'(?:b)?r(#{0,255})"')
+IDENTIFIER_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+# Same shape at the `#[path = "…"]` site: the tail was re-copied per occurrence.
+PATH_LITERAL_RE = re.compile(r'\s*"([^"\n]+)"')
+
+
 def rust_views(source: str, path: Path) -> tuple[str, str]:
     comments_removed = list(source)
     code_only = list(source)
@@ -66,10 +78,10 @@ def rust_views(source: str, path: Path) -> tuple[str, str]:
             mask(index, end, comment=True)
             index = end
             continue
-        raw = re.match(r'(?:b)?r(#{0,255})"', source[index:])
+        raw = RAW_STRING_RE.match(source, index)
         if raw:
             delimiter = '"' + raw.group(1)
-            close = source.find(delimiter, index + raw.end())
+            close = source.find(delimiter, raw.end())
             if close < 0:
                 fail(f"{path.relative_to(root)} has an unterminated raw string")
             end = close + len(delimiter)
@@ -99,9 +111,9 @@ def rust_views(source: str, path: Path) -> tuple[str, str]:
             body = quote + 1
             # An apostrophe followed by an identifier without an immediate closing apostrophe is
             # a lifetime, not a character literal. It must remain visible to the Rust-token scan.
-            identifier = re.match(r"[A-Za-z_][A-Za-z0-9_]*", source[body:])
-            if not byte_character and identifier and source[body + identifier.end():body + identifier.end() + 1] != "'":
-                index = body + identifier.end()
+            identifier = IDENTIFIER_RE.match(source, body)
+            if not byte_character and identifier and source[identifier.end():identifier.end() + 1] != "'":
+                index = identifier.end()
                 continue
             end, escaped = body, False
             while end < len(source) and source[end] != "\n":
@@ -284,7 +296,7 @@ for path in crate.rglob("*.rs"):
         body = code[opening + 1:end - 1]
         for match in re.finditer(r"\bpath\s*=", body):
             start = opening + 1 + match.end()
-            literal = re.match(r'\s*"([^"\n]+)"', comments_removed[start:])
+            literal = PATH_LITERAL_RE.match(comments_removed, start)
             if literal is None or "\\" in literal.group(1):
                 fail(f"{path.relative_to(root)} has an unresolvable path attribute")
             if (path.parent / literal.group(1)).resolve() in protected:
