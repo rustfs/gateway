@@ -259,3 +259,294 @@ fn an_environment_failure_is_a_skip_not_a_red_case() {
             .is_some_and(|r| r.starts_with("environment:"))
     );
 }
+
+// --- `${capture.<name>}` inside an `expect` block -----------------------------------------------
+//
+// Until this branch only `request` was interpolated, so `etag = "${capture.tag}"` in an expectation
+// compared an observed header against the seventeen literal characters of the reference. That is
+// the shape `AGENTS.md` lists eight times: a check that cannot pass reads as a red case, and its
+// mirror — `not_contains_utf8 = ["${capture.tag}"]` — is a check that cannot *fail*. The tests
+// below drive both directions through the real engine rather than asserting on the substitution
+// helper, because the helper was never the broken part.
+
+struct NoGoldens;
+
+impl GoldenSource for NoGoldens {
+    fn read_golden(&self, relative: &str) -> Result<Vec<u8>, String> {
+        Err(format!("this test declares no golden `{relative}`"))
+    }
+}
+
+/// A case built in memory rather than read from the corpus, so an expectation can be written that
+/// the shipped corpus deliberately does not contain.
+fn synthetic(id: &str, source: &str) -> Case {
+    Case {
+        id: id.to_owned(),
+        domain: "synthetic".to_owned(),
+        path: std::path::PathBuf::from(format!("cases/synthetic/{id}.toml")),
+        relative: format!("cases/synthetic/{id}.toml"),
+        document: Some(crate::toml::parse(source).expect("the test case is valid TOML")),
+        diagnostics: Vec::new(),
+    }
+}
+
+fn drive(case: &Case, sut: &mut dyn Sut) -> CaseOutcome {
+    let mut notes = Vec::new();
+    run_case(case, sut, &RunOptions::default(), &NoGoldens, &mut notes)
+}
+
+/// Two exchanges: the first publishes an entity tag in its body, the second asserts the header the
+/// object carries *is that value*.
+const ECHOES_A_CAPTURED_TAG: &str = r#"
+[[exchanges]]
+name = "the completion publishes a tag"
+[exchanges.request]
+method = "POST"
+target = "/b/k?uploadId=u"
+[exchanges.expect]
+kind = "response"
+status = 200
+[exchanges.expect.capture]
+tag = { xml_text = "ETag" }
+
+[[exchanges]]
+name = "the object carries the same tag"
+[exchanges.request]
+method = "HEAD"
+target = "/b/k"
+[exchanges.expect]
+kind = "response"
+status = 200
+[exchanges.expect.headers_present]
+etag = "${capture.tag}"
+"#;
+
+fn completion(body: &'static str) -> Observation {
+    Observation::response(
+        200,
+        vec![("content-type".to_owned(), "application/xml".to_owned())],
+        body.as_bytes().to_vec(),
+    )
+}
+
+fn head_with_etag(etag: &str) -> Observation {
+    Observation::response(200, vec![("etag".to_owned(), etag.to_owned())], Vec::new())
+}
+
+#[test]
+fn a_capture_reaches_the_expect_block_of_a_later_exchange() {
+    let case = synthetic("s-expect-0001", ECHOES_A_CAPTURED_TAG);
+    let mut sut = Scripted::new()
+        .with("s-expect-0001", 0, completion("<R><ETag>\"abc-1\"</ETag></R>"))
+        .with("s-expect-0001", 1, head_with_etag("\"abc-1\""));
+    let outcome = drive(&case, &mut sut);
+    assert_eq!(
+        outcome.verdict,
+        Verdict::Passed,
+        "{:?}",
+        outcome.failures().iter().map(ToString::to_string).collect::<Vec<_>>()
+    );
+}
+
+/// The control for the test above, and the one that makes it worth having. An expectation that was
+/// substituted still has to be *compared*: a runner that dropped the reference, or replaced it with
+/// a wildcard, would pass both.
+#[test]
+fn a_substituted_expectation_still_fails_when_the_value_differs() {
+    let case = synthetic("s-expect-0002", ECHOES_A_CAPTURED_TAG);
+    let mut sut = Scripted::new()
+        .with("s-expect-0002", 0, completion("<R><ETag>\"abc-1\"</ETag></R>"))
+        .with("s-expect-0002", 1, head_with_etag("\"abc-2\""));
+    let outcome = drive(&case, &mut sut);
+    assert_eq!(outcome.verdict, Verdict::Failed);
+    let messages: Vec<&str> = outcome.failures().iter().map(|d| d.message.as_str()).collect();
+    assert!(
+        messages.iter().any(|m| m.contains("expected `etag: \"abc-1\"`")),
+        "the failure must name the substituted value, not the reference: {messages:?}"
+    );
+    assert!(
+        !messages.iter().any(|m| m.contains("${capture.")),
+        "an unsubstituted reference reached the comparison: {messages:?}"
+    );
+}
+
+/// The mirror direction, and the one that was silently vacuous: a body that *must not* contain the
+/// captured value. Under the old runner this compared against the literal reference and could
+/// never fail, so the case below is the negative control for the whole change.
+const REFUSES_A_CAPTURED_TAG: &str = r#"
+[[exchanges]]
+[exchanges.request]
+method = "POST"
+target = "/b/k?uploadId=u"
+[exchanges.expect]
+kind = "response"
+status = 200
+[exchanges.expect.capture]
+tag = { xml_text = "ETag" }
+
+[[exchanges]]
+[exchanges.request]
+method = "GET"
+target = "/b/k?attributes"
+[exchanges.expect]
+kind = "response"
+status = 200
+[exchanges.expect.body]
+not_contains_utf8 = ["${capture.tag}"]
+"#;
+
+#[test]
+fn a_not_contains_naming_a_capture_fires_when_the_value_is_there() {
+    let case = synthetic("s-expect-0003", REFUSES_A_CAPTURED_TAG);
+    let mut sut = Scripted::new()
+        .with("s-expect-0003", 0, completion("<R><ETag>abc-1</ETag></R>"))
+        .with("s-expect-0003", 1, completion("<A><ETag>abc-1</ETag></A>"));
+    let outcome = drive(&case, &mut sut);
+    assert_eq!(
+        outcome.verdict,
+        Verdict::Failed,
+        "a `not_contains` naming a capture that is present must fire"
+    );
+}
+
+#[test]
+fn the_same_not_contains_holds_when_the_value_is_absent() {
+    let case = synthetic("s-expect-0004", REFUSES_A_CAPTURED_TAG);
+    let mut sut = Scripted::new()
+        .with("s-expect-0004", 0, completion("<R><ETag>abc-1</ETag></R>"))
+        .with("s-expect-0004", 1, completion("<A><ETag>def-2</ETag></A>"));
+    let outcome = drive(&case, &mut sut);
+    assert_eq!(
+        outcome.verdict,
+        Verdict::Passed,
+        "{:?}",
+        outcome.failures().iter().map(ToString::to_string).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn an_unbound_capture_in_an_expectation_fails_the_case_and_names_the_field() {
+    let source = r#"
+[[exchanges]]
+[exchanges.request]
+method = "GET"
+target = "/b/k"
+[exchanges.expect]
+kind = "response"
+status = 200
+[exchanges.expect.headers_present]
+etag = "${capture.never_bound}"
+"#;
+    let case = synthetic("s-expect-0005", source);
+    let mut sut = Scripted::new().with("s-expect-0005", 0, head_with_etag("\"abc\""));
+    let outcome = drive(&case, &mut sut);
+    assert_eq!(outcome.verdict, Verdict::Failed);
+    let failure = outcome
+        .failures()
+        .into_iter()
+        .find(|d| d.rule == "runner/interpolation")
+        .cloned()
+        .expect("the interpolation failure is reported");
+    assert!(failure.pointer.ends_with("/expect"), "the field is named: {}", failure.pointer);
+    assert!(failure.message.contains("never_bound"), "{}", failure.message);
+}
+
+#[test]
+fn a_computed_form_in_an_expectation_is_refused_rather_than_compared_literally() {
+    let source = r#"
+[[exchanges]]
+[exchanges.request]
+method = "GET"
+target = "/b/k"
+[exchanges.expect]
+kind = "response"
+status = 200
+[exchanges.expect.headers_present]
+etag = "${md5(body)}"
+"#;
+    let case = synthetic("s-expect-0006", source);
+    let mut sut = Scripted::new().with("s-expect-0006", 0, head_with_etag("\"abc\""));
+    let outcome = drive(&case, &mut sut);
+    assert_eq!(outcome.verdict, Verdict::Failed);
+    let rules: Vec<&str> = outcome.failures().iter().map(|d| d.rule.as_str()).collect();
+    assert!(rules.contains(&"runner/interpolation"), "{rules:?}");
+}
+
+/// The one place substitution cannot reach, made loud rather than left silent. A reference in a
+/// field *name* is not something the walk can resolve — a header name is not a value — so it is
+/// refused. Leaving it alone would put a `${capture.x}` in the corpus that nothing ever touches
+/// and that reads, afterwards, exactly like one that had been resolved.
+#[test]
+fn a_reference_in_a_field_name_is_refused_rather_than_left_where_it_stands() {
+    let source = r#"
+[[exchanges]]
+[exchanges.request]
+method = "GET"
+target = "/b/k"
+[exchanges.expect]
+status = 200
+[exchanges.expect.headers_present]
+"${capture.header_name}" = "x"
+"#;
+    let case = synthetic("s-expect-0007", source);
+    let mut sut = Scripted::new().with("s-expect-0007", 0, head_with_etag("\"abc\""));
+    let outcome = drive(&case, &mut sut);
+    assert_eq!(outcome.verdict, Verdict::Failed);
+    let failure = outcome
+        .failures()
+        .into_iter()
+        .find(|d| d.rule == "runner/interpolation")
+        .cloned()
+        .expect("the interpolation failure is reported");
+    assert!(failure.message.contains("field name"), "{}", failure.message);
+}
+
+/// The control: the request half is refused the same way, so this is a property of the walk rather
+/// than of the expectation it was added for.
+#[test]
+fn a_reference_in_a_request_field_name_is_refused_too() {
+    let source = r#"
+[[exchanges]]
+[exchanges.request]
+method = "GET"
+target = "/b/k"
+[exchanges.request.headers]
+"${capture.header_name}" = "x"
+"#;
+    let case = synthetic("s-expect-0008", source);
+    let mut sut = Scripted::new().with("s-expect-0008", 0, head_with_etag("\"abc\""));
+    let outcome = drive(&case, &mut sut);
+    assert_eq!(outcome.verdict, Verdict::Failed);
+    let pointers: Vec<&str> = outcome
+        .failures()
+        .iter()
+        .filter(|d| d.rule == "runner/interpolation")
+        .map(|d| d.pointer.as_str())
+        .collect();
+    assert!(pointers.iter().any(|p| p.ends_with("/request")), "{pointers:?}");
+}
+
+/// And the other direction: an ordinary field name is untouched, so the refusal above is a rule
+/// about `${`, not about names.
+#[test]
+fn an_ordinary_field_name_is_left_exactly_as_written() {
+    let source = r#"
+[[exchanges]]
+[exchanges.request]
+method = "GET"
+target = "/b/k"
+[exchanges.expect]
+status = 200
+[exchanges.expect.headers_present]
+etag = "\"abc\""
+"#;
+    let case = synthetic("s-expect-0009", source);
+    let mut sut = Scripted::new().with("s-expect-0009", 0, head_with_etag("\"abc\""));
+    let outcome = drive(&case, &mut sut);
+    assert_eq!(
+        outcome.verdict,
+        Verdict::Passed,
+        "{:?}",
+        outcome.failures().iter().map(ToString::to_string).collect::<Vec<_>>()
+    );
+}

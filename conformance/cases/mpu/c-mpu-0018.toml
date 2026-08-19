@@ -2,8 +2,9 @@
 # whole response.
 #
 # Schema dimensions exercised: a header value asserted with its literal quotes, a body-size
-# assertion, a header capture echoed into an XML element, and a refusal that proves the echoed value
-# is compared.
+# assertion, a header capture echoed into an XML element, a refusal that proves the echoed value is
+# compared, and — in the other direction — a document capture spent as a precondition and named in
+# the expectation that judges the exchange it conditions.
 
 [case]
 id = "c-mpu-0018"
@@ -18,7 +19,13 @@ Asserting one part's tag against a constant cannot see an implementation that an
 for every part, so a second part with different bytes is uploaded beside it and the returned value \
 is then spent: a completion naming a tag the server never minted is refused, and a completion \
 naming the captured one succeeds. The body assertion is the other half: a part upload has no body, \
-and bytes after this head desynchronise a reused connection."""
+and bytes after this head desynchronise a reused connection. The last two exchanges close the loop \
+the other way round: the tag the completion published *in its document* is read out of that \
+document and spent as an `If-Match`, and the header the object answers is asserted to be that same \
+captured value rather than a constant written beside it. A document renders the quotes escaped and \
+a header renders them bare, so this is the pair of renderings that has to agree, and asserting each \
+against its own hand-written constant is exactly the arrangement that let two spellings drift apart \
+upstream."""
 polarity = "positive"
 operation = "UploadPart"
 tags = ["multipart", "etag", "framing"]
@@ -145,6 +152,12 @@ kind = "response"
 status = 200
 connection_after = "open"
 
+# The tag is captured out of the document as well as asserted in it. The element is written
+# `&quot;...&quot;`; what is captured is the value those bytes encode, because a capture exists to
+# be spent and six literal characters of entity are not an entity tag.
+[exchanges.expect.capture]
+result_etag = { xml_text = "ETag" }
+
 [exchanges.expect.body]
 redact = ["Location", "UploadId"]
 contains_utf8 = ["<CompleteMultipartUploadResult", "6304d8b66864869a34b0f9efd0631414-1&quot;</ETag>"]
@@ -153,3 +166,50 @@ not_contains_utf8 = ["48df983668c1507a42914184ecc64d4a", "<Error>"]
 [exchanges.expect.body.xml]
 root = "CompleteMultipartUploadResult"
 element_order = ["Location", "Bucket", "Key", "ETag"]
+
+# 5 — the two renderings are the same value. The tag is taken from the completion *document*, where
+# its quotes are escaped, and spent as an `If-Match`, where they are not; the header the object
+# answers is then asserted against that captured value rather than against a constant repeated here.
+# A completion whose document and header disagree — the upstream defect this case is named for —
+# fails on the precondition, and one that mints a per-response tag fails on the header.
+[[exchanges]]
+name = "the tag the document published is the tag the object has"
+
+[exchanges.request]
+method = "HEAD"
+target = "/conf-mpu/one-part-upload"
+headers = { "if-match" = "${capture.result_etag}" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.headers_present]
+etag = "${capture.result_etag}"
+
+# 6 — the control for exchange 5, and the reason its 200 means anything. The composite with its
+# suffix removed is what an implementation that stored the object like any ordinary write would
+# hold, and it is the value a precondition must refuse. Without this the 200 above is satisfied by
+# a server that ignores `If-Match` entirely.
+#
+# A GET rather than a HEAD: a HEAD carries no body whatever the server writes, so an assertion
+# about the refusal document would be true by construction.
+[[exchanges]]
+name = "the same tag without its part count is refused as a precondition"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-mpu/one-part-upload"
+headers = { "if-match" = "\"6304d8b66864869a34b0f9efd0631414\"" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 412
+connection_after = "open"
+
+[exchanges.expect.error]
+code = "PreconditionFailed"
+request_id_present = true

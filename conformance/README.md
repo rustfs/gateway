@@ -100,9 +100,18 @@ must agree case for case; a case that could name a path would be a case that hid
   both sides before comparison. Element presence and position are still asserted byte for byte. It
   exists so that a response containing a server-minted opaque value — upload id, continuation token,
   request id — can still be pinned to bytes. Redact the smallest possible set.
-- **Interpolation.** `${capture.<name>}` is substituted **before** signing, so an interpolated value
-  is covered by the signature. Captures come from `expect.capture` on an earlier exchange or from
-  `setup.multipart_uploads[].capture_upload_id_as`.
+- **Interpolation.** `${capture.<name>}` is substituted in a `request` **before** signing, so an
+  interpolated value is covered by the signature, and in an `expect` **before** the exchange is
+  judged, so an assertion may name a value an earlier exchange produced. Captures come from
+  `expect.capture` on an earlier exchange or from `setup.multipart_uploads[].capture_upload_id_as`;
+  an expectation cannot name the capture its own exchange binds, because the expectation is judged
+  first. Substitution applies to **values only** — a `${...}` written in a field name, such as a
+  header name, is refused rather than left in place, so every reference in a case is either
+  substituted or reported and none is silently ignored.
+- **A captured `xml_text` is the value, not the wire form.** `expect.capture.<name>.xml_text` expands
+  the XML entities in the element's text, so a captured `<ETag>&quot;abc-1&quot;</ETag>` is spendable
+  as an `If-Match`. Assertions are the other way round: `contains_utf8`, `exact_utf8` and the `xml`
+  block all judge the bytes that arrived, escaping included.
 - **`headers_exact` excludes** the hop-by-hop headers the transport itself manages: `connection`,
   `keep-alive`, `transfer-encoding`, `date`. Assert those explicitly via `headers_present` when they
   are the subject of the case.

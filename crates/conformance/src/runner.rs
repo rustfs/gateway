@@ -14,11 +14,17 @@
 
 //! The execution engine: corpus in, one verdict per case out.
 //!
-//! Responsible for: selecting cases, interpolating captures into a request before it is signed,
-//! driving the exchanges in order, and turning what came back into a verdict with its reason
-//! attached. Every case reaches a conclusion — a case that could not run is skipped *with a
-//! reason*, never dropped, because "not run" and "run and red" are different facts and a report
-//! that conflates them is worse than no report.
+//! Responsible for: selecting cases, interpolating captures into a request before it is signed and
+//! into an expectation before it is judged, driving the exchanges in order, and turning what came
+//! back into a verdict with its reason attached. Every case reaches a conclusion — a case that
+//! could not run is skipped *with a reason*, never dropped, because "not run" and "run and red"
+//! are different facts and a report that conflates them is worse than no report.
+//!
+//! Both sides are interpolated by the same total walk over the document
+//! (`interpolate_value`), which discriminates on the shape of a [`Value`] and never on a field
+//! name. That is deliberate: a substitution that had to be opted into field by field would
+//! eventually miss one, and an assertion that *looks* substituted and is not is worse than one
+//! that plainly is not — it reads as measured where nothing was measured.
 //! NOT responsible for: judging an assertion (`crate::expect`), performing I/O (`crate::sut`), or
 //! rendering (`crate::report`).
 //! Upstream: `crate::corpus`, `crate::lint`, `crate::expect`, `crate::sut`. Downstream:
@@ -212,7 +218,26 @@ fn run_case(
                 ));
             }
             let Some(expectation) = exchange.expect else { continue };
-            let judgement = expect::judge(expectation, &observed, &format!("{}/expect", exchange.pointer), goldens);
+            // The expectation is interpolated on the same terms as the request, and for the same
+            // reason: an assertion naming `${capture.x}` that reached the comparison unsubstituted
+            // would be judged against the literal reference. On a `contains` that reads as a red
+            // case; on a `not_contains` it reads as a green one and can never fail. Substitution
+            // happens here rather than once per exchange because `captures` grows as the exchanges
+            // run, and an expectation may only name a value an *earlier* exchange bound — this
+            // exchange's own `expect.capture` is collected below, after the judgement.
+            let expectation = match interpolate_value(expectation, &captures) {
+                Ok(expectation) => expectation,
+                Err(message) => {
+                    outcome.diagnostics.push(Diagnostic::deny(
+                        "runner/interpolation",
+                        &format!("{}/expect", exchange.pointer),
+                        message,
+                    ));
+                    outcome.verdict = Verdict::Failed;
+                    return outcome;
+                }
+            };
+            let judgement = expect::judge(&expectation, &observed, &format!("{}/expect", exchange.pointer), goldens);
             for mut diagnostic in judgement.diagnostics {
                 diagnostic.message = format!("exchange {}, attempt {}: {}", exchange.label(), attempt + 1, diagnostic.message);
                 outcome.diagnostics.push(diagnostic);
@@ -362,7 +387,20 @@ fn interpolate_value(value: &Value, captures: &Captures) -> Result<Value, String
             .map(Value::Array),
         Value::Table(entries) => entries
             .iter()
-            .map(|(key, item)| interpolate_value(item, captures).map(|item| (key.clone(), item)))
+            .map(|(key, item)| {
+                // A table key is a header name, a capture name or a schema field — never a place a
+                // value is substituted, in either half of an exchange. Refusing it is what keeps
+                // this walk *total*: every `${` in a case is now either substituted or reported,
+                // and there is no third outcome where a reference sits in a position nothing
+                // touches and reads afterwards as though it had been resolved.
+                if key.contains("${") {
+                    return Err(format!(
+                        "`{key}` uses `${{...}}` in a field name; substitution applies to values only, \
+                         and a reference left in a name is not a reference the runner resolved"
+                    ));
+                }
+                interpolate_value(item, captures).map(|item| (key.clone(), item))
+            })
             .collect::<Result<Vec<_>, _>>()
             .map(Value::Table),
         other => Ok(other.clone()),

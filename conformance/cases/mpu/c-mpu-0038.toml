@@ -5,12 +5,18 @@ id = "c-mpu-0038"
 schema_version = 1
 title = "Whitespace written while the outcome is pending leaves the response a valid document"
 rationale = """
-The whitespace exists because the head has to be flushed before the outcome is known, and it is \
-only safe because leading whitespace before an XML declaration-less document is well formed. Two \
-ways to get it wrong both produce a document no parser accepts: writing the whitespace after the \
-declaration, or writing it between the root element's own children. Asserting the parsed shape as \
-well as the presence of the result element is what separates 'the bytes arrived' from 'the bytes \
-parse'."""
+The whitespace exists because the head has to be flushed before the outcome is known, and what \
+makes it safe is the shape of the XML prolog rather than the absence of a declaration. `prolog ::= \
+XMLDecl? Misc*` and `Misc` includes white space, so a declaration written first with the \
+keep-alive whitespace after it is a well-formed document. The one ordering that is not well formed \
+is the mirror of it: nothing may precede an XML declaration, so a server that writes its whitespace \
+first has not delayed a declaration, it has destroyed one, and every byte after that is a document \
+with a stray processing instruction in front of it. This case asserted the inverse until it was \
+settled against evidence — it demanded the declaration be absent, which is neither what AWS emits \
+nor what the rest of this corpus already says: `c-mpu-0001` and `c-copy-0038` both pin \
+`body_bytes_before_error = 39`, the declaration and its newline, as everything this same operation \
+had committed before it discovered it had failed. Asserting the parsed shape as well as the \
+presence of the result element is what separates 'the bytes arrived' from 'the bytes parse'."""
 polarity = "negative"
 operation = "CompleteMultipartUpload"
 tags = ["multipart", "streaming", "xml-shape"]
@@ -24,8 +30,13 @@ kind = "s3s-pr"
 
 [[case.evidence]]
 url = "https://www.w3.org/TR/xml/#sec-prolog-dtd"
-summary = "White space is permitted in the prolog, before the document element."
+summary = "The prolog production puts the optional XML declaration first and allows white space only after it, so whitespace may follow a declaration but never precede one."
 kind = "other"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CompleteMultipartUpload.html"
+summary = "The documented response syntax and both sample 200 responses open this operation's body with an XML declaration, and the sample carrying an embedded error shows the whitespace after it."
+kind = "aws-doc"
 
 [clock]
 fixed = "2026-01-02T03:04:05Z"
@@ -69,7 +80,10 @@ terminate_within_ms = 45000
 [expect.body]
 redact = ["Location", "ETag", "UploadId"]
 
+# `declaration = true` is the position rule, not a presence one: `crate::xml::has_declaration`
+# requires the declaration at the first byte, so a response that wrote its keep-alive whitespace
+# before the declaration fails here rather than passing on a document no parser accepts.
 [expect.body.xml]
 root = "CompleteMultipartUploadResult"
-declaration = false
+declaration = true
 element_order = ["Location", "Bucket", "Key", "ETag"]

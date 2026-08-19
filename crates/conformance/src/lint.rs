@@ -16,8 +16,9 @@
 //!
 //! Responsible for: everything `conformance/README.md` states as a rule but JSON Schema cannot
 //! check — that an identifier agrees with its directory and file name, that a golden exists, that
-//! every `${capture.*}` has a producer earlier in the same case, that a tag is in the documented
-//! vocabulary, and that a value the runner could compute was not written into the file by hand.
+//! every `${capture.*}` in either half of an exchange has a producer earlier in the same case and
+//! sits where substitution can reach it, that a tag is in the documented vocabulary, and that a
+//! value the runner could compute was not written into the file by hand.
 //! Rules that make a case unusable deny; rules that describe drift warn, because a warning that
 //! fails the build gets suppressed and a suppressed rule teaches nothing.
 //! NOT responsible for: schema validation (`crate::schema`) or execution (`crate::runner`).
@@ -226,32 +227,52 @@ fn check_interpolation(case: &Case, out: &mut Vec<Diagnostic>) {
     }
     let mut used: BTreeSet<String> = BTreeSet::new();
     for exchange in case.exchanges() {
-        let Some(request) = exchange.request else { continue };
-        let mut strings = Vec::new();
-        collect_strings(request, &mut strings);
-        for text in &strings {
-            for form in interpolate::unsupported_forms(text) {
+        // Both halves of an exchange are interpolated by the runner, so both are checked here, and
+        // both are checked *before* this exchange's own captures are declared available: an
+        // expectation is judged before its captures are collected, so it can only name a value an
+        // earlier exchange bound. Scanning the request alone was the gap that let
+        // `not_contains_utf8 = ["${capture.x}"]` reach a comparison as eleven literal characters.
+        for (half, value) in [("request", exchange.request), ("expect", exchange.expect)] {
+            let Some(value) = value else { continue };
+            // A field *name* is never substituted — the runner refuses one that tries — so a
+            // reference written there is caught at load time rather than at the moment the case
+            // would otherwise have run with it silently in place.
+            for key in reference_bearing_keys(value) {
                 out.push(Diagnostic::deny(
-                    "lint/interpolation-unsupported",
-                    &format!("{}/request", exchange.pointer),
+                    "lint/interpolation-in-field-name",
+                    &format!("{}/{half}", exchange.pointer),
                     format!(
-                        "`${{{form}}}` is not a capture reference. Schema version 1 has only \
-                         `${{capture.<name>}}`; a computed value needs a schema change, not a \
-                         runner-local expression language"
+                        "`{key}` uses `${{...}}` in a field name. Substitution applies to values only; \
+                         a header name or a capture name is written out in full"
                     ),
                 ));
             }
-            for name in interpolate::referenced_captures(text) {
-                used.insert(name.clone());
-                if !available.contains(&name) {
+            let mut strings = Vec::new();
+            collect_strings(value, &mut strings);
+            for text in &strings {
+                for form in interpolate::unsupported_forms(text) {
                     out.push(Diagnostic::deny(
-                        "lint/capture-unresolved",
-                        &format!("{}/request", exchange.pointer),
+                        "lint/interpolation-unsupported",
+                        &format!("{}/{half}", exchange.pointer),
                         format!(
-                            "`${{capture.{name}}}` has no producer at this point; a capture must come \
-                             from `setup` or from `expect.capture` on an earlier exchange"
+                            "`${{{form}}}` is not a capture reference. Schema version 1 has only \
+                             `${{capture.<name>}}`; a computed value needs a schema change, not a \
+                             runner-local expression language"
                         ),
                     ));
+                }
+                for name in interpolate::referenced_captures(text) {
+                    used.insert(name.clone());
+                    if !available.contains(&name) {
+                        out.push(Diagnostic::deny(
+                            "lint/capture-unresolved",
+                            &format!("{}/{half}", exchange.pointer),
+                            format!(
+                                "`${{capture.{name}}}` has no producer at this point; a capture must come \
+                                 from `setup` or from `expect.capture` on an earlier exchange"
+                            ),
+                        ));
+                    }
                 }
             }
         }
@@ -320,6 +341,35 @@ fn setup_captures(setup: &Value) -> Vec<String> {
             }
         }
     }
+    out
+}
+
+/// Every table key anywhere under `value` that carries a `${...}`.
+///
+/// `collect_strings` walks values, which is what substitution acts on. This walks the other half of
+/// each table, which is what substitution deliberately does not act on — and therefore the half
+/// where a reference would sit unresolved and unreported.
+fn reference_bearing_keys(value: &Value) -> Vec<String> {
+    let mut out = Vec::new();
+    fn walk(value: &Value, out: &mut Vec<String>) {
+        match value {
+            Value::Array(items) => {
+                for item in items {
+                    walk(item, out);
+                }
+            }
+            Value::Table(entries) => {
+                for (key, item) in entries {
+                    if key.contains("${") {
+                        out.push(key.clone());
+                    }
+                    walk(item, out);
+                }
+            }
+            _ => {}
+        }
+    }
+    walk(value, &mut out);
     out
 }
 
@@ -510,125 +560,4 @@ fn check_hand_computed_values(case: &Case, out: &mut Vec<Diagnostic>) {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::corpus::Corpus;
-    use crate::diagnostic::Severity;
-
-    fn linted() -> Corpus {
-        let root = Corpus::discover_root().expect("the repository corpus");
-        let mut corpus = Corpus::load(&root).expect("the corpus loads");
-        lint(&mut corpus);
-        corpus
-    }
-
-    #[test]
-    fn the_repository_corpus_has_no_denied_convention_violation() {
-        let corpus = linted();
-        let denied: Vec<String> = corpus
-            .cases()
-            .iter()
-            .flat_map(|case| {
-                case.diagnostics
-                    .iter()
-                    .filter(|d| d.severity == Severity::Deny)
-                    .map(move |d| format!("{}: {d}", case.relative))
-            })
-            .collect();
-        assert!(denied.is_empty(), "convention violations:\n{}", denied.join("\n"));
-    }
-
-    #[test]
-    fn negative_cases_outnumber_positive_ones() {
-        let (negative, positive) = polarity_balance(&linted());
-        assert!(negative >= positive, "{negative} negative versus {positive} positive");
-    }
-
-    #[test]
-    fn every_case_declares_a_rationale_and_evidence() {
-        let corpus = linted();
-        for case in corpus.cases() {
-            // `get`, not `read`: `caseMeta.rationale` is declared inert in `crate::keys`, and a
-            // test recording it would contradict that declaration.
-            let rationale = case.document.as_ref().and_then(|doc| doc.path("case/rationale"));
-            assert!(rationale.is_some(), "{} has no rationale", case.relative);
-            let evidence = case
-                .document
-                .as_ref()
-                .and_then(|doc| doc.path("case/evidence"))
-                .and_then(Value::as_array)
-                .map(<[Value]>::len)
-                .unwrap_or(0);
-            assert!(evidence > 0, "{} has no evidence", case.relative);
-        }
-    }
-
-    #[test]
-    fn a_case_whose_identifier_disagrees_with_its_file_is_denied() {
-        let root = Corpus::discover_root().expect("the repository corpus");
-        let mut corpus = Corpus::load(&root).expect("the corpus loads");
-        let case = &mut corpus.cases_mut()[0];
-        if let Some(document) = case.document.as_mut()
-            && let Some(meta) = document.get_mut("case")
-        {
-            meta.insert("id", Value::String("c-etag-9999".to_owned()));
-        }
-        lint(&mut corpus);
-        let found = corpus.cases()[0].diagnostics.iter().any(|d| d.rule == "lint/id-file-name");
-        assert!(found, "{:?}", corpus.cases()[0].diagnostics);
-    }
-
-    #[test]
-    fn an_unresolved_capture_reference_is_denied() {
-        let root = Corpus::discover_root().expect("the repository corpus");
-        let mut corpus = Corpus::load(&root).expect("the corpus loads");
-        for case in corpus.cases_mut() {
-            if case.id != "c-cond-0001" {
-                continue;
-            }
-            if let Some(document) = case.document.as_mut()
-                && let Some(request) = document.get_mut("request")
-            {
-                request.insert("target", Value::String("/b/${capture.nothing}".to_owned()));
-            }
-        }
-        lint(&mut corpus);
-        let case = corpus
-            .cases()
-            .iter()
-            .find(|case| case.id == "c-cond-0001")
-            .expect("c-cond-0001");
-        assert!(
-            case.diagnostics.iter().any(|d| d.rule == "lint/capture-unresolved"),
-            "{:?}",
-            case.diagnostics
-        );
-    }
-
-    #[test]
-    fn a_computed_interpolation_form_is_denied_rather_than_invented() {
-        let root = Corpus::discover_root().expect("the repository corpus");
-        let mut corpus = Corpus::load(&root).expect("the corpus loads");
-        for case in corpus.cases_mut() {
-            if case.id != "c-cond-0001" {
-                continue;
-            }
-            if let Some(document) = case.document.as_mut()
-                && let Some(request) = document.get_mut("request")
-            {
-                request.insert("target", Value::String("/b/${md5(body)}".to_owned()));
-            }
-        }
-        lint(&mut corpus);
-        let case = corpus
-            .cases()
-            .iter()
-            .find(|case| case.id == "c-cond-0001")
-            .expect("c-cond-0001");
-        assert!(
-            case.diagnostics.iter().any(|d| d.rule == "lint/interpolation-unsupported"),
-            "{:?}",
-            case.diagnostics
-        );
-    }
-}
+mod tests;
