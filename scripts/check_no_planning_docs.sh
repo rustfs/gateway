@@ -102,7 +102,7 @@ done <"$directory_inputs"
 while IFS= read -r file; do
     [[ -z "$file" ]] && continue
     base="$(basename "$file" | tr '[:upper:]' '[:lower:]')"
-    if printf '%s' "$base" | grep -Eq "$PLANNING_NAME_RE"; then
+    if printf '%s' "$base" | grep -E "$PLANNING_NAME_RE" >/dev/null; then
         report "$file" "filename reads like a working note"
     fi
 done <"$markdown_inputs"

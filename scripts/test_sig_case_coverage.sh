@@ -148,10 +148,14 @@ expect_fail_self_mutation() {
 
 printf 'Positive control (signature case coverage must be clean)\n'
 cases=$((cases + 1))
-if "${SCRIPT_DIR}/check_sig_case_coverage.sh" >/dev/null 2>&1; then
+positive_control_output=""
+if positive_control_output="$("${SCRIPT_DIR}/check_sig_case_coverage.sh" 2>&1)"; then
     pass_msg 'check_sig_case_coverage.sh'
 else
+    # This exit aborts the whole worker that called this suite, so the guard's own
+    # message is the only evidence anyone downstream will have. Print it.
     fail_msg 'check_sig_case_coverage.sh fails on the current tree'
+    printf '%s\n' "$positive_control_output" | sed 's/^/       /' >&2
     exit 1
 fi
 

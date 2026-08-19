@@ -118,14 +118,14 @@ fi
 # -----------------------------------------------------------------------------
 while IFS= read -r name; do
     [[ -z "$name" ]] && continue
-    if ! printf '%s\n' "$file_tests" | grep -qx -- "$name"; then
+    if ! printf '%s\n' "$file_tests" | grep -x -- "$name" >/dev/null; then
         report "${DOC_FILE}: the landing table names '${name}', which is not a test in ${TEST_FILE}; the row is a claim with nothing behind it"
     fi
 done <<<"$table_tests"
 
 while IFS= read -r name; do
     [[ -z "$name" ]] && continue
-    if ! printf '%s\n' "$table_tests" | grep -qx -- "$name"; then
+    if ! printf '%s\n' "$table_tests" | grep -x -- "$name" >/dev/null; then
         report "${TEST_FILE}: '${name}' has no row in the ${DOC_FILE} landing table; P10-06 reads the table, so a landing that is not in it is one nobody will account for"
     fi
 done <<<"$file_tests"

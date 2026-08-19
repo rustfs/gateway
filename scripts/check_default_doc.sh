@@ -30,7 +30,7 @@ for subject in "${subjects[@]}"; do
     line="$(grep -nE "^impl Default for ${type}[[:space:]]*\\{" "$file" | cut -d: -f1)"
     [[ -n "$line" ]] || fail "${relative}: Default for ${type} is missing"
     start=$((line > 8 ? line - 8 : 1))
-    sed -n "${start},$((line - 1))p" "$file" | grep -qF '/// # Security' \
+    sed -n "${start},$((line - 1))p" "$file" | grep -F '/// # Security' >/dev/null \
         || fail "${relative}:${line}: Default for ${type} has no # Security section"
     checked=$((checked + 1))
 done
