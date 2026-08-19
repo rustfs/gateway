@@ -1419,14 +1419,6 @@ fn refused(rejection: PreconditionRejection) -> HandlerError {
 /// that switches on the element sees `if-none-match` as a value it has no branch for.
 const DESTINATION_CONDITIONS: [&str; 4] = ["If-Match", "If-Unmodified-Since", "If-None-Match", "If-Modified-Since"];
 
-/// The copy-source spellings of the same four. Lowercase, because the `x-amz-` headers are.
-const COPY_SOURCE_CONDITIONS: [&str; 4] = [
-    "x-amz-copy-source-if-match",
-    "x-amz-copy-source-if-unmodified-since",
-    "x-amz-copy-source-if-none-match",
-    "x-amz-copy-source-if-modified-since",
-];
-
 /// The header a `412` names, when the request carried exactly one condition.
 ///
 /// # Why only one, and why this is not the evaluation order
@@ -1497,16 +1489,15 @@ fn guard_copy_source(
     now: i64,
 ) -> Result<(), HandlerError> {
     let conditions = conditions(if_match, if_unmodified_since, if_none_match, if_modified_since, now)?;
-    let named = sole_condition(
-        &COPY_SOURCE_CONDITIONS,
-        [
-            if_match.is_some(),
-            if_unmodified_since.is_some(),
-            if_none_match.is_some(),
-            if_modified_since.is_some(),
-        ],
-    );
-    let result = settle_write(Some(found), &conditions, named);
+    // No `<Condition>`, even when exactly one header arrived and the failed one is therefore known.
+    // ADR-0008 closes that element to `If-Match`, `If-None-Match`, `If-Modified-Since` and
+    // `If-Unmodified-Since`, and a refusal carrying anything else is not trimmed by the resolver —
+    // the whole `412` is replaced by a static `InternalError`. Naming the source header would
+    // therefore turn a precondition failure into a `500`, which is what it did until this comment
+    // existed. The destination's four spellings are in the set and are still named; there is simply
+    // no admitted spelling for the source side, so the element is omitted rather than mis-attributed
+    // to the destination header of the same shape.
+    let result = settle_write(Some(found), &conditions, None);
     let only_if_match =
         if_match.is_some() && if_unmodified_since.is_none() && if_none_match.is_none() && if_modified_since.is_none();
     if only_if_match && copy_source_if_match_miss_proceeds() {
@@ -4696,6 +4687,8 @@ fn paginate(fixture: &Fixture, bucket: &str, prefix: &str, delimiter: Option<&st
 
 #[cfg(test)]
 mod tests {
+    use rustfs_gateway::{ErrorContext, ResponseKind, resolve};
+
     use super::*;
 
     /// The elements of a refusal, in the order the document will write them.
@@ -4705,6 +4698,37 @@ mod tests {
             .iter()
             .map(|detail| (detail.element(), detail.text().into_owned()))
             .collect()
+    }
+
+    /// The status the *service* would answer with, rather than the one the backend intended.
+    ///
+    /// A `HandlerError` is a proposal. Everything a backend puts on one — code, message, headers,
+    /// `<Condition>` and the rest — is re-validated by `ErrorContext::ordinary` against ADR-0008's
+    /// closed matrix before any of it reaches a socket, and a proposal that fails that validation
+    /// is not trimmed: the whole refusal is replaced by a static `InternalError`. So a test that
+    /// reads `error.code()` is reading an intention, and a backend can carry a `412` all the way to
+    /// a green unit test while the wire gets a `500`. This runs the proposal through the same gate
+    /// the service does and reports what survived.
+    fn resolved(error: &HandlerError) -> (u16, ErrorCode, Vec<(&'static str, String)>) {
+        let proposal = HandlerError::new(error.code().clone(), error.message().to_owned());
+        let proposal = error
+            .details()
+            .iter()
+            .fold(proposal, |carried, detail| carried.with_detail(detail.clone()));
+        let Ok(context) = ErrorContext::ordinary(proposal) else {
+            // What `render::internal_resolution` produces for a refusal the resolver refuses.
+            return (500, ErrorCode::INTERNAL_ERROR, Vec::new());
+        };
+        let resolution = resolve(context, ResponseKind::Other);
+        (
+            resolution.status().as_u16(),
+            resolution.code().cloned().unwrap_or(ErrorCode::INTERNAL_ERROR),
+            resolution
+                .details()
+                .iter()
+                .map(|detail| (detail.element(), detail.text().into_owned()))
+                .collect(),
+        )
     }
 
     /// The headers a refusal adds to its own head, rendered.
@@ -4929,17 +4953,68 @@ mod tests {
             .expect_err("the source condition is false");
         assert_eq!(*error.code(), ErrorCode::PRECONDITION_FAILED);
         assert_eq!(
-            elements(&error),
-            vec![("Condition", "x-amz-copy-source-if-match".to_owned())],
-            "the refusal names the header that carried the failed condition, not its destination twin"
+            resolved(&error),
+            (412, ErrorCode::PRECONDITION_FAILED, Vec::new()),
+            "the source-side refusal reaches the wire as a 412 and attributes itself to no header"
         );
+    }
+
+    /// Negative — a copy-source precondition failure is a `412` on the wire, not a `500`.
+    ///
+    /// This is the assertion the family was missing. The copy test above reads `error.code()` and
+    /// sees `PreconditionFailed`, and that was true and unobservable at the same time: while this
+    /// backend named the failed condition
+    /// `x-amz-copy-source-if-match`, ADR-0008's closed matrix admitted only the four RFC 9110
+    /// spellings in `<Condition>`, so `ErrorContext::ordinary` refused the whole proposal and the
+    /// service answered a static `InternalError`. Three cases went red — `c-cond-0026`,
+    /// `c-copy-0031`, `c-copy-0032` — and every unit test in this file stayed green, because none
+    /// of them had ever asked what survived resolution.
+    ///
+    /// Both directions are asserted: the destination guard still names its header, so this is not
+    /// the element being dropped everywhere, and the copy-source guard resolves to the same `412`
+    /// while naming nothing, because the vocabulary has no spelling for the side it failed on.
+    #[test]
+    fn a_copy_source_precondition_failure_survives_resolution_as_a_412() {
+        let source_side = refusal(guard_copy_source(
+            &StoredObject::new(b"hello".to_vec(), None, 0),
+            Some("\"0000000000000000000000000000dead\""),
+            None,
+            None,
+            None,
+            0,
+        ));
+        assert_eq!(
+            resolved(&source_side),
+            (412, ErrorCode::PRECONDITION_FAILED, Vec::new()),
+            "a copy-source condition has no spelling in the admitted `<Condition>` set, so the \
+             refusal names none and stays a 412 rather than being replaced by a 500"
+        );
+
+        let destination_side = refusal(guard_write(
+            Some(&StoredObject::new(b"original".to_vec(), None, 0)),
+            Some("\"0000000000000000000000000000dead\""),
+            None,
+            0,
+        ));
+        assert_eq!(
+            resolved(&destination_side),
+            (412, ErrorCode::PRECONDITION_FAILED, vec![("Condition", "If-Match".to_owned())]),
+            "the destination header is in the admitted set and must still reach the document"
+        );
+    }
+
+    /// The refusal a guard produced, for a guard that was supposed to refuse.
+    fn refusal(outcome: Result<(), HandlerError>) -> HandlerError {
+        outcome.expect_err("the condition does not hold")
     }
 
     /// Positive — one conditional header arrived, so the `412` can say which one failed.
     ///
-    /// Both spellings are asserted: the destination set is the canonical mixed case a client reads
-    /// out of `<Condition>`, and the copy-source set names the `x-amz-` header that actually
-    /// carried the condition rather than the destination header of the same shape.
+    /// Only the destination set is attributable: it is the canonical mixed case a client reads out
+    /// of `<Condition>`, and it is the only set ADR-0008 admits into the element at all. The
+    /// copy-source spellings were asserted here too until it turned out no client could ever see
+    /// one; `a_copy_source_precondition_failure_survives_resolution_as_a_412` holds that side now,
+    /// against the resolved response rather than against the proposal.
     #[test]
     fn a_single_condition_is_named_by_the_header_that_carried_it() {
         assert_eq!(
@@ -4947,10 +5022,6 @@ mod tests {
             Some("If-None-Match")
         );
         assert_eq!(sole_condition(&DESTINATION_CONDITIONS, [true, false, false, false]), Some("If-Match"));
-        assert_eq!(
-            sole_condition(&COPY_SOURCE_CONDITIONS, [true, false, false, false]),
-            Some("x-amz-copy-source-if-match")
-        );
     }
 
     /// Negative — a request that carried two conditions, or none, is not attributed to one.
