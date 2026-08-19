@@ -523,12 +523,12 @@ struct CommittedFault {
 
 /// The operation names this fixture commits a head for, and can therefore report a fault from.
 ///
-/// One home, because a fault armed against a name no handler reads is armed against nothing:
-/// [`Fixture::committed_fault`] answers `None`, the case runs as though it had declared no fault,
-/// and it reports whatever it happened to get. The list is not merely written down — every name in
-/// it is driven through its handler by
-/// [`tests::every_operation_this_fixture_commits_for_reports_the_fault_armed_against_it`], so a name
-/// added here without a call site is a red test rather than a silent skip.
+/// One home, because a fault armed against a name no handler reads is armed against nothing: the
+/// lookup answers `None`, the case runs as though it had declared no fault, and it reports whatever
+/// it happened to get. The list is not merely written down — every name in it is driven through its
+/// own handler by `every_operation_this_fixture_commits_for_reports_the_fault_armed_against_it` in
+/// this file's tests, so a name added here without a call site is a red test rather than a silent
+/// skip.
 ///
 /// Shorter than the model's `ERROR_AFTER_200`, which also carries `UploadPartCopy`: this fixture
 /// answers that one without committing anything, so there is no point in it at which a fault could
