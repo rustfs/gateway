@@ -41,7 +41,21 @@ sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential
 kind = "response"
 status = 400
 connection_after = "open"
-headers_absent = ["set-cookie", "etag"]
+# The injected name is deliberately NOT in `headers_absent`. A response header *named*
+# `x-injected` or `set-cookie` is unconstructible in this gateway — `crates/core/src/lib.rs`
+# is `#![forbid(unsafe_code)]`, every insertion goes through `HeaderName::from_bytes` on a
+# compile-time constant, and hyper serialises the head from a typed map — so the needle could
+# not fail for any reachable defect and would read exactly like a check that passed. The live
+# assertion against the same input is the `not_contains_utf8` twin below, which fires when the
+# value is echoed into the error document.
+headers_absent = ["etag"]
+
+# `content-type` cannot be asserted absent here the way the sibling cases assert theirs: the
+# error document always sets one. The falsifiable statement is that it is still the error
+# document's own media type — an implementation that applied the override would relabel this
+# XML as `text/plain`, which is c-object-0016's rule reaching the refusal path as well.
+[expect.headers_present]
+"content-type" = "application/xml"
 
 [expect.error]
 code = "InvalidArgument"

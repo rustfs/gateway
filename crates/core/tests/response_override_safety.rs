@@ -59,6 +59,8 @@ struct Override {
     member: &'static str,
     header: &'static str,
     legal: &'static str,
+    /// The bytes `legal` must arrive in the header as, once decoded.
+    carried: &'static str,
 }
 
 /// The six, in the order the IR lists them.
@@ -68,36 +70,42 @@ const OVERRIDES: &[Override] = &[
         member: "ResponseCacheControl",
         header: "cache-control",
         legal: "no-store",
+        carried: "no-store",
     },
     Override {
         query: "response-content-disposition",
         member: "ResponseContentDisposition",
         header: "content-disposition",
         legal: "attachment%3B%20filename%3D%22r.txt%22",
+        carried: "attachment; filename=\"r.txt\"",
     },
     Override {
         query: "response-content-encoding",
         member: "ResponseContentEncoding",
         header: "content-encoding",
         legal: "identity",
+        carried: "identity",
     },
     Override {
         query: "response-content-language",
         member: "ResponseContentLanguage",
         header: "content-language",
         legal: "fr-CA",
+        carried: "fr-CA",
     },
     Override {
         query: "response-content-type",
         member: "ResponseContentType",
         header: "content-type",
         legal: "text%2Fplain",
+        carried: "text/plain",
     },
     Override {
         query: "response-expires",
         member: "ResponseExpires",
         header: "expires",
         legal: "Thu%2C%2001%20Jan%201970%2000%3A00%3A00%20GMT",
+        carried: "Thu, 01 Jan 1970 00:00:00 GMT",
     },
 ];
 
@@ -264,18 +272,24 @@ fn n_a_request_carrying_no_override_at_all_is_not_refused() {
 
 // ── positive controls ────────────────────────────────────────────────────────────────────────
 
-/// Positive — every legal value still decodes and still reaches its header.
+/// Positive — every legal value still decodes and still reaches its header, byte for byte.
 ///
 /// The direction that keeps the six refusals above from being satisfied by a decoder that refuses
 /// the parameters outright.
+///
+/// It asserts the bytes rather than the header's presence, and that is not pedantry: the first
+/// version of this test read `carried.is_some()` and **survived** a mutation that replaced
+/// `override_header_value` with a constant — a decoder writing a wholly wrong value passed it
+/// while its docstring claimed the value "reaches its header". Presence is not the claim.
 #[test]
 fn every_legal_override_still_reaches_its_header() {
     for entry in OVERRIDES {
         let target = format!("/photos/key?{}={}", entry.query, entry.legal);
         let carried = encoded_header(&target, entry.header);
-        assert!(
-            carried.is_some(),
-            "{} carrying a legal value must still overwrite {}",
+        assert_eq!(
+            carried.as_deref(),
+            Some(entry.carried.as_bytes()),
+            "{} carrying a legal value must overwrite {} with exactly that value",
             entry.query,
             entry.header
         );
