@@ -157,7 +157,7 @@ else
 fi
 
 is_allowed() {
-    [[ -n "$ALLOWANCES" ]] && printf '%s' "$ALLOWANCES" | grep -qxF "$1"
+    [[ -n "$ALLOWANCES" ]] && printf '%s' "$ALLOWANCES" | grep -xF "$1" >/dev/null
 }
 
 percent_hits="$(matching_files 'percent_decode_str[[:space:]]*\(|percent_decode[[:space:]]*\(')"

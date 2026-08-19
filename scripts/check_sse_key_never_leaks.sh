@@ -140,7 +140,7 @@ if [[ -z "$list_definition" ]]; then
 else
     for constant in SSEC_KEY COPY_SSEC_KEY; do
         # Word-boundary match: `SSEC_KEY` must not be satisfied by `SSEC_KEY_MD5`.
-        if ! printf '%s\n' "$list_definition" | grep -qE "(^|[^A-Z_])${constant}([^A-Z_]|$)"; then
+        if ! printf '%s\n' "$list_definition" | grep -E "(^|[^A-Z_])${constant}([^A-Z_]|$)" >/dev/null; then
             report "NEVER_IN_A_RESPONSE in ${HEADERS_FILE} does not list ${constant}; a CopyObject carries two independent keys and dropping either spelling echoes the one nobody was looking for"
         fi
     done
