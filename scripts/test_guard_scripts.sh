@@ -9589,6 +9589,329 @@ expect_fail check_shared_reachable.sh \
     'a new public item in shared/ that the facade does not re-export' mut_unexported_shared_item
 
 # -----------------------------------------------------------------------------
+# `check_shared_members.sh` implements both directions and, until now, proved
+# one: the case above breaks "claimed but unused", and nothing broke "used but
+# unclaimed". A guard half of whose code has never been observed to fail is half
+# a guard — this is the other half.
+# -----------------------------------------------------------------------------
+
+mut_members_omits_user() {
+    python3 - <<'PYEOF'
+import pathlib
+p = pathlib.Path("crates/core/src/ops/shared/pagination.rs")
+t = p.read_text()
+old = "//! Members: ListBuckets, ListObjectVersions, ListObjects, ListObjectsV2"
+if old not in t:
+    raise SystemExit("pagination Members mutation subject is missing")
+p.write_text(t.replace(old, "//! Members: ListObjectVersions, ListObjects, ListObjectsV2", 1))
+PYEOF
+}
+expect_fail_with_diagnostic check_shared_members.sh \
+    'an operation dropping off Members: while it still uses the module' \
+    'used by operations absent from' \
+    mut_members_omits_user
+
+# -----------------------------------------------------------------------------
+# check_op_file_shape.sh — rustfs/backlog#1895.
+#
+# Two documents said this guard enforced the One Operation Per File rule from
+# P1. The file did not exist. The mutations below are grouped by the three rules
+# it carries, and the two `//! Shares:` edges are broken separately in each
+# direction, because the interesting property is not that one of them fails but
+# that neither can be satisfied from one file alone.
+# -----------------------------------------------------------------------------
+
+# -- Rule 1: one operation per file -------------------------------------------
+
+mut_op_shape_second_operation() {
+    python3 - <<'PYEOF'
+import pathlib
+p = pathlib.Path("crates/core/src/ops/get_bucket_versioning.rs")
+p.write_text(p.read_text() + "\nimpl Operation for GetBucketVersioningAgain {}\n")
+PYEOF
+}
+expect_fail_with_diagnostic check_op_file_shape.sh \
+    'a second operation moving into an existing operation file' \
+    'declares 2 `impl Operation`' \
+    mut_op_shape_second_operation
+
+# The same declaration one turn of the screw away. `impl<T> Operation for X<T>` is
+# what a second operation looks like when the author has read the guard.
+mut_op_shape_second_operation_generic() {
+    python3 - <<'PYEOF'
+import pathlib
+p = pathlib.Path("crates/core/src/ops/list_objects.rs")
+p.write_text(p.read_text() + "\nimpl<T> Operation for ListObjectsGeneric<T> {}\n")
+PYEOF
+}
+expect_fail_with_diagnostic check_op_file_shape.sh \
+    'a second operation written with a generic parameter' \
+    'declares 2 `impl Operation`' \
+    mut_op_shape_second_operation_generic
+
+mut_op_shape_impl_outside_ops() {
+    python3 - <<'PYEOF'
+import pathlib
+p = pathlib.Path("crates/core/src/registry/opset.rs")
+p.write_text(p.read_text() + "\nimpl Operation for SmuggledIn {}\n")
+PYEOF
+}
+expect_fail_with_diagnostic check_op_file_shape.sh \
+    'an operation declared outside the ops tree entirely' \
+    'declares `impl Operation` outside the ops tree' \
+    mut_op_shape_impl_outside_ops
+
+# The other direction of the same control. A guard that rejected every
+# `impl Operation` outside `ops/` would reject the fixtures and the third-party
+# dialect examples the trait is public for, and would have to be silenced with
+# an allowance list within a week. The line is `#[cfg(test)]`, and it is real:
+# the same text one scope deeper must pass.
+mut_op_shape_impl_in_test_module() {
+    python3 - <<'PYEOF'
+import pathlib
+p = pathlib.Path("crates/core/src/registry/opset.rs")
+p.write_text(
+    p.read_text()
+    + "\n#[cfg(test)]\nmod smuggle_probe {\n    impl Operation for SmuggledIn {}\n}\n"
+)
+PYEOF
+}
+expect_guard_pass check_op_file_shape.sh \
+    'the same operation impl inside a #[cfg(test)] module' \
+    mut_op_shape_impl_in_test_module
+
+mut_op_shape_name_disagrees() {
+    python3 - <<'PYEOF'
+import pathlib
+p = pathlib.Path("crates/core/src/ops/head_bucket.rs")
+t = p.read_text()
+old = "impl Operation for HeadBucket {"
+if old not in t:
+    raise SystemExit("head_bucket impl mutation subject is missing")
+p.write_text(t.replace(old, "impl Operation for HeadBucketV2 {", 1))
+PYEOF
+}
+expect_fail_with_diagnostic check_op_file_shape.sh \
+    'an operation whose name no longer matches the file it lives in' \
+    'operation name and file name disagree' \
+    mut_op_shape_name_disagrees
+
+mut_op_shape_unmounted_module() {
+    python3 - <<'PYEOF'
+import pathlib
+source = pathlib.Path("crates/core/src/ops/head_bucket.rs").read_text()
+pathlib.Path("crates/core/src/ops/head_bucket_v2.rs").write_text(
+    source.replace("impl Operation for HeadBucket {", "impl Operation for HeadBucketV2 {", 1)
+    .replace("//! `HeadBucket`", "//! `HeadBucketV2`", 1)
+)
+PYEOF
+}
+expect_fail_with_diagnostic check_op_file_shape.sh \
+    'an operation file that no `pub mod` in ops/mod.rs mounts' \
+    'mounts it, so nothing compiles it' \
+    mut_op_shape_unmounted_module
+
+mut_op_shape_operation_in_shared() {
+    python3 - <<'PYEOF'
+import pathlib
+p = pathlib.Path("crates/core/src/ops/shared/pagination.rs")
+p.write_text(p.read_text() + "\nimpl Operation for ListEverything {}\n")
+PYEOF
+}
+expect_fail_with_diagnostic check_op_file_shape.sh \
+    'an operation growing inside a shared contract module' \
+    'a shared contract declares `impl Operation for' \
+    mut_op_shape_operation_in_shared
+
+# -- Rule 2, edge (a): `//! Shares:` against the use graph ----------------------
+
+# Broken so that only edge (a) can see it: the module is added to the operation's
+# `Shares:` line *and* to that module's `Members:` list, so the two declarations
+# agree with each other and disagree only with the code.
+mut_op_shape_shares_claims_unreached() {
+    python3 - <<'PYEOF'
+import pathlib
+op = pathlib.Path("crates/core/src/ops/get_object.rs")
+t = op.read_text()
+old = "//! Shares: precondition, etag"
+if old not in t:
+    raise SystemExit("get_object Shares mutation subject is missing")
+op.write_text(t.replace(old, "//! Shares: precondition, etag, pagination", 1))
+
+shared = pathlib.Path("crates/core/src/ops/shared/pagination.rs")
+s = shared.read_text()
+shared.write_text(s.replace("//! Members: ListBuckets", "//! Members: GetObject, ListBuckets", 1))
+PYEOF
+}
+expect_fail_with_diagnostic check_op_file_shape.sh \
+    'a Shares: line naming a contract the file never reaches' \
+    'names `pagination`, which this file never reaches' \
+    mut_op_shape_shares_claims_unreached
+
+mut_op_shape_shares_omits_reached() {
+    python3 - <<'PYEOF'
+import pathlib
+p = pathlib.Path("crates/core/src/ops/get_object.rs")
+t = p.read_text()
+old = "//! Shares: precondition, etag"
+if old not in t:
+    raise SystemExit("get_object Shares mutation subject is missing")
+p.write_text(t.replace(old, "//! Shares: precondition", 1))
+PYEOF
+}
+expect_fail_with_diagnostic check_op_file_shape.sh \
+    'a contract the file reaches dropping off its Shares: line' \
+    'reaches `shared::etag`, which its `//! Shares:` line does not name' \
+    mut_op_shape_shares_omits_reached
+
+# -- Rule 2, edge (b): `//! Shares:` against `//! Members:` ---------------------
+
+# The case edge (b) exists for. The declaration is added as an intra-doc link,
+# which is itself a `shared::pagination` reference, so edge (a) is satisfied by
+# the very text that makes the claim. Only the far end of the declaration can
+# refuse it.
+mut_op_shape_shares_link_without_membership() {
+    python3 - <<'PYEOF'
+import pathlib
+p = pathlib.Path("crates/core/src/ops/get_object.rs")
+t = p.read_text()
+old = "//! Shares: precondition, etag"
+if old not in t:
+    raise SystemExit("get_object Shares mutation subject is missing")
+new = (
+    "//! Shares: precondition, etag. Its listing behaviour is\n"
+    "//! [`shared::pagination`](super::shared::pagination)."
+)
+p.write_text(t.replace(old, new, 1))
+PYEOF
+}
+expect_fail_with_diagnostic check_op_file_shape.sh \
+    'a Shares: declaration whose far end never agreed to it' \
+    "`Members:` does not name it" \
+    mut_op_shape_shares_link_without_membership
+
+mut_op_shape_members_without_shares() {
+    python3 - <<'PYEOF'
+import pathlib
+p = pathlib.Path("crates/core/src/ops/shared/pagination.rs")
+t = p.read_text()
+old = "//! Members: ListBuckets"
+if old not in t:
+    raise SystemExit("pagination Members mutation subject is missing")
+p.write_text(t.replace(old, "//! Members: HeadBucket, ListBuckets", 1))
+PYEOF
+}
+expect_fail_with_diagnostic check_op_file_shape.sh \
+    'a Members: list claiming an operation that never claimed it back' \
+    'does not name `pagination` back' \
+    mut_op_shape_members_without_shares
+
+# -- Rule 2: the declaration itself --------------------------------------------
+
+mut_op_shape_shares_names_non_module() {
+    python3 - <<'PYEOF'
+import pathlib
+p = pathlib.Path("crates/core/src/ops/get_object.rs")
+t = p.read_text()
+old = "//! Shares: precondition, etag"
+if old not in t:
+    raise SystemExit("get_object Shares mutation subject is missing")
+p.write_text(t.replace(old, "//! Shares: precondition, etag, range_header", 1))
+PYEOF
+}
+expect_fail_with_diagnostic check_op_file_shape.sh \
+    'a Shares: line naming something that is not a module at all' \
+    'which is not a module under' \
+    mut_op_shape_shares_names_non_module
+
+mut_op_shape_shares_line_removed() {
+    python3 - <<'PYEOF'
+import pathlib
+import re
+p = pathlib.Path("crates/core/src/ops/get_bucket_location.rs")
+t = p.read_text()
+if not re.search(r"^//! Shares:", t, re.M):
+    raise SystemExit("get_bucket_location Shares mutation subject is missing")
+p.write_text(re.sub(r"^//! Shares:.*\n", "", t, count=1, flags=re.M))
+PYEOF
+}
+expect_fail_with_diagnostic check_op_file_shape.sh \
+    'an operation module with no Shares: declaration at all' \
+    'has no `//! Shares:` declaration' \
+    mut_op_shape_shares_line_removed
+
+# The other direction of the parse. Seven operations share a rule with a family
+# that has no module under `shared/` and say so in prose; a guard that scanned
+# the block for module-shaped words would read `precondition` out of the
+# sentence "it carries no precondition header" — which is a real sentence in
+# `put_object_tagging.rs` — and demand a contract that must not be there.
+mut_op_shape_shares_prose_mentions_module() {
+    python3 - <<'PYEOF'
+import pathlib
+p = pathlib.Path("crates/core/src/ops/list_parts.rs")
+t = p.read_text()
+old = "//! Shares: the cursor-and-truncation contract with the listing family;"
+if old not in t:
+    raise SystemExit("list_parts Shares mutation subject is missing")
+p.write_text(
+    t.replace(old, old + " it needs no pagination cursor codec and no etag comparison;", 1)
+)
+PYEOF
+}
+expect_guard_pass check_op_file_shape.sh \
+    'prose naming a module in order to say it is not used' \
+    mut_op_shape_shares_prose_mentions_module
+
+# -- Rule 3: the ceiling and its absent exemption -------------------------------
+
+mut_op_shape_over_ceiling() {
+    python3 - <<'PYEOF'
+import pathlib
+p = pathlib.Path("crates/core/src/ops/get_bucket_location.rs")
+p.write_text(p.read_text() + "\n".join("// pad" for _ in range(900)))
+PYEOF
+}
+expect_fail_with_diagnostic check_op_file_shape.sh \
+    'an operation file growing past the 800-line ceiling' \
+    'over the 800-line ceiling' \
+    mut_op_shape_over_ceiling
+
+# `check_file_size.sh` accepts this entry — it is a well-formed allowance with a
+# real issue behind it. The ops tree is the one place where raising the number is
+# not an answer, so the two guards deliberately disagree about this file.
+mut_op_shape_ceiling_allowance() {
+    python3 - <<'PYEOF'
+import pathlib
+p = pathlib.Path("allowances/file_size.txt")
+p.write_text(
+    p.read_text()
+    + "crates/core/src/ops/get_object.rs 1200 https://github.com/rustfs/backlog/issues/1895"
+    + " Existing operation; split later.\n"
+)
+PYEOF
+}
+expect_fail_with_diagnostic check_op_file_shape.sh \
+    'the size allowance list being used to raise an operation file ceiling' \
+    'the ops tree has no ceiling exemption' \
+    mut_op_shape_ceiling_allowance
+
+# -- The guard's own inputs ----------------------------------------------------
+
+# `[[ -d x ]] || exit 0` is right for an input that may not exist yet and wrong
+# for one that always exists: it turns "the tree moved" into a green check.
+mut_op_shape_shared_dir_removed() {
+    python3 - <<'PYEOF'
+import pathlib
+import shutil
+shutil.rmtree(pathlib.Path("crates/core/src/ops/shared"))
+PYEOF
+}
+expect_fail_with_diagnostic check_op_file_shape.sh \
+    'the shared contract directory disappearing, which must fail rather than skip' \
+    'required input is missing' \
+    mut_op_shape_shared_dir_removed
+
+# -----------------------------------------------------------------------------
 # The route-coverage register has to move in both directions or it stops being a
 # measurement. Growing it silently is how `PUT /b/k?acl` came to write the ACL
 # document over the object — the row at 560 has since retired that line, which is
