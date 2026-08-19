@@ -25,3 +25,6 @@ commands:
   bootstrap                 prepare a fresh checkout for work (<=5 minutes)
   conformance <run|validate|baseline> [--filter <glob>] [--transport hyper|conn]
               [--profile aws|minio|strict] [--baseline <f>] [--json <f>] [--junit <f>]
+  conformance mutate (--family <name> | --quirk <id>) [--filter <glob>]
+                            flip each declared mutable rule of a family in turn and report which
+                            case caught it
