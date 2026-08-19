@@ -253,6 +253,7 @@ if actual_core_harness != core_harness:
     fail("core integration harness must register each frozen source exactly once")
 
 conformance_modules = (
+    "bucket_family",
     "bucket_lifecycle",
     "copy_family",
     "corpus",
