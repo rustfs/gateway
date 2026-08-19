@@ -139,12 +139,44 @@ required = (
     # A host that cannot answer the idle control listener is skipped with its reason, not passed on
     # two saturated percentiles that compare equal because both were charged the ceiling.
     "if control_probes.stalled > 0 {",
-    # Resident memory while the wave is parked, and again across a second identical wave.
+    # Resident memory while the wave is parked, and again across the identical waves that follow.
     "parked_growth <= parked_budget,",
-    "second_growth <= reuse_ceiling,",
+    "tail_mean <= reuse_ceiling,",
+    # More than one further wave, so that the claim is a trend and not one reading, and the tail is
+    # averaged over samples rather than resting on whichever way a single one happened to round.
+    "for _ in 1..WAVES {",
+    # The ceiling is derived from the first wave's own growth. A constant here is what made this
+    # case fail one run in three on healthy trees: 8 MiB is the noise floor of a `ps` reading taken
+    # across a thousand connections, so a hardcoded bound measures the host and not the server.
+    "let reuse_ceiling = first_growth / TAIL_SHARE_OF_FIRST;",
+    # A host whose first wave shows no scale is reported, not passed against a ceiling near zero.
+    "if first_growth < MIN_SCALE {",
+    # The positive control for `ps` itself, and the gate that keeps the reuse assertion from
+    # running where it could not go red. On macOS a resident-set delta cannot see retained memory
+    # at all, so without this the whole reading is a green line that had no other option.
+    "let ballast_seen = resident_growth_ps_can_see()",
+    "if ballast_seen < BALLAST_BYTES / BALLAST_SHARE_SEEN {",
     "let first_closure = retire_slow_readers(first_wave, &loaded.metrics).await;",
-    "let second_closure = retire_slow_readers(second_wave, &loaded.metrics).await;",
+    "closures.push(retire_slow_readers(wave, &loaded.metrics).await);",
 )
+# The harness races the write-progress deadline for every connection's first byte, and a reader it
+# loses that race for reports end of file rather than a byte. Tolerating that silently would let a
+# wave that never opened a single window still be timed as though it had, so the count is bounded.
+stall = re.search(r"async fn stall_slow_readers\(.*?\n\}\n", source, re.S)
+if stall is None:
+    raise SystemExit("check_timeout_layer_ownership: c-lim-0061 slow-reader stall helper is missing")
+for fragment in (
+    "retired_early <= requested / EARLY_RETIREMENT_SHARE,",
+    # Each reader driven by its own task, so a thousand first bytes are waited on at once rather
+    # than one behind another, which is what made the harness lose that race in the first place.
+    "tokio::spawn(async move {",
+):
+    if fragment not in stall.group(0):
+        raise SystemExit(
+            "check_timeout_layer_ownership: c-lim-0061 does not bound readers retired before their first byte: "
+            + fragment
+        )
+
 missing = [fragment for fragment in required if fragment not in body]
 if missing:
     raise SystemExit(
