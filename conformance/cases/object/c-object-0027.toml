@@ -1,0 +1,65 @@
+[case]
+id = "c-object-0027"
+schema_version = 1
+title = "A write is not the place a media type is validated"
+rationale = """
+An empty Content-Type and one that is not a media type at all both reach real buckets, from proxies that rewrite the header and from clients that build it by string concatenation, and S3 stores the object either way. An implementation that validates the value refuses uploads that the reference implementation accepts, and it does so at the only point in the request where the caller cannot work around it. Both spellings are sent because a validator usually rejects one and not the other."""
+polarity = "negative"
+operation = "PutObject"
+tags = ["encoding", "object-attributes"]
+timeout_ms = 10000
+quirks = []
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObject.html"
+summary = "The documented write is the authority for the headers a write accepts and the digests it verifies."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/issues/361"
+summary = "Upstream failed a write whose media type it could not parse."
+kind = "s3s-issue"
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = true
+
+[[setup.buckets]]
+name = "conf-object"
+
+[[exchanges]]
+name = "empty-media-type"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-object/mime/empty"
+headers = { "content-type" = "" }
+body = { utf8 = "hello world" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.headers_present]
+"etag" = "\"5eb63bbbe01eeed093cb22bb8f5acdc3\""
+
+[[exchanges]]
+name = "not-a-media-type"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-object/mime/nonsense"
+headers = { "content-type" = "not/a/mime/type" }
+body = { utf8 = "hello world" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.headers_present]
+"etag" = "\"5eb63bbbe01eeed093cb22bb8f5acdc3\""

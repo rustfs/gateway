@@ -1,0 +1,41 @@
+[case]
+id = "c-object-0023"
+schema_version = 1
+title = "An empty Key element in a delete body is refused rather than read as a key"
+rationale = """
+An empty element and an absent one look identical to a parser that maps missing text to the empty string, and the empty string is not a key any object can have. The failure this guards against is not a crash: it is a request that reports a successful delete of a key that never existed and could not exist, which is indistinguishable to the caller from the delete they asked for."""
+polarity = "negative"
+operation = "DeleteObjects"
+tags = ["xml", "error-shape", "naming"]
+timeout_ms = 10000
+quirks = ["q-deletes-0027"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteObjects.html"
+summary = "The documented multi-object delete is the authority for its request root, its result root and its integrity header."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-object"
+
+[request]
+method = "POST"
+target = "/conf-object?delete"
+headers = { "content-type" = "application/xml", "content-md5" = "D4u8Yz2FKBjaKmHO7IlgxQ==" }
+body = { utf8 = "<Delete><Object><Key></Key></Object></Delete>" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+request_id_present = true
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+not_contains_utf8 = ["<Deleted>"]

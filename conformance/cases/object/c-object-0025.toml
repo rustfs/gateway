@@ -1,0 +1,70 @@
+[case]
+id = "c-object-0025"
+schema_version = 1
+title = "A read and a delete on a bucket that does not exist both name the bucket, not the key"
+rationale = """
+The two not-found codes are the whole of what a client has to tell a mistyped bucket from a mistyped key, and an implementation that looks the key up first answers NoSuchKey for a bucket that was never created. The delete is asserted in the same run as the read because a delete of an absent key is a success, and the temptation is therefore to make a delete on an absent bucket a success too; it is not one, and the distinction is invisible unless both are observed together."""
+polarity = "negative"
+operation = "GetObject"
+tags = ["error-shape", "routing"]
+timeout_ms = 10000
+quirks = []
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObject.html"
+summary = "The documented read response is the authority for the headers a read returns and the errors it raises."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteObject.html"
+summary = "The documented single-object delete is the authority for its success status and its error set."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/issues/545"
+summary = "Upstream answered with the wrong one of the two not-found codes when the bucket existed and the key did not."
+kind = "s3s-issue"
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = true
+
+[[setup.buckets]]
+name = "conf-absent"
+absent = true
+
+[[exchanges]]
+name = "read"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-absent/any/key"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 404
+connection_after = "open"
+headers_absent = ["etag", "last-modified"]
+
+[exchanges.expect.error]
+code = "NoSuchBucket"
+request_id_present = true
+
+[[exchanges]]
+name = "delete"
+
+[exchanges.request]
+method = "DELETE"
+target = "/conf-absent/any/key"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 404
+connection_after = "open"
+
+[exchanges.expect.error]
+code = "NoSuchBucket"
+request_id_present = true

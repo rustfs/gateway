@@ -1,0 +1,44 @@
+[case]
+id = "c-object-0024"
+schema_version = 1
+title = "A quiet multi-object delete reports the failures and stays silent about the successes"
+rationale = """
+Quiet mode exists because the successful half of a thousand-key delete is a response body nobody reads, and a server that ignores the flag sends it anyway. The assertion is byte-exact on the result document because the observable difference between honouring the flag and ignoring it is entirely in which elements the body carries."""
+polarity = "positive"
+operation = "DeleteObjects"
+tags = ["xml", "wire-bytes"]
+timeout_ms = 10000
+quirks = ["q-deletes-0027"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteObjects.html"
+summary = "The documented multi-object delete is the authority for its request root, its result root and its integrity header."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-object"
+
+[[setup.objects]]
+bucket = "conf-object"
+key = "batch/one"
+body = { utf8 = "hello world" }
+
+[request]
+method = "POST"
+target = "/conf-object?delete"
+headers = { "content-type" = "application/xml", "content-md5" = "4khUp8Qkm2YBU7Svpeh5Pg==" }
+body = { utf8 = "<Delete><Quiet>true</Quiet><Object><Key>batch/one</Key></Object></Delete>" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[expect.body]
+exact_utf8 = """
+<?xml version="1.0" encoding="UTF-8"?>
+<DeleteResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/"></DeleteResult>"""

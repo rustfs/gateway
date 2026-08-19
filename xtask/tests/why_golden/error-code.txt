@@ -6,6 +6,7 @@ CASES     c-copy-0025 — A copy source that is an ARN of another service is ref
           c-cors-0033 — A post-authorisation failure still carries the CORS headers
           c-object-0007 — A read of a key that does not exist is a 404 NoSuchKey with no object headers at all
           c-object-0016 — The response- overrides apply to a successful read and never to the error document
+          c-object-0025 — A read and a delete on a bucket that does not exist both name the bucket, not the key
           c-tagging-0016 — PutObject with x-amz-tagging carrying a segment without '=' is a 400 and stores nothing
           c-tagging-0024 — A ?tagging request naming a delete marker is a 405, not a NoSuchKey
 ADR       NONE
