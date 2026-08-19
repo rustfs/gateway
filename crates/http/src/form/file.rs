@@ -17,8 +17,8 @@
 //! Responsible for: emitting file content to a sink, stopping at the byte that crosses the
 //! ceiling, finding the closing delimiter, and refusing a part that arrives after the file.
 //! NOT responsible for: choosing the ceiling — that is the caller's, at
-//! [`super::FormReader::into_file`]; storing the bytes; or hashing them.
-//! Upstream: `super::reader`, which is the only thing that can construct this type. Downstream:
+//! [`crate::FormReader::into_file`]; storing the bytes; or hashing them.
+//! Upstream: the form reader, which is the only thing that can construct this type. Downstream:
 //! whatever the caller's sink writes to.
 
 use super::{FormReject, find};
@@ -63,7 +63,7 @@ enum Tail {
 
 /// Reads the file part, under a ceiling that was named before it existed.
 ///
-/// The only way to obtain one is [`super::FormReader::into_file`]. There is no `new`, no
+/// The only way to obtain one is [`crate::FormReader::into_file`]. There is no `new`, no
 /// `Default`, and no way to raise the ceiling once reading has begun.
 #[derive(Debug)]
 pub struct FileReader {

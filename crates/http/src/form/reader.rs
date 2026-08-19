@@ -58,7 +58,7 @@ enum State {
 
 /// Reads a POST Object form's text fields and stops at the file.
 ///
-/// See the module documentation of [`super`] for why stopping is the point.
+/// See the `form` module documentation for why stopping is the point.
 #[derive(Debug)]
 pub struct FormReader {
     limits: FormLimits,
