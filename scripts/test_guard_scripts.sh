@@ -1806,15 +1806,20 @@ expect_fail check_xtask_codegen_surface.sh \
 
 mut_xtask_inherits_dangerous_facade_feature() {
     python3 - <<'PYEOF'
+import re
 from pathlib import Path
 
+# The version is matched rather than spelled out. It used to be literal, and a facade version
+# bump then made this control fail as "anchor is missing" — a control that reports a defect it
+# was not testing for is one nobody trusts the next time.
 path = Path("Cargo.toml")
 text = path.read_text()
-old = 'rustfs-gateway = { path = "crates/gateway", version = "0.8.0" }'
-new = 'rustfs-gateway = { path = "crates/gateway", version = "0.8.0", features = ["dangerous-allow-all-authorizer"] }'
-if text.count(old) != 1:
+pattern = re.compile(r'^rustfs-gateway = \{ path = "crates/gateway", version = "[0-9]+\.[0-9]+\.[0-9]+" \}$', re.M)
+found = pattern.findall(text)
+if len(found) != 1:
     raise SystemExit("workspace facade dependency is missing")
-path.write_text(text.replace(old, new, 1))
+replacement = found[0][: -len(" }")] + ', features = ["dangerous-allow-all-authorizer"] }'
+path.write_text(pattern.sub(lambda _: replacement, text, count=1))
 PYEOF
 }
 expect_fail check_xtask_codegen_surface.sh \
@@ -8702,6 +8707,126 @@ mut_stale_exposure() {
 }
 expect_fail check_route_coverage.sh \
     'a register entry for an exposure that no longer exists' mut_stale_exposure
+
+# -----------------------------------------------------------------------------
+# The cross-precedence shadowing record has exactly one hand-written source:
+# `model/overlays/route.toml`. Until rustfs/gateway#4 it had two — the overlay it
+# was specified to have, and six files of Rust that were the one the runtime
+# actually read. Two sources for one fact is the defect this repository keeps
+# re-finding, and it is invisible in review because both copies read like the
+# reviewed answer.
+#
+# Five controls, one per way the single source can be lost: the field that says
+# why is deleted; the field that says where it comes from is emptied; a
+# declaration is written back into Rust; a pair is added straight to the
+# generated file; and the generated file is left behind by an overlay edit.
+#
+# The fourth and fifth are the two directions of the same equality. An earlier
+# draft of the fourth used `GetBucketAcl over ListObjects`, which the overlay
+# already declares — so the guard passed, and the control proved nothing. The
+# pair it injects now is the reverse of a declared one, which no overlay entry
+# can carry because a winner has the lower precedence by definition.
+# -----------------------------------------------------------------------------
+
+mut_route_shadowing_reason_deleted() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("model/overlays/route.toml")
+text = path.read_text()
+anchor = 'reason   = "A request carrying both ?location and ?list-type=2'
+if text.count(anchor) != 1:
+    raise SystemExit("shadowing reason mutation anchor is not unique")
+path.write_text(text.replace(anchor, 'unrelated_note = "' + anchor.split('"', 1)[1], 1))
+PYEOF
+}
+expect_fail check_route_shadowing_authority.sh \
+    'a shadowing pair whose reason was deleted' mut_route_shadowing_reason_deleted \
+    'an undeclared ordering is a guess'
+
+mut_route_shadowing_evidence_emptied() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("model/overlays/route.toml")
+text = path.read_text()
+anchor = 'evidence = ["get-bucket-location", "list-objects-v2"]'
+if anchor not in text:
+    raise SystemExit("shadowing evidence mutation anchor is missing")
+path.write_text(text.replace(anchor, "evidence = []", 1))
+PYEOF
+}
+expect_fail check_route_shadowing_authority.sh \
+    'a shadowing pair whose evidence list was emptied' mut_route_shadowing_evidence_emptied \
+    'an unsourced ordering is a guess'
+
+mut_route_shadowing_declared_in_rust() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("crates/core/src/route/shadowing.rs")
+text = path.read_text()
+anchor = "pub const SHADOWING: ShadowingDecls = ShadowingDecls::over(&[data::SHADOWING]);"
+if text.count(anchor) != 1:
+    raise SystemExit("shadowing runtime mutation anchor is not unique")
+residual = """const EXTRA: &[ShadowingDecl] = &[ShadowingDecl {
+    winner: "GetBucketAcl",
+    shadowed: "ListObjects",
+    reason: "a hand-written declaration kept beside the generated one",
+    evidence: &["https://example.invalid - a fabricated citation"],
+}];
+
+pub const SHADOWING: ShadowingDecls = ShadowingDecls::over(&[data::SHADOWING, EXTRA]);"""
+path.write_text(text.replace(anchor, residual, 1))
+PYEOF
+}
+expect_fail check_route_shadowing_authority.sh \
+    'a shadowing declaration written back into Rust beside the generated one' \
+    mut_route_shadowing_declared_in_rust \
+    'a hand-written `ShadowingDecl` literal'
+
+mut_route_shadowing_added_to_generated_only() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("generated/route_shadowing.rs")
+text = path.read_text()
+anchor = "pub const SHADOWING: &[ShadowingDecl] = &[\n"
+if text.count(anchor) != 1:
+    raise SystemExit("generated shadowing mutation anchor is not unique")
+injected = anchor + """    ShadowingDecl {
+        winner: "ListObjects",
+        shadowed: "GetBucketAcl",
+        reason: "added straight into the generated file, bypassing the overlay entirely",
+        evidence: &[
+            "https://example.invalid - a fabricated citation",
+        ],
+    },
+"""
+path.write_text(text.replace(anchor, injected, 1))
+PYEOF
+}
+expect_fail check_route_shadowing_authority.sh \
+    'a shadowing pair added straight to the generated file' \
+    mut_route_shadowing_added_to_generated_only \
+    'The generated file is output, never a place to add a pair'
+
+mut_route_shadowing_overlay_not_regenerated() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("model/overlays/route.toml")
+text = path.read_text()
+anchor = '[[shadowing]]\nwinner   = "GetBucketLocation"\nshadowed = "ListObjectsV2"'
+if text.count(anchor) != 1:
+    raise SystemExit("shadowing pair mutation anchor is not unique")
+path.write_text(text.replace(anchor, anchor.replace('"ListObjectsV2"', '"ListParts"'), 1))
+PYEOF
+}
+expect_fail check_route_shadowing_authority.sh \
+    'an overlay pair that never reached the generated file' \
+    mut_route_shadowing_overlay_not_regenerated \
+    'never reached generated/route_shadowing.rs'
 
 # -----------------------------------------------------------------------------
 # A conformance case may only declare what the harness reads. Twice already a

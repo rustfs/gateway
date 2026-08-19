@@ -1,0 +1,2743 @@
+# Copyright 2026 RustFS Team
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# =============================================================================================
+# route.toml — the one hand-written authority for cross-precedence route shadowing.
+#
+# The ordered route table is first-match: lower precedence is tried first. A request that
+# satisfies two rows at different precedences is answered by the earlier one and the later row is
+# ignored. That is legal and necessary — it is why the disjointness model was abandoned — but it
+# is never allowed to be an accident of source order. Every such pair is declared here with a
+# reason and evidence, and a pair that overlaps without a declaration fails the table build
+# (`UndeclaredShadowing`).
+#
+# `cargo xtask codegen` lowers this file into `generated/route_shadowing.rs`, which
+# `rustfs-gateway-core` includes. Nothing else declares a shadowing pair: a hand-written
+# `ShadowingDecl` literal in Rust is refused by `scripts/check_route_shadowing_authority.sh`,
+# because two sources would be two sets of reasons that can drift apart.
+#
+# Same-precedence overlap is not declarable at all. It is always a build failure, and the fix is
+# to give the two rows different precedences here and in `ops/<family>.toml`.
+#
+# Precedence itself is not set here. It is `precedence` on `[op.<Operation>]` in
+# `model/overlays/ops/<family>.toml`, and the rule it follows is that the narrower row is tried
+# first: a subresource read before a listing, a listing that pins a key before the one that pins
+# none, and the fallback last. The resolved order, as one text, is
+# `crates/core/tests/golden/route-table.txt` — read that to see what the numbers came to, rather
+# than reconstructing it from the family files.
+#
+# ---------------------------------------------------------------------------------------------
+# Grammar
+#
+#   [evidence.<id>]        url = "https://…"   summary = "one sentence, written here"
+#   [reason.<id>]          text = "the paragraph shared by several pairs"
+#   [[shadowing]]          winner, shadowed, exactly one of reason / reason_ref, evidence
+#
+# `evidence` is a list of `[evidence.<id>]` keys, never a URL written in place: one operation has
+# one reference and one self-written sentence, and a second spelling of it is a second fact to
+# keep in step. Never paste upstream prose — the summary is a sentence this project wrote.
+#
+# `reason` carries the prose inline and is for a pair whose reasoning is its own. `reason_ref`
+# names a `[reason.<id>]` and is for reasoning a whole band shares. Exactly one of the two, and
+# two entries may not carry the same inline `reason` — a repeated paragraph belongs in
+# `[reason.<id>]`, where changing it changes every pair that meant it.
+#
+# Everything here is refused by the loader when it is wrong rather than ignored: an unknown
+# evidence id, an unused `[evidence]` or `[reason]` entry, a missing or empty field, a repeated
+# `winner`/`shadowed` pair, a pair naming an operation outside `include`, and a `winner` equal to
+# its own `shadowed`.
+# =============================================================================================
+
+# ------------------------------------------------------------------ shared reasons
+[reason.two-subresource-keys]
+text = "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it."
+
+[reason.subresource-over-listing]
+text = "A subresource key and a listing key in one request name a configuration document and a page of the bucket's contents at the same time. The subresource is the narrower question and is tried first; the listing is ignored rather than merged into the answer."
+
+[reason.subresource-over-fallback]
+text = "ListObjects is what a GET on a bucket means when no other row claimed it, so its selector pins no query key and every subresource read satisfies it too. That is not a conflict but the design, and it is the whole reason this band sits at 200: a row behind the fallback would hand every configuration read back to the key listing, which is the defect the band exists to retire."
+
+
+# ----------------------------------------------------------------------- evidence
+[evidence.abort-multipart-upload]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_AbortMultipartUpload.html"
+summary = "an abort is a DELETE to the object key carrying the upload id as a query parameter."
+
+[evidence.complete-multipart-upload]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CompleteMultipartUpload.html"
+summary = "completion is a POST to the object key carrying the upload id."
+
+[evidence.copy-object]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CopyObject.html"
+summary = "a copy is a PUT to the destination key whose source is named by a header, and which carries no request body."
+
+[evidence.create-multipart-upload]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CreateMultipartUpload.html"
+summary = "initiation is a POST to the object key carrying the ?uploads subresource and no upload id."
+
+[evidence.delete-bucket-cors]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketCors.html"
+summary = "a CORS configuration removal is a DELETE on the bucket carrying the ?cors subresource."
+
+[evidence.delete-bucket-encryption]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketEncryption.html"
+summary = "DeleteBucketEncryption is selected by the ?encryption subresource on a bucket DELETE and removes only the encryption document."
+
+[evidence.delete-bucket-lifecycle]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketLifecycle.html"
+summary = "DeleteBucketLifecycle is selected by the ?lifecycle subresource on a bucket DELETE and removes only the lifecycle document."
+
+[evidence.delete-bucket-policy]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketPolicy.html"
+summary = "DeleteBucketPolicy is selected by the ?policy subresource on a bucket DELETE and removes only the policy document."
+
+[evidence.delete-bucket-replication]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketReplication.html"
+summary = "DeleteBucketReplication is selected by the ?replication subresource on a bucket DELETE and removes only the replication document."
+
+[evidence.delete-bucket-tagging]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketTagging.html"
+summary = "a bucket tag-set removal is a DELETE on the bucket carrying the ?tagging subresource, and it leaves the bucket in place."
+
+[evidence.delete-bucket-website]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketWebsite.html"
+summary = "DeleteBucketWebsite is selected by the ?website subresource on a bucket DELETE and removes only the website document."
+
+[evidence.delete-object]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteObject.html"
+summary = "an object delete is the same method and path with no upload id."
+
+[evidence.delete-object-tagging]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteObjectTagging.html"
+summary = "a tag-set removal is a DELETE to the object key carrying the ?tagging subresource, and it leaves the object in place."
+
+[evidence.delete-public-access-block]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeletePublicAccessBlock.html"
+summary = "DeletePublicAccessBlock is selected by the ?publicAccessBlock subresource on a bucket DELETE and removes only those switches."
+
+[evidence.get-bucket-accelerate-configuration]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketAccelerateConfiguration.html"
+summary = "GetBucketAccelerateConfiguration is selected by the ?accelerate subresource alone and answers with the stored configuration document."
+
+[evidence.get-bucket-acl]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketAcl.html"
+summary = "GetBucketAcl is selected by the ?acl subresource on a bucket GET and answers with the access control policy document."
+
+[evidence.get-bucket-cors]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketCors.html"
+summary = "GetBucketCors is selected by the ?cors subresource alone and answers with the stored configuration document."
+
+[evidence.get-bucket-encryption]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketEncryption.html"
+summary = "GetBucketEncryption is selected by the ?encryption subresource alone and answers with the stored configuration document."
+
+[evidence.get-bucket-lifecycle-configuration]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketLifecycleConfiguration.html"
+summary = "GetBucketLifecycleConfiguration is selected by the ?lifecycle subresource alone and answers with the stored configuration document."
+
+[evidence.get-bucket-location]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketLocation.html"
+summary = "GetBucketLocation is selected by the ?location subresource alone and takes no other query input."
+
+[evidence.get-bucket-logging]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketLogging.html"
+summary = "GetBucketLogging is selected by the ?logging subresource alone and answers with the stored logging document."
+
+[evidence.get-bucket-notification-configuration]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketNotificationConfiguration.html"
+summary = "GetBucketNotificationConfiguration is selected by the ?notification subresource alone and answers with the stored notification document."
+
+[evidence.get-bucket-policy]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketPolicy.html"
+summary = "GetBucketPolicy is selected by the ?policy subresource alone and answers with the stored policy document as JSON."
+
+[evidence.get-bucket-policy-status]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketPolicyStatus.html"
+summary = "GetBucketPolicyStatus is selected by the ?policyStatus subresource, which is a different key from ?policy and answers a different document."
+
+[evidence.get-bucket-replication]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketReplication.html"
+summary = "GetBucketReplication is selected by the ?replication subresource alone and answers with the stored configuration document."
+
+[evidence.get-bucket-request-payment]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketRequestPayment.html"
+summary = "GetBucketRequestPayment is selected by the ?requestPayment subresource alone and answers with the stored payer."
+
+[evidence.get-bucket-tagging]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketTagging.html"
+summary = "a bucket tag-set read is a GET on the bucket carrying the ?tagging subresource, and it defines no other selector."
+
+[evidence.get-bucket-versioning]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketVersioning.html"
+summary = "GetBucketVersioning is selected by the ?versioning subresource alone and answers with the stored versioning state."
+
+[evidence.get-bucket-website]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketWebsite.html"
+summary = "GetBucketWebsite is selected by the ?website subresource alone and answers with the stored website document."
+
+[evidence.get-object]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObject.html"
+summary = "an object read is the same method and path with no upload id."
+
+[evidence.get-object-acl]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObjectAcl.html"
+summary = "an ACL read is a GET to the object key carrying the ?acl subresource, and it answers with the access control policy rather than with the object."
+
+[evidence.get-object-attributes]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObjectAttributes.html"
+summary = "an attributes read is a GET to the object key carrying the ?attributes subresource, and it answers with metadata rather than with the object."
+
+[evidence.get-object-legal-hold]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObjectLegalHold.html"
+summary = "a legal-hold read is a GET to the object key carrying the ?legal-hold subresource, and it answers with the hold status rather than with the object."
+
+[evidence.get-object-lock-configuration]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObjectLockConfiguration.html"
+summary = "the lock-configuration read is a GET on the bucket carrying the ?object-lock subresource, and it defines no other selector."
+
+[evidence.get-object-retention]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObjectRetention.html"
+summary = "a retention read is a GET to the object key carrying the ?retention subresource, and it answers with the retention document rather than with the object."
+
+[evidence.get-object-tagging]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObjectTagging.html"
+summary = "a tag-set read is a GET to the object key carrying the ?tagging subresource, and it answers with the tag set rather than with the object."
+
+[evidence.get-public-access-block]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetPublicAccessBlock.html"
+summary = "GetPublicAccessBlock is selected by the ?publicAccessBlock subresource alone and answers with the four stored switches."
+
+[evidence.list-multipart-uploads]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListMultipartUploads.html"
+summary = "ListMultipartUploads is selected by the ?uploads subresource and defines no other selector."
+
+[evidence.list-object-versions]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectVersions.html"
+summary = "ListObjectVersions is selected by the ?versions subresource and ignores query keys it does not define."
+
+[evidence.list-objects]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjects.html"
+summary = "ListObjects is what a GET on a bucket means when no other subresource claimed it, so it pins no query key."
+
+[evidence.list-objects-v2]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectsV2.html"
+summary = "ListObjectsV2 is selected by list-type=2 and treats unrecognised query keys as inert."
+
+[evidence.list-parts]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListParts.html"
+summary = "a part listing is a GET to the object key carrying the upload id as a query parameter."
+
+[evidence.put-bucket-accelerate-configuration]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketAccelerateConfiguration.html"
+summary = "PutBucketAccelerateConfiguration is selected by the ?accelerate subresource on a bucket PUT and replaces the stored acceleration document."
+
+[evidence.put-bucket-acl]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketAcl.html"
+summary = "PutBucketAcl is selected by the ?acl subresource on a bucket PUT and replaces the access control policy, from the body or from the ACL headers."
+
+[evidence.put-bucket-cors]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketCors.html"
+summary = "a CORS configuration write is a PUT on the bucket carrying the ?cors subresource, and its body is the configuration document."
+
+[evidence.put-bucket-encryption]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketEncryption.html"
+summary = "PutBucketEncryption is selected by the ?encryption subresource on a bucket PUT and replaces the stored encryption document."
+
+[evidence.put-bucket-lifecycle-configuration]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketLifecycleConfiguration.html"
+summary = "PutBucketLifecycleConfiguration is selected by the ?lifecycle subresource on a bucket PUT and replaces the stored lifecycle document."
+
+[evidence.put-bucket-logging]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketLogging.html"
+summary = "PutBucketLogging is selected by the ?logging subresource on a bucket PUT and replaces the stored logging document."
+
+[evidence.put-bucket-notification-configuration]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketNotificationConfiguration.html"
+summary = "PutBucketNotificationConfiguration is selected by the ?notification subresource on a bucket PUT and replaces the stored notification document."
+
+[evidence.put-bucket-policy]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketPolicy.html"
+summary = "PutBucketPolicy is selected by the ?policy subresource on a bucket PUT and replaces the stored policy document."
+
+[evidence.put-bucket-replication]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketReplication.html"
+summary = "PutBucketReplication is selected by the ?replication subresource on a bucket PUT and replaces the stored replication document."
+
+[evidence.put-bucket-request-payment]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketRequestPayment.html"
+summary = "PutBucketRequestPayment is selected by the ?requestPayment subresource on a bucket PUT and replaces the stored payer."
+
+[evidence.put-bucket-tagging]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketTagging.html"
+summary = "a bucket tag-set write is a PUT on the bucket carrying the ?tagging subresource, and its body is the tagging document."
+
+[evidence.put-bucket-versioning]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketVersioning.html"
+summary = "PutBucketVersioning is selected by the ?versioning subresource on a bucket PUT and replaces the stored versioning state."
+
+[evidence.put-bucket-website]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketWebsite.html"
+summary = "PutBucketWebsite is selected by the ?website subresource on a bucket PUT and replaces the stored website document."
+
+[evidence.put-object]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObject.html"
+summary = "a plain object write is the same method and path with neither of those parameters."
+
+[evidence.put-object-acl]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObjectAcl.html"
+summary = "an ACL write is a PUT to the object key carrying the ?acl subresource, and its body is an AccessControlPolicy rather than object data."
+
+[evidence.put-object-legal-hold]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObjectLegalHold.html"
+summary = "a legal-hold write is a PUT to the object key carrying the ?legal-hold subresource, and its body is a LegalHold document rather than object data."
+
+[evidence.put-object-lock-configuration]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObjectLockConfiguration.html"
+summary = "the lock-configuration write is a PUT on the bucket carrying the ?object-lock subresource, and its body is the lock document."
+
+[evidence.put-object-retention]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObjectRetention.html"
+summary = "a retention write is a PUT to the object key carrying the ?retention subresource, and its body is a Retention document rather than object data."
+
+[evidence.put-object-tagging]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObjectTagging.html"
+summary = "a tag-set write is a PUT to the object key carrying the ?tagging subresource, and its body is a tagging document rather than object data."
+
+[evidence.put-public-access-block]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutPublicAccessBlock.html"
+summary = "PutPublicAccessBlock is selected by the ?publicAccessBlock subresource on a bucket PUT and replaces the four stored switches."
+
+[evidence.restore-object]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_RestoreObject.html"
+summary = "a restore is a POST to the object key carrying the ?restore subresource, and its body is a RestoreRequest document rather than object data."
+
+[evidence.select-object-content]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_SelectObjectContent.html"
+summary = "a select is a POST to the object key carrying ?select together with select-type=2, and it answers with a framed event stream rather than a document."
+
+[evidence.upload-part]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UploadPart.html"
+summary = "a part upload is a PUT to the object key carrying the part number and the upload id as query parameters."
+
+[evidence.upload-part-copy]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UploadPartCopy.html"
+summary = "a part copy is a part upload whose bytes come from a source object named by a header rather than from the body."
+
+# -------------------------------------------------------------- shadowing pairs
+[[shadowing]]
+winner   = "GetBucketLocation"
+shadowed = "ListObjectsV2"
+reason   = "A request carrying both ?location and ?list-type=2 asks two questions at once. AWS documents neither combination, so the answer is fixed here rather than left to source order: the subresource band (300) is tried before the listing band (600), so ?location wins and the listing is ignored."
+evidence = ["get-bucket-location", "list-objects-v2"]
+
+[[shadowing]]
+winner   = "GetBucketLocation"
+shadowed = "ListObjectVersions"
+reason   = "Same shape as the pair above with the version listing in place of the key listing: only a client sending ?location and ?versions together reaches it, AWS documents no such combination, and the subresource band is tried first."
+evidence = ["get-bucket-location", "list-object-versions"]
+
+[[shadowing]]
+winner   = "GetBucketLocation"
+shadowed = "ListObjects"
+reason   = "ListObjects pins no query key, so every ?location request also satisfies it. That is not a conflict but the design: the subresource is the specific reading and the key listing is the fallback, which is why the fallback sits at the end of the band. Reversing the two would make ?location unreachable."
+evidence = ["get-bucket-location", "list-objects"]
+
+[[shadowing]]
+winner   = "GetBucketLocation"
+shadowed = "ListMultipartUploads"
+reason   = "The same both-keys-at-once shape as the three pairs above: ?location and ?uploads name two different subresources of one bucket. ?location is the narrower question and is tried first (300 before 460); the upload listing is ignored rather than merged into the answer."
+evidence = ["get-bucket-location", "list-multipart-uploads"]
+
+[[shadowing]]
+winner   = "ListMultipartUploads"
+shadowed = "ListObjectsV2"
+reason   = "?uploads and ?list-type=2 together ask for the in-progress uploads and for a page of committed keys at the same time. The upload listing is the more specific reading and is tried first; the key listing is ignored."
+evidence = ["list-multipart-uploads", "list-objects-v2"]
+
+[[shadowing]]
+winner   = "ListMultipartUploads"
+shadowed = "ListObjectVersions"
+reason   = "?uploads and ?versions together name two different listings of the same bucket. The upload listing is tried first for the same reason as the pair above."
+evidence = ["list-multipart-uploads", "list-object-versions"]
+
+[[shadowing]]
+winner   = "ListMultipartUploads"
+shadowed = "ListObjects"
+reason   = "ListObjects pins no query key, so a ?uploads request satisfies it too. The upload listing is the specific reading and wins; the fallback stays last in the band."
+evidence = ["list-multipart-uploads", "list-objects"]
+
+[[shadowing]]
+winner   = "ListObjectsV2"
+shadowed = "ListObjectVersions"
+reason   = "A request carrying list-type=2 and ?versions asks for a page of current keys and for every version of them at once. The two are different operations with different response roots, so one has to win: list-type=2 is an explicit value rather than a bare subresource key, and it is tried first."
+evidence = ["list-objects-v2", "list-object-versions"]
+
+[[shadowing]]
+winner   = "ListObjectsV2"
+shadowed = "ListObjects"
+reason   = "This is the pair the version discriminator exists for: list-type=2 selects the second listing and its absence selects the first. Because the first pins no query key, the selection is entirely a matter of which is tried first, and getting it backwards would make the second version unreachable."
+evidence = ["list-objects-v2", "list-objects"]
+
+[[shadowing]]
+winner   = "ListObjectVersions"
+shadowed = "ListObjects"
+reason   = "?versions selects the version listing, and its absence leaves the key listing. Same fallback relationship as the pair above, with the subresource in place of the version discriminator."
+evidence = ["list-object-versions", "list-objects"]
+
+[[shadowing]]
+winner   = "GetBucketLocation"
+shadowed = "GetBucketTagging"
+reason   = "?location and ?tagging name two subresources of one bucket, and a request sending both asks two questions at once. AWS documents no such combination, so the answer is fixed here rather than left to source order: 300 is tried before 340, and the tagging reading is ignored rather than merged into the answer."
+evidence = ["get-bucket-location", "get-bucket-tagging"]
+
+[[shadowing]]
+winner   = "GetBucketCors"
+shadowed = "GetBucketTagging"
+reason   = "?cors and ?tagging name two configuration documents of one bucket, and a request sending both keys reaches both rows. AWS documents no such combination, so the band order decides: ?cors at 310 arrived first and is tried before ?tagging at 340; the tagging reading is ignored rather than merged into the answer."
+evidence = ["get-bucket-cors", "get-bucket-tagging"]
+
+[[shadowing]]
+winner   = "PutBucketCors"
+shadowed = "PutBucketTagging"
+reason   = "PUT /b?cors&tagging carries one body and names two documents to replace with it, which cannot both be meant. The same arrival order as the GET pair decides (320 before 350): the body is read as the CORS document it would have to be for the winning row, and the tagging reading is ignored rather than applied to a document of the wrong shape."
+evidence = ["put-bucket-cors", "put-bucket-tagging"]
+
+[[shadowing]]
+winner   = "DeleteBucketCors"
+shadowed = "DeleteBucketTagging"
+reason   = "DELETE /b?cors&tagging asks to remove two configurations at once, which AWS does not document; one 204 cannot report two removals. The arrival order decides (330 before 360) and only the CORS configuration is removed — consistent with the GET and PUT pairs, so the whole cross-family decision is one rule in three methods."
+evidence = ["delete-bucket-cors", "delete-bucket-tagging"]
+
+[[shadowing]]
+winner   = "GetBucketTagging"
+shadowed = "ListMultipartUploads"
+reason   = "?tagging and ?uploads together name a subresource and a listing of the same bucket. The subresource band (340) is tried before the upload listing (460), the same order the ?location pair above settled."
+evidence = ["get-bucket-tagging", "list-multipart-uploads"]
+
+[[shadowing]]
+winner   = "GetBucketTagging"
+shadowed = "ListObjectsV2"
+reason   = "A request carrying both ?tagging and ?list-type=2 asks for the bucket's labels and for a page of its keys at once. The subresource is the narrower question and is tried first (340 before 600); the listing is ignored."
+evidence = ["get-bucket-tagging", "list-objects-v2"]
+
+[[shadowing]]
+winner   = "GetBucketTagging"
+shadowed = "ListObjectVersions"
+reason   = "Same shape as the pair above with the version listing in place of the key listing: only a client sending ?tagging and ?versions together reaches it, and the subresource band is tried first."
+evidence = ["get-bucket-tagging", "list-object-versions"]
+
+[[shadowing]]
+winner   = "GetBucketTagging"
+shadowed = "ListObjects"
+reason   = "ListObjects pins no query key, so every ?tagging request also satisfies it — and before the row at 340 existed, that is exactly what happened: a request for the bucket's labels was answered with a page of its keys. The subresource is the specific reading and wins; the fallback stays last in the band."
+evidence = ["get-bucket-tagging", "list-objects"]
+
+[[shadowing]]
+winner   = "GetBucketLocation"
+shadowed = "GetBucketCors"
+reason   = "A request carrying both ?location and ?cors asks two subresource questions at once. AWS documents no such combination, so the answer is fixed here rather than left to source order: ?location at 300 is tried before ?cors at 310, and the CORS reading is ignored rather than merged into the answer."
+evidence = ["get-bucket-location", "get-bucket-cors"]
+
+[[shadowing]]
+winner   = "GetBucketCors"
+shadowed = "ListMultipartUploads"
+reason   = "?cors and ?uploads together name a configuration document and a listing of one bucket. The subresource band (310) is tried before the upload listing (460), the same order ?location settled against the same neighbour."
+evidence = ["get-bucket-cors", "list-multipart-uploads"]
+
+[[shadowing]]
+winner   = "GetBucketCors"
+shadowed = "ListObjectsV2"
+reason   = "A request carrying ?cors and ?list-type=2 asks for the CORS document and a page of keys at once. The configuration subresource is the narrower question and is tried first (310 before 600); the listing is ignored."
+evidence = ["get-bucket-cors", "list-objects-v2"]
+
+[[shadowing]]
+winner   = "GetBucketCors"
+shadowed = "ListObjectVersions"
+reason   = "Same shape as the pair above with the version listing in place of the key page: only a client sending ?cors and ?versions together reaches it, and the subresource band is tried first (310 before 610)."
+evidence = ["get-bucket-cors", "list-object-versions"]
+
+[[shadowing]]
+winner   = "GetBucketCors"
+shadowed = "ListObjects"
+reason   = "ListObjects pins no query key, so every ?cors request also satisfies it. Until this row existed that was not a latent overlap but the served behaviour: a CORS document request was answered with a key listing. The subresource is the specific reading and wins (310 before 700); the fallback stays last in the band."
+evidence = ["get-bucket-cors", "list-objects"]
+
+[[shadowing]]
+winner   = "GetBucketLocation"
+shadowed = "GetBucketLifecycleConfiguration"
+reason   = "A request carrying both ?location and ?lifecycle asks two subresource questions at once. AWS documents no such combination, so the answer is fixed here rather than left to source order: ?location at 300 is tried before ?lifecycle at 370, and the lifecycle reading is ignored rather than merged into the answer."
+evidence = ["get-bucket-location", "get-bucket-lifecycle-configuration"]
+
+[[shadowing]]
+winner   = "GetBucketCors"
+shadowed = "GetBucketLifecycleConfiguration"
+reason   = "Two configuration subresources named in one GET. Neither is the narrower question, so the earlier band wins: ?cors at 310 is tried before ?lifecycle at 370, the same first-band-wins rule ?location settled against ?cors."
+evidence = ["get-bucket-cors", "get-bucket-lifecycle-configuration"]
+
+[[shadowing]]
+winner   = "GetBucketTagging"
+shadowed = "GetBucketLifecycleConfiguration"
+reason   = "Two configuration subresources named in one GET, the same shape as the ?cors pair above with the tagging band in its place. The earlier band wins: ?tagging at 340 is tried before ?lifecycle at 370, and the lifecycle reading is ignored."
+evidence = ["get-bucket-tagging", "get-bucket-lifecycle-configuration"]
+
+[[shadowing]]
+winner   = "GetBucketLifecycleConfiguration"
+shadowed = "ListMultipartUploads"
+reason   = "?lifecycle and ?uploads together name a configuration document and a listing of one bucket. The subresource band (370) is tried before the upload listing (460), the same order the ?cors band settled against the same neighbour."
+evidence = ["get-bucket-lifecycle-configuration", "list-multipart-uploads"]
+
+[[shadowing]]
+winner   = "GetBucketLifecycleConfiguration"
+shadowed = "ListObjectsV2"
+reason   = "A request carrying ?lifecycle and ?list-type=2 asks for the lifecycle document and a page of keys at once. The configuration subresource is the narrower question and is tried first (370 before 600); the listing is ignored."
+evidence = ["get-bucket-lifecycle-configuration", "list-objects-v2"]
+
+[[shadowing]]
+winner   = "GetBucketLifecycleConfiguration"
+shadowed = "ListObjectVersions"
+reason   = "Same shape as the pair above with the version listing in place of the key page: only a client sending ?lifecycle and ?versions together reaches it, and the subresource band is tried first (370 before 610)."
+evidence = ["get-bucket-lifecycle-configuration", "list-object-versions"]
+
+[[shadowing]]
+winner   = "GetBucketLifecycleConfiguration"
+shadowed = "ListObjects"
+reason   = "ListObjects pins no query key, so every ?lifecycle request also satisfies it. Until this row existed that was not a latent overlap but the served behaviour: a lifecycle document request was answered with a key listing. The subresource is the specific reading and wins (370 before 700); the fallback stays last in the band."
+evidence = ["get-bucket-lifecycle-configuration", "list-objects"]
+
+[[shadowing]]
+winner   = "PutBucketCors"
+shadowed = "PutBucketLifecycleConfiguration"
+reason   = "Two configuration writes named in one PUT: a request carrying ?cors and ?lifecycle satisfies both selectors, and AWS documents no such combination. The earlier band wins (320 before 380), so the body is read as a CORS document and the lifecycle reading is ignored rather than double-written."
+evidence = ["put-bucket-cors", "put-bucket-lifecycle-configuration"]
+
+[[shadowing]]
+winner   = "PutBucketTagging"
+shadowed = "PutBucketLifecycleConfiguration"
+reason   = "Two configuration writes named in one PUT, the tagging twin of the ?cors pair above. The earlier band wins (350 before 380), so the body is read as a tagging document and the lifecycle reading is ignored rather than double-written."
+evidence = ["put-bucket-tagging", "put-bucket-lifecycle-configuration"]
+
+[[shadowing]]
+winner   = "DeleteBucketCors"
+shadowed = "DeleteBucketLifecycle"
+reason   = "Two configuration deletes named in one DELETE. The earlier band wins (330 before 390), so only the CORS document is removed: a request that destroys two configurations because it named two query keys would turn a typo into data loss."
+evidence = ["delete-bucket-cors", "delete-bucket-lifecycle"]
+
+[[shadowing]]
+winner   = "DeleteBucketTagging"
+shadowed = "DeleteBucketLifecycle"
+reason   = "Two configuration deletes named in one DELETE, the tagging twin of the pair above. The earlier band wins (360 before 390), so only the tag set is removed: a request that destroys two configurations because it named two query keys would turn a typo into data loss."
+evidence = ["delete-bucket-tagging", "delete-bucket-lifecycle"]
+
+[[shadowing]]
+winner   = "GetBucketLocation"
+shadowed = "GetBucketEncryption"
+reason   = "A request carrying both ?location and ?encryption asks two subresource questions at once. AWS documents no such combination, so the answer is fixed here rather than left to source order: ?location at 300 is tried before ?encryption at 391, and the encryption reading is ignored rather than merged into the answer."
+evidence = ["get-bucket-location", "get-bucket-encryption"]
+
+[[shadowing]]
+winner   = "GetBucketCors"
+shadowed = "GetBucketEncryption"
+reason   = "Two configuration subresources named in one GET. Neither is the narrower question, so the earlier band wins: ?cors at 310 is tried before ?encryption at 391, the same first-band-wins rule ?location settled against ?cors."
+evidence = ["get-bucket-cors", "get-bucket-encryption"]
+
+[[shadowing]]
+winner   = "GetBucketTagging"
+shadowed = "GetBucketEncryption"
+reason   = "Two configuration subresources named in one GET, the same shape as the ?cors pair above with the tagging band in its place. The earlier band wins: ?tagging at 340 is tried before ?encryption at 391, and the encryption reading is ignored."
+evidence = ["get-bucket-tagging", "get-bucket-encryption"]
+
+[[shadowing]]
+winner   = "GetBucketLifecycleConfiguration"
+shadowed = "GetBucketEncryption"
+reason   = "Two configuration subresources named in one GET, the third same-method neighbour. The earlier band wins: ?lifecycle at 370 is tried before ?encryption at 391, in the arrival order every subresource pair in the table follows."
+evidence = ["get-bucket-lifecycle-configuration", "get-bucket-encryption"]
+
+[[shadowing]]
+winner   = "GetBucketEncryption"
+shadowed = "ListMultipartUploads"
+reason   = "?encryption and ?uploads together name a configuration document and a listing of one bucket. The subresource band (391) is tried before the upload listing (460), the same order the ?cors and ?lifecycle bands settled against the same neighbour."
+evidence = ["get-bucket-encryption", "list-multipart-uploads"]
+
+[[shadowing]]
+winner   = "GetBucketEncryption"
+shadowed = "ListObjectsV2"
+reason   = "A request carrying ?encryption and ?list-type=2 asks for the encryption document and a page of keys at once. The configuration subresource is the narrower question and is tried first (391 before 600); the listing is ignored."
+evidence = ["get-bucket-encryption", "list-objects-v2"]
+
+[[shadowing]]
+winner   = "GetBucketEncryption"
+shadowed = "ListObjectVersions"
+reason   = "Same shape as the pair above with the version listing in place of the key page: only a client sending ?encryption and ?versions together reaches it, and the subresource band is tried first (391 before 610)."
+evidence = ["get-bucket-encryption", "list-object-versions"]
+
+[[shadowing]]
+winner   = "GetBucketEncryption"
+shadowed = "ListObjects"
+reason   = "ListObjects pins no query key, so every ?encryption request also satisfies it. Until this row existed that was not a latent overlap but the served behaviour: an encryption document request was answered with a key listing. The subresource is the specific reading and wins (391 before 700); the fallback stays last in the band."
+evidence = ["get-bucket-encryption", "list-objects"]
+
+[[shadowing]]
+winner   = "PutBucketCors"
+shadowed = "PutBucketEncryption"
+reason   = "Two configuration writes named in one PUT: a request carrying ?cors and ?encryption satisfies both selectors, and AWS documents no such combination. The earlier band wins (320 before 392), so the body is read as a CORS document and the encryption reading is ignored rather than double-written."
+evidence = ["put-bucket-cors", "put-bucket-encryption"]
+
+[[shadowing]]
+winner   = "PutBucketTagging"
+shadowed = "PutBucketEncryption"
+reason   = "Two configuration writes named in one PUT, the tagging twin of the ?cors pair above. The earlier band wins (350 before 392), so the body is read as a tagging document and the encryption reading is ignored rather than double-written."
+evidence = ["put-bucket-tagging", "put-bucket-encryption"]
+
+[[shadowing]]
+winner   = "PutBucketLifecycleConfiguration"
+shadowed = "PutBucketEncryption"
+reason   = "Two configuration writes named in one PUT, the lifecycle twin of the two pairs above. The earlier band wins (380 before 392), so the body is read as a lifecycle document and the encryption reading is ignored rather than double-written."
+evidence = ["put-bucket-lifecycle-configuration", "put-bucket-encryption"]
+
+[[shadowing]]
+winner   = "DeleteBucketCors"
+shadowed = "DeleteBucketEncryption"
+reason   = "Two configuration deletes named in one DELETE. The earlier band wins (330 before 393), so only the CORS document is removed: a request that destroys two configurations because it named two query keys would turn a typo into data loss."
+evidence = ["delete-bucket-cors", "delete-bucket-encryption"]
+
+[[shadowing]]
+winner   = "DeleteBucketTagging"
+shadowed = "DeleteBucketEncryption"
+reason   = "Two configuration deletes named in one DELETE, the tagging twin of the pair above. The earlier band wins (360 before 393), so only the tag set is removed and the encryption document stays: turning a typo into the silent loss of a security configuration is the worst spelling of the data-loss rule."
+evidence = ["delete-bucket-tagging", "delete-bucket-encryption"]
+
+[[shadowing]]
+winner   = "DeleteBucketLifecycle"
+shadowed = "DeleteBucketEncryption"
+reason   = "Two configuration deletes named in one DELETE, the lifecycle twin of the two pairs above. The earlier band wins (390 before 393), so only the lifecycle document is removed and the bucket keeps its default encryption."
+evidence = ["delete-bucket-lifecycle", "delete-bucket-encryption"]
+
+[[shadowing]]
+winner   = "GetBucketLocation"
+shadowed = "GetBucketReplication"
+reason   = "A request carrying both ?location and ?replication asks two subresource questions at once. AWS documents no such combination, so the answer is fixed here rather than left to source order: ?location at 300 is tried before ?replication at 394, and the replication reading is ignored rather than merged into the answer."
+evidence = ["get-bucket-location", "get-bucket-replication"]
+
+[[shadowing]]
+winner   = "GetBucketCors"
+shadowed = "GetBucketReplication"
+reason   = "Two configuration subresources named in one GET. Neither is the narrower question, so the earlier band wins: ?cors at 310 is tried before ?replication at 394, the same first-band-wins rule ?location settled against ?cors."
+evidence = ["get-bucket-cors", "get-bucket-replication"]
+
+[[shadowing]]
+winner   = "GetBucketTagging"
+shadowed = "GetBucketReplication"
+reason   = "Two configuration subresources named in one GET, the same shape as the ?cors pair above with the tagging band in its place. The earlier band wins: ?tagging at 340 is tried before ?replication at 394, and the replication reading is ignored."
+evidence = ["get-bucket-tagging", "get-bucket-replication"]
+
+[[shadowing]]
+winner   = "GetBucketLifecycleConfiguration"
+shadowed = "GetBucketReplication"
+reason   = "Two configuration subresources named in one GET, the third same-method neighbour. The earlier band wins: ?lifecycle at 370 is tried before ?replication at 394, in the arrival order every subresource pair in the table follows."
+evidence = ["get-bucket-lifecycle-configuration", "get-bucket-replication"]
+
+[[shadowing]]
+winner   = "GetBucketEncryption"
+shadowed = "GetBucketReplication"
+reason   = "Two configuration subresources named in one GET, the fourth same-method neighbour — the first band to have one band packed directly behind it. The earlier band wins: ?encryption at 391 is tried before ?replication at 394, and the replication reading is ignored."
+evidence = ["get-bucket-encryption", "get-bucket-replication"]
+
+[[shadowing]]
+winner   = "GetBucketReplication"
+shadowed = "ListMultipartUploads"
+reason   = "?replication and ?uploads together name a configuration document and a listing of one bucket. The subresource band (394) is tried before the upload listing (460), the same order every earlier configuration band settled against the same neighbour."
+evidence = ["get-bucket-replication", "list-multipart-uploads"]
+
+[[shadowing]]
+winner   = "GetBucketReplication"
+shadowed = "ListObjectsV2"
+reason   = "A request carrying ?replication and ?list-type=2 asks for the replication document and a page of keys at once. The configuration subresource is the narrower question and is tried first (394 before 600); the listing is ignored."
+evidence = ["get-bucket-replication", "list-objects-v2"]
+
+[[shadowing]]
+winner   = "GetBucketReplication"
+shadowed = "ListObjectVersions"
+reason   = "Same shape as the pair above with the version listing in place of the key page: only a client sending ?replication and ?versions together reaches it, and the subresource band is tried first (394 before 610)."
+evidence = ["get-bucket-replication", "list-object-versions"]
+
+[[shadowing]]
+winner   = "GetBucketReplication"
+shadowed = "ListObjects"
+reason   = "ListObjects pins no query key, so every ?replication request also satisfies it. Until this row existed that was not a latent overlap but the served behaviour: a replication document request was answered with a key listing. The subresource is the specific reading and wins (394 before 700); the fallback stays last in the band."
+evidence = ["get-bucket-replication", "list-objects"]
+
+[[shadowing]]
+winner   = "PutBucketCors"
+shadowed = "PutBucketReplication"
+reason   = "Two configuration writes named in one PUT: a request carrying ?cors and ?replication satisfies both selectors, and AWS documents no such combination. The earlier band wins (320 before 395), so the body is read as a CORS document and the replication reading is ignored rather than double-written."
+evidence = ["put-bucket-cors", "put-bucket-replication"]
+
+[[shadowing]]
+winner   = "PutBucketTagging"
+shadowed = "PutBucketReplication"
+reason   = "Two configuration writes named in one PUT, the tagging twin of the ?cors pair above. The earlier band wins (350 before 395), so the body is read as a tagging document and the replication reading is ignored rather than double-written."
+evidence = ["put-bucket-tagging", "put-bucket-replication"]
+
+[[shadowing]]
+winner   = "PutBucketLifecycleConfiguration"
+shadowed = "PutBucketReplication"
+reason   = "Two configuration writes named in one PUT, the lifecycle twin of the two pairs above. The earlier band wins (380 before 395), so the body is read as a lifecycle document and the replication reading is ignored rather than double-written."
+evidence = ["put-bucket-lifecycle-configuration", "put-bucket-replication"]
+
+[[shadowing]]
+winner   = "PutBucketEncryption"
+shadowed = "PutBucketReplication"
+reason   = "Two configuration writes named in one PUT, the encryption twin of the three pairs above. The earlier band wins (392 before 395), so the body is read as an encryption document and the replication reading is ignored rather than double-written."
+evidence = ["put-bucket-encryption", "put-bucket-replication"]
+
+[[shadowing]]
+winner   = "DeleteBucketCors"
+shadowed = "DeleteBucketReplication"
+reason   = "Two configuration deletes named in one DELETE. The earlier band wins (330 before 396), so only the CORS document is removed: a request that destroys two configurations because it named two query keys would turn a typo into data loss."
+evidence = ["delete-bucket-cors", "delete-bucket-replication"]
+
+[[shadowing]]
+winner   = "DeleteBucketTagging"
+shadowed = "DeleteBucketReplication"
+reason   = "Two configuration deletes named in one DELETE, the tagging twin of the pair above. The earlier band wins (360 before 396), so only the tag set is removed and the replication document stays: silently severing cross-site replication because of a typo is the availability spelling of the data-loss rule."
+evidence = ["delete-bucket-tagging", "delete-bucket-replication"]
+
+[[shadowing]]
+winner   = "DeleteBucketLifecycle"
+shadowed = "DeleteBucketReplication"
+reason   = "Two configuration deletes named in one DELETE, the lifecycle twin of the two pairs above. The earlier band wins (390 before 396), so only the lifecycle document is removed and the bucket keeps replicating."
+evidence = ["delete-bucket-lifecycle", "delete-bucket-replication"]
+
+[[shadowing]]
+winner   = "DeleteBucketEncryption"
+shadowed = "DeleteBucketReplication"
+reason   = "Two configuration deletes named in one DELETE, the encryption twin of the three pairs above. The earlier band wins (393 before 396), so only the encryption document is removed and the replication document stays."
+evidence = ["delete-bucket-encryption", "delete-bucket-replication"]
+
+[[shadowing]]
+winner   = "GetBucketLocation"
+shadowed = "GetObjectLockConfiguration"
+reason   = "A request carrying both ?location and ?object-lock asks two subresource questions at once. AWS documents no such combination, so the answer is fixed here rather than left to source order: ?location at 300 is tried before ?object-lock at 397, and the lock reading is ignored rather than merged into the answer."
+evidence = ["get-bucket-location", "get-object-lock-configuration"]
+
+[[shadowing]]
+winner   = "GetBucketCors"
+shadowed = "GetObjectLockConfiguration"
+reason   = "Two configuration subresources named in one GET. Neither is the narrower question, so the earlier band wins: ?cors at 310 is tried before ?object-lock at 397, the same first-band-wins rule every subresource pair follows."
+evidence = ["get-bucket-cors", "get-object-lock-configuration"]
+
+[[shadowing]]
+winner   = "GetBucketTagging"
+shadowed = "GetObjectLockConfiguration"
+reason   = "Two configuration subresources named in one GET, the same shape as the ?cors pair above with the tagging band in its place. The earlier band wins: ?tagging at 340 is tried before ?object-lock at 397, and the lock reading is ignored."
+evidence = ["get-bucket-tagging", "get-object-lock-configuration"]
+
+[[shadowing]]
+winner   = "GetBucketLifecycleConfiguration"
+shadowed = "GetObjectLockConfiguration"
+reason   = "Two configuration subresources named in one GET, the third same-method neighbour. The earlier band wins: ?lifecycle at 370 is tried before ?object-lock at 397, in the arrival order every subresource pair follows."
+evidence = ["get-bucket-lifecycle-configuration", "get-object-lock-configuration"]
+
+[[shadowing]]
+winner   = "GetBucketEncryption"
+shadowed = "GetObjectLockConfiguration"
+reason   = "Two configuration subresources named in one GET, the fourth same-method neighbour and the nearest: ?encryption at 391 is tried before ?object-lock at 397, in the same packed corner of the band, and the lock reading is ignored."
+evidence = ["get-bucket-encryption", "get-object-lock-configuration"]
+
+[[shadowing]]
+winner   = "GetBucketReplication"
+shadowed = "GetObjectLockConfiguration"
+reason   = "Two configuration subresources named in one GET, and the closest pair in the table: ?replication at 394 and ?object-lock at 397 are three slots apart in the same packed corner. Neither is the narrower question, so the earlier band wins and the lock reading is ignored."
+evidence = ["get-bucket-replication", "get-object-lock-configuration"]
+
+[[shadowing]]
+winner   = "GetObjectLockConfiguration"
+shadowed = "ListMultipartUploads"
+reason   = "?object-lock and ?uploads together name a configuration document and a listing of one bucket. The subresource band (397) is tried before the upload listing (460), the same order the three earlier configuration bands settled against the same neighbour."
+evidence = ["get-object-lock-configuration", "list-multipart-uploads"]
+
+[[shadowing]]
+winner   = "GetObjectLockConfiguration"
+shadowed = "ListObjectsV2"
+reason   = "A request carrying ?object-lock and ?list-type=2 asks for the lock document and a page of keys at once. The configuration subresource is the narrower question and is tried first (397 before 600); the listing is ignored."
+evidence = ["get-object-lock-configuration", "list-objects-v2"]
+
+[[shadowing]]
+winner   = "GetObjectLockConfiguration"
+shadowed = "ListObjectVersions"
+reason   = "Same shape as the pair above with the version listing in place of the key page: only a client sending ?object-lock and ?versions together reaches it, and the subresource band is tried first (397 before 610)."
+evidence = ["get-object-lock-configuration", "list-object-versions"]
+
+[[shadowing]]
+winner   = "GetObjectLockConfiguration"
+shadowed = "ListObjects"
+reason   = "ListObjects pins no query key, so every ?object-lock request also satisfies it. Until this row existed that was not a latent overlap but the served behaviour: a WORM configuration request was answered with a key listing. The subresource is the specific reading and wins (397 before 700); the fallback stays last in the band."
+evidence = ["get-object-lock-configuration", "list-objects"]
+
+[[shadowing]]
+winner   = "PutBucketCors"
+shadowed = "PutObjectLockConfiguration"
+reason   = "Two configuration writes named in one PUT: a request carrying ?cors and ?object-lock satisfies both selectors, and AWS documents no such combination. The earlier band wins (320 before 398), so the body is read as a CORS document and the lock reading is ignored rather than double-written."
+evidence = ["put-bucket-cors", "put-object-lock-configuration"]
+
+[[shadowing]]
+winner   = "PutBucketTagging"
+shadowed = "PutObjectLockConfiguration"
+reason   = "Two configuration writes named in one PUT, the tagging twin of the ?cors pair above. The earlier band wins (350 before 398), so the body is read as a tagging document and the lock reading is ignored rather than double-written."
+evidence = ["put-bucket-tagging", "put-object-lock-configuration"]
+
+[[shadowing]]
+winner   = "PutBucketLifecycleConfiguration"
+shadowed = "PutObjectLockConfiguration"
+reason   = "Two configuration writes named in one PUT, the lifecycle twin of the two pairs above. The earlier band wins (380 before 398), so the body is read as a lifecycle document and the lock reading is ignored."
+evidence = ["put-bucket-lifecycle-configuration", "put-object-lock-configuration"]
+
+[[shadowing]]
+winner   = "PutBucketEncryption"
+shadowed = "PutObjectLockConfiguration"
+reason   = "Two configuration writes named in one PUT, the nearest neighbour in the packed corner of the band. The earlier band wins (392 before 398), so the body is read as an encryption document and the lock reading is ignored."
+evidence = ["put-bucket-encryption", "put-object-lock-configuration"]
+
+[[shadowing]]
+winner   = "PutBucketReplication"
+shadowed = "PutObjectLockConfiguration"
+reason   = "Two configuration writes named in one PUT, the replication twin of the pair above. The earlier band wins (395 before 398), so the body is read as a replication document and the lock reading is ignored rather than double-written."
+evidence = ["put-bucket-replication", "put-object-lock-configuration"]
+
+[[shadowing]]
+winner   = "GetBucketAcl"
+shadowed = "GetBucketLocation"
+reason   = "?acl and ?location name two subresources of one bucket, and a request sending both asks two questions at once. AWS documents no such combination, so the band order decides: 250 is tried before 300, and the location reading is ignored."
+evidence = ["get-bucket-acl", "get-bucket-location"]
+
+[[shadowing]]
+winner   = "GetBucketAcl"
+shadowed = "GetBucketCors"
+reason   = "Two subresources of one bucket named together, the same shape as the pair above with the CORS document in place of the region. 250 before 310."
+evidence = ["get-bucket-acl", "get-bucket-cors"]
+
+[[shadowing]]
+winner   = "GetBucketAcl"
+shadowed = "GetBucketTagging"
+reason   = "?acl and ?tagging name two subresources of one bucket; the access-control reading is tried first (250 before 340) and the tag set is not merged into it."
+evidence = ["get-bucket-acl", "get-bucket-tagging"]
+
+[[shadowing]]
+winner   = "GetBucketAcl"
+shadowed = "GetBucketLifecycleConfiguration"
+reason   = "Two configuration reads named in one GET. The ACL row is tried first (250 before 370); the lifecycle document is ignored rather than answered instead."
+evidence = ["get-bucket-acl", "get-bucket-lifecycle-configuration"]
+
+[[shadowing]]
+winner   = "GetBucketAcl"
+shadowed = "GetBucketEncryption"
+reason   = "The encryption twin of the pair above: two documents named in one GET, and the ACL row is tried first (250 before 391)."
+evidence = ["get-bucket-acl", "get-bucket-encryption"]
+
+[[shadowing]]
+winner   = "GetBucketAcl"
+shadowed = "GetBucketReplication"
+reason   = "The replication twin of the two pairs above, decided the same way: 250 before 394, and the replication document is ignored."
+evidence = ["get-bucket-acl", "get-bucket-replication"]
+
+[[shadowing]]
+winner   = "GetBucketAcl"
+shadowed = "GetObjectLockConfiguration"
+reason   = "?acl and ?object-lock are two bucket-level documents, and a request naming both reaches both rows. The ACL row is tried first (250 before 397); the WORM configuration is ignored rather than answered under the ACL's root element."
+evidence = ["get-bucket-acl", "get-object-lock-configuration"]
+
+[[shadowing]]
+winner   = "GetBucketAcl"
+shadowed = "ListMultipartUploads"
+reason   = "?acl and ?uploads name a document and a listing of one bucket. The subresource is the narrower question and is tried first (250 before 460)."
+evidence = ["get-bucket-acl", "list-multipart-uploads"]
+
+[[shadowing]]
+winner   = "GetBucketAcl"
+shadowed = "ListObjectsV2"
+reason   = "A request carrying ?acl and list-type=2 asks for the access control policy and for a page of keys at once. The ACL row is tried first (250 before 600)."
+evidence = ["get-bucket-acl", "list-objects-v2"]
+
+[[shadowing]]
+winner   = "GetBucketAcl"
+shadowed = "ListObjectVersions"
+reason   = "The version-listing twin of the pair above: ?acl and ?versions together, and the ACL row is tried first (250 before 610)."
+evidence = ["get-bucket-acl", "list-object-versions"]
+
+[[shadowing]]
+winner   = "GetBucketAcl"
+shadowed = "ListObjects"
+reason   = "ListObjects pins no query key, so every ?acl request satisfies it too. This is the pair the row's position exists for: behind the listing fallback the ACL read would be answered with a page of object keys, which is the GetBucketAcl -> ListObjects line the debt register carried."
+evidence = ["get-bucket-acl", "list-objects"]
+
+[[shadowing]]
+winner   = "PutBucketAcl"
+shadowed = "PutBucketCors"
+reason   = "One PUT carrying one body and naming two configuration documents. The earlier band wins (260 before 320), so the body is read as an access control policy and the CORS reading is ignored rather than double-written."
+evidence = ["put-bucket-acl", "put-bucket-cors"]
+
+[[shadowing]]
+winner   = "PutBucketAcl"
+shadowed = "PutBucketTagging"
+reason   = "The tagging twin of the pair above: one body, two documents named, and the ACL row tried first (260 before 350)."
+evidence = ["put-bucket-acl", "put-bucket-tagging"]
+
+[[shadowing]]
+winner   = "PutBucketAcl"
+shadowed = "PutBucketLifecycleConfiguration"
+reason   = "The lifecycle twin of the two pairs above, decided the same way: 260 before 380, and the body is read as an access control policy."
+evidence = ["put-bucket-acl", "put-bucket-lifecycle-configuration"]
+
+[[shadowing]]
+winner   = "PutBucketAcl"
+shadowed = "PutBucketEncryption"
+reason   = "The encryption twin of the three pairs above: 260 before 392, one body, and the access-control reading wins."
+evidence = ["put-bucket-acl", "put-bucket-encryption"]
+
+[[shadowing]]
+winner   = "PutBucketAcl"
+shadowed = "PutBucketReplication"
+reason   = "The replication twin of the four pairs above: 260 before 395, one body, and the access-control reading wins."
+evidence = ["put-bucket-acl", "put-bucket-replication"]
+
+[[shadowing]]
+winner   = "PutBucketAcl"
+shadowed = "PutObjectLockConfiguration"
+reason   = "?acl and ?object-lock named in one PUT that carries one body. The ACL row is tried first (260 before 398), so a WORM configuration is never written from a body the client meant as an access control policy."
+evidence = ["put-bucket-acl", "put-object-lock-configuration"]
+
+[[shadowing]]
+winner   = "GetBucketAccelerateConfiguration"
+shadowed = "GetBucketLogging"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-accelerate-configuration", "get-bucket-logging"]
+
+[[shadowing]]
+winner   = "GetBucketAccelerateConfiguration"
+shadowed = "GetBucketNotificationConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-accelerate-configuration", "get-bucket-notification-configuration"]
+
+[[shadowing]]
+winner   = "GetBucketAccelerateConfiguration"
+shadowed = "GetBucketPolicy"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-accelerate-configuration", "get-bucket-policy"]
+
+[[shadowing]]
+winner   = "GetBucketAccelerateConfiguration"
+shadowed = "GetBucketPolicyStatus"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-accelerate-configuration", "get-bucket-policy-status"]
+
+[[shadowing]]
+winner   = "GetBucketAccelerateConfiguration"
+shadowed = "GetPublicAccessBlock"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-accelerate-configuration", "get-public-access-block"]
+
+[[shadowing]]
+winner   = "GetBucketAccelerateConfiguration"
+shadowed = "GetBucketRequestPayment"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-accelerate-configuration", "get-bucket-request-payment"]
+
+[[shadowing]]
+winner   = "GetBucketAccelerateConfiguration"
+shadowed = "GetBucketVersioning"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-accelerate-configuration", "get-bucket-versioning"]
+
+[[shadowing]]
+winner   = "GetBucketAccelerateConfiguration"
+shadowed = "GetBucketWebsite"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-accelerate-configuration", "get-bucket-website"]
+
+[[shadowing]]
+winner   = "GetBucketLogging"
+shadowed = "GetBucketNotificationConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-logging", "get-bucket-notification-configuration"]
+
+[[shadowing]]
+winner   = "GetBucketLogging"
+shadowed = "GetBucketPolicy"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-logging", "get-bucket-policy"]
+
+[[shadowing]]
+winner   = "GetBucketLogging"
+shadowed = "GetBucketPolicyStatus"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-logging", "get-bucket-policy-status"]
+
+[[shadowing]]
+winner   = "GetBucketLogging"
+shadowed = "GetPublicAccessBlock"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-logging", "get-public-access-block"]
+
+[[shadowing]]
+winner   = "GetBucketLogging"
+shadowed = "GetBucketRequestPayment"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-logging", "get-bucket-request-payment"]
+
+[[shadowing]]
+winner   = "GetBucketLogging"
+shadowed = "GetBucketVersioning"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-logging", "get-bucket-versioning"]
+
+[[shadowing]]
+winner   = "GetBucketLogging"
+shadowed = "GetBucketWebsite"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-logging", "get-bucket-website"]
+
+[[shadowing]]
+winner   = "GetBucketNotificationConfiguration"
+shadowed = "GetBucketPolicy"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-notification-configuration", "get-bucket-policy"]
+
+[[shadowing]]
+winner   = "GetBucketNotificationConfiguration"
+shadowed = "GetBucketPolicyStatus"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-notification-configuration", "get-bucket-policy-status"]
+
+[[shadowing]]
+winner   = "GetBucketNotificationConfiguration"
+shadowed = "GetPublicAccessBlock"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-notification-configuration", "get-public-access-block"]
+
+[[shadowing]]
+winner   = "GetBucketNotificationConfiguration"
+shadowed = "GetBucketRequestPayment"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-notification-configuration", "get-bucket-request-payment"]
+
+[[shadowing]]
+winner   = "GetBucketNotificationConfiguration"
+shadowed = "GetBucketVersioning"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-notification-configuration", "get-bucket-versioning"]
+
+[[shadowing]]
+winner   = "GetBucketNotificationConfiguration"
+shadowed = "GetBucketWebsite"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-notification-configuration", "get-bucket-website"]
+
+[[shadowing]]
+winner   = "GetBucketPolicy"
+shadowed = "GetBucketPolicyStatus"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-policy", "get-bucket-policy-status"]
+
+[[shadowing]]
+winner   = "GetBucketPolicy"
+shadowed = "GetPublicAccessBlock"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-policy", "get-public-access-block"]
+
+[[shadowing]]
+winner   = "GetBucketPolicy"
+shadowed = "GetBucketRequestPayment"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-policy", "get-bucket-request-payment"]
+
+[[shadowing]]
+winner   = "GetBucketPolicy"
+shadowed = "GetBucketVersioning"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-policy", "get-bucket-versioning"]
+
+[[shadowing]]
+winner   = "GetBucketPolicy"
+shadowed = "GetBucketWebsite"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-policy", "get-bucket-website"]
+
+[[shadowing]]
+winner   = "GetBucketPolicyStatus"
+shadowed = "GetPublicAccessBlock"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-policy-status", "get-public-access-block"]
+
+[[shadowing]]
+winner   = "GetBucketPolicyStatus"
+shadowed = "GetBucketRequestPayment"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-policy-status", "get-bucket-request-payment"]
+
+[[shadowing]]
+winner   = "GetBucketPolicyStatus"
+shadowed = "GetBucketVersioning"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-policy-status", "get-bucket-versioning"]
+
+[[shadowing]]
+winner   = "GetBucketPolicyStatus"
+shadowed = "GetBucketWebsite"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-policy-status", "get-bucket-website"]
+
+[[shadowing]]
+winner   = "GetPublicAccessBlock"
+shadowed = "GetBucketRequestPayment"
+reason_ref = "two-subresource-keys"
+evidence = ["get-public-access-block", "get-bucket-request-payment"]
+
+[[shadowing]]
+winner   = "GetPublicAccessBlock"
+shadowed = "GetBucketVersioning"
+reason_ref = "two-subresource-keys"
+evidence = ["get-public-access-block", "get-bucket-versioning"]
+
+[[shadowing]]
+winner   = "GetPublicAccessBlock"
+shadowed = "GetBucketWebsite"
+reason_ref = "two-subresource-keys"
+evidence = ["get-public-access-block", "get-bucket-website"]
+
+[[shadowing]]
+winner   = "GetBucketRequestPayment"
+shadowed = "GetBucketVersioning"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-request-payment", "get-bucket-versioning"]
+
+[[shadowing]]
+winner   = "GetBucketRequestPayment"
+shadowed = "GetBucketWebsite"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-request-payment", "get-bucket-website"]
+
+[[shadowing]]
+winner   = "GetBucketVersioning"
+shadowed = "GetBucketWebsite"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-versioning", "get-bucket-website"]
+
+[[shadowing]]
+winner   = "GetBucketAccelerateConfiguration"
+shadowed = "GetBucketLocation"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-accelerate-configuration", "get-bucket-location"]
+
+[[shadowing]]
+winner   = "GetBucketAccelerateConfiguration"
+shadowed = "GetBucketCors"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-accelerate-configuration", "get-bucket-cors"]
+
+[[shadowing]]
+winner   = "GetBucketAccelerateConfiguration"
+shadowed = "GetBucketTagging"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-accelerate-configuration", "get-bucket-tagging"]
+
+[[shadowing]]
+winner   = "GetBucketAccelerateConfiguration"
+shadowed = "GetBucketLifecycleConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-accelerate-configuration", "get-bucket-lifecycle-configuration"]
+
+[[shadowing]]
+winner   = "GetBucketAccelerateConfiguration"
+shadowed = "GetBucketEncryption"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-accelerate-configuration", "get-bucket-encryption"]
+
+[[shadowing]]
+winner   = "GetBucketAccelerateConfiguration"
+shadowed = "GetBucketReplication"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-accelerate-configuration", "get-bucket-replication"]
+
+[[shadowing]]
+winner   = "GetBucketAccelerateConfiguration"
+shadowed = "GetObjectLockConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-accelerate-configuration", "get-object-lock-configuration"]
+
+[[shadowing]]
+winner   = "GetBucketAccelerateConfiguration"
+shadowed = "ListMultipartUploads"
+reason_ref = "subresource-over-listing"
+evidence = ["get-bucket-accelerate-configuration", "list-multipart-uploads"]
+
+[[shadowing]]
+winner   = "GetBucketAccelerateConfiguration"
+shadowed = "ListObjectsV2"
+reason_ref = "subresource-over-listing"
+evidence = ["get-bucket-accelerate-configuration", "list-objects-v2"]
+
+[[shadowing]]
+winner   = "GetBucketAccelerateConfiguration"
+shadowed = "ListObjectVersions"
+reason_ref = "subresource-over-listing"
+evidence = ["get-bucket-accelerate-configuration", "list-object-versions"]
+
+[[shadowing]]
+winner   = "GetBucketAccelerateConfiguration"
+shadowed = "ListObjects"
+reason_ref = "subresource-over-fallback"
+evidence = ["get-bucket-accelerate-configuration", "list-objects"]
+
+[[shadowing]]
+winner   = "GetBucketLogging"
+shadowed = "GetBucketLocation"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-logging", "get-bucket-location"]
+
+[[shadowing]]
+winner   = "GetBucketLogging"
+shadowed = "GetBucketCors"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-logging", "get-bucket-cors"]
+
+[[shadowing]]
+winner   = "GetBucketLogging"
+shadowed = "GetBucketTagging"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-logging", "get-bucket-tagging"]
+
+[[shadowing]]
+winner   = "GetBucketLogging"
+shadowed = "GetBucketLifecycleConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-logging", "get-bucket-lifecycle-configuration"]
+
+[[shadowing]]
+winner   = "GetBucketLogging"
+shadowed = "GetBucketEncryption"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-logging", "get-bucket-encryption"]
+
+[[shadowing]]
+winner   = "GetBucketLogging"
+shadowed = "GetBucketReplication"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-logging", "get-bucket-replication"]
+
+[[shadowing]]
+winner   = "GetBucketLogging"
+shadowed = "GetObjectLockConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-logging", "get-object-lock-configuration"]
+
+[[shadowing]]
+winner   = "GetBucketLogging"
+shadowed = "ListMultipartUploads"
+reason_ref = "subresource-over-listing"
+evidence = ["get-bucket-logging", "list-multipart-uploads"]
+
+[[shadowing]]
+winner   = "GetBucketLogging"
+shadowed = "ListObjectsV2"
+reason_ref = "subresource-over-listing"
+evidence = ["get-bucket-logging", "list-objects-v2"]
+
+[[shadowing]]
+winner   = "GetBucketLogging"
+shadowed = "ListObjectVersions"
+reason_ref = "subresource-over-listing"
+evidence = ["get-bucket-logging", "list-object-versions"]
+
+[[shadowing]]
+winner   = "GetBucketLogging"
+shadowed = "ListObjects"
+reason_ref = "subresource-over-fallback"
+evidence = ["get-bucket-logging", "list-objects"]
+
+[[shadowing]]
+winner   = "GetBucketNotificationConfiguration"
+shadowed = "GetBucketLocation"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-notification-configuration", "get-bucket-location"]
+
+[[shadowing]]
+winner   = "GetBucketNotificationConfiguration"
+shadowed = "GetBucketCors"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-notification-configuration", "get-bucket-cors"]
+
+[[shadowing]]
+winner   = "GetBucketNotificationConfiguration"
+shadowed = "GetBucketTagging"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-notification-configuration", "get-bucket-tagging"]
+
+[[shadowing]]
+winner   = "GetBucketNotificationConfiguration"
+shadowed = "GetBucketLifecycleConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-notification-configuration", "get-bucket-lifecycle-configuration"]
+
+[[shadowing]]
+winner   = "GetBucketNotificationConfiguration"
+shadowed = "GetBucketEncryption"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-notification-configuration", "get-bucket-encryption"]
+
+[[shadowing]]
+winner   = "GetBucketNotificationConfiguration"
+shadowed = "GetBucketReplication"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-notification-configuration", "get-bucket-replication"]
+
+[[shadowing]]
+winner   = "GetBucketNotificationConfiguration"
+shadowed = "GetObjectLockConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-notification-configuration", "get-object-lock-configuration"]
+
+[[shadowing]]
+winner   = "GetBucketNotificationConfiguration"
+shadowed = "ListMultipartUploads"
+reason_ref = "subresource-over-listing"
+evidence = ["get-bucket-notification-configuration", "list-multipart-uploads"]
+
+[[shadowing]]
+winner   = "GetBucketNotificationConfiguration"
+shadowed = "ListObjectsV2"
+reason_ref = "subresource-over-listing"
+evidence = ["get-bucket-notification-configuration", "list-objects-v2"]
+
+[[shadowing]]
+winner   = "GetBucketNotificationConfiguration"
+shadowed = "ListObjectVersions"
+reason_ref = "subresource-over-listing"
+evidence = ["get-bucket-notification-configuration", "list-object-versions"]
+
+[[shadowing]]
+winner   = "GetBucketNotificationConfiguration"
+shadowed = "ListObjects"
+reason_ref = "subresource-over-fallback"
+evidence = ["get-bucket-notification-configuration", "list-objects"]
+
+[[shadowing]]
+winner   = "GetBucketPolicy"
+shadowed = "GetBucketLocation"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-policy", "get-bucket-location"]
+
+[[shadowing]]
+winner   = "GetBucketPolicy"
+shadowed = "GetBucketCors"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-policy", "get-bucket-cors"]
+
+[[shadowing]]
+winner   = "GetBucketPolicy"
+shadowed = "GetBucketTagging"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-policy", "get-bucket-tagging"]
+
+[[shadowing]]
+winner   = "GetBucketPolicy"
+shadowed = "GetBucketLifecycleConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-policy", "get-bucket-lifecycle-configuration"]
+
+[[shadowing]]
+winner   = "GetBucketPolicy"
+shadowed = "GetBucketEncryption"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-policy", "get-bucket-encryption"]
+
+[[shadowing]]
+winner   = "GetBucketPolicy"
+shadowed = "GetBucketReplication"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-policy", "get-bucket-replication"]
+
+[[shadowing]]
+winner   = "GetBucketPolicy"
+shadowed = "GetObjectLockConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-policy", "get-object-lock-configuration"]
+
+[[shadowing]]
+winner   = "GetBucketPolicy"
+shadowed = "ListMultipartUploads"
+reason_ref = "subresource-over-listing"
+evidence = ["get-bucket-policy", "list-multipart-uploads"]
+
+[[shadowing]]
+winner   = "GetBucketPolicy"
+shadowed = "ListObjectsV2"
+reason_ref = "subresource-over-listing"
+evidence = ["get-bucket-policy", "list-objects-v2"]
+
+[[shadowing]]
+winner   = "GetBucketPolicy"
+shadowed = "ListObjectVersions"
+reason_ref = "subresource-over-listing"
+evidence = ["get-bucket-policy", "list-object-versions"]
+
+[[shadowing]]
+winner   = "GetBucketPolicy"
+shadowed = "ListObjects"
+reason_ref = "subresource-over-fallback"
+evidence = ["get-bucket-policy", "list-objects"]
+
+[[shadowing]]
+winner   = "GetBucketPolicyStatus"
+shadowed = "GetBucketLocation"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-policy-status", "get-bucket-location"]
+
+[[shadowing]]
+winner   = "GetBucketPolicyStatus"
+shadowed = "GetBucketCors"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-policy-status", "get-bucket-cors"]
+
+[[shadowing]]
+winner   = "GetBucketPolicyStatus"
+shadowed = "GetBucketTagging"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-policy-status", "get-bucket-tagging"]
+
+[[shadowing]]
+winner   = "GetBucketPolicyStatus"
+shadowed = "GetBucketLifecycleConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-policy-status", "get-bucket-lifecycle-configuration"]
+
+[[shadowing]]
+winner   = "GetBucketPolicyStatus"
+shadowed = "GetBucketEncryption"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-policy-status", "get-bucket-encryption"]
+
+[[shadowing]]
+winner   = "GetBucketPolicyStatus"
+shadowed = "GetBucketReplication"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-policy-status", "get-bucket-replication"]
+
+[[shadowing]]
+winner   = "GetBucketPolicyStatus"
+shadowed = "GetObjectLockConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-policy-status", "get-object-lock-configuration"]
+
+[[shadowing]]
+winner   = "GetBucketPolicyStatus"
+shadowed = "ListMultipartUploads"
+reason_ref = "subresource-over-listing"
+evidence = ["get-bucket-policy-status", "list-multipart-uploads"]
+
+[[shadowing]]
+winner   = "GetBucketPolicyStatus"
+shadowed = "ListObjectsV2"
+reason_ref = "subresource-over-listing"
+evidence = ["get-bucket-policy-status", "list-objects-v2"]
+
+[[shadowing]]
+winner   = "GetBucketPolicyStatus"
+shadowed = "ListObjectVersions"
+reason_ref = "subresource-over-listing"
+evidence = ["get-bucket-policy-status", "list-object-versions"]
+
+[[shadowing]]
+winner   = "GetBucketPolicyStatus"
+shadowed = "ListObjects"
+reason_ref = "subresource-over-fallback"
+evidence = ["get-bucket-policy-status", "list-objects"]
+
+[[shadowing]]
+winner   = "GetPublicAccessBlock"
+shadowed = "GetBucketLocation"
+reason_ref = "two-subresource-keys"
+evidence = ["get-public-access-block", "get-bucket-location"]
+
+[[shadowing]]
+winner   = "GetPublicAccessBlock"
+shadowed = "GetBucketCors"
+reason_ref = "two-subresource-keys"
+evidence = ["get-public-access-block", "get-bucket-cors"]
+
+[[shadowing]]
+winner   = "GetPublicAccessBlock"
+shadowed = "GetBucketTagging"
+reason_ref = "two-subresource-keys"
+evidence = ["get-public-access-block", "get-bucket-tagging"]
+
+[[shadowing]]
+winner   = "GetPublicAccessBlock"
+shadowed = "GetBucketLifecycleConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-public-access-block", "get-bucket-lifecycle-configuration"]
+
+[[shadowing]]
+winner   = "GetPublicAccessBlock"
+shadowed = "GetBucketEncryption"
+reason_ref = "two-subresource-keys"
+evidence = ["get-public-access-block", "get-bucket-encryption"]
+
+[[shadowing]]
+winner   = "GetPublicAccessBlock"
+shadowed = "GetBucketReplication"
+reason_ref = "two-subresource-keys"
+evidence = ["get-public-access-block", "get-bucket-replication"]
+
+[[shadowing]]
+winner   = "GetPublicAccessBlock"
+shadowed = "GetObjectLockConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-public-access-block", "get-object-lock-configuration"]
+
+[[shadowing]]
+winner   = "GetPublicAccessBlock"
+shadowed = "ListMultipartUploads"
+reason_ref = "subresource-over-listing"
+evidence = ["get-public-access-block", "list-multipart-uploads"]
+
+[[shadowing]]
+winner   = "GetPublicAccessBlock"
+shadowed = "ListObjectsV2"
+reason_ref = "subresource-over-listing"
+evidence = ["get-public-access-block", "list-objects-v2"]
+
+[[shadowing]]
+winner   = "GetPublicAccessBlock"
+shadowed = "ListObjectVersions"
+reason_ref = "subresource-over-listing"
+evidence = ["get-public-access-block", "list-object-versions"]
+
+[[shadowing]]
+winner   = "GetPublicAccessBlock"
+shadowed = "ListObjects"
+reason_ref = "subresource-over-fallback"
+evidence = ["get-public-access-block", "list-objects"]
+
+[[shadowing]]
+winner   = "GetBucketRequestPayment"
+shadowed = "GetBucketLocation"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-request-payment", "get-bucket-location"]
+
+[[shadowing]]
+winner   = "GetBucketRequestPayment"
+shadowed = "GetBucketCors"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-request-payment", "get-bucket-cors"]
+
+[[shadowing]]
+winner   = "GetBucketRequestPayment"
+shadowed = "GetBucketTagging"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-request-payment", "get-bucket-tagging"]
+
+[[shadowing]]
+winner   = "GetBucketRequestPayment"
+shadowed = "GetBucketLifecycleConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-request-payment", "get-bucket-lifecycle-configuration"]
+
+[[shadowing]]
+winner   = "GetBucketRequestPayment"
+shadowed = "GetBucketEncryption"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-request-payment", "get-bucket-encryption"]
+
+[[shadowing]]
+winner   = "GetBucketRequestPayment"
+shadowed = "GetBucketReplication"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-request-payment", "get-bucket-replication"]
+
+[[shadowing]]
+winner   = "GetBucketRequestPayment"
+shadowed = "GetObjectLockConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-request-payment", "get-object-lock-configuration"]
+
+[[shadowing]]
+winner   = "GetBucketRequestPayment"
+shadowed = "ListMultipartUploads"
+reason_ref = "subresource-over-listing"
+evidence = ["get-bucket-request-payment", "list-multipart-uploads"]
+
+[[shadowing]]
+winner   = "GetBucketRequestPayment"
+shadowed = "ListObjectsV2"
+reason_ref = "subresource-over-listing"
+evidence = ["get-bucket-request-payment", "list-objects-v2"]
+
+[[shadowing]]
+winner   = "GetBucketRequestPayment"
+shadowed = "ListObjectVersions"
+reason_ref = "subresource-over-listing"
+evidence = ["get-bucket-request-payment", "list-object-versions"]
+
+[[shadowing]]
+winner   = "GetBucketRequestPayment"
+shadowed = "ListObjects"
+reason_ref = "subresource-over-fallback"
+evidence = ["get-bucket-request-payment", "list-objects"]
+
+[[shadowing]]
+winner   = "GetBucketVersioning"
+shadowed = "GetBucketLocation"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-versioning", "get-bucket-location"]
+
+[[shadowing]]
+winner   = "GetBucketVersioning"
+shadowed = "GetBucketCors"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-versioning", "get-bucket-cors"]
+
+[[shadowing]]
+winner   = "GetBucketVersioning"
+shadowed = "GetBucketTagging"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-versioning", "get-bucket-tagging"]
+
+[[shadowing]]
+winner   = "GetBucketVersioning"
+shadowed = "GetBucketLifecycleConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-versioning", "get-bucket-lifecycle-configuration"]
+
+[[shadowing]]
+winner   = "GetBucketVersioning"
+shadowed = "GetBucketEncryption"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-versioning", "get-bucket-encryption"]
+
+[[shadowing]]
+winner   = "GetBucketVersioning"
+shadowed = "GetBucketReplication"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-versioning", "get-bucket-replication"]
+
+[[shadowing]]
+winner   = "GetBucketVersioning"
+shadowed = "GetObjectLockConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-versioning", "get-object-lock-configuration"]
+
+[[shadowing]]
+winner   = "GetBucketVersioning"
+shadowed = "ListMultipartUploads"
+reason_ref = "subresource-over-listing"
+evidence = ["get-bucket-versioning", "list-multipart-uploads"]
+
+[[shadowing]]
+winner   = "GetBucketVersioning"
+shadowed = "ListObjectsV2"
+reason_ref = "subresource-over-listing"
+evidence = ["get-bucket-versioning", "list-objects-v2"]
+
+[[shadowing]]
+winner   = "GetBucketVersioning"
+shadowed = "ListObjectVersions"
+reason_ref = "subresource-over-listing"
+evidence = ["get-bucket-versioning", "list-object-versions"]
+
+[[shadowing]]
+winner   = "GetBucketVersioning"
+shadowed = "ListObjects"
+reason_ref = "subresource-over-fallback"
+evidence = ["get-bucket-versioning", "list-objects"]
+
+[[shadowing]]
+winner   = "GetBucketWebsite"
+shadowed = "GetBucketLocation"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-website", "get-bucket-location"]
+
+[[shadowing]]
+winner   = "GetBucketWebsite"
+shadowed = "GetBucketCors"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-website", "get-bucket-cors"]
+
+[[shadowing]]
+winner   = "GetBucketWebsite"
+shadowed = "GetBucketTagging"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-website", "get-bucket-tagging"]
+
+[[shadowing]]
+winner   = "GetBucketWebsite"
+shadowed = "GetBucketLifecycleConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-website", "get-bucket-lifecycle-configuration"]
+
+[[shadowing]]
+winner   = "GetBucketWebsite"
+shadowed = "GetBucketEncryption"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-website", "get-bucket-encryption"]
+
+[[shadowing]]
+winner   = "GetBucketWebsite"
+shadowed = "GetBucketReplication"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-website", "get-bucket-replication"]
+
+[[shadowing]]
+winner   = "GetBucketWebsite"
+shadowed = "GetObjectLockConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-website", "get-object-lock-configuration"]
+
+[[shadowing]]
+winner   = "GetBucketWebsite"
+shadowed = "ListMultipartUploads"
+reason_ref = "subresource-over-listing"
+evidence = ["get-bucket-website", "list-multipart-uploads"]
+
+[[shadowing]]
+winner   = "GetBucketWebsite"
+shadowed = "ListObjectsV2"
+reason_ref = "subresource-over-listing"
+evidence = ["get-bucket-website", "list-objects-v2"]
+
+[[shadowing]]
+winner   = "GetBucketWebsite"
+shadowed = "ListObjectVersions"
+reason_ref = "subresource-over-listing"
+evidence = ["get-bucket-website", "list-object-versions"]
+
+[[shadowing]]
+winner   = "GetBucketWebsite"
+shadowed = "ListObjects"
+reason_ref = "subresource-over-fallback"
+evidence = ["get-bucket-website", "list-objects"]
+
+[[shadowing]]
+winner   = "GetBucketAccelerateConfiguration"
+shadowed = "GetBucketAcl"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-accelerate-configuration", "get-bucket-acl"]
+
+[[shadowing]]
+winner   = "GetBucketLogging"
+shadowed = "GetBucketAcl"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-logging", "get-bucket-acl"]
+
+[[shadowing]]
+winner   = "GetBucketNotificationConfiguration"
+shadowed = "GetBucketAcl"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-notification-configuration", "get-bucket-acl"]
+
+[[shadowing]]
+winner   = "GetBucketPolicy"
+shadowed = "GetBucketAcl"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-policy", "get-bucket-acl"]
+
+[[shadowing]]
+winner   = "GetBucketPolicyStatus"
+shadowed = "GetBucketAcl"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-policy-status", "get-bucket-acl"]
+
+[[shadowing]]
+winner   = "GetPublicAccessBlock"
+shadowed = "GetBucketAcl"
+reason_ref = "two-subresource-keys"
+evidence = ["get-public-access-block", "get-bucket-acl"]
+
+[[shadowing]]
+winner   = "GetBucketRequestPayment"
+shadowed = "GetBucketAcl"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-request-payment", "get-bucket-acl"]
+
+[[shadowing]]
+winner   = "GetBucketVersioning"
+shadowed = "GetBucketAcl"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-versioning", "get-bucket-acl"]
+
+[[shadowing]]
+winner   = "GetBucketWebsite"
+shadowed = "GetBucketAcl"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-website", "get-bucket-acl"]
+
+[[shadowing]]
+winner   = "PutBucketAccelerateConfiguration"
+shadowed = "PutBucketLogging"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-accelerate-configuration", "put-bucket-logging"]
+
+[[shadowing]]
+winner   = "PutBucketAccelerateConfiguration"
+shadowed = "PutBucketNotificationConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-accelerate-configuration", "put-bucket-notification-configuration"]
+
+[[shadowing]]
+winner   = "PutBucketAccelerateConfiguration"
+shadowed = "PutBucketPolicy"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-accelerate-configuration", "put-bucket-policy"]
+
+[[shadowing]]
+winner   = "PutBucketAccelerateConfiguration"
+shadowed = "PutPublicAccessBlock"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-accelerate-configuration", "put-public-access-block"]
+
+[[shadowing]]
+winner   = "PutBucketAccelerateConfiguration"
+shadowed = "PutBucketRequestPayment"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-accelerate-configuration", "put-bucket-request-payment"]
+
+[[shadowing]]
+winner   = "PutBucketAccelerateConfiguration"
+shadowed = "PutBucketVersioning"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-accelerate-configuration", "put-bucket-versioning"]
+
+[[shadowing]]
+winner   = "PutBucketAccelerateConfiguration"
+shadowed = "PutBucketWebsite"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-accelerate-configuration", "put-bucket-website"]
+
+[[shadowing]]
+winner   = "PutBucketLogging"
+shadowed = "PutBucketNotificationConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-logging", "put-bucket-notification-configuration"]
+
+[[shadowing]]
+winner   = "PutBucketLogging"
+shadowed = "PutBucketPolicy"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-logging", "put-bucket-policy"]
+
+[[shadowing]]
+winner   = "PutBucketLogging"
+shadowed = "PutPublicAccessBlock"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-logging", "put-public-access-block"]
+
+[[shadowing]]
+winner   = "PutBucketLogging"
+shadowed = "PutBucketRequestPayment"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-logging", "put-bucket-request-payment"]
+
+[[shadowing]]
+winner   = "PutBucketLogging"
+shadowed = "PutBucketVersioning"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-logging", "put-bucket-versioning"]
+
+[[shadowing]]
+winner   = "PutBucketLogging"
+shadowed = "PutBucketWebsite"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-logging", "put-bucket-website"]
+
+[[shadowing]]
+winner   = "PutBucketNotificationConfiguration"
+shadowed = "PutBucketPolicy"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-notification-configuration", "put-bucket-policy"]
+
+[[shadowing]]
+winner   = "PutBucketNotificationConfiguration"
+shadowed = "PutPublicAccessBlock"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-notification-configuration", "put-public-access-block"]
+
+[[shadowing]]
+winner   = "PutBucketNotificationConfiguration"
+shadowed = "PutBucketRequestPayment"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-notification-configuration", "put-bucket-request-payment"]
+
+[[shadowing]]
+winner   = "PutBucketNotificationConfiguration"
+shadowed = "PutBucketVersioning"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-notification-configuration", "put-bucket-versioning"]
+
+[[shadowing]]
+winner   = "PutBucketNotificationConfiguration"
+shadowed = "PutBucketWebsite"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-notification-configuration", "put-bucket-website"]
+
+[[shadowing]]
+winner   = "PutBucketPolicy"
+shadowed = "PutPublicAccessBlock"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-policy", "put-public-access-block"]
+
+[[shadowing]]
+winner   = "PutBucketPolicy"
+shadowed = "PutBucketRequestPayment"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-policy", "put-bucket-request-payment"]
+
+[[shadowing]]
+winner   = "PutBucketPolicy"
+shadowed = "PutBucketVersioning"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-policy", "put-bucket-versioning"]
+
+[[shadowing]]
+winner   = "PutBucketPolicy"
+shadowed = "PutBucketWebsite"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-policy", "put-bucket-website"]
+
+[[shadowing]]
+winner   = "PutPublicAccessBlock"
+shadowed = "PutBucketRequestPayment"
+reason_ref = "two-subresource-keys"
+evidence = ["put-public-access-block", "put-bucket-request-payment"]
+
+[[shadowing]]
+winner   = "PutPublicAccessBlock"
+shadowed = "PutBucketVersioning"
+reason_ref = "two-subresource-keys"
+evidence = ["put-public-access-block", "put-bucket-versioning"]
+
+[[shadowing]]
+winner   = "PutPublicAccessBlock"
+shadowed = "PutBucketWebsite"
+reason_ref = "two-subresource-keys"
+evidence = ["put-public-access-block", "put-bucket-website"]
+
+[[shadowing]]
+winner   = "PutBucketRequestPayment"
+shadowed = "PutBucketVersioning"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-request-payment", "put-bucket-versioning"]
+
+[[shadowing]]
+winner   = "PutBucketRequestPayment"
+shadowed = "PutBucketWebsite"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-request-payment", "put-bucket-website"]
+
+[[shadowing]]
+winner   = "PutBucketVersioning"
+shadowed = "PutBucketWebsite"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-versioning", "put-bucket-website"]
+
+[[shadowing]]
+winner   = "PutBucketAccelerateConfiguration"
+shadowed = "PutBucketCors"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-accelerate-configuration", "put-bucket-cors"]
+
+[[shadowing]]
+winner   = "PutBucketAccelerateConfiguration"
+shadowed = "PutBucketTagging"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-accelerate-configuration", "put-bucket-tagging"]
+
+[[shadowing]]
+winner   = "PutBucketAccelerateConfiguration"
+shadowed = "PutBucketLifecycleConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-accelerate-configuration", "put-bucket-lifecycle-configuration"]
+
+[[shadowing]]
+winner   = "PutBucketAccelerateConfiguration"
+shadowed = "PutBucketEncryption"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-accelerate-configuration", "put-bucket-encryption"]
+
+[[shadowing]]
+winner   = "PutBucketAccelerateConfiguration"
+shadowed = "PutBucketReplication"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-accelerate-configuration", "put-bucket-replication"]
+
+[[shadowing]]
+winner   = "PutBucketAccelerateConfiguration"
+shadowed = "PutObjectLockConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-accelerate-configuration", "put-object-lock-configuration"]
+
+[[shadowing]]
+winner   = "PutBucketLogging"
+shadowed = "PutBucketCors"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-logging", "put-bucket-cors"]
+
+[[shadowing]]
+winner   = "PutBucketLogging"
+shadowed = "PutBucketTagging"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-logging", "put-bucket-tagging"]
+
+[[shadowing]]
+winner   = "PutBucketLogging"
+shadowed = "PutBucketLifecycleConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-logging", "put-bucket-lifecycle-configuration"]
+
+[[shadowing]]
+winner   = "PutBucketLogging"
+shadowed = "PutBucketEncryption"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-logging", "put-bucket-encryption"]
+
+[[shadowing]]
+winner   = "PutBucketLogging"
+shadowed = "PutBucketReplication"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-logging", "put-bucket-replication"]
+
+[[shadowing]]
+winner   = "PutBucketLogging"
+shadowed = "PutObjectLockConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-logging", "put-object-lock-configuration"]
+
+[[shadowing]]
+winner   = "PutBucketNotificationConfiguration"
+shadowed = "PutBucketCors"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-notification-configuration", "put-bucket-cors"]
+
+[[shadowing]]
+winner   = "PutBucketNotificationConfiguration"
+shadowed = "PutBucketTagging"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-notification-configuration", "put-bucket-tagging"]
+
+[[shadowing]]
+winner   = "PutBucketNotificationConfiguration"
+shadowed = "PutBucketLifecycleConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-notification-configuration", "put-bucket-lifecycle-configuration"]
+
+[[shadowing]]
+winner   = "PutBucketNotificationConfiguration"
+shadowed = "PutBucketEncryption"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-notification-configuration", "put-bucket-encryption"]
+
+[[shadowing]]
+winner   = "PutBucketNotificationConfiguration"
+shadowed = "PutBucketReplication"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-notification-configuration", "put-bucket-replication"]
+
+[[shadowing]]
+winner   = "PutBucketNotificationConfiguration"
+shadowed = "PutObjectLockConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-notification-configuration", "put-object-lock-configuration"]
+
+[[shadowing]]
+winner   = "PutBucketPolicy"
+shadowed = "PutBucketCors"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-policy", "put-bucket-cors"]
+
+[[shadowing]]
+winner   = "PutBucketPolicy"
+shadowed = "PutBucketTagging"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-policy", "put-bucket-tagging"]
+
+[[shadowing]]
+winner   = "PutBucketPolicy"
+shadowed = "PutBucketLifecycleConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-policy", "put-bucket-lifecycle-configuration"]
+
+[[shadowing]]
+winner   = "PutBucketPolicy"
+shadowed = "PutBucketEncryption"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-policy", "put-bucket-encryption"]
+
+[[shadowing]]
+winner   = "PutBucketPolicy"
+shadowed = "PutBucketReplication"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-policy", "put-bucket-replication"]
+
+[[shadowing]]
+winner   = "PutBucketPolicy"
+shadowed = "PutObjectLockConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-policy", "put-object-lock-configuration"]
+
+[[shadowing]]
+winner   = "PutPublicAccessBlock"
+shadowed = "PutBucketCors"
+reason_ref = "two-subresource-keys"
+evidence = ["put-public-access-block", "put-bucket-cors"]
+
+[[shadowing]]
+winner   = "PutPublicAccessBlock"
+shadowed = "PutBucketTagging"
+reason_ref = "two-subresource-keys"
+evidence = ["put-public-access-block", "put-bucket-tagging"]
+
+[[shadowing]]
+winner   = "PutPublicAccessBlock"
+shadowed = "PutBucketLifecycleConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-public-access-block", "put-bucket-lifecycle-configuration"]
+
+[[shadowing]]
+winner   = "PutPublicAccessBlock"
+shadowed = "PutBucketEncryption"
+reason_ref = "two-subresource-keys"
+evidence = ["put-public-access-block", "put-bucket-encryption"]
+
+[[shadowing]]
+winner   = "PutPublicAccessBlock"
+shadowed = "PutBucketReplication"
+reason_ref = "two-subresource-keys"
+evidence = ["put-public-access-block", "put-bucket-replication"]
+
+[[shadowing]]
+winner   = "PutPublicAccessBlock"
+shadowed = "PutObjectLockConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-public-access-block", "put-object-lock-configuration"]
+
+[[shadowing]]
+winner   = "PutBucketRequestPayment"
+shadowed = "PutBucketCors"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-request-payment", "put-bucket-cors"]
+
+[[shadowing]]
+winner   = "PutBucketRequestPayment"
+shadowed = "PutBucketTagging"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-request-payment", "put-bucket-tagging"]
+
+[[shadowing]]
+winner   = "PutBucketRequestPayment"
+shadowed = "PutBucketLifecycleConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-request-payment", "put-bucket-lifecycle-configuration"]
+
+[[shadowing]]
+winner   = "PutBucketRequestPayment"
+shadowed = "PutBucketEncryption"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-request-payment", "put-bucket-encryption"]
+
+[[shadowing]]
+winner   = "PutBucketRequestPayment"
+shadowed = "PutBucketReplication"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-request-payment", "put-bucket-replication"]
+
+[[shadowing]]
+winner   = "PutBucketRequestPayment"
+shadowed = "PutObjectLockConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-request-payment", "put-object-lock-configuration"]
+
+[[shadowing]]
+winner   = "PutBucketVersioning"
+shadowed = "PutBucketCors"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-versioning", "put-bucket-cors"]
+
+[[shadowing]]
+winner   = "PutBucketVersioning"
+shadowed = "PutBucketTagging"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-versioning", "put-bucket-tagging"]
+
+[[shadowing]]
+winner   = "PutBucketVersioning"
+shadowed = "PutBucketLifecycleConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-versioning", "put-bucket-lifecycle-configuration"]
+
+[[shadowing]]
+winner   = "PutBucketVersioning"
+shadowed = "PutBucketEncryption"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-versioning", "put-bucket-encryption"]
+
+[[shadowing]]
+winner   = "PutBucketVersioning"
+shadowed = "PutBucketReplication"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-versioning", "put-bucket-replication"]
+
+[[shadowing]]
+winner   = "PutBucketVersioning"
+shadowed = "PutObjectLockConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-versioning", "put-object-lock-configuration"]
+
+[[shadowing]]
+winner   = "PutBucketWebsite"
+shadowed = "PutBucketCors"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-website", "put-bucket-cors"]
+
+[[shadowing]]
+winner   = "PutBucketWebsite"
+shadowed = "PutBucketTagging"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-website", "put-bucket-tagging"]
+
+[[shadowing]]
+winner   = "PutBucketWebsite"
+shadowed = "PutBucketLifecycleConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-website", "put-bucket-lifecycle-configuration"]
+
+[[shadowing]]
+winner   = "PutBucketWebsite"
+shadowed = "PutBucketEncryption"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-website", "put-bucket-encryption"]
+
+[[shadowing]]
+winner   = "PutBucketWebsite"
+shadowed = "PutBucketReplication"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-website", "put-bucket-replication"]
+
+[[shadowing]]
+winner   = "PutBucketWebsite"
+shadowed = "PutObjectLockConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-website", "put-object-lock-configuration"]
+
+[[shadowing]]
+winner   = "DeleteBucketPolicy"
+shadowed = "DeletePublicAccessBlock"
+reason_ref = "two-subresource-keys"
+evidence = ["delete-bucket-policy", "delete-public-access-block"]
+
+[[shadowing]]
+winner   = "DeleteBucketPolicy"
+shadowed = "DeleteBucketWebsite"
+reason_ref = "two-subresource-keys"
+evidence = ["delete-bucket-policy", "delete-bucket-website"]
+
+[[shadowing]]
+winner   = "DeletePublicAccessBlock"
+shadowed = "DeleteBucketWebsite"
+reason_ref = "two-subresource-keys"
+evidence = ["delete-public-access-block", "delete-bucket-website"]
+
+[[shadowing]]
+winner   = "DeleteBucketPolicy"
+shadowed = "DeleteBucketCors"
+reason_ref = "two-subresource-keys"
+evidence = ["delete-bucket-policy", "delete-bucket-cors"]
+
+[[shadowing]]
+winner   = "DeleteBucketPolicy"
+shadowed = "DeleteBucketTagging"
+reason_ref = "two-subresource-keys"
+evidence = ["delete-bucket-policy", "delete-bucket-tagging"]
+
+[[shadowing]]
+winner   = "DeleteBucketPolicy"
+shadowed = "DeleteBucketLifecycle"
+reason_ref = "two-subresource-keys"
+evidence = ["delete-bucket-policy", "delete-bucket-lifecycle"]
+
+[[shadowing]]
+winner   = "DeleteBucketPolicy"
+shadowed = "DeleteBucketEncryption"
+reason_ref = "two-subresource-keys"
+evidence = ["delete-bucket-policy", "delete-bucket-encryption"]
+
+[[shadowing]]
+winner   = "DeleteBucketPolicy"
+shadowed = "DeleteBucketReplication"
+reason_ref = "two-subresource-keys"
+evidence = ["delete-bucket-policy", "delete-bucket-replication"]
+
+[[shadowing]]
+winner   = "DeletePublicAccessBlock"
+shadowed = "DeleteBucketCors"
+reason_ref = "two-subresource-keys"
+evidence = ["delete-public-access-block", "delete-bucket-cors"]
+
+[[shadowing]]
+winner   = "DeletePublicAccessBlock"
+shadowed = "DeleteBucketTagging"
+reason_ref = "two-subresource-keys"
+evidence = ["delete-public-access-block", "delete-bucket-tagging"]
+
+[[shadowing]]
+winner   = "DeletePublicAccessBlock"
+shadowed = "DeleteBucketLifecycle"
+reason_ref = "two-subresource-keys"
+evidence = ["delete-public-access-block", "delete-bucket-lifecycle"]
+
+[[shadowing]]
+winner   = "DeletePublicAccessBlock"
+shadowed = "DeleteBucketEncryption"
+reason_ref = "two-subresource-keys"
+evidence = ["delete-public-access-block", "delete-bucket-encryption"]
+
+[[shadowing]]
+winner   = "DeletePublicAccessBlock"
+shadowed = "DeleteBucketReplication"
+reason_ref = "two-subresource-keys"
+evidence = ["delete-public-access-block", "delete-bucket-replication"]
+
+[[shadowing]]
+winner   = "DeleteBucketWebsite"
+shadowed = "DeleteBucketCors"
+reason_ref = "two-subresource-keys"
+evidence = ["delete-bucket-website", "delete-bucket-cors"]
+
+[[shadowing]]
+winner   = "DeleteBucketWebsite"
+shadowed = "DeleteBucketTagging"
+reason_ref = "two-subresource-keys"
+evidence = ["delete-bucket-website", "delete-bucket-tagging"]
+
+[[shadowing]]
+winner   = "DeleteBucketWebsite"
+shadowed = "DeleteBucketLifecycle"
+reason_ref = "two-subresource-keys"
+evidence = ["delete-bucket-website", "delete-bucket-lifecycle"]
+
+[[shadowing]]
+winner   = "DeleteBucketWebsite"
+shadowed = "DeleteBucketEncryption"
+reason_ref = "two-subresource-keys"
+evidence = ["delete-bucket-website", "delete-bucket-encryption"]
+
+[[shadowing]]
+winner   = "DeleteBucketWebsite"
+shadowed = "DeleteBucketReplication"
+reason_ref = "two-subresource-keys"
+evidence = ["delete-bucket-website", "delete-bucket-replication"]
+
+[[shadowing]]
+winner   = "PutBucketAccelerateConfiguration"
+shadowed = "PutBucketAcl"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-accelerate-configuration", "put-bucket-acl"]
+
+[[shadowing]]
+winner   = "PutBucketLogging"
+shadowed = "PutBucketAcl"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-logging", "put-bucket-acl"]
+
+[[shadowing]]
+winner   = "PutBucketNotificationConfiguration"
+shadowed = "PutBucketAcl"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-notification-configuration", "put-bucket-acl"]
+
+[[shadowing]]
+winner   = "PutBucketPolicy"
+shadowed = "PutBucketAcl"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-policy", "put-bucket-acl"]
+
+[[shadowing]]
+winner   = "PutPublicAccessBlock"
+shadowed = "PutBucketAcl"
+reason_ref = "two-subresource-keys"
+evidence = ["put-public-access-block", "put-bucket-acl"]
+
+[[shadowing]]
+winner   = "PutBucketRequestPayment"
+shadowed = "PutBucketAcl"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-request-payment", "put-bucket-acl"]
+
+[[shadowing]]
+winner   = "PutBucketVersioning"
+shadowed = "PutBucketAcl"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-versioning", "put-bucket-acl"]
+
+[[shadowing]]
+winner   = "PutBucketWebsite"
+shadowed = "PutBucketAcl"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-website", "put-bucket-acl"]
+
+[[shadowing]]
+winner   = "UploadPart"
+shadowed = "PutObject"
+reason   = "Every part upload is a PUT to an object key, so PutObject's selector accepts it too. The model spells this operation /{Bucket}/{Key+}?x-id=UploadPart and x-id is inert, so partNumber and uploadId are declared as its discriminators in the overlay and put it at 410, ahead of PutObject at 800. The other order is not a style choice: it would write a part over the object it is a part of."
+evidence = ["upload-part", "put-object"]
+
+[[shadowing]]
+winner   = "CompleteMultipartUpload"
+shadowed = "CreateMultipartUpload"
+reason   = "A POST to an object key carrying both ?uploads and ?uploadId asks to start and to finish an upload at once. Completion is the narrower question — it names an upload that already exists — so it is tried first (420 before 450), and the initiation is ignored rather than performed as a side effect."
+evidence = ["complete-multipart-upload", "create-multipart-upload"]
+
+[[shadowing]]
+winner   = "AbortMultipartUpload"
+shadowed = "DeleteObject"
+reason   = "The same refinement as UploadPart over PutObject, in the DELETE method: an abort is a DELETE to the object key plus ?uploadId, and DeleteObject accepts every such request. Abort is tried first (430 before 1000). The other order would delete the object the upload was never merged into, and answer a success for it."
+evidence = ["abort-multipart-upload", "delete-object"]
+
+[[shadowing]]
+winner   = "ListParts"
+shadowed = "GetObject"
+reason   = "Listing the parts of an upload is a GET to the object key plus ?uploadId, and GetObject accepts every such request. ListParts is tried first (440 before 900). The other order would answer a listing request with the object's bytes — or, in the common case where the object does not exist yet, with a not-found error."
+evidence = ["list-parts", "get-object"]
+
+[[shadowing]]
+winner   = "ListParts"
+shadowed = "GetObjectAttributes"
+reason   = "A GET on an object key carrying both ?uploadId and ?attributes asks for the parts of an in-progress upload and for the attributes of the committed object at once. AWS documents no such combination, so the answer is fixed here rather than left to source order: the multipart band (440) is tried before the attributes row (470), and the attributes reading is ignored rather than merged into the answer."
+evidence = ["list-parts", "get-object-attributes"]
+
+[[shadowing]]
+winner   = "GetObjectAttributes"
+shadowed = "GetObject"
+reason   = "Reading an object's attributes is a GET to the object key plus ?attributes, and GetObject accepts every such request. GetObjectAttributes is tried first (470 before 900). The other order is not a mis-route but a disclosure: the caller asked for metadata and would receive the object's bytes, under GetObject's content type and entity tag, with no signal that a different operation answered."
+evidence = ["get-object-attributes", "get-object"]
+
+[[shadowing]]
+winner   = "ListParts"
+shadowed = "GetObjectTagging"
+reason   = "A GET on an object key carrying both ?uploadId and ?tagging asks for the parts of an in-progress upload and for the committed object's tag set at once. AWS documents no such combination, so the multipart band (440) is tried before the tagging row (480) — the same order the attributes row settled at 470, kept rather than inverted for one family."
+evidence = ["list-parts", "get-object-tagging"]
+
+[[shadowing]]
+winner   = "GetObjectAttributes"
+shadowed = "GetObjectTagging"
+reason   = "?attributes and ?tagging are two subresources of one object, and a request sending both asks for two different documents. Neither is a refinement of the other, so the band decides: attributes at 470 is tried before tagging at 480. The order is arbitrary in the sense that AWS documents neither, and fixed here so that it is not decided by source order instead."
+evidence = ["get-object-attributes", "get-object-tagging"]
+
+[[shadowing]]
+winner   = "GetObjectTagging"
+shadowed = "GetObject"
+reason   = "Reading a tag set is a GET to the object key plus ?tagging, and GetObject accepts every such request. GetObjectTagging is tried first (480 before 900). The other order is the disclosure the attributes row already recorded, under a second subresource: the caller asked for labels and would receive the object's bytes."
+evidence = ["get-object-tagging", "get-object"]
+
+[[shadowing]]
+winner   = "UploadPartCopy"
+shadowed = "PutObjectTagging"
+reason   = "A PUT naming a part, an upload, a copy source and ?tagging satisfies both. The part copy is the reading with three discriminators to the tagging row's one, and the multipart band (400) is tried first. The tagging reading is ignored rather than applied to the part."
+evidence = ["upload-part-copy", "put-object-tagging"]
+
+[[shadowing]]
+winner   = "UploadPart"
+shadowed = "PutObjectTagging"
+reason   = "The same pair without the copy source: ?partNumber and ?uploadId alongside ?tagging name a part upload and a tag-set replacement at once. AWS documents no such request; the multipart band (410) is tried before the tagging row (490), so the body is read as the part it is framed as rather than parsed as XML."
+evidence = ["upload-part", "put-object-tagging"]
+
+[[shadowing]]
+winner   = "PutObjectTagging"
+shadowed = "CopyObject"
+reason   = "A PUT to an object key carrying x-amz-copy-source and ?tagging satisfies both, and neither selector refines the other. The tagging row is tried first (490 before 790), which is the safe half of the pair: the other order would perform the copy, overwrite the destination from the source, and discard the tagging document the request actually carried. x-amz-tagging-directive is how a copy manages tags; the ?tagging subresource is a different operation and not a modifier of this one."
+evidence = ["put-object-tagging", "copy-object"]
+
+[[shadowing]]
+winner   = "PutObjectTagging"
+shadowed = "PutObject"
+reason   = "Replacing a tag set is a PUT to the object key plus ?tagging, and PutObject's selector is the method and the target and nothing else. PutObjectTagging is tried first (490 before 800). The other order is destruction rather than a mis-route: PutObject would store the <Tagging> document as the object's body and answer 200, so a caller relabelling an object would lose it."
+evidence = ["put-object-tagging", "put-object"]
+
+[[shadowing]]
+winner   = "AbortMultipartUpload"
+shadowed = "DeleteObjectTagging"
+reason   = "A DELETE on an object key carrying both ?uploadId and ?tagging asks to discard an upload and to clear the committed object's tags at once. The multipart band (430) is tried before the tagging row (500), matching the GET and PUT halves of this band."
+evidence = ["abort-multipart-upload", "delete-object-tagging"]
+
+[[shadowing]]
+winner   = "DeleteObjectTagging"
+shadowed = "DeleteObject"
+reason   = "Clearing a tag set is a DELETE to the object key plus ?tagging, and DeleteObject accepts every such request. DeleteObjectTagging is tried first (500 before 1000). The other order is the worst outcome in the table: the object itself is removed, and the 204 a successful untag answers with is indistinguishable from the 204 the delete answers with."
+evidence = ["delete-object-tagging", "delete-object"]
+
+[[shadowing]]
+winner   = "CopyObject"
+shadowed = "PutObject"
+reason   = "A copy is a PUT to an object key carrying x-amz-copy-source, so PutObject's selector accepts it too. The header is the whole discriminator, which puts CopyObject at 790, ahead of PutObject at 800. The other order is data loss rather than a mis-route: a copy carries no request body, so PutObject would answer a success after replacing the destination with zero bytes."
+evidence = ["copy-object", "put-object"]
+
+[[shadowing]]
+winner   = "UploadPartCopy"
+shadowed = "UploadPart"
+reason   = "A part copy is a part upload plus x-amz-copy-source, so UploadPart accepts every request UploadPartCopy does. The copy is the narrower reading and is tried first (400 before 410) — the precedence ops/multipart.toml reserved for it. The other order would store the empty request body as the part and report its digest as the copied range's."
+evidence = ["upload-part-copy", "upload-part"]
+
+[[shadowing]]
+winner   = "UploadPartCopy"
+shadowed = "CopyObject"
+reason   = "A part copy carries x-amz-copy-source, which is the whole of CopyObject's own discriminator, so the two meet on any PUT that also names a part and an upload. The part copy is the narrower reading and wins at 400. The other order would commit the copy as a whole object at the upload's key, bypassing the upload."
+evidence = ["upload-part-copy", "copy-object"]
+
+[[shadowing]]
+winner   = "UploadPartCopy"
+shadowed = "PutObject"
+reason   = "The transitive case of the two rows above: a part copy satisfies PutObject's selector as well, because PutObject pins nothing but the method and the target. It is recorded rather than inferred, so that removing either intermediate row cannot silently leave this pair undeclared."
+evidence = ["upload-part-copy", "put-object"]
+
+[[shadowing]]
+winner   = "UploadPart"
+shadowed = "CopyObject"
+reason   = "A PUT naming a part, an upload and a copy source satisfies both. This is the one pair in the family neither selector resolves by refinement — neither contains the other — so it is resolved by the band: the multipart band (410) is tried before the object band (790). In practice UploadPartCopy at 400 claims every such request first, and this row records what the table would do if it did not."
+evidence = ["upload-part", "copy-object"]
+
+[[shadowing]]
+winner   = "ListParts"
+shadowed = "GetObjectRetention"
+reason   = "A GET on an object key carrying both ?uploadId and ?retention asks for the parts of an in-progress upload and for the committed object's retention at once. AWS documents no such combination, so the multipart band (440) is tried before the retention row (510) — the same order the attributes and tagging rows settled, kept rather than inverted for one family."
+evidence = ["list-parts", "get-object-retention"]
+
+[[shadowing]]
+winner   = "GetObjectAttributes"
+shadowed = "GetObjectRetention"
+reason   = "?attributes and ?retention are two subresources of one object, and a request sending both asks for two different documents. Neither is a refinement of the other, so the band decides: attributes at 470 is tried before retention at 510, fixed here so that source order does not decide it instead."
+evidence = ["get-object-attributes", "get-object-retention"]
+
+[[shadowing]]
+winner   = "GetObjectTagging"
+shadowed = "GetObjectRetention"
+reason   = "?tagging and ?retention are two subresources of one object. The earlier band wins: tagging at 480 is tried before retention at 510, the same arrival-order rule the attributes pair above follows."
+evidence = ["get-object-tagging", "get-object-retention"]
+
+[[shadowing]]
+winner   = "GetObjectRetention"
+shadowed = "GetObjectLegalHold"
+reason   = "?retention and ?legal-hold together name both halves of the object-lock state in one GET. AWS documents no such combination, and the two answers have different roots, so one must win: the retention row arrived first in the band (510 before 530), and the hold reading is ignored."
+evidence = ["get-object-retention", "get-object-legal-hold"]
+
+[[shadowing]]
+winner   = "GetObjectRetention"
+shadowed = "GetObject"
+reason   = "Reading a retention document is a GET to the object key plus ?retention, and GetObject accepts every such request. GetObjectRetention is tried first (510 before 900). The other order is the disclosure the attributes and tagging rows already recorded: the caller asked for a compliance document and would receive the object's bytes."
+evidence = ["get-object-retention", "get-object"]
+
+[[shadowing]]
+winner   = "ListParts"
+shadowed = "GetObjectLegalHold"
+reason   = "The retention pair's shape one subresource over: ?uploadId and ?legal-hold together reach both rows, AWS documents no such combination, and the multipart band (440) is tried before the legal-hold row (530)."
+evidence = ["list-parts", "get-object-legal-hold"]
+
+[[shadowing]]
+winner   = "GetObjectAttributes"
+shadowed = "GetObjectLegalHold"
+reason   = "?attributes and ?legal-hold are two subresources of one object. The band decides: attributes at 470 is tried before legal-hold at 530."
+evidence = ["get-object-attributes", "get-object-legal-hold"]
+
+[[shadowing]]
+winner   = "GetObjectTagging"
+shadowed = "GetObjectLegalHold"
+reason   = "?tagging and ?legal-hold are two subresources of one object. The earlier band wins: tagging at 480 is tried before legal-hold at 530."
+evidence = ["get-object-tagging", "get-object-legal-hold"]
+
+[[shadowing]]
+winner   = "GetObjectLegalHold"
+shadowed = "GetObject"
+reason   = "Reading a legal hold is a GET to the object key plus ?legal-hold, and GetObject accepts every such request. GetObjectLegalHold is tried first (530 before 900); the other order answers a hold-status request with the object's bytes."
+evidence = ["get-object-legal-hold", "get-object"]
+
+[[shadowing]]
+winner   = "UploadPartCopy"
+shadowed = "PutObjectRetention"
+reason   = "A PUT naming a part, an upload, a copy source and ?retention satisfies both. The part copy is the reading with three discriminators to the retention row's one, and the multipart band (400) is tried first. The retention reading is ignored rather than applied to the part."
+evidence = ["upload-part-copy", "put-object-retention"]
+
+[[shadowing]]
+winner   = "UploadPart"
+shadowed = "PutObjectRetention"
+reason   = "The same pair without the copy source: ?partNumber and ?uploadId alongside ?retention name a part upload and a retention write at once. The multipart band (410) is tried before the retention row (520), so the body is read as the part it is framed as rather than parsed as XML."
+evidence = ["upload-part", "put-object-retention"]
+
+[[shadowing]]
+winner   = "PutObjectTagging"
+shadowed = "PutObjectRetention"
+reason   = "PUT /b/k?tagging&retention carries one body and names two documents to replace with it, which cannot both be meant. The earlier band wins (490 before 520): the body is read as the tagging document it would have to be for the winning row, and the retention reading is ignored rather than applied to a document of the wrong shape."
+evidence = ["put-object-tagging", "put-object-retention"]
+
+[[shadowing]]
+winner   = "PutObjectRetention"
+shadowed = "PutObjectLegalHold"
+reason   = "?retention and ?legal-hold in one PUT name both halves of the object-lock state and carry one body. The retention row arrived first in the band (520 before 540), matching the GET pair, so the body is read as a Retention document and the hold reading is ignored."
+evidence = ["put-object-retention", "put-object-legal-hold"]
+
+[[shadowing]]
+winner   = "PutObjectRetention"
+shadowed = "CopyObject"
+reason   = "A PUT to an object key carrying x-amz-copy-source and ?retention satisfies both, and neither selector refines the other. The retention row is tried first (520 before 790), which is the safe half of the pair: the other order would perform the copy, overwrite the destination from the source, and discard the retention document the request actually carried."
+evidence = ["put-object-retention", "copy-object"]
+
+[[shadowing]]
+winner   = "PutObjectRetention"
+shadowed = "PutObject"
+reason   = "Placing a retention is a PUT to the object key plus ?retention, and PutObject's selector is the method and the target and nothing else. PutObjectRetention is tried first (520 before 800). The other order is destruction with a compliance meaning: PutObject would store the <Retention> document as the object's body and answer 200, so a caller protecting an object would destroy it."
+evidence = ["put-object-retention", "put-object"]
+
+[[shadowing]]
+winner   = "UploadPartCopy"
+shadowed = "PutObjectLegalHold"
+reason   = "The retention pair's shape one subresource over: a part copy carrying ?legal-hold reaches both rows, and the multipart band (400) is tried first."
+evidence = ["upload-part-copy", "put-object-legal-hold"]
+
+[[shadowing]]
+winner   = "UploadPart"
+shadowed = "PutObjectLegalHold"
+reason   = "?partNumber and ?uploadId alongside ?legal-hold name a part upload and a hold write at once. The multipart band (410) is tried before the legal-hold row (540), so the body is read as the part it is framed as."
+evidence = ["upload-part", "put-object-legal-hold"]
+
+[[shadowing]]
+winner   = "PutObjectTagging"
+shadowed = "PutObjectLegalHold"
+reason   = "PUT /b/k?tagging&legal-hold carries one body and names two documents. The earlier band wins (490 before 540), the same rule as the retention twin."
+evidence = ["put-object-tagging", "put-object-legal-hold"]
+
+[[shadowing]]
+winner   = "PutObjectLegalHold"
+shadowed = "CopyObject"
+reason   = "A PUT carrying x-amz-copy-source and ?legal-hold satisfies both, and neither selector refines the other. The legal-hold row is tried first (540 before 790): the other order would perform the copy and discard the hold document the request actually carried."
+evidence = ["put-object-legal-hold", "copy-object"]
+
+[[shadowing]]
+winner   = "PutObjectLegalHold"
+shadowed = "PutObject"
+reason   = "Placing a legal hold is a PUT to the object key plus ?legal-hold, and PutObject accepts every such request. PutObjectLegalHold is tried first (540 before 800). The other order stores the <LegalHold> document as the object's body — destroying the object a court told somebody to keep, with a 200."
+evidence = ["put-object-legal-hold", "put-object"]
+
+[[shadowing]]
+winner   = "CompleteMultipartUpload"
+shadowed = "RestoreObject"
+reason   = "A POST to an object key carrying both ?uploadId and ?restore asks to finish an upload and to retrieve an archived copy of the same key at once. AWS documents no such combination, so the multipart band (420) is tried before the restore row (570) — the order every other object subresource band settled at. The other way round the completion would be dropped and its parts left dangling, with a 202 that says a retrieval was started instead."
+evidence = ["complete-multipart-upload", "restore-object"]
+
+[[shadowing]]
+winner   = "CreateMultipartUpload"
+shadowed = "RestoreObject"
+reason   = "The same pair one multipart operation over: ?uploads beside ?restore names an initiation and a retrieval at once, and the multipart band (450) is tried before the restore row (570)."
+evidence = ["create-multipart-upload", "restore-object"]
+
+[[shadowing]]
+winner   = "CompleteMultipartUpload"
+shadowed = "SelectObjectContent"
+reason   = "?uploadId beside ?select&select-type=2 reaches both rows: a completion carries a CompleteMultipartUpload document and a select carries a SelectObjectContentRequest, and one body cannot be both. The multipart band (420) is tried before the select row (580), so the body is read as the document the winning row's decoder expects rather than parsed twice."
+evidence = ["complete-multipart-upload", "select-object-content"]
+
+[[shadowing]]
+winner   = "CreateMultipartUpload"
+shadowed = "SelectObjectContent"
+reason   = "?uploads beside ?select&select-type=2 names an initiation and a query at once, and the multipart band (450) is tried before the select row (580)."
+evidence = ["create-multipart-upload", "select-object-content"]
+
+[[shadowing]]
+winner   = "RestoreObject"
+shadowed = "SelectObjectContent"
+reason   = "?restore and ?select&select-type=2 are two subresources of one object and neither selector refines the other — the select row pins one query key more, but a different one — so the band decides: restore at 570 is tried before select at 580. The order is arbitrary in the sense that AWS documents neither, and fixed here so that it is not decided by source order instead. The two are not variants of one request: the select-on-restore form is spelled inside a RestoreRequest, as <Type>SELECT</Type> with SelectParameters, and never as both query keys at once."
+evidence = ["restore-object", "select-object-content"]
+
+[[shadowing]]
+winner   = "ListParts"
+shadowed = "GetObjectAcl"
+reason   = "GET /b/k?uploadId&acl asks for the parts of an upload and for an object's access control policy at once. The multipart band (440) is tried before the ACL row (550), the same order the attributes and tagging rows already keep."
+evidence = ["list-parts", "get-object-acl"]
+
+[[shadowing]]
+winner   = "GetObjectAttributes"
+shadowed = "GetObjectAcl"
+reason   = "?attributes and ?acl name two metadata reads of one key. The earlier band wins (470 before 550) and the attributes document is answered."
+evidence = ["get-object-attributes", "get-object-acl"]
+
+[[shadowing]]
+winner   = "GetObjectTagging"
+shadowed = "GetObjectAcl"
+reason   = "?tagging and ?acl name two subresources of one key, and the earlier band wins (480 before 550): the tag set is answered and the ACL reading is ignored."
+evidence = ["get-object-tagging", "get-object-acl"]
+
+[[shadowing]]
+winner   = "GetObjectRetention"
+shadowed = "GetObjectAcl"
+reason   = "The retention twin of the pair above: two subresource reads of one key, and 510 is tried before 550."
+evidence = ["get-object-retention", "get-object-acl"]
+
+[[shadowing]]
+winner   = "GetObjectLegalHold"
+shadowed = "GetObjectAcl"
+reason   = "The legal-hold twin of the two pairs above: 530 before 550, and the hold status is answered rather than the access control policy."
+evidence = ["get-object-legal-hold", "get-object-acl"]
+
+[[shadowing]]
+winner   = "GetObjectAcl"
+shadowed = "GetObject"
+reason   = "An ACL read is a GET to the object key plus ?acl, and GetObject accepts every such request. GetObjectAcl is tried first (550 before 900). The other order is the GetObjectAcl -> GetObject line the debt register carried: a caller asking who may read an object is handed the object's bytes instead."
+evidence = ["get-object-acl", "get-object"]
+
+[[shadowing]]
+winner   = "UploadPartCopy"
+shadowed = "PutObjectAcl"
+reason   = "PUT /b/k?partNumber&uploadId&acl with x-amz-copy-source is a part copy that also names the ACL subresource. The multipart band (400) is tried before the ACL row (560), the same order the tagging and retention writes already keep."
+evidence = ["upload-part-copy", "put-object-acl"]
+
+[[shadowing]]
+winner   = "UploadPart"
+shadowed = "PutObjectAcl"
+reason   = "A part upload that also names ?acl frames its body as a part and as an access control policy at once. The multipart band (410) is tried before the ACL row (560), so the body is read as the part it is framed as."
+evidence = ["upload-part", "put-object-acl"]
+
+[[shadowing]]
+winner   = "PutObjectTagging"
+shadowed = "PutObjectAcl"
+reason   = "PUT /b/k?tagging&acl carries one body and names two documents. The earlier band wins (490 before 560), so the body is read as a tagging document."
+evidence = ["put-object-tagging", "put-object-acl"]
+
+[[shadowing]]
+winner   = "PutObjectRetention"
+shadowed = "PutObjectAcl"
+reason   = "The retention twin of the pair above: one body, two documents named, and 520 is tried before 560."
+evidence = ["put-object-retention", "put-object-acl"]
+
+[[shadowing]]
+winner   = "PutObjectLegalHold"
+shadowed = "PutObjectAcl"
+reason   = "The legal-hold twin of the two pairs above: 540 before 560, and the body is read as a <LegalHold> document."
+evidence = ["put-object-legal-hold", "put-object-acl"]
+
+[[shadowing]]
+winner   = "PutObjectAcl"
+shadowed = "CopyObject"
+reason   = "A PUT carrying x-amz-copy-source and ?acl satisfies both, and neither selector refines the other. The ACL row is tried first (560 before 790): the other order would overwrite the destination object from the source and discard the access control policy the request actually carried."
+evidence = ["put-object-acl", "copy-object"]
+
+[[shadowing]]
+winner   = "PutObjectAcl"
+shadowed = "PutObject"
+reason   = "An ACL write is a PUT to the object key plus ?acl, and PutObject accepts every such request. PutObjectAcl is tried first (560 before 800). The other order is the PutObjectAcl -> PutObject line the debt register carried, and it is not a mis-route but a data loss: the <AccessControlPolicy> document is stored as the object, destroying the bytes the caller only wanted to change the permissions of, and answering 200 for it."
+evidence = ["put-object-acl", "put-object"]
+

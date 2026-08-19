@@ -16,19 +16,19 @@
 //!
 //! Responsible for: [`ShadowingDecl`] (winner, shadowed, reason, evidence), the collection type
 //! the table consults, [`ShadowingPolicy`] — how much of the overlap surface must be declared —
-//! and the pairing of the table's five files into
-//! the one ordered sequence consumers read.
+//! and mounting the generated record as the one ordered sequence consumers read.
 //! NOT responsible for: computing overlap (`lattice`), or the same-precedence case, which is never
 //! a declaration and always a build failure (`table`).
 //! Upstream: nothing. Downstream: `table`, `explain`.
 //!
-//! # Where these belong
+//! # Where these come from
 //!
-//! The issue places the declarations in `model/overlays/route.toml`, the one sanctioned
-//! hand-written protocol-exception source, loaded by codegen. That file is outside this task's
-//! file scope, so [`PROVISIONAL_SHADOWING`] carries the declarations the generated table needs
-//! today, in the same four fields the overlay will use, with the loader left to P4-06. It is one
-//! declaration; the type, not the storage, is what the rest of the crate depends on.
+//! Nowhere in this file. Every declaration is written in `model/overlays/route.toml` — the one
+//! sanctioned hand-written protocol-exception source and a protected file — and lowered by
+//! `cargo xtask codegen` into `generated/route_shadowing.rs`, which [`SHADOWING`] mounts. A
+//! `ShadowingDecl` literal written by hand anywhere in this tree is refused by
+//! `scripts/check_route_shadowing_authority.sh`, because a second source is a second set of
+//! reasons, and two sets of reasons drift.
 //!
 //! A dialect's declarations do not live here at all: they arrive with the
 //! [`crate::dialect::Dialect`] a deployment installs, are appended by [`ShadowingDecls::and`], and
@@ -116,7 +116,7 @@ impl ShadowingDecls {
     /// The same declarations plus one more group.
     ///
     /// How a dialect's declarations reach the table: [`crate::registry::RouterBuilder::build`]
-    /// folds one group per installed dialect onto [`PROVISIONAL_SHADOWING`]. Appending rather than
+    /// folds one group per installed dialect onto [`SHADOWING`]. Appending rather than
     /// replacing is the point — a dialect can declare the overlaps its own row creates and cannot
     /// touch the reviewed record for the generated table.
     #[must_use]
@@ -149,42 +149,25 @@ impl ShadowingDecls {
         self.iter().find(|decl| decl.winner == winner && decl.shadowed == shadowed)
     }
 }
-/// The declarations the generated table needs today.
+/// The generated record. Data only; [`ShadowingDecl`] above is its vocabulary.
 ///
-/// Every entry is the same shape: two bucket-level operations distinguished by different query
-/// keys, reachable together only by a client that sends both keys at once. Precedence, which
-/// codegen assigns, decides the winner; a row here records that somebody looked at it and agreed.
+/// Mounted in a module of its own so that the crate-wide `missing_docs = "deny"` can be lifted for
+/// exactly one item — the generated `SHADOWING` constant, which the emitter does not write a doc
+/// comment for.
+#[allow(missing_docs, reason = "the emitter writes data, not rustdoc; see the module docs")]
+#[allow(
+    unreachable_pub,
+    reason = "the emitter writes `pub`; this module is the constant's only reader"
+)]
+mod data {
+    use super::ShadowingDecl;
+
+    include!("../../generated/route_shadowing.rs");
+}
+
+/// The reviewed cross-precedence shadowing record for the generated table.
 ///
-/// The listing family adds one wrinkle the subresources do not have. `ListObjects` is the meaning
-/// of a `GET` on a bucket that nothing else claimed, so its selector pins no query key and it
-/// therefore overlaps every other bucket-level `GET` in the table. It is last in the band for
-/// exactly that reason, and the rows below are what "last" is allowed to mean.
-///
-/// # Why the table lives in several files
-///
-/// The declarations outgrew the 800-line file ceiling, and the split follows the one seam the
-/// table already has: which target the overlapping selectors address. Bucket-target pairs live in
-/// `shadowing_bucket.rs`, object-target pairs in `shadowing_object.rs`, and
-/// [`ShadowingDecls::over`] reads the groups end to end — so every consumer still sees one
-/// ordered sequence, and a declaration added to the wrong half is a review comment rather than a
-/// behaviour change.
-///
-/// The bucket half is four files now, and each split had the same cause. The `?acl` band sits
-/// ahead of every other bucket subresource, so it wins a pair against each of them and against
-/// each listing, and those seventeen declarations pushed `shadowing_bucket.rs` over the ceiling on
-/// their own. The `?accelerate`-to-`?website` configuration band at 200-249 is the same arithmetic
-/// an order of magnitude up: nine `GET` rows arriving in front of twelve is a hundred and
-/// forty-four pairs before the band is compared with itself, and two hundred and forty-six in all,
-/// so it needed two groups rather than one — `shadowing_bucket_config.rs` for the reads and
-/// `shadowing_bucket_config_write.rs` for the writes and deletes.
-///
-/// None of them is a second way of grouping: same seam, same declaration type, one more element in
-/// the list. That is why the field is a list and no longer a pair, and why the next band that
-/// overflows costs a file and nothing else.
-pub const PROVISIONAL_SHADOWING: ShadowingDecls = ShadowingDecls::over(&[
-    super::shadowing_bucket::DECLS,
-    super::shadowing_bucket_acl::DECLS,
-    super::shadowing_bucket_config::DECLS,
-    super::shadowing_bucket_config_write::DECLS,
-    super::shadowing_object::DECLS,
-]);
+/// One group, because the overlay is one file. A second group here would be a second authority;
+/// the only other group any table ever sees is a dialect's, appended at assembly time by
+/// [`ShadowingDecls::and`].
+pub const SHADOWING: ShadowingDecls = ShadowingDecls::over(&[data::SHADOWING]);

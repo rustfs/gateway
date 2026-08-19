@@ -47,7 +47,7 @@
 use crate::error::PreAuthError;
 use crate::registry::{OperationSpec, Registry, check_required};
 use crate::route::{
-    CompileError, CompiledRouter, PROVISIONAL_SHADOWING, RouteBuildError, RouteEntry, RouteRequestParts, RouteTable, RowError,
+    CompileError, CompiledRouter, RouteBuildError, RouteEntry, RouteRequestParts, RouteTable, RowError, SHADOWING,
     generated_entries,
 };
 
@@ -146,7 +146,7 @@ impl Router {
     /// or a table that will not compile.
     pub fn from_generated(registry: Registry) -> Result<Self, RouterBuildError> {
         let entries = generated_entries()?;
-        let table = RouteTable::build(entries, &PROVISIONAL_SHADOWING)?;
+        let table = RouteTable::build(entries, &SHADOWING)?;
         Self::new(table, registry)
     }
 

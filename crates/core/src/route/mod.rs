@@ -25,7 +25,7 @@
 //!   lattice.rs   can two selectors be satisfied at once — a decision, not a comparison
 //!   shape.rs     the concrete request a conflict is reported with
 //!   table.rs     the ordered table, the build-time refusals, the readable matcher
-//!   shadowing.rs the reviewed record of who wins across precedences
+//!   shadowing.rs the reviewed record of who wins across precedences, from the route overlay
 //!   mask.rs      every routing query key as one bit, derived from the table itself
 //!   compiled.rs  the same table as an array index
 //!   explain.rs   what the table did with one request, and what it did not do
@@ -42,18 +42,12 @@
 //! reading one file, and `crates/core/tests/purity_guard.rs` checks it over the source.
 
 mod compiled;
-mod evidence;
 mod explain;
 mod generated;
 mod lattice;
 mod mask;
 mod selector;
 mod shadowing;
-mod shadowing_bucket;
-mod shadowing_bucket_acl;
-mod shadowing_bucket_config;
-mod shadowing_bucket_config_write;
-mod shadowing_object;
 mod shape;
 mod table;
 
@@ -63,6 +57,6 @@ pub use self::generated::{ROUTES, RoutePredicate, RouteRow, RowError, generated_
 pub use self::lattice::{Contradiction, OverlapError};
 pub use self::mask::{CompileError, MAX_SUBRESOURCE_KEYS, SubresourceBits};
 pub use self::selector::{ArnForm, HostClass, Predicate, RouteEntry, RouteRequestParts, RouteSelector, TargetKind};
-pub use self::shadowing::{PROVISIONAL_SHADOWING, ShadowingDecl, ShadowingDecls, ShadowingPolicy};
+pub use self::shadowing::{SHADOWING, ShadowingDecl, ShadowingDecls, ShadowingPolicy};
 pub use self::shape::RequestShape;
 pub use self::table::{FALLBACK_BAND, RouteBuildError, RouteTable, SelectorReport, render_selector};

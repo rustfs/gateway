@@ -23,6 +23,7 @@ Editing a generated file is a CI failure (`cargo xtask spec verify`), not a styl
 ```
 overlays/
   scalars.toml          the cross-family scalar vocabulary — the ONLY shared file
+  route.toml            [[shadowing]] — cross-precedence route order, also cross-family
   ops/<family>.toml     include, [[deferred]], [op.<Operation>], [shape.<Shape>]
   quirks/<family>.toml  [[quirk]]
 ```
@@ -94,6 +95,46 @@ quietly disable the rule it was carrying, which is the worst outcome for a hand-
 The grammar is a deliberate TOML subset: tables, arrays of tables, strings, integers, booleans and
 arrays. No inline tables, no floats, no dates. If the parser rejects your entry, rewrite it in the
 subset rather than widening the reader.
+
+## route.toml
+
+`[[shadowing]]` alone, plus the `[evidence.<id>]` and `[reason.<id>]` tables its entries name.
+
+The route table is ordered first-match, so a request that satisfies two rows at different
+precedences is answered by the earlier one and the later row is ignored. That is legal — it is why
+the disjointness model was abandoned — but it may never be an accident of source order, so every
+such pair is declared here and an undeclared overlap fails the table build.
+
+Like `scalars.toml`, this file is deliberately *not* sharded, and for the stronger version of the
+same reason: a shadowing pair spans two families by construction. `GetBucketAcl` winning over
+`ListObjects` is neither the acl family's fact nor the list family's, and putting it in either
+would mean the other family could not see it. The loader refuses a family file that carries
+`[[shadowing]]`.
+
+`cargo xtask codegen` lowers this into `generated/route_shadowing.rs`, which `rustfs-gateway-core`
+includes. That is the only source: a hand-written `ShadowingDecl` in Rust is refused by
+`scripts/check_route_shadowing_authority.sh`, because a second source is a second set of reasons
+and two sets drift. Six files of hand-written Rust are what this file replaced.
+
+```toml
+[evidence.get-bucket-location]
+url     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketLocation.html"
+summary = "…"                    # your own sentence; never paste upstream prose
+
+[reason.two-subresource-keys]
+text    = "…"                    # a paragraph a whole band shares
+
+[[shadowing]]
+winner   = "GetBucketLocation"   # the lower, earlier precedence
+shadowed = "ListObjectsV2"
+reason   = "…"                   # inline, for reasoning that is this pair's own …
+reason_ref = "two-subresource-keys"   # … or a `[reason.<id>]`; exactly one of the two
+evidence = ["get-bucket-location", "list-objects-v2"]
+```
+
+Refused: a missing or empty field, both `reason` and `reason_ref`, the same paragraph written
+inline twice (give it an id instead), a dangling or unused `[evidence]` / `[reason]` id, one pair
+declared twice, a route naming itself, and a pair naming an operation no family `include`s.
 
 ## scalars.toml
 
