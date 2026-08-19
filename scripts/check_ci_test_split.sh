@@ -181,50 +181,32 @@ require_equal(error_status_steps.last.keys, ["name", "run"],
               "error-status-self-test command can skip or hide failure")
 
 workspace_run = <<~'RUN'
-  started="$(date +%s)"
-  timeout 480s cargo test --workspace
-  timeout 30s scripts/test_handlers_facade_fixture.sh
-  elapsed="$(( $(date +%s) - started ))"
-  echo "workspace tests completed in ${elapsed}s"
+  scripts/ci_budget.sh 480 "workspace tests" cargo test --workspace
+  scripts/ci_budget.sh 30 "handlers facade fixture" scripts/test_handlers_facade_fixture.sh
 RUN
 signing_suite_run = <<~'RUN'
-  timeout 90s cargo build --package xtask --bin xtask
-  timeout 60s target/debug/xtask sigsuite fetch
-  timeout 60s target/debug/xtask sigsuite run
+  scripts/ci_budget.sh 90 "signing suite build" cargo build --package xtask --bin xtask
+  scripts/ci_budget.sh 60 "signing suite fetch" target/debug/xtask sigsuite fetch
+  scripts/ci_budget.sh 60 "signing suite run" target/debug/xtask sigsuite run
 RUN
 # Every runner declares the same budget it is given, so an overrun stops itself with a
 # diagnosis instead of being killed at exit 124 with every case still printing ok.
 guard_runs = (0...4).map do |group|
   <<~RUN
-    started="$(date +%s)"
-    timeout 300s env GATEWAY_GUARD_BUDGET_SECONDS=300 GATEWAY_GUARD_SHARD_GROUPS=4 GATEWAY_GUARD_SHARD_GROUP=#{group} bash scripts/test_guard_scripts.sh
-    elapsed="$(( $(date +%s) - started ))"
-    echo "guard mutations #{group + 1}/4 completed in ${elapsed}s"
+    scripts/ci_budget.sh 300 "guard mutations #{group + 1}/4" env GATEWAY_GUARD_BUDGET_SECONDS=300 GATEWAY_GUARD_SHARD_GROUPS=4 GATEWAY_GUARD_SHARD_GROUP=#{group} bash scripts/test_guard_scripts.sh
   RUN
 end
 target_run = <<~'RUN'
-  started="$(date +%s)"
-  timeout 120s bash scripts/test_test_target_consolidation.sh
-  elapsed="$(( $(date +%s) - started ))"
-  echo "target consolidation self-test completed in ${elapsed}s"
+  scripts/ci_budget.sh 120 "target consolidation self-test" bash scripts/test_test_target_consolidation.sh
 RUN
 quirk_ledger_run = <<~'RUN'
-  started="$(date +%s)"
-  timeout 60s env GATEWAY_GUARD_QUIRK_LEDGER_ONLY=1 bash scripts/test_guard_scripts.sh
-  elapsed="$(( $(date +%s) - started ))"
-  echo "quirk ledger self-test completed in ${elapsed}s"
+  scripts/ci_budget.sh 60 "quirk ledger self-test" env GATEWAY_GUARD_QUIRK_LEDGER_ONLY=1 bash scripts/test_guard_scripts.sh
 RUN
 dto_compiler_run = <<~'RUN'
-  started="$(date +%s)"
-  timeout 90s env GATEWAY_GUARD_DTO_COMPILER_ONLY=1 bash scripts/test_guard_scripts.sh
-  elapsed="$(( $(date +%s) - started ))"
-  echo "DTO compiler self-test completed in ${elapsed}s"
+  scripts/ci_budget.sh 90 "DTO compiler self-test" env GATEWAY_GUARD_DTO_COMPILER_ONLY=1 bash scripts/test_guard_scripts.sh
 RUN
 build_guard_run = <<~'RUN'
-  started="$(date +%s)"
-  timeout 270s env GATEWAY_GUARD_BUILD_GUARDS_ONLY=1 bash scripts/test_guard_scripts.sh
-  elapsed="$(( $(date +%s) - started ))"
-  echo "build-backed guards completed in ${elapsed}s"
+  scripts/ci_budget.sh 270 "build-backed guards" env GATEWAY_GUARD_BUILD_GUARDS_ONLY=1 bash scripts/test_guard_scripts.sh
 RUN
 require_equal(workspace.fetch("steps").last.fetch("run"), workspace_run,
               "workspace-tests command changed or can hide a failure")
@@ -244,15 +226,46 @@ require_equal(quirk_ledger.fetch("steps").last.fetch("run"), quirk_ledger_run,
 require_equal(dto_compiler.fetch("steps").last.fetch("run"), dto_compiler_run,
               "dto-compiler-self-test command changed or can hide a failure")
 error_status_run = <<~'RUN'
-  started="$(date +%s)"
-  timeout 60s env GATEWAY_GUARD_ERROR_STATUS_ONLY=1 bash scripts/test_guard_scripts.sh
-  elapsed="$(( $(date +%s) - started ))"
-  echo "error status self-test completed in ${elapsed}s"
+  scripts/ci_budget.sh 60 "error status self-test" env GATEWAY_GUARD_ERROR_STATUS_ONLY=1 bash scripts/test_guard_scripts.sh
 RUN
 require_equal(build_guard.fetch("steps").last.fetch("run"), build_guard_run,
               "build-guard-self-test command changed or can hide a failure")
 require_equal(error_status.fetch("steps").last.fetch("run"), error_status_run,
               "error-status-self-test command changed or can hide a failure")
+
+# Every timed command behind the Test aggregate must report the margin it had left.
+#
+# rustfs/gateway#188 and #217 are the same failure twice. A job grows with every merge until it
+# crosses its hard `timeout`, and what CI prints is `exit code 124` after every case has said ok
+# — no failing assertion, nothing naming the clock — on whichever branch happened to be next
+# through the gate. Both times the margin had been shrinking for weeks and nothing reported it,
+# because a bare `timeout` is silent right up until the moment it is fatal.
+#
+# So a bare `timeout` is no longer allowed in these jobs. The budget goes through
+# scripts/ci_budget.sh, which prints the margin on every run, raises a ::warning:: annotation
+# past 80% of budget while there is still room to act cheaply, and turns an overrun into an
+# explicit OUT OF TIME diagnosis instead of an opaque 124. A new job cannot be added to the
+# gate without one.
+aggregate.fetch("needs").each do |job_id|
+  budgeted = 0
+  jobs.fetch(job_id).fetch("steps").each do |step|
+    run = step["run"]
+    next if run.nil?
+    run.each_line do |line|
+      command = line.strip
+      next if command.empty?
+      if command.match?(/(\A|\s)timeout\s+[0-9]+s?\s/)
+        abort("ERROR: #{job_id} runs a bare `timeout`, so an overrun reads as an opaque exit 124 " \
+              "instead of naming the budget it exhausted: #{command}")
+      end
+      budgeted += 1 if command.start_with?("scripts/ci_budget.sh ")
+    end
+  end
+  if budgeted.zero?
+    abort("ERROR: #{job_id} is behind the Test gate but declares no wall-clock budget through " \
+          "scripts/ci_budget.sh, so nothing would report its margin until it fails")
+  end
+end
 
 aggregate_keys = ["name", "needs", "if", "runs-on", "timeout-minutes", "steps"]
 require_equal(aggregate.keys, aggregate_keys, "the Test job changed its dependency, failure, or budget contract")
@@ -367,7 +380,8 @@ if re.search(r'^GUARD_BUDGET_SECONDS="\$\{GATEWAY_GUARD_BUDGET_SECONDS:-[0-9]+\}
         "ERROR: the guard self-test no longer reads the wall-clock budget it must defend"
     )
 invocations = re.findall(
-    r"timeout ([0-9]+)s env ([^\n]*?) bash scripts/test_guard_scripts\.sh", workflow
+    r'scripts/ci_budget\.sh ([0-9]+) "[^"]*" env ([^\n]*?) bash scripts/test_guard_scripts\.sh',
+    workflow,
 )
 shards = [
     (int(seconds), env) for seconds, env in invocations if "GATEWAY_GUARD_SHARD_GROUP=" in env

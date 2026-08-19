@@ -12320,13 +12320,13 @@ expect_fail check_ci_test_split.sh \
     'the workspace-tests job being renamed away' mut_ci_workspace_job_missing
 
 mut_ci_workspace_command_weakened() {
-    replace_ci_text 'timeout 480s cargo test --workspace' 'timeout 480s cargo test -p xtask'
+    replace_ci_text 'scripts/ci_budget.sh 480 "workspace tests" cargo test --workspace' 'scripts/ci_budget.sh 480 "workspace tests" cargo test -p xtask'
 }
 expect_fail check_ci_test_split.sh \
     'the workspace test job running only one package' mut_ci_workspace_command_weakened
 
 mut_ci_handlers_facade_fixture_removed() {
-    replace_ci_text '          timeout 30s scripts/test_handlers_facade_fixture.sh
+    replace_ci_text '          scripts/ci_budget.sh 30 "handlers facade fixture" scripts/test_handlers_facade_fixture.sh
 ' ''
 }
 expect_fail check_ci_test_split.sh \
@@ -12334,26 +12334,26 @@ expect_fail check_ci_test_split.sh \
     mut_ci_handlers_facade_fixture_removed
 
 mut_ci_workspace_failure_swallowed() {
-    replace_ci_text '          timeout 480s cargo test --workspace' \
-        '          timeout 480s cargo test --workspace || true'
+    replace_ci_text '          scripts/ci_budget.sh 480 "workspace tests" cargo test --workspace' \
+        '          scripts/ci_budget.sh 480 "workspace tests" cargo test --workspace || true'
 }
 expect_fail check_ci_test_split.sh \
     'the workspace test job swallowing a failure or timeout' mut_ci_workspace_failure_swallowed
 
 mut_ci_signing_suite_run_dropped() {
-    replace_ci_text '          timeout 60s target/debug/xtask sigsuite run' '          timeout 60s true'
+    replace_ci_text '          scripts/ci_budget.sh 60 "signing suite run" target/debug/xtask sigsuite run' '          scripts/ci_budget.sh 60 "signing suite run" true'
 }
 expect_fail check_ci_test_split.sh \
     'the official signing suite run being replaced with a no-op' mut_ci_signing_suite_run_dropped
 
 mut_ci_signing_suite_fetch_dropped() {
-    replace_ci_text '          timeout 60s target/debug/xtask sigsuite fetch' '          timeout 60s true'
+    replace_ci_text '          scripts/ci_budget.sh 60 "signing suite fetch" target/debug/xtask sigsuite fetch' '          scripts/ci_budget.sh 60 "signing suite fetch" true'
 }
 expect_fail check_ci_test_split.sh \
     'the official signing suite fetch being replaced with a no-op' mut_ci_signing_suite_fetch_dropped
 
 mut_ci_signing_suite_build_dropped() {
-    replace_ci_text '          timeout 90s cargo build --package xtask --bin xtask' '          timeout 90s true'
+    replace_ci_text '          scripts/ci_budget.sh 90 "signing suite build" cargo build --package xtask --bin xtask' '          scripts/ci_budget.sh 90 "signing suite build" true'
 }
 expect_fail check_ci_test_split.sh \
     'the official signing suite runner build being replaced with a no-op' mut_ci_signing_suite_build_dropped
@@ -12424,14 +12424,14 @@ expect_fail check_ci_test_split.sh \
     'the guard mutation job losing access to the branch merge base' mut_ci_guard_parent_fetch_dropped
 
 mut_ci_guard_command_dropped() {
-    replace_ci_text 'timeout 300s env GATEWAY_GUARD_BUDGET_SECONDS=300 GATEWAY_GUARD_SHARD_GROUPS=4 GATEWAY_GUARD_SHARD_GROUP=0 bash scripts/test_guard_scripts.sh' 'timeout 300s true'
+    replace_ci_text 'scripts/ci_budget.sh 300 "guard mutations 1/4" env GATEWAY_GUARD_BUDGET_SECONDS=300 GATEWAY_GUARD_SHARD_GROUPS=4 GATEWAY_GUARD_SHARD_GROUP=0 bash scripts/test_guard_scripts.sh' 'scripts/ci_budget.sh 300 "guard mutations 1/4" true'
 }
 expect_fail check_ci_test_split.sh \
     'the guard mutation suite being replaced with a no-op' mut_ci_guard_command_dropped
 
 mut_ci_guard_failure_swallowed() {
-    replace_ci_text '          timeout 300s env GATEWAY_GUARD_BUDGET_SECONDS=300 GATEWAY_GUARD_SHARD_GROUPS=4 GATEWAY_GUARD_SHARD_GROUP=0 bash scripts/test_guard_scripts.sh' \
-        '          timeout 300s env GATEWAY_GUARD_BUDGET_SECONDS=300 GATEWAY_GUARD_SHARD_GROUPS=4 GATEWAY_GUARD_SHARD_GROUP=0 bash scripts/test_guard_scripts.sh || true'
+    replace_ci_text '          scripts/ci_budget.sh 300 "guard mutations 1/4" env GATEWAY_GUARD_BUDGET_SECONDS=300 GATEWAY_GUARD_SHARD_GROUPS=4 GATEWAY_GUARD_SHARD_GROUP=0 bash scripts/test_guard_scripts.sh' \
+        '          scripts/ci_budget.sh 300 "guard mutations 1/4" env GATEWAY_GUARD_BUDGET_SECONDS=300 GATEWAY_GUARD_SHARD_GROUPS=4 GATEWAY_GUARD_SHARD_GROUP=0 bash scripts/test_guard_scripts.sh || true'
 }
 expect_fail check_ci_test_split.sh \
     'the guard mutation job swallowing a failure or timeout' mut_ci_guard_failure_swallowed
@@ -12464,15 +12464,15 @@ expect_fail check_ci_test_split.sh \
     'the target-consolidation-self-test job being renamed away' mut_ci_target_job_missing
 
 mut_ci_target_command_dropped() {
-    replace_ci_text 'timeout 120s bash scripts/test_test_target_consolidation.sh' \
-        'timeout 120s true'
+    replace_ci_text 'scripts/ci_budget.sh 120 "target consolidation self-test" bash scripts/test_test_target_consolidation.sh' \
+        'scripts/ci_budget.sh 120 "target consolidation self-test" true'
 }
 expect_fail check_ci_test_split.sh \
     'the target-consolidation mutation suite being replaced with a no-op' mut_ci_target_command_dropped
 
 mut_ci_target_failure_swallowed() {
-    replace_ci_text '          timeout 120s bash scripts/test_test_target_consolidation.sh' \
-        '          timeout 120s bash scripts/test_test_target_consolidation.sh || true'
+    replace_ci_text '          scripts/ci_budget.sh 120 "target consolidation self-test" bash scripts/test_test_target_consolidation.sh' \
+        '          scripts/ci_budget.sh 120 "target consolidation self-test" bash scripts/test_test_target_consolidation.sh || true'
 }
 expect_fail check_ci_test_split.sh \
     'the target-consolidation job swallowing a failure or timeout' mut_ci_target_failure_swallowed
@@ -12522,15 +12522,15 @@ expect_fail check_ci_test_split.sh \
     'the quirk-ledger-self-test job being renamed away' mut_ci_quirk_ledger_job_missing
 
 mut_ci_quirk_ledger_command_dropped() {
-    replace_ci_text 'timeout 60s env GATEWAY_GUARD_QUIRK_LEDGER_ONLY=1 bash scripts/test_guard_scripts.sh' \
-        'timeout 60s true'
+    replace_ci_text 'scripts/ci_budget.sh 60 "quirk ledger self-test" env GATEWAY_GUARD_QUIRK_LEDGER_ONLY=1 bash scripts/test_guard_scripts.sh' \
+        'scripts/ci_budget.sh 60 "quirk ledger self-test" true'
 }
 expect_fail check_ci_test_split.sh \
     'the quirk-ledger mutation suite being replaced with a no-op' mut_ci_quirk_ledger_command_dropped
 
 mut_ci_quirk_ledger_failure_swallowed() {
-    replace_ci_text '          timeout 60s env GATEWAY_GUARD_QUIRK_LEDGER_ONLY=1 bash scripts/test_guard_scripts.sh' \
-        '          timeout 60s env GATEWAY_GUARD_QUIRK_LEDGER_ONLY=1 bash scripts/test_guard_scripts.sh || true'
+    replace_ci_text '          scripts/ci_budget.sh 60 "quirk ledger self-test" env GATEWAY_GUARD_QUIRK_LEDGER_ONLY=1 bash scripts/test_guard_scripts.sh' \
+        '          scripts/ci_budget.sh 60 "quirk ledger self-test" env GATEWAY_GUARD_QUIRK_LEDGER_ONLY=1 bash scripts/test_guard_scripts.sh || true'
 }
 expect_fail check_ci_test_split.sh \
     'the quirk-ledger job swallowing a failure or timeout' mut_ci_quirk_ledger_failure_swallowed
@@ -12574,29 +12574,29 @@ expect_fail check_ci_test_split.sh \
     'the quirk-ledger job waiting for guard mutations' mut_ci_quirk_ledger_serialized
 
 mut_ci_dto_compiler_command_dropped() {
-    replace_ci_text 'timeout 90s env GATEWAY_GUARD_DTO_COMPILER_ONLY=1 bash scripts/test_guard_scripts.sh' \
-        'timeout 90s true'
+    replace_ci_text 'scripts/ci_budget.sh 90 "DTO compiler self-test" env GATEWAY_GUARD_DTO_COMPILER_ONLY=1 bash scripts/test_guard_scripts.sh' \
+        'scripts/ci_budget.sh 90 "DTO compiler self-test" true'
 }
 expect_fail check_ci_test_split.sh \
     'the DTO compiler mutation suite being replaced with a no-op' mut_ci_dto_compiler_command_dropped
 
 mut_ci_dto_compiler_failure_swallowed() {
-    replace_ci_text '          timeout 90s env GATEWAY_GUARD_DTO_COMPILER_ONLY=1 bash scripts/test_guard_scripts.sh' \
-        '          timeout 90s env GATEWAY_GUARD_DTO_COMPILER_ONLY=1 bash scripts/test_guard_scripts.sh || true'
+    replace_ci_text '          scripts/ci_budget.sh 90 "DTO compiler self-test" env GATEWAY_GUARD_DTO_COMPILER_ONLY=1 bash scripts/test_guard_scripts.sh' \
+        '          scripts/ci_budget.sh 90 "DTO compiler self-test" env GATEWAY_GUARD_DTO_COMPILER_ONLY=1 bash scripts/test_guard_scripts.sh || true'
 }
 expect_fail check_ci_test_split.sh \
     'the DTO compiler job swallowing a failure or timeout' mut_ci_dto_compiler_failure_swallowed
 
 mut_ci_build_guard_command_dropped() {
-    replace_ci_text 'timeout 270s env GATEWAY_GUARD_BUILD_GUARDS_ONLY=1 bash scripts/test_guard_scripts.sh' \
-        'timeout 270s true'
+    replace_ci_text 'scripts/ci_budget.sh 270 "build-backed guards" env GATEWAY_GUARD_BUILD_GUARDS_ONLY=1 bash scripts/test_guard_scripts.sh' \
+        'scripts/ci_budget.sh 270 "build-backed guards" true'
 }
 expect_fail check_ci_test_split.sh \
     'the build-backed mutation suite being replaced with a no-op' mut_ci_build_guard_command_dropped
 
 mut_ci_build_guard_failure_swallowed() {
-    replace_ci_text '          timeout 270s env GATEWAY_GUARD_BUILD_GUARDS_ONLY=1 bash scripts/test_guard_scripts.sh' \
-        '          timeout 270s env GATEWAY_GUARD_BUILD_GUARDS_ONLY=1 bash scripts/test_guard_scripts.sh || true'
+    replace_ci_text '          scripts/ci_budget.sh 270 "build-backed guards" env GATEWAY_GUARD_BUILD_GUARDS_ONLY=1 bash scripts/test_guard_scripts.sh' \
+        '          scripts/ci_budget.sh 270 "build-backed guards" env GATEWAY_GUARD_BUILD_GUARDS_ONLY=1 bash scripts/test_guard_scripts.sh || true'
 }
 expect_fail check_ci_test_split.sh \
     'the build-backed guard job swallowing a failure or timeout' mut_ci_build_guard_failure_swallowed
@@ -12692,8 +12692,8 @@ expect_fail check_ci_test_split.sh \
     'the aggregate check never comparing the error-status result' mut_ci_error_status_comparison_dropped
 
 mut_ci_error_status_suite_is_a_no_op() {
-    replace_ci_text 'timeout 60s env GATEWAY_GUARD_ERROR_STATUS_ONLY=1 bash scripts/test_guard_scripts.sh' \
-        'timeout 60s true'
+    replace_ci_text 'scripts/ci_budget.sh 60 "error status self-test" env GATEWAY_GUARD_ERROR_STATUS_ONLY=1 bash scripts/test_guard_scripts.sh' \
+        'scripts/ci_budget.sh 60 "error status self-test" true'
 }
 expect_fail check_ci_test_split.sh \
     'the error-status mutation suite being replaced with a no-op' \
@@ -12934,8 +12934,8 @@ import pathlib
 
 path = pathlib.Path(".github/workflows/ci.yml")
 text = path.read_text()
-before = "timeout 300s env GATEWAY_GUARD_BUDGET_SECONDS=300 GATEWAY_GUARD_SHARD_GROUPS=4 GATEWAY_GUARD_SHARD_GROUP=2"
-after = "timeout 300s env GATEWAY_GUARD_BUDGET_SECONDS=600 GATEWAY_GUARD_SHARD_GROUPS=4 GATEWAY_GUARD_SHARD_GROUP=2"
+before = 'scripts/ci_budget.sh 300 "guard mutations 3/4" env GATEWAY_GUARD_BUDGET_SECONDS=300 GATEWAY_GUARD_SHARD_GROUPS=4 GATEWAY_GUARD_SHARD_GROUP=2'
+after = 'scripts/ci_budget.sh 300 "guard mutations 3/4" env GATEWAY_GUARD_BUDGET_SECONDS=600 GATEWAY_GUARD_SHARD_GROUPS=4 GATEWAY_GUARD_SHARD_GROUP=2'
 if text.count(before) != 1:
     raise SystemExit("missing guard budget mutation subject")
 path.write_text(text.replace(before, after, 1))
@@ -12961,6 +12961,37 @@ PYEOF
 expect_fail check_ci_test_split.sh \
     'a guard shard running blind to the budget, so an overrun returns to an opaque exit 124' \
     mut_guard_budget_env_removed
+
+# -----------------------------------------------------------------------------
+# Every gate job reports the margin it had left (rustfs/gateway#217)
+#
+# A bare `timeout` says nothing until the moment it is fatal, and then it says only
+# `exit code 124`. Both #188 and #217 were diagnosed as broken branches for days because
+# of it. scripts/ci_budget.sh is the outer layer that makes the margin visible on every
+# run, and check_ci_test_split.sh requires every timed command behind Test to use it.
+# -----------------------------------------------------------------------------
+
+mut_ci_target_budget_unreported() {
+    replace_ci_text 'scripts/ci_budget.sh 120 "target consolidation self-test" bash scripts/test_test_target_consolidation.sh' \
+        'timeout 120s bash scripts/test_test_target_consolidation.sh'
+}
+expect_fail check_ci_test_split.sh \
+    'a gate job returning to a bare timeout, whose overrun is an unexplained exit 124' \
+    mut_ci_target_budget_unreported
+
+mut_ci_guard_shard_budget_unreported() {
+    replace_ci_text 'scripts/ci_budget.sh 300 "guard mutations 1/4" env' 'timeout 300s env'
+}
+expect_fail check_ci_test_split.sh \
+    'a guard shard returning to a bare timeout' mut_ci_guard_shard_budget_unreported
+
+mut_ci_tsan_budget_removed() {
+    replace_ci_text 'scripts/ci_budget.sh 480 "gateway TSAN" scripts/run_gateway_tsan.sh' \
+        'scripts/run_gateway_tsan.sh'
+}
+expect_fail check_ci_test_split.sh \
+    'a gate job declaring no wall-clock budget at all, so nothing reports its margin' \
+    mut_ci_tsan_budget_removed
 
 mut_guard_shard_group_duplicated() {
     python3 - <<'PYEOF'
@@ -12999,6 +13030,89 @@ expect_fail check_ci_test_split.sh \
 fi
 
 if [[ "$QUIRK_LEDGER_ONLY" == 0 && "$DTO_COMPILER_ONLY" == 0 && "$BUILD_GUARDS_ONLY" == 0 && "$ERROR_STATUS_ONLY" == 0 ]]; then
+
+# ci_budget.sh is driven directly rather than through a sandbox: its whole contract is what
+# it prints and what it returns. The verdict function is pure, so the thresholds are asserted
+# without burning wall-clock on sleeps the suite cannot afford.
+ci_budget_verdict_case() {
+    local elapsed="$1" budget="$2" expected="$3" actual
+    cases=$((cases + 1))
+    guard_case_owned "$cases" || return 0
+    actual="$(bash -c "source '${SCRIPT_DIR}/ci_budget.sh'; ci_budget_verdict $elapsed $budget 80")"
+    if [[ "$actual" == "$expected" ]]; then
+        pass_msg "ci_budget.sh calls ${elapsed}s of ${budget}s '${expected}'"
+    else
+        fail_msg "ci_budget.sh called ${elapsed}s of ${budget}s '${actual}', expected '${expected}'"
+    fi
+}
+ci_budget_verdict_case 0 100 ok
+ci_budget_verdict_case 79 100 ok
+ci_budget_verdict_case 80 100 warn
+ci_budget_verdict_case 99 100 warn
+ci_budget_verdict_case 100 100 over
+
+ci_budget_case() {
+    local desc="$1" expected_rc="$2" expected_fragment="$3"
+    shift 3
+    local output rc=0
+    cases=$((cases + 1))
+    guard_case_owned "$cases" || return 0
+    output="$("$@" 2>&1)" || rc=$?
+    if [[ "$rc" -eq "$expected_rc" && "$output" == *"$expected_fragment"* ]]; then
+        pass_msg "ci_budget.sh ${desc}"
+    else
+        fail_msg "ci_budget.sh ${desc} — rc ${rc}, expected ${expected_rc}; output: ${output}"
+    fi
+}
+ci_budget_case 'reports the margin a passing job left' 0 'of its 100s budget' \
+    bash "${SCRIPT_DIR}/ci_budget.sh" 100 'sample job' true
+ci_budget_case 'preserves the exit status of the job it wraps' 7 '' \
+    bash "${SCRIPT_DIR}/ci_budget.sh" 100 'sample job' bash -c 'exit 7'
+ci_budget_case 'rejects a budget that is not a positive integer' 2 'positive integer' \
+    bash "${SCRIPT_DIR}/ci_budget.sh" 0 'sample job' true
+ci_budget_case 'rejects an empty label, which an overrun could not name' 2 'label must not be empty' \
+    bash "${SCRIPT_DIR}/ci_budget.sh" 100 '' true
+
+# The 124 is produced by a stub on PATH on purpose. The unit under test is ci_budget.sh's
+# handling of an exhausted budget, not GNU timeout's ability to report one, and a stub keeps
+# the case honest on macOS, where timeout(1) does not exist at all and the case would
+# otherwise quietly assert nothing.
+ci_budget_timeout_case() {
+    local stub output rc=0
+    cases=$((cases + 1))
+    guard_case_owned "$cases" || return 0
+    stub="$(mktemp -d "${TMPDIR:-/tmp}/gateway-ci-budget-stub.XXXXXX")"
+    printf '#!/usr/bin/env bash\nexit 124\n' >"${stub}/timeout"
+    chmod +x "${stub}/timeout"
+    output="$(PATH="${stub}:${PATH}" bash "${SCRIPT_DIR}/ci_budget.sh" 100 'sample job' true 2>&1)" || rc=$?
+    rm -rf "$stub"
+    if [[ "$rc" -eq 124 && "$output" == *'OUT OF TIME'* && "$output" == *'::error'* ]]; then
+        pass_msg 'ci_budget.sh turns an exhausted budget into an OUT OF TIME diagnosis and an annotation'
+    else
+        fail_msg "ci_budget.sh did not diagnose an exhausted budget — rc ${rc}: ${output}"
+    fi
+}
+ci_budget_timeout_case
+
+# A budget nothing can enforce is a check that cannot fail. Off CI that degrades to measurement
+# with a warning; on CI it must be a hard error instead.
+ci_budget_missing_enforcer_case() {
+    local empty output rc=0
+    cases=$((cases + 1))
+    guard_case_owned "$cases" || return 0
+    empty="$(mktemp -d "${TMPDIR:-/tmp}/gateway-ci-budget-empty.XXXXXX")"
+    # The interpreter is named absolutely because the emptied PATH cannot resolve `bash` either,
+    # and a 127 here would look like the refusal this case is trying to observe.
+    output="$(PATH="$empty" CI=true "$BASH" "${SCRIPT_DIR}/ci_budget.sh" 100 'sample job' true 2>&1)" || rc=$?
+    rm -rf "$empty"
+    if [[ "$rc" -eq 2 && "$output" == *'no budget could be enforced'* ]]; then
+        pass_msg 'ci_budget.sh refuses to report a margin CI could not enforce'
+    else
+        fail_msg "ci_budget.sh accepted an unenforceable budget on CI — rc ${rc}: ${output}"
+    fi
+}
+ci_budget_missing_enforcer_case
+
 mut_config_snapshot_case_identity_removed() {
     python3 - <<'PYEOF'
 import pathlib

@@ -100,6 +100,9 @@ jobs:
           GATEWAY_ADR_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: |
           ran=0
+          slowest=0
+          slowest_guard=none
+          loop_started="$(date +%s)"
           for guard in scripts/check_*.sh; do
             if grep -q '^# REQUIRES-PR$' "$guard"; then
               echo "deferred to the pull-request step: $guard"
@@ -110,11 +113,18 @@ jobs:
               continue
             fi
             echo "::group::$guard"
-            bash "$guard"
+            guard_started="$(date +%s)"
+            scripts/ci_budget.sh 120 "$guard" bash "$guard"
+            guard_elapsed="$(( $(date +%s) - guard_started ))"
             echo "::endgroup::"
+            if [ "$guard_elapsed" -gt "$slowest" ]; then
+              slowest="$guard_elapsed"
+              slowest_guard="$guard"
+            fi
             ran=$((ran + 1))
           done
-          echo "ran $ran guard(s)"
+          loop_elapsed="$(( $(date +%s) - loop_started ))"
+          echo "ran $ran guard(s) in ${loop_elapsed}s; slowest was $slowest_guard at ${slowest}s"
       - name: Protected files
         env:
           GATEWAY_PROTECTED_BASE: ${{ github.event.pull_request.base.sha }}
@@ -218,11 +228,8 @@ jobs:
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - name: Workspace tests (maximum 8 minutes after setup)
         run: |
-          started="$(date +%s)"
-          timeout 480s cargo test --workspace
-          timeout 30s scripts/test_handlers_facade_fixture.sh
-          elapsed="$(( $(date +%s) - started ))"
-          echo "workspace tests completed in ${elapsed}s"
+          scripts/ci_budget.sh 480 "workspace tests" cargo test --workspace
+          scripts/ci_budget.sh 30 "handlers facade fixture" scripts/test_handlers_facade_fixture.sh
 
   signing-suite:
     name: Official signing suite
@@ -234,9 +241,9 @@ jobs:
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - name: Pinned smithy-rs signing suite
         run: |
-          timeout 90s cargo build --package xtask --bin xtask
-          timeout 60s target/debug/xtask sigsuite fetch
-          timeout 60s target/debug/xtask sigsuite run
+          scripts/ci_budget.sh 90 "signing suite build" cargo build --package xtask --bin xtask
+          scripts/ci_budget.sh 60 "signing suite fetch" target/debug/xtask sigsuite fetch
+          scripts/ci_budget.sh 60 "signing suite run" target/debug/xtask sigsuite run
 
   gateway-tsan:
     name: Gateway ThreadSanitizer
@@ -250,7 +257,7 @@ jobs:
           components: rust-src
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - name: One hundred OS threads under TSAN
-        run: timeout 480s scripts/run_gateway_tsan.sh
+        run: scripts/ci_budget.sh 480 "gateway TSAN" scripts/run_gateway_tsan.sh
 
   # The guard self-test is split over four runners because it grows with every merge:
   # AGENTS.md requires a mutation per new assertion, so its case count only ever goes
@@ -276,10 +283,7 @@ jobs:
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - name: Guard mutations 1 of 4 (maximum 5 minutes after setup)
         run: |
-          started="$(date +%s)"
-          timeout 300s env GATEWAY_GUARD_BUDGET_SECONDS=300 GATEWAY_GUARD_SHARD_GROUPS=4 GATEWAY_GUARD_SHARD_GROUP=0 bash scripts/test_guard_scripts.sh
-          elapsed="$(( $(date +%s) - started ))"
-          echo "guard mutations 1/4 completed in ${elapsed}s"
+          scripts/ci_budget.sh 300 "guard mutations 1/4" env GATEWAY_GUARD_BUDGET_SECONDS=300 GATEWAY_GUARD_SHARD_GROUPS=4 GATEWAY_GUARD_SHARD_GROUP=0 bash scripts/test_guard_scripts.sh
 
   guard-self-test-2:
     name: Guard self-test 2
@@ -293,10 +297,7 @@ jobs:
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - name: Guard mutations 2 of 4 (maximum 5 minutes after setup)
         run: |
-          started="$(date +%s)"
-          timeout 300s env GATEWAY_GUARD_BUDGET_SECONDS=300 GATEWAY_GUARD_SHARD_GROUPS=4 GATEWAY_GUARD_SHARD_GROUP=1 bash scripts/test_guard_scripts.sh
-          elapsed="$(( $(date +%s) - started ))"
-          echo "guard mutations 2/4 completed in ${elapsed}s"
+          scripts/ci_budget.sh 300 "guard mutations 2/4" env GATEWAY_GUARD_BUDGET_SECONDS=300 GATEWAY_GUARD_SHARD_GROUPS=4 GATEWAY_GUARD_SHARD_GROUP=1 bash scripts/test_guard_scripts.sh
 
   guard-self-test-3:
     name: Guard self-test 3
@@ -310,10 +311,7 @@ jobs:
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - name: Guard mutations 3 of 4 (maximum 5 minutes after setup)
         run: |
-          started="$(date +%s)"
-          timeout 300s env GATEWAY_GUARD_BUDGET_SECONDS=300 GATEWAY_GUARD_SHARD_GROUPS=4 GATEWAY_GUARD_SHARD_GROUP=2 bash scripts/test_guard_scripts.sh
-          elapsed="$(( $(date +%s) - started ))"
-          echo "guard mutations 3/4 completed in ${elapsed}s"
+          scripts/ci_budget.sh 300 "guard mutations 3/4" env GATEWAY_GUARD_BUDGET_SECONDS=300 GATEWAY_GUARD_SHARD_GROUPS=4 GATEWAY_GUARD_SHARD_GROUP=2 bash scripts/test_guard_scripts.sh
 
   guard-self-test-4:
     name: Guard self-test 4
@@ -327,10 +325,7 @@ jobs:
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - name: Guard mutations 4 of 4 (maximum 5 minutes after setup)
         run: |
-          started="$(date +%s)"
-          timeout 300s env GATEWAY_GUARD_BUDGET_SECONDS=300 GATEWAY_GUARD_SHARD_GROUPS=4 GATEWAY_GUARD_SHARD_GROUP=3 bash scripts/test_guard_scripts.sh
-          elapsed="$(( $(date +%s) - started ))"
-          echo "guard mutations 4/4 completed in ${elapsed}s"
+          scripts/ci_budget.sh 300 "guard mutations 4/4" env GATEWAY_GUARD_BUDGET_SECONDS=300 GATEWAY_GUARD_SHARD_GROUPS=4 GATEWAY_GUARD_SHARD_GROUP=3 bash scripts/test_guard_scripts.sh
 
   target-consolidation-self-test:
     name: Target consolidation self-test
@@ -340,10 +335,7 @@ jobs:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - name: Target consolidation mutations (maximum 2 minutes after setup)
         run: |
-          started="$(date +%s)"
-          timeout 120s bash scripts/test_test_target_consolidation.sh
-          elapsed="$(( $(date +%s) - started ))"
-          echo "target consolidation self-test completed in ${elapsed}s"
+          scripts/ci_budget.sh 120 "target consolidation self-test" bash scripts/test_test_target_consolidation.sh
 
   quirk-ledger-self-test:
     name: Quirk ledger self-test
@@ -353,10 +345,7 @@ jobs:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - name: Quirk ledger mutations (maximum 1 minute after setup)
         run: |
-          started="$(date +%s)"
-          timeout 60s env GATEWAY_GUARD_QUIRK_LEDGER_ONLY=1 bash scripts/test_guard_scripts.sh
-          elapsed="$(( $(date +%s) - started ))"
-          echo "quirk ledger self-test completed in ${elapsed}s"
+          scripts/ci_budget.sh 60 "quirk ledger self-test" env GATEWAY_GUARD_QUIRK_LEDGER_ONLY=1 bash scripts/test_guard_scripts.sh
 
   dto-compiler-self-test:
     name: DTO compiler self-test
@@ -368,10 +357,7 @@ jobs:
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - name: DTO compiler mutations (maximum 1 minute after setup)
         run: |
-          started="$(date +%s)"
-          timeout 90s env GATEWAY_GUARD_DTO_COMPILER_ONLY=1 bash scripts/test_guard_scripts.sh
-          elapsed="$(( $(date +%s) - started ))"
-          echo "DTO compiler self-test completed in ${elapsed}s"
+          scripts/ci_budget.sh 90 "DTO compiler self-test" env GATEWAY_GUARD_DTO_COMPILER_ONLY=1 bash scripts/test_guard_scripts.sh
 
   build-guard-self-test:
     name: Build guard self-test
@@ -383,10 +369,7 @@ jobs:
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - name: Build-backed guards (maximum 4.5 minutes after setup)
         run: |
-          started="$(date +%s)"
-          timeout 270s env GATEWAY_GUARD_BUILD_GUARDS_ONLY=1 bash scripts/test_guard_scripts.sh
-          elapsed="$(( $(date +%s) - started ))"
-          echo "build-backed guards completed in ${elapsed}s"
+          scripts/ci_budget.sh 270 "build-backed guards" env GATEWAY_GUARD_BUILD_GUARDS_ONLY=1 bash scripts/test_guard_scripts.sh
 
   error-status-self-test:
     name: Error status self-test
@@ -396,10 +379,7 @@ jobs:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - name: Error status mutations (maximum 1 minute after setup)
         run: |
-          started="$(date +%s)"
-          timeout 60s env GATEWAY_GUARD_ERROR_STATUS_ONLY=1 bash scripts/test_guard_scripts.sh
-          elapsed="$(( $(date +%s) - started ))"
-          echo "error status self-test completed in ${elapsed}s"
+          scripts/ci_budget.sh 60 "error status self-test" env GATEWAY_GUARD_ERROR_STATUS_ONLY=1 bash scripts/test_guard_scripts.sh
 
   # Branch protection requires this exact check name. It aggregates all twelve parallel jobs and must
   # run even after a dependency fails, otherwise a skipped required check could hide the failure.
