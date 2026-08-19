@@ -196,6 +196,10 @@ pub struct StoredObject {
     /// stub that re-sorted them would be answering from a decision of its own. Duplicate keys never
     /// reach here — `read_tagging_header` and `tag_pairs` refuse them — so the sequence is a
     /// map in everything but lookup cost, and ten pairs is the ceiling AWS documents.
+    ///
+    /// It sits on the *version* rather than beside the key, which is what lets `?tagging&versionId`
+    /// answer and write the version the request named: relabelling one version leaves every other
+    /// version's set exactly where it was.
     pub tags: Vec<(String, String)>,
     /// The retention document a retention write stored, exactly as validated — never invented,
     /// and never *evaluated*: whether this fixture's deletes and overwrites honour it is
@@ -2237,26 +2241,32 @@ fn tag_pairs(document: &dto::Tagging, scope: TagScope) -> Result<Vec<(String, St
 
 /// Refuses `?versionId` on a tagging request rather than answering the current version's tag set.
 ///
-/// This fixture keeps one tag set per key, on its newest version, because no case declares a tag
-/// set per version — `[setup.objects]` has no field for one, and inventing per-version labels is
-/// exactly the kind of state a conformance stub must not hold. So the honest answer to a request
-/// that names a version is that this backend does not serve it. Silently ignoring the parameter
-/// would report the *current* labels as the named version's, and a case asserting on that would go
-/// green against a wrong answer.
+/// The refusal a `?tagging` request that named a version with no representation gets.
 ///
-/// # Errors
+/// A delete marker is a version that exists and holds nothing, so it has no tag set to read or to
+/// write — and `NoSuchKey` would be the wrong sentence for it, because the version is right there
+/// in the history. It is the same distinction [`read_copy_source`] draws for a copy source, and it
+/// is drawn here for the same reason: a client branches on the two answers.
+fn tagging_delete_marker(version_id: &str) -> HandlerError {
+    HandlerErrorContext::versioned_delete_marker(version_id)
+        .map(HandlerError::from)
+        .unwrap_or_else(|_| HandlerError::internal_error("a fixture version id is not valid"))
+}
+
+/// The version id a tagging answer reports, for the version it actually acted on.
 ///
-/// `NotImplemented` whenever the parameter is present, with a value or without. The message is
-/// AWS's own constant for the code — it says "header" where this one is a query key, and it is
-/// still the sentence AWS sends, so it is reproduced rather than improved on.
-fn refuse_versioned_tagging(version_id: Option<&str>) -> Result<(), HandlerError> {
-    if version_id.is_none() {
-        return Ok(());
+/// Reported only for a versioned bucket, for [`read_copy_source`]'s reason: `null` is the version
+/// of an object in a bucket that was never versioned, and a header carrying it tells a client its
+/// object has a version to come back for. `None` on an unversioned bucket is the omission AWS
+/// makes.
+fn reported_tagging_version(fixture: &Fixture, bucket: &str, key: &str, requested: Option<&str>) -> Option<String> {
+    if !fixture.is_versioned(bucket) {
+        return None;
     }
-    Err(HandlerError::new(
-        ErrorCode::NOT_IMPLEMENTED,
-        "A header you provided implies functionality that is not implemented",
-    ))
+    match requested {
+        Some(version_id) => Some(version_id.to_owned()),
+        None => fixture.newest_version_id(bucket, key).map(ToOwned::to_owned),
+    }
 }
 
 /// The access control policy a bucket or an object that nobody configured answers with.
@@ -2851,19 +2861,30 @@ impl Stub {
     /// as the bucket-level read: `NoSuchTagSet` has no object-level twin, and answering `404` here
     /// would make "this object has no labels" indistinguishable from "this key is not there".
     ///
-    /// `versionId` is refused rather than ignored. This fixture stores the tag set on the newest
-    /// version of a key, so answering a request that named an older one would report the current
-    /// labels as that version's — a wrong answer, where a refusal is merely a gap.
+    /// `versionId` is honoured rather than refused, the way the ACL family next door honours it: the
+    /// tag set lives on the version, so the named one can be answered exactly. Ignoring the
+    /// parameter would report the *current* labels as the named version's — a wrong answer wearing
+    /// a `200`, which is worse than the gap the refusal used to be. An id this fixture never minted
+    /// for this key is `NoSuchVersion`, and a version that is a delete marker has no tag set.
     fn get_object_tagging(&self, input: &dto::GetObjectTaggingInput) -> HandlerResult<dto::GetObjectTagging> {
         let fixture = self.borrow()?;
         require_bucket(&fixture, &input.bucket)?;
-        refuse_versioned_tagging(input.version_id.as_deref())?;
-        let object = fixture
-            .object(input.bucket.as_str(), input.key.as_str())
-            .ok_or_else(|| no_such_key(input.key.as_str()))?;
+        let requested = input.version_id.as_deref();
+        let reported = reported_tagging_version(&fixture, input.bucket.as_str(), input.key.as_str(), requested);
+        let object = match requested {
+            None => fixture
+                .object(input.bucket.as_str(), input.key.as_str())
+                .ok_or_else(|| no_such_key(input.key.as_str()))?,
+            Some(version_id) => fixture
+                .version(input.bucket.as_str(), input.key.as_str(), version_id)
+                .ok_or_else(no_such_version)?
+                .object
+                .as_ref()
+                .ok_or_else(|| tagging_delete_marker(version_id))?,
+        };
         Ok(Resp::new(dto::GetObjectTaggingOutput {
             tag_set: tag_elements(&object.tags)?,
-            ..dto::GetObjectTaggingOutput::default()
+            version_id: reported,
         }))
     }
 
@@ -2878,12 +2899,23 @@ impl Stub {
         let pairs = tag_pairs(&input.tagging, TagScope::Object)?;
         let mut fixture = self.borrow()?;
         require_bucket(&fixture, &input.bucket)?;
-        refuse_versioned_tagging(input.version_id.as_deref())?;
-        let object = fixture
-            .object_mut(input.bucket.as_str(), input.key.as_str())
-            .ok_or_else(|| no_such_key(input.key.as_str()))?;
+        let requested = input.version_id.clone();
+        // Resolved before the writable borrow, because the reported id is read off the fixture and
+        // the write holds it exclusively.
+        let reported = reported_tagging_version(&fixture, input.bucket.as_str(), input.key.as_str(), requested.as_deref());
+        let object = match requested.as_deref() {
+            None => fixture
+                .object_mut(input.bucket.as_str(), input.key.as_str())
+                .ok_or_else(|| no_such_key(input.key.as_str()))?,
+            Some(version_id) => fixture
+                .version_mut(input.bucket.as_str(), input.key.as_str(), version_id)
+                .ok_or_else(no_such_version)?
+                .object
+                .as_mut()
+                .ok_or_else(|| tagging_delete_marker(version_id))?,
+        };
         object.tags = pairs;
-        Ok(Resp::new(dto::PutObjectTaggingOutput::default()))
+        Ok(Resp::new(dto::PutObjectTaggingOutput { version_id: reported }))
     }
 
     /// The tag set removed, the object left where it is.
@@ -2895,12 +2927,21 @@ impl Stub {
     fn delete_object_tagging(&self, input: &dto::DeleteObjectTaggingInput) -> HandlerResult<dto::DeleteObjectTagging> {
         let mut fixture = self.borrow()?;
         require_bucket(&fixture, &input.bucket)?;
-        refuse_versioned_tagging(input.version_id.as_deref())?;
-        let object = fixture
-            .object_mut(input.bucket.as_str(), input.key.as_str())
-            .ok_or_else(|| no_such_key(input.key.as_str()))?;
+        let requested = input.version_id.clone();
+        let reported = reported_tagging_version(&fixture, input.bucket.as_str(), input.key.as_str(), requested.as_deref());
+        let object = match requested.as_deref() {
+            None => fixture
+                .object_mut(input.bucket.as_str(), input.key.as_str())
+                .ok_or_else(|| no_such_key(input.key.as_str()))?,
+            Some(version_id) => fixture
+                .version_mut(input.bucket.as_str(), input.key.as_str(), version_id)
+                .ok_or_else(no_such_version)?
+                .object
+                .as_mut()
+                .ok_or_else(|| tagging_delete_marker(version_id))?,
+        };
         object.tags.clear();
-        Ok(Resp::new(dto::DeleteObjectTaggingOutput::default()))
+        Ok(Resp::new(dto::DeleteObjectTaggingOutput { version_id: reported }))
     }
 
     /// The bucket's access control policy — always a `200`, never a `404`.
@@ -2946,10 +2987,10 @@ impl Stub {
 
     /// One object version's policy, defaulting the same way the bucket read does.
     ///
-    /// `versionId` is honoured rather than refused, which is where this family parts company with
-    /// the tagging and lock-state reads next door: an ACL is held on the version, so the named
-    /// one can be answered exactly. An id this fixture never minted is `NoSuchVersion`, and a
-    /// version that is a delete marker has no object and therefore no policy.
+    /// `versionId` is honoured rather than refused, as it is for the tagging reads next door and
+    /// unlike the lock-state ones: an ACL is held on the version, so the named one can be answered
+    /// exactly. An id this fixture never minted is `NoSuchVersion`, and a version that is a delete
+    /// marker has no object and therefore no policy.
     fn get_object_acl(&self, input: &dto::GetObjectAclInput) -> HandlerResult<dto::GetObjectAcl> {
         let fixture = self.borrow()?;
         require_bucket(&fixture, &input.bucket)?;

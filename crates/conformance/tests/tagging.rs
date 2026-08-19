@@ -56,6 +56,14 @@ const BUCKET: &str = "conf-copy";
 const SOURCE_KEY: &str = "src/plain.txt";
 const DEST_KEY: &str = "dst/0008";
 
+/// The versioned bucket the `?tagging&versionId` tests work in, and the key that holds two versions.
+///
+/// A second bucket rather than a flag on the first: `Fixture::declare_bucket` decides whether a
+/// write appends a version or replaces the single `null` one, and every test above this line asserts
+/// on the replacing shape. Flipping the shared bucket would have rewritten what those tests measure.
+const VERSIONED_BUCKET: &str = "conf-tagging-versions";
+const VERSIONED_KEY: &str = "doc.txt";
+
 /// `Content-MD5` for a tagging document.
 ///
 /// `PutObjectTagging` declares `http_checksum_required`, so a write with no integrity header is
@@ -91,9 +99,10 @@ struct Harness {
     state: Arc<Mutex<Fixture>>,
 }
 
-/// What one exchange observed: the status line and the whole body.
+/// What one exchange observed: the status line, the answered headers, and the whole body.
 struct Answer {
     status: u16,
+    headers: http::HeaderMap,
     body: String,
 }
 
@@ -105,6 +114,15 @@ impl Answer {
     fn assert_lacks(&self, needle: &str) {
         assert!(!self.body.contains(needle), "the body contains {needle}: {}", self.body);
     }
+
+    /// One answered header, as text. `None` for a header the answer did not carry.
+    ///
+    /// Absence is a value here rather than a panic: `x-amz-version-id` is *omitted* on an
+    /// unversioned bucket, and a test that could not tell "absent" from "present and wrong" could
+    /// not assert that omission at all.
+    fn header(&self, name: &str) -> Option<&str> {
+        self.headers.get(name).and_then(|value| value.to_str().ok())
+    }
 }
 
 impl Harness {
@@ -115,7 +133,33 @@ impl Harness {
         let mut source = StoredObject::new(b"hello world".to_vec(), Some("text/plain".to_owned()), NOW);
         source.metadata.insert("origin".to_owned(), "source".to_owned());
         fixture.put_object(BUCKET, SOURCE_KEY, source);
+        Harness::over(fixture)
+    }
 
+    /// The same service over a versioned bucket holding two versions of one key.
+    ///
+    /// The two versions are written through [`Fixture::put_object`] rather than declared, because
+    /// that is the only path that mints ids — and the ids are what the `?tagging&versionId` tests
+    /// name. Neither version carries tags: every tag set below is written by the exchange under
+    /// test, so a set a test observes is one a request in that test put there.
+    fn versioned() -> Harness {
+        let mut fixture = Fixture::at(NOW);
+        fixture.declare_bucket(VERSIONED_BUCKET, true);
+        fixture.put_object(
+            VERSIONED_BUCKET,
+            VERSIONED_KEY,
+            StoredObject::new(b"first".to_vec(), Some("text/plain".to_owned()), NOW),
+        );
+        fixture.put_object(
+            VERSIONED_BUCKET,
+            VERSIONED_KEY,
+            StoredObject::new(b"second".to_vec(), Some("text/plain".to_owned()), NOW),
+        );
+        Harness::over(fixture)
+    }
+
+    /// The assembled service, over whatever state the caller built.
+    fn over(fixture: Fixture) -> Harness {
         let state = Arc::new(Mutex::new(fixture));
         let backend = Arc::new(Stub::new(Arc::clone(&state)));
         let credentials =
@@ -188,9 +232,11 @@ impl Harness {
         let response = block_on(self.service.call_bytes(request));
         let (parts, payload) = response.into_parts();
         let status = parts.status.as_u16();
+        let headers = parts.headers.clone();
         let drained = block_on(collect(http::Response::from_parts(parts, payload))).expect("the body drains");
         Answer {
             status,
+            headers,
             body: String::from_utf8_lossy(drained.body()).into_owned(),
         }
     }
@@ -208,6 +254,36 @@ impl Harness {
             .object(BUCKET, key)
             .map(|object| object.tags.clone())
             .unwrap_or_default()
+    }
+
+    /// The tag set held on one *named version* of the versioned key. Reads state, not the wire.
+    ///
+    /// This is the observation no corpus case can make: a wire read of one version cannot tell a
+    /// store that isolated the write from one that applied it everywhere and happened to be asked
+    /// about the version it was meant for.
+    fn stored_tags_of(&self, version_id: &str) -> Vec<(String, String)> {
+        let fixture = self.state.lock().expect("the fixture is not poisoned");
+        fixture
+            .version(VERSIONED_BUCKET, VERSIONED_KEY, version_id)
+            .and_then(|version| version.object.as_ref())
+            .map(|object| object.tags.clone())
+            .unwrap_or_default()
+    }
+
+    /// The ids of the two versions [`Harness::versioned`] wrote, oldest first.
+    fn version_ids(&self) -> (String, String) {
+        let fixture = self.state.lock().expect("the fixture is not poisoned");
+        let mut ids: Vec<String> = fixture
+            .versions_in(VERSIONED_BUCKET)
+            .into_iter()
+            .map(|entry| entry.version.version_id.clone())
+            .collect();
+        assert_eq!(ids.len(), 2, "the versioned fixture holds two versions");
+        // `versions_in` answers newest first, and every test below names the older one first.
+        ids.reverse();
+        let newest = ids.pop().expect("two versions");
+        let oldest = ids.pop().expect("two versions");
+        (oldest, newest)
     }
 }
 
@@ -405,14 +481,236 @@ fn n_a_tagging_document_with_the_wrong_root_is_refused() {
     assert!(harness.stored_tags(SOURCE_KEY).is_empty());
 }
 
-/// Negative — a tagging read that names a version is refused rather than answered with the current
-/// version's tag set, which would be a wrong answer wearing a `200`.
+/// A tag set belongs to a version, not to a key: the write lands on the version the request named
+/// and the version beside it keeps whatever it had.
+///
+/// Both directions are asserted on purpose. A store that ignored `versionId` and one that applied
+/// the write to every version would each satisfy "the named version carries the new set" alone,
+/// and the second assertion is the only one that separates them.
 #[test]
-fn n_a_versioned_tagging_read_is_refused_rather_than_answered_from_the_newest_version() {
-    let harness = Harness::new();
-    let answer = harness.send("GET", "/conf-copy/src/plain.txt?tagging&versionId=null", &[], b"");
-    assert_eq!(answer.status, 501, "{}", answer.body);
-    answer.assert_contains("NotImplemented");
+fn a_tag_set_written_to_one_version_is_read_back_from_that_version_and_from_no_other() {
+    let harness = Harness::versioned();
+    let (oldest, newest) = harness.version_ids();
+
+    let written = harness.put_tags(
+        &format!("/{VERSIONED_BUCKET}/{VERSIONED_KEY}?tagging&versionId={oldest}"),
+        b"<Tagging><TagSet><Tag><Key>colour</Key><Value>green</Value></Tag></TagSet></Tagging>",
+    );
+    assert_eq!(written.status, 200, "{}", written.body);
+    assert_eq!(harness.stored_tags_of(&oldest), [("colour".to_owned(), "green".to_owned())]);
+    assert!(
+        harness.stored_tags_of(&newest).is_empty(),
+        "the write landed on a version the request did not name"
+    );
+
+    let named = harness.send(
+        "GET",
+        &format!("/{VERSIONED_BUCKET}/{VERSIONED_KEY}?tagging&versionId={oldest}"),
+        &[],
+        b"",
+    );
+    assert_eq!(named.status, 200, "{}", named.body);
+    named.assert_contains("<Key>colour</Key>");
+
+    let other = harness.send(
+        "GET",
+        &format!("/{VERSIONED_BUCKET}/{VERSIONED_KEY}?tagging&versionId={newest}"),
+        &[],
+        b"",
+    );
+    assert_eq!(other.status, 200, "{}", other.body);
+    other.assert_lacks("<Tag>");
+
+    // No `versionId` selects the newest version, which is the one that was never tagged. A read
+    // that answered the older version's set here would make the parameter's absence mean
+    // "whichever version happens to have labels".
+    let current = harness.send("GET", &format!("/{VERSIONED_BUCKET}/{VERSIONED_KEY}?tagging"), &[], b"");
+    assert_eq!(current.status, 200, "{}", current.body);
+    current.assert_lacks("<Tag>");
+}
+
+/// Negative — a tagging delete that names a version clears that version's set and no other's.
+#[test]
+fn n_a_versioned_tagging_delete_does_not_clear_another_versions_tag_set() {
+    let harness = Harness::versioned();
+    let (oldest, newest) = harness.version_ids();
+    for version in [&oldest, &newest] {
+        let written = harness.put_tags(
+            &format!("/{VERSIONED_BUCKET}/{VERSIONED_KEY}?tagging&versionId={version}"),
+            b"<Tagging><TagSet><Tag><Key>colour</Key><Value>green</Value></Tag></TagSet></Tagging>",
+        );
+        assert_eq!(written.status, 200, "{}", written.body);
+    }
+
+    let cleared = harness.send(
+        "DELETE",
+        &format!("/{VERSIONED_BUCKET}/{VERSIONED_KEY}?tagging&versionId={oldest}"),
+        &[],
+        b"",
+    );
+    assert_eq!(cleared.status, 204, "{}", cleared.body);
+    assert!(harness.stored_tags_of(&oldest).is_empty());
+    assert_eq!(
+        harness.stored_tags_of(&newest),
+        [("colour".to_owned(), "green".to_owned())],
+        "the delete cleared a version the request did not name"
+    );
+}
+
+/// Negative — a `versionId` this fixture never minted is `NoSuchVersion`, not the newest version's
+/// tag set under a `200`. The wrong answer here is the dangerous one: a caller auditing the labels
+/// of an archived version would be shown the current ones and told they were that version's.
+#[test]
+fn n_a_tagging_request_naming_an_unminted_version_is_not_answered_from_the_newest() {
+    let harness = Harness::versioned();
+    let (oldest, _) = harness.version_ids();
+    let written = harness.put_tags(
+        &format!("/{VERSIONED_BUCKET}/{VERSIONED_KEY}?tagging&versionId={oldest}"),
+        b"<Tagging><TagSet><Tag><Key>colour</Key><Value>green</Value></Tag></TagSet></Tagging>",
+    );
+    assert_eq!(written.status, 200, "{}", written.body);
+
+    let read = harness.send(
+        "GET",
+        &format!("/{VERSIONED_BUCKET}/{VERSIONED_KEY}?tagging&versionId=conformance-version-9999"),
+        &[],
+        b"",
+    );
+    assert_eq!(read.status, 404, "{}", read.body);
+    read.assert_contains("NoSuchVersion");
+    read.assert_lacks("<Key>colour</Key>");
+
+    let write = harness.put_tags(
+        &format!("/{VERSIONED_BUCKET}/{VERSIONED_KEY}?tagging&versionId=conformance-version-9999"),
+        b"<Tagging><TagSet><Tag><Key>colour</Key><Value>red</Value></Tag></TagSet></Tagging>",
+    );
+    assert_eq!(write.status, 404, "{}", write.body);
+    write.assert_contains("NoSuchVersion");
+    assert_eq!(
+        harness.stored_tags_of(&oldest),
+        [("colour".to_owned(), "green".to_owned())],
+        "a write against an unknown version was applied to a real one"
+    );
+
+    let delete = harness.send(
+        "DELETE",
+        &format!("/{VERSIONED_BUCKET}/{VERSIONED_KEY}?tagging&versionId=conformance-version-9999"),
+        &[],
+        b"",
+    );
+    assert_eq!(delete.status, 404, "{}", delete.body);
+    delete.assert_contains("NoSuchVersion");
+    assert_eq!(
+        harness.stored_tags_of(&oldest),
+        [("colour".to_owned(), "green".to_owned())],
+        "a delete against an unknown version cleared a real one"
+    );
+}
+
+/// The unversioned bucket's own version has a spelling, and `versionId=null` names it.
+///
+/// S3 calls the version of an object in a bucket that was never versioned `null`, and a request
+/// that spells it must be answered rather than refused — a client that read `x-amz-version-id` off
+/// a listing and put it back on a tagging read gets exactly this request. The boundary companion is
+/// the versioned bucket, where no null version was ever minted and the same spelling names nothing.
+#[test]
+fn n_the_null_version_names_the_only_version_of_an_unversioned_object_and_nothing_else() {
+    let unversioned = Harness::new();
+    let written = unversioned.put_tags(
+        "/conf-copy/src/plain.txt?tagging&versionId=null",
+        b"<Tagging><TagSet><Tag><Key>colour</Key><Value>green</Value></Tag></TagSet></Tagging>",
+    );
+    assert_eq!(written.status, 200, "{}", written.body);
+    assert_eq!(unversioned.stored_tags(SOURCE_KEY), [("colour".to_owned(), "green".to_owned())]);
+    let read = unversioned.send("GET", "/conf-copy/src/plain.txt?tagging&versionId=null", &[], b"");
+    assert_eq!(read.status, 200, "{}", read.body);
+    read.assert_contains("<Key>colour</Key>");
+    // Naming the null version does not conjure a version id into the answer: the bucket has no
+    // history, so there is still nothing for a client to come back for.
+    assert_eq!(read.header("x-amz-version-id"), None);
+
+    let versioned = Harness::versioned();
+    let refused = versioned.send("GET", &format!("/{VERSIONED_BUCKET}/{VERSIONED_KEY}?tagging&versionId=null"), &[], b"");
+    assert_eq!(refused.status, 404, "{}", refused.body);
+    refused.assert_contains("NoSuchVersion");
+}
+
+/// Negative — a version id is not a global handle. An id minted for one key names nothing under
+/// another, and a lookup keyed on the id alone would answer one object's labels for a request that
+/// named a different one.
+#[test]
+fn n_a_version_id_minted_for_one_key_is_not_a_version_of_another() {
+    let harness = Harness::versioned();
+    let (oldest, _) = harness.version_ids();
+    let answer = harness.send("GET", &format!("/{VERSIONED_BUCKET}/other.txt?tagging&versionId={oldest}"), &[], b"");
+    assert_eq!(answer.status, 404, "{}", answer.body);
+    answer.assert_contains("NoSuchVersion");
+}
+
+/// Negative — a delete marker is a version with no representation, so it has no tag set to read or
+/// to write. `NoSuchKey` would be the wrong refusal: the version is right there in the history.
+#[test]
+fn n_a_tagging_request_naming_a_delete_marker_is_refused_as_method_not_allowed() {
+    let harness = Harness::versioned();
+    let removed = harness.send("DELETE", &format!("/{VERSIONED_BUCKET}/{VERSIONED_KEY}"), &[], b"");
+    assert_eq!(removed.status, 204, "{}", removed.body);
+    let marker = removed
+        .header("x-amz-version-id")
+        .expect("the delete named its marker")
+        .to_owned();
+
+    let read = harness.send(
+        "GET",
+        &format!("/{VERSIONED_BUCKET}/{VERSIONED_KEY}?tagging&versionId={marker}"),
+        &[],
+        b"",
+    );
+    assert_eq!(read.status, 405, "{}", read.body);
+    read.assert_contains("MethodNotAllowed");
+
+    let write = harness.put_tags(
+        &format!("/{VERSIONED_BUCKET}/{VERSIONED_KEY}?tagging&versionId={marker}"),
+        b"<Tagging><TagSet><Tag><Key>colour</Key><Value>green</Value></Tag></TagSet></Tagging>",
+    );
+    assert_eq!(write.status, 405, "{}", write.body);
+    write.assert_contains("MethodNotAllowed");
+}
+
+/// The three tagging answers name the version they acted on, and only on a versioned bucket.
+///
+/// Without the header a client that wrote tags without naming a version cannot say which version
+/// now carries them; with it on an *unversioned* bucket the client is told its object has a version
+/// to come back for, and `null` is not a handle any later request may use.
+#[test]
+fn n_the_tagging_answers_do_not_report_a_version_on_an_unversioned_bucket() {
+    let unversioned = Harness::new();
+    let written = unversioned.put_tags(
+        "/conf-copy/src/plain.txt?tagging",
+        b"<Tagging><TagSet><Tag><Key>colour</Key><Value>green</Value></Tag></TagSet></Tagging>",
+    );
+    assert_eq!(written.status, 200, "{}", written.body);
+    assert_eq!(written.header("x-amz-version-id"), None);
+    let read = unversioned.send("GET", "/conf-copy/src/plain.txt?tagging", &[], b"");
+    assert_eq!(read.header("x-amz-version-id"), None);
+    let cleared = unversioned.send("DELETE", "/conf-copy/src/plain.txt?tagging", &[], b"");
+    assert_eq!(cleared.header("x-amz-version-id"), None);
+
+    let versioned = Harness::versioned();
+    let (oldest, newest) = versioned.version_ids();
+    let named = versioned.put_tags(
+        &format!("/{VERSIONED_BUCKET}/{VERSIONED_KEY}?tagging&versionId={oldest}"),
+        b"<Tagging><TagSet><Tag><Key>colour</Key><Value>green</Value></Tag></TagSet></Tagging>",
+    );
+    assert_eq!(named.header("x-amz-version-id"), Some(oldest.as_str()));
+    let current = versioned.send("GET", &format!("/{VERSIONED_BUCKET}/{VERSIONED_KEY}?tagging"), &[], b"");
+    assert_eq!(current.header("x-amz-version-id"), Some(newest.as_str()));
+    let cleared = versioned.send(
+        "DELETE",
+        &format!("/{VERSIONED_BUCKET}/{VERSIONED_KEY}?tagging&versionId={oldest}"),
+        &[],
+        b"",
+    );
+    assert_eq!(cleared.header("x-amz-version-id"), Some(oldest.as_str()));
 }
 
 /// Negative — a tagging read of a key that is not there is a `NoSuchKey`, not an empty tag set.

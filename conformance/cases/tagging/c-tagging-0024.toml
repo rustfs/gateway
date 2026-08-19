@@ -1,0 +1,102 @@
+# c-tagging-0024 — a delete marker is a version with nothing to label.
+#
+# Schema dimensions exercised: error shape distinguished from NoSuchKey, refusal on read and write.
+
+[case]
+id = "c-tagging-0024"
+schema_version = 1
+title = "A ?tagging request naming a delete marker is a 405, not a NoSuchKey"
+rationale = """
+A delete marker is a version that exists and holds no representation, so it has no tag set to \
+read and none to write. The two wrong answers are opposite and both plausible: a 200 with an \
+empty set invents labels for bytes that are not there, and a 404 NoSuchKey tells a caller the \
+version is unknown when it is right there in the history and can be named again. AWS answers \
+MethodNotAllowed for a version-scoped request against a delete marker, and this suite already \
+pins that answer for a copy source in c-copy-0035 — the tagging band has to agree with it."""
+polarity = "negative"
+operation = "GetObjectTagging"
+tags = ["tagging", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-tag-wrapped-0088", "q-tag-object-unconfigured-0090"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/DeleteMarker.html"
+summary = "A delete marker is a version with no data, and a request that names it is answered as a method that does not apply rather than as a missing object."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = true
+
+[[setup.buckets]]
+name = "conf-tagging-marker"
+versioning = "enabled"
+
+[[exchanges]]
+name = "write-a-version"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-tagging-marker/doc.txt"
+headers = { "content-type" = "text/plain" }
+body = { utf8 = "first" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[[exchanges]]
+name = "hide-it-behind-a-delete-marker"
+
+[exchanges.request]
+method = "DELETE"
+target = "/conf-tagging-marker/doc.txt"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 204
+connection_after = "open"
+
+[exchanges.expect.capture]
+marker = { header = "x-amz-version-id" }
+
+[[exchanges]]
+name = "the-read-of-the-marker-is-not-an-empty-tag-set"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-tagging-marker/doc.txt?tagging&versionId=${capture.marker}"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 405
+connection_after = "open"
+
+[exchanges.expect.error]
+code = "MethodNotAllowed"
+request_id_present = true
+
+[[exchanges]]
+name = "the-write-onto-the-marker-is-refused"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-tagging-marker/doc.txt?tagging&versionId=${capture.marker}"
+headers = { "content-md5" = "QTsTDAb4c0VADLNy4ipavA==" }
+body = { utf8 = '<Tagging><TagSet><Tag><Key>colour</Key><Value>green</Value></Tag></TagSet></Tagging>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 405
+connection_after = "open"
+
+[exchanges.expect.error]
+code = "MethodNotAllowed"
+request_id_present = true

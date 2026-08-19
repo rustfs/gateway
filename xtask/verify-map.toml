@@ -58,7 +58,7 @@ cases = "c-object-0003"
 
 [[operation]]
 name = "DeleteObjectTagging"
-cases = ""
+cases = "c-tagging-0022"
 
 [[operation]]
 name = "DeleteObjects"
@@ -154,7 +154,7 @@ cases = "c-lock-0012,c-lock-0028"
 
 [[operation]]
 name = "GetObjectTagging"
-cases = "c-tagging-0007"
+cases = "c-tagging-0007,c-tagging-0023,c-tagging-0024,c-tagging-0025"
 
 [[operation]]
 name = "GetPublicAccessBlock"
@@ -266,7 +266,7 @@ cases = "c-lock-0005,c-lock-0008,c-lock-0009,c-lock-0015,c-lock-0016,c-lock-0017
 
 [[operation]]
 name = "PutObjectTagging"
-cases = "c-tagging-0004,c-tagging-0009,c-tagging-0011,c-tagging-0013,c-tagging-0015"
+cases = "c-tagging-0004,c-tagging-0009,c-tagging-0011,c-tagging-0013,c-tagging-0015,c-tagging-0021"
 
 [[operation]]
 name = "PutPublicAccessBlock"
