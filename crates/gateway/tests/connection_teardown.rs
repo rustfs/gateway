@@ -342,3 +342,62 @@ async fn a_completed_handler_reports_no_deadline() {
     assert_eq!(response.status(), http::StatusCode::OK);
     assert_eq!(recorder.seen.lock().expect("not poisoned").as_slice(), [None]);
 }
+
+/// `c-wire-0063`, server half. Negative — a `Content-Length` past the wire ceiling is refused on a
+/// real socket before one byte of the body it promises is sent, and the socket is then closed.
+///
+/// The `crates/http` half of this case (`c_wire_0063_an_over_large_declared_body_is_400_entity_too_large_and_never_drained`)
+/// reads `may_read_body()` and `must_close_connection()`, which are the service's *intentions*.
+/// Neither is an observation of what the wire did, and this repository has shipped that
+/// substitution seven times. What is observed here instead: the client writes a head declaring
+/// 4096 body bytes and then writes nothing at all, and the complete response still arrives. An
+/// implementation that drained the declared body before answering would still be waiting, and this
+/// case would fail by timeout rather than by assertion.
+///
+/// The status is the second half. `EntityTooLarge` is a `400` in AWS's published error table and
+/// in this repository's single status authority (`ErrorCode::ENTITY_TOO_LARGE`); a `413` carrying
+/// that code would be a pairing no S3 client has seen, and would fork the wire layer away from the
+/// one table that answers "which status does this code get?".
+#[tokio::test]
+async fn c_wire_0063_an_over_large_body_is_refused_on_the_socket_before_it_is_sent() {
+    let limits = Limits {
+        max_body_bytes: 16,
+        ..Limits::default()
+    };
+    let service = wired()
+        .register::<Ping, _>(Arc::new(Backend))
+        .route(ping_route())
+        .limits(limits)
+        .build()
+        .expect("a complete assembly");
+    let RunningServer {
+        local_addr,
+        task,
+        shutdown,
+        ..
+    } = live_server(service);
+    let mut stream = TcpStream::connect(local_addr).await.expect("connect succeeds");
+    stream
+        .write_all(b"POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length: 4096\r\n\r\n")
+        .await
+        .expect("the request head writes");
+
+    let mut response = Vec::new();
+    tokio::time::timeout(Duration::from_secs(5), stream.read_to_end(&mut response))
+        .await
+        .expect("the refusal arrives without the body it declared, and the socket then reaches end of stream")
+        .expect("response reads");
+    let wire = String::from_utf8(response).expect("an HTTP/1.1 response");
+    assert!(wire.starts_with("HTTP/1.1 400 "), "the refusal was not a 400: {wire}");
+    assert!(
+        wire.contains(rustfs_gateway::ErrorCode::ENTITY_TOO_LARGE.as_str()),
+        "the refusal did not carry the S3 code clients branch on: {wire}"
+    );
+    assert!(
+        wire.to_ascii_lowercase().contains("connection: close\r\n"),
+        "the peer was not warned before close: {wire}"
+    );
+
+    assert_eq!(shutdown.trigger(Duration::from_secs(1)).await, ShutdownReport { drained: 0, aborted: 0 });
+    assert!(task.await.expect("server task joins").is_ok());
+}
