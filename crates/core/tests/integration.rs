@@ -86,5 +86,8 @@ mod static_dispatch;
 #[path = "tagging_contract.rs"]
 mod tagging_contract;
 
+#[path = "tagging_roundtrip.rs"]
+mod tagging_roundtrip;
+
 #[path = "tolerant_conditions.rs"]
 mod tolerant_conditions;

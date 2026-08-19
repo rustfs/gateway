@@ -103,8 +103,8 @@ fn read_tagging(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::Tagging, Code
     for item in node.child("TagSet").into_iter().flat_map(|w| w.children_named("Tag")) {
         shape.tag_set.push(read_tag(item)?);
     }
-    if shape.tag_set.is_empty() {
-        return Err(CodecError::malformed_xml("the body carries no entry for a member that requires one").about("TagSet"));
+    if node.child("TagSet").is_none() {
+        return Err(CodecError::malformed_xml("the body omits a member the schema requires").about("TagSet"));
     }
     value::exit(shape.check_required())?;
     Ok(shape)

@@ -1,0 +1,84 @@
+# c-tagging-0026 — the declared digest is compared to the body that arrived.
+#
+# Schema dimensions exercised: body-digest verification before the store, refusal-then-verify.
+
+[case]
+id = "c-tagging-0026"
+schema_version = 1
+title = "A tagging write whose Content-MD5 is the digest of a different document is 400 BadDigest and stores nothing"
+rationale = """
+c-tagging-0008 proves the integrity header must be present on this operation and c-tagging-0018 \
+proves a body that is not this document is refused before it can be stored; neither can prove the \
+declared digest is compared to anything at all. A gateway that read content-md5 and matched it \
+against nothing would satisfy both while telling every client its labels arrived intact. This is \
+the direction those two cannot reach: a well-formed digest naming bytes other than the ones that \
+arrived. The digest here is the real digest of the same document with staging in place of prod, \
+which is exactly the shape the check exists for — a tag set mutated in flight now differs from the \
+one the client signed for by the single value that decides which lifecycle rule, which replication \
+filter and which s3:ExistingObjectTag condition select this bucket, and every one of those reads \
+the label rather than the bytes. The read-back is the half that says nothing was written: a \
+gateway that verified after storing would answer this same 400 and leave the set installed, so the \
+second exchange demands the bucket still have no tag set at all."""
+polarity = "negative"
+operation = "PutBucketTagging"
+tags = ["tagging", "checksum", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-tag-md5-required-0092"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketTagging.html"
+summary = "The write reference documents Content-MD5 as required for this operation, which is the header this case gets wrong on purpose."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/ErrorResponses.html"
+summary = "The error list gives BadDigest for a Content-MD5 that disagrees with the body it accompanies."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = true
+
+[[setup.buckets]]
+name = "conf-tagging"
+
+[[exchanges]]
+name = "write-carrying-the-digest-of-a-different-value"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-tagging?tagging"
+headers = { "content-type" = "application/xml", "content-md5" = "SLUuwoyIypl6dC2U1q6rCA==" }
+body = { utf8 = '<Tagging><TagSet><Tag><Key>stage</Key><Value>prod</Value></Tag></TagSet></Tagging>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[exchanges.expect.error]
+code = "BadDigest"
+request_id_present = true
+
+[exchanges.expect.headers_present]
+"content-type" = "application/xml"
+
+[[exchanges]]
+name = "read-back-shows-no-set-was-stored"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-tagging?tagging"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 404
+connection_after = "open"
+
+[exchanges.expect.error]
+code = "NoSuchTagSet"
+request_id_present = true

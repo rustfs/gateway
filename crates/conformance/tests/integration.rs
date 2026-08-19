@@ -40,5 +40,7 @@ mod object;
 mod range_cond_family;
 #[path = "tagging.rs"]
 mod tagging;
+#[path = "tagging_family.rs"]
+mod tagging_family;
 #[path = "wired.rs"]
 mod wired;

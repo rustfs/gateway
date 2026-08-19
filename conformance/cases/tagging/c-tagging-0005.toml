@@ -1,32 +1,42 @@
-# c-tagging-0005 — the empty TagSet is not a write; the delete is the clearing path.
+# c-tagging-0005 — the empty TagSet is the documented clearing write, not a malformed document.
 #
-# Schema dimensions exercised: required-member enforcement at its boundary, refusal-then-verify.
+# Schema dimensions exercised: required-member enforcement at its boundary, write-then-verify.
 
 [case]
 id = "c-tagging-0005"
 schema_version = 1
-title = "PutBucketTagging with an empty TagSet is a 400 MalformedXML and the set survives"
+title = "PutBucketTagging with an empty TagSet clears the set and the read afterwards is NoSuchTagSet"
 rationale = """
-The tempting reading is that the empty document clears the set, and implementations that adopt it \
-diverge from AWS in the worst way: the write succeeds locally and fails against the real service, \
-so the client's clearing path breaks only in production. AWS validates the document against its \
-schema, where TagSet requires at least one Tag, and answers MalformedXML; DeleteBucketTagging is \
-the clearing operation. The follow-up read proves the refused document did not half-apply — the \
-previous set is still there, byte for byte."""
-polarity = "negative"
+This case asserted the opposite until rustfs/backlog#1717, on the strength of `required = true` \
+alone, and that reading was wrong twice over. `required` says the `<TagSet>` element has to be \
+there; minimum cardinality is a different trait, and the pinned model spells it out where it means \
+it — `Tag.Key` targets a shape carrying `length { min: 1 }` two members away, while the list \
+carries no length trait at all. AWS's user guide is the other half: it documents the empty tag set \
+on the tagging write as *deleting* the existing tag set, and recommends the delete only because it \
+is cheaper, not because the write is refused. The gateway also wrote `<TagSet></TagSet>` for every \
+untagged read (`c-tagging-0007`) and then refused to read those same bytes back, so it was \
+emitting a document it could not accept. The follow-up read is what distinguishes clearing from \
+storing an empty set: this scope has no `200` with nothing in it, so a cleared bucket answers \
+`404 NoSuchTagSet` exactly as one that never had a set does."""
+polarity = "positive"
 operation = "PutBucketTagging"
-tags = ["tagging", "xml", "error-shape"]
+tags = ["tagging", "xml", "wire-bytes"]
 timeout_ms = 10000
-quirks = ["q-tag-wrapped-0088"]
+quirks = ["q-tag-wrapped-0088", "q-tag-bucket-unconfigured-0089"]
 
 [[case.evidence]]
-url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketTagging.html"
-summary = "TagSet is a required member of the request document, and MalformedXML is the documented refusal for a body that does not validate."
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/object-tagging.html"
+summary = "The user guide states that a tagging write carrying an empty tag set deletes the existing tag set, and prefers the delete operation only on cost."
 kind = "aws-doc"
 
 [[case.evidence]]
-url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketTagging.html"
-summary = "Clearing the set has its own operation, so the empty write is not the clearing path."
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketTagging.html"
+summary = "TagSet is a required member of the request document, which is a claim about the element being present and not about how many entries it holds."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketTagging.html"
+summary = "The bucket read answers NoSuchTagSet when there is no tag set, which is the state a cleared bucket is in."
 kind = "aws-doc"
 
 [clock]
@@ -39,7 +49,7 @@ reuse = true
 name = "conf-tagging"
 
 [[exchanges]]
-name = "configure-a-set-to-survive"
+name = "configure-a-set-to-clear"
 
 [exchanges.request]
 method = "PUT"
@@ -54,7 +64,7 @@ status = 200
 connection_after = "open"
 
 [[exchanges]]
-name = "the-empty-document-is-refused"
+name = "the-empty-document-is-accepted"
 
 [exchanges.request]
 method = "PUT"
@@ -65,15 +75,11 @@ sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential
 
 [exchanges.expect]
 kind = "response"
-status = 400
+status = 200
 connection_after = "open"
 
-[exchanges.expect.error]
-code = "MalformedXML"
-request_id_present = true
-
 [[exchanges]]
-name = "the-previous-set-survived"
+name = "the-set-is-gone-not-empty"
 
 [exchanges.request]
 method = "GET"
@@ -82,10 +88,9 @@ sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential
 
 [exchanges.expect]
 kind = "response"
-status = 200
+status = 404
 connection_after = "open"
 
-[exchanges.expect.body]
-exact_utf8 = '''
-<?xml version="1.0" encoding="UTF-8"?>
-<Tagging xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><TagSet><Tag><Key>keep</Key><Value>yes</Value></Tag></TagSet></Tagging>'''
+[exchanges.expect.error]
+code = "NoSuchTagSet"
+request_id_present = true

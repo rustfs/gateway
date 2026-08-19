@@ -1,0 +1,97 @@
+# c-tagging-0028 — the empty document at the object scope, whose cleared answer is the other one.
+#
+# Schema dimensions exercised: the same clearing write across two scopes with two unconfigured
+# answers, write-then-verify.
+
+[case]
+id = "c-tagging-0028"
+schema_version = 1
+title = "PutObjectTagging with an empty TagSet clears the tags and the read afterwards is a 200 with an empty TagSet"
+rationale = """
+The object half of c-tagging-0005, and it is a separate case because the two scopes answer a \
+cleared resource differently: the bucket read answers 404 NoSuchTagSet and the object read answers \
+200 with an empty TagSet. A gateway that routed the empty document to a single clearing path and \
+then reported one scope's unconfigured answer at both would satisfy either case alone. The \
+generated decoders are also separate — one per operation over one shape — so an implementation \
+that re-derived the required-member reading for the bucket write and inherited it for the object \
+write is a real shape, and only asserting both catches it. The read-back is the same bytes \
+GetObjectTagging owes an object that was never tagged at all, which is what says clearing leaves \
+the object in that state rather than in a third one."""
+polarity = "positive"
+operation = "PutObjectTagging"
+tags = ["tagging", "xml", "wire-bytes"]
+timeout_ms = 10000
+quirks = ["q-tag-wrapped-0088", "q-tag-object-unconfigured-0090"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/object-tagging.html"
+summary = "The user guide states that a tagging write carrying an empty tag set deletes the existing tag set on the object."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObjectTagging.html"
+summary = "An object with no tags answers a success with an empty TagSet, which is the state a cleared object is in."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = true
+
+[[setup.buckets]]
+name = "conf-tagging"
+
+[[setup.objects]]
+bucket = "conf-tagging"
+key = "cleared.txt"
+content_type = "text/plain"
+body = { utf8 = "object body" }
+
+[[exchanges]]
+name = "label-the-object"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-tagging/cleared.txt?tagging"
+headers = { "content-md5" = "QTsTDAb4c0VADLNy4ipavA==" }
+body = { utf8 = '<Tagging><TagSet><Tag><Key>colour</Key><Value>green</Value></Tag></TagSet></Tagging>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[[exchanges]]
+name = "the-empty-document-clears-the-labels"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-tagging/cleared.txt?tagging"
+headers = { "content-md5" = "k6PBbu32RmFaV5nRULDSlw==" }
+body = { utf8 = '<Tagging><TagSet></TagSet></Tagging>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[[exchanges]]
+name = "the-cleared-object-reads-as-untagged"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-tagging/cleared.txt?tagging"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.body]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Tagging xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><TagSet></TagSet></Tagging>'''

@@ -1,0 +1,88 @@
+# c-tagging-0027 — an absent wrapper is still a missing member.
+#
+# Schema dimensions exercised: required-member enforcement, refusal-then-verify.
+
+[case]
+id = "c-tagging-0027"
+schema_version = 1
+title = "PutBucketTagging with a document carrying no TagSet element is a 400 MalformedXML and the set survives"
+rationale = """
+The other side of c-tagging-0005, and the reason that ruling is a re-reading rather than a deleted \
+check. `required` on TagSet is exactly the claim that the element has to be on the wire; what it \
+does not claim is how many entries the element encloses. An empty `<TagSet/>` is present and \
+empty at the same time, and a document with no `<TagSet>` at all is neither — it is the member \
+missing, which is the one thing `required` refuses. An implementation that answered the empty \
+document by dropping the check would pass c-tagging-0005 and this one would catch it, which is \
+why the pair has to be read together. The follow-up read proves the refused document did not \
+half-apply: the previous set is still there, byte for byte."""
+polarity = "negative"
+operation = "PutBucketTagging"
+tags = ["tagging", "xml", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-tag-wrapped-0088"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketTagging.html"
+summary = "TagSet is a required member of the request document, and MalformedXML is the documented refusal for a body that does not validate."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = true
+
+[[setup.buckets]]
+name = "conf-tagging"
+
+[[exchanges]]
+name = "configure-a-set-to-survive"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-tagging?tagging"
+headers = { "content-md5" = "lIekmFtFZOTSZInJM/f1eQ==" }
+body = { utf8 = '<Tagging><TagSet><Tag><Key>keep</Key><Value>yes</Value></Tag></TagSet></Tagging>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[[exchanges]]
+name = "the-document-without-a-wrapper-is-refused"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-tagging?tagging"
+headers = { "content-md5" = "LqZ+4+XlqgnOj2+V9Ka/ZA==" }
+body = { utf8 = '<Tagging></Tagging>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[exchanges.expect.error]
+code = "MalformedXML"
+request_id_present = true
+
+[[exchanges]]
+name = "the-previous-set-survived"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-tagging?tagging"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.body]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Tagging xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><TagSet><Tag><Key>keep</Key><Value>yes</Value></Tag></TagSet></Tagging>'''

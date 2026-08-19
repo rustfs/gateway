@@ -205,6 +205,7 @@ core_modules = (
     "route_table",
     "static_dispatch",
     "tagging_contract",
+    "tagging_roundtrip",
     "tolerant_conditions",
 )
 core_tests = root / "crates/core/tests"
@@ -284,6 +285,7 @@ conformance_modules = (
     "object",
     "range_cond_family",
     "tagging",
+    "tagging_family",
     "wired",
 )
 conformance_root = root / "crates/conformance"
