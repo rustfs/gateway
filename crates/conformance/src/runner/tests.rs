@@ -227,11 +227,10 @@ fn an_unbound_capture_fails_the_case_instead_of_sending_a_literal_placeholder() 
 #[test]
 fn setup_captures_reach_the_first_request() {
     let corpus = corpus();
-    let mut sut = Scripted::new().with_setup_capture("upload_id", "upload-42").with(
-        "c-mpu-0001",
-        0,
-        Observation::response(200, Vec::new(), Vec::new()),
-    );
+    let mut sut = Scripted::new()
+        .with_setup_capture("upload_id", "upload-42")
+        .with_setup_capture("part1_etag", "\"part-1-digest\"")
+        .with("c-mpu-0001", 0, Observation::response(200, Vec::new(), Vec::new()));
     let options = RunOptions {
         filter: Some("c-mpu-0001".to_owned()),
         ..RunOptions::default()
@@ -240,6 +239,16 @@ fn setup_captures_reach_the_first_request() {
     let first = sut.seen.first().expect("a request was sent");
     let target = first.get("target").and_then(Value::as_str).unwrap_or_default();
     assert!(target.contains("uploadId=upload-42"), "{target}");
+    // The body too, and from a second capture. Both halves of the case are interpolated from setup,
+    // and a substitution that reached only the target would leave the body carrying the literal
+    // `${capture.part1_etag}` — which the service would read as a part digest nothing has.
+    let body = first
+        .get("body")
+        .and_then(|body| body.get("utf8"))
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    assert!(body.contains("<ETag>\"part-1-digest\"</ETag>"), "{body}");
+    assert!(!body.contains("${capture."), "{body}");
 }
 
 #[test]

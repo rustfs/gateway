@@ -69,11 +69,42 @@ Each dimension below therefore has a field on day one.
 | Clock injection | `[clock] fixed`, `skew_ms`, `request_time`, `presign_expires_s` | Clock skew, presigned expiry — and determinism for any body containing a timestamp |
 | TLS and h2 framing | `case.applies_to.http_versions` / `tls`, `connection.tls`, `request.h2_frames` | Cases meaningful only over h2 or only in cleartext; TLS truncation |
 | Expectations beyond status | `expect.kind` = `response` / `stream_error` / `event_stream` / `hang` / `connection_reset` | Errors delivered inside a 200; bodies that simply stop |
+| Failure after the head | `[setup.fault] at = "after_commit"` | The refusal a client cannot see in the status line, because the status line was already sent |
 | Byte-exact bodies | `expect.body.exact_utf8` / `exact_hex` / `golden` | Element order, `xmlns`, empty-element rendering, whitespace |
 | Header set assertions | `expect.headers_exact` / `headers_absent` / `header_order` | Headers that must **not** be present; casing and ordering |
 | Traceability | `case.rationale`, `case.evidence[]` | Cases nobody dares delete; assertions nobody can justify |
 | Quirk back-reference | `case.quirks[]` | The mutation gate's coverage matrix |
 | Polarity | `case.polarity` | The negative-cases-outnumber-positive requirement |
+
+### Why a fault is declared rather than arranged
+
+Every other `[setup]` entry describes state that was already true when the request arrived: a bucket
+that is not there, a key that is not there, an upload with one part in it. A backend discovers all of
+those while a status is still choosable, so all of them are refused with a status of their own. That
+is the behaviour most of the corpus is about, and it is why `[setup.objects] absent = true` cannot
+express a copy that fails halfway.
+
+`CompleteMultipartUpload`, `CopyObject` and `UploadPartCopy` send their head before they know the
+outcome, because the work can outlast a client's timeout. After that point a failure has nowhere to
+go but the body, under a status line that already says `200`. `[setup.fault]` is how a case says the
+failure happens *there*:
+
+```toml
+[setup.fault]
+operation = "CopyObject"
+at = "after_commit"
+code = "NoSuchKey"
+```
+
+The alternative — rearranging an implementation until one of its ordinary refusals arrives late — is
+the thing this field exists to stop. It produces the same bytes and it moves the boundary every other
+case in the family stands on: `c-copy-0034` and `c-mpu-0020` … `c-mpu-0026` each pin a refusal that
+must be decided *before* the head goes out, and each of them turns into a `200` carrying an `<Error>`
+the moment that check moves down. The two ledgers assert both halves together for that reason.
+
+Only an operation that commits its head early may be named; `lint/fault-after-commit` denies any
+other, because a fault at a point the operation never reaches is an assertion that cannot fail. The
+list is held equal to the `ERROR_AFTER_200` table `cargo xtask codegen` lowers from the model.
 
 One dimension is deliberately **not** in the schema: the internal assembly path
 (`--transport hyper|conn`) is injected by the runner. Every case runs on both paths and the two runs

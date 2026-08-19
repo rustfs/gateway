@@ -286,3 +286,88 @@ target = "/b/${capture.never_bound}"
     assert_eq!(denied[0].rule, "lint/capture-unresolved");
     assert!(denied[0].pointer.ends_with("/request"), "{}", denied[0].pointer);
 }
+
+/// The three operations the model marks as able to fail after a `200`, lowered by
+/// `cargo xtask codegen` and read here as the authority [`COMMITS_HEAD_EARLY`] is measured against.
+///
+/// Included rather than restated. A hand-written second copy of a generated list is a copy that can
+/// disagree with it, and the disagreement would be silent in exactly the direction that matters: a
+/// fourth operation gaining the property in the model, no case being allowed to declare a fault
+/// against it, and nobody finding out until somebody read both files.
+#[allow(dead_code, unreachable_pub)]
+mod generated_error_codes {
+    include!("../../../../generated/error_codes.rs");
+}
+
+/// Positive — the lint's list of head-committing operations is the generated one, in order.
+#[test]
+fn the_committed_operations_are_the_ones_the_model_lowered() {
+    assert_eq!(COMMITS_HEAD_EARLY, generated_error_codes::ERROR_AFTER_200);
+}
+
+/// Negative — a fault declared after a commit, on an operation that has no commit, is denied.
+///
+/// `PutObject` answers when it is done, so there is no moment in it at which a status has been sent
+/// and an outcome has not. A case declaring one would be run anyway: the fixture would arm nothing,
+/// the request would succeed or be refused on its own terms, and the case would report whatever
+/// that happened to be. The point of denying is that the scenario does not exist, not that the
+/// wording is wrong.
+#[test]
+fn a_fault_after_a_commit_on_an_operation_that_does_not_commit_is_denied() {
+    let root = Corpus::discover_root().expect("the repository corpus");
+    let mut corpus = Corpus::load(&root).expect("the corpus loads");
+    for case in corpus.cases_mut() {
+        if case.id != "c-copy-0038" {
+            continue;
+        }
+        if let Some(document) = case.document.as_mut()
+            && let Some(fault) = document.get_mut("setup").and_then(|setup| setup.get_mut("fault"))
+        {
+            fault.insert("operation", Value::String("PutObject".to_owned()));
+        }
+    }
+    lint(&mut corpus);
+    let case = corpus
+        .cases()
+        .iter()
+        .find(|case| case.id == "c-copy-0038")
+        .expect("c-copy-0038");
+    assert!(
+        case.diagnostics.iter().any(|d| d.rule == "lint/fault-after-commit"),
+        "{:?}",
+        case.diagnostics
+    );
+}
+
+/// Negative — the rule fires on the point, not on the presence of a fault.
+///
+/// The same operation with no `after_commit` is not denied, because the denial is about a moment
+/// that does not exist in that operation rather than about faults being unwelcome. Without this the
+/// rule above would be satisfied by a check that denied every fault it saw.
+#[test]
+fn a_fault_at_no_declared_point_is_not_denied_for_the_operation_that_carries_it() {
+    let root = Corpus::discover_root().expect("the repository corpus");
+    let mut corpus = Corpus::load(&root).expect("the corpus loads");
+    for case in corpus.cases_mut() {
+        if case.id != "c-copy-0038" {
+            continue;
+        }
+        if let Some(document) = case.document.as_mut()
+            && let Some(fault) = document.get_mut("setup").and_then(|setup| setup.get_mut("fault"))
+        {
+            fault.insert("operation", Value::String("PutObject".to_owned()));
+            fault.insert("at", Value::String("before_commit".to_owned()));
+        }
+    }
+    lint(&mut corpus);
+    let case = corpus
+        .cases()
+        .iter()
+        .find(|case| case.id == "c-copy-0038")
+        .expect("c-copy-0038");
+    assert!(
+        !case.diagnostics.iter().any(|d| d.rule == "lint/fault-after-commit"),
+        "{:?}",
+        case.diagnostics
+    );
+}

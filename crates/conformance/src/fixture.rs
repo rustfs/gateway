@@ -496,7 +496,74 @@ pub struct Fixture {
     /// 301. Defaults to [`HOME_REGION`]; the integration tests move it to exercise the non-us-east-1
     /// half of the status matrix.
     pub home_region: String,
+    /// The failure `[setup.fault]` armed, if the case armed one.
+    committed_fault: Option<CommittedFault>,
 }
+
+/// A failure a case declared for the point *after* an operation has committed its response head.
+///
+/// Every other way a case can make an operation fail describes state that was already true when the
+/// request arrived — a bucket that is not there, a key that is not there, a precondition that does
+/// not hold. All of those are discovered while a status is still choosable, so all of them are
+/// refused with their own status, which is what `c-copy-0026`, `c-copy-0034` and the ten
+/// completions `crates/conformance/tests/multipart_family.rs::REFUSED_BEFORE_COMMIT` names pin.
+/// None of them can reach the state this type exists to produce: the head is on
+/// the wire, the status is spent, and the failure has nowhere to go but the body.
+///
+/// Moving one of those checks below the commit boundary instead would have produced the same wire
+/// shape and destroyed the cases that pin the boundary, which is exactly the trade
+/// `crates/conformance/tests/copy_family.rs` recorded as the reason `c-copy-0038` stayed red.
+#[derive(Debug, Clone)]
+struct CommittedFault {
+    /// The operation whose work fails. A case with several exchanges fails one of them, not all.
+    operation: String,
+    /// The code the failure reports, inside the body, under the status already sent.
+    code: ErrorCode,
+}
+
+/// The operation names this fixture commits a head for, and can therefore report a fault from.
+///
+/// One home, because a fault armed against a name no handler reads is armed against nothing: the
+/// lookup answers `None`, the case runs as though it had declared no fault, and it reports whatever
+/// it happened to get. The list is not merely written down — every name in it is driven through its
+/// own handler by `every_operation_this_fixture_commits_for_reports_the_fault_armed_against_it` in
+/// this file's tests, so a name added here without a call site is a red test rather than a silent
+/// skip.
+///
+/// Shorter than the model's `ERROR_AFTER_200`, which also carries `UploadPartCopy`: this fixture
+/// answers that one without committing anything, so there is no point in it at which a fault could
+/// arrive. `crate::inprocess` refuses a case naming it rather than arming nothing.
+pub const COMMITTED_OPERATIONS: &[&str] = &[COMPLETE_MULTIPART_UPLOAD, COPY_OBJECT];
+
+/// The one spelling of `CompleteMultipartUpload` that arms and the one that reports are the same.
+const COMPLETE_MULTIPART_UPLOAD: &str = "CompleteMultipartUpload";
+/// The one spelling of `CopyObject` that arms and the one that reports are the same.
+const COPY_OBJECT: &str = "CopyObject";
+
+/// A fault was armed against an operation this fixture does not commit a head for.
+///
+/// Carries the name so the refusal can say which one; the set it was measured against is
+/// [`COMMITTED_OPERATIONS`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnreportableFault {
+    operation: String,
+}
+
+impl UnreportableFault {
+    /// The operation the case named.
+    #[must_use]
+    pub fn operation(&self) -> &str {
+        &self.operation
+    }
+}
+
+/// What a committed operation reports when a case armed a fault against it.
+///
+/// Deliberately not the message AWS writes for the code: this failure was arranged by the case, and
+/// a message claiming otherwise would put the fixture's arrangement on the wire disguised as the
+/// service's own diagnosis. No case asserts it — they assert the code, which is the part a client
+/// branches on.
+const COMMITTED_FAULT_MESSAGE: &str = "The operation failed after its response head had been committed.";
 
 impl Fixture {
     /// An empty fixture whose clock reads `now`.
@@ -507,6 +574,50 @@ impl Fixture {
             home_region: HOME_REGION.to_owned(),
             ..Fixture::default()
         }
+    }
+
+    /// Arms the failure `[setup.fault]` declared, so that `operation` fails after its head is out.
+    ///
+    /// One fault per case: a case that armed two would be describing two operations failing in one
+    /// exchange, which no request can observe.
+    ///
+    /// # Errors
+    ///
+    /// [`UnreportableFault`] when `operation` is not one this fixture commits a head for. Refusing
+    /// here is the whole point of the call being fallible: arming a fault against a handler that
+    /// never reads one leaves the case running with nothing arranged, and a case that reports on a
+    /// scenario that did not happen is worse than one that does not run.
+    pub fn arm_committed_fault(&mut self, operation: &str, code: ErrorCode) -> Result<(), UnreportableFault> {
+        if !COMMITTED_OPERATIONS.contains(&operation) {
+            return Err(UnreportableFault {
+                operation: operation.to_owned(),
+            });
+        }
+        self.committed_fault = Some(CommittedFault {
+            operation: operation.to_owned(),
+            code,
+        });
+        Ok(())
+    }
+
+    /// The armed failure for `operation`, as the refusal its continuation returns.
+    ///
+    /// Read *before* the head is committed and reported *after*, which is the whole distinction:
+    /// the lookup is a fixture detail, and the moment the client learns of it is not.
+    ///
+    /// `subject` is the object the operation was working on. A handful of codes — `NoSuchKey` among
+    /// them — are refused by [`rustfs_gateway::ErrorContext::ordinary`] unless they carry the fact
+    /// they are about, because a context-free one cannot be masked against a caller who is not
+    /// allowed to learn the object exists. A fault naming one and handing over no subject does not
+    /// fail loudly: it resolves to `InternalError`, and the case reads as a defect in the
+    /// committed-response path rather than as a fault that was armed wrong.
+    #[must_use]
+    fn committed_fault(&self, operation: &str, subject: &str) -> Option<HandlerError> {
+        let fault = self.committed_fault.as_ref().filter(|fault| fault.operation == operation)?;
+        if fault.code == ErrorCode::NO_SUCH_KEY {
+            return Some(no_such_key(subject));
+        }
+        Some(HandlerError::new(fault.code.clone(), COMMITTED_FAULT_MESSAGE))
     }
 
     /// When a copy retrieved *now* would lapse, as the RFC 1123 string `x-amz-restore` carries.
@@ -2836,6 +2947,10 @@ impl Stub {
         if let Some(class) = input.storage_class.as_ref() {
             object.storage_class = class.to_string();
         }
+        // Read while the guard is still held, reported only from inside the continuation. This is
+        // the one thing a copy can still discover after the head is out: the source resolved, the
+        // conditions held, and the bytes were not there when they came to be read.
+        let fault = fixture.committed_fault(COPY_OBJECT, source.key.as_str());
         // The guard is released before the head goes out: the continuation is `'static` and takes
         // the state back on its own, so nothing holds the fixture across the commit.
         drop(fixture);
@@ -2844,9 +2959,13 @@ impl Stub {
         let bucket = input.bucket.clone();
         let key = input.key.clone();
 
-        // The head is committed here. Nothing below chooses a status, and nothing below can refuse:
-        // every rule this operation has was applied above.
+        // The head is committed here. Everything below runs with the status line already on the
+        // wire, and the only thing it can still report is a failure with no status of its own —
+        // which is all a `[setup.fault]` arranged for this operation is able to be.
         Ok(Resp::commit(Box::pin(async move {
+            if let Some(error) = fault {
+                return Err(error);
+            }
             let etag = object.etag.clone();
             let mut fixture = state
                 .lock()
@@ -4172,6 +4291,11 @@ impl Stub {
             }
             ordered_parts.push(stored.clone());
         }
+        // Read while the guard is still held, reported only from inside the continuation. A case
+        // that armed `[setup.fault]` against this operation has said the completion fails once the
+        // status line is spent, and every check above still runs first — which is why arming one
+        // cannot turn any of the completions `REFUSED_BEFORE_COMMIT` names into a `200`.
+        let fault = fixture.committed_fault(COMPLETE_MULTIPART_UPLOAD, upload.key.as_str());
         // The guard is released before the head goes out: the continuation is `'static` and takes
         // the state back on its own, so nothing holds the fixture across the commit.
         drop(fixture);
@@ -4185,6 +4309,9 @@ impl Stub {
         // The head is committed here. Everything below runs with the status line already on the
         // wire, and the only thing it can still report is a failure with no status of its own.
         Ok(Resp::commit(Box::pin(async move {
+            if let Some(error) = fault {
+                return Err(error);
+            }
             let mut assembled = Vec::new();
             let mut digests = Vec::new();
             let mut part_checksums = Vec::new();
@@ -4877,6 +5004,75 @@ mod tests {
             copy_source: source.to_owned(),
             ..dto::CopyObjectInput::default()
         }
+    }
+
+    /// The refusal a committed answer eventually produced, or `None` if it answered.
+    ///
+    /// Drives the continuation `Resp::commit` handed back. A test that only looked at the `Resp`
+    /// would see `Answer::Committed(_)` and learn nothing: the fault this arms lives inside the
+    /// future, which is the whole reason it is a fault after a commit and not a refusal.
+    fn refusal_after_commit<O: rustfs_gateway::Operation>(resp: Resp<O>) -> Option<HandlerError> {
+        let (answer, _status) = resp.into_parts();
+        match answer {
+            rustfs_gateway::Answer::Committed(work) => crate::exec::block_on(work).err(),
+            _ => panic!("{} did not commit its head", O::NAME),
+        }
+    }
+
+    /// Negative — every operation named in [`COMMITTED_OPERATIONS`] really reports a fault armed
+    /// against it.
+    ///
+    /// The list is read by [`Fixture::arm_committed_fault`], which is what stops a case naming
+    /// `UploadPartCopy` from arming nothing. But the list being *read* proves only that the name was
+    /// admitted. What makes it true is a handler that looks the fault up and returns it, and
+    /// `Fixture::committed_fault` answers `None` for a name no handler asks about — silently, which
+    /// is exactly the shape that lets a case run against a scenario it did not get. So each name is
+    /// driven through its own handler here, and the loop is over the list rather than over two
+    /// hand-written calls: a third name added to `COMMITTED_OPERATIONS` without a call site fails
+    /// this test instead of quietly arming nothing.
+    #[test]
+    fn every_operation_this_fixture_commits_for_reports_the_fault_armed_against_it() {
+        for operation in COMMITTED_OPERATIONS {
+            let mut fixture = Fixture::at(0);
+            fixture.declare_bucket("conf-bucket", false);
+            fixture.put_object("conf-bucket", "src", StoredObject::new(b"source bytes".to_vec(), None, 0));
+            let upload = fixture.create_upload("conf-bucket", "k");
+            let first = fixture.put_part(&upload, 1, vec![0_u8; MIN_PART_BYTES]);
+            fixture
+                .arm_committed_fault(operation, ErrorCode::INTERNAL_ERROR)
+                .expect("a name this fixture commits for");
+            let stub = Stub::new(Arc::new(Mutex::new(fixture)));
+
+            let refusal = match *operation {
+                "CompleteMultipartUpload" => {
+                    let input = completion(&upload, vec![(1, Some(&first))]);
+                    refusal_after_commit(stub.complete_multipart_upload(&input).expect("a committed answer"))
+                }
+                "CopyObject" => {
+                    let input = copy("/conf-bucket/src", "dst");
+                    refusal_after_commit(stub.copy_object(&input).expect("a committed answer"))
+                }
+                other => panic!("{other} is in COMMITTED_OPERATIONS and this test does not drive it"),
+            };
+            let refusal = refusal.unwrap_or_else(|| panic!("{operation} answered rather than reporting the armed fault"));
+            assert_eq!(*refusal.code(), ErrorCode::INTERNAL_ERROR, "{operation}");
+        }
+    }
+
+    /// Negative — a fault armed against an operation this fixture never commits for is refused.
+    ///
+    /// `UploadPartCopy` is the one that matters. The model marks it as able to fail after a `200`,
+    /// so a case may legitimately name it; this fixture answers it without committing anything, so
+    /// there is no point in it at which the fault could arrive. Accepting the arming would leave the
+    /// case running with nothing arranged and reporting whatever it happened to get.
+    #[test]
+    fn a_fault_armed_against_an_operation_this_fixture_never_commits_for_is_refused() {
+        let mut fixture = Fixture::at(0);
+        let refused = fixture
+            .arm_committed_fault("UploadPartCopy", ErrorCode::INTERNAL_ERROR)
+            .expect_err("an operation this fixture does not commit for");
+        assert_eq!(refused.operation(), "UploadPartCopy");
+        assert!(fixture.committed_fault("UploadPartCopy", "k").is_none());
     }
 
     /// Negative — **every** refusal a completion has happens while a status is still choosable.

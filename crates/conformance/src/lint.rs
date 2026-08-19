@@ -112,6 +112,7 @@ pub fn lint(corpus: &mut Corpus) {
         check_assertion_strength(case, &mut found);
         check_hand_computed_values(case, &mut found);
         check_stale_digests(case, &mut found);
+        check_committed_fault(case, &mut found);
         case.diagnostics.extend(found);
     }
 }
@@ -197,6 +198,50 @@ fn check_identity(case: &Case, out: &mut Vec<Diagnostic>) {
             "/case/quirks",
             "no quirk is referenced, so the mutation gate has nothing to hold this case against; \
              an empty list is only legitimate while model/overlays/ has no matching entry",
+        ));
+    }
+}
+
+/// The operations whose response head goes out before the outcome is known.
+///
+/// AWS documents each of these three as able to answer `200` and then report a failure in the body,
+/// and `generated/error_codes.rs` carries the same three as `ERROR_AFTER_200`, lowered from the
+/// model. The two lists are held equal by a test rather than by a comment, because a fourth
+/// operation gaining the property in the model and not here would let a case declare a fault at a
+/// point that operation never reaches — and a fault at a point nothing reaches is an assertion that
+/// cannot fail.
+pub const COMMITS_HEAD_EARLY: &[&str] = &["CompleteMultipartUpload", "CopyObject", "UploadPartCopy"];
+
+/// A fault declared after a commit must name an operation that commits.
+///
+/// The point named by `setup.fault.at = "after_commit"` exists only for an operation that sends its
+/// head before it knows the outcome. For any other, the failure would be discovered while a status
+/// was still choosable and delivered as an ordinary refusal — the case would run, it would be given
+/// the refusal it did not ask for, and whether it noticed would depend on what else it happened to
+/// assert. This denies instead: a case whose scenario cannot occur is unusable, not merely drifting.
+fn check_committed_fault(case: &Case, out: &mut Vec<Diagnostic>) {
+    let Some(document) = case.document.as_ref() else { return };
+    // Two statements, not one chain: the key ledger records the *source location* of each read, and
+    // one location claiming two keys is how this audit would be made vacuous.
+    let Some(setup) = document.read("setup") else { return };
+    let Some(fault) = setup.read("setup.fault") else { return };
+    let at = fault.read("setup.fault.at").and_then(Value::as_str);
+    if at != Some("after_commit") {
+        return;
+    }
+    let operation = fault
+        .read("setup.fault.operation")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    if !COMMITS_HEAD_EARLY.contains(&operation) {
+        out.push(Diagnostic::deny(
+            "lint/fault-after-commit",
+            "/setup/fault/operation",
+            format!(
+                "`{operation}` does not commit its response head before it knows the outcome, so there \
+                 is no point in it at which `after_commit` could happen; the operations that do are {}",
+                COMMITS_HEAD_EARLY.join(", ")
+            ),
         ));
     }
 }

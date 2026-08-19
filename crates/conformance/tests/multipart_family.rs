@@ -43,9 +43,41 @@ const POSITIVE: usize = 17;
 /// The cases this family was blocked on. Three are about the entity tag a multipart upload
 /// publishes; `c-mpu-0038` is the one whose own expectation was the defect — it demanded that the
 /// completion body carry no XML declaration, which is neither what AWS emits nor what the rest of
-/// this corpus says. The baseline still records all four as failing, so their verdicts are checked
-/// directly rather than through the ratchet, which tolerates a recorded failure.
-const RECOVERED: [&str; 4] = ["c-mpu-0002", "c-mpu-0003", "c-mpu-0018", "c-mpu-0038"];
+/// this corpus says. `c-mpu-0001` is the fifth: a completion that fails after its head is out, which
+/// the corpus could not describe until `setup.fault` existed and which is only reachable *below* the
+/// commit boundary — see [`the_late_failure_is_green_without_moving_the_commit_boundary`]. The
+/// baseline still records all five as failing, so their verdicts are checked directly rather than
+/// through the ratchet, which tolerates a recorded failure.
+const RECOVERED: [&str; 5] = ["c-mpu-0001", "c-mpu-0002", "c-mpu-0003", "c-mpu-0018", "c-mpu-0038"];
+
+/// The completions whose refusal must stay *above* the commit boundary, and their statuses.
+///
+/// The price of `c-mpu-0001` is exactly this list. A completion that fails after its head is out is
+/// one line away from a completion that always commits first and reports everything late, and that
+/// rearrangement makes `c-mpu-0001` green while turning each of these into a `200` whose body
+/// carries the refusal. A client that reads the status line — which is every client that has not
+/// been told this operation is special — records each of them as a successful upload.
+///
+/// Ten of them, not the five the fixture's own doc block happens to name: a guard is only as good as
+/// the cases it covers, and a boundary move that spared half of them would still be a boundary move.
+/// One is a `412`, which a list of `400`s alone would have missed.
+///
+/// `c-mpu-0041` is the completion left out. It is the same rule under two exchanges, and its status
+/// lives inside `[[exchanges]]` rather than at `expect.status`, so the second half of this ledger —
+/// reading the demand back out of the file — would have nothing to read. A row naming it with no
+/// status to check against would assert only the colour.
+const REFUSED_BEFORE_COMMIT: [(&str, u16); 10] = [
+    ("c-mpu-0019", 400),
+    ("c-mpu-0020", 400),
+    ("c-mpu-0021", 400),
+    ("c-mpu-0022", 400),
+    ("c-mpu-0023", 400),
+    ("c-mpu-0026", 400),
+    ("c-mpu-0033", 400),
+    ("c-mpu-0034", 400),
+    ("c-mpu-0036", 400),
+    ("c-mpu-0042", 412),
+];
 
 /// The cases the in-process target cannot execute, each for a reason the runner prints with the
 /// skip. Two ask for a fresh connection per exchange, one for a malformed request head that only a
@@ -190,6 +222,76 @@ fn the_multipart_family_runs_green_with_the_entity_tag_cases_recovered() {
             Verdict::Passed,
             "{id}: {:?}",
             recovered.failures().iter().map(ToString::to_string).collect::<Vec<_>>()
+        );
+    }
+}
+
+/// Negative — the late failure is green, and the completions that must refuse early still do.
+///
+/// `c-mpu-0001` asks for a completion that fails *after* its head has gone out: `200`, and an
+/// `<Error>` document in the body. There are two ways to arrive at that. One is to describe a fault
+/// that happens at that point. The other is to move the completion's checks below the commit, which
+/// is a smaller diff, makes `c-mpu-0001` green immediately, and turns every refusal this operation
+/// can still name a status for into a `200` whose body carries the refusal. Every case
+/// [`REFUSED_BEFORE_COMMIT`] names is what that costs, and a client that reads the status line —
+/// which is every client that has not been told this operation is special — would record each of
+/// them as a successful upload.
+///
+/// So the verdict on `c-mpu-0001` alone does not say which of the two happened. Both halves do, and
+/// the second half is asserted twice over: the run says those cases pass, and their own files are
+/// read back to confirm they still *demand* a status chosen before the head went out. A ledger that
+/// only checked the colour would stay green through an edit that moved the demand instead of the
+/// behaviour.
+#[test]
+fn the_late_failure_is_green_without_moving_the_commit_boundary() {
+    let root = Corpus::discover_root().expect("a corpus sits next to this crate");
+    let corpus = runner::prepare_corpus(&root).expect("the corpus loads");
+    let mut sut = InProcess::new(root);
+    let options = RunOptions {
+        filter: Some("mpu/".to_owned()),
+        ..RunOptions::default()
+    };
+    let report = runner::run(&corpus, &mut sut, &options);
+
+    let late = report
+        .outcomes
+        .iter()
+        .find(|outcome| outcome.id == "c-mpu-0001")
+        .expect("c-mpu-0001 is selected by the multipart filter");
+    assert_eq!(
+        late.verdict,
+        Verdict::Passed,
+        "c-mpu-0001 is red — a completion that fails after its head is out no longer answers with an \
+         Error document inside the committed status: {:?}",
+        late.failures().iter().map(ToString::to_string).collect::<Vec<_>>()
+    );
+
+    for (id, status) in REFUSED_BEFORE_COMMIT {
+        let outcome = report
+            .outcomes
+            .iter()
+            .find(|outcome| outcome.id == id)
+            .unwrap_or_else(|| panic!("{id} is selected by the multipart filter"));
+        assert_eq!(
+            outcome.verdict,
+            Verdict::Passed,
+            "{id} is red: a completion that can still be refused with its own status no longer is, \
+             which is the boundary c-mpu-0001 must be green *without* moving: {:?}",
+            outcome.failures().iter().map(ToString::to_string).collect::<Vec<_>>()
+        );
+        // `path`, not `read`: this reaches into the case document to check what it demands, and a
+        // recorded read here would claim coverage the runner is the one that owns.
+        let demanded = corpus
+            .cases()
+            .iter()
+            .find(|case| case.id == id)
+            .and_then(|case| case.document.as_ref())
+            .and_then(|document| document.path("expect/status"))
+            .and_then(rustfs_gateway_conformance::value::Value::as_integer);
+        assert_eq!(
+            demanded,
+            Some(i64::from(status)),
+            "{id} no longer demands {status}; the ledger's other half was edited rather than honoured"
         );
     }
 }
