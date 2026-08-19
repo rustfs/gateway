@@ -160,6 +160,7 @@ core_modules = (
     "codec_binding",
     "compile_fail",
     "configuration_error_declarations",
+    "cors_roundtrip",
     "dialect",
     "dto_cold_split",
     "error_resolution",

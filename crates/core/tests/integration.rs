@@ -35,6 +35,9 @@ mod compile_fail;
 #[path = "configuration_error_declarations.rs"]
 mod configuration_error_declarations;
 
+#[path = "cors_roundtrip.rs"]
+mod cors_roundtrip;
+
 #[path = "dialect.rs"]
 mod dialect;
 
