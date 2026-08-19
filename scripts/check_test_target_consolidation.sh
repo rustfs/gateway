@@ -616,6 +616,7 @@ gateway_modules = (
     "refusal_order_guards",
     "reject_rendering",
     "replication_token",
+    "request_allocations",
     "select_restore_intent",
     "service_clone_allocations",
     "service_concurrency",
