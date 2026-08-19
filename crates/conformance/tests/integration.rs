@@ -20,6 +20,8 @@
 
 #[path = "bucket_lifecycle.rs"]
 mod bucket_lifecycle;
+#[path = "copy_family.rs"]
+mod copy_family;
 #[path = "corpus.rs"]
 mod corpus;
 #[path = "list_family.rs"]
