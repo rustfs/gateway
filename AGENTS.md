@@ -130,6 +130,13 @@ mechanism by which infrastructure kills a project is: the gate gets slow → hum
 skipping local verification → the gate stops catching anything. A PR that pushes the gate past 10
 minutes must make it faster elsewhere in the same PR.
 
+Every timed command behind the `Test` aggregate runs through `scripts/ci_budget.sh`, which reports
+how much of its budget the job used and warns past 80%. **If a CI job fails at exit 124 or prints
+`OUT OF TIME`, that is the gate running out of clock, not your change breaking.** Check whether the
+job is red on `main` before assuming your branch caused it — rustfs/gateway#188 and #217 each cost
+several PRs a full cycle to that mistake. Fix an overrun by making the work faster or splitting it
+across runners, never by deleting, skipping or sampling checks to fit the clock.
+
 ## Protected Files
 
 Changing any path below requires the **Breaking Change process**: bump the affected version, write
