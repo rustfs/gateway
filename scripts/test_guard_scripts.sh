@@ -418,7 +418,7 @@ run_guard_shards() {
         "$total_executed" "${considered:-0}" "$((GUARD_SHARD_GROUP + 1))" "$GUARD_SHARD_GROUPS" \
         "$total_failures"
     guard_print_elapsed
-    rm -rf "$workdir"
+    rm -rf "$workdir" || true
     ((total_failures == 0)) || status=1
     return "$status"
 }
@@ -678,18 +678,26 @@ cleanup_sandbox() {
     # Must return 0: an EXIT trap's status becomes the script's status, so a bare
     # `[[ -n "$SANDBOX" ]] && rm -rf` reports failure whenever no sandbox was made,
     # and the suite would exit 1 while printing "0 failures".
+    #
+    # Every removal is `|| true` for the same reason, one step further along. Under `set -e` a
+    # failing `rm -rf` aborts this function before its `return 0`, and the run exits 1 having just
+    # printed "0 failure(s)" — which is what happened on rustfs/gateway#232, where a sandbox's
+    # `.git` was still being written to when the trap fired: `rm: cannot remove '.git': Directory
+    # not empty`, thirteen green cases, exit 1. A temporary directory that outlives the run is
+    # litter on a throwaway runner; a green run reported red is a defect nobody can distinguish
+    # from a real one.
     if [[ -n "$SANDBOX" ]]; then
-        rm -rf "$SANDBOX"
+        rm -rf "$SANDBOX" || true
     fi
-    rm -f "$SANDBOX_RESET_TRACKED" "$SANDBOX_RESET_UNTRACKED"
+    rm -f "$SANDBOX_RESET_TRACKED" "$SANDBOX_RESET_UNTRACKED" || true
     if [[ -n "$QUIRK_LEDGER_PARSE_CACHE" ]]; then
-        rm -f "$QUIRK_LEDGER_PARSE_CACHE"
+        rm -f "$QUIRK_LEDGER_PARSE_CACHE" || true
     fi
     if [[ -n "$CT_EQ_SANDBOX" ]]; then
-        rm -rf "$CT_EQ_SANDBOX"
+        rm -rf "$CT_EQ_SANDBOX" || true
     fi
     if [[ -n "$SEMVER_SANDBOX" ]]; then
-        rm -rf "$SEMVER_SANDBOX"
+        rm -rf "$SEMVER_SANDBOX" || true
     fi
     return 0
 }
