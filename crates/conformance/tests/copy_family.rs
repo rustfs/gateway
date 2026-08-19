@@ -173,8 +173,7 @@ fn every_copy_case_carries_a_verdict_in_the_baseline() {
     assert!(unrecorded.is_empty(), "copy cases absent from the baseline: {unrecorded:?}");
 }
 
-/// Positive — the family executes against the assembled service, and thirty-seven of the
-/// thirty-eight are green.
+/// Positive — the family executes against the assembled service, and all thirty-eight are green.
 ///
 /// Three separate things are asserted because each is satisfiable without the others, and the
 /// combination is what "the family passes" is usually taken to mean:
@@ -182,10 +181,10 @@ fn every_copy_case_carries_a_verdict_in_the_baseline() {
 /// * the filter selects the whole family — otherwise a narrowed filter proves whatever is left;
 /// * no case is *skipped* — an unwired registry answers every case with a skip, and a summary line
 ///   renders that identically to a family with nothing wrong with it;
-/// * exactly thirty-seven passed, and exactly one failed, and it is the one named below — a count
-///   alone would let a newly-green case pay for a newly-red one.
+/// * every one of them passed — a count of greens alone would let a newly-green case pay for a
+///   newly-red one, so the reds are enumerated and the list has to be empty.
 #[test]
-fn the_copy_family_runs_with_thirty_seven_green_and_nothing_skipped() {
+fn the_copy_family_runs_with_all_thirty_eight_green_and_nothing_skipped() {
     let report = run_copy_domain();
 
     assert_eq!(report.outcomes.len(), FAMILY_SIZE, "the filter did not select the whole family");
