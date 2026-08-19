@@ -72,6 +72,8 @@ mod refusal_order_guards;
 mod reject_rendering;
 #[path = "replication_token.rs"]
 mod replication_token;
+#[path = "request_allocations.rs"]
+mod request_allocations;
 #[path = "select_restore_intent.rs"]
 mod select_restore_intent;
 #[path = "service_clone_allocations.rs"]
