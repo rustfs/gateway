@@ -63,15 +63,19 @@ use core::fmt;
 use http::HeaderMap;
 
 use crate::clock::{ClockChecked, PresignExpiry, RequestNow, SkewWindow, enforce_clock_skew, enforce_expiry};
+use crate::mode::{
+    STREAMING_ECDSA, STREAMING_ECDSA_TRAILER, STREAMING_SIGNED, STREAMING_SIGNED_TRAILER, STREAMING_UNSIGNED_TRAILER,
+};
 use crate::operation::{OperationFloor, SchemeSlot, SigV2Presigned};
 use crate::parse::{AmzDate, X_AMZ_ALGORITHM, X_AMZ_CREDENTIAL, X_AMZ_DATE, X_AMZ_SIGNED_HEADERS};
 use crate::query::{RawQuery, X_AMZ_SIGNATURE, percent_decode};
 use crate::scheme::{SigFamily, SigLocation};
+use crate::sig_v2::{SIGV2_EXPIRES_PARAM, SealedSigV2, SigV2Mode, SigV2Policy};
 use crate::timing::FailureFloor;
 use crate::verdict::{AnonymousAck, AuthError, CredentialPresence, Verdict};
 use crate::verifier::{
-    AUTHORIZATION_HEADER, AWS_ACCESS_KEY_ID_PARAM, CustomAuthRequest, CustomSchemeRegistry, SIGV2_SIGNATURE_PARAM, SealedAws,
-    detect_aws_credential_marker,
+    AUTHORIZATION_HEADER, AWS_ACCESS_KEY_ID_PARAM, AwsCredentialMarker, CustomAuthRequest, CustomSchemeRegistry,
+    SIGV2_SIGNATURE_PARAM, SealedAws, detect_aws_credential_marker,
 };
 
 /// The presigned expiry parameter.
@@ -82,12 +86,14 @@ pub const X_AMZ_SECURITY_TOKEN: &str = "X-Amz-Security-Token";
 pub const X_AMZ_SECURITY_TOKEN_HEADER: &str = "x-amz-security-token";
 /// The timestamp header, lowercased.
 pub const X_AMZ_DATE_HEADER: &str = "x-amz-date";
+/// The payload declaration header, lowercased.
+const X_AMZ_CONTENT_SHA256_HEADER: &str = "x-amz-content-sha256";
 
 /// Every query parameter that carries part of a signature, and must therefore appear at most once.
 ///
 /// A server that reads the first occurrence and a proxy that reads the last disagree about what
 /// was signed, which is a parameter-smuggling bypass (s3s#176, open with a security label).
-const SIGNED_QUERY_PARAMS: [&str; 9] = [
+const SIGNED_QUERY_PARAMS: [&str; 10] = [
     X_AMZ_ALGORITHM,
     X_AMZ_CREDENTIAL,
     X_AMZ_DATE,
@@ -97,6 +103,10 @@ const SIGNED_QUERY_PARAMS: [&str; 9] = [
     X_AMZ_SECURITY_TOKEN,
     AWS_ACCESS_KEY_ID_PARAM,
     SIGV2_SIGNATURE_PARAM,
+    // SigV2's own expiry parameter. It is not `X-Amz-Expires` under another name: it is an
+    // absolute instant, it is inside SigV2's string-to-sign, and until the SigV2 verifier was
+    // wired nothing read it, so nothing noticed it was missing from this list.
+    SIGV2_EXPIRES_PARAM,
 ];
 
 /// Every header that carries part of a signature, and must therefore appear at most once.
@@ -332,6 +342,38 @@ pub fn enforce_presign_expiry(view: &WireView<'_>, clock: ClockChecked) -> Resul
     enforce_expiry(clock, seconds)
 }
 
+/// Refuses a SigV2 request that declares a framed payload.
+///
+/// `x-amz-content-sha256` is not part of SigV2 at all; a client that sends one has it signed as an
+/// ordinary `x-amz-*` header and nothing else. The token spellings below name `aws-chunked`
+/// framing whose chunk signatures are SigV4 values, so a SigV2 request cannot have produced them.
+///
+/// The alternative is worse than a refusal. The pipeline decodes framing only for a payload mode
+/// it was given, and the SigV2 path gives it none — so an ignored declaration means the chunk
+/// size lines and chunk signatures are delivered to the operation as object bytes.
+///
+/// Non-streaming declarations (`UNSIGNED-PAYLOAD`, a hex digest) are left alone: they claim
+/// nothing about framing, some middleboxes add them, and refusing them would reject requests that
+/// are correctly signed and correctly framed.
+///
+/// # Errors
+///
+/// [`AuthError::NotImplemented`] carrying [`crate::error::Unimplemented::StreamingSigV2`], and
+/// [`AuthError::AuthorizationHeaderMalformed`] for a declaration that is not even text.
+fn refuse_framed_sigv2_payload(view: &WireView<'_>) -> Result<(), AuthError> {
+    let Some(raw) = view.headers().get(X_AMZ_CONTENT_SHA256_HEADER) else {
+        return Ok(());
+    };
+    let token = raw.to_str().map_err(|_| AuthError::AuthorizationHeaderMalformed)?;
+    if matches!(
+        token,
+        STREAMING_SIGNED | STREAMING_SIGNED_TRAILER | STREAMING_UNSIGNED_TRAILER | STREAMING_ECDSA | STREAMING_ECDSA_TRAILER
+    ) {
+        return Err(AuthError::NotImplemented(crate::error::Unimplemented::StreamingSigV2));
+    }
+    Ok(())
+}
+
 /// What [`SecurityFloor::admit`] decided.
 ///
 /// Every variant is a request that has already been through the floor. There is no variant that
@@ -340,6 +382,12 @@ pub fn enforce_presign_expiry(view: &WireView<'_>, clock: ClockChecked) -> Resul
 pub enum Admission<'a> {
     /// AWS-marked. Only the built-in SigV4 path may handle it.
     Sealed(SealedAws<'a>),
+    /// AWS-marked as SigV2, and admitted by the [`SigV2Policy`] in force.
+    ///
+    /// A separate variant rather than a [`SealedAws`] carrying a family tag, because the point is
+    /// that the SigV4 verifier is never handed this request: there is no conversion between the
+    /// two types, so "SigV2 verified as SigV4" is not a mistake that can be made.
+    SealedSigV2(SealedSigV2<'a>),
     /// No AWS credential marker, and a registered custom scheme claims it.
     Custom(CustomAuthRequest<'a>),
     /// Nothing was presented, and the operation is anonymously reachable.
@@ -352,6 +400,7 @@ impl fmt::Debug for Admission<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Sealed(sealed) => f.debug_tuple("Sealed").field(sealed).finish(),
+            Self::SealedSigV2(sealed) => f.debug_tuple("SealedSigV2").field(sealed).finish(),
             Self::Custom(request) => f.debug_tuple("Custom").field(request).finish(),
             Self::Anonymous(_) => f.write_str("Anonymous"),
         }
@@ -367,7 +416,7 @@ impl fmt::Debug for Admission<'_> {
 #[derive(Clone, Debug, Default)]
 pub struct SecurityFloor {
     skew: SkewWindow,
-    sigv2_presigned: SigV2Presigned,
+    sigv2: SigV2Policy,
     failure_floor: FailureFloor,
     custom_schemes: CustomSchemeRegistry,
 }
@@ -393,16 +442,35 @@ impl SecurityFloor {
         self
     }
 
-    /// Accepts SigV2 presigned URLs as far as the floor is concerned.
+    /// Accepts SigV2 presigned URLs, which is [`SigV2Policy::HeaderAndPresigned`].
     ///
-    /// Verification of SigV2 is P2-06's and is absent today, so a request admitted by this switch
-    /// is still refused with `NotImplemented`. The switch exists now because the *default* is the
-    /// security-relevant half, and a deployment reading this method's name learns what it is
+    /// Presigned is the dangerous half of SigV2: a presigned URL is a bearer token that travels in
+    /// referrer headers and proxy logs, SigV2 signs almost none of the query string, and MinIO
+    /// #5411 was a rewritten SigV2 presigned URL that reached an admin operation. The default is
+    /// the security-relevant half, and a deployment reading this method's name learns what it is
     /// turning on.
     #[must_use]
-    pub const fn enable_sigv2_presigned_compatibility(mut self) -> Self {
-        self.sigv2_presigned = SigV2Presigned::Enabled;
+    pub const fn enable_sigv2_presigned_compatibility(self) -> Self {
+        self.with_sigv2_policy(SigV2Policy::HeaderAndPresigned)
+    }
+
+    /// Sets which SigV2 locations this deployment accepts.
+    ///
+    /// This is the **single** SigV2 switch. It used to be two — a three-way [`SigV2Policy`] beside
+    /// a two-way presigned flag — and two switches that can disagree about whether an
+    /// authentication scheme is on is the shape this repository has caught eight times.
+    /// [`SecurityFloor::sigv2_presigned`] is now derived from this value rather than stored beside
+    /// it, so the two cannot drift.
+    #[must_use]
+    pub const fn with_sigv2_policy(mut self, policy: SigV2Policy) -> Self {
+        self.sigv2 = policy;
         self
+    }
+
+    /// The SigV2 policy in force, for the startup security-posture report.
+    #[must_use]
+    pub const fn sigv2_policy(&self) -> SigV2Policy {
+        self.sigv2
     }
 
     /// The clock-skew window in force.
@@ -412,9 +480,15 @@ impl SecurityFloor {
     }
 
     /// Whether SigV2 presigned URLs are accepted.
+    ///
+    /// Derived from [`SecurityFloor::sigv2_policy`] and never stored: there is one switch.
     #[must_use]
     pub const fn sigv2_presigned(&self) -> SigV2Presigned {
-        self.sigv2_presigned
+        if self.sigv2.allows(SigV2Mode::PresignedUrl) {
+            SigV2Presigned::Enabled
+        } else {
+            SigV2Presigned::Disabled
+        }
     }
 
     /// The registered custom schemes, for the startup security-posture report.
@@ -447,7 +521,7 @@ impl SecurityFloor {
             if operation.privileged() {
                 return Err(AuthError::AccessDenied);
             }
-            if matches!(family, SigFamily::V2) && matches!(self.sigv2_presigned, SigV2Presigned::Disabled) {
+            if matches!(family, SigFamily::V2) && matches!(self.sigv2_presigned(), SigV2Presigned::Disabled) {
                 return Err(AuthError::AccessDenied);
             }
         }
@@ -490,9 +564,11 @@ impl SecurityFloor {
         };
         self.enforce_scheme_allowed(operation, slot, marker.family())?;
         if matches!(marker.family(), SigFamily::V2) {
-            // Recognised and refused rather than routed into the SigV4 verifier: P2-06 owns the
-            // SigV2 string-to-sign, and a SigV2 request verified as SigV4 is a downgrade.
-            return Err(AuthError::NotImplemented(crate::error::Unimplemented::SigV2));
+            // Answered on its own branch rather than routed into the SigV4 verifier below: P2-06
+            // owns the SigV2 string-to-sign, and a SigV2 request verified as SigV4 is a downgrade.
+            // The branch is total — every path out of it is a `SealedSigV2` or an `AuthError` —
+            // so a SigV2 request can never reach the `SealedAws` this function builds afterwards.
+            return self.admit_sigv2(view, marker, operation, presence, now);
         }
 
         // 5. H1 — clock skew, on whichever path carried the timestamp.
@@ -514,6 +590,105 @@ impl SecurityFloor {
             expiry,
             operation.service(),
         )))
+    }
+
+    /// The SigV2 branch of [`SecurityFloor::admit`], and the only route to a [`SealedSigV2`].
+    ///
+    /// # Why this is a branch and not a fall-through
+    ///
+    /// Until P2-06's wiring this was one line: `Err(NotImplemented(SigV2))`. Replacing that line
+    /// with nothing would have made a SigV2 request continue into the SigV4 path below, where the
+    /// `Authorization` header parses as neither and the outcome depends on which rejection came
+    /// first. So the refusal was replaced by a branch that returns from every path: a
+    /// [`SealedSigV2`], or an error. There is no arm that falls out of it, and
+    /// [`crate::Admission::SealedSigV2`] is a variant of a `#[non_exhaustive]` enum, so an
+    /// assembly that does not handle SigV2 refuses the request rather than mishandling it.
+    ///
+    /// # Errors
+    ///
+    /// * [`AuthError::AccessDenied`] when the [`SigV2Policy`] does not admit this location.
+    /// * [`AuthError::NotImplemented`] for the POST-form shape, which is P2-05's and is refused
+    ///   here rather than half-verified.
+    /// * [`AuthError::AuthorizationHeaderMalformed`] for a credential this crate cannot parse, and
+    ///   [`AuthError::AuthorizationQueryParametersError`] for its presigned spelling. Both are
+    ///   rejections: a presented credential that cannot be read is never an anonymous request.
+    /// * [`AuthError::RequestTimeTooSkewed`] from the same H1 window SigV4 uses, and
+    ///   [`AuthError::RequestExpired`] for an elapsed presigned URL.
+    fn admit_sigv2<'a>(
+        &self,
+        view: WireView<'a>,
+        marker: AwsCredentialMarker,
+        operation: &OperationFloor,
+        presence: CredentialPresence,
+        now: RequestNow,
+    ) -> Result<Admission<'a>, AuthError> {
+        let mode = match marker.location() {
+            SigLocation::Header => SigV2Mode::HeaderAuth,
+            SigLocation::Query => SigV2Mode::PresignedUrl,
+            // The POST-form SigV2 shape (`AWSAccessKeyId` and `signature` fields) belongs to
+            // P2-05's policy enforcement. "Recognised and refused" is the honest answer for it;
+            // verifying the signature without the field-level rules would be worse than not
+            // verifying it at all.
+            _ => return Err(AuthError::NotImplemented(crate::error::Unimplemented::SigV2)),
+        };
+        if !self.sigv2.allows(mode) {
+            return Err(AuthError::AccessDenied);
+        }
+        refuse_framed_sigv2_payload(&view)?;
+        match mode {
+            SigV2Mode::PresignedUrl => {
+                let access_key_id = self.sigv2_query_value(&view, AWS_ACCESS_KEY_ID_PARAM)?;
+                let signature = self.sigv2_query_value(&view, SIGV2_SIGNATURE_PARAM)?;
+                let expires = self.sigv2_query_value(&view, SIGV2_EXPIRES_PARAM)?;
+                // Before the credential is parsed, so that an expired URL and a malformed one are
+                // not distinguishable by which check ran.
+                let expires_at = crate::sig_v2::parse_presigned_expires(&expires, now)?;
+                let presented = crate::sig_v2::parse_presigned_credential(&access_key_id, &signature)?;
+                Ok(Admission::SealedSigV2(SealedSigV2::presigned(
+                    view,
+                    presented,
+                    now,
+                    expires_at,
+                    presence,
+                    operation.service(),
+                )))
+            }
+            // `SigV2Mode` is `#[non_exhaustive]`; a location added later must not be admitted by a
+            // wildcard, so header authentication is the named arm and everything else is refused
+            // above by the `marker.location()` match.
+            _ => {
+                let raw = view
+                    .headers()
+                    .get(AUTHORIZATION_HEADER)
+                    .ok_or(AuthError::AuthorizationHeaderMalformed)?
+                    .to_str()
+                    .map_err(|_| AuthError::AuthorizationHeaderMalformed)?;
+                let presented = crate::sig_v2::parse_authorization(raw)?;
+                // H1, through the same `enforce_clock_skew` SigV4 reaches. SigV2's two timestamp
+                // spellings are normalised into one `AmzDate` first; there is no second window,
+                // no second overflow rule and no second clock reading.
+                let signed_at = crate::sig_v2::signed_timestamp(view.headers())?;
+                let clock = enforce_clock_skew(&signed_at, now, self.skew)?;
+                Ok(Admission::SealedSigV2(SealedSigV2::header(
+                    view,
+                    presented,
+                    clock,
+                    presence,
+                    operation.service(),
+                )))
+            }
+        }
+    }
+
+    /// Reads one SigV2 query parameter that must be present exactly once.
+    ///
+    /// H6 has already refused a repeated `AWSAccessKeyId`, `Signature` or `Expires`, so presence
+    /// is the only thing left to check. A missing one is a rejection rather than a default.
+    fn sigv2_query_value(&self, view: &WireView<'_>, name: &str) -> Result<String, AuthError> {
+        view.query()
+            .decoded_value(name)
+            .map_err(|_| AuthError::AuthorizationQueryParametersError)?
+            .ok_or(AuthError::AuthorizationQueryParametersError)
     }
 
     /// The branch for a request that carried no AWS credential marker.
@@ -594,47 +769,5 @@ impl SecurityFloor {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::query::RawQuery;
-
-    fn headers_with(pairs: &[(&str, &str)]) -> HeaderMap {
-        let mut map = HeaderMap::new();
-        for (name, value) in pairs {
-            let name = http::header::HeaderName::from_bytes(name.as_bytes()).expect("valid name");
-            map.append(name, http::HeaderValue::from_str(value).expect("valid value"));
-        }
-        map
-    }
-
-    /// Negative — a duplicate spelled with a broken escape is still a duplicate.
-    #[test]
-    fn a_malformed_escape_cannot_hide_a_second_occurrence() {
-        let headers = HeaderMap::new();
-        let view = WireView::new(&headers, RawQuery::new("X-Amz-Signature=a%zz&X-Amz-Signature=b"));
-        assert_eq!(view.count_query_param(X_AMZ_SIGNATURE), 2);
-        assert_eq!(
-            enforce_no_duplicate_sig_params(&view).err(),
-            Some(AuthError::AuthorizationQueryParametersError)
-        );
-    }
-
-    /// Negative — a session token with no signature is neither verifiable nor anonymous.
-    #[test]
-    fn a_security_token_alone_is_a_rejection() {
-        let headers = headers_with(&[(X_AMZ_SECURITY_TOKEN_HEADER, "FQoDYXdzE")]);
-        let view = WireView::new(&headers, RawQuery::new(""));
-        let presence = detect_credentials(&view);
-        assert!(presence.any());
-        assert!(presence.into_evidence().is_err());
-    }
-
-    /// Negative — the wire view prints no header value.
-    #[test]
-    fn the_wire_view_debug_prints_no_header_value() {
-        let headers = headers_with(&[("authorization", "AWS4-HMAC-SHA256 Credential=leaked")]);
-        let view = WireView::new(&headers, RawQuery::new(""));
-        let rendered = format!("{view:?}");
-        assert!(!rendered.contains("leaked"));
-    }
-}
+#[path = "floor_tests.rs"]
+mod tests;

@@ -258,6 +258,42 @@ second. This too is the algorithm rather than this implementation: botocore comp
 string, so refusing it here would reject requests AWS's own SDK signs successfully. It is pinned
 by `c-sig-0556` and is a third reason to prefer SigV4.
 
+P2-06's wiring slice — the change that made SigV2 actually verify — considered diverging from
+botocore here and **did not**. Diverging would mean computing a `CanonicalizedResource` no client
+computes, so every correctly-signed request carrying a percent-encoded `&` or `=` inside a covered
+sub-resource value would be answered `SignatureDoesNotMatch`. That is a compatibility break sold
+as a security fix, and it does not even close the hole: the value is still unsigned for every
+parameter outside the 35. The mitigation that does work is the one above — do not authorise on an
+unsigned query parameter — plus keeping SigV2 presigned off, which is the default. If a later
+change does diverge, `c-sig-0556` fails loudly rather than letting every SigV2 signature shift
+quietly.
+
+### What a SigV2 request does not sign, beyond the query string
+
+- **The body.** SigV2 has no `x-amz-content-sha256` and no payload digest. `Content-MD5` is the
+  only body binding it offers and it is optional, so a SigV2 request's body is authenticated only
+  as far as the client chose to bind it. SigV4 signs a payload declaration on every request.
+- **Framing.** SigV2 has no streaming form; `aws-chunked` chunk signatures are SigV4 values. A
+  SigV2 request that declares one is refused `501` rather than read as if the declaration were
+  absent, because the pipeline decodes framing only for a payload mode it was given and the SigV2
+  path gives it none — an ignored declaration would deliver chunk headers to the operation as
+  object bytes.
+
+### Where a SigV2 request goes, and where it cannot
+
+`SecurityFloor::admit` answers a SigV2 request with its own `Admission::SealedSigV2`, never with
+the `Admission::Sealed` the built-in SigV4 verifier consumes, and there is no conversion between
+the two request types. So "a SigV2 request verified as SigV4" — the algorithm downgrade — is not a
+mistake an assembly can make. `Authenticator`'s SigV2 entry point defaults to a refusal, so a
+deployment's own authenticator answers `501` rather than anything weaker. The POST-form SigV2
+shape is refused outright: its field-level enforcement is P2-05's, and a signature checked without
+those rules is worse than no signature at all.
+
+A SigV2 credential that cannot be parsed, cannot be verified, or is presented under a policy that
+does not admit it is **always a rejection** — never an anonymous request. That holds on operations
+that accept anonymous access, where the two outcomes differ only in the status code;
+`c-sig-0570`..`c-sig-0572` assert it against exactly such an operation.
+
 ### Presigned replay semantics
 
 Presigned URLs are replayable within their validity window. That is an intentional property of

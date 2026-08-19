@@ -84,6 +84,8 @@ mod service_clone_allocations;
 mod service_concurrency;
 #[path = "service_config.rs"]
 mod service_config;
+#[path = "sigv2_runtime.rs"]
+mod sigv2_runtime;
 #[path = "sse_runtime.rs"]
 mod sse_runtime;
 #[path = "vhost_resolution.rs"]

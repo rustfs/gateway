@@ -36,6 +36,8 @@ mod security_floor_fixtures;
 mod security_floor_schemes;
 #[path = "sig_v2.rs"]
 mod sig_v2;
+#[path = "sig_v2_admission.rs"]
+mod sig_v2_admission;
 #[path = "signer_roundtrip.rs"]
 mod signer_roundtrip;
 #[path = "timing.rs"]

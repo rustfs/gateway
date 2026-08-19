@@ -625,6 +625,7 @@ gateway_modules = (
     "service_clone_allocations",
     "service_concurrency",
     "service_config",
+    "sigv2_runtime",
     "sse_runtime",
     "vhost_resolution",
 )

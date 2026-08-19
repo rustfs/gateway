@@ -74,6 +74,7 @@ mod host;
 mod observer;
 mod oplayer;
 mod policy;
+mod sigv2;
 mod vhost;
 
 pub use self::authenticator::{
@@ -108,4 +109,6 @@ pub use self::policy::{
     DEFAULT_POLICY_SNAPSHOT_TIMEOUT, MAX_POLICY_SNAPSHOT_TIMEOUT, NoPolicy, PolicyError, PolicySnapshot, PolicySource,
     PolicyTimeout, PolicyTimeoutError, SnapshotId, policy_from,
 };
+pub use self::sigv2::SigV2Authentication;
+pub(crate) use self::sigv2::vhost_signing_bucket;
 pub use self::vhost::{BaseDomain, DomainError, MAX_BASE_DOMAIN_BYTES, VirtualHostStyle};

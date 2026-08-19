@@ -144,7 +144,7 @@ use crate::ext::{
     AuthSchemeRef, Authentication, AuthenticationOutcome, Authenticator, Authorizer, AuthzAuditEvent, AuthzAuditSink,
     AuthzRequest, AuthzStage, CORS_PREFLIGHT, CachedCorsSource, ClassKind, ClientAddr, Governor, GovernorRequest, HostQuery,
     HostResolver, InputAuthzRequest, Observer, PolicySnapshot, PolicySource, PolicyTimeout, RequestContext, RequestEvent,
-    ResolvedHost, ResponseView, RoutedView, ServerExtensions, StageFilter, WireHead, emit_safely,
+    ResolvedHost, ResponseView, RoutedView, ServerExtensions, SigV2Authentication, StageFilter, WireHead, emit_safely,
 };
 use crate::gate::{Authenticated, BodyCeilings, BodyDigestObligation, BodyTimeouts, SealedBody};
 use crate::monomorphic::sealed::Set as StaticSet;
@@ -158,6 +158,12 @@ use crate::render::{
 use crate::request_config::{BodyRead, Entered, HandlerDeadlineReport, RequestConfig, RouteAuthorized};
 use crate::request_deadline::{elapsed_since, hold_failure_floor, policy_snapshot_with_timeout};
 use crate::trace::{RequestTrace, TraceSource};
+
+/// The one sentence a request gets when the authenticator itself could not answer.
+///
+/// A constant because both signing families reach it and they must be indistinguishable: which
+/// algorithm the credential store fell over under is not a fact a caller needs.
+const UNAUTHENTICATED: &str = "the request could not be authenticated";
 
 /// Everything an assembled service holds. Behind one `Arc`, so cloning the service is one
 /// refcount bump and a connection may hold its own clone.
@@ -534,6 +540,7 @@ impl S3Service {
         // the single normalisation under the deployment's policy. Routing above read the raw path
         // and the signature below reads the raw path; everything after this line reads `meta` and
         // is never handed the path to parse again.
+        let vhost_bucket = crate::ext::vhost_signing_bucket(&resolved);
         let meta = match MetaView::addressed_with(&wire, target, resolved.bucket().cloned(), &self.inner.names) {
             Ok(meta) => meta,
             Err(error) => return outcome.refuse(from_codec(error, response_kind)),
@@ -638,11 +645,18 @@ impl S3Service {
                     let signature_mismatch = question.into_signature_mismatch();
                     match result {
                         Ok(authentication) => (authentication, signature_mismatch),
-                        Err(_) => {
-                            return outcome
-                                .refuse_handler(HandlerError::internal_error("the request could not be authenticated"));
-                        }
+                        Err(_) => return outcome.refuse_handler(HandlerError::internal_error(UNAUTHENTICATED)),
                     }
+                }
+            }
+            // No payload mode and no framed body: SigV2 has neither, so `framing_mode` stays
+            // `None` and the body read at the bottom is a plain one.
+            Ok(Admission::SealedSigV2(sealed)) => {
+                let question =
+                    SigV2Authentication::new(&sealed, wire.method(), wire.raw_path().as_str(), vhost_bucket.as_deref());
+                match self.inner.authenticator.authenticate_sigv2(&question).await {
+                    Ok(authentication) => (authentication, None),
+                    Err(_) => return outcome.refuse_handler(HandlerError::internal_error(UNAUTHENTICATED)),
                 }
             }
             Ok(Admission::Custom(request)) => match &self.inner.custom_signature_verifier {
@@ -1367,33 +1381,5 @@ fn into_response(encoded: EncodedResponse) -> Response<Body> {
 }
 
 #[cfg(test)]
-#[allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
-mod tests {
-    use super::*;
-
-    /// Positive — cloning the service is one pointer's worth of work, which is what makes cloning
-    /// it per connection the right thing for a server to do.
-    #[test]
-    fn the_service_is_one_pointer_wide() {
-        assert_eq!(core::mem::size_of::<S3Service>(), core::mem::size_of::<usize>());
-    }
-
-    /// Negative — a request nobody annotated is cleartext, so the customer-key gate is closed by
-    /// default rather than open by default.
-    #[test]
-    fn an_unannotated_request_is_cleartext() {
-        assert_eq!(connection_security(&http::Extensions::new()), TransportSecurity::Plaintext);
-    }
-
-    /// Negative — and the other direction, so the reader is not simply stuck on one answer. A
-    /// function that returned `Plaintext` unconditionally satisfies every test above.
-    #[test]
-    fn n_a_transport_that_declares_tls_is_believed_and_one_that_declares_cleartext_is_too() {
-        let mut encrypted = http::Extensions::new();
-        encrypted.insert(TransportSecurity::Encrypted);
-        assert_eq!(connection_security(&encrypted), TransportSecurity::Encrypted);
-        let mut plaintext = http::Extensions::new();
-        plaintext.insert(TransportSecurity::Plaintext);
-        assert_eq!(connection_security(&plaintext), TransportSecurity::Plaintext);
-    }
-}
+#[path = "service_tests.rs"]
+mod tests;

@@ -314,7 +314,12 @@ impl AuthError {
             Self::AccessDenied | Self::RequestExpired => "the request is not allowed",
             Self::RequestTimeTooSkewed => "the request timestamp is outside the accepted window",
             Self::AuthorizationQueryParametersError => "the presigned query parameters are not acceptable",
-            Self::NotImplemented(_) => "the signing algorithm is recognised but not implemented",
+            // The one arm that varies with its payload. "Recognised and refused" is not one
+            // sentence: a client told its algorithm is unimplemented and a client told its
+            // *framing* is unimplemented have different things to change, and neither sentence
+            // says anything the request did not already state. Every spelling is still a
+            // constant, so nothing derived from the request reaches the wire.
+            Self::NotImplemented(feature) => feature.message(),
         }
     }
 

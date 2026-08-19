@@ -129,9 +129,9 @@ pub use crate::ext::{
     MAX_BASE_DOMAIN_BYTES, MAX_POLICY_SNAPSHOT_TIMEOUT, Next, NoAuthzAudit, NoCors, NoObserver, NoPolicy, Observer, OpLayer,
     PathStyleOnly, PolicyError, PolicySnapshot, PolicySource, PolicyTimeout, PolicyTimeoutError, ProviderError, ProviderMetrics,
     Rate, RequestContext, RequestEvent, ResolvedHost, ResponseView, RoutedView, ServerExtensions, SessionBinding,
-    SessionBindingError, SigV4Authenticator, SnapshotId, StageFilter, StaticCredentials, TargetOrigin, Unavailable, Unlimited,
-    VhostHint, VirtualHostStyle, WireHead, allow_when, decide_with, fn_credential_provider, op_layer, policy_from,
-    response_filter, routed_filter, wire_filter,
+    SessionBindingError, SigV2Authentication, SigV4Authenticator, SnapshotId, StageFilter, StaticCredentials, TargetOrigin,
+    Unavailable, Unlimited, VhostHint, VirtualHostStyle, WireHead, allow_when, decide_with, fn_credential_provider, op_layer,
+    policy_from, response_filter, routed_filter, wire_filter,
 };
 #[cfg(feature = "dangerous-allow-all-authorizer")]
 pub use crate::ext::{AllowAllAuthorizer, DangerAck};

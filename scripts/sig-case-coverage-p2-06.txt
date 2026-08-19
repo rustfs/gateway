@@ -35,3 +35,27 @@ c-sig-0553|negative|crates/sig/tests/sig_v2.rs|fn c_sig_0553_no_virtual_host_buc
 c-sig-0554|negative|crates/sig/tests/sig_v2.rs|fn c_sig_0554_ambiguous_header_input_is_refused|
 c-sig-0555|negative|crates/sig/tests/compile_fail/c_sig_0555_sigv2_authorization_debug.rs|println!|
 c-sig-0556|negative|crates/sig/tests/sig_v2.rs|fn c_sig_0556_a_decoded_subresource_value_can_forge_a_second_parameter|assert_eq!(smuggled, honest)
+c-sig-0557|positive|crates/gateway/tests/sigv2_runtime.rs|fn c_sig_0557_a_correctly_signed_sigv2_request_reaches_the_handler|assert_eq!(reached.load(Ordering::SeqCst), 1
+c-sig-0558|positive|crates/gateway/tests/sigv2_runtime.rs|fn c_sig_0558_the_numeric_zero_offset_date_also_authenticates|assert_eq!(reached.load(Ordering::SeqCst), 1
+c-sig-0559|positive|crates/gateway/tests/sigv2_runtime.rs|fn c_sig_0559_an_x_amz_date_client_authenticates_with_an_empty_date_line|assert_eq!(reached.load(Ordering::SeqCst), 1
+c-sig-0560|positive|crates/gateway/tests/sigv2_runtime.rs|fn c_sig_0560_presigned_sigv2_authenticates_when_the_deployment_opts_in|assert_eq!(reached.load(Ordering::SeqCst), 1
+c-sig-0561|negative|crates/sig/tests/sig_v2_admission.rs|fn c_sig_0561_a_sigv2_request_is_never_sealed_for_the_sigv4_verifier|let sealed_for_sigv2 = matches!(admitted, Admission::SealedSigV2(_));
+c-sig-0562|negative|crates/sig/tests/sig_v2_admission.rs|fn c_sig_0562_an_unparsable_sigv2_credential_is_never_admitted_anonymously|assert_eq!(refusal, AuthError::AuthorizationHeaderMalformed)
+c-sig-0563|negative|crates/sig/tests/sig_v2_admission.rs|fn c_sig_0563_the_sigv2_post_form_shape_is_refused|assert_eq!(refusal, AuthError::NotImplemented(rustfs_gateway_sig::Unimplemented::SigV2))
+c-sig-0564|negative|crates/sig/tests/sig_v2_admission.rs|fn c_sig_0564_a_repeated_sigv2_expires_is_refused|assert_eq!(refusal, AuthError::AuthorizationQueryParametersError)
+c-sig-0565|negative|crates/sig/tests/sig_v2_admission.rs|fn c_sig_0565_the_disabled_policy_refuses_what_the_default_admits|assert_eq!(refusal, AuthError::AccessDenied)
+c-sig-0566|negative|crates/sig/tests/sig_v2_admission.rs|fn c_sig_0566_a_presigned_url_without_a_signature_is_refused|assert_eq!(refusal, AuthError::AuthorizationQueryParametersError)
+c-sig-0567|negative|crates/sig/tests/sig_v2_admission.rs|fn c_sig_0567_a_presigned_expires_beyond_seven_days_is_refused|assert_eq!(refusal, AuthError::AuthorizationQueryParametersError)
+c-sig-0568|negative|crates/sig/tests/sig_v2_admission.rs|fn c_sig_0568_a_framed_payload_declaration_is_refused|assert_eq!(refusal, AuthError::NotImplemented(rustfs_gateway_sig::Unimplemented::StreamingSigV2))
+c-sig-0569|negative|crates/sig/tests/sig_v2_admission.rs|fn c_sig_0569_the_skew_window_reaches_sigv2_in_both_directions|assert_eq!(refusal, AuthError::RequestTimeTooSkewed)
+c-sig-0570|negative|crates/gateway/tests/sigv2_runtime.rs|fn c_sig_0570_a_wrong_sigv2_signature_never_degrades_to_anonymous|assert_eq!(reached.load(Ordering::SeqCst), 0
+c-sig-0571|negative|crates/gateway/tests/sigv2_runtime.rs|fn c_sig_0571_an_unparsable_sigv2_authorization_is_refused_not_anonymous|assert_eq!(reached.load(Ordering::SeqCst), 0
+c-sig-0572|negative|crates/gateway/tests/sigv2_runtime.rs|fn c_sig_0572_a_tampered_amz_header_is_refused|assert_eq!(reached.load(Ordering::SeqCst), 0
+c-sig-0573|negative|crates/gateway/tests/sigv2_runtime.rs|fn c_sig_0573_a_skewed_sigv2_date_is_refused|assert_eq!(reached.load(Ordering::SeqCst), 0
+c-sig-0574|negative|crates/gateway/tests/sigv2_runtime.rs|fn c_sig_0574_a_sigv2_request_without_a_timestamp_is_refused|assert_eq!(reached.load(Ordering::SeqCst), 0
+c-sig-0575|negative|crates/gateway/tests/sigv2_runtime.rs|fn c_sig_0575_the_default_policy_refuses_a_valid_sigv2_presigned_url|assert_eq!(reached.load(Ordering::SeqCst), 0
+c-sig-0576|negative|crates/gateway/tests/sigv2_runtime.rs|fn c_sig_0576_the_disabled_policy_refuses_header_authentication|assert_eq!(permitted.load(Ordering::SeqCst), 1)
+c-sig-0577|negative|crates/gateway/tests/sigv2_runtime.rs|fn c_sig_0577_an_elapsed_sigv2_presigned_url_is_refused|assert_eq!(reached.load(Ordering::SeqCst), 0
+c-sig-0578|negative|crates/gateway/tests/sigv2_runtime.rs|fn c_sig_0578_a_sigv2_request_declaring_a_framed_payload_is_refused|assert_eq!(reached.load(Ordering::SeqCst), 0
+c-sig-0579|negative|crates/gateway/tests/sigv2_runtime.rs|fn c_sig_0579_an_unknown_sigv2_access_key_is_refused|assert_eq!(reached.load(Ordering::SeqCst), 0
+c-sig-0580|negative|crates/sig/tests/sig_v2.rs|fn c_sig_0580_the_access_key_id_obeys_the_shared_identity_rule|assert!(parse_authorization(&over).is_err());

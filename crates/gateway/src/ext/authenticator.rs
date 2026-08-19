@@ -72,6 +72,7 @@ use rustfs_gateway_sig::{
 
 use super::credential_guard::{CredentialGuardConfig, GuardedCredentialProvider};
 use super::credentials::{CredentialLookup, CredentialProvider};
+use super::sigv2::SigV2Authentication;
 
 /// The credential store could not answer.
 ///
@@ -389,6 +390,23 @@ pub trait Authenticator: Send + Sync + 'static {
     /// verdict with [`AuthenticationOutcome::ordinary`].
     fn authenticate<'a>(&'a self, request: &'a Authentication<'a>) -> BoxFuture<'a, Result<AuthenticationOutcome, Unavailable>>;
 
+    /// Produces an authentication outcome for one admitted **SigV2** request.
+    ///
+    /// **The default refuses.** A SigV2 request is a distinct [`rustfs_gateway_sig::Admission`]
+    /// variant carrying a [`SealedSigV2`], which has no route to the [`SealedAws`] the method
+    /// above takes — so an authenticator written before SigV2 existed cannot be handed one by
+    /// accident, keeps compiling, and answers `501 NotImplemented`. That is the fail-closed half
+    /// of P2-06's wiring: the alternative to a refusing default is a trait method every existing
+    /// implementation is forced to write, and the value most of them would write is the one that
+    /// makes the request anonymous.
+    fn authenticate_sigv2<'a>(
+        &'a self,
+        request: &'a SigV2Authentication<'a>,
+    ) -> BoxFuture<'a, Result<AuthenticationOutcome, Unavailable>> {
+        let _ = request;
+        super::sigv2::refuse_sigv2()
+    }
+
     /// The credential-lookup protection this authenticator contributes to the assembled service.
     ///
     /// `None` means the authenticator has no credential-provider lookup. The built-in SigV4
@@ -404,6 +422,13 @@ impl<T: Authenticator + ?Sized> Authenticator for Arc<T> {
         (**self).authenticate(request)
     }
 
+    fn authenticate_sigv2<'a>(
+        &'a self,
+        request: &'a SigV2Authentication<'a>,
+    ) -> BoxFuture<'a, Result<AuthenticationOutcome, Unavailable>> {
+        (**self).authenticate_sigv2(request)
+    }
+
     fn credential_guard_config(&self) -> Option<CredentialGuardConfig> {
         (**self).credential_guard_config()
     }
@@ -416,7 +441,10 @@ impl<T: Authenticator + ?Sized> Authenticator for Arc<T> {
 /// secret, enforce the signed-header list, canonicalise every path spelling, derive, and compare
 /// in constant time.
 pub struct SigV4Authenticator {
-    credentials: Arc<GuardedCredentialProvider>,
+    /// `pub(super)` so the SigV2 half in `super::sigv2` reaches the same credential source. One
+    /// store, one negative cache, one timing posture — a second authenticator holding its own
+    /// would be two of each, kept in step by hand.
+    pub(super) credentials: Arc<GuardedCredentialProvider>,
     regions: RegionSet,
 }
 
@@ -617,6 +645,17 @@ impl Authenticator for SigV4Authenticator {
         Box::pin(self.verify(request))
     }
 
+    /// The one override in this crate. `SigV4Authenticator` is named for the algorithm it was
+    /// written around, and it answers SigV2 too because it is the type that holds the credential
+    /// source — a second authenticator would mean a second credential store, a second negative
+    /// cache and a second timing posture to keep in step.
+    fn authenticate_sigv2<'a>(
+        &'a self,
+        request: &'a SigV2Authentication<'a>,
+    ) -> BoxFuture<'a, Result<AuthenticationOutcome, Unavailable>> {
+        Box::pin(self.verify_sigv2(request))
+    }
+
     fn credential_guard_config(&self) -> Option<CredentialGuardConfig> {
         Some(*self.credentials.config())
     }
@@ -702,98 +741,5 @@ impl Presented {
 }
 
 #[cfg(test)]
-#[allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
-mod tests {
-    use super::*;
-    use crate::ext::credentials::{Credentials, StaticCredentials};
-    use rustfs_gateway_sig::{
-        Admission, OperationFloor, RawQuery, RequestNow, SecurityFloor, SigService, SkewWindow, WireView, enforce_clock_skew,
-    };
-
-    fn authenticator() -> SigV4Authenticator {
-        SigV4Authenticator::new(
-            Arc::new(StaticCredentials::new().with(Credentials::new("AKIDEXAMPLE", b"secret").expect("valid"))),
-            RegionSet::new(["us-east-1"]).expect("non-empty"),
-        )
-    }
-
-    /// Negative — the verifier is usable behind `Arc<dyn _>`. An RPITIT method here would not
-    /// compile at all, which is the measured `E0038` ADR-0002 records.
-    #[test]
-    fn the_trait_is_dyn_compatible() {
-        let _: Arc<dyn Authenticator> = Arc::new(authenticator());
-    }
-
-    /// Negative — a deployment cannot be built with an empty region set: an empty set matches no
-    /// presented region and would reject every request with a scope error rather than saying the
-    /// configuration is wrong.
-    #[test]
-    fn an_empty_region_set_is_refused_where_it_is_written() {
-        assert!(RegionSet::new(Vec::<String>::new()).is_err());
-    }
-
-    /// Negative — a store outage is not an `AuthError`, so it cannot be rendered as a statement
-    /// about the caller's credentials.
-    #[test]
-    fn a_store_outage_is_not_a_credential_rejection() {
-        assert_eq!(Unavailable.to_string(), "the credential store could not answer");
-    }
-
-    #[test]
-    fn an_ordinary_outcome_borrows_the_exact_verdict() {
-        let outcome = AuthenticationOutcome::ordinary(Verdict::reject(AuthError::AuthorizationHeaderMalformed));
-        assert_eq!(outcome.verdict().rejection(), Some(AuthError::AuthorizationHeaderMalformed));
-        assert!(outcome.scope_rejection.is_none());
-    }
-
-    #[test]
-    fn a_scope_outcome_fixes_the_public_verdict() {
-        let signed_at = AmzDate::parse("20150830T123600Z").expect("valid timestamp");
-        let clock = enforce_clock_skew(&signed_at, RequestNow::from_unix_seconds(1_440_938_160), SkewWindow::DEFAULT)
-            .expect("inside the window");
-        let regions = RegionSet::new(["us-east-1"]).expect("valid region");
-        let expected = ExpectedScope::new(SigService::S3, &regions);
-        let presented = CredentialScope::parse("AKID/20150830/eu-west-1/s3/aws4_request").expect("valid scope");
-        let rejection = enforce_scope(&presented, clock, &expected).expect_err("region is not configured");
-        let outcome = AuthenticationOutcome::scope_rejected(rejection);
-
-        assert_eq!(outcome.verdict().rejection(), Some(AuthError::AuthorizationHeaderMalformed));
-        assert_eq!(
-            outcome
-                .scope_rejection
-                .as_ref()
-                .and_then(ScopeRejection::expected_region)
-                .map(rustfs_gateway_sig::ScopeRegion::as_str),
-            Some("us-east-1")
-        );
-    }
-
-    #[tokio::test]
-    async fn c_sig_0428_form_field_material_uses_the_post_policy_authority() {
-        const POLICY: &str = "eyJleHBpcmF0aW9uIjoiMjAxNS0wOC0zMFQxMzozNjowMFoiLCJjb25kaXRpb25zIjpbeyJidWNrZXQiOiJleGFtcGxlLWJ1Y2tldCJ9LHsia2V5IjoidXBsb2Fkcy9yZXBvcnQudHh0In0seyJ4LWFtei1hbGdvcml0aG0iOiJBV1M0LUhNQUMtU0hBMjU2In0seyJ4LWFtei1jcmVkZW50aWFsIjoiQUtJREVYQU1QTEUvMjAxNTA4MzAvdXMtZWFzdC0xL3MzL2F3czRfcmVxdWVzdCJ9LHsieC1hbXotZGF0ZSI6IjIwMTUwODMwVDEyMzYwMFoifV19";
-        let headers = http::HeaderMap::new();
-        let fields = [
-            ("key", "uploads/report.txt"),
-            ("bucket", "example-bucket"),
-            ("x-amz-algorithm", "AWS4-HMAC-SHA256"),
-            ("x-amz-credential", "AKIDEXAMPLE/20150830/us-east-1/s3/aws4_request"),
-            ("x-amz-date", "20150830T123600Z"),
-            ("x-amz-signature", "77e76bae68e9999f40becaeae16e5e41ae02b70e6e816c41d7fcf1a3a7e0b5f9"),
-            ("policy", POLICY),
-        ];
-        let view = WireView::new(&headers, RawQuery::new("")).with_form_fields(&fields);
-        let operation = OperationFloor::builtin("PutObject", SigService::S3).allow_post_policy();
-        let admitted = SecurityFloor::new()
-            .admit(view, &operation, RequestNow::from_unix_seconds(1_440_938_160))
-            .expect("valid form reaches the sealed path");
-        let Admission::Sealed(sealed) = admitted else { panic!("AWS form must be sealed") };
-        let method = Method::POST;
-        let host = RawHost::from_host_header(b"example-bucket.s3.example.test").expect("valid host");
-        let payload = PayloadMode::Empty;
-        let request = Authentication::new(&sealed, &method, "/", &host, &payload, Some(0));
-        let Ok(Some(verdict)) = authenticator().try_verify(&request).await else {
-            panic!("authenticated verdict required")
-        };
-        assert!(verdict.is_authenticated());
-    }
-}
+#[path = "authenticator_tests.rs"]
+mod tests;
