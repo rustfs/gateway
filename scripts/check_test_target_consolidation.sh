@@ -244,6 +244,7 @@ if actual_core_harness != core_harness:
 
 conformance_modules = (
     "bucket_lifecycle",
+    "copy_family",
     "corpus",
     "list_family",
     "multipart_family",
