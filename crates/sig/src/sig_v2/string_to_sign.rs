@@ -322,6 +322,12 @@ impl<'r> SigV2StringToSignSpec<'r> {
     /// **Everything not in [`INCLUDED_QUERY`] is absent from the signature.** That is SigV2's own
     /// weakness, recorded in `docs/security-model.md`, and the second reason SigV2 presigned URLs
     /// are refused unless a deployment opts in.
+    ///
+    /// A second SigV2 weakness lives here too, and is pinned by `c-sig-0556`: values are
+    /// percent-decoded before they are written, and this block's own separator is `&`, so
+    /// `?acl=x%26versionId%3Dy` and `?acl=x&versionId=y` canonicalise to one string. botocore
+    /// computes the same collision, so closing it unilaterally would reject requests AWS's own
+    /// SDK signs. Both facts are recorded in `docs/security-model.md`.
     fn canonicalized_resource(&self) -> Result<String, AuthError> {
         let mut out = String::new();
         if let Some(bucket) = self.virtual_host_bucket {

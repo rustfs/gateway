@@ -134,7 +134,7 @@ NO_EQUALITY_PATH_RE='^crates/sig/src/sig_v2/'
 # the SigV2 core: a ratchet that trails the tree is not a ratchet, it is a
 # number nobody has to think about.
 COMPILE_FAIL_FLOOR=32
-NEGATIVE_LABEL_FLOOR=185
+NEGATIVE_LABEL_FLOOR=186
 
 status=0
 sensitive_seen=0

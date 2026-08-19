@@ -672,3 +672,27 @@ fn c_sig_0554_ambiguous_header_input_is_refused() {
         Some(AuthError::AuthorizationHeaderMalformed)
     );
 }
+
+/// Negative — c-sig-0556: two different query spellings canonicalise to one string-to-sign.
+///
+/// Not in this task's case table; found by the `security-adversary` pass and pinned here.
+/// A covered sub-resource's value is percent-decoded before it is written into
+/// `CanonicalizedResource`, and the block's own separator is `&`. So
+/// `?acl=x%26versionId%3Dy` — one parameter whose value happens to decode to `x&versionId=y` —
+/// produces byte-for-byte the same preimage as `?acl=x&versionId=y`, which is two parameters. A
+/// signature minted for one is valid for the other, and the router sees different parameters in
+/// each.
+///
+/// This is the SigV2 algorithm, not this implementation: botocore's `canonical_resource` decodes
+/// with `parse_qsl` and joins with `&`, so it computes the identical string. Diverging here would
+/// refuse requests AWS's own SDK signs successfully, so the collision is pinned rather than
+/// closed, recorded in `docs/security-model.md`, and left as an explicit decision for the slice
+/// that wires SigV2 into the verifier. The assertion exists so the fact cannot be lost, and so a
+/// later change that *does* close it fails loudly rather than quietly changing every signature.
+#[test]
+fn c_sig_0556_a_decoded_subresource_value_can_forge_a_second_parameter() {
+    let smuggled = header_sts(&Method::GET, "/o", "acl=x%26versionId%3Dy", &[("Date", "d")], None);
+    let honest = header_sts(&Method::GET, "/o", "acl=x&versionId=y", &[("Date", "d")], None);
+    assert_eq!(smuggled, honest);
+    assert!(honest.ends_with("/o?acl=x&versionId=y"), "{honest}");
+}

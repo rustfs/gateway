@@ -1044,8 +1044,8 @@ done
     exit 1
 }
 
-[[ "${#p2_06_cases[@]}" -eq 36 ]] || {
-    printf 'check_sig_case_coverage: expected 36 P2-06 mappings, got %s\n' "${#p2_06_cases[@]}" >&2
+[[ "${#p2_06_cases[@]}" -eq 37 ]] || {
+    printf 'check_sig_case_coverage: expected 37 P2-06 mappings, got %s\n' "${#p2_06_cases[@]}" >&2
     exit 1
 }
 p2_06_expected_ids=(
@@ -1055,6 +1055,7 @@ p2_06_expected_ids=(
     c-sig-0537 c-sig-0538 c-sig-0539 c-sig-0540 c-sig-0541 c-sig-0542
     c-sig-0543 c-sig-0544 c-sig-0545 c-sig-0546 c-sig-0547 c-sig-0548
     c-sig-0549 c-sig-0550 c-sig-0551 c-sig-0553 c-sig-0554 c-sig-0555
+    c-sig-0556
 )
 positive=0
 negative=0
@@ -1125,12 +1126,12 @@ for index in "${!p2_06_cases[@]}"; do
     validate_rust_evidence "$file" runtime "$evidence" "$required_call" \
         "check_sig_case_coverage: ${id} is not a named active P2-06 test in ${relative}"
 done
-[[ "$positive" -eq 11 && "$negative" -eq 25 && "$negative" -gt "$positive" ]] || {
-    printf 'check_sig_case_coverage: expected 11 positive and 25 negative P2-06 cases, got %s/%s\n' \
+[[ "$positive" -eq 11 && "$negative" -eq 26 && "$negative" -gt "$positive" ]] || {
+    printf 'check_sig_case_coverage: expected 11 positive and 26 negative P2-06 cases, got %s/%s\n' \
         "$positive" "$negative" >&2
     exit 1
 }
-[[ "$(printf '%s\n' "${p2_06_evidence[@]}" | sort -u | wc -l | tr -d ' ')" -eq 36 ]] || {
+[[ "$(printf '%s\n' "${p2_06_evidence[@]}" | sort -u | wc -l | tr -d ' ')" -eq 37 ]] || {
     printf 'check_sig_case_coverage: P2-06 cases must use distinct named evidence\n' >&2
     exit 1
 }
@@ -1460,5 +1461,5 @@ done
 
 run_evidence_validations
 
-printf 'OK: all 199 P2 signature cases map to executable evidence '
-printf '(P2-01: 8/17; P2-02: 6/22; P2-03: 14/29; P2-04: 9/42; P2-05: 3/13; P2-06: 11/25)\n'
+printf 'OK: all 200 P2 signature cases map to executable evidence '
+printf '(P2-01: 8/17; P2-02: 6/22; P2-03: 14/29; P2-04: 9/42; P2-05: 3/13; P2-06: 11/26)\n'

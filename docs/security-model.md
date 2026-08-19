@@ -250,6 +250,14 @@ Yours: if you route on a query parameter that is not one of the 35, do not treat
 request as having authorised its value. Prefer SigV4 for anything privileged, and keep SigV2
 disabled entirely (`SigV2Policy::Disabled`) if no legacy client needs it.
 
+A second, related SigV2 property: a covered sub-resource's value is percent-decoded before it is
+written into `CanonicalizedResource`, and that block separates its own entries with `&`. So
+`?acl=x%26versionId%3Dy` and `?acl=x&versionId=y` produce the same string-to-sign, and one
+signature is valid for both — while the router sees one parameter in the first and two in the
+second. This too is the algorithm rather than this implementation: botocore computes the identical
+string, so refusing it here would reject requests AWS's own SDK signs successfully. It is pinned
+by `c-sig-0556` and is a third reason to prefer SigV4.
+
 ### Presigned replay semantics
 
 Presigned URLs are replayable within their validity window. That is an intentional property of

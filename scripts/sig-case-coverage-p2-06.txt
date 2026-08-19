@@ -34,3 +34,4 @@ c-sig-0551|negative|scripts/test_guard_scripts.sh|mut_c_sig_0551_signature_equal
 c-sig-0553|negative|crates/sig/tests/sig_v2.rs|fn c_sig_0553_no_virtual_host_bucket_means_no_prefix|
 c-sig-0554|negative|crates/sig/tests/sig_v2.rs|fn c_sig_0554_ambiguous_header_input_is_refused|
 c-sig-0555|negative|crates/sig/tests/compile_fail/c_sig_0555_sigv2_authorization_debug.rs|println!|
+c-sig-0556|negative|crates/sig/tests/sig_v2.rs|fn c_sig_0556_a_decoded_subresource_value_can_forge_a_second_parameter|assert_eq!(smuggled, honest)
