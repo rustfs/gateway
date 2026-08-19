@@ -44,3 +44,9 @@ hmac = { workspace = true }
 sha2 = { workspace = true }
 subtle = { workspace = true }
 zeroize = { workspace = true }
+
+[dev-dependencies]
+# The allocation instrument. `form_allocations.rs` installs `dhat::Alloc` as the test binary's
+# global allocator and compares two runs of the same read at two file sizes; a claim about a
+# bounded reader that is not measured is a claim about a comment.
+dhat = { workspace = true }

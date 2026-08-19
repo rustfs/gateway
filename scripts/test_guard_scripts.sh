@@ -16565,6 +16565,115 @@ shard_case 'concurrent shards with private TMPDIRs never see each other sandbox 
 shard_case 'one sandbox shared by concurrent shards loses a mutation, and the contract says so' \
     shard_sandbox_isolation_contract shared
 
+# --- check_form_limits.sh (rustfs/backlog#1699, POST Object form) -----------------------------
+
+mut_form_case_identity_removed() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("crates/http/tests/form_limits.rs")
+old = "fn c_lim_0031_a_field_after_the_file_part_is_refused()"
+new = "fn a_field_after_the_file_part_is_refused()"
+text = path.read_text()
+if text.count(old) != 1:
+    raise SystemExit("c-lim-0031 identity anchor drifted")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_form_limits.sh \
+    'c-lim-0031 losing its executable identity' mut_form_case_identity_removed \
+    'c-lim-0031 must name exactly one test function'
+
+mut_form_case_disabled_by_cfg() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("crates/http/tests/form_limits.rs")
+old = "#[test]\nfn c_lim_0028_a_policy_ceiling_stops_the_file_at_the_policy_ceiling()"
+new = "#[cfg(any())]\n#[test]\nfn c_lim_0028_a_policy_ceiling_stops_the_file_at_the_policy_ceiling()"
+text = path.read_text()
+if text.count(old) != 1:
+    raise SystemExit("c-lim-0028 active-test anchor drifted")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_form_limits.sh \
+    'c-lim-0028 being switched off by cfg while its name stays greppable' mut_form_case_disabled_by_cfg \
+    'conditional or ignored'
+
+mut_form_second_file_reader_door() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("crates/http/src/form/file.rs")
+old = "    /// Builds the reader. Crate-private: the ceiling has to come from `into_file`.\n"
+text = path.read_text()
+if text.count(old) != 1:
+    raise SystemExit("FileReader constructor anchor drifted")
+extra = (
+    "    /// A second door.\n"
+    "    #[must_use]\n"
+    "    pub fn new(delimiter: &[u8]) -> Self {\n"
+    "        Self::new(u64::MAX, u64::MAX, delimiter, Vec::new(), 0)\n"
+    "    }\n\n"
+)
+path.write_text(text.replace(old, extra + old, 1))
+PYEOF
+}
+expect_fail check_form_limits.sh \
+    'a public FileReader constructor that needs no ceiling' mut_form_second_file_reader_door \
+    'public `FileReader::new`'
+
+mut_form_ceiling_no_longer_composed() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("crates/http/src/form/reader.rs")
+old = "            ceiling.min(self.limits.max_file_bytes()),"
+new = "            ceiling.max(self.limits.max_file_bytes()),"
+text = path.read_text()
+if text.count(old) != 1:
+    raise SystemExit("into_file ceiling composition anchor drifted")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_form_limits.sh \
+    'a policy ceiling that widens the deployment maximum instead of tightening it' \
+    mut_form_ceiling_no_longer_composed \
+    'composes the policy ceiling'
+
+mut_form_unlimited_constructor_added() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("crates/http/src/form/mod.rs")
+old = "impl Default for FormLimits {"
+text = path.read_text()
+if text.count(old) != 1:
+    raise SystemExit("FormLimits Default anchor drifted")
+extra = (
+    "impl FormLimits {\n"
+    "    /// Everything unbounded.\n"
+    "    #[must_use]\n"
+    "    pub fn unlimited_dangerous() -> Self {\n"
+    "        Self::default()\n"
+    "    }\n"
+    "}\n\n"
+)
+path.write_text(text.replace(old, extra + old, 1))
+PYEOF
+}
+expect_fail check_form_limits.sh \
+    'an unlimited FormLimits constructor' mut_form_unlimited_constructor_added \
+    'unlimited `FormLimits` constructor'
+
+mut_form_evidence_file_removed() {
+    rm -f crates/sig/tests/post_object_form.rs
+}
+expect_fail check_form_limits.sh \
+    'c-lim-0002 evidence deleted, which must fail rather than skip' mut_form_evidence_file_removed \
+    'required input is missing'
+
 fi
 
 if [[ "$ERROR_STATUS_ONLY" == 1 ]]; then

@@ -29,6 +29,7 @@ Agent entry point for SigV2/SigV4 parsing, canonicalization and verification.
 | `src/verifier.rs` | Sealed AWS markers, custom verifier boundary, replay hook, and danger acknowledgement. | A custom or replacement verifier crosses its permitted boundary. |
 | `tests/integration.rs` | Single Cargo target registering all integration-test modules. | Integration tests duplicate compile or disappear. |
 | `tests/sig_v2.rs` | P2-06 evidence: sub-resource census, string-to-sign shape, `Authorization` grammar, `Expires` bounds. | Change any SigV2 contract. |
+| `tests/post_object_form.rs` | `c-lim-0002`: the POST form's policy is proved before its file is read, and the file is read under `content-length-range`. | The POST Object ordering or its ceiling composition changes. |
 | `tests/compile_fail.rs` | Trybuild harness for compile-time proof boundaries. | A private witness or verified type becomes constructible. |
 | `tests/security_floor*.rs` | P2-04 H1-H7 runtime evidence. | Security-floor admission or scheme policy changes. |
 | `tests/*.rs` | Remaining public verification and negative matrices. | Change any signature contract. |
