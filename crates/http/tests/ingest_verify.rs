@@ -47,7 +47,7 @@ const OTHER_SEED: [u8; 32] = [0x33; 32];
 
 /// Positive: three signed chunks verify in order and arrive byte for byte.
 #[test]
-fn a_signed_body_verifies_and_arrives_byte_for_byte() {
+fn c_ing_0001_a_signed_body_verifies_and_arrives_byte_for_byte() {
     let mut chunker = SignedChunker::new(KEY, SEED);
     chunker.push(b"first-").push(b"second-").push(b"third");
     let body = chunker.finish();
@@ -67,7 +67,7 @@ fn a_signed_body_verifies_and_arrives_byte_for_byte() {
 
 /// Positive: an empty signed body is the terminal chunk, and its signature is still checked.
 #[test]
-fn an_empty_signed_body_still_verifies_its_terminal_chunk() {
+fn c_ing_0009_an_empty_signed_body_still_verifies_its_terminal_chunk() {
     let body = SignedChunker::new(KEY, SEED).finish();
     let mut pipeline = signed_pipeline(body, 4096, 0, KEY, SEED, no_observers(), ChunkLimits::default());
     let out = drain_pipeline(&mut pipeline, 64).expect("an empty signed body is well formed");
@@ -95,7 +95,7 @@ fn the_chain_survives_a_byte_at_a_time_socket() {
 /// signature is wrong, the consumer has been shown zero bytes. There is no partial object to roll
 /// back, because there was never a partial object.
 #[test]
-fn a_bad_first_chunk_signature_delivers_zero_bytes() {
+fn c_ing_0035_a_bad_first_chunk_signature_delivers_zero_bytes() {
     let mut chunker = SignedChunker::new(KEY, SEED);
     chunker.push_with_signature(b"payload-that-must-not-arrive", &[0xAA; 32]);
     let body = chunker.finish();
@@ -116,7 +116,7 @@ fn a_bad_first_chunk_signature_delivers_zero_bytes() {
 /// Negative: when a later chunk fails, the bytes of *that* chunk are still zero — the consumer
 /// has seen exactly the chunks that verified, and nothing of the one that did not.
 #[test]
-fn a_bad_later_chunk_delivers_none_of_its_own_bytes() {
+fn c_ing_0035_a_bad_later_chunk_delivers_none_of_its_own_bytes() {
     let mut chunker = SignedChunker::new(KEY, SEED);
     chunker.push(b"good-chunk");
     chunker.push_with_signature(b"forged-chunk", &[0xBB; 32]);
@@ -147,7 +147,7 @@ fn a_bad_later_chunk_delivers_none_of_its_own_bytes() {
 /// Negative: a chunk signature from another position in the same body. The chain is ordered, so
 /// a signature that was valid at chunk one is not valid at chunk three.
 #[test]
-fn a_signature_replayed_from_another_position_breaks_the_chain() {
+fn c_ing_0036_a_signature_replayed_from_another_position_breaks_the_chain() {
     let mut chunker = SignedChunker::new(KEY, SEED);
     let first_signature = chunker.signature_for(b"one");
     chunker.push(b"one").push(b"two");
@@ -162,7 +162,7 @@ fn a_signature_replayed_from_another_position_breaks_the_chain() {
 /// Negative: chunk signatures from a different request. The seed is this request's own head
 /// signature, so a chain built on another seed does not verify against it.
 #[test]
-fn chunk_signatures_from_another_request_do_not_verify() {
+fn c_ing_0037_chunk_signatures_from_another_request_do_not_verify() {
     let mut chunker = SignedChunker::new(KEY, OTHER_SEED);
     chunker.push(b"replayed");
     let body = chunker.finish();
@@ -204,7 +204,7 @@ fn moving_a_byte_across_a_chunk_boundary_breaks_the_signature() {
 
 /// Negative: every spelling of the signature extension that is not the exact one.
 #[test]
-fn every_other_spelling_of_the_signature_extension_is_refused() {
+fn c_ing_0029_to_0031_every_other_spelling_of_the_signature_extension_is_refused() {
     let signature = SignedChunker::new(KEY, SEED).signature_for(b"data");
     let hex = hex_lower(&signature);
     let spellings = [
@@ -363,7 +363,7 @@ fn the_delivery_policy_has_no_opt_out() {
 /// Negative: a truncated signed body — the terminal chunk never arrives — fails, and the bytes
 /// that did verify are reported so the caller knows exactly how much it accepted.
 #[test]
-fn a_truncated_signed_body_reports_what_had_verified() {
+fn c_ing_0043_a_truncated_signed_body_reports_what_had_verified() {
     let mut chunker = SignedChunker::new(KEY, SEED);
     chunker.push(b"partial");
     let body = chunker.finish_truncated();

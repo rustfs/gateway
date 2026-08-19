@@ -44,7 +44,7 @@ fn refuse(header_line: &str, data: &[u8]) -> ChunkReject {
 
 /// Positive: three chunks arrive byte for byte, and the body is committable.
 #[test]
-fn three_chunks_round_trip_byte_for_byte() {
+fn c_ing_0002_three_chunks_round_trip_byte_for_byte() {
     let body = unsigned_body(&[b"first-", b"second-", b"third"]);
     let mut pipeline = unsigned_pipeline(body, 7, 18, no_observers(), ChunkLimits::default());
     let out = drain_pipeline(&mut pipeline, 5).expect("a well formed body is accepted");
@@ -65,7 +65,7 @@ fn a_body_arriving_one_byte_at_a_time_reassembles() {
 
 /// Positive: a chunk of exactly the ceiling is accepted; the ceiling is inclusive.
 #[test]
-fn a_chunk_of_exactly_the_ceiling_is_accepted() {
+fn c_ing_0007_a_chunk_of_exactly_the_ceiling_is_accepted() {
     let limits = ChunkLimits::default().with_max_chunk_size(4096);
     let payload = vec![b'x'; 4096];
     let body = unsigned_body(&[&payload]);
@@ -99,7 +99,7 @@ fn an_uppercase_hex_chunk_size_is_accepted() {
 /// Negative, and the reason this task exists: a chunk announcing four gigabytes is refused at its
 /// header. Not one data byte is read and the window never grows to hold it.
 #[test]
-fn a_four_gigabyte_chunk_is_refused_at_the_header_without_reading_a_data_byte() {
+fn c_ing_0021_a_four_gigabyte_chunk_is_refused_at_the_header_without_reading_a_data_byte() {
     let mut pipeline = unsigned_pipeline(b"ffffffff\r\n".to_vec(), 1024, 4096, no_observers(), ChunkLimits::default());
     let before = pipeline.window_bytes();
     let err = drain_pipeline(&mut pipeline, 4096).expect_err("an over-large chunk is refused");
@@ -120,7 +120,7 @@ fn a_four_gigabyte_chunk_is_refused_at_the_header_without_reading_a_data_byte() 
 /// Negative: the same announcement fed one byte per read is refused just as early, so the attack
 /// cannot be stretched over time into an unbounded buffer.
 #[test]
-fn an_over_large_chunk_fed_one_byte_at_a_time_is_still_refused_immediately() {
+fn c_ing_0022_an_over_large_chunk_fed_one_byte_at_a_time_is_still_refused_immediately() {
     let mut body = b"ffffffff\r\n".to_vec();
     body.extend_from_slice(&[b'z'; 4096]);
     let mut pipeline = unsigned_pipeline(body, 1, 4096, no_observers(), ChunkLimits::default());
@@ -160,14 +160,14 @@ fn the_chunk_ceiling_cannot_be_configured_away() {
 /// Negative: more than one leading zero. Stricter than RFC 9112 on purpose — the same number to
 /// one parser, an overflow or a truncation to another.
 #[test]
-fn a_chunk_size_with_leading_zeros_is_refused() {
+fn c_ing_0023_a_chunk_size_with_leading_zeros_is_refused() {
     assert_eq!(refuse("0000000000001\r\n", b"x"), ChunkReject::LeadingZeros);
     assert_eq!(refuse("01\r\n", b"x"), ChunkReject::LeadingZeros);
 }
 
 /// Negative: a `0x` prefix.
 #[test]
-fn a_chunk_size_with_a_hex_prefix_is_refused() {
+fn c_ing_0024_a_chunk_size_with_a_hex_prefix_is_refused() {
     // The hexadecimal-digit rule fires before the leading-zero rule, so `0x10` is refused as a
     // malformed size rather than as a leading zero. Either way it never becomes sixteen.
     assert_eq!(refuse("0x10\r\n", b"x"), ChunkReject::MalformedChunkSize);
@@ -176,14 +176,14 @@ fn a_chunk_size_with_a_hex_prefix_is_refused() {
 
 /// Negative: a sign.
 #[test]
-fn a_signed_chunk_size_is_refused() {
+fn c_ing_0025_a_signed_chunk_size_is_refused() {
     assert_eq!(refuse("+10\r\n", b"x"), ChunkReject::MalformedChunkSize);
     assert_eq!(refuse("-10\r\n", b"x"), ChunkReject::MalformedChunkSize);
 }
 
 /// Negative: whitespace anywhere around the size.
 #[test]
-fn whitespace_around_the_chunk_size_is_refused() {
+fn c_ing_0028_whitespace_around_the_chunk_size_is_refused() {
     assert_eq!(refuse(" 10\r\n", b"x"), ChunkReject::MalformedChunkSize);
     assert_eq!(refuse("10 \r\n", b"x"), ChunkReject::MalformedChunkSize);
     assert_eq!(refuse("10 ;foo\r\n", b"x"), ChunkReject::MalformedChunkSize);
@@ -199,7 +199,7 @@ fn an_empty_or_over_long_chunk_size_is_refused() {
 /// Negative: the metadata ceiling, which bounds the header and — unlike the chunk ceiling — has
 /// always been there. Both are needed; neither substitutes for the other.
 #[test]
-fn an_over_long_chunk_size_line_is_refused() {
+fn c_ing_0026_an_over_long_chunk_size_line_is_refused() {
     let padding = "a".repeat(300);
     let (reject, _) = reject_of(raw_chunk_body(&format!("10;{padding}\r\n"), b"x"), 4096, ChunkLimits::default());
     assert_eq!(reject, ChunkReject::ChunkMetaTooLong);
@@ -207,7 +207,7 @@ fn an_over_long_chunk_size_line_is_refused() {
 
 /// Negative: a bare LF terminates a line for several parsers and not for others.
 #[test]
-fn a_bare_line_feed_is_refused() {
+fn c_ing_0027_a_bare_line_feed_is_refused() {
     assert_eq!(refuse("10\n", b"x"), ChunkReject::BadLineTerminator);
 }
 
@@ -229,7 +229,7 @@ fn a_chunk_data_terminator_other_than_crlf_is_refused() {
 /// Negative: unsigned framing permits no chunk extension at all, including the signature one.
 /// A chunk extension one party parses and another ignores is the chunk-extension desync.
 #[test]
-fn an_extension_on_unsigned_framing_is_refused() {
+fn c_ing_0032_an_extension_on_unsigned_framing_is_refused() {
     assert_eq!(
         refuse(
             "5;chunk-signature=0000000000000000000000000000000000000000000000000000000000000000\r\n",
@@ -244,7 +244,7 @@ fn an_extension_on_unsigned_framing_is_refused() {
 /// Negative: a micro-chunk flood is bounded by the chunk count derived from the declared length,
 /// so the CPU spent on framing cannot be amplified without bound.
 #[test]
-fn a_micro_chunk_flood_is_refused_by_the_chunk_count_ceiling() {
+fn c_ing_0034_a_micro_chunk_flood_is_refused_by_the_chunk_count_ceiling() {
     let mut body = Vec::new();
     for _ in 0..4096 {
         body.extend_from_slice(b"1\r\nx\r\n");
@@ -257,7 +257,7 @@ fn a_micro_chunk_flood_is_refused_by_the_chunk_count_ceiling() {
 /// Negative: the overhead ratio catches the same shape when the chunk count alone would not,
 /// because the declared body is large enough to justify many chunks.
 #[test]
-fn framing_overhead_out_of_proportion_to_the_payload_is_refused() {
+fn c_ing_0034_framing_overhead_out_of_proportion_to_the_payload_is_refused() {
     let limits = ChunkLimits::default()
         .with_min_chunk_size_for_count(1)
         .with_overhead_ratio_floor_bytes(64);
@@ -273,7 +273,7 @@ fn framing_overhead_out_of_proportion_to_the_payload_is_refused() {
 /// Negative: more body than the declaration allows is refused, and the decoder's own counter —
 /// the only length any consumer may read — never exceeds the declaration.
 #[test]
-fn more_body_than_declared_is_refused_and_the_counter_never_exceeds_the_declaration() {
+fn c_ing_0038_more_body_than_declared_is_refused_and_the_counter_never_exceeds_the_declaration() {
     let payload = vec![b'p'; 512];
     let body = unsigned_body(&[&payload, &payload, &payload]);
     let mut pipeline = unsigned_pipeline(body, 4096, 1024, no_observers(), ChunkLimits::default());
@@ -291,7 +291,7 @@ fn more_body_than_declared_is_refused_and_the_counter_never_exceeds_the_declarat
 /// Negative: less body than declared is refused at the terminal chunk, and nothing may be
 /// committed. A short upload accepted as complete is a truncated object stored as a whole one.
 #[test]
-fn less_body_than_declared_is_refused_and_may_not_be_committed() {
+fn c_ing_0039_less_body_than_declared_is_refused_and_may_not_be_committed() {
     let payload = vec![b'p'; 16];
     let mut pipeline = unsigned_pipeline(unsigned_body(&[&payload]), 4096, 1024, no_observers(), ChunkLimits::default());
     let _ = drain_pipeline(&mut pipeline, 4096).expect_err("the body is short");
@@ -308,7 +308,7 @@ fn less_body_than_declared_is_refused_and_may_not_be_committed() {
 
 /// Negative: a stream that stops before the terminal chunk fails; it never reports end-of-stream.
 #[test]
-fn a_truncated_stream_fails_and_never_reports_end_of_stream() {
+fn c_ing_0043_a_truncated_stream_fails_and_never_reports_end_of_stream() {
     let mut body = b"10\r\n".to_vec();
     body.extend_from_slice(&[b'q'; 16]);
     let mut pipeline = unsigned_pipeline(body, 8, 16, no_observers(), ChunkLimits::default());
@@ -321,7 +321,7 @@ fn a_truncated_stream_fails_and_never_reports_end_of_stream() {
 /// Negative: bytes after the terminal chunk mean the peer treated a zero-sized chunk as an
 /// ordinary one, which is two different bodies depending on who is reading.
 #[test]
-fn bytes_after_the_terminal_chunk_are_refused() {
+fn c_ing_0033_bytes_after_the_terminal_chunk_are_refused() {
     let mut body = unsigned_body(&[b"data"]);
     body.extend_from_slice(b"4\r\nmore\r\n");
     let mut pipeline = unsigned_pipeline(body, 4096, 4, no_observers(), ChunkLimits::default());

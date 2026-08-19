@@ -606,6 +606,7 @@ gateway_modules = (
     "facade_probe",
     "governor_runtime",
     "handler_panic",
+    "ingest_assembly",
     "middleware",
     "monomorphic",
     "naming_policy",

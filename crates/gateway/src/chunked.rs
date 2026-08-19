@@ -401,7 +401,7 @@ mod tests {
     /// `Content-Encoding` says. This is the one rule the whole ingest layer is arranged around,
     /// asserted at the point this assembly could break it.
     #[tokio::test]
-    async fn an_unframed_mode_never_builds_a_pipeline() {
+    async fn c_ing_0020_an_unframed_mode_never_builds_a_pipeline() {
         let mut headers = HeaderMap::new();
         headers.insert(
             http::HeaderName::from_static("content-encoding"),
@@ -412,6 +412,87 @@ mod tests {
             ChunkIngest::prepare(&PayloadMode::Unsigned, &headers, &wire, &ChunkSink::new(), None, ChunkLimits::default())
                 .expect("an unframed mode is not an error");
         assert!(prepared.is_none());
+    }
+
+    /// Positive — the same header alongside a *streaming* signature changes nothing either: the
+    /// parser runs because `x-amz-content-sha256` says the body is framed, and `Content-Encoding`
+    /// is carried past it as the object metadata it is.
+    ///
+    /// This is the other half of the rule above, and the half that has to be asserted separately.
+    /// "Content-Encoding never enables the parser" is satisfied by a service that never runs the
+    /// parser at all; only a case where the parser must run distinguishes the two.
+    #[tokio::test]
+    async fn c_ing_0010_a_content_encoding_of_aws_chunked_alongside_a_streaming_signature_still_parses() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            http::HeaderName::from_static("content-encoding"),
+            http::HeaderValue::from_static("aws-chunked"),
+        );
+        headers.insert(http::HeaderName::from_static(DECODED_LENGTH_HEADER), http::HeaderValue::from_static("11"));
+        let ingest = ChunkIngest::prepare(
+            &unsigned_streaming(),
+            &headers,
+            &wire_length(4096),
+            &ChunkSink::new(),
+            None,
+            ChunkLimits::default(),
+        )
+        .expect("head-level checks pass")
+        .expect("a streaming signature frames the body whatever Content-Encoding says");
+
+        let mut digests = rustfs_gateway_http::BodyIntegrity::NONE.begin();
+        let decoded = ingest
+            .run(Bytes::from_static(b"b\r\nhello world\r\n0\r\n\r\n"), &mut digests)
+            .await
+            .expect("well-formed unsigned framing");
+        assert_eq!(decoded, Bytes::from_static(b"hello world"));
+    }
+
+    /// Negative — a `Content-Encoding` this service does not frame with is never decoded, and the
+    /// bytes it labels arrive exactly as they were sent.
+    ///
+    /// Both halves, because either alone is satisfiable by the wrong implementation: a service
+    /// that inflated the body would still decline to build a chunk parser for it, and a service
+    /// that built one would still be free to inflate afterwards. The payload is a real gzip
+    /// header, so a decoder that recognised the magic bytes would have had its chance.
+    #[tokio::test]
+    async fn c_ing_0044_a_gzip_content_encoding_is_delivered_without_being_inflated() {
+        const GZIP_HEADER: &[u8] = b"\x1f\x8b\x08\x00\x00\x00\x00\x00\x00\x03";
+
+        let mut headers = HeaderMap::new();
+        headers.insert(http::HeaderName::from_static("content-encoding"), http::HeaderValue::from_static("gzip"));
+        let unframed = ChunkIngest::prepare(
+            &PayloadMode::Unsigned,
+            &headers,
+            &wire_length(64),
+            &ChunkSink::new(),
+            None,
+            ChunkLimits::default(),
+        )
+        .expect("an unframed mode is not an error");
+        assert!(unframed.is_none(), "gzip is a content encoding, never a framing");
+
+        headers.insert(http::HeaderName::from_static(DECODED_LENGTH_HEADER), http::HeaderValue::from_static("10"));
+        let framed = ChunkIngest::prepare(
+            &unsigned_streaming(),
+            &headers,
+            &wire_length(4096),
+            &ChunkSink::new(),
+            None,
+            ChunkLimits::default(),
+        )
+        .expect("head-level checks pass")
+        .expect("a framed mode");
+
+        let mut wire = b"a\r\n".to_vec();
+        wire.extend_from_slice(GZIP_HEADER);
+        wire.extend_from_slice(b"\r\n0\r\n\r\n");
+        let mut digests = rustfs_gateway_http::BodyIntegrity::NONE.begin();
+        let decoded = framed
+            .run(Bytes::from(wire), &mut digests)
+            .await
+            .expect("the framing is well formed; the payload is opaque");
+        assert_eq!(decoded, Bytes::from_static(GZIP_HEADER), "the compressed bytes are the object");
     }
 
     /// Negative — a signed framed body with no published material is refused rather than decoded

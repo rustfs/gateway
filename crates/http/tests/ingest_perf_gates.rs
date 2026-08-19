@@ -20,9 +20,12 @@
 //! noisy gate is a muted gate within a month; every gate here is a count.
 //! Upstream: the module's declared inputs. Downstream: its callers and regression tests.
 //!
-//! 7 positive / 10 negative.
+//! 8 positive / 10 negative.
 
 mod support;
+
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use rustfs_gateway_http::{ChunkLimits, ChunkSigningKey, ScopeId, SigningKeyCache};
 use rustfs_gateway_stream::{ByteCounter, ByteObserver, ObserverOutcome, Payload, StreamMetrics};
@@ -66,6 +69,28 @@ impl ByteObserver for Witness {
     }
 }
 
+/// A witness whose tally outlives the pipeline that held it.
+///
+/// [`Witness`] is moved into the pipeline and only its outcome comes back, which is enough to
+/// assert a total and not enough to point the same instrument at a *second* walk over the same
+/// bytes. This one shares its counter, so one number can span both.
+#[derive(Clone)]
+struct SharedWitness(Arc<AtomicU64>);
+
+impl ByteObserver for SharedWitness {
+    fn update(&mut self, bytes: &[u8]) {
+        self.0.fetch_add(bytes.len() as u64, Ordering::Relaxed);
+    }
+
+    fn finish(self: Box<Self>) -> ObserverOutcome {
+        ObserverOutcome::new("shared-witness", &[], self.0.load(Ordering::Relaxed))
+    }
+
+    fn label(&self) -> &'static str {
+        "shared-witness"
+    }
+}
+
 fn scope(credential: &str) -> ScopeId {
     ScopeId::new(credential, "20130524", "us-east-1", "s3")
 }
@@ -87,7 +112,7 @@ fn derive_once(counter: &mut u64) -> ChunkSigningKey {
 /// Deriving per chunk instead of per scope is what turns a 5 GiB upload's 81,924 HMAC operations
 /// into 409,600. The cache makes the difference a count.
 #[test]
-fn one_scope_is_derived_once_however_many_requests_use_it() {
+fn c_ing_0003_one_scope_is_derived_once_however_many_requests_use_it() {
     let mut cache = SigningKeyCache::new(SigningKeyCache::DEFAULT_CAPACITY);
     let mut hmacs = 0u64;
     let id = scope("AKIDEXAMPLE");
@@ -125,7 +150,7 @@ fn the_hit_ratio_is_exact() {
 /// same and a gate has a ten-minute budget: 5 GiB in 64 KiB chunks is 81,920 + 4 = 81,924
 /// against a per-chunk baseline of 409,600, which is 80.0% fewer.
 #[test]
-fn a_signed_upload_costs_one_hmac_per_chunk_plus_four() {
+fn c_ing_0003_a_signed_upload_costs_one_hmac_per_chunk_plus_four() {
     const CHUNKS: usize = 256;
     // 8 KiB is the smallest chunk an AWS SDK emits for signed streaming, and the smallest this
     // gateway accepts under the default framing-overhead ratio: an 87-byte signed header is
@@ -165,7 +190,7 @@ fn a_signed_upload_costs_one_hmac_per_chunk_plus_four() {
 /// Positive: four observers over a 1 MiB body see it once each, and so does the signer. A second
 /// pass would show up here as twice the byte count.
 #[test]
-fn four_observers_and_the_signer_each_see_the_body_exactly_once() {
+fn c_ing_0005_four_observers_and_the_signer_each_see_the_body_exactly_once() {
     const CHUNK_BYTES: usize = 64 * 1024;
     const CHUNKS: usize = 16;
 
@@ -204,10 +229,54 @@ fn four_observers_and_the_signer_each_see_the_body_exactly_once() {
     }
 }
 
+/// Positive, and the control for the gate above: the same instrument, pointed at a body that is
+/// walked twice, reports twice the body.
+///
+/// The gate above asserts an equality — `observed == declared` — and an equality is only worth
+/// what its instrument can distinguish. A counter that saturated at the body length, or one wired
+/// to the declaration rather than to the bytes, would satisfy it while the pipeline collected
+/// each chunk and hashed it afterwards, which is the exact design the pipeline replaced. So the
+/// second walk here is that rejected design, performed deliberately: the delivered body is handed
+/// to the same counter a second time, and the counter says `2 x declared`. Whatever else is
+/// uncertain, the single-pass assertion is not one that could not fail.
+#[test]
+fn c_ing_0005_the_single_pass_instrument_reports_two_when_the_body_is_walked_twice() {
+    const CHUNK_BYTES: usize = 16 * 1024;
+    const CHUNKS: usize = 8;
+
+    let payload = vec![b'c'; CHUNK_BYTES];
+    let mut chunker = SignedChunker::new(KEY, SEED);
+    for _ in 0..CHUNKS {
+        chunker.push(&payload);
+    }
+    let body = chunker.finish();
+    let declared = (CHUNKS * CHUNK_BYTES) as u64;
+
+    let tally = Arc::new(AtomicU64::new(0));
+    let observers: SmallVec<[Box<dyn ByteObserver>; 4]> =
+        SmallVec::from_vec(vec![Box::new(SharedWitness(Arc::clone(&tally))) as Box<dyn ByteObserver>]);
+    let mut pipeline = signed_pipeline(body, 64 * 1024, declared, KEY, SEED, observers, ChunkLimits::default());
+    let out = drain_pipeline(&mut pipeline, 64 * 1024).expect("a correctly signed body");
+
+    assert_eq!(out.len() as u64, declared);
+    assert_eq!(tally.load(Ordering::Relaxed), declared, "the pipeline walked the body once");
+
+    // The rejected shape, run on purpose: collect the bytes, then walk them again to digest them.
+    let mut collect_then_digest = SharedWitness(Arc::clone(&tally));
+    collect_then_digest.update(&out);
+
+    assert_eq!(
+        tally.load(Ordering::Relaxed),
+        declared.saturating_mul(2),
+        "a second walk over the same bytes must be visible to this counter, or the equality above \
+         is an assertion about nothing"
+    );
+}
+
 /// Positive: the observers are called at chunk granularity, not at every framing boundary. A
 /// hardware digest restarted every few hundred bytes loses most of its advantage.
 #[test]
-fn observers_are_called_at_chunk_granularity() {
+fn c_ing_0008_observers_are_called_at_chunk_granularity() {
     const CHUNK_BYTES: usize = 64 * 1024;
     let payload = vec![b'g'; CHUNK_BYTES];
     let mut chunker = SignedChunker::new(KEY, SEED);
@@ -264,7 +333,7 @@ fn consuming_the_pipeline_in_its_native_model_performs_no_adapting_copy() {
 /// fits inside the window is delivered whole, with 32 chunk headers stripped, having memmoved
 /// exactly zero bytes. Headers are skipped by advancing a cursor, never by moving the bytes.
 #[test]
-fn stripping_chunk_headers_moves_no_bytes_at_all() {
+fn c_ing_0004_stripping_chunk_headers_moves_no_bytes_at_all() {
     const CHUNK_BYTES: usize = 1024;
     const CHUNKS: usize = 32;
 
@@ -372,7 +441,7 @@ fn signed_chunks_too_small_to_amortise_their_header_are_refused() {
 /// Negative: the window never grows to the announced size of a chunk it has refused, and never
 /// past the ceiling the limits imply.
 #[test]
-fn the_window_stays_bounded_by_the_chunk_ceiling() {
+fn c_ing_0063_the_window_stays_bounded_by_the_chunk_ceiling() {
     let limits = ChunkLimits::default().with_max_chunk_size(4096);
     let payload = vec![b'w'; 4096];
     let body = unsigned_body(&[&payload, &payload, &payload, &payload]);
@@ -390,7 +459,7 @@ fn the_window_stays_bounded_by_the_chunk_ceiling() {
 /// Negative: a large chunk ceiling does not mean a large allocation up front. The window grows on
 /// demand, so a connection that uploads nothing costs nothing.
 #[test]
-fn the_window_is_not_allocated_up_front() {
+fn c_ing_0063_the_window_is_not_allocated_up_front() {
     let limits = ChunkLimits::default().with_max_chunk_size(ChunkLimits::HARD_MAX_CHUNK_SIZE);
     let pipeline = unsigned_pipeline(b"0\r\n\r\n".to_vec(), 8, 0, no_observers(), limits);
     assert!(pipeline.window_bytes() <= 64 * 1024, "a 16 MiB ceiling must not mean a 16 MiB allocation");
