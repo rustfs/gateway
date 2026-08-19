@@ -14,7 +14,10 @@
 
 //! `UploadPartCopy`: one part of an upload taken from a span of another object.
 //!
-//! Shares: copy_source, precondition, etag, range, upload_id
+//! Shares: copy_source. `x-amz-copy-source-range` and the copy-source conditional headers are
+//! part of that one contract rather than modules of their own — `shared/precondition.rs` says so
+//! from the other end — and the upload-id capability is shared with the rest of the multipart
+//! family, which has no module under `shared/`.
 //!
 //! Responsible for: the spec, the security floor and the [`Operation`] implementation for
 //! `UploadPartCopy`, plus the [`HasOperation`] reverse mapping from its input type.
