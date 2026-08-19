@@ -179,7 +179,7 @@ fixed now so that the same check does not get written twice under two names.
 | `check_error_status_total.sh` | The error code to HTTP status mapping has one hand-written authority, covers every code an operation can produce, keeps the 5xx band to an explicit allowlist in both directions, and carries no row nothing reaches | P4-02 |
 | `check_error_has_rule_ref.sh` | Diagnostic errors carry a rule reference (quirk id / RFC section / spec field path) | P2 |
 | `check_wire_boundary.sh` | Wire-layer boundary constraints | P3 |
-| `check_multer_constraints.sh` | multipart parsing sets explicit limits (multer defaults to `u64::MAX`) | P3 |
+| `check_form_limits.sh` | The six POST Object form cases each name one active test; `FileReader` has one door and it takes a byte ceiling, composed with the deployment maximum by `min`; `FormLimits` grows no unlimited constructor | P3-05 |
 | `check_governor_position.sh` | `c-lim-0039` fixes `Governor::try_acquire` after routing and before body reads; `c-lim-0040` observes a 503 with zero body reads | P3-05 |
 | `check_no_header_unwrap.sh` | Header parsing never `unwrap`s | P3 |
 | `check_no_duplicate_fuzz_targets.sh` | Fuzz targets are not duplicated between P2-07 and P8-07 | P8-07 |

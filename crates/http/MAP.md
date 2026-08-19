@@ -8,6 +8,7 @@ Agent entry point for bounded, signature-aware HTTP wire ingestion.
 | `src/head.rs` | Request-head validation and normalized views. | Header/query/path metadata is accepted wrongly. |
 | `src/host.rs` | Host and addressing parsing. | Virtual-hosted/path addressing differs. |
 | `src/limits.rs` | Wire budget vocabulary. | A header/query/body ceiling changes. |
+| `src/form/` | The POST Object multipart reader: bounded text fields, then a file reader that cannot exist without a ceiling. | A POST form field or file ceiling changes, or the policy-before-file order is in question. |
 | `src/checksum.rs` | The one authority on request-body integrity: `Content-MD5` and `x-amz-checksum-*` arbitration, the digests, and the `ChecksumVerified` witness. | A digest is claimed and not compared, or two layers disagree about which checksum a request made. |
 | `src/metadata.rs` | Metadata-header validation. | User metadata is malformed or oversized. |
 | `src/framing.rs` | Body framing selected from authenticated payload mode. | Content length or chunk framing is wrong. |
@@ -20,3 +21,5 @@ Agent entry point for bounded, signature-aware HTTP wire ingestion.
 | `tests/ingest_verify.rs` | Streaming signature matrix. | Change signature-chain verification. |
 | `tests/ingest_perf_gates.rs` | Ingestion allocation/cost gates. | Change the hot path. |
 | `tests/host.rs` | Host parsing matrix. | Change addressing. |
+| `tests/form_limits.rs` | POST Object form ceilings and ordering. | Change `src/form/`. |
+| `tests/form_allocations.rs` | Measures that reading a file part costs a heap independent of the file. | Change the file read path. |
