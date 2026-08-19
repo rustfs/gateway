@@ -21,7 +21,7 @@
 
 use std::collections::BTreeSet;
 
-use rustfs_gateway_sig::{OperationFloor, SecurityFloor, SigV2Presigned};
+use rustfs_gateway_sig::{OperationFloor, SecurityFloor};
 
 use crate::ext::{CredentialGuardConfig, Rate};
 
@@ -129,17 +129,18 @@ pub(crate) fn render_startup_posture<'a>(
         .map(OperationFloor::name)
         .collect();
     let custom_verifier = if custom_signature_verifier { "installed" } else { "none" };
-    let sigv2 = match floor.sigv2_presigned() {
-        SigV2Presigned::Disabled => "disabled",
-        SigV2Presigned::Enabled => "presigned-compatibility-enabled",
-    };
+    // The policy, not the derived presigned flag. Before P2-06's wiring, `sigv2=disabled` meant
+    // "presigned SigV2 is off" while header SigV2 was refused outright, so the two readings agreed
+    // by accident. Now that header SigV2 authenticates, a line reading `disabled` beside a live
+    // SigV2 verifier would be a posture report that lies about which schemes are reachable.
+    let sigv2_policy = floor.sigv2_policy().as_str();
     let aws_signature_verifier = if dangerously_replaced_signature_verifier {
         "dangerously-replaced"
     } else {
         "built-in"
     };
     format!(
-        "SECURITY_POSTURE anonymous_reachable_ops=[{}] custom_verifier={custom_verifier} sigv2={sigv2} presigned_allowed_ops=[{}] aws_signature_verifier={aws_signature_verifier}",
+        "SECURITY_POSTURE anonymous_reachable_ops=[{}] custom_verifier={custom_verifier} sigv2_policy={sigv2_policy} presigned_allowed_ops=[{}] aws_signature_verifier={aws_signature_verifier}",
         format_names(&anonymous_reachable_ops),
         format_names(&presigned_allowed_ops),
     )
@@ -175,7 +176,7 @@ mod tests {
 
         assert_eq!(
             report,
-            "SECURITY_POSTURE anonymous_reachable_ops=[PublicRead] custom_verifier=installed sigv2=disabled presigned_allowed_ops=[GetObject] aws_signature_verifier=built-in"
+            "SECURITY_POSTURE anonymous_reachable_ops=[PublicRead] custom_verifier=installed sigv2_policy=HeaderOnly presigned_allowed_ops=[GetObject] aws_signature_verifier=built-in"
         );
     }
 
@@ -187,7 +188,7 @@ mod tests {
 
         assert_eq!(
             report,
-            "SECURITY_POSTURE anonymous_reachable_ops=[] custom_verifier=none sigv2=presigned-compatibility-enabled presigned_allowed_ops=[] aws_signature_verifier=dangerously-replaced"
+            "SECURITY_POSTURE anonymous_reachable_ops=[] custom_verifier=none sigv2_policy=HeaderAndPresigned presigned_allowed_ops=[] aws_signature_verifier=dangerously-replaced"
         );
     }
 }

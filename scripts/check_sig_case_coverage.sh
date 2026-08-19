@@ -1045,6 +1045,22 @@ for index in "${!p2_05_cases[@]}"; do
     p2_05_evidence+=("${relative}|${evidence}")
     evidence_kind=nested_runtime
     [[ "$relative" == crates/gateway/tests/pipeline.rs ]] && evidence_kind=runtime
+    if [[ "$relative" == crates/gateway/src/ext/authenticator_tests.rs ]]; then
+        # The unit suite left authenticator.rs when P2-06's SigV2 entry point pushed that file past
+        # the 800-line limit, using the `#[cfg(test)] #[path] mod tests;` split this repository
+        # already uses in `crates/sig/src/signer.rs` and `crates/conformance/src/lint.rs`. The
+        # module is now the file, so `nested_runtime`'s enclosing `mod tests` no longer exists —
+        # and the `#[cfg(test)]` it used to observe moved to the declaration site. Asserted there,
+        # adjacency included, so the suite cannot be detached from its gate or re-pointed at
+        # another file.
+        evidence_kind=runtime
+        declaring="$(tr '\n' '\001' <"${ROOT}/crates/gateway/src/ext/authenticator.rs")"
+        wanted="$(printf '#[cfg(test)]\001#[path = "authenticator_tests.rs"]\001mod tests;')"
+        grep -Fq "$wanted" <<<"$declaring" || {
+            printf 'check_sig_case_coverage: authenticator.rs does not declare its split unit suite under #[cfg(test)]\n' >&2
+            exit 1
+        }
+    fi
     validate_rust_evidence "$file" "$evidence_kind" "$evidence" "$required_call" \
         "check_sig_case_coverage: ${id} is not a named active P2-05 test in ${relative}"
     if [[ -n "${secondary_call:-}" ]]; then
@@ -1062,8 +1078,8 @@ done
     exit 1
 }
 
-[[ "${#p2_06_cases[@]}" -eq 37 ]] || {
-    printf 'check_sig_case_coverage: expected 37 P2-06 mappings, got %s\n' "${#p2_06_cases[@]}" >&2
+[[ "${#p2_06_cases[@]}" -eq 62 ]] || {
+    printf 'check_sig_case_coverage: expected 62 P2-06 mappings, got %s\n' "${#p2_06_cases[@]}" >&2
     exit 1
 }
 p2_06_expected_ids=(
@@ -1073,7 +1089,11 @@ p2_06_expected_ids=(
     c-sig-0537 c-sig-0538 c-sig-0539 c-sig-0540 c-sig-0541 c-sig-0542
     c-sig-0543 c-sig-0544 c-sig-0545 c-sig-0546 c-sig-0547 c-sig-0548
     c-sig-0549 c-sig-0550 c-sig-0551 c-sig-0553 c-sig-0554 c-sig-0555
-    c-sig-0556
+    c-sig-0556 c-sig-0557 c-sig-0558 c-sig-0559 c-sig-0560 c-sig-0561
+    c-sig-0562 c-sig-0563 c-sig-0564 c-sig-0565 c-sig-0566 c-sig-0567
+    c-sig-0568 c-sig-0569 c-sig-0570 c-sig-0571 c-sig-0572 c-sig-0573
+    c-sig-0574 c-sig-0575 c-sig-0576 c-sig-0577 c-sig-0578 c-sig-0579
+    c-sig-0580 c-sig-0581
 )
 positive=0
 negative=0
@@ -1144,12 +1164,12 @@ for index in "${!p2_06_cases[@]}"; do
     validate_rust_evidence "$file" runtime "$evidence" "$required_call" \
         "check_sig_case_coverage: ${id} is not a named active P2-06 test in ${relative}"
 done
-[[ "$positive" -eq 11 && "$negative" -eq 26 && "$negative" -gt "$positive" ]] || {
-    printf 'check_sig_case_coverage: expected 11 positive and 26 negative P2-06 cases, got %s/%s\n' \
+[[ "$positive" -eq 15 && "$negative" -eq 47 && "$negative" -gt "$positive" ]] || {
+    printf 'check_sig_case_coverage: expected 15 positive and 47 negative P2-06 cases, got %s/%s\n' \
         "$positive" "$negative" >&2
     exit 1
 }
-[[ "$(printf '%s\n' "${p2_06_evidence[@]}" | sort -u | wc -l | tr -d ' ')" -eq 37 ]] || {
+[[ "$(printf '%s\n' "${p2_06_evidence[@]}" | sort -u | wc -l | tr -d ' ')" -eq 62 ]] || {
     printf 'check_sig_case_coverage: P2-06 cases must use distinct named evidence\n' >&2
     exit 1
 }
@@ -1284,13 +1304,16 @@ validate_rust_evidence "$gateway_posture" source_order \
     '.filter(|operation| !operation.privileged() && operation.allowed_schemes().allows_presigned())' \
     'format_names(&presigned_allowed_ops)' \
     'check_sig_case_coverage: startup posture lost presigned operation enumeration'
+# P2-06's wiring made SigV2 a three-way policy that is actually verified, so the report names the
+# policy rather than the presigned flag derived from it. `as_str()` is the switch: a report that
+# printed a constant would say `HeaderOnly` while a deployment ran `HeaderAndPresigned`.
 validate_rust_evidence "$gateway_posture" source_order \
-    'match floor.sigv2_presigned() {' \
-    'SigV2Presigned::Enabled =>' \
+    'let sigv2_policy = floor.sigv2_policy().as_str();' \
+    'format!(' \
     'check_sig_case_coverage: startup posture lost the live SigV2 switch'
 validate_rust_evidence "$gateway_posture" source_order \
     'let custom_verifier = if custom_signature_verifier {' \
-    'let sigv2 = match floor.sigv2_presigned() {' \
+    'let sigv2_policy = floor.sigv2_policy().as_str();' \
     'check_sig_case_coverage: startup posture lost the live custom verifier switch'
 validate_rust_evidence "$gateway_posture" source_order \
     'let aws_signature_verifier = if dangerously_replaced_signature_verifier {' \
@@ -1298,7 +1321,7 @@ validate_rust_evidence "$gateway_posture" source_order \
     'check_sig_case_coverage: startup posture lost the live AWS verifier switch'
 validate_rust_evidence "$gateway_posture" format_literal \
     'SECURITY_POSTURE' \
-    '"SECURITY_POSTURE anonymous_reachable_ops=[{}] custom_verifier={custom_verifier} sigv2={sigv2} presigned_allowed_ops=[{}] aws_signature_verifier={aws_signature_verifier}"' \
+    '"SECURITY_POSTURE anonymous_reachable_ops=[{}] custom_verifier={custom_verifier} sigv2_policy={sigv2_policy} presigned_allowed_ops=[{}] aws_signature_verifier={aws_signature_verifier}"' \
     'check_sig_case_coverage: startup posture output lost a required field'
 validate_rust_evidence "$gateway_posture" log_render \
     'log_startup_posture' \
@@ -1350,7 +1373,7 @@ validate_rust_evidence "$xtask_security_posture" string_match_arm \
     'check_sig_case_coverage: dry-run no longer recognizes the presigned floor constructor'
 validate_rust_evidence "$xtask_security_posture" format_literal_exact \
     'SECURITY_POSTURE' \
-    '"SECURITY_POSTURE anonymous_reachable_ops=[] custom_verifier=none sigv2=disabled presigned_allowed_ops=[{presigned}] aws_signature_verifier=built-in"' \
+    '"SECURITY_POSTURE anonymous_reachable_ops=[] custom_verifier=none sigv2_policy=HeaderOnly presigned_allowed_ops=[{presigned}] aws_signature_verifier=built-in"' \
     'check_sig_case_coverage: dry-run output lost a required startup-posture field'
 
 python3 - "$ROOT/crates/gateway/Cargo.toml" <<'PYEOF'
@@ -1479,5 +1502,5 @@ done
 
 run_evidence_validations
 
-printf 'OK: all 200 P2 signature cases map to executable evidence '
-printf '(P2-01: 8/17; P2-02: 6/22; P2-03: 14/29; P2-04: 9/42; P2-05: 3/13; P2-06: 11/26)\n'
+printf 'OK: all 225 P2 signature cases map to executable evidence '
+printf '(P2-01: 8/17; P2-02: 6/22; P2-03: 14/29; P2-04: 9/42; P2-05: 3/13; P2-06: 15/47)\n'

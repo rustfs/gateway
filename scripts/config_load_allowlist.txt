@@ -30,4 +30,4 @@ crates/gateway/src/probe.rs:69
 crates/gateway/src/request_config.rs:56
 crates/gateway/src/request_deadline.rs:135
 crates/gateway/src/request_deadline.rs:142
-crates/gateway/src/service.rs:301
+crates/gateway/src/service.rs:307

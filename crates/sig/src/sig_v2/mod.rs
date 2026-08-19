@@ -43,15 +43,21 @@
 //!    timestamps. URL-safe unpadded base64 and a timestamp truncated to midnight are the two
 //!    halves of rustfs#4456.
 
+pub mod sealed;
+pub mod signer;
 pub mod string_to_sign;
+pub mod timestamp;
 
+pub use sealed::SealedSigV2;
+pub use signer::SigV2Signer;
 pub use string_to_sign::{INCLUDED_QUERY, SIGV2_EXPIRES_PARAM, SigV2Mode, SigV2StringToSign, SigV2StringToSignSpec};
+pub use timestamp::{parse_sigv2_date, signed_timestamp};
 
 use crate::clock::{MAX_PRESIGNED_EXPIRY_SECONDS, RequestNow};
 use crate::codec::decode_base64_exact;
 use crate::scheme::ALGORITHM_SIGV2_PREFIX;
 use crate::signature::{CtBytes, Signature, SignatureMatch};
-use crate::verdict::AuthError;
+use crate::verdict::{AuthError, Identity};
 
 /// Whether SigV2 is accepted, and in which location.
 ///
@@ -164,15 +170,39 @@ pub fn parse_authorization(raw: &str) -> Result<SigV2Authorization, AuthError> {
     if access_key_id.is_empty() || encoded.is_empty() || encoded.contains(':') {
         return Err(AuthError::AuthorizationHeaderMalformed);
     }
-    if access_key_id
-        .bytes()
-        .any(|byte| byte.is_ascii_control() || byte.is_ascii_whitespace())
-    {
-        return Err(AuthError::AuthorizationHeaderMalformed);
-    }
+    // The same rule SigV4's `CredentialScope::parse` applies: non-empty, at most 128 bytes,
+    // ASCII-graphic only. SigV2 used to check only for control characters and whitespace, which
+    // let a multi-kilobyte or non-ASCII access key id reach the credential store and the audit
+    // record that names it — the access key id is the one authentication value that legitimately
+    // appears in a log line, so its character set is a rule and not a formality.
+    let access_key_id = Identity::new(access_key_id).map_err(|_| AuthError::AuthorizationHeaderMalformed)?;
     let bytes = decode_base64_exact::<20>(encoded).map_err(|_| AuthError::AuthorizationHeaderMalformed)?;
     Ok(SigV2Authorization {
-        access_key_id: access_key_id.to_owned(),
+        access_key_id: access_key_id.access_key_id().to_owned(),
+        presented: Signature::HmacSha1(CtBytes::from_array(bytes)),
+    })
+}
+
+/// Reads the credential a SigV2 presigned URL carries, with the same strictness as the header.
+///
+/// The presigned form splits what the header packs into one value: `AWSAccessKeyId` and
+/// `Signature` are separate query parameters. The rules do not relax because of that — the access
+/// key id goes through [`Identity::new`], the same character-set and length rule SigV4's credential
+/// scope applies, and the signature is canonical standard base64 of exactly twenty bytes.
+///
+/// The parameters are read after [`crate::enforce_no_duplicate_sig_params`] has refused a repeated
+/// spelling of either, so "which occurrence was this" is not a question that can be asked here.
+///
+/// # Errors
+///
+/// [`AuthError::AuthorizationQueryParametersError`] for every deviation. It is the query-shaped
+/// sibling of the header's [`AuthError::AuthorizationHeaderMalformed`], and like it says nothing
+/// about which field was wrong.
+pub fn parse_presigned_credential(access_key_id: &str, signature: &str) -> Result<SigV2Authorization, AuthError> {
+    let access_key_id = Identity::new(access_key_id).map_err(|_| AuthError::AuthorizationQueryParametersError)?;
+    let bytes = decode_base64_exact::<20>(signature).map_err(|_| AuthError::AuthorizationQueryParametersError)?;
+    Ok(SigV2Authorization {
+        access_key_id: access_key_id.access_key_id().to_owned(),
         presented: Signature::HmacSha1(CtBytes::from_array(bytes)),
     })
 }

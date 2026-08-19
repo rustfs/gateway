@@ -12,6 +12,7 @@ the consumer surface. Ring 1: no rustfs crate dependency. Start at `src/lib.rs`;
 | `src/builder.rs` | Registration, extension setters, assembly checks | Adding a knob or diagnosing `build()` |
 | `src/config.rs` | Hot config, update handle, immutable request snapshot | Adding a runtime setting or checking one-load-per-request |
 | `src/service.rs` | Ordered pipeline and `S3Service` | Moving a stage or tracing a response |
+| `src/service_tests.rs` | The pipeline's own unit suite, split out at the 800-line limit | Changing what is decidable without a request |
 | `src/adapt.rs` | tower and hyper adapters | Wiring a server or checking `Infallible` |
 | `src/assembly.rs` | `AssemblyError` and `asm-*` rule refs | Adding an assembly refusal |
 | `src/dispatch.rs` | Codec-aware operation erasure and dispatch table | A route cannot decode or invoke |
@@ -41,6 +42,8 @@ the consumer surface. Ring 1: no rustfs crate dependency. Start at `src/lib.rs`;
 | --- | --- | --- |
 | `src/ext/mod.rs` | Extension roster and safe defaults | Choosing or adding an extension |
 | `src/ext/authenticator.rs` | `Authenticator`, SigV4 implementation | Replacing authentication |
+| `src/ext/authenticator_tests.rs` | The authenticator's own unit suite, split out at the 800-line limit | Changing an authenticator contract |
+| `src/ext/sigv2.rs` | `SigV2Authentication` and the SigV2 half of the built-in authenticator | A SigV2 client fails to authenticate |
 | `src/ext/authorizer.rs` | Two-stage authorization contract | Writing policy decisions |
 | `src/ext/authz_audit.rs` | Read-only decision audit sink | Recording authorization outcomes |
 | `src/ext/policy.rs` | One policy snapshot per request | Two stages disagree on policy |

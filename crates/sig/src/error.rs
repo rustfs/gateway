@@ -101,16 +101,35 @@ pub enum Unimplemented {
     SigV2,
     /// `STREAMING-AWS4-ECDSA-P256-SHA256-PAYLOAD[-TRAILER]`, the streaming form of SigV4a.
     StreamingSigV4a,
+    /// A SigV2 request declaring a framed (`aws-chunked`) payload.
+    ///
+    /// SigV2 has no streaming form: AWS never defined one, and the chunk signatures the framing
+    /// carries are SigV4 values. Refused rather than ignored, because ignoring the declaration
+    /// means the chunk headers are handed to the operation as if they were object bytes — a
+    /// declared thing nobody acts on, which is the defect shape this repository has recorded
+    /// seven times.
+    StreamingSigV2,
+}
+
+impl Unimplemented {
+    /// The sentence this refusal puts on the wire.
+    ///
+    /// A constant per variant, and the only thing [`crate::AuthError::message`] takes from a
+    /// `NotImplemented` rejection: nothing derived from the request may appear here.
+    #[must_use]
+    pub const fn message(&self) -> &'static str {
+        match self {
+            Self::SigV4a => "SigV4a (AWS4-ECDSA-P256-SHA256) is not implemented",
+            Self::SigV2 => "SigV2 is recognised and not implemented",
+            Self::StreamingSigV4a => "streaming SigV4a is not implemented",
+            Self::StreamingSigV2 => "SigV2 has no streaming payload form",
+        }
+    }
 }
 
 impl fmt::Display for Unimplemented {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let text = match self {
-            Self::SigV4a => "SigV4a (AWS4-ECDSA-P256-SHA256) is not implemented",
-            Self::SigV2 => "SigV2 is recognised and not implemented",
-            Self::StreamingSigV4a => "streaming SigV4a is not implemented",
-        };
-        f.write_str(text)
+        f.write_str(self.message())
     }
 }
 

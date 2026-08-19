@@ -479,6 +479,26 @@ fn c_sig_0538_the_authorization_grammar_is_exact() {
     assert!(parse_authorization(&format!("AWS key:{signature}")).is_ok());
 }
 
+/// Negative — c-sig-0580: the SigV2 access key id obeys the same character-set and length rule as
+/// SigV4's credential scope, in both directions.
+///
+/// The access key id is the one authentication value that legitimately reaches a log line and an
+/// audit record, which is why its character set is a rule rather than a formality. SigV2 used to
+/// check only for control characters and whitespace, so a non-ASCII or multi-kilobyte identifier
+/// could reach the credential store and whatever writes it down; `Identity::new` is the single
+/// place that rule lives and SigV2 now goes through it too.
+#[test]
+fn c_sig_0580_the_access_key_id_obeys_the_shared_identity_rule() {
+    let signature = "AAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+    let accented = format!("AWS AKIDEXAMPL\u{c9}:{signature}");
+    assert!(parse_authorization(&accented).is_err());
+    let over = format!("AWS {}:{signature}", "A".repeat(129));
+    assert!(parse_authorization(&over).is_err());
+    // The other direction, so the rule is a boundary and not a blanket refusal.
+    let at_limit = format!("AWS {}:{signature}", "A".repeat(128));
+    assert!(parse_authorization(&at_limit).is_ok());
+}
+
 /// Negative — c-sig-0539: a wrong signature does not verify, first byte or last.
 #[test]
 fn c_sig_0539_a_wrong_signature_never_verifies() {

@@ -9025,10 +9025,10 @@ mut_sig_p2_04_startup_posture_sigv2_switch_removed() {
 from pathlib import Path
 path = Path("crates/gateway/src/posture.rs")
 text = path.read_text()
-old = "    let sigv2 = match floor.sigv2_presigned() {"
+old = "    let sigv2_policy = floor.sigv2_policy().as_str();"
 if text.count(old) != 1:
     raise SystemExit("missing startup posture SigV2 mutation subject")
-path.write_text(text.replace(old, "    let sigv2 = match SigV2Presigned::Disabled {", 1))
+path.write_text(text.replace(old, '    let sigv2_policy = "HeaderOnly";', 1))
 PYEOF
 }
 expect_fail check_sig_case_coverage.sh \
@@ -9068,10 +9068,10 @@ mut_sig_p2_04_startup_posture_format_dropped_field() {
 from pathlib import Path
 path = Path("crates/gateway/src/posture.rs")
 text = path.read_text()
-old = '        "SECURITY_POSTURE anonymous_reachable_ops=[{}] custom_verifier={custom_verifier} sigv2={sigv2} presigned_allowed_ops=[{}] aws_signature_verifier={aws_signature_verifier}",'
+old = '        "SECURITY_POSTURE anonymous_reachable_ops=[{}] custom_verifier={custom_verifier} sigv2_policy={sigv2_policy} presigned_allowed_ops=[{}] aws_signature_verifier={aws_signature_verifier}",'
 if text.count(old) != 1:
     raise SystemExit("missing startup posture format mutation subject")
-new = '        // "SECURITY_POSTURE anonymous_reachable_ops=[{}] custom_verifier={custom_verifier} sigv2={sigv2} presigned_allowed_ops=[{}] aws_signature_verifier={aws_signature_verifier}",\n        "SECURITY_POSTURE anonymous_reachable_ops=[{}] custom_verifier={custom_verifier} sigv2={sigv2} presigned_allowed_ops=[{}]",'
+new = '        // "SECURITY_POSTURE anonymous_reachable_ops=[{}] custom_verifier={custom_verifier} sigv2_policy={sigv2_policy} presigned_allowed_ops=[{}] aws_signature_verifier={aws_signature_verifier}",\n        "SECURITY_POSTURE anonymous_reachable_ops=[{}] custom_verifier={custom_verifier} sigv2_policy={sigv2_policy} presigned_allowed_ops=[{}]",'
 path.write_text(text.replace(old, new, 1))
 PYEOF
 }
@@ -9274,10 +9274,10 @@ mut_sig_p2_04_dry_run_output_dropped_field() {
 from pathlib import Path
 path = Path("xtask/src/security_posture.rs")
 text = path.read_text()
-old = '        "SECURITY_POSTURE anonymous_reachable_ops=[] custom_verifier=none sigv2=disabled presigned_allowed_ops=[{presigned}] aws_signature_verifier=built-in"'
+old = '        "SECURITY_POSTURE anonymous_reachable_ops=[] custom_verifier=none sigv2_policy=HeaderOnly presigned_allowed_ops=[{presigned}] aws_signature_verifier=built-in"'
 if text.count(old) != 1:
     raise SystemExit("missing dry-run output mutation subject")
-new = '        // "SECURITY_POSTURE anonymous_reachable_ops=[] custom_verifier=none sigv2=disabled presigned_allowed_ops=[{presigned}] aws_signature_verifier=built-in"\n        "SECURITY_POSTURE anonymous_reachable_ops=[] custom_verifier=none sigv2=disabled presigned_allowed_ops=[{presigned}]"'
+new = '        // "SECURITY_POSTURE anonymous_reachable_ops=[] custom_verifier=none sigv2_policy=HeaderOnly presigned_allowed_ops=[{presigned}] aws_signature_verifier=built-in"\n        "SECURITY_POSTURE anonymous_reachable_ops=[] custom_verifier=none sigv2_policy=HeaderOnly presigned_allowed_ops=[{presigned}]"'
 path.write_text(text.replace(old, new, 1))
 PYEOF
 }

@@ -73,7 +73,7 @@ fn dry_run(root: PathBuf) -> Result<String, String> {
         .collect::<Vec<_>>()
         .join(",");
     Ok(format!(
-        "SECURITY_POSTURE anonymous_reachable_ops=[] custom_verifier=none sigv2=disabled presigned_allowed_ops=[{presigned}] aws_signature_verifier=built-in"
+        "SECURITY_POSTURE anonymous_reachable_ops=[] custom_verifier=none sigv2_policy=HeaderOnly presigned_allowed_ops=[{presigned}] aws_signature_verifier=built-in"
     ))
 }
 
