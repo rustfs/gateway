@@ -59,3 +59,4 @@ c-sig-0577|negative|crates/gateway/tests/sigv2_runtime.rs|fn c_sig_0577_an_elaps
 c-sig-0578|negative|crates/gateway/tests/sigv2_runtime.rs|fn c_sig_0578_a_sigv2_request_declaring_a_framed_payload_is_refused|assert_eq!(reached.load(Ordering::SeqCst), 0
 c-sig-0579|negative|crates/gateway/tests/sigv2_runtime.rs|fn c_sig_0579_an_unknown_sigv2_access_key_is_refused|assert_eq!(reached.load(Ordering::SeqCst), 0
 c-sig-0580|negative|crates/sig/tests/sig_v2.rs|fn c_sig_0580_the_access_key_id_obeys_the_shared_identity_rule|assert!(parse_authorization(&over).is_err());
+c-sig-0581|negative|crates/gateway/tests/sigv2_runtime.rs|fn c_sig_0581_an_authenticator_without_a_sigv2_override_refuses|assert_eq!(reached.load(Ordering::SeqCst), 0)

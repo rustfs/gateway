@@ -37,7 +37,9 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use bytes::Bytes;
-use rustfs_gateway::{ClockSkewAck, S3Service, SecurityFloor};
+use rustfs_gateway::{
+    Authentication, AuthenticationOutcome, Authenticator, BoxFuture, ClockSkewAck, S3Service, SecurityFloor, Unavailable, Verdict,
+};
 use rustfs_gateway_sig::sig_v2::{SigV2Mode, SigV2Policy, SigV2Signer, SigV2StringToSignSpec};
 use rustfs_gateway_sig::{RawQuery, percent_encode};
 use support::{Ping, exchange, ping_route, wired};
@@ -124,6 +126,24 @@ fn with_authorization(request: http::Request<Bytes>, value: &str) -> http::Reque
         .headers
         .insert(http::header::AUTHORIZATION, http::HeaderValue::from_str(value).expect("a header value"));
     http::Request::from_parts(parts, body)
+}
+
+/// An authenticator written before SigV2 existed: it implements the one required method and does
+/// **not** override the SigV2 entry point.
+///
+/// This is the shape the refusing default exists for. A default that authenticated, or that
+/// produced an anonymous verdict, would silently turn every such deployment into one that accepts
+/// unverified SigV2 requests.
+struct SigV4Only;
+
+impl Authenticator for SigV4Only {
+    fn authenticate<'a>(&'a self, _request: &'a Authentication<'a>) -> BoxFuture<'a, Result<AuthenticationOutcome, Unavailable>> {
+        Box::pin(async {
+            Ok(AuthenticationOutcome::ordinary(Verdict::reject(
+                rustfs_gateway_sig::AuthError::SignatureDoesNotMatch,
+            )))
+        })
+    }
 }
 
 // ── positive ───────────────────────────────────────────────────────────────────────────────────
@@ -336,5 +356,33 @@ async fn c_sig_0579_an_unknown_sigv2_access_key_is_refused() {
     let (status, body) = exchange(&service, with_authorization(dated_v2(), &authorization)).await;
     assert_eq!(status, http::StatusCode::FORBIDDEN, "{body}");
     assert!(body.contains("<Code>InvalidAccessKeyId</Code>"), "{body}");
+    assert_eq!(reached.load(Ordering::SeqCst), 0);
+}
+
+/// Negative — c-sig-0581: an authenticator that does not override the SigV2 entry point refuses
+/// the request rather than letting it through.
+///
+/// The trait's default is the whole safety argument for adding a method to a trait deployments
+/// already implement: an implementation written before SigV2 existed keeps compiling and answers
+/// `501`. This case is what stops that default from being quietly widened — a default that
+/// authenticated would make every such deployment accept unverified SigV2.
+#[tokio::test]
+async fn c_sig_0581_an_authenticator_without_a_sigv2_override_refuses() {
+    let reached = Arc::new(AtomicUsize::new(0));
+    let service = rustfs_gateway::ServiceBuilder::new()
+        .authenticator(SigV4Only)
+        .authorizer(rustfs_gateway::allow_when(|_| true))
+        .clock_with_skew_ack(
+            support::fixed_clock(),
+            ClockSkewAck::i_understand_a_skewed_clock_can_disable_signature_expiry(),
+        )
+        .register::<Ping, _>(Arc::new(support::CountingBackend::new(&reached)))
+        .route(ping_route())
+        .build()
+        .expect("a complete assembly");
+
+    let (status, body) = exchange(&service, dated_v2()).await;
+    assert_eq!(status, http::StatusCode::NOT_IMPLEMENTED, "{body}");
+    assert!(body.contains("SigV2 is recognised and not implemented"), "{body}");
     assert_eq!(reached.load(Ordering::SeqCst), 0);
 }
