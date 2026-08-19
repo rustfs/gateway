@@ -340,7 +340,7 @@ Direction violations are hard-blocked by `scripts/check_layer_dependencies.sh` (
 
 | Path | Why | Read this instead |
 | --- | --- | --- |
-| `generated/**`, and its second name `crates/types/generated/**` | Generated code at s3s scale: `dto/generated.rs` alone is 39,374 lines, all `generated.rs` files total 73,019. Once 70k lines of it are in context, every `grep ETag` returns hundreds of noise hits and you can no longer locate anything. The second path is the ADR-0005 symlink onto `generated/dto` — same files, same rule | `OPERATIONS.md` for operation shapes |
+| `generated/**`, and its second name `crates/types/generated/**` | Generated code at s3s scale: `dto/generated.rs` alone is 39,374 lines, all `generated.rs` files total 73,019. Once 70k lines of it are in context, every `grep ETag` returns hundreds of noise hits and you can no longer locate anything. The second path is the ADR-0005 symlink onto `generated/dto` — same files, same rule One exception, and it is stated rather than assumed: `generated/ERROR_CODES.md` is 113 rows written for a reader, and reading it costs less than reading the overlay it is rendered from | `OPERATIONS.md` for operation shapes, `generated/ERROR_CODES.md` for a wire error code |
 | `model/s3.json` | 3MB. One read consumes the entire session budget | `spec/operations/*.toml`, which is generated from it |
 | `Cargo.lock` | Large and information-free | `cargo tree -p <crate> -e normal` |
 
