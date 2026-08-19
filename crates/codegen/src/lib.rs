@@ -31,6 +31,7 @@
 
 pub mod emit;
 pub mod golden;
+pub mod mutate;
 pub mod semantic;
 pub mod why;
 
@@ -224,9 +225,44 @@ pub struct Artifacts {
 
 /// Loads the model and the overlays, lowers, and renders every artefact in memory.
 pub fn generate(input: &CodegenInput, out: &CodegenOutput) -> Result<Artifacts> {
+    generate_mutated(input, out, &[])
+}
+
+/// Renders every artefact from a lowered IR with `mutations` written into it first.
+///
+/// This is the whole of what makes a mutation run a measurement rather than an opinion: the
+/// mutation is applied to the same IR document code generation consumes, so whatever the mutated
+/// artefacts do is what the built gateway does. Nothing on disk is touched — the caller decides
+/// whether to write the result, and is responsible for putting the unmutated bytes back.
+///
+/// Each write is read back afterwards through [`emit::quirk_toml::resolve_at`], the reader that
+/// produced the current value in the first place. A writer that silently addressed a different
+/// field would otherwise produce a run in which every mutant survives, which is indistinguishable
+/// from a corpus that checks nothing.
+///
+/// # Errors
+///
+/// Returns [`Error::Policy`] when a mutation names a path that does not resolve, replaces a value
+/// that is not the one found there, or does not read back as written.
+pub fn generate_mutated(input: &CodegenInput, out: &CodegenOutput, mutations: &[mutate::Mutation]) -> Result<Artifacts> {
     let model = Model::load(&input.model)?;
     let overlay = Overlay::load(&input.overlays)?;
-    let lowered = lower(&model, &overlay)?;
+    let mut lowered = lower(&model, &overlay)?;
+    for mutation in mutations {
+        mutate::apply::apply(&mut lowered.operations, mutation)
+            .map_err(|message| Error::Policy(format!("quirk `{}`: {message}", mutation.quirk)))?;
+        match emit::quirk_toml::resolve_at(&lowered.operations, &mutation.path) {
+            Ok(written) if written == mutation.to => {}
+            found => {
+                return Err(Error::Policy(format!(
+                    "quirk `{}`: source `{}` does not read back as the {:?} it was written; the reader \
+                     answered {found:?}",
+                    mutation.quirk, mutation.path, mutation.to
+                )));
+            }
+        }
+    }
+    let lowered = lowered;
 
     let mut files: Vec<(PathBuf, String)> = Vec::new();
     let mut resolved_source_rules = BTreeMap::new();

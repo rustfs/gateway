@@ -28,6 +28,8 @@ mod ir;
 #[cfg(feature = "full")]
 mod model;
 #[cfg(feature = "full")]
+mod mutate;
+#[cfg(feature = "full")]
 mod new_op;
 #[cfg(feature = "full")]
 mod operation_spec_guard;
@@ -153,6 +155,9 @@ commands:
   bootstrap                 prepare a fresh checkout for work (<=5 minutes)
   conformance <run|validate|baseline> [--filter <glob>] [--transport hyper|conn]
               [--profile aws|minio|strict] [--baseline <f>] [--json <f>] [--junit <f>]
+  conformance mutate (--family <name> | --quirk <id>) [--filter <glob>]
+                            flip each declared mutable rule of a family in turn and report which
+                            case caught it
 ";
 
 /// Shells out to the conformance binary.
@@ -161,6 +166,13 @@ commands:
 /// same here as they are for an outside implementation.
 #[cfg(feature = "full")]
 fn conformance(args: Vec<String>) -> ExitCode {
+    // `mutate` is the one conformance subcommand that cannot be the suite's own: it regenerates
+    // the tree, rebuilds the gateway and runs the suite as a child, which is exactly the
+    // repository automation the suite must not know about to stay runnable against a foreign
+    // server.
+    if args.first().map(String::as_str) == Some("mutate") {
+        return mutate::command(&args[1..]);
+    }
     let mut cmd = std::process::Command::new(env!("CARGO"));
     cmd.args([
         "run",

@@ -44,6 +44,8 @@ and the zero-diff gate needs no temporary directory.
 | `src/emit/runtime_contracts/cors.rs` | Bucket-CORS half of `generated/contracts.rs`. | A CORS policy needs a core runtime constant. |
 | `src/emit/runtime_contracts/select_restore.rs` | Select/restore half of `generated/contracts.rs`. | A SelectObjectContent or RestoreObject policy needs a core runtime constant. |
 | `src/emit/codec/expr.rs` | One IR type to one Rust expression, in each direction. Every conversion is a call into `rustfs-gateway-core`'s `codec::value`, never inline logic. | You are adding a scalar to the IR. |
+| `src/mutate.rs` | The one alternative value each mutation dimension admits, plus the quirk id to overlay family index the kill matrix selects by. | A rule's planned flip is wrong, or a dimension needs a planned mutation. |
+| `src/mutate/apply.rs` | The writer for the mutation-source path grammar `emit/quirk_toml.rs` reads, refusing to write over a value the plan did not record. | A mutation must reach an IR field the writer has no arm for. |
 | `src/golden.rs` | The structural diff behind the sample comparison: objects as maps, arrays as sequences, records matched by `name` or `id`, string lists as sets plus an order note. | A golden difference report is noisy or misleading. |
 | `src/semantic.rs` | The wire-dimension diff for a PR body: operations, route selectors, optionality, bindings, types, XML, error codes. | `generated/` moved by more than 200 lines and the PR needs a summary. |
 | `src/why.rs` | Reverse tracing from a quirk id, operation, error code, header or query key to the evidence behind it — with nearest-candidate suggestions when nothing matches. | Someone asks "why is this behaviour like this?", or you are adding a lookup namespace. |
@@ -56,6 +58,7 @@ cargo xtask codegen        # regenerate everything, print the run report and the
 cargo xtask codegen --diff # the semantic summary between the working tree and a fresh run
 cargo xtask spec verify    # the zero-diff gate; also runs as a unit test
 cargo xtask why <target>   # quirk id, operation, error code, header or query key
+cargo xtask conformance mutate --family <name>   # flip each mutable rule and report what caught it
 ```
 
 ## Things that will bite you

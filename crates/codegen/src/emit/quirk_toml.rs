@@ -67,6 +67,18 @@ pub fn resolve_sources(operations: &[OperationIr], rule: &SourceRule) -> Result<
     rule.sources.iter().map(|path| resolve_source(operations, path)).collect()
 }
 
+/// Reads the value one mutation source path names, without the path echoed back.
+///
+/// The mutation writer needs the reader's answer to prove it is about to overwrite the value the
+/// ledger recorded rather than a value the two have drifted apart on.
+///
+/// # Errors
+///
+/// Returns the reason when the path names nothing resolvable.
+pub fn resolve_at(operations: &[OperationIr], path: &str) -> Result<SourceValue, String> {
+    resolve_source(operations, path).map(|resolved| resolved.current)
+}
+
 fn resolve_source(operations: &[OperationIr], path: &str) -> Result<ResolvedSource, String> {
     let parts: Vec<&str> = path.split('.').collect();
     let operation_name = parts.first().copied().ok_or_else(|| "empty mutation source".to_owned())?;
