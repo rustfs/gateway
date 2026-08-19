@@ -7559,6 +7559,56 @@ PYEOF
 expect_fail check_sig_case_coverage.sh \
     'c-sig-0019 evidence being disabled at its statement boundary' mut_sig_family_evidence_disabled_by_cfg
 
+# P3-01 wire case coverage (rustfs/backlog#1689). Three failure modes, one mutation each: a mapping
+# can be deleted, it can point at a function nobody wrote, and the assertion it points at can be
+# replaced by something that reads like an assertion and cannot fail.
+mut_wire_case_mapping_deleted() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("scripts/check_wire_case_coverage.sh")
+text = path.read_text()
+line = next((line for line in text.splitlines(True) if line.lstrip().startswith("'c-wire-0021|")), None)
+if line is None:
+    raise SystemExit("missing wire mapping mutation subject")
+path.write_text(text.replace(line, "", 1))
+PYEOF
+}
+expect_fail_self_mutation check_wire_case_coverage.sh \
+    'one of the 39 wire acceptance mappings being deleted' mut_wire_case_mapping_deleted
+
+mut_wire_case_function_missing() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("scripts/check_wire_case_coverage.sh")
+text = path.read_text()
+old = "c_wire_0021_repeated_transfer_encoding_is_rejected"
+if old not in text:
+    raise SystemExit("missing wire function mutation subject")
+path.write_text(text.replace(old, "c_wire_0021_a_function_nobody_wrote", 1))
+PYEOF
+}
+expect_fail_self_mutation check_wire_case_coverage.sh \
+    'a wire mapping naming a function that does not exist' mut_wire_case_function_missing
+
+mut_wire_case_assertion_is_a_decoy() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/http/tests/framing_smuggling.rs")
+text = path.read_text()
+old = "    assert_eq!(reject, WireReject::TransferEncodingMalformed);\n}"
+new = (
+    "    // assert_eq!(reject, WireReject::TransferEncodingMalformed);\n"
+    '    let decoy = "assert_eq!(reject, WireReject::TransferEncodingMalformed);";\n'
+    "    let _ = (reject, decoy);\n}"
+)
+if old not in text:
+    raise SystemExit("missing wire decoy mutation subject")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_wire_case_coverage.sh \
+    'a commented-out assertion and a string of it standing in for wire evidence' mut_wire_case_assertion_is_a_decoy
+
 mut_sig_compile_char_decoy() {
     python3 - <<'PYEOF'
 from pathlib import Path
