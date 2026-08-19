@@ -394,6 +394,7 @@ fn refuses_a_status_that_is_not_an_http_status() {
     assert!(message.contains("42") && message.contains("NoSuchKey"), "{message}");
 }
 
+/// c-err-1011 — the acceptance id rustfs/backlog#1694 §7 gives this rule.
 #[test]
 fn refuses_a_row_without_a_status() {
     let sandbox = Sandbox::new("no-status");

@@ -209,6 +209,7 @@ fn an_unconfigured_subresource_has_its_own_code() {
 
 // ── negative ─────────────────────────────────────────────────────────────────────────────────
 
+/// c-param-1001 — the acceptance id rustfs/backlog#1694 §7 gives this rule.
 /// The headline: a missing required parameter is a `400`, not a `501`.
 #[test]
 fn a_missing_required_query_parameter_is_a_400_not_a_501() {
@@ -226,6 +227,7 @@ fn a_missing_required_query_parameter_is_a_400_not_a_501() {
     );
 }
 
+/// c-param-1001 — the acceptance id rustfs/backlog#1694 §7 gives this rule.
 /// Routing still happened: the operation is known, which is why the error can be specific.
 #[test]
 fn the_route_still_resolves_when_a_required_parameter_is_missing() {
@@ -265,6 +267,7 @@ fn a_required_parameter_declaring_an_out_of_band_status_cannot_be_registered() {
     assert_eq!(*param, "content-length");
 }
 
+/// c-route-1005 — the acceptance id rustfs/backlog#1694 §7 gives this rule.
 /// The two `501`s call for opposite actions, so they must not read the same.
 #[test]
 fn the_two_not_implemented_messages_are_different() {
@@ -290,6 +293,7 @@ fn the_two_not_implemented_messages_are_different() {
     assert_eq!(unregistered.operation(), Some("DeleteObject"));
 }
 
+/// c-route-1004 — the acceptance id rustfs/backlog#1694 §7 gives this rule.
 /// The unrouted message must be actionable: the usual cause is an unconfigured vhost domain.
 #[test]
 fn the_unrouted_message_says_what_to_check() {
@@ -299,6 +303,7 @@ fn the_unrouted_message_says_what_to_check() {
     );
 }
 
+/// c-param-1002 — the acceptance id rustfs/backlog#1694 §7 gives this rule.
 /// Nothing in a pre-authentication error may come from the request.
 #[test]
 fn a_missing_parameter_error_echoes_nothing_from_the_request() {
@@ -387,6 +392,7 @@ fn registering_an_operation_twice_is_refused() {
     assert!(matches!(error, RegistryError::Duplicate { .. }), "got {error}");
 }
 
+/// c-route-1005 — the acceptance id rustfs/backlog#1694 §7 gives this rule.
 /// An empty registry routes everything and handles nothing — every answer is the second `501`.
 #[test]
 fn an_empty_registry_answers_the_second_not_implemented() {
