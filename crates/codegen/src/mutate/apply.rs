@@ -21,7 +21,7 @@
 //!
 //! # Why the current value is re-checked here
 //!
-//! [`crate::emit::quirk_toml::resolve_source`] is the reader for this grammar and this is its
+//! [`crate::emit::quirk_toml::resolve_at`] is the reader for this grammar and this is its
 //! writer, so the two can drift: a path that reads one field and writes another produces a mutation
 //! run in which every mutant survives, which reads exactly like a corpus with no coverage. Refusing
 //! to write unless the value found is the value the plan recorded turns that drift into an error
