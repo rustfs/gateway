@@ -57,7 +57,7 @@ pub struct S3Error {
     status: StatusCode,
     body_policy: BodyPolicy,
     message: Option<std::borrow::Cow<'static, str>>,
-    resource: Option<String>,
+    resource: Option<Box<str>>,
     etag: Option<ETag>,
     connection: ConnectionIntent,
     extras: Option<Box<Extras>>,
@@ -175,7 +175,7 @@ impl From<ErrorResolution> for S3Error {
             message: resolution
                 .message()
                 .map(|message| std::borrow::Cow::Owned(message.to_owned())),
-            resource: resolution.resource().map(str::to_owned),
+            resource: resolution.resource().map(Box::from),
             etag: resolution.etag().cloned(),
             connection: ConnectionIntent::MayKeepAlive,
             extras,
@@ -221,17 +221,17 @@ pub(crate) fn from_pre_auth(error: PreAuthError, response: ResponseKind) -> S3Er
 }
 
 pub(crate) fn from_auth(error: AuthError, response: ResponseKind) -> S3Error {
-    // A comparison failure is deliberately collapsed into the unknown-key response. Keeping
-    // the internal variants distinct lets the verifier test its state machine without making
-    // the access-key store observable on the wire.
-    //
-    // Authentication has its own connection policy; it is neither wire nor chunk rejection.
+    // A comparison failure is deliberately collapsed into the unknown-key response. Keeping the
+    // internal variants distinct lets the verifier test its state machine without making the
+    // access-key store observable on the wire. Authentication has its own connection policy; it is
+    // neither wire nor chunk rejection. Every `AuthError::code()` spelling has a row in the error
+    // status authority — `check_error_status_total.sh` reads the arms — so `known` cannot miss.
     let (code, message) = if error == AuthError::SignatureDoesNotMatch {
         (ErrorCode::INVALID_ACCESS_KEY_ID, AuthError::InvalidAccessKeyId.message())
     } else if error == AuthError::AuthorizationHeaderMalformed {
         (ErrorCode::ACCESS_DENIED, "the request was not authenticated")
     } else {
-        (ErrorCode::custom(error.code()), error.message())
+        (ErrorCode::known(error.code()).unwrap_or(ErrorCode::ACCESS_DENIED), error.message())
     };
     from_handler(HandlerError::new(code, message), response, crate::close::after_auth_failure(&error))
 }

@@ -45,6 +45,12 @@ impl Sandbox {
         // The route overlay is required to exist: a missing authority is a failure, never an
         // empty declaration set. A fixture with no cross-precedence overlap declares none.
         sandbox.write(ROUTE_FILE, "# no reviewed cross-precedence overlap in this fixture\n");
+        // The error-status authority is required for the same reason, and one row is enough for a
+        // test that is about something else.
+        sandbox.write(
+            "error-status.toml",
+            "[[code]]\nname = \"NoSuchKey\"\nconstant = \"NO_SUCH_KEY\"\nstatus = 404\n",
+        );
         // Both directories must hold at least one family file, so every sandbox starts with the
         // one that is not the subject of the test.
         sandbox.write("quirks/base.toml", &quirk("q-base-0001", "c-base-0001"));
@@ -308,4 +314,162 @@ fn refuses_a_missing_quirks_directory() {
 
     let message = load_error(&sandbox);
     assert!(message.contains("quirks"), "{message}");
+}
+
+// ── The error code to HTTP status authority ───────────────────────────────────────────────────
+//
+// Every case below is a shape that would put a status nobody chose onto the wire. The positive
+// one is last on purpose: what matters about this file is what it refuses.
+
+/// The `ops/` file every error-status sandbox needs, so that a refusal is about the authority.
+fn minimal_ops() -> &'static str {
+    "include = [\"Alpha\"]\n\n[op.Alpha]\nprecedence = 100\n"
+}
+
+#[test]
+fn refuses_one_error_code_declared_twice() {
+    let sandbox = Sandbox::new("code-twice");
+    sandbox.write("ops/alpha.toml", minimal_ops()).write(
+        "error-status.toml",
+        "[[code]]\nname = \"NoSuchKey\"\nconstant = \"NO_SUCH_KEY\"\nstatus = 404\n\n\
+         [[code]]\nname = \"NoSuchKey\"\nconstant = \"MISSING_KEY\"\nstatus = 400\n",
+    );
+
+    let message = load_error(&sandbox);
+    assert!(message.contains("NoSuchKey") && message.contains("NO_SUCH_KEY"), "{message}");
+    assert!(message.contains("MISSING_KEY"), "{message}");
+}
+
+#[test]
+fn refuses_one_constant_declared_twice() {
+    let sandbox = Sandbox::new("constant-twice");
+    sandbox.write("ops/alpha.toml", minimal_ops()).write(
+        "error-status.toml",
+        "[[code]]\nname = \"NoSuchKey\"\nconstant = \"NO_SUCH_KEY\"\nstatus = 404\n\n\
+         [[code]]\nname = \"NoSuchThing\"\nconstant = \"NO_SUCH_KEY\"\nstatus = 404\n",
+    );
+
+    let message = load_error(&sandbox);
+    assert!(message.contains("NO_SUCH_KEY"), "{message}");
+    assert!(message.contains("NoSuchThing"), "{message}");
+}
+
+#[test]
+fn refuses_a_5xx_row_that_did_not_declare_itself_a_server_fault() {
+    // The digit that turns a 400 into a 500 is one keystroke, and the consequence is an SDK
+    // retrying a request that cannot succeed. The flag is what a typo cannot also write.
+    let sandbox = Sandbox::new("unflagged-5xx");
+    sandbox.write("ops/alpha.toml", minimal_ops()).write(
+        "error-status.toml",
+        "[[code]]\nname = \"InvalidArgument\"\nconstant = \"INVALID_ARGUMENT\"\nstatus = 500\n",
+    );
+
+    let message = load_error(&sandbox);
+    assert!(message.contains("InvalidArgument") && message.contains("server_fault"), "{message}");
+}
+
+#[test]
+fn refuses_a_server_fault_flag_on_a_client_error() {
+    // The other direction: a flag that outlives the status it described would quietly widen the
+    // allowlist for whatever row inherits it next.
+    let sandbox = Sandbox::new("flagged-4xx");
+    sandbox.write("ops/alpha.toml", minimal_ops()).write(
+        "error-status.toml",
+        "[[code]]\nname = \"InvalidArgument\"\nconstant = \"INVALID_ARGUMENT\"\nstatus = 400\nserver_fault = true\n",
+    );
+
+    let message = load_error(&sandbox);
+    assert!(message.contains("InvalidArgument") && message.contains("server_fault"), "{message}");
+}
+
+#[test]
+fn refuses_a_status_that_is_not_an_http_status() {
+    let sandbox = Sandbox::new("nonsense-status");
+    sandbox.write("ops/alpha.toml", minimal_ops()).write(
+        "error-status.toml",
+        "[[code]]\nname = \"NoSuchKey\"\nconstant = \"NO_SUCH_KEY\"\nstatus = 42\n",
+    );
+
+    let message = load_error(&sandbox);
+    assert!(message.contains("42") && message.contains("NoSuchKey"), "{message}");
+}
+
+#[test]
+fn refuses_a_row_without_a_status() {
+    let sandbox = Sandbox::new("no-status");
+    sandbox
+        .write("ops/alpha.toml", minimal_ops())
+        .write("error-status.toml", "[[code]]\nname = \"NoSuchKey\"\nconstant = \"NO_SUCH_KEY\"\n");
+
+    let message = load_error(&sandbox);
+    assert!(message.contains("status"), "{message}");
+}
+
+#[test]
+fn refuses_a_constant_that_is_not_a_rust_constant_name() {
+    let sandbox = Sandbox::new("bad-constant");
+    sandbox.write("ops/alpha.toml", minimal_ops()).write(
+        "error-status.toml",
+        "[[code]]\nname = \"NoSuchKey\"\nconstant = \"no_such_key\"\nstatus = 404\n",
+    );
+
+    let message = load_error(&sandbox);
+    assert!(message.contains("no_such_key"), "{message}");
+}
+
+#[test]
+fn refuses_an_authority_with_no_rows() {
+    let sandbox = Sandbox::new("no-rows");
+    sandbox
+        .write("ops/alpha.toml", minimal_ops())
+        .write("error-status.toml", "# nothing at all\n");
+
+    let message = load_error(&sandbox);
+    assert!(message.contains("[[code]]"), "{message}");
+}
+
+#[test]
+fn refuses_per_operation_keys_in_the_authority() {
+    let sandbox = Sandbox::new("authority-op");
+    sandbox.write("ops/alpha.toml", minimal_ops()).write(
+        "error-status.toml",
+        "[[code]]\nname = \"NoSuchKey\"\nconstant = \"NO_SUCH_KEY\"\nstatus = 404\n\n\
+         [op.Alpha]\nprecedence = 1\n",
+    );
+
+    let message = load_error(&sandbox);
+    assert!(
+        message.contains("error-status.toml") && message.contains("ops/<family>.toml"),
+        "{message}"
+    );
+}
+
+#[test]
+fn refuses_a_note_line_that_is_blank() {
+    let sandbox = Sandbox::new("blank-note");
+    sandbox.write("ops/alpha.toml", minimal_ops()).write(
+        "error-status.toml",
+        "[[code]]\nname = \"NoSuchKey\"\nconstant = \"NO_SUCH_KEY\"\nstatus = 404\nnote = [\"a line\", \"  \"]\n",
+    );
+
+    let message = load_error(&sandbox);
+    assert!(message.contains("NoSuchKey") && message.contains("note"), "{message}");
+}
+
+#[test]
+fn loads_a_well_formed_authority_in_declaration_order() {
+    let sandbox = Sandbox::new("authority-ok");
+    sandbox.write("ops/alpha.toml", minimal_ops()).write(
+        "error-status.toml",
+        "[[code]]\nname = \"NoSuchKey\"\nconstant = \"NO_SUCH_KEY\"\nstatus = 404\nnote = [\"Only when listable.\"]\n\n\
+         [[code]]\nname = \"InternalError\"\nconstant = \"INTERNAL_ERROR\"\nstatus = 500\nserver_fault = true\n",
+    );
+
+    let overlay = Overlay::load(sandbox.path()).expect("a well-formed authority loads");
+    let names: Vec<&str> = overlay.error_status.iter().map(|row| row.name.as_str()).collect();
+    assert_eq!(names, vec!["NoSuchKey", "InternalError"]);
+    assert_eq!(overlay.error_status[0].status, 404);
+    assert_eq!(overlay.error_status[0].note, vec!["Only when listable.".to_owned()]);
+    assert!(!overlay.error_status[0].server_fault);
+    assert!(overlay.error_status[1].server_fault);
 }

@@ -25,6 +25,7 @@
 //! Upstream: `generated/ir/AbortMultipartUpload.json`, `spec/operations/AbortMultipartUpload.toml`. Downstream:
 //! `crate::codec::ops`.
 
+use rustfs_gateway_types::ErrorCode;
 use rustfs_gateway_types::TimestampFormat;
 use rustfs_gateway_types::dto;
 use rustfs_gateway_types::ops::abort_multipart_upload::Input;
@@ -44,7 +45,7 @@ impl OperationCodec for dto::AbortMultipartUpload {
             let raw = raw.as_ref();
             input.upload_id = raw.to_owned();
         } else {
-            return Err(value::missing("InvalidArgument", "UploadId"));
+            return Err(value::missing(ErrorCode::INVALID_ARGUMENT, "UploadId"));
         }
         // RequestPayer — header `x-amz-request-payer`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-request-payer") {

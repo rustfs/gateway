@@ -1,0 +1,728 @@
+# Copyright 2026 RustFS Team
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+
+# The error code -> HTTP status authority: the one hand-written place this mapping exists.
+#
+# `generated/error_status.rs` is rendered from this file and is the only table the runtime reads,
+# so `rustfs-gateway-types::ErrorCode` cannot hold a second opinion about a status. Before
+# rustfs/backlog#1694 the table was hand-written Rust and an unlisted code silently took a 400
+# fallback; the fallback is gone, `ErrorCode::custom` now demands a status from its caller, and a
+# code an operation can produce but this file does not list is a `check_error_status_total.sh`
+# failure rather than a plausible-looking 400.
+#
+# It is deliberately NOT sharded per operation family, for the same reason `scalars.toml` is not:
+# `NoSuchKey` means one status whichever family raises it, so two families holding two answers is
+# not a merge to resolve, it is a contradiction, and one file is the cheapest way to make it
+# impossible.
+#
+# Every row:
+#   name         the wire spelling, as it appears in the `<Code>` element
+#   constant     the associated constant on `ErrorCode`; `grep` finds the use sites from here
+#   status       the HTTP status, as an integer, because the wire carries an integer
+#   server_fault required on every 5xx row and refused on every other row. This is the whole 5xx
+#                allowlist: a 5xx tells an SDK to retry and trips its circuit breaker, so a client
+#                error that lands in the 5xx band is amplified into an outage
+#   note         optional rustdoc lines, verbatim, for a row whose status reads wrong at a glance
+#
+# A code with no use site yet is listed in `allowances/error-status-unreferenced.txt`; that file is
+# the dead-code ledger, and an entry in it that HAS a use site is also a guard failure.
+
+# ── 3xx ───────────────────────────────────────────────────────────────────────────────────
+[[code]]
+name = "PermanentRedirect"
+constant = "PERMANENT_REDIRECT"
+status = 301
+note = [
+  "Path-style request for a bucket in another region; the response also carries",
+  "`x-amz-bucket-region` so the client can retry without a second lookup.",
+]
+
+[[code]]
+name = "TemporaryRedirect"
+constant = "TEMPORARY_REDIRECT"
+status = 307
+note = [
+  "A newly created bucket whose virtual-hosted DNS name has not propagated yet. Temporary by",
+  "definition, so the client must not cache it.",
+]
+
+[[code]]
+name = "NotModified"
+constant = "NOT_MODIFIED"
+status = 304
+note = [
+  "A precondition matched on a read: the response carries an `ETag` and no body at all, not",
+  "even a `Content-Length`.",
+]
+
+
+# ── 400 ───────────────────────────────────────────────────────────────────────────────────
+[[code]]
+name = "AmbiguousGrantByEmailAddress"
+constant = "AMBIGUOUS_GRANT_BY_EMAIL_ADDRESS"
+status = 400
+
+[[code]]
+name = "AuthorizationHeaderMalformed"
+constant = "AUTHORIZATION_HEADER_MALFORMED"
+status = 400
+note = [
+  "The signing region in the credential scope does not match the bucket's region. The error",
+  "body carries an extra `<Region>` element, which is why error bodies are not a fixed shape.",
+]
+
+[[code]]
+name = "AuthorizationQueryParametersError"
+constant = "AUTHORIZATION_QUERY_PARAMETERS_ERROR"
+status = 400
+
+[[code]]
+name = "BadDigest"
+constant = "BAD_DIGEST"
+status = 400
+note = ["`Content-MD5` was well formed but did not match the body."]
+
+[[code]]
+name = "CredentialsNotSupported"
+constant = "CREDENTIALS_NOT_SUPPORTED"
+status = 400
+
+[[code]]
+name = "EntityTooSmall"
+constant = "ENTITY_TOO_SMALL"
+status = 400
+note = ["An upload part below the 5 MiB minimum, in a position other than the last."]
+
+[[code]]
+name = "EntityTooLarge"
+constant = "ENTITY_TOO_LARGE"
+status = 400
+note = [
+  "An object beyond the size limit. Note this is a 400 and not the 413 the status name would",
+  "suggest.",
+]
+
+[[code]]
+name = "ExpiredToken"
+constant = "EXPIRED_TOKEN"
+status = 400
+
+[[code]]
+name = "IllegalVersioningConfigurationException"
+constant = "ILLEGAL_VERSIONING_CONFIGURATION"
+status = 400
+
+[[code]]
+name = "IncompleteBody"
+constant = "INCOMPLETE_BODY"
+status = 400
+note = ["Fewer body bytes arrived than `Content-Length` promised."]
+
+[[code]]
+name = "IncorrectNumberOfFilesInPostRequest"
+constant = "INCORRECT_NUMBER_OF_FILES_IN_POST_REQUEST"
+status = 400
+
+[[code]]
+name = "InlineDataTooLarge"
+constant = "INLINE_DATA_TOO_LARGE"
+status = 400
+
+[[code]]
+name = "InvalidArgument"
+constant = "INVALID_ARGUMENT"
+status = 400
+
+[[code]]
+name = "InvalidBucketName"
+constant = "INVALID_BUCKET_NAME"
+status = 400
+
+[[code]]
+name = "InvalidChunkSizeError"
+constant = "INVALID_CHUNK_SIZE"
+status = 400
+
+[[code]]
+name = "InvalidDigest"
+constant = "INVALID_DIGEST"
+status = 400
+note = ["`Content-MD5` was not valid base64 of sixteen bytes."]
+
+[[code]]
+name = "InvalidEncryptionAlgorithmError"
+constant = "INVALID_ENCRYPTION_ALGORITHM"
+status = 400
+
+[[code]]
+name = "InvalidLocationConstraint"
+constant = "INVALID_LOCATION_CONSTRAINT"
+status = 400
+
+[[code]]
+name = "InvalidPart"
+constant = "INVALID_PART"
+status = 400
+
+[[code]]
+name = "InvalidPartNumber"
+constant = "INVALID_PART_NUMBER"
+status = 400
+
+[[code]]
+name = "InvalidPartOrder"
+constant = "INVALID_PART_ORDER"
+status = 400
+
+[[code]]
+name = "InvalidPolicyDocument"
+constant = "INVALID_POLICY_DOCUMENT"
+status = 400
+
+[[code]]
+name = "InvalidRequest"
+constant = "INVALID_REQUEST"
+status = 400
+note = ["The general-purpose rejection, and the fallback for a code with no table row."]
+
+[[code]]
+name = "InvalidRetentionPeriod"
+constant = "INVALID_RETENTION_PERIOD"
+status = 400
+
+[[code]]
+name = "InvalidSOAPRequest"
+constant = "INVALID_SOAP_REQUEST"
+status = 400
+
+[[code]]
+name = "InvalidStorageClass"
+constant = "INVALID_STORAGE_CLASS"
+status = 400
+
+[[code]]
+name = "InvalidTag"
+constant = "INVALID_TAG"
+status = 400
+
+[[code]]
+name = "InvalidTargetBucketForLogging"
+constant = "INVALID_TARGET_BUCKET_FOR_LOGGING"
+status = 400
+
+[[code]]
+name = "InvalidToken"
+constant = "INVALID_TOKEN"
+status = 400
+
+[[code]]
+name = "InvalidURI"
+constant = "INVALID_URI"
+status = 400
+
+[[code]]
+name = "KeyTooLongError"
+constant = "KEY_TOO_LONG"
+status = 400
+
+[[code]]
+name = "MalformedACLError"
+constant = "MALFORMED_ACL"
+status = 400
+
+[[code]]
+name = "MalformedPolicy"
+constant = "MALFORMED_POLICY"
+status = 400
+
+[[code]]
+name = "MalformedPOSTRequest"
+constant = "MALFORMED_POST_REQUEST"
+status = 400
+
+[[code]]
+name = "MalformedXML"
+constant = "MALFORMED_XML"
+status = 400
+
+# ── SelectObjectContent's own codes ───────────────────────────────────────────────────────
+
+# Twelve codes that belong to one operation, listed here rather than left to the fallback for
+# a reason the fallback cannot serve: a code with no row is *rendered*, so an implementation
+# that answered `CSVParsingError` without a row would answer the fallback status and read as
+# correct. Every one is a 400 — the request described data the server could not read the way
+# the request said it was written — and none is a 5xx: the object is fine, the description of
+# it is not. When this crate raises them is a separate question and the answer is "never":
+# parsing an expression and reading a record are the storage side's, and these rows exist so
+# that side can express what it found.
+[[code]]
+name = "CSVParsingError"
+constant = "CSV_PARSING_ERROR"
+status = 400
+
+[[code]]
+name = "ExpressionTooLong"
+constant = "EXPRESSION_TOO_LONG"
+status = 400
+
+[[code]]
+name = "InvalidColumnIndex"
+constant = "INVALID_COLUMN_INDEX"
+status = 400
+
+[[code]]
+name = "InvalidCompressionFormat"
+constant = "INVALID_COMPRESSION_FORMAT"
+status = 400
+
+[[code]]
+name = "InvalidDataType"
+constant = "INVALID_DATA_TYPE"
+status = 400
+
+[[code]]
+name = "InvalidExpressionType"
+constant = "INVALID_EXPRESSION_TYPE"
+status = 400
+
+[[code]]
+name = "InvalidTextEncoding"
+constant = "INVALID_TEXT_ENCODING"
+status = 400
+
+[[code]]
+name = "JSONParsingError"
+constant = "JSON_PARSING_ERROR"
+status = 400
+
+[[code]]
+name = "ObjectSerializationConflict"
+constant = "OBJECT_SERIALIZATION_CONFLICT"
+status = 400
+
+[[code]]
+name = "OverMaxRecordSize"
+constant = "OVER_MAX_RECORD_SIZE"
+status = 400
+
+[[code]]
+name = "ParseUnexpectedToken"
+constant = "PARSE_UNEXPECTED_TOKEN"
+status = 400
+
+[[code]]
+name = "UnsupportedFunction"
+constant = "UNSUPPORTED_FUNCTION"
+status = 400
+
+[[code]]
+name = "MaxMessageLengthExceeded"
+constant = "MAX_MESSAGE_LENGTH_EXCEEDED"
+status = 400
+
+[[code]]
+name = "MaxPostPreDataLengthExceededError"
+constant = "MAX_POST_PRE_DATA_LENGTH_EXCEEDED"
+status = 400
+
+[[code]]
+name = "MetadataTooLarge"
+constant = "METADATA_TOO_LARGE"
+status = 400
+
+[[code]]
+name = "MissingRequestBodyError"
+constant = "MISSING_REQUEST_BODY"
+status = 400
+
+[[code]]
+name = "MissingSecurityElement"
+constant = "MISSING_SECURITY_ELEMENT"
+status = 400
+
+[[code]]
+name = "MissingSecurityHeader"
+constant = "MISSING_SECURITY_HEADER"
+status = 400
+
+[[code]]
+name = "NoLoggingStatusForKey"
+constant = "NO_LOGGING_STATUS_FOR_KEY"
+status = 400
+
+[[code]]
+name = "RequestIsNotMultiPartContent"
+constant = "REQUEST_IS_NOT_MULTIPART_CONTENT"
+status = 400
+
+[[code]]
+name = "RequestTimeout"
+constant = "REQUEST_TIMEOUT"
+status = 400
+note = ["The client stopped sending. A 400 rather than the 408 the name suggests."]
+
+[[code]]
+name = "TokenRefreshRequired"
+constant = "TOKEN_REFRESH_REQUIRED"
+status = 400
+
+[[code]]
+name = "TooManyBuckets"
+constant = "TOO_MANY_BUCKETS"
+status = 400
+
+[[code]]
+name = "UnexpectedContent"
+constant = "UNEXPECTED_CONTENT"
+status = 400
+
+[[code]]
+name = "UnresolvableGrantByEmailAddress"
+constant = "UNRESOLVABLE_GRANT_BY_EMAIL_ADDRESS"
+status = 400
+
+[[code]]
+name = "UserKeyMustBeSpecified"
+constant = "USER_KEY_MUST_BE_SPECIFIED"
+status = 400
+
+[[code]]
+name = "XAmzContentChecksumMismatch"
+constant = "X_AMZ_CONTENT_CHECKSUM_MISMATCH"
+status = 400
+note = [
+  "An `x-amz-checksum-*` value did not match the body. Distinct from `BadDigest`, which is the",
+  "`Content-MD5` failure; SDKs branch on the difference.",
+]
+
+[[code]]
+name = "XAmzContentSHA256Mismatch"
+constant = "X_AMZ_CONTENT_SHA256_MISMATCH"
+status = 400
+
+
+# Three codes `PutObject` declares and nothing had named, so each took the 400 fallback while
+# reading like a mapped row. Evidence: the S3 API error list and the PutObject reference at
+# https://docs.aws.amazon.com/AmazonS3/latest/API/ErrorResponses.html — my summary: all three
+# describe a request that contradicts the object it addresses, which is the client's mistake, so
+# they are 400s and not the 409 "conflict" reading their names invite.
+[[code]]
+name = "EncryptionTypeMismatch"
+constant = "ENCRYPTION_TYPE_MISMATCH"
+status = 400
+note = [
+  "The encryption the request asked for is not the encryption the existing object has. A 400,",
+  "not a 409: nothing is racing, the request simply describes a different object than the one",
+  "that is there.",
+]
+
+[[code]]
+name = "InvalidWriteOffset"
+constant = "INVALID_WRITE_OFFSET"
+status = 400
+note = ["An append whose write offset is not the object's current size."]
+
+[[code]]
+name = "TooManyParts"
+constant = "TOO_MANY_PARTS"
+status = 400
+note = ["More parts than the upload allows. A 400 rather than the 413 the name suggests."]
+
+# ── 403 ───────────────────────────────────────────────────────────────────────────────────
+[[code]]
+name = "AccessDenied"
+constant = "ACCESS_DENIED"
+status = 403
+
+[[code]]
+name = "AccessForbidden"
+constant = "ACCESS_FORBIDDEN"
+status = 403
+note = [
+  "`OPTIONS` against a bucket with no CORS configuration. A 403 with its own code rather than",
+  "a 404, so a browser preflight fails in a way the developer can diagnose.",
+]
+
+[[code]]
+name = "AccountProblem"
+constant = "ACCOUNT_PROBLEM"
+status = 403
+
+[[code]]
+name = "AllAccessDisabled"
+constant = "ALL_ACCESS_DISABLED"
+status = 403
+
+[[code]]
+name = "CrossLocationLoggingProhibited"
+constant = "CROSS_LOCATION_LOGGING_PROHIBITED"
+status = 403
+
+[[code]]
+name = "InvalidAccessKeyId"
+constant = "INVALID_ACCESS_KEY_ID"
+status = 403
+
+[[code]]
+name = "InvalidObjectState"
+constant = "INVALID_OBJECT_STATE"
+status = 403
+note = ["The object's storage class requires a restore first. A 403, not a 409."]
+
+[[code]]
+name = "InvalidPayer"
+constant = "INVALID_PAYER"
+status = 403
+
+[[code]]
+name = "InvalidSecurity"
+constant = "INVALID_SECURITY"
+status = 403
+
+[[code]]
+name = "NotSignedUp"
+constant = "NOT_SIGNED_UP"
+status = 403
+
+[[code]]
+name = "RequestTimeTooSkewed"
+constant = "REQUEST_TIME_TOO_SKEWED"
+status = 403
+
+[[code]]
+name = "SignatureDoesNotMatch"
+constant = "SIGNATURE_DOES_NOT_MATCH"
+status = 403
+
+
+# The two storage-tier codes `RestoreObject` and `CopyObject` declare. Evidence:
+# https://docs.aws.amazon.com/AmazonS3/latest/API/ErrorResponses.html — my summary: S3 answers both
+# with 403 Forbidden, which is the counterintuitive one, because neither is an authorization
+# failure and both read like a 409.
+[[code]]
+name = "ObjectAlreadyInActiveTierError"
+constant = "OBJECT_ALREADY_IN_ACTIVE_TIER"
+status = 403
+note = ["A restore for an object that is already in the active tier. A 403, not a 409."]
+
+[[code]]
+name = "ObjectNotInActiveTierError"
+constant = "OBJECT_NOT_IN_ACTIVE_TIER"
+status = 403
+note = ["A copy whose source is still in an archive tier. A 403, not a 409."]
+
+# ── 404 ───────────────────────────────────────────────────────────────────────────────────
+[[code]]
+name = "NoSuchBucket"
+constant = "NO_SUCH_BUCKET"
+status = 404
+
+[[code]]
+name = "NoSuchBucketPolicy"
+constant = "NO_SUCH_BUCKET_POLICY"
+status = 404
+
+[[code]]
+name = "NoSuchCORSConfiguration"
+constant = "NO_SUCH_CORS_CONFIGURATION"
+status = 404
+
+[[code]]
+name = "NoSuchKey"
+constant = "NO_SUCH_KEY"
+status = 404
+note = [
+  "Returned only when the caller may list the bucket; without that permission the existence of",
+  "the key is itself privileged and the answer is `AccessDenied`.",
+]
+
+[[code]]
+name = "NoSuchLifecycleConfiguration"
+constant = "NO_SUCH_LIFECYCLE_CONFIGURATION"
+status = 404
+
+[[code]]
+name = "NoSuchObjectLockConfiguration"
+constant = "NO_SUCH_OBJECT_LOCK_CONFIGURATION"
+status = 404
+
+[[code]]
+name = "NoSuchPublicAccessBlockConfiguration"
+constant = "NO_SUCH_PUBLIC_ACCESS_BLOCK_CONFIGURATION"
+status = 404
+
+[[code]]
+name = "NoSuchTagSet"
+constant = "NO_SUCH_TAG_SET"
+status = 404
+
+[[code]]
+name = "NoSuchUpload"
+constant = "NO_SUCH_UPLOAD"
+status = 404
+
+[[code]]
+name = "NoSuchVersion"
+constant = "NO_SUCH_VERSION"
+status = 404
+
+[[code]]
+name = "NoSuchWebsiteConfiguration"
+constant = "NO_SUCH_WEBSITE_CONFIGURATION"
+status = 404
+
+[[code]]
+name = "ObjectLockConfigurationNotFoundError"
+constant = "OBJECT_LOCK_CONFIGURATION_NOT_FOUND"
+status = 404
+
+[[code]]
+name = "ReplicationConfigurationNotFoundError"
+constant = "REPLICATION_CONFIGURATION_NOT_FOUND"
+status = 404
+
+[[code]]
+name = "ServerSideEncryptionConfigurationNotFoundError"
+constant = "SERVER_SIDE_ENCRYPTION_CONFIGURATION_NOT_FOUND"
+status = 404
+
+
+# The bare code the HEAD operations answer with. Evidence: the HeadObject and HeadBucket
+# references at https://docs.aws.amazon.com/AmazonS3/latest/API/API_HeadObject.html — my summary: a
+# HEAD carries no body, so the only thing that can distinguish "no such key" is the status, and S3
+# spells the code `NotFound` rather than `NoSuchKey` there.
+[[code]]
+name = "NotFound"
+constant = "NOT_FOUND"
+status = 404
+note = [
+  "What `HeadObject` and `HeadBucket` answer with instead of `NoSuchKey` or `NoSuchBucket`. A",
+  "HEAD response has no body to carry the code, so this row exists for the status and for the",
+  "code a client reconstructs from it.",
+]
+
+# ── 405 / 409 / 411 / 412 / 416 ───────────────────────────────────────────────────────────
+[[code]]
+name = "MethodNotAllowed"
+constant = "METHOD_NOT_ALLOWED"
+status = 405
+note = [
+  "The verb is not allowed on this resource. Distinct from `NotImplemented`, which means the",
+  "operation itself is unknown; conflating them hides routing bugs. A `GET` of a delete marker",
+  "by version id also lands here.",
+]
+
+[[code]]
+name = "BucketAlreadyExists"
+constant = "BUCKET_ALREADY_EXISTS"
+status = 409
+
+[[code]]
+name = "BucketAlreadyOwnedByYou"
+constant = "BUCKET_ALREADY_OWNED_BY_YOU"
+status = 409
+note = [
+  "Re-creating a bucket you already own. Historically a 200 in the original region, which is",
+  "why the status is context-sensitive rather than a plain table lookup.",
+]
+
+[[code]]
+name = "BucketNotEmpty"
+constant = "BUCKET_NOT_EMPTY"
+status = 409
+
+[[code]]
+name = "ConditionalRequestConflict"
+constant = "CONDITIONAL_REQUEST_CONFLICT"
+status = 409
+note = [
+  "Two conditional writes raced for the same key and this one lost. A 409 rather than a 412:",
+  "the precondition was true when it was evaluated, so the client is being told to retry, not",
+  "that its condition was false.",
+]
+
+[[code]]
+name = "InvalidBucketState"
+constant = "INVALID_BUCKET_STATE"
+status = 409
+
+[[code]]
+name = "OperationAborted"
+constant = "OPERATION_ABORTED"
+status = 409
+
+[[code]]
+name = "RestoreAlreadyInProgress"
+constant = "RESTORE_ALREADY_IN_PROGRESS"
+status = 409
+note = [
+  "A second restore for an object whose retrieval has not finished. A 409 and not a 202: the",
+  "request was not accepted, and a client that read one would stop polling.",
+]
+
+[[code]]
+name = "MissingContentLength"
+constant = "MISSING_CONTENT_LENGTH"
+status = 411
+note = [
+  "A `PUT` with no `Content-Length`. A 411, not a 400: the client must add the header, not fix",
+  "its parameters.",
+]
+
+[[code]]
+name = "PreconditionFailed"
+constant = "PRECONDITION_FAILED"
+status = 412
+
+[[code]]
+name = "InvalidRange"
+constant = "INVALID_RANGE"
+status = 416
+note = [
+  "The requested range cannot be satisfied at all. A range that merely runs past the end is",
+  "clamped and answered with 206 instead.",
+]
+
+
+# ── 5xx ───────────────────────────────────────────────────────────────────────────────────
+[[code]]
+name = "InternalError"
+constant = "INTERNAL_ERROR"
+status = 500
+server_fault = true
+note = [
+  "Reserved for genuine server faults. It is never a fallback: see",
+  "[`ErrorCode::default_status`].",
+]
+
+[[code]]
+name = "NotImplemented"
+constant = "NOT_IMPLEMENTED"
+status = 501
+server_fault = true
+note = ["The operation is not supported by this implementation at all."]
+
+[[code]]
+name = "ServiceUnavailable"
+constant = "SERVICE_UNAVAILABLE"
+status = 503
+server_fault = true
+
+[[code]]
+name = "SlowDown"
+constant = "SLOW_DOWN"
+status = 503
+server_fault = true
+note = ["The throttling signal SDKs treat as retryable with backoff."]

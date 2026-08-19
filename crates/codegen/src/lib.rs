@@ -218,6 +218,8 @@ pub struct Artifacts {
     pub source_rules: BTreeMap<String, Vec<emit::quirk_toml::ResolvedSource>>,
     /// Typed runtime contract inputs emitted for core consumers.
     pub contract_rules: BTreeMap<String, ContractRule>,
+    /// The error code to `ErrorCode` constant index, from the error-status authority.
+    pub error_codes: emit::error_status::Constants,
 }
 
 /// Loads the model and the overlays, lowers, and renders every artefact in memory.
@@ -295,9 +297,16 @@ pub fn generate(input: &CodegenInput, out: &CodegenOutput) -> Result<Artifacts> 
         out.generated_dir.join("error_codes.rs"),
         emit::rust_files::error_codes(&lowered.operations),
     ));
+    files.push((
+        out.generated_dir.join("error_status.rs"),
+        emit::error_status::render(&overlay.error_status).map_err(Error::Policy)?,
+    ));
+    let error_codes = emit::error_status::Constants::new(&overlay.error_status);
     let (dto_files, dto) = emit::dto::emit(&lowered.operations, &out.generated_dir).map_err(Error::Policy)?;
     files.extend(dto_files);
-    files.extend(emit::codec::emit(&lowered.operations, &overlay.codec_rules, &out.generated_dir).map_err(Error::Policy)?);
+    files.extend(
+        emit::codec::emit(&lowered.operations, &overlay.codec_rules, &error_codes, &out.generated_dir).map_err(Error::Policy)?,
+    );
     for required in out.required_external_files() {
         if !files.iter().any(|(path, _)| *path == required) {
             return Err(Error::Policy(format!(
@@ -317,6 +326,7 @@ pub fn generate(input: &CodegenInput, out: &CodegenOutput) -> Result<Artifacts> 
         codec_rules: overlay.codec_rules,
         source_rules: resolved_source_rules,
         contract_rules: overlay.contract_rules,
+        error_codes,
     })
 }
 

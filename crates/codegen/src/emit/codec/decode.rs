@@ -63,6 +63,7 @@ use rustfs_gateway_model::ir::{Binding, Field, OperationIr, Shape, Type};
 
 use super::{CodecRules, attribute_name, bounds, carried_as_attribute, expr, forms, media, tolerance};
 use crate::emit::dto::naming;
+use crate::emit::error_status::Constants;
 
 /// The default code for a required member the request did not carry.
 const DEFAULT_MISSING_CODE: &str = "InvalidArgument";
@@ -151,7 +152,7 @@ fn push_stmt(indent: usize, target: &str, expression: &str) -> String {
 }
 
 /// Renders the body of one operation's `decode`.
-pub fn body(ir: &OperationIr, rules: &CodecRules) -> Result<String, String> {
+pub fn body(ir: &OperationIr, rules: &CodecRules, codes: &Constants) -> Result<String, String> {
     let mut out = String::new();
     // Functional-update syntax rather than `Input::default()`: the fields are filled in one at a
     // time from bindings that may or may not fire, and `clippy::field_reassign_with_default`
@@ -173,7 +174,7 @@ pub fn body(ir: &OperationIr, rules: &CodecRules) -> Result<String, String> {
     // that refuses on its head must not have buffered a body first.
     let first_body_member = ir.input.iter().position(|field| field.binding == Binding::BodyXml);
     for (index, field) in ir.input.iter().enumerate() {
-        out.push_str(&one_field(ir, field, first_body_member == Some(index), rules)?);
+        out.push_str(&one_field(ir, field, first_body_member == Some(index), rules, codes)?);
     }
     if !ir.input.iter().any(uses_body) {
         out.push_str("        let _ = body;\n");
@@ -190,7 +191,13 @@ fn uses_body(field: &Field) -> bool {
 ///
 /// `open_document` is true for the first operation-level [`Binding::BodyXml`] member, which is
 /// the one that parses the request body into the `root` node its siblings then read from.
-fn one_field(ir: &OperationIr, field: &Field, open_document: bool, rules: &CodecRules) -> Result<String, String> {
+fn one_field(
+    ir: &OperationIr,
+    field: &Field,
+    open_document: bool,
+    rules: &CodecRules,
+    codes: &Constants,
+) -> Result<String, String> {
     let op = &ir.operation;
     let member = &field.name;
     let target = format!("input.{}", naming::field_name(member));
@@ -240,7 +247,7 @@ fn one_field(ir: &OperationIr, field: &Field, open_document: bool, rules: &Codec
             let _ = writeln!(out, "        if let Some(raw) = request.header(\"{wire}\") {{");
             let _ = writeln!(out, "            let raw = raw.as_ref();");
             out.push_str(&assign(12, &target, &assignment));
-            out.push_str(&otherwise(field, &target)?);
+            out.push_str(&otherwise(field, &target, codes)?);
         }
         Binding::Query => {
             let conversion = expr::from_wire(
@@ -256,7 +263,7 @@ fn one_field(ir: &OperationIr, field: &Field, open_document: bool, rules: &Codec
             let _ = writeln!(out, "        if let Some(raw) = request.query(\"{wire}\") {{");
             let _ = writeln!(out, "            let raw = raw.as_ref();");
             out.push_str(&assign(12, &target, &wrap(field, &conversion)));
-            out.push_str(&otherwise(field, &target)?);
+            out.push_str(&otherwise(field, &target, codes)?);
         }
         Binding::PrefixHeaders => match &field.ty {
             Type::Map { .. } => {
@@ -378,7 +385,7 @@ fn one_field(ir: &OperationIr, field: &Field, open_document: bool, rules: &Codec
 }
 
 /// The `else` arm of a header or query binding: a wire default, a refusal, or nothing.
-fn otherwise(field: &Field, target: &str) -> Result<String, String> {
+fn otherwise(field: &Field, target: &str, codes: &Constants) -> Result<String, String> {
     let member = &field.name;
     let mut out = String::new();
     match (&field.default, field.required) {
@@ -389,9 +396,9 @@ fn otherwise(field: &Field, target: &str) -> Result<String, String> {
             out.push_str("        }\n");
         }
         (None, true) => {
-            let code = field.missing_error.as_deref().unwrap_or(DEFAULT_MISSING_CODE);
+            let code = codes.path(field.missing_error.as_deref().unwrap_or(DEFAULT_MISSING_CODE))?;
             out.push_str("        } else {\n");
-            let _ = writeln!(out, "            return Err(value::missing(\"{code}\", \"{member}\"));");
+            let _ = writeln!(out, "            return Err(value::missing({code}, \"{member}\"));");
             out.push_str("        }\n");
         }
         (None, false) => out.push_str("        }\n"),

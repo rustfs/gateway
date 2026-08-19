@@ -70,3 +70,40 @@ async fn a_rendered_refusal_carries_the_client_message() {
         "the real service response does not carry its client message: {body}"
     );
 }
+
+/// Every `AuthError` spelling is a declared code, so the auth path never has to invent a status.
+///
+/// `render::from_auth` resolves `AuthError::code()` through `ErrorCode::known`, which returns
+/// `None` for a spelling the error-status authority does not declare. This is the proof the
+/// `unwrap_or(ACCESS_DENIED)` arm there is unreachable rather than a fallback in disguise: a
+/// variant answering an undeclared code fails here, not on the wire with a status nobody chose.
+/// The arm still answers `AccessDenied`, because 403 is the truthful answer for an authentication
+/// failure whatever spelling reached it — never a status invented for an unrecognised code.
+#[test]
+fn c_render_0001_every_auth_error_code_is_declared() {
+    use rustfs_gateway::ErrorCode;
+    use rustfs_gateway_sig::{AuthError, Unimplemented};
+
+    let all = [
+        AuthError::InvalidAccessKeyId,
+        AuthError::SignatureDoesNotMatch,
+        AuthError::AuthorizationHeaderMalformed,
+        AuthError::AccessDenied,
+        AuthError::RequestTimeTooSkewed,
+        AuthError::AuthorizationQueryParametersError,
+        AuthError::RequestExpired,
+        AuthError::NotImplemented(Unimplemented::SigV4a),
+    ];
+    // `AuthError` is `#[non_exhaustive]`, so an exhaustive match from this crate is impossible and
+    // this array cannot prove it covers the enum. The half it cannot do is done deterministically
+    // by `check_error_status_total.sh`, which reads every arm of `AuthError::code` in
+    // `crates/sig/src/verdict.rs` and refuses a spelling the authority does not declare.
+    for error in all {
+        let code = error.code();
+        assert!(
+            ErrorCode::known(code).is_some(),
+            "`{code}` is answered before authentication but `model/overlays/error-status.toml` \
+             declares no row for it"
+        );
+    }
+}

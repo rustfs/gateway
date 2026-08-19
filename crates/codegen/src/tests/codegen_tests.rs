@@ -400,8 +400,13 @@ fn unknown_xml_element_policy_reaches_the_generated_reader() {
             CodecValue::UnknownElementPolicy(UnknownElementPolicyValue::Reject);
     }
 
-    let files = crate::emit::codec::emit(&artifacts.operations, &artifacts.codec_rules, Path::new("generated"))
-        .expect("the mutated codec renders in memory");
+    let files = crate::emit::codec::emit(
+        &artifacts.operations,
+        &artifacts.codec_rules,
+        &artifacts.error_codes,
+        Path::new("generated"),
+    )
+    .expect("the mutated codec renders in memory");
     let put_acl = files
         .iter()
         .find(|(path, _)| path.to_string_lossy().ends_with("codec/ops/put_bucket_acl.rs"))

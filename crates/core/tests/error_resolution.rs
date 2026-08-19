@@ -27,11 +27,12 @@ use rustfs_gateway_types::{BucketName, ETag, ErrorCode, ObjectKey};
 
 #[test]
 fn c_err_n001_unknown_custom_code_is_a_client_error() {
-    let context = ErrorContext::ordinary(HandlerError::new(ErrorCode::custom("VendorSpecific"), "vendor refusal"))
-        .expect("the bounded identifier is valid");
+    let vendor = ErrorCode::custom("VendorSpecific", StatusCode::BAD_REQUEST);
+    let context =
+        ErrorContext::ordinary(HandlerError::new(vendor.clone(), "vendor refusal")).expect("the bounded identifier is valid");
     let resolution = resolve(context, ResponseKind::Other);
     assert_eq!(resolution.status(), StatusCode::BAD_REQUEST);
-    assert_eq!(resolution.code(), Some(&ErrorCode::custom("VendorSpecific")));
+    assert_eq!(resolution.code(), Some(&vendor));
 }
 
 #[test]
@@ -137,11 +138,20 @@ fn c_err_n010_cors_refusal_has_the_canonical_static_message() {
 }
 
 #[test]
-fn c_err_n011_unknown_codes_never_become_server_errors() {
-    for code in ["VendorSpecific", "AnotherVendorCode", "Z9"] {
-        let context = ErrorContext::ordinary(HandlerError::new(ErrorCode::custom(code.to_owned()), "vendor refusal"))
+fn c_err_n011_resolution_answers_the_status_the_custom_code_carries() {
+    // Resolution used to be the place a code with no table row acquired a status. It is not any
+    // more: the code arrives carrying one, and resolution neither promotes it into the 5xx band
+    // nor rewrites it downward.
+    for (code, status) in [
+        ("VendorSpecific", StatusCode::BAD_REQUEST),
+        ("AnotherVendorCode", StatusCode::CONFLICT),
+        ("Z9", StatusCode::FORBIDDEN),
+    ] {
+        let context = ErrorContext::ordinary(HandlerError::new(ErrorCode::custom(code.to_owned(), status), "vendor refusal"))
             .expect("the generated identifier is valid");
-        assert!(!resolve(context, ResponseKind::Other).status().is_server_error());
+        let resolution = resolve(context, ResponseKind::Other);
+        assert_eq!(resolution.status(), status, "{code}");
+        assert!(!resolution.status().is_server_error(), "{code}");
     }
 }
 

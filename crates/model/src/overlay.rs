@@ -43,12 +43,14 @@ use std::path::Path;
 use crate::error::{Error, Result};
 use crate::ir::{ChecksumAlgo, EmptyValue, Quirk};
 use crate::toml_lite::{self, Toml};
+use error_status::ERROR_STATUS_FILE;
 
 mod codec;
 mod codec_inputs;
 mod contract_values;
 mod cors_contract_inputs;
 mod cors_contract_values;
+mod error_status;
 mod mutation_dimension;
 mod naming_contract_inputs;
 mod precondition_contract_inputs;
@@ -73,6 +75,7 @@ pub use contract_values::{
     ValidatorAuthorityValue, ValidatorReplaceabilityValue,
 };
 pub use cors_contract_values::*;
+pub use error_status::ErrorStatus;
 pub use mutation_dimension::MutationDimension;
 pub use precondition_contract_values::*;
 pub use route::{ROUTE_FILE, ShadowingDecl};
@@ -96,6 +99,8 @@ pub struct Overlay {
     pub deferred: BTreeMap<String, String>,
     /// Smithy shape local name to IR scalar spelling.
     pub scalars: BTreeMap<String, String>,
+    /// The error code to HTTP status authority, in declaration order.
+    pub error_status: Vec<ErrorStatus>,
     /// Per-operation overrides.
     pub ops: BTreeMap<String, OpOverlay>,
     /// Per-shape overrides.
@@ -315,8 +320,8 @@ const OPS_DIR: &str = "ops";
 const QUIRKS_DIR: &str = "quirks";
 
 impl Overlay {
-    /// Loads an overlay directory: `scalars.toml`, then every `ops/*.toml`, then every
-    /// `quirks/*.toml`, merged in file-name order.
+    /// Loads an overlay directory: `scalars.toml` and `error-status.toml`, then every
+    /// `ops/*.toml`, then every `quirks/*.toml`, merged in file-name order.
     ///
     /// # Errors
     ///
@@ -327,6 +332,7 @@ impl Overlay {
     pub fn load(dir: &Path) -> Result<Self> {
         let mut overlay = Overlay::default();
         overlay.read_scalars(&dir.join(SCALARS_FILE))?;
+        overlay.read_error_status(&dir.join(ERROR_STATUS_FILE))?;
 
         let mut include_origin = Origins::new();
         let mut deferred_origin = Origins::new();
@@ -377,6 +383,14 @@ impl Overlay {
                 .ok_or_else(|| Error::Overlay(format!("scalar `{name}` must be a string")))?;
             self.scalars.insert(name.clone(), spelling.to_owned());
         }
+        Ok(())
+    }
+
+    /// Reads the error code to HTTP status authority; unsharded for the reason `scalars.toml` is.
+    fn read_error_status(&mut self, path: &Path) -> Result<()> {
+        let text = read(path)?;
+        let doc = toml_lite::parse(&path.display().to_string(), &text)?;
+        self.error_status = error_status::read(&doc)?;
         Ok(())
     }
 

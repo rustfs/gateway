@@ -53,7 +53,12 @@ if [[ "$BUILD_GUARDS_ONLY" != 0 && "$BUILD_GUARDS_ONLY" != 1 ]]; then
     printf 'test_guard_scripts: GATEWAY_GUARD_BUILD_GUARDS_ONLY must be 0 or 1\n' >&2
     exit 1
 fi
-if [[ $((QUIRK_LEDGER_ONLY + DTO_COMPILER_ONLY + BUILD_GUARDS_ONLY)) -gt 1 ]]; then
+ERROR_STATUS_ONLY="${GATEWAY_GUARD_ERROR_STATUS_ONLY:-0}"
+if [[ "$ERROR_STATUS_ONLY" != 0 && "$ERROR_STATUS_ONLY" != 1 ]]; then
+    printf 'test_guard_scripts: GATEWAY_GUARD_ERROR_STATUS_ONLY must be 0 or 1\n' >&2
+    exit 1
+fi
+if [[ $((QUIRK_LEDGER_ONLY + DTO_COMPILER_ONLY + BUILD_GUARDS_ONLY + ERROR_STATUS_ONLY)) -gt 1 ]]; then
     printf 'test_guard_scripts: mutation-only modes are mutually exclusive\n' >&2
     exit 1
 fi
@@ -229,14 +234,14 @@ guard_case_owned() {
     return 0
 }
 
-# guard_shard_plan <requested> <quirk-only> <dto-only> <build-only>
+# guard_shard_plan <requested> <quirk-only> <dto-only> <build-only> <error-status-only>
 # Pure: how many shards a run actually gets. The mode-scoped runs are already
 # minutes-scale, and the build-guard mode is the one whose cases compile, so it
-# is also the one that must keep CARGO_TARGET_DIR to itself. All three stay
+# is also the one that must keep CARGO_TARGET_DIR to itself. All four stay
 # single-process.
 guard_shard_plan() {
-    local requested="$1" quirk="$2" dto="$3" build="$4"
-    if ((quirk + dto + build > 0)); then
+    local requested="$1" quirk="$2" dto="$3" build="$4" error_status="${5:-0}"
+    if ((quirk + dto + build + error_status > 0)); then
         printf '1\n'
         return 0
     fi
@@ -437,7 +442,8 @@ if [[ -z "$GUARD_SHARD_COUNT" ]]; then
         exit 1
     fi
     GUARD_JOBS="$(guard_shard_plan \
-        "$GUARD_JOBS" "$QUIRK_LEDGER_ONLY" "$DTO_COMPILER_ONLY" "$BUILD_GUARDS_ONLY")"
+        "$GUARD_JOBS" "$QUIRK_LEDGER_ONLY" "$DTO_COMPILER_ONLY" "$BUILD_GUARDS_ONLY" \
+        "$ERROR_STATUS_ONLY")"
     # One worker is still a shard when the suite is split over runners: the group
     # filter and the coverage proof both live in run_guard_shards, so a single-worker
     # group must go through it rather than quietly running every other group's cases.
@@ -1346,7 +1352,7 @@ expect_fail check_macro_governance.sh \
     'crates/macros/Cargo.toml'
 fi
 
-if [[ "$QUIRK_LEDGER_ONLY" == 0 && "$DTO_COMPILER_ONLY" == 0 && "$BUILD_GUARDS_ONLY" == 0 ]]; then
+if [[ "$QUIRK_LEDGER_ONLY" == 0 && "$DTO_COMPILER_ONLY" == 0 && "$BUILD_GUARDS_ONLY" == 0 && "$ERROR_STATUS_ONLY" == 0 ]]; then
 printf 'Positive control (repository must be clean)\n'
 for guard in "${SCRIPT_DIR}"/check_*.sh; do
     grep -q '^# REQUIRES-PR$' "$guard" && continue
@@ -1368,9 +1374,11 @@ fi
 # -----------------------------------------------------------------------------
 # Negative cases
 # -----------------------------------------------------------------------------
+if [[ "$ERROR_STATUS_ONLY" == 0 ]]; then
 printf '\nNegative cases (guards must fail)\n'
+fi
 
-if [[ "$QUIRK_LEDGER_ONLY" == 0 && "$DTO_COMPILER_ONLY" == 0 && "$BUILD_GUARDS_ONLY" == 0 ]]; then
+if [[ "$QUIRK_LEDGER_ONLY" == 0 && "$DTO_COMPILER_ONLY" == 0 && "$BUILD_GUARDS_ONLY" == 0 && "$ERROR_STATUS_ONLY" == 0 ]]; then
 
 replace_template_text() {
     python3 - "$1" "$2" "$3" <<'PYEOF'
@@ -10602,7 +10610,7 @@ else
 fi
 rm -rf "$missing_tool_dir" "$missing_tool_count_dir"
 fi
-if [[ "$QUIRK_LEDGER_ONLY" == 0 && "$DTO_COMPILER_ONLY" == 0 && "$BUILD_GUARDS_ONLY" == 0 ]]; then
+if [[ "$QUIRK_LEDGER_ONLY" == 0 && "$DTO_COMPILER_ONLY" == 0 && "$BUILD_GUARDS_ONLY" == 0 && "$ERROR_STATUS_ONLY" == 0 ]]; then
 # check_stage_filter_sync.sh has four rules and each one gets its own negative
 # control, for the reason check_resolver_pure.sh's do: two of the three seams
 # run before the request has been authenticated, so "it cannot await", "it holds
@@ -12188,14 +12196,14 @@ expect_fail check_ci_test_split.sh \
     'the branch-protected Test check being renamed' mut_ci_required_name_changed
 
 mut_ci_aggregate_drops_guard() {
-    replace_ci_text 'needs: [workspace-tests, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, gateway-tsan]' \
+    replace_ci_text 'needs: [workspace-tests, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, error-status-self-test, gateway-tsan]' \
         'needs: [workspace-tests, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, gateway-tsan]'
 }
 expect_fail check_ci_test_split.sh \
     'the required Test check no longer waiting for guard mutations' mut_ci_aggregate_drops_guard
 
 mut_ci_aggregate_drops_target() {
-    replace_ci_text 'needs: [workspace-tests, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, gateway-tsan]' \
+    replace_ci_text 'needs: [workspace-tests, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, error-status-self-test, gateway-tsan]' \
         'needs: [workspace-tests, guard-self-test, quirk-ledger-self-test, dto-compiler-self-test, gateway-tsan]'
 }
 expect_fail check_ci_test_split.sh \
@@ -12203,7 +12211,7 @@ expect_fail check_ci_test_split.sh \
     mut_ci_aggregate_drops_target
 
 mut_ci_aggregate_drops_quirk_ledger() {
-    replace_ci_text 'needs: [workspace-tests, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, gateway-tsan]' \
+    replace_ci_text 'needs: [workspace-tests, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, error-status-self-test, gateway-tsan]' \
         'needs: [workspace-tests, guard-self-test, target-consolidation-self-test, dto-compiler-self-test, gateway-tsan]'
 }
 expect_fail check_ci_test_split.sh \
@@ -12211,7 +12219,7 @@ expect_fail check_ci_test_split.sh \
     mut_ci_aggregate_drops_quirk_ledger
 
 mut_ci_aggregate_drops_dto_compiler() {
-    replace_ci_text 'needs: [workspace-tests, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, gateway-tsan]' \
+    replace_ci_text 'needs: [workspace-tests, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, error-status-self-test, gateway-tsan]' \
         'needs: [workspace-tests, guard-self-test, target-consolidation-self-test, quirk-ledger-self-test, gateway-tsan]'
 }
 expect_fail check_ci_test_split.sh \
@@ -12219,12 +12227,54 @@ expect_fail check_ci_test_split.sh \
     mut_ci_aggregate_drops_dto_compiler
 
 mut_ci_aggregate_drops_build_guard() {
-    replace_ci_text 'needs: [workspace-tests, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, gateway-tsan]' \
+    replace_ci_text 'needs: [workspace-tests, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, error-status-self-test, gateway-tsan]' \
         'needs: [workspace-tests, guard-self-test, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, gateway-tsan]'
 }
 expect_fail check_ci_test_split.sh \
     'the required Test check no longer waiting for build-backed mutations' \
     mut_ci_aggregate_drops_build_guard
+
+mut_ci_aggregate_drops_error_status() {
+    replace_ci_text 'needs: [workspace-tests, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, error-status-self-test, gateway-tsan]' \
+        'needs: [workspace-tests, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, gateway-tsan]'
+}
+expect_fail check_ci_test_split.sh \
+    'the required Test check no longer waiting for error-status mutations' \
+    mut_ci_aggregate_drops_error_status
+
+mut_ci_error_status_result_ignored() {
+    replace_ci_text 'ERROR_STATUS_RESULT: ${{ needs.error-status-self-test.result }}' \
+        'ERROR_STATUS_RESULT: success'
+}
+expect_fail check_ci_test_split.sh \
+    'the aggregate check ignoring the error-status result' mut_ci_error_status_result_ignored
+
+mut_ci_error_status_comparison_dropped() {
+    replace_ci_text '          test "$ERROR_STATUS_RESULT" = success' '          true'
+}
+expect_fail check_ci_test_split.sh \
+    'the aggregate check never comparing the error-status result' mut_ci_error_status_comparison_dropped
+
+mut_ci_error_status_suite_is_a_no_op() {
+    replace_ci_text 'timeout 60s env GATEWAY_GUARD_ERROR_STATUS_ONLY=1 bash scripts/test_guard_scripts.sh' \
+        'timeout 60s true'
+}
+expect_fail check_ci_test_split.sh \
+    'the error-status mutation suite being replaced with a no-op' \
+    mut_ci_error_status_suite_is_a_no_op
+
+mut_ci_error_status_job_widens_budget() {
+    replace_ci_text '  error-status-self-test:
+    name: Error status self-test
+    runs-on: ubuntu-latest
+    timeout-minutes: 2' '  error-status-self-test:
+    name: Error status self-test
+    runs-on: ubuntu-latest
+    timeout-minutes: 9'
+}
+expect_fail check_ci_test_split.sh \
+    'the error-status job widening its two-minute budget' \
+    mut_ci_error_status_job_widens_budget
 
 mut_ci_aggregate_skips_on_failure() {
     replace_ci_text 'if: always()' 'if: success()'
@@ -12249,12 +12299,12 @@ expect_fail check_ci_test_split.sh \
 mut_ci_aggregate_budget_widened() {
     replace_ci_text '  test:
     name: Test
-    needs: [workspace-tests, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, gateway-tsan]
+    needs: [workspace-tests, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, error-status-self-test, gateway-tsan]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 1' '  test:
     name: Test
-    needs: [workspace-tests, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, gateway-tsan]
+    needs: [workspace-tests, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, error-status-self-test, gateway-tsan]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 2'
@@ -12512,7 +12562,7 @@ expect_fail check_ci_test_split.sh \
 
 fi
 
-if [[ "$QUIRK_LEDGER_ONLY" == 0 && "$DTO_COMPILER_ONLY" == 0 && "$BUILD_GUARDS_ONLY" == 0 ]]; then
+if [[ "$QUIRK_LEDGER_ONLY" == 0 && "$DTO_COMPILER_ONLY" == 0 && "$BUILD_GUARDS_ONLY" == 0 && "$ERROR_STATUS_ONLY" == 0 ]]; then
 mut_config_snapshot_case_identity_removed() {
     python3 - <<'PYEOF'
 import pathlib
@@ -13933,7 +13983,7 @@ QUIRK_LEDGER_PARSE_CACHE=""
 
 fi
 
-if [[ "$QUIRK_LEDGER_ONLY" == 0 && "$DTO_COMPILER_ONLY" == 0 && "$BUILD_GUARDS_ONLY" == 0 ]]; then
+if [[ "$QUIRK_LEDGER_ONLY" == 0 && "$DTO_COMPILER_ONLY" == 0 && "$BUILD_GUARDS_ONLY" == 0 && "$ERROR_STATUS_ONLY" == 0 ]]; then
 
 mut_dto_field_count_decreased() {
     python3 - <<'PYEOF'
@@ -14150,7 +14200,7 @@ expect_fail check_operation_spec_builder.sh \
 
 fi
 
-if [[ "$QUIRK_LEDGER_ONLY" == 0 && "$DTO_COMPILER_ONLY" == 0 && "$BUILD_GUARDS_ONLY" == 0 ]]; then
+if [[ "$QUIRK_LEDGER_ONLY" == 0 && "$DTO_COMPILER_ONLY" == 0 && "$BUILD_GUARDS_ONLY" == 0 && "$ERROR_STATUS_ONLY" == 0 ]]; then
 
 mut_handler_context_entry_removed() {
     python3 - <<'PYEOF'
@@ -15365,7 +15415,7 @@ mut_types_version_loses_model_date() {
 import pathlib
 
 path = pathlib.Path("crates/types/Cargo.toml")
-text = path.read_text().replace('version = "0.2.1+aws.2026-08-04"', 'version = "0.2.1"', 1)
+text = path.read_text().replace('version = "0.3.0+aws.2026-08-04"', 'version = "0.3.0"', 1)
 path.write_text(text)
 PYEOF
 }
@@ -15389,7 +15439,7 @@ mut_types_version_numeric_part_diverges() {
 import pathlib
 
 path = pathlib.Path("crates/types/Cargo.toml")
-text = path.read_text().replace('version = "0.2.1+aws.', 'version = "0.3.0+aws.', 1)
+text = path.read_text().replace('version = "0.3.0+aws.', 'version = "0.4.0+aws.', 1)
 path.write_text(text)
 PYEOF
 }
@@ -15442,6 +15492,8 @@ shard_case 'the DTO compiler mode never shards' \
     shard_plan_is 1 4 0 1 0
 shard_case 'the build-guard mode never shards, so the compiling cases keep CARGO_TARGET_DIR alone' \
     shard_plan_is 1 4 0 0 1
+shard_case 'the error-status mode never shards' \
+    shard_plan_is 1 4 0 0 0 1
 
 shard_of_is() {
     local expected="$1" fn="$2"
@@ -15574,6 +15626,237 @@ shard_case 'concurrent shards with private TMPDIRs never see each other sandbox 
     shard_sandbox_isolation_contract private
 shard_case 'one sandbox shared by concurrent shards loses a mutation, and the contract says so' \
     shard_sandbox_isolation_contract shared
+
+fi
+
+if [[ "$ERROR_STATUS_ONLY" == 1 ]]; then
+
+# -----------------------------------------------------------------------------
+# check_error_status_total.sh — rustfs/backlog#1694
+#
+# The guard replaces a fallback that could not fail: a code with no row used to take a silent 400.
+# Each rule is mutated separately, because one case would leave five of them as prose.
+#
+# Its own parallel runner, like the quirk-ledger, DTO-compiler and build-backed splits: the shared
+# mutation suite is already at its eight-minute ceiling on `main` before these cases exist, and a
+# case that is killed by a neighbour's budget produces no evidence at all. None of these mutations
+# runs codegen or Cargo, so the split costs one runner and about a minute.
+# -----------------------------------------------------------------------------
+
+printf 'Positive control (check_error_status_total.sh must pass on the current tree)\n'
+# The ordinal gate is what the group's coverage proof counts, so it is owed here exactly as it is
+# owed by `expect_fail`. A mode-scoped run is single-process, so it always owns the case — but a
+# site that skipped the gate would be indistinguishable from a duplicate to the proof.
+error_status_positive_control() {
+    cases=$((cases + 1))
+    guard_case_owned "$cases" || return 0
+    if "${SCRIPT_DIR}/check_error_status_total.sh" >/dev/null 2>&1; then
+        pass_msg 'check_error_status_total.sh'
+    else
+        fail_msg 'check_error_status_total.sh fails on the current tree'
+    fi
+}
+error_status_positive_control
+
+printf '\nNegative cases (the error-status guard must fail)\n'
+
+mut_error_status_declared_code_has_no_row() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("generated/error_codes.rs")
+text = path.read_text()
+old = 'pub static ERROR_CODE_OPERATIONS: &[(&str, &[&str])] = &[\n'
+if old not in text:
+    raise SystemExit("error-code index mutation subject is missing")
+path.write_text(text.replace(old, old + '    ("CodeNobodyGaveAStatus", &["GetObject"]),\n', 1))
+PYEOF
+}
+expect_fail check_error_status_total.sh \
+    'an operation declaring a code the status authority does not map' \
+    mut_error_status_declared_code_has_no_row \
+    'CodeNobodyGaveAStatus'
+
+mut_error_status_missing_error_has_no_row() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("spec/operations/PutObject.toml")
+text = path.read_text()
+old = 'missing_error = "MissingContentLength"'
+if old not in text:
+    raise SystemExit("missing_error mutation subject is missing")
+path.write_text(text.replace(old, 'missing_error = "CodecCodeWithNoStatus"', 1))
+PYEOF
+}
+expect_fail check_error_status_total.sh \
+    'a codec raising a missing-member code with no status row' \
+    mut_error_status_missing_error_has_no_row \
+    'CodecCodeWithNoStatus'
+
+mut_error_status_unflagged_5xx() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("model/overlays/error-status.toml")
+text = path.read_text()
+old = 'name = "InvalidArgument"\nconstant = "INVALID_ARGUMENT"\nstatus = 400'
+if old not in text:
+    raise SystemExit("5xx allowlist mutation subject is missing")
+path.write_text(text.replace(old, 'name = "InvalidArgument"\nconstant = "INVALID_ARGUMENT"\nstatus = 500', 1))
+PYEOF
+}
+expect_fail check_error_status_total.sh \
+    'a client error typed into the 5xx band without joining the allowlist' \
+    mut_error_status_unflagged_5xx \
+    'server_fault'
+
+mut_error_status_server_fault_on_a_client_error() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("model/overlays/error-status.toml")
+text = path.read_text()
+old = 'name = "InvalidArgument"\nconstant = "INVALID_ARGUMENT"\nstatus = 400'
+if old not in text:
+    raise SystemExit("server_fault mutation subject is missing")
+path.write_text(text.replace(old, old + '\nserver_fault = true', 1))
+PYEOF
+}
+expect_fail check_error_status_total.sh \
+    'a server-fault flag outliving the 5xx status it described' \
+    mut_error_status_server_fault_on_a_client_error \
+    'server_fault'
+
+mut_error_status_generated_table_edited() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("generated/error_status.rs")
+text = path.read_text()
+old = '    ("NoSuchKey", StatusCode::NOT_FOUND),'
+if old not in text:
+    raise SystemExit("generated status mutation subject is missing")
+path.write_text(text.replace(old, '    ("NoSuchKey", StatusCode::FORBIDDEN),', 1))
+PYEOF
+}
+expect_fail check_error_status_total.sh \
+    'the generated table answering a status the authority does not hold' \
+    mut_error_status_generated_table_edited \
+    'disagree about `NoSuchKey`'
+
+mut_error_status_custom_loses_its_status() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("crates/types/src/scalar/error_code.rs")
+text = path.read_text()
+old = 'pub fn custom(code: impl Into<Cow<\'static, str>>, status: StatusCode) -> Self {'
+if old not in text:
+    raise SystemExit("custom-signature mutation subject is missing")
+path.write_text(text.replace(old, 'pub fn custom(code: impl Into<Cow<\'static, str>>) -> Self {', 1))
+PYEOF
+}
+expect_fail check_error_status_total.sh \
+    'ErrorCode::custom going back to inventing a status for its caller' \
+    mut_error_status_custom_loses_its_status \
+    'name a status'
+
+mut_error_status_second_hand_written_table() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("crates/types/src/scalar/error_code.rs")
+text = path.read_text()
+old = 'use http::StatusCode;'
+if old not in text:
+    raise SystemExit("hand-written table mutation subject is missing")
+new = old + '\n\nconst SECOND_OPINION: StatusCode = StatusCode::BAD_REQUEST;'
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_error_status_total.sh \
+    'a second hand-written status growing back beside the generated table' \
+    mut_error_status_second_hand_written_table \
+    'second hand-written answer'
+
+mut_error_status_include_removed() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("crates/types/src/scalar/error_code.rs")
+text = path.read_text()
+old = 'include!("../../../../generated/error_status.rs");'
+if old not in text:
+    raise SystemExit("include mutation subject is missing")
+path.write_text(text.replace(old, '// ' + old, 1))
+PYEOF
+}
+expect_fail check_error_status_total.sh \
+    'the types crate no longer reading the generated table at all' \
+    mut_error_status_include_removed \
+    'no longer includes the generated table'
+
+mut_error_status_auth_code_undeclared() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("crates/sig/src/verdict.rs")
+text = path.read_text()
+old = 'Self::RequestTimeTooSkewed => "RequestTimeTooSkewed",'
+if old not in text:
+    raise SystemExit("auth-code mutation subject is missing")
+path.write_text(text.replace(old, 'Self::RequestTimeTooSkewed => "ClockIsWrongSomehow",', 1))
+PYEOF
+}
+expect_fail check_error_status_total.sh \
+    'an authentication refusal answering a code with no status row' \
+    mut_error_status_auth_code_undeclared \
+    'ClockIsWrongSomehow'
+
+mut_error_status_stale_allowance() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("allowances/error-status-unreferenced.txt")
+text = path.read_text()
+path.write_text(text + "NoSuchKey|a row the tree reaches every day\n")
+PYEOF
+}
+expect_fail check_error_status_total.sh \
+    'the dead-code ledger excusing a row that is reached' \
+    mut_error_status_stale_allowance \
+    'still excuses'
+
+mut_error_status_unlisted_dead_row() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("allowances/error-status-unreferenced.txt")
+text = path.read_text()
+old = "InvalidSOAPRequest|"
+if old not in text:
+    raise SystemExit("dead-row ledger mutation subject is missing")
+kept = [line for line in text.splitlines(keepends=True) if not line.startswith(old)]
+path.write_text("".join(kept))
+PYEOF
+}
+expect_fail check_error_status_total.sh \
+    'a row nothing reaches dropping off the dead-code ledger' \
+    mut_error_status_unlisted_dead_row \
+    'InvalidSOAPRequest'
+
+mut_error_status_authority_removed() {
+    python3 - <<'PYEOF'
+import pathlib
+
+pathlib.Path("model/overlays/error-status.toml").unlink()
+PYEOF
+}
+expect_fail check_error_status_total.sh \
+    'the authority file disappearing, which must fail rather than skip' \
+    mut_error_status_authority_removed \
+    'required input is missing'
 
 fi
 

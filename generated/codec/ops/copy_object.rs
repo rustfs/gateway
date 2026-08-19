@@ -25,6 +25,7 @@
 //! Upstream: `generated/ir/CopyObject.json`, `spec/operations/CopyObject.toml`. Downstream:
 //! `crate::codec::ops`.
 
+use rustfs_gateway_types::ErrorCode;
 use rustfs_gateway_types::EtagRender;
 use rustfs_gateway_types::TimestampFormat;
 use rustfs_gateway_types::dto;
@@ -78,7 +79,7 @@ impl OperationCodec for dto::CopyObject {
             let raw = raw.as_ref();
             input.copy_source = raw.to_owned();
         } else {
-            return Err(value::missing("InvalidArgument", "CopySource"));
+            return Err(value::missing(ErrorCode::INVALID_ARGUMENT, "CopySource"));
         }
         // CopySourceIfMatch — header `x-amz-copy-source-if-match`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-copy-source-if-match") {

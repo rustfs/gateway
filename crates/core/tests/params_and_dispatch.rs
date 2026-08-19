@@ -351,14 +351,20 @@ fn a_server_error_code_cannot_become_a_pre_auth_error() {
     }
 }
 
-/// A code with no table row falls back to `400`, never to a server error.
+/// A code with no table row carries the status its author named, and the pre-authentication
+/// surface stays closed against the 5xx band in both directions.
 #[test]
-fn an_unknown_code_falls_back_to_400_not_500() {
-    let code = ErrorCode::custom("SomethingNobodyModelled");
+fn an_unknown_code_carries_the_status_its_author_named() {
+    let code = ErrorCode::custom("SomethingNobodyModelled", StatusCode::BAD_REQUEST);
     assert!(!code.is_known());
     assert_eq!(code.default_status(), StatusCode::BAD_REQUEST);
     let error = PreAuthError::with_code(code, "static").expect("400 is reachable before authentication");
     assert_eq!(error.status(), StatusCode::BAD_REQUEST);
+
+    // The other direction: an undeclared code cannot smuggle a 5xx past the pre-authentication
+    // surface just because nobody wrote a row for it.
+    PreAuthError::with_code(ErrorCode::custom("SomethingNobodyModelled", StatusCode::INTERNAL_SERVER_ERROR), "static")
+        .expect_err("a 5xx is not reachable before authentication, declared or not");
 }
 
 /// `NotImplemented` for a routed-but-unhandled operation is not the same as `MethodNotAllowed`.

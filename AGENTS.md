@@ -150,6 +150,7 @@ match word for word.
 | `crates/core/tests/golden/route-table.txt` | The resolved route table, in order. A diff here means some request now reaches a different operation than it did before — the one change that cannot be reviewed by reading the code that caused it |
 
 | `model/overlays/**` | The only sanctioned hand-written protocol exception source. Quirks are hand-written, so they live here and **never** under the generated `spec/` tree |
+| `model/overlays/error-status.toml` | Error code → HTTP status. Externally observable API surface; clients branch on it, and SDK retry and circuit-breaker logic branches on the 4xx/5xx band. Listed separately from the glob above it because a status is not a quirk: it is the only overlay row whose change is visible to every client of every operation at once |
 | `spec/quirks/**` | Generated mutable protocol-rule table. Every entry names a typed current value and mutation dimension consumed by the mutation gate |
 | `spec/contracts/**` | Generated non-codec contract table. Every entry must bind to an independently mutable runtime or emitter consumer; this is not a mutation exemption |
 | `spec/third-party/aws-signing-test-suite.lock` | Reviewed smithy-rs signing-suite commit, license, tree identities, and complete v4/v4a case census |
@@ -162,7 +163,6 @@ proved, wired, or complete.
 
 | Path | Contract it encodes |
 | --- | --- |
-| The error-code → HTTP status mapping table | Externally observable API surface; clients branch on it |
 | The public API snapshot | Semver contract for `rustfs-gateway` and every `s3gate-*` crate |
 | Deletion of anything under `conformance/cases/**` | A deleted case is a silently dropped guarantee. Adding cases is unrestricted |
 

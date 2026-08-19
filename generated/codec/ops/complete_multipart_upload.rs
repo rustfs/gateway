@@ -25,6 +25,7 @@
 //! Upstream: `generated/ir/CompleteMultipartUpload.json`, `spec/operations/CompleteMultipartUpload.toml`. Downstream:
 //! `crate::codec::ops`.
 
+use rustfs_gateway_types::ErrorCode;
 use rustfs_gateway_types::EtagRender;
 use rustfs_gateway_types::dto;
 use rustfs_gateway_types::ops::complete_multipart_upload::Input;
@@ -52,7 +53,7 @@ impl OperationCodec for dto::CompleteMultipartUpload {
             let raw = raw.as_ref();
             input.upload_id = raw.to_owned();
         } else {
-            return Err(value::missing("InvalidArgument", "UploadId"));
+            return Err(value::missing(ErrorCode::INVALID_ARGUMENT, "UploadId"));
         }
         // ChecksumSpec — the one checksum header under `x-amz-checksum-`.
         input.checksum_spec = value::checksum_spec(request, "x-amz-checksum-", "ChecksumSpec")?;

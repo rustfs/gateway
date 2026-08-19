@@ -21,6 +21,7 @@
 
 pub mod codec;
 pub mod dto;
+pub mod error_status;
 pub mod naming_contracts;
 pub mod operations_json;
 pub mod operations_md;

@@ -41,14 +41,13 @@ use crate::codec::view::MetaView;
 /// The error a decoder raises for a required member the wire did not carry.
 ///
 /// The code is IR data — `PutObject.ContentLength` names `MissingContentLength` and nothing else
-/// does — so it arrives as a string from the overlay rather than being chosen here.
+/// does — so the generated call site names the constant rather than this function choosing one.
+/// It arrives resolved, not as a string: a wire spelling would have to be looked up here, in the
+/// request path, where a code the error-status authority does not declare has no status to be
+/// given. Codegen refuses to emit such a code at all, which turns that into a build failure.
 #[must_use]
-pub fn missing(code: &'static str, member: &'static str) -> CodecError {
-    CodecError::new(
-        rustfs_gateway_types::ErrorCode::custom(code),
-        "the request omits a member the wire contract requires",
-    )
-    .about(member)
+pub fn missing(code: ErrorCode, member: &'static str) -> CodecError {
+    CodecError::new(code, "the request omits a member the wire contract requires").about(member)
 }
 
 /// The error a decoder raises for a member that is present and unusable.
