@@ -436,6 +436,12 @@ proptest! {
     }
 
     /// c-route-1011, generated: no precedence ever matches twice.
+    ///
+    /// Structurally true while the fixture's precedences stay pairwise distinct, so it is not the
+    /// case's evidence — `route_table.rs`'s
+    /// `two_selectors_the_lattice_called_disjoint_never_both_match` and
+    /// `fuzz/fuzz_targets/route_disjoint.rs` state the property where it can fail. What this adds
+    /// is that a row sharing a precedence is caught by a generated request rather than by review.
     #[test]
     fn no_precedence_matches_twice_for_a_generated_request(
         (method, path, target, host, query, headers) in a_request()
