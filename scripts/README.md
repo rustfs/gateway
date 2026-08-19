@@ -124,7 +124,7 @@ fixed now so that the same check does not get written twice under two names.
 | `check_xtask_test_target_consolidation.sh` | All four xtask integration sources remain active and unique in one explicit Cargo target | P0 |
 | `check_sig_test_target_consolidation.sh` | All nine sig integration sources remain active and unique in one explicit Cargo target | P0 |
 | `check_no_host_normalize.sh` | Ring-1 server source never mutates Host or URI authority | P7-02 |
-| `check_timeout_layer_ownership.sh` | Server owns three of six idle-timeout layers; connection lifetime remains a separate safety valve | P3-05, P7-02 |
+| `check_timeout_layer_ownership.sh` | Server owns three of six idle-timeout layers; connection lifetime remains a separate safety valve; `c-lim-0061` keeps the write-progress layer's thousand-slow-reader closure, healthy p99 and resident-memory evidence executable | P3-05, P7-02 |
 | `check_tuning_doc.sh` | Every server tuning field documents both directions of its tradeoff | P7-02 |
 | `test_guard_scripts.sh` | Not a guard: runs every guard on the tree and asserts each one fails on an injected violation | P0 |
 | `test_handlers_facade_fixture.sh` | Not a guard: compiles a downstream Cargo fixture whose only dependency is `rustfs-gateway` | P4-01 |

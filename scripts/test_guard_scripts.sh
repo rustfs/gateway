@@ -5619,6 +5619,85 @@ PYEOF
 expect_fail check_timeout_layer_ownership.sh \
     'c-lim-0062 losing its healthy recovery direction' mut_server_c_lim_0062_recovery_removed
 
+mut_server_c_lim_0061_case_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/server/tests/server_load.rs")
+text = path.read_text()
+subject = "async fn c_lim_0061_a_srv_0026_one_thousand_slow_readers_close_without_starving_healthy_traffic() {"
+if text.count(subject) != 1:
+    raise SystemExit("c-lim-0061 test name is not unique")
+path.write_text(text.replace(subject, "async fn a_srv_0026_one_thousand_slow_readers_close() {", 1))
+PYEOF
+}
+expect_fail check_timeout_layer_ownership.sh \
+    'c-lim-0061 losing its executable load evidence' mut_server_c_lim_0061_case_removed
+
+mut_server_c_lim_0061_cfg_disabled() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/server/tests/server_load.rs")
+text = path.read_text()
+subject = (
+    '#[tokio::test(flavor = "multi_thread", worker_threads = 4)]\n'
+    "async fn c_lim_0061_a_srv_0026_one_thousand_slow_readers_close_without_starving_healthy_traffic() {"
+)
+if text.count(subject) != 1:
+    raise SystemExit("c-lim-0061 active test entry is not unique")
+path.write_text(text.replace(subject, "#[cfg(any())]\n" + subject, 1))
+PYEOF
+}
+expect_fail check_timeout_layer_ownership.sh \
+    'c-lim-0061 being disabled by cfg' mut_server_c_lim_0061_cfg_disabled
+
+mut_server_c_lim_0061_baseline_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/server/tests/server_load.rs")
+text = path.read_text()
+subject = "    let unloaded = probe_p99(local_addr, PROBES, PROBE_CEILING).await;\n"
+if text.count(subject) != 1:
+    raise SystemExit("c-lim-0061 unloaded latency baseline is not unique")
+replacement = "    let unloaded = Duration::from_millis(500);\n"
+path.write_text(text.replace(subject, replacement, 1))
+PYEOF
+}
+expect_fail check_timeout_layer_ownership.sh \
+    'c-lim-0061 replacing its unloaded latency reading with a constant' mut_server_c_lim_0061_baseline_removed
+
+mut_server_c_lim_0061_reuse_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/server/tests/server_load.rs")
+text = path.read_text()
+subject = "        second_growth <= reuse_ceiling,\n"
+if text.count(subject) != 1:
+    raise SystemExit("c-lim-0061 second-wave reuse assertion is not unique")
+path.write_text(text.replace(subject, "        second_growth <= usize::MAX,\n", 1))
+PYEOF
+}
+expect_fail check_timeout_layer_ownership.sh \
+    'c-lim-0061 losing its second-wave reuse direction' mut_server_c_lim_0061_reuse_removed
+
+mut_server_c_lim_0061_keep_alive_pulled_in() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/server/tests/server_load.rs")
+text = path.read_text()
+subject = "    config.keep_alive_idle = Duration::from_secs(60);\n"
+if text.count(subject) != 1:
+    raise SystemExit("c-lim-0061 distant keep-alive gap is not unique")
+path.write_text(text.replace(subject, "    config.keep_alive_idle = Duration::from_secs(1);\n", 1))
+PYEOF
+}
+expect_fail check_timeout_layer_ownership.sh \
+    'c-lim-0061 letting the keep-alive gap retire the readers instead' mut_server_c_lim_0061_keep_alive_pulled_in
+
 mut_server_connection_lifetime_removed() {
     python3 - <<'PYEOF'
 from pathlib import Path

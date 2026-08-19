@@ -22,6 +22,7 @@
 
 use std::convert::Infallible;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+#[cfg(target_os = "linux")]
 use std::process::Command;
 use std::time::Duration;
 
@@ -212,61 +213,6 @@ async fn a_srv_0006_in_flight_request_drains_before_grace() {
     let body = &response[body_start..];
     assert_eq!(body.len(), EXPECTED_BODY_LEN, "graceful shutdown drains the complete response body");
     assert!(body.iter().all(|byte| *byte == b'x'));
-    assert!(task.await.expect("server task joins").is_ok());
-}
-
-fn rss_bytes() -> Option<usize> {
-    let output = Command::new("ps")
-        .args(["-o", "rss=", "-p", &std::process::id().to_string()])
-        .output()
-        .ok()?;
-    let kibibytes = String::from_utf8(output.stdout).ok()?.trim().parse::<usize>().ok()?;
-    kibibytes.checked_mul(1024)
-}
-
-#[tokio::test]
-async fn a_srv_0008_one_thousand_connections_stay_inside_the_rss_budget() {
-    let RunningServer {
-        local_addr,
-        metrics,
-        task,
-        shutdown,
-    } = echo_server(plaintext_config());
-    let Some(before) = rss_bytes() else {
-        eprintln!("SKIP a-srv-0008: this runner cannot report RSS through ps");
-        let _ = shutdown.trigger(Duration::from_secs(1)).await;
-        let _ = task.await;
-        return;
-    };
-    let mut connections = Vec::with_capacity(1_000);
-    for index in 0..1_000 {
-        let mut stream = TcpStream::connect(local_addr).await.expect("connection succeeds");
-        if index % 10 == 0 {
-            stream
-                .write_all(b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n")
-                .await
-                .expect("mixed-load request writes");
-        } else if index % 10 == 1 {
-            stream
-                .write_all(b"GET / HTTP/1.1\r\nHost:")
-                .await
-                .expect("mixed slow header writes");
-        }
-        connections.push(stream);
-    }
-    tokio::time::timeout(Duration::from_secs(2), async {
-        while metrics.accepted_connections() < 1_000 {
-            tokio::task::yield_now().await;
-        }
-    })
-    .await
-    .expect("all connections are accepted");
-    let after = rss_bytes().expect("RSS remains readable");
-    let growth = after.saturating_sub(before);
-    let budget = rustfs_gateway_server::conn_memory_budget(1_000);
-    assert!(growth <= budget + budget / 2, "RSS growth {growth} exceeded the 1.5x budget");
-    drop(connections);
-    let _ = shutdown.trigger(Duration::from_secs(1)).await;
     assert!(task.await.expect("server task joins").is_ok());
 }
 
