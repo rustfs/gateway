@@ -35,7 +35,7 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 use rustfs_gateway_model::MutationDimension;
-use rustfs_gateway_model::ir::TimestampFormat;
+use rustfs_gateway_model::ir::{EmptyValue, TimestampFormat};
 use rustfs_gateway_model::toml_lite::{self, Toml};
 
 use crate::emit::quirk_toml::{ResolvedSource, SourceValue};
@@ -182,11 +182,14 @@ fn text_alternative(dimension: MutationDimension, value: &str, path: &str) -> st
             other => Err(format!("source `{path}` renders an entity tag as `{other}`, which has no known opposite")),
         },
         MutationDimension::TimeFormat => time_format_alternative(value, path),
-        MutationDimension::EmptyElementRender => match value {
-            "Emit" => Ok(SourceValue::Text("Omit".to_owned())),
-            "Omit" => Ok(SourceValue::Text("Emit".to_owned())),
-            other => Err(format!(
-                "source `{path}` renders an empty value as `{other}`, which has no known opposite"
+        // Spelled through the IR's own vocabulary rather than by hand: the spellings are lower case,
+        // and matching them capitalised made every empty-element rule unplannable while reading like
+        // a rule with no opposite.
+        MutationDimension::EmptyElementRender => match EmptyValue::parse(value) {
+            Some(EmptyValue::Emit) => Ok(SourceValue::Text(EmptyValue::Omit.as_str().to_owned())),
+            Some(EmptyValue::Omit) => Ok(SourceValue::Text(EmptyValue::Emit.as_str().to_owned())),
+            None => Err(format!(
+                "source `{path}` renders an empty value as `{value}`, which the IR does not define"
             )),
         },
         other => Err(format!(
