@@ -25,9 +25,6 @@
 
 use crate::SigParseError;
 
-/// Length of the base64 encoding of a 32-byte digest, padding included.
-const BASE64_SHA256_LEN: usize = 44;
-
 const BASE64_ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
 /// Decodes exactly `N * 2` lowercase hex characters into `N` bytes.
@@ -91,41 +88,69 @@ fn nibble_to_hex(nibble: u8) -> u8 {
     }
 }
 
-/// Decodes canonical standard base64 of a 32-byte SHA-256 digest.
+/// The number of base64 characters that encode `N` bytes, padding included.
+const fn base64_len(bytes: usize) -> usize {
+    bytes.div_ceil(3) * 4
+}
+
+/// The number of `=` characters that terminate the encoding of `N` bytes.
+const fn base64_padding(bytes: usize) -> usize {
+    (3 - bytes % 3) % 3
+}
+
+/// Decodes canonical standard base64 into exactly `N` bytes.
 ///
-/// Generic REST SigV4 signers put the payload checksum into `x-amz-content-sha256` in base64
-/// rather than hex (observed in s3s#631), so this form has to be accepted — but only in its one
-/// canonical spelling.
+/// Two widths use it today: 32 for a SHA-256 digest — generic REST SigV4 signers put the payload
+/// checksum into `x-amz-content-sha256` in base64 rather than hex (observed in s3s#631) — and 20
+/// for a SigV2 HMAC-SHA1 signature.
 ///
 /// Rejected, each for a concrete reason:
 ///
-/// * any length other than 44 characters — the digest is fixed at 32 bytes;
-/// * the URL-safe alphabet (`-`/`_`) and any whitespace — same bytes, different string;
+/// * any length other than the exact encoded length of `N` bytes — the width is fixed by the
+///   algorithm, and a decoder that truncates or zero-pads lets a client choose how many bytes a
+///   later comparison covers;
+/// * the URL-safe alphabet (`-`/`_`) and any whitespace — same bytes, different string. This is
+///   half of rustfs#4456, where a SigV2 signer emitted URL-safe unpadded base64;
 /// * missing, extra, or interior padding;
-/// * a final character carrying non-zero unused bits. 44 characters encode 33 bytes' worth of
-///   slots; the last character contributes only 4 of its 6 bits. A lenient decoder accepts 64
-///   different spellings of every digest, and "two strings, one digest" is exactly the shape of
-///   a comparison bypass.
+/// * a final character carrying non-zero unused bits. A lenient decoder accepts 4 or 16 different
+///   spellings of every value, and "two strings, one value" is exactly the shape of a comparison
+///   bypass.
 ///
 /// # Errors
 ///
 /// [`SigParseError::MalformedBase64`] on any of the above.
-pub fn decode_base64_sha256(input: &str) -> Result<[u8; 32], SigParseError> {
+///
+/// # Examples
+///
+/// ```
+/// # use rustfs_gateway_sig::codec::decode_base64_exact;
+/// let encoded = format!("{}=", "A".repeat(27));
+/// assert_eq!(decode_base64_exact::<20>(&encoded), Ok([0u8; 20]));
+/// // 28 alphabet characters and no padding: the right length, the wrong shape.
+/// assert!(decode_base64_exact::<20>(&"A".repeat(28)).is_err());
+/// ```
+pub fn decode_base64_exact<const N: usize>(input: &str) -> Result<[u8; N], SigParseError> {
+    let encoded_len = base64_len(N);
+    let padding = base64_padding(N);
     let bytes = input.as_bytes();
-    if bytes.len() != BASE64_SHA256_LEN {
+    if bytes.len() != encoded_len {
         return Err(SigParseError::MalformedBase64);
     }
-    // Exactly one padding character, and it is last: 32 bytes is 10 full groups plus 2 bytes.
-    if bytes[BASE64_SHA256_LEN - 1] != b'=' {
-        return Err(SigParseError::MalformedBase64);
+    let data_len = encoded_len - padding;
+    // Exactly `padding` pad characters, all of them at the end.
+    for index in data_len..encoded_len {
+        if bytes.get(index) != Some(&b'=') {
+            return Err(SigParseError::MalformedBase64);
+        }
     }
 
-    let mut out = [0u8; 32];
+    let mut out = [0u8; N];
     let mut written = 0usize;
     let mut accumulator = 0u32;
     let mut bits = 0u32;
 
-    for &byte in &bytes[..BASE64_SHA256_LEN - 1] {
+    for index in 0..data_len {
+        let byte = *bytes.get(index).ok_or(SigParseError::MalformedBase64)?;
         let value = base64_value(byte)?;
         accumulator = (accumulator << 6) | u32::from(value);
         bits += 6;
@@ -138,7 +163,7 @@ pub fn decode_base64_sha256(input: &str) -> Result<[u8; 32], SigParseError> {
         }
     }
 
-    if written != 32 {
+    if written != N {
         return Err(SigParseError::MalformedBase64);
     }
     // Canonicality: the leftover bits of the last character must be zero.
@@ -146,6 +171,18 @@ pub fn decode_base64_sha256(input: &str) -> Result<[u8; 32], SigParseError> {
         return Err(SigParseError::MalformedBase64);
     }
     Ok(out)
+}
+
+/// Decodes canonical standard base64 of a 32-byte SHA-256 digest.
+///
+/// A width-fixed alias for [`decode_base64_exact`]; the rules and the rejections are that
+/// function's.
+///
+/// # Errors
+///
+/// [`SigParseError::MalformedBase64`] on any deviation from the one canonical spelling.
+pub fn decode_base64_sha256(input: &str) -> Result<[u8; 32], SigParseError> {
+    decode_base64_exact::<32>(input)
 }
 
 fn base64_value(byte: u8) -> Result<u8, SigParseError> {
@@ -159,13 +196,17 @@ fn base64_value(byte: u8) -> Result<u8, SigParseError> {
     }
 }
 
-/// Encodes a 32-byte digest as canonical standard base64, padding included.
+/// Encodes exactly `N` bytes as canonical standard base64, padding included.
+///
+/// The inverse of [`decode_base64_exact`]: standard alphabet, exact padding. It is the spelling a
+/// correct client sends, and the one this crate rebuilds when it needs to show a client what it
+/// signed.
 #[must_use]
-pub fn encode_base64_sha256(digest: &[u8; 32]) -> String {
-    let mut out = String::with_capacity(BASE64_SHA256_LEN);
+pub fn encode_base64_exact<const N: usize>(bytes: &[u8; N]) -> String {
+    let mut out = String::with_capacity(base64_len(N));
     let mut accumulator = 0u32;
     let mut bits = 0u32;
-    for &byte in digest {
+    for &byte in bytes {
         accumulator = (accumulator << 8) | u32::from(byte);
         bits += 8;
         while bits >= 6 {
@@ -182,6 +223,14 @@ pub fn encode_base64_sha256(digest: &[u8; 32]) -> String {
         out.push('=');
     }
     out
+}
+
+/// Encodes a 32-byte digest as canonical standard base64, padding included.
+///
+/// A width-fixed alias for [`encode_base64_exact`].
+#[must_use]
+pub fn encode_base64_sha256(digest: &[u8; 32]) -> String {
+    encode_base64_exact::<32>(digest)
 }
 
 #[cfg(test)]
@@ -203,7 +252,7 @@ mod tests {
     #[test]
     fn base64_round_trip_matches_hex_digest() {
         let encoded = encode_base64_sha256(&DIGEST);
-        assert_eq!(encoded.len(), BASE64_SHA256_LEN);
+        assert_eq!(encoded.len(), base64_len(32));
         assert_eq!(decode_base64_sha256(&encoded).expect("round trip"), DIGEST);
     }
 
@@ -244,7 +293,7 @@ mod tests {
         if url_safe != encoded {
             assert_eq!(decode_base64_sha256(&url_safe), Err(SigParseError::MalformedBase64));
         }
-        let with_newline = format!("{}\n", &encoded[..BASE64_SHA256_LEN - 1]);
+        let with_newline = format!("{}\n", &encoded[..base64_len(32) - 1]);
         assert_eq!(decode_base64_sha256(&with_newline), Err(SigParseError::MalformedBase64));
     }
 }

@@ -221,6 +221,43 @@ Four things are **yours**:
 
 ## Credentials: your responsibilities
 
+### SigV2 signs almost none of the query string
+
+SigV2's `CanonicalizedResource` covers the path and a **fixed list of 35 sub-resources** —
+`acl`, `uploadId`, `versionId`, `cors`, `tagging`, `lifecycle` and the rest, as re-derived from
+botocore's `HmacV1Auth.QSAOfInterest`, which is what AWS's own SDKs sign with. Every other query
+parameter is outside the signature. Appending `&foo=1` to a SigV2 URL therefore leaves the
+signature valid, and a proxy or a client that reads `foo` reads an unsigned value.
+
+This is a property of the SigV2 specification, not a gap in this implementation, and it cannot be
+closed without breaking every conforming client: signing the parameters AWS does not sign would
+reject correctly-signed requests. SigV4, by contrast, signs the whole canonical query.
+
+Two consequences that are this framework's half:
+
+- **SigV2 presigned URLs are refused by default.** `SigV2Policy::HeaderOnly` is the default:
+  header authentication works, presigned does not. The header form at least binds the request to
+  a live `Date` and an `Authorization` header rather than to a URL that travels in referrer
+  headers, proxy logs and browser history. This is also the answer to MinIO #5411, where a
+  rewritten SigV2 presigned URL reached an admin operation. Enabling
+  `SigV2Policy::HeaderAndPresigned` is an explicit deployment decision, and the startup posture
+  report names the value in force.
+- **The list is a contract, not a convenience.** Dropping an entry makes correctly-signed requests
+  to that sub-resource fail (s3s#517 lost 14 at once); adding one AWS does not sign fails the same
+  way in the other direction. `c-sig-0530` and `c-sig-0531` pin the order and the membership.
+
+Yours: if you route on a query parameter that is not one of the 35, do not treat a SigV2-signed
+request as having authorised its value. Prefer SigV4 for anything privileged, and keep SigV2
+disabled entirely (`SigV2Policy::Disabled`) if no legacy client needs it.
+
+A second, related SigV2 property: a covered sub-resource's value is percent-decoded before it is
+written into `CanonicalizedResource`, and that block separates its own entries with `&`. So
+`?acl=x%26versionId%3Dy` and `?acl=x&versionId=y` produce the same string-to-sign, and one
+signature is valid for both — while the router sees one parameter in the first and two in the
+second. This too is the algorithm rather than this implementation: botocore computes the identical
+string, so refusing it here would reject requests AWS's own SDK signs successfully. It is pinned
+by `c-sig-0556` and is a third reason to prefer SigV4.
+
 ### Presigned replay semantics
 
 Presigned URLs are replayable within their validity window. That is an intentional property of

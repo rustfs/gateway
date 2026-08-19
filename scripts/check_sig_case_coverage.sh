@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# WHAT: Maps every P2-01 and P2-02 acceptance id to named executable evidence.
+# WHAT: Maps every P2-01 through P2-06 acceptance id to named executable evidence.
 # WHY: rustfs/backlog#1678 and rustfs/backlog#1679 require explicit cases; nearby doctests or a
 # green crate suite do not prove that every listed contract still has a test.
 # HOW TO EXEMPT: There is no exemption; replace a mapping only with equivalent executable evidence.
@@ -122,6 +122,20 @@ while IFS= read -r mapping; do
     }
     p2_05_cases+=("$mapping")
 done <"$p2_05_manifest"
+
+p2_06_cases=()
+p2_06_manifest="${ROOT}/scripts/sig-case-coverage-p2-06.txt"
+[[ -f "$p2_06_manifest" ]] || {
+    printf 'check_sig_case_coverage: P2-06 case manifest is missing\n' >&2
+    exit 1
+}
+while IFS= read -r mapping; do
+    [[ -n "$mapping" ]] || {
+        printf 'check_sig_case_coverage: P2-06 case manifest contains a blank row\n' >&2
+        exit 1
+    }
+    p2_06_cases+=("$mapping")
+done <"$p2_06_manifest"
 
 [[ "${#cases[@]}" -eq 25 ]] || {
     printf 'check_sig_case_coverage: expected 25 mappings, got %s\n' "${#cases[@]}" >&2
@@ -1030,6 +1044,114 @@ done
     exit 1
 }
 
+[[ "${#p2_06_cases[@]}" -eq 37 ]] || {
+    printf 'check_sig_case_coverage: expected 37 P2-06 mappings, got %s\n' "${#p2_06_cases[@]}" >&2
+    exit 1
+}
+p2_06_expected_ids=(
+    c-sig-0501 c-sig-0502 c-sig-0503 c-sig-0504 c-sig-0505 c-sig-0506
+    c-sig-0507 c-sig-0508 c-sig-0509 c-sig-0510 c-sig-0511 c-sig-0530
+    c-sig-0531 c-sig-0532 c-sig-0533 c-sig-0534 c-sig-0535 c-sig-0536
+    c-sig-0537 c-sig-0538 c-sig-0539 c-sig-0540 c-sig-0541 c-sig-0542
+    c-sig-0543 c-sig-0544 c-sig-0545 c-sig-0546 c-sig-0547 c-sig-0548
+    c-sig-0549 c-sig-0550 c-sig-0551 c-sig-0553 c-sig-0554 c-sig-0555
+    c-sig-0556
+)
+positive=0
+negative=0
+p2_06_evidence=()
+p2_06_compile_fail_paths=()
+for index in "${!p2_06_cases[@]}"; do
+    IFS='|' read -r id polarity relative evidence required_call <<<"${p2_06_cases[$index]}"
+    [[ "$id" == "${p2_06_expected_ids[$index]}" ]] || {
+        printf 'check_sig_case_coverage: expected P2-06 %s, found %s\n' \
+            "${p2_06_expected_ids[$index]}" "$id" >&2
+        exit 1
+    }
+    case "$polarity" in
+        positive) positive=$((positive + 1)) ;;
+        negative) negative=$((negative + 1)) ;;
+        *) printf 'check_sig_case_coverage: %s has unknown polarity %s\n' "$id" "$polarity" >&2; exit 1 ;;
+    esac
+    file="${ROOT}/${relative}"
+    [[ -f "$file" ]] || {
+        printf 'check_sig_case_coverage: mapped file is missing: %s\n' "$relative" >&2
+        exit 1
+    }
+    p2_06_evidence+=("${relative}|${evidence}")
+    if [[ "$relative" == scripts/*.sh ]]; then
+        validate_shell_mutation "$file" "$evidence" || {
+            printf 'check_sig_case_coverage: %s is not an executable guard mutation in %s\n' \
+                "$id" "$relative" >&2
+            exit 1
+        }
+        continue
+    fi
+    grep -Fq "$id" "$file" || {
+        printf 'check_sig_case_coverage: %s is not named by %s\n' "$id" "$relative" >&2
+        exit 1
+    }
+    if [[ "$relative" == crates/sig/tests/compile_fail/c_sig_*.rs ]]; then
+        p2_06_compile_fail_paths+=("$relative")
+        validate_rust_evidence "$file" compile "$evidence" '' \
+            "check_sig_case_coverage: ${relative} is not an executable compile-fail fixture"
+        stderr="${file%.rs}.stderr"
+        [[ -f "$stderr" ]] || {
+            printf 'check_sig_case_coverage: compile-fail golden is missing: %s.stderr\n' \
+                "${relative%.rs}" >&2
+            exit 1
+        }
+        diagnostic=''
+        case "$id" in
+            c-sig-0550) diagnostic='`rustfs_gateway_sig::Signature` does not implement `PartialEq`' ;;
+            c-sig-0555) diagnostic='the trait `Debug` is not implemented for `SigV2Authorization`' ;;
+        esac
+        [[ -n "$diagnostic" ]] || {
+            printf 'check_sig_case_coverage: %s has no pinned compile-fail diagnostic\n' "$id" >&2
+            exit 1
+        }
+        grep -Fq "$diagnostic" "$stderr" || {
+            printf 'check_sig_case_coverage: %s golden lost its case-specific diagnostic\n' "$id" >&2
+            exit 1
+        }
+        continue
+    fi
+    function="${evidence#fn }"
+    token="${id//-/_}_"
+    [[ "$function" == "$token"* ]] || {
+        printf 'check_sig_case_coverage: %s is bound to the wrong executable test %s\n' \
+            "$id" "$function" >&2
+        exit 1
+    }
+    validate_rust_evidence "$file" runtime "$evidence" "$required_call" \
+        "check_sig_case_coverage: ${id} is not a named active P2-06 test in ${relative}"
+done
+[[ "$positive" -eq 11 && "$negative" -eq 26 && "$negative" -gt "$positive" ]] || {
+    printf 'check_sig_case_coverage: expected 11 positive and 26 negative P2-06 cases, got %s/%s\n' \
+        "$positive" "$negative" >&2
+    exit 1
+}
+[[ "$(printf '%s\n' "${p2_06_evidence[@]}" | sort -u | wc -l | tr -d ' ')" -eq 37 ]] || {
+    printf 'check_sig_case_coverage: P2-06 cases must use distinct named evidence\n' >&2
+    exit 1
+}
+[[ "${#p2_06_compile_fail_paths[@]}" -eq 2 ]] || {
+    printf 'check_sig_case_coverage: expected two P2-06 compile-fail fixtures, got %s\n' \
+        "${#p2_06_compile_fail_paths[@]}" >&2
+    exit 1
+}
+
+# The SigV2 sub-resource weakness is a deployment fact, not an implementation note: if the
+# security model stops stating it, the reason SigV2 presigned is off by default is gone too.
+grep -Fq 'SigV2 signs almost none of the query string' "${ROOT}/docs/security-model.md" || {
+    printf 'check_sig_case_coverage: security model lost the SigV2 query-coverage statement\n' >&2
+    exit 1
+}
+grep -Fq '`SigV2Policy::HeaderOnly` is the default' "${ROOT}/docs/security-model.md" || {
+    printf 'check_sig_case_coverage: security model lost the SigV2 default-policy statement\n' >&2
+    exit 1
+}
+
 grep -Fq 'Presigned URLs are replayable within their validity window.' \
     "${ROOT}/docs/security-model.md" || {
     printf 'check_sig_case_coverage: security model lost the H7 replay statement\n' >&2
@@ -1339,5 +1461,5 @@ done
 
 run_evidence_validations
 
-printf 'OK: all 163 P2 signature cases map to executable evidence '
-printf '(P2-01: 8/17; P2-02: 6/22; P2-03: 14/29; P2-04: 9/42; P2-05: 3/13)\n'
+printf 'OK: all 200 P2 signature cases map to executable evidence '
+printf '(P2-01: 8/17; P2-02: 6/22; P2-03: 14/29; P2-04: 9/42; P2-05: 3/13; P2-06: 11/26)\n'

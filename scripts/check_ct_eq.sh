@@ -37,8 +37,21 @@ set -euo pipefail
 #      `/// Negative` test labels in `crates/sig` may not fall below the
 #      recorded baselines. Aligns with rustfs/rustfs#4815 — a negative suite
 #      that is quietly emptied leaves a green check mark and no coverage.
+#   9. Signature material is never compared with `==` / `!=`, in two scopes.
+#      Repository-wide within the guarded crates: an equality on a line naming
+#      lowercase signature or secret material (`presented_signature ==
+#      expected_signature`) is a violation. And inside
+#      `crates/sig/src/sig_v2/`: no `==` / `!=` at all, on anything. Rules 1
+#      and 2 only stop a *derived or hand-written* `PartialEq` on a
+#      secret-bearing type; they say nothing about two `String`s or two
+#      `&[u8]`s being compared directly, which is the form the defect
+#      actually took in s3s#616 and rustfs/rustfs#4519. SigV2 gets the
+#      stricter scope because SigV2 is where the second comparison
+#      historically appears: it is the algorithm with the second signature
+#      width, so it is the path that grows its own comparison. Use
+#      `matches!` for enums and `Signature::ct_verify` for signatures.
 #
-#   Comment and doc-comment lines are skipped by rules 4-7. This matters: the
+#   Comment and doc-comment lines are skipped by rules 4-7 and 9. This matters: the
 #   codebase explains these rules in prose right next to the code they govern
 #   (`crates/stream` documents that it deliberately has no `as_any()`,
 #   `secret.rs` shows `format!("{token}")` inside a `compile_fail` example), and
@@ -110,12 +123,18 @@ CHOICE_TO_BOOL_FILE='crates/sig/src/signature.rs'
 # Identifiers that name key material. Deliberately NOT bare `key` or `token`:
 # `access_key_id` is a public identifier and `continuation_token` is paging.
 SECRET_IDENT_RE='(secret|signing_key|session_token|private_key|derived_key|passphrase|expected_signature)'
+# Rule 9's vocabulary. Case-sensitive and lowercase on purpose: `X_AMZ_SIGNATURE`
+# is the *name* of a query parameter and comparing a key against it is correct,
+# while `expected_signature` is the value and comparing it is the defect.
+SIGNATURE_VALUE_RE='(signature|secret|signing_key|session_token)'
+# The subtree that may not compare anything at all.
+NO_EQUALITY_PATH_RE='^crates/sig/src/sig_v2/'
 # Baselines for rule 8. Raise them when a PR adds cases; lowering one is the
-# change a reviewer must refuse to wave through. Set to the counts measured
-# after P2-04 landed the security floor: a ratchet that trails the tree by 80
-# cases is not a ratchet, it is a number nobody has to think about.
-COMPILE_FAIL_FLOOR=29
-NEGATIVE_LABEL_FLOOR=143
+# change a reviewer must refuse to wave through. Re-measured when P2-06 landed
+# the SigV2 core: a ratchet that trails the tree is not a ratchet, it is a
+# number nobody has to think about.
+COMPILE_FAIL_FLOOR=32
+NEGATIVE_LABEL_FLOOR=186
 
 status=0
 sensitive_seen=0
@@ -650,6 +669,20 @@ for file in "${guarded[@]}"; do
         [[ -z "$hit" ]] && continue
         report "${file}:${hit%%:*}: key material in a Vec<u8>/String; zeroize cannot reach the buffers a growing Vec left behind — use Box<[u8]> or a fixed-size array"
     done < <(printf '%s\n' "$code" | grep -nE '(Vec<u8>|String)' | grep -iE "$SECRET_IDENT_RE" || true)
+
+    # Rule 9, first scope — ordinary equality on a line naming signature material.
+    while IFS= read -r hit; do
+        [[ -z "$hit" ]] && continue
+        report "${file}:${hit%%:*}: == / != on signature material; ordinary equality short-circuits on the first differing byte and leaks the expected value through timing (s3s#616, rustfs/rustfs#4519) — compare through Signature::ct_verify"
+    done < <(printf '%s\n' "$code" | grep -nE '(==|!=)' | grep -E "$SIGNATURE_VALUE_RE" || true)
+
+    # Rule 9, second scope — the SigV2 subtree compares nothing directly.
+    if [[ "$file" =~ $NO_EQUALITY_PATH_RE ]]; then
+        while IFS= read -r hit; do
+            [[ -z "$hit" ]] && continue
+            report "${file}:${hit%%:*}: == / != inside ${file%%/sig_v2/*}/sig_v2/; SigV2 is the path that historically grows its own signature comparison, so this subtree compares nothing directly — use matches! for enums and Signature::ct_verify for signatures"
+        done < <(printf '%s\n' "$code" | grep -nE '(==|!=)' || true)
+    fi
 done
 
 if [[ "$choice_to_bool_total" -gt 1 ]]; then
