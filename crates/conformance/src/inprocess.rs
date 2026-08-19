@@ -87,7 +87,7 @@ use rustfs_gateway::sig::{
 };
 use rustfs_gateway::{
     Authorizer, AuthzRequest, BoxFuture, BucketName, ClassKind, CorsSource, CorsSourceError, CredentialGuardConfig,
-    CredentialLookup, CredentialProvider, Credentials, Decision, FixedClock, Governor, GovernorRequest,
+    CredentialLookup, CredentialProvider, Credentials, Decision, ErrorCode, FixedClock, Governor, GovernorRequest,
     GuardedCredentialProvider, HandlerResult, InputAuthzRequest, InputDecisions, Lease, Limits, Next, ObservedBody, PolicyError,
     PolicySnapshot, ProviderError, RegionSet, Req, RequestContext, S3Service, ServiceBuilder, SessionBinding, SigV4Authenticator,
     SnapshotId, StaticCredentials, VirtualHostStyle, WireRequest, allow_when, collect, dto, fn_credential_provider, op_layer,
@@ -1098,6 +1098,42 @@ impl Sut for InProcess {
                  would be carried over and a case relying on it would run against state it never \
                  declared"
             )));
+        }
+
+        if let Some(fault) = setup.read("setup.fault") {
+            let operation = fault
+                .read("setup.fault.operation")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            let at = fault.read("setup.fault.at").and_then(Value::as_str).unwrap_or_default();
+            let code = fault.read("setup.fault.code").and_then(Value::as_str).unwrap_or_default();
+            // The two operations whose fixture handlers commit a head. `UploadPartCopy` is the
+            // third the model marks as able to fail after a `200`, and this fixture answers it
+            // without committing — so a fault armed against it would be armed against nothing, and
+            // the case would run as though it had asked for no fault at all and report whatever it
+            // happened to get. Refusing is the difference between a skip that says why and a green
+            // verdict on an assertion that was never made.
+            if !matches!(operation, "CompleteMultipartUpload" | "CopyObject") {
+                return Err(SutError::Environment(format!(
+                    "`setup.fault.operation = \"{operation}\"` names an operation this target does not \
+                     commit a head for; it commits only CompleteMultipartUpload and CopyObject, and a \
+                     fault armed against any other would never be reported"
+                )));
+            }
+            if at != "after_commit" {
+                return Err(SutError::Environment(format!(
+                    "`setup.fault.at = \"{at}\"` is not a point this target can fail at; it arranges \
+                     `after_commit` and nothing else"
+                )));
+            }
+            let Some(code) = ErrorCode::known(code) else {
+                return Err(SutError::Environment(format!(
+                    "`setup.fault.code = \"{code}\"` is not a declared error code, so it has no status \
+                     and no row; a fault reporting it would put a code on the wire that this workspace \
+                     does not admit exists"
+                )));
+            };
+            fixture.arm_committed_fault(operation, code);
         }
 
         for bucket in setup.read("setup.buckets").and_then(Value::as_array).unwrap_or_default() {

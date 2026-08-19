@@ -496,7 +496,37 @@ pub struct Fixture {
     /// 301. Defaults to [`HOME_REGION`]; the integration tests move it to exercise the non-us-east-1
     /// half of the status matrix.
     pub home_region: String,
+    /// The failure `[setup.fault]` armed, if the case armed one.
+    committed_fault: Option<CommittedFault>,
 }
+
+/// A failure a case declared for the point *after* an operation has committed its response head.
+///
+/// Every other way a case can make an operation fail describes state that was already true when the
+/// request arrived — a bucket that is not there, a key that is not there, a precondition that does
+/// not hold. All of those are discovered while a status is still choosable, so all of them are
+/// refused with their own status, which is what `c-copy-0026`, `c-copy-0034` and `c-mpu-0020` …
+/// `c-mpu-0026` pin. None of them can reach the state this type exists to produce: the head is on
+/// the wire, the status is spent, and the failure has nowhere to go but the body.
+///
+/// Moving one of those checks below the commit boundary instead would have produced the same wire
+/// shape and destroyed the cases that pin the boundary, which is exactly the trade
+/// `crates/conformance/tests/copy_family.rs` recorded as the reason `c-copy-0038` stayed red.
+#[derive(Debug, Clone)]
+struct CommittedFault {
+    /// The operation whose work fails. A case with several exchanges fails one of them, not all.
+    operation: String,
+    /// The code the failure reports, inside the body, under the status already sent.
+    code: ErrorCode,
+}
+
+/// What a committed operation reports when a case armed a fault against it.
+///
+/// Deliberately not the message AWS writes for the code: this failure was arranged by the case, and
+/// a message claiming otherwise would put the fixture's arrangement on the wire disguised as the
+/// service's own diagnosis. No case asserts it — they assert the code, which is the part a client
+/// branches on.
+const COMMITTED_FAULT_MESSAGE: &str = "The operation failed after its response head had been committed.";
 
 impl Fixture {
     /// An empty fixture whose clock reads `now`.
@@ -507,6 +537,37 @@ impl Fixture {
             home_region: HOME_REGION.to_owned(),
             ..Fixture::default()
         }
+    }
+
+    /// Arms the failure `[setup.fault]` declared, so that `operation` fails after its head is out.
+    ///
+    /// One fault per case: a case that armed two would be describing two operations failing in one
+    /// exchange, which no request can observe.
+    pub fn arm_committed_fault(&mut self, operation: &str, code: ErrorCode) {
+        self.committed_fault = Some(CommittedFault {
+            operation: operation.to_owned(),
+            code,
+        });
+    }
+
+    /// The armed failure for `operation`, as the refusal its continuation returns.
+    ///
+    /// Read *before* the head is committed and reported *after*, which is the whole distinction:
+    /// the lookup is a fixture detail, and the moment the client learns of it is not.
+    ///
+    /// `subject` is the object the operation was working on. A handful of codes — `NoSuchKey` among
+    /// them — are refused by [`rustfs_gateway::ErrorContext::ordinary`] unless they carry the fact
+    /// they are about, because a context-free one cannot be masked against a caller who is not
+    /// allowed to learn the object exists. A fault naming one and handing over no subject does not
+    /// fail loudly: it resolves to `InternalError`, and the case reads as a defect in the
+    /// committed-response path rather than as a fault that was armed wrong.
+    #[must_use]
+    fn committed_fault(&self, operation: &str, subject: &str) -> Option<HandlerError> {
+        let fault = self.committed_fault.as_ref().filter(|fault| fault.operation == operation)?;
+        if fault.code == ErrorCode::NO_SUCH_KEY {
+            return Some(no_such_key(subject));
+        }
+        Some(HandlerError::new(fault.code.clone(), COMMITTED_FAULT_MESSAGE))
     }
 
     /// When a copy retrieved *now* would lapse, as the RFC 1123 string `x-amz-restore` carries.
@@ -2836,6 +2897,10 @@ impl Stub {
         if let Some(class) = input.storage_class.as_ref() {
             object.storage_class = class.to_string();
         }
+        // Read while the guard is still held, reported only from inside the continuation. This is
+        // the one thing a copy can still discover after the head is out: the source resolved, the
+        // conditions held, and the bytes were not there when they came to be read.
+        let fault = fixture.committed_fault("CopyObject", source.key.as_str());
         // The guard is released before the head goes out: the continuation is `'static` and takes
         // the state back on its own, so nothing holds the fixture across the commit.
         drop(fixture);
@@ -2847,6 +2912,9 @@ impl Stub {
         // The head is committed here. Nothing below chooses a status, and nothing below can refuse:
         // every rule this operation has was applied above.
         Ok(Resp::commit(Box::pin(async move {
+            if let Some(error) = fault {
+                return Err(error);
+            }
             let etag = object.etag.clone();
             let mut fixture = state
                 .lock()
@@ -4172,6 +4240,11 @@ impl Stub {
             }
             ordered_parts.push(stored.clone());
         }
+        // Read while the guard is still held, reported only from inside the continuation. A case
+        // that armed `[setup.fault]` against this operation has said the completion fails once the
+        // status line is spent, and every check above still runs first — which is why arming one
+        // cannot turn `c-mpu-0020` … `c-mpu-0026` into a `200`.
+        let fault = fixture.committed_fault("CompleteMultipartUpload", upload.key.as_str());
         // The guard is released before the head goes out: the continuation is `'static` and takes
         // the state back on its own, so nothing holds the fixture across the commit.
         drop(fixture);
@@ -4185,6 +4258,9 @@ impl Stub {
         // The head is committed here. Everything below runs with the status line already on the
         // wire, and the only thing it can still report is a failure with no status of its own.
         Ok(Resp::commit(Box::pin(async move {
+            if let Some(error) = fault {
+                return Err(error);
+            }
             let mut assembled = Vec::new();
             let mut digests = Vec::new();
             let mut part_checksums = Vec::new();

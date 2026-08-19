@@ -1,6 +1,7 @@
 # c-copy-0038 — a failure delivered inside a success
 #
-# Schema dimensions exercised: expect.kind = "stream_error" with an error document, and the trailer that must not be announced
+# Schema dimensions exercised: setup.fault at = "after_commit", expect.kind = "stream_error" with an
+# error document, and the trailer that must not be announced
 
 [case]
 id = "c-copy-0038"
@@ -35,12 +36,20 @@ fixed = "2026-01-02T03:04:05Z"
 [[setup.buckets]]
 name = "conf-copy"
 
-# The source is declared absent: the copy is admitted, the head is committed, and the failure is
-# only discovered once the source is opened — which is the shape this case exists to pin.
+# The source is there when the request arrives, so every check that could still choose a status
+# passes and the head goes out. Declaring it absent instead would be a different case: a source that
+# was already missing is refused with a `404` before the copy starts, which is what `c-copy-0034`
+# pins and what this case must not become.
 [[setup.objects]]
 bucket = "conf-copy"
 key = "src/vanishes"
-absent = true
+body = { utf8 = "the bytes that are no longer there when they come to be read" }
+
+# The fault this case exists for: the copy fails at the one point where the status is already spent.
+[setup.fault]
+operation = "CopyObject"
+at = "after_commit"
+code = "NoSuchKey"
 
 [request]
 method = "PUT"
