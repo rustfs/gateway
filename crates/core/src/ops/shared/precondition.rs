@@ -65,13 +65,12 @@
 //! What no member can hold is the call to [`evaluate`]. An `impl Operation` is a static
 //! [`crate::registry::OperationSpec`] and a security floor, both settled before a request is read,
 //! while a precondition needs the representation the *handler* resolved. So the call site is the
-//! backend's — and a backend outside this workspace cannot reach [`evaluate`] at all, because the
-//! facade re-exports `ops::shared::copy_source` and nothing else from this directory.
-//!
-//! That is why the conformance fixture answers `If-Match` out of a private mirror of this file
-//! rather than out of this file, and why the mirror disagrees with it on six outcomes. Closing the
-//! gap is a facade export plus a backend edit, recorded in `crates/core/MAP.md` under "Open for
-//! maintainer review".
+//! backend's, and the facade re-exports [`evaluate`], [`evaluate_range`] and
+//! [`super::part_table::resolve_part`] for
+//! exactly that reason: a backend outside this workspace runs these rules rather than a mirror of
+//! them. The conformance fixture is the worked example — it holds no conditional or range
+//! arithmetic of its own, and the mirror that once disagreed with this file on six outcomes is
+//! gone.
 
 use http::StatusCode;
 use rustfs_gateway_types::{ByteRange, ETag, ErrorCode, RangeOutcome, RangeParse, Timestamp, TimestampFormat};
@@ -196,6 +195,13 @@ pub struct PreconditionRejection {
 }
 
 impl PreconditionRejection {
+    /// Builds a refusal. `reason` is `&'static str` by signature, which is what stops a caller
+    /// assembling one out of the bytes that were rejected.
+    #[must_use]
+    pub const fn new(code: ErrorCode, reason: &'static str) -> Self {
+        Self { code, reason }
+    }
+
     /// The S3 error code to render.
     #[must_use]
     pub fn code(&self) -> &ErrorCode {
@@ -463,14 +469,21 @@ pub enum RangeDecision {
     ///
     /// This variant is the *selector*, not a resolved window: [`evaluate_range`] is given the
     /// object's total length and nothing about where its parts begin and end, so it cannot say
-    /// which bytes the part covers or how many parts there are. The operation resolves it against
-    /// the part table and supplies `Content-Range` and `x-amz-mp-parts-count` itself.
+    /// which bytes the part covers. It stays a selector because the part table is a fact only
+    /// storage holds, and inventing one here is how a `206` acquires a `Content-Range` nobody
+    /// measured.
     ///
-    /// Until it does, [`RangeDecision::status`] answers `206` while
-    /// [`RangeDecision::content_range`] answers `None`, and a `206` without a `Content-Range` is
-    /// not a response RFC 9110 §15.3.7 allows. Recorded in `crates/core/MAP.md` under "Open for
-    /// maintainer review" rather than papered over here: completing it changes this variant's
-    /// shape, which is a contract decision and not a fix.
+    /// The other half is [`super::part_table::resolve_part`], which the backend calls with that
+    /// table: it answers a
+    /// [`super::part_table::PartWindow`] whose
+    /// [`super::part_table::PartWindow::as_decision`] is an ordinary [`RangeDecision::Partial`],
+    /// so `Content-Range` and `Content-Length` are rendered by the code that already renders them
+    /// for a byte range. This variant keeps [`RangeDecision::status`] and
+    /// [`RangeDecision::part_count_header`], the two answers that are policy rather than
+    /// arithmetic. A backend that reads [`RangeDecision::content_range`] on *this* variant still
+    /// gets `None`, and a `206` without a `Content-Range` is not a response RFC 9110 §15.3.7
+    /// allows — which is the shape of the mistake, and why the resolved window is a different type
+    /// rather than a mutation of this one.
     Part {
         /// The requested part.
         part_number: u32,

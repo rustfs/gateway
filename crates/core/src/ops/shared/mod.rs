@@ -49,6 +49,7 @@ pub mod lifecycle;
 pub mod location_constraint;
 pub mod object_lock;
 pub mod pagination;
+pub mod part_table;
 pub mod precondition;
 pub mod replication;
 pub mod restore;

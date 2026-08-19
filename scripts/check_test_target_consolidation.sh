@@ -171,6 +171,7 @@ core_modules = (
     "params_and_dispatch",
     "precondition_range",
     "purity_guard",
+    "range_part_table",
     "registration",
     "route_table",
     "static_dispatch",
@@ -249,6 +250,7 @@ conformance_modules = (
     "list_family",
     "multipart_family",
     "object",
+    "range_cond_family",
     "tagging",
     "wired",
 )

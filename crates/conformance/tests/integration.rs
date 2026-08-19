@@ -30,6 +30,8 @@ mod list_family;
 mod multipart_family;
 #[path = "object.rs"]
 mod object;
+#[path = "range_cond_family.rs"]
+mod range_cond_family;
 #[path = "tagging.rs"]
 mod tagging;
 #[path = "wired.rs"]
