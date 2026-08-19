@@ -22,6 +22,15 @@ set -euo pipefail
 #
 # USAGE
 #   scripts/test_guard_scripts.sh
+#
+#   GATEWAY_GUARD_JOBS=<n>              run this group's cases across n worker
+#                                       processes (default: the core count, capped
+#                                       at 8)
+#   GATEWAY_GUARD_SHARD_GROUPS=<n>      how many CI runners the suite is split over
+#   GATEWAY_GUARD_SHARD_GROUP=<i>       which of them this run is (0-based)
+#   GATEWAY_GUARD_BUDGET_SECONDS=<n>    wall-clock budget; the suite stops itself with
+#                                       a diagnosis 30s before it, rather than being
+#                                       killed by the CI `timeout` wrapper
 # =============================================================================
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -47,6 +56,396 @@ fi
 if [[ $((QUIRK_LEDGER_ONLY + DTO_COMPILER_ONLY + BUILD_GUARDS_ONLY)) -gt 1 ]]; then
     printf 'test_guard_scripts: mutation-only modes are mutually exclusive\n' >&2
     exit 1
+fi
+
+# -----------------------------------------------------------------------------
+# Wall-clock budget
+#
+# CI runs each guard shard under `timeout 300s` and hands it the same number in
+# GATEWAY_GUARD_BUDGET_SECONDS (.github/workflows/ci.yml, pinned by
+# scripts/check_ci_test_split.sh, which also fails if the two ever disagree). The
+# 300s and the jobs' `timeout-minutes: 6` sit inside the ten-minute whole-gate
+# budget in AGENTS.md: a guard runner plus the one-minute Test aggregate is the
+# longest path at seven minutes, and the runner keeps the rest for checkout and
+# toolchain setup. The default below is for running the suite by hand.
+#
+# The first time the suite outgrew its slice, the only symptom was
+# `Process completed with exit code 124` after every printed case had said `ok`.
+# Three separate pull requests were read as broken by their own authors before
+# anyone noticed the suite had simply run out of time. An opaque kill is the
+# worst possible failure for a self-test, so the suite now watches its own clock
+# and stops with an explicit diagnosis before `timeout` can reach it.
+# -----------------------------------------------------------------------------
+GUARD_BUDGET_SECONDS="${GATEWAY_GUARD_BUDGET_SECONDS:-480}"
+if [[ ! "$GUARD_BUDGET_SECONDS" =~ ^[1-9][0-9]*$ ]]; then
+    printf 'test_guard_scripts: GATEWAY_GUARD_BUDGET_SECONDS must be a positive integer\n' >&2
+    exit 1
+fi
+# Stop with thirty seconds to spare: enough for the case in flight to finish and
+# for the diagnosis to reach the log before `timeout` sends its signal.
+GUARD_BUDGET_STOP=$((GUARD_BUDGET_SECONDS - 30))
+((GUARD_BUDGET_STOP > 0)) || GUARD_BUDGET_STOP=1
+# Say so out loud well before that, so an overrun is visible one pull request
+# early rather than on the pull request that crosses the line.
+GUARD_BUDGET_WARN=$((GUARD_BUDGET_SECONDS * 4 / 5))
+
+# guard_budget_verdict <elapsed> <stop> <warn>
+# Pure: the whole budget policy in one testable place.
+guard_budget_verdict() {
+    local elapsed="$1" stop="$2" warn="$3"
+    if ((elapsed >= stop)); then
+        printf 'stop\n'
+    elif ((elapsed >= warn)); then
+        printf 'warn\n'
+    else
+        printf 'ok\n'
+    fi
+}
+
+# -----------------------------------------------------------------------------
+# Case shards
+#
+# The suite grows with every merge — that is AGENTS.md's mutation rule working as
+# intended — and each case is a short burst of forks (git, grep, python3, ruby)
+# against a sandbox. So it parallelises across processes far better than it can be
+# micro-optimised case by case, and it is split twice:
+#
+#   * across CI runners, by GATEWAY_GUARD_SHARD_GROUPS / GATEWAY_GUARD_SHARD_GROUP.
+#     .github/workflows/ci.yml runs one `Guard self-test <i>/<n>` job per group.
+#   * across processes inside one runner, by GATEWAY_GUARD_JOBS. The parent process
+#     runs no cases at all: it re-executes this script once per worker.
+#
+# A case ordinal is assigned to exactly one (group, worker) pair by arithmetic on
+# the ordinal alone, so the two levels compose without a scheduler and without any
+# shared state between runners.
+#
+# Two things the previous authors optimised must survive that, and both do
+# because a shard is a *process*, not a thread:
+#
+#   * One sandbox, reused, mutated by one mutator at a time. Every shard makes
+#     its own sandbox under its own private TMPDIR, so the single-mutator
+#     assumption inside `make_sandbox` / `stage_sandbox_changes` /
+#     `reset_sandbox_changes` holds exactly as it did when the suite was serial.
+#     `shard_sandbox_isolation_contract` proves it in both directions.
+#   * One shared CARGO_TARGET_DIR. It stays shared, because giving each shard its
+#     own would cold-compile the workspace per shard, which is the cost the
+#     sharing was introduced to remove. That is sound under concurrency for two
+#     reasons: cargo takes an exclusive lock on the target directory for the
+#     duration of a build, so concurrent invocations serialise rather than
+#     interleave; and the mode that shards is the mode that never compiles. The
+#     guards that compile carry `# REQUIRES-BUILD`, the positive control skips
+#     them, and their mutations live in the mode-scoped runs — which never shard.
+#     `guard_shard_plan` and its four cases pin that scoping.
+#
+# Coverage is not taken on trust, and it survives being split over runners that
+# never see each other. Every worker counts every case it *considers*, whether or
+# not it owns it, and records the ordinal of every case it *executes*. Each group's
+# parent then proves that its workers executed **exactly** the ordinal set the
+# arithmetic assigns to that group — no hole, no duplicate, nothing outside it —
+# against a case total every worker agreed on. The groups partition 1..total by
+# construction, so the whole suite is covered when every group's job is green, and
+# the `test` aggregate requires all of them. A worker that died early leaves a
+# hole; a case site that never learned about the gate leaves a duplicate; a group
+# that drifted out of step reports a different total. All three fail loudly, so the
+# split suite cannot quietly run fewer cases than the serial one did.
+# -----------------------------------------------------------------------------
+GUARD_SELF="${SCRIPT_DIR}/$(basename "${BASH_SOURCE[0]}")"
+GUARD_SHARD_INDEX="${GATEWAY_GUARD_SHARD_INDEX:-}"
+GUARD_SHARD_COUNT="${GATEWAY_GUARD_SHARD_COUNT:-}"
+GUARD_SHARD_GROUPS="${GATEWAY_GUARD_SHARD_GROUPS:-1}"
+GUARD_SHARD_GROUP="${GATEWAY_GUARD_SHARD_GROUP:-0}"
+if [[ ! "$GUARD_SHARD_GROUPS" =~ ^[1-9][0-9]*$ ]]; then
+    printf 'test_guard_scripts: GATEWAY_GUARD_SHARD_GROUPS must be a positive integer\n' >&2
+    exit 1
+fi
+if [[ ! "$GUARD_SHARD_GROUP" =~ ^(0|[1-9][0-9]*)$ ]] ||
+    ((GUARD_SHARD_GROUP >= GUARD_SHARD_GROUPS)); then
+    printf 'test_guard_scripts: GATEWAY_GUARD_SHARD_GROUP must be in 0..%s\n' \
+        "$((GUARD_SHARD_GROUPS - 1))" >&2
+    exit 1
+fi
+GUARD_SHARD_LEDGER="${GATEWAY_GUARD_SHARD_LEDGER:-}"
+GUARD_SHARD_SUMMARY="${GATEWAY_GUARD_SHARD_SUMMARY:-}"
+GUARD_EXECUTED=0
+
+guard_budget_stop() {
+    local ordinal="$1" where='this run'
+    [[ -z "$GUARD_SHARD_COUNT" ]] ||
+        where="group $((GUARD_SHARD_GROUP + 1))/${GUARD_SHARD_GROUPS} worker $((GUARD_SHARD_INDEX + 1))/${GUARD_SHARD_COUNT}"
+    printf '\n' >&2
+    printf 'test_guard_scripts: OUT OF TIME — no assertion in this suite failed.\n' >&2
+    printf '  %s reached %ss of its %ss budget at case %s and stopped itself.\n' \
+        "$where" "$SECONDS" "$GUARD_BUDGET_SECONDS" "$ordinal" >&2
+    printf '  This is not a defect in the change under test. The suite no longer fits\n' >&2
+    printf '  the CI slice it is given, which is a gate failing for a reason having\n' >&2
+    printf '  nothing to do with what it checks.\n' >&2
+    printf '  Fix it by making cases faster or by raising GATEWAY_GUARD_JOBS, never by\n' >&2
+    printf '  deleting, skipping or sampling cases. See the budget note at the top of\n' >&2
+    printf '  scripts/test_guard_scripts.sh.\n' >&2
+    exit 2
+}
+
+# guard_group_of <ordinal> <groups>
+# Pure: which CI runner owns a case. Runners take every groups-th ordinal rather
+# than a contiguous block, because the cases for one guard are written consecutively
+# and the costs are very uneven — one guard is 30% of the whole suite. Blocking
+# would drop that guard on one or two runners and make them the slow ones; striding
+# spreads every guard evenly. Measured: blocked, the four runners came in at 100s,
+# 95s, 160s and 180s for the same 240 cases each.
+guard_group_of() {
+    printf '%s\n' "$((($1 - 1) % $2))"
+}
+
+# guard_worker_of <ordinal> <groups> <workers>
+# Pure: which worker process inside the owning runner runs the case, striding for
+# the same reason. Both are functions of the ordinal alone, which is what lets
+# runners that never talk to each other partition the suite exactly.
+guard_worker_of() {
+    printf '%s\n' "$(((($1 - 1) / $2) % $3))"
+}
+
+# guard_case_owned <ordinal>
+# Called once per case, immediately after the case counter is advanced. Returns
+# non-zero when another shard owns the case, so the caller skips it; every worker
+# still counts it, which is what makes the group's coverage proof possible.
+guard_case_owned() {
+    local ordinal="$1"
+    if ((SECONDS >= GUARD_BUDGET_STOP)); then
+        guard_budget_stop "$ordinal"
+    fi
+    if [[ -n "$GUARD_SHARD_COUNT" ]]; then
+        if (($(guard_group_of "$ordinal" "$GUARD_SHARD_GROUPS") != GUARD_SHARD_GROUP)); then
+            return 1
+        fi
+        if (($(guard_worker_of "$ordinal" "$GUARD_SHARD_GROUPS" "$GUARD_SHARD_COUNT") !=
+            GUARD_SHARD_INDEX)); then
+            return 1
+        fi
+    fi
+    GUARD_EXECUTED=$((GUARD_EXECUTED + 1))
+    if [[ -n "$GUARD_SHARD_LEDGER" ]]; then
+        printf '%s\n' "$ordinal" >>"$GUARD_SHARD_LEDGER"
+    fi
+    return 0
+}
+
+# guard_shard_plan <requested> <quirk-only> <dto-only> <build-only>
+# Pure: how many shards a run actually gets. The mode-scoped runs are already
+# minutes-scale, and the build-guard mode is the one whose cases compile, so it
+# is also the one that must keep CARGO_TARGET_DIR to itself. All three stay
+# single-process.
+guard_shard_plan() {
+    local requested="$1" quirk="$2" dto="$3" build="$4"
+    if ((quirk + dto + build > 0)); then
+        printf '1\n'
+        return 0
+    fi
+    ((requested >= 1)) || requested=1
+    printf '%s\n' "$requested"
+}
+
+guard_detect_jobs() {
+    local cores=""
+    if command -v nproc >/dev/null 2>&1; then
+        cores="$(nproc 2>/dev/null || true)"
+    elif command -v sysctl >/dev/null 2>&1; then
+        cores="$(sysctl -n hw.ncpu 2>/dev/null || true)"
+    fi
+    [[ "$cores" =~ ^[1-9][0-9]*$ ]] || cores=1
+    # One worker per core, not more. Each worker builds its own sandbox — a copy of
+    # the whole tree plus a fresh Git index — which on a two-core hosted runner is
+    # tens of seconds, so an extra worker beyond the core count adds more setup than
+    # the cases it takes away. GATEWAY_GUARD_JOBS overrides it, and every run prints
+    # its elapsed time, so the choice stays reviewable against real numbers.
+    local jobs="$cores"
+    ((jobs <= 8)) || jobs=8
+    printf '%s\n' "$jobs"
+}
+
+# guard_shard_ledger_report <considered> <groups> <group> <ledger>...
+# The coverage proof for one group. Prints one line per defect and returns non-zero
+# unless this group's workers together executed exactly the ordinals the shard
+# arithmetic assigns to this group — every one of them, once each, and nothing
+# else. Every group asserting that about the same total is what makes the union
+# over groups exactly 1..considered.
+guard_shard_ledger_report() {
+    local considered="$1" groups="$2" group="$3"
+    shift 3
+    python3 - "$considered" "$groups" "$group" "$@" <<'PYEOF'
+import sys
+from pathlib import Path
+
+considered = int(sys.argv[1])
+groups = int(sys.argv[2])
+group = int(sys.argv[3])
+seen: dict[int, int] = {}
+for name in sys.argv[4:]:
+    path = Path(name)
+    if not path.exists():
+        print(f"shard ledger is missing: {name}")
+        raise SystemExit(1)
+    for token in path.read_text().split():
+        ordinal = int(token)
+        seen[ordinal] = seen.get(ordinal, 0) + 1
+
+expected = {n for n in range(1, considered + 1) if (n - 1) % groups == group}
+missing = sorted(expected - set(seen))
+duplicated = sorted(n for n, count in seen.items() if count > 1)
+unknown = sorted(n for n in seen if n not in expected)
+
+
+def sample(values: list[int]) -> str:
+    head = ", ".join(str(value) for value in values[:10])
+    return head + (f", ... ({len(values)} total)" if len(values) > 10 else "")
+
+
+status = 0
+if missing:
+    print(
+        f"group {group + 1}/{groups} coverage is incomplete: {len(missing)} of its "
+        f"{len(expected)} case(s) ran in no worker: {sample(missing)}"
+    )
+    status = 1
+if duplicated:
+    print(
+        f"group {group + 1}/{groups} coverage overlaps: {len(duplicated)} case(s) ran in "
+        f"more than one worker, so a case site is missing its guard_case_owned gate: "
+        f"{sample(duplicated)}"
+    )
+    status = 1
+if unknown:
+    print(
+        f"group {group + 1}/{groups} ran {len(unknown)} case(s) that belong to another "
+        f"group or to no case at all: {sample(unknown)}"
+    )
+    status = 1
+if status == 0:
+    print(
+        f"group {group + 1}/{groups} coverage complete: {len(expected)} of {considered} "
+        f"case(s), each executed exactly once"
+    )
+raise SystemExit(status)
+PYEOF
+}
+
+guard_print_elapsed() {
+    local verdict remaining
+    verdict="$(guard_budget_verdict "$SECONDS" "$GUARD_BUDGET_STOP" "$GUARD_BUDGET_WARN")"
+    printf '%ss elapsed of the %ss CI budget\n' "$SECONDS" "$GUARD_BUDGET_SECONDS"
+    if [[ "$verdict" != ok ]]; then
+        remaining=$((GUARD_BUDGET_SECONDS - SECONDS))
+        printf 'WARNING: the guard self-test has %ss of its CI budget left. The next cases added to\n' \
+            "$remaining" >&2
+        printf 'WARNING: it will turn the guard-self-test job red for a reason having nothing to do\n' >&2
+        printf 'WARNING: with what it checks. Make cases faster or raise GATEWAY_GUARD_JOBS.\n' >&2
+    fi
+}
+
+run_guard_shards() {
+    local jobs="$1"
+    local workdir index rc status=0 considered="" summary recorded=0
+    local total_failures=0 total_executed=0
+    local pids=() codes=()
+    local shard_considered shard_executed shard_failures
+    workdir="$(mktemp -d "${TMPDIR:-/tmp}/gateway-guard-shards.XXXXXX")"
+    printf 'Guard self-test: group %s/%s, %s worker(s), %ss budget\n' \
+        "$((GUARD_SHARD_GROUP + 1))" "$GUARD_SHARD_GROUPS" "$jobs" "$GUARD_BUDGET_SECONDS"
+    for ((index = 0; index < jobs; index++)); do
+        mkdir -p "${workdir}/tmp-${index}"
+        : >"${workdir}/ledger-${index}"
+        env \
+            GATEWAY_GUARD_SHARD_INDEX="$index" \
+            GATEWAY_GUARD_SHARD_COUNT="$jobs" \
+            GATEWAY_GUARD_SHARD_GROUPS="$GUARD_SHARD_GROUPS" \
+            GATEWAY_GUARD_SHARD_GROUP="$GUARD_SHARD_GROUP" \
+            GATEWAY_GUARD_SHARD_LEDGER="${workdir}/ledger-${index}" \
+            GATEWAY_GUARD_SHARD_SUMMARY="${workdir}/summary-${index}" \
+            GATEWAY_GUARD_BUDGET_SECONDS="$GUARD_BUDGET_SECONDS" \
+            TMPDIR="${workdir}/tmp-${index}" \
+            bash "$GUARD_SELF" >"${workdir}/out-${index}" 2>&1 &
+        pids[index]=$!
+    done
+    for ((index = 0; index < jobs; index++)); do
+        rc=0
+        wait "${pids[index]}" || rc=$?
+        codes[index]=$rc
+    done
+    for ((index = 0; index < jobs; index++)); do
+        printf '\n===== group %s/%s worker %s/%s (exit %s) =====\n' \
+            "$((GUARD_SHARD_GROUP + 1))" "$GUARD_SHARD_GROUPS" "$((index + 1))" "$jobs" "${codes[index]}"
+        cat "${workdir}/out-${index}"
+        summary="${workdir}/summary-${index}"
+        if [[ ! -f "$summary" ]]; then
+            printf 'test_guard_scripts: worker %s/%s ended without a summary, so its cases did not all run\n' \
+                "$((index + 1))" "$jobs" >&2
+            status=1
+            continue
+        fi
+        read -r shard_considered shard_executed shard_failures <"$summary"
+        if [[ -z "$considered" ]]; then
+            considered="$shard_considered"
+        elif [[ "$shard_considered" != "$considered" ]]; then
+            printf 'test_guard_scripts: workers disagree on the case list (%s vs %s); the suite is not deterministic\n' \
+                "$considered" "$shard_considered" >&2
+            status=1
+        fi
+        total_executed=$((total_executed + shard_executed))
+        total_failures=$((total_failures + shard_failures))
+        ((codes[index] <= 1)) || status=1
+    done
+    printf '\n'
+    if [[ -n "$considered" ]]; then
+        guard_shard_ledger_report "$considered" "$GUARD_SHARD_GROUPS" "$GUARD_SHARD_GROUP" \
+            "${workdir}"/ledger-* || status=1
+        # Independent of the ledger contents: what the workers counted themselves must
+        # equal what they recorded, so a worker cannot report cases it never wrote down.
+        recorded="$(cat "${workdir}"/ledger-* | wc -l | tr -d ' ')"
+        if ((total_executed != recorded)); then
+            printf 'test_guard_scripts: workers counted %s executed case(s) but recorded %s\n' \
+                "$total_executed" "$recorded" >&2
+            status=1
+        fi
+    else
+        printf 'test_guard_scripts: no worker reported a case list\n' >&2
+        status=1
+    fi
+    printf '\n%s of %s case(s) in group %s/%s, %s failure(s)\n' \
+        "$total_executed" "${considered:-0}" "$((GUARD_SHARD_GROUP + 1))" "$GUARD_SHARD_GROUPS" \
+        "$total_failures"
+    guard_print_elapsed
+    rm -rf "$workdir"
+    ((total_failures == 0)) || status=1
+    return "$status"
+}
+
+guard_finish() {
+    if [[ -n "$GUARD_SHARD_SUMMARY" ]]; then
+        printf '%s %s %s\n' "$cases" "$GUARD_EXECUTED" "$failures" >"$GUARD_SHARD_SUMMARY"
+        printf '\n%s of %s case(s) in this worker, %s failure(s)\n' \
+            "$GUARD_EXECUTED" "$cases" "$failures"
+    else
+        printf '\n%s case(s), %s failure(s)\n' "$cases" "$failures"
+        guard_print_elapsed
+    fi
+    [[ "$failures" -eq 0 ]]
+}
+
+if [[ -z "$GUARD_SHARD_COUNT" ]]; then
+    GUARD_JOBS="${GATEWAY_GUARD_JOBS:-$(guard_detect_jobs)}"
+    if [[ ! "$GUARD_JOBS" =~ ^[1-9][0-9]*$ ]]; then
+        printf 'test_guard_scripts: GATEWAY_GUARD_JOBS must be a positive integer\n' >&2
+        exit 1
+    fi
+    GUARD_JOBS="$(guard_shard_plan \
+        "$GUARD_JOBS" "$QUIRK_LEDGER_ONLY" "$DTO_COMPILER_ONLY" "$BUILD_GUARDS_ONLY")"
+    # One worker is still a shard when the suite is split over runners: the group
+    # filter and the coverage proof both live in run_guard_shards, so a single-worker
+    # group must go through it rather than quietly running every other group's cases.
+    if ((GUARD_JOBS > 1 || GUARD_SHARD_GROUPS > 1)); then
+        GUARD_SHARDS_RC=0
+        run_guard_shards "$GUARD_JOBS" || GUARD_SHARDS_RC=$?
+        exit "$GUARD_SHARDS_RC"
+    fi
 fi
 
 pass_msg() { printf '  ok   %s\n' "$*"; }
@@ -136,7 +535,8 @@ reset_sandbox_changes() {
 }
 # Reuse the caller's build directory. A guard that declares REQUIRES-BUILD compiles
 # the workspace, and a separate target/ recompiles it after `cargo test --workspace`.
-# CI measured that duplication past the ten-minute hard limit. Sandbox mutations still
+# CI measured that duplication past this suite's wall-clock budget (declared at the top of
+# this file: 480s, its slice of the ten-minute whole-gate budget). Sandbox mutations still
 # rebuild affected workspace crates because Cargo fingerprints their different source
 # root, while registry dependencies and the positive control remain reusable.
 #
@@ -335,6 +735,7 @@ RS
 expect_semver_fail() {
     local guard="$1" desc="$2" mutate="$3" output rc=0
     cases=$((cases + 1))
+    guard_case_owned "$cases" || return 0
     make_semver_sandbox
     (cd "$SEMVER_SANDBOX" && "$mutate" >/dev/null)
     output="$(GATEWAY_CHECK_ROOT="$SEMVER_SANDBOX" \
@@ -384,6 +785,7 @@ make_ct_eq_sandbox() {
 expect_ct_eq_fail() {
     local desc="$1" mutate="$2" output rc=0
     cases=$((cases + 1))
+    guard_case_owned "$cases" || return 0
     make_ct_eq_sandbox
     (cd "$CT_EQ_SANDBOX" && "$mutate" >/dev/null)
     (cd "$CT_EQ_SANDBOX" && git add -A >/dev/null 2>&1)
@@ -404,6 +806,7 @@ expect_fail_unstaged() {
     local guard="$1" desc="$2" mutate="$3"
     local sandbox rc=0
     cases=$((cases + 1))
+    guard_case_owned "$cases" || return 0
     if [[ ! -x "${SCRIPT_DIR}/${guard}" ]]; then
         fail_msg "${guard} is missing or not executable; cannot test: ${desc}"
         return
@@ -426,6 +829,7 @@ expect_english_fail_minimal() {
     local desc="$1" mutate="$2" path="$3" mode="$4"
     local sandbox output rc=0
     cases=$((cases + 1))
+    guard_case_owned "$cases" || return 0
     sandbox="$(mktemp -d "${TMPDIR:-/tmp}/gateway-english-test.XXXXXX")"
     mkdir -p "$sandbox/$(dirname "$path")" "$sandbox/scripts/allowances"
     printf 'Visible English — middle · dot.\n' >"$sandbox/visible-control.txt"
@@ -471,6 +875,7 @@ expect_fail() {
     local expected_diagnostic="${4:-}" require_diagnostic=0 sandbox output rc=0
     [[ "$#" -ge 4 ]] && require_diagnostic=1
     cases=$((cases + 1))
+    guard_case_owned "$cases" || return 0
     if [[ ! -x "${SCRIPT_DIR}/${guard}" ]]; then
         fail_msg "${guard} is missing or not executable; cannot test: ${desc}"
         return
@@ -507,6 +912,7 @@ expect_fail_forced_staged() {
     local guard="$1" desc="$2" mutate="$3"
     local sandbox output rc=0
     cases=$((cases + 1))
+    guard_case_owned "$cases" || return 0
     make_sandbox
     sandbox="$SANDBOX"
     (cd "$sandbox" && "$mutate" >/dev/null)
@@ -530,6 +936,7 @@ expect_guard_pass() {
     local guard="$1" desc="$2" mutate="$3"
     local sandbox rc=0
     cases=$((cases + 1))
+    guard_case_owned "$cases" || return 0
     make_sandbox
     sandbox="$SANDBOX"
     (cd "$sandbox" && "$mutate" >/dev/null)
@@ -550,6 +957,7 @@ expect_fail_self_mutation() {
     local guard="$1" desc="$2" mutate="$3"
     local sandbox rc=0
     cases=$((cases + 1))
+    guard_case_owned "$cases" || return 0
     make_sandbox
     sandbox="$SANDBOX"
     (cd "$sandbox" && "$mutate" >/dev/null)
@@ -568,6 +976,7 @@ expect_fail_with_diagnostic() {
     local guard="$1" desc="$2" diagnostic="$3" mutate="$4"
     local sandbox output rc=0
     cases=$((cases + 1))
+    guard_case_owned "$cases" || return 0
     if [[ ! -x "${SCRIPT_DIR}/${guard}" ]]; then
         fail_msg "${guard} is missing or not executable; cannot test: ${desc}"
         return
@@ -590,6 +999,7 @@ expect_cargo_test_fail_with_diagnostic() {
     local package="$1" target="$2" test_name="$3" diagnostic="$4" mutate="$5"
     local sandbox output rc=0
     cases=$((cases + 1))
+    guard_case_owned "$cases" || return 0
     make_sandbox
     sandbox="$SANDBOX"
     (cd "$sandbox" && "$mutate" >/dev/null)
@@ -611,6 +1021,7 @@ expect_rustc_test_fail_with_diagnostic() {
     local source="$1" test_name="$2" diagnostic="$3" mutate="$4"
     local sandbox output binary rc=0
     cases=$((cases + 1))
+    guard_case_owned "$cases" || return 0
     make_sandbox
     sandbox="$SANDBOX"
     binary="$(mktemp "${TMPDIR:-/tmp}/gateway-rustc-test.XXXXXX")"
@@ -640,6 +1051,7 @@ expect_fail_and_missing_grep() {
     local guard="$1" desc="$2" mutate="$3"
     local sandbox mutation_rc=0 missing_rc=0 missing_output tool_path clean=1
     cases=$((cases + 1))
+    guard_case_owned "$cases" || return 0
     if [[ ! -x "${SCRIPT_DIR}/${guard}" ]]; then
         fail_msg "${guard} is missing or not executable; cannot test: ${desc}"
         return
@@ -679,6 +1091,7 @@ expect_monomorphic_ir_fail() {
     local desc="$1" mutate="$2"
     local sandbox ir rc=0
     cases=$((cases + 1))
+    guard_case_owned "$cases" || return 0
     make_sandbox
     sandbox="$SANDBOX"
     (cd "$sandbox" && "$mutate" >/dev/null)
@@ -698,6 +1111,7 @@ expect_fail_and_missing_cargo() {
     local guard="$1" desc="$2" mutate="$3"
     local sandbox mutation_rc=0 missing_rc=0 missing_output tool_path clean=1
     cases=$((cases + 1))
+    guard_case_owned "$cases" || return 0
     if [[ ! -x "${SCRIPT_DIR}/${guard}" ]]; then
         fail_msg "${guard} is missing or not executable; cannot test: ${desc}"
         return
@@ -741,6 +1155,7 @@ for guard in \
     check_monomorphic_dispatch.sh \
     check_verify_map_generated.sh; do
     cases=$((cases + 1))
+    guard_case_owned "$cases" || continue
     if "${SCRIPT_DIR}/${guard}" >/dev/null 2>&1; then
         pass_msg "$guard"
     else
@@ -937,6 +1352,7 @@ for guard in "${SCRIPT_DIR}"/check_*.sh; do
     grep -q '^# REQUIRES-PR$' "$guard" && continue
     grep -q '^# REQUIRES-BUILD$' "$guard" && continue
     cases=$((cases + 1))
+    guard_case_owned "$cases" || continue
     if grep -q '^# REQUIRES-PR$' "$guard"; then
         pass_msg "$(basename "$guard") deferred to its PR-context probes"
         continue
@@ -1174,6 +1590,7 @@ expect_fail check_template_contract.sh \
 probe_template_guard_missing_ruby() {
     local output rc=0 sandbox
     cases=$((cases + 1))
+    guard_case_owned "$cases" || return 0
     make_sandbox
     sandbox="$SANDBOX"
     output="$(GATEWAY_CHECK_ROOT="$sandbox" PATH=/nonexistent /bin/bash \
@@ -2006,6 +2423,7 @@ expect_fail check_scalar_case_coverage.sh \
 probe_scalar_case_guard_missing_python() {
     local output rc=0 tool_path
     cases=$((cases + 1))
+    guard_case_owned "$cases" || return 0
     tool_path="$(mktemp -d "${TMPDIR:-/tmp}/gateway-scalar-guard-path.XXXXXX")"
     ln -s "$(command -v dirname)" "${tool_path}/dirname"
     output="$(GATEWAY_CHECK_ROOT="$REPO_ROOT" PATH="$tool_path" /bin/bash \
@@ -2305,6 +2723,7 @@ RSEOF
 probe_gateway_consolidated_registration_decoys() {
     local sandbox rc=0
     cases=$((cases + 1))
+    guard_case_owned "$cases" || return 0
     make_sandbox
     sandbox="$SANDBOX"
     (cd "$sandbox" && mut_gateway_consolidated_registration_decoys >/dev/null)
@@ -2714,6 +3133,7 @@ probe_error_scope_guards_without_rg() {
     ln -s "$(command -v awk)" "${tool_path}/awk"
     for guard in "${guards[@]}"; do
         cases=$((cases + 1))
+        guard_case_owned "$cases" || continue
         rc=0
         output="$(GATEWAY_CHECK_ROOT="$REPO_ROOT" PATH="$tool_path" /bin/bash "${SCRIPT_DIR}/${guard}" 2>&1)" || rc=$?
         if [[ "$rc" -eq 0 ]]; then
@@ -2735,6 +3155,7 @@ probe_error_scope_guards_missing_python() {
     ln -s "$(command -v awk)" "${tool_path}/awk"
     for guard in "${guards[@]}"; do
         cases=$((cases + 1))
+        guard_case_owned "$cases" || continue
         rc=0
         output="$(GATEWAY_CHECK_ROOT="$REPO_ROOT" PATH="$tool_path" /bin/bash "${SCRIPT_DIR}/${guard}" 2>&1)" || rc=$?
         if [[ "$rc" -ne 0 && "$output" == *'required command is missing: python3'* ]]; then
@@ -2858,6 +3279,7 @@ expect_fail check_adr_contract.sh \
 probe_adr_committed_self_base_rejected() {
     local holder sandbox implicit_output explicit_output implicit_rc=0 explicit_rc=0
     cases=$((cases + 1))
+    guard_case_owned "$cases" || return 0
     make_sandbox
     holder="$(mktemp -d "${TMPDIR:-/tmp}/gateway-adr-self-base.XXXXXX")"
     git clone -q "$SANDBOX" "$holder/repository"
@@ -2887,6 +3309,7 @@ probe_adr_committed_self_base_rejected
 probe_adr_origin_main_self_base_rejected() {
     local holder sandbox output rc=0
     cases=$((cases + 1))
+    guard_case_owned "$cases" || return 0
     make_sandbox
     holder="$(mktemp -d "${TMPDIR:-/tmp}/gateway-adr-origin-self.XXXXXX")"
     git clone -q "$SANDBOX" "$holder/repository"
@@ -2914,6 +3337,7 @@ probe_adr_origin_main_self_base_rejected
 probe_adr_pull_request_merge_uses_first_parent() {
     local sandbox
     cases=$((cases + 1))
+    guard_case_owned "$cases" || return 0
     make_sandbox
     sandbox="$SANDBOX"
     local rc=0
@@ -2998,6 +3422,7 @@ expect_fail check_adr_contract.sh \
 probe_adr_paired_supersession_allowed() {
     local sandbox rc=0
     cases=$((cases + 1))
+    guard_case_owned "$cases" || return 0
     make_sandbox
     sandbox="$SANDBOX"
     (
@@ -3227,6 +3652,7 @@ expect_fail check_adr_contract.sh \
 probe_adr_guard_missing_ruby() {
     local output rc=0 sandbox
     cases=$((cases + 1))
+    guard_case_owned "$cases" || return 0
     make_sandbox
     sandbox="$SANDBOX"
     output="$(GATEWAY_CHECK_ROOT="$sandbox" PATH=/nonexistent /bin/bash \
@@ -3533,13 +3959,16 @@ stage_mutant_rejects_empty() {
 probe_selective_staging() {
     local mutant desc
     cases=$((cases + 1))
-    if stage_helper_contract stage_sandbox_changes; then
-        pass_msg 'selective staging covers modified, deleted, untracked and empty mutations'
-    else
-        fail_msg 'selective staging lost a changed path or scanned the whole repository'
+    if guard_case_owned "$cases"; then
+        if stage_helper_contract stage_sandbox_changes; then
+            pass_msg 'selective staging covers modified, deleted, untracked and empty mutations'
+        else
+            fail_msg 'selective staging lost a changed path or scanned the whole repository'
+        fi
     fi
     while IFS='|' read -r mutant desc; do
         cases=$((cases + 1))
+        guard_case_owned "$cases" || continue
         if stage_helper_contract "$mutant"; then
             fail_msg "selective staging accepted its mutation: ${desc}"
         else
@@ -3613,16 +4042,20 @@ reset_mutant_uses_raw_pathspecs() {
 
 probe_literal_reset_paths() {
     cases=$((cases + 1))
-    if reset_helper_contract reset_sandbox_changes; then
-        pass_msg 'selective reset treats glob-like and bracket paths literally'
-    else
-        fail_msg 'selective reset lost a literal tracked or untracked path'
+    if guard_case_owned "$cases"; then
+        if reset_helper_contract reset_sandbox_changes; then
+            pass_msg 'selective reset treats glob-like and bracket paths literally'
+        else
+            fail_msg 'selective reset lost a literal tracked or untracked path'
+        fi
     fi
     cases=$((cases + 1))
-    if reset_helper_contract reset_mutant_uses_raw_pathspecs; then
-        fail_msg 'selective reset accepted raw Git pathspec magic'
-    else
-        pass_msg 'selective reset catches its own mutation: raw Git pathspec magic restored'
+    if guard_case_owned "$cases"; then
+        if reset_helper_contract reset_mutant_uses_raw_pathspecs; then
+            fail_msg 'selective reset accepted raw Git pathspec magic'
+        else
+            pass_msg 'selective reset catches its own mutation: raw Git pathspec magic restored'
+        fi
     fi
 }
 probe_literal_reset_paths
@@ -3633,6 +4066,7 @@ probe_literal_reset_paths
 probe_cached_sandbox_reset() {
     local repo shim log real_git rc=0
     cases=$((cases + 1))
+    guard_case_owned "$cases" || return 0
     repo="$(mktemp -d "${TMPDIR:-/tmp}/gateway-reset-cache.XXXXXX")"
     shim="$(mktemp -d "${TMPDIR:-/tmp}/gateway-reset-cache-git.XXXXXX")"
     log="$(mktemp "${TMPDIR:-/tmp}/gateway-reset-cache-log.XXXXXX")"
@@ -3747,6 +4181,7 @@ probe_cached_reset_failures() {
     local command repo shim marker real_git helper_rc
     for command in reset clean checkout; do
         cases=$((cases + 1))
+        guard_case_owned "$cases" || continue
         repo="$(mktemp -d "${TMPDIR:-/tmp}/gateway-reset-failure.XXXXXX")"
         shim="$(mktemp -d "${TMPDIR:-/tmp}/gateway-reset-failure-git.XXXXXX")"
         marker="${repo}.failed"
@@ -3800,6 +4235,7 @@ probe_cached_reset_failures
 probe_selective_reset() {
     local sandbox
     cases=$((cases + 1))
+    guard_case_owned "$cases" || return 0
     make_sandbox
     sandbox="$SANDBOX"
     (
@@ -3827,6 +4263,7 @@ probe_selective_reset
 probe_history_sensitive_reset() {
     local sandbox
     cases=$((cases + 1))
+    guard_case_owned "$cases" || return 0
     make_sandbox
     sandbox="$SANDBOX"
     (
@@ -3999,6 +4436,7 @@ TOMLEOF
 probe_xtask_dispatch_manifest_without_dependencies() {
     local sandbox layer_rc=0 ring_rc=0
     cases=$((cases + 1))
+    guard_case_owned "$cases" || return 0
     make_sandbox
     sandbox="$SANDBOX"
     (cd "$sandbox" && write_future_xtask_dispatch_manifest)
@@ -4015,6 +4453,7 @@ probe_xtask_dispatch_manifest_without_dependencies
 probe_xtask_dispatch_guard_missing_python() {
     local output rc=0 tool_path
     cases=$((cases + 1))
+    guard_case_owned "$cases" || return 0
     tool_path="$(mktemp -d "${TMPDIR:-/tmp}/gateway-dispatch-guard-path.XXXXXX")"
     ln -s "$(command -v dirname)" "${tool_path}/dirname"
     output="$(GATEWAY_CHECK_ROOT="$REPO_ROOT" PATH="$tool_path" /bin/bash \
@@ -4142,6 +4581,7 @@ expect_fail check_layer_dependencies.sh \
 probe_layer_dev_dependency_is_allowed() {
     local sandbox rc=0
     cases=$((cases + 1))
+    guard_case_owned "$cases" || return 0
     make_sandbox
     sandbox="$SANDBOX"
     printf '\n[dev-dependencies]\nrustfs-gateway-types = { workspace = true }\n' \
@@ -4498,6 +4938,7 @@ expect_fail check_stream_vocabulary.sh \
 probe_stream_vocabulary_allows_plain_object() {
     local sandbox rc=0
     cases=$((cases + 1))
+    guard_case_owned "$cases" || return 0
     make_sandbox
     sandbox="$SANDBOX"
     printf '\n// A trait object is ordinary stream-kernel vocabulary.\n' >>"${sandbox}/crates/stream/src/stream.rs"
@@ -4513,6 +4954,7 @@ probe_stream_vocabulary_allows_plain_object
 probe_pipeline_borrowed_view_allowed() {
     local sandbox rc=0
     cases=$((cases + 1))
+    guard_case_owned "$cases" || return 0
     make_sandbox
     sandbox="$SANDBOX"
     cat >>"${sandbox}/crates/stream/src/read.rs" <<'RUST'
@@ -4547,6 +4989,7 @@ expect_fail check_pipeline_stage_shape.sh \
 probe_pipeline_non_unit_stage_allowed() {
     local sandbox rc=0
     cases=$((cases + 1))
+    guard_case_owned "$cases" || return 0
     make_sandbox
     sandbox="$SANDBOX"
     GATEWAY_SANDBOX="$sandbox" python3 - <<'PY'
@@ -4573,6 +5016,7 @@ probe_pipeline_non_unit_stage_allowed
 probe_pipeline_multiple_roots_allowed() {
     local sandbox rc=0
     cases=$((cases + 1))
+    guard_case_owned "$cases" || return 0
     make_sandbox
     sandbox="$SANDBOX"
     GATEWAY_SANDBOX="$sandbox" python3 - <<'PY'
@@ -4696,6 +5140,7 @@ probe_stream_guards_fail_closed() {
     ln -s "$(command -v dirname)" "${tool_path}/dirname"
     for guard in "${guards[@]}"; do
         cases=$((cases + 1))
+        guard_case_owned "$cases" || continue
         rc=0
         output="$(GATEWAY_CHECK_ROOT="$REPO_ROOT" PATH="$tool_path" /bin/bash \
             "${SCRIPT_DIR}/${guard}" 2>&1)" || rc=$?
@@ -4710,6 +5155,7 @@ probe_stream_guards_fail_closed() {
     empty_root="$(mktemp -d "${TMPDIR:-/tmp}/gateway-stream-guard-empty.XXXXXX")"
     for guard in "${guards[@]}"; do
         cases=$((cases + 1))
+        guard_case_owned "$cases" || continue
         rc=0
         GATEWAY_CHECK_ROOT="$empty_root" "${SCRIPT_DIR}/${guard}" >/dev/null 2>&1 || rc=$?
         if [[ "$rc" -ne 0 ]]; then
@@ -4811,6 +5257,7 @@ expect_fail check_smithy_timestamp_corpus.sh \
 probe_smithy_timestamp_guard_missing_python() {
     local output rc=0 tool_path
     cases=$((cases + 1))
+    guard_case_owned "$cases" || return 0
     tool_path="$(mktemp -d "${TMPDIR:-/tmp}/gateway-smithy-guard-path.XXXXXX")"
     ln -s "$(command -v dirname)" "${tool_path}/dirname"
     output="$(GATEWAY_CHECK_ROOT="$REPO_ROOT" PATH="$tool_path" /bin/bash \
@@ -4878,6 +5325,7 @@ expect_fail check_has_operation_coverage.sh \
 probe_has_operation_guard_missing_python() {
     local output rc=0 tool_path
     cases=$((cases + 1))
+    guard_case_owned "$cases" || return 0
     tool_path="$(mktemp -d "${TMPDIR:-/tmp}/gateway-has-operation-path.XXXXXX")"
     ln -s "$(command -v dirname)" "${tool_path}/dirname"
     output="$(GATEWAY_CHECK_ROOT="$REPO_ROOT" PATH="$tool_path" /bin/bash \
@@ -5759,6 +6207,7 @@ expect_fail_forced_staged check_no_planning_docs.sh \
 probe_planning_guard_missing_git_input() {
     local empty output rc=0
     cases=$((cases + 1))
+    guard_case_owned "$cases" || return 0
     empty="$(mktemp -d "${TMPDIR:-/tmp}/gateway-planning-empty.XXXXXX")"
     output="$(GATEWAY_CHECK_ROOT="$empty" "${SCRIPT_DIR}/check_no_planning_docs.sh" 2>&1)" || rc=$?
     rmdir "$empty"
@@ -5773,6 +6222,7 @@ probe_planning_guard_missing_git_input
 expect_protected_fail() {
     local desc="$1" mutate="$2" sandbox rc=0
     cases=$((cases + 1))
+    guard_case_owned "$cases" || return 0
     [[ -x "${SCRIPT_DIR}/check_protected_files.sh" ]] || { fail_msg "check_protected_files.sh is missing or not executable; cannot test: ${desc}"; return; }
     make_sandbox; sandbox="$SANDBOX"
     (cd "$sandbox" && "$mutate" >/dev/null && git add -A && git -c user.name=t -c user.email=t@t commit -qm mutation)
@@ -5783,7 +6233,10 @@ expect_protected_fail() {
 
 expect_protected_pass() {
     local desc="$1" mutate="$2" body="${3:-}" sandbox rc=0
-    cases=$((cases + 1)); make_sandbox; sandbox="$SANDBOX"
+    cases=$((cases + 1))
+    guard_case_owned "$cases" || return 0
+    make_sandbox
+    sandbox="$SANDBOX"
     (cd "$sandbox" && "$mutate" >/dev/null && git add -A && git -c user.name=t -c user.email=t@t commit -qm mutation)
     GATEWAY_CHECK_ROOT="$sandbox" GATEWAY_PROTECTED_BASE=HEAD^ GATEWAY_PROTECTED_HEAD=HEAD GATEWAY_PR_BODY="$body" \
         "${SCRIPT_DIR}/check_protected_files.sh" >/dev/null 2>&1 || rc=$?
@@ -5810,6 +6263,7 @@ expect_protected_fail 'the AGENTS protected path table drifting from the executa
 probe_protected_missing_inputs() {
     local output rc=0
     cases=$((cases + 1))
+    guard_case_owned "$cases" || return 0
     output="$(GATEWAY_CHECK_ROOT="$REPO_ROOT" "${SCRIPT_DIR}/check_protected_files.sh" 2>&1)" || rc=$?
     [[ "$rc" -ne 0 && "$output" == *'required input is missing: GATEWAY_PROTECTED_BASE'* ]] && \
         pass_msg 'check_protected_files.sh fails closed without PR comparison inputs' || \
@@ -5942,6 +6396,7 @@ expect_fail check_no_global_registry_deps.sh \
 probe_global_registry_diagnostic() {
     local diagnostic_pattern output rc=0 sandbox
     cases=$((cases + 1))
+    guard_case_owned "$cases" || return 0
     make_sandbox
     sandbox="$SANDBOX"
     cat >>"$sandbox/crates/core/Cargo.toml" <<'TOML'
@@ -5967,6 +6422,7 @@ probe_global_registry_diagnostic
 probe_global_registry_text_decoys() {
     local sandbox rc=0
     cases=$((cases + 1))
+    guard_case_owned "$cases" || return 0
     make_sandbox
     sandbox="$SANDBOX"
     mkdir -p "$sandbox/examples/registry-decoy"
@@ -5995,6 +6451,7 @@ probe_global_registry_text_decoys
 probe_global_registry_guard_missing_python() {
     local output rc=0 sandbox tool_path
     cases=$((cases + 1))
+    guard_case_owned "$cases" || return 0
     make_sandbox
     sandbox="$SANDBOX"
     tool_path="$(mktemp -d "${TMPDIR:-/tmp}/gateway-registry-path.XXXXXX")"
@@ -6174,6 +6631,7 @@ expect_fail check_guard_grep_pipelines.sh \
 probe_guard_grep_policy_allows_shell_eq() {
     local sandbox rc=0
     cases=$((cases + 1))
+    guard_case_owned "$cases" || return 0
     make_sandbox
     sandbox="$SANDBOX"
     printf '\n[[ 1 -eq 1 ]]\n' >>"${sandbox}/scripts/check_license_headers.sh"
@@ -6190,6 +6648,7 @@ probe_guard_grep_policy_allows_shell_eq
 probe_guard_grep_policy_missing_grep() {
     local sandbox tool_path output rc=0
     cases=$((cases + 1))
+    guard_case_owned "$cases" || return 0
     make_sandbox
     sandbox="$SANDBOX"
     tool_path="$(mktemp -d "${TMPDIR:-/tmp}/gateway-guard-path.XXXXXX")"
@@ -6209,6 +6668,7 @@ probe_guard_grep_policy_missing_grep
 probe_guard_grep_policy_missing_awk() {
     local sandbox tool_path output rc=0
     cases=$((cases + 1))
+    guard_case_owned "$cases" || return 0
     make_sandbox
     sandbox="$SANDBOX"
     tool_path="$(mktemp -d "${TMPDIR:-/tmp}/gateway-guard-path.XXXXXX")"
@@ -6228,6 +6688,7 @@ probe_guard_grep_policy_missing_awk
 probe_guard_grep_policy_awk_error() {
     local sandbox tool_path output rc=0
     cases=$((cases + 1))
+    guard_case_owned "$cases" || return 0
     make_sandbox
     sandbox="$SANDBOX"
     tool_path="$(mktemp -d "${TMPDIR:-/tmp}/gateway-guard-path.XXXXXX")"
@@ -6514,6 +6975,7 @@ expect_ct_eq_fail \
 probe_secret_partial_eq_with_constant_time_call() {
     local sandbox rc=0
     cases=$((cases + 1))
+    guard_case_owned "$cases" || return 0
     make_ct_eq_sandbox
     sandbox="$CT_EQ_SANDBOX"
     cat >"${sandbox}/ct_eq_positive.rs" <<'RS'
@@ -6541,6 +7003,7 @@ probe_secret_partial_eq_with_constant_time_call
 probe_secret_partial_eq_allowance() {
     local sandbox rc=0
     cases=$((cases + 1))
+    guard_case_owned "$cases" || return 0
     make_ct_eq_sandbox
     sandbox="$CT_EQ_SANDBOX"
     cat >"${sandbox}/ct_eq_allowed.rs" <<'RS'
@@ -6565,6 +7028,7 @@ probe_secret_partial_eq_allowance
 probe_ct_eq_missing_git_inputs() {
     local empty output rc=0
     cases=$((cases + 1))
+    guard_case_owned "$cases" || return 0
     empty="$(mktemp -d "${TMPDIR:-/tmp}/gateway-ct-eq-empty.XXXXXX")"
     output="$(GATEWAY_CHECK_ROOT="$empty" "${SCRIPT_DIR}/check_ct_eq.sh" 2>&1)" || rc=$?
     rmdir "$empty"
@@ -6578,6 +7042,7 @@ probe_ct_eq_missing_git_inputs
 
 probe_role_verdict_guard_exists() {
     cases=$((cases + 1))
+    guard_case_owned "$cases" || return 0
     if [[ -x "${SCRIPT_DIR}/check_role_verdicts.sh" ]]; then
         pass_msg 'check_role_verdicts.sh exists and is executable'
     else
@@ -6589,6 +7054,7 @@ probe_role_verdict_guard_exists
 expect_role_result() {
     local expected="$1" desc="$2" changed="$3" body="$4" changed_diff="${5:-}" rc=0
     cases=$((cases + 1))
+    guard_case_owned "$cases" || return 0
     GATEWAY_CHECK_ROOT="$REPO_ROOT" \
         GATEWAY_CHANGED_FILES="$changed" \
         GATEWAY_CHANGED_DIFF="$changed_diff" \
@@ -6660,6 +7126,7 @@ expect_role_result fail 'a hidden HIGH-RISK marker authorizing four roles' \
 probe_role_verdict_missing_inputs() {
     local rc=0
     cases=$((cases + 1))
+    guard_case_owned "$cases" || return 0
     GATEWAY_CHECK_ROOT="$REPO_ROOT" GATEWAY_PR_BODY='' \
         "${SCRIPT_DIR}/check_role_verdicts.sh" >/dev/null 2>&1 || rc=$?
     if [[ "$rc" -ne 0 ]]; then
@@ -6673,6 +7140,7 @@ probe_role_verdict_missing_inputs
 probe_role_verdict_table_drift() {
     local sandbox rc=0
     cases=$((cases + 1))
+    guard_case_owned "$cases" || return 0
     make_sandbox
     sandbox="$SANDBOX"
     sed -i.bak 's/at most 60k tokens per PR/at most 61k tokens per PR/' "${sandbox}/AGENTS.md"
@@ -6692,6 +7160,7 @@ probe_role_verdict_table_drift
 probe_compat_role_required() {
     local repo base head rc=0
     cases=$((cases + 1))
+    guard_case_owned "$cases" || return 0
     repo="$(mktemp -d "${TMPDIR:-/tmp}/gateway-role-compat.XXXXXX")"
     mkdir -p "${repo}/crates/types"
     cp "${REPO_ROOT}/AGENTS.md" "${repo}/AGENTS.md"
@@ -6727,6 +7196,7 @@ probe_compat_role_required
 probe_compat_source_role_required() {
     local repo base head rc=0
     cases=$((cases + 1))
+    guard_case_owned "$cases" || return 0
     repo="$(mktemp -d "${TMPDIR:-/tmp}/gateway-role-compat-source.XXXXXX")"
     mkdir -p "${repo}/crates/types/src"
     cp "${REPO_ROOT}/AGENTS.md" "${repo}/AGENTS.md"
@@ -6763,6 +7233,7 @@ probe_compat_source_role_required
 probe_existing_compat_body_role_required() {
     local repo base head rc=0
     cases=$((cases + 1))
+    guard_case_owned "$cases" || return 0
     repo="$(mktemp -d "${TMPDIR:-/tmp}/gateway-role-compat-body.XXXXXX")"
     mkdir -p "${repo}/crates/types/src"
     cp "${REPO_ROOT}/AGENTS.md" "${repo}/AGENTS.md"
@@ -8514,6 +8985,7 @@ expect_semver_fail check_no_exhaustive_destructuring.sh \
 probe_semver_guards_missing_python() {
     local guard output rc tool_path all_failed=1
     cases=$((cases + 1))
+    guard_case_owned "$cases" || return 0
     make_semver_sandbox
     tool_path="$(mktemp -d "${TMPDIR:-/tmp}/gateway-semver-path.XXXXXX")"
     ln -s "$(command -v dirname)" "${tool_path}/dirname"
@@ -8537,6 +9009,7 @@ probe_semver_guards_missing_python
 probe_semver_guard_decoys() {
     local sandbox rc=0 non_exhaustive_output destructuring_output
     cases=$((cases + 1))
+    guard_case_owned "$cases" || return 0
     make_semver_sandbox
     sandbox="$SEMVER_SANDBOX"
     cat >>"$sandbox/generated/dto/ops/get_bucket_location.rs" <<'RS'
@@ -8840,7 +9313,7 @@ expect_fail check_route_shadowing_authority.sh \
 # because check_case_keys_honoured.sh audits the sandbox's corpus using the
 # binary built next to this script: a harness mutation would need a cold
 # compile of the whole workspace inside the sandbox, and this suite has a
-# ten-minute budget.
+# 480-second wall-clock budget (declared at the top of this file).
 #
 # The first control is the defect itself: a key the frozen schema allows and
 # nothing reads. The second is the guard's other end — an entry in DECLARED
@@ -9577,6 +10050,7 @@ scanner_budget_case() {
     local guard="$1" ceiling="$2" expectation="$3" desc="$4" mutate="${5:-}"
     local sandbox shim_dir count_dir rc=0 observed
     cases=$((cases + 1))
+    guard_case_owned "$cases" || return 0
     make_sandbox
     sandbox="$SANDBOX"
     if [[ -n "$mutate" ]]; then
@@ -9640,6 +10114,7 @@ mut_no_minio_rg_scan() {
 absolute_scanner_path_case() {
     local expectation="$1" desc="$2" mutate="${3:-}" sandbox hits rc=0
     cases=$((cases + 1))
+    guard_case_owned "$cases" || return 0
     make_sandbox
     sandbox="$SANDBOX"
     if [[ -n "$mutate" ]]; then
@@ -9686,6 +10161,7 @@ absolute_scanner_path_case clean \
 absolute_scanner_path_case caught \
     'an absolute grep path cannot bypass the process counter' mut_absolute_scanner_path
 
+# No shard gate: guard_shard_plan keeps GATEWAY_GUARD_BUILD_GUARDS_ONLY single-process.
 cases=$((cases + 1))
 missing_shim_dir="$(mktemp -d "${TMPDIR:-/tmp}/gateway-scanner-missing.XXXXXX")"
 missing_count_dir="$(mktemp -d "${TMPDIR:-/tmp}/gateway-scanner-missing-count.XXXXXX")"
@@ -9699,6 +10175,7 @@ else
 fi
 rm -rf "$missing_shim_dir" "$missing_count_dir"
 
+# No shard gate: guard_shard_plan keeps GATEWAY_GUARD_BUILD_GUARDS_ONLY single-process.
 cases=$((cases + 1))
 missing_tool_dir="$(mktemp -d "${TMPDIR:-/tmp}/gateway-scanner-missing-tool.XXXXXX")"
 missing_tool_count_dir="$(mktemp -d "${TMPDIR:-/tmp}/gateway-scanner-missing-tool-count.XXXXXX")"
@@ -10191,6 +10668,7 @@ expect_authz_fail_minimal() {
     )
 
     cases=$((cases + 1))
+    guard_case_owned "$cases" || return 0
     for tool in awk bash cat cp dirname git grep mkdir mktemp python3 rm sort tr; do
         if ! command -v "$tool" >/dev/null 2>&1; then
             fail_msg "check_authz_fail_closed.sh cannot test ${desc}; required command is missing: ${tool}"
@@ -11093,14 +11571,14 @@ expect_fail check_ci_test_split.sh \
     'the guard mutation job losing access to the branch merge base' mut_ci_guard_parent_fetch_dropped
 
 mut_ci_guard_command_dropped() {
-    replace_ci_text 'timeout 480s bash scripts/test_guard_scripts.sh' 'timeout 480s true'
+    replace_ci_text 'timeout 300s env GATEWAY_GUARD_BUDGET_SECONDS=300 GATEWAY_GUARD_SHARD_GROUPS=4 GATEWAY_GUARD_SHARD_GROUP=0 bash scripts/test_guard_scripts.sh' 'timeout 300s true'
 }
 expect_fail check_ci_test_split.sh \
     'the guard mutation suite being replaced with a no-op' mut_ci_guard_command_dropped
 
 mut_ci_guard_failure_swallowed() {
-    replace_ci_text '          timeout 480s bash scripts/test_guard_scripts.sh' \
-        '          timeout 480s bash scripts/test_guard_scripts.sh || true'
+    replace_ci_text '          timeout 300s env GATEWAY_GUARD_BUDGET_SECONDS=300 GATEWAY_GUARD_SHARD_GROUPS=4 GATEWAY_GUARD_SHARD_GROUP=0 bash scripts/test_guard_scripts.sh' \
+        '          timeout 300s env GATEWAY_GUARD_BUDGET_SECONDS=300 GATEWAY_GUARD_SHARD_GROUPS=4 GATEWAY_GUARD_SHARD_GROUP=0 bash scripts/test_guard_scripts.sh || true'
 }
 expect_fail check_ci_test_split.sh \
     'the guard mutation job swallowing a failure or timeout' mut_ci_guard_failure_swallowed
@@ -11109,7 +11587,7 @@ mut_ci_guard_budget_widened() {
     replace_ci_text '  guard-self-test:
     name: Guard self-test
     runs-on: ubuntu-latest
-    timeout-minutes: 9' '  guard-self-test:
+    timeout-minutes: 6' '  guard-self-test:
     name: Guard self-test
     runs-on: ubuntu-latest
     timeout-minutes: 10'
@@ -11301,14 +11779,14 @@ expect_fail check_ci_test_split.sh \
     'the branch-protected Test check being renamed' mut_ci_required_name_changed
 
 mut_ci_aggregate_drops_guard() {
-    replace_ci_text 'needs: [workspace-tests, signing-suite, guard-self-test, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, gateway-tsan]' \
+    replace_ci_text 'needs: [workspace-tests, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, gateway-tsan]' \
         'needs: [workspace-tests, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, gateway-tsan]'
 }
 expect_fail check_ci_test_split.sh \
     'the required Test check no longer waiting for guard mutations' mut_ci_aggregate_drops_guard
 
 mut_ci_aggregate_drops_target() {
-    replace_ci_text 'needs: [workspace-tests, signing-suite, guard-self-test, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, gateway-tsan]' \
+    replace_ci_text 'needs: [workspace-tests, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, gateway-tsan]' \
         'needs: [workspace-tests, guard-self-test, quirk-ledger-self-test, dto-compiler-self-test, gateway-tsan]'
 }
 expect_fail check_ci_test_split.sh \
@@ -11316,7 +11794,7 @@ expect_fail check_ci_test_split.sh \
     mut_ci_aggregate_drops_target
 
 mut_ci_aggregate_drops_quirk_ledger() {
-    replace_ci_text 'needs: [workspace-tests, signing-suite, guard-self-test, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, gateway-tsan]' \
+    replace_ci_text 'needs: [workspace-tests, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, gateway-tsan]' \
         'needs: [workspace-tests, guard-self-test, target-consolidation-self-test, dto-compiler-self-test, gateway-tsan]'
 }
 expect_fail check_ci_test_split.sh \
@@ -11324,7 +11802,7 @@ expect_fail check_ci_test_split.sh \
     mut_ci_aggregate_drops_quirk_ledger
 
 mut_ci_aggregate_drops_dto_compiler() {
-    replace_ci_text 'needs: [workspace-tests, signing-suite, guard-self-test, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, gateway-tsan]' \
+    replace_ci_text 'needs: [workspace-tests, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, gateway-tsan]' \
         'needs: [workspace-tests, guard-self-test, target-consolidation-self-test, quirk-ledger-self-test, gateway-tsan]'
 }
 expect_fail check_ci_test_split.sh \
@@ -11332,7 +11810,7 @@ expect_fail check_ci_test_split.sh \
     mut_ci_aggregate_drops_dto_compiler
 
 mut_ci_aggregate_drops_build_guard() {
-    replace_ci_text 'needs: [workspace-tests, signing-suite, guard-self-test, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, gateway-tsan]' \
+    replace_ci_text 'needs: [workspace-tests, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, gateway-tsan]' \
         'needs: [workspace-tests, guard-self-test, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, gateway-tsan]'
 }
 expect_fail check_ci_test_split.sh \
@@ -11362,12 +11840,12 @@ expect_fail check_ci_test_split.sh \
 mut_ci_aggregate_budget_widened() {
     replace_ci_text '  test:
     name: Test
-    needs: [workspace-tests, signing-suite, guard-self-test, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, gateway-tsan]
+    needs: [workspace-tests, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, gateway-tsan]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 1' '  test:
     name: Test
-    needs: [workspace-tests, signing-suite, guard-self-test, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, gateway-tsan]
+    needs: [workspace-tests, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, gateway-tsan]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 2'
@@ -11486,8 +11964,8 @@ expect_fail check_ci_test_split.sh \
     'the workspace test step being allowed to fail' mut_ci_worker_continues_on_error
 
 mut_ci_worker_shell_disables_errexit() {
-    replace_ci_text '      - name: Guard mutations (maximum 8 minutes after setup)' \
-        '      - name: Guard mutations (maximum 8 minutes after setup)
+    replace_ci_text '      - name: Guard mutations 1 of 4 (maximum 5 minutes after setup)' \
+        '      - name: Guard mutations 1 of 4 (maximum 5 minutes after setup)
         shell: bash {0}'
 }
 expect_fail check_ci_test_split.sh \
@@ -11554,6 +12032,74 @@ mut_ci_workflow_deleted() {
 }
 expect_fail check_ci_test_split.sh \
     "the guard's own workflow input deleted, which must fail rather than skip" mut_ci_workflow_deleted
+
+mut_guard_budget_diverges_from_ci_timeout() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path(".github/workflows/ci.yml")
+text = path.read_text()
+before = "timeout 300s env GATEWAY_GUARD_BUDGET_SECONDS=300 GATEWAY_GUARD_SHARD_GROUPS=4 GATEWAY_GUARD_SHARD_GROUP=2"
+after = "timeout 300s env GATEWAY_GUARD_BUDGET_SECONDS=600 GATEWAY_GUARD_SHARD_GROUPS=4 GATEWAY_GUARD_SHARD_GROUP=2"
+if text.count(before) != 1:
+    raise SystemExit("missing guard budget mutation subject")
+path.write_text(text.replace(before, after, 1))
+PYEOF
+}
+expect_fail check_ci_test_split.sh \
+    'a guard shard defending a budget larger than the timeout CI enforces on it' \
+    mut_guard_budget_diverges_from_ci_timeout
+
+mut_guard_budget_env_removed() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path(".github/workflows/ci.yml")
+text = path.read_text()
+before = "env GATEWAY_GUARD_BUDGET_SECONDS=300 GATEWAY_GUARD_SHARD_GROUPS=4 GATEWAY_GUARD_SHARD_GROUP=1"
+after = "env GATEWAY_GUARD_SHARD_GROUPS=4 GATEWAY_GUARD_SHARD_GROUP=1"
+if text.count(before) != 1:
+    raise SystemExit("missing guard budget env mutation subject")
+path.write_text(text.replace(before, after, 1))
+PYEOF
+}
+expect_fail check_ci_test_split.sh \
+    'a guard shard running blind to the budget, so an overrun returns to an opaque exit 124' \
+    mut_guard_budget_env_removed
+
+mut_guard_shard_group_duplicated() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path(".github/workflows/ci.yml")
+text = path.read_text()
+before = "GATEWAY_GUARD_SHARD_GROUP=3 bash scripts/test_guard_scripts.sh"
+after = "GATEWAY_GUARD_SHARD_GROUP=0 bash scripts/test_guard_scripts.sh"
+if text.count(before) != 1:
+    raise SystemExit("missing guard shard group mutation subject")
+path.write_text(text.replace(before, after, 1))
+PYEOF
+}
+expect_fail check_ci_test_split.sh \
+    'two guard runners taking the same quarter, leaving one quarter of the suite unrun' \
+    mut_guard_shard_group_duplicated
+
+mut_guard_budget_declaration_removed() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("scripts/test_guard_scripts.sh")
+text = path.read_text()
+# Split so this mutation's own source is not a second copy of its subject.
+before = 'GUARD_BUDGET_SECONDS="${GATEWAY_GUARD' + '_BUDGET_SECONDS:-480}"'
+if text.count(before) != 1:
+    raise SystemExit("missing guard budget declaration mutation subject")
+path.write_text(text.replace(before, "GUARD_BUDGET_SECONDS=480", 1))
+PYEOF
+}
+expect_fail check_ci_test_split.sh \
+    'the guard self-test ignoring the budget CI hands it, which is what keeps an overrun legible' \
+    mut_guard_budget_declaration_removed
 
 fi
 
@@ -11897,6 +12443,7 @@ expect_fail check_default_doc.sh \
 expect_sandbox_setup_failure() {
     local mode="$1" probe_root rc=0
     cases=$((cases + 1))
+    guard_case_owned "$cases" || return 0
     probe_root="$(mktemp -d "${TMPDIR:-/tmp}/gateway-guard-fault.XXXXXX")"
     mkdir -p "$probe_root/repo" "$probe_root/tmp"
     (
@@ -14238,6 +14785,7 @@ expect_fail_with_diagnostic check_handler_deadline_class.sh \
 expect_signing_suite_dirty_checkout_fail() {
     local checkout output rc=0
     cases=$((cases + 1))
+    guard_case_owned "$cases" || return 0
     checkout="$(mktemp -d "${TMPDIR:-/tmp}/gateway-signing-suite-dirty.XXXXXX")"
     if ! git -C "$checkout" init -q ||
         ! git -C "$checkout" config user.name t ||
@@ -14439,7 +14987,185 @@ PYEOF
 expect_fail check_version_metadata.sh \
     'the types crate numeric version diverging from the root dependency' mut_types_version_numeric_part_diverges
 
+# -----------------------------------------------------------------------------
+# The shard machinery is itself a guard, so it owes the same negative cases as
+# every other guard here. Nothing below runs a real case: they run the pure
+# decision functions and the isolation mechanism with synthetic inputs, so they
+# cost milliseconds and cannot be timing-dependent.
+# -----------------------------------------------------------------------------
+
+# shard_case <description> <predicate> [args...]
+shard_case() {
+    local desc="$1"
+    shift
+    cases=$((cases + 1))
+    guard_case_owned "$cases" || return 0
+    if "$@"; then
+        pass_msg "$desc"
+    else
+        fail_msg "$desc"
+    fi
+}
+
+budget_verdict_is() {
+    local expected="$1" elapsed="$2" stop="$3" warn="$4"
+    [[ "$(guard_budget_verdict "$elapsed" "$stop" "$warn")" == "$expected" ]]
+}
+
+shard_case 'the budget verdict stays quiet while the suite has room' \
+    budget_verdict_is ok 100 450 384
+shard_case 'the budget verdict warns once four fifths of the budget is spent' \
+    budget_verdict_is warn 384 450 384
+shard_case 'the budget verdict stops the suite before timeout can kill it' \
+    budget_verdict_is stop 450 450 384
+
+shard_plan_is() {
+    local expected="$1"
+    shift
+    [[ "$(guard_shard_plan "$@")" == "$expected" ]]
+}
+
+shard_case 'the default mode shards across the requested workers' \
+    shard_plan_is 4 4 0 0 0
+shard_case 'the quirk-ledger mode never shards' \
+    shard_plan_is 1 4 1 0 0
+shard_case 'the DTO compiler mode never shards' \
+    shard_plan_is 1 4 0 1 0
+shard_case 'the build-guard mode never shards, so the compiling cases keep CARGO_TARGET_DIR alone' \
+    shard_plan_is 1 4 0 0 1
+
+shard_of_is() {
+    local expected="$1" fn="$2"
+    shift 2
+    [[ "$("$fn" "$@")" == "$expected" ]]
+}
+
+# shard_partition_holds <groups> <workers> <total>
+# Every ordinal lands on exactly one (runner, worker) pair in range, and the runners
+# get equal shares. That equal split is the whole reason a runner can prove its own
+# coverage without ever seeing another runner's ledger.
+shard_partition_holds() {
+    local groups="$1" workers="$2" total="$3" n group worker
+    local owned=()
+    for ((n = 0; n < groups * workers; n++)); do
+        owned[n]=0
+    done
+    for ((n = 1; n <= total; n++)); do
+        group="$(guard_group_of "$n" "$groups")"
+        worker="$(guard_worker_of "$n" "$groups" "$workers")"
+        ((group >= 0 && group < groups)) || return 1
+        ((worker >= 0 && worker < workers)) || return 1
+        owned[group * workers + worker]=$((owned[group * workers + worker] + 1))
+    done
+    for ((n = 0; n < groups * workers; n++)); do
+        ((owned[n] == total / (groups * workers))) || return 1
+    done
+}
+
+shard_case 'the first case belongs to the first runner' \
+    shard_of_is 0 guard_group_of 1 4
+shard_case 'the fourth case belongs to the last of four runners' \
+    shard_of_is 3 guard_group_of 4 4
+shard_case 'runners stride, so the fifth case comes back to the first runner' \
+    shard_of_is 0 guard_group_of 5 4
+shard_case 'a runner hands its first case to its first worker' \
+    shard_of_is 0 guard_worker_of 1 4 2
+shard_case 'a runner strides across its own workers too' \
+    shard_of_is 1 guard_worker_of 5 4 2
+shard_case 'four runners of two workers split the ordinals into eight equal shares' \
+    shard_partition_holds 4 2 64
+
+# ledger_report_is <complete|defective> <considered> <groups> <group>
+#                  <comma-separated ordinals per worker>...
+ledger_report_is() {
+    local expected="$1" considered="$2" groups="$3" group="$4"
+    shift 4
+    local dir spec index=0 rc=0
+    dir="$(mktemp -d "${TMPDIR:-/tmp}/gateway-shard-ledger.XXXXXX")"
+    for spec in "$@"; do
+        printf '%s\n' ${spec//,/ } >"${dir}/ledger-${index}"
+        index=$((index + 1))
+    done
+    guard_shard_ledger_report "$considered" "$groups" "$group" \
+        "${dir}"/ledger-* >/dev/null 2>&1 || rc=$?
+    rm -rf "$dir"
+    if [[ "$expected" == complete ]]; then
+        [[ "$rc" -eq 0 ]]
+    else
+        [[ "$rc" -ne 0 ]]
+    fi
+}
+
+# With two runners, the first owns the odd ordinals: 1, 3, 5 and 7 out of eight,
+# which its two workers take alternately as 1, 5 and 3, 7.
+shard_case 'the coverage proof accepts workers that between them ran their whole runner share' \
+    ledger_report_is complete 8 2 0 1,5 3,7
+shard_case 'the coverage proof catches a worker that died before its last cases' \
+    ledger_report_is defective 8 2 0 1,5 3
+shard_case 'the coverage proof catches a case site that never learned about the shard gate' \
+    ledger_report_is defective 8 2 0 1,5 1,3,7
+shard_case 'the coverage proof catches a runner that ran a case belonging to another runner' \
+    ledger_report_is defective 8 2 0 1,5,2 3,7
+shard_case 'the coverage proof catches a ledger ordinal outside the considered range' \
+    ledger_report_is defective 8 2 0 1,5,9 3,7
+
+# shard_sandbox_isolation_contract <private|shared>
+# Two concurrent workers shaped the way run_guard_shards shapes a shard: each is
+# a separate process, and under `private` each derives its sandbox from its own
+# TMPDIR with the same `mktemp -d` expression make_sandbox uses. Both write a
+# marker, a file rendezvous makes both writes land before either read, and both
+# read back. Under `private` each worker must read its own value. Under `shared`
+# — one sandbox for both, which is what parallelising this suite without a
+# per-process sandbox produces — exactly one worker must read the other's value,
+# whichever wrote last. The rendezvous is what makes that deterministic instead
+# of a race that passes by luck.
+shard_sandbox_isolation_contract() {
+    local mode="$1" base worker contaminated=0 spins
+    base="$(mktemp -d "${TMPDIR:-/tmp}/gateway-shard-isolation.XXXXXX")"
+    mkdir -p "${base}/shared"
+    for worker in a b; do
+        (
+            sandbox="${base}/shared"
+            if [[ "$mode" == private ]]; then
+                mkdir -p "${base}/tmp-${worker}"
+                sandbox="$(TMPDIR="${base}/tmp-${worker}" mktemp -d "${base}/tmp-${worker}/gateway-guard-test.XXXXXX")"
+                printf '%s\n' "$sandbox" >"${base}/where-${worker}"
+            fi
+            printf '%s\n' "$worker" >"${sandbox}/marker.txt"
+            : >"${base}/wrote-${worker}"
+            spins=0
+            while [[ ! -f "${base}/wrote-a" || ! -f "${base}/wrote-b" ]]; do
+                spins=$((spins + 1))
+                ((spins < 500)) || break
+                sleep 0.02
+            done
+            cat "${sandbox}/marker.txt" >"${base}/read-${worker}"
+        ) &
+    done
+    wait
+    for worker in a b; do
+        [[ -f "${base}/read-${worker}" ]] || contaminated=2
+        [[ "$(cat "${base}/read-${worker}" 2>/dev/null)" == "$worker" ]] || contaminated=1
+        if [[ "$mode" == private ]]; then
+            # The isolation is not an accident of mktemp: it is that the worker's
+            # sandbox lives under the TMPDIR the parent handed only to it.
+            [[ "$(cat "${base}/where-${worker}" 2>/dev/null)" == "${base}/tmp-${worker}/"* ]] ||
+                contaminated=3
+        fi
+    done
+    rm -rf "$base"
+    if [[ "$mode" == private ]]; then
+        [[ "$contaminated" -eq 0 ]]
+    else
+        [[ "$contaminated" -eq 1 ]]
+    fi
+}
+
+shard_case 'concurrent shards with private TMPDIRs never see each other sandbox writes' \
+    shard_sandbox_isolation_contract private
+shard_case 'one sandbox shared by concurrent shards loses a mutation, and the contract says so' \
+    shard_sandbox_isolation_contract shared
+
 fi
 
-printf '\n%s case(s), %s failure(s)\n' "$cases" "$failures"
-[[ "$failures" -eq 0 ]]
+guard_finish

@@ -10,7 +10,15 @@ scripts/test_guard_scripts.sh          # runs the main guard suite and its negat
 scripts/test_test_target_consolidation.sh # runs target-consolidation mutations in a parallel CI job
 scripts/test_handlers_facade_fixture.sh # compiles the facade-only downstream macro fixture
 GATEWAY_GUARD_QUIRK_LEDGER_ONLY=1 scripts/test_guard_scripts.sh # runs quirk-ledger mutations in a parallel CI job
+GATEWAY_GUARD_JOBS=1 scripts/test_guard_scripts.sh # runs every case in one process, for debugging
 ```
+
+`test_guard_scripts.sh` is split over four CI runners by `GATEWAY_GUARD_SHARD_GROUPS` /
+`GATEWAY_GUARD_SHARD_GROUP`, and each runner splits its quarter again across worker
+processes (one per core, capped at eight; `GATEWAY_GUARD_JOBS` overrides it). Each runner
+proves afterwards that its workers executed exactly its own quarter, once each. It also watches its own clock against the
+480-second budget CI gives it and stops with an explicit diagnosis rather than letting the
+`timeout` wrapper kill it with an unexplained exit 124.
 
 `run_gateway_tsan.sh` is the pinned-nightly a-asm-0024 execution command; it is a CI test rather
 than a stable architecture guard.
