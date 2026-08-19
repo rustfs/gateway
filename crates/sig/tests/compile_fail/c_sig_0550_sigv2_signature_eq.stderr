@@ -1,0 +1,13 @@
+error[E0369]: binary operation `==` cannot be applied to type `rustfs_gateway_sig::Signature`
+  --> tests/compile_fail/c_sig_0550_sigv2_signature_eq.rs:28:18
+   |
+28 |     let _ = left == right;
+   |             ---- ^^ ----- rustfs_gateway_sig::Signature
+   |             |
+   |             rustfs_gateway_sig::Signature
+   |
+note: `rustfs_gateway_sig::Signature` does not implement `PartialEq`
+  --> src/signature.rs
+   |
+   | pub enum Signature {
+   | ^^^^^^^^^^^^^^^^^^ `rustfs_gateway_sig::Signature` is defined in another crate

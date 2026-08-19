@@ -1,0 +1,13 @@
+error[E0277]: `SigV2Authorization` doesn't implement `Debug`
+  --> tests/compile_fail/c_sig_0555_sigv2_authorization_debug.rs:26:15
+   |
+26 |     println!("{parsed:?}");
+   |               ^^^^^^^^^^ `SigV2Authorization` cannot be formatted using `{:?}` because it doesn't implement `Debug`
+   |
+   = help: the trait `Debug` is not implemented for `SigV2Authorization`
+help: the trait `Debug` is implemented for `Result<T, E>`
+  --> $RUST/core/src/result.rs
+   |
+   | #[derive(Copy, Debug, Hash)]
+   |                ^^^^^
+   = note: required for `Result<SigV2Authorization, AuthError>` to implement `Debug`

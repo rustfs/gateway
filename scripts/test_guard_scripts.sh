@@ -6903,6 +6903,20 @@ mut_strip_negative_floor() {
 expect_ct_eq_fail \
     'negative-case coverage dropping below its floor' mut_strip_negative_floor
 
+mut_c_sig_0551_signature_equality() {
+    printf '\nfn oops(presented: &[u8], expected_signature: &[u8]) -> bool { presented == expected_signature }\n' \
+        >>crates/sig/src/verdict.rs
+}
+expect_ct_eq_fail \
+    '[c-sig-0551] ordinary == on signature material, which no PartialEq rule sees' mut_c_sig_0551_signature_equality
+
+mut_c_sig_0551_sig_v2_equality() {
+    printf '\nfn oops(a: u8, b: u8) -> bool { a == b }\n' \
+        >>crates/sig/src/sig_v2/mod.rs
+}
+expect_ct_eq_fail \
+    '[c-sig-0551] any == inside the sig_v2 subtree, which compares nothing directly' mut_c_sig_0551_sig_v2_equality
+
 mut_secret_partial_eq_without_ct_eq() {
     cat >>crates/sig/src/secret.rs <<'RS'
 

@@ -103,6 +103,7 @@ mod query;
 mod scheme;
 mod scope;
 mod secret;
+pub mod sig_v2;
 mod signature;
 mod signed_headers;
 mod signer;
@@ -153,6 +154,7 @@ pub use scheme::{
 };
 pub use scope::{ExpectedScope, RegionSet, ScopeRegion, ScopeRejection, enforce_scope};
 pub use secret::{SafeToLog, SecretBytes, SessionToken, SigningKey, assert_safe_to_log};
+pub use sig_v2::{SigV2Mode, SigV2Policy, SigV2StringToSign, SigV2StringToSignSpec};
 pub use signature::{CtBytes, Signature, SignatureMatch, VerifyRejection};
 pub use signed_headers::{AMZ_HEADER_PREFIX, SignedHeaderSet, UNSIGNED_HEADER_EXEMPTIONS};
 pub use signer::{

@@ -19,6 +19,8 @@ Agent entry point for SigV2/SigV4 parsing, canonicalization and verification.
 | `src/scheme.rs` | Closed authentication-scheme dimensions. | Header, query, POST, or SigV2 dispatch changes. |
 | `src/scope.rs` | H5 scope cross-checks. | Credential date, region, service, or terminator validation changes. |
 | `src/secret.rs` | Secret byte ownership, redaction, and constant-time boundaries. | Credential material leaks or becomes comparable. |
+| `src/sig_v2/mod.rs` | SigV2's `Authorization` grammar, 20-byte signature decode, `Expires` rules and the `SigV2Policy` switch. | A legacy SigV2 client fails to authenticate, or SigV2 presigned needs turning on. |
+| `src/sig_v2/string_to_sign.rs` | SigV2's six-line string-to-sign and the 35 sub-resources it covers. | A SigV2 signature differs despite the same request, or a new S3 sub-resource must be signed. |
 | `src/signature.rs` | Secret-bearing signature types and constant-time comparison. | Verification or redaction changes. |
 | `src/signer.rs` | Test/client request signing. | Conformance requests are signed wrongly. |
 | `src/signed_headers.rs` | Signed-header parsing and canonical selection. | Header coverage differs between signer and verifier. |
@@ -26,6 +28,7 @@ Agent entry point for SigV2/SigV4 parsing, canonicalization and verification.
 | `src/verdict.rs` | Proof-carrying authentication outcomes and errors. | Authenticated or anonymous outcomes become forgeable. |
 | `src/verifier.rs` | Sealed AWS markers, custom verifier boundary, replay hook, and danger acknowledgement. | A custom or replacement verifier crosses its permitted boundary. |
 | `tests/integration.rs` | Single Cargo target registering all integration-test modules. | Integration tests duplicate compile or disappear. |
+| `tests/sig_v2.rs` | P2-06 evidence: sub-resource census, string-to-sign shape, `Authorization` grammar, `Expires` bounds. | Change any SigV2 contract. |
 | `tests/compile_fail.rs` | Trybuild harness for compile-time proof boundaries. | A private witness or verified type becomes constructible. |
 | `tests/security_floor*.rs` | P2-04 H1-H7 runtime evidence. | Security-floor admission or scheme policy changes. |
 | `tests/*.rs` | Remaining public verification and negative matrices. | Change any signature contract. |

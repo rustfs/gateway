@@ -1,7 +1,7 @@
 [package]
 name = "rustfs-gateway-sig"
 description = "SigV2/SigV4 verification state machine"
-version = "0.5.3"
+version = "0.6.0"
 autotests = false
 edition.workspace = true
 rust-version.workspace = true
@@ -66,13 +66,15 @@ rustfs-gateway-http = { workspace = true }
 #
 # `hmac` + `sha2` are the SigV4 primitives: four HMAC-SHA256 steps, and one SHA-256 over the
 # canonical request. They are what makes porting the two `aws-sigv4` pure functions into
-# `src/derive.rs` cheaper than depending on the crate they came from.
+# `src/derive.rs` cheaper than depending on the crate they came from. `sha1` is SigV2's only
+# primitive: one HMAC-SHA1 over the string-to-sign, in `src/sig_v2/`.
 #
 # `percent-encoding` is deliberately NOT here: its decoder is lossy on a malformed escape (`%zz`
 # passes through unchanged), and a signature input may never have two spellings. `src/query.rs`
 # hand-rolls a strict codec instead, in the same spirit as `src/codec.rs`.
 hmac = { workspace = true }
 http = { workspace = true }
+sha1 = { workspace = true }
 sha2 = { workspace = true }
 smallvec = { workspace = true }
 subtle = { workspace = true }

@@ -6,5 +6,5 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 GATEWAY_TEST_TARGET_CRATE=crates/sig \
-GATEWAY_TEST_TARGET_MODULES=canonical_request,compile_fail,effective_host,frozen_dimensions,security_floor,security_floor_schemes,signer_roundtrip,timing,verification_proof \
+GATEWAY_TEST_TARGET_MODULES=canonical_request,compile_fail,effective_host,frozen_dimensions,security_floor,security_floor_schemes,sig_v2,signer_roundtrip,timing,verification_proof \
     exec "${SCRIPT_DIR}/check_xtask_test_target_consolidation.sh"
