@@ -173,15 +173,18 @@ fn n_a_code_absent_from_the_authority_is_absent_from_both_documents() {
 
 #[test]
 fn every_row_reaches_both_published_documents_with_its_own_status() {
+    // Three bands, chosen so that status order and alphabetical order disagree: alphabetically
+    // this reads "client, redirect, server", which is the census a sort would produce and is not
+    // the order a reader follows.
     let rows = [
         row("NoSuchKey", "NO_SUCH_KEY", 404, false),
         row("InternalError", "INTERNAL_ERROR", 500, true),
+        row("PermanentRedirect", "PERMANENT_REDIRECT", 301, false),
     ];
     let markdown = render_markdown(&rows).expect("renders");
     assert!(markdown.contains("| `NoSuchKey` | 404 | `ErrorCode::NO_SUCH_KEY` |"), "{markdown}");
     assert!(markdown.contains("| `InternalError` | 500 | `ErrorCode::INTERNAL_ERROR` |"), "{markdown}");
-    // The census counts each band once, in status order rather than alphabetically.
-    assert!(markdown.contains("2 codes: 1 client, 1 server."), "{markdown}");
+    assert!(markdown.contains("3 codes: 1 redirect, 1 client, 1 server."), "{markdown}");
 
     let json = parsed(&render_json(&rows));
     let entry = json
