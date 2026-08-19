@@ -133,6 +133,9 @@ required = (
     # several seconds of unrelated host activity away from the other.
     "paired_probe_p99(control.local_addr, loaded.local_addr, PROBES, PROBE_CEILING)",
     "loaded_probes.p99 <= ceiling,",
+    # A stalled probe is charged the ceiling and the ceiling lands in the tail the rank discards,
+    # so the percentile alone cannot see a handful of unanswered probes.
+    "loaded_probes.stalled <= control_probes.stalled,",
     # A host that cannot answer the idle control listener is skipped with its reason, not passed on
     # two saturated percentiles that compare equal because both were charged the ceiling.
     "if control_probes.stalled > 0 {",
