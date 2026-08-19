@@ -476,8 +476,8 @@ fn literal_body(request: &Value) -> Option<Vec<u8>> {
 fn deliberate_digest_failure(exchange: &Exchange<'_>) -> bool {
     exchange
         .expect
-        .and_then(|expect| expect.read("expectation.error"))
-        .and_then(|error| error.read("errorExpectation.code"))
+        .and_then(|expect| expect.read("expect.error"))
+        .and_then(|error| error.read("expect.error.code"))
         .and_then(Value::as_str)
         .is_some_and(|code| code == "BadDigest" || code == "InvalidDigest")
 }
