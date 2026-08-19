@@ -133,21 +133,39 @@ fn c_sig_0563_the_sigv2_post_form_shape_is_refused() {
     assert_eq!(refusal, AuthError::NotImplemented(rustfs_gateway_sig::Unimplemented::SigV2));
 }
 
-/// Negative — c-sig-0564: a repeated `Expires` is refused by H6.
+/// Negative — c-sig-0564: a repeated `Expires` is refused by **H6**, before any other rule runs.
 ///
 /// `Expires` was missing from the signature-bearing parameter list until the SigV2 verifier was
 /// wired, because until then nothing read it. A server reading the first occurrence and a proxy
 /// reading the last disagree about when the URL dies.
+///
+/// The policy is `Disabled` on purpose, and that is the whole case. Every other refusal this
+/// request could earn is `AccessDenied`: the scheme allow-list refuses presigned SigV2 under this
+/// policy, and so does the SigV2 branch. Only H6 answers
+/// `AuthorizationQueryParametersError` — and H6 answers it only if `Expires` is in
+/// `SIGNED_QUERY_PARAMS`. Asserted the obvious way instead, under a policy that admits presigned
+/// SigV2, this case passes with `Expires` removed from that list, because the strict query reader
+/// refuses a duplicate on its own and produces the same error code. That version was written
+/// first and survived its mutation; this one does not.
 #[test]
-fn c_sig_0564_a_repeated_sigv2_expires_is_refused() {
+fn c_sig_0564_a_repeated_sigv2_expires_is_refused_before_every_other_rule() {
     let map = HeaderMap::new();
     let query = format!("{}&Expires={}", presigned_query(SIGNED_AT_UNIX + 900), SIGNED_AT_UNIX + 604_800);
     let view = WireView::new(&map, RawQuery::new(&query));
     let refusal = SecurityFloor::new()
-        .with_sigv2_policy(SigV2Policy::HeaderAndPresigned)
+        .with_sigv2_policy(SigV2Policy::Disabled)
         .admit(view, &operation(), now())
         .expect_err("a repeated Expires is refused");
     assert_eq!(refusal, AuthError::AuthorizationQueryParametersError);
+
+    // The control: the same request with one `Expires` reaches the policy and is refused by it.
+    let single = presigned_query(SIGNED_AT_UNIX + 900);
+    let view = WireView::new(&map, RawQuery::new(&single));
+    let refusal = SecurityFloor::new()
+        .with_sigv2_policy(SigV2Policy::Disabled)
+        .admit(view, &operation(), now())
+        .expect_err("presigned SigV2 is refused under the disabled policy");
+    assert_eq!(refusal, AuthError::AccessDenied);
 }
 
 /// Negative — c-sig-0565: `SigV2Policy::Disabled` refuses a request the default admits.

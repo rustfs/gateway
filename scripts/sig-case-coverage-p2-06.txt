@@ -42,7 +42,7 @@ c-sig-0560|positive|crates/gateway/tests/sigv2_runtime.rs|fn c_sig_0560_presigne
 c-sig-0561|negative|crates/sig/tests/sig_v2_admission.rs|fn c_sig_0561_a_sigv2_request_is_never_sealed_for_the_sigv4_verifier|let sealed_for_sigv2 = matches!(admitted, Admission::SealedSigV2(_));
 c-sig-0562|negative|crates/sig/tests/sig_v2_admission.rs|fn c_sig_0562_an_unparsable_sigv2_credential_is_never_admitted_anonymously|assert_eq!(refusal, AuthError::AuthorizationHeaderMalformed)
 c-sig-0563|negative|crates/sig/tests/sig_v2_admission.rs|fn c_sig_0563_the_sigv2_post_form_shape_is_refused|assert_eq!(refusal, AuthError::NotImplemented(rustfs_gateway_sig::Unimplemented::SigV2))
-c-sig-0564|negative|crates/sig/tests/sig_v2_admission.rs|fn c_sig_0564_a_repeated_sigv2_expires_is_refused|assert_eq!(refusal, AuthError::AuthorizationQueryParametersError)
+c-sig-0564|negative|crates/sig/tests/sig_v2_admission.rs|fn c_sig_0564_a_repeated_sigv2_expires_is_refused_before_every_other_rule|assert_eq!(refusal, AuthError::AuthorizationQueryParametersError)
 c-sig-0565|negative|crates/sig/tests/sig_v2_admission.rs|fn c_sig_0565_the_disabled_policy_refuses_what_the_default_admits|assert_eq!(refusal, AuthError::AccessDenied)
 c-sig-0566|negative|crates/sig/tests/sig_v2_admission.rs|fn c_sig_0566_a_presigned_url_without_a_signature_is_refused|assert_eq!(refusal, AuthError::AuthorizationQueryParametersError)
 c-sig-0567|negative|crates/sig/tests/sig_v2_admission.rs|fn c_sig_0567_a_presigned_expires_beyond_seven_days_is_refused|assert_eq!(refusal, AuthError::AuthorizationQueryParametersError)
