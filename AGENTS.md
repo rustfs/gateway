@@ -158,6 +158,7 @@ match word for word.
 
 | `model/overlays/**` | The only sanctioned hand-written protocol exception source. Quirks are hand-written, so they live here and **never** under the generated `spec/` tree |
 | `model/overlays/error-status.toml` | Error code → HTTP status. Externally observable API surface; clients branch on it, and SDK retry and circuit-breaker logic branches on the 4xx/5xx band. Listed separately from the glob above it because a status is not a quirk: it is the only overlay row whose change is visible to every client of every operation at once |
+| `generated/ERROR_CODES.md`, `generated/error_codes.json` | The published renderings of the row above: the status a client sees for a code, and the 5xx set its SDK retries. `cargo xtask spec verify` regenerates them, so they never diverge from the authority — the row exists because a reader downstream may be holding one of these two files and nothing else |
 | `spec/quirks/**` | Generated mutable protocol-rule table. Every entry names a typed current value and mutation dimension consumed by the mutation gate |
 | `spec/contracts/**` | Generated non-codec contract table. Every entry must bind to an independently mutable runtime or emitter consumer; this is not a mutation exemption |
 | `spec/third-party/aws-signing-test-suite.lock` | Reviewed smithy-rs signing-suite commit, license, tree identities, and complete v4/v4a case census |

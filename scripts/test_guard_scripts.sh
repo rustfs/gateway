@@ -10468,6 +10468,105 @@ expect_fail check_operations_json_fields.sh \
     'this guard and the wire index require'
 
 # -----------------------------------------------------------------------------
+# `generated/error_codes.json` and `generated/ERROR_CODES.md` are the published
+# renderings of the error-status authority (rustfs/backlog#1694). `spec verify`
+# proves each equals what the emitter emits; it cannot notice that the emitter
+# emits a document nobody can use. Five controls, one per property the guard
+# owns: the field set, an index, an index that stopped inverting its own field,
+# the two renderings disagreeing, and the 5xx allowlist drifting off the band.
+# -----------------------------------------------------------------------------
+
+mut_error_codes_json_field_deleted() {
+    python3 - <<'PYEOF'
+import json
+import pathlib
+
+path = pathlib.Path("generated/error_codes.json")
+document = json.loads(path.read_text(encoding="utf-8"))
+for entry in document["codes"].values():
+    entry.pop("server_fault", None)
+document.pop("by_server_fault", None)
+path.write_text(json.dumps(document, indent=1) + "\n", encoding="utf-8")
+PYEOF
+}
+expect_fail check_error_codes_json_fields.sh \
+    'a code entry that lost one of its three fields' \
+    mut_error_codes_json_field_deleted \
+    'carries the wrong fields'
+
+mut_error_codes_json_index_dropped() {
+    python3 - <<'PYEOF'
+import json
+import pathlib
+
+path = pathlib.Path("generated/error_codes.json")
+document = json.loads(path.read_text(encoding="utf-8"))
+document.pop("by_status", None)
+path.write_text(json.dumps(document, indent=1) + "\n", encoding="utf-8")
+PYEOF
+}
+expect_fail check_error_codes_json_fields.sh \
+    'the status index removed, leaving a field that cannot be entered by value' \
+    mut_error_codes_json_index_dropped \
+    'cannot be entered by value'
+
+mut_error_codes_json_index_outlives_its_fact() {
+    python3 - <<'PYEOF'
+import json
+import pathlib
+
+path = pathlib.Path("generated/error_codes.json")
+document = json.loads(path.read_text(encoding="utf-8"))
+name = next(code for code, entry in document["codes"].items() if entry["status"] == 404)
+document["codes"][name]["status"] = 409
+path.write_text(json.dumps(document, indent=1) + "\n", encoding="utf-8")
+PYEOF
+}
+expect_fail check_error_codes_json_fields.sh \
+    'a code whose status moved while the index kept pointing at the old one' \
+    mut_error_codes_json_index_outlives_its_fact \
+    'a stale index outlives the fact that built it'
+
+mut_error_codes_markdown_row_deleted() {
+    python3 - <<'PYEOF'
+import pathlib
+import re
+
+path = pathlib.Path("generated/ERROR_CODES.md")
+text = path.read_text(encoding="utf-8")
+head, _, table = text.partition("## Every code")
+rows = [line for line in table.splitlines() if re.match(r"^\| `\w+` \| \d+ \|", line)]
+if not rows:
+    raise SystemExit("ERROR_CODES.md carries no code rows to delete")
+path.write_text(head + "## Every code" + table.replace(rows[0] + "\n", "", 1), encoding="utf-8")
+PYEOF
+}
+expect_fail check_error_codes_json_fields.sh \
+    'a code the JSON carries and the Markdown no longer renders' \
+    mut_error_codes_markdown_row_deleted \
+    'but is absent from'
+
+mut_error_codes_json_fault_flag_flipped() {
+    python3 - <<'PYEOF'
+import json
+import pathlib
+
+path = pathlib.Path("generated/error_codes.json")
+document = json.loads(path.read_text(encoding="utf-8"))
+name = next(code for code, entry in document["codes"].items() if entry["status"] >= 500)
+document["codes"][name]["server_fault"] = False
+document["by_server_fault"]["true"].remove(name)
+document["by_server_fault"].setdefault("false", []).append(name)
+document["by_server_fault"]["false"].sort()
+path.write_text(json.dumps(document, indent=1) + "\n", encoding="utf-8")
+PYEOF
+}
+expect_fail check_error_codes_json_fields.sh \
+    'a 5xx code dropped off the allowlist an SDK reads to decide what to retry' \
+    mut_error_codes_json_fault_flag_flipped \
+    'is not flagged `server_fault`'
+
+# -----------------------------------------------------------------------------
 # `ci.yml` defers the fuzz job on purpose — a full run does not fit the ten
 # minute gate — so nothing in CI compiles `fuzz/`. That makes an unregistered
 # target invisible: the file sits in the tree, `cargo fuzz list` never names it,

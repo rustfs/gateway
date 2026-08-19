@@ -337,6 +337,14 @@ pub fn generate_mutated(input: &CodegenInput, out: &CodegenOutput, mutations: &[
         out.generated_dir.join("error_status.rs"),
         emit::error_status::render(&overlay.error_status).map_err(Error::Policy)?,
     ));
+    files.push((
+        out.generated_dir.join("ERROR_CODES.md"),
+        emit::error_status::render_markdown(&overlay.error_status).map_err(Error::Policy)?,
+    ));
+    files.push((
+        out.generated_dir.join("error_codes.json"),
+        emit::error_status::render_json(&overlay.error_status),
+    ));
     let error_codes = emit::error_status::Constants::new(&overlay.error_status);
     let (dto_files, dto) = emit::dto::emit(&lowered.operations, &out.generated_dir).map_err(Error::Policy)?;
     files.extend(dto_files);
