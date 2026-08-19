@@ -53,9 +53,14 @@
 //!   user guide above, the bucket ceiling from AWS's cost-allocation tag restrictions,
 //!   <https://docs.aws.amazon.com/awsaccountbilling/latest/aboutv2/allocation-tag-restrictions.html>.
 //!
-//! The ceilings are counted in Unicode scalar values (`char`s). A caller that measures UTF-16
-//! units disagrees with this only on supplementary-plane characters, where AWS's own documentation
-//! stops short of a definition; scalar values are the counting this module promises.
+//! The ceilings are counted in **UTF-16 code units**, which is the counting AWS's own user guide
+//! names: it says object tags are represented internally in UTF-16 and that a character there
+//! occupies one or two positions. A supplementary-plane character therefore spends two of a key's
+//! 128 and two of a value's 256, and the two countings differ on nothing else — every BMP
+//! character is one unit and one scalar value alike. Counting scalar values instead accepted a key
+//! of 128 astral characters that AWS refuses, which is the divergence that only shows up in
+//! production, so `char`s are not the unit here even though `char`s are what Rust reaches for.
+//! See <https://docs.aws.amazon.com/AmazonS3/latest/userguide/object-tagging.html>.
 //!
 //! # What a rejection may say
 //!
@@ -73,11 +78,11 @@ pub const MAX_OBJECT_TAGS: usize = 10;
 /// The largest number of tags one bucket may carry.
 pub const MAX_BUCKET_TAGS: usize = 50;
 
-/// The longest tag key, in Unicode scalar values.
-pub const MAX_TAG_KEY_CHARS: usize = 128;
+/// The longest tag key, in UTF-16 code units.
+pub const MAX_TAG_KEY_UNITS: usize = 128;
 
-/// The longest tag value, in Unicode scalar values.
-pub const MAX_TAG_VALUE_CHARS: usize = 256;
+/// The longest tag value, in UTF-16 code units.
+pub const MAX_TAG_VALUE_UNITS: usize = 256;
 
 /// AWS's own wording for an `x-amz-tagging` header that is not a tag set.
 ///
@@ -220,8 +225,8 @@ const TOO_MANY_BUCKET_TAGS: &str = "Bucket tag count cannot be greater than 50";
 /// The one copy of every semantic tag-set rule, for both channels and both scopes.
 ///
 /// Checks, in order: the scope's count ceiling, then per tag the key (non-empty, at most
-/// [`MAX_TAG_KEY_CHARS`] characters, documented character set), the value (at most
-/// [`MAX_TAG_VALUE_CHARS`] characters, same character set), and finally that no key repeats. The
+/// [`MAX_TAG_KEY_UNITS`] UTF-16 code units, documented character set), the value (at most
+/// [`MAX_TAG_VALUE_UNITS`] units, same character set), and finally that no key repeats. The
 /// order is observable only through which reason a set violating several rules gets, and it is
 /// fixed here so that it cannot differ between the header and the XML channel.
 ///
@@ -238,10 +243,10 @@ pub fn validate_tag_set(pairs: &[(String, String)], scope: TagScope) -> Result<(
         return Err(TaggingRejection::new(ErrorCode::INVALID_TAG, reason));
     }
     for (index, (key, value)) in pairs.iter().enumerate() {
-        if key.is_empty() || key.chars().count() > MAX_TAG_KEY_CHARS || !is_legal_tag_text(key) {
+        if key.is_empty() || utf16_units(key) > MAX_TAG_KEY_UNITS || !is_legal_tag_text(key) {
             return Err(TaggingRejection::new(ErrorCode::INVALID_TAG, INVALID_KEY));
         }
-        if value.chars().count() > MAX_TAG_VALUE_CHARS || !is_legal_tag_text(value) {
+        if utf16_units(value) > MAX_TAG_VALUE_UNITS || !is_legal_tag_text(value) {
             return Err(TaggingRejection::new(ErrorCode::INVALID_TAG, INVALID_VALUE));
         }
         if pairs.iter().take(index).any(|(existing, _)| existing == key) {
@@ -249,6 +254,16 @@ pub fn validate_tag_set(pairs: &[(String, String)], scope: TagScope) -> Result<(
         }
     }
     Ok(())
+}
+
+/// The length of one label in the units AWS measures it in.
+///
+/// `str::chars().count()` is the tempting spelling and it is wrong above the basic multilingual
+/// plane: a supplementary-plane character is one scalar value and two UTF-16 code units, and AWS
+/// documents the second counting. `encode_utf16().count()` walks the string once and allocates
+/// nothing, so the honest unit costs nothing over the convenient one.
+fn utf16_units(text: &str) -> usize {
+    text.encode_utf16().count()
 }
 
 /// The documented tag alphabet: letters and numbers in any script, the space, and `+ - = . _ : / @`.

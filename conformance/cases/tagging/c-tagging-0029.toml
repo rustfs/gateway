@@ -1,0 +1,79 @@
+# c-tagging-0029 — the tag length ceiling is counted in UTF-16 code units.
+#
+# Schema dimensions exercised: a length boundary whose unit is only observable above the basic
+# multilingual plane, refusal-then-verify.
+
+[case]
+id = "c-tagging-0029"
+schema_version = 1
+title = "A tag key of 65 supplementary-plane characters is 130 UTF-16 units and a 400 InvalidTag"
+rationale = """
+c-tagging-0013 fixes the ceiling at 129 of something, and every character it uses is one scalar \
+value and one UTF-16 code unit, so it cannot say which. This key is the differential: 65 \
+supplementary-plane characters, which is 65 scalar values, 130 UTF-16 code units and 260 UTF-8 \
+bytes. A gateway counting Rust chars accepts it, a gateway counting bytes refuses it for the wrong \
+reason at the wrong threshold, and only the UTF-16 reading refuses it at 130 of an allowed 128. \
+AWS's user guide says object tags are represented internally in UTF-16 and that a character there \
+occupies one or two positions, which is the definition the issue's earlier audit could not find \
+and treated as undecided. The bucket read afterwards proves the refusal was taken before the \
+store, so a set refused for its key length is not a set half-written."""
+polarity = "negative"
+operation = "PutBucketTagging"
+tags = ["tagging", "xml", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-tag-limits-0094"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/object-tagging.html"
+summary = "The user guide gives the key ceiling as 128 Unicode characters and states that tags are held internally in UTF-16, where a character occupies one or two positions."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketTagging.html"
+summary = "InvalidTag is the documented code for a tag that fails input validation."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = true
+
+[[setup.buckets]]
+name = "conf-tagging"
+
+[[exchanges]]
+name = "a-key-of-sixty-five-astral-characters"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-tagging?tagging"
+headers = { "content-md5" = "kmtBgpAbKGK3yMyxXFno6A==" }
+body = { utf8 = '<Tagging><TagSet><Tag><Key>𐐀𐐀𐐀𐐀𐐀𐐀𐐀𐐀𐐀𐐀𐐀𐐀𐐀𐐀𐐀𐐀𐐀𐐀𐐀𐐀𐐀𐐀𐐀𐐀𐐀𐐀𐐀𐐀𐐀𐐀𐐀𐐀𐐀𐐀𐐀𐐀𐐀𐐀𐐀𐐀𐐀𐐀𐐀𐐀𐐀𐐀𐐀𐐀𐐀𐐀𐐀𐐀𐐀𐐀𐐀𐐀𐐀𐐀𐐀𐐀𐐀𐐀𐐀𐐀𐐀</Key><Value>v</Value></Tag></TagSet></Tagging>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[exchanges.expect.error]
+code = "InvalidTag"
+request_id_present = true
+
+[[exchanges]]
+name = "nothing-was-stored"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-tagging?tagging"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 404
+connection_after = "open"
+
+[exchanges.expect.error]
+code = "NoSuchTagSet"
+request_id_present = true

@@ -234,7 +234,7 @@ cases = "c-bucketconfig-0006,c-bucketconfig-0038,c-bucketconfig-0045"
 
 [[operation]]
 name = "PutBucketTagging"
-cases = "c-tagging-0005,c-tagging-0008,c-tagging-0012,c-tagging-0014,c-tagging-0018"
+cases = "c-tagging-0005,c-tagging-0008,c-tagging-0012,c-tagging-0014,c-tagging-0018,c-tagging-0026,c-tagging-0027,c-tagging-0029"
 
 [[operation]]
 name = "PutBucketVersioning"
@@ -266,7 +266,7 @@ cases = "c-lock-0005,c-lock-0008,c-lock-0009,c-lock-0015,c-lock-0016,c-lock-0017
 
 [[operation]]
 name = "PutObjectTagging"
-cases = "c-tagging-0004,c-tagging-0009,c-tagging-0011,c-tagging-0013,c-tagging-0015,c-tagging-0021"
+cases = "c-tagging-0004,c-tagging-0009,c-tagging-0011,c-tagging-0013,c-tagging-0015,c-tagging-0021,c-tagging-0028"
 
 [[operation]]
 name = "PutPublicAccessBlock"

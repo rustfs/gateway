@@ -3262,11 +3262,12 @@ impl Stub {
     /// The whole bucket tag set, replaced — under the bucket scope's ceilings.
     ///
     /// The same shared validator the object write goes through, with `TagScope::Bucket` naming
-    /// the one rule that differs: fifty tags rather than ten. An empty `<TagSet/>` never reaches
-    /// here — `TagSet` is a required member, so the generated decoder answers it with
-    /// `MalformedXML` (`c-tagging-0005`); the delete is the clearing path. The empty-to-`None`
-    /// collapse below is therefore a defensive spelling of "a configured set is never empty",
-    /// not a wire behaviour.
+    /// the one rule that differs: fifty tags rather than ten. An empty `<TagSet/>` does reach here
+    /// and clears the set (`c-tagging-0005`): `required` on `TagSet` says the wrapper must be
+    /// present, not that the list must have a member, and AWS documents the empty tag set as
+    /// deleting the existing one. The empty-to-`None` collapse below is what makes the cleared
+    /// bucket answer `404 NoSuchTagSet` on the next read rather than a `200` with nothing in it —
+    /// "labelled with nothing" is not a state this scope has.
     fn put_bucket_tagging(&self, input: &dto::PutBucketTaggingInput) -> HandlerResult<dto::PutBucketTagging> {
         let pairs = tag_pairs(&input.tagging, TagScope::Bucket)?;
         let mut fixture = self.borrow()?;
