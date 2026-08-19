@@ -1,6 +1,7 @@
 # c-mpu-0003 — a single-part upload still carries the suffix.
 #
-# Schema dimensions exercised: the boundary of the part-count suffix rule.
+# Schema dimensions exercised: the boundary of the part-count suffix rule, a capture read back as a
+# conditional header, and a refusal pair that separates the composite from the object's own digest.
 
 [case]
 id = "c-mpu-0003"
@@ -8,10 +9,14 @@ schema_version = 1
 title = "A completed single-part upload answers an entity tag suffixed with one"
 rationale = """
 One part is the case where the composite entity tag and the whole-object digest are most easily \
-confused, because the digest of one part's digest is still a single digest. AWS keeps the suffix \
-anyway, and clients use its presence to decide whether the value may be compared against a locally \
-computed object digest at all. Dropping it for a one-part upload makes a client believe it can \
-verify the object that way, and every such comparison then fails."""
+confused, because the digest of one part's digest is still a single digest — and for one part the \
+assembled object is that part, so the two values are computable from the same bytes and only the \
+derivation tells them apart. AWS keeps the suffix anyway, and clients use its presence to decide \
+whether the value may be compared against a locally computed object digest at all. Dropping it for \
+a one-part upload makes a client believe it can verify the object that way, and every such \
+comparison then fails. The completion is asserted against the whole composite rather than against \
+the suffix, the object's own digest is refused as a precondition beside it, and the published tag \
+is read back so the value is pinned to the object rather than to a shape."""
 polarity = "positive"
 operation = "CompleteMultipartUpload"
 tags = ["multipart", "etag", "integrity", "boundary"]
@@ -43,21 +48,125 @@ part_number = 1
 body = { size = 1024 }
 capture_etag_as = "part1_etag"
 
-[request]
+# 1 — the completion, and the whole value rather than its last three bytes. The part is 1024 bytes
+# of the fixture's default fill, whose digest is 9ee0a0e0c0bc0f1ff29d663d1fdf0743; the composite is
+# the digest of that digest with the count after a hyphen. Asserting only the suffix would be
+# satisfied by a tag that carried the right shape over the wrong content, which is the failure the
+# upstream defect actually was.
+[[exchanges]]
+name = "complete the one-part upload"
+
+[exchanges.request]
 method = "POST"
 target = "/conf-mpu/one-part?uploadId=${capture.upload_id}"
 headers = { "content-type" = "application/xml" }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 
-[request.body]
+[exchanges.request.body]
 utf8 = '''
 <CompleteMultipartUpload xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Part><PartNumber>1</PartNumber><ETag>${capture.part1_etag}</ETag></Part></CompleteMultipartUpload>'''
 
-[expect]
+[exchanges.expect]
 kind = "response"
 status = 200
+connection_after = "open"
 
-[expect.body]
+[exchanges.expect.body]
 redact = ["Location", "UploadId"]
-contains_utf8 = ["-1\"</ETag>"]
-not_contains_utf8 = ["<Error>"]
+contains_utf8 = ["<CompleteMultipartUploadResult", "4c74d98129a2c7a9a6736355b7178813-1&quot;</ETag>"]
+# The first is the digest of the object's bytes, which for a one-part upload is also the part's own
+# digest: it is exactly what an implementation that skipped the derivation would publish here. The
+# second is the unescaped spelling of the same element — the quotes belong to the value and the
+# writer escapes them, so a case asserting only the escaped form cannot tell the two apart.
+not_contains_utf8 = ["9ee0a0e0c0bc0f1ff29d663d1fdf0743", "-1\"</ETag>", "<Error>"]
+
+[exchanges.expect.body.xml]
+root = "CompleteMultipartUploadResult"
+element_order = ["Location", "Bucket", "Key", "ETag"]
+
+# 2 — the object publishes the same value the result document did, in the header form a client
+# reads it in: bare of the XML escaping, byte for byte the tag asserted above.
+[[exchanges]]
+name = "the object carries the same tag in a header"
+
+[exchanges.request]
+method = "HEAD"
+target = "/conf-mpu/one-part"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.capture]
+head_etag = { header = "etag" }
+
+[exchanges.expect.headers_present]
+etag = "\"4c74d98129a2c7a9a6736355b7178813-1\""
+content-length = "1024"
+
+# 3 — the tag the header published is the object's own rather than a value minted per response:
+# read back as a precondition it matches.
+[[exchanges]]
+name = "the published tag matches as a precondition"
+
+[exchanges.request]
+method = "HEAD"
+target = "/conf-mpu/one-part"
+headers = { "if-match" = "${capture.head_etag}" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.headers_present]
+etag = "\"4c74d98129a2c7a9a6736355b7178813-1\""
+content-length = "1024"
+
+# 4 — the control this case exists for. The object is one part, so the digest of its bytes is a
+# perfectly good single-part entity tag; an implementation that dropped the suffix for a one-part
+# upload would store precisely this value and answer 200 here.
+#
+# A GET rather than a HEAD, because a HEAD is answered with no body whatever the server writes and
+# an assertion about that body would be true by construction. The refusal is asserted by its code,
+# which is a value the implementation chooses.
+[[exchanges]]
+name = "the object's own digest is not its entity tag"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-mpu/one-part"
+headers = { "if-match" = "\"9ee0a0e0c0bc0f1ff29d663d1fdf0743\"" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 412
+connection_after = "open"
+
+[exchanges.expect.error]
+code = "PreconditionFailed"
+request_id_present = true
+
+# 5 — the control for exchange 3. A precondition that matched every value of the same shape would
+# make exchange 3 green whatever the completion minted, so a different `-1` tag must be refused.
+[[exchanges]]
+name = "a different suffixed tag is refused"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-mpu/one-part"
+headers = { "if-match" = "\"d41d8cd98f00b204e9800998ecf8427e-1\"" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 412
+connection_after = "open"
+
+[exchanges.expect.error]
+code = "PreconditionFailed"
+request_id_present = true
