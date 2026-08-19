@@ -24,6 +24,8 @@ mod bucket_lifecycle;
 mod copy_family;
 #[path = "corpus.rs"]
 mod corpus;
+#[path = "domain_wiring.rs"]
+mod domain_wiring;
 #[path = "list_family.rs"]
 mod list_family;
 #[path = "multipart_family.rs"]
