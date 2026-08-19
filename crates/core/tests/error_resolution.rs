@@ -286,3 +286,38 @@ fn ordinary_extra_builders_cannot_mutate_a_contextual_carrier() {
     assert_eq!(resolution.code(), Some(&ErrorCode::NO_SUCH_BUCKET));
     assert!(resolution.details().is_empty());
 }
+
+/// Negative — the two contextual not-found messages are the wire text three cases pin byte-exactly,
+/// and no arm of the resolver may reword them.
+///
+/// `c-cors-0025`, `c-lock-0029` and `c-object-0007` assert the whole `<Error>` document byte for
+/// byte, so these two sentences are externally observable API surface rather than internal prose: a
+/// client that branches on the document sees any edit to them. They are asserted here because the
+/// backend cannot supply them — `NoSuchBucket` and `NoSuchKey` are contextual codes that
+/// `ErrorContext::ordinary` refuses, so the only writer of these bytes is the resolver itself, and
+/// before this test nothing at unit level read `message()` on either arm at all.
+#[test]
+fn the_contextual_not_found_messages_are_the_ones_the_corpus_pins() {
+    let missing_bucket = resolve(ErrorContext::missing_bucket(), ResponseKind::Other);
+    assert_eq!(missing_bucket.message(), Some("The specified bucket does not exist"));
+
+    let missing_key = resolve(
+        ErrorContext::missing_object(MissingObject::Key, ResourceVisibility::Visible),
+        ResponseKind::Other,
+    );
+    assert_eq!(missing_key.message(), Some("The specified key does not exist."));
+}
+
+/// Negative — masking replaces the message as well as the code, so a hidden key's refusal reads
+/// exactly like a refusal about a key that is there.
+///
+/// The control that matters is the *other* direction: if the hidden arm kept the visible sentence,
+/// the code would say `AccessDenied` while the message said the key does not exist, which discloses
+/// the very fact the mask exists to withhold.
+#[test]
+fn a_masked_missing_object_reveals_nothing_through_its_message() {
+    for kind in [MissingObject::Key, MissingObject::Version] {
+        let hidden = resolve(ErrorContext::missing_object(kind, ResourceVisibility::Hidden), ResponseKind::Other);
+        assert_eq!(hidden.message(), Some("the request is not allowed"));
+    }
+}
