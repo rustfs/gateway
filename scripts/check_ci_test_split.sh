@@ -3,8 +3,8 @@ set -euo pipefail
 
 # WHAT THIS CHECKS
 #   Workspace tests, the official signing suite, guard mutations split over four runners,
-#   target-consolidation mutations, quirk-ledger mutations and TSAN run on separate CI runners,
-#   while the branch-protected Test check waits for every worker. This
+#   target-consolidation mutations, quirk-ledger mutations, error-status mutations and TSAN run on
+#   separate CI runners, while the branch-protected Test check waits for every worker. This
 #   keeps the gate wall time below ten
 #   minutes as coverage grows.
 
@@ -50,6 +50,7 @@ target = jobs.fetch("target-consolidation-self-test")
 quirk_ledger = jobs.fetch("quirk-ledger-self-test")
 dto_compiler = jobs.fetch("dto-compiler-self-test")
 build_guard = jobs.fetch("build-guard-self-test")
+error_status = jobs.fetch("error-status-self-test")
 aggregate = jobs.fetch("test")
 
 worker_keys = ["name", "runs-on", "timeout-minutes", "steps"]
@@ -91,6 +92,11 @@ require_equal(build_guard.keys, worker_keys,
 require_equal(build_guard.values_at("name", "runs-on", "timeout-minutes"),
               ["Build guard self-test", "ubuntu-latest", 5],
               "build-guard-self-test identity or budget changed")
+require_equal(error_status.keys, worker_keys,
+              "error-status-self-test changed its parallel two-minute contract")
+require_equal(error_status.values_at("name", "runs-on", "timeout-minutes"),
+              ["Error status self-test", "ubuntu-latest", 2],
+              "error-status-self-test identity or budget changed")
 
 ([workspace] + guard_groups).each do |job|
   steps = job.fetch("steps")
@@ -165,6 +171,14 @@ require_equal(build_guard_steps.first(3).map(&:keys), [["uses"], ["uses"], ["use
               "build-guard-self-test setup gained executable control")
 require_equal(build_guard_steps.last.keys, ["name", "run"],
               "build-guard-self-test command can skip or hide failure")
+error_status_steps = error_status.fetch("steps")
+require_equal(error_status_steps.length, 2,
+              "error-status-self-test changed its setup or command step count")
+require_equal(error_status_steps.first,
+              {"uses" => "actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10"},
+              "error-status-self-test checkout action or pin changed")
+require_equal(error_status_steps.last.keys, ["name", "run"],
+              "error-status-self-test command can skip or hide failure")
 
 workspace_run = <<~'RUN'
   started="$(date +%s)"
@@ -229,14 +243,22 @@ require_equal(quirk_ledger.fetch("steps").last.fetch("run"), quirk_ledger_run,
               "quirk-ledger-self-test command changed or can hide a failure")
 require_equal(dto_compiler.fetch("steps").last.fetch("run"), dto_compiler_run,
               "dto-compiler-self-test command changed or can hide a failure")
+error_status_run = <<~'RUN'
+  started="$(date +%s)"
+  timeout 60s env GATEWAY_GUARD_ERROR_STATUS_ONLY=1 bash scripts/test_guard_scripts.sh
+  elapsed="$(( $(date +%s) - started ))"
+  echo "error status self-test completed in ${elapsed}s"
+RUN
 require_equal(build_guard.fetch("steps").last.fetch("run"), build_guard_run,
               "build-guard-self-test command changed or can hide a failure")
+require_equal(error_status.fetch("steps").last.fetch("run"), error_status_run,
+              "error-status-self-test command changed or can hide a failure")
 
 aggregate_keys = ["name", "needs", "if", "runs-on", "timeout-minutes", "steps"]
 require_equal(aggregate.keys, aggregate_keys, "the Test job changed its dependency, failure, or budget contract")
 require_equal(aggregate.values_at("name", "needs", "if", "runs-on", "timeout-minutes"),
-              ["Test", ["workspace-tests", "signing-suite", "guard-self-test", "guard-self-test-2", "guard-self-test-3", "guard-self-test-4", "target-consolidation-self-test", "quirk-ledger-self-test", "dto-compiler-self-test", "build-guard-self-test", "gateway-tsan"], "always()", "ubuntu-latest", 1],
-              "the Test job no longer aggregates all eleven workers within the budget")
+              ["Test", ["workspace-tests", "signing-suite", "guard-self-test", "guard-self-test-2", "guard-self-test-3", "guard-self-test-4", "target-consolidation-self-test", "quirk-ledger-self-test", "dto-compiler-self-test", "build-guard-self-test", "error-status-self-test", "gateway-tsan"], "always()", "ubuntu-latest", 1],
+              "the Test job no longer aggregates all twelve workers within the budget")
 steps = aggregate.fetch("steps")
 require_equal(steps.length, 1, "the Test job must have exactly one result-checking step")
 require_equal(steps.first.keys, ["name", "env", "run"], "the Test comparison step can be skipped or hidden")
@@ -251,6 +273,7 @@ expected_env = {
   "QUIRK_LEDGER_RESULT" => "${{ needs.quirk-ledger-self-test.result }}",
   "DTO_COMPILER_RESULT" => "${{ needs.dto-compiler-self-test.result }}",
   "BUILD_GUARD_RESULT" => "${{ needs.build-guard-self-test.result }}",
+  "ERROR_STATUS_RESULT" => "${{ needs.error-status-self-test.result }}",
   "TSAN_RESULT" => "${{ needs.gateway-tsan.result }}"
 }
 require_equal(steps.first.fetch("env"), expected_env, "the Test step does not bind all worker results")
@@ -265,6 +288,7 @@ expected_run = <<~'RUN'
   test "$QUIRK_LEDGER_RESULT" = success
   test "$DTO_COMPILER_RESULT" = success
   test "$BUILD_GUARD_RESULT" = success
+  test "$ERROR_STATUS_RESULT" = success
   test "$TSAN_RESULT" = success
 RUN
 require_equal(steps.first.fetch("run"), expected_run, "the Test step does not execute all comparisons")
@@ -286,6 +310,12 @@ first_case = text.find("expect_fail check_quirk_ledger.sh")
 end = text.find("\nfi\n", first_case)
 if start < 0 or first_case < start or end < first_case:
     raise SystemExit("ERROR: guard-self-test still serializes or omits quirk-ledger mutations")
+
+start = text.find('if [[ "$ERROR_STATUS_ONLY" == 1 ]]; then')
+first_case = text.find("expect_fail check_error_status_total.sh")
+end = text.find("\nfi\n", first_case)
+if start < 0 or first_case < start or end < first_case:
+    raise SystemExit("ERROR: guard-self-test still serializes or omits error-status mutations")
 PY
 if ! grep -F 'if [[ "$DTO_COMPILER_ONLY" == 1 ]]; then' "$GUARD_SELF_TEST" >/dev/null ||
     ! grep -F 'expect_rustc_test_fail_with_diagnostic crates/types/tests/semver_policy.rs' "$GUARD_SELF_TEST" >/dev/null ||
@@ -367,4 +397,5 @@ if groups != [0, 1, 2, 3]:
     )
 PY
 
-printf 'OK: workspace, signing suite, four guard shards, target-consolidation, quirk-ledger, DTO compiler, build guard and TSAN workers are parallel behind Test\n'
+printf 'OK: workspace, signing suite, four guard shards, target-consolidation, quirk-ledger, DTO compiler, build guard, error-status and TSAN workers are parallel behind Test\n'
+

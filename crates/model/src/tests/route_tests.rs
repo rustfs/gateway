@@ -42,6 +42,13 @@ impl Sandbox {
         std::fs::create_dir_all(root.join("ops")).expect("test sandbox is creatable");
         std::fs::create_dir_all(root.join("quirks")).expect("test sandbox is creatable");
         std::fs::write(root.join("scalars.toml"), "[scalar]\nETag = \"ETag\"\n").expect("test sandbox is writable");
+        // The error-status authority is required to exist, so every sandbox declares the one row a
+        // test that is about routing never looks at.
+        std::fs::write(
+            root.join("error-status.toml"),
+            "[[code]]\nname = \"NoSuchKey\"\nconstant = \"NO_SUCH_KEY\"\nstatus = 404\n",
+        )
+        .expect("test sandbox is writable");
         std::fs::write(
             root.join("ops/family.toml"),
             "include = [\"Alpha\", \"Beta\"]\n\n[op.Alpha]\nprecedence = 1\n\n[op.Beta]\nprecedence = 2\n",

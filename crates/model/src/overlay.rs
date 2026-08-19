@@ -386,10 +386,7 @@ impl Overlay {
         Ok(())
     }
 
-    /// Reads the other cross-family file: the error code to HTTP status authority.
-    ///
-    /// Sharding it per family would let two families answer differently for one code, and a code
-    /// means one status whoever raises it — so, like the scalar vocabulary, it has one home.
+    /// Reads the error code to HTTP status authority; unsharded for the reason `scalars.toml` is.
     fn read_error_status(&mut self, path: &Path) -> Result<()> {
         let text = read(path)?;
         let doc = toml_lite::parse(&path.display().to_string(), &text)?;
