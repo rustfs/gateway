@@ -1,0 +1,77 @@
+# c-checksum-0001 — a write whose x-amz-checksum value is not the digest of its body.
+#
+# Schema dimensions exercised: request-progress asserting the body WAS read, header absence proving
+# no object was written, and the checksum-specific error code rather than the generic one.
+
+[case]
+id = "c-checksum-0001"
+schema_version = 1
+title = "A write whose x-amz-checksum value disagrees with its body is refused and not stored"
+rationale = """
+Carrying a checksum header is not verifying one. An implementation that parses the value, records \
+it against the object and never compares it against the bytes answers 200 to a corrupted upload \
+and then serves the corruption back under the caller's own digest — the one artefact a client \
+would use to detect the corruption. The failure is silent by construction: no error, no metric, \
+and a stored checksum that matches nothing. This case is the difference between a checksum that is \
+carried and a checksum that is checked, and the distinct XAmzContentChecksumMismatch code is what \
+tells an SDK that its newer checksum header failed rather than a legacy Content-MD5."""
+polarity = "negative"
+operation = "PutObject"
+tags = ["checksum", "error-shape", "security"]
+timeout_ms = 10000
+quirks = ["q-checksum-0006"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/checking-object-integrity.html"
+summary = "A checksum supplied on an upload is verified against the received object and the upload fails when it does not match."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/pull/371"
+summary = "An upstream change reports the Content-MD5 and x-amz-checksum verification as having been incomplete on the write path."
+kind = "s3s-issue"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-checksum"
+
+[[setup.objects]]
+bucket = "conf-checksum"
+key = "mismatch/crc32"
+absent = true
+
+[request]
+method = "PUT"
+target = "/conf-checksum/mismatch/crc32"
+# Well-formed base64 of exactly four bytes, so nothing about the header's shape is under test: the
+# value parses, names a supported algorithm, and is simply not the CRC32 of the body.
+headers = { "content-type" = "text/plain", "x-amz-checksum-crc32" = "AAAAAA==" }
+body = { utf8 = "hello world" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+# No entity tag, no version id, and no checksum echoed back: nothing about this upload was kept.
+headers_absent = ["etag", "x-amz-version-id", "x-amz-checksum-crc32"]
+connection_after = "open"
+
+[expect.error]
+code = "XAmzContentChecksumMismatch"
+request_id_present = true
+
+[expect.timing]
+terminate_within_ms = 5000
+
+# The opposite of c-object-0013, and deliberately so. An ambiguity between two checksum headers is
+# decidable from the head and must be refused before the transfer; a mismatch is decidable only
+# from the bytes, so the body has to have been read for the comparison to have happened at all. A
+# `false` here would mean the refusal came from somewhere other than a digest comparison.
+[expect.request_progress]
+body_fully_sent = true
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+contains_utf8 = ["<Code>XAmzContentChecksumMismatch</Code>"]

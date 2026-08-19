@@ -140,20 +140,24 @@ fn n_refuses_a_put_with_no_content_length_using_the_code_the_overlay_names() {
 }
 
 #[test]
-fn n_refuses_a_request_carrying_two_different_checksum_algorithms() {
-    let request = accepted(
-        "PUT",
-        "/photos/key",
-        &[
-            ("content-length", "0"),
-            ("x-amz-checksum-crc32", "AAAAAA=="),
-            ("x-amz-checksum-sha1", "2jmj7l5rSw0yVb/vlWAYkK/YBwk="),
-        ],
-    );
-    let view = MetaView::of(&request, TargetKind::Object).expect("view");
-    let error = dto::PutObject::decode(&view, RequestBody::None).expect_err("two algorithms is a contradiction");
-
-    assert_eq!(error.code().as_str(), "InvalidRequest");
+fn n_refuses_a_request_whose_checksum_headers_contradict_or_cannot_be_read() {
+    // The second half pins a `continue`: a value this binder cannot read must not be skipped, or
+    // the caller's claim is dropped and the object is stored as though none had been made. The
+    // three digest-less headers under the prefix are excepted by name, not by parse failure.
+    let decode = |head: &[(&str, &str)]| {
+        let mut all = vec![("content-length", "0")];
+        all.extend_from_slice(head);
+        let request = accepted("PUT", "/photos/key", &all);
+        dto::PutObject::decode(&MetaView::of(&request, TargetKind::Object).expect("view"), RequestBody::None).map(|_| ())
+    };
+    let two = [
+        ("x-amz-checksum-crc32", "AAAAAA=="),
+        ("x-amz-checksum-sha1", "2jmj7l5rSw0yVb/vlWAYkK/YBwk="),
+    ];
+    assert_eq!(decode(&two).expect_err("two algorithms contradict").code().as_str(), "InvalidRequest");
+    let error = decode(&[("x-amz-checksum-crc32", "nope")]).expect_err("that value is not a CRC32");
+    assert_eq!((error.code().as_str(), error.member()), ("InvalidRequest", Some("ChecksumSpec")));
+    decode(&[("x-amz-checksum-mode", "ON")]).expect("that header declares no digest");
 }
 
 // ---------------------------------------------------------------------------------------------

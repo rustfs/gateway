@@ -39,8 +39,8 @@ use std::sync::{Arc, Mutex};
 use bytes::Bytes;
 use rustfs_gateway::sig::{AmzDate, PayloadMode, SigService, SigV4Signer, SigningCredentials, SigningRequest, SigningScope};
 use rustfs_gateway::{
-    Credentials, FixedClock, Limits, RegionSet, S3Service, ServiceBuilder, SigV4Authenticator, StaticCredentials, WireRequest,
-    allow_when, collect, dto,
+    BucketName, Credentials, FixedClock, Limits, RegionSet, S3Service, ServiceBuilder, SigV4Authenticator, StaticCredentials,
+    WireRequest, allow_when, collect, dto,
 };
 use rustfs_gateway_conformance::exec::block_on;
 use rustfs_gateway_conformance::fixture::{Fixture, StoredObject, Stub};
@@ -86,6 +86,22 @@ impl Harness {
     }
 
     fn over(fixture: Fixture, region: &str) -> Harness {
+        Harness::assembled(fixture, region, None)
+    }
+
+    /// The same deployment, with one bucket the authorizer refuses.
+    ///
+    /// A refusal is the only way to reach the `403` arm of the head, and the corpus has no
+    /// vocabulary for "this principal may not see this bucket" — `setup.buckets` declares what
+    /// exists, not who may look at it. So the refusal is staged here, and it is staged for *one*
+    /// bucket rather than for the whole service: a harness that denied everything would answer
+    /// `403` to a request that never reached the operation, which is a different code path from
+    /// the one under test and would prove nothing about the head's response shape.
+    fn refusing(fixture: Fixture, region: &str, denied: &'static str) -> Harness {
+        Harness::assembled(fixture, region, Some(denied))
+    }
+
+    fn assembled(fixture: Fixture, region: &str, denied: Option<&'static str>) -> Harness {
         let state = Arc::new(Mutex::new(fixture));
         let backend = Arc::new(Stub::new(Arc::clone(&state)));
         let credentials =
@@ -122,7 +138,9 @@ impl Harness {
             .register::<dto::GetBucketLogging, _>(Arc::clone(&backend))
             .register::<dto::PutObject, _>(Arc::clone(&backend))
             .authenticator(SigV4Authenticator::new(credentials, RegionSet::new([region]).expect("non-empty")))
-            .authorizer(allow_when(|request| !request.is_anonymous()))
+            .authorizer(allow_when(move |request| {
+                !request.is_anonymous() && request.bucket.map(BucketName::as_str) != denied
+            }))
             .clock_with_skew_ack(
                 FixedClock::at_unix_seconds(NOW),
                 rustfs_gateway::ClockSkewAck::i_understand_a_skewed_clock_can_disable_signature_expiry(),
@@ -347,6 +365,71 @@ fn the_head_response_reports_the_deployments_own_region() {
     assert_eq!(answer.status, 200, "{}", answer.body);
     assert_eq!(answer.header("x-amz-bucket-region"), Some("us-west-2"));
     assert!(answer.body.is_empty(), "a HEAD response must carry no body: {}", answer.body);
+}
+
+/// Negative — a head the authorizer refuses answers `403` with nothing after the headers, and the
+/// permitted head in the same deployment still answers `200`.
+///
+/// The third arm of the head's response shape, and the one the corpus cannot stage: `c-bkt-0008`
+/// pins the `200` and `c-bkt-0025` the `404`, both with a zero-length body, and the `403` was
+/// asserted nowhere. It is the arm most likely to regress, because it is the one an error renderer
+/// reaches with a code, a message and every reason to write a document — RFC 9110 §9.3.2 forbids a
+/// body on any response to `HEAD`, error responses included, and a `403` carrying an `<Error>`
+/// document is what `HeadRequestBodyFixLayer` exists downstream to strip.
+///
+/// Both directions are asserted against one service on purpose. A harness that answered `403` to
+/// everything would satisfy the refusal half while proving only that the authorizer was consulted;
+/// the permitted head is what shows the refusal was about this bucket and that the head still works.
+///
+/// The framing header is the third thing asserted, and it is asserted against a measurement: the
+/// same refusal delivered to a method that may carry content. `Content-Length` on a `HEAD` answer
+/// is the length a `GET` would have sent and must survive the body being dropped
+/// (`BodyAllowance::HeadOfContent`), so both failure directions are covered — a document left in
+/// the response, and a number rewritten to `0` by something that mistook the rule for "a HEAD
+/// answer is empty".
+#[test]
+fn n_a_refused_bucket_head_is_a_403_with_no_body_and_the_permitted_one_still_answers() {
+    let mut fixture = Fixture::at(NOW);
+    fixture.declare_bucket("conf-bkt-secret", false);
+    fixture.declare_bucket("conf-bkt-open", false);
+    let harness = Harness::refusing(fixture, "us-east-1", "conf-bkt-secret");
+
+    let refused = harness.send("HEAD", "/conf-bkt-secret", b"");
+    assert_eq!(refused.status, 403, "{}", refused.body);
+    assert_eq!(
+        refused.body.len(),
+        0,
+        "a refused HEAD carried {} bytes of body: {}",
+        refused.body.len(),
+        refused.body
+    );
+    assert!(
+        !refused.body.contains("<Error"),
+        "the refusal rendered an error document into a HEAD response: {}",
+        refused.body
+    );
+
+    // The same refusal with a method that may carry content, so the `Content-Length` above can be
+    // checked against a measurement rather than against a guess. `BodyAllowance::HeadOfContent` is
+    // the rule: the bytes go, the number stays, because the number is the answer the `HEAD` asked
+    // for. Rewriting it to `0` is the opposite defect from leaving the document in, and it reads
+    // just as much like a fix, so both directions are pinned here.
+    let visible = harness.send("DELETE", "/conf-bkt-secret", b"");
+    assert_eq!(visible.status, 403, "{}", visible.body);
+    visible.assert_contains("<Code>AccessDenied</Code>");
+    assert!(!visible.body.is_empty(), "the non-HEAD refusal rendered no document at all");
+    assert_eq!(
+        refused.header("content-length"),
+        Some(visible.body.len().to_string().as_str()),
+        "the refused HEAD announced {:?} against a rendered refusal of {} bytes",
+        refused.header("content-length"),
+        visible.body.len()
+    );
+
+    let permitted = harness.send("HEAD", "/conf-bkt-open", b"");
+    assert_eq!(permitted.status, 200, "{}", permitted.body);
+    assert_eq!(permitted.header("x-amz-bucket-region"), Some("us-east-1"));
+    assert!(permitted.body.is_empty(), "{}", permitted.body);
 }
 
 /// Negative — a creation naming a region this deployment does not serve is refused, and the bucket

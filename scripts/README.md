@@ -23,6 +23,30 @@ proves afterwards that its workers executed exactly its own quarter, once each. 
 `run_gateway_tsan.sh` is the pinned-nightly a-asm-0024 execution command; it is a CI test rather
 than a stable architecture guard.
 
+`ci_budget.sh` runs one CI command under its wall-clock budget and reports the margin left over
+**every run**, not only when the budget is blown:
+
+```sh
+scripts/ci_budget.sh 120 "target consolidation self-test" bash scripts/test_test_target_consolidation.sh
+```
+
+It exists because rustfs/gateway#188 and #217 were the same failure twice. A job grows with every
+merge — AGENTS.md requires a mutation per new assertion, so case counts only go up — until it
+crosses its hard `timeout`, and CI then prints `exit code 124` after every case has said `ok`. There
+is no failing assertion to read and nothing names the clock, so the failure gets attributed to
+whichever branch was next through the gate. #188 cost four pull requests a cycle each and one author
+concluded their own work was broken; #217 sat red on main across three merges. Both times the margin
+had been shrinking for weeks and nothing reported it.
+
+So the wrapper prints `<label> completed in Ns of its Ms budget (P%)`, raises a `::warning::`
+annotation past 80% of budget — visible on the pull-request checks UI, one PR early rather than on
+the PR that crosses the line — and turns an overrun into an explicit `OUT OF TIME` diagnosis naming
+the budget. `check_ci_test_split.sh` requires every timed command behind the `Test` aggregate to go
+through it, so a new gate job cannot be added without a reported margin. A suite that can also watch
+its own clock should still do so — `test_guard_scripts.sh` names the case in flight, which this
+outer layer cannot — but the wrapper works for `cargo test` and everything else that will never
+instrument itself.
+
 ## Conventions
 
 These are binding for every script added here (rustfs/backlog#1723).

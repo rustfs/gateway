@@ -87,7 +87,7 @@ use rustfs_gateway::sig::{
 };
 use rustfs_gateway::{
     Authorizer, AuthzRequest, BoxFuture, BucketName, ClassKind, CorsSource, CorsSourceError, CredentialGuardConfig,
-    CredentialLookup, CredentialProvider, Credentials, Decision, FixedClock, Governor, GovernorRequest,
+    CredentialLookup, CredentialProvider, Credentials, Decision, ErrorCode, FixedClock, Governor, GovernorRequest,
     GuardedCredentialProvider, HandlerResult, InputAuthzRequest, InputDecisions, Lease, Limits, Next, ObservedBody, PolicyError,
     PolicySnapshot, ProviderError, RegionSet, Req, RequestContext, S3Service, ServiceBuilder, SessionBinding, SigV4Authenticator,
     SnapshotId, StaticCredentials, VirtualHostStyle, WireRequest, allow_when, collect, dto, fn_credential_provider, op_layer,
@@ -1098,6 +1098,41 @@ impl Sut for InProcess {
                  would be carried over and a case relying on it would run against state it never \
                  declared"
             )));
+        }
+
+        if let Some(fault) = setup.read("setup.fault") {
+            let operation = fault
+                .read("setup.fault.operation")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            let at = fault.read("setup.fault.at").and_then(Value::as_str).unwrap_or_default();
+            let code = fault.read("setup.fault.code").and_then(Value::as_str).unwrap_or_default();
+            if at != "after_commit" {
+                return Err(SutError::Environment(format!(
+                    "`setup.fault.at = \"{at}\"` is not a point this target can fail at; it arranges \
+                     `after_commit` and nothing else"
+                )));
+            }
+            let Some(code) = ErrorCode::known(code) else {
+                return Err(SutError::Environment(format!(
+                    "`setup.fault.code = \"{code}\"` is not a declared error code, so it has no status \
+                     and no row; a fault reporting it would put a code on the wire that this workspace \
+                     does not admit exists"
+                )));
+            };
+            // The set is not restated here. `Fixture::arm_committed_fault` measures the name
+            // against the one list the handlers themselves read, so a name this target cannot
+            // report a fault from is refused by the code that would have had to report it.
+            // `UploadPartCopy` is the case that matters: the model marks it as able to fail after a
+            // `200` and this fixture answers it without committing, so a fault armed against it
+            // would be armed against nothing and the case would run as though it had declared none.
+            if let Err(unreportable) = fixture.arm_committed_fault(operation, code) {
+                return Err(SutError::Environment(format!(
+                    "`setup.fault.operation = \"{}\"` names an operation this target does not commit a \
+                     head for, so a fault armed against it would never be reported",
+                    unreportable.operation()
+                )));
+            }
         }
 
         for bucket in setup.read("setup.buckets").and_then(Value::as_array).unwrap_or_default() {

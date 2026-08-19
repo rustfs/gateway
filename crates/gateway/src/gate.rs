@@ -64,10 +64,12 @@ use futures_timer::Delay;
 use http::StatusCode;
 use http_body_util::BodyExt;
 use rustfs_gateway_core::{HandlerError, ResponseKind};
+use rustfs_gateway_http::{BodyIntegrity, ChecksumVerified};
 use rustfs_gateway_sig::Verdict;
 use rustfs_gateway_types::ErrorCode;
 use sha2::{Digest, Sha256};
 
+use crate::integrity::checksum_refusal;
 use crate::render::{S3Error, from_handler, from_transport_limit};
 
 /// Evidence that a request's signature reached a verdict and the verdict was not a rejection.
@@ -217,15 +219,31 @@ where
         timeouts: BodyTimeouts,
         ingest: Option<crate::chunked::ChunkIngest>,
         digest: BodyDigestObligation,
+        // Settled from the head by `crate::integrity::resolve`, above this call, because a
+        // contradiction between two claims is not decidable from any number of body bytes.
+        integrity: BodyIntegrity,
     ) -> Result<Bytes, S3Error> {
         let mut sha256 = match digest {
             BodyDigestObligation::None => None,
             BodyDigestObligation::Sha256(_) => Some(Sha256::new()),
         };
+        // Opened here, closed on every path that reaches a caller with bytes in hand. Not two
+        // halves of one guarantee: `BodyDigestObligation::Sha256` is minted only by
+        // `presigned_body_obligation`, so a header-signed request's payload hash is still not
+        // compared here — a P2 gap this predates and does not close.
+        // Only when the body is *not* `aws-chunked`: under framing the bytes arriving here are
+        // chunk headers, signatures and CRLFs, and the object's own octets exist only after the
+        // decoder has produced them, so the framed path is fed from inside `ChunkIngest::run`.
+        let fuse_digests = ingest.is_none() && !integrity.is_empty();
+        let mut digests = integrity.begin();
         let Some(body) = self.body else {
             if !body_digest_matches(digest, sha256) {
                 return Err(content_sha256_mismatch());
             }
+            // An absent body is a zero-length body, and a zero-length body has a digest. A request
+            // that claims the checksum of one byte and sends none must not pass because there was
+            // nothing to compare.
+            let _verified: ChecksumVerified = digests.verify().map_err(checksum_refusal)?;
             return Ok(Bytes::new());
         };
         if let Some(cap) = ceilings.declared
@@ -259,17 +277,23 @@ where
             if seen > ceilings.buffered {
                 return Err(past_buffered_ceiling());
             }
-            match sha256.as_mut() {
-                Some(hasher) => {
-                    while data.has_remaining() {
-                        let chunk = data.chunk();
-                        let length = chunk.len();
+            // Every digest this body owes is fed from this borrowed run while it is still in
+            // cache, so the body is walked once however many claims it carries.
+            if sha256.is_some() || fuse_digests {
+                while data.has_remaining() {
+                    let chunk = data.chunk();
+                    let length = chunk.len();
+                    if let Some(hasher) = sha256.as_mut() {
                         hasher.update(chunk);
-                        collected.put_slice(chunk);
-                        data.advance(length);
                     }
+                    if fuse_digests {
+                        digests.update(chunk);
+                    }
+                    collected.put_slice(chunk);
+                    data.advance(length);
                 }
-                None => collected.put(data),
+            } else {
+                collected.put(data);
             }
         }
         if !body_digest_matches(digest, sha256) {
@@ -280,10 +304,17 @@ where
         // to the *wire* bytes — the ones the peer wrote and this process is holding — and only what
         // survived them is handed to the chunk parser. `crate::chunked` states why that is the
         // right side of the decode to count on.
-        match ingest {
-            Some(ingest) => ingest.run(wire_bytes).await,
-            None => Ok(wire_bytes),
-        }
+        let body = match ingest {
+            // The decoder feeds the digests as it produces the object's own octets, so the
+            // checksum covers what the caller claimed a digest for and not the framing around it.
+            Some(ingest) => ingest.run(wire_bytes, &mut digests).await?,
+            // Already fed, frame by frame, by the loop above.
+            None => wire_bytes,
+        };
+        // Bound and dropped on purpose: the witness's value is where it can be produced, not what
+        // it carries. When the commit path takes an integrity proof by value (P5), it takes this.
+        let _verified: ChecksumVerified = digests.verify().map_err(checksum_refusal)?;
+        Ok(body)
     }
 }
 
@@ -438,7 +469,10 @@ mod tests {
                     .and_then(|value| value.parse().ok());
                 let body = SealedBody::seal(Some(request.into_body()), declared_length);
                 let proof = Authenticated::granted_for_test();
-                let mut response = match body.read(&proof, roomy(), timeouts, None, BodyDigestObligation::None).await {
+                let mut response = match body
+                    .read(&proof, roomy(), timeouts, None, BodyDigestObligation::None, BodyIntegrity::NONE)
+                    .await
+                {
                     Ok(_) => {
                         service_reached.fetch_add(1, Ordering::SeqCst);
                         http::Response::new(rustfs_gateway_stream::Body::from_bytes(Bytes::from_static(b"ok")))
@@ -534,6 +568,33 @@ mod tests {
         }
     }
 
+    /// Negative — an absent body is a zero-length body, and a claim about a longer one fails.
+    ///
+    /// The state this refuses is "there was nothing to compare, so nothing disagreed". The absent
+    /// body takes its own early return out of `read`, so without a comparison on that path a
+    /// request declaring the digest of eleven bytes and sending none is answered `200`.
+    #[tokio::test]
+    async fn an_absent_body_still_discharges_the_claim_it_carried() {
+        let mut map = http::HeaderMap::new();
+        // The CRC32 of "hello world", against a body of no bytes at all.
+        let (name, value) = ("x-amz-checksum-crc32", "DUoRhQ==");
+        map.insert(http::HeaderName::from_static(name), http::HeaderValue::from_static(value));
+        let view = rustfs_gateway_http::HeaderView::new(&map);
+        let integrity = crate::integrity::resolve(&view, &http::Method::PUT, "PutObject").expect("one well-formed claim");
+        let error = SealedBody::<crate::probe::ObservedBody>::seal(None, None)
+            .read(
+                &Authenticated::granted_for_test(),
+                roomy(),
+                BodyTimeouts::S3,
+                None,
+                BodyDigestObligation::None,
+                integrity,
+            )
+            .await
+            .expect_err("a claim about eleven bytes is not satisfied by none");
+        assert_eq!(error.code(), Some(&ErrorCode::X_AMZ_CONTENT_CHECKSUM_MISMATCH));
+    }
+
     /// Negative — a body that announces more than the assembly's ceiling is refused before a single
     /// frame is polled, so the refusal costs nothing.
     #[tokio::test]
@@ -545,7 +606,7 @@ mod tests {
             declared: None,
         };
         let error = SealedBody::seal(Some(body), Some(1 << 30))
-            .read(&proof, ceilings, BodyTimeouts::S3, None, BodyDigestObligation::None)
+            .read(&proof, ceilings, BodyTimeouts::S3, None, BodyDigestObligation::None, BodyIntegrity::NONE)
             .await
             .expect_err("over the ceiling");
         assert_eq!(error.status(), StatusCode::PAYLOAD_TOO_LARGE);
@@ -564,7 +625,7 @@ mod tests {
             declared: None,
         };
         let error = SealedBody::seal(Some(body), None)
-            .read(&proof, ceilings, BodyTimeouts::S3, None, BodyDigestObligation::None)
+            .read(&proof, ceilings, BodyTimeouts::S3, None, BodyDigestObligation::None, BodyIntegrity::NONE)
             .await
             .expect_err("over the ceiling");
         assert_eq!(error.code(), Some(&ErrorCode::ENTITY_TOO_LARGE));
@@ -584,7 +645,7 @@ mod tests {
             declared: Some(128),
         };
         let error = SealedBody::seal(Some(body), None)
-            .read(&proof, ceilings, BodyTimeouts::S3, None, BodyDigestObligation::None)
+            .read(&proof, ceilings, BodyTimeouts::S3, None, BodyDigestObligation::None, BodyIntegrity::NONE)
             .await
             .expect_err("past the operation's cap");
         assert_eq!(error.code(), Some(&ErrorCode::INVALID_REQUEST));
@@ -605,7 +666,7 @@ mod tests {
             declared: Some(128),
         };
         let error = SealedBody::seal(Some(body), Some(4096))
-            .read(&proof, ceilings, BodyTimeouts::S3, None, BodyDigestObligation::None)
+            .read(&proof, ceilings, BodyTimeouts::S3, None, BodyDigestObligation::None, BodyIntegrity::NONE)
             .await
             .expect_err("past the operation's cap");
         assert_eq!(error.code(), Some(&ErrorCode::INVALID_REQUEST));
@@ -619,7 +680,7 @@ mod tests {
         let sealed: SealedBody<crate::probe::ObservedBody> = SealedBody::seal(None, None);
         assert!(
             sealed
-                .read(&proof, roomy(), BodyTimeouts::S3, None, BodyDigestObligation::None)
+                .read(&proof, roomy(), BodyTimeouts::S3, None, BodyDigestObligation::None, BodyIntegrity::NONE,)
                 .await
                 .expect("no body")
                 .is_empty()
@@ -632,7 +693,7 @@ mod tests {
         let proof = Authenticated::granted_for_test();
         let (body, read) = crate::probe::ObservedBody::new([Bytes::from_static(b"first-"), Bytes::from_static(b"second")]);
         let bytes = SealedBody::seal(Some(body), Some(12))
-            .read(&proof, roomy(), BodyTimeouts::S3, None, BodyDigestObligation::None)
+            .read(&proof, roomy(), BodyTimeouts::S3, None, BodyDigestObligation::None, BodyIntegrity::NONE)
             .await
             .expect("inside every ceiling");
         assert_eq!(bytes, Bytes::from_static(b"first-second"));

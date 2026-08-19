@@ -1,7 +1,10 @@
-# c-mpu-0018 — the part entity tag is quoted, and it is the whole response.
+# c-mpu-0018 — the part entity tag is quoted, it is the digest of that part's bytes, and it is the
+# whole response.
 #
-# Schema dimensions exercised: a header value asserted with its literal quotes, plus a body-size
-# assertion.
+# Schema dimensions exercised: a header value asserted with its literal quotes, a body-size
+# assertion, a header capture echoed into an XML element, a refusal that proves the echoed value is
+# compared, and — in the other direction — a document capture spent as a precondition and named in
+# the expectation that judges the exchange it conditions.
 
 [case]
 id = "c-mpu-0018"
@@ -12,8 +15,17 @@ The value returned here is the value a completion request has to echo back, so t
 have to agree down to the quotes. A part tag written without them is not equal to the tag the \
 client sends back, so every completion built from those tags is refused as if the parts had \
 changed — and the client has no way to see why, because both spellings look correct in isolation. \
-The body assertion is the other half: a part upload has no body, and bytes after this head \
-desynchronise a reused connection."""
+Asserting one part's tag against a constant cannot see an implementation that answers the same tag \
+for every part, so a second part with different bytes is uploaded beside it and the returned value \
+is then spent: a completion naming a tag the server never minted is refused, and a completion \
+naming the captured one succeeds. The body assertion is the other half: a part upload has no body, \
+and bytes after this head desynchronise a reused connection. The last two exchanges close the loop \
+the other way round: the tag the completion published *in its document* is read out of that \
+document and spent as an `If-Match`, and the header the object answers is asserted to be that same \
+captured value rather than a constant written beside it. A document renders the quotes escaped and \
+a header renders them bare, so this is the pair of renderings that has to agree, and asserting each \
+against its own hand-written constant is exactly the arrangement that let two spellings drift apart \
+upstream."""
 polarity = "positive"
 operation = "UploadPart"
 tags = ["multipart", "etag", "framing"]
@@ -22,6 +34,11 @@ quirks = ["q-etag-0004", "q-mpu-etag-0028", "q-mpu-attributes-etag-0036"]
 [[case.evidence]]
 url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UploadPart.html"
 summary = "The documented part response carries the entity tag as a header and no body."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CompleteMultipartUpload.html"
+summary = "A completion names each part by the entity tag the part upload returned, so the two spellings have to agree."
 kind = "aws-doc"
 
 [[case.evidence]]
@@ -40,19 +57,159 @@ bucket = "conf-mpu"
 key = "one-part-upload"
 capture_upload_id_as = "upload_id"
 
-[request]
+# 1 — the assertion the case is named for. The tag is the MD5 of the twenty-seven bytes sent, in
+# hex, wrapped in the quotes that are part of the value.
+[[exchanges]]
+name = "the part is stored and answers its tag"
+
+[exchanges.request]
 method = "PUT"
 target = "/conf-mpu/one-part-upload?partNumber=1&uploadId=${capture.upload_id}"
 body = { utf8 = "the exact bytes of part one" }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 
-[expect]
+[exchanges.expect]
 kind = "response"
 status = 200
 connection_after = "open"
 
-[expect.headers_present]
-etag = "\"88d1a0e3f0d0eb1b06e0d9c8bd6f6d5f\""
+[exchanges.expect.capture]
+part1_etag = { header = "etag" }
 
-[expect.body]
+[exchanges.expect.headers_present]
+etag = "\"48df983668c1507a42914184ecc64d4a\""
+
+[exchanges.expect.body]
 size = 0
+
+# 2 — the control for exchange 1. One part asserted against one constant is satisfied by an
+# implementation that answers a fixed tag, or one that answers the tag of the first part it ever
+# saw; a second part whose bytes differ in one character is not.
+[[exchanges]]
+name = "a second part answers its own tag"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-mpu/one-part-upload?partNumber=2&uploadId=${capture.upload_id}"
+body = { utf8 = "the exact bytes of part two" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.headers_present]
+etag = "\"3f33588ca7c6b16696cbc00a3218c887\""
+
+[exchanges.expect.body]
+size = 0
+
+# 3 — the tag is compared rather than accepted. Without this, exchange 4 would pass against a
+# completion that ignored the `<ETag>` elements entirely, and the round trip would prove nothing
+# about the spelling exchange 1 published.
+[[exchanges]]
+name = "a completion naming a tag the server never minted is refused"
+
+[exchanges.request]
+method = "POST"
+target = "/conf-mpu/one-part-upload?uploadId=${capture.upload_id}"
+headers = { "content-type" = "application/xml" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.request.body]
+utf8 = '''
+<CompleteMultipartUpload xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Part><PartNumber>1</PartNumber><ETag>"d41d8cd98f00b204e9800998ecf8427e"</ETag></Part></CompleteMultipartUpload>'''
+
+[exchanges.expect]
+kind = "response"
+status = 400
+connection_after = "open"
+headers_absent = ["etag", "x-amz-version-id"]
+
+[exchanges.expect.error]
+code = "InvalidPart"
+request_id_present = true
+
+# 4 — the round trip. The header exchange 1 published, quotes included, is written straight back
+# into the completion body and accepted, and the object that results carries the composite of the
+# one part it names.
+[[exchanges]]
+name = "the published tag completes the upload"
+
+[exchanges.request]
+method = "POST"
+target = "/conf-mpu/one-part-upload?uploadId=${capture.upload_id}"
+headers = { "content-type" = "application/xml" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.request.body]
+utf8 = '''
+<CompleteMultipartUpload xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Part><PartNumber>1</PartNumber><ETag>${capture.part1_etag}</ETag></Part></CompleteMultipartUpload>'''
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+# The tag is captured out of the document as well as asserted in it. The element is written
+# `&quot;...&quot;`; what is captured is the value those bytes encode, because a capture exists to
+# be spent and six literal characters of entity are not an entity tag.
+[exchanges.expect.capture]
+result_etag = { xml_text = "ETag" }
+
+[exchanges.expect.body]
+redact = ["Location", "UploadId"]
+contains_utf8 = ["<CompleteMultipartUploadResult", "6304d8b66864869a34b0f9efd0631414-1&quot;</ETag>"]
+not_contains_utf8 = ["48df983668c1507a42914184ecc64d4a", "<Error>"]
+
+[exchanges.expect.body.xml]
+root = "CompleteMultipartUploadResult"
+element_order = ["Location", "Bucket", "Key", "ETag"]
+
+# 5 — the two renderings are the same value. The tag is taken from the completion *document*, where
+# its quotes are escaped, and spent as an `If-Match`, where they are not; the header the object
+# answers is then asserted against that captured value rather than against a constant repeated here.
+# A completion whose document and header disagree — the upstream defect this case is named for —
+# fails on the precondition, and one that mints a per-response tag fails on the header.
+[[exchanges]]
+name = "the tag the document published is the tag the object has"
+
+[exchanges.request]
+method = "HEAD"
+target = "/conf-mpu/one-part-upload"
+headers = { "if-match" = "${capture.result_etag}" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.headers_present]
+etag = "${capture.result_etag}"
+
+# 6 — the control for exchange 5, and the reason its 200 means anything. The composite with its
+# suffix removed is what an implementation that stored the object like any ordinary write would
+# hold, and it is the value a precondition must refuse. Without this the 200 above is satisfied by
+# a server that ignores `If-Match` entirely.
+#
+# A GET rather than a HEAD: a HEAD carries no body whatever the server writes, so an assertion
+# about the refusal document would be true by construction.
+[[exchanges]]
+name = "the same tag without its part count is refused as a precondition"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-mpu/one-part-upload"
+headers = { "if-match" = "\"6304d8b66864869a34b0f9efd0631414\"" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 412
+connection_after = "open"
+
+[exchanges.expect.error]
+code = "PreconditionFailed"
+request_id_present = true

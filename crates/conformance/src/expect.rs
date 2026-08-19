@@ -744,7 +744,13 @@ fn collect_captures(expect: &Value, observed: &Observation, pointer: &str, out: 
         if let Some(element) = source.read("expect.capture.*.xml_text").and_then(Value::as_str) {
             match xml::first_element_text(&body, element) {
                 Some(text) => {
-                    captures.insert(name.clone(), text);
+                    // The element's *text*, which is what the schema names, rather than the bytes
+                    // between its tags. A captured value exists to be spent — written back into a
+                    // later request as a header or an element — and `&quot;abc-1&quot;` spent as
+                    // an `If-Match` matches nothing, so a capture that kept the wire spelling
+                    // would silently answer 412 to every case built on it. Assertions still read
+                    // the raw bytes: `expect.body.contains_utf8` is about what arrived.
+                    captures.insert(name.clone(), xml::unescape(&text));
                 }
                 None => out.push(Diagnostic::deny(
                     "expect/capture",

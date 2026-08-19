@@ -177,7 +177,7 @@ impl From<ErrorResolution> for S3Error {
                 .map(|message| std::borrow::Cow::Owned(message.to_owned())),
             resource: resolution.resource().map(Box::from),
             etag: resolution.etag().cloned(),
-            connection: ConnectionIntent::MayKeepAlive,
+            connection: crate::close::after_refusal_code(resolution.code()),
             extras,
         }
     }

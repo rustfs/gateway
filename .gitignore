@@ -2,3 +2,7 @@
 /docs/notes/
 /docs/plans/
 /docs/superpowers/
+
+# proptest saves shrunk failing seeds beside the test; they are a local debugging aid, not a
+# checked-in fixture, and a stale one names inputs the generator no longer produces.
+*.proptest-regressions

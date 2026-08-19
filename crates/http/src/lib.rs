@@ -62,6 +62,7 @@
     clippy::panic
 )]
 
+mod checksum;
 mod framing;
 mod header_view;
 mod host;
@@ -73,6 +74,7 @@ mod reject;
 mod text;
 mod wire;
 
+pub use crate::checksum::{BodyDigests, BodyIntegrity, ChecksumReject, ChecksumSubject, ChecksumVerified};
 pub use crate::framing::{BodyLength, Framing, MAX_CHUNK_SIZE_LINE_BYTES, validate_chunk_size_line};
 pub use crate::header_view::{
     CanonicalHeadersError, HeaderView, SINGLE_VALUED_HEADERS, SignedHeaderList, SignedHeadersError, is_significant_header,

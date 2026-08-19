@@ -33,6 +33,30 @@ def fail(message: str) -> None:
     raise SystemExit(f"test-target consolidation violation: {message}")
 
 
+# Matched at a position rather than against `source[index:]`. Slicing the remainder of the file
+# on every character makes the scan quadratic in file size, and this function runs once per source
+# file per guard invocation — sixty-one of them in the self-test alone. Neither pattern is anchored
+# or uses a lookbehind, so matching at an offset is the same match.
+#
+# A token this scanner cares about can only begin at one of these characters: `//` and `/*` start
+# with a slash, `"` and `b"` with a quote or a `b`, a raw string with `r` or `b`, a character
+# literal with `'` or `b`. Every other position is passed over, so the scanner skips runs of
+# ordinary code in one C-level search instead of one Python loop iteration per byte. The set is
+# what makes that equivalent to walking every index, and it must be widened in step with the
+# branches below.
+#
+# `b` is in the set for the branches that read it and not because dropping it would break
+# anything: `b"…"` ends where the `"…"` inside it ends, `b'x'` where `'x'` does, and `br"…"` where
+# `r"…"` does, so every byte-prefixed form falls through to the same close via its unprefixed
+# opener. It is listed because the branches below genuinely begin there and a reader checking the
+# set against them should find it — but `scripts/test_test_target_consolidation.sh` cannot kill a
+# mutation that removes it, and that is a property of Rust's grammar rather than a gap in the
+# suite. Removing `/`, `"` or `'` is caught.
+TOKEN_START = re.compile(r"""[/"'br]""")
+RUST_RAW_STRING = re.compile(r'(?:b)?r(#{0,255})"')
+RUST_CHAR_LITERAL = re.compile(r"(?:b)?'(?:\\.|[^'\\\n])+'")
+
+
 def rust_views(source: str, path: Path) -> tuple[str, str]:
     """Return comment-free source and code with comments/literals masked."""
     comment_free = list(source)
@@ -41,13 +65,17 @@ def rust_views(source: str, path: Path) -> tuple[str, str]:
     length = len(source)
 
     def mask(start: int, end: int, *, comments: bool) -> None:
-        for position in range(start, end):
-            if source[position] != "\n":
-                code_only[position] = " "
-                if comments:
-                    comment_free[position] = " "
+        segment = source[start:end]
+        blanks = [" "] * len(segment) if "\n" not in segment else [" " if c != "\n" else "\n" for c in segment]
+        code_only[start:end] = blanks
+        if comments:
+            comment_free[start:end] = blanks
 
     while index < length:
+        step = TOKEN_START.search(source, index)
+        if step is None:
+            break
+        index = step.start()
         if source.startswith("//", index):
             end = source.find("\n", index)
             end = length if end < 0 else end
@@ -72,10 +100,10 @@ def rust_views(source: str, path: Path) -> tuple[str, str]:
             index = end
             continue
 
-        raw = re.match(r'(?:b)?r(#{0,255})"', source[index:])
+        raw = RUST_RAW_STRING.match(source, index)
         if raw:
             delimiter = '"' + raw.group(1)
-            body_start = index + raw.end()
+            body_start = raw.end()
             close = source.find(delimiter, body_start)
             if close < 0:
                 fail(f"{path.relative_to(root)} has an unterminated raw string")
@@ -103,9 +131,9 @@ def rust_views(source: str, path: Path) -> tuple[str, str]:
             index = end
             continue
 
-        char_literal = re.match(r"(?:b)?'(?:\\.|[^'\\\n])+'", source[index:])
+        char_literal = RUST_CHAR_LITERAL.match(source, index)
         if char_literal:
-            end = index + char_literal.end()
+            end = char_literal.end()
             mask(index, end, comments=False)
             index = end
             continue
@@ -160,16 +188,19 @@ core_modules = (
     "codec_binding",
     "compile_fail",
     "configuration_error_declarations",
+    "cors_roundtrip",
     "dialect",
     "dto_cold_split",
     "error_resolution",
     "golden",
     "hot_path",
+    "lifecycle_roundtrip",
     "limit_layering",
     "operation_spec_semver",
     "params_and_dispatch",
     "precondition_range",
     "purity_guard",
+    "range_part_table",
     "registration",
     "route_table",
     "static_dispatch",
@@ -242,9 +273,16 @@ if actual_core_harness != core_harness:
     fail("core integration harness must register each frozen source exactly once")
 
 conformance_modules = (
+    "bucket_family",
     "bucket_lifecycle",
+    "copy_family",
     "corpus",
+    "domain_wiring",
+    "lifecycle_family",
     "list_family",
+    "multipart_family",
+    "object",
+    "range_cond_family",
     "tagging",
     "wired",
 )

@@ -8,6 +8,7 @@ Agent entry point for bounded, signature-aware HTTP wire ingestion.
 | `src/head.rs` | Request-head validation and normalized views. | Header/query/path metadata is accepted wrongly. |
 | `src/host.rs` | Host and addressing parsing. | Virtual-hosted/path addressing differs. |
 | `src/limits.rs` | Wire budget vocabulary. | A header/query/body ceiling changes. |
+| `src/checksum.rs` | The one authority on request-body integrity: `Content-MD5` and `x-amz-checksum-*` arbitration, the digests, and the `ChecksumVerified` witness. | A digest is claimed and not compared, or two layers disagree about which checksum a request made. |
 | `src/metadata.rs` | Metadata-header validation. | User metadata is malformed or oversized. |
 | `src/framing.rs` | Body framing selected from authenticated payload mode. | Content length or chunk framing is wrong. |
 | `src/chunk.rs` | aws-chunked syntax and decoding. | A chunk boundary or trailer is rejected wrongly. |

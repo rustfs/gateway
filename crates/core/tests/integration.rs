@@ -35,6 +35,9 @@ mod compile_fail;
 #[path = "configuration_error_declarations.rs"]
 mod configuration_error_declarations;
 
+#[path = "cors_roundtrip.rs"]
+mod cors_roundtrip;
+
 #[path = "dialect.rs"]
 mod dialect;
 
@@ -50,6 +53,9 @@ mod golden;
 #[path = "hot_path.rs"]
 mod hot_path;
 
+#[path = "lifecycle_roundtrip.rs"]
+mod lifecycle_roundtrip;
+
 #[path = "limit_layering.rs"]
 mod limit_layering;
 
@@ -64,6 +70,9 @@ mod precondition_range;
 
 #[path = "purity_guard.rs"]
 mod purity_guard;
+
+#[path = "range_part_table.rs"]
+mod range_part_table;
 
 #[path = "registration.rs"]
 mod registration;

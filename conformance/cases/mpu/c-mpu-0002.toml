@@ -1,7 +1,8 @@
 # c-mpu-0002 — the entity tag of a three-part upload.
 #
 # Schema dimensions exercised: multipart fixtures with captured part digests, multi-exchange form
-# with connection reuse, byte-level assertion on the entity-tag suffix.
+# with connection reuse, a capture read back as a conditional header, and a refusal pair that
+# separates the composite from the digest of the assembled bytes.
 
 [case]
 id = "c-mpu-0002"
@@ -11,9 +12,11 @@ rationale = """
 The entity tag of a multipart object is a digest over the concatenated raw part digests followed by \
 a hyphen and the number of parts. An implementation that digests the assembled object instead \
 produces a value of the right shape and the wrong content, and every client that verifies integrity \
-against it concludes the object is corrupt and re-uploads. The suffix is what makes the two forms \
-distinguishable on the wire at all, so it is asserted on both the completion result and the \
-subsequent head, which is where a client actually reads it."""
+against it concludes the object is corrupt and re-uploads. Asserting the suffix alone cannot see \
+that failure at all, so the whole composite is asserted, the digest of the assembled bytes is \
+refused as a precondition beside it, and the tag the completion published is read back on the head \
+— which is where a client actually reads it — so the value is pinned to the object rather than to a \
+shape."""
 polarity = "positive"
 operation = "CompleteMultipartUpload"
 tags = ["multipart", "etag", "integrity"]
@@ -58,6 +61,10 @@ part_number = 3
 body = { size = 17 }
 capture_etag_as = "part3_etag"
 
+# 1 — the completion, asserted against the whole composite. The three parts are the fixture's
+# default fill, so the digests are 4c28640dc8df1933aaea192100d50ae0 twice and
+# 1bdd36b0a024c90db383512607293692; the composite is the digest of those forty-eight raw bytes with
+# the count after a hyphen.
 [[exchanges]]
 name = "complete"
 
@@ -76,18 +83,22 @@ kind = "response"
 status = 200
 connection_after = "open"
 
-[exchanges.expect.capture]
-object_etag = { xml_text = "ETag" }
-
 [exchanges.expect.body]
 redact = ["Location", "UploadId"]
-contains_utf8 = ["<CompleteMultipartUploadResult", "-3\"</ETag>"]
-not_contains_utf8 = ["<Error>"]
+contains_utf8 = ["<CompleteMultipartUploadResult", "ceb79c6e3e838cdabb8fa04e30b4082f-3&quot;</ETag>"]
+# The first is the digest of the ten and a half megabytes the three parts assemble into — the value
+# the upstream defect published, and one that carries no suffix to warn a client. The second is the
+# unescaped spelling of the same element: the quotes belong to the value and the writer escapes
+# them, so a case asserting only the escaped form cannot tell the two apart.
+not_contains_utf8 = ["4aaeac05ec090730e66f8d66ec75763b", "-3\"</ETag>", "<Error>"]
 
 [exchanges.expect.body.xml]
 root = "CompleteMultipartUploadResult"
 element_order = ["Location", "Bucket", "Key", "ETag"]
 
+# 2 — the object publishes the same value the result document did, in the header form a client
+# reads it in: bare of the XML escaping, byte for byte the tag asserted above. The length is the
+# concatenation of all three parts rather than of the first.
 [[exchanges]]
 name = "head"
 
@@ -101,8 +112,73 @@ kind = "response"
 status = 200
 connection_after = "open"
 
-[exchanges.expect.headers_present]
-etag = "*"
+[exchanges.expect.capture]
+head_etag = { header = "etag" }
 
-[exchanges.expect.body]
-size = 0
+[exchanges.expect.headers_present]
+etag = "\"ceb79c6e3e838cdabb8fa04e30b4082f-3\""
+content-length = "10485777"
+
+# 3 — the tag the header published is the object's own rather than a value minted per response:
+# read back as a precondition it matches.
+[[exchanges]]
+name = "the published tag matches as a precondition"
+
+[exchanges.request]
+method = "HEAD"
+target = "/conf-mpu/three-parts"
+headers = { "if-match" = "${capture.head_etag}" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.headers_present]
+etag = "\"ceb79c6e3e838cdabb8fa04e30b4082f-3\""
+content-length = "10485777"
+
+# 4 — the control this case exists for. An implementation that digested the assembled object and
+# then appended the count would answer 200 here: the shape is right and every suffix assertion in
+# the family would still be green.
+#
+# A GET rather than a HEAD, because a HEAD is answered with no body whatever the server writes and
+# an assertion about that body would be true by construction.
+[[exchanges]]
+name = "the assembled digest wearing the suffix is refused"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-mpu/three-parts"
+headers = { "if-match" = "\"4aaeac05ec090730e66f8d66ec75763b-3\"" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 412
+connection_after = "open"
+
+[exchanges.expect.error]
+code = "PreconditionFailed"
+request_id_present = true
+
+# 5 — the same digest without the suffix, which is what an implementation that treated a multipart
+# object like any other write would store.
+[[exchanges]]
+name = "the assembled digest is refused"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-mpu/three-parts"
+headers = { "if-match" = "\"4aaeac05ec090730e66f8d66ec75763b\"" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 412
+connection_after = "open"
+
+[exchanges.expect.error]
+code = "PreconditionFailed"
+request_id_present = true

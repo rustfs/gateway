@@ -69,11 +69,42 @@ Each dimension below therefore has a field on day one.
 | Clock injection | `[clock] fixed`, `skew_ms`, `request_time`, `presign_expires_s` | Clock skew, presigned expiry — and determinism for any body containing a timestamp |
 | TLS and h2 framing | `case.applies_to.http_versions` / `tls`, `connection.tls`, `request.h2_frames` | Cases meaningful only over h2 or only in cleartext; TLS truncation |
 | Expectations beyond status | `expect.kind` = `response` / `stream_error` / `event_stream` / `hang` / `connection_reset` | Errors delivered inside a 200; bodies that simply stop |
+| Failure after the head | `[setup.fault] at = "after_commit"` | The refusal a client cannot see in the status line, because the status line was already sent |
 | Byte-exact bodies | `expect.body.exact_utf8` / `exact_hex` / `golden` | Element order, `xmlns`, empty-element rendering, whitespace |
 | Header set assertions | `expect.headers_exact` / `headers_absent` / `header_order` | Headers that must **not** be present; casing and ordering |
 | Traceability | `case.rationale`, `case.evidence[]` | Cases nobody dares delete; assertions nobody can justify |
 | Quirk back-reference | `case.quirks[]` | The mutation gate's coverage matrix |
 | Polarity | `case.polarity` | The negative-cases-outnumber-positive requirement |
+
+### Why a fault is declared rather than arranged
+
+Every other `[setup]` entry describes state that was already true when the request arrived: a bucket
+that is not there, a key that is not there, an upload with one part in it. A backend discovers all of
+those while a status is still choosable, so all of them are refused with a status of their own. That
+is the behaviour most of the corpus is about, and it is why `[setup.objects] absent = true` cannot
+express a copy that fails halfway.
+
+`CompleteMultipartUpload`, `CopyObject` and `UploadPartCopy` send their head before they know the
+outcome, because the work can outlast a client's timeout. After that point a failure has nowhere to
+go but the body, under a status line that already says `200`. `[setup.fault]` is how a case says the
+failure happens *there*:
+
+```toml
+[setup.fault]
+operation = "CopyObject"
+at = "after_commit"
+code = "NoSuchKey"
+```
+
+The alternative — rearranging an implementation until one of its ordinary refusals arrives late — is
+the thing this field exists to stop. It produces the same bytes and it moves the boundary every other
+case in the family stands on: `c-copy-0034` and `c-mpu-0020` … `c-mpu-0026` each pin a refusal that
+must be decided *before* the head goes out, and each of them turns into a `200` carrying an `<Error>`
+the moment that check moves down. The two ledgers assert both halves together for that reason.
+
+Only an operation that commits its head early may be named; `lint/fault-after-commit` denies any
+other, because a fault at a point the operation never reaches is an assertion that cannot fail. The
+list is held equal to the `ERROR_AFTER_200` table `cargo xtask codegen` lowers from the model.
 
 One dimension is deliberately **not** in the schema: the internal assembly path
 (`--transport hyper|conn`) is injected by the runner. Every case runs on both paths and the two runs
@@ -100,9 +131,18 @@ must agree case for case; a case that could name a path would be a case that hid
   both sides before comparison. Element presence and position are still asserted byte for byte. It
   exists so that a response containing a server-minted opaque value — upload id, continuation token,
   request id — can still be pinned to bytes. Redact the smallest possible set.
-- **Interpolation.** `${capture.<name>}` is substituted **before** signing, so an interpolated value
-  is covered by the signature. Captures come from `expect.capture` on an earlier exchange or from
-  `setup.multipart_uploads[].capture_upload_id_as`.
+- **Interpolation.** `${capture.<name>}` is substituted in a `request` **before** signing, so an
+  interpolated value is covered by the signature, and in an `expect` **before** the exchange is
+  judged, so an assertion may name a value an earlier exchange produced. Captures come from
+  `expect.capture` on an earlier exchange or from `setup.multipart_uploads[].capture_upload_id_as`;
+  an expectation cannot name the capture its own exchange binds, because the expectation is judged
+  first. Substitution applies to **values only** — a `${...}` written in a field name, such as a
+  header name, is refused rather than left in place, so every reference in a case is either
+  substituted or reported and none is silently ignored.
+- **A captured `xml_text` is the value, not the wire form.** `expect.capture.<name>.xml_text` expands
+  the XML entities in the element's text, so a captured `<ETag>&quot;abc-1&quot;</ETag>` is spendable
+  as an `If-Match`. Assertions are the other way round: `contains_utf8`, `exact_utf8` and the `xml`
+  block all judge the bytes that arrived, escaping included.
 - **`headers_exact` excludes** the hop-by-hop headers the transport itself manages: `connection`,
   `keep-alive`, `transfer-encoding`, `date`. Assert those explicitly via `headers_present` when they
   are the subject of the case.
@@ -115,7 +155,7 @@ must agree case for case; a case that could name a path would be a case that hid
   `xml`, `wire-bytes`, `etag`, `routing`, `vhost`, `conditional`, `preconditions`, `list`,
   `pagination`, `multipart`, `checksum`, `range`, `encoding`, `cors`, `preflight`, `encryption`, `lifecycle`, `replication`, `bucketconfig`, `region`, `security`, `dos`,
   `sse`, `timing`, `connection`, `event-stream`, `tls`, `h2`, `error-shape`, `known-divergence`, `tagging`,
-  `object-lock`, `restore`, `select`, `acl`, `naming`, and `slow`. `slow` is reserved: it moves a case out of
+  `object-lock`, `restore`, `select`, `acl`, `naming`, `object-attributes`, and `slow`. `slow` is reserved: it moves a case out of
   the pull-request gate and
   into the merge queue. `region` marks a case whose subject is the deployment's region posture — the
   location-constraint rules and the `x-amz-bucket-region` redirect contract. `object-lock` marks a

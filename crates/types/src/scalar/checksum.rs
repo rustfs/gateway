@@ -54,6 +54,8 @@ const SDK_ALGORITHM_HEADER: &str = "x-amz-sdk-checksum-algorithm";
 const CHECKSUM_TYPE_HEADER: &str = "x-amz-checksum-type";
 /// The response-side algorithm name header, which carries no checksum value.
 const CHECKSUM_ALGORITHM_HEADER: &str = "x-amz-checksum-algorithm";
+/// The read-side opt-in header, which asks for a checksum back and declares none.
+const CHECKSUM_MODE_HEADER: &str = "x-amz-checksum-mode";
 /// Upper bound on the number of parts, which bounds the `-N` suffix.
 const MAX_MULTIPART_PARTS: u32 = 10_000;
 /// Inline capacity for the base64 text: base64(SHA-256) is 44 bytes, `-10000` adds 6, and the
@@ -529,6 +531,48 @@ impl ContentMd5 {
             Err(ChecksumError::BadDigest)
         }
     }
+
+    /// Opens the streaming digest [`ContentMd5::verify`] expects to be handed.
+    ///
+    /// It is an associated function of this type and not a free constructor elsewhere so that the
+    /// only MD5 a verifier can reach is the one the comparison takes. MD5 is deliberately absent
+    /// from [`ChecksumAlgorithm`]: `Content-MD5` is a different protocol feature with different
+    /// error codes, and folding it into the algorithm enumeration would let it be selected by an
+    /// `x-amz-checksum-md5` header AWS does not define.
+    #[must_use]
+    pub fn digester() -> Md5Digest {
+        Md5Digest::default()
+    }
+}
+
+/// A streaming MD5 over a request body.
+///
+/// Separate from [`Checksummer`] because its output width is fixed at sixteen bytes and
+/// [`ContentMd5::verify`] takes exactly that array: routing it through a `Bytes` of unknown length
+/// would put a width check between the digest and the comparison, and a width check that fails
+/// open is how a shorter digest ends up compared against a prefix.
+#[derive(Default)]
+pub struct Md5Digest(md5::Md5);
+
+impl Md5Digest {
+    /// Feeds the next run of body bytes.
+    pub fn update(&mut self, bytes: &[u8]) {
+        md5::Digest::update(&mut self.0, bytes);
+    }
+
+    /// Closes the digest.
+    #[must_use]
+    pub fn finish(self) -> [u8; 16] {
+        md5::Digest::finalize(self.0).into()
+    }
+}
+
+impl fmt::Debug for Md5Digest {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // The running state is not rendered: a partial digest of a body is still a fact about the
+        // body, and this type appears in the error paths of a request pipeline.
+        f.write_str("Md5Digest")
+    }
 }
 
 /// Everything that can go wrong with a checksum, paired with the code S3 reports for it.
@@ -601,18 +645,34 @@ impl std::error::Error for ChecksumError {}
 
 /// Picks the one checksum a request declares, out of all its headers.
 ///
-/// `headers` is the request's header list as `(name, value)` pairs; names are matched
-/// case-insensitively. The rules encoded here are the ones S3 enforces before a handler runs:
+/// **This is the arbitration authority.** Every layer that needs to know which checksum a request
+/// claims calls this function; a second implementation of the same decision is how one component
+/// verifies a claim another component discarded. `headers` is the request's header list as
+/// `(name, value)` pairs, and it is an iterator rather than a slice so a caller holding a borrowed
+/// header view can pass it without materialising a `Vec` on the request path.
+///
+/// Names are matched case-insensitively. The rules encoded here are the ones S3 enforces before a
+/// handler runs:
 ///
 /// - two *different* `x-amz-checksum-*` headers are a rejection, not a choice;
 /// - a repeated header with an identical value is one header, not two;
 /// - `x-amz-sdk-checksum-algorithm` without its value header is a rejection;
-/// - `x-amz-checksum-type` must agree with the value's own shape.
+/// - `x-amz-checksum-type` must agree with the value's own shape;
+/// - a value that is not base64 of the algorithm's width is a rejection, **not** a header to skip.
+///
+/// Three headers share the `x-amz-checksum-` prefix and declare no digest —
+/// `x-amz-checksum-algorithm`, `x-amz-checksum-type` and `x-amz-checksum-mode`. They are named
+/// here rather than pattern-matched away: the prefix is otherwise a closed set of algorithms, and
+/// an unknown member of it is refused rather than ignored, so a fourth such header added by AWS
+/// must arrive as a compile-and-test change and not as a silently accepted unknown.
 ///
 /// # Errors
 ///
 /// See [`ChecksumError`]; every variant returned here maps to `400 InvalidRequest`.
-pub fn parse_request_checksum(headers: &[(&str, &str)]) -> Result<Option<ChecksumSpec>, ChecksumError> {
+pub fn parse_request_checksum<'a, I>(headers: I) -> Result<Option<ChecksumSpec>, ChecksumError>
+where
+    I: IntoIterator<Item = (&'a str, &'a str)>,
+{
     let mut found: Option<(ChecksumAlgorithm, &str)> = None;
     let mut declared: Option<ChecksumAlgorithm> = None;
     let mut declared_type: Option<ChecksumType> = None;
@@ -626,7 +686,7 @@ pub fn parse_request_checksum(headers: &[(&str, &str)]) -> Result<Option<Checksu
             declared_type = Some(ChecksumType::parse(value).map_err(|_| ChecksumError::InvalidChecksumValue)?);
             continue;
         }
-        if name.eq_ignore_ascii_case(CHECKSUM_ALGORITHM_HEADER) {
+        if name.eq_ignore_ascii_case(CHECKSUM_ALGORITHM_HEADER) || name.eq_ignore_ascii_case(CHECKSUM_MODE_HEADER) {
             continue;
         }
         let is_checksum_header = name
@@ -637,7 +697,7 @@ pub fn parse_request_checksum(headers: &[(&str, &str)]) -> Result<Option<Checksu
         }
         let algo = ChecksumAlgorithm::from_header_name(name).ok_or(ChecksumError::UnknownAlgorithm)?;
         match found {
-            Some((seen_algo, seen_value)) if seen_algo != algo || seen_value != *value => {
+            Some((seen_algo, seen_value)) if seen_algo != algo || seen_value != value => {
                 return Err(ChecksumError::MultipleChecksumHeaders);
             }
             _ => found = Some((algo, value)),

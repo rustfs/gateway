@@ -40,12 +40,27 @@ mechanisms, different blast radii and different rules.
 | 2 | **Extension fields on existing types** | `ExtField` codec vtable | add a child element to an existing parent shape | change an existing field's type, order or name; add a field to a security-relevant type |
 | 3 | **Parsing leniency** | runtime `CodecPolicy` | relax request-XML strictness — unknown elements, bare-literal bodies | relax anything about a security-relevant configuration, a signature, or an authorisation decision |
 
-**Only dimension 1 exists today.** Dimensions 2 and 3 depend on the `ExtField` feasibility spike
-and its ADR (task `P1-08`), which has not landed: `docs/adr/` has no ExtField ADR, so there is no
-accepted conclusion to implement. Implementing the vtable against a guess is exactly the thing the
-spike exists to prevent, so this document records the split and the boundary now, and the rows for
-2 and 3 are the contract their implementation has to satisfy rather than a description of code that
-exists.
+**Only dimension 1 exists today.** The `ExtField` feasibility spike and its ADR have now landed —
+`docs/adr/ADR-0007-ext-field-codec.md`, evidenced by the `spikes/ext-field` crate — so dimensions 2
+and 3 have an accepted conclusion, but they still have no production code. The ADR says so in
+terms: the spike "does not authorize moving its implementation into production crates; that is a
+separate task using this ADR as input." No workspace crate names `ExtField` or `CodecPolicy`, and
+no generated codec carries an extension slot. So the rows for 2 and 3 remain the contract their
+implementation has to satisfy rather than a description of code that exists.
+
+What that costs, concretely, is written down where it can go red rather than only here. A lifecycle
+document carrying MinIO's `DelMarkerExpiration` is *accepted* — dimension 3's leniency is the
+decoder's default — and the element is then dropped from the re-encoded document, which is how
+RustFS persists. `c-lifecycle-0018` pins that on the wire and
+`crates/core/tests/lifecycle_roundtrip.rs` pins it at the codec seam; both name themselves as the
+assertions to invert when dimension 2 reaches production. Until then, ADR-0007's persistence
+boundary applies: `lenient` is not a lossless read-modify-write policy, so production persistence
+must retain the original bytes and must never turn a parse or registration miss into an absent
+configuration.
+
+(ADR-0007's header says "Superseded by ADR-0010". ADR-0010 replaces one finding of it — Q6, the
+handler request layout — and leaves the vtable decision standing; read the two together rather
+than reading the header as retiring the dialect mechanism.)
 
 The reason the split matters even while two thirds of it is pending: dimension 1 is the one that
 touches routing and authorisation, which is where a mistake is a security incident rather than a

@@ -30,7 +30,6 @@
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 
-use md5::{Digest as _, Md5};
 use rustfs_gateway_types::{
     BucketName, ChecksumError, ChecksumSpec, ContentMd5, ETag, ErrorCode, EtagRender, ObjectKey, OpaqueString, RangeSpec,
     Timestamp, TimestampFormat, is_xml_representable,
@@ -548,13 +547,26 @@ pub fn checksum_spec(
 ) -> Result<Option<ChecksumSpec>, CodecError> {
     let mut found: Option<ChecksumSpec> = None;
     for (suffix, value) in request.headers_with_prefix(prefix) {
-        // `algorithm` is one of a closed set; anything else is not a checksum header this gateway
-        // recognises and is left to the signature layer to ignore.
+        // Three headers share the prefix and declare no digest. They are named rather than
+        // pattern-matched away, for the same reason `parse_request_checksum` names them: the
+        // prefix is otherwise a closed set of algorithms, and a member of it this build does not
+        // know must be refused rather than waved through.
+        if matches!(suffix, "algorithm" | "type" | "mode") {
+            continue;
+        }
         let mut name = String::with_capacity(prefix.len().saturating_add(suffix.len()));
         name.push_str(prefix);
         name.push_str(suffix);
+        // Refused, never skipped. Skipping a value this binder cannot read means the input reaches
+        // the handler with no checksum at all, so the caller's claim is dropped on the floor and
+        // the object is stored as though none had been made. The head-level arbitration in
+        // `rustfs-gateway-http` has already applied the identical rule above the body read; this
+        // agreeing with it is what makes the two one decision instead of two.
         let Ok(spec) = ChecksumSpec::parse_header(&name, value) else {
-            continue;
+            return Err(CodecError::invalid_request(
+                "the request carries a checksum value that is not valid for the algorithm its header names",
+            )
+            .about(member));
         };
         if let Some(existing) = &found
             && existing.algorithm() != spec.algorithm()
@@ -567,24 +579,6 @@ pub fn checksum_spec(
         found = Some(spec);
     }
     Ok(found)
-}
-
-/// Refuses a request whose head carries two different checksum algorithms, before its body.
-///
-/// The same rule as [`checksum_spec`], reached from a caller that has a request head and no
-/// operation input yet — the assembled pipeline applies it once, above the body read, so a
-/// contradictory upload costs the response and not the transfer. It is the identical function
-/// call, not a second copy of the decision: adding an algorithm or changing what counts as a
-/// contradiction happens in [`checksum_spec`] and both callers move together.
-///
-/// It is stated over the head alone on purpose. Two integrity claims cannot be settled by any
-/// number of body bytes, so no amount of reading turns this request into a well-formed one.
-///
-/// # Errors
-///
-/// [`CodecError::invalid_request`] when two different algorithms are claimed at once.
-pub fn refuse_contradictory_checksums(request: &MetaView<'_>) -> Result<(), CodecError> {
-    checksum_spec(request, CHECKSUM_PREFIX, "ChecksumAlgorithm").map(|_| ())
 }
 
 /// The header prefix every per-algorithm request checksum is spelled with.
@@ -646,12 +640,37 @@ pub fn require_integrity(request: &MetaView<'_>) -> Result<(), CodecError> {
 /// bytes are not the bytes it names. Collapsing them would tell an uploader with a broken SDK the
 /// same thing as an uploader with a corrupted wire.
 ///
-/// # What this does not cover
+/// # What this does not cover, and what covers it instead
 ///
-/// A **streaming** body. `PutObject` and `UploadPart` hand their payload to the backend without
-/// aggregating it, so nothing here ever sees their bytes and their `Content-MD5` stays unverified;
-/// that check belongs to the stream layer and needs the digest computed as the body is consumed,
-/// not after. Every buffered body — every XML configuration write in the surface — is covered.
+/// **Only `Content-MD5`, and only a buffered body.** The two gaps have different owners and it
+/// matters which is which:
+///
+/// * A **streaming** body. `PutObject` and `UploadPart` hand their payload onward without
+///   aggregating it here, so nothing at this layer ever sees their bytes. An assembly that reads
+///   the body itself covers them at the read — `rustfs_gateway_http::BodyIntegrity` is that check
+///   and it is the same comparison, run over the bytes as they arrive.
+/// * The **`x-amz-checksum-*` family**. It is arbitrated and compared by
+///   `rustfs_gateway_http::BodyIntegrity`, above this layer, because the ambiguities it has to
+///   refuse — two claims, a claim that names an algorithm no value carried — are decidable from
+///   the head and must be refused *before* the transfer rather than after it. Restating that
+///   decision here would be a second copy of it.
+///
+/// What this function does own is the guarantee that a decoder buffering a body **cannot** be
+/// composed into an assembly that forgot to check the digest: it is generated at the buffering
+/// site itself, from one string, so acquiring the body and checking its digest are the same edit.
+/// The digest itself is [`ContentMd5::digester`], the same one every other caller uses; nothing
+/// here computes MD5 a second way.
+///
+/// # It is redundant in the assembly this repository ships, on purpose
+///
+/// `rustfs-gateway`'s body read refuses the same request earlier, so deleting the comparison below
+/// leaves that assembly's test suite and the whole conformance corpus green. That is stated here
+/// rather than left to be discovered: this crate is a library, an assembly that reads the body
+/// some other way is exactly what it exists to support, and a decoder that trusted its caller to
+/// have checked would be a decoder whose safety depends on a caller it cannot see. The redundancy
+/// is defence in depth and not an oversight — but it does mean a regression here is invisible to
+/// this repository's own suite, so treat this function as covered by
+/// `crates/codegen`'s structural control over the emission and by nothing else.
 ///
 /// # Errors
 ///
@@ -662,10 +681,9 @@ pub fn verify_body_digest(request: &MetaView<'_>, body: &[u8]) -> Result<(), Cod
     };
     let refuse = |error: ChecksumError| CodecError::new(error.error_code(), error.message());
     let expected = ContentMd5::parse(declared.as_ref()).map_err(refuse)?;
-    let mut hasher = Md5::new();
-    hasher.update(body);
-    let actual: [u8; 16] = hasher.finalize().into();
-    expected.verify(&actual).map_err(refuse)
+    let mut digest = ContentMd5::digester();
+    digest.update(body);
+    expected.verify(&digest.finish()).map_err(refuse)
 }
 
 /// Renders a checksum back into its `x-amz-checksum-<algorithm>` header name and value.

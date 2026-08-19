@@ -75,8 +75,8 @@ use bytes::{Bytes, BytesMut};
 use http::HeaderMap;
 use rustfs_gateway_core::{HandlerError, ResponseKind};
 use rustfs_gateway_http::{
-    ChunkFraming, ChunkLimits, ChunkReject, ChunkScope, ChunkSeed, ChunkSigner, DecodedLength, Framing, IngestPipeline,
-    IngestPolicy, PayloadFramingSource, validate_decoded_length,
+    BodyDigests, ChunkFraming, ChunkLimits, ChunkReject, ChunkScope, ChunkSeed, ChunkSigner, DecodedLength, Framing,
+    IngestPipeline, IngestPolicy, PayloadFramingSource, validate_decoded_length,
 };
 use rustfs_gateway_sig::PayloadMode;
 use rustfs_gateway_stream::{AsyncPayloadRead, MemoryReader, ReadProgress, TrailingHeaders};
@@ -183,13 +183,18 @@ impl ChunkIngest {
     /// `poll_fn` is how a pull-model reader is consumed from an `async fn`; it is not a spin, and
     /// [`MemoryReader`] returns `Pending` for nothing.
     ///
+    /// `digests` is shown each run of **decoded** bytes as it is produced, in the same loop that
+    /// copies it out, so the caller's checksum covers the object's own octets and not the chunk
+    /// framing around them. It is a borrow rather than an observer installed on the pipeline
+    /// because it ends in a comparison that can fail, and `ByteObserver::finish` cannot.
+    ///
     /// # Errors
     ///
     /// The mapped [`ChunkReject`] for any framing or signature verdict, and a `501` if the
     /// pipeline finishes without permitting a commit — which can only happen for a shape this
     /// assembly declined to accept at [`Self::prepare`], and is refused again rather than
     /// delivered.
-    pub(crate) async fn run(self, wire_bytes: Bytes) -> Result<Bytes, S3Error> {
+    pub(crate) async fn run(self, wire_bytes: Bytes, digests: &mut BodyDigests) -> Result<Bytes, S3Error> {
         let reader = MemoryReader::new([wire_bytes], TrailingHeaders::empty());
         let mut pipeline = IngestPipeline::new(
             reader,
@@ -219,7 +224,10 @@ impl ChunkIngest {
                 Err(_) => return Err(pipeline.reject().map_or_else(chunk_stream_failed, from_chunk_reject)),
                 Ok(ReadProgress::Filled(0)) => continue,
                 Ok(ReadProgress::Filled(written)) => match buffer.get(..written) {
-                    Some(run) => decoded.extend_from_slice(run),
+                    Some(run) => {
+                        digests.update(run);
+                        decoded.extend_from_slice(run);
+                    }
                     None => return Err(chunk_stream_failed()),
                 },
                 Ok(ReadProgress::Eof { .. }) => break,
@@ -430,6 +438,82 @@ mod tests {
         assert!(error.must_close_connection());
     }
 
+    /// The unsigned streaming mode without a trailer: framed, no signature chain, decodable here.
+    fn unsigned_streaming() -> PayloadMode {
+        PayloadMode::StreamingUnsigned {
+            trailer: rustfs_gateway_sig::TrailerSet::None,
+        }
+    }
+
+    /// Builds the ingest for an unsigned framed body of `decoded` bytes.
+    fn unsigned_ingest(decoded: &str) -> ChunkIngest {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            http::HeaderName::from_static(DECODED_LENGTH_HEADER),
+            http::HeaderValue::from_str(decoded).expect("a decoded length"),
+        );
+        ChunkIngest::prepare(
+            &unsigned_streaming(),
+            &headers,
+            &wire_length(4096),
+            &ChunkSink::new(),
+            None,
+            ChunkLimits::default(),
+        )
+        .expect("head-level checks pass")
+        .expect("a framed mode")
+    }
+
+    /// Opens the digests for one `x-amz-checksum-crc32` claim.
+    fn crc32_claim(value: &'static str) -> rustfs_gateway_http::BodyDigests {
+        let mut map = HeaderMap::new();
+        map.insert(
+            http::HeaderName::from_static("x-amz-checksum-crc32"),
+            http::HeaderValue::from_static(value),
+        );
+        rustfs_gateway_http::BodyIntegrity::resolve(
+            &rustfs_gateway_http::HeaderView::new(&map),
+            rustfs_gateway_http::ChecksumSubject::RequestBody,
+        )
+        .expect("one well-formed claim")
+        .begin()
+    }
+
+    /// Positive — the digests see the object's own octets, exactly once, and not the framing.
+    ///
+    /// `observed_bytes` is the measurement rather than the claim: the decoded body is eleven bytes
+    /// and the wire body is twenty-one, so a pipeline that digested the wire — or digested the
+    /// decoded body twice — reports a number this cannot be made to print.
+    #[tokio::test]
+    async fn the_digests_see_the_decoded_body_once_and_never_the_framing() {
+        let mut digests = crc32_claim("DUoRhQ==");
+        let decoded = unsigned_ingest("11")
+            .run(Bytes::from_static(b"b\r\nhello world\r\n0\r\n\r\n"), &mut digests)
+            .await
+            .expect("well-formed unsigned framing");
+        assert_eq!(decoded, Bytes::from_static(b"hello world"));
+        assert_eq!(digests.observed_bytes(), 11, "eleven decoded bytes, not the twenty-one on the wire");
+        let verified = digests.verify().expect("DUoRhQ== is the CRC32 of the decoded body");
+        assert_eq!(verified.verified_bytes(), 11);
+    }
+
+    /// Negative — the CRC32 of the *wire* body does not satisfy a claim about the object.
+    ///
+    /// The pair is what makes the positive above mean something: if the pipeline fed the digests
+    /// the framing, this value would be the one that verified and the other the one that failed.
+    #[tokio::test]
+    async fn a_checksum_of_the_wire_framing_does_not_satisfy_the_object_claim() {
+        let mut digests = crc32_claim("zrwdEw==");
+        unsigned_ingest("11")
+            .run(Bytes::from_static(b"b\r\nhello world\r\n0\r\n\r\n"), &mut digests)
+            .await
+            .expect("well-formed unsigned framing");
+        assert_eq!(
+            digests.verify().expect_err("that is the digest of the framing"),
+            rustfs_gateway_http::ChecksumReject::ChecksumMismatch
+        );
+    }
+
     /// A sink holding material that verifies nothing real.
     ///
     /// The key is a fixed pattern and the scope is the published AWS example, so nothing here
@@ -493,7 +577,7 @@ mod tests {
         .expect("head-level checks pass")
         .expect("a framed mode");
         let error = ingest
-            .run(Bytes::from_static(b"hello world"))
+            .run(Bytes::from_static(b"hello world"), &mut rustfs_gateway_http::BodyIntegrity::NONE.begin())
             .await
             .expect_err("plain text is not aws-chunked framing");
         assert_eq!(error.status(), http::StatusCode::BAD_REQUEST);
@@ -525,7 +609,7 @@ mod tests {
             "c".repeat(64)
         );
         let error = ingest
-            .run(Bytes::from(body))
+            .run(Bytes::from(body), &mut rustfs_gateway_http::BodyIntegrity::NONE.begin())
             .await
             .expect_err("the chunk signature is not the one the chain derives");
         assert_eq!(error.status(), http::StatusCode::FORBIDDEN);

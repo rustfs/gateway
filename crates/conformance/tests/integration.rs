@@ -18,12 +18,26 @@
 //! NOT responsible for: test behavior or production implementation.
 //! Upstream: the conformance integration-test modules. Downstream: Cargo's test harness.
 
+#[path = "bucket_family.rs"]
+mod bucket_family;
 #[path = "bucket_lifecycle.rs"]
 mod bucket_lifecycle;
+#[path = "copy_family.rs"]
+mod copy_family;
 #[path = "corpus.rs"]
 mod corpus;
+#[path = "domain_wiring.rs"]
+mod domain_wiring;
+#[path = "lifecycle_family.rs"]
+mod lifecycle_family;
 #[path = "list_family.rs"]
 mod list_family;
+#[path = "multipart_family.rs"]
+mod multipart_family;
+#[path = "object.rs"]
+mod object;
+#[path = "range_cond_family.rs"]
+mod range_cond_family;
 #[path = "tagging.rs"]
 mod tagging;
 #[path = "wired.rs"]

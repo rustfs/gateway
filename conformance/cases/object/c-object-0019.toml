@@ -1,0 +1,54 @@
+[case]
+id = "c-object-0019"
+schema_version = 1
+title = "Every one of the six response overrides wins over the value the object carries"
+rationale = """
+The override set is six parameters wide and an implementation that wires three of them looks correct in any test that only sends three. Each stored attribute here disagrees with its override, so a binding that reads the object instead of the query is a failure rather than a coincidence, and the six are asserted in one exchange because the defect this guards against is a missing entry in a list, not a broken mechanism."""
+polarity = "positive"
+operation = "GetObject"
+tags = ["presigned", "wire-bytes"]
+timeout_ms = 10000
+quirks = ["q-response-0023"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObject.html"
+summary = "The documented read response is the authority for the headers a read returns and the query overrides it honours."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/issues/15"
+summary = "Upstream did not honour the response- query overrides at all."
+kind = "s3s-issue"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-object"
+
+[[setup.objects]]
+bucket = "conf-object"
+key = "overrides/six.bin"
+content_type = "application/x-stored"
+body = { utf8 = "hello world" }
+
+[request]
+method = "GET"
+target = "/conf-object/overrides/six.bin?response-content-type=text%2Fplain&response-content-language=fr-CA&response-expires=Thu%2C%2001%20Jan%201970%2000%3A00%3A00%20GMT&response-cache-control=no-store&response-content-disposition=attachment%3B%20filename%3D%22r.txt%22&response-content-encoding=identity"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[expect.headers_present]
+"content-type" = "text/plain"
+"content-language" = "fr-CA"
+"expires" = "Thu, 01 Jan 1970 00:00:00 GMT"
+"cache-control" = "no-store"
+"content-disposition" = "attachment; filename=\"r.txt\""
+"content-encoding" = "identity"
+
+[expect.body]
+exact_utf8 = "hello world"

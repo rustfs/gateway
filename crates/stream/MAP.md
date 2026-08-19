@@ -38,6 +38,8 @@ shape. Three dependencies (`bytes`, `http`, `bitflags`), zero internal ones.
 | `src/error.rs` | `StreamError` + `StreamErrorKind`, and `bytes_before_error` | Deciding what an aborted transfer may still commit |
 | `src/file_region.rs` | `FileRegion` (unix): owned fd + offset + len, overflow refused at construction | Adding a kernel-side transfer path |
 | `src/tests/` | `eof_trailers` (ordering and concrete EOF shape), `cancellation` (drop ownership), `caps_matrix` (shape × model), `adapt_cost` (cost + counters), `zero_copy` (the four refusals and their order), `observer` (single-pass accounting), `body`, `trailers`, `file_region`, `support` (scripted producers) | Changing any behaviour above |
+| `src/tests/pay_ledger.rs` | The 28 `c-pay-*` rows, each bound to a case body, to a named guard case, or deferred to an owning issue; the meta-checks that stop the table rotting | Adding a payload case, or moving one off the deferred list |
+| `src/tests/pay_cases.rs`, `src/tests/pay_scale.rs` | The case bodies. `pay_scale` holds the gibibyte gate and the no-read-ahead measurement, each with the control that proves its instrument can report the opposite | Changing what a `c-pay-*` row asserts |
 
 ## Boundaries
 

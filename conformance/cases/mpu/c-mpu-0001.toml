@@ -1,7 +1,8 @@
 # c-mpu-0001 — a failure that arrives inside a 200 response.
 #
-# Schema dimensions exercised: expect.kind = "stream_error" with stream_termination and
-# body_bytes_before_error, multipart fixtures, capture of a server-minted upload id.
+# Schema dimensions exercised: setup.fault at = "after_commit", expect.kind = "stream_error" with
+# stream_termination and body_bytes_before_error, multipart fixtures, capture of a server-minted
+# upload id.
 
 [case]
 id = "c-mpu-0001"
@@ -52,17 +53,28 @@ part_number = 1
 body = { size = 5242880 }
 capture_etag_as = "part1_etag"
 
+# The assembly fails, and it fails after the head has gone out. Every refusal this operation can
+# still name a status for — an empty part list, parts out of order, a part that is not there, a part
+# below the size floor, a digest that does not match — happens above the commit boundary and keeps
+# its own status, which is what ten other cases in this family pin. This case is the other side of
+# that boundary, and it is the only side the corpus could not describe before.
+[setup.fault]
+operation = "CompleteMultipartUpload"
+at = "after_commit"
+code = "InvalidPart"
+
 [request]
 method = "POST"
 target = "/conf-mpu/late-failure?uploadId=${capture.upload_id}"
 headers = { "content-type" = "application/xml" }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 
-# A part digest that was never uploaded. The upload id is real, so the request reaches the point
-# where the response head has already been sent.
+# The part that was uploaded, named by the digest the upload reported. Everything about this request
+# is well formed, which is the point: a malformed completion is refused with its own status while one
+# is still choosable, and this case is about the failure that arrives after that.
 [request.body]
 utf8 = '''
-<CompleteMultipartUpload xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Part><PartNumber>1</PartNumber><ETag>&quot;00000000000000000000000000000000&quot;</ETag></Part></CompleteMultipartUpload>'''
+<CompleteMultipartUpload xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Part><PartNumber>1</PartNumber><ETag>${capture.part1_etag}</ETag></Part></CompleteMultipartUpload>'''
 
 [expect]
 kind = "stream_error"
