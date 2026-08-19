@@ -37,6 +37,22 @@ def fail(message: str) -> None:
 # on every character makes the scan quadratic in file size, and this function runs once per source
 # file per guard invocation — sixty-one of them in the self-test alone. Neither pattern is anchored
 # or uses a lookbehind, so matching at an offset is the same match.
+#
+# A token this scanner cares about can only begin at one of these characters: `//` and `/*` start
+# with a slash, `"` and `b"` with a quote or a `b`, a raw string with `r` or `b`, a character
+# literal with `'` or `b`. Every other position is passed over, so the scanner skips runs of
+# ordinary code in one C-level search instead of one Python loop iteration per byte. The set is
+# what makes that equivalent to walking every index, and it must be widened in step with the
+# branches below.
+#
+# `b` is in the set for the branches that read it and not because dropping it would break
+# anything: `b"…"` ends where the `"…"` inside it ends, `b'x'` where `'x'` does, and `br"…"` where
+# `r"…"` does, so every byte-prefixed form falls through to the same close via its unprefixed
+# opener. It is listed because the branches below genuinely begin there and a reader checking the
+# set against them should find it — but `scripts/test_test_target_consolidation.sh` cannot kill a
+# mutation that removes it, and that is a property of Rust's grammar rather than a gap in the
+# suite. Removing `/`, `"` or `'` is caught.
+TOKEN_START = re.compile(r"""[/"'br]""")
 RUST_RAW_STRING = re.compile(r'(?:b)?r(#{0,255})"')
 RUST_CHAR_LITERAL = re.compile(r"(?:b)?'(?:\\.|[^'\\\n])+'")
 
@@ -49,13 +65,17 @@ def rust_views(source: str, path: Path) -> tuple[str, str]:
     length = len(source)
 
     def mask(start: int, end: int, *, comments: bool) -> None:
-        for position in range(start, end):
-            if source[position] != "\n":
-                code_only[position] = " "
-                if comments:
-                    comment_free[position] = " "
+        segment = source[start:end]
+        blanks = [" "] * len(segment) if "\n" not in segment else [" " if c != "\n" else "\n" for c in segment]
+        code_only[start:end] = blanks
+        if comments:
+            comment_free[start:end] = blanks
 
     while index < length:
+        step = TOKEN_START.search(source, index)
+        if step is None:
+            break
+        index = step.start()
         if source.startswith("//", index):
             end = source.find("\n", index)
             end = length if end < 0 else end

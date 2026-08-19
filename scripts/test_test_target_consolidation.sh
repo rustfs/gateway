@@ -687,5 +687,33 @@ RSEOF
 }
 expect_pass 'gateway trybuild, path, and include comment/string decoys stay inert' mut_gateway_comment_and_string_decoys
 
+# The remaining literal forms. The case above covers a line comment and a raw string; the scanner
+# in `check_test_target_consolidation.sh` also has to recognise a block comment, a plain string, a
+# byte string and a character literal, and it now finds all of them by searching for the characters
+# those forms can begin with rather than by walking every byte. That set and the branches it feeds
+# have to stay in step: a form whose opening character left the set would be scanned as ordinary
+# code, and the decoy inside it would be read as a real declaration. This is the direction that
+# would fail — the guard turning red on a file that is fine.
+mut_gateway_remaining_literal_decoys() {
+    cat >>crates/gateway/tests/facade_probe.rs <<'RSEOF'
+
+/* #[path = "compile_fail.rs"] mod block_comment_duplicate;
+   let cases = trybuild::TestCases::new(); */
+const PLAIN_STRING_DECOY: &str = "#[path = \"../tests/integration.rs\"] mod plain;";
+const BYTE_STRING_DECOY: &[u8] = b"include!(\"../tests/integration.rs\");";
+const QUOTE_DECOY: char = '"';
+const BYTE_DECOY: u8 = b'/';
+RSEOF
+}
+expect_pass 'block comment, plain string, byte string and char literal decoys stay inert' mut_gateway_remaining_literal_decoys
+
+# And the direction that proves the case above is not simply unreadable to the guard: the same
+# declaration outside any literal is still caught. Without this pair a scanner that had stopped
+# looking at this file altogether would satisfy the decoy case perfectly.
+mut_gateway_declaration_outside_a_literal() {
+    printf '\n#[path = "../tests/integration.rs"]\nmod plain;\n' >>crates/gateway/tests/facade_probe.rs
+}
+expect_fail 'the same declaration outside a literal is still caught' mut_gateway_declaration_outside_a_literal
+
 printf '%s case(s), %s failure(s)\n' "$cases" "$failures"
 [[ "$failures" -eq 0 ]]
