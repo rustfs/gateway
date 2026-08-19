@@ -20,7 +20,7 @@
 //! NOT responsible for: building or comparing a signature (that is [`super::string_to_sign`] and
 //! [`crate::Signature::ct_verify`]), or deciding whether the credential exists (that is the
 //! deployment's credential source).
-//! Upstream: [`crate::floor`]. Downstream: `rustfs-gateway`'s authentication stage.
+//! Upstream: [`crate::SecurityFloor`]. Downstream: `rustfs-gateway`'s authentication stage.
 //!
 //! # Why this is a separate type from [`crate::SealedAws`]
 //!

@@ -393,7 +393,7 @@ pub trait Authenticator: Send + Sync + 'static {
     /// Produces an authentication outcome for one admitted **SigV2** request.
     ///
     /// **The default refuses.** A SigV2 request is a distinct [`rustfs_gateway_sig::Admission`]
-    /// variant carrying a [`SealedSigV2`], which has no route to the [`SealedAws`] the method
+    /// variant carrying a [`rustfs_gateway_sig::SealedSigV2`], which has no route to the [`SealedAws`] the method
     /// above takes — so an authenticator written before SigV2 existed cannot be handed one by
     /// accident, keeps compiling, and answers `501 NotImplemented`. That is the fail-closed half
     /// of P2-06's wiring: the alternative to a refusing default is a trait method every existing
